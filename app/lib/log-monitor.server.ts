@@ -105,6 +105,8 @@ export interface LogMonitorRunResult {
   p2:            number
   suppressed:    number
   issuesOpened:  string[]
+  /** Improvement-bus ticket ids filed for P0/P1 groups (0 = deduped/failed). */
+  ticketsFiled:  number[]
 }
 
 /**
@@ -280,6 +282,53 @@ async function openIssuesForP0(
   return opened
 }
 
+/**
+ * File one improvement-bus ticket per actionable group, so a detection becomes
+ * claimable work instead of another email the owner has to route by hand.
+ *
+ * Identity is the group TITLE, hashed: that is the same thing the GitHub issue
+ * dedupes on, so an error recurring every 15 minutes comments on one issue and
+ * lives on one ticket. Recurrence therefore never floods the queue.
+ *
+ * Additive only. The GitHub issue and the owner SMS/email above are untouched;
+ * this cannot throw, so a Neon hiccup can never suppress them.
+ */
+async function fileTicketsForGroups(
+  groups: LogGroup[],
+  issues: Array<{ url: string; title: string; created: boolean }>,
+  windowMinutes: number,
+): Promise<number[]> {
+  const { fileDetectionTicket, makeDedupeKey, priorityFromSeverity, hashToken } =
+    await import('~/lib/detection-tickets.server')
+
+  const ids: number[] = []
+  // P2 is the "low volume, edge case" bucket by the classifier's own
+  // definition; ticketing it would bury the queue in things nobody will fix.
+  for (const group of groups.filter((g) => g.priority === 'P0' || g.priority === 'P1')) {
+    const issue = issues.find((i) => i.title === `[P0] ${group.title}`)
+    ids.push(
+      await fileDetectionTicket({
+        detector: 'log-monitor',
+        dedupeKey: makeDedupeKey('logmon', hashToken(group.title)),
+        priority: priorityFromSeverity(group.priority),
+        category: 'other',
+        kind: 'code',
+        suggestion:
+          `${group.priority} runtime error: ${group.title}\n\n`
+          + `Occurrences: ${group.occurrences} in the last ${windowMinutes} min\n`
+          + `First seen: ${group.firstSeen}\n`
+          + `Suggested owner: ${group.owner}\n`
+          + `Likely cause: ${group.likelyCause}\n\n`
+          + '```\n' + group.excerpt + '\n```\n\n'
+          + 'Detected by /cron/log-monitor. Reproduce from the excerpt, fix, and confirm the '
+          + 'signal stops appearing in the next log window.',
+        ...(issue ? { links: [{ kind: 'issue', ref: issue.url, state: 'open' }] } : {}),
+      }),
+    )
+  }
+  return ids
+}
+
 export async function runLogMonitor(
   { windowMinutes = 15 }: { windowMinutes?: number } = {},
 ): Promise<LogMonitorRunResult> {
@@ -287,6 +336,16 @@ export async function runLogMonitor(
   const report = await classifyLogs(logs)
   const issues = await openIssuesForP0(report.groups, windowMinutes)
   const issuesOpened = issues.map((i) => i.url)
+
+  // Ticket filing must never be able to break the detector, so it is wrapped
+  // here as well as inside fileDetectionTicket (the dynamic import itself could
+  // fail on a cold bundle).
+  let ticketsFiled: number[] = []
+  try {
+    ticketsFiled = await fileTicketsForGroups(report.groups, issues, windowMinutes)
+  } catch (err) {
+    console.error('[log-monitor] ticket filing failed (ignored):', err)
+  }
 
   // Owner alert only for newly created issues (first detection). Recurrence
   // comments on an existing open issue run every 15 min and must not re-page.
@@ -312,5 +371,6 @@ export async function runLogMonitor(
     p2:          report.groups.filter((g) => g.priority === 'P2').length,
     suppressed:  report.suppressedNoiseCount,
     issuesOpened,
+    ticketsFiled,
   }
 }

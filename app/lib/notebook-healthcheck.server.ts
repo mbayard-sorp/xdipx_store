@@ -36,6 +36,8 @@ export interface NotebookHealthResult {
   checks: NotebookPageCheck[]
   alerted: boolean
   message?: string
+  /** Improvement-bus ticket ids filed for failing pages (0 = deduped/failed). */
+  ticketsFiled?: number[]
 }
 
 function siteOrigin(): string {
@@ -218,6 +220,38 @@ export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
   )
 
   const result: NotebookHealthResult = { ok: false, checks, alerted: true }
+
+  // Ticket each failing page onto the improvement bus. Same pattern as the
+  // homepage and log detectors, at a lower priority: the Notebook is
+  // report-only (no auto-publish, so nothing to roll back) and a broken post
+  // page costs traffic, not revenue. Deduped per path so a page that stays
+  // broken across daily runs stays one ticket. Wrapped so a failed write can
+  // never suppress the Sentry capture or the owner email below.
+  try {
+    const { fileDetectionTicket, makeDedupeKey, priorityFromSeverity } =
+      await import('~/lib/detection-tickets.server')
+    result.ticketsFiled = []
+    for (const c of failed) {
+      result.ticketsFiled.push(
+        await fileDetectionTicket({
+          detector: 'notebook-healthcheck',
+          dedupeKey: makeDedupeKey('notebook', c.path),
+          priority: priorityFromSeverity(c.hardFail ? 'P1' : 'P3'),
+          category: 'other',
+          kind: 'code',
+          suggestion:
+            `Notebook healthcheck failing on ${c.path} (HTTP ${c.status}).\n\n`
+            + `Problems:\n${c.problems.map(p => `- ${p}`).join('\n')}\n\n`
+            + `Detected by /cron/notebook-healthcheck against ${siteOrigin()}. `
+            + 'Fix the page, then re-run the cron to confirm it renders with images and valid JSON-LD.',
+          links: [{ kind: 'url', ref: `${siteOrigin()}${c.path}`, state: 'failed' }],
+        }),
+      )
+    }
+  } catch (err) {
+    console.error('[notebook-healthcheck] ticket filing failed (ignored):', err)
+  }
+
   if (hard) {
     const issueBody = [
       `Notebook healthcheck failed against ${siteOrigin()}.`,

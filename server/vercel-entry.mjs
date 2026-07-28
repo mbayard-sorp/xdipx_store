@@ -10807,11 +10807,11 @@ __export(team_keys_exports, {
 function isTeamId(v) {
   return typeof v === "string" && TEAM_IDS.includes(v);
 }
-function teamSpendKvKey(team, utcDay2) {
-  return `team:spend:${team}:${utcDay2}`;
+function teamSpendKvKey(team, utcDay3) {
+  return `team:spend:${team}:${utcDay3}`;
 }
-function teamImagesKvKey(utcDay2) {
-  return `team:images:homepage:${utcDay2}`;
+function teamImagesKvKey(utcDay3) {
+  return `team:images:homepage:${utcDay3}`;
 }
 function teamFromFeature(feature) {
   const i = feature.indexOf("-");
@@ -16479,6 +16479,813 @@ var init_deal_rotator_server = __esm({
   }
 });
 
+// app/lib/content-slot.ts
+function contentSlotForDate(d) {
+  const weekday = d.toLocaleDateString("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "long"
+  });
+  const slot = SLOT_BY_WEEKDAY[weekday] ?? ["guides", null];
+  return { weekday, expectedCategory: slot[0], fallbackCategory: slot[1] };
+}
+var SLOT_BY_WEEKDAY;
+var init_content_slot = __esm({
+  "app/lib/content-slot.ts"() {
+    "use strict";
+    SLOT_BY_WEEKDAY = {
+      Monday: ["guides", null],
+      Tuesday: ["real-talk", null],
+      Wednesday: ["guides", null],
+      Thursday: ["podcast-notes", "care"],
+      Friday: ["real-talk", null],
+      Saturday: ["care", null],
+      Sunday: ["comparisons", "wellness-basics"]
+    };
+  }
+});
+
+// app/lib/homepage-team-keys.ts
+var TEAM_KEYS;
+var init_homepage_team_keys = __esm({
+  "app/lib/homepage-team-keys.ts"() {
+    "use strict";
+    TEAM_KEYS = {
+      enabled: "homepage_team_enabled",
+      dailyCents: "homepage_team_daily_cents",
+      buildCents: "homepage_team_build_cents",
+      maxImagesPerDay: "homepage_team_max_images",
+      maxRunsPerDay: "homepage_team_max_runs"
+    };
+  }
+});
+
+// app/lib/team.server.ts
+var team_server_exports = {};
+__export(team_server_exports, {
+  AGENT_EDITOR_APPLY_KINDS: () => AGENT_EDITOR_APPLY_KINDS,
+  ALLOWED: () => ALLOWED,
+  CLAIMANT_ACTORS: () => CLAIMANT_ACTORS,
+  CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
+  CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
+  SUGGESTION_LIST_MAX: () => SUGGESTION_LIST_MAX,
+  TEAM_DEFAULTS: () => TEAM_DEFAULTS,
+  TEAM_IDS: () => TEAM_IDS,
+  TERMINAL_TICKET_STATUSES: () => TERMINAL_TICKET_STATUSES,
+  TICKET_STATUSES: () => TICKET_STATUSES,
+  VALVE_KEYS: () => VALVE_KEYS,
+  assertTeamAuth: () => assertTeamAuth,
+  buildClaimQuery: () => buildClaimQuery,
+  claimSuggestion: () => claimSuggestion,
+  createAdCampaign: () => createAdCampaign,
+  createDraftSocialPost: () => createDraftSocialPost,
+  createSuggestion: () => createSuggestion,
+  createSuggestionDetailed: () => createSuggestionDetailed,
+  decideAdCampaign: () => decideAdCampaign,
+  decideSuggestion: () => decideSuggestion,
+  expireStaleClaims: () => expireStaleClaims,
+  expireStaleRuns: () => expireStaleRuns,
+  findTransitionRule: () => findTransitionRule,
+  gate: () => gate,
+  getActiveBrief: () => getActiveBrief,
+  getSocialFrequencies: () => getSocialFrequencies,
+  getTeamConfig: () => getTeamConfig,
+  getTicket: () => getTicket,
+  getTodayImageCount: () => getTodayImageCount,
+  getTodayRunCount: () => getTodayRunCount,
+  getTodaySpendCents: () => getTodaySpendCents,
+  getValve: () => getValve,
+  invalidateTeamSettingsCache: () => invalidateTeamSettingsCache,
+  isRunInProgress: () => isRunInProgress,
+  isTeamId: () => isTeamId,
+  isTicketActor: () => isTicketActor,
+  isTicketStatus: () => isTicketStatus,
+  isTransitionAllowed: () => isTransitionAllowed,
+  listAdCampaigns: () => listAdCampaigns,
+  listBriefs: () => listBriefs,
+  listCalendar: () => listCalendar,
+  listRecentEvents: () => listRecentEvents,
+  listRecentRuns: () => listRecentRuns,
+  listRunEvents: () => listRunEvents,
+  listSocialPosts: () => listSocialPosts,
+  listSuggestions: () => listSuggestions,
+  markSuggestion: () => markSuggestion,
+  proposeCalendarEvent: () => proposeCalendarEvent,
+  publishBrief: () => publishBrief,
+  recordEvent: () => recordEvent,
+  rescheduleSocialPost: () => rescheduleSocialPost,
+  retireSuggestion: () => retireSuggestion,
+  reviewSocialPost: () => reviewSocialPost,
+  startRun: () => startRun,
+  teamKeys: () => teamKeys,
+  transitionSuggestion: () => transitionSuggestion,
+  updateRun: () => updateRun
+});
+import { timingSafeEqual } from "node:crypto";
+import { and as and3, asc as asc3, desc, eq as eq11, gte, inArray as inArray3, lt, lte, ne as ne2, sql as sql3 } from "drizzle-orm";
+function assertTeamAuth(request) {
+  const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
+  const auth = request.headers.get("authorization") ?? "";
+  const provided = request.headers.get("x-team-secret") ?? auth.replace(/^Bearer\s+/i, "");
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  const ok = expected.length > 0 && a.length === b.length && timingSafeEqual(a, b);
+  if (!ok) {
+    throw new Response("Unauthorized", { status: 401 });
+  }
+}
+function num(v, fallback) {
+  if (v == null) return fallback;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+async function getTeamConfig(team) {
+  return cached(`team:cfg:${team}`, SETTINGS_CACHE_TTL_SEC, () => getTeamConfigUncached(team));
+}
+async function getTeamConfigUncached(team) {
+  const keys = teamKeys(team);
+  const rows = await db.select().from(pipelineSettings).where(sql3`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const d = TEAM_DEFAULTS[team];
+  const cfg = {
+    team,
+    enabled: (map.get(keys.enabled) ?? "false") === "true",
+    dailyCents: num(map.get(keys.dailyCents), d.dailyCents),
+    maxRunsPerDay: num(map.get(keys.maxRunsPerDay), d.maxRunsPerDay),
+    autoApproveSuggestions: (map.get(keys.autoApproveSuggestions) ?? "false") === "true"
+  };
+  if (team === "homepage") {
+    cfg.buildCents = num(map.get(TEAM_KEYS.buildCents), 1e4);
+    cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12);
+  } else if (team === "content") {
+    cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT);
+  } else if (team === "video") {
+    cfg.maxCostCents = num(map.get(VIDEO_EXTRA_KEYS.maxCostCents), VIDEO_MAX_COST_CENTS_DEFAULT);
+  }
+  return cfg;
+}
+async function getValve(key) {
+  return cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
+    const [row] = await db.select().from(pipelineSettings).where(eq11(pipelineSettings.key, key)).limit(1);
+    return row?.value === "true";
+  });
+}
+async function invalidateTeamSettingsCache() {
+  invalidateCache("team:cfg:");
+  invalidateCache("team:valve:");
+  const keys = [
+    ...TEAM_IDS.map((t) => `team:cfg:${t}`),
+    ...Object.values(VALVE_KEYS).map((k) => `team:valve:${k}`)
+  ];
+  await Promise.all(keys.map((k) => kvDel(k)));
+}
+function utcDay() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+async function counterRead(key, sumFromDb) {
+  const seedKey = `${key}:seededAt`;
+  const [count, seededAt] = await Promise.all([kvGet(key), kvGet(seedKey)]);
+  if (typeof count === "number" && typeof seededAt === "number" && Date.now() - seededAt < SPEND_RESEED_MS) {
+    return count;
+  }
+  const fresh = await sumFromDb();
+  await Promise.all([
+    kvSet(key, fresh, SPEND_KV_TTL_SEC),
+    kvSet(seedKey, Date.now(), SPEND_KV_TTL_SEC)
+  ]);
+  return fresh;
+}
+async function getTodaySpendCents(team) {
+  return counterRead(teamSpendKvKey(team, utcDay()), async () => {
+    const res = await db.execute(
+      sql3`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
+          FROM api_token_log
+          WHERE ts >= current_date AND feature LIKE ${team + "-%"}`
+    );
+    const dollars = Number(res.rows?.[0]?.dollars ?? 0);
+    return Math.round(dollars * 100);
+  });
+}
+async function getTodayRunCount(team, excludeRunId) {
+  const res = await db.execute(
+    excludeRunId == null ? sql3`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+            WHERE started_at >= current_date AND team = ${team}` : sql3`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+            WHERE started_at >= current_date AND team = ${team} AND id <> ${excludeRunId}`
+  );
+  return Number(res.rows?.[0]?.n ?? 0);
+}
+async function getTodayImageCount() {
+  return counterRead(teamImagesKvKey(utcDay()), async () => {
+    const res = await db.execute(
+      sql3`SELECT COALESCE(SUM(request_count), 0)::int AS n
+          FROM api_token_log
+          WHERE ts >= current_date AND feature = 'homepage-images'`
+    );
+    return Number(res.rows?.[0]?.n ?? 0);
+  });
+}
+async function isRunInProgress(team, excludeRunId) {
+  const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 6e4);
+  const conditions = [
+    eq11(homepageTeamRuns.team, team),
+    eq11(homepageTeamRuns.status, "running"),
+    gte(homepageTeamRuns.startedAt, since)
+  ];
+  if (excludeRunId !== void 0) conditions.push(ne2(homepageTeamRuns.id, excludeRunId));
+  const [row] = await db.select({ id: homepageTeamRuns.id }).from(homepageTeamRuns).where(and3(...conditions)).limit(1);
+  return !!row;
+}
+async function expireStaleRuns() {
+  const cutoff = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 6e4);
+  await db.update(homepageTeamRuns).set({
+    status: "failed",
+    error: `auto-expired: still 'running' past the ${RUN_LOCK_WINDOW_MIN}-minute lock window`,
+    finishedAt: /* @__PURE__ */ new Date()
+  }).where(and3(eq11(homepageTeamRuns.status, "running"), lt(homepageTeamRuns.startedAt, cutoff)));
+}
+async function gate(team, excludeRunId) {
+  if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
+    await Promise.all([expireStaleRuns(), expireStaleClaims()]);
+  }
+  const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
+    getTeamConfig(team),
+    getTodaySpendCents(team),
+    getTodayRunCount(team, excludeRunId),
+    team === "homepage" ? getTodayImageCount() : Promise.resolve(0),
+    isRunInProgress(team, excludeRunId),
+    getActiveBriefId(),
+    team === "content" ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(void 0)
+  ]);
+  const remainingCents = Math.max(0, cfg.dailyCents - spentCents);
+  const maxImagesPerDay = cfg.maxImagesPerDay ?? 0;
+  const base = {
+    team,
+    enabled: cfg.enabled,
+    dailyCents: cfg.dailyCents,
+    spentCents,
+    remainingCents,
+    runsToday,
+    maxRunsPerDay: cfg.maxRunsPerDay,
+    imagesToday,
+    maxImagesPerDay,
+    activeBriefId: briefId,
+    ...autopublish !== void 0 ? { valves: { autopublish } } : {},
+    ...team === "content" ? { contentSlot: contentSlotForDate(/* @__PURE__ */ new Date()) } : {}
+  };
+  if (!cfg.enabled) return { ...base, ok: false, reason: "disabled" };
+  if (inProgress) return { ...base, ok: false, reason: "run_in_progress" };
+  if (remainingCents <= 0) return { ...base, ok: false, reason: "over_budget" };
+  if (runsToday >= cfg.maxRunsPerDay) return { ...base, ok: false, reason: "over_run_cap" };
+  if (team === "homepage" && imagesToday >= maxImagesPerDay)
+    return { ...base, ok: false, reason: "over_image_cap" };
+  return { ...base, ok: true };
+}
+async function startRun(team, runType) {
+  const [row] = await db.insert(homepageTeamRuns).values({ team, runType, status: "running" }).returning({ id: homepageTeamRuns.id });
+  return row.id;
+}
+async function updateRun(id, u) {
+  const patch = {};
+  if (u.status) patch["status"] = u.status;
+  if (u.currentPhase !== void 0) patch["currentPhase"] = u.currentPhase;
+  if (u.currentAgent !== void 0) patch["currentAgent"] = u.currentAgent;
+  if (u.summary !== void 0) patch["summary"] = u.summary;
+  if (u.prUrl !== void 0) patch["prUrl"] = u.prUrl;
+  if (u.error !== void 0) patch["error"] = u.error;
+  if (u.finished) patch["finishedAt"] = /* @__PURE__ */ new Date();
+  if (u.incrementAttempt) patch["attemptCount"] = sql3`${homepageTeamRuns.attemptCount} + 1`;
+  if (Object.keys(patch).length === 0) return;
+  await db.update(homepageTeamRuns).set(patch).where(eq11(homepageTeamRuns.id, id));
+}
+async function recordEvent(e) {
+  await db.insert(homepageTeamEvents).values({
+    runId: e.runId,
+    eventType: e.eventType,
+    summary: e.summary,
+    agentRole: e.agentRole ?? null,
+    phase: e.phase ?? null,
+    transcriptRef: e.transcriptRef ?? null
+  });
+}
+async function listRecentRuns(team, limit = 25) {
+  const q = db.select().from(homepageTeamRuns);
+  return (team ? q.where(eq11(homepageTeamRuns.team, team)) : q).orderBy(desc(homepageTeamRuns.startedAt)).limit(limit);
+}
+async function listRunEvents(runId) {
+  return db.select().from(homepageTeamEvents).where(eq11(homepageTeamEvents.runId, runId)).orderBy(homepageTeamEvents.ts);
+}
+async function listRecentEvents(team, sinceDays = 7, limit = 500) {
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 6e4);
+  const conditions = [gte(homepageTeamEvents.ts, since)];
+  if (team) conditions.push(eq11(homepageTeamRuns.team, team));
+  return db.select({
+    id: homepageTeamEvents.id,
+    runId: homepageTeamEvents.runId,
+    team: homepageTeamRuns.team,
+    ts: homepageTeamEvents.ts,
+    agentRole: homepageTeamEvents.agentRole,
+    phase: homepageTeamEvents.phase,
+    eventType: homepageTeamEvents.eventType,
+    summary: homepageTeamEvents.summary
+  }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq11(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and3(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
+}
+async function createSuggestion(s) {
+  const res = await createSuggestionDetailed(s);
+  return res.deduped ? 0 : res.id;
+}
+async function createSuggestionDetailed(s) {
+  const actingTeam = s.targetTeam ?? s.team;
+  const autoApprove = await getTeamConfig(actingTeam).then((c) => c.autoApproveSuggestions).catch(() => false);
+  const [row] = await db.insert(homepageTeamSuggestions).values({
+    team: s.team,
+    targetTeam: s.targetTeam ?? null,
+    runId: s.runId ?? null,
+    category: s.category,
+    kind: s.kind ?? "process",
+    suggestion: s.suggestion,
+    estSavingsUsd: String(s.estSavingsUsd ?? 0),
+    cxRisk: s.cxRisk ?? "low",
+    status: autoApprove ? "approved" : "proposed",
+    decidedBy: autoApprove ? "auto" : null,
+    decidedAt: autoApprove ? /* @__PURE__ */ new Date() : null,
+    priority: s.priority ?? 3,
+    dedupeKey: s.dedupeKey ?? null,
+    dueAt: s.dueAt == null ? null : new Date(s.dueAt)
+  }).onConflictDoNothing().returning({ id: homepageTeamSuggestions.id });
+  if (row?.id) return { id: row.id, deduped: false };
+  if (!s.dedupeKey) return { id: 0, deduped: false };
+  const [live] = await db.select({ id: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and3(
+    eq11(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
+    sql3`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
+  )).limit(1);
+  return { id: live?.id ?? 0, deduped: !!live };
+}
+async function listSuggestions(filter = {}) {
+  const conditions = [];
+  if (filter.team) conditions.push(eq11(homepageTeamSuggestions.team, filter.team));
+  if (filter.targetTeam) conditions.push(eq11(homepageTeamSuggestions.targetTeam, filter.targetTeam));
+  if (filter.status) conditions.push(eq11(homepageTeamSuggestions.status, filter.status));
+  if (filter.statuses?.length) {
+    conditions.push(inArray3(homepageTeamSuggestions.status, [...filter.statuses]));
+  }
+  if (filter.kinds?.length) {
+    conditions.push(inArray3(homepageTeamSuggestions.kind, [...filter.kinds]));
+  }
+  if (filter.assignee) conditions.push(eq11(homepageTeamSuggestions.assignee, filter.assignee));
+  if (filter.updatedSince) {
+    conditions.push(gte(homepageTeamSuggestions.updatedAt, filter.updatedSince));
+  }
+  const order = filter.orderBy === "priority" ? [asc3(homepageTeamSuggestions.priority), asc3(homepageTeamSuggestions.createdAt)] : filter.orderBy === "age" ? [asc3(homepageTeamSuggestions.createdAt)] : [desc(homepageTeamSuggestions.createdAt)];
+  const limit = Math.min(SUGGESTION_LIST_MAX, Math.max(1, filter.limit ?? 100));
+  const q = db.select().from(homepageTeamSuggestions);
+  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(...order).limit(limit);
+}
+async function decideSuggestion(id, status) {
+  await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "proposed")));
+}
+async function retireSuggestion(id) {
+  await db.update(homepageTeamSuggestions).set({ status: "dismissed", decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "approved")));
+}
+async function markSuggestion(id, status, applyRef) {
+  const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
+  const res = await db.update(homepageTeamSuggestions).set({ status, applyRef, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, allowedFrom))).returning({ id: homepageTeamSuggestions.id });
+  if (res.length === 0) {
+    throw new Response(
+      `Conflict: suggestion ${id} is not in '${allowedFrom}' (agents cannot move rows out of 'proposed')`,
+      { status: 409 }
+    );
+  }
+}
+function isTicketStatus(v) {
+  return typeof v === "string" && TICKET_STATUSES.includes(v);
+}
+function isTicketActor(v) {
+  return typeof v === "string" && (v === "owner" || v === "auto" || v === "system" || AGENT_ACTOR_RE.test(v));
+}
+function findTransitionRule(from, to, actor, ctx = {}) {
+  for (const rule of ALLOWED[from] ?? []) {
+    if (rule.to !== to) continue;
+    const actorOk = rule.actors.some(
+      (a) => a === "assignee" ? !!ctx.assignee && ctx.assignee === actor : a === actor
+    );
+    if (!actorOk) continue;
+    if (rule.kinds && !rule.kinds.includes(ctx.kind ?? "")) continue;
+    return rule;
+  }
+  return null;
+}
+function isTransitionAllowed(from, to, actor, ctx = {}) {
+  return findTransitionRule(from, to, actor, ctx) !== null;
+}
+async function addTicketLinks(id, links) {
+  if (links.length === 0) return;
+  await db.insert(suggestionLinks).values(
+    links.map((l) => ({
+      suggestionId: id,
+      kind: l.kind.slice(0, 12),
+      ref: l.ref,
+      state: l.state ? l.state.slice(0, 16) : null
+    }))
+  );
+}
+async function transitionSuggestion(id, to, actor, opts = {}) {
+  if (!isTicketStatus(to)) {
+    throw new Response(`Bad Request: unknown status '${String(to)}'`, { status: 400 });
+  }
+  if (!isTicketActor(actor)) {
+    throw new Response(`Bad Request: unknown actor '${String(actor)}'`, { status: 400 });
+  }
+  const [row] = await db.select().from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
+  const from = row.status;
+  const rule = findTransitionRule(from, to, actor, { assignee: row.assignee, kind: row.kind });
+  if (!rule) {
+    throw new Response(
+      `Conflict: '${from}' -> '${to}' is not permitted for actor '${actor}' on suggestion ${id}`,
+      { status: 409 }
+    );
+  }
+  const now = /* @__PURE__ */ new Date();
+  const patch = { status: to, updatedAt: now };
+  if (rule.incrementAttempt || opts.incrementAttempt) {
+    patch["attemptCount"] = sql3`${homepageTeamSuggestions.attemptCount} + 1`;
+  }
+  if (opts.lastError !== void 0) patch["lastError"] = opts.lastError;
+  if (to === "approved") {
+    patch["assignee"] = null;
+    patch["claimedAt"] = null;
+    patch["claimExpiresAt"] = null;
+  }
+  if (to === "verified") {
+    patch["verifiedBy"] = actor;
+    patch["verifiedAt"] = now;
+  }
+  if (from === "proposed" || to === "dismissed") {
+    patch["decidedBy"] = actor;
+    patch["decidedAt"] = now;
+  }
+  if (to === "applied" && !row.applyRef) {
+    const pr = opts.links?.find((l) => l.kind === "pr");
+    if (pr) patch["applyRef"] = pr.ref;
+  }
+  const guards = [eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, from)];
+  if (rule.actors.includes("assignee")) {
+    guards.push(eq11(homepageTeamSuggestions.assignee, actor));
+  }
+  const updated = await db.update(homepageTeamSuggestions).set(patch).where(and3(...guards)).returning();
+  if (updated.length === 0) {
+    throw new Response(
+      `Conflict: suggestion ${id} changed underneath the '${from}' -> '${to}' transition`,
+      { status: 409 }
+    );
+  }
+  const links = [...opts.links ?? []];
+  if (opts.note) links.push({ kind: "note", ref: opts.note, state: to });
+  await addTicketLinks(id, links);
+  return updated[0];
+}
+async function expireStaleClaims() {
+  const res = await db.update(homepageTeamSuggestions).set({
+    status: "approved",
+    assignee: null,
+    claimedAt: null,
+    claimExpiresAt: null,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(and3(
+    eq11(homepageTeamSuggestions.status, "in_progress"),
+    lt(homepageTeamSuggestions.claimExpiresAt, /* @__PURE__ */ new Date())
+  )).returning({ id: homepageTeamSuggestions.id });
+  return res.length;
+}
+function buildClaimQuery(c) {
+  const conds = [sql3`c.status = ${c.from}`];
+  if (c.id != null) conds.push(sql3`c.id = ${c.id}`);
+  if (c.filter.kind) conds.push(sql3`c.kind = ${c.filter.kind}`);
+  if (c.filter.team) conds.push(sql3`c.team = ${c.filter.team}`);
+  if (c.filter.targetTeam) conds.push(sql3`c.target_team = ${c.filter.targetTeam}`);
+  conds.push(sql3`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`);
+  return sql3`
+    UPDATE homepage_team_suggestions AS s
+       SET status           = 'in_progress',
+           assignee         = ${c.assignee},
+           claimed_at       = now(),
+           claim_expires_at = now() + make_interval(secs => ${c.leaseSeconds}),
+           updated_at       = now()
+     WHERE s.id = (
+       SELECT c.id
+         FROM homepage_team_suggestions AS c
+        WHERE ${sql3.join(conds, sql3` AND `)}
+        ORDER BY c.priority ASC, c.created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+     )
+    RETURNING s.id AS id`;
+}
+async function claimSuggestion(input, exec = defaultExecutor) {
+  if (!isTicketActor(input.assignee)) {
+    throw new Response(`Bad Request: unknown actor '${String(input.assignee)}'`, { status: 400 });
+  }
+  const from = input.filter?.status ?? "approved";
+  if (!isTicketStatus(from)) {
+    throw new Response(`Bad Request: unknown status '${String(from)}'`, { status: 400 });
+  }
+  if (!isTransitionAllowed(from, "in_progress", input.assignee)) {
+    throw new Response(
+      `Conflict: actor '${input.assignee}' may not claim a '${from}' ticket`,
+      { status: 409 }
+    );
+  }
+  const leaseSeconds = Math.min(
+    CLAIM_LEASE_MAX_SEC,
+    Math.max(60, Math.floor(input.leaseSeconds ?? CLAIM_LEASE_DEFAULT_SEC))
+  );
+  const res = await exec(buildClaimQuery({
+    assignee: input.assignee,
+    leaseSeconds,
+    from,
+    id: input.id,
+    filter: input.filter ?? {}
+  }));
+  const id = Number(res.rows?.[0]?.id ?? 0);
+  return id > 0 ? { empty: false, id } : { empty: true };
+}
+async function getTicket(id) {
+  const [suggestion] = await db.select().from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
+  if (!suggestion) return null;
+  const links = await db.select().from(suggestionLinks).where(eq11(suggestionLinks.suggestionId, id)).orderBy(desc(suggestionLinks.createdAt)).limit(50);
+  const events = suggestion.runId == null ? [] : await db.select().from(homepageTeamEvents).where(eq11(homepageTeamEvents.runId, suggestion.runId)).orderBy(desc(homepageTeamEvents.ts)).limit(20);
+  return { suggestion, links, events };
+}
+async function getActiveBrief() {
+  const [row] = await db.select().from(strategyBriefs).where(eq11(strategyBriefs.status, "active")).orderBy(desc(strategyBriefs.createdAt)).limit(1);
+  return row ?? null;
+}
+async function getActiveBriefId() {
+  return cached(
+    "team:brief:active-id",
+    SETTINGS_CACHE_TTL_SEC,
+    async () => (await getActiveBrief())?.id ?? null
+  );
+}
+async function publishBrief(input) {
+  await db.update(strategyBriefs).set({ status: "superseded" }).where(eq11(strategyBriefs.status, "active"));
+  const [row] = await db.insert(strategyBriefs).values({
+    weekStart: input.weekStart,
+    brief: input.brief,
+    metricsJson: input.metricsJson ?? null,
+    status: "active",
+    createdBy: input.createdBy ?? "store-strategist"
+  }).returning({ id: strategyBriefs.id });
+  invalidateCache("team:brief:");
+  await kvDel("team:brief:active-id");
+  return row.id;
+}
+async function listBriefs(limit = 12) {
+  return db.select().from(strategyBriefs).orderBy(desc(strategyBriefs.createdAt)).limit(limit);
+}
+async function createAdCampaign(c) {
+  const [row] = await db.insert(adCampaigns).values({
+    platform: c.platform,
+    name: c.name,
+    objective: c.objective,
+    plannedDailyCents: c.plannedDailyCents ?? 0,
+    plannedTotalCents: c.plannedTotalCents ?? null,
+    audienceJson: c.audienceJson ?? null,
+    creativeJson: c.creativeJson ?? null,
+    policyCheck: c.policyCheck,
+    runId: c.runId ?? null,
+    status: "proposed"
+  }).returning({ id: adCampaigns.id });
+  return row.id;
+}
+async function listAdCampaigns(status, limit = 50) {
+  const q = db.select().from(adCampaigns);
+  return (status ? q.where(eq11(adCampaigns.status, status)) : q).orderBy(desc(adCampaigns.createdAt)).limit(limit);
+}
+async function decideAdCampaign(id, status) {
+  await db.update(adCampaigns).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(adCampaigns.id, id), eq11(adCampaigns.status, "proposed")));
+}
+async function createDraftSocialPost(p) {
+  const [row] = await db.insert(socialPosts).values({
+    platform: p.platform,
+    postType: p.postType,
+    tweetText: p.tweetText,
+    mediaUrls: p.mediaUrls ?? null,
+    dealHistoryId: p.dealHistoryId ?? null,
+    status: "draft",
+    createdBy: "agent",
+    reviewStatus: "pending_review",
+    scheduledFor: p.scheduledFor ?? null,
+    reworkedFrom: p.reworkedFrom ?? null,
+    videoJobId: p.videoJobId ?? null,
+    posterUrl: p.posterUrl ?? null
+  }).returning({ id: socialPosts.id });
+  return row.id;
+}
+async function listSocialPosts(status, limit = 50, reviewStatus) {
+  const conditions = [];
+  if (status) conditions.push(eq11(socialPosts.status, status));
+  if (reviewStatus) conditions.push(eq11(socialPosts.reviewStatus, reviewStatus));
+  const q = db.select().from(socialPosts);
+  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
+}
+async function getSocialFrequencies() {
+  const rows = await db.select().from(pipelineSettings).where(sql3`${pipelineSettings.key} LIKE 'social_freq_%'`);
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const out = {};
+  for (const p of SOCIAL_PLATFORMS) {
+    out[p] = num(map.get(socialFreqKey(p)), SOCIAL_FREQ_DEFAULTS[p]);
+  }
+  return out;
+}
+async function reviewSocialPost(id, input) {
+  const result = await db.update(socialPosts).set({
+    reviewStatus: input.reviewStatus,
+    feedback: input.feedback ?? null,
+    editedText: input.editedText ?? null,
+    reviewedBy: input.reviewedBy,
+    reviewedAt: /* @__PURE__ */ new Date()
+  }).where(and3(eq11(socialPosts.id, id), ne2(socialPosts.status, "posted"))).returning({ id: socialPosts.id });
+  return result.length > 0;
+}
+async function rescheduleSocialPost(id, scheduledFor) {
+  await db.update(socialPosts).set({ scheduledFor }).where(eq11(socialPosts.id, id));
+}
+async function listCalendar(from, to) {
+  const conditions = [];
+  if (from) conditions.push(gte(marketingCalendar.eventDate, from));
+  if (to) conditions.push(lte(marketingCalendar.eventDate, to));
+  const q = db.select().from(marketingCalendar);
+  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(marketingCalendar.eventDate).limit(200);
+}
+async function proposeCalendarEvent(input) {
+  const [row] = await db.insert(marketingCalendar).values({
+    eventDate: input.eventDate,
+    name: input.name,
+    type: input.type ?? "promo",
+    theme: input.theme ?? null,
+    status: "planned"
+  }).returning({ id: marketingCalendar.id });
+  return row.id;
+}
+var RUN_LOCK_WINDOW_MIN, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
+var init_team_server = __esm({
+  "app/lib/team.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_content_slot();
+    init_homepage_team_keys();
+    init_kv_server();
+    init_team_keys();
+    init_schema();
+    init_team_keys();
+    RUN_LOCK_WINDOW_MIN = 20;
+    SETTINGS_CACHE_TTL_SEC = 60;
+    SPEND_KV_TTL_SEC = 26 * 3600;
+    SPEND_RESEED_MS = 15 * 6e4;
+    SUGGESTION_LIST_MAX = 200;
+    TICKET_STATUSES = [
+      "proposed",
+      "approved",
+      "in_progress",
+      "pr_open",
+      "in_review",
+      "verified",
+      "applied",
+      "blocked",
+      "dismissed"
+    ];
+    TERMINAL_TICKET_STATUSES = ["applied", "dismissed"];
+    AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/;
+    AGENT_EDITOR_APPLY_KINDS = ["instructions", "agent-def", "config"];
+    CLAIMANT_ACTORS = ["agent:rr7-engineer", "agent:agent-editor"];
+    OWNER_DISMISS = { to: "dismissed", actors: ["owner"] };
+    ALLOWED = {
+      proposed: [
+        { to: "approved", actors: ["owner", "auto"] },
+        OWNER_DISMISS
+      ],
+      approved: [
+        { to: "in_progress", actors: CLAIMANT_ACTORS },
+        OWNER_DISMISS
+      ],
+      in_progress: [
+        { to: "pr_open", actors: ["assignee"] },
+        { to: "blocked", actors: ["assignee", "system"] },
+        // Lease expiry releases the ticket back onto the unassigned queue.
+        { to: "approved", actors: ["system"] },
+        OWNER_DISMISS
+      ],
+      pr_open: [
+        { to: "in_review", actors: ["agent:qa-reviewer"] },
+        // The legacy agent-editor docs path, preserved verbatim.
+        { to: "applied", actors: ["agent:agent-editor"], kinds: AGENT_EDITOR_APPLY_KINDS },
+        OWNER_DISMISS
+      ],
+      in_review: [
+        { to: "verified", actors: ["agent:qa-reviewer"] },
+        // FAIL bounce: back to the assignee with a reason, one attempt spent.
+        { to: "in_progress", actors: ["agent:qa-reviewer"], incrementAttempt: true },
+        OWNER_DISMISS
+      ],
+      verified: [
+        // Release engine only, post-merge and post-smoke.
+        { to: "applied", actors: ["system"] },
+        // Merge, deploy, or smoke failed: bounce and spend an attempt.
+        { to: "in_progress", actors: ["system"], incrementAttempt: true },
+        OWNER_DISMISS
+      ],
+      blocked: [
+        { to: "approved", actors: ["owner", "system"] },
+        OWNER_DISMISS
+      ],
+      applied: [],
+      dismissed: []
+    };
+    CLAIM_LEASE_DEFAULT_SEC = 1200;
+    CLAIM_LEASE_MAX_SEC = 6 * 3600;
+    defaultExecutor = async (query) => await db.execute(query);
+  }
+});
+
+// app/lib/detection-tickets.server.ts
+var detection_tickets_server_exports = {};
+__export(detection_tickets_server_exports, {
+  MAX_DEDUPE_KEY_LENGTH: () => MAX_DEDUPE_KEY_LENGTH,
+  fileDetectionTicket: () => fileDetectionTicket,
+  hashToken: () => hashToken,
+  makeDedupeKey: () => makeDedupeKey,
+  priorityFromSeverity: () => priorityFromSeverity
+});
+function priorityFromSeverity(severity) {
+  return SEVERITY_PRIORITY[severity] ?? 3;
+}
+function hashToken(input) {
+  let h = 5381;
+  for (let i = 0; i < input.length; i++) {
+    h = (h << 5) + h + input.charCodeAt(i) >>> 0;
+  }
+  return h.toString(36);
+}
+function slugPart(part) {
+  return part.toLowerCase().replace(/[^a-z0-9._/-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
+}
+function makeDedupeKey(...parts) {
+  const joined = parts.filter((p) => p !== null && p !== void 0 && String(p).length > 0).map((p) => slugPart(String(p))).filter((p) => p.length > 0).join(":");
+  if (joined.length <= MAX_DEDUPE_KEY_LENGTH) return joined;
+  const suffix = `~${hashToken(joined)}`;
+  return `${joined.slice(0, MAX_DEDUPE_KEY_LENGTH - suffix.length)}${suffix}`;
+}
+async function fileDetectionTicket(input) {
+  try {
+    const id = await createSuggestion({
+      team: "homepage",
+      targetTeam: input.targetTeam ?? "homepage",
+      category: input.category ?? "other",
+      kind: input.kind ?? "code",
+      suggestion: input.suggestion,
+      cxRisk: input.priority <= 2 ? "high" : "low",
+      priority: input.priority,
+      dedupeKey: input.dedupeKey
+    });
+    if (!id) {
+      console.info(`[${input.detector}] ticket deduped on "${input.dedupeKey}"`);
+      return 0;
+    }
+    const links = (input.links ?? []).filter((l) => l.ref);
+    if (links.length > 0) {
+      await db.insert(suggestionLinks).values(
+        links.map((l) => ({
+          suggestionId: id,
+          kind: l.kind.slice(0, 12),
+          ref: l.ref,
+          state: l.state ? l.state.slice(0, 16) : null
+        }))
+      );
+    }
+    console.info(`[${input.detector}] filed ticket #${id} (${input.dedupeKey}, P${input.priority})`);
+    return id;
+  } catch (err) {
+    console.error(`[${input.detector}] filing ticket "${input.dedupeKey}" failed (ignored):`, err);
+    return 0;
+  }
+}
+var MAX_DEDUPE_KEY_LENGTH, SEVERITY_PRIORITY;
+var init_detection_tickets_server = __esm({
+  "app/lib/detection-tickets.server.ts"() {
+    "use strict";
+    init_team_server();
+    init_db_server();
+    init_schema();
+    MAX_DEDUPE_KEY_LENGTH = 64;
+    SEVERITY_PRIORITY = {
+      P0: 1,
+      P1: 2,
+      P2: 3,
+      P3: 4
+    };
+  }
+});
+
 // app/lib/sensation-map.ts
 function labelForType(v) {
   return TYPE_LABELS[v] ?? v.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -16856,9 +17663,20 @@ var init_owner_alerts_server = __esm({
 // app/lib/homepage-healthcheck.server.ts
 var homepage_healthcheck_server_exports = {};
 __export(homepage_healthcheck_server_exports, {
+  FALLBACK_MARKERS: () => FALLBACK_MARKERS,
+  RENDER_TRUTH_PROPAGATION_MS: () => RENDER_TRUTH_PROPAGATION_MS,
+  assertSlateRendered: () => assertSlateRendered,
   checkPageOnce: () => checkPageOnce,
+  compareFingerprints: () => compareFingerprints,
   extractJsonLd: () => extractJsonLd,
-  runHomepageHealthcheck: () => runHomepageHealthcheck
+  extractPublishedSlate: () => extractPublishedSlate,
+  fingerprintSlate: () => fingerprintSlate,
+  normalizeMarker: () => normalizeMarker,
+  normalizeRenderedText: () => normalizeRenderedText,
+  renderTruth: () => renderTruth,
+  runHomepageHealthcheck: () => runHomepageHealthcheck,
+  sanityAssetId: () => sanityAssetId,
+  utcDay: () => utcDay2
 });
 async function activeServedVariant() {
   try {
@@ -16889,12 +17707,13 @@ function extractJsonLd(html) {
   }
   return { parsed, scripts };
 }
-async function checkPageOnce(path, attempt) {
+async function checkPageOnce(path, attempt, opts = {}) {
   const bust = `__healthcheck=${Date.now()}-${attempt}`;
   const url = `${siteOrigin()}${path}${path.includes("?") ? "&" : "?"}${bust}`;
   const problems = [];
   let status = 0;
   let bodyOk = false;
+  let captured;
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -16904,6 +17723,7 @@ async function checkPageOnce(path, attempt) {
     }).finally(() => clearTimeout(timer));
     status = res.status;
     const html = await res.text();
+    if (opts.captureHtml) captured = html;
     if (status !== 200) problems.push(`HTTP ${status}`);
     if (html.length < MIN_BODY_BYTES) problems.push(`body too small (${html.length} bytes)`);
     if (!/<img[\s>]/i.test(html)) problems.push("no <img> (hero/LCP image likely missing)");
@@ -16916,12 +17736,14 @@ async function checkPageOnce(path, attempt) {
     problems.push(`fetch error: ${err instanceof Error ? err.message : String(err)}`);
   }
   const hardFail = status >= 500;
-  return { path, status, ok: problems.length === 0, problems, bodyOk, hardFail };
+  const check = { path, status, ok: problems.length === 0, problems, bodyOk, hardFail };
+  if (captured !== void 0) check.html = captured;
+  return check;
 }
-async function checkPage(path) {
+async function checkPage(path, opts = {}) {
   let best = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS2; attempt++) {
-    const c = await checkPageOnce(path, attempt);
+    const c = await checkPageOnce(path, attempt, opts);
     if (c.ok) return c;
     if (!best || c.problems.length < best.problems.length) best = c;
     if (attempt < MAX_ATTEMPTS2) {
@@ -16929,6 +17751,298 @@ async function checkPage(path) {
     }
   }
   return best;
+}
+function decodeEntities(s) {
+  return s.replace(/&#x([0-9a-f]+);/gi, (_m, hex) => String.fromCodePoint(parseInt(hex, 16))).replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(parseInt(dec, 10))).replace(/&([a-z]+);/gi, (m, name) => ENTITIES[name.toLowerCase()] ?? m);
+}
+function normalizeRenderedText(html) {
+  return decodeEntities(
+    html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]*>/g, " ")
+  ).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').toLowerCase().replace(/\s+/g, "");
+}
+function normalizeMarker(marker) {
+  return decodeEntities(marker).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').toLowerCase().replace(/\s+/g, "");
+}
+function stripScripts(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ");
+}
+function sanityAssetId(url) {
+  if (!url) return null;
+  const m = /\/images\/[^/]+\/[^/]+\/([^/?#]+)/.exec(url);
+  if (!m?.[1]) return url;
+  return m[1].replace(/-\d+x\d+\.[a-z0-9]+$/i, "");
+}
+function extractPublishedSlate(payload) {
+  const sections = payload.contentBlocks?.sections ?? [];
+  const rails = sections.filter((s) => s._type === "emmaCuratedRail");
+  const wayfinder = sections.find((s) => s._type === "wayfinderMosaic");
+  const couples = sections.find((s) => s._type === "playTogetherBanner");
+  const tiles = wayfinder?.wayfinderTiles ?? [];
+  const couplesImage = couples?.image;
+  return {
+    heroHandle: payload.pinnedProduct?.handle ?? null,
+    heroHandleRequested: payload.emmaHero?.featuredProductHandle?.trim() || null,
+    railTitles: rails.slice(0, RENDERED_TEAM_RAILS).map((r) => (r.heading ?? "").trim()).filter((t) => t.length > 0),
+    wayfinderHeading: wayfinder?.heading?.trim() || null,
+    tileHeadlines: tiles.map((t) => (t.label ?? "").trim()).filter((t) => t.length > 0),
+    couplesHeading: couples?.heading?.trim() || null,
+    tileImageIds: tiles.map((t) => sanityAssetId(t.image?.url)).filter((id) => !!id),
+    couplesImageId: sanityAssetId(couplesImage?.url),
+    publishedBlockCount: sections.length
+  };
+}
+function assertSlateRendered(slate, html) {
+  const text2 = normalizeRenderedText(html);
+  const attrs = stripScripts(html).toLowerCase();
+  const out = [];
+  const has = (marker) => text2.includes(normalizeMarker(marker));
+  if (slate.heroHandleRequested && !slate.heroHandle) {
+    out.push({
+      section: "hero",
+      expected: slate.heroHandleRequested,
+      ok: false,
+      fallbackRendered: true,
+      detail: "pinned handle never resolved into the payload, so the hero is rotating, not pinned"
+    });
+  } else if (slate.heroHandle) {
+    const handle = slate.heroHandle.toLowerCase();
+    const ok = attrs.includes(`/products/${handle}"`) || attrs.includes(`/products/${handle}?`);
+    const a = {
+      section: "hero",
+      expected: `/products/${slate.heroHandle}`,
+      ok,
+      fallbackRendered: !ok
+    };
+    if (!ok) a.detail = "pinned hero product is not linked anywhere on the page";
+    out.push(a);
+  }
+  const railsFellBack = slate.railTitles.length > 0 && has(FALLBACK_MARKERS.rails);
+  for (const title of slate.railTitles) {
+    const ok = has(title);
+    const a = {
+      section: "rails",
+      expected: title,
+      ok,
+      fallbackRendered: !ok && railsFellBack
+    };
+    if (!ok) {
+      a.detail = railsFellBack ? `rail title missing and the shell "${FALLBACK_MARKERS.rails}" fallback rendered instead` : "published rail title is not in the rendered page text";
+    }
+    out.push(a);
+  }
+  const wayfinderPublished = !!slate.wayfinderHeading || slate.tileHeadlines.length > 0;
+  const wayfinderFellBack = wayfinderPublished && has(FALLBACK_MARKERS.wayfinder);
+  const wayfinderExpected = [
+    ...slate.wayfinderHeading ? [slate.wayfinderHeading] : [],
+    ...slate.tileHeadlines
+  ];
+  for (const expected of wayfinderExpected) {
+    const ok = has(expected);
+    const a = {
+      section: "wayfinder",
+      expected,
+      ok,
+      fallbackRendered: !ok && wayfinderFellBack
+    };
+    if (!ok) {
+      a.detail = wayfinderFellBack ? `missing and the shell "${FALLBACK_MARKERS.wayfinder}" fallback rendered instead` : "published wayfinder copy is not in the rendered page text";
+    }
+    out.push(a);
+  }
+  if (slate.couplesHeading) {
+    const ok = has(slate.couplesHeading);
+    const fellBack = !ok && has(FALLBACK_MARKERS.couples);
+    const a = {
+      section: "couples",
+      expected: slate.couplesHeading,
+      ok,
+      fallbackRendered: fellBack
+    };
+    if (!ok) {
+      a.detail = fellBack ? `missing and the shell "${FALLBACK_MARKERS.couples}" fallback rendered instead` : "published couples heading is not in the rendered page text";
+    }
+    out.push(a);
+  }
+  return out;
+}
+function fingerprintSlate(slate) {
+  return {
+    hero: slate.heroHandle ?? "",
+    rails: slate.railTitles.join("|"),
+    tiles: slate.tileImageIds.join("|"),
+    couples: slate.couplesImageId ?? ""
+  };
+}
+function compareFingerprints(today, yesterday) {
+  if (!yesterday) return [];
+  return Object.keys(today).filter(
+    (slot) => today[slot] !== "" && today[slot] === yesterday[slot]
+  );
+}
+function utcDay2(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 10);
+}
+function fingerprintKey(day) {
+  return `${FINGERPRINT_KEY_PREFIX}:${day}`;
+}
+async function fetchHomeHtml() {
+  let best = null;
+  for (let attempt = 1; attempt <= RENDER_TRUTH_MAX_ATTEMPTS; attempt++) {
+    const c = await checkPageOnce("/", attempt, { captureHtml: true });
+    if (c.html && c.bodyOk) return c.html;
+    if (c.html && !best) best = c.html;
+    if (attempt < RENDER_TRUTH_MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, RENDER_TRUTH_RETRY_BACKOFF_MS));
+    }
+  }
+  return best;
+}
+async function renderTruth(opts = {}) {
+  const now = opts.now ?? Date.now();
+  const fileTickets = opts.fileTickets ?? true;
+  const base = {
+    ok: true,
+    skipped: null,
+    assertions: [],
+    missing: [],
+    fallbacks: [],
+    slate: null,
+    fingerprint: {},
+    sameSlots: [],
+    ticketIds: []
+  };
+  try {
+    const variant = await activeServedVariant();
+    if (variant !== "b") {
+      return { ...base, skipped: "variant-not-b", message: `homepage is serving variant ${variant}` };
+    }
+    const [payload, rawDoc] = await Promise.all([
+      readHomepagePayloadB().catch(() => null),
+      getHomepageDocRaw().catch(() => null)
+    ]);
+    if (!payload) {
+      return { ...base, skipped: "no-payload", message: "no precomputed payload B blob to assert against" };
+    }
+    const slate = extractPublishedSlate(payload);
+    const fingerprint = fingerprintSlate(slate);
+    const updatedAtRaw = rawDoc?.["_updatedAt"];
+    const updatedAt = typeof updatedAtRaw === "string" ? Date.parse(updatedAtRaw) : NaN;
+    const propagating = Number.isFinite(updatedAt) && now - updatedAt < RENDER_TRUTH_PROPAGATION_MS;
+    const rawSections = Array.isArray(rawDoc?.["sections"]) ? rawDoc["sections"] : [];
+    const assertions = [];
+    if (rawSections.length > 0 && slate.publishedBlockCount === 0) {
+      assertions.push({
+        section: "payload",
+        expected: `${rawSections.length} published Sanity section(s) resolved into the homepage payload`,
+        ok: false,
+        fallbackRendered: true,
+        detail: "the Sanity homepage doc has sections but payload B carries none, so every slot is rendering shell defaults. This is the 2026-07-24 signature: one malformed block kills the whole projection."
+      });
+    }
+    let html = opts.html;
+    if (slate.publishedBlockCount > 0 || slate.heroHandleRequested) {
+      if (!html) html = await fetchHomeHtml() ?? void 0;
+      if (!html) {
+        return {
+          ...base,
+          slate,
+          fingerprint,
+          skipped: "no-html",
+          message: "could not fetch the live homepage to assert against"
+        };
+      }
+      assertions.push(...assertSlateRendered(slate, html));
+    } else if (assertions.length === 0) {
+      return {
+        ...base,
+        slate,
+        fingerprint,
+        skipped: "nothing-published",
+        message: "no team content published, nothing to assert"
+      };
+    }
+    const today = utcDay2(now);
+    const yesterday = utcDay2(now - 864e5);
+    let sameSlots = [];
+    try {
+      const prior = await kvGet(fingerprintKey(yesterday));
+      sameSlots = compareFingerprints(fingerprint, prior);
+      await kvSet(fingerprintKey(today), fingerprint);
+    } catch (err) {
+      console.warn("[render-truth] fingerprint snapshot failed", err);
+    }
+    const failed = assertions.filter((a) => !a.ok);
+    const missing = failed.map((a) => a.expected);
+    const fallbacks = [...new Set(failed.filter((a) => a.fallbackRendered).map((a) => a.section))];
+    const result = {
+      ...base,
+      assertions,
+      missing,
+      fallbacks,
+      slate,
+      fingerprint,
+      sameSlots,
+      ok: failed.length === 0,
+      skipped: propagating && failed.length > 0 ? "propagating" : null
+    };
+    if (propagating && failed.length > 0) {
+      result.ok = true;
+      result.message = `${failed.length} assertion(s) failing but the Sanity doc changed ${Math.round((now - updatedAt) / 6e4)} min ago, inside the propagation window, so not reporting`;
+      return result;
+    }
+    if (fileTickets) {
+      result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate);
+    }
+    return result;
+  } catch (err) {
+    console.error("[render-truth] check failed (ignored)", err);
+    return { ...base, message: `render-truth error: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+async function fileRenderTruthTickets(failed, sameSlots, day, slate) {
+  const ids = [];
+  const bySection = /* @__PURE__ */ new Map();
+  for (const a of failed) {
+    const list = bySection.get(a.section) ?? [];
+    list.push(a);
+    bySection.set(a.section, list);
+  }
+  for (const [section, items] of bySection) {
+    const lines = items.map((a) => `- expected: ${a.expected}${a.detail ? ` (${a.detail})` : ""}`);
+    ids.push(
+      await fileDetectionTicket({
+        detector: "render-truth",
+        // Dated: a render break on a specific day's slate is a distinct
+        // incident from the same section breaking a week later.
+        dedupeKey: makeDedupeKey("render", section, day),
+        priority: 1,
+        category: "agents",
+        suggestion: `Render-truth FAILED on the homepage "${section}" slot (${day}).
+
+The merchandising team published content that is not reaching the live page. Published content that did not render:
+${lines.join("\n")}
+
+Payload block count: ${slate.publishedBlockCount}. Fix the publish-to-render path, then re-run /cron/homepage-healthcheck to confirm the markers appear.`,
+        links: [{ kind: "url", ref: `${siteOrigin()}/`, state: "failed" }]
+      })
+    );
+  }
+  for (const slot of sameSlots) {
+    ids.push(
+      await fileDetectionTicket({
+        detector: "render-truth",
+        // Undated: one open conversation until the slot actually changes.
+        dedupeKey: makeDedupeKey("sameness", slot),
+        priority: 3,
+        category: "agents",
+        kind: "process",
+        suggestion: `Homepage freshness: the "${slot}" slot is byte-identical to yesterday (${day}).
+
+The merchandise routine's freshness rule designates this slot as must-change daily. Two consecutive identical days means the run either reused the slot or never touched it. Check the daily run's art-director step and the slot's reuse-first default.`
+      })
+    );
+  }
+  return ids;
 }
 async function openHealthcheckIssue(title, body) {
   const token = process.env["GITHUB_TOKEN"];
@@ -16972,9 +18086,28 @@ async function openHealthcheckIssue(title, body) {
   }
 }
 async function runHomepageHealthcheck() {
-  const checks = await Promise.all(PATHS.map(checkPage));
+  const checks = await Promise.all(
+    PATHS.map((p) => checkPage(p, p === "/" ? { captureHtml: true } : {}))
+  );
   const healthy = checks.every((c) => c.ok);
   const home = checks.find((c) => c.path === "/");
+  const homeHtml = home?.html;
+  for (const c of checks) delete c.html;
+  const rt = await renderTruth({ html: homeHtml });
+  if (!rt.ok) {
+    Sentry.captureException(
+      new Error(`Homepage render-truth failed. Missing: ${rt.missing.join(" | ")}`),
+      {
+        tags: { healthcheck: "render-truth", severity: "P1" },
+        extra: {
+          missing: rt.missing,
+          fallbacks: rt.fallbacks,
+          slate: rt.slate,
+          tickets: rt.ticketIds
+        }
+      }
+    );
+  }
   if (home?.bodyOk) {
     try {
       const doc = await getHomepageDocRaw();
@@ -16984,7 +18117,15 @@ async function runHomepageHealthcheck() {
     }
   }
   if (healthy) {
-    return { ok: true, checks, action: "snapshot", rolledBack: false, alerted: false };
+    return {
+      ok: rt.ok,
+      checks,
+      action: "snapshot",
+      rolledBack: false,
+      alerted: !rt.ok,
+      renderTruth: rt,
+      ...rt.ok ? {} : { message: `render-truth failed: ${rt.missing.join(" | ")}` }
+    };
   }
   const failed = checks.filter((c) => !c.ok);
   const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
@@ -16994,7 +18135,8 @@ async function runHomepageHealthcheck() {
     checks,
     action: homeHardBroken ? "rollback" : "alert",
     rolledBack: false,
-    alerted: false
+    alerted: false,
+    renderTruth: rt
   };
   if (homeHardBroken) {
     try {
@@ -17065,7 +18207,7 @@ async function runHomepageHealthcheck() {
   }
   return result;
 }
-var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2;
+var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2, RENDER_TRUTH_PROPAGATION_MS, RENDER_TRUTH_MAX_ATTEMPTS, RENDER_TRUTH_RETRY_BACKOFF_MS, RENDERED_TEAM_RAILS, FINGERPRINT_KEY_PREFIX, FALLBACK_MARKERS, ENTITIES;
 var init_homepage_healthcheck_server = __esm({
   "app/lib/homepage-healthcheck.server.ts"() {
     "use strict";
@@ -17073,12 +18215,34 @@ var init_homepage_healthcheck_server = __esm({
     init_kv_server();
     init_sanity_server();
     init_homepage_payload_server();
+    init_detection_tickets_server();
     LAST_GOOD_KEY = "homepage:healthcheck:lastgood";
     PATHS = ["/", "/discover"];
     FETCH_TIMEOUT_MS = 12e3;
     MIN_BODY_BYTES = 1e3;
     MAX_ATTEMPTS2 = 3;
     RETRY_BACKOFF_MS2 = 1500;
+    RENDER_TRUTH_PROPAGATION_MS = 30 * 6e4;
+    RENDER_TRUTH_MAX_ATTEMPTS = 3;
+    RENDER_TRUTH_RETRY_BACKOFF_MS = 2e3;
+    RENDERED_TEAM_RAILS = 4;
+    FINGERPRINT_KEY_PREFIX = "homepage:render-truth:fingerprint";
+    FALLBACK_MARKERS = {
+      wayfinder: "Find your way in.",
+      couples: "Better together.",
+      rails: "Emma's edit"
+    };
+    ENTITIES = {
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      nbsp: " ",
+      hellip: "\u2026",
+      mdash: "-",
+      ndash: "-"
+    };
   }
 });
 
@@ -17229,6 +18393,30 @@ async function runNotebookHealthcheck() {
     }
   );
   const result = { ok: false, checks, alerted: true };
+  try {
+    const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2, priorityFromSeverity: priorityFromSeverity2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+    result.ticketsFiled = [];
+    for (const c of failed) {
+      result.ticketsFiled.push(
+        await fileDetectionTicket2({
+          detector: "notebook-healthcheck",
+          dedupeKey: makeDedupeKey2("notebook", c.path),
+          priority: priorityFromSeverity2(c.hardFail ? "P1" : "P3"),
+          category: "other",
+          kind: "code",
+          suggestion: `Notebook healthcheck failing on ${c.path} (HTTP ${c.status}).
+
+Problems:
+${c.problems.map((p) => `- ${p}`).join("\n")}
+
+Detected by /cron/notebook-healthcheck against ${siteOrigin2()}. Fix the page, then re-run the cron to confirm it renders with images and valid JSON-LD.`,
+          links: [{ kind: "url", ref: `${siteOrigin2()}${c.path}`, state: "failed" }]
+        })
+      );
+    }
+  } catch (err) {
+    console.error("[notebook-healthcheck] ticket filing failed (ignored):", err);
+  }
   if (hard) {
     const issueBody = [
       `Notebook healthcheck failed against ${siteOrigin2()}.`,
@@ -17269,10 +18457,10 @@ __export(profit_server_exports, {
   getDashboardStats: () => getDashboardStats,
   writeProfitSummary: () => writeProfitSummary
 });
-import { eq as eq11, sql as sql3 } from "drizzle-orm";
+import { eq as eq12, sql as sql4 } from "drizzle-orm";
 async function writeProfitSummary() {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  const [todayDeal] = await db.select().from(dealHistory).where(eq11(dealHistory.dealDate, today)).limit(1);
+  const [todayDeal] = await db.select().from(dealHistory).where(eq12(dealHistory.dealDate, today)).limit(1);
   if (!todayDeal) return;
   const { shopifyAdmin: shopifyAdmin2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
   const ordersData = await shopifyAdmin2(`/orders.json?status=paid&created_at_min=${today}T00:00:00-00:00`);
@@ -17300,21 +18488,21 @@ async function writeProfitSummary() {
   }).onConflictDoUpdate({
     target: dailyProfitSummary.summaryDate,
     set: {
-      totalOrders: sql3`excluded.total_orders`,
-      totalRevenue: sql3`excluded.total_revenue`,
-      totalCogs: sql3`excluded.total_cogs`,
-      totalProfit: sql3`excluded.total_profit`,
-      avgOrderValue: sql3`excluded.avg_order_value`
+      totalOrders: sql4`excluded.total_orders`,
+      totalRevenue: sql4`excluded.total_revenue`,
+      totalCogs: sql4`excluded.total_cogs`,
+      totalProfit: sql4`excluded.total_profit`,
+      avgOrderValue: sql4`excluded.avg_order_value`
     }
   });
   await db.update(dealHistory).set({
     unitsSold: totalOrders,
     totalRevenue: totalRevenue.toFixed(2),
     totalProfit: totalProfit.toFixed(2)
-  }).where(eq11(dealHistory.dealDate, today));
+  }).where(eq12(dealHistory.dealDate, today));
 }
 async function getDashboardStats(days = 30) {
-  const rows = await db.select().from(dailyProfitSummary).orderBy(sql3`${dailyProfitSummary.summaryDate} DESC`).limit(days);
+  const rows = await db.select().from(dailyProfitSummary).orderBy(sql4`${dailyProfitSummary.summaryDate} DESC`).limit(days);
   const total = rows.reduce((acc, r) => ({
     revenue: acc.revenue + parseFloat(r.totalRevenue ?? "0"),
     profit: acc.profit + parseFloat(r.totalProfit ?? "0"),
@@ -17479,8 +18667,8 @@ async function getProductReviews(shopifyProductId, opts = {}) {
   const reviewQ = `SELECT r.* FROM reviews r WHERE r.shopify_product_id = $1 AND r.status = $2 ${filterClause} ORDER BY ${orderBy} LIMIT $3 OFFSET $4`;
   const countQ = `SELECT COUNT(*) as total FROM reviews r WHERE r.shopify_product_id = $1 AND r.status = $2 ${filterClause}`;
   const [rows, countRows] = await Promise.all([
-    sql4(reviewQ, [shopifyProductId, status, perPage, offset]),
-    sql4(countQ, [shopifyProductId, status])
+    sql5(reviewQ, [shopifyProductId, status, perPage, offset]),
+    sql5(countQ, [shopifyProductId, status])
   ]);
   if (rows.length === 0) {
     const empty = { reviews: [], total: 0 };
@@ -17489,8 +18677,8 @@ async function getProductReviews(shopifyProductId, opts = {}) {
   }
   const reviewIds = rows.map((r) => r["id"]);
   const [mediaRows, attrRows] = await Promise.all([
-    sql4`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`,
-    sql4`SELECT * FROM review_attribute_ratings WHERE review_id = ANY(${reviewIds})`
+    sql5`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`,
+    sql5`SELECT * FROM review_attribute_ratings WHERE review_id = ANY(${reviewIds})`
   ]);
   const mediaByReview = /* @__PURE__ */ new Map();
   for (const m of mediaRows) {
@@ -17523,7 +18711,7 @@ async function getProductAggregate(shopifyProductId) {
   const ck = `aggregate:v1:${shopifyProductId}`;
   const hit = await kvGetMemo(ck, 60);
   if (hit) return hit;
-  const rows = await sql4`
+  const rows = await sql5`
     SELECT * FROM review_aggregates WHERE shopify_product_id = ${shopifyProductId}
   `;
   if (!rows[0]) return null;
@@ -17569,13 +18757,13 @@ async function getAdminReviewQueue(filters = {}) {
   const countQuery = `SELECT COUNT(*) as total FROM reviews r ${whereClause}`;
   const allParams = [...params, perPage, offset];
   const [rows, countRows] = await Promise.all([
-    sql4(baseQuery, allParams),
-    sql4(countQuery, params)
+    sql5(baseQuery, allParams),
+    sql5(countQuery, params)
   ]);
   if (rows.length === 0) return { reviews: [], total: 0 };
   const typedRows = rows;
   const reviewIds = typedRows.map((r) => r["id"]);
-  const mediaRows = await sql4`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`;
+  const mediaRows = await sql5`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`;
   const mediaByReview = /* @__PURE__ */ new Map();
   for (const m of mediaRows) {
     const rid2 = m["review_id"];
@@ -17592,7 +18780,7 @@ async function getAdminReviewQueue(filters = {}) {
 }
 async function getReviewStats() {
   const [countRows, avgRows, inviteRows, conversionRows] = await Promise.all([
-    sql4`
+    sql5`
       SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE status = 'pending')  as pending,
@@ -17601,12 +18789,12 @@ async function getReviewStats() {
         COUNT(*) FILTER (WHERE status = 'spam')     as spam
       FROM reviews
     `,
-    sql4`
+    sql5`
       SELECT COALESCE(AVG(rating) FILTER (WHERE status = 'approved'), 0) as avg_rating
       FROM reviews
     `,
-    sql4`SELECT COUNT(*) as sent FROM review_invites`,
-    sql4`SELECT COUNT(*) as completed FROM review_invites WHERE status = 'completed'`
+    sql5`SELECT COUNT(*) as sent FROM review_invites`,
+    sql5`SELECT COUNT(*) as completed FROM review_invites WHERE status = 'completed'`
   ]);
   const c = countRows[0];
   const total = parseInt(c?.["total"] ?? "0", 10);
@@ -17629,7 +18817,7 @@ async function getReviewStats() {
   };
 }
 async function getReviewsPerDay() {
-  const rows = await sql4`
+  const rows = await sql5`
     SELECT
       date_trunc('day', created_at)::date::text as date,
       COUNT(*) as count
@@ -17644,7 +18832,7 @@ async function getReviewsPerDay() {
   }));
 }
 async function getProductsWithReviews() {
-  const rows = await sql4`
+  const rows = await sql5`
     SELECT
       shopify_product_id,
       total_count,
@@ -17663,7 +18851,7 @@ async function getProductsWithReviews() {
   }));
 }
 async function createReview(input) {
-  const rows = await sql4`
+  const rows = await sql5`
     INSERT INTO reviews (
       shopify_product_id, shopify_order_id, shopify_customer_id,
       reviewer_name, reviewer_email, rating, title, body,
@@ -17691,7 +18879,7 @@ async function createReview(input) {
   const review = rowToReview(rows[0]);
   if (input.attributeRatings && Object.keys(input.attributeRatings).length > 0) {
     for (const [name, rating] of Object.entries(input.attributeRatings)) {
-      await sql4`
+      await sql5`
         INSERT INTO review_attribute_ratings (review_id, attribute_name, rating)
         VALUES (${review.id}, ${name}, ${rating})
       `;
@@ -17700,14 +18888,14 @@ async function createReview(input) {
   if (input.mediaUrls && input.mediaUrls.length > 0) {
     for (let i = 0; i < input.mediaUrls.length; i++) {
       const m = input.mediaUrls[i];
-      await sql4`
+      await sql5`
         INSERT INTO review_media (review_id, media_type, url, thumbnail_url, sort_order)
         VALUES (${review.id}, ${m.mediaType}, ${m.url}, ${m.thumbnailUrl ?? null}, ${i})
       `;
     }
   }
   if (input.inviteToken) {
-    await sql4`
+    await sql5`
       UPDATE review_invites
       SET status = 'completed', completed_at = now()
       WHERE invite_token = ${input.inviteToken}::uuid
@@ -17717,7 +18905,7 @@ async function createReview(input) {
   return review;
 }
 async function updateReviewStatus(id, status, opts = {}) {
-  const rows = await sql4`
+  const rows = await sql5`
     UPDATE reviews
     SET
       status         = ${status},
@@ -17731,7 +18919,7 @@ async function updateReviewStatus(id, status, opts = {}) {
   return rowToReview(rows[0]);
 }
 async function updateReviewAI(id, ai) {
-  await sql4`
+  await sql5`
     UPDATE reviews
     SET
       ai_sentiment = ${ai.aiSentiment},
@@ -17742,7 +18930,7 @@ async function updateReviewAI(id, ai) {
   `;
 }
 async function updateReviewReply(id, replyBody) {
-  const rows = await sql4`
+  const rows = await sql5`
     UPDATE reviews
     SET reply_body = ${replyBody}, reply_at = now(), updated_at = now()
     WHERE id = ${id}::uuid
@@ -17751,16 +18939,16 @@ async function updateReviewReply(id, replyBody) {
   return rowToReview(rows[0]);
 }
 async function updateReviewFeatured(id, isFeatured) {
-  await sql4`
+  await sql5`
     UPDATE reviews SET is_featured = ${isFeatured}, updated_at = now() WHERE id = ${id}::uuid
   `;
 }
 async function deleteReview(id) {
-  await sql4`DELETE FROM reviews WHERE id = ${id}::uuid`;
+  await sql5`DELETE FROM reviews WHERE id = ${id}::uuid`;
 }
 async function voteHelpful(id, vote) {
   const col = vote === "yes" ? "helpful_yes" : "helpful_no";
-  const rows = await sql4(
+  const rows = await sql5(
     `UPDATE reviews SET ${col} = ${col} + 1, updated_at = now() WHERE id = $1::uuid RETURNING helpful_yes, helpful_no`,
     [id]
   );
@@ -17771,19 +18959,19 @@ async function voteHelpful(id, vote) {
   };
 }
 async function getReviewById(id) {
-  const rows = await sql4`SELECT * FROM reviews WHERE id = ${id}::uuid`;
+  const rows = await sql5`SELECT * FROM reviews WHERE id = ${id}::uuid`;
   if (!rows[0]) return null;
   const review = rowToReview(rows[0]);
   const [mediaRows, attrRows] = await Promise.all([
-    sql4`SELECT * FROM review_media WHERE review_id = ${id}::uuid ORDER BY sort_order`,
-    sql4`SELECT * FROM review_attribute_ratings WHERE review_id = ${id}::uuid`
+    sql5`SELECT * FROM review_media WHERE review_id = ${id}::uuid ORDER BY sort_order`,
+    sql5`SELECT * FROM review_attribute_ratings WHERE review_id = ${id}::uuid`
   ]);
   review.media = mediaRows.map((m) => rowToMedia(m));
   review.attributeRatings = attrRows.map((a) => rowToAttributeRating(a));
   return review;
 }
 async function createInvite(input) {
-  const rows = input.sendAfter ? await sql4`
+  const rows = input.sendAfter ? await sql5`
         INSERT INTO review_invites (
           shopify_order_id, shopify_customer_id, shopify_product_id,
           reviewer_email, reviewer_name, status, send_after
@@ -17797,7 +18985,7 @@ async function createInvite(input) {
           ${input.sendAfter.toISOString()}
         )
         RETURNING *
-      ` : await sql4`
+      ` : await sql5`
         INSERT INTO review_invites (
           shopify_order_id, shopify_customer_id, shopify_product_id,
           reviewer_email, reviewer_name
@@ -17813,7 +19001,7 @@ async function createInvite(input) {
   return rowToInvite(rows[0]);
 }
 async function getDueScheduledInvites(limit = 200) {
-  const rows = await sql4`
+  const rows = await sql5`
     SELECT * FROM review_invites
     WHERE status = 'scheduled' AND send_after <= now()
     ORDER BY send_after ASC
@@ -17822,33 +19010,33 @@ async function getDueScheduledInvites(limit = 200) {
   return rows.map((r) => rowToInvite(r));
 }
 async function markInviteSent(id) {
-  await sql4`
+  await sql5`
     UPDATE review_invites SET status = 'sent', sent_at = now() WHERE id = ${id}::uuid
   `;
 }
 async function getInviteByToken(token) {
-  const rows = await sql4`
+  const rows = await sql5`
     SELECT * FROM review_invites WHERE invite_token = ${token}::uuid
   `;
   if (!rows[0]) return null;
   return rowToInvite(rows[0]);
 }
 async function markInviteClicked(token) {
-  await sql4`
+  await sql5`
     UPDATE review_invites
     SET clicked_at = COALESCE(clicked_at, now()), status = 'clicked'
     WHERE invite_token = ${token}::uuid AND status NOT IN ('completed', 'expired')
   `;
 }
 async function markInviteOpened(token) {
-  await sql4`
+  await sql5`
     UPDATE review_invites
     SET opened_at = COALESCE(opened_at, now()), status = CASE WHEN status = 'sent' THEN 'opened' ELSE status END
     WHERE invite_token = ${token}::uuid
   `;
 }
 async function getPendingReminderInvites() {
-  const rows = await sql4`
+  const rows = await sql5`
     SELECT * FROM review_invites
     WHERE sent_at < now() - interval '5 days'
       AND reminder_sent_at IS NULL
@@ -17857,12 +19045,12 @@ async function getPendingReminderInvites() {
   return rows.map((r) => rowToInvite(r));
 }
 async function markReminderSent(id) {
-  await sql4`
+  await sql5`
     UPDATE review_invites SET reminder_sent_at = now() WHERE id = ${id}::uuid
   `;
 }
 async function getInviteStats() {
-  const rows = await sql4`
+  const rows = await sql5`
     SELECT
       COUNT(*) as sent,
       COUNT(*) FILTER (WHERE status IN ('opened','clicked','completed')) as opened,
@@ -17881,12 +19069,12 @@ async function getInviteStats() {
 async function getPaginatedInvites(page = 1, perPage = 20) {
   const offset = (page - 1) * perPage;
   const [rows, countRows] = await Promise.all([
-    sql4`
+    sql5`
       SELECT * FROM review_invites
       ORDER BY sent_at DESC
       LIMIT ${perPage} OFFSET ${offset}
     `,
-    sql4`SELECT COUNT(*) as total FROM review_invites`
+    sql5`SELECT COUNT(*) as total FROM review_invites`
   ]);
   return {
     invites: rows.map((r) => rowToInvite(r)),
@@ -17894,7 +19082,7 @@ async function getPaginatedInvites(page = 1, perPage = 20) {
   };
 }
 async function getReviewSettings() {
-  const rows = await sql4`SELECT * FROM review_settings WHERE id = 1`;
+  const rows = await sql5`SELECT * FROM review_settings WHERE id = 1`;
   const r = rows[0] ?? {};
   return {
     autoApprove: r["auto_approve"] ?? false,
@@ -17913,7 +19101,7 @@ async function getReviewSettings() {
   };
 }
 async function updateReviewSettings(settings) {
-  await sql4`
+  await sql5`
     UPDATE review_settings SET
       auto_approve           = COALESCE(${settings.autoApprove ?? null}::boolean, auto_approve),
       spam_threshold         = COALESCE(${settings.spamThreshold ?? null}::numeric, spam_threshold),
@@ -17946,743 +19134,15 @@ async function getReviewsForExport(filters = {}) {
     params.push(productId);
   }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await sql4(`SELECT * FROM reviews ${where} ORDER BY created_at DESC`, params);
+  const rows = await sql5(`SELECT * FROM reviews ${where} ORDER BY created_at DESC`, params);
   return rows.map((r) => rowToReview(r));
 }
-var sql4;
+var sql5;
 var init_reviews_server = __esm({
   "app/lib/reviews.server.ts"() {
     "use strict";
     init_kv_server();
-    sql4 = neon2(process.env["DATABASE_URL"]);
-  }
-});
-
-// app/lib/content-slot.ts
-function contentSlotForDate(d) {
-  const weekday = d.toLocaleDateString("en-US", {
-    timeZone: "America/Los_Angeles",
-    weekday: "long"
-  });
-  const slot = SLOT_BY_WEEKDAY[weekday] ?? ["guides", null];
-  return { weekday, expectedCategory: slot[0], fallbackCategory: slot[1] };
-}
-var SLOT_BY_WEEKDAY;
-var init_content_slot = __esm({
-  "app/lib/content-slot.ts"() {
-    "use strict";
-    SLOT_BY_WEEKDAY = {
-      Monday: ["guides", null],
-      Tuesday: ["real-talk", null],
-      Wednesday: ["guides", null],
-      Thursday: ["podcast-notes", "care"],
-      Friday: ["real-talk", null],
-      Saturday: ["care", null],
-      Sunday: ["comparisons", "wellness-basics"]
-    };
-  }
-});
-
-// app/lib/homepage-team-keys.ts
-var TEAM_KEYS;
-var init_homepage_team_keys = __esm({
-  "app/lib/homepage-team-keys.ts"() {
-    "use strict";
-    TEAM_KEYS = {
-      enabled: "homepage_team_enabled",
-      dailyCents: "homepage_team_daily_cents",
-      buildCents: "homepage_team_build_cents",
-      maxImagesPerDay: "homepage_team_max_images",
-      maxRunsPerDay: "homepage_team_max_runs"
-    };
-  }
-});
-
-// app/lib/team.server.ts
-var team_server_exports = {};
-__export(team_server_exports, {
-  AGENT_EDITOR_APPLY_KINDS: () => AGENT_EDITOR_APPLY_KINDS,
-  ALLOWED: () => ALLOWED,
-  CLAIMANT_ACTORS: () => CLAIMANT_ACTORS,
-  CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
-  CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
-  SUGGESTION_LIST_MAX: () => SUGGESTION_LIST_MAX,
-  TEAM_DEFAULTS: () => TEAM_DEFAULTS,
-  TEAM_IDS: () => TEAM_IDS,
-  TERMINAL_TICKET_STATUSES: () => TERMINAL_TICKET_STATUSES,
-  TICKET_STATUSES: () => TICKET_STATUSES,
-  VALVE_KEYS: () => VALVE_KEYS,
-  assertTeamAuth: () => assertTeamAuth,
-  buildClaimQuery: () => buildClaimQuery,
-  claimSuggestion: () => claimSuggestion,
-  createAdCampaign: () => createAdCampaign,
-  createDraftSocialPost: () => createDraftSocialPost,
-  createSuggestion: () => createSuggestion,
-  createSuggestionDetailed: () => createSuggestionDetailed,
-  decideAdCampaign: () => decideAdCampaign,
-  decideSuggestion: () => decideSuggestion,
-  expireStaleClaims: () => expireStaleClaims,
-  expireStaleRuns: () => expireStaleRuns,
-  findTransitionRule: () => findTransitionRule,
-  gate: () => gate,
-  getActiveBrief: () => getActiveBrief,
-  getSocialFrequencies: () => getSocialFrequencies,
-  getTeamConfig: () => getTeamConfig,
-  getTicket: () => getTicket,
-  getTodayImageCount: () => getTodayImageCount,
-  getTodayRunCount: () => getTodayRunCount,
-  getTodaySpendCents: () => getTodaySpendCents,
-  getValve: () => getValve,
-  invalidateTeamSettingsCache: () => invalidateTeamSettingsCache,
-  isRunInProgress: () => isRunInProgress,
-  isTeamId: () => isTeamId,
-  isTicketActor: () => isTicketActor,
-  isTicketStatus: () => isTicketStatus,
-  isTransitionAllowed: () => isTransitionAllowed,
-  listAdCampaigns: () => listAdCampaigns,
-  listBriefs: () => listBriefs,
-  listCalendar: () => listCalendar,
-  listRecentEvents: () => listRecentEvents,
-  listRecentRuns: () => listRecentRuns,
-  listRunEvents: () => listRunEvents,
-  listSocialPosts: () => listSocialPosts,
-  listSuggestions: () => listSuggestions,
-  markSuggestion: () => markSuggestion,
-  proposeCalendarEvent: () => proposeCalendarEvent,
-  publishBrief: () => publishBrief,
-  recordEvent: () => recordEvent,
-  rescheduleSocialPost: () => rescheduleSocialPost,
-  retireSuggestion: () => retireSuggestion,
-  reviewSocialPost: () => reviewSocialPost,
-  startRun: () => startRun,
-  teamKeys: () => teamKeys,
-  transitionSuggestion: () => transitionSuggestion,
-  updateRun: () => updateRun
-});
-import { timingSafeEqual } from "node:crypto";
-import { and as and3, asc as asc3, desc, eq as eq12, gte, inArray as inArray3, lt, lte, ne as ne2, sql as sql5 } from "drizzle-orm";
-function assertTeamAuth(request) {
-  const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
-  const auth = request.headers.get("authorization") ?? "";
-  const provided = request.headers.get("x-team-secret") ?? auth.replace(/^Bearer\s+/i, "");
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  const ok = expected.length > 0 && a.length === b.length && timingSafeEqual(a, b);
-  if (!ok) {
-    throw new Response("Unauthorized", { status: 401 });
-  }
-}
-function num(v, fallback) {
-  if (v == null) return fallback;
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-async function getTeamConfig(team) {
-  return cached(`team:cfg:${team}`, SETTINGS_CACHE_TTL_SEC, () => getTeamConfigUncached(team));
-}
-async function getTeamConfigUncached(team) {
-  const keys = teamKeys(team);
-  const rows = await db.select().from(pipelineSettings).where(sql5`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
-  const map = new Map(rows.map((r) => [r.key, r.value]));
-  const d = TEAM_DEFAULTS[team];
-  const cfg = {
-    team,
-    enabled: (map.get(keys.enabled) ?? "false") === "true",
-    dailyCents: num(map.get(keys.dailyCents), d.dailyCents),
-    maxRunsPerDay: num(map.get(keys.maxRunsPerDay), d.maxRunsPerDay),
-    autoApproveSuggestions: (map.get(keys.autoApproveSuggestions) ?? "false") === "true"
-  };
-  if (team === "homepage") {
-    cfg.buildCents = num(map.get(TEAM_KEYS.buildCents), 1e4);
-    cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12);
-  } else if (team === "content") {
-    cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT);
-  } else if (team === "video") {
-    cfg.maxCostCents = num(map.get(VIDEO_EXTRA_KEYS.maxCostCents), VIDEO_MAX_COST_CENTS_DEFAULT);
-  }
-  return cfg;
-}
-async function getValve(key) {
-  return cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
-    const [row] = await db.select().from(pipelineSettings).where(eq12(pipelineSettings.key, key)).limit(1);
-    return row?.value === "true";
-  });
-}
-async function invalidateTeamSettingsCache() {
-  invalidateCache("team:cfg:");
-  invalidateCache("team:valve:");
-  const keys = [
-    ...TEAM_IDS.map((t) => `team:cfg:${t}`),
-    ...Object.values(VALVE_KEYS).map((k) => `team:valve:${k}`)
-  ];
-  await Promise.all(keys.map((k) => kvDel(k)));
-}
-function utcDay() {
-  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-}
-async function counterRead(key, sumFromDb) {
-  const seedKey = `${key}:seededAt`;
-  const [count, seededAt] = await Promise.all([kvGet(key), kvGet(seedKey)]);
-  if (typeof count === "number" && typeof seededAt === "number" && Date.now() - seededAt < SPEND_RESEED_MS) {
-    return count;
-  }
-  const fresh = await sumFromDb();
-  await Promise.all([
-    kvSet(key, fresh, SPEND_KV_TTL_SEC),
-    kvSet(seedKey, Date.now(), SPEND_KV_TTL_SEC)
-  ]);
-  return fresh;
-}
-async function getTodaySpendCents(team) {
-  return counterRead(teamSpendKvKey(team, utcDay()), async () => {
-    const res = await db.execute(
-      sql5`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
-          FROM api_token_log
-          WHERE ts >= current_date AND feature LIKE ${team + "-%"}`
-    );
-    const dollars = Number(res.rows?.[0]?.dollars ?? 0);
-    return Math.round(dollars * 100);
-  });
-}
-async function getTodayRunCount(team, excludeRunId) {
-  const res = await db.execute(
-    excludeRunId == null ? sql5`SELECT COUNT(*)::int AS n FROM homepage_team_runs
-            WHERE started_at >= current_date AND team = ${team}` : sql5`SELECT COUNT(*)::int AS n FROM homepage_team_runs
-            WHERE started_at >= current_date AND team = ${team} AND id <> ${excludeRunId}`
-  );
-  return Number(res.rows?.[0]?.n ?? 0);
-}
-async function getTodayImageCount() {
-  return counterRead(teamImagesKvKey(utcDay()), async () => {
-    const res = await db.execute(
-      sql5`SELECT COALESCE(SUM(request_count), 0)::int AS n
-          FROM api_token_log
-          WHERE ts >= current_date AND feature = 'homepage-images'`
-    );
-    return Number(res.rows?.[0]?.n ?? 0);
-  });
-}
-async function isRunInProgress(team, excludeRunId) {
-  const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 6e4);
-  const conditions = [
-    eq12(homepageTeamRuns.team, team),
-    eq12(homepageTeamRuns.status, "running"),
-    gte(homepageTeamRuns.startedAt, since)
-  ];
-  if (excludeRunId !== void 0) conditions.push(ne2(homepageTeamRuns.id, excludeRunId));
-  const [row] = await db.select({ id: homepageTeamRuns.id }).from(homepageTeamRuns).where(and3(...conditions)).limit(1);
-  return !!row;
-}
-async function expireStaleRuns() {
-  const cutoff = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 6e4);
-  await db.update(homepageTeamRuns).set({
-    status: "failed",
-    error: `auto-expired: still 'running' past the ${RUN_LOCK_WINDOW_MIN}-minute lock window`,
-    finishedAt: /* @__PURE__ */ new Date()
-  }).where(and3(eq12(homepageTeamRuns.status, "running"), lt(homepageTeamRuns.startedAt, cutoff)));
-}
-async function gate(team, excludeRunId) {
-  if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
-    await Promise.all([expireStaleRuns(), expireStaleClaims()]);
-  }
-  const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
-    getTeamConfig(team),
-    getTodaySpendCents(team),
-    getTodayRunCount(team, excludeRunId),
-    team === "homepage" ? getTodayImageCount() : Promise.resolve(0),
-    isRunInProgress(team, excludeRunId),
-    getActiveBriefId(),
-    team === "content" ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(void 0)
-  ]);
-  const remainingCents = Math.max(0, cfg.dailyCents - spentCents);
-  const maxImagesPerDay = cfg.maxImagesPerDay ?? 0;
-  const base = {
-    team,
-    enabled: cfg.enabled,
-    dailyCents: cfg.dailyCents,
-    spentCents,
-    remainingCents,
-    runsToday,
-    maxRunsPerDay: cfg.maxRunsPerDay,
-    imagesToday,
-    maxImagesPerDay,
-    activeBriefId: briefId,
-    ...autopublish !== void 0 ? { valves: { autopublish } } : {},
-    ...team === "content" ? { contentSlot: contentSlotForDate(/* @__PURE__ */ new Date()) } : {}
-  };
-  if (!cfg.enabled) return { ...base, ok: false, reason: "disabled" };
-  if (inProgress) return { ...base, ok: false, reason: "run_in_progress" };
-  if (remainingCents <= 0) return { ...base, ok: false, reason: "over_budget" };
-  if (runsToday >= cfg.maxRunsPerDay) return { ...base, ok: false, reason: "over_run_cap" };
-  if (team === "homepage" && imagesToday >= maxImagesPerDay)
-    return { ...base, ok: false, reason: "over_image_cap" };
-  return { ...base, ok: true };
-}
-async function startRun(team, runType) {
-  const [row] = await db.insert(homepageTeamRuns).values({ team, runType, status: "running" }).returning({ id: homepageTeamRuns.id });
-  return row.id;
-}
-async function updateRun(id, u) {
-  const patch = {};
-  if (u.status) patch["status"] = u.status;
-  if (u.currentPhase !== void 0) patch["currentPhase"] = u.currentPhase;
-  if (u.currentAgent !== void 0) patch["currentAgent"] = u.currentAgent;
-  if (u.summary !== void 0) patch["summary"] = u.summary;
-  if (u.prUrl !== void 0) patch["prUrl"] = u.prUrl;
-  if (u.error !== void 0) patch["error"] = u.error;
-  if (u.finished) patch["finishedAt"] = /* @__PURE__ */ new Date();
-  if (u.incrementAttempt) patch["attemptCount"] = sql5`${homepageTeamRuns.attemptCount} + 1`;
-  if (Object.keys(patch).length === 0) return;
-  await db.update(homepageTeamRuns).set(patch).where(eq12(homepageTeamRuns.id, id));
-}
-async function recordEvent(e) {
-  await db.insert(homepageTeamEvents).values({
-    runId: e.runId,
-    eventType: e.eventType,
-    summary: e.summary,
-    agentRole: e.agentRole ?? null,
-    phase: e.phase ?? null,
-    transcriptRef: e.transcriptRef ?? null
-  });
-}
-async function listRecentRuns(team, limit = 25) {
-  const q = db.select().from(homepageTeamRuns);
-  return (team ? q.where(eq12(homepageTeamRuns.team, team)) : q).orderBy(desc(homepageTeamRuns.startedAt)).limit(limit);
-}
-async function listRunEvents(runId) {
-  return db.select().from(homepageTeamEvents).where(eq12(homepageTeamEvents.runId, runId)).orderBy(homepageTeamEvents.ts);
-}
-async function listRecentEvents(team, sinceDays = 7, limit = 500) {
-  const since = new Date(Date.now() - sinceDays * 24 * 60 * 6e4);
-  const conditions = [gte(homepageTeamEvents.ts, since)];
-  if (team) conditions.push(eq12(homepageTeamRuns.team, team));
-  return db.select({
-    id: homepageTeamEvents.id,
-    runId: homepageTeamEvents.runId,
-    team: homepageTeamRuns.team,
-    ts: homepageTeamEvents.ts,
-    agentRole: homepageTeamEvents.agentRole,
-    phase: homepageTeamEvents.phase,
-    eventType: homepageTeamEvents.eventType,
-    summary: homepageTeamEvents.summary
-  }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq12(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and3(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
-}
-async function createSuggestion(s) {
-  const res = await createSuggestionDetailed(s);
-  return res.deduped ? 0 : res.id;
-}
-async function createSuggestionDetailed(s) {
-  const actingTeam = s.targetTeam ?? s.team;
-  const autoApprove = await getTeamConfig(actingTeam).then((c) => c.autoApproveSuggestions).catch(() => false);
-  const [row] = await db.insert(homepageTeamSuggestions).values({
-    team: s.team,
-    targetTeam: s.targetTeam ?? null,
-    runId: s.runId ?? null,
-    category: s.category,
-    kind: s.kind ?? "process",
-    suggestion: s.suggestion,
-    estSavingsUsd: String(s.estSavingsUsd ?? 0),
-    cxRisk: s.cxRisk ?? "low",
-    status: autoApprove ? "approved" : "proposed",
-    decidedBy: autoApprove ? "auto" : null,
-    decidedAt: autoApprove ? /* @__PURE__ */ new Date() : null,
-    priority: s.priority ?? 3,
-    dedupeKey: s.dedupeKey ?? null,
-    dueAt: s.dueAt == null ? null : new Date(s.dueAt)
-  }).onConflictDoNothing().returning({ id: homepageTeamSuggestions.id });
-  if (row?.id) return { id: row.id, deduped: false };
-  if (!s.dedupeKey) return { id: 0, deduped: false };
-  const [live] = await db.select({ id: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and3(
-    eq12(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
-    sql5`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
-  )).limit(1);
-  return { id: live?.id ?? 0, deduped: !!live };
-}
-async function listSuggestions(filter = {}) {
-  const conditions = [];
-  if (filter.team) conditions.push(eq12(homepageTeamSuggestions.team, filter.team));
-  if (filter.targetTeam) conditions.push(eq12(homepageTeamSuggestions.targetTeam, filter.targetTeam));
-  if (filter.status) conditions.push(eq12(homepageTeamSuggestions.status, filter.status));
-  if (filter.statuses?.length) {
-    conditions.push(inArray3(homepageTeamSuggestions.status, [...filter.statuses]));
-  }
-  if (filter.kinds?.length) {
-    conditions.push(inArray3(homepageTeamSuggestions.kind, [...filter.kinds]));
-  }
-  if (filter.assignee) conditions.push(eq12(homepageTeamSuggestions.assignee, filter.assignee));
-  if (filter.updatedSince) {
-    conditions.push(gte(homepageTeamSuggestions.updatedAt, filter.updatedSince));
-  }
-  const order = filter.orderBy === "priority" ? [asc3(homepageTeamSuggestions.priority), asc3(homepageTeamSuggestions.createdAt)] : filter.orderBy === "age" ? [asc3(homepageTeamSuggestions.createdAt)] : [desc(homepageTeamSuggestions.createdAt)];
-  const limit = Math.min(SUGGESTION_LIST_MAX, Math.max(1, filter.limit ?? 100));
-  const q = db.select().from(homepageTeamSuggestions);
-  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(...order).limit(limit);
-}
-async function decideSuggestion(id, status) {
-  await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq12(homepageTeamSuggestions.id, id), eq12(homepageTeamSuggestions.status, "proposed")));
-}
-async function retireSuggestion(id) {
-  await db.update(homepageTeamSuggestions).set({ status: "dismissed", decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq12(homepageTeamSuggestions.id, id), eq12(homepageTeamSuggestions.status, "approved")));
-}
-async function markSuggestion(id, status, applyRef) {
-  const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
-  const res = await db.update(homepageTeamSuggestions).set({ status, applyRef, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq12(homepageTeamSuggestions.id, id), eq12(homepageTeamSuggestions.status, allowedFrom))).returning({ id: homepageTeamSuggestions.id });
-  if (res.length === 0) {
-    throw new Response(
-      `Conflict: suggestion ${id} is not in '${allowedFrom}' (agents cannot move rows out of 'proposed')`,
-      { status: 409 }
-    );
-  }
-}
-function isTicketStatus(v) {
-  return typeof v === "string" && TICKET_STATUSES.includes(v);
-}
-function isTicketActor(v) {
-  return typeof v === "string" && (v === "owner" || v === "auto" || v === "system" || AGENT_ACTOR_RE.test(v));
-}
-function findTransitionRule(from, to, actor, ctx = {}) {
-  for (const rule of ALLOWED[from] ?? []) {
-    if (rule.to !== to) continue;
-    const actorOk = rule.actors.some(
-      (a) => a === "assignee" ? !!ctx.assignee && ctx.assignee === actor : a === actor
-    );
-    if (!actorOk) continue;
-    if (rule.kinds && !rule.kinds.includes(ctx.kind ?? "")) continue;
-    return rule;
-  }
-  return null;
-}
-function isTransitionAllowed(from, to, actor, ctx = {}) {
-  return findTransitionRule(from, to, actor, ctx) !== null;
-}
-async function addTicketLinks(id, links) {
-  if (links.length === 0) return;
-  await db.insert(suggestionLinks).values(
-    links.map((l) => ({
-      suggestionId: id,
-      kind: l.kind.slice(0, 12),
-      ref: l.ref,
-      state: l.state ? l.state.slice(0, 16) : null
-    }))
-  );
-}
-async function transitionSuggestion(id, to, actor, opts = {}) {
-  if (!isTicketStatus(to)) {
-    throw new Response(`Bad Request: unknown status '${String(to)}'`, { status: 400 });
-  }
-  if (!isTicketActor(actor)) {
-    throw new Response(`Bad Request: unknown actor '${String(actor)}'`, { status: 400 });
-  }
-  const [row] = await db.select().from(homepageTeamSuggestions).where(eq12(homepageTeamSuggestions.id, id)).limit(1);
-  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
-  const from = row.status;
-  const rule = findTransitionRule(from, to, actor, { assignee: row.assignee, kind: row.kind });
-  if (!rule) {
-    throw new Response(
-      `Conflict: '${from}' -> '${to}' is not permitted for actor '${actor}' on suggestion ${id}`,
-      { status: 409 }
-    );
-  }
-  const now = /* @__PURE__ */ new Date();
-  const patch = { status: to, updatedAt: now };
-  if (rule.incrementAttempt || opts.incrementAttempt) {
-    patch["attemptCount"] = sql5`${homepageTeamSuggestions.attemptCount} + 1`;
-  }
-  if (opts.lastError !== void 0) patch["lastError"] = opts.lastError;
-  if (to === "approved") {
-    patch["assignee"] = null;
-    patch["claimedAt"] = null;
-    patch["claimExpiresAt"] = null;
-  }
-  if (to === "verified") {
-    patch["verifiedBy"] = actor;
-    patch["verifiedAt"] = now;
-  }
-  if (from === "proposed" || to === "dismissed") {
-    patch["decidedBy"] = actor;
-    patch["decidedAt"] = now;
-  }
-  if (to === "applied" && !row.applyRef) {
-    const pr = opts.links?.find((l) => l.kind === "pr");
-    if (pr) patch["applyRef"] = pr.ref;
-  }
-  const guards = [eq12(homepageTeamSuggestions.id, id), eq12(homepageTeamSuggestions.status, from)];
-  if (rule.actors.includes("assignee")) {
-    guards.push(eq12(homepageTeamSuggestions.assignee, actor));
-  }
-  const updated = await db.update(homepageTeamSuggestions).set(patch).where(and3(...guards)).returning();
-  if (updated.length === 0) {
-    throw new Response(
-      `Conflict: suggestion ${id} changed underneath the '${from}' -> '${to}' transition`,
-      { status: 409 }
-    );
-  }
-  const links = [...opts.links ?? []];
-  if (opts.note) links.push({ kind: "note", ref: opts.note, state: to });
-  await addTicketLinks(id, links);
-  return updated[0];
-}
-async function expireStaleClaims() {
-  const res = await db.update(homepageTeamSuggestions).set({
-    status: "approved",
-    assignee: null,
-    claimedAt: null,
-    claimExpiresAt: null,
-    updatedAt: /* @__PURE__ */ new Date()
-  }).where(and3(
-    eq12(homepageTeamSuggestions.status, "in_progress"),
-    lt(homepageTeamSuggestions.claimExpiresAt, /* @__PURE__ */ new Date())
-  )).returning({ id: homepageTeamSuggestions.id });
-  return res.length;
-}
-function buildClaimQuery(c) {
-  const conds = [sql5`c.status = ${c.from}`];
-  if (c.id != null) conds.push(sql5`c.id = ${c.id}`);
-  if (c.filter.kind) conds.push(sql5`c.kind = ${c.filter.kind}`);
-  if (c.filter.team) conds.push(sql5`c.team = ${c.filter.team}`);
-  if (c.filter.targetTeam) conds.push(sql5`c.target_team = ${c.filter.targetTeam}`);
-  conds.push(sql5`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`);
-  return sql5`
-    UPDATE homepage_team_suggestions AS s
-       SET status           = 'in_progress',
-           assignee         = ${c.assignee},
-           claimed_at       = now(),
-           claim_expires_at = now() + make_interval(secs => ${c.leaseSeconds}),
-           updated_at       = now()
-     WHERE s.id = (
-       SELECT c.id
-         FROM homepage_team_suggestions AS c
-        WHERE ${sql5.join(conds, sql5` AND `)}
-        ORDER BY c.priority ASC, c.created_at ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-     )
-    RETURNING s.id AS id`;
-}
-async function claimSuggestion(input, exec = defaultExecutor) {
-  if (!isTicketActor(input.assignee)) {
-    throw new Response(`Bad Request: unknown actor '${String(input.assignee)}'`, { status: 400 });
-  }
-  const from = input.filter?.status ?? "approved";
-  if (!isTicketStatus(from)) {
-    throw new Response(`Bad Request: unknown status '${String(from)}'`, { status: 400 });
-  }
-  if (!isTransitionAllowed(from, "in_progress", input.assignee)) {
-    throw new Response(
-      `Conflict: actor '${input.assignee}' may not claim a '${from}' ticket`,
-      { status: 409 }
-    );
-  }
-  const leaseSeconds = Math.min(
-    CLAIM_LEASE_MAX_SEC,
-    Math.max(60, Math.floor(input.leaseSeconds ?? CLAIM_LEASE_DEFAULT_SEC))
-  );
-  const res = await exec(buildClaimQuery({
-    assignee: input.assignee,
-    leaseSeconds,
-    from,
-    id: input.id,
-    filter: input.filter ?? {}
-  }));
-  const id = Number(res.rows?.[0]?.id ?? 0);
-  return id > 0 ? { empty: false, id } : { empty: true };
-}
-async function getTicket(id) {
-  const [suggestion] = await db.select().from(homepageTeamSuggestions).where(eq12(homepageTeamSuggestions.id, id)).limit(1);
-  if (!suggestion) return null;
-  const links = await db.select().from(suggestionLinks).where(eq12(suggestionLinks.suggestionId, id)).orderBy(desc(suggestionLinks.createdAt)).limit(50);
-  const events = suggestion.runId == null ? [] : await db.select().from(homepageTeamEvents).where(eq12(homepageTeamEvents.runId, suggestion.runId)).orderBy(desc(homepageTeamEvents.ts)).limit(20);
-  return { suggestion, links, events };
-}
-async function getActiveBrief() {
-  const [row] = await db.select().from(strategyBriefs).where(eq12(strategyBriefs.status, "active")).orderBy(desc(strategyBriefs.createdAt)).limit(1);
-  return row ?? null;
-}
-async function getActiveBriefId() {
-  return cached(
-    "team:brief:active-id",
-    SETTINGS_CACHE_TTL_SEC,
-    async () => (await getActiveBrief())?.id ?? null
-  );
-}
-async function publishBrief(input) {
-  await db.update(strategyBriefs).set({ status: "superseded" }).where(eq12(strategyBriefs.status, "active"));
-  const [row] = await db.insert(strategyBriefs).values({
-    weekStart: input.weekStart,
-    brief: input.brief,
-    metricsJson: input.metricsJson ?? null,
-    status: "active",
-    createdBy: input.createdBy ?? "store-strategist"
-  }).returning({ id: strategyBriefs.id });
-  invalidateCache("team:brief:");
-  await kvDel("team:brief:active-id");
-  return row.id;
-}
-async function listBriefs(limit = 12) {
-  return db.select().from(strategyBriefs).orderBy(desc(strategyBriefs.createdAt)).limit(limit);
-}
-async function createAdCampaign(c) {
-  const [row] = await db.insert(adCampaigns).values({
-    platform: c.platform,
-    name: c.name,
-    objective: c.objective,
-    plannedDailyCents: c.plannedDailyCents ?? 0,
-    plannedTotalCents: c.plannedTotalCents ?? null,
-    audienceJson: c.audienceJson ?? null,
-    creativeJson: c.creativeJson ?? null,
-    policyCheck: c.policyCheck,
-    runId: c.runId ?? null,
-    status: "proposed"
-  }).returning({ id: adCampaigns.id });
-  return row.id;
-}
-async function listAdCampaigns(status, limit = 50) {
-  const q = db.select().from(adCampaigns);
-  return (status ? q.where(eq12(adCampaigns.status, status)) : q).orderBy(desc(adCampaigns.createdAt)).limit(limit);
-}
-async function decideAdCampaign(id, status) {
-  await db.update(adCampaigns).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq12(adCampaigns.id, id), eq12(adCampaigns.status, "proposed")));
-}
-async function createDraftSocialPost(p) {
-  const [row] = await db.insert(socialPosts).values({
-    platform: p.platform,
-    postType: p.postType,
-    tweetText: p.tweetText,
-    mediaUrls: p.mediaUrls ?? null,
-    dealHistoryId: p.dealHistoryId ?? null,
-    status: "draft",
-    createdBy: "agent",
-    reviewStatus: "pending_review",
-    scheduledFor: p.scheduledFor ?? null,
-    reworkedFrom: p.reworkedFrom ?? null,
-    videoJobId: p.videoJobId ?? null,
-    posterUrl: p.posterUrl ?? null
-  }).returning({ id: socialPosts.id });
-  return row.id;
-}
-async function listSocialPosts(status, limit = 50, reviewStatus) {
-  const conditions = [];
-  if (status) conditions.push(eq12(socialPosts.status, status));
-  if (reviewStatus) conditions.push(eq12(socialPosts.reviewStatus, reviewStatus));
-  const q = db.select().from(socialPosts);
-  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
-}
-async function getSocialFrequencies() {
-  const rows = await db.select().from(pipelineSettings).where(sql5`${pipelineSettings.key} LIKE 'social_freq_%'`);
-  const map = new Map(rows.map((r) => [r.key, r.value]));
-  const out = {};
-  for (const p of SOCIAL_PLATFORMS) {
-    out[p] = num(map.get(socialFreqKey(p)), SOCIAL_FREQ_DEFAULTS[p]);
-  }
-  return out;
-}
-async function reviewSocialPost(id, input) {
-  const result = await db.update(socialPosts).set({
-    reviewStatus: input.reviewStatus,
-    feedback: input.feedback ?? null,
-    editedText: input.editedText ?? null,
-    reviewedBy: input.reviewedBy,
-    reviewedAt: /* @__PURE__ */ new Date()
-  }).where(and3(eq12(socialPosts.id, id), ne2(socialPosts.status, "posted"))).returning({ id: socialPosts.id });
-  return result.length > 0;
-}
-async function rescheduleSocialPost(id, scheduledFor) {
-  await db.update(socialPosts).set({ scheduledFor }).where(eq12(socialPosts.id, id));
-}
-async function listCalendar(from, to) {
-  const conditions = [];
-  if (from) conditions.push(gte(marketingCalendar.eventDate, from));
-  if (to) conditions.push(lte(marketingCalendar.eventDate, to));
-  const q = db.select().from(marketingCalendar);
-  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(marketingCalendar.eventDate).limit(200);
-}
-async function proposeCalendarEvent(input) {
-  const [row] = await db.insert(marketingCalendar).values({
-    eventDate: input.eventDate,
-    name: input.name,
-    type: input.type ?? "promo",
-    theme: input.theme ?? null,
-    status: "planned"
-  }).returning({ id: marketingCalendar.id });
-  return row.id;
-}
-var RUN_LOCK_WINDOW_MIN, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
-var init_team_server = __esm({
-  "app/lib/team.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_content_slot();
-    init_homepage_team_keys();
-    init_kv_server();
-    init_team_keys();
-    init_schema();
-    init_team_keys();
-    RUN_LOCK_WINDOW_MIN = 20;
-    SETTINGS_CACHE_TTL_SEC = 60;
-    SPEND_KV_TTL_SEC = 26 * 3600;
-    SPEND_RESEED_MS = 15 * 6e4;
-    SUGGESTION_LIST_MAX = 200;
-    TICKET_STATUSES = [
-      "proposed",
-      "approved",
-      "in_progress",
-      "pr_open",
-      "in_review",
-      "verified",
-      "applied",
-      "blocked",
-      "dismissed"
-    ];
-    TERMINAL_TICKET_STATUSES = ["applied", "dismissed"];
-    AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/;
-    AGENT_EDITOR_APPLY_KINDS = ["instructions", "agent-def", "config"];
-    CLAIMANT_ACTORS = ["agent:rr7-engineer", "agent:agent-editor"];
-    OWNER_DISMISS = { to: "dismissed", actors: ["owner"] };
-    ALLOWED = {
-      proposed: [
-        { to: "approved", actors: ["owner", "auto"] },
-        OWNER_DISMISS
-      ],
-      approved: [
-        { to: "in_progress", actors: CLAIMANT_ACTORS },
-        OWNER_DISMISS
-      ],
-      in_progress: [
-        { to: "pr_open", actors: ["assignee"] },
-        { to: "blocked", actors: ["assignee", "system"] },
-        // Lease expiry releases the ticket back onto the unassigned queue.
-        { to: "approved", actors: ["system"] },
-        OWNER_DISMISS
-      ],
-      pr_open: [
-        { to: "in_review", actors: ["agent:qa-reviewer"] },
-        // The legacy agent-editor docs path, preserved verbatim.
-        { to: "applied", actors: ["agent:agent-editor"], kinds: AGENT_EDITOR_APPLY_KINDS },
-        OWNER_DISMISS
-      ],
-      in_review: [
-        { to: "verified", actors: ["agent:qa-reviewer"] },
-        // FAIL bounce: back to the assignee with a reason, one attempt spent.
-        { to: "in_progress", actors: ["agent:qa-reviewer"], incrementAttempt: true },
-        OWNER_DISMISS
-      ],
-      verified: [
-        // Release engine only, post-merge and post-smoke.
-        { to: "applied", actors: ["system"] },
-        // Merge, deploy, or smoke failed: bounce and spend an attempt.
-        { to: "in_progress", actors: ["system"], incrementAttempt: true },
-        OWNER_DISMISS
-      ],
-      blocked: [
-        { to: "approved", actors: ["owner", "system"] },
-        OWNER_DISMISS
-      ],
-      applied: [],
-      dismissed: []
-    };
-    CLAIM_LEASE_DEFAULT_SEC = 1200;
-    CLAIM_LEASE_MAX_SEC = 6 * 3600;
-    defaultExecutor = async (query) => await db.execute(query);
+    sql5 = neon2(process.env["DATABASE_URL"]);
   }
 });
 
@@ -18932,6 +19392,7 @@ async function runCheckoutProbe() {
 }
 async function recordAndAlertProbe(tier, result) {
   let alerted = false;
+  let ticketId = 0;
   if (!result.ok) {
     const failedStep = result.failedStep ?? "unknown";
     const detail = result.steps.find((s) => !s.ok)?.detail ?? "";
@@ -18946,6 +19407,26 @@ async function recordAndAlertProbe(tier, result) {
       await sendOwnerSms(`xdipx checkout probe FAILED at ${failedStep} (${tier}). Purchase path broken.`);
       alerted = true;
     }
+    try {
+      const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+      const stepLines = result.steps.map((s) => `${s.ok ? "ok  " : "FAIL"} ${s.step}${s.detail ? ` (${s.detail})` : ""}`).join("\n");
+      ticketId = await fileDetectionTicket2({
+        detector: "checkout-probe",
+        dedupeKey: makeDedupeKey2("probe", tier, failedStep),
+        priority: 1,
+        category: "other",
+        kind: "code",
+        suggestion: `P0 checkout probe FAILED at "${failedStep}" (${tier} tier).
+
+The purchase path is broken up to at least this step, so the store may be taking $0.
+
+${stepLines}
+
+PROTECTED PATH: checkout, payment, and cart are owner-only. Do not open an automated fix PR against them. This ticket is the incident record; the owner has already been paged by email and SMS.`
+      });
+    } catch (err) {
+      console.error("[checkout-probe] ticket filing failed (ignored):", err);
+    }
   }
   const inserted = await db.insert(checkoutProbeRuns).values({
     tier,
@@ -18955,7 +19436,7 @@ async function recordAndAlertProbe(tier, result) {
     durationMs: result.durationMs,
     alerted
   }).returning({ id: checkoutProbeRuns.id });
-  return { rowId: inserted[0]?.id ?? 0, alerted };
+  return { rowId: inserted[0]?.id ?? 0, alerted, ticketId };
 }
 var FETCH_TIMEOUT_MS3, MIN_BODY_BYTES3, ALERT_THROTTLE_SECONDS, PROBE_UA;
 var init_checkout_probe_server = __esm({
@@ -20913,11 +21394,44 @@ ${body}` }) }
   }
   return opened;
 }
+async function fileTicketsForGroups(groups, issues, windowMinutes) {
+  const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2, priorityFromSeverity: priorityFromSeverity2, hashToken: hashToken2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+  const ids = [];
+  for (const group of groups.filter((g) => g.priority === "P0" || g.priority === "P1")) {
+    const issue = issues.find((i) => i.title === `[P0] ${group.title}`);
+    ids.push(
+      await fileDetectionTicket2({
+        detector: "log-monitor",
+        dedupeKey: makeDedupeKey2("logmon", hashToken2(group.title)),
+        priority: priorityFromSeverity2(group.priority),
+        category: "other",
+        kind: "code",
+        suggestion: `${group.priority} runtime error: ${group.title}
+
+Occurrences: ${group.occurrences} in the last ${windowMinutes} min
+First seen: ${group.firstSeen}
+Suggested owner: ${group.owner}
+Likely cause: ${group.likelyCause}
+
+\`\`\`
+` + group.excerpt + "\n```\n\nDetected by /cron/log-monitor. Reproduce from the excerpt, fix, and confirm the signal stops appearing in the next log window.",
+        ...issue ? { links: [{ kind: "issue", ref: issue.url, state: "open" }] } : {}
+      })
+    );
+  }
+  return ids;
+}
 async function runLogMonitor({ windowMinutes = 15 } = {}) {
   const logs = await fetchRecentLogs({ windowMinutes });
   const report = await classifyLogs(logs);
   const issues = await openIssuesForP0(report.groups, windowMinutes);
   const issuesOpened = issues.map((i) => i.url);
+  let ticketsFiled = [];
+  try {
+    ticketsFiled = await fileTicketsForGroups(report.groups, issues, windowMinutes);
+  } catch (err) {
+    console.error("[log-monitor] ticket filing failed (ignored):", err);
+  }
   const created = issues.filter((i) => i.created);
   if (created.length > 0) {
     const { sendOwnerSms: sendOwnerSms2, sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
@@ -20936,7 +21450,8 @@ async function runLogMonitor({ windowMinutes = 15 } = {}) {
     p1: report.groups.filter((g) => g.priority === "P1").length,
     p2: report.groups.filter((g) => g.priority === "P2").length,
     suppressed: report.suppressedNoiseCount,
-    issuesOpened
+    issuesOpened,
+    ticketsFiled
   };
 }
 var MODEL2, anthropic, SYSTEM_PROMPT2, REPORT_TOOL;
