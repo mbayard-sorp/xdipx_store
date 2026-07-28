@@ -1,11 +1,15 @@
 # Routine B — Design Cycle
 
 The weekly / on-demand playbook for structural and visual change. Unlike Routine A (which
-auto-publishes content), Routine B **never auto-merges**: it produces wireframes, builds a prototype
-on a branch, runs the review gates, and **opens a PR for human approval**. The Vercel preview URL is
+auto-publishes content), Routine B **never merges its own work**: it produces wireframes, builds a
+prototype on a branch, runs the review gates, and **stops at an open PR**. The merge is the release
+engine's, after CI is green, the linked ticket is QA-verified, and no changed file touches a
+protected path; protected-path PRs stop and go to the owner by email. The Vercel preview URL is
 the "designs on localhost before build" — a cloud routine can't drive your localhost, so the loop is:
-routine pushes a branch → Vercel preview deploys → you review that URL (or `git checkout` to run
-locally) → you approve the PR. Branch protection on `main` enforces approval.
+routine pushes a branch → Vercel preview deploys → you (or `qa-reviewer`) review that URL, or
+`git checkout` to run locally → the engine merges once the gates pass. Branch protection on `main`
+still enforces the required CI check, and `release_engine_enabled` off puts the merge back in your
+hands with no other change.
 
 Entry agent: `homepage-orchestrator` (coordinator). Cadence: weekly, or on-demand from the dashboard.
 This routine has its own turn cap and `homepage_team_build_cents` allowance (separate from the daily
@@ -112,7 +116,7 @@ imagery via `media-manager` (reuse-first), copy via `emma-copywriter`.
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the
   markdown/llms surface, or section structure.
 
-### 5. Open a PR — never auto-merge
+### 5. Open a PR — the routine never merges
 
 Push the branch and open a PR against `main`. Record the PR URL on the run:
 
@@ -122,10 +126,14 @@ curl -s -X POST "$BASE_URL/api/homepage-team/run" \
   -d '{"op":"update","id":'"$RUN_ID"',"update":{"status":"succeeded","finished":true,"currentPhase":"pr-open","prUrl":"https://github.com/<org>/<repo>/pull/<n>","summary":"Design cycle: new hero block + category-nav block; preview deploy attached, awaiting approval"}}'
 ```
 
-The Vercel preview URL (auto-attached to the PR) is the human's review surface. **The routine stops
-here.** A human reviews the preview, approves the PR, and merges. **Branch protection on `main`
-requires that approval** — the team cannot merge its own code. That is the enforcement of the
-"gate code" decision.
+The Vercel preview URL (auto-attached to the PR) is the review surface. **The routine stops here.**
+Review happens on that preview (`qa-reviewer` on the daily QA pass, or you), and the release engine
+squash-merges once CI is green, the linked ticket is `verified`, and the protected-path classifier
+finds nothing sensitive in the diff. Anything touching checkout and payment, cart, migrations and
+schema, auth and session, team valves and spend controls, CI and deploy config, or the release
+engine itself stops and emails you; only you merge those. **The team still cannot merge its own
+code.** That remains the enforcement of the "gate code" decision, and `release_engine_enabled` off
+restores owner-merges-everything.
 
 ### 6. Spend
 
@@ -229,7 +237,9 @@ see `docs/store-team/improvement-loop.md`.
 
 ## Hard rules for this routine
 
-- **Never auto-merge.** Always a PR; a human approves. Branch protection on `main` enforces it.
+- **Never merge your own work.** Always a PR; the release engine merges it after CI, QA verification,
+  and the protected-path check, and the owner merges anything protected. Branch protection on `main`
+  keeps the CI check required.
 - **Never touch `main` directly.** All work on a feature branch.
 - **Additive Sanity only** — new blocks/fields in new files; never modify existing schema.
 - **Respect the repo-native Motion system + v3 tokens** — don't hand-roll IntersectionObserver or

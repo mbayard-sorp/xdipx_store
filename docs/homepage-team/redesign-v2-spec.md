@@ -10,7 +10,8 @@
 > Scope: art direction + section-by-section build spec for `app/components/store/StorefrontHome.tsx`
 > (variant `b`). Section ORDER and the locked shell (announcement / hero / trust / email last)
 > are unchanged from `homepage-redesign-brief.md`. This is a Routine B design cycle: an engineer
-> implements this directly, gated PR, never auto-merged.
+> implements this directly on a gated PR; the engineer never merges it, the release engine does
+> once CI and QA verification pass and the diff touches no protected path.
 >
 > Voice: all copy below complies with `docs/emma-voice.md` (v4). No em-dashes, no "Buy now",
 > CTA whitelist only, Emma has no lived experience, no homepage-hero top billing for Emma.
@@ -421,7 +422,7 @@ carry this comfortably; `/discover` appears exactly twice: the Nº 05 promo tile
 
 ## Handoffs
 
-- **`rr7-engineer`** — build the relayout in `StorefrontHome.tsx` per §2/§5 (gated PR, never auto-merged).
+- **`rr7-engineer`** — build the relayout in `StorefrontHome.tsx` per §2/§5 (gated PR; the engineer never merges, the release engine merges after CI + QA + the protected-path check).
 - **`sanity-content-builder`** — the single optional additive `seeAllLink/Label` field (§5); confirm collections exist.
 - **`media-manager`** — generate/reuse the 7 supporting scenes in the §4 manifest; tag by mood + section.
 - **`emma-copywriter`** (gated by `emma-empathy-reviewer`) — finalize the §2 copy slots per weekly theme.

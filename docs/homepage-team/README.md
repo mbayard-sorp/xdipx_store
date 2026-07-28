@@ -33,7 +33,7 @@ POST /api/homepage-team/spend ◄───────────────�
 POST /api/homepage-team/run   ◄────────────────────┤   IA + designer → prototype branch
 POST /api/homepage-team/event ◄────────────────────┘   → rr7-engineer + sanity-content-builder build
                                                        → tech-architect + qa + Emma voice gate
-Admin UI: /admin/homepage-team                         → opens a PR (NEVER auto-merge) + preview URL
+Admin UI: /admin/homepage-team                         → opens a PR (release engine merges) + preview
   (kill switch, $budget, spend, run log, "run now")
 ```
 
@@ -118,8 +118,8 @@ Cascade-risk guards (the orchestrator and routines enforce these — see the ris
 6. **Sanity write thrash** → diff before write; patch only changed fields; skip no-op publishes.
 7. **Structural churn hurts SEO** → merchandising changes **content only** in a stable shell;
    structure/layout changes go through the gated PR path.
-8. **Weekly cycle sprawl** → Routine B is weekly, has its own turn + `build_cents` cap, and opens a
-   PR (never auto-merges).
+8. **Weekly cycle sprawl** → Routine B is weekly, has its own turn + `build_cents` cap, and stops at
+   an open PR; the release engine merges it after CI + QA + the protected-path check, never the team.
 9. **Over-optimizing on sparse data** → early runs are heuristic/best-practice led; GA4 is weighted
    only once traffic is meaningful.
 
@@ -178,4 +178,4 @@ too. Spend itself is on `/admin/usage` under features `homepage-merchandise`, `h
 - [`routine-daily-merchandise.md`](./routine-daily-merchandise.md) — Routine A, the exact daily
   playbook (auto-publishes content, never code).
 - [`routine-design-cycle.md`](./routine-design-cycle.md) — Routine B, weekly/on-demand
-  wires → prototype → build → PR (never auto-merges).
+  wires → prototype → build → PR (the team never merges; the release engine does, after the gates).

@@ -47,7 +47,8 @@ Invoked by `store-strategist` before brief synthesis:
    cxRisk:'low'}`. Cap at ~8 per run, ranked; the long tail lives in the scoreboard event.
 6. If any milestone row or the status log changed: update the tracker doc(s), commit on branch
    `pm/tracker-<YYYY-MM-DD>` touching ONLY `docs/store-team/trackers/*.md`, push, and open a
-   docs-only PR (never auto-merge). Prepend the dated Status log entry. No changes → no PR;
+   docs-only PR (you never merge it; the release engine merges after CI and the allowlist check).
+   Prepend the dated Status log entry. No changes → no PR;
    say so in the scoreboard event.
 </workflow>
 
