@@ -219,3 +219,18 @@ about a package that was installed the whole time.
 Both are fixed (PR #354) and a real digest was delivered and confirmed. The lesson worth keeping:
 an error string that asserts a cause nobody verified will hide a bug for as long as anyone is
 willing to believe it. Prefer reporting the underlying error.
+
+## Operational note: the release engine's Vercel credential, 2026-07-28
+
+The engine's post-merge phase looks up the production deployment by matching the merge commit SHA
+against `meta.githubCommitSha`. That call needs `VERCEL_TOKEN`, and the token's scope must include
+the team that owns the project (`mikebayard-5194s-projects`). A personal-scoped or expired token
+does not error loudly: `listProductionDeployments` logs a warning and returns an empty list, which
+the poller reports as "deployment not found yet", indistinguishable from a deploy that has not
+started. The first live merge (PR #356) hit exactly this and sat in `awaiting-deploy` while the
+deployment had in fact succeeded.
+
+Two things follow. Rotate `VERCEL_TOKEN` and `GITHUB_TOKEN` together, since both were minted at the
+same time and both expired silently. And when the poller reports "not found" for more than a couple
+of minutes, check the token before believing the deployment is missing: confirm against the commit
+status on GitHub, which is written by Vercel's own integration and does not depend on our token.
