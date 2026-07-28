@@ -20,14 +20,47 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react
 import { Form, Link, useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
-import { eq } from 'drizzle-orm'
-import { pipelineSettings } from '../../db/schema'
+import { and, eq, inArray, notInArray, sql } from 'drizzle-orm'
+import { homepageTeamSuggestions, pipelineSettings, suggestionLinks } from '../../db/schema'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import {
   gate, getTeamConfig, getValve, invalidateTeamSettingsCache, listRecentRuns, listRunEvents,
-  listSuggestions, decideSuggestion, retireSuggestion, listBriefs, listAdCampaigns, decideAdCampaign,
-  type TeamConfig, type GateResult,
+  listSuggestions, decideSuggestion, retireSuggestion, transitionSuggestion, listBriefs,
+  listAdCampaigns, decideAdCampaign,
+  type TeamConfig, type GateResult, type TicketStatus,
 } from '~/lib/team.server'
 import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
+
+/**
+ * Release-engine controls. Deliberately NOT added to VALVE_KEYS: that constant
+ * lives in team-keys.ts, which the release engine treats as a protected path,
+ * and the digest enumerates it. Both keys are seeded in pipeline_settings by
+ * migration 070, read here directly, and allowlisted explicitly in the action
+ * (an unlisted key makes the toggle a silent no-op).
+ */
+const RELEASE_ENGINE_KEYS = {
+  enabled:          'release_engine_enabled',
+  maxMergesPerDay:  'release_engine_max_merges_per_day',
+} as const
+
+/**
+ * Everything still in flight. The pre-070 board only knew proposed/approved/
+ * pr_open; the ticket lifecycle added the middle of the road, and a ticket that
+ * is not on this list is invisible to the owner.
+ *
+ * Spelled out here rather than derived from team.server's TICKET_STATUSES
+ * because the component reads them too, and importing a value (not just a
+ * type) from a .server module drags it into the client bundle. `satisfies`
+ * keeps them tied to the canonical union: adding a status there without
+ * classifying it here is a typecheck failure, not a silently missing filter.
+ */
+const OPEN_TICKET_STATUSES = [
+  'proposed', 'approved', 'in_progress', 'pr_open', 'in_review', 'verified', 'blocked',
+] as const satisfies readonly TicketStatus[]
+
+const CLOSED_TICKET_STATUSES = ['applied', 'dismissed'] as const satisfies readonly TicketStatus[]
+
+const ALL_TICKET_STATUSES = [...OPEN_TICKET_STATUSES, ...CLOSED_TICKET_STATUSES]
 
 export const meta: MetaFunction = () => [{ title: 'Agent Teams — xdipx Admin' }]
 
@@ -48,6 +81,19 @@ const TEAM_LABELS: Record<TeamId, string> = {
   video:    'Video',
 }
 
+interface TicketLink {
+  suggestionId: number
+  kind: string | null
+  ref: string
+  state: string | null
+}
+
+interface TicketFilter {
+  status: string   // '' = the whole open set
+  kind: string
+  assignee: string
+}
+
 interface LoaderData {
   team: TeamId
   config: TeamConfig
@@ -56,6 +102,11 @@ interface LoaderData {
   runs: RunRow[]
   selectedRun: { run: RunRow; events: EventRow[] } | null
   suggestions: SuggestionRow[]
+  ticketLinks: TicketLink[]
+  filter: TicketFilter
+  kindOptions: string[]
+  assigneeOptions: string[]
+  statusCounts: Array<{ status: string; n: number }>
   briefs: BriefRow[]
   campaigns: CampaignRow[]
   autopost: boolean
@@ -66,6 +117,8 @@ interface LoaderData {
   trendScout: boolean
   videoAutopublish: boolean
   videoFrameReview: boolean
+  releaseEngine: boolean
+  releaseEngineMaxMerges: number
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
@@ -78,7 +131,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview] = await Promise.all([
+  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, releaseEngineRow] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
@@ -91,7 +144,14 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.frameReview)).limit(1)
       .then(rows => rows[0]?.value !== 'false')
       .catch(() => true),
+    // Release-engine settings: read directly, same reason as frame review.
+    db.select().from(pipelineSettings)
+      .where(inArray(pipelineSettings.key, [RELEASE_ENGINE_KEYS.enabled, RELEASE_ENGINE_KEYS.maxMergesPerDay]))
+      .catch(() => [] as Array<{ key: string; value: string }>),
   ])
+  const releaseEngine = releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.enabled)?.value === 'true'
+  const releaseEngineMaxMerges =
+    Number(releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.maxMergesPerDay)?.value ?? 6) || 6
 
   // The team tables (049/051) may not be applied yet — degrade cleanly.
   let migrated = true
@@ -106,8 +166,69 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   } catch {
     migrated = false
   }
+  // Filters live in the query string so a filtered board is a shareable URL and
+  // a browser refresh keeps the owner where they were.
+  const filter: TicketFilter = {
+    status:   url.searchParams.get('status') ?? '',
+    kind:     url.searchParams.get('kind') ?? '',
+    assignee: url.searchParams.get('assignee') ?? '',
+  }
+  let ticketLinks: TicketLink[] = []
+  let kindOptions: string[] = []
+  let assigneeOptions: string[] = []
+  let statusCounts: LoaderData['statusCounts'] = []
   if (migrated) {
-    suggestions = await listSuggestions({ limit: 60 }).catch(() => [])
+    suggestions = await listSuggestions({
+      // An explicit status wins; otherwise the board is the whole open set.
+      statuses: filter.status ? [filter.status] : OPEN_TICKET_STATUSES,
+      ...(filter.kind ? { kinds: [filter.kind] } : {}),
+      ...(filter.assignee ? { assignee: filter.assignee } : {}),
+      orderBy: 'priority',
+      limit: 120,
+    }).catch(() => [])
+
+    // Links for exactly the rows on screen: one query, not one per ticket.
+    const ids = suggestions.map(s => s.id)
+    if (ids.length > 0) {
+      ticketLinks = await db
+        .select({
+          suggestionId: suggestionLinks.suggestionId,
+          kind:         suggestionLinks.kind,
+          ref:          suggestionLinks.ref,
+          state:        suggestionLinks.state,
+        })
+        .from(suggestionLinks)
+        .where(inArray(suggestionLinks.suggestionId, ids))
+        .limit(400)
+        .catch(() => [])
+    }
+
+    // Filter vocabularies and the status tally come from the table itself, so a
+    // kind or an agent this UI has never heard of still shows up in the picker.
+    const facets = await db
+      .select({
+        status: homepageTeamSuggestions.status,
+        kind:   homepageTeamSuggestions.kind,
+        assignee: homepageTeamSuggestions.assignee,
+        n:      sql<number>`count(*)::int`,
+      })
+      .from(homepageTeamSuggestions)
+      .groupBy(homepageTeamSuggestions.status, homepageTeamSuggestions.kind, homepageTeamSuggestions.assignee)
+      .catch(() => [])
+    const statusTally = new Map<string, number>()
+    const kinds = new Set<string>()
+    const assignees = new Set<string>()
+    for (const f of facets) {
+      statusTally.set(f.status, (statusTally.get(f.status) ?? 0) + f.n)
+      if (f.kind) kinds.add(f.kind)
+      if (f.assignee) assignees.add(f.assignee)
+    }
+    statusCounts = [...statusTally.entries()]
+      .map(([status, n]) => ({ status, n }))
+      .sort((a, b) => b.n - a.n)
+    kindOptions = [...kinds].sort()
+    assigneeOptions = [...assignees].sort()
+
     briefs = await listBriefs(8).catch(() => [])
     if (team === 'ads') campaigns = await listAdCampaigns(undefined, 30).catch(() => [])
   }
@@ -122,7 +243,12 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     }
   }
 
-  return { team, config, migrated, gateResult, runs, selectedRun, suggestions, briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview }
+  return {
+    team, config, migrated, gateResult, runs, selectedRun, suggestions, ticketLinks, filter,
+    kindOptions, assigneeOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
+    suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
+    videoFrameReview, releaseEngine, releaseEngineMaxMerges,
+  }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -130,13 +256,16 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData()
   const intent = String(form.get('intent') ?? '')
 
-  // Allowlisted pipeline_settings keys: every team's key set + homepage extras + valves.
+  // Allowlisted pipeline_settings keys: every team's key set + homepage extras
+  // + valves + the release-engine controls. A key that is not here is rejected,
+  // so a new toggle must be added in both places or it silently does nothing.
   const allowed = new Set<string>([
     ...TEAM_IDS.flatMap(t => Object.values(teamKeys(t))),
     ...Object.values(HOMEPAGE_EXTRA_KEYS),
     ...Object.values(CONTENT_EXTRA_KEYS),
     ...Object.values(VIDEO_EXTRA_KEYS),
     ...Object.values(VALVE_KEYS),
+    ...Object.values(RELEASE_ENGINE_KEYS),
   ])
 
   async function upsertSetting(key: string, value: string) {
@@ -170,6 +299,42 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ ok: true })
   }
 
+  // Unblock: blocked -> approved, back onto the unassigned queue. Routed
+  // through transitionSuggestion so the transition map (not this route) stays
+  // the single arbiter, and so the attempt/claim bookkeeping is the same one
+  // the agents get.
+  if (intent === 'suggestion-unblock') {
+    const id = Number(form.get('id'))
+    if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false }, { status: 400 })
+    try {
+      await transitionSuggestion(id, 'approved', 'owner', { note: 'unblocked by owner from /admin/homepage-team' })
+    } catch (err) {
+      if (err instanceof Response) return Response.json({ ok: false, error: await err.text() }, { status: err.status })
+      throw err
+    }
+    return Response.json({ ok: true })
+  }
+
+  // Priority is a plain re-prioritisation, not a lifecycle move: it changes
+  // where a ticket sits in the claim queue and nothing else. Terminal rows are
+  // excluded so reordering can never disturb applied/dismissed history.
+  if (intent === 'suggestion-priority') {
+    const id = Number(form.get('id'))
+    const priority = Number(form.get('priority'))
+    if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false }, { status: 400 })
+    if (!Number.isFinite(priority) || priority < 1 || priority > 5) {
+      return Response.json({ ok: false, error: 'priority must be 1..5' }, { status: 400 })
+    }
+    await db
+      .update(homepageTeamSuggestions)
+      .set({ priority, updatedAt: new Date() })
+      .where(and(
+        eq(homepageTeamSuggestions.id, id),
+        notInArray(homepageTeamSuggestions.status, [...CLOSED_TICKET_STATUSES]),
+      ))
+    return Response.json({ ok: true })
+  }
+
   if (intent === 'ad-approve' || intent === 'ad-reject') {
     const id = Number(form.get('id'))
     if (!Number.isFinite(id) || id <= 0) return Response.json({ ok: false }, { status: 400 })
@@ -199,18 +364,46 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
   )
 }
 
+/** Whole-day age, computed on the server so SSR and hydration agree. */
+function fmtAge(from: Date | string | null): string {
+  if (!from) return '—'
+  const ms = Date.now() - new Date(from).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return '—'
+  const hours = Math.floor(ms / 3_600_000)
+  if (hours < 1) return '<1h'
+  if (hours < 48) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
 export default function AgentTeamsPage() {
   const {
     team, config, migrated, gateResult, runs, selectedRun,
-    suggestions, briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview,
+    suggestions, ticketLinks, filter, kindOptions, assigneeOptions, statusCounts,
+    briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
+    seoCuration, trendScout, videoAutopublish, videoFrameReview,
+    releaseEngine, releaseEngineMaxMerges,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
-  const openSuggestions = suggestions.filter(s => s.status === 'proposed' || s.status === 'approved' || s.status === 'pr_open')
-  const closedSuggestions = suggestions.filter(s => s.status === 'applied' || s.status === 'dismissed')
+  const countOf = (status: string) => statusCounts.find(s => s.status === status)?.n ?? 0
+  const openTotal = statusCounts
+    .filter(s => (OPEN_TICKET_STATUSES as readonly string[]).includes(s.status))
+    .reduce((a, s) => a + s.n, 0)
+  const closedTotal = countOf('applied') + countOf('dismissed')
+  const linksById = new Map<number, TicketLink[]>()
+  for (const l of ticketLinks) {
+    // `note` rows are free-text transition reasons, not destinations.
+    if (l.kind === 'note') continue
+    const arr = linksById.get(l.suggestionId)
+    if (arr) arr.push(l)
+    else linksById.set(l.suggestionId, [l])
+  }
+  const filtered = filter.status !== '' || filter.kind !== '' || filter.assignee !== ''
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    // max-w-5xl (not 4xl) so the ticket table's nine columns fit on a laptop
+    // without horizontal scrolling; phones still scroll inside ResponsiveTable.
+    <div className="max-w-5xl mx-auto space-y-8">
       <h1 className="text-2xl font-bold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
         Agent Teams
       </h1>
@@ -341,12 +534,29 @@ export default function AgentTeamsPage() {
           </>
         )}
         {team === 'strategy' && (
-          <ValveRow
-            label={`Suggestion apply is ${suggestionApply ? 'ON' : 'OFF'}`}
-            detail="When ON, agent-editor turns approved instruction-suggestions into PRs (you still merge). OFF pauses the apply path entirely."
-            settingKey={VALVE_KEYS.suggestionApply}
-            on={suggestionApply}
-          />
+          <>
+            <ValveRow
+              label={`Suggestion apply is ${suggestionApply ? 'ON' : 'OFF'}`}
+              detail="When ON, agent-editor turns approved instruction-suggestions into PRs (you still merge). OFF pauses the apply path entirely."
+              settingKey={VALVE_KEYS.suggestionApply}
+              on={suggestionApply}
+            />
+            <ValveRow
+              label={`Release engine (auto-merge) is ${releaseEngine ? 'ON' : 'OFF'}`}
+              detail="Master kill switch for the whole auto-merge system. ON means agent PRs that pass CI and the QA gate are merged, deployed, and smoke-tested with no click from you. OFF means nothing auto-merges, ever: you merge every PR by hand, exactly like before this shipped. Everything else keeps running, so turning it off is safe and reversible. PRs touching checkout, payments, auth, migrations, or team valves always wait for you either way."
+              settingKey={RELEASE_ENGINE_KEYS.enabled}
+              on={releaseEngine}
+            />
+            {releaseEngine && (
+              <div className="grid gap-4 sm:grid-cols-3">
+                <SettingField
+                  label="Max auto-merges / day"
+                  settingKey={RELEASE_ENGINE_KEYS.maxMergesPerDay}
+                  value={releaseEngineMaxMerges}
+                />
+              </div>
+            )}
+          </>
         )}
         {team === 'strategy' && (
           <p className="text-xs text-ink-4">
@@ -399,78 +609,178 @@ export default function AgentTeamsPage() {
         </section>
       )}
 
-      {/* ── Improvement bus (suggestions) ────────────────────────────────── */}
+      {/* ── Ticket queue (improvement bus) ───────────────────────────────── */}
       {migrated && (
         <section>
-          <h2 className="kicker mb-3">Suggestions (all teams)</h2>
-          {openSuggestions.length === 0 ? (
+          <h2 className="kicker mb-3">Ticket queue (all teams)</h2>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <StatCard label="Open" value={String(openTotal)} />
+            <StatCard
+              label="Awaiting your triage"
+              value={String(countOf('proposed'))}
+              tone={countOf('proposed') > 0 ? 'warn' : 'ok'}
+            />
+            <StatCard
+              label="Blocked"
+              value={String(countOf('blocked'))}
+              tone={countOf('blocked') > 0 ? 'warn' : 'ok'}
+            />
+            <StatCard label="Closed" value={String(closedTotal)} sub="applied or dismissed" />
+          </div>
+
+          {/* Filters. GET so a filtered board is a shareable, refreshable URL. */}
+          <Form method="get" className="flex flex-col gap-3 md:flex-row md:items-end mb-3">
+            <input type="hidden" name="team" value={team} />
+            <FilterSelect label="Status" name="status" value={filter.status} options={ALL_TICKET_STATUSES} allLabel="Open (all in flight)" />
+            <FilterSelect label="Kind" name="kind" value={filter.kind} options={kindOptions} allLabel="Any kind" />
+            <FilterSelect label="Assignee" name="assignee" value={filter.assignee} options={assigneeOptions} allLabel="Anyone" />
+            <div className="flex gap-2">
+              <button className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:bg-paper-2">
+                Filter
+              </button>
+              {filtered && (
+                <Link
+                  to={`/admin/homepage-team?team=${team}`}
+                  className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-3 hover:bg-paper-2"
+                >
+                  Clear
+                </Link>
+              )}
+            </div>
+          </Form>
+
+          {suggestions.length === 0 ? (
             <p className="text-sm text-ink-4">
-              Nothing proposed right now. Team retros and process-optimizer write suggestions here for your approval.
+              {filtered
+                ? 'No tickets match this filter.'
+                : 'Nothing in flight right now. Detectors, team retros, and process-optimizer file tickets here for your approval.'}
             </p>
           ) : (
-            <div className="bg-paper rounded-xl border border-line divide-y divide-line">
-              {openSuggestions.map(s => (
-                <div key={s.id} className="px-4 py-3">
-                  <div className="flex items-center gap-2 text-xs text-ink-4">
-                    <span className="font-mono">#{s.id}</span>
-                    <span className="text-plum">{s.team}</span>
-                    {s.targetTeam && <span>→ {s.targetTeam}</span>}
-                    <span className="rounded bg-paper-3 px-1.5 py-0.5 font-mono">{s.kind}</span>
-                    <span>{s.category}</span>
-                    <span className={s.cxRisk === 'high' ? 'text-coral' : s.cxRisk === 'med' ? 'text-plum' : ''}>
-                      cx:{s.cxRisk}
-                    </span>
-                    {Number(s.estSavingsUsd) > 0 && <span>~${Number(s.estSavingsUsd).toFixed(2)} saved</span>}
-                    <StatusBadge status={s.status} />
-                    {s.decidedBy === 'auto' && (
-                      <span className="rounded bg-plum-soft px-1.5 py-0.5 font-mono text-plum">auto</span>
-                    )}
-                  </div>
-                  <p className="mt-1 text-sm text-ink">{s.suggestion}</p>
-                  {s.status === 'proposed' && (
-                    <div className="mt-2 flex gap-2">
-                      <Form method="post">
-                        <input type="hidden" name="intent" value="suggestion-approve" />
-                        <input type="hidden" name="id" value={s.id} />
-                        <button className="rounded-lg bg-sage/20 px-3 py-1 text-xs font-semibold text-sage hover:bg-sage/30">
-                          Approve
-                        </button>
-                      </Form>
-                      <Form method="post">
-                        <input type="hidden" name="intent" value="suggestion-dismiss" />
-                        <input type="hidden" name="id" value={s.id} />
-                        <button className="rounded-lg bg-paper-3 px-3 py-1 text-xs font-semibold text-ink-3 hover:bg-paper-2">
-                          Dismiss
-                        </button>
-                      </Form>
-                    </div>
-                  )}
-                  {s.status === 'approved' && (
-                    <div className="mt-1 flex items-center gap-3">
-                      <p className="text-xs text-ink-4">
-                        {s.decidedBy === 'auto' ? 'Auto-approved. ' : ''}Queued for agent-editor{s.kind === 'code' ? ' (code kind — route to rr7-engineer manually)' : ''}.
-                      </p>
-                      <Form method="post">
-                        <input type="hidden" name="intent" value="suggestion-retire" />
-                        <input type="hidden" name="id" value={s.id} />
-                        <button className="rounded-lg bg-paper-3 px-2.5 py-0.5 text-[11px] font-semibold text-ink-3 hover:bg-coral-soft hover:text-coral" title="Retire this stale/superseded approved suggestion (reversible)">
-                          Retire
-                        </button>
-                      </Form>
-                    </div>
-                  )}
-                  {s.status === 'pr_open' && s.applyRef && (
-                    <a href={s.applyRef} target="_blank" rel="noreferrer" className="link-coral mt-1 inline-block text-xs">
-                      review PR →
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
+            <ResponsiveTable>
+              {/* Floor, not a width: 860px keeps the columns legible while
+                  still fitting inside the max-w-4xl shell on a laptop, so only
+                  phones do the horizontal scroll. */}
+              <table className="min-w-[860px] w-full bg-paper rounded-xl border border-line text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] text-ink-4 kicker border-b border-line">
+                    <th className="px-3 py-2 font-normal">Ticket</th>
+                    <th className="px-3 py-2 font-normal">Status</th>
+                    <th className="px-3 py-2 font-normal">Pri</th>
+                    <th className="px-3 py-2 font-normal">Assignee</th>
+                    <th className="px-3 py-2 font-normal">Age</th>
+                    <th className="px-3 py-2 font-normal">Att</th>
+                    <th className="px-3 py-2 font-normal">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line align-top">
+                  {suggestions.map(s => {
+                    const links = linksById.get(s.id) ?? []
+                    return (
+                      <tr key={s.id}>
+                        <td className="px-3 py-3 max-w-[380px]">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-ink-4">
+                            <span className="font-mono">#{s.id}</span>
+                            <span className="text-plum">{s.team}</span>
+                            {s.targetTeam && <span>→ {s.targetTeam}</span>}
+                            <span className="rounded bg-paper-3 px-1.5 py-0.5 font-mono">{s.kind}</span>
+                            <span>{s.category}</span>
+                            <span className={s.cxRisk === 'high' ? 'text-coral' : s.cxRisk === 'med' ? 'text-plum' : ''}>
+                              cx:{s.cxRisk}
+                            </span>
+                            {Number(s.estSavingsUsd) > 0 && <span>~${Number(s.estSavingsUsd).toFixed(2)} saved</span>}
+                            {s.decidedBy === 'auto' && (
+                              <span className="rounded bg-plum-soft px-1.5 py-0.5 font-mono text-plum">auto</span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-sm text-ink">{s.suggestion}</p>
+                          {s.lastError && (
+                            <p
+                              className="mt-1 text-[11px] text-coral truncate"
+                              title={s.lastError}
+                            >
+                              last error: {s.lastError}
+                            </p>
+                          )}
+                          {(links.length > 0 || s.applyRef) && (
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                              {links.map((l, i) => (
+                                <TicketRef key={`${l.ref}-${i}`} kind={l.kind} ref_={l.ref} state={l.state} />
+                              ))}
+                              {links.length === 0 && s.applyRef && (
+                                <TicketRef kind="pr" ref_={s.applyRef} state={null} />
+                              )}
+                            </div>
+                          )}
+                          {s.status === 'approved' && (
+                            <p className="mt-1 text-[11px] text-ink-4">
+                              {s.decidedBy === 'auto' ? 'Auto-approved. ' : ''}
+                              {s.kind === 'code'
+                                ? 'Claimable by the dev routine.'
+                                : 'Queued for agent-editor.'}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3"><StatusBadge status={s.status} /></td>
+                        <td className="px-3 py-3">
+                          <PriorityForm id={s.id} priority={s.priority} />
+                        </td>
+                        <td className="px-3 py-3 text-xs text-ink-3 font-mono whitespace-nowrap">
+                          {s.assignee ?? <span className="text-ink-4">unassigned</span>}
+                        </td>
+                        <td className="px-3 py-3 text-xs text-ink-3 whitespace-nowrap">{fmtAge(s.createdAt)}</td>
+                        <td className={`px-3 py-3 text-xs whitespace-nowrap ${s.attemptCount >= 3 ? 'text-coral font-semibold' : 'text-ink-3'}`}>
+                          {s.attemptCount}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex flex-col gap-1.5">
+                            {s.status === 'proposed' && (
+                              <>
+                                <IntentButton
+                                  intent="suggestion-approve"
+                                  id={s.id}
+                                  label="Approve"
+                                  className="bg-sage/20 text-sage hover:bg-sage/30"
+                                />
+                                <IntentButton
+                                  intent="suggestion-dismiss"
+                                  id={s.id}
+                                  label="Dismiss"
+                                  className="bg-paper-3 text-ink-3 hover:bg-paper-2"
+                                />
+                              </>
+                            )}
+                            {s.status === 'approved' && (
+                              <IntentButton
+                                intent="suggestion-retire"
+                                id={s.id}
+                                label="Retire"
+                                className="bg-paper-3 text-ink-3 hover:bg-coral-soft hover:text-coral"
+                                title="Retire this stale or superseded approved ticket (reversible)"
+                              />
+                            )}
+                            {s.status === 'blocked' && (
+                              <IntentButton
+                                intent="suggestion-unblock"
+                                id={s.id}
+                                label="Unblock"
+                                className="bg-plum-soft text-plum hover:bg-plum-soft/70"
+                                title="Send this ticket back to approved so an agent can claim it again"
+                              />
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </ResponsiveTable>
           )}
-          {closedSuggestions.length > 0 && (
-            <p className="text-xs text-ink-4 mt-2">{closedSuggestions.length} applied/dismissed in recent history.</p>
-          )}
+          <p className="text-xs text-ink-4 mt-2">
+            Showing {suggestions.length} ticket{suggestions.length === 1 ? '' : 's'}
+            {filtered ? ' (filtered)' : ' in flight'} · {closedTotal} applied/dismissed on record.
+          </p>
         </section>
       )}
 
@@ -586,11 +896,84 @@ export default function AgentTeamsPage() {
 
 function StatusBadge({ status }: { status: string }) {
   const tone =
-    status === 'succeeded' || status === 'applied' || status === 'approved' ? 'bg-sage/20 text-sage'
-    : status === 'failed' || status === 'rolled_back' || status === 'rejected' ? 'bg-coral-soft text-coral'
-    : status === 'running' || status === 'pr_open' ? 'bg-plum-soft text-plum'
+    status === 'succeeded' || status === 'applied' || status === 'approved' || status === 'verified' ? 'bg-sage/20 text-sage'
+    : status === 'failed' || status === 'rolled_back' || status === 'rejected' || status === 'blocked' ? 'bg-coral-soft text-coral'
+    : status === 'running' || status === 'pr_open' || status === 'in_progress' || status === 'in_review' ? 'bg-plum-soft text-plum'
     : 'bg-paper-3 text-ink-4'
   return <span className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-mono font-semibold ${tone}`}>{status}</span>
+}
+
+function FilterSelect({
+  label, name, value, options, allLabel,
+}: { label: string; name: string; value: string; options: string[]; allLabel: string }) {
+  return (
+    <label className="flex flex-col gap-1 md:w-44">
+      <span className="text-xs text-ink-4">{label}</span>
+      <select
+        name={name}
+        defaultValue={value}
+        className="rounded-lg border border-line bg-paper-2 px-3 py-1.5 text-sm text-ink"
+      >
+        <option value="">{allLabel}</option>
+        {options.map(o => (
+          <option key={o} value={o}>{o}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/** One outbound ref on a ticket: the PR, the run, the deploy, the issue. */
+function TicketRef({ kind, ref_, state }: { kind: string | null; ref_: string; state: string | null }) {
+  const label = `${kind ?? 'ref'}${state ? ` (${state})` : ''}`
+  const isUrl = /^https?:\/\//.test(ref_)
+  const short = ref_.replace(/^https?:\/\/(www\.)?github\.com\//, '').slice(0, 48)
+  return isUrl ? (
+    <a href={ref_} target="_blank" rel="noreferrer" className="link-coral" title={ref_}>
+      {label} → {short}
+    </a>
+  ) : (
+    <span className="text-ink-4" title={ref_}>{label}: {short}</span>
+  )
+}
+
+function PriorityForm({ id, priority }: { id: number; priority: number }) {
+  return (
+    <Form method="post" className="flex items-center gap-1">
+      <input type="hidden" name="intent" value="suggestion-priority" />
+      <input type="hidden" name="id" value={id} />
+      <select
+        name="priority"
+        defaultValue={String(priority)}
+        aria-label={`Priority for ticket ${id}`}
+        className="rounded border border-line bg-paper-2 px-1.5 py-0.5 text-xs text-ink"
+      >
+        {[1, 2, 3, 4, 5].map(p => (
+          <option key={p} value={p}>P{p}</option>
+        ))}
+      </select>
+      <button className="rounded border border-line px-1.5 py-0.5 text-[11px] font-semibold text-ink-3 hover:bg-paper-2" title="1 is highest priority; the claim queue reads this first">
+        Set
+      </button>
+    </Form>
+  )
+}
+
+function IntentButton({
+  intent, id, label, className, title,
+}: { intent: string; id: number; label: string; className: string; title?: string }) {
+  return (
+    <Form method="post">
+      <input type="hidden" name="intent" value={intent} />
+      <input type="hidden" name="id" value={id} />
+      <button
+        className={`w-full rounded-lg px-3 py-1 text-xs font-semibold whitespace-nowrap ${className}`}
+        {...(title ? { title } : {})}
+      >
+        {label}
+      </button>
+    </Form>
+  )
 }
 
 function SettingField({
