@@ -1061,7 +1061,17 @@ export async function getProductsByTag(tag: string, limit = 6): Promise<Product[
           edges { node { ${PRODUCT_CORE_FRAGMENT} } }
         }
       }
-    `, { query: `tag:${tag}`, first: limit })
+    `, {
+      // The tag value MUST be quoted. Our taxonomy tags are namespaced with a
+      // colon ("brand:shots", "section:play"), and Shopify's search parser
+      // reads an unquoted colon as a field separator, so `tag:brand:shots`
+      // silently matched nothing. That broke the cold-start recommendation
+      // fallback on every PDP, since `tags[0]` is always the `brand:` tag.
+      // Verified 2026-07-27 against the live Storefront API: quoting fixes
+      // `brand:*` and `section:*` (0 -> 5 results) and regresses nothing.
+      query: `tag:${JSON.stringify(tag)}`,
+      first: limit,
+    })
     return data.products.edges.map(e => nodeToProduct(e.node))
   })
 }

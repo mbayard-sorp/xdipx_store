@@ -154,7 +154,7 @@ export default {
       title: 'Discretion Box Body',
       type: 'text',
       rows: 2,
-      description: 'Body text in the discretion box (e.g. "Orders ship in unmarked boxes. Billing appears as XD Inc.")',
+      description: 'Body text in the discretion box (e.g. "Orders ship in unmarked boxes. Your statement reads XDIPX."). The billing descriptor is always XDIPX, never XD Inc.',
     },
     {
       name: 'footerCopyright',
@@ -208,6 +208,38 @@ export default {
             }
           },
         },
+      }],
+    },
+    {
+      name: 'footerBrandLinks',
+      title: 'Footer — Brands We Carry',
+      description:
+        'Compact brand link row rendered near the bottom of the footer on every page. Sitewide internal links to brand collections. Leave empty to use the built-in fallback list. Max 12.',
+      type: 'array',
+      validation: (Rule) => Rule.max(12),
+      of: [{
+        type: 'object',
+        fields: [
+          { name: 'label', title: 'Label', type: 'string', validation: (Rule) => Rule.required() },
+          { name: 'href',  title: 'URL',   type: 'string', description: 'Internal path, e.g. /collections/lelo', validation: (Rule) => Rule.required() },
+        ],
+        preview: { select: { title: 'label', subtitle: 'href' } },
+      }],
+    },
+    {
+      name: 'footerCategoryLinks',
+      title: 'Footer — Shop by Category',
+      description:
+        'Compact category link row rendered near the bottom of the footer on every page. Leave empty to use the built-in fallback list. Max 12.',
+      type: 'array',
+      validation: (Rule) => Rule.max(12),
+      of: [{
+        type: 'object',
+        fields: [
+          { name: 'label', title: 'Label', type: 'string', validation: (Rule) => Rule.required() },
+          { name: 'href',  title: 'URL',   type: 'string', description: 'Internal path, e.g. /collections/vibrators', validation: (Rule) => Rule.required() },
+        ],
+        preview: { select: { title: 'label', subtitle: 'href' } },
       }],
     },
   ],

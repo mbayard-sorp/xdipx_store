@@ -16,6 +16,7 @@ import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredD
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { readRecentHandles } from '~/lib/recent-views.server'
 import { NotebookRail } from '~/components/blog/NotebookRail'
+import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 
 const FACET_PARAMS = ['mood', 'audience', 'matters', 'budgetMax'] as const
 const PAGE_SIZE = 24
@@ -170,8 +171,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     ? `${fallbackTitle} — Shop ${productsCount} Curated Picks`
     : `${fallbackTitle} — Curated Picks`
   const descriptionFallback = productsCount > 0
-    ? `Shop ${productsCount} hand-picked ${lcTitle} at xdipx. Emma's editorial picks on intimate-wellness products. Discreet shipping, US ships free over $59.`
-    : `Shop ${lcTitle} at xdipx. Emma's editorial picks on intimate-wellness products. Discreet shipping, US ships free over $59.`
+    ? `Shop ${productsCount} hand-picked ${lcTitle} at xdipx. Emma's editorial picks on intimate-wellness products. Discreet shipping, US ships free over $${FREE_SHIPPING_THRESHOLD}.`
+    : `Shop ${lcTitle} at xdipx. Emma's editorial picks on intimate-wellness products. Discreet shipping, US ships free over $${FREE_SHIPPING_THRESHOLD}.`
 
   const h1 = sanity?.h1 || fallbackTitle
   const seoTitle =

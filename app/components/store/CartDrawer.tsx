@@ -7,8 +7,7 @@ import type { EmmaPersona } from '~/types/cms'
 import { trackViewCart, trackRemoveFromCart, trackBeginCheckout, type GA4Item } from '~/lib/analytics.client'
 import { AgeGatePanel, type VerificationLevel } from '~/components/store/AgeGate'
 import { useAgeVerified } from '~/lib/use-age-verified'
-
-const FREE_SHIPPING_THRESHOLD = 99
+import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 
 interface CartDrawerProps {
   cart: Cart | null

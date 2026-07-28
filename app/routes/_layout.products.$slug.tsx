@@ -76,6 +76,9 @@ import { HeartButton } from '~/components/store/HeartButton'
 import { Toast } from '~/components/account/Toast'
 import { buildSocialMeta } from '~/lib/social-meta'
 
+/** Max combined product cards across the two PDP cross-link rails. */
+const PDP_CROSSLINK_CAP = 7
+
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export function headers() {
@@ -504,6 +507,18 @@ function ProductPage() {
   const fbtProducts = loaderData.fbtProducts
   const pairsWithItems = loaderData.pairsWithItems
   const notebookPosts = loaderData.notebookPosts
+
+  // Internal linking: render BOTH cross-link rails when both have data. This
+  // used to be either/or, which left most PDPs carrying only 3-4 internal
+  // product links and starved the catalog of crawl paths. Pairs-with is Emma's
+  // curated pairing so it keeps priority and wins the dedupe; "frequently
+  // bought with" fills the remainder up to a combined cap so the page does not
+  // sprawl. Both data sets are already in the loader payload, so this is a pure
+  // derivation, no extra fetching.
+  const pairedHandles = new Set(pairsWithItems.map(p => p.handle))
+  const fbtCrossLinks = fbtProducts
+    .filter(p => !pairedHandles.has(p.handle))
+    .slice(0, Math.max(0, PDP_CROSSLINK_CAP - pairsWithItems.length))
   // When an editor has curated a relatedGuides block (with published picks),
   // that block renders the rail at its chosen position — suppress the automatic
   // fallback rail below to avoid two Notebook rails on one page.
@@ -1091,10 +1106,10 @@ function ProductPage() {
       ) : heroContent}
 
       <div className="max-w-6xl mx-auto px-4">
-        {pairsWithItems.length > 0
-          ? <PairsWith items={pairsWithItems} />
-          : <FrequentlyBoughtWith products={fbtProducts} />
-        }
+        {/* Both rails render when both have data. Each component already
+            returns null on an empty list. */}
+        <PairsWith items={pairsWithItems} />
+        <FrequentlyBoughtWith products={fbtCrossLinks} />
         <RecentlyBrowsed currentHandle={deal.handle} />
         {companionBundle && (
           <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />

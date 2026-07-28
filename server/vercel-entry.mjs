@@ -3123,7 +3123,9 @@ async function getSiteSettings() {
           megaMenuBanners[] { _key, menuLabel, position, link, "imageUrl": image.asset->url, "imageAlt": image.alt },
           socialLinks[],
           footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer,
-          footerColumns[] { _key, heading, links[] { _key, label, url } }
+          footerColumns[] { _key, heading, links[] { _key, label, url } },
+          footerBrandLinks[] { _key, label, href },
+          footerCategoryLinks[] { _key, label, href }
         }`
       );
       return data ?? null;
@@ -4971,7 +4973,17 @@ async function getProductsByTag(tag, limit = 6) {
           edges { node { ${PRODUCT_CORE_FRAGMENT} } }
         }
       }
-    `, { query: `tag:${tag}`, first: limit });
+    `, {
+      // The tag value MUST be quoted. Our taxonomy tags are namespaced with a
+      // colon ("brand:shots", "section:play"), and Shopify's search parser
+      // reads an unquoted colon as a field separator, so `tag:brand:shots`
+      // silently matched nothing. That broke the cold-start recommendation
+      // fallback on every PDP, since `tags[0]` is always the `brand:` tag.
+      // Verified 2026-07-27 against the live Storefront API: quoting fixes
+      // `brand:*` and `section:*` (0 -> 5 results) and regresses nothing.
+      query: `tag:${JSON.stringify(tag)}`,
+      first: limit
+    });
     return data.products.edges.map((e) => nodeToProduct(e.node));
   });
 }
@@ -10804,14 +10816,16 @@ var init_team_keys = __esm({
       { slug: "out-and-about-stoop", label: "Out-and-About Stoop", status: "stretch", note: SCENE_KIT_NOTE },
       { slug: "reading-nook", label: "Reading Nook", status: "stretch", note: SCENE_KIT_NOTE }
     ];
-    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook", "youtube"];
+    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook", "youtube", "linkedin"];
     SOCIAL_FREQ_DEFAULTS = {
       x: 1,
       instagram: 1,
       tiktok: 1,
       facebook: 0,
-      youtube: 0
+      youtube: 0,
       // video-only platform; drafts come from the video pipeline, not the daily text routine
+      linkedin: 0
+      // authority posts drafted only from pending researchBrief docs (brand voice, not Emma); owner opts in
     };
     SOCIAL_REVIEW_STATUSES = ["pending_review", "approved", "needs_changes", "rejected"];
     VALVE_KEYS = {
@@ -21028,6 +21042,7 @@ var init_enricher_brief_server = __esm({
 
 // app/lib/batch-enrichment.server.ts
 import { readFile } from "node:fs/promises";
+import { existsSync as existsSync3 } from "node:fs";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { dirname as dirname3, resolve as resolve3 } from "node:path";
 import Anthropic5 from "@anthropic-ai/sdk";
@@ -21037,7 +21052,16 @@ function stripFences2(raw) {
 async function loadEnricherAgentPrompt() {
   if (_cachedAgentPrompt !== null) return _cachedAgentPrompt;
   const here = dirname3(fileURLToPath3(import.meta.url));
-  const path = resolve3(here, "..", "..", ".claude", "agents", "emma-product-enricher.md");
+  const rel = [".claude", "agents", "emma-product-enricher.md"];
+  const candidates = [
+    resolve3(process.cwd(), ...rel),
+    resolve3(here, "..", "..", ...rel),
+    resolve3(here, "..", ...rel)
+  ];
+  const path = candidates.find((p) => existsSync3(p));
+  if (!path) {
+    throw new Error(`enricher agent prompt not found; tried ${candidates.join(", ")}`);
+  }
   const raw = await readFile(path, "utf8");
   const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
   if (!body) throw new Error(`empty agent prompt at ${path}`);
@@ -24395,7 +24419,7 @@ var init_blob_server = __esm({
 });
 
 // app/lib/video-assembly.server.ts
-import { readFileSync as readFileSync3, writeFileSync, existsSync as existsSync3, unlinkSync } from "node:fs";
+import { readFileSync as readFileSync3, writeFileSync, existsSync as existsSync4, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import ffmpegPath from "ffmpeg-static";
@@ -24406,7 +24430,7 @@ function tmp(name) {
 function cleanup(paths) {
   for (const p of paths) {
     try {
-      if (existsSync3(p)) unlinkSync(p);
+      if (existsSync4(p)) unlinkSync(p);
     } catch {
     }
   }
@@ -24489,7 +24513,7 @@ async function applyWatermark(video) {
       "+faststart",
       output
     ], { timeout: 6e4 });
-    return existsSync3(output) ? readFileSync3(output) : video;
+    return existsSync4(output) ? readFileSync3(output) : video;
   } catch (err) {
     console.warn("[video-assembly] watermark failed, returning original:", err instanceof Error ? err.message : err);
     return video;
@@ -24610,7 +24634,7 @@ var init_elevenlabs_server = __esm({
 });
 
 // app/lib/video-postpass.server.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, existsSync as existsSync4, unlinkSync as unlinkSync2 } from "node:fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, existsSync as existsSync5, unlinkSync as unlinkSync2 } from "node:fs";
 import { execFileSync as execFileSync2, spawnSync } from "node:child_process";
 import { randomBytes as randomBytes2 } from "node:crypto";
 import { createRequire } from "node:module";
@@ -24621,7 +24645,7 @@ function tmp2(name) {
 function cleanup2(paths) {
   for (const p of paths) {
     try {
-      if (existsSync4(p)) unlinkSync2(p);
+      if (existsSync5(p)) unlinkSync2(p);
     } catch {
     }
   }
@@ -24699,7 +24723,7 @@ function resolveCaptionFontFile() {
   try {
     const req = createRequire(import.meta.url);
     const p = req.resolve("@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2");
-    return existsSync4(p) ? p : null;
+    return existsSync5(p) ? p : null;
   } catch {
     return null;
   }

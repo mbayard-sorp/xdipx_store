@@ -21,6 +21,7 @@ import { VaultCard } from '~/components/store/VaultCard'
 import { Breadcrumbs } from '~/components/seo/Breadcrumbs'
 import { CollectionStructuredData } from '~/components/seo/CollectionStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
+import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 
 const TAG = 'new-arrival'
 const PAGE_SIZE = 24
@@ -28,7 +29,7 @@ const PAGE_SIZE = 24
 const H1 = 'New Arrivals'
 const SEO_TITLE = 'New Arrivals'
 const SEO_DESCRIPTION =
-  "The newest picks on xdipx.com, hand-checked before they join Emma's regular rotation. Discreet shipping, ships free over $59."
+  `The newest picks on xdipx.com, hand-checked before they join Emma's regular rotation. Discreet shipping, ships free over $${FREE_SHIPPING_THRESHOLD}.`
 const INTRO =
   "The newest additions to the shelf, hand-checked the same as everything else here. Each one eventually settles into its own category page. This is just where it lands first."
 
