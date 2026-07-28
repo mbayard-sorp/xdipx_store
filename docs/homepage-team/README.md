@@ -104,8 +104,13 @@ Cascade-risk guards (the orchestrator and routines enforce these — see the ris
 1. **Loop never converges** → hard `maxTurns` per routine (~12–16); abort + alert on cap hit.
 2. **Self-heal retry storm** → circuit breaker on `attempt_count` in `homepage_team_runs`; disable +
    alert after N same-day failures.
-3. **Image-gen runaway** → reuse Shopify Files first; per-product cache; `max_images` cap; re-gate
-   before every generation.
+3. **Image-gen runaway** → `max_images` cap; per-product cache; re-gate before every generation;
+   hard stop at `remainingCents <= 0`. **Note (2026-07-27): the guard is the caps, not reuse.**
+   Reuse-before-generate was demoted for homepage merchandising art after it produced zero images
+   in 15 consecutive runs and $0.43 of spend in 11 days. A fresh-art floor now applies (changed hero
+   or changed theme → generate at least three swappable slots; reuse only after two failed
+   vision-gate attempts on a slot), while reuse-first stays correct for product packshots and PDP
+   art. See mission brief section 2.
 4. **Overlapping runs** → one run at a time; the gate returns `reason:'run_in_progress'` and the
    second run exits immediately.
 5. **Stale gate / overspend** → gate computes remaining live from `api_token_daily`; every paid step

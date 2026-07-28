@@ -69,10 +69,17 @@ agent that edits agent defs, only via PR, only for owner-approved suggestions.
 ## 6. Budget and cascade guards (inherited from homepage doctrine)
 
 Gate first, gate often; hard maxTurns per routine; one run at a time per team; circuit-breaker on
-repeated same-day failures; diff-before-write on anything stateful; reuse-before-generate for
-imagery; GA4 weighted only at ≥300 sessions/week — below that, run on margin math and heuristics and
-say so. Reasoning bills to Max; log usage honestly via `POST /api/homepage-team/spend` with your
-team's feature label.
+repeated same-day failures; diff-before-write on anything stateful; GA4 weighted only at ≥300
+sessions/week — below that, run on margin math and heuristics and say so. Reasoning bills to Max;
+log usage honestly via `POST /api/homepage-team/spend` with your team's feature label.
+
+**Imagery is a fresh-art floor, not reuse-before-generate (owner direction 2026-07-27).** On a
+merchandising surface whose subject changed since yesterday (a new hero product, a new calendar
+theme), generate new art for at least three swappable slots; reuse a slot only after two failed
+vision-gate attempts on it. Reuse-before-generate remains correct for product packshots and PDP
+art, where the real photo is the point. The image caps and $/day caps are unchanged ceilings and
+still hard-stop every run; the floor never overrides a cap, a kill switch, or a vision gate. Full
+rules: `docs/homepage-team/mission-brief.md` section 2.
 
 ## 7. Definition of done (per run)
 
