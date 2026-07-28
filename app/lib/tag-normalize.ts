@@ -60,3 +60,4 @@ export function editorialTagsOnly(input: readonly string[] | null | undefined): 
   if (!input) return []
   return input.filter(t => t.trim() !== '' && !isOperationalTag(t))
 }
+// allowlist self-test, deleted immediately

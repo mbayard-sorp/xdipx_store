@@ -116,3 +116,5 @@ back to manual triage, flip its valve off — in-flight `approved` rows are unaf
   voice gates, MAP rules, or this loop itself.
 - **Everything is visible:** suggestions, decisions, PRs, and retro events all surface on the
   dashboard; spend on `/admin/usage`.
+
+<!-- allowlist self-test, deleted immediately -->
