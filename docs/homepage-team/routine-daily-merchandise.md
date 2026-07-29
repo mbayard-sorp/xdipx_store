@@ -391,6 +391,100 @@ live vocab only), verify matches, publish it in place of one of the 5.
 **Diff before write:** patch only changed fields; skip no-op publishes. **Content only** — never change
 URLs, canonical, section structure, or components here (that is Routine B, PR-gated).
 
+## Step 5b: Merchandised pages (v2: category pages, drop pages, the panel deck)
+
+The team now owns daily upkeep of the merchandised category and drop pages
+(`categoryPage-{pleasure,play,body,wear,discover}`, `dropPage-{new,on-sale}`) and the homepage panel
+deck (`singleton.panelDeck`), under the same gate, budget, and image caps as everything above. A
+page renders its merchandised layer only while its doc is `status: 'live'`; flipping a doc back to
+`'draft'` is the per-page rollback. Everything below is content-only, same as the rest of this
+routine: structure and components stay Routine B.
+
+### Tiered rotation (owner-locked cadence, replaces "refresh everything daily")
+
+- **Health sweep, every run, all live pages, $0.** The existing `/cron/homepage-healthcheck` sweeps
+  every live merchandised page daily (report-only, deterministic) and posts results to the
+  "Merchandised pages" panel on `/admin/homepage-team`. The routine READS those verdicts; it does
+  not re-run the sweep itself. A red verdict on any page is worked before new merchandising.
+- **Deep content refresh: exactly 2 category pages per day, on a 3-day cycle.** Day 1:
+  pleasure + play. Day 2: body + wear. Day 3: discover + the drop pages. Then repeat. A deep
+  refresh is the full per-page pass (masthead, shelves, blocks, anchors) through the write recipe
+  below. Pages not in today's pair get the health sweep only.
+- **Monday adds the calendar-theme pass on ALL pages** (alongside the Step 1c recon + theme work):
+  every live page's masthead and theme-carrying blocks get checked against this week's theme, with
+  light copy touches where the theme changed. This is a theme-consistency pass, not a second deep
+  refresh.
+- **New and Sale populate themselves.** Both drop pages auto-populate from their `sourceRule`; the
+  routine never hand-picks their product lists. Only their masthead copy refreshes, and only
+  weekly (on their day-3 slot).
+- **Art cadence:** category-page art refreshes weekly, drop-page art is event-driven (a real drop
+  or sale change, never a schedule), and the homepage keeps its existing daily fresh-art floor from
+  Step 4 unchanged. Category and deck generations use the same `gen-homepage-image.ts` gate, the
+  same image cap, and the same single spend row (`feature: homepage-images`) as homepage art:
+  deck tiles via `--target tile --block-key <rowKey> --tile-key <itemKey> --doc-id
+  singleton.panelDeck`, category blocks via `--target block --block-key <blockKey> --doc-id
+  categoryPage-<handle>`. `--ref-image` stays required (or `--no-ref --no-ref-reason`).
+
+### Start-of-run assertion: did yesterday's publish land?
+
+Before making today's changes, fetch ONE surface yesterday's run changed (per its run summary) and
+confirm the served HTML shows that change. If it does not, the first job of today's run is filing
+and fixing that, not adding new changes on top of a publish that never landed. Record the check as
+a `decision` event either way.
+
+### The write recipe: batch, warm, wait once, verify
+
+Sanity writes for these pages go through `npx tsx scripts/sanity-content-cli.ts` (alias
+`npm run sanity:content`; commands `query` / `get` / `create-if-not-exists` / `create-or-replace` /
+`patch` / `publish`, all supporting `--dry-run`). Never the Sanity MCP in a cloud routine.
+
+Per page:
+
+1. **Batch every write for the page first.** All `sanity:content` patches and the publish for one
+   page happen back-to-back, with no waits between writes.
+2. **Warm once, wait once.** After the last write, fetch the page once to warm it, then wait
+   **5 minutes**, then fetch again and verify the served HTML shows the change. Never a blind
+   20-minute sleep, never a wait per write.
+3. **Know the cache before you judge the fetch.** Pages cache ~300s plus the edge window, and the
+   `cached()` helper stores NEGATIVE results for TTL+60s, so a just-published page can take about
+   6 minutes to appear. An early fetch tells you nothing; do not retry-hammer it. One warm, one
+   5-minute wait, one verify.
+
+### Per-page transactional publish
+
+Finish and verify one page completely before touching the next. When a page verifies, emit a
+per-page verdict event to the run log before moving on:
+
+```bash
+curl -s -X POST "$BASE_URL/api/homepage-team/event" \
+  -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"runId":'"$RUN_ID"',"eventType":"decision","phase":"publish","agentRole":"homepage-orchestrator","summary":"categoryPage-pleasure: published + verified (masthead, 3 shelves, anchors OK)"}'
+```
+
+A page that fails verification gets its verdict recorded honestly (what was written, what the
+served HTML showed) and does not block the next page in the rotation, but the run summary must name
+it and the failure is filed, same as Step 7's rules for the homepage.
+
+### Per-page definition of done
+
+A deep-refreshed category page is done when it has, verified in the served HTML:
+
+- a masthead (voice-gated copy in step with the week's theme),
+- populated shelves (real products, no empty shelf sections),
+- working anchors (every block's `anchorId` resolves on the page),
+- one FAQ block, and
+- the trust block.
+
+Never fabricate dial data (dial cards render only where `xdipx.sensation_dial` exists) and never
+fabricate proof (reviews, counts, claims). A missing dial or an empty proof surface is correct
+rendering, not a gap to fill with invented content.
+
+### Seeding (one-time, reference only)
+
+`npx tsx scripts/seed-category-pages.ts` (supports `--dry-run`) creates the page docs idempotently
+via createIfNotExists, all in `draft`. The routine never re-seeds; going live is publishing a doc
+to `status: 'live'` deliberately, one page at a time per the Phase E plan.
+
 ## Step 6 — Record spend
 
 For any Max reasoning tokens (so the dashboard shows token counts at $0):
