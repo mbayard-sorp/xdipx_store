@@ -1,5 +1,12 @@
 # Lighthouse CI on homepage-touching PRs (design-elevation milestone p3-lighthouse).
 #
+# Reading the result: lighthouserc.json asserts on the MEDIAN of 5 runs. LHCI's
+# default aggregation is "optimistic", which silently reports the run most
+# likely to PASS (the best one) — a flattering number that hides the spread and
+# makes a regression easy to miss. Median is the honest central estimate. It is
+# stricter than the old default, so expect reported values to move even where
+# the page did not change.
+#
 # Runs against the Vercel preview deployment for the PR branch. If the Vercel
 # project has Deployment Protection enabled, add the project's automation
 # bypass secret to the repo as VERCEL_AUTOMATION_BYPASS_SECRET (Vercel project
@@ -16,6 +23,8 @@ on:
       - 'vercel.json'
       - 'package.json'
       - '.github/workflows/lighthouse.yml'
+      # Budgets and run count live here; a change to them must re-measure.
+      - 'lighthouserc.json'
 
 permissions:
   contents: read
@@ -81,6 +90,49 @@ jobs:
 
           echo "Preview reachable (HTTP 200)."
           echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      # Cold starts, not the page, were the loudest thing this job measured.
+      # Every PR gets a fresh Vercel preview, and vercel.json routes EVERY
+      # request (including /assets/*) through the Node function, so the first
+      # visitor pays a function cold start for the document and again for the
+      # asset graph. Lighthouse was that first visitor.
+      #
+      # Measured on 2026-07-28: the same commit, re-run, moved its observed
+      # first paint from a flat 2310ms across 6 runs to a 309-2546ms spread,
+      # and simulated LCP swung 3764-7863ms. That is wider than any change
+      # worth shipping, which made every perf PR unfalsifiable.
+      #
+      # So: warm the function and the asset graph before measuring. Failures
+      # here are deliberately non-fatal — a warm-up that could not run is a
+      # noisier measurement, not a reason to report a verdict on the page.
+      - name: Warm the preview
+        if: steps.reachable.outputs.ok == 'true'
+        continue-on-error: true
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          set -uo pipefail
+          hdr=(-H "x-vercel-protection-bypass: ${BYPASS}" -H "x-vercel-set-bypass-cookie: false")
+
+          for path in "/" "/?variant=b"; do
+            for i in 1 2 3; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${hdr[@]}" "${PREVIEW_URL}${path}" || echo 000)
+              echo "document ${path} warm ${i}: HTTP ${code}"
+            done
+          done
+
+          # The document is only half of it. Pull the asset graph the page
+          # actually references so JS/CSS/fonts are warm too, deduped and
+          # bounded so a big manifest cannot stall the job.
+          html=$(curl -s --max-time 30 "${hdr[@]}" "${PREVIEW_URL}/" || true)
+          assets=$(printf '%s' "$html" | grep -oE '/assets/[A-Za-z0-9._-]+' | sort -u | head -60)
+          count=0
+          for a in $assets; do
+            curl -s -o /dev/null --max-time 20 "${hdr[@]}" "${PREVIEW_URL}${a}" || true
+            count=$((count + 1))
+          done
+          echo "warmed ${count} asset(s)"
 
       - name: Inject protection-bypass header into LHCI config
         if: steps.reachable.outputs.ok == 'true'

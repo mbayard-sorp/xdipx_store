@@ -1,7 +1,7 @@
 {
   "ci": {
     "collect": {
-      "numberOfRuns": 3,
+      "numberOfRuns": 5,
       "settings": {
         "formFactor": "mobile",
         "screenEmulation": {
@@ -14,25 +14,29 @@
         "categories:performance": [
           "error",
           {
-            "minScore": 0.9
+            "minScore": 0.9,
+            "aggregationMethod": "median"
           }
         ],
         "largest-contentful-paint": [
           "error",
           {
-            "maxNumericValue": 2500
+            "maxNumericValue": 2500,
+            "aggregationMethod": "median"
           }
         ],
         "cumulative-layout-shift": [
           "error",
           {
-            "maxNumericValue": 0.1
+            "maxNumericValue": 0.1,
+            "aggregationMethod": "median"
           }
         ],
         "total-blocking-time": [
           "warn",
           {
-            "maxNumericValue": 300
+            "maxNumericValue": 300,
+            "aggregationMethod": "median"
           }
         ]
       }
