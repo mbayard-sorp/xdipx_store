@@ -28,6 +28,7 @@ export default function handleRequest(
 
   return new Promise((resolve, reject) => {
     let shellRendered = false
+    let renderErrored = false
     const userAgent = request.headers.get('user-agent')
 
     const readyOption: keyof RenderToPipeableStreamOptions =
@@ -54,6 +55,20 @@ export default function handleRequest(
           })
           const stream = createReadableStreamFromReadable(body)
           responseHeaders.set('Content-Type', 'text/html')
+
+          // Error pages must never be cached. Routes set a shared
+          // s-maxage/stale-while-revalidate policy (STOREFRONT_CACHE_HEADERS)
+          // that applies to whatever the route returns, so without this one
+          // unlucky render could be stored at the edge and handed to every
+          // subsequent visitor — crawlers included — for the rest of the SWR
+          // window. That turns a single transient failure into a stretch of
+          // identical, canonical-less HTML, which is how URLs end up clustered
+          // under the homepage in Search Console.
+          if (renderErrored || responseStatusCode >= 400) {
+            responseHeaders.set('Cache-Control', 'no-store')
+            responseHeaders.delete('Vercel-CDN-Cache-Control')
+          }
+
           pipe(body)
           resolve(new Response(stream, { headers: responseHeaders, status: responseStatusCode }))
         },
@@ -61,6 +76,7 @@ export default function handleRequest(
           reject(error)
         },
         onError(error: unknown) {
+          renderErrored = true
           responseStatusCode = 500
           if (shellRendered) console.error(error)
         },
@@ -77,8 +93,18 @@ export function handleError(
   { request }: { request: Request },
 ) {
   if (request.signal.aborted) return
+
+  // An error served to a crawler is a different severity of event than the same
+  // error served to a person: the visitor retries, Google records a verdict and
+  // keeps it for months. Tagging the crawler case makes it alertable on its own,
+  // which is the leading indicator that was missing while ~337 URLs were being
+  // clustered under the homepage — the damage was only visible in Search
+  // Console weeks later, long after the window that caused it had closed.
+  const ua = request.headers.get('user-agent')
+  const tags = { crawler: String(!!ua && isbot(ua)) }
+
   if (error instanceof Error) {
-    Sentry.captureException(error, { extra: { url: request.url } })
+    Sentry.captureException(error, { tags, extra: { url: request.url, userAgent: ua } })
     return
   }
   // React Router sometimes surfaces thrown Responses as non-Error values.
@@ -87,7 +113,7 @@ export function handleError(
     if (error.status >= 500) {
       Sentry.captureException(
         new Error(`Response thrown: ${error.status} ${error.statusText}`),
-        { extra: { url: request.url, status: error.status } },
+        { tags, extra: { url: request.url, status: error.status, userAgent: ua } },
       )
     }
     return
@@ -99,5 +125,5 @@ export function handleError(
     message = Object.prototype.toString.call(error)
   }
   const wrapped = new Error(`Non-Error thrown: ${message}`)
-  Sentry.captureException(wrapped, { extra: { url: request.url, raw: error } })
+  Sentry.captureException(wrapped, { tags, extra: { url: request.url, raw: error, userAgent: ua } })
 }

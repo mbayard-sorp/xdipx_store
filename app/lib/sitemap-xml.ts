@@ -92,6 +92,44 @@ export function isTrustworthyDeadVerdict(coverageState: string, lastCrawl: Date 
   return crawled >= RECRAWL_EPOCH
 }
 
+/**
+ * Largest share of the product list the Shopify liveness filter may drop
+ * before we stop trusting it and publish unfiltered.
+ *
+ * The filter exists to remove the handful of products Sanity still has a page
+ * for but Shopify no longer serves (4% on 2026-07-29). A partial Storefront
+ * failure looks exactly like a genuinely shrunken catalog, and quietly
+ * suppressing a third of the catalog from the sitemap is far worse than
+ * shipping a few dead URLs — so past this ratio we keep every URL and log.
+ */
+export const MAX_INDEXABLE_DROP_RATIO = 0.25
+
+/**
+ * Keep only products whose handle the PDP route will serve.
+ *
+ * `indexable` is null when the Storefront lookup failed; that and an
+ * implausibly large drop both fall through to the unfiltered list, because
+ * every product missing its only submission path is a worse outcome than a
+ * few dead URLs costing crawl budget.
+ */
+export function keepIndexable<T extends { handle: string }>(
+  products: T[],
+  indexable: Set<string> | null,
+): T[] {
+  if (!indexable) return products
+  const kept = products.filter(p => indexable.has(p.handle))
+  const dropped = products.length - kept.length
+  if (products.length > 0 && dropped / products.length > MAX_INDEXABLE_DROP_RATIO) {
+    console.warn(
+      `[sitemap] liveness filter would drop ${dropped}/${products.length} products ` +
+      `(> ${MAX_INDEXABLE_DROP_RATIO * 100}%); publishing unfiltered`,
+    )
+    return products
+  }
+  if (dropped > 0) console.log(`[sitemap] dropped ${dropped} product URLs the PDP route would 404/410`)
+  return kept
+}
+
 /** Drop dead URLs and floor the lastmod of URLs holding a stale verdict. */
 export function applyHealth(urls: SitemapUrl[], health: UrlHealth): SitemapUrl[] {
   const out: SitemapUrl[] = []

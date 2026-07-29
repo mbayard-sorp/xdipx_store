@@ -7,6 +7,7 @@ import {
   Scripts,
   ScrollRestoration,
   useLoaderData,
+  useLocation,
   useRouteError,
   useRouteLoaderData,
 } from 'react-router'
@@ -21,6 +22,7 @@ import stylesheet from './app.css?url'
 import newsreaderLatinWoff2 from '@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2?url'
 import dmSansLatinWoff2 from '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2?url'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
+import { SITE_ORIGIN } from '~/lib/social-meta'
 import { captureUTM } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 
@@ -280,6 +282,7 @@ export default function App() {
 
 export function ErrorBoundary() {
   const error = useRouteError()
+  const location = useLocation()
 
   // Friendly, brand-voice copy for the user-facing page.
   // The raw status code goes into a hidden HTML comment so we keep it for
@@ -308,15 +311,31 @@ export function ErrorBoundary() {
   const isPermanentlyUnindexable = status === 404 || status === 410
 
   // Brand-safe SEO title + noindex so error pages never get indexed.
-  // React 19 hoists <title>/<meta> from anywhere in the tree into <head>.
+  // React 19 hoists <title>/<meta>/<link> from anywhere in the tree into <head>.
   // BRAND_TITLE and BRAND_DESCRIPTION come from app/lib/brand.ts — single source
   // of truth shared with the homepage meta export.
+
+  // Canonical comes from each route's `meta` export, which React Router does
+  // not run when that route errors — so before this, every error page shipped
+  // brand-generic markup with no canonical at all. Identical HTML across many
+  // URLs is precisely the input Google's dedup wants: it clustered them and
+  // elected `/` as the representative, leaving 337 URLs (2026-07-29) sitting in
+  // "Duplicate without user-selected canonical" pointing at the homepage —
+  // including pages as unmistakably distinct as /discover. Declaring the URL's
+  // own canonical here keeps an errored page a document of its own, so a
+  // transient failure costs a retry instead of the URL's identity.
+  //
+  // 404/410 are left out on purpose: those carry `noindex`, and Google ignores
+  // a canonical on a page it has been told not to index.
+  const selfCanonical = `${SITE_ORIGIN}${location.pathname}`
 
   return (
     <>
       <title>{BRAND_TITLE}</title>
-      {isPermanentlyUnindexable && (
+      {isPermanentlyUnindexable ? (
         <meta name="robots" content="noindex, nofollow" />
+      ) : (
+        <link rel="canonical" href={selfCanonical} />
       )}
       <meta name="description" content={BRAND_DESCRIPTION} />
       {/* Keep the status code visible to ops without putting it in the title. */}

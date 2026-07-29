@@ -3,7 +3,7 @@ import {
   HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY,
   PRODUCT_CHANGEFREQ, PRODUCT_PRIORITY,
   RECRAWL_EPOCH, SITEMAP_CACHE_CONTROL, applyHealth, chunkSegments, floorLastmod,
-  isTrustworthyDeadVerdict, newestLastmod, renderSitemapIndex, renderUrlset,
+  isTrustworthyDeadVerdict, keepIndexable, newestLastmod, renderSitemapIndex, renderUrlset,
   type SitemapUrl, type UrlHealth,
 } from '~/lib/sitemap-xml'
 
@@ -125,6 +125,39 @@ describe('applyHealth', () => {
   it('leaves healthy URLs untouched', () => {
     const input = [url('https://xdipx.com/products/fine', '2026-05-16')]
     expect(applyHealth(input, health())).toEqual(input)
+  })
+})
+
+describe('keepIndexable', () => {
+  // 20 live + 1 dead: a 4.8% drop, comfortably inside the trust ratio.
+  const catalog = [
+    ...Array.from({ length: 20 }, (_, i) => ({ handle: `live-${i}` })),
+    { handle: 'archived-in-shopify' },
+  ]
+  const liveHandles = new Set(catalog.slice(0, 20).map(p => p.handle))
+
+  it('drops handles the PDP route would not serve', () => {
+    const kept = keepIndexable(catalog, liveHandles)
+    expect(kept).toHaveLength(20)
+    expect(kept.map(p => p.handle)).not.toContain('archived-in-shopify')
+  })
+
+  it('publishes unfiltered when the Storefront lookup failed', () => {
+    expect(keepIndexable(catalog, null)).toEqual(catalog)
+  })
+
+  it('publishes unfiltered rather than drop more than the trust ratio', () => {
+    // A partial Storefront failure looks like a catalog that lost most of its
+    // products. Suppressing them all would strip their only submission path.
+    expect(keepIndexable(catalog, new Set(['live-0']))).toEqual(catalog)
+  })
+
+  it('treats an empty live set as a failure, not an empty catalog', () => {
+    expect(keepIndexable(catalog, new Set())).toEqual(catalog)
+  })
+
+  it('handles an empty product list without dividing by zero', () => {
+    expect(keepIndexable([], new Set())).toEqual([])
   })
 })
 
