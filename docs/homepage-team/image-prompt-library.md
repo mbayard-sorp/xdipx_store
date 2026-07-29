@@ -281,6 +281,30 @@ as a standing rule for this scaffold, not a one-off: always pair a named ground-
 language for archetype C in-situ scenes where a gradient/shadow reads as natural, not for B
 color-block stills).
 
+3-Speed Tantus Original Bullet Vibrator (`3-speed-original-bullet-vibrator`), guides category
+(no accent prop), product standing upright large in frame on white paper with warm diagonal
+window daylight and a natural soft shadow, no props → keeper (post:
+`how-do-couples-use-a-vibrator-together`, content-writer run 120). Ref image used the product's
+**second** Shopify photo (plain chrome bullet, no blister-pack packaging in frame), not the first
+(packaged) image — the packaging photo carries heavy printed brand copy that Kontext reliably
+mangles (see failure class below); when a product's primary image is packaging-heavy, check for a
+clean unpackaged shot among its other images before generating.
+
+**Rejects (this run):** first choice of subject was the We-Vibe Sync Go Turquoise Couples
+Vibrator (`we-vibe-sync-go-turquoise`) — its only product photo bundles box + product, so the ref
+was cropped to isolate just the product before use. Two rounds both failed: round 1 produced a
+faint invented cursive/logo squiggle embossed into the smooth teal silicone where the real product
+has none (both candidates), plus one candidate with fully garbled invented script text on both the
+vibe and its travel case; round 2 (prompt hardened with explicit "no engraved logo, no embossed
+insignia, no signature" language) fixed the invented-mark issue on one candidate but the product's
+identifying C-shape was lost entirely (rendered as a generic teal egg, not ref-matched), while the
+other candidate re-invented legible "We-Vibe / Sync Go" lettering. Read as: Kontext dev struggles
+to hold both this product's curved silhouette AND a blank (unlabeled) surface at the same time —
+it fills the "expected" logo/text real We-Vibe products carry with an invented mark, or gives up
+the shape to make room for one. Switched subject to the Tantus Bullet (simpler geometry, genuinely
+unbranded in its second photo) rather than spend a third attempt on the same product — the brief
+explicitly allows choosing whichever embedded product gives the strongest frame.
+
 **Tooling gotcha (not a prompt reject, a call-site bug):** on the `naturals-h2o` run, calling
 `generateImage()` directly (not through `gen-notebook-art.ts`, which has no `hero` surface) with
 `imageSize: { width: 1200, height: 900 }` silently produced a 16:9-ish 1392×752 frame — the
