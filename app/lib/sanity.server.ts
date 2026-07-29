@@ -370,6 +370,25 @@ export async function getHomepageSections(preview = false): Promise<HomepageSect
 }
 
 // ─── Mutation helpers (for admin / AI agent use) ──────────────────────────
+//
+// Every block writer takes an optional trailing `docId` (default the homepage
+// singleton, so existing call sites are untouched). The block array lives at
+// `sections[]` on the homepage doc, `rows[].items[]` on the panel deck, and
+// `blocks[]` on categoryPage/dropPage docs — `blockArrayField` resolves the
+// prefix. Cache note: only the homepage read cache is invalidated here; other
+// docs (category pages, the deck) are cached by handle/route keys the writer
+// cannot derive from a doc id, so they surface after their TTL (≤300s edge
+// window) — the merchandising playbook's warm-then-verify step accounts for
+// this.
+
+/** Root array field for a given target document's blocks. */
+function blockArrayField(docId: string): string {
+  return docId === HOMEPAGE_DOC_ID ? 'sections' : 'blocks'
+}
+
+function invalidateDocCache(docId: string): void {
+  if (docId === HOMEPAGE_DOC_ID) invalidateCache('sanity:homepage')
+}
 
 export async function upsertAnnouncementBar(messages: AnnouncementMessage[]): Promise<void> {
   const client = getClient(true)
@@ -385,34 +404,47 @@ export async function upsertAnnouncementBar(messages: AnnouncementMessage[]): Pr
   invalidateCache('sanity:homepage')
 }
 
-export async function addCmsBlock(block: Omit<ContentBlock, '_key'>): Promise<void> {
+export async function addCmsBlock(
+  block: Omit<ContentBlock, '_key'>,
+  docId: string = HOMEPAGE_DOC_ID,
+): Promise<void> {
   const client = getClient(true)
   if (!client) throw new Error('Sanity not configured')
   const key = `${block._type}-${Date.now()}`
+  const field = blockArrayField(docId)
+  // Only the homepage singleton may be created on the fly — category/drop
+  // docs carry required fields (handle, status) a bare stub would violate,
+  // so they must be seeded first (scripts/seed-category-pages.ts).
+  if (docId === HOMEPAGE_DOC_ID) {
+    await client.createIfNotExists({ _id: HOMEPAGE_DOC_ID, _type: 'homepageSections', sections: [] })
+  }
   await client
-    .createIfNotExists({ _id: 'singleton.homepage', _type: 'homepageSections', sections: [] })
-  await client
-    .patch('singleton.homepage')
-    .setIfMissing({ sections: [] })
-    .append('sections', [{ ...block, _key: key }])
+    .patch(docId)
+    .setIfMissing({ [field]: [] })
+    .append(field, [{ ...block, _key: key }])
     .commit()
-  invalidateCache('sanity:homepage')
+  invalidateDocCache(docId)
 }
 
-export async function updateCmsBlock(key: string, patch: Record<string, unknown>): Promise<void> {
+export async function updateCmsBlock(
+  key: string,
+  patch: Record<string, unknown>,
+  docId: string = HOMEPAGE_DOC_ID,
+): Promise<void> {
   const client = getClient(true)
   if (!client) throw new Error('Sanity not configured')
+  const prefix = blockArrayField(docId)
   // Sanity doesn't support in-array patching by key natively via REST;
   // use the transaction API with a GROQ-targeted patch
   await client
-    .patch('singleton.homepage')
+    .patch(docId)
     .set(
       Object.fromEntries(
-        Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
+        Object.entries(patch).map(([field, value]) => [`${prefix}[_key=="${key}"].${field}`, value])
       )
     )
     .commit()
-  invalidateCache('sanity:homepage')
+  invalidateDocCache(docId)
 }
 
 /**
@@ -461,16 +493,21 @@ export async function updateCmsTileImage(
   tileKey: string,
   assetId: string,
   alt: string,
+  docId: string = HOMEPAGE_DOC_ID,
 ): Promise<void> {
   const client = getClient(true)
   if (!client) throw new Error('Sanity not configured')
+  // The panel deck nests its tiles as rows[].items[] (panelSquareRow /
+  // panelRowLarge); homepage and category docs use <arrayField>[].tiles[].
+  const path =
+    docId === PANEL_DECK_DOC_ID
+      ? `rows[_key=="${blockKey}"].items[_key=="${tileKey}"].image`
+      : `${blockArrayField(docId)}[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`
   await client
-    .patch('singleton.homepage')
-    .set({
-      [`sections[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`]: sanityImageRef(assetId, alt),
-    })
+    .patch(docId)
+    .set({ [path]: sanityImageRef(assetId, alt) })
     .commit()
-  invalidateCache('sanity:homepage')
+  invalidateDocCache(docId)
 }
 
 /**
@@ -482,26 +519,27 @@ export async function updateCmsPromoImage(
   blockKey: string,
   assetId: string,
   alt: string,
+  docId: string = HOMEPAGE_DOC_ID,
 ): Promise<void> {
   const client = getClient(true)
   if (!client) throw new Error('Sanity not configured')
   await client
-    .patch('singleton.homepage')
+    .patch(docId)
     .set({
-      [`sections[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt),
+      [`${blockArrayField(docId)}[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt),
     })
     .commit()
-  invalidateCache('sanity:homepage')
+  invalidateDocCache(docId)
 }
 
-export async function removeCmsBlock(key: string): Promise<void> {
+export async function removeCmsBlock(key: string, docId: string = HOMEPAGE_DOC_ID): Promise<void> {
   const client = getClient(true)
   if (!client) throw new Error('Sanity not configured')
   await client
-    .patch('singleton.homepage')
-    .unset([`sections[_key=="${key}"]`])
+    .patch(docId)
+    .unset([`${blockArrayField(docId)}[_key=="${key}"]`])
     .commit()
-  invalidateCache('sanity:homepage')
+  invalidateDocCache(docId)
 }
 
 export function invalidateCmsCache(): void {
@@ -509,6 +547,7 @@ export function invalidateCmsCache(): void {
 }
 
 const HOMEPAGE_DOC_ID = 'singleton.homepage'
+const PANEL_DECK_DOC_ID = 'singleton.panelDeck'
 
 /**
  * Full raw homepage singleton document (every field + section, incl. inactive
