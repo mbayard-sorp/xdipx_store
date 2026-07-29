@@ -4357,6 +4357,7 @@ __export(shopify_server_exports, {
   getFeedCatalogProducts: () => getFeedCatalogProducts,
   getFeedDeals: () => getFeedDeals,
   getHandleByProductId: () => getHandleByProductId,
+  getIndexableProductHandles: () => getIndexableProductHandles,
   getLiveDealHandle: () => getLiveDealHandle,
   getMainMenu: () => getMainMenu,
   getPairingCandidates: () => getPairingCandidates,
@@ -5027,7 +5028,7 @@ async function getProductsByIds(ids) {
       }
     }
   `, { ids });
-  return (data.nodes ?? []).filter((n) => n.__typename === "Product").map((n) => nodeToProduct(n));
+  return (data.nodes ?? []).filter((n) => n?.__typename === "Product").map((n) => nodeToProduct(n));
 }
 async function getProductsByTag(tag, limit = 6) {
   return cached(`shopify:tag:${tag}:${limit}`, READ_TTL, async () => {
@@ -5153,6 +5154,34 @@ async function getPairingCandidates(opts) {
     }
   }
   return out;
+}
+async function getIndexableProductHandles() {
+  const handles = /* @__PURE__ */ new Set();
+  let cursor = null;
+  for (let page = 0; page < CATALOG_PAGE_CAP; page++) {
+    const data = await storefront(`
+      query IndexableProductHandles($first: Int!, $after: String) {
+        products(first: $first, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              handle
+              dealStatus: metafield(namespace: "xdipx", key: "deal_status") { value }
+            }
+          }
+        }
+      }
+    `, { first: 250, after: cursor });
+    for (const edge of data.products.edges) {
+      if (edge.node.dealStatus?.value === "archived") continue;
+      handles.add(edge.node.handle);
+    }
+    if (!data.products.pageInfo.hasNextPage) return handles;
+    cursor = data.products.pageInfo.endCursor;
+    if (!cursor) return handles;
+  }
+  console.warn(`[shopify] getIndexableProductHandles hit the ${CATALOG_PAGE_CAP}-page cap; catalog may be truncated`);
+  return handles;
 }
 async function getProductImagesForSitemap() {
   const entries = await cached("shopify:sitemap:product-images:v2", 3600, async () => {
@@ -8349,10 +8378,15 @@ function parsePricingSnapshot(raw) {
   };
 }
 async function bulkFetchProductsForPricing(opts) {
-  const pageSize = opts?.limit ?? 100;
+  const pageSize = opts?.limit ?? PRICING_FETCH_PAGE_SIZE;
   let cursor = opts?.cursor ?? null;
   const results = [];
+  let firstPage = true;
   do {
+    if (!firstPage) {
+      await new Promise((r) => setTimeout(r, PRICING_FETCH_PAGE_DELAY_MS));
+    }
+    firstPage = false;
     const data = await adminGraphQL(PRICING_PRODUCTS_QUERY, {
       first: pageSize,
       after: cursor ?? null,
@@ -8476,7 +8510,7 @@ async function getProductMetafieldDebug(numericProductId) {
     emmaHero: result.metafields.find((m) => m.key === "emma_hero") ?? null
   };
 }
-var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, GMC_FEED_METAFIELDS_FRAGMENT, GMC_FEED_CARD_FRAGMENT, CART_FRAGMENT, XDIPX_LOCATION_IDS, XDIPX_PUBLICATION_NAMES, XDIPX_EXCLUDED_PUBLICATION_NAMES, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
+var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CATALOG_PAGE_CAP, GMC_FEED_METAFIELDS_FRAGMENT, GMC_FEED_CARD_FRAGMENT, CART_FRAGMENT, XDIPX_LOCATION_IDS, XDIPX_PUBLICATION_NAMES, XDIPX_EXCLUDED_PUBLICATION_NAMES, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, PRICING_FETCH_PAGE_SIZE, PRICING_FETCH_PAGE_DELAY_MS, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
@@ -8642,6 +8676,7 @@ var init_shopify_server = __esm({
       longevity: "Longevity",
       fit: "Fit"
     };
+    CATALOG_PAGE_CAP = 40;
     GMC_FEED_METAFIELDS_FRAGMENT = `
   metafields(identifiers: [
     { namespace: "xdipx", key: "deal_date" }
@@ -8845,6 +8880,8 @@ var init_shopify_server = __esm({
     }
   }
 `;
+    PRICING_FETCH_PAGE_SIZE = 50;
+    PRICING_FETCH_PAGE_DELAY_MS = 500;
     VARIANTS_BY_SKU_QUERY = `
   query VariantsBySkus($query: String!, $first: Int!) {
     productVariants(first: $first, query: $query) {
@@ -16678,23 +16715,23 @@ async function getTodayImageCount() {
   });
 }
 async function isRunInProgress(team, excludeRunId) {
-  const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 6e4);
+  const since = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 6e4);
   const conditions = [
     eq11(homepageTeamRuns.team, team),
     eq11(homepageTeamRuns.status, "running"),
-    gte(homepageTeamRuns.startedAt, since)
+    sql3`${lastActivityAt} >= ${since}`
   ];
   if (excludeRunId !== void 0) conditions.push(ne2(homepageTeamRuns.id, excludeRunId));
   const [row] = await db.select({ id: homepageTeamRuns.id }).from(homepageTeamRuns).where(and3(...conditions)).limit(1);
   return !!row;
 }
 async function expireStaleRuns() {
-  const cutoff = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 6e4);
+  const cutoff = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 6e4);
   await db.update(homepageTeamRuns).set({
     status: "failed",
-    error: `auto-expired: still 'running' past the ${RUN_LOCK_WINDOW_MIN}-minute lock window`,
+    error: `auto-expired: no recorded activity for ${RUN_IDLE_TIMEOUT_MIN} minutes`,
     finishedAt: /* @__PURE__ */ new Date()
-  }).where(and3(eq11(homepageTeamRuns.status, "running"), lt(homepageTeamRuns.startedAt, cutoff)));
+  }).where(and3(eq11(homepageTeamRuns.status, "running"), sql3`${lastActivityAt} < ${cutoff}`));
 }
 async function gate(team, excludeRunId) {
   if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
@@ -17121,7 +17158,7 @@ async function proposeCalendarEvent(input) {
   }).returning({ id: marketingCalendar.id });
   return row.id;
 }
-var RUN_LOCK_WINDOW_MIN, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
+var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
 var init_team_server = __esm({
   "app/lib/team.server.ts"() {
     "use strict";
@@ -17132,7 +17169,15 @@ var init_team_server = __esm({
     init_team_keys();
     init_schema();
     init_team_keys();
-    RUN_LOCK_WINDOW_MIN = 20;
+    RUN_IDLE_TIMEOUT_MIN = 240;
+    lastActivityAt = sql3`GREATEST(
+  ${homepageTeamRuns.startedAt},
+  COALESCE(
+    (SELECT MAX(${homepageTeamEvents.ts}) FROM ${homepageTeamEvents}
+      WHERE ${homepageTeamEvents.runId} = ${homepageTeamRuns.id}),
+    ${homepageTeamRuns.startedAt}
+  )
+)`;
     SETTINGS_CACHE_TTL_SEC = 60;
     SPEND_KV_TTL_SEC = 26 * 3600;
     SPEND_RESEED_MS = 15 * 6e4;
@@ -20658,6 +20703,19 @@ function isTrustworthyDeadVerdict(coverageState, lastCrawl) {
   const crawled = lastCrawl instanceof Date ? lastCrawl.toISOString().slice(0, 10) : String(lastCrawl).slice(0, 10);
   return crawled >= RECRAWL_EPOCH;
 }
+function keepIndexable(products, indexable) {
+  if (!indexable) return products;
+  const kept = products.filter((p) => indexable.has(p.handle));
+  const dropped = products.length - kept.length;
+  if (products.length > 0 && dropped / products.length > MAX_INDEXABLE_DROP_RATIO) {
+    console.warn(
+      `[sitemap] liveness filter would drop ${dropped}/${products.length} products (> ${MAX_INDEXABLE_DROP_RATIO * 100}%); publishing unfiltered`
+    );
+    return products;
+  }
+  if (dropped > 0) console.log(`[sitemap] dropped ${dropped} product URLs the PDP route would 404/410`);
+  return kept;
+}
 function applyHealth(urls, health) {
   const out = [];
   for (const u of urls) {
@@ -20683,7 +20741,7 @@ function chunkSegments(prefix, urls, size) {
   }
   return segments;
 }
-var BASE2, RECRAWL_EPOCH, HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY, PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ;
+var BASE2, RECRAWL_EPOCH, HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY, PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ, MAX_INDEXABLE_DROP_RATIO;
 var init_sitemap_xml = __esm({
   "app/lib/sitemap-xml.ts"() {
     "use strict";
@@ -20694,6 +20752,7 @@ var init_sitemap_xml = __esm({
     NEW_ARRIVALS_PRIORITY = "0.8";
     PRODUCT_PRIORITY = "0.6";
     PRODUCT_CHANGEFREQ = "weekly";
+    MAX_INDEXABLE_DROP_RATIO = 0.25;
   }
 });
 
@@ -20749,7 +20808,7 @@ async function assembleSegments() {
     console.error(`[sitemap] ${name} failed:`, err2);
     return fallback;
   });
-  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health] = await Promise.all([
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles] = await Promise.all([
     guard(getBlogPostsForSitemap(), [], "getBlogPostsForSitemap"),
     guard(getBlogCategories(), [], "getBlogCategories"),
     guard(getAllBlogSeries(), [], "getAllBlogSeries"),
@@ -20759,7 +20818,8 @@ async function assembleSegments() {
     guard(getCollectionsForSitemap(), [], "getCollectionsForSitemap"),
     guard(db.select().from(dealHistory).where(eq13(dealHistory.status, "live")).limit(1), [], "liveDeal query"),
     guard(getMainMenu(), [], "getMainMenu"),
-    getUrlHealth()
+    getUrlHealth(),
+    guard(getIndexableProductHandles(), null, "getIndexableProductHandles")
   ]);
   const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0].dealDate) : null;
   const homepageLastmod = liveDealDate && !Number.isNaN(liveDealDate.getTime()) ? liveDealDate.toISOString().split("T")[0] : void 0;
@@ -20842,7 +20902,8 @@ async function assembleSegments() {
       ...images.length > 0 ? { images } : {}
     };
   });
-  const productUrls = products.map((p) => {
+  const listable = keepIndexable(products, indexableHandles);
+  const productUrls = listable.map((p) => {
     const imageData = productImages.get(p.handle);
     const images = imageData ? imageData.images.map((img) => ({
       loc: img.url,
@@ -27491,7 +27552,7 @@ var init_release_engine_server = __esm({
     init_owner_alerts_server();
     init_team_server();
     LOG = "[release-engine]";
-    AGENT_BRANCH_PREFIXES = ["agents/", "claude/", "phase1/", "tonight/"];
+    AGENT_BRANCH_PREFIXES = ["agents/", "ticket/", "claude/", "phase1/", "tonight/"];
     REVERT_BRANCH_PREFIX = "revert/pr-";
     REQUIRED_CHECK = "check";
     ALLOWLIST_CHECK_NAMES = ["allowlist", "agent-allowlist"];

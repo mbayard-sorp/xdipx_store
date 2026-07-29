@@ -1038,7 +1038,13 @@ export async function getDealByHandle(handle: string): Promise<Deal | null> {
 
 export async function getProductsByIds(ids: string[]): Promise<Product[]> {
   if (ids.length === 0) return []
-  const data = await storefront<{ nodes: ({ __typename: string } & ShopifyProductNode)[] }>(`
+  // `nodes` yields null for any id the Storefront API cannot resolve, which is
+  // what a deleted or unpublished product looks like once something still holds
+  // its gid. Accessory and pairing metafields hold exactly those gids and are
+  // never cleaned up when a product goes away, so an unguarded `n.__typename`
+  // threw and took the whole PDP down with a 500. It was doing that in
+  // production on /products/diy-vibrating-dildo-kit-light-skin-tone.
+  const data = await storefront<{ nodes: (({ __typename: string } & ShopifyProductNode) | null)[] }>(`
     query GetProductsByIds($ids: [ID!]!) {
       nodes(ids: $ids) {
         __typename
@@ -1047,7 +1053,7 @@ export async function getProductsByIds(ids: string[]): Promise<Product[]> {
     }
   `, { ids })
   return (data.nodes ?? [])
-    .filter(n => n.__typename === 'Product')
+    .filter((n): n is { __typename: string } & ShopifyProductNode => n?.__typename === 'Product')
     .map(n => nodeToProduct(n))
 }
 
@@ -1243,6 +1249,69 @@ export async function getPairingCandidates(opts: {
   }
 
   return out
+}
+
+/** Storefront pages of 250 to walk before giving up. ~2x the current catalog. */
+const CATALOG_PAGE_CAP = 40
+
+/**
+ * Handles that /products/$slug will actually serve a 200 for.
+ *
+ * The sitemap's product list comes from Sanity `productPage` docs, but the PDP
+ * route resolves against Shopify: a handle the Storefront API does not return
+ * 404s, and one whose `deal_status` metafield is `archived` 410s. Nothing
+ * reconciled the two, so the sitemap shipped URLs that were dead on arrival:
+ * 183 of them on 2026-07-29 (164 would 404, 19 would 410). That is crawl budget
+ * spent to learn nothing on a property with very little of it, and every dead
+ * entry costs the sitemap some of the trust that makes the rest worth crawling.
+ *
+ * Deliberately not routed through cached(): the result is a ~4,500-entry set,
+ * and KV is the wrong home for a payload that size (the sitemap module keeps
+ * its assembled URL set in-process for the same reason). buildSitemapSegments
+ * memoizes the whole assembly for an hour, which is the caching that matters.
+ */
+export async function getIndexableProductHandles(): Promise<Set<string>> {
+  const handles = new Set<string>()
+  let cursor: string | null = null
+
+  for (let page = 0; page < CATALOG_PAGE_CAP; page++) {
+    const data: {
+      products: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null }
+        edges: Array<{
+          node: { handle: string; dealStatus: { value: string } | null }
+        }>
+      }
+    } = await storefront(`
+      query IndexableProductHandles($first: Int!, $after: String) {
+        products(first: $first, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              handle
+              dealStatus: metafield(namespace: "xdipx", key: "deal_status") { value }
+            }
+          }
+        }
+      }
+    `, { first: 250, after: cursor })
+
+    for (const edge of data.products.edges) {
+      // `archived` is the one deal_status the PDP route turns into a 410.
+      if (edge.node.dealStatus?.value === 'archived') continue
+      handles.add(edge.node.handle)
+    }
+
+    if (!data.products.pageInfo.hasNextPage) return handles
+    cursor = data.products.pageInfo.endCursor
+    if (!cursor) return handles
+  }
+
+  // Only reachable if the catalog outgrew the cap. Returning a short set would
+  // silently suppress real products, so say so loudly. The caller's drop-ratio
+  // guard is what actually stops the truncated set from being used.
+  console.warn(`[shopify] getIndexableProductHandles hit the ${CATALOG_PAGE_CAP}-page cap; catalog may be truncated`)
+  return handles
 }
 
 export interface SitemapProductImages {

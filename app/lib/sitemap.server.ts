@@ -33,11 +33,11 @@
  */
 import { neon } from '@neondatabase/serverless'
 import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
-import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, type SitemapProductImages, type SitemapCollection } from '~/lib/shopify.server'
+import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, getIndexableProductHandles, type SitemapProductImages, type SitemapCollection } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
 import { DEAD_VERDICT_STATES } from '~/lib/gsc-index.server'
 import {
-  BASE, applyHealth, chunkSegments, isTrustworthyDeadVerdict, newestLastmod,
+  BASE, applyHealth, chunkSegments, isTrustworthyDeadVerdict, keepIndexable, newestLastmod,
   HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY,
   PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ,
   type SitemapImage, type SitemapSegment, type SitemapUrl, type UrlHealth,
@@ -158,7 +158,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
       return fallback
     })
 
-  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health] = await Promise.all([
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles] = await Promise.all([
     guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
     guard(getBlogCategories(), [], 'getBlogCategories'),
     guard(getAllBlogSeries(), [], 'getAllBlogSeries'),
@@ -169,6 +169,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     guard(db.select().from(dealHistory).where(eq(dealHistory.status, 'live')).limit(1), [], 'liveDeal query'),
     guard(getMainMenu(), [], 'getMainMenu'),
     getUrlHealth(),
+    guard(getIndexableProductHandles(), null, 'getIndexableProductHandles'),
   ])
 
   const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0]!.dealDate) : null
@@ -293,7 +294,12 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     })
 
   // ── products ─────────────────────────────────────────────────────────────
-  const productUrls: SitemapUrl[] = products.map(p => {
+  // Sanity says which products have a page; Shopify decides whether that page
+  // resolves. Only list handles the PDP route will serve, per
+  // getIndexableProductHandles. Fail open on a missing or implausible set.
+  const listable = keepIndexable(products, indexableHandles)
+
+  const productUrls: SitemapUrl[] = listable.map(p => {
     const imageData = productImages.get(p.handle)
     const images: SitemapImage[] = imageData
       ? imageData.images.map(img => ({
