@@ -603,6 +603,11 @@ export const PROTECTED_GLOBS: readonly string[] = [
   // Valve and spend definitions beyond the two named files.
   'app/lib/homepage-team.server.ts',
   'app/lib/homepage-team-keys.ts',
+  // The audited write path for every pipeline_settings key, including the
+  // release engine's own enable flag. A change here can weaken or bypass the
+  // attribution trail on the store's entire safety boundary, so it needs the
+  // owner's eyes even though the file itself is small.
+  'app/lib/settings.server.ts',
   // The cron auth block lives here; a change to it is a change to who can
   // trigger every scheduled job.
   'server/cron.ts',

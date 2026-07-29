@@ -104,12 +104,27 @@ export const dailyProfitSummary = pgTable('daily_profit_summary', {
   avgOrderValue: decimal('avg_order_value',{ precision: 10, scale: 2 }),
   featuredSku:   varchar('featured_sku', { length: 20 }),
   adSpend:       decimal('ad_spend', { precision: 10, scale: 2 }).default('0').notNull(),
+  // Migration 073: units whose wholesale cost could not be resolved from any
+  // source. Excluded from totalCogs rather than counted as free stock.
+  cogsMissingUnits: integer('cogs_missing_units').default(0).notNull(),
 })
 
 export const pipelineSettings = pgTable('pipeline_settings', {
   key:       varchar('key', { length: 50 }).primaryKey(),
   value:     text('value').notNull(),
   updatedAt: timestamp('updated_at').defaultNow(),
+})
+
+// Migration 072: append-only attribution trail for pipeline_settings writes.
+// Written by setPipelineSettingAudited() in app/lib/settings.server.ts.
+export const settingsAuditLog = pgTable('settings_audit_log', {
+  id:        bigserial('id', { mode: 'number' }).primaryKey(),
+  key:       varchar('key', { length: 50 }).notNull(),
+  oldValue:  text('old_value'),
+  newValue:  text('new_value').notNull(),
+  actor:     varchar('actor', { length: 32 }).notNull(),
+  source:    varchar('source', { length: 64 }).notNull(),
+  changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 // Migration 066: synthetic checkout probe results. One row per probe run.
