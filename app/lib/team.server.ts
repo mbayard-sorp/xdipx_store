@@ -80,8 +80,41 @@ export function assertTeamAuth(request: Request): void {
   }
 }
 
-/** A run is considered to be holding the lock if it started within this window. */
-const RUN_LOCK_WINDOW_MIN = 20
+/**
+ * A run is presumed dead after this long with no recorded activity.
+ *
+ * Liveness is measured from activity, never from total elapsed time. The old
+ * 20-minute start-time window reaped live runs mid-flight: run 106 (homepage,
+ * 2026-07-28) was marked failed at 22 minutes and went on posting events for
+ * another 82 seconds, and content runs 102/111 ran 190 and 200 minutes and
+ * survived only because the reaper's 5-minute throttle happened to miss them.
+ *
+ * The threshold is generous on purpose. Measured over 21 days of SUCCEEDED
+ * runs, healthy routines go quiet for long stretches between steps: content
+ * p95 45.6 min and max 155.6, strategy max 102.5, homepage max 36.5. Anything
+ * near 20 minutes re-creates the bug. The failure modes are asymmetric, since
+ * a false reap corrupts the record and masks real failures, while a late reap
+ * only leaves a dead row marked 'running' a while longer.
+ *
+ * This also releases the concurrency lock, because isRunInProgress() only
+ * counts status='running' rows: reaping a dead run is what frees its team.
+ */
+const RUN_IDLE_TIMEOUT_MIN = 240
+
+/**
+ * Last sign of life for a run: the newest event it posted, falling back to its
+ * own start for a run that has not posted anything yet. Both the concurrency
+ * lock and the zombie reaper key off this, so a routine that keeps reporting
+ * keeps its lock and stays out of the reaper's way however long it takes.
+ */
+const lastActivityAt = sql`GREATEST(
+  ${homepageTeamRuns.startedAt},
+  COALESCE(
+    (SELECT MAX(${homepageTeamEvents.ts}) FROM ${homepageTeamEvents}
+      WHERE ${homepageTeamEvents.runId} = ${homepageTeamRuns.id}),
+    ${homepageTeamRuns.startedAt}
+  )
+)`
 
 export interface TeamConfig {
   team: TeamId
@@ -249,16 +282,16 @@ export async function getTodayImageCount(): Promise<number> {
 }
 
 /**
- * True if a run of THIS TEAM is currently in progress (started within the lock
- * window). Teams don't block each other — a social run never locks homepage.
+ * True if a run of THIS TEAM is currently in progress (active within the idle
+ * timeout). Teams don't block each other, a social run never locks homepage.
  * Callers that already hold a run row pass excludeRunId to avoid self-blocking.
  */
 export async function isRunInProgress(team: TeamId, excludeRunId?: number): Promise<boolean> {
-  const since = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 60_000)
+  const since = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 60_000)
   const conditions = [
     eq(homepageTeamRuns.team, team),
     eq(homepageTeamRuns.status, 'running'),
-    gte(homepageTeamRuns.startedAt, since),
+    sql`${lastActivityAt} >= ${since}`,
   ]
   if (excludeRunId !== undefined) conditions.push(ne(homepageTeamRuns.id, excludeRunId))
   const [row] = await db
@@ -270,19 +303,20 @@ export async function isRunInProgress(team: TeamId, excludeRunId?: number): Prom
 }
 
 /**
- * Mark zombie rows failed across ALL teams: status='running' but started before
- * the lock window, meaning the routine died without posting a final update.
+ * Mark zombie rows failed across ALL teams: status='running' with no recorded
+ * activity for the idle timeout, meaning the routine died without posting a
+ * final update. A slow-but-reporting run is not a zombie and is left alone.
  */
 export async function expireStaleRuns(): Promise<void> {
-  const cutoff = new Date(Date.now() - RUN_LOCK_WINDOW_MIN * 60_000)
+  const cutoff = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 60_000)
   await db
     .update(homepageTeamRuns)
     .set({
       status: 'failed',
-      error: `auto-expired: still 'running' past the ${RUN_LOCK_WINDOW_MIN}-minute lock window`,
+      error: `auto-expired: no recorded activity for ${RUN_IDLE_TIMEOUT_MIN} minutes`,
       finishedAt: new Date(),
     })
-    .where(and(eq(homepageTeamRuns.status, 'running'), lt(homepageTeamRuns.startedAt, cutoff)))
+    .where(and(eq(homepageTeamRuns.status, 'running'), sql`${lastActivityAt} < ${cutoff}`))
 }
 
 export interface GateResult {
