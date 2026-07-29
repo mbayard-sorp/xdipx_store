@@ -87,7 +87,13 @@ and describe the obstacle precisely, not to route around it.
 
 ## Step 3 — Implement (per ticket)
 
-1. Branch `agents/ticket-<id>` from the default branch. One ticket, one branch, one PR. Never batch.
+1. Branch `ticket/<id>` from the default branch. One ticket, one branch, one PR. Never batch.
+
+   The prefix matters. `agents/**` triggers the `agent-allowlist` workflow, which fails any PR
+   touching a file outside agent-editor's docs allowlist. Code fixes belong on `ticket/*`, where
+   the gate is green CI plus a QA-verified ticket. A code PR opened on `agents/**` cannot merge,
+   no matter how good the change is.
+
 2. Read the files the ticket names before editing any of them. If the ticket is too vague to
    implement faithfully, do not guess: transition it back to `blocked` with a note saying exactly
    what information is missing.

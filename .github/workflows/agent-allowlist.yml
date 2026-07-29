@@ -12,6 +12,14 @@
 # plus the release engine's protected-path classifier
 # (app/lib/github.server.ts, PROTECTED_GLOBS).
 #
+# `agents/**` is agent-editor's namespace and nothing else's. R-DEV's code fixes
+# branch as `ticket/<id>` on purpose: they are gated by green CI plus a
+# QA-verified ticket, not by a docs allowlist they could never satisfy. Anything
+# that opens a code PR under `agents/**` is permanently unmergeable, which is
+# the intended outcome, not a bug to work around by widening ALLOW below.
+# `requiresAllowlistCheck` in app/lib/release-engine.server.ts mirrors the
+# head-ref condition on the job; the two must stay in lockstep.
+#
 # This file is itself a protected path: agent-editor is forbidden from
 # `.github/**` and the classifier stops any PR that touches it, so changes here
 # come from an engineer PR and an owner merge. That is deliberate.

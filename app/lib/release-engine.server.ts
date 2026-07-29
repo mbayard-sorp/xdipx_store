@@ -73,8 +73,16 @@ import { getTicket, transitionSuggestion, type TicketStatus } from '~/lib/team.s
 
 const LOG = '[release-engine]'
 
-/** Head-branch prefixes the engine will even look at. */
-export const AGENT_BRANCH_PREFIXES: readonly string[] = ['agents/', 'claude/', 'phase1/', 'tonight/']
+/**
+ * Head-branch prefixes the engine will even look at.
+ *
+ * `agents/` and `ticket/` are deliberately separate namespaces, because the
+ * `agent-allowlist` workflow fires on `agents/**` and hard-fails anything
+ * outside agent-editor's docs allowlist. Code fixes from R-DEV live on
+ * `ticket/<id>` so they are gated by CI plus a QA-verified ticket instead of by
+ * a docs allowlist that was never written for them. See `requiresAllowlistCheck`.
+ */
+export const AGENT_BRANCH_PREFIXES: readonly string[] = ['agents/', 'ticket/', 'claude/', 'phase1/', 'tonight/']
 
 /** Revert branches the engine opens for itself. */
 export const REVERT_BRANCH_PREFIX = 'revert/pr-'
@@ -222,7 +230,15 @@ export function isEligibleBranch(headRef: string): boolean {
   return isAgentBranch(headRef) || isRevertBranch(headRef)
 }
 
-/** Only `agents/*` runs the allowlist workflow, so only `agents/*` is gated on it. */
+/**
+ * Only `agents/*` runs the allowlist workflow, so only `agents/*` is gated on it.
+ *
+ * This must stay in lockstep with `on.pull_request` + the `startsWith(github.
+ * head_ref, 'agents/')` job condition in agent-allowlist.yml. Widening it to a
+ * namespace the workflow does not run on would park those PRs forever on
+ * `allowlist-pending`; narrowing it below what the workflow covers would let a
+ * red allowlist merge. `ticket/*` is outside both, by design.
+ */
 export function requiresAllowlistCheck(headRef: string): boolean {
   return headRef.startsWith('agents/')
 }

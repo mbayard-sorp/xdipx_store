@@ -74,18 +74,24 @@ const DOCS_FILES = ['docs/homepage-team/mission-brief.md', '.claude/agents/desig
 
 const verifiedTicket: TicketFacts = { id: 41, status: 'verified', kind: 'code', attemptCount: 0 }
 
+/** An agent-editor docs branch. `agents/*` is the only namespace the allowlist
+ *  workflow runs on, so every allowlist assertion below names it explicitly. */
+const DOCS_BRANCH = 'agents/suggestion-9'
+
+/** The default fixture is an R-DEV code PR, which lives on `ticket/*` precisely
+ *  so the docs allowlist does not apply to it. */
 function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
   const changedPaths = over.changedPaths ?? CODE_FILES
   return {
     number: 100,
-    headRef: 'agents/ticket-41',
+    headRef: 'ticket/41',
     draft: false,
     mergeable: true,
     mergeableState: 'clean',
     labels: [],
     classification: over.classification ?? classifyChangedFiles(changedPaths),
     changedPaths,
-    checks: { [REQUIRED_CHECK]: 'success', allowlist: 'success' },
+    checks: { [REQUIRED_CHECK]: 'success' },
     ticket: verifiedTicket,
     ...over,
   }
@@ -97,10 +103,10 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
 
 describe('branch predicates', () => {
   it('recognises every agent branch prefix and nothing else', () => {
-    for (const ref of ['agents/ticket-1', 'claude/foo', 'phase1/release-engine', 'tonight/hotfix']) {
+    for (const ref of ['agents/suggestion-1', 'ticket/43', 'claude/foo', 'phase1/release-engine', 'tonight/hotfix']) {
       expect(isAgentBranch(ref)).toBe(true)
     }
-    for (const ref of ['main', 'feature/x', 'agent/typo', 'renovate/deps']) {
+    for (const ref of ['main', 'feature/x', 'agent/typo', 'ticketing/x', 'renovate/deps']) {
       expect(isAgentBranch(ref)).toBe(false)
     }
   })
@@ -113,9 +119,17 @@ describe('branch predicates', () => {
   })
 
   it('requires the allowlist check only on agents/*, matching the workflow trigger', () => {
-    expect(requiresAllowlistCheck('agents/ticket-1')).toBe(true)
+    expect(requiresAllowlistCheck('agents/suggestion-1')).toBe(true)
     expect(requiresAllowlistCheck('claude/foo')).toBe(false)
     expect(requiresAllowlistCheck('revert/pr-9')).toBe(false)
+  })
+
+  // Regression: code tickets used to branch as `agents/ticket-<id>`, which put
+  // every R-DEV code fix under a docs-only allowlist it could never satisfy.
+  // The namespaces are split now, and must stay split.
+  it('does not gate a code ticket branch on the docs allowlist', () => {
+    expect(isAgentBranch('ticket/43')).toBe(true)
+    expect(requiresAllowlistCheck('ticket/43')).toBe(false)
   })
 })
 
@@ -284,7 +298,7 @@ describe('protected classification routing', () => {
 // ---------------------------------------------------------------------------
 
 describe('evaluatePullRequest: gates', () => {
-  it('merges a verified code PR with green CI and a green allowlist', () => {
+  it('merges a verified code PR on green CI, with no allowlist check in sight', () => {
     const d = evaluatePullRequest(facts())
     expect(d.action).toBe('merge')
     expect(d.code).toBe('ready')
@@ -306,19 +320,19 @@ describe('evaluatePullRequest: gates', () => {
   })
 
   it('waits while CI is still running instead of merging optimistically', () => {
-    const d = evaluatePullRequest(facts({ checks: { check: null, allowlist: 'success' } }))
+    const d = evaluatePullRequest(facts({ checks: { check: null } }))
     expect(d.action).toBe('wait')
     expect(d.code).toBe('ci-pending')
   })
 
   it('waits when CI never reported at all: no news is not good news', () => {
-    const d = evaluatePullRequest(facts({ checks: { allowlist: 'success' } }))
+    const d = evaluatePullRequest(facts({ checks: {} }))
     expect(d.action).toBe('wait')
     expect(d.code).toBe('ci-pending')
   })
 
   it('bounces a verified ticket when CI is red, spending a fix attempt', () => {
-    const d = evaluatePullRequest(facts({ checks: { check: 'failure', allowlist: 'success' } }))
+    const d = evaluatePullRequest(facts({ checks: { check: 'failure' } }))
     expect(d.action).toBe('bounce')
     expect(d.code).toBe('ci-red')
     expect(d.lastError).toContain('failed')
@@ -328,7 +342,7 @@ describe('evaluatePullRequest: gates', () => {
   it('does not bounce a ticket that is not verified: a red build there is QA business', () => {
     const d = evaluatePullRequest(
       facts({
-        checks: { check: 'failure', allowlist: 'success' },
+        checks: { check: 'failure' },
         ticket: { id: 41, status: 'pr_open', kind: 'code', attemptCount: 0 },
       }),
     )
@@ -338,20 +352,30 @@ describe('evaluatePullRequest: gates', () => {
 
   it('never merges over a red build, not even a docs-only PR', () => {
     const d = evaluatePullRequest(
-      facts({ changedPaths: DOCS_FILES, checks: { check: 'failure', allowlist: 'success' }, ticket: null }),
+      facts({
+        headRef: DOCS_BRANCH,
+        changedPaths: DOCS_FILES,
+        checks: { check: 'failure', allowlist: 'success' },
+        ticket: null,
+      }),
     )
     expect(d.action).not.toBe('merge')
     expect(d.code).toBe('ci-red')
   })
 
   it('waits when the allowlist check has not reported on an agents/* branch', () => {
-    const d = evaluatePullRequest(facts({ changedPaths: DOCS_FILES, checks: { check: 'success' }, ticket: null }))
+    const d = evaluatePullRequest(
+      facts({ headRef: DOCS_BRANCH, changedPaths: DOCS_FILES, checks: { check: 'success' }, ticket: null }),
+    )
     expect(d.action).toBe('wait')
     expect(d.code).toBe('allowlist-pending')
   })
 
   it('blocks on a red allowlist even when CI is green', () => {
-    const d = evaluatePullRequest(facts({ checks: { check: 'success', allowlist: 'failure' } }))
+    // An agents/* PR carrying code: exactly what the workflow exists to catch.
+    const d = evaluatePullRequest(
+      facts({ headRef: DOCS_BRANCH, checks: { check: 'success', allowlist: 'failure' } }),
+    )
     expect(d.code).toBe('allowlist-red')
     expect(d.action).toBe('bounce')
   })
@@ -359,6 +383,15 @@ describe('evaluatePullRequest: gates', () => {
   it('does not require the allowlist on a non-agents branch', () => {
     const d = evaluatePullRequest(facts({ headRef: 'claude/fix-thing', checks: { check: 'success' } }))
     expect(d.action).toBe('merge')
+  })
+
+  // The bug this split fixes: a code fix on the old `agents/ticket-<id>` branch
+  // tripped a docs allowlist it could never pass, and no amount of green CI or
+  // QA verification could get it merged.
+  it('merges a code ticket PR without ever consulting the allowlist', () => {
+    const d = evaluatePullRequest(facts({ headRef: 'ticket/43', checks: { check: 'success' } }))
+    expect(d.action).toBe('merge')
+    expect(d.code).toBe('ready')
   })
 })
 
@@ -379,10 +412,20 @@ describe('evaluatePullRequest: ticket linkage', () => {
 
   it('applies the docs-only carve-out: allowlist green is enough, no ticket needed', () => {
     const d = evaluatePullRequest(
-      facts({ changedPaths: DOCS_FILES, ticket: null, checks: { allowlist: 'success' } }),
+      facts({ headRef: DOCS_BRANCH, changedPaths: DOCS_FILES, ticket: null, checks: { allowlist: 'success' } }),
     )
     expect(d.action).toBe('merge')
     expect(d.docsOnly).toBe(true)
+  })
+
+  // A docs-only diff on a code branch is still a code PR: the carve-out belongs
+  // to agent-editor's namespace, and `ticket/*` never gets it.
+  it('does not extend the docs carve-out to a ticket/* branch', () => {
+    const d = evaluatePullRequest(
+      facts({ headRef: 'ticket/43', changedPaths: DOCS_FILES, ticket: null, checks: { check: 'success' } }),
+    )
+    expect(d.action).toBe('skip')
+    expect(d.code).toBe('no-ticket')
   })
 
   it('does not extend the docs carve-out to a non-agents branch', () => {
