@@ -96,6 +96,46 @@ import kbBrandFaq          from '../schemas/kbBrandFaq.js'
 // (additive; existing schemas untouched).
 import socialLanding       from '../schemas/socialLanding.js'
 
+// Panel deck — the eight doors below the storefront headliner. Deck singleton
+// plus its row/tile object types. Additive; placed on the page by the
+// storefrontHome layout singleton, so nothing renders until that enables it.
+import panelLink           from '../schemas/blocks/panelLink.js'
+import panelTile           from '../schemas/blocks/panelTile.js'
+import panelSquareRow      from '../schemas/blocks/panelSquareRow.js'
+import panelLarge          from '../schemas/blocks/panelLarge.js'
+import panelSmall          from '../schemas/blocks/panelSmall.js'
+import panelRowLarge       from '../schemas/blocks/panelRowLarge.js'
+import panelRowSmall       from '../schemas/blocks/panelRowSmall.js'
+import panelDeck           from '../schemas/panelDeck.js'
+
+// Storefront home layout singleton — band order + the chrome copy that used to
+// be hardcoded in StorefrontHome. Additive: no doc published means the shipped
+// order renders unchanged.
+import homeBand            from '../schemas/blocks/homeBand.js'
+import homeMoodPills       from '../schemas/blocks/homeMoodPills.js'
+import panelDeckSection    from '../schemas/blocks/panelDeckSection.js'
+import storefrontHome      from '../schemas/storefrontHome.js'
+
+// Merchandised category and drop pages. Additive docs that enrich the existing
+// /collections/{handle} and /new surfaces; no new routes, no URL churn.
+import categoryMasthead    from '../schemas/blocks/category/categoryMasthead.js'
+import shelfNav            from '../schemas/blocks/category/shelfNav.js'
+import sensationLegend     from '../schemas/blocks/category/sensationLegend.js'
+import editorialFeature    from '../schemas/blocks/category/editorialFeature.js'
+import shelfSection        from '../schemas/blocks/category/shelfSection.js'
+import learnStrip          from '../schemas/blocks/category/learnStrip.js'
+import benefitEditorial    from '../schemas/blocks/category/benefitEditorial.js'
+import categoryTrust       from '../schemas/blocks/category/categoryTrust.js'
+import chooserBlock        from '../schemas/blocks/category/chooserBlock.js'
+import faqBlock            from '../schemas/blocks/category/faqBlock.js'
+import dropMasthead        from '../schemas/blocks/category/dropMasthead.js'
+import justLanded          from '../schemas/blocks/category/justLanded.js'
+import dropTimeline        from '../schemas/blocks/category/dropTimeline.js'
+import makersNote          from '../schemas/blocks/category/makersNote.js'
+import comingSoon          from '../schemas/blocks/category/comingSoon.js'
+import categoryPage        from '../schemas/categoryPage.js'
+import dropPage            from '../schemas/dropPage.js'
+
 export const schemaTypes = [
   // Documents (singletons)
   homepageSections,
@@ -206,4 +246,36 @@ export const schemaTypes = [
   kbBrandFaq,
   // Social bio-link landing (/social), featured product + Emma blurb. Singleton.
   socialLanding,
+  // Panel deck — eight doors below the headliner. Singleton + object types.
+  panelDeck,
+  panelLink,
+  panelTile,
+  panelSquareRow,
+  panelLarge,
+  panelSmall,
+  panelRowLarge,
+  panelRowSmall,
+  // Storefront home layout — band order + chrome overrides. Singleton.
+  storefrontHome,
+  homeBand,
+  homeMoodPills,
+  panelDeckSection,
+  // Merchandised category + drop pages (enrich existing collection routes).
+  categoryPage,
+  dropPage,
+  categoryMasthead,
+  shelfNav,
+  sensationLegend,
+  editorialFeature,
+  shelfSection,
+  learnStrip,
+  benefitEditorial,
+  categoryTrust,
+  chooserBlock,
+  faqBlock,
+  dropMasthead,
+  justLanded,
+  dropTimeline,
+  makersNote,
+  comingSoon,
 ]
