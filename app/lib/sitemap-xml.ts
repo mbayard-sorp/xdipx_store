@@ -100,7 +100,7 @@ export function isTrustworthyDeadVerdict(coverageState: string, lastCrawl: Date 
  * for but Shopify no longer serves (4% on 2026-07-29). A partial Storefront
  * failure looks exactly like a genuinely shrunken catalog, and quietly
  * suppressing a third of the catalog from the sitemap is far worse than
- * shipping a few dead URLs — so past this ratio we keep every URL and log.
+ * shipping a few dead URLs, so past this ratio we keep every URL and log.
  */
 export const MAX_INDEXABLE_DROP_RATIO = 0.25
 

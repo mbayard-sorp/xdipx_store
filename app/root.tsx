@@ -316,11 +316,11 @@ export function ErrorBoundary() {
   // of truth shared with the homepage meta export.
 
   // Canonical comes from each route's `meta` export, which React Router does
-  // not run when that route errors — so before this, every error page shipped
+  // not run when that route errors, so before this every error page shipped
   // brand-generic markup with no canonical at all. Identical HTML across many
   // URLs is precisely the input Google's dedup wants: it clustered them and
   // elected `/` as the representative, leaving 337 URLs (2026-07-29) sitting in
-  // "Duplicate without user-selected canonical" pointing at the homepage —
+  // "Duplicate without user-selected canonical" pointing at the homepage,
   // including pages as unmistakably distinct as /discover. Declaring the URL's
   // own canonical here keeps an errored page a document of its own, so a
   // transient failure costs a retry instead of the URL's identity.

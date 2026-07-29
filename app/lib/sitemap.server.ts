@@ -295,7 +295,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
 
   // ── products ─────────────────────────────────────────────────────────────
   // Sanity says which products have a page; Shopify decides whether that page
-  // resolves. Only list handles the PDP route will serve — see
+  // resolves. Only list handles the PDP route will serve, per
   // getIndexableProductHandles. Fail open on a missing or implausible set.
   const listable = keepIndexable(products, indexableHandles)
 

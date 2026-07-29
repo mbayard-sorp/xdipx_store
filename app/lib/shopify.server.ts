@@ -1254,7 +1254,7 @@ const CATALOG_PAGE_CAP = 40
  * The sitemap's product list comes from Sanity `productPage` docs, but the PDP
  * route resolves against Shopify: a handle the Storefront API does not return
  * 404s, and one whose `deal_status` metafield is `archived` 410s. Nothing
- * reconciled the two, so the sitemap shipped URLs that were dead on arrival —
+ * reconciled the two, so the sitemap shipped URLs that were dead on arrival:
  * 183 of them on 2026-07-29 (164 would 404, 19 would 410). That is crawl budget
  * spent to learn nothing on a property with very little of it, and every dead
  * entry costs the sitemap some of the trust that makes the rest worth crawling.
@@ -1302,7 +1302,7 @@ export async function getIndexableProductHandles(): Promise<Set<string>> {
   }
 
   // Only reachable if the catalog outgrew the cap. Returning a short set would
-  // silently suppress real products, so say so loudly — the caller's drop-ratio
+  // silently suppress real products, so say so loudly. The caller's drop-ratio
   // guard is what actually stops the truncated set from being used.
   console.warn(`[shopify] getIndexableProductHandles hit the ${CATALOG_PAGE_CAP}-page cap; catalog may be truncated`)
   return handles

@@ -60,7 +60,7 @@ export default function handleRequest(
           // s-maxage/stale-while-revalidate policy (STOREFRONT_CACHE_HEADERS)
           // that applies to whatever the route returns, so without this one
           // unlucky render could be stored at the edge and handed to every
-          // subsequent visitor — crawlers included — for the rest of the SWR
+          // subsequent visitor, crawlers included, for the rest of the SWR
           // window. That turns a single transient failure into a stretch of
           // identical, canonical-less HTML, which is how URLs end up clustered
           // under the homepage in Search Console.
@@ -98,7 +98,7 @@ export function handleError(
   // error served to a person: the visitor retries, Google records a verdict and
   // keeps it for months. Tagging the crawler case makes it alertable on its own,
   // which is the leading indicator that was missing while ~337 URLs were being
-  // clustered under the homepage — the damage was only visible in Search
+  // clustered under the homepage. The damage was only visible in Search
   // Console weeks later, long after the window that caused it had closed.
   const ua = request.headers.get('user-agent')
   const tags = { crawler: String(!!ua && isbot(ua)) }
