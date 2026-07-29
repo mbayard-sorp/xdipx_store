@@ -33,6 +33,7 @@ function makeProduct(overrides: Partial<DiscoveryProduct> & Pick<DiscoveryProduc
     imageUrl:       null,
     imageAlt:       null,
     subcategory:    overrides.subcategory ?? overrides.category,
+    brand:          overrides.brand ?? null,
     mood:           overrides.mood ?? [],
     audience:       overrides.audience ?? [],
     matters:        overrides.matters ?? [],

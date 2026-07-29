@@ -67,11 +67,15 @@ export function StorefrontProductCard({ product, priority = false, onSelect, flu
       </div>
 
       <div className="mt-3">
+        {/* Brand eyebrow: a recognizable vendor name reads as a legitimacy
+            signal on a shame-adjacent category. Falls back to subcategory /
+            category when the product has no vendor so the eyebrow is never
+            empty. Mono ink-4, the doctrine's kicker treatment. */}
         <p
-          className="text-[13px] uppercase tracking-[0.12em] text-ink-3"
+          className="text-[13px] uppercase tracking-[0.12em] text-ink-4"
           style={{ fontFamily: 'var(--font-mono)' }}
         >
-          {product.subcategory || product.category}
+          {product.brand || product.subcategory || product.category}
         </p>
         <h3
           className="mt-1 line-clamp-2 text-[15px] leading-snug text-ink group-hover:text-plum transition-colors"

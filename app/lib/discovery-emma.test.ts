@@ -36,6 +36,7 @@ function product(overrides: Partial<DiscoveryProduct> = {}): DiscoveryProduct {
     imageAlt:       null,
     category:       'Pleasure',
     subcategory:    'Vibrators',
+    brand:          overrides.brand ?? null,
     mood:           [],
     audience:       [],
     matters:        [],

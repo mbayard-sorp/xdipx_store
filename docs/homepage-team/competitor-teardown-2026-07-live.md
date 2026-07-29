@@ -214,3 +214,60 @@ per mission brief §9.
 no Sanity schema modified. The Emma fix is a content-source swap inside the locked
 Nº01–Nº11 shell; the ambition concept stays a proposal pending IA review + additive
 schema before any build.
+
+---
+
+## Delta — 2026-07-29 (Routine B design cycle, run #117)
+
+**Sourcing honesty (mandatory).** One live capture this run: `https://xdipx.com/`
+(our own homepage, WebFetch 200 OK, real content read). Two reference-bench fetches
+attempted and both failed at the origin, not at our egress: `dame.com` returned
+**403 Forbidden** (site-level bot block, the same pattern `maude.com` showed on the
+2026-07-22 delta) and `vush.com` failed DNS resolution (**ESERVFAIL**, not reachable
+from this sandbox). Agent-proxy reports egress `enabled: true` with no
+`connect_rejected` relay failures, so the blocks are the origins' and the network's,
+not an org egress denial. No competitor homepage was re-captured. Anything below
+about the field is **prior knowledge from the base teardown above**, tagged as such;
+no competitor copy is quoted from memory and no new site was reviewed. Today is
+Wednesday, so the mission-brief §4 Monday five-site recon is not due; this is
+Routine B's own step 0.5 lightweight delta.
+
+**Live self-capture — what our own homepage shows today (verified this run):**
+- The homepage is running a **lube theme**: the hero is *Heat Water-Based Warming
+  Personal Lubricant* with the headline "The water-based one that warms as you go,"
+  and the rails are lube-comparison rails (Water-based / Silicone / Hybrid). Hero is
+  product-forward and 200 OK. Consistent with mission-brief §3's theme binding
+  (hero belongs to the theme).
+- **Card eyebrow is category/subcategory, not brand.** Ground truth from
+  `app/components/store/StorefrontProductCard.tsx`: the mono eyebrow renders
+  `product.subcategory || product.category`. `DiscoveryProduct` (the lean index
+  shape the storefront rails consume) still carries **no `brand` field**, exactly as
+  the 2026-07-22 delta root-caused. On a lube-comparison week this is a visible miss:
+  the recognizable-brand set on those rails (Wicked, Pjur, System JO, Sliquid,
+  Intimate Earth, and the like) is precisely the legitimacy signal a shopper reads
+  when choosing a lubricant, and we throw it away by captioning every card with its
+  category instead.
+
+**Decision this delta forces (recon that changes nothing is a wasted step):**
+1. **Execute the brand eyebrow (backlog #6) this cycle.** The 2026-07-22 delta
+   investigated it, re-scoped it as two steps ("index schema first, then card
+   render"), and deferred it to keep that cycle's PR clean. This cycle picks it up
+   exactly where that note left off: add `brand` (Shopify product `vendor`) to the
+   discovery-index projection and bump `INDEX_VERSION`, then render it as the mono
+   ink-4 eyebrow on `StorefrontProductCard`, falling back to subcategory/category
+   when a product has no vendor. The lube-theme self-capture above is the live
+   argument for why it earns the slot now. This cycle's shell PR.
+
+**Adopted this cycle:** brand eyebrow (P0 #6), the item the prior cycle teed up.
+**Rejected/deferred this cycle (logged so ambition compounds):** imagery wave 1 (#3)
+and hero art-directed frame (#4), both still gated on `media-manager` fal.ai
+generation whose spend/quality risk belongs in its own asset-generation cycle, not
+bundled with a data-shape + card-render PR; footer legitimacy pass (#7), which waits
+on owner-supplied processor mark assets. The ambition-mandate concept carried this
+cycle is a **design doc + wire only** (see `docs/homepage-team/concepts/`),
+shipping-disciplined per mission brief §9.
+
+**IA fence respected:** no new section type, no new route, no `/discover` link added,
+no existing Sanity schema modified. The brand eyebrow is a card-caption change plus an
+additive index-projection field inside the locked Nº01–Nº11 shell; the ambition
+concept stays a proposal pending IA review before any build.
