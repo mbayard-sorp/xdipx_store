@@ -15380,6 +15380,7 @@ function nodeToDiscoveryProduct(n, categoryMap) {
     imageAlt: n.featuredImage?.altText ?? null,
     category,
     subcategory,
+    brand: (n.vendor ?? "").trim() || null,
     mood,
     audience,
     matters,
@@ -15464,6 +15465,7 @@ async function fetchHonoraryProducts(ids, category) {
         category,
         // honorary — forced to the pinned rail's category
         subcategory,
+        brand: (node.vendor ?? "").trim() || null,
         mood: cleanTagList(parseListMetafield(node.moodTagsRaw?.value)),
         audience: cleanTagList(parseListMetafield(node.audienceTagsRaw?.value)),
         matters: cleanTagList(parseListMetafield(node.mattersTagsRaw?.value)),
@@ -15759,7 +15761,7 @@ var init_discovery_server = __esm({
     init_discovery_emma();
     init_discovery_tags();
     init_discovery_rules_server();
-    INDEX_VERSION = "v7";
+    INDEX_VERSION = "v8";
     INDEX_KEY = `discovery:index:${INDEX_VERSION}`;
     INDEX_TTL_SECONDS = 60 * 60 * 24;
     VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`;
@@ -15782,6 +15784,7 @@ var init_discovery_server = __esm({
         title
         status
         productType
+        vendor
         featuredImage { url altText }
         variants(first: 1) { nodes { id } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
@@ -15826,6 +15829,7 @@ var init_discovery_server = __esm({
         title
         status
         productType
+        vendor
         featuredImage { url altText }
         variants(first: 1) { nodes { id } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
