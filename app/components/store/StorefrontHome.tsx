@@ -23,7 +23,7 @@
  * hero image (zero CLS).
  */
 
-import { useEffect, useRef } from 'react'
+import { Fragment, useEffect, useRef, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
@@ -1099,14 +1099,57 @@ function FAQ({ block }: { block?: HomepageFaqBlock | undefined } = {}) {
 }
 
 /* ── Composition ───────────────────────────────────────────────────────────
-   Order is the stable shell. The team's Sanity blocks (rails, wayfinder,
-   Notebook override, couples band) arrive already resolved on `contentBlocks`
-   and render inline. They used to stream in as a deferred promise behind
-   <Suspense>/<Await>, which never survived the storefront's edge cache, so
-   every slot rendered its fallback forever (see storefront-home.server.ts).
-   Each slot still degrades to the same shell fallback when the team has
-   published nothing or the upstream failed — `contentBlocks` is then simply
-   the empty payload. */
+   The team's Sanity blocks (rails, wayfinder, Notebook override, couples band)
+   arrive already resolved on `contentBlocks` and render inline. They used to
+   stream in as a deferred promise behind <Suspense>/<Await>, which never
+   survived the storefront's edge cache, so every slot rendered its fallback
+   forever (see storefront-home.server.ts). Each slot still degrades to the same
+   shell fallback when the team has published nothing or the upstream failed —
+   `contentBlocks` is then simply the empty payload.
+
+   Band order lives in DEFAULT_BAND_ORDER rather than in the JSX, so the page can
+   later render a Sanity-supplied order without the composition being rewritten.
+   The hero stays first in every arrangement: it carries the H1 and the LCP
+   image, and moving it would move the largest paint element. */
+
+/** Every separately-orderable band of the storefront shell.
+ *
+ *  The trust strip and the mood pills are deliberately absent: both render
+ *  inside the hero band rather than as siblings of it, so they are the hero's
+ *  content, not their own slot. */
+export const BAND_NAMES = [
+  'hero',
+  'anchorGrid',
+  'teamRails',
+  'meetEmma',
+  'wayfinder',
+  'emmasEdit',
+  'sensationMap',
+  'couples',
+  'stillDeciding',
+  'notebook',
+  'faq',
+  'emailCapture',
+] as const
+
+export type BandName = (typeof BAND_NAMES)[number]
+
+/** The shipped order. Rendered when Sanity supplies no layout, which is also
+ *  what makes an unpublished layout document a safe no-op. */
+export const DEFAULT_BAND_ORDER: BandName[] = [
+  'hero',
+  'anchorGrid',
+  'teamRails',
+  'meetEmma',
+  'wayfinder',
+  'emmasEdit',
+  'sensationMap',
+  'couples',
+  'stillDeciding',
+  'notebook',
+  'faq',
+  'emailCapture',
+]
 
 export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
@@ -1182,6 +1225,118 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
     ? { ...gridRail, items: gridRail.items.filter(it => !teamRailHandles.has(it.product.handle)) }
     : gridRail
 
+  /* One entry per band. Each is the same JSX the composition rendered inline
+     before; hoisting them into a map is what lets the order come from data. A
+     band that has nothing to show still returns null here rather than being
+     omitted, so the map stays total and a missing key is a real bug. */
+  const bands: Record<BandName, ReactNode> = {
+    hero: <Hero featured={featured} emmaHero={emmaHero} trustBar={trustBarBlock} />,
+
+    /* Nº 03 · Most picked, right now — the discovery best-of anchor as a
+       bright static grid. This ALWAYS renders now, whether or not the team
+       published a rail, because it is the page's bestseller wall and the
+       reason a first-time visitor sees proven product above the fold-ish.
+       It is only skipped when a rail explicitly claims the slot
+       (`replacesAnchor`), or when every discovery rail is empty (cold KV),
+       in which case nothing renders here and the page still reads complete. */
+    anchorGrid: !replacesAnchor && anchorRail ? <ProductGrid rail={anchorRail} /> : null,
+
+    /* The team's first `emmaCuratedRail`. With `replacesAnchor` it takes the
+       Nº 03 slot as the dense grid (heading/eyebrow from Sanity, so
+       merchandising owns the words). Otherwise it renders right AFTER the
+       anchor through the normal Sanity render path, same as rails 2..N,
+       which also gives the page grid-then-scroller rhythm instead of two
+       identical grids stacked. */
+    teamRails: firstTeamRail ? (
+      replacesAnchor && firstTeamRailProducts.length > 0 ? (
+        <ProductGrid
+          rail={teamRailToGridRail(firstTeamRailProducts)}
+          eyebrow={firstTeamRail.eyebrow || "What's working"}
+          heading={firstTeamRail.heading}
+          seeAllHref={firstTeamRail.ctaLink || '/collections/best-sellers'}
+          seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}
+        />
+      ) : (
+        <ContentBlockRenderer block={firstTeamRail} carouselProductMap={carouselProductMap} />
+      )
+    ) : null,
+
+    meetEmma: <MeetEmma photoUrl={emmaPhotoUrl} photoAlt={emmaPhotoAlt} />,
+
+    /* Find your way in — the team's `wayfinderMosaic` block when published,
+       otherwise the hardcoded fallback (an unset block and a degraded
+       upstream both leave this undefined — never empty boxes). */
+    wayfinder: <FindYourWayIn block={wayfinderBlock} />,
+
+    /* Nº 06 · Emma's edit — the team's remaining `emmaCuratedRail` blocks
+       (2nd..Nth) when published, otherwise the discovery rails not already
+       used by the Nº 03 grid, rendered as the calm horizontal scroller.
+       `editRails` excludes the anchor rail, so the fallback can never reprint
+       the products already shown in the Nº 03 grid. */
+    emmasEdit: (
+      <>
+        {restTeamRails.map(block => (
+          <ContentBlockRenderer
+            key={block._key}
+            block={block}
+            carouselProductMap={carouselProductMap}
+          />
+        ))}
+        {teamRails.length === 0 && <EmmasEdit rails={editRails} />}
+      </>
+    ),
+
+    /* Nº 07 · The Sensation Map — a plum-soft discovery instrument between the
+       Emma's edit rail (paper-2) and Couples (paper-3) for a tinted beat in
+       the ground rhythm. Skipped entirely on a cold index (no defaultState),
+       so it never renders an empty band. */
+    sensationMap:
+      sensationMap.defaultState && sensationMap.defaultMatch ? (
+        <SensationMap
+          types={sensationMap.types}
+          feels={sensationMap.feels}
+          defaultState={sensationMap.defaultState}
+          defaultMatch={sensationMap.defaultMatch}
+        />
+      ) : null,
+
+    /* Nº 08 · Couples — the `playTogetherBanner` block supplies the band's
+       photo + copy when published; fallback renders the coral-soft band
+       with hardcoded copy (never blank). */
+    couples: <Couples block={couplesBlock} rail={couplesRail} />,
+
+    stillDeciding: <StillDecidingBand />,
+
+    /* From the Notebook — a curated `editorialTiles` block wins when the team
+       publishes one (each card can also link a product/collection); otherwise
+       the section auto-populates with the latest published posts so fresh
+       daily content always reaches the homepage with no merchandiser action. */
+    notebook:
+      notebookBlocks.length === 0 ? (
+        <HomeNotebookRail posts={notebookPosts} />
+      ) : (
+        <>
+          {notebookBlocks.map(block => (
+            <ContentBlockRenderer
+              key={block._key}
+              block={block}
+              carouselProductMap={carouselProductMap}
+            />
+          ))}
+        </>
+      ),
+
+    faq: <FAQ block={faqBlock} />,
+
+    emailCapture: (
+      <EmailSubscribe
+        heading="Good taste, delivered quietly."
+        subcopy="Emma's picks, on an irregular schedule. Discreet, direct."
+        buttonLabel="I'm in ♥"
+      />
+    ),
+  }
+
   return (
     <>
       {/* SEO: ItemList only for the featured set (one lead product per
@@ -1190,7 +1345,8 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
           lean discovery-index shape can't populate brand/gtin/shipping and
           would collide on @id with the PDP's full node.
           Variant 'a'/legacy each own their own schema elsewhere, so this
-          only renders for variant 'b'. */}
+          only renders for variant 'b'. Page-level, so it sits outside the
+          band order and cannot be reordered away. */}
       {featured.length > 0 && (
         <ItemListStructuredData
           name="Emma's picks"
@@ -1203,100 +1359,9 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
         />
       )}
 
-      <Hero featured={featured} emmaHero={emmaHero} trustBar={trustBarBlock} />
-
-      {/* Nº 03 · Most picked, right now — the discovery best-of anchor as a
-          bright static grid. This ALWAYS renders now, whether or not the team
-          published a rail, because it is the page's bestseller wall and the
-          reason a first-time visitor sees proven product above the fold-ish.
-          It is only skipped when a rail explicitly claims the slot
-          (`replacesAnchor`), or when every discovery rail is empty (cold KV),
-          in which case nothing renders here and the page still reads complete. */}
-      {!replacesAnchor && anchorRail ? <ProductGrid rail={anchorRail} /> : null}
-
-      {/* The team's first `emmaCuratedRail`. With `replacesAnchor` it takes the
-          Nº 03 slot as the dense grid (heading/eyebrow from Sanity, so
-          merchandising owns the words). Otherwise it renders right AFTER the
-          anchor through the normal Sanity render path, same as rails 2..N,
-          which also gives the page grid-then-scroller rhythm instead of two
-          identical grids stacked. */}
-      {firstTeamRail ? (
-        replacesAnchor && firstTeamRailProducts.length > 0 ? (
-          <ProductGrid
-            rail={teamRailToGridRail(firstTeamRailProducts)}
-            eyebrow={firstTeamRail.eyebrow || "What's working"}
-            heading={firstTeamRail.heading}
-            seeAllHref={firstTeamRail.ctaLink || '/collections/best-sellers'}
-            seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}
-          />
-        ) : (
-          <ContentBlockRenderer block={firstTeamRail} carouselProductMap={carouselProductMap} />
-        )
-      ) : null}
-
-      <MeetEmma photoUrl={emmaPhotoUrl} photoAlt={emmaPhotoAlt} />
-
-      {/* Find your way in — the team's `wayfinderMosaic` block when published,
-          otherwise the hardcoded fallback (an unset block and a degraded
-          upstream both leave this undefined — never empty boxes). */}
-      <FindYourWayIn block={wayfinderBlock} />
-
-      {/* Nº 06 · Emma's edit — the team's remaining `emmaCuratedRail` blocks
-          (2nd..Nth) when published, otherwise the discovery rails not already
-          used by the Nº 03 grid, rendered as the calm horizontal scroller. */}
-      {restTeamRails.map(block => (
-        <ContentBlockRenderer
-          key={block._key}
-          block={block}
-          carouselProductMap={carouselProductMap}
-        />
+      {DEFAULT_BAND_ORDER.map(name => (
+        <Fragment key={name}>{bands[name]}</Fragment>
       ))}
-      {/* Discovery fallback only when the team published no rails at all.
-          `editRails` excludes the anchor rail, so this can never reprint the
-          products already shown in the Nº 03 grid. */}
-      {teamRails.length === 0 && <EmmasEdit rails={editRails} />}
-
-      {/* Nº 07 · The Sensation Map — a plum-soft discovery instrument between the
-          Emma's edit rail (paper-2) and Couples (paper-3) for a tinted beat in
-          the ground rhythm. Skipped entirely on a cold index (no defaultState),
-          so it never renders an empty band. */}
-      {sensationMap.defaultState && sensationMap.defaultMatch && (
-        <SensationMap
-          types={sensationMap.types}
-          feels={sensationMap.feels}
-          defaultState={sensationMap.defaultState}
-          defaultMatch={sensationMap.defaultMatch}
-        />
-      )}
-
-      {/* Nº 08 · Couples — the `playTogetherBanner` block supplies the band's
-          photo + copy when published; fallback renders the coral-soft band
-          with hardcoded copy (never blank). */}
-      <Couples block={couplesBlock} rail={couplesRail} />
-      <StillDecidingBand />
-
-      {/* From the Notebook — a curated `editorialTiles` block wins when the team
-          publishes one (each card can also link a product/collection); otherwise
-          the section auto-populates with the latest published posts so fresh
-          daily content always reaches the homepage with no merchandiser action. */}
-      {notebookBlocks.length === 0 ? (
-        <HomeNotebookRail posts={notebookPosts} />
-      ) : (
-        notebookBlocks.map(block => (
-          <ContentBlockRenderer
-            key={block._key}
-            block={block}
-            carouselProductMap={carouselProductMap}
-          />
-        ))
-      )}
-
-      <FAQ block={faqBlock} />
-      <EmailSubscribe
-        heading="Good taste, delivered quietly."
-        subcopy="Emma's picks, on an irregular schedule. Discreet, direct."
-        buttonLabel="I'm in ♥"
-      />
     </>
   )
 }
