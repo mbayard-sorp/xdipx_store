@@ -775,3 +775,176 @@ export interface StorefrontHomeLayout {
   note?: string
   sections: StorefrontHomeSection[]
 }
+
+// ─── Merchandised category / drop pages (resolved) ───────────────────────────
+// Docs: categoryPage / dropPage, resolved server-side by
+// app/lib/category-page.server.ts. Every value is renderable as-is: products
+// are lean cards, images are URLs, Notebook refs are slugs. A block that
+// failed to resolve is absent from the array — one bad block costs itself,
+// never the page.
+
+export interface CategoryCardProduct {
+  id: string
+  handle: string
+  title: string
+  price: number
+  compareAtPrice: number | null
+  brand: string | null
+  imageUrl: string | null
+  imageAlt: string | null
+  /** Up to three sensation-dial readings. Empty = product has no dial data,
+   *  and the card renders no dial rather than a fabricated one. */
+  dial: { label: string; value: number }[]
+}
+
+export interface ResolvedShelfNavTile {
+  label: string
+  anchorId: string
+  count: number | null
+}
+
+export interface ResolvedDialAxis {
+  label: string
+  definition: string | null
+  scaleLow: string | null
+  scaleMid: string | null
+  scaleHigh: string | null
+}
+
+export type ResolvedCategoryBlock =
+  | {
+      _type: 'categoryMasthead'
+      key: string
+      anchorId: string
+      kicker: string | null
+      headline: string
+      italicWord: string | null
+      standfirst: string | null
+      imageUrl: string | null
+      imageAlt: string | null
+    }
+  | {
+      _type: 'shelfNav'
+      key: string
+      anchorId: string
+      label: string
+      sticky: boolean
+      tiles: ResolvedShelfNavTile[]
+    }
+  | {
+      _type: 'sensationLegend'
+      key: string
+      anchorId: string
+      heading: string
+      intro: string | null
+      axes: ResolvedDialAxis[]
+    }
+  | {
+      _type: 'editorialFeature'
+      key: string
+      anchorId: string
+      kicker: string | null
+      headline: string
+      italicWord: string | null
+      body: string | null
+      ctaLabel: string
+      product: CategoryCardProduct | null
+      imageUrl: string | null
+      imageAlt: string | null
+    }
+  | {
+      _type: 'shelfSection'
+      key: string
+      anchorId: string
+      title: string
+      collectionHandle: string
+      intro: string | null
+      sortRationale: string | null
+      seeAllLabel: string
+      products: CategoryCardProduct[]
+    }
+  | {
+      _type: 'learnStrip'
+      key: string
+      anchorId: string
+      heading: string
+      posts: { slug: string; title: string; heroImageUrl: string | null; excerpt: string | null }[]
+    }
+  | {
+      _type: 'benefitEditorial'
+      key: string
+      anchorId: string
+      heading: string | null
+      claims: { claim: string; detail: string | null; source: string; sourceUrl: string | null }[]
+    }
+  | {
+      _type: 'categoryTrust'
+      key: string
+      anchorId: string
+      items: { headline: string; subheadline: string | null }[]
+    }
+  | {
+      _type: 'chooserBlock'
+      key: string
+      anchorId: string
+      heading: string
+      options: { label: string; tag: string; narratorCopy: string | null }[]
+    }
+  | {
+      _type: 'faqBlock'
+      key: string
+      anchorId: string
+      heading: string
+      items: { question: string; answer: string }[]
+    }
+  | {
+      _type: 'dropMasthead'
+      key: string
+      anchorId: string
+      period: string | null
+      headline: string
+      italicWord: string | null
+      standfirst: string | null
+      imageUrl: string | null
+      imageAlt: string | null
+    }
+  | {
+      _type: 'justLanded'
+      key: string
+      anchorId: string
+      kicker: string
+      body: string | null
+      product: CategoryCardProduct | null
+    }
+  | {
+      _type: 'dropTimeline'
+      key: string
+      anchorId: string
+      heading: string
+      entries: { label: string; note: string | null; products: CategoryCardProduct[] }[]
+    }
+  | {
+      _type: 'makersNote'
+      key: string
+      anchorId: string
+      heading: string
+      body: string
+    }
+  | {
+      _type: 'comingSoon'
+      key: string
+      anchorId: string
+      heading: string | null
+      body: string | null
+      ctaLabel: string
+    }
+
+export interface ResolvedCategoryPage {
+  handle: string
+  blocks: ResolvedCategoryBlock[]
+}
+
+export interface ResolvedDropPage {
+  routeKey: 'new' | 'on-sale'
+  blocks: ResolvedCategoryBlock[]
+}
