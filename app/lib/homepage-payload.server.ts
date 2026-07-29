@@ -30,7 +30,7 @@ import { normalizeProductHandles } from '~/lib/product-handles'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
 import type { Product, LeanCardProduct } from '~/types'
 import type { DiscoveryProduct } from '~/types/discovery'
-import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, PlayTogetherBannerBlock, EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout } from '~/types/cms'
+import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, PlayTogetherBannerBlock, EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout, ResolvedPanelDeck } from '~/types/cms'
 import type { SensationMapData } from '~/lib/sensation-map.server'
 
 /**
@@ -492,8 +492,12 @@ export function reshuffleRailsWithSeed(rails: Rail[], seed: number): Rail[] {
  *     overrides). A b3 blob has no such field, so it would read as "no layout"
  *     and keep serving the shipped order after the team published a new
  *     arrangement. Null stays the normal, correct value for both.
+ * b5: added `panelDeck` (singleton.panelDeck resolved to renderable rows with
+ *     validated destinations). A b4 blob has no such field, so the deck would
+ *     stay invisible after the team published it. Null = no deck, which is the
+ *     launch state.
  */
-export const HOMEPAGE_PAYLOAD_B_VERSION = 'b4'
+export const HOMEPAGE_PAYLOAD_B_VERSION = 'b5'
 
 /** KV key for the precomputed storefront blob. Versioned. */
 export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`
@@ -547,6 +551,14 @@ export interface HomepagePayloadB {
    * after the shell has flushed.
    */
   layout: StorefrontHomeLayout | null
+  /**
+   * The eight-door deck from `singleton.panelDeck`, destinations validated
+   * against the live collection list at build time (a typo cannot ship a dead
+   * door). Null = no deck published, which renders nothing. The layout's
+   * `panelDeckSection` marker decides WHERE it renders; this field is only
+   * WHAT.
+   */
+  panelDeck: ResolvedPanelDeck | null
   builtAt: number // epoch ms (number, NOT Date)
   degraded: boolean // true if discovery rails came back empty during build
 }

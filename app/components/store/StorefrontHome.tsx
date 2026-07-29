@@ -35,6 +35,7 @@ import type { BlogPostCard } from '~/types/cms'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import { Reveal } from '~/components/motion/Reveal'
+import { PanelDeck } from '~/components/home/panels/PanelDeck'
 import {
   trackViewItemList,
   trackSelectItem,
@@ -1153,30 +1154,46 @@ export const DEFAULT_BAND_ORDER: BandName[] = [
 
 const KNOWN_BAND = new Set<string>(BAND_NAMES)
 
+/** A renderable slot: a shell band, or the panel deck placed by the layout. */
+export type HomeSlot = BandName | 'panelDeck'
+
 /**
- * Turn a published layout into the band order to render.
+ * Turn a published layout into the slot order to render.
  *
- * Three rules, all of them about never letting a content edit break the page:
- * the hero always leads (it owns the H1 and the LCP image), a band may appear
- * at most once, and anything this deploy does not recognise is dropped rather
- * than trusted. A layout that survives none of that is treated as no layout at
- * all, which renders the shipped order.
+ * The rules are all about never letting a content edit break the page: the
+ * hero always leads (it owns the H1 and the LCP image, and nothing — not even
+ * the deck — may sit above the largest paint element), a slot may appear at
+ * most once, and anything this deploy does not recognise is dropped rather
+ * than trusted. A layout that survives none of that is treated as no layout
+ * at all, which renders the shipped order.
+ *
+ * The deck only OCCUPIES a slot here; whether it has anything to show is the
+ * payload's business (`panelDeck` null renders nothing in that slot).
  */
-export function resolveBandOrder(layout?: { sections: { _type: string; band?: string; enabled?: boolean }[] } | null): BandName[] {
+export function resolveBandOrder(layout?: { sections: { _type: string; band?: string; enabled?: boolean }[] } | null): HomeSlot[] {
   if (!layout?.sections?.length) return DEFAULT_BAND_ORDER
 
   const seen = new Set<string>()
-  const ordered: BandName[] = []
+  const ordered: HomeSlot[] = []
   for (const section of layout.sections) {
-    if (section._type !== 'homeBand') continue
     if (section.enabled === false) continue
+    if (section._type === 'panelDeckSection') {
+      if (!seen.has('panelDeck')) {
+        seen.add('panelDeck')
+        ordered.push('panelDeck')
+      }
+      continue
+    }
+    if (section._type !== 'homeBand') continue
     const band = section.band
     if (!band || !KNOWN_BAND.has(band) || seen.has(band)) continue
     seen.add(band)
     ordered.push(band as BandName)
   }
 
-  if (ordered.length === 0) return DEFAULT_BAND_ORDER
+  // A layout with no usable band renders the shipped order — a deck marker
+  // alone is not a homepage.
+  if (!ordered.some(slot => slot !== 'panelDeck')) return DEFAULT_BAND_ORDER
 
   // The hero is not reorderable. A layout that omits or demotes it would move
   // the largest paint element, so it is put back at the front rather than
@@ -1184,7 +1201,7 @@ export function resolveBandOrder(layout?: { sections: { _type: string; band?: st
   return ordered[0] === 'hero' ? ordered : ['hero', ...ordered.filter(b => b !== 'hero')]
 }
 
-export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout }: StorefrontData) {
+export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout, panelDeck }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
   // per page view; the localStorage flag distinguishes first-time visitors.
   useEffect(() => {
@@ -1370,6 +1387,14 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
     ),
   }
 
+  /* Every renderable slot: the twelve shell bands plus the deck. The deck's
+     position comes from the layout; whether it shows anything comes from the
+     payload. Both must agree before a visitor sees a door. */
+  const slots: Record<HomeSlot, ReactNode> = {
+    ...bands,
+    panelDeck: panelDeck ? <PanelDeck deck={panelDeck} /> : null,
+  }
+
   return (
     <>
       {/* SEO: ItemList only for the featured set (one lead product per
@@ -1393,7 +1418,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
       )}
 
       {resolveBandOrder(layout).map(name => (
-        <Fragment key={name}>{bands[name]}</Fragment>
+        <Fragment key={name}>{slots[name]}</Fragment>
       ))}
     </>
   )
