@@ -5028,7 +5028,7 @@ async function getProductsByIds(ids) {
       }
     }
   `, { ids });
-  return (data.nodes ?? []).filter((n) => n.__typename === "Product").map((n) => nodeToProduct(n));
+  return (data.nodes ?? []).filter((n) => n?.__typename === "Product").map((n) => nodeToProduct(n));
 }
 async function getProductsByTag(tag, limit = 6) {
   return cached(`shopify:tag:${tag}:${limit}`, READ_TTL, async () => {

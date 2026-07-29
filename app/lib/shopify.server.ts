@@ -1038,7 +1038,13 @@ export async function getDealByHandle(handle: string): Promise<Deal | null> {
 
 export async function getProductsByIds(ids: string[]): Promise<Product[]> {
   if (ids.length === 0) return []
-  const data = await storefront<{ nodes: ({ __typename: string } & ShopifyProductNode)[] }>(`
+  // `nodes` yields null for any id the Storefront API cannot resolve, which is
+  // what a deleted or unpublished product looks like once something still holds
+  // its gid. Accessory and pairing metafields hold exactly those gids and are
+  // never cleaned up when a product goes away, so an unguarded `n.__typename`
+  // threw and took the whole PDP down with a 500. It was doing that in
+  // production on /products/diy-vibrating-dildo-kit-light-skin-tone.
+  const data = await storefront<{ nodes: (({ __typename: string } & ShopifyProductNode) | null)[] }>(`
     query GetProductsByIds($ids: [ID!]!) {
       nodes(ids: $ids) {
         __typename
@@ -1047,7 +1053,7 @@ export async function getProductsByIds(ids: string[]): Promise<Product[]> {
     }
   `, { ids })
   return (data.nodes ?? [])
-    .filter(n => n.__typename === 'Product')
+    .filter((n): n is { __typename: string } & ShopifyProductNode => n?.__typename === 'Product')
     .map(n => nodeToProduct(n))
 }
 
