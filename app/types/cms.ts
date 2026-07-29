@@ -705,3 +705,73 @@ export interface HomeSeo {
   seoDescription?: string
   ogImageUrl?: string
 }
+
+// ─── Storefront home layout ──────────────────────────────────────────────────
+// Singleton: singleton.storefrontHome
+//
+// Band order plus the per-band chrome copy that used to be hardcoded in
+// StorefrontHome. Additive and optional throughout: a null layout renders the
+// shipped order, and every override field left blank keeps the band's shipped
+// default. That is what makes an unpublished document a safe no-op and an
+// unpublish a complete rollback.
+
+/** Bands that can be ordered independently. Mirrors BAND_NAMES in
+ *  app/components/store/StorefrontHome.tsx; the trust strip and mood pills are
+ *  absent because both render inside the hero rather than beside it. */
+export type HomeBandName =
+  | 'hero'
+  | 'anchorGrid'
+  | 'teamRails'
+  | 'meetEmma'
+  | 'wayfinder'
+  | 'emmasEdit'
+  | 'sensationMap'
+  | 'couples'
+  | 'stillDeciding'
+  | 'notebook'
+  | 'faq'
+  | 'emailCapture'
+
+export interface HomeBandSection {
+  _type: 'homeBand'
+  _key: string
+  band: HomeBandName
+  enabled?: boolean
+  eyebrow?: string
+  heading?: string
+  emphasis?: string
+  body?: string
+  ctaLabel?: string
+  ctaLink?: string
+}
+
+export interface HomeMoodPill {
+  label: string
+  collectionHandle: string
+}
+
+export interface HomeMoodPillsSection {
+  _type: 'homeMoodPills'
+  _key: string
+  enabled?: boolean
+  prompt?: string
+  pills?: HomeMoodPill[]
+}
+
+/** Placement marker only. The deck's content lives in singleton.panelDeck, so
+ *  publishing the deck and showing the deck are two separate acts. */
+export interface PanelDeckSection {
+  _type: 'panelDeckSection'
+  _key: string
+  enabled?: boolean
+}
+
+export type StorefrontHomeSection =
+  | HomeBandSection
+  | HomeMoodPillsSection
+  | PanelDeckSection
+
+export interface StorefrontHomeLayout {
+  note?: string
+  sections: StorefrontHomeSection[]
+}
