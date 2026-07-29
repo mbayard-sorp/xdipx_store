@@ -15,6 +15,10 @@ import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 
 import { BotIdClient } from 'botid/client'
 import stylesheet from './app.css?url'
+
+/** DIAGNOSTIC ONLY — DO NOT MERGE. Typed as boolean so tsc does not fold the
+ *  branch away as always-falsy; flip to true to restore normal behaviour. */
+const RENDER_CLIENT_SCRIPTS: boolean = false
 // Same physical files app.css's @fontsource @font-face rules reference — Vite
 // dedupes them into one hashed asset, so these ?url imports resolve to the
 // exact URLs the stylesheet will request (preload hits, never a double fetch).
@@ -254,7 +258,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
         )}
         {children}
         <ScrollRestoration />
-        <Scripts />
+        {/* DIAGNOSTIC ONLY — DO NOT MERGE. <Scripts /> removed to measure how
+            much of the mobile LCP is attributable to the client JS bundle at
+            all. This ships zero JS: no hydration, no interactivity, no
+            analytics. The result is a lower bound, not a proposal. */}
+        {RENDER_CLIENT_SCRIPTS ? <Scripts /> : null}
       </body>
     </html>
   )
