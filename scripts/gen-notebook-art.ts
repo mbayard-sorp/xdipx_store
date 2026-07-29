@@ -55,8 +55,18 @@ const SHARED_PREFIX =
   'tasteful and non-explicit, no text, no tableware, no clinical staging, ' +
   'not moody, not dark. '
 
+/**
+ * fal's FLUX Kontext (ref-image) endpoint ignores a {width,height} object and
+ * only honors a string image_size enum for aspect (see KONTEXT_ASPECT in
+ * app/lib/fal.server.ts); an object silently falls back to 16:9. So each surface
+ * carries the string enum nearest its pixel `size`, used on the --ref-image path.
+ */
+type KontextAspect = 'landscape_16_9' | 'landscape_4_3' | 'portrait_4_3' | 'portrait_16_9' | 'square_hd'
+
 interface SurfaceSpec {
   size: { width: number; height: number }
+  /** Nearest fal image_size enum to `size`, used when --ref-image is set. */
+  aspect: KontextAspect
   defaultPrompt: (slug?: string) => string
 }
 
@@ -85,21 +95,25 @@ const SERIES_MOTIFS: Record<string, string> = {
 const SURFACES: Record<Surface, SurfaceSpec> = {
   masthead: {
     size: { width: 2400, height: 1000 },
+    aspect: 'landscape_16_9',
     defaultPrompt: () =>
       `${SHARED_PREFIX}soft abstract editorial backdrop, blurred warm still life of light and paper textures, coral blushing into soft plum and sage at the edges, center almost white and empty, dreamy shallow depth of field, nothing in sharp focus, calm.`,
   },
   category: {
     size: { width: 2000, height: 800 },
+    aspect: 'landscape_16_9',
     defaultPrompt: (slug) =>
       `${SHARED_PREFIX}${CATEGORY_MOTIFS[slug ?? ''] ?? 'a simple warm editorial still life'}, left third of the frame calm and near-empty for a title overlay.`,
   },
   series: {
     size: { width: 1200, height: 1500 },
+    aspect: 'portrait_4_3',
     defaultPrompt: (slug) =>
       `${SHARED_PREFIX}portrait editorial magazine cover, ${SERIES_MOTIFS[slug ?? ''] ?? 'a composed characterful single-subject still life'}, subject in the lower two-thirds, upper third calm for a title.`,
   },
   spot: {
     size: { width: 1200, height: 900 },
+    aspect: 'landscape_4_3',
     defaultPrompt: () =>
       `${SHARED_PREFIX}single-subject editorial still life, one soft accent tint in the daylight, simple clean composition, room to breathe.`,
   },
@@ -120,7 +134,10 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
     count: opts.count,
     feature: 'notebook-images',
     caller: `media-manager/notebook-${surface}`,
-    imageSize: spec.size,
+    // Text-to-image takes the exact pixel size; the Kontext ref-image path only
+    // honors a string aspect enum, so send the nearest enum there instead of a
+    // {width,height} object that would silently fall back to 16:9.
+    imageSize: opts.refImage ? spec.aspect : spec.size,
     ...(opts.only ? { only: opts.only } : {}),
     ...(opts.refImage ? { refImageUrl: opts.refImage } : {}),
   })
@@ -259,7 +276,7 @@ async function main() {
         surface,
         ...(slug ? { slug } : {}),
         prompt,
-        size: SURFACES[surface].size,
+        size: refImage ? SURFACES[surface].aspect : SURFACES[surface].size,
         count,
         saveDir,
         only: only ?? 'fal-then-imagen',
