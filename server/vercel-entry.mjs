@@ -2895,6 +2895,12 @@ async function getHomepageSections(preview = false) {
   if (preview) return fetcher();
   return cached("sanity:homepage", 60, fetcher);
 }
+function blockArrayField(docId) {
+  return docId === HOMEPAGE_DOC_ID ? "sections" : "blocks";
+}
+function invalidateDocCache(docId) {
+  if (docId === HOMEPAGE_DOC_ID) invalidateCache("sanity:homepage");
+}
 async function upsertAnnouncementBar(messages) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
@@ -2904,23 +2910,27 @@ async function upsertAnnouncementBar(messages) {
   }).commit();
   invalidateCache("sanity:homepage");
 }
-async function addCmsBlock(block) {
+async function addCmsBlock(block, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
   const key = `${block._type}-${Date.now()}`;
-  await client5.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
-  await client5.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
-  invalidateCache("sanity:homepage");
+  const field = blockArrayField(docId);
+  if (docId === HOMEPAGE_DOC_ID) {
+    await client5.createIfNotExists({ _id: HOMEPAGE_DOC_ID, _type: "homepageSections", sections: [] });
+  }
+  await client5.patch(docId).setIfMissing({ [field]: [] }).append(field, [{ ...block, _key: key }]).commit();
+  invalidateDocCache(docId);
 }
-async function updateCmsBlock(key, patch) {
+async function updateCmsBlock(key, patch, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").set(
+  const prefix = blockArrayField(docId);
+  await client5.patch(docId).set(
     Object.fromEntries(
-      Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
+      Object.entries(patch).map(([field, value]) => [`${prefix}[_key=="${key}"].${field}`, value])
     )
   ).commit();
-  invalidateCache("sanity:homepage");
+  invalidateDocCache(docId);
 }
 async function uploadBufferToSanity(buffer, filename, contentType) {
   const client5 = getClient(true);
@@ -2934,27 +2944,26 @@ async function uploadBufferToSanity(buffer, filename, contentType) {
 function sanityImageRef(assetId, alt) {
   return { _type: "image", asset: { _type: "reference", _ref: assetId }, alt };
 }
-async function updateCmsTileImage(blockKey, tileKey, assetId, alt) {
+async function updateCmsTileImage(blockKey, tileKey, assetId, alt, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").set({
-    [`sections[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`]: sanityImageRef(assetId, alt)
-  }).commit();
-  invalidateCache("sanity:homepage");
+  const path = docId === PANEL_DECK_DOC_ID ? `rows[_key=="${blockKey}"].items[_key=="${tileKey}"].image` : `${blockArrayField(docId)}[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`;
+  await client5.patch(docId).set({ [path]: sanityImageRef(assetId, alt) }).commit();
+  invalidateDocCache(docId);
 }
-async function updateCmsPromoImage(blockKey, assetId, alt) {
+async function updateCmsPromoImage(blockKey, assetId, alt, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").set({
-    [`sections[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt)
+  await client5.patch(docId).set({
+    [`${blockArrayField(docId)}[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt)
   }).commit();
-  invalidateCache("sanity:homepage");
+  invalidateDocCache(docId);
 }
-async function removeCmsBlock(key) {
+async function removeCmsBlock(key, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
-  invalidateCache("sanity:homepage");
+  await client5.patch(docId).unset([`${blockArrayField(docId)}[_key=="${key}"]`]).commit();
+  invalidateDocCache(docId);
 }
 function invalidateCmsCache() {
   invalidateCache("sanity:homepage");
@@ -4105,7 +4114,7 @@ async function getStorefrontHomeLayout(preview = false) {
   if (preview) return fetcher();
   return cached("sanity:storefront-home-layout", 60, fetcher);
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, SOCIAL_LANDING_GROQ, STOREFRONT_HOME_GROQ, KNOWN_BANDS, KNOWN_SECTION_TYPES;
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, PANEL_DECK_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, SOCIAL_LANDING_GROQ, STOREFRONT_HOME_GROQ, KNOWN_BANDS, KNOWN_SECTION_TYPES;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
@@ -4258,6 +4267,7 @@ var init_sanity_server = __esm({
   }
 `;
     HOMEPAGE_DOC_ID = "singleton.homepage";
+    PANEL_DECK_DOC_ID = "singleton.panelDeck";
     _blogCache = /* @__PURE__ */ new Map();
     BLOG_CACHE_TTL = 6e4;
     BLOG_CAT_CACHE_TTL = 3e5;
