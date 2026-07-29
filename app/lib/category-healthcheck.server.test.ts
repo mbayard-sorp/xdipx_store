@@ -4,7 +4,7 @@ const fetchMock = vi.fn()
 const sanityFetch = vi.fn()
 const kvSet = vi.fn()
 const readPayload = vi.fn()
-const fileDetectionTicket = vi.fn(async () => 42)
+const fileDetectionTicket = vi.fn(async (..._args: unknown[]) => 42)
 const captureException = vi.fn()
 
 vi.mock('~/lib/sanity.server', () => ({
