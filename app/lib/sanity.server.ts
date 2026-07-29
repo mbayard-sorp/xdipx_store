@@ -127,7 +127,7 @@ const apiVersion = '2024-10-01'
 
 // ─── Client ───────────────────────────────────────────────────────────────
 
-function getClient(withToken = false, preview = false, perspective?: 'raw' | 'published' | 'previewDrafts') {
+export function getClient(withToken = false, preview = false, perspective?: 'raw' | 'published' | 'previewDrafts') {
   if (!projectId) return null
   // Always include the API token — the dataset requires auth for reads.
   // Use CDN for normal reads (fast), bypass CDN for writes + preview (fresh).

@@ -95,15 +95,15 @@ describe('VARIANT_B_SECTION_TYPES', () => {
 })
 
 describe('HOMEPAGE_PAYLOAD_B_VERSION', () => {
-  it('is past b3, so blobs built before the layout field miss', () => {
+  it('is past b4, so blobs built before the panelDeck field miss', () => {
     // The blob is read verbatim from KV and Neon. Shipping a new payload shape
     // without bumping this serves the OLD shape until the caches expire, and
-    // none of the new content appears live. b4 added `layout`: a b3 blob has no
-    // such field, so it would read as "no layout" and keep serving the shipped
-    // band order after the team published a new arrangement.
-    expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b2')
+    // none of the new content appears live. b5 added `panelDeck`: a b4 blob has
+    // no such field, so the deck would stay invisible after the team published
+    // it.
     expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b3')
-    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b4')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b4')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b5')
   })
 
   it('embeds the version in the KV key so old blobs cannot be read back', () => {

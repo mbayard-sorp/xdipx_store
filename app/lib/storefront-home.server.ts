@@ -24,9 +24,10 @@ import {
 } from '~/lib/homepage-payload.server'
 import { getSensationMapData, type SensationMapData } from '~/lib/sensation-map.server'
 import { getEmmaHeroSettings, getBlogPosts, getEditor, getStorefrontHomeLayout } from '~/lib/sanity.server'
+import { getPanelDeck } from '~/lib/panel-deck.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
-import type { EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout } from '~/types/cms'
+import type { EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout, ResolvedPanelDeck } from '~/types/cms'
 
 const EMMA_HERO_TIMEOUT_MS = 4000
 const EDITOR_TIMEOUT_MS = 4000
@@ -129,6 +130,8 @@ export interface StorefrontData {
    * makes an unpublished layout a no-op.
    */
   layout: StorefrontHomeLayout | null
+  /** The eight-door deck, resolved. Null = not published; renders nothing. */
+  panelDeck: ResolvedPanelDeck | null
 }
 
 /**
@@ -259,6 +262,7 @@ export function hydrateStorefrontPayloadB(payload: HomepagePayloadB): Storefront
     // Resolved at build time for the same reason contentBlocks is: the shell
     // cannot decide what to render from a value that arrives after it flushes.
     layout: payload.layout ?? null,
+    panelDeck: payload.panelDeck ?? null,
   }
 }
 
@@ -270,7 +274,7 @@ export function hydrateStorefrontPayloadB(payload: HomepagePayloadB): Storefront
  */
 export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
   const railSeed = 0
-  const [railsResult, emmaHero, notebook, editor, contentBlocks, layout] = await Promise.all([
+  const [railsResult, emmaHero, notebook, editor, contentBlocks, layout, panelDeck] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
     // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
@@ -309,6 +313,17 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
       'getStorefrontHomeLayout(storefront)',
     ).catch((err: unknown) => {
       console.error('[storefront-home] layout failed, using shipped band order:', err)
+      return null
+    }),
+    // The deck. Same contract: resolved at build time, degrades to null, and
+    // null renders nothing, so a failed leg costs the deck and only the deck.
+    withTimeout(
+      getPanelDeck(),
+      LAYOUT_TIMEOUT_MS,
+      null,
+      'getPanelDeck(storefront)',
+    ).catch((err: unknown) => {
+      console.error('[storefront-home] panel deck failed, rendering without it:', err)
       return null
     }),
   ])
@@ -358,6 +373,7 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     notebookPosts: notebook.posts,
     sensationMap,
     layout,
+    panelDeck,
     builtAt: Date.now(),
     // Empty rails == the discovery index was cold during the build. The write
     // guard refuses to clobber a good blob with this unless forced.
