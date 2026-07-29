@@ -51,3 +51,21 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # `server/vercel-entry.mjs` is a build artifact that is committed on
+      # purpose: vercel.json uses the legacy `builds` array, and Vercel matches
+      # `builds[].src` against the files in the repo before any build runs, so
+      # the file has to exist in git or the deployment gets no function at all.
+      # Vercel does rebuild it during install (the `postinstall` script), so a
+      # stale copy does not ship, but a committed copy that disagrees with
+      # source makes every local read of the artifact a lie. This step keeps the
+      # two honest. Only this file should be dirty after a build; `build/` is
+      # gitignored.
+      - name: Assert build artifacts are in sync
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::Build produced a dirty tree. Run 'npm run build' and commit the result."
+            git status --short
+            git diff --stat
+            exit 1
+          fi
