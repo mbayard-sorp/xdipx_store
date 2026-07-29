@@ -39,6 +39,7 @@ vi.mock('~/lib/sanity.server', () => ({
   getEmmaHeroSettings: vi.fn(),
   getBlogPosts: vi.fn(),
   getEditor: vi.fn(),
+  getStorefrontHomeLayout: vi.fn(),
 }))
 
 import {
@@ -213,6 +214,7 @@ function payload(over: Partial<HomepagePayloadB> = {}): HomepagePayloadB {
     contentBlocks: { sections: [], carouselProductMap: {} },
     notebookPosts: [],
     sensationMap: { types: [], feels: [], defaultState: null, defaultMatch: null },
+    layout: null,
     builtAt: 0,
     degraded: false,
     ...over,

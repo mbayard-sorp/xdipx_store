@@ -2,7 +2,7 @@ import { createClient } from '@sanity/client'
 import type { SanityImageAssetDocument } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, GlossaryTerm, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig, HomeSeo } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, GlossaryTerm, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig, HomeSeo, StorefrontHomeLayout, StorefrontHomeSection } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
@@ -2238,4 +2238,74 @@ export async function getSocialLandingSettings(): Promise<SocialLandingSettings 
       return null
     }
   })
+}
+
+// ─── Storefront home layout (singleton.storefrontHome) ───────────────────────
+// Band order + the per-band chrome copy that used to be hardcoded in
+// StorefrontHome. Returning null is the normal, safe state: the storefront then
+// renders its shipped order, so an absent or unpublished document changes
+// nothing and unpublishing is a full rollback.
+const STOREFRONT_HOME_GROQ = `
+  *[_id == "singleton.storefrontHome"][0]{
+    note,
+    sections[]{
+      _type, _key, enabled,
+      band, eyebrow, heading, emphasis, body, ctaLabel, ctaLink,
+      prompt,
+      pills[]{ label, collectionHandle }
+    }
+  }
+`
+
+/** Bands the renderer knows about. A layout naming anything else is from a
+ *  newer schema than this deploy, so it is dropped rather than trusted. */
+const KNOWN_BANDS = new Set([
+  'hero',
+  'anchorGrid',
+  'teamRails',
+  'meetEmma',
+  'wayfinder',
+  'emmasEdit',
+  'sensationMap',
+  'couples',
+  'stillDeciding',
+  'notebook',
+  'faq',
+  'emailCapture',
+])
+
+const KNOWN_SECTION_TYPES = new Set(['homeBand', 'homeMoodPills', 'panelDeckSection'])
+
+export async function getStorefrontHomeLayout(preview = false): Promise<StorefrontHomeLayout | null> {
+  if (!projectId) return null
+
+  const fetcher = async (): Promise<StorefrontHomeLayout | null> => {
+    try {
+      const client = getClient(false, preview)
+      if (!client) return null
+      const raw = await client.fetch<{
+        note?: string
+        sections?: StorefrontHomeSection[]
+      } | null>(STOREFRONT_HOME_GROQ)
+
+      const sections = (raw?.sections ?? []).filter(s => {
+        if (!s?._type || !KNOWN_SECTION_TYPES.has(s._type)) return false
+        if (s._type === 'homeBand') return KNOWN_BANDS.has(s.band)
+        return true
+      })
+
+      // An empty or fully-unrecognized layout is indistinguishable from having
+      // no layout at all, and the shipped order is the better answer in both
+      // cases. Never return an empty section list: that would render a blank page.
+      if (sections.length === 0) return null
+
+      return { ...(raw?.note ? { note: raw.note } : {}), sections }
+    } catch (err) {
+      console.error('[sanity] getStorefrontHomeLayout error:', err)
+      return null
+    }
+  }
+
+  if (preview) return fetcher()
+  return cached('sanity:storefront-home-layout', 60, fetcher)
 }

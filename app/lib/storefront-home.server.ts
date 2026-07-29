@@ -23,13 +23,16 @@ import {
   type HomepagePayloadB,
 } from '~/lib/homepage-payload.server'
 import { getSensationMapData, type SensationMapData } from '~/lib/sensation-map.server'
-import { getEmmaHeroSettings, getBlogPosts, getEditor } from '~/lib/sanity.server'
+import { getEmmaHeroSettings, getBlogPosts, getEditor, getStorefrontHomeLayout } from '~/lib/sanity.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
-import type { EmmaHeroSettings, BlogPostCard } from '~/types/cms'
+import type { EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout } from '~/types/cms'
 
 const EMMA_HERO_TIMEOUT_MS = 4000
 const EDITOR_TIMEOUT_MS = 4000
+// Layout is a single small singleton read; it degrades to the shipped order, so
+// it gets the same short budget as the other Sanity legs.
+const LAYOUT_TIMEOUT_MS = 4000
 /**
  * Wall-clock ceiling for the team's Sanity merchandising surface. This leg is
  * now resolved BEFORE the response is sent (see `contentBlocks` below), so it
@@ -120,6 +123,12 @@ export interface StorefrontData {
    * null on a cold/empty index, in which case StorefrontHome skips the band.
    */
   sensationMap: SensationMapData
+  /**
+   * Band order + per-band chrome overrides from `singleton.storefrontHome`.
+   * Null means render the shipped order, which is the normal state and what
+   * makes an unpublished layout a no-op.
+   */
+  layout: StorefrontHomeLayout | null
 }
 
 /**
@@ -247,6 +256,9 @@ export function hydrateStorefrontPayloadB(payload: HomepagePayloadB): Storefront
     contentBlocks: payload.contentBlocks,
     notebookPosts: payload.notebookPosts,
     sensationMap: payload.sensationMap,
+    // Resolved at build time for the same reason contentBlocks is: the shell
+    // cannot decide what to render from a value that arrives after it flushes.
+    layout: payload.layout ?? null,
   }
 }
 
@@ -258,7 +270,7 @@ export function hydrateStorefrontPayloadB(payload: HomepagePayloadB): Storefront
  */
 export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
   const railSeed = 0
-  const [railsResult, emmaHero, notebook, editor, contentBlocks] = await Promise.all([
+  const [railsResult, emmaHero, notebook, editor, contentBlocks, layout] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, 'getEmmaHeroSettings(storefront)'),
     // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
@@ -285,6 +297,19 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     ).catch((err: unknown) => {
       console.error('[storefront-home] contentBlocks failed, using shell fallbacks:', err)
       return EMPTY_CONTENT_BLOCKS
+    }),
+    // Band order + chrome overrides. Same reasoning as contentBlocks above: the
+    // shell cannot decide what to render from a value that lands after it has
+    // flushed, so this is resolved at build time and stored. Degrading to null
+    // renders the shipped order, so a slow or failed leg costs nothing.
+    withTimeout(
+      getStorefrontHomeLayout(),
+      LAYOUT_TIMEOUT_MS,
+      null,
+      'getStorefrontHomeLayout(storefront)',
+    ).catch((err: unknown) => {
+      console.error('[storefront-home] layout failed, using shipped band order:', err)
+      return null
     }),
   ])
 
@@ -332,6 +357,7 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     contentBlocks, // resolved above — team-managed Sanity surface, lean/slimmed for variant b
     notebookPosts: notebook.posts,
     sensationMap,
+    layout,
     builtAt: Date.now(),
     // Empty rails == the discovery index was cold during the build. The write
     // guard refuses to clobber a good blob with this unless forced.
