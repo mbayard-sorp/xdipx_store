@@ -7,6 +7,34 @@
 # stricter than the old default, so expect reported values to move even where
 # the page did not change.
 #
+# WHAT RED MEANS: "this PR made the page slower", not "the page is not fast
+# yet". The thresholds in lighthouserc.json are a REGRESSION FLOOR derived from
+# a measured baseline, not the target. JSON takes no comments, so the numbers
+# are justified here.
+#
+# Baseline, main @ f3c3e73, measured 2026-07-28 through this workflow:
+#   perf median 0.72–0.76 · LCP median 4822–5039ms · CLS ~0.02 · TBT ~132ms
+#   within-run LCP spread 635–807ms · median-to-median drift 217ms
+#
+#   floor  perf >= 0.65   ~0.07 under the worst measured median
+#   floor  LCP  <= 5500ms  ~460ms over the worst measured median, roughly 2x the
+#                          observed median drift, so it catches a regression of
+#                          ~500ms or worse without firing on noise
+#   guard  CLS  <= 0.1     unchanged; measured ~0.02, real headroom
+#   warn   TBT  <= 300ms   unchanged; measured ~132ms
+#
+# THE TARGET IS STILL perf 0.9 / LCP 2500ms. It is deliberately not asserted,
+# because it is not reachable as the page is built today and a permanently red
+# check is a check everyone learns to ignore. Measured on 2026-07-28 (PR #371,
+# closed): stripping ALL client JS — no hydration, no interactivity — moved LCP
+# only 4822ms -> 3169ms. A perfect result on the app bundle still lands ~700ms
+# above 2500ms. The remaining 683KB floor is 267KB third-party analytics (gtag,
+# fbevents), 200KB images, and 132KB fonts.
+#
+# Do not "fix" a red check here by raising these numbers. Raising the floor to
+# accommodate a regression is how the budget stops meaning anything. Lower them
+# when the page genuinely gets faster, and re-derive from a fresh baseline.
+#
 # Runs against the Vercel preview deployment for the PR branch. If the Vercel
 # project has Deployment Protection enabled, add the project's automation
 # bypass secret to the repo as VERCEL_AUTOMATION_BYPASS_SECRET (Vercel project
