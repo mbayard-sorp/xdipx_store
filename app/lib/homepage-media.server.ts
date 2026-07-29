@@ -26,6 +26,14 @@ export interface GenerateAndPlaceHomepageImageOpts {
   /** Alt text stored alongside the image asset. */
   alt: string
   target: HomepageMediaTarget
+  /**
+   * Sanity document to patch. Defaults to the homepage singleton; the
+   * merchandising team passes 'singleton.panelDeck', 'categoryPage-*', or
+   * 'dropPage-*' ids to place art on the deck and the merchandised pages.
+   * Spend attribution is unchanged (feature stays 'homepage-images') — all
+   * surfaces bill the same homepage-team image budget.
+   */
+  docId?: string
   /** Free-form origin for the cost row, e.g. 'media-manager/wayfinder'. */
   caller?: string
   /** Extra generateImage() overrides (e.g. `only: 'fal'`). */
@@ -68,15 +76,16 @@ export async function generateAndPlaceHomepageImage(
   const filename = `homepage-${opts.target.blockKey}-${Date.now()}.png`
   const { assetId, url } = await uploadBufferToSanity(res.buffers[0]!, filename, 'image/png')
 
+  const docId = opts.docId ?? 'singleton.homepage'
   switch (opts.target.kind) {
     case 'blockImage':
-      await updateCmsBlock(opts.target.blockKey, { image: sanityImageRef(assetId, opts.alt) })
+      await updateCmsBlock(opts.target.blockKey, { image: sanityImageRef(assetId, opts.alt) }, docId)
       break
     case 'tileImage':
-      await updateCmsTileImage(opts.target.blockKey, opts.target.tileKey, assetId, opts.alt)
+      await updateCmsTileImage(opts.target.blockKey, opts.target.tileKey, assetId, opts.alt, docId)
       break
     case 'promoImage':
-      await updateCmsPromoImage(opts.target.blockKey, assetId, opts.alt)
+      await updateCmsPromoImage(opts.target.blockKey, assetId, opts.alt, docId)
       break
   }
 

@@ -14,6 +14,7 @@
     "db:seed": "tsx db/seed.ts",
     "emma:log": "tsx scripts/inspect-emma-log.ts",
     "sanity:sync": "tsx scripts/sync-products-to-sanity.ts",
+    "sanity:content": "tsx scripts/sanity-content-cli.ts",
     "bg:remove": "tsx scripts/remove-product-bg.ts",
     "eval:emma": "npx tsx evals/runner.ts",
     "postinstall": "if [ \"$VERCEL\" = \"1\" ]; then npm run build; fi"
