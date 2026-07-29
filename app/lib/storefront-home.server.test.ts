@@ -215,6 +215,7 @@ function payload(over: Partial<HomepagePayloadB> = {}): HomepagePayloadB {
     notebookPosts: [],
     sensationMap: { types: [], feels: [], defaultState: null, defaultMatch: null },
     layout: null,
+    panelDeck: null,
     builtAt: 0,
     degraded: false,
     ...over,

@@ -2710,6 +2710,7 @@ __export(sanity_server_exports, {
   getBlogPosts: () => getBlogPosts,
   getBlogPostsForSitemap: () => getBlogPostsForSitemap,
   getBlogSeries: () => getBlogSeries,
+  getClient: () => getClient,
   getCollectionPage: () => getCollectionPage,
   getCollectionTypeMap: () => getCollectionTypeMap,
   getCollectionsHub: () => getCollectionsHub,
@@ -2895,6 +2896,12 @@ async function getHomepageSections(preview = false) {
   if (preview) return fetcher();
   return cached("sanity:homepage", 60, fetcher);
 }
+function blockArrayField(docId) {
+  return docId === HOMEPAGE_DOC_ID ? "sections" : "blocks";
+}
+function invalidateDocCache(docId) {
+  if (docId === HOMEPAGE_DOC_ID) invalidateCache("sanity:homepage");
+}
 async function upsertAnnouncementBar(messages) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
@@ -2904,23 +2911,27 @@ async function upsertAnnouncementBar(messages) {
   }).commit();
   invalidateCache("sanity:homepage");
 }
-async function addCmsBlock(block) {
+async function addCmsBlock(block, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
   const key = `${block._type}-${Date.now()}`;
-  await client5.createIfNotExists({ _id: "singleton.homepage", _type: "homepageSections", sections: [] });
-  await client5.patch("singleton.homepage").setIfMissing({ sections: [] }).append("sections", [{ ...block, _key: key }]).commit();
-  invalidateCache("sanity:homepage");
+  const field = blockArrayField(docId);
+  if (docId === HOMEPAGE_DOC_ID) {
+    await client5.createIfNotExists({ _id: HOMEPAGE_DOC_ID, _type: "homepageSections", sections: [] });
+  }
+  await client5.patch(docId).setIfMissing({ [field]: [] }).append(field, [{ ...block, _key: key }]).commit();
+  invalidateDocCache(docId);
 }
-async function updateCmsBlock(key, patch) {
+async function updateCmsBlock(key, patch, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").set(
+  const prefix = blockArrayField(docId);
+  await client5.patch(docId).set(
     Object.fromEntries(
-      Object.entries(patch).map(([field, value]) => [`sections[_key=="${key}"].${field}`, value])
+      Object.entries(patch).map(([field, value]) => [`${prefix}[_key=="${key}"].${field}`, value])
     )
   ).commit();
-  invalidateCache("sanity:homepage");
+  invalidateDocCache(docId);
 }
 async function uploadBufferToSanity(buffer, filename, contentType) {
   const client5 = getClient(true);
@@ -2934,27 +2945,26 @@ async function uploadBufferToSanity(buffer, filename, contentType) {
 function sanityImageRef(assetId, alt) {
   return { _type: "image", asset: { _type: "reference", _ref: assetId }, alt };
 }
-async function updateCmsTileImage(blockKey, tileKey, assetId, alt) {
+async function updateCmsTileImage(blockKey, tileKey, assetId, alt, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").set({
-    [`sections[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`]: sanityImageRef(assetId, alt)
-  }).commit();
-  invalidateCache("sanity:homepage");
+  const path = docId === PANEL_DECK_DOC_ID ? `rows[_key=="${blockKey}"].items[_key=="${tileKey}"].image` : `${blockArrayField(docId)}[_key=="${blockKey}"].tiles[_key=="${tileKey}"].image`;
+  await client5.patch(docId).set({ [path]: sanityImageRef(assetId, alt) }).commit();
+  invalidateDocCache(docId);
 }
-async function updateCmsPromoImage(blockKey, assetId, alt) {
+async function updateCmsPromoImage(blockKey, assetId, alt, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").set({
-    [`sections[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt)
+  await client5.patch(docId).set({
+    [`${blockArrayField(docId)}[_key=="${blockKey}"].promo.image`]: sanityImageRef(assetId, alt)
   }).commit();
-  invalidateCache("sanity:homepage");
+  invalidateDocCache(docId);
 }
-async function removeCmsBlock(key) {
+async function removeCmsBlock(key, docId = HOMEPAGE_DOC_ID) {
   const client5 = getClient(true);
   if (!client5) throw new Error("Sanity not configured");
-  await client5.patch("singleton.homepage").unset([`sections[_key=="${key}"]`]).commit();
-  invalidateCache("sanity:homepage");
+  await client5.patch(docId).unset([`${blockArrayField(docId)}[_key=="${key}"]`]).commit();
+  invalidateDocCache(docId);
 }
 function invalidateCmsCache() {
   invalidateCache("sanity:homepage");
@@ -4105,7 +4115,7 @@ async function getStorefrontHomeLayout(preview = false) {
   if (preview) return fetcher();
   return cached("sanity:storefront-home-layout", 60, fetcher);
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, SOCIAL_LANDING_GROQ, STOREFRONT_HOME_GROQ, KNOWN_BANDS, KNOWN_SECTION_TYPES;
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, PANEL_DECK_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, SOCIAL_LANDING_GROQ, STOREFRONT_HOME_GROQ, KNOWN_BANDS, KNOWN_SECTION_TYPES;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
@@ -4258,6 +4268,7 @@ var init_sanity_server = __esm({
   }
 `;
     HOMEPAGE_DOC_ID = "singleton.homepage";
+    PANEL_DECK_DOC_ID = "singleton.panelDeck";
     _blogCache = /* @__PURE__ */ new Map();
     BLOG_CACHE_TTL = 6e4;
     BLOG_CAT_CACHE_TTL = 3e5;
@@ -16247,7 +16258,7 @@ var init_homepage_payload_server = __esm({
       // published block feeds BOTH the visible accordion and the FAQPage JSON-LD.
       "homepageFaq"
     ];
-    HOMEPAGE_PAYLOAD_B_VERSION = "b4";
+    HOMEPAGE_PAYLOAD_B_VERSION = "b5";
     HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
   }
 });
@@ -17501,6 +17512,138 @@ var init_sensation_map_server = __esm({
   }
 });
 
+// app/lib/panel-deck.server.ts
+function resolveHref(link2, liveHandles) {
+  if (!link2?.kind) return null;
+  switch (link2.kind) {
+    case "collection": {
+      const handle = link2.collectionHandle?.trim();
+      if (!handle) return null;
+      if (liveHandles && !liveHandles.has(handle)) return null;
+      return `/collections/${handle}`;
+    }
+    case "article": {
+      if (!link2.articleSlug || link2.articlePublished === false) return null;
+      return `/notebook/${link2.articleSlug}`;
+    }
+    case "route": {
+      const route = link2.route?.trim();
+      return route && route.startsWith("/") ? route : null;
+    }
+    default:
+      return null;
+  }
+}
+function baseTile(item, href) {
+  return {
+    key: item._key ?? `${item.label}-${href}`,
+    label: item.label?.trim() ?? "",
+    surface: SURFACES.includes(item.surface) ? item.surface : "stone",
+    mark: item.mark ?? null,
+    imageUrl: item.imageUrl ?? null,
+    imageAlt: item.imageAlt ?? null,
+    href
+  };
+}
+async function getPanelDeck(preview = false) {
+  const client5 = getClient(false, preview);
+  if (!client5) return null;
+  let raw = null;
+  try {
+    raw = await client5.fetch(PANEL_DECK_GROQ);
+  } catch (err2) {
+    console.error("[panel-deck] fetch failed:", err2);
+    return null;
+  }
+  if (!raw?.rows?.length) return null;
+  let liveHandles = null;
+  try {
+    const collections = await getCollectionList();
+    liveHandles = new Set(
+      collections.filter((c) => c.productsCount === null || c.productsCount > 0).map((c) => c.handle)
+    );
+  } catch (err2) {
+    console.warn("[panel-deck] collection list unavailable, skipping handle validation:", err2);
+  }
+  const rows = [];
+  for (const row of raw.rows) {
+    const rowKey = row._key ?? `row-${rows.length}`;
+    const resolveItems = (decorate) => (row.items ?? []).flatMap((item) => {
+      const href = resolveHref(item.link, liveHandles);
+      if (!href || !item.label?.trim()) {
+        console.warn(
+          `[panel-deck] dropping panel "${item.label ?? "(unlabelled)"}": ` + (item.label?.trim() ? "destination missing, dead, or empty" : "no label")
+        );
+        return [];
+      }
+      return [decorate(item, baseTile(item, href))];
+    });
+    switch (row._type) {
+      case "panelSquareRow": {
+        const items = resolveItems((_item, tile) => tile);
+        if (items.length > 0) rows.push({ kind: "square", key: rowKey, items });
+        break;
+      }
+      case "panelRowLarge": {
+        const items = resolveItems((item, tile) => ({
+          ...tile,
+          kicker: item.kicker?.trim() || null,
+          blurb: item.blurb?.trim() || null,
+          ctaLabel: item.ctaLabel?.trim() || null
+        }));
+        if (items.length > 0) rows.push({ kind: "large", key: rowKey, items });
+        break;
+      }
+      case "panelRowSmall": {
+        const items = resolveItems((item, tile) => ({
+          ...tile,
+          meta: item.meta?.trim() || null,
+          figure: item.figure?.trim() || null
+        }));
+        if (items.length > 0) rows.push({ kind: "small", key: rowKey, items });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  if (rows.length === 0) return null;
+  return {
+    eyebrow: raw.eyebrow?.trim() || null,
+    theme: THEMES.includes(raw.theme) ? raw.theme : "tint",
+    showOrdinals: raw.showOrdinals === true,
+    rows
+  };
+}
+var PANEL_DECK_GROQ, SURFACES, THEMES;
+var init_panel_deck_server = __esm({
+  "app/lib/panel-deck.server.ts"() {
+    "use strict";
+    init_sanity_server();
+    init_shopify_server();
+    PANEL_DECK_GROQ = `
+  *[_id == "singleton.panelDeck"][0]{
+    eyebrow, theme, showOrdinals,
+    rows[]{
+      _type, _key,
+      items[]{
+        _key, label, surface, mark, kicker, blurb, ctaLabel, meta, figure,
+        "imageUrl": image.asset->url,
+        "imageAlt": image.alt,
+        link{
+          kind, collectionHandle, route,
+          "articleSlug": article->slug.current,
+          "articlePublished": article->status == "published"
+        }
+      }
+    }
+  }
+`;
+    SURFACES = ["blush", "lilac", "stone", "paper", "plum", "coral", "ink"];
+    THEMES = ["tint", "photo", "ruled"];
+  }
+});
+
 // app/lib/storefront-home.server.ts
 var storefront_home_server_exports = {};
 __export(storefront_home_server_exports, {
@@ -17553,12 +17696,13 @@ function hydrateStorefrontPayloadB(payload) {
     sensationMap: payload.sensationMap,
     // Resolved at build time for the same reason contentBlocks is: the shell
     // cannot decide what to render from a value that arrives after it flushes.
-    layout: payload.layout ?? null
+    layout: payload.layout ?? null,
+    panelDeck: payload.panelDeck ?? null
   };
 }
 async function buildHomepagePayloadB() {
   const railSeed = 0;
-  const [railsResult, emmaHero, notebook, editor, contentBlocks, layout] = await Promise.all([
+  const [railsResult, emmaHero, notebook, editor, contentBlocks, layout, panelDeck] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, "getEmmaHeroSettings(storefront)"),
     // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
@@ -17598,6 +17742,17 @@ async function buildHomepagePayloadB() {
     ).catch((err2) => {
       console.error("[storefront-home] layout failed, using shipped band order:", err2);
       return null;
+    }),
+    // The deck. Same contract: resolved at build time, degrades to null, and
+    // null renders nothing, so a failed leg costs the deck and only the deck.
+    withTimeout(
+      getPanelDeck(),
+      LAYOUT_TIMEOUT_MS,
+      null,
+      "getPanelDeck(storefront)"
+    ).catch((err2) => {
+      console.error("[storefront-home] panel deck failed, rendering without it:", err2);
+      return null;
     })
   ]);
   const rails = railsResult.rails;
@@ -17629,6 +17784,7 @@ async function buildHomepagePayloadB() {
     notebookPosts: notebook.posts,
     sensationMap,
     layout,
+    panelDeck,
     builtAt: Date.now(),
     // Empty rails == the discovery index was cold during the build. The write
     // guard refuses to clobber a good blob with this unless forced.
@@ -17649,6 +17805,7 @@ var init_storefront_home_server = __esm({
     init_homepage_payload_server();
     init_sensation_map_server();
     init_sanity_server();
+    init_panel_deck_server();
     init_with_timeout_server();
     init_discovery();
     EMMA_HERO_TIMEOUT_MS = 4e3;
