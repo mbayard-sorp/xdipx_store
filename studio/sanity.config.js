@@ -35,6 +35,18 @@ export default defineConfig({
               .icon(() => '🔗')
               .child(S.document().schemaType('emmaHeroStorefront').documentId('singleton.emmaHeroStorefront')),
             S.listItem()
+              .title('Storefront home layout')
+              .id('storefrontHome')
+              .icon(() => '🧱')
+              .child(S.document().schemaType('storefrontHome').documentId('singleton.storefrontHome')),
+            S.listItem()
+              .title('Panel deck (eight doors)')
+              .id('panelDeck')
+              .icon(() => '🚪')
+              .child(S.document().schemaType('panelDeck').documentId('singleton.panelDeck')),
+            S.documentTypeListItem('categoryPage').title('Category pages').icon(() => '🗂️'),
+            S.documentTypeListItem('dropPage').title('Drop pages').icon(() => '📦'),
+            S.listItem()
               .title('Home Config')
               .id('homeConfig')
               .icon(() => '🧭')
