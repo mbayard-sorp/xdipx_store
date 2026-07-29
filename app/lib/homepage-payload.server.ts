@@ -30,7 +30,7 @@ import { normalizeProductHandles } from '~/lib/product-handles'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
 import type { Product, LeanCardProduct } from '~/types'
 import type { DiscoveryProduct } from '~/types/discovery'
-import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, PlayTogetherBannerBlock, EmmaHeroSettings, BlogPostCard } from '~/types/cms'
+import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, PlayTogetherBannerBlock, EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout } from '~/types/cms'
 import type { SensationMapData } from '~/lib/sensation-map.server'
 
 /**
@@ -488,8 +488,12 @@ export function reshuffleRailsWithSeed(rails: Rail[], seed: number): Rail[] {
  *     the couples band's resolved `productHandles`, and `notebookPosts` grew
  *     from 3 to 6. A b2 blob has none of that, so serving one would keep the
  *     trust strip, FAQ, couples strip and notebook on their old shape forever.
+ * b4: added `layout` (singleton.storefrontHome band order + per-band chrome
+ *     overrides). A b3 blob has no such field, so it would read as "no layout"
+ *     and keep serving the shipped order after the team published a new
+ *     arrangement. Null stays the normal, correct value for both.
  */
-export const HOMEPAGE_PAYLOAD_B_VERSION = 'b3'
+export const HOMEPAGE_PAYLOAD_B_VERSION = 'b4'
 
 /** KV key for the precomputed storefront blob. Versioned. */
 export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`
@@ -533,6 +537,16 @@ export interface HomepagePayloadB {
   contentBlocks: HomeContentBlocksLean
   notebookPosts: BlogPostCard[]
   sensationMap: SensationMapData
+  /**
+   * Band order + per-band chrome overrides from `singleton.storefrontHome`.
+   *
+   * Null is the normal value and means "render the shipped order", so an
+   * unpublished layout costs nothing and unpublishing is a complete rollback.
+   * Resolved at build time for the same reason `contentBlocks` is: a value the
+   * shell needs in order to decide what to render cannot be allowed to arrive
+   * after the shell has flushed.
+   */
+  layout: StorefrontHomeLayout | null
   builtAt: number // epoch ms (number, NOT Date)
   degraded: boolean // true if discovery rails came back empty during build
 }

@@ -95,12 +95,15 @@ describe('VARIANT_B_SECTION_TYPES', () => {
 })
 
 describe('HOMEPAGE_PAYLOAD_B_VERSION', () => {
-  it('is past b2, so blobs built before the trust/FAQ/couples/notebook change miss', () => {
+  it('is past b3, so blobs built before the layout field miss', () => {
     // The blob is read verbatim from KV and Neon. Shipping a new payload shape
     // without bumping this serves the OLD shape until the caches expire, and
-    // none of the new content appears live.
+    // none of the new content appears live. b4 added `layout`: a b3 blob has no
+    // such field, so it would read as "no layout" and keep serving the shipped
+    // band order after the team published a new arrangement.
     expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b2')
-    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b3')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b3')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b4')
   })
 
   it('embeds the version in the KV key so old blobs cannot be read back', () => {

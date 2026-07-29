@@ -1151,7 +1151,40 @@ export const DEFAULT_BAND_ORDER: BandName[] = [
   'emailCapture',
 ]
 
-export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap }: StorefrontData) {
+const KNOWN_BAND = new Set<string>(BAND_NAMES)
+
+/**
+ * Turn a published layout into the band order to render.
+ *
+ * Three rules, all of them about never letting a content edit break the page:
+ * the hero always leads (it owns the H1 and the LCP image), a band may appear
+ * at most once, and anything this deploy does not recognise is dropped rather
+ * than trusted. A layout that survives none of that is treated as no layout at
+ * all, which renders the shipped order.
+ */
+export function resolveBandOrder(layout?: { sections: { _type: string; band?: string; enabled?: boolean }[] } | null): BandName[] {
+  if (!layout?.sections?.length) return DEFAULT_BAND_ORDER
+
+  const seen = new Set<string>()
+  const ordered: BandName[] = []
+  for (const section of layout.sections) {
+    if (section._type !== 'homeBand') continue
+    if (section.enabled === false) continue
+    const band = section.band
+    if (!band || !KNOWN_BAND.has(band) || seen.has(band)) continue
+    seen.add(band)
+    ordered.push(band as BandName)
+  }
+
+  if (ordered.length === 0) return DEFAULT_BAND_ORDER
+
+  // The hero is not reorderable. A layout that omits or demotes it would move
+  // the largest paint element, so it is put back at the front rather than
+  // honoured, and the page keeps its LCP guarantee whatever Sanity says.
+  return ordered[0] === 'hero' ? ordered : ['hero', ...ordered.filter(b => b !== 'hero')]
+}
+
+export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
   // per page view; the localStorage flag distinguishes first-time visitors.
   useEffect(() => {
@@ -1359,7 +1392,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
         />
       )}
 
-      {DEFAULT_BAND_ORDER.map(name => (
+      {resolveBandOrder(layout).map(name => (
         <Fragment key={name}>{bands[name]}</Fragment>
       ))}
     </>
