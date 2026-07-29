@@ -424,7 +424,10 @@ function shopifyToDiscovery(p: LeanCardProduct): DiscoveryProduct {
     imageUrl: p.images[0]?.url ?? null,
     imageAlt: p.images[0]?.altText ?? null,
     category: 'Pleasure',
-    subcategory: p.brand ?? '',
+    // brand now has its own field on DiscoveryProduct; no longer overloaded
+    // into subcategory. The card renders brand as the mono eyebrow.
+    subcategory: '',
+    brand: p.brand ?? null,
     mood: [],
     audience: [],
     matters: [],

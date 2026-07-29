@@ -52,7 +52,10 @@ import {
 //     (Pleasure / Play / Body / Wear). v2 cached entries reference the
 //     old categorization. Bumping invalidates them.
 // v2: tag values normalized (Title-Case canonical form) before indexing.
-const INDEX_VERSION = 'v7'
+// v8: added `brand` (Shopify product `vendor`) to the DiscoveryProduct shape.
+// Bumping the version namespaces the KV/Neon payload so a deploy with the new
+// shape never reads stale v7 entries that lack `brand`.
+const INDEX_VERSION = 'v8'
 export const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 export const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
 
@@ -137,6 +140,7 @@ interface AdminProductNode {
   title:        string
   status:       string
   productType:  string | null   // Shopify's native "Product organization → Type"
+  vendor: string | null
   featuredImage: { url: string; altText: string | null } | null
   variants: { nodes: Array<{ id: string }> } | null
   priceRangeV2: {
@@ -221,6 +225,7 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
         title
         status
         productType
+        vendor
         featuredImage { url altText }
         variants(first: 1) { nodes { id } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
@@ -294,6 +299,7 @@ function nodeToDiscoveryProduct(
     imageAlt:    n.featuredImage?.altText ?? null,
     category,
     subcategory,
+    brand:       (n.vendor ?? '').trim() || null,
     mood,
     audience,
     matters,
@@ -405,6 +411,7 @@ const NODES_BY_IDS_QUERY = /* GraphQL */ `
         title
         status
         productType
+        vendor
         featuredImage { url altText }
         variants(first: 1) { nodes { id } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
@@ -471,6 +478,7 @@ export async function fetchHonoraryProducts(
         imageAlt:       node.featuredImage?.altText ?? null,
         category, // honorary — forced to the pinned rail's category
         subcategory,
+        brand:          (node.vendor ?? '').trim() || null,
         mood:           cleanTagList(parseListMetafield(node.moodTagsRaw?.value)),
         audience:       cleanTagList(parseListMetafield(node.audienceTagsRaw?.value)),
         matters:        cleanTagList(parseListMetafield(node.mattersTagsRaw?.value)),

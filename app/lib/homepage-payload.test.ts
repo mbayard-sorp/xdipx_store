@@ -31,6 +31,7 @@ function makeRail(category: 'Pleasure' | 'Play' | 'Body' | 'Wear', n: number): R
         imageAlt: null,
         category,
         subcategory: 'X',
+        brand: null,
         mood: [],
         audience: [],
         matters: [],

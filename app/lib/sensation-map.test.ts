@@ -23,6 +23,7 @@ function mk(p: Partial<DiscoveryProduct> & { id: string; handle: string }): Disc
     imageAlt: null,
     category: p.category ?? 'Pleasure',
     subcategory: p.subcategory ?? '',
+    brand: p.brand ?? null,
     mood: p.mood ?? [],
     audience: [],
     matters: [],

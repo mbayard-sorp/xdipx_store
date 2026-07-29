@@ -134,6 +134,13 @@ export interface DiscoveryProduct {
   imageAlt:    string | null
   category:    Category
   subcategory: string
+  /**
+   * Shopify's native product `vendor` — the manufacturer/brand (e.g. "Wicked",
+   * "System JO", "We-Vibe"). Rendered as the mono eyebrow on the storefront
+   * product card so recognizable brands read as a legitimacy signal. Null when
+   * the vendor is unset; the card falls back to subcategory/category then.
+   */
+  brand:       string | null
   mood:        Mood[]
   audience:    Audience[]
   matters:     Matters[]
