@@ -2710,6 +2710,7 @@ __export(sanity_server_exports, {
   getBlogPosts: () => getBlogPosts,
   getBlogPostsForSitemap: () => getBlogPostsForSitemap,
   getBlogSeries: () => getBlogSeries,
+  getClient: () => getClient,
   getCollectionPage: () => getCollectionPage,
   getCollectionTypeMap: () => getCollectionTypeMap,
   getCollectionsHub: () => getCollectionsHub,
@@ -2738,6 +2739,7 @@ __export(sanity_server_exports, {
   getRailsByDealId: () => getRailsByDealId,
   getSiteSettings: () => getSiteSettings,
   getSocialLandingSettings: () => getSocialLandingSettings,
+  getStorefrontHomeLayout: () => getStorefrontHomeLayout,
   invalidateBlogCache: () => invalidateBlogCache,
   invalidateCmsCache: () => invalidateCmsCache,
   isPreviewRequest: () => isPreviewRequest,
@@ -4082,7 +4084,29 @@ async function getSocialLandingSettings() {
     }
   });
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, SOCIAL_LANDING_GROQ;
+async function getStorefrontHomeLayout(preview = false) {
+  if (!projectId) return null;
+  const fetcher = async () => {
+    try {
+      const client5 = getClient(false, preview);
+      if (!client5) return null;
+      const raw = await client5.fetch(STOREFRONT_HOME_GROQ);
+      const sections = (raw?.sections ?? []).filter((s) => {
+        if (!s?._type || !KNOWN_SECTION_TYPES.has(s._type)) return false;
+        if (s._type === "homeBand") return KNOWN_BANDS.has(s.band);
+        return true;
+      });
+      if (sections.length === 0) return null;
+      return { ...raw?.note ? { note: raw.note } : {}, sections };
+    } catch (err2) {
+      console.error("[sanity] getStorefrontHomeLayout error:", err2);
+      return null;
+    }
+  };
+  if (preview) return fetcher();
+  return cached("sanity:storefront-home-layout", 60, fetcher);
+}
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, SOCIAL_LANDING_GROQ, STOREFRONT_HOME_GROQ, KNOWN_BANDS, KNOWN_SECTION_TYPES;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
@@ -4276,6 +4300,32 @@ var init_sanity_server = __esm({
     featuredProductHandle
   }
 `;
+    STOREFRONT_HOME_GROQ = `
+  *[_id == "singleton.storefrontHome"][0]{
+    note,
+    sections[]{
+      _type, _key, enabled,
+      band, eyebrow, heading, emphasis, body, ctaLabel, ctaLink,
+      prompt,
+      pills[]{ label, collectionHandle }
+    }
+  }
+`;
+    KNOWN_BANDS = /* @__PURE__ */ new Set([
+      "hero",
+      "anchorGrid",
+      "teamRails",
+      "meetEmma",
+      "wayfinder",
+      "emmasEdit",
+      "sensationMap",
+      "couples",
+      "stillDeciding",
+      "notebook",
+      "faq",
+      "emailCapture"
+    ]);
+    KNOWN_SECTION_TYPES = /* @__PURE__ */ new Set(["homeBand", "homeMoodPills", "panelDeckSection"]);
   }
 });
 
@@ -16198,7 +16248,7 @@ var init_homepage_payload_server = __esm({
       // published block feeds BOTH the visible accordion and the FAQPage JSON-LD.
       "homepageFaq"
     ];
-    HOMEPAGE_PAYLOAD_B_VERSION = "b3";
+    HOMEPAGE_PAYLOAD_B_VERSION = "b4";
     HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
   }
 });
@@ -17501,12 +17551,15 @@ function hydrateStorefrontPayloadB(payload) {
     // removes the Sanity round-trip from the request path entirely.
     contentBlocks: payload.contentBlocks,
     notebookPosts: payload.notebookPosts,
-    sensationMap: payload.sensationMap
+    sensationMap: payload.sensationMap,
+    // Resolved at build time for the same reason contentBlocks is: the shell
+    // cannot decide what to render from a value that arrives after it flushes.
+    layout: payload.layout ?? null
   };
 }
 async function buildHomepagePayloadB() {
   const railSeed = 0;
-  const [railsResult, emmaHero, notebook, editor, contentBlocks] = await Promise.all([
+  const [railsResult, emmaHero, notebook, editor, contentBlocks, layout] = await Promise.all([
     getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
     withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, "getEmmaHeroSettings(storefront)"),
     // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
@@ -17533,6 +17586,19 @@ async function buildHomepagePayloadB() {
     ).catch((err2) => {
       console.error("[storefront-home] contentBlocks failed, using shell fallbacks:", err2);
       return EMPTY_CONTENT_BLOCKS;
+    }),
+    // Band order + chrome overrides. Same reasoning as contentBlocks above: the
+    // shell cannot decide what to render from a value that lands after it has
+    // flushed, so this is resolved at build time and stored. Degrading to null
+    // renders the shipped order, so a slow or failed leg costs nothing.
+    withTimeout(
+      getStorefrontHomeLayout(),
+      LAYOUT_TIMEOUT_MS,
+      null,
+      "getStorefrontHomeLayout(storefront)"
+    ).catch((err2) => {
+      console.error("[storefront-home] layout failed, using shipped band order:", err2);
+      return null;
     })
   ]);
   const rails = railsResult.rails;
@@ -17563,6 +17629,7 @@ async function buildHomepagePayloadB() {
     // resolved above — team-managed Sanity surface, lean/slimmed for variant b
     notebookPosts: notebook.posts,
     sensationMap,
+    layout,
     builtAt: Date.now(),
     // Empty rails == the discovery index was cold during the build. The write
     // guard refuses to clobber a good blob with this unless forced.
@@ -17575,7 +17642,7 @@ async function warmHomepagePayloadB(opts = {}) {
   await writeHomepagePayloadB(payload, { force });
   return payload;
 }
-var EMMA_HERO_TIMEOUT_MS, EDITOR_TIMEOUT_MS, CONTENT_BLOCKS_TIMEOUT_MS, EMPTY_CONTENT_BLOCKS, RAIL_SEED_BUCKET_MS, STOREFRONT_EDGE_CACHE_HEADERS;
+var EMMA_HERO_TIMEOUT_MS, EDITOR_TIMEOUT_MS, LAYOUT_TIMEOUT_MS, CONTENT_BLOCKS_TIMEOUT_MS, EMPTY_CONTENT_BLOCKS, RAIL_SEED_BUCKET_MS, STOREFRONT_EDGE_CACHE_HEADERS;
 var init_storefront_home_server = __esm({
   "app/lib/storefront-home.server.ts"() {
     "use strict";
@@ -17587,6 +17654,7 @@ var init_storefront_home_server = __esm({
     init_discovery();
     EMMA_HERO_TIMEOUT_MS = 4e3;
     EDITOR_TIMEOUT_MS = 4e3;
+    LAYOUT_TIMEOUT_MS = 4e3;
     CONTENT_BLOCKS_TIMEOUT_MS = 6e3;
     EMPTY_CONTENT_BLOCKS = { sections: [], carouselProductMap: {} };
     RAIL_SEED_BUCKET_MS = 9e5;

@@ -3,6 +3,8 @@ import type { LoaderFunctionArgs, MetaDescriptor, MetaFunction } from 'react-rou
 import { useLoaderData, useSearchParams, Link } from 'react-router'
 import { getCollection, getCollectionDeals, getMainMenu, type CollectionSort } from '~/lib/shopify.server'
 import { getCollectionPage, getEmmaPresets, getBlogPosts, getNotebookPostsForProductHandles } from '~/lib/sanity.server'
+import { getCategoryPage, getDropPage } from '~/lib/category-page.server'
+import { CategoryBlockRenderer } from '~/components/category/CategoryBlockRenderer'
 import { canonicalUrl, pageTitle, robotsContent, truncateForMeta } from '~/lib/seo'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import { VaultCard } from '~/components/store/VaultCard'
@@ -130,7 +132,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // Treat them like filters for indexing purposes — see meta() above.
   const nonCanonicalVariant = filtersApplied || sort !== 'manual'
 
-  const [collection, sanity, { deals, hasNextPage }, presets, menu, notebook] = await Promise.all([
+  const [collection, sanity, { deals, hasNextPage }, presets, menu, notebook, categoryPage] = await Promise.all([
     getCollection(handle),
     getCollectionPage(handle),
     getCollectionDeals(handle, page, PAGE_SIZE, sort),
@@ -141,6 +143,16 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     page === 1
       ? getBlogPosts({ perPage: 3 }).catch(() => ({ posts: [], total: 0 }))
       : Promise.resolve({ posts: [], total: 0 }),
+    // Merchandised layer, canonical page-1 only; deeper pages and sort/filter
+    // variants keep the plain grid. Null = no doc = today's rendering, byte
+    // for byte. Sale is a merchandising moment rather than an aisle (owner
+    // decision 2026-07-29), so on-sale reads the dropPage doc; the block
+    // union and renderer are shared either way.
+    page !== 1
+      ? Promise.resolve(null)
+      : handle === 'on-sale'
+        ? getDropPage('on-sale').catch(() => null)
+        : getCategoryPage(handle).catch(() => null),
   ])
 
   // 404 — no Shopify collection at this handle.
@@ -241,6 +253,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     recentViews,
     faqs: sanity?.faqs ?? [],
     relatedCollections,
+    categoryBlocks: categoryPage?.blocks ?? null,
     productsCount: collection.productsCount,
     notebookPosts,
   }
@@ -263,6 +276,7 @@ export default function CollectionPage() {
     recentViews,
     faqs,
     relatedCollections,
+    categoryBlocks,
     filtersApplied,
     productsCount,
     notebookPosts,
@@ -271,6 +285,12 @@ export default function CollectionPage() {
   // (hero, intro, FAQs, notebook rail). Pages > 1 are pagination-only and
   // strip those sections to avoid near-duplicate-content signals.
   const isCanonicalPage = page === 1
+  // Merchandised frame: present only when a live categoryPage doc resolved
+  // (the loader already restricts that to page 1).
+  const merchandised = !!categoryBlocks?.length
+  const merchandisedFaq = merchandised
+    ? (categoryBlocks!.find(b => b._type === 'faqBlock') ?? null)
+    : null
   const [params, setParams] = useSearchParams()
   const [starred, setStarred] = useState<Record<string, string>>({})
 
@@ -367,11 +387,22 @@ export default function CollectionPage() {
           }))}
         />
       )}
-      {isCanonicalPage && faqs.length > 0 && <FAQStructuredData faqs={faqs} />}
+      {/* One FAQPage node per document: the merchandised faqBlock wins over
+          the collectionPage faqs, never both. */}
+      {isCanonicalPage && !merchandisedFaq && faqs.length > 0 && <FAQStructuredData faqs={faqs} />}
+      {isCanonicalPage && merchandisedFaq && merchandisedFaq._type === 'faqBlock' && (
+        <FAQStructuredData faqs={merchandisedFaq.items} />
+      )}
 
       <Breadcrumbs items={breadcrumbItems} className="mb-4" />
 
-      {isCanonicalPage && heroImageUrl && (
+      {merchandised && categoryBlocks ? (
+        <div className="mb-8">
+          <CategoryBlockRenderer blocks={categoryBlocks} />
+        </div>
+      ) : null}
+
+      {isCanonicalPage && !merchandised && heroImageUrl && (
         <div className="mb-6 overflow-hidden rounded-2xl border border-line bg-cream-2">
           <picture>
             <source
@@ -407,14 +438,18 @@ export default function CollectionPage() {
         </div>
       )}
 
-      <header className="mb-6">
-        <h1
-          className="text-3xl md:text-4xl font-bold text-ink"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {h1}{page > 1 ? ` — Page ${page}` : ''}
-        </h1>
-      </header>
+      {/* The merchandised masthead carries the H1; rendering both would put
+          two h1 elements on the page. */}
+      {!merchandised && (
+        <header className="mb-6">
+          <h1
+            className="text-3xl md:text-4xl font-bold text-ink"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            {h1}{page > 1 ? ` — Page ${page}` : ''}
+          </h1>
+        </header>
+      )}
 
       <div className="flex flex-col md:flex-row gap-8">
         <div className="flex flex-col gap-4 md:w-[260px] md:shrink-0">
@@ -538,7 +573,10 @@ export default function CollectionPage() {
           Both blocks live in the SSR'd DOM so Google reads everything; the
           "more" toggle is a CSS class swap, and the FAQ uses native <details>
           which keeps every answer in DOM regardless of open state. */}
-      {isCanonicalPage && (introHtml || faqs.length > 0) && (
+      {/* The merchandised blocks carry their own editorial layer and FAQ
+          accordion; doubling the collectionPage boxes under them would repeat
+          the same content on one page. */}
+      {isCanonicalPage && !merchandised && (introHtml || faqs.length > 0) && (
         <div className="mt-16">
           <CollectionInfoBoxes introHtml={introHtml} faqs={faqs} />
         </div>
