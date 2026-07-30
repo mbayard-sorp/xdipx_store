@@ -19005,37 +19005,104 @@ var init_notebook_healthcheck_server = __esm({
 // app/lib/profit.server.ts
 var profit_server_exports = {};
 __export(profit_server_exports, {
+  accumulateOrders: () => accumulateOrders,
+  computeProfitForDate: () => computeProfitForDate,
+  costLineItem: () => costLineItem,
+  costsFromOrderMetafields: () => costsFromOrderMetafields,
+  deleteSeedProfitRows: () => deleteSeedProfitRows,
   getDashboardStats: () => getDashboardStats,
-  writeProfitSummary: () => writeProfitSummary
+  getProfitReconciliation: () => getProfitReconciliation,
+  getProfitRows: () => getProfitRows,
+  nextUtcDate: () => nextUtcDate,
+  ordersSearchQuery: () => ordersSearchQuery,
+  writeProfitSummary: () => writeProfitSummary,
+  yesterdayUtc: () => yesterdayUtc
 });
-import { eq as eq12, sql as sql4 } from "drizzle-orm";
-async function writeProfitSummary() {
-  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  const [todayDeal] = await db.select().from(dealHistory).where(eq12(dealHistory.dealDate, today)).limit(1);
-  if (!todayDeal) return;
-  const { shopifyAdmin: shopifyAdmin2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
-  const ordersData = await shopifyAdmin2(`/orders.json?status=paid&created_at_min=${today}T00:00:00-00:00`);
-  let totalOrders = 0;
-  let totalRevenue = 0;
-  let totalCogs = 0;
-  for (const order of ordersData.orders) {
-    totalOrders++;
-    totalRevenue += parseFloat(order.total_price);
-    for (const item of order.line_items) {
-      const cost = parseFloat(todayDeal.wholesaleCost ?? "0");
-      totalCogs += cost * item.quantity;
+import { and as and4, eq as eq12, gte as gte2, like, lt as lt2, sql as sql4 } from "drizzle-orm";
+function yesterdayUtc(now = Date.now()) {
+  return new Date(now - 864e5).toISOString().slice(0, 10);
+}
+function nextUtcDate(date2) {
+  return new Date((/* @__PURE__ */ new Date(`${date2}T00:00:00Z`)).getTime() + 864e5).toISOString().slice(0, 10);
+}
+function ordersSearchQuery(date2) {
+  return `created_at:>='${date2}T00:00:00Z' created_at:<'${nextUtcDate(date2)}T00:00:00Z' financial_status:paid status:any`;
+}
+function costsFromOrderMetafields(metafields) {
+  const out = /* @__PURE__ */ new Map();
+  for (const mf of metafields) {
+    if (!mf.key.startsWith("profit_")) continue;
+    const sku = mf.key.slice("profit_".length);
+    if (!sku) continue;
+    try {
+      const parsed = JSON.parse(mf.value);
+      const cost = Number(parsed.wholesale_cost);
+      if (Number.isFinite(cost) && cost > 0) out.set(sku, cost);
+    } catch {
     }
   }
-  const totalProfit = totalRevenue - totalCogs;
-  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+  return out;
+}
+function costLineItem(line, orderCosts) {
+  const qty = Number.isFinite(line.quantity) && line.quantity > 0 ? line.quantity : 0;
+  if (qty === 0) return { cost: 0, source: "none" };
+  const fromOrder = line.sku ? orderCosts.get(line.sku) : void 0;
+  if (fromOrder !== void 0 && fromOrder > 0) {
+    return { cost: fromOrder * qty, source: "order-metafield" };
+  }
+  const unit = Number(line.variant?.inventoryItem?.unitCost?.amount);
+  if (Number.isFinite(unit) && unit > 0) {
+    return { cost: unit * qty, source: "inventory-item" };
+  }
+  return { cost: null, source: "none" };
+}
+function accumulateOrders(orders, into) {
+  const t = { ...into };
+  for (const order of orders) {
+    t.totalOrders += 1;
+    const revenue = Number(order.totalPriceSet?.shopMoney?.amount ?? "0");
+    if (Number.isFinite(revenue)) t.totalRevenue += revenue;
+    const orderCosts = costsFromOrderMetafields(order.metafields?.nodes ?? []);
+    for (const line of order.lineItems?.nodes ?? []) {
+      const { cost } = costLineItem(line, orderCosts);
+      if (cost === null) {
+        t.cogsMissingUnits += Math.max(0, line.quantity);
+      } else {
+        t.totalCogs += cost;
+      }
+    }
+  }
+  t.totalProfit = t.totalRevenue - t.totalCogs;
+  t.avgOrderValue = t.totalOrders > 0 ? t.totalRevenue / t.totalOrders : 0;
+  return t;
+}
+async function computeProfitForDate(date2) {
+  const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const search = ordersSearchQuery(date2);
+  let totals = { ...EMPTY_TOTALS };
+  let cursor = null;
+  do {
+    const page = await adminGraphQL2(ORDERS_QUERY2, {
+      query: search,
+      first: ORDERS_PAGE,
+      after: cursor
+    });
+    totals = accumulateOrders(page.orders.nodes ?? [], totals);
+    cursor = page.orders.pageInfo?.hasNextPage ? page.orders.pageInfo.endCursor ?? null : null;
+  } while (cursor !== null);
+  return totals;
+}
+async function writeProfitSummary(targetDate) {
+  const date2 = targetDate ?? yesterdayUtc();
+  const totals = await computeProfitForDate(date2);
   await db.insert(dailyProfitSummary).values({
-    summaryDate: today,
-    totalOrders,
-    totalRevenue: totalRevenue.toFixed(2),
-    totalCogs: totalCogs.toFixed(2),
-    totalProfit: totalProfit.toFixed(2),
-    avgOrderValue: avgOrderValue.toFixed(2),
-    featuredSku: todayDeal.sku
+    summaryDate: date2,
+    totalOrders: totals.totalOrders,
+    totalRevenue: totals.totalRevenue.toFixed(2),
+    totalCogs: totals.totalCogs.toFixed(2),
+    totalProfit: totals.totalProfit.toFixed(2),
+    avgOrderValue: totals.avgOrderValue.toFixed(2),
+    cogsMissingUnits: totals.cogsMissingUnits
   }).onConflictDoUpdate({
     target: dailyProfitSummary.summaryDate,
     set: {
@@ -19043,14 +19110,37 @@ async function writeProfitSummary() {
       totalRevenue: sql4`excluded.total_revenue`,
       totalCogs: sql4`excluded.total_cogs`,
       totalProfit: sql4`excluded.total_profit`,
-      avgOrderValue: sql4`excluded.avg_order_value`
+      avgOrderValue: sql4`excluded.avg_order_value`,
+      cogsMissingUnits: sql4`excluded.cogs_missing_units`
     }
   });
-  await db.update(dealHistory).set({
-    unitsSold: totalOrders,
-    totalRevenue: totalRevenue.toFixed(2),
-    totalProfit: totalProfit.toFixed(2)
-  }).where(eq12(dealHistory.dealDate, today));
+  return totals;
+}
+async function getProfitReconciliation(date2) {
+  const day = date2 ?? yesterdayUtc();
+  const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const counted = await adminGraphQL2(
+    `query ProfitReconcile($query: String!) { ordersCount(query: $query, limit: 10000) { count } }`,
+    { query: ordersSearchQuery(day) }
+  );
+  const [row] = await db.select({
+    totalOrders: dailyProfitSummary.totalOrders,
+    cogsMissingUnits: dailyProfitSummary.cogsMissingUnits
+  }).from(dailyProfitSummary).where(eq12(dailyProfitSummary.summaryDate, day)).limit(1);
+  const shopifyPaidOrders = counted.ordersCount?.count ?? 0;
+  const summaryOrders = row ? row.totalOrders ?? 0 : null;
+  return {
+    date: day,
+    shopifyPaidOrders,
+    summaryOrders,
+    summaryExists: !!row,
+    match: !!row && summaryOrders === shopifyPaidOrders,
+    cogsMissingUnits: row?.cogsMissingUnits ?? 0
+  };
+}
+async function deleteSeedProfitRows() {
+  const deleted = await db.delete(dailyProfitSummary).where(like(dailyProfitSummary.featuredSku, "SEED-%")).returning({ date: dailyProfitSummary.summaryDate });
+  return deleted.length;
 }
 async function getDashboardStats(days = 30) {
   const rows = await db.select().from(dailyProfitSummary).orderBy(sql4`${dailyProfitSummary.summaryDate} DESC`).limit(days);
@@ -19061,11 +19151,48 @@ async function getDashboardStats(days = 30) {
   }), { revenue: 0, profit: 0, orders: 0 });
   return { rows, total: total2 };
 }
+async function getProfitRows(fromDate, toDate) {
+  return db.select().from(dailyProfitSummary).where(and4(
+    gte2(dailyProfitSummary.summaryDate, fromDate),
+    lt2(dailyProfitSummary.summaryDate, nextUtcDate(toDate))
+  )).orderBy(dailyProfitSummary.summaryDate);
+}
+var ORDERS_PAGE, ORDERS_QUERY2, EMPTY_TOTALS;
 var init_profit_server = __esm({
   "app/lib/profit.server.ts"() {
     "use strict";
     init_db_server();
     init_schema();
+    ORDERS_PAGE = 50;
+    ORDERS_QUERY2 = `
+  query ProfitOrders($query: String!, $first: Int!, $after: String) {
+    orders(first: $first, after: $after, query: $query) {
+      nodes {
+        id
+        name
+        createdAt
+        totalPriceSet { shopMoney { amount } }
+        metafields(first: 25, namespace: "xdipx") { nodes { key value } }
+        lineItems(first: 50) {
+          nodes {
+            sku
+            quantity
+            variant { id inventoryItem { unitCost { amount } } }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+    EMPTY_TOTALS = {
+      totalOrders: 0,
+      totalRevenue: 0,
+      totalCogs: 0,
+      totalProfit: 0,
+      avgOrderValue: 0,
+      cogsMissingUnits: 0
+    };
   }
 });
 
@@ -24078,7 +24205,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and4, asc as asc4, eq as eq17, inArray as inArray5, isNull as isNull2, sql as sql13 } from "drizzle-orm";
+import { and as and5, asc as asc4, eq as eq17, inArray as inArray5, isNull as isNull2, sql as sql13 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -24224,7 +24351,7 @@ function passesQualityGate(writes) {
   return true;
 }
 async function submitEnrichmentBatch(cap, opts = {}) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
     eq17(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichBatchId),
@@ -24268,7 +24395,7 @@ async function detectImportEnrichStall(enabled) {
     const cutoff = new Date(Date.now() - STALL_AGE_HOURS * 3600 * 1e3);
     const rows = await db.select({
       anchor: sql13`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
-    }).from(importCandidates).where(and4(
+    }).from(importCandidates).where(and5(
       eq17(importCandidates.status, "imported"),
       isNull2(importCandidates.enrichedAt),
       isNull2(importCandidates.enrichBatchId),
@@ -24301,7 +24428,7 @@ async function collectEnrichmentBatch() {
     batchId: importCandidates.enrichBatchId,
     productId: dealHistory.shopifyProductId,
     enrichAttempts: importCandidates.enrichAttempts
-  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
     eq17(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichFailedAt),
@@ -24365,7 +24492,7 @@ async function publishEnrichedProducts() {
     sku: dealHistory.sku,
     title: dealHistory.seoTitle,
     categories: dealHistory.categories
-  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and4(
+  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
     eq17(importCandidates.status, "imported"),
     sql13`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
@@ -26180,7 +26307,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and5, eq as eq21, inArray as inArray7, sql as sql14 } from "drizzle-orm";
+import { and as and6, eq as eq21, inArray as inArray7, sql as sql14 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -26452,7 +26579,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql14`count(*)::int` }).from(importCandidates).where(and5(eq21(importCandidates.status, "imported"), eq21(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql14`count(*)::int` }).from(importCandidates).where(and6(eq21(importCandidates.status, "imported"), eq21(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -26470,7 +26597,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
     msrp: importCandidates.msrp,
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
-  }).from(importCandidates).where(and5(
+  }).from(importCandidates).where(and6(
     eq21(importCandidates.status, "pending"),
     inArray7(importCandidates.masterKey, cappedKeys)
   )).orderBy(importCandidates.tier, sql14`${importCandidates.dealScore} DESC NULLS LAST`);
@@ -27168,17 +27295,17 @@ __export(ticket_out_of_band_sweep_server_exports, {
   isMergedOutOfBand: () => isMergedOutOfBand,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and6, desc as desc2, eq as eq22, lt as lt2, sql as sql15 } from "drizzle-orm";
+import { and as and7, desc as desc2, eq as eq22, lt as lt3, sql as sql15 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
     ticketId: homepageTeamSuggestions.id,
     ref: suggestionLinks.ref,
     linkedAt: suggestionLinks.createdAt
-  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and6(
+  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
     eq22(homepageTeamSuggestions.status, "verified"),
     eq22(suggestionLinks.kind, "pr"),
-    lt2(homepageTeamSuggestions.updatedAt, cutoff)
+    lt3(homepageTeamSuggestions.updatedAt, cutoff)
   )).orderBy(homepageTeamSuggestions.updatedAt, desc2(suggestionLinks.createdAt));
   const seen = /* @__PURE__ */ new Set();
   const out = [];
@@ -27196,7 +27323,7 @@ function isMergedOutOfBand(pr) {
   return pr.merged === true;
 }
 async function markPrLinkMerged(ticketId, prRef) {
-  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and6(
+  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and7(
     eq22(suggestionLinks.suggestionId, ticketId),
     eq22(suggestionLinks.kind, "pr"),
     eq22(suggestionLinks.ref, prRef)
@@ -27238,10 +27365,10 @@ async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
 }
 async function countStrandedVerifiedTickets() {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const [row] = await db.select({ n: sql15`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and6(
+  const [row] = await db.select({ n: sql15`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
     eq22(homepageTeamSuggestions.status, "verified"),
     eq22(suggestionLinks.kind, "pr"),
-    lt2(homepageTeamSuggestions.updatedAt, cutoff)
+    lt3(homepageTeamSuggestions.updatedAt, cutoff)
   ));
   return row?.n ?? 0;
 }
@@ -27266,7 +27393,7 @@ __export(settings_server_exports, {
   recentSettingChanges: () => recentSettingChanges,
   setPipelineSettingAudited: () => setPipelineSettingAudited
 });
-import { desc as desc3, eq as eq23, gte as gte2 } from "drizzle-orm";
+import { desc as desc3, eq as eq23, gte as gte3 } from "drizzle-orm";
 async function setPipelineSettingAudited(key, value, actor, source) {
   const [existing] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq23(pipelineSettings.key, key)).limit(1);
   const oldValue = existing?.value ?? null;
@@ -27297,7 +27424,7 @@ async function recentSettingChanges(sinceHours = 24, limit = 20) {
     actor: settingsAuditLog.actor,
     source: settingsAuditLog.source,
     changedAt: settingsAuditLog.changedAt
-  }).from(settingsAuditLog).where(gte2(settingsAuditLog.changedAt, since)).orderBy(desc3(settingsAuditLog.changedAt)).limit(limit);
+  }).from(settingsAuditLog).where(gte3(settingsAuditLog.changedAt, since)).orderBy(desc3(settingsAuditLog.changedAt)).limit(limit);
 }
 var init_settings_server = __esm({
   "app/lib/settings.server.ts"() {
@@ -27345,7 +27472,7 @@ __export(release_engine_server_exports, {
   summarizeSmoke: () => summarizeSmoke,
   utcDay: () => utcDay3
 });
-import { and as and7, desc as desc4, eq as eq24, sql as sql16 } from "drizzle-orm";
+import { and as and8, desc as desc4, eq as eq24, sql as sql16 } from "drizzle-orm";
 function utcDay3(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -27686,7 +27813,7 @@ async function runSelfCheck(opts = {}) {
   return { ok: false, problems };
 }
 async function resolveTicketForPr(pr) {
-  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and7(
+  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and8(
     eq24(suggestionLinks.kind, "pr"),
     sql16`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
@@ -27694,7 +27821,7 @@ async function resolveTicketForPr(pr) {
   if (match) return loadTicketFacts(match.suggestionId);
   const titleId = parseTicketRefFromTitle(pr.title);
   if (titleId === null) return null;
-  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and7(
+  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and8(
     eq24(suggestionLinks.kind, "pr"),
     eq24(suggestionLinks.suggestionId, titleId)
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
@@ -28245,7 +28372,7 @@ async function markPrLinksState(pending, state) {
   if (pending.ticketId === null) return;
   try {
     await db.update(suggestionLinks).set({ state: state.slice(0, 16), updatedAt: /* @__PURE__ */ new Date() }).where(
-      and7(
+      and8(
         eq24(suggestionLinks.suggestionId, pending.ticketId),
         eq24(suggestionLinks.kind, "pr"),
         eq24(suggestionLinks.ref, pending.prUrl)
@@ -29131,7 +29258,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq26, and as and8, inArray as inArray8, desc as desc5, isNotNull, ne as ne3, sql as sql17 } from "drizzle-orm";
+import { eq as eq26, and as and9, inArray as inArray8, desc as desc5, isNotNull, ne as ne3, sql as sql17 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -29257,7 +29384,7 @@ async function frameReviewEnabled() {
   return v !== "false";
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
-  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and8(
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and9(
     sql17`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
     eq26(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
@@ -29280,7 +29407,7 @@ async function advanceSceneFrame(job) {
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
-    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and8(
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and9(
       eq26(videoJobs.sceneFrameAssetId, reuseId),
       eq26(videoJobs.presenter, job.presenter),
       inArray8(videoJobs.stage, FRAME_APPROVED_STAGES)
@@ -30140,8 +30267,8 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and9, eq: eq29, isNull: isNull3, lt: lt3 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and9(isNull3(metaCapiFailures2.resolvedAt), lt3(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and10, eq: eq29, isNull: isNull3, lt: lt4 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and10(isNull3(metaCapiFailures2.resolvedAt), lt4(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
@@ -30164,8 +30291,8 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and9, eq: eq29, isNull: isNull3, lt: lt3 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and9(isNull3(ga4PurchaseFailures2.resolvedAt), lt3(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and10, eq: eq29, isNull: isNull3, lt: lt4 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and10(isNull3(ga4PurchaseFailures2.resolvedAt), lt4(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
@@ -30803,13 +30930,7 @@ async function handleOrderCreated(order) {
         type: "json"
       }
     }).catch((err2) => console.error("[webhook] metafield write failed:", err2));
-    const dealHistoryUpdate = db2.update(dealHistory).set({
-      unitsSold: db2.$count(dealHistory, eq28(dealHistory.sku, lineItem.sku)),
-      totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
-      totalProfit: String(profit * lineItem.quantity)
-    }).where(eq28(dealHistory.sku, lineItem.sku)).catch(() => {
-    });
-    await Promise.all([metafieldWrite, dealHistoryUpdate]);
+    await metafieldWrite;
   }));
   try {
     const rows = order.line_items.map((li, i) => ({
@@ -30961,18 +31082,16 @@ async function handleOrderCreated(order) {
 }
 async function handleOrderFulfilled(order) {
   if (!order.email || order.line_items.length === 0) return;
-  const { shopifyAdmin: shopifyAdmin2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
   const { getReviewSettings: getReviewSettings2, createInvite: createInvite2 } = await Promise.resolve().then(() => (init_reviews_server(), reviews_server_exports));
   const settings = await getReviewSettings2();
   const sendAfter = new Date(Date.now() + settings.inviteDelayDays * 24 * 60 * 60 * 1e3);
   for (const lineItem of order.line_items) {
     if (!lineItem.sku) continue;
-    const searchRes = await shopifyAdmin2(
-      `/products.json?limit=1&sku=${encodeURIComponent(lineItem.sku)}`,
-      "GET"
-    ).catch(() => null);
-    const productId = searchRes?.products?.[0]?.id;
-    if (!productId) continue;
+    const productId = lineItem.product_id;
+    if (!productId) {
+      console.warn(`[webhook:order-fulfilled] line item ${lineItem.sku} has no product_id, skipping invite`);
+      continue;
+    }
     const shopifyProductId = `gid://shopify/Product/${productId}`;
     const reviewerName = [
       order.customer?.first_name,

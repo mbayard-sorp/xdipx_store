@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
-import { dealHistory, ga4PurchaseFailures, metaCapiFailures, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
+import { ga4PurchaseFailures, metaCapiFailures, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
 import { eq, sql } from 'drizzle-orm'
 
 // ─── HMAC verification ────────────────────────────────────────────────────
@@ -86,17 +86,13 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
       },
     }).catch(err => console.error('[webhook] metafield write failed:', err))
 
-    const dealHistoryUpdate = db
-      .update(dealHistory)
-      .set({
-        unitsSold:    db.$count(dealHistory, eq(dealHistory.sku, lineItem.sku)),
-        totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
-        totalProfit:  String(profit * lineItem.quantity),
-      })
-      .where(eq(dealHistory.sku, lineItem.sku))
-      .catch(() => {/* non-critical */})
-
-    await Promise.all([metafieldWrite, dealHistoryUpdate])
+    // No deal_history rollup here. It used to write unitsSold from a COUNT of
+    // deal_history rows matching the SKU (an aggregate that never meant units
+    // sold) and overwrite, rather than accumulate, revenue and profit per line
+    // item — so a two-item order left the totals reflecting only whichever
+    // line finished last. Revenue and profit come from daily_profit_summary,
+    // which is computed from Shopify's own paid orders.
+    await metafieldWrite
   }))
 
   // Persist raw line items for analytics + copurchase rollups
@@ -305,7 +301,6 @@ interface ShopifyFulfilledOrder extends ShopifyOrder {
 async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void> {
   if (!order.email || order.line_items.length === 0) return
 
-  const { shopifyAdmin } = await import('../app/lib/shopify.server.js')
   const { getReviewSettings, createInvite } = await import('../app/lib/reviews.server.js')
   const settings = await getReviewSettings()
 
@@ -319,13 +314,17 @@ async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void>
   for (const lineItem of order.line_items) {
     if (!lineItem.sku) continue
 
-    const searchRes = await shopifyAdmin(
-      `/products.json?limit=1&sku=${encodeURIComponent(lineItem.sku)}`,
-      'GET',
-    ).catch(() => null) as { products?: { id: number }[] } | null
-
-    const productId = searchRes?.products?.[0]?.id
-    if (!productId) continue
+    // The product id is already in the fulfillment payload. This used to call
+    // `/products.json?limit=1&sku=...`, but REST `/products.json` has no `sku`
+    // filter: Shopify ignored it and returned the first product in the shop, so
+    // every invite was either attributed to an unrelated product or dropped.
+    // `review_invites` is empty despite a real fulfilled order, which is also
+    // why /cron/review-reminders has never had anything to send.
+    const productId = lineItem.product_id
+    if (!productId) {
+      console.warn(`[webhook:order-fulfilled] line item ${lineItem.sku} has no product_id, skipping invite`)
+      continue
+    }
 
     const shopifyProductId = `gid://shopify/Product/${productId}`
     const reviewerName = [
