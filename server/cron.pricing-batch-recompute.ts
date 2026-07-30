@@ -6,15 +6,22 @@
 // Two behaviours worth knowing about:
 //
 //  1. A failure here used to be a console.error and a 500, nothing else. Prod
-//     console output is swallowed (handleError routes to Sentry), so on both
-//     2026-07-28 and 07-29 this job wrote no pricing rows at all and the first
-//     anyone knew of it was an audit days later. It now captures to Sentry,
-//     files a deduped ticket, and emails the owner.
+//     console output is swallowed (handleError routes to Sentry), so the
+//     scheduled pass could die without anyone hearing: on 2026-07-28 the 07:00
+//     run produced nothing and was only rescued by hand at 14:48, and on
+//     2026-07-29 nothing ran at all. The first anyone knew was an audit days
+//     later. It now captures to Sentry, files a deduped ticket, and emails the
+//     owner. (An earlier version of this comment said both days wrote no rows;
+//     07-28 did write 4,705, just seven hours late and only because a human
+//     noticed. That is the failure this alarm is for.)
 //  2. The pricing-ops agent can POST here to catch up a missed run. Catch-up
 //     runs pass trigger='batch_catchup' so they are distinguishable from the
 //     scheduled 07:00 pass. That distinction is the whole point: while both
 //     wrote trigger='batch', every late rescue reset the agent's 26-hour
 //     look-back, so a dead daily cron looked like a healthy every-other-day one.
+//  3. It prunes aged-out pricing_audit_log noise. That table had no retention
+//     and was at 310,170 rows growing ~5k/day. See prunePricingAuditLog for why
+//     only two of the four statuses are eligible.
 
 import type { Request, Response } from 'express'
 
@@ -39,7 +46,17 @@ export async function handlePricingBatchRecompute(req: Request, res: Response): 
       )
     }
 
-    res.json({ ok: true, trigger, ...result })
+    // Housekeeping rides the same handler. Independently guarded: a recompute
+    // that succeeded must never be reported as failed because a DELETE did not.
+    let pruned = 0
+    try {
+      const { prunePricingAuditLog } = await import('../app/lib/pricing-apply-v2.server.js')
+      pruned = await prunePricingAuditLog()
+    } catch (e) {
+      console.warn('[cron:pricing-batch-recompute] audit-log prune skipped (ignored):', e)
+    }
+
+    res.json({ ok: true, trigger, pruned, ...result })
   } catch (err) {
     console.error('[cron:pricing-batch-recompute]', err)
     await alertPricingFailure(err, trigger)
