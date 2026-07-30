@@ -41,10 +41,23 @@ Invoked by `store-strategist` before brief synthesis:
 4. Hand `store-strategist` a **Program Status** section for the weekly brief: per program, one
    line of overall RAG + phase progress, then top 3 risks and any explicit owner asks. Keep it
    under ~15 lines per program.
-5. For each RED milestone and each newly-AMBER one, file
+5. **Status is a report, not a ticket.** A milestone's RED/AMBER *status* goes to the brief
+   (Step 4) and the scoreboard/decision run events (Step 3) — never as a suggestion row. A status
+   has no executor and can never reach a terminal state on the bus, so filing it as a row is what
+   built the 13-row `process` pileup that re-files itself every week (rows #55-59 came back as
+   #108-115). `routine-seo-curation.md` already applies this exact rule to its weekly report.
+   File a suggestion **only when a milestone genuinely needs work done**, and then exactly ONE row
+   in the kind that has an executor: `kind:'code'` (claimed by R-DEV) for a code/schema/script
+   change, or `kind:'instructions'` (applied by `agent-editor`) for a playbook/agent-def/charter
+   edit. **Never `kind:'process'` for tracker work** — `process` has no automated executor and ages
+   until the owner reads it, so choosing it for executable work is choosing to delay that work
+   indefinitely. Give every such row `dedupeKey:'tracker:<milestone-tag>'` (e.g.
+   `tracker:p0-2-restock`, no date in it) so next week's re-file is a no-op that returns the live
+   ticket id and you comment on that ticket instead of opening a new one. Cap at ~8 work-rows per
+   run, ranked; the long tail lives in the scoreboard event.
    `POST /api/team/suggestion {op:'create', team:'strategy', targetTeam:<owning team>,
-   category:'other', kind:'process', suggestion:<milestone id + what's missing + the unblock>,
-   cxRisk:'low'}`. Cap at ~8 per run, ranked; the long tail lives in the scoreboard event.
+   category:'other', kind:'code'|'instructions', suggestion:<milestone id + what's missing + the
+   unblock + an explicit DONE WHEN>, dedupeKey:'tracker:<tag>', cxRisk:'low'}`.
 6. If any milestone row or the status log changed: update the tracker doc(s), commit on branch
    `pm/tracker-<YYYY-MM-DD>` touching ONLY `docs/store-team/trackers/*.md`, push, and open a
    docs-only PR (you never merge it; the release engine merges after CI and the allowlist check).
@@ -64,9 +77,10 @@ Invoked by `store-strategist` before brief synthesis:
   already covered by any NON-TERMINAL suggestion from a prior run (`proposed`, `approved`,
   `in_progress`, `pr_open`, `in_review`, `verified`, `blocked`) — not just `proposed`. Auto-approve
   writes new rows straight to `approved`, so a `proposed`-only check never matched and every RED
-  milestone was re-filed weekly: rows #55-59 (07-20) came back verbatim as #108-115 (07-27). Pass a
-  `dedupeKey` keyed on the milestone id with NO date in it, so the bus enforces this even when the
-  check is wrong.
+  milestone was re-filed weekly: rows #55-59 (07-20) came back verbatim as #108-115 (07-27). Pass
+  `dedupeKey:'tracker:<milestone-tag>'` (the milestone id, NO date in it), so the bus enforces this
+  even when the check is wrong — and only ever on a work-row in an executable kind, since a status
+  is not a row at all (Step 5).
 - **Honest uncertainty.** If a probe can't run (API down, table missing), report AMBER-unverified
   with the failure — never guess a status to keep the report tidy.
 </guardrails>

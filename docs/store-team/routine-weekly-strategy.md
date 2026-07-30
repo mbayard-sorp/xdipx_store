@@ -98,8 +98,12 @@ curl -s -X POST "$BASE_URL/api/team/event" \
    gaps, a growing needs-review or price-drop backlog), and hand catalog direction into the brief.
 5. `program-manager` (run last) — audits `docs/store-team/trackers/*.md` against each
    milestone's evidence probe, recomputes status + RAG per the trackers README, posts a
-   `decision` event per RAG change + an audit scoreboard event, files kind `process`
-   suggestions for Red/newly-Amber milestones, opens a docs-only tracker PR
+   `decision` event per RAG change + an audit scoreboard event, reports each milestone's
+   **status** only in those events and the Program Status brief section (a RED tracker line is a
+   report, never a suggestion row — a status has no executor and can never reach a terminal state
+   on the bus), files a suggestion **only when a milestone genuinely needs work done** and then in
+   an executable kind (`code` for R-DEV, `instructions` for agent-editor, **never** `process`) with
+   `dedupeKey:'tracker:<milestone-tag>'` so a re-file is a no-op, opens a docs-only tracker PR
    (`pm/tracker-<date>`, merged by the release engine after CI, never by the PM) when rows
    changed, and hands the strategist a
    **Program Status** section (overall RAG + top risks + owner asks per program) to include
