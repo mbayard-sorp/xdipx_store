@@ -76,6 +76,18 @@ npm run typecheck && npm test && npm run build
 Run them yourself rather than trusting the PR body. If one fails, that is your `last_error`, and it
 should include the actual error text.
 
+**The stale-artifact bounce.** CI's `check` job also asserts the tree is clean after a build, and
+the one file that legitimately goes dirty is `server/vercel-entry.mjs`, a committed build artifact.
+When that is the *only* thing wrong with an otherwise-correct PR, the change is not defective and
+your `last_error` must say so precisely, so the next dev pass fixes it in one commit instead of
+re-diagnosing the ticket:
+
+> CI `check` red only because `server/vercel-entry.mjs` is stale. Logic verified correct. Fix:
+> `npm run build && git add server/vercel-entry.mjs && git commit`, then push. No other changes needed.
+
+Bounce it, do not verify it. A red `check` is a hard gate and the release engine will not merge over
+it. But an unspecific `last_error` here is what turns a one-commit fix into a burned attempt.
+
 ## Step 5 — CI status and the rendered preview
 
 Cloud routines can only reach xdipx.com, so **`/api/team/pr` is the only path that works** for CI

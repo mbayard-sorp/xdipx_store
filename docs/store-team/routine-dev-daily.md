@@ -127,6 +127,23 @@ A pre-existing failure unrelated to your change does not block the PR, but you m
 paste the error text in the PR body. Silently passing over a red check is the one thing that makes
 this whole loop untrustworthy.
 
+4b. **Commit the rebuilt artifact, or your PR bounces.** `server/vercel-entry.mjs` is a build
+   artifact that is committed on purpose, and CI's `check` job fails the PR when it disagrees with a
+   fresh `npm run build`. Running the build in step 4 is not enough: the build leaves the
+   regenerated file dirty in your tree, and pushing without it turns a correct change into a red
+   `check`, which QA has to bounce and the release engine refuses to merge. So after step 4, always:
+
+```bash
+git status --short          # expect server/vercel-entry.mjs, and nothing else, to be dirty
+git add server/vercel-entry.mjs && git commit -m "chore: rebuild vercel entry artifact"
+```
+
+   A clean tree after `npm run build` means the bundle did not change and there is nothing to
+   commit; that is normal for diffs that touch no bundled source. Anything dirty *other than*
+   `server/vercel-entry.mjs` is a real problem: name it in the PR body, do not blanket `git add .`.
+   This one missing step bounced tickets #291 and #323 in the 2026-07-30 QA pass, and it is the
+   single most common reason a technically-correct agent PR never reaches the engine.
+
 5. Open the PR against `main`, titled `agents: ticket #<id>: <summary>`. Body: what the ticket
    asked for, what you changed and why, the local verification output, and anything the reviewer
    should look at first. **Never merge it. Never push to `main`.**
