@@ -167,13 +167,7 @@ file a suggestion (`team:'social'`, kind `instructions`) proposing the concrete 
 playbook — that is how the owner's review period trains you. Organic winners worth paid
 amplification → suggestion with `targetTeam:'ads'`.
 
-## Step 8 — Spend + finish
-
-Log tokens (`feature:'social-drafts'`), then post the final run update
-(`status:'succeeded'`, summary = drafts written + reworks + gate results + retro verdict).
-
-
-## Inbound suggestions (read your own mail)
+## Step 7b — Inbound suggestions (read your own mail)
 
 Other agents file findings *at* this team, and before 2026-07-29 no routine read them: the playbooks
 only ever wrote suggestions, so routed findings aged in `approved` forever.
@@ -190,7 +184,16 @@ gates it already obeys. Close each one you did execute so tomorrow's run does no
 ```bash
 -d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:social-media-manager","note":"<what changed>"}'
 ```
+Only `process` and `strategy` rows can be closed this way (`RUN_CLOSE_KINDS`). A `campaign`,
+`promo`, `instructions`, or `code` row returns 409 — those have their own executor, or the owner's,
+and are not yours to end. Note them instead.
+
 
 Looked but deliberately did not act (out of scope, no longer true, needs code)? Post
 `{"op":"note", ...}` with which and why and leave the status alone. Never close a row you did not
 execute: a false `applied` looks handled and is worse than an aging row.
+
+## Step 8 — Spend + finish
+
+Log tokens (`feature:'social-drafts'`), then post the final run update
+(`status:'succeeded'`, summary = drafts written + reworks + gate results + retro verdict).

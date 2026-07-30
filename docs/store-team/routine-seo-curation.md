@@ -6,8 +6,9 @@ consolidated (merge maps are PROPOSED as suggestions, never executed here), revi
 trend-scout's pending `trendTopicBrief` proposals (adopt/skip/expire), and plan the coming
 week's `seoContentBrief` queue (up to 7) that the daily content-writer consumes.
 
-Runs on the **Max subscription**. Recommended cadence: weekly, Sunday 16:00 UTC (before Monday's
-strategy run reads the results). Never call the site's Anthropic-keyed endpoints; the site is for
+Runs on the **Max subscription**. Cadence: weekly, **Sunday 19:00 UTC** (`0 19 * * 0`), before Monday's
+strategy run reads the results. Moved off 16:00 on 2026-07-29 because the content team's
+in-progress lock runs up to ~200 minutes from its 15:00 start and was swallowing the 16:00 slot. Never call the site's Anthropic-keyed endpoints; the site is for
 data reads and spend logging only. Sanity reads/writes go through the Sanity MCP tools.
 
 Auth on every `/api/team/*` call: header `x-team-secret: $TEAM_TOKEN` (falls back to
@@ -129,7 +130,10 @@ backlog); say so in the event. One `step` event (`phase:'planning'`) listing slu
 
 ## Step 6: Report + finish
 
-Compute and post the weekly report as ONE suggestion row (kind `process`, team `content`):
+Compute and post the weekly report as ONE **run event** (`POST /api/team/event`), not a suggestion
+row. A report has nothing to execute, so on the bus it can never reach a terminal state and just
+ages in `approved`: 22 of the 52 stuck `process` rows were exactly this. Events are the retro
+channel and are free. (Step 7 below already said this; line 132 used to say the opposite.)
 
 - Triage: approved / rejected / left pending counts.
 - Trend review: adopted / skipped / expired counts, plus trend `suggestedTerms` missing from the

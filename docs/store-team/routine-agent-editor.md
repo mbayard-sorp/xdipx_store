@@ -40,7 +40,13 @@ done it, and nothing could close a row in a kind with no automated executor. 52 
 rows built up that way with zero completions ever. Two ops fix it; use them first, capped at **10
 rekinds and 10 retires per run** so a bad judgement call is small and reviewable.
 
-1. List approved `process` and `strategy` rows (`{"op":"list","status":"approved","kind":"process"}`).
+1. List the approved rows in the three kinds you may dispose of — `process`, `strategy`, `program`
+   (`AGENT_RETIRE_KINDS` in `app/lib/team.server.ts`). One call per kind:
+   ```bash
+   -d '{"op":"list","status":"approved","kind":"process"}'
+   ```
+   Only `process` can be **rekinded** (`REKIND_FROM_KINDS`). A `strategy` or `program` row can be
+   retired but not re-filed, so for those the choice is retire or leave.
 2. **Re-file the misfiled.** A row asking for a playbook or agent-definition edit is `instructions`;
    one that needs code is `code` (it will then be claimed by R-DEV, not by you):
    ```bash
@@ -65,15 +71,27 @@ rekinds and 10 retires per run** so a bad judgement call is small and reviewable
 1. Read the suggestion and the files it names. Too vague to implement faithfully → leave it
    approved, post a `decision` event saying what's missing.
 2. Branch `agents/suggestion-<id>` from the default branch.
-3. Minimal diff, allowlisted files only (`.claude/agents/*.md`, `docs/store-team/*.md`,
-   `docs/homepage-team/*.md`; `docs/ads-policy.md`/`docs/emma-voice.md` only when explicitly
-   targeted and risk-approved). Diff-before-write: already satisfied → mark `applied` with a note,
-   no empty PR.
-4. **Refuse and flag** (decision event) any suggestion that would weaken a money valve, the Emma
-   voice gate, MAP rules, propose-only discipline, or the improvement loop's own human gates. Then
-   **dispose of the row** rather than leaving it approved: retire it with the refusal as the note, or
-   rekind it if another lane could do it safely. A refused row left approved is re-listed and
-   re-evaluated on every future run forever, which is exactly what happened to #7 from 2026-07-12.
+3. Minimal diff, allowlisted files only: **`.claude/agents/*.md`, `docs/store-team/*.md`,
+   `docs/homepage-team/*.md`, and nothing else.** That is the literal regex in
+   `.github/workflows/agent-allowlist.yml`, and it is depth-1 `.md` only. One file outside it fails
+   the check for the *whole* PR, permanently — so a suggestion asking you to touch anything else is
+   a suggestion you cannot execute on an `agents/` branch. Say so in a `decision` event and leave
+   the row for the owner.
+   Diff-before-write: already satisfied → mark `applied` with a note, no empty PR.
+4. **Refuse and flag** any suggestion that would weaken a money valve, the Emma voice gate, MAP
+   rules, propose-only discipline, or the improvement loop's own human gates. Post a `decision`
+   event stating what it would have weakened, and **leave the row approved** for the owner.
+
+   Do not try to retire or rekind it. Your apply queue is `instructions`/`agent-def`/`config`, and
+   the bus rejects both ops on exactly those kinds: `AGENT_RETIRE_KINDS` is
+   `process|strategy|program` and `REKIND_FROM_KINDS` is `process`, so either call returns 409. That
+   fence is deliberate, and the code comment says why — being able to retire your own instruction
+   rows is being able to dismiss the suggestions that constrain you. An earlier version of this step
+   told you to dispose of the row anyway, which was an instruction the API could not honour.
+
+   Yes, this means a refused row is re-listed on every future run. Re-reading it is cheap; the
+   alternative is a hole in the only fence pointed at you. Skip it fast on sight of your own prior
+   `decision` event.
 5. Open the PR (never merge it yourself; the release engine does that once the gates pass): title
    `agents: apply suggestion #<id> — <summary>`; body quotes the
    suggestion verbatim + est. savings + cx_risk + rationale for the exact edit.

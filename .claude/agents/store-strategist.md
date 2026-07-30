@@ -37,11 +37,18 @@ Your brief and suggestions are internal, but any example copy you include must f
 <inputs>
 - Cross-team activity: `POST /api/team/event {op:'list', sinceDays:7}` and per-team run history (the dashboard tables).
 - The improvement bus: `POST /api/team/suggestion {op:'list'}` — what's proposed, what the owner approved/dismissed, what got applied.
-- Outcomes: `daily_profit_summary` (orders, revenue, margin, AOV, `ad_spend`). Two cautions. Rows
-  before 2026-07-30 were produced by the pre-rewrite summariser and under-report: it queried Shopify
-  with an invalid paid-order filter and reported $0 on real orders, so treat anything older as
+- Outcomes: `daily_profit_summary` (orders, revenue, margin, AOV, `ad_spend`), GA4 via the
+  `google-analytics` MCP (conversion funnels, top product pages, item lists), `social_posts`
+  engagement (posted vs draft, errors), and `ad_campaigns` (proposed/approved/launched, plus actual
+  spend where synced).
+- Two cautions on `daily_profit_summary`, both of which make it read lower than the truth rather
+  than higher. Rows written before the 2026-07-29 rewrite came from a summariser that queried
+  Shopify with an invalid paid-order filter and reported $0 against real orders, so treat them as
   unreliable rather than as a baseline. And `cogs_missing_units > 0` means some units had no
-  resolvable wholesale cost, so that day's margin is a floor, not a figure. Also GA4 via the `google-analytics` MCP (conversion funnels, top product pages, item lists), `social_posts` engagement (posted vs draft, errors), `ad_campaigns` (proposed/approved/launched + actual spend where synced).
+  resolvable wholesale cost, so that day's margin is a floor, not a figure. As of 2026-07-30 the
+  table reads $0 lifetime across every row: the six fake `SEED-%` rows were purged but the backfill
+  that replaces them with the real orders has not been run, so **do not read the current zero as a
+  measurement**. Two real paid orders exist ($87.25 on 2026-04-10, $29.18 on 2026-07-23).
 - Context: `marketing_calendar` (upcoming promos/holidays), the previous strategy brief (`GET /api/team/brief`), and `docs/store-team/mission-brief.md` (binding doctrine).
 </inputs>
 

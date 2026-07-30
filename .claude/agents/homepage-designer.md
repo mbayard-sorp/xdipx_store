@@ -1,7 +1,7 @@
 ---
 name: homepage-designer
 description: Visual designer and art director for xdipx's homepage. Sets art direction, wireframes, and design tokens for new sections and redesigns, loading the team's design capability stack (taste-skill, ui-ux-pro-max, Emil Kowalski's animation skill) on top of the repo-native Motion primitives and v3 brand tokens. Use in Routine B (Design Cycle) to produce wires + an art-direction doc before build, or when a section needs a visual treatment. Hands wires to rr7-engineer / sanity-content-builder.
-tools: Read, Edit, Write, Grep, Glob, Bash, WebFetch, mcp__Claude_Preview__*, mcp__Sanity__generate_image
+tools: Read, Edit, Write, Grep, Glob, Bash, WebFetch, mcp__Sanity__generate_image
 model: opus
 color: plum
 ---

@@ -140,7 +140,10 @@ execution path is untouched:
   (Klaviyo send, Shopify code, engineering task). Auto-approve just clears them from the
   triage queue; nothing runs unattended.
 
-**Rollout:** **As of 2026-07-29 auto-approve is ON for all five active teams** (homepage, content, product, social, strategy), by owner decision. The four non-homepage valves were in fact flipped on 2026-07-18; the docs said otherwise for eleven days, which is why valve writes are now recorded in `settings_audit_log` (migration 072) with an actor and a source. Auto-approved rows carry an
+**Rollout:** as of 2026-07-29, auto-approve is ON for all five active teams (homepage, content,
+product, social, strategy) by owner decision. The four non-homepage valves were in fact flipped on
+2026-07-18; the docs said otherwise for eleven days, which is why valve writes are now recorded in
+`settings_audit_log` (migration 072) with an actor and a source. Auto-approved rows carry an
 `auto` badge on the dashboard so the automated decisions stay auditable. To pull a team
 back to manual triage, flip its valve off — in-flight `approved` rows are unaffected.
 
@@ -190,7 +193,10 @@ hit, a routine that skipped at the gate. Those are ordinary states with an owner
   (`{team}_team_auto_approve_suggestions`, default off).
 - **The apply pass needs run-cap headroom:** the Apply Pass and Cost Review share `team=strategy`
   with Monday's Weekly Strategy run, and the gate's run cap counts per team, not per run type.
-  `strategy_team_max_runs` must be **8** (R-DEV runs twice daily and R-QA once, all as `team=strategy`, alongside the three loop runs) or the later two Monday runs skip `over_run_cap`
+  `strategy_team_max_runs` must be **8**: Monday schedules six runs as `team=strategy` (R-DEV
+  twice, R-QA once, plus Weekly Strategy, Cost Review, and the Apply Pass), and the cap counts every
+  run row whether or not it succeeded, so six scheduled runs need more than six slots. Otherwise the
+  later Monday runs skip `over_run_cap`
   and approved suggestions silently never become PRs (this exact failure hid every apply run
   from 2026-07-07 to 2026-07-21).
 - **agent-editor's file allowlist is hard:** agent defs and team docs only — no app code, schema,

@@ -12,8 +12,9 @@ Status 2026-07-29 (fleet-evaluation fixes): the manifest lists 19 routines plus 
 16 (Trend Scout) and 20 (Social Trend Scout), both of which had their VALVES turned on 2026-07-28
 without a trigger ever being created, so they are live-but-dead; and 17 (Business Research), never
 created. Times were also re-spaced this day: the content team's in-progress lock runs up to ~200 min
-from its 15:08 UTC start, which was silently skipping the 16:00 podcast run (run 122), and two
-strategy runs both fired at 20:00 Mondays. Coverage checking is now derived from this file rather
+from its 15:00 UTC start (observed ~15:08), which was silently skipping the 16:00 podcast run
+(run 122 skipped `run_in_progress` on 2026-07-29), and two strategy runs both fired at 20:00
+Mondays. Coverage checking is now derived from this file rather
 than from a hardcoded routine range — see `routine-weekly-strategy.md` step 4.
 
 Trigger changes applied to the scheduler the same day, so this file and the scheduler agree: podcast
@@ -47,7 +48,7 @@ Trigger IDs, for reference when editing or deleting a routine:
 | # | Name | Trigger ID |
 |---|---|---|
 | 1 | xdipx — Weekly Strategy | `trig_018pSqtCKWC3fxbstN7wQBvs` |
-| 2 | xdipx — Apply Pass (agent-editor) | `trig_018kKMQRtD6a5XPUJu5aVPK5` |
+| 2 | xdipx — Apply Pass (agent-editor) | `trig_018kKMQRtD6a5XPUJu5aVPK5` (Mon) and `trig_01EQSUudJsye3bxAhncdBf1b` (Thu, created 2026-07-29) |
 | 3 | xdipx — Cost Review (process-optimizer) | `trig_01S2ha8LYtKkpZ7JoPGAJKKZ` |
 | 4 | xdipx — Ads Proposals | `trig_013PfuKac4rkjPTHuUwXWzRn` |
 | 5 | xdipx — Email Briefs | `trig_01FkT8YQZJWvPqVQ8nBEPzjq` |
@@ -57,31 +58,45 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 9 | xdipx — Daily Content Writer | `trig_01Qf5puo6AZyJqWn9QHN5mxQ` (cloud trigger since 2026-07-13; replaces desktop task `xdipx-daily-content-writer`, which should be deleted) |
 | 10 | xdipx — Weekly SEO Curation | `trig_01YJJXKSCfKRXPfHH5DAFJ24` (created 2026-07-21 at enablement; `seo_curation_enabled` flipped on the same day after the `seo-bank-triage.ts` backlog drain) |
 | 11 | xdipx — Weekly Off-site Scout | `trig_0131NQ3PLTRpcgdMU4wdoxh8` (created 2026-07-23; Tue 16:00 UTC, strategy team, propose-only) |
-| 12 | xdipx — Weekly Podcast Review | `trig_01AN6PKVghE9AM51R13z2UEu` (cron corrected 2026-07-23 from daily `0 16 * * *` back to `5 16 * * 3`; the daily drift was burning a content run-cap slot every day and set up a Sunday collision with routine 10) |
+| 12 | xdipx — Weekly Podcast Review | `trig_01AN6PKVghE9AM51R13z2UEu` (now `5 19 * * 3`. Corrected 2026-07-23 from a daily `0 16 * * *` drift that burned a content run-cap slot every day, then moved 16:05 -> 19:05 on 2026-07-29 to clear the content team's in-progress lock) |
 | 13 | xdipx — Daily Pricing Sweep | `trig_01AchSCvZnX56hbr7VsTvVSi` (cloud trigger since 2026-07-13; replaces desktop task `pricing-daily-sweep`, deleted the same day) |
 | 14 | xdipx — Daily Product Manager | `trig_01M76v95xQkhruMBTGive13o` (created 2026-07-21; a supervised catch-up run worked the queue backlog the same day) |
+| 15 | xdipx — Weekly Video Producer | none — `video_team_enabled` is off, so this is expected-missing |
+| 16 | xdipx — Weekly Trend Scout | **none, and the valve is ON** (`trend_scout_enabled=true` since 2026-07-28). Live-but-dead until created at `0 19 * * 6` |
+| 17 | xdipx — Weekly Business Research | none, never created |
+| 18 | xdipx — Daily Dev (R-DEV) | `trig_01MEQYsg5sHPbM4v39FqssAD` (live 2026-07-28; one trigger, `0 14,20 * * *`, covering both passes) |
+| 19 | xdipx — Daily QA Gate (R-QA) | `trig_019GjVP9hGBU1gmXRBYtYURm` (live 2026-07-28) |
+| 20 | xdipx — Weekly Social Trend Scout | **none, and the valve is ON** (`social_trend_scout_enabled=true` since 2026-07-28). Live-but-dead until created at `0 17 * * 1` |
 
 Routine 11 (Weekly Off-site Scout) was created 2026-07-23 as `trig_0131NQ3PLTRpcgdMU4wdoxh8` (Tue
 16:00 UTC). Its first fire is 2026-07-28. It is propose-only by construction, so no valve gates it.
 
-**Run-cap requirements (updated 2026-07-29):** `strategy_team_max_runs` must be **8**, not 3. The
-original figure predated R-DEV and R-QA, which both run as `team=strategy`: Mondays now carry
-Weekly Strategy (12:00), R-DEV (14:00), R-QA (15:30), Apply Pass (22:00), R-DEV again (20:00), and
-Cost Review (21:00). That is six scheduled runs against the cap, leaving zero headroom for a retry
-or a manual run, which is the same shape as the failure below. `social_team_max_runs` must be **3**
-(it was unset, defaulting to 2, with Business Research and Social Trend Scout both being added).
-Historical note, retained because it is the canonical example of this failure mode:
-`strategy_team_max_runs` was once **3** — Weekly Strategy
-(Mon 12:00), Apply Pass (Mon 20:00), and Cost Review (Mon 21:00) all run as `team=strategy` on the
-same day, and the gate's run cap counts per team, not per run type. At cap 1 the noon run consumed
-the only slot and the Apply Pass and Cost Review skipped `over_run_cap` every Monday (runs 28/58),
-which is why no approved suggestion ever became a PR. Cap 3 leaves zero retry headroom on Mondays;
-the Weekly Strategy self-audit is the backstop. Similarly `content_team_max_runs` must be **3**:
-Saturdays carry content-writer (15:00) + trend-scout (16:00), Sundays carry content-writer +
-SEO curation (16:00), and Wednesdays carry content-writer + podcast review, and cap 2 left no
-room for a gate-retry run on those days. Migration 068 versions the cap at 3 (previously an
-unversioned 2026-07-21 prod hand-edit) alongside `content_team_daily_cents` at 500, sized for
-the sex-wellness-reviewer accuracy gate's web verification plus the Saturday trend-scout run.
+### Run-cap requirements
+
+The gate's run cap counts **per team, per UTC day, and per run row** — not per run type, and not
+per *successful* run. `getTodayRunCount` (`app/lib/team.server.ts:257`) counts every row regardless
+of status, and every routine opens its run row *before* it calls the gate. So a run that skips
+still burns a slot, and the cap must be sized above the scheduled count, not equal to it.
+
+| Key | Required | Scheduled runs on the busiest day | Headroom |
+|---|---|---|---|
+| `strategy_team_max_runs` | **8** | 6 on Monday: Weekly Strategy 12:00, R-DEV 14:00, R-QA 15:30, R-DEV 20:00, Cost Review 21:00, Apply Pass 22:00 | 2 |
+| `content_team_max_runs` | **3** | 2 on Sat / Sun / Wed: content-writer 15:00 plus trend-scout 19:00, SEO curation 19:00, or podcast review 19:05 | 1 |
+| `social_team_max_runs` | **3** | 2-3: Social Drafts daily 14:00, Business Research Thu 16:00, Social Trend Scout Mon 17:00 | 0-1 |
+
+As of 2026-07-30 production has `strategy_team_max_runs=6` (one short of Monday's own schedule, so
+the 22:00 Apply Pass is one skip away from being locked out) and `social_team_max_runs` unset, which
+defaults to 2. Both are owner writes on `/admin`.
+
+Migration 068 versions `content_team_max_runs` at 3 (previously an unversioned 2026-07-21 prod
+hand-edit) alongside `content_team_daily_cents` at 500, sized for the sex-wellness-reviewer accuracy
+gate's web verification plus the Saturday trend-scout run.
+
+**Historical note**, kept because it is the canonical example of the failure mode: the strategy cap
+was once **1**. Weekly Strategy, Apply Pass, and Cost Review all run as `team=strategy` on the same
+Monday, so the noon run consumed the only slot and the other two skipped `over_run_cap` every week
+(runs 28/58). That is why no approved suggestion became a PR between 2026-07-07 and 07-21, and
+nothing reported it. Nothing in this note is a current requirement; the table above is.
 
 On 2026-07-13 the last three desktop scheduled tasks on the owner's machine were deleted:
 `pricing-daily-sweep` (recreated as cloud routine 13), plus `homepage-daily-merchandise` and
@@ -120,10 +135,10 @@ spend via `POST https://xdipx.com/api/homepage-team/spend` under the team's feat
 | 7 | xdipx — Daily Merchandiser (Routine A) | `0 10 * * *` (daily) | homepage / `homepage-*` | `docs/homepage-team/routine-daily-merchandise.md` | Entry agent homepage-orchestrator; mission brief is `docs/homepage-team/mission-brief.md`; content auto-publish within the gate/budget/image caps; never code changes. Scope includes the merchandised pages tiered rotation (all live category/drop pages health-swept every run at $0 via the cron's verdicts; exactly 2 category pages deep-refreshed per day on the 3-day cycle; Monday theme pass on all; New/Sale auto-populate from sourceRule with weekly masthead refresh) and content upkeep of the panel deck (tile copy and art via `--doc-id singleton.panelDeck`). Deck reshuffles are NOT this routine's call: panel order is navigation, an IA decision, owned by Routine B. |
 | 8 | xdipx — Design Cycle (Routine B) | `0 14 * * 3` (Wed) | homepage / `homepage-build` | `docs/homepage-team/routine-design-cycle.md` | Build on a branch and open a PR; stop at the open PR. The routine never merges: the release engine merges after CI, QA verification, and the protected-path check, and protected-path PRs go to the owner. Owns panel-deck reshuffles: panel order is navigation, an information-architecture decision made here on the weekly cycle, never by Routine A's daily merchandising. |
 | 9 | xdipx — Daily Content Writer | `0 15 * * *` (daily, approx 8a Pacific) | content / `content-blog` | `docs/store-team/routine-content-daily.md` | Entry agent content-writer. Cloud trigger since 2026-07-13 (`trig_01Qf5puo6AZyJqWn9QHN5mxQ`), replacing the unreliable desktop task `xdipx-daily-content-writer` (delete the desktop task to prevent double-fires). One post per run; topic by the weekly rhythm in `docs/store-team/content-plan.md` (Thursday checks the pending `podcastReviewBrief` first; Tue/Fri are Real Talk per content-plan §8B); every draft passes the dual gate (emma-empathy-reviewer voice gate, then the sex-wellness-reviewer accuracy gate with web-verified claims and 0-2 Sources citations); publish live only when BOTH gates PASS with the `content_team_autopublish` valve on, otherwise leave the Sanity draft. No-ops at the gate until migration 054 is applied and `content_team_enabled` is on; see the enablement runbook appendix in the playbook. |
-| 10 | xdipx — Weekly SEO Curation | `0 19 * * 0` (Sun) | content / `content-seo-curation` | `docs/store-team/routine-seo-curation.md` | Entry agent seo-curator. Step 0: if `seo_curation_enabled` is not `'true'`, exit without starting a run. Triage the gray-zone pending keywords (cap 250 decisions); propose cluster merge maps as suggestions (NEVER execute merges); review Saturday's pending trendTopicBrief proposals (expire past-due, adopt into the queue or skip with a reason, clusterless trend briefs capped at 1-2/week inside the 7-brief cap); plan up to 7 seoContentBrief docs for the coming week following the content-plan rhythm; file the weekly report suggestion (coverage, queue depth, bank staleness, enrichment coverage, trend review counts). Never write posts, never touch flagged keywords, never delete anything. |
+| 10 | xdipx — Weekly SEO Curation | `0 19 * * 0` (Sun) | content / `content-seo-curation` | `docs/store-team/routine-seo-curation.md` | Entry agent seo-curator. Step 0: if `seo_curation_enabled` is not `'true'`, exit without starting a run. Triage the gray-zone pending keywords (cap 250 decisions); propose cluster merge maps as suggestions (NEVER execute merges); review Saturday's pending trendTopicBrief proposals (expire past-due, adopt into the queue or skip with a reason, clusterless trend briefs capped at 1-2/week inside the 7-brief cap); plan up to 7 seoContentBrief docs for the coming week following the content-plan rhythm; post the weekly report as a run EVENT, not a suggestion row (coverage, queue depth, bank staleness, enrichment coverage, trend review counts): a report has no executor and can never reach a terminal state on the bus. Never write posts, never touch flagged keywords, never delete anything. |
 | 11 | xdipx — Weekly Off-site Scout | `0 16 * * 2` (Tue) | strategy / `strategy-offsite` | `docs/store-team/routine-offsite-weekly.md` | Entry agent offsite-scout. PROPOSE-ONLY: research the roundups/listicles LLM answers cite for sexual-wellness shopping queries, draft pitches + unlinked-mention reclamations + expert-quote prospects as suggestion rows (max 6/run, no duplicates of still-proposed rows), each with a mandatory policy note against `docs/ads-policy.md`. Never send, never post, never spend; the owner executes approved pitches manually from hello@xdipx.com. Tuesday avoids the Monday strategy run (1-run/day cap). Fewer than 5 published notebook posts → file only the summary and recommend waiting. |
 | 12 | xdipx — Weekly Podcast Review | `5 19 * * 3` (Wed) | content / `content-podcast` | `docs/store-team/routine-podcast-weekly.md` | Entry agent podcast-reviewer. RESEARCH-ONLY: pick the most recent unreviewed episode from `docs/store-team/podcast-shortlist.md` (rotation rules binding), review from transcript or show notes with sourceQuality recorded honestly, and write ONE pending `podcastReviewBrief` in Sanity — never a blogPost, never a publish, no images. A pending brief already waiting → skip honestly. Wednesday so Thursday's content run (routine 9, podcast-notes slot) finds a fresh brief. Trigger created 2026-07-13: `trig_01AN6PKVghE9AM51R13z2UEu`. |
-| 13 | xdipx — Daily Pricing Sweep | `37 14 * * *` (daily, approx 7:37a Pacific) | ops (no team gate) / n/a | `.claude/agents/pricing-ops.md` | Entry agent pricing-ops. Cloud trigger since 2026-07-13 (`trig_01AchSCvZnX56hbr7VsTvVSi`), replacing the desktop task `pricing-daily-sweep` (deleted). Verify the 07:00 UTC batch recompute ran in the last 26 hours (~1,200+ audit rows), catch up via `POST /cron/pricing-batch-recompute` at most once if missed, triage the pending approval queue, flag error rows and reject spikes. Read-only on the database; never approves/rejects/applies price changes; the catch-up trigger is the only allowed mutation. |
+| 13 | xdipx — Daily Pricing Sweep | `37 14 * * *` (daily, approx 7:37a Pacific) | ops (no team gate) / n/a | `.claude/agents/pricing-ops.md` | Entry agent pricing-ops. Cloud trigger since 2026-07-13 (`trig_01AchSCvZnX56hbr7VsTvVSi`), replacing the desktop task `pricing-daily-sweep` (deleted). Verify a SCHEDULED `trigger='batch'` recompute wrote rows **today (UTC)** — not "in the last 26 hours", which yesterday's afternoon rescue satisfied, so a dead daily cron read as a healthy every-other-day one (2026-07-28 was rescued at 14:48 and 2026-07-29 then went completely unpriced). Catch up at most once via `POST /cron/pricing-batch-recompute` with body `{"trigger":"batch_catchup"}`, which is what keeps a rescue from satisfying tomorrow's check, triage the pending approval queue, flag error rows and reject spikes. Read-only on the database; never approves/rejects/applies price changes; the catch-up trigger is the only allowed mutation. |
 | 14 | xdipx — Daily Product Manager | `0 9 * * *` (daily) | product / `product-daily` | `docs/store-team/routine-product-daily.md` | Entry agent product-manager. Sweeps `import_candidates` for pending/watching rows the deterministic Phase-2 gates left behind and executes approve/reject/watch via `/api/team/import-candidate-action` (bulk `ids`, one call per intent). 09:00 UTC sits after the `/cron/import-monitor` discovery run, which despite the `0 8 * * *` entry in `vercel.json` only actually runs **Mon/Wed/Fri** (`server/cron.ts` skips days outside the `import_monitor_run_days` valve, currently `1,3,5`). On other days this routine works whatever the last discovery pass left behind. No-ops at the gate until migration 059 is applied and `product_team_enabled` is on; the execute endpoint is separately gated by `product_manager_enabled` (on from migration 052). This is the execution cadence; the weekly-strategy run invokes product-manager review-only. See the enablement runbook appendix in the playbook. |
 | 15 | xdipx — Weekly Video Producer | `0 17 * * 2` (Tue) | video / `video-*` | `docs/store-team/routine-video-weekly.md` | Entry agent video-producer. REVIEW-FIRST: script the brief's Video Plan slate, voice-gate every script through emma-empathy-reviewer, enqueue generation via `POST /api/team/video-job` (metered fal spend, hard per-video ceiling `video_team_max_cost_cents`); the owner reviews frames and finished videos in `/admin/video-studio`. Never posts, never uploads to Shopify, never touches valves. Tuesday afternoon so it reads Monday's fresh brief. No-ops at the gate until migration 065 is applied and `video_team_enabled` is on; see the enablement runbook in the playbook. Trigger: owner creates at enablement. |
 | 16 | xdipx — Weekly Trend Scout | `0 19 * * 6` (Sat) | content / `content-trend-scout` | `docs/store-team/routine-trend-scout.md` | Entry agent trend-scout. Step 0: if `trend_scout_enabled` is not `'true'`, exit without starting a run. RESEARCH-ONLY: scan the four lanes (Reddit communities, sex-ed TikTok trend coverage, new research/press, product buzz) and write 3-5 pending `trendTopicBrief` docs in Sanity (real evidence URLs with honest sourceQuality, expiresAt +14 days); more than 10 already pending → skip honestly. Never a blogPost, never a seoContentBrief, never keyword docs, no images. Saturday so Sunday's SEO curation (routine 10) finds fresh proposals to adopt or skip. No-ops until migration 068 is applied and the valve is on; see the enablement runbook in the playbook. Trigger: created at enablement (record the trig_ id here). |
