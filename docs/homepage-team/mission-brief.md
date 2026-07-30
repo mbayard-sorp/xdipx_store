@@ -42,6 +42,20 @@ Every module must earn a click to a specific product or collection.
   the hero copy about that product's payoff for the reader. Set the hero's
   primaryCtaLink to the featured product's page. If the field is not yet
   live in production, compensate with product links elsewhere on the page.
+- **Destination continuity for every See-all (owner direction, all-hands
+  2026-07-30).** Every "See all" must land the visitor on a surface that
+  CONTAINS the products they just looked at, in an order they recognise. This
+  is a hard rule for EVERY See-all, whether the module is team-published
+  (`emmaCuratedRail`) or auto-generated (the Nº 03 "Most picked" anchor grid,
+  whose See-all is set in code, not Sanity). A See-all whose destination does
+  not contain the module's own products is a definition-of-done failure,
+  exactly like a blank `ctaLink`. `/collections/best-sellers` is no longer an
+  acceptable silent fallback for any module: Shopify best-seller order is a
+  different ranking from the discovery index that fills the anchor grid, so the
+  fallback is structurally guaranteed to mismatch. When the team cannot name a
+  destination that genuinely contains the set, ship the module with NO See-all
+  rather than point it somewhere plausible. The renderer and the anchor-grid
+  destination itself are covered by a companion code ticket.
 
 ## 2. Images: the product is the star
 
