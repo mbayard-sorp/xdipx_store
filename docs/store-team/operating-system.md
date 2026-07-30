@@ -188,26 +188,78 @@ Short list, deliberately. If it is not here, the system is supposed to handle it
   is *for*, what it sells, what the voice is, and what a good week looks like remain the owner's.
 - **One-time setup that only an owner can do:** GitHub branch protection and the merge token, Vercel
   environment variables, creating cloud-routine triggers and their secret stores.
+- **Authoring protected-path code**, not merely merging it. No agent in the roster may write a
+  protected-path diff: R-DEV blocks the ticket instead. Until that changes, this work happens in an
+  owner-attended session. See §9, fact two.
+
+**If you are the owner and you are merging more than the list above**, the cause is almost never a
+gate misfiring. It is that the change never entered the ticket bus, so the engine was never allowed
+to look at it. §9 has the measurements.
 
 ---
 
 ## 8. What is not built yet
 
-Recorded plainly so nobody mistakes the design for the system, as of 2026-07-27:
+**This section was six rows of stale fiction until 2026-07-30.** It still claimed the release engine
+did not exist and that `release_engine_enabled` was false, three days after the engine shipped, was
+turned on, and started merging. §2 said LIVE on the same page. An agent that reads this file at run
+start and believes §8 concludes the entire merge lane is imaginary. Corrected below; the honesty
+rule at the top of this document applies to this section hardest, because it is the one that ages
+fastest.
 
-- The release engine (`app/lib/release-engine.server.ts`, `/cron/release-engine`) does not exist in
-  the repo. `release_engine_enabled` exists and is **false**.
-- `app/lib/github.server.ts` and `/api/team/pr` (the egress-safe GitHub and preview proxy that the
-  QA routine depends on) do not exist yet.
-- The guarded transition map (`transitionSuggestion`, `expireStaleClaims`) is not yet in
-  `app/lib/team.server.ts`; migration 070 has shipped the columns it needs.
-- The R-DEV and R-QA cloud-routine triggers have not been created. Their playbooks exist.
-- Render-truth, the theme gate, and the freshness gate are specified, not implemented. The
-  design-critic screenshot gate stays REVISE-only until the snapshot harness exists; text-based
-  render truth is the enforcing gate, and pretending otherwise is how the last blindness happened.
-- The detectors file GitHub issues today but do not yet file tickets.
+Built and live since this section was last written: the release engine and its cron,
+`app/lib/github.server.ts` and `/api/team/pr`, the guarded transition map in `app/lib/team.server.ts`,
+the R-DEV and R-QA triggers, render-truth, the freshness detector, and ticket-filing detectors.
+Verified 2026-07-30: `release_engine_enabled` is `true`, the daily cap is 12, and the engine has
+merged autonomously — tickets #43, #70 and #152 reached `applied` through it, and PR #421 was
+squash-merged by it with no owner involvement at all.
 
-When you implement one of these, move its row from PLANNED to LIVE here in the same PR.
+Genuinely not built, as of 2026-07-30:
+
+- **The theme gate.** Still blocked, and honestly so: `design-critic` cannot obtain a screenshot in a
+  scheduled run and correctly abstains. It only runs when the owner invokes it interactively.
+- **Auto-filing a ticket for a ticket-less PR.** See §9: this is the largest remaining hole and it is
+  designed but undecided (`docs/adr/ADR-008-owner-out-of-merge-path.md`, steps 2 and 4).
+
+When you implement one of these, move its row out of this section in the same PR. When you find a row
+here that is already built, delete it in the same PR — a stale "not built" row is worse than no
+section, because it actively misleads.
+
+---
+
+## 9. Why work still reaches the owner's merge button
+
+Two structural facts, both measured on 2026-07-30. Neither is a bug in the release engine; both are
+limits of what it was scoped to see. Read this before concluding the engine is broken.
+
+**Fact one: most PRs are outside the engine's jurisdiction by construction.** The engine considers
+only branches under `agents/`, `ticket/`, `claude/`, `phase1/`, `tonight/` or `revert/pr-`, and for
+anything that is not a revert or docs-only it additionally requires a linked ticket in status
+`verified`. Classifying the last 60 merged PRs against those rules:
+
+| | count | why the engine never merged it |
+|---|---|---|
+| Ineligible branch (`fix/`, `docs/`, `chore/`, `ci/`) | 18 (30%) | the engine does not look at these prefixes |
+| Eligible branch, no ticket reference in the title | 35 (58%) | decision `skip`, code `no-ticket` |
+| Actual candidates | 7 (12%) | |
+
+The cause is origin, not quality: most work is born in an owner-attended session, which produces a
+branch and a PR but never a bus row, so the PR can never acquire the `verified` ticket the engine
+demands. **A change that is never ticketed can never be merged by the engine.** If you want a fix to
+ship without the owner, it has to enter through the bus.
+
+**Fact two: protected-path work has no agent lane at all.** `routine-dev-daily.md` Step 2 requires
+R-DEV to transition a ticket to `blocked` rather than write a line of code when any changed file is
+protected, and it is right to. But nothing else picks that work up. There is no agent anywhere in the
+roster permitted to author a protected-path diff, so every such change must be written in an
+owner-attended session and merged by the owner.
+
+This has a consequence worth stating plainly, because it looks like a paradox and gets rediscovered
+every few weeks: **the changes that would reduce the owner's merge load are themselves almost all
+protected-path changes.** The transition map, the engine's own gate logic, the branch prefixes, CI
+config, valve plumbing — all protected. Getting the owner out of the merge path costs a small,
+finite number of owner merges up front. That cost is one-time and correct; it is not the recurring
+tax, and it is not a reason to widen the protected list.
 
 ## A note on owner email, 2026-07-28
 
