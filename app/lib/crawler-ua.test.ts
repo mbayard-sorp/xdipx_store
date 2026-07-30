@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { isCrawlerUserAgent } from '~/lib/crawler-ua.server'
+import {
+  MIN_BROWSE_FOR_PAID_ASIDE,
+  isCrawlerUserAgent,
+  qualifiesForPaidAside,
+} from '~/lib/crawler-ua.server'
 
 /**
  * This gate decides whether a page view is worth a paid Haiku generation. A
  * false positive costs one personalized sentence; a false negative costs money
- * on every page of a catalog walk, which is how emma-aside became ~47% of all
- * metered spend. The asymmetry is why the generic tokens are broad.
+ * on every page of a catalog walk, which is how emma-aside became roughly a
+ * quarter of all metered spend. The asymmetry is why the generic tokens are
+ * broad.
+ *
+ * It is also, on its own, not enough: a scraper sending a stock Chrome UA
+ * passes every assertion in this file. See `qualifiesForPaidAside` below for
+ * the layer that does not depend on the client telling the truth.
  */
 
 describe('isCrawlerUserAgent', () => {
@@ -66,5 +75,46 @@ describe('isCrawlerUserAgent', () => {
   it('is case-insensitive', () => {
     expect(isCrawlerUserAgent('GOOGLEBOT/2.1')).toBe(true)
     expect(isCrawlerUserAgent('CURL/8.4.0')).toBe(true)
+  })
+})
+
+/**
+ * The layer that does not trust the client's self-description. Every case here
+ * assumes `looksAutomated: false`, i.e. the UA gate has already been passed,
+ * which is what a spoofed Chrome user-agent achieves for free.
+ */
+describe('qualifiesForPaidAside', () => {
+  const anonymous = { looksAutomated: false, hasCart: false, isLoggedIn: false }
+
+  it('refuses a declared crawler regardless of every other signal', () => {
+    expect(qualifiesForPaidAside({
+      looksAutomated: true, hasCart: true, browseCount: 9, isLoggedIn: true,
+    })).toBe(false)
+  })
+
+  it('refuses a first page view', () => {
+    expect(qualifiesForPaidAside({ ...anonymous, browseCount: 0 })).toBe(false)
+  })
+
+  it('refuses a SECOND page view, which is the catalog-walk shape', () => {
+    // This is the regression that matters. The old rule was `> 0`, so a
+    // cookie-retaining client qualified here and on every page after it.
+    expect(qualifiesForPaidAside({ ...anonymous, browseCount: 1 })).toBe(false)
+  })
+
+  it('allows a visitor who has actually moved around the store', () => {
+    expect(qualifiesForPaidAside({ ...anonymous, browseCount: MIN_BROWSE_FOR_PAID_ASIDE })).toBe(true)
+    expect(qualifiesForPaidAside({ ...anonymous, browseCount: 4 })).toBe(true)
+  })
+
+  it('lets a cart or an account short-circuit the browse threshold', () => {
+    // Both are expensive for a crawler to fake and neither is a side effect of
+    // merely loading pages, which is exactly what browse history is.
+    expect(qualifiesForPaidAside({ ...anonymous, hasCart: true, browseCount: 0 })).toBe(true)
+    expect(qualifiesForPaidAside({ ...anonymous, isLoggedIn: true, browseCount: 0 })).toBe(true)
+  })
+
+  it('keeps the threshold above 1 so the rule cannot silently regress', () => {
+    expect(MIN_BROWSE_FOR_PAID_ASIDE).toBeGreaterThan(1)
   })
 })

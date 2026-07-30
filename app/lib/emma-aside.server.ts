@@ -15,7 +15,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { kvGet, kvSet, kvIncr, kvDel, KV_KEYS } from './kv.server'
+import { kvGet, kvSet, kvIncr, kvDel, kvSetNX, KV_KEYS } from './kv.server'
 import { BRAND_VOICE_SYSTEM_PROMPT, generateWithSystem } from './claude.server'
 import { getFallbackAside } from './emma-aside-templates.server'
 import type { Deal } from '~/types'
@@ -24,7 +24,21 @@ const HAIKU_TIMEOUT_MS  = 3500
 const CACHE_TTL_SECONDS = 60 * 60 * 24        // 24h
 const LOCK_TTL_SECONDS  = 3
 const MAX_OUTPUT_TOKENS = 240
-const DAILY_BUDGET_CEIL = 5000                 // fallback-only after this many gens/day
+/**
+ * Fallback-only after this many generations in a UTC day.
+ *
+ * This ceiling already existed at 5,000 and never fired: the 2026-07-21 catalog
+ * walk spent 3,566 calls and came in under it, so the one backstop that does not
+ * depend on correctly identifying a crawler sat above the only event it needed
+ * to catch. The store sees roughly 26 human sessions a week, and a real visitor
+ * generates at most a handful of asides, so 300/day is far above legitimate
+ * demand and far below a catalog walk.
+ *
+ * Every other guard here is defeatable: the user-agent list loses to a spoofed
+ * Chrome UA, and `checkRateLimit` fails open when KV errors. This number is the
+ * only hard guarantee on the bill, so it is deliberately the tightest one.
+ */
+const DAILY_BUDGET_CEIL = 300
 
 const ASIDE_SYSTEM = `${BRAND_VOICE_SYSTEM_PROMPT}
 
@@ -127,9 +141,22 @@ export async function getEmmaAside(args: EmmaAsideArgs): Promise<EmmaAsideResult
 
   // 2. Daily budget ceiling
   try {
-    const countKey = KV_KEYS.emmaAsideDailyCount(utcDateKey())
+    const day = utcDateKey()
+    const countKey = KV_KEYS.emmaAsideDailyCount(day)
     const todayCount = await kvGet<number>(countKey)
     if (typeof todayCount === 'number' && todayCount >= DAILY_BUDGET_CEIL) {
+      // Say so once a day. A silently-tripped ceiling looks identical to a quiet
+      // day, and the whole reason this surface overspent for a week is that
+      // nothing anywhere reported it. Guarded by SETNX so a catalog walk that
+      // keeps hitting the ceiling logs one line, not thousands.
+      const firstTrip = await kvSetNX(`emmaAside:ceilingLogged:${day}`, '1', 26 * 3600)
+        .catch(() => false)
+      if (firstTrip) {
+        console.warn(
+          `[emma-aside] daily ceiling reached (${todayCount}/${DAILY_BUDGET_CEIL} on ${day}); ` +
+          'serving the static aside for the rest of the day',
+        )
+      }
       return { text: getFallbackAside(product), source: 'fallback' }
     }
   } catch { /* non-fatal */ }

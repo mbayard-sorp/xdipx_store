@@ -12,9 +12,20 @@
  * account). The browse history comes from a cookie the PDP itself sets, so a
  * crawler that retains cookies accumulates one and starts looking personalized:
  * on the night of 2026-07-21 something walked 2,709 distinct products and spent
- * 3,566 Haiku calls doing it, and `emma-aside` became roughly 47% of all
- * metered API spend (~$40/month) against a site seeing about 26 human sessions
- * a week.
+ * 3,566 Haiku calls doing it, against a site seeing about 26 human sessions a
+ * week.
+ *
+ * Two numbers in the original version of this comment were wrong, and they are
+ * corrected here because they were quoted onward into commit messages: measured
+ * against `api_token_log`, `emma-aside` is about 27% of metered spend over the
+ * last 30 days ($20.15), not 47% and not $40/month.
+ *
+ * WHAT THIS ALONE DOES NOT DO. A scraper sending a stock Chrome user-agent is
+ * not caught by anything in this file, and the burst pattern did continue after
+ * this gate deployed. It is one of three layers; the other two live at the call
+ * site (`_layout.products.$slug.tsx`: a two-product browse threshold and an IP
+ * rate limit) and in `emma-aside.server.ts` (`DAILY_BUDGET_CEIL`, the only one
+ * that cannot be defeated by disguise).
  *
  * Nothing is lost by skipping it. The server-rendered HTML already contains
  * `emmaAsideStatic` (the approved admin aside, or the per-product template
@@ -59,4 +70,44 @@ export function isCrawlerUserAgent(ua: string | null | undefined): boolean {
 /** Convenience wrapper for a Request. */
 export function isCrawlerRequest(request: Request): boolean {
   return isCrawlerUserAgent(request.headers.get('user-agent'))
+}
+
+/**
+ * How many *other* products a visitor must have browsed before browse history
+ * alone earns a paid generation.
+ *
+ * It was 1, which meant the second page a cookie-retaining client loaded
+ * already qualified, and every page after that. That is indistinguishable from
+ * a catalog walk. Two is the smallest value that requires a client to have
+ * actually moved around the store rather than merely kept a cookie.
+ */
+export const MIN_BROWSE_FOR_PAID_ASIDE = 2
+
+export interface PaidAsideSignals {
+  /** The user-agent looked automated. */
+  looksAutomated: boolean
+  /** There is a cart cookie. */
+  hasCart: boolean
+  /** Distinct OTHER products in the browse cookie (excludes the current one). */
+  browseCount: number
+  /** A customer account is attached to the session. */
+  isLoggedIn: boolean
+}
+
+/**
+ * Whether a request has earned a paid, personalized aside. Pure, so the rule is
+ * testable without a Request, a cookie jar, or KV.
+ *
+ * A cart or a logged-in account is strong evidence of a human and short-circuits
+ * the browse threshold: both are expensive for a crawler to fake and neither is
+ * a side effect of merely loading pages, which is the property browse history
+ * lacks.
+ *
+ * This is the qualification rule only. The caller still applies an IP rate limit
+ * on top, and `DAILY_BUDGET_CEIL` in emma-aside.server.ts is the hard stop.
+ */
+export function qualifiesForPaidAside(s: PaidAsideSignals): boolean {
+  if (s.looksAutomated) return false
+  if (s.hasCart || s.isLoggedIn) return true
+  return s.browseCount >= MIN_BROWSE_FOR_PAID_ASIDE
 }
