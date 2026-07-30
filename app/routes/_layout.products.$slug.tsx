@@ -1185,7 +1185,7 @@ function ProductPage() {
           content and the persistent bottom menu, matching how desktop stacks
           its CTA above the footer chrome. */}
       {inStock && showSticky && (
-        <div className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-50 md:hidden bg-white border-t border-cream-2 px-4 py-3 flex items-center gap-3 shadow-lg shadow-ink/10">
+        <div className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-[54] md:hidden bg-white border-t border-cream-2 px-4 py-3 flex items-center gap-3 shadow-lg shadow-ink/10">
           {deal.images[0] && (
             <img
               src={shopifyImageUrl(deal.images[0].url, 120)}

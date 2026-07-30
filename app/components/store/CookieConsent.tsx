@@ -1,17 +1,24 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const CONSENT_KEY     = 'xdipx_consent'
 const POLICY_VERSION  = '1.0'
 
 export function CookieConsent() {
   const [visible, setVisible] = useState(false)
+  const firstButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     const stored = localStorage.getItem(CONSENT_KEY)
     if (!stored) setVisible(true)
   }, [])
+
+  // WCAG 4.1.2: this is a dialog, so focus should move into it on open
+  // rather than leaving it stranded behind the mobile nav.
+  useEffect(() => {
+    if (visible) firstButtonRef.current?.focus()
+  }, [visible])
 
   function accept(type: 'all' | 'essential_only') {
     localStorage.setItem(CONSENT_KEY, JSON.stringify({ type, version: POLICY_VERSION, ts: Date.now() }))
@@ -36,8 +43,16 @@ export function CookieConsent() {
 
   return (
     <div
-      className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:max-w-sm z-50 bg-ink text-white rounded-2xl p-5 shadow-2xl fade-in"
+      // bottom offset clears the fixed mobile tab bar (56px + safe-area,
+      // see MobileExploreMenu z-[55]) with an 16px gap, instead of the old
+      // bottom-4 which sat the card's own buttons half behind the nav.
+      // z-[57] sits above both the tab bar (55) and MobileExploreMenu's
+      // own category flyout dialog (56) so the banner and its buttons are
+      // never occluded, however the user is interacting with the bottom
+      // nav; see the z-index scale note in app.css.
+      className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] left-4 right-4 md:bottom-4 md:left-auto md:right-6 md:max-w-sm z-[57] bg-ink text-white rounded-2xl p-5 shadow-2xl fade-in"
       role="dialog"
+      aria-modal="true"
       aria-label="Cookie consent"
     >
       <p className="text-sm leading-relaxed mb-4 text-white/80">
@@ -46,6 +61,7 @@ export function CookieConsent() {
       </p>
       <div className="flex gap-2">
         <button
+          ref={firstButtonRef}
           onClick={() => accept('all')}
           className="flex-1 bg-coral text-white text-sm font-bold py-2 rounded-full hover:opacity-90 transition-opacity"
           style={{ fontFamily: 'var(--font-display)' }}
