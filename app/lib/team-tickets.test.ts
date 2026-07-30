@@ -80,6 +80,11 @@ import {
   isTransitionAllowed,
   markSuggestion,
   transitionSuggestion,
+  AGENT_RETIRE_KINDS,
+  REKIND_FROM_KINDS,
+  REKIND_TO_KINDS,
+  RUN_CLOSE_ACTORS,
+  RUN_CLOSE_KINDS,
   type TicketActor,
   type TicketStatus,
 } from '~/lib/team.server'
@@ -198,6 +203,50 @@ describe('ALLOWED transition matrix', () => {
     expect(findTransitionRule('verified', 'in_progress', 'system')!.incrementAttempt).toBe(true)
     expect(findTransitionRule('approved', 'in_progress', 'agent:rr7-engineer')!.incrementAttempt)
       .toBeUndefined()
+  })
+
+  it('lets a daily run close an operational row it acted on, and nothing else', () => {
+    for (const kind of RUN_CLOSE_KINDS) {
+      for (const actor of RUN_CLOSE_ACTORS) {
+        expect(isTransitionAllowed('approved', 'applied', actor, { kind })).toBe(true)
+      }
+    }
+    // Not a lane a run may close: code goes through QA and the release engine.
+    for (const kind of ['code', 'instructions', 'agent-def', 'config', 'program']) {
+      expect(isTransitionAllowed('approved', 'applied', 'agent:homepage-orchestrator', { kind }))
+        .toBe(false)
+    }
+    // Only the named entry agents, and only from `approved`.
+    expect(isTransitionAllowed('approved', 'applied', 'agent:media-manager', { kind: 'process' }))
+      .toBe(false)
+    for (const from of TICKET_STATUSES.filter(s => s !== 'approved')) {
+      expect(isTransitionAllowed(from, 'applied', 'agent:homepage-orchestrator', { kind: 'process' }))
+        .toBe(false)
+    }
+  })
+
+  it('fences agent-editor retirement to the kinds with no executor', () => {
+    for (const kind of AGENT_RETIRE_KINDS) {
+      expect(isTransitionAllowed('approved', 'dismissed', 'agent:agent-editor', { kind })).toBe(true)
+    }
+    // Its own work queue stays out of reach: agent-editor must not be able to
+    // dismiss the instruction rows that constrain agent-editor.
+    for (const kind of ['instructions', 'agent-def', 'config', 'code']) {
+      expect(isTransitionAllowed('approved', 'dismissed', 'agent:agent-editor', { kind })).toBe(false)
+    }
+    for (const actor of ACTORS.filter(a => a !== 'agent:agent-editor' && a !== 'owner')) {
+      expect(isTransitionAllowed('approved', 'dismissed', actor, { kind: 'process' })).toBe(false)
+    }
+  })
+
+  it('keeps rekind one-way so it cannot compose with retire into a kill switch', () => {
+    // The dangerous shape would be: rekind an inconvenient `instructions` row
+    // to `process`, then retire it under AGENT_RETIRE_KINDS. Closed by making
+    // `process` the only source and excluding retirable kinds as targets.
+    expect(REKIND_FROM_KINDS).toEqual(['process'])
+    for (const target of REKIND_TO_KINDS) {
+      expect(AGENT_RETIRE_KINDS).not.toContain(target)
+    }
   })
 
   it('validates actor strings', () => {

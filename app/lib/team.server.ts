@@ -664,6 +664,105 @@ export async function retireSuggestion(id: number): Promise<void> {
 }
 
 /**
+ * Re-file a suggestion under the kind that actually has an executor.
+ *
+ * A lot of what agents file as `process` ("the playbook should compute the
+ * weekday differently") is really instruction work, and some is a code change.
+ * `kind` was previously write-once at insert, so a misfiled row could never
+ * reach the lane that would have done it — the 52-row `process` pile was
+ * mostly this.
+ *
+ * Deliberately one-way: `process` is the only source, and the targets are
+ * lanes with real executors. Rekinding *into* a retirable kind would compose
+ * with the hygiene pass into an unaudited kill switch (rekind an inconvenient
+ * `instructions` row to `process`, then retire it), so that direction stays
+ * closed. Every rekind leaves a note link naming the actor.
+ */
+export const REKIND_FROM_KINDS: readonly string[] = ['process']
+export const REKIND_TO_KINDS: readonly string[] = ['instructions', 'code']
+export const REKIND_ACTORS: readonly TicketActor[] = ['owner', 'agent:agent-editor']
+
+export async function rekindSuggestion(
+  id: number,
+  toKind: string,
+  actor: TicketActor,
+  note?: string,
+): Promise<TicketRow> {
+  if (!isTicketActor(actor) || !REKIND_ACTORS.includes(actor)) {
+    throw new Response(`Forbidden: actor '${String(actor)}' may not rekind`, { status: 403 })
+  }
+  if (!REKIND_TO_KINDS.includes(toKind)) {
+    throw new Response(
+      `Bad Request: cannot rekind to '${toKind}' (allowed: ${REKIND_TO_KINDS.join(', ')})`,
+      { status: 400 },
+    )
+  }
+
+  const [row] = await db
+    .select()
+    .from(homepageTeamSuggestions)
+    .where(eq(homepageTeamSuggestions.id, id))
+    .limit(1)
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 })
+
+  if (!REKIND_FROM_KINDS.includes(row.kind ?? '')) {
+    throw new Response(
+      `Conflict: only ${REKIND_FROM_KINDS.join('/')} rows may be rekinded, suggestion ${id} is '${row.kind}'`,
+      { status: 409 },
+    )
+  }
+  if ((TERMINAL_TICKET_STATUSES as readonly string[]).includes(row.status ?? '')) {
+    throw new Response(`Conflict: suggestion ${id} is ${row.status}`, { status: 409 })
+  }
+
+  const fromKind = row.kind
+  const updated = await db
+    .update(homepageTeamSuggestions)
+    .set({ kind: toKind, updatedAt: new Date() })
+    .where(and(eq(homepageTeamSuggestions.id, id), eq(homepageTeamSuggestions.kind, fromKind)))
+    .returning()
+  if (updated.length === 0) {
+    throw new Response(`Conflict: suggestion ${id} changed underneath the rekind`, { status: 409 })
+  }
+
+  await addTicketLinks(id, [{
+    kind: 'note',
+    ref: `rekind ${fromKind} -> ${toKind} by ${actor}${note ? `: ${note}` : ''}`,
+    state: updated[0]!.status ?? undefined,
+  }])
+
+  return updated[0]!
+}
+
+/**
+ * agent-editor retiring an approved row with no executor, during its hygiene
+ * pass. Thin wrapper over the transition map so ALLOWED stays the only source
+ * of transition authority (the kind fence lives in the map, not here).
+ */
+export async function agentRetireSuggestion(
+  id: number,
+  actor: TicketActor,
+  note: string,
+): Promise<TicketRow> {
+  return transitionSuggestion(id, 'dismissed', actor, { note })
+}
+
+/**
+ * Append a free-text note to a ticket without changing its status. Lets a run
+ * record what it did to a row it could not close (refused, partially handled)
+ * so the next reader sees the history instead of re-deriving it.
+ */
+export async function addSuggestionNote(id: number, ref: string): Promise<void> {
+  const [row] = await db
+    .select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status })
+    .from(homepageTeamSuggestions)
+    .where(eq(homepageTeamSuggestions.id, id))
+    .limit(1)
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 })
+  await addTicketLinks(id, [{ kind: 'note', ref, state: row.status ?? undefined }])
+}
+
+/**
  * Agent-side transition (agent-editor): approved -> pr_open -> applied, with
  * the PR URL in applyRef. Throws 409 on any other transition — agents can
  * never move a row out of `proposed`; that decision is the owner's.
@@ -747,6 +846,40 @@ export const AGENT_EDITOR_APPLY_KINDS: readonly string[] = ['instructions', 'age
 /** Agents permitted to claim an approved ticket. */
 export const CLAIMANT_ACTORS: readonly TicketActor[] = ['agent:rr7-engineer', 'agent:agent-editor']
 
+/**
+ * Kinds agent-editor may retire on its own during its weekly hygiene pass.
+ *
+ * These are the kinds with no automated executor: the taxonomy routes them to
+ * "the owner acts directly", and with auto-approve on they never pass through
+ * a triage click, so nothing ever closed one. 52 `process` rows accumulated
+ * this way, including run-observations that were only ever notes to nobody.
+ * Deliberately excludes `code` (the ticket lane owns those) and
+ * `instructions`/`agent-def`/`config` (agent-editor's own work queue — letting
+ * it retire those would let it dismiss the suggestions that constrain it).
+ */
+export const AGENT_RETIRE_KINDS: readonly string[] = ['process', 'strategy', 'program']
+
+/**
+ * Entry agents for the daily routines, permitted to close an inbound
+ * operational row they acted on.
+ *
+ * Routed findings (inventory-sentinel's out-of-stock carousel swaps, say) used
+ * to be filed at a team and then read by nobody, because the daily playbooks
+ * only ever *wrote* suggestions. Now each routine reads its inbound approved
+ * rows, and a row it actually acts on has to be closable in the same run or
+ * tomorrow's run re-reads it forever.
+ */
+export const RUN_CLOSE_ACTORS: readonly TicketActor[] = [
+  'agent:homepage-orchestrator',
+  'agent:content-writer',
+  'agent:social-media-manager',
+  'agent:product-manager',
+  'agent:store-strategist',
+]
+
+/** Operational kinds a daily run may close once it has executed the ask. */
+export const RUN_CLOSE_KINDS: readonly string[] = ['process', 'strategy']
+
 export interface TransitionRule {
   to: TicketStatus
   /**
@@ -771,6 +904,12 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
   ],
   approved: [
     { to: 'in_progress', actors: CLAIMANT_ACTORS },
+    // A daily routine executed the ask in this run: close it so it is not
+    // re-read tomorrow. Operational kinds only.
+    { to: 'applied', actors: RUN_CLOSE_ACTORS, kinds: RUN_CLOSE_KINDS },
+    // agent-editor's hygiene pass retiring a row with no executor. Kinds are
+    // fenced so it can never dismiss the instruction rows aimed at itself.
+    { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_RETIRE_KINDS },
     OWNER_DISMISS,
   ],
   in_progress: [
