@@ -152,7 +152,7 @@ Every one of these is a `pipeline_settings` row. Agents may never write `pipelin
 | `release_engine_enabled` | No agent PR is merged by anything but the owner. Exactly today's world. Default **false** | `/admin/homepage-team`, strategy tab |
 | `release_engine_max_merges_per_day` | Hard ceiling on merges per day (seeded at 6), independent of the switch | same |
 | `suggestion_apply_enabled` | `agent-editor` opens no PRs at all | `/admin/homepage-team` |
-| `{team}_team_auto_approve_suggestions` | That team's suggestions land in `proposed` and wait for the owner's triage click. Homepage is on; every other team defaults off | that team's tab |
+| `{team}_team_auto_approve_suggestions` | Off: that team's suggestions land in `proposed` and wait for the owner's triage click. **On for all five active teams since 2026-07-29** (owner decision; the four non-homepage valves were actually flipped 2026-07-18 and the docs lagged, which is why valve writes now land in `settings_audit_log` with an actor) | that team's tab |
 | `{team}_team_enabled` | That team's routines no-op at the gate | that team's tab |
 | `{team}_team_daily_cents` / `{team}_team_max_runs` | Spend and run ceilings per team per day | that team's tab |
 | `homepage_team_enabled` | The daily merchandising run publishes nothing | `/admin/homepage-team` |

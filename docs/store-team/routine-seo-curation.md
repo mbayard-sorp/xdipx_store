@@ -161,7 +161,7 @@ Ships inert. To turn on, in order:
    `--apply`. The curator's weekly cap of 250 is sized for steady-state, not the initial 1,700.
 3. **Flip `seo_curation_enabled`** on the Content tab of `/admin/homepage-team`.
 4. **One supervised manual run:** fire the trigger by hand; verify the run row + events on
-   `/admin/homepage-team?team=content`, the briefs in Sanity, and the weekly report suggestion.
+   `/admin/homepage-team?team=content`, the briefs in Sanity, and the weekly report event (posted as a run event, not a suggestion row: a report has no executor and can never reach a terminal state, so filing it on the bus just ages there — see improvement-loop.md).
 5. **Confirm the schedule** (routine #10 in `docs/store-team/routine-schedule.md`).
 
 **Kill-switch drill:** `seo_curation_enabled` off = Step 0 exits before any run row.

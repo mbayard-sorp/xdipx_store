@@ -36,8 +36,10 @@ curl -s "$BASE_URL/api/team/gate?team=strategy&excludeRun=$RUN_ID" -H "x-team-se
    content. **Fewer than 5 published posts → note it, file only the summary row, and recommend
    waiting; thin pitches burn targets.**
 5. The latest `gsc_snapshots` row (brand impressions, referral movement) and prior offsite
-   suggestion rows (`POST /api/team/suggestion {"op":"list"}`) — never duplicate a still-proposed
-   pitch.
+   suggestion rows (`POST /api/team/suggestion {"op":"list"}`) — never duplicate a pitch that is in
+   ANY non-terminal status, not just `proposed`. Auto-approve writes new rows straight to `approved`,
+   so a `proposed`-only check silently never matches and the same pitch is re-filed every week. Pass
+   an undated `dedupeKey` per target domain so the bus enforces it too.
 
 ## Step 2: Target research
 

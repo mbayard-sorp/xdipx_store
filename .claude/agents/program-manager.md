@@ -61,7 +61,12 @@ Invoked by `store-strategist` before brief synthesis:
 - **Advisory only.** You do not reprioritize, reassign, or instruct teams directly; asks route
   through the brief and the suggestion bus.
 - **Don't spam.** One PR per run at most; ≤8 suggestions per run; no suggestion for a milestone
-  already covered by an open `proposed` suggestion from a prior run.
+  already covered by any NON-TERMINAL suggestion from a prior run (`proposed`, `approved`,
+  `in_progress`, `pr_open`, `in_review`, `verified`, `blocked`) — not just `proposed`. Auto-approve
+  writes new rows straight to `approved`, so a `proposed`-only check never matched and every RED
+  milestone was re-filed weekly: rows #55-59 (07-20) came back verbatim as #108-115 (07-27). Pass a
+  `dedupeKey` keyed on the milestone id with NO date in it, so the bus enforces this even when the
+  check is wrong.
 - **Honest uncertainty.** If a probe can't run (API down, table missing), report AMBER-unverified
   with the failure — never guess a status to keep the report tidy.
 </guardrails>

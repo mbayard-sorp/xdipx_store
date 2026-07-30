@@ -32,7 +32,35 @@ Yours: kind `instructions` | `agent-def` | `config` (doc-level only). Everything
 silently (kind `code` waits for a human + rr7-engineer; `campaign`/`promo`/`program` are the
 owner's to execute).
 
-## Step 2 — Implement (per suggestion, max 5 per run)
+## Step 1.5 — Hygiene pass (before implementing anything)
+
+The bus accumulates rows no lane will ever execute. `kind` used to be write-once, so a row filed as
+`process` when it was really instruction or code work could never reach the lane that would have
+done it, and nothing could close a row in a kind with no automated executor. 52 approved `process`
+rows built up that way with zero completions ever. Two ops fix it; use them first, capped at **10
+rekinds and 10 retires per run** so a bad judgement call is small and reviewable.
+
+1. List approved `process` and `strategy` rows (`{"op":"list","status":"approved","kind":"process"}`).
+2. **Re-file the misfiled.** A row asking for a playbook or agent-definition edit is `instructions`;
+   one that needs code is `code` (it will then be claimed by R-DEV, not by you):
+   ```bash
+   -d '{"op":"rekind","id":123,"kind":"instructions","actor":"agent:agent-editor","note":"playbook edit, not an owner decision"}'
+   ```
+   Rekind is one-way (`process` → `instructions`|`code`) by design. You cannot rekind *into* a
+   retirable kind, because that plus a retire would let you dismiss the instruction rows aimed at
+   you.
+3. **Retire what is genuinely finished or moot** — a run-observation that was only ever a note to
+   nobody, a duplicate, or something superseded by shipped work:
+   ```bash
+   -d '{"op":"retire","id":124,"actor":"agent:agent-editor","note":"superseded by #131, which shipped 07-28"}'
+   ```
+   The note is required: a retirement with no stated reason is indistinguishable from a mistake, and
+   every retire you make is listed in the next owner digest. When unsure, leave it — an aging row is
+   cheap, a wrongly-closed one is invisible.
+4. **Never retire** a row that names a live customer-facing defect (out-of-stock product in a live
+   slot, a broken page, a money-path bug) even if it is old. Rekind those to `code` instead.
+
+## Step 2 — Implement (per suggestion, max 15 per run)
 
 1. Read the suggestion and the files it names. Too vague to implement faithfully → leave it
    approved, post a `decision` event saying what's missing.
@@ -41,9 +69,11 @@ owner's to execute).
    `docs/homepage-team/*.md`; `docs/ads-policy.md`/`docs/emma-voice.md` only when explicitly
    targeted and risk-approved). Diff-before-write: already satisfied → mark `applied` with a note,
    no empty PR.
-4. **Refuse and flag** (decision event, row left approved) any suggestion that would weaken a money
-   valve, the Emma voice gate, MAP rules, propose-only discipline, or the improvement loop's own
-   human gates.
+4. **Refuse and flag** (decision event) any suggestion that would weaken a money valve, the Emma
+   voice gate, MAP rules, propose-only discipline, or the improvement loop's own human gates. Then
+   **dispose of the row** rather than leaving it approved: retire it with the refusal as the note, or
+   rekind it if another lane could do it safely. A refused row left approved is re-listed and
+   re-evaluated on every future run forever, which is exactly what happened to #7 from 2026-07-12.
 5. Open the PR (never merge it yourself; the release engine does that once the gates pass): title
    `agents: apply suggestion #<id> — <summary>`; body quotes the
    suggestion verbatim + est. savings + cx_risk + rationale for the exact edit.
