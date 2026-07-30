@@ -523,6 +523,30 @@ export async function getDropPage(
   return cached(`drop-page:${routeKey}`, PAGE_CACHE_TTL_S, fetcher)
 }
 
+/**
+ * The `_updatedAt` of a live drop-page doc, as a YYYY-MM-DD date, or undefined
+ * when no live doc exists. Reads only the timestamp — never resolves blocks —
+ * so it is cheap enough for the sitemap. Used so /new's sitemap lastmod tracks
+ * real merchandising edits (the tiered-rotation refreshes) instead of a
+ * fabricated per-build "today" floor.
+ */
+export async function getDropPageUpdatedAt(
+  routeKey: 'new' | 'on-sale',
+): Promise<string | undefined> {
+  try {
+    const client = getClient(false)
+    if (!client) return undefined
+    const updatedAt = await client.fetch<string | null>(
+      `*[_type == "dropPage" && routeKey == $routeKey && status == "live"][0]._updatedAt`,
+      { routeKey },
+    )
+    return updatedAt?.split('T')[0] ?? undefined
+  } catch (err) {
+    console.error(`[category-page] getDropPageUpdatedAt(${routeKey}) failed:`, err)
+    return undefined
+  }
+}
+
 /** Exposed for the drop pages' sourceRule=tag default. */
 export async function getDropTagProducts(tag = 'new-arrival', limit = 12): Promise<CategoryCardProduct[]> {
   try {

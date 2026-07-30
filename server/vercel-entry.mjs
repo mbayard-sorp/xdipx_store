@@ -21698,6 +21698,221 @@ var init_sitemap_xml = __esm({
   }
 });
 
+// app/lib/collection-canonical-aliases.ts
+var COLLECTION_CANONICAL_ALIASES, CANONICAL_ALIASED_HANDLES;
+var init_collection_canonical_aliases = __esm({
+  "app/lib/collection-canonical-aliases.ts"() {
+    "use strict";
+    COLLECTION_CANONICAL_ALIASES = {
+      "just-dropped": "/new"
+    };
+    CANONICAL_ALIASED_HANDLES = new Set(
+      Object.keys(COLLECTION_CANONICAL_ALIASES)
+    );
+  }
+});
+
+// app/lib/dial-registry.server.ts
+import { createClient as createClient5 } from "@sanity/client";
+function client2(write = false) {
+  if (!projectId5) return null;
+  const token = process.env["SANITY_API_TOKEN"];
+  return createClient5({
+    projectId: projectId5,
+    dataset: dataset5,
+    apiVersion: apiVersion5,
+    useCdn: !write,
+    ...token ? { token } : {}
+  });
+}
+async function getDialRegistry() {
+  const c = client2(false);
+  if (!c) return { ...FALLBACK };
+  try {
+    const projection = REGISTRY_FIELD_NAMES.join(", ");
+    const doc = await c.fetch(
+      `*[_id == $id][0]{ ${projection} }`,
+      { id: SINGLETON_ID }
+    );
+    const out = {};
+    for (const type of Object.keys(TYPE_TO_FIELD)) {
+      const field = TYPE_TO_FIELD[type];
+      let labels = doc?.[field] ?? [];
+      if (type === "vibrator") {
+        labels = [
+          ...labels,
+          ...doc?.["airPulsation"] ?? [],
+          ...doc?.["wand"] ?? []
+        ];
+        labels = Array.from(new Set(labels));
+      }
+      if (labels.length > 0) {
+        out[type] = labels;
+      } else if (FALLBACK[type]) {
+        out[type] = FALLBACK[type];
+      }
+    }
+    return out;
+  } catch (err2) {
+    console.error("[dial-registry] fetch failed, using fallback:", err2);
+    return { ...FALLBACK };
+  }
+}
+async function getDialLabelsForType(type) {
+  const reg = await getDialRegistry();
+  return reg[type] ?? [];
+}
+async function getDialTaxonomy() {
+  const empty = {};
+  const c = client2(false);
+  if (!c) return empty;
+  try {
+    const projection = REGISTRY_FIELD_NAMES.join(", ");
+    const doc = await c.fetch(
+      `*[_id == $id][0]{ ${projection} }`,
+      { id: TAXONOMY_SINGLETON_ID }
+    );
+    if (!doc) return empty;
+    const out = {};
+    for (const type of Object.keys(TYPE_TO_FIELD)) {
+      const field = TYPE_TO_FIELD[type];
+      let entries = Array.isArray(doc[field]) ? doc[field] : [];
+      if (type === "vibrator") {
+        const merged = [
+          ...entries,
+          ...Array.isArray(doc["airPulsation"]) ? doc["airPulsation"] : [],
+          ...Array.isArray(doc["wand"]) ? doc["wand"] : []
+        ];
+        const seen = /* @__PURE__ */ new Set();
+        entries = [];
+        for (const entry of merged) {
+          if (!entry?.label || seen.has(entry.label)) continue;
+          seen.add(entry.label);
+          entries.push(entry);
+        }
+      }
+      if (entries.length > 0) out[type] = entries;
+    }
+    return out;
+  } catch (err2) {
+    console.error("[dial-registry] taxonomy fetch failed, returning empty:", err2);
+    return empty;
+  }
+}
+async function appendDialLabel(type, label) {
+  const trimmed = label.trim();
+  if (!trimmed) throw new Error("label cannot be empty");
+  const c = client2(true);
+  if (!c) throw new Error("Sanity client unavailable \u2014 set SANITY_PROJECT_ID and SANITY_API_TOKEN");
+  const current = await getDialLabelsForType(type);
+  const exists = current.some((x) => x.toLowerCase() === trimmed.toLowerCase());
+  if (exists) return current;
+  const field = TYPE_TO_FIELD[type];
+  if (!field) {
+    throw new Error(`No Sanity dialRegistry field mapped for product type "${type}". Run the Sanity dialRegistry migration before appending labels for this type.`);
+  }
+  const next = [...current, trimmed];
+  await c.patch(SINGLETON_ID).set({ [field]: next }).commit();
+  return next;
+}
+var projectId5, dataset5, apiVersion5, SINGLETON_ID, TAXONOMY_SINGLETON_ID, TYPE_TO_FIELD, REGISTRY_FIELD_NAMES, FALLBACK;
+var init_dial_registry_server = __esm({
+  "app/lib/dial-registry.server.ts"() {
+    "use strict";
+    projectId5 = process.env["SANITY_PROJECT_ID"];
+    dataset5 = process.env["SANITY_DATASET"] ?? "production";
+    apiVersion5 = "2024-10-01";
+    SINGLETON_ID = "singleton.dialRegistry";
+    TAXONOMY_SINGLETON_ID = "singleton.dialTaxonomy";
+    TYPE_TO_FIELD = {
+      vibrator: "vibrator",
+      dildo: "dildo",
+      anal: "anal",
+      bondage: "bondage",
+      "cock-ring": "cockRing",
+      stroker: "stroker",
+      couples: "couples",
+      harness: "harness",
+      extender: "extender",
+      pump: "pump",
+      lube: "lube",
+      massage: "massage",
+      enhancer: "enhancer",
+      wear: "wear",
+      condom: "condom",
+      wellness: "wellness",
+      novelty: "novelty",
+      "book-media": "bookMedia",
+      "sex-machine": "sexMachine"
+    };
+    REGISTRY_FIELD_NAMES = [
+      ...Object.values(TYPE_TO_FIELD),
+      "airPulsation",
+      "wand"
+    ];
+    FALLBACK = {
+      vibrator: ["Intensity", "Quietness", "Pattern variety", "Buildup speed", "Battery life", "Learning curve"],
+      lube: ["Slipperiness", "Longevity", "Taste-safe", "Body-safe", "Tidy-up", "Skin feel"],
+      wear: ["Fit", "Softness", "Washability", "Discretion", "Adjustability", "Occasion"]
+    };
+  }
+});
+
+// app/lib/category-page.server.ts
+async function getDropPageUpdatedAt(routeKey) {
+  try {
+    const client5 = getClient(false);
+    if (!client5) return void 0;
+    const updatedAt = await client5.fetch(
+      `*[_type == "dropPage" && routeKey == $routeKey && status == "live"][0]._updatedAt`,
+      { routeKey }
+    );
+    return updatedAt?.split("T")[0] ?? void 0;
+  } catch (err2) {
+    console.error(`[category-page] getDropPageUpdatedAt(${routeKey}) failed:`, err2);
+    return void 0;
+  }
+}
+var BLOCKS_PROJECTION, CATEGORY_PAGE_GROQ, DROP_PAGE_GROQ;
+var init_category_page_server = __esm({
+  "app/lib/category-page.server.ts"() {
+    "use strict";
+    init_sanity_server();
+    init_kv_server();
+    init_with_timeout_server();
+    init_shopify_server();
+    init_dial_registry_server();
+    init_product_handles();
+    BLOCKS_PROJECTION = `
+  blocks[]{
+    _type, _key, anchorId,
+    kicker, headline, italicWord, standfirst, heading, intro, label, sticky,
+    showCounts, axisSet, title, collectionHandle, sortRationale, seeAllLabel,
+    pinnedHandles, productHandle, body, ctaLabel, period,
+    "imageUrl": image.asset->url,
+    "imageAlt": image.alt,
+    claims[]{ claim, detail, source, "sourceUrl": sourceUrl },
+    items[]{ headline, subheadline, question, answer },
+    options[]{ label, tag, narratorCopy },
+    entries[]{ label, note, productHandles },
+    posts[]->{ "slug": slug.current, title, "heroImageUrl": heroImage.asset->url, excerpt, status }
+  }
+`;
+    CATEGORY_PAGE_GROQ = `
+  *[_type == "categoryPage" && shopifyCollectionHandle == $handle && status == "live"][0]{
+    shopifyCollectionHandle,
+    ${BLOCKS_PROJECTION}
+  }
+`;
+    DROP_PAGE_GROQ = `
+  *[_type == "dropPage" && routeKey == $routeKey && status == "live"][0]{
+    routeKey,
+    ${BLOCKS_PROJECTION}
+  }
+`;
+  }
+});
+
 // app/lib/sitemap.server.ts
 var sitemap_server_exports = {};
 __export(sitemap_server_exports, {
@@ -21750,7 +21965,7 @@ async function assembleSegments() {
     console.error(`[sitemap] ${name} failed:`, err2);
     return fallback;
   });
-  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles] = await Promise.all([
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles, newDropLastmod] = await Promise.all([
     guard(getBlogPostsForSitemap(), [], "getBlogPostsForSitemap"),
     guard(getBlogCategories(), [], "getBlogCategories"),
     guard(getAllBlogSeries(), [], "getAllBlogSeries"),
@@ -21761,7 +21976,8 @@ async function assembleSegments() {
     guard(db.select().from(dealHistory).where(eq13(dealHistory.status, "live")).limit(1), [], "liveDeal query"),
     guard(getMainMenu(), [], "getMainMenu"),
     getUrlHealth(),
-    guard(getIndexableProductHandles(), null, "getIndexableProductHandles")
+    guard(getIndexableProductHandles(), null, "getIndexableProductHandles"),
+    guard(getDropPageUpdatedAt("new"), void 0, "getDropPageUpdatedAt(new)")
   ]);
   const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0].dealDate) : null;
   const homepageLastmod = liveDealDate && !Number.isNaN(liveDealDate.getTime()) ? liveDealDate.toISOString().split("T")[0] : void 0;
@@ -21791,7 +22007,10 @@ async function assembleSegments() {
     // zero products (thin content); the rest of the time it is a fully
     // indexable page, so omitting it left it with no submission path and
     // almost no inbound links. Listed above generic PLPs, below the nav.
-    { loc: `${BASE2}/new`, lastmod: today, changefreq: "daily", priority: NEW_ARRIVALS_PRIORITY },
+    // lastmod is the merchandised dropPage doc's real edit date (the
+    // tiered-rotation refreshes), not a per-build "today" floor that told Google
+    // the page changed every crawl; undefined when no live doc exists.
+    { loc: `${BASE2}/new`, lastmod: newDropLastmod, changefreq: "daily", priority: NEW_ARRIVALS_PRIORITY },
     { loc: `${BASE2}/discover`, lastmod: today, changefreq: "weekly", priority: "0.7" },
     { loc: `${BASE2}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: "weekly", priority: "0.7" },
     { loc: `${BASE2}/notebook`, lastmod: today, changefreq: "weekly", priority: "0.5" },
@@ -21834,7 +22053,7 @@ async function assembleSegments() {
       priority: "0.5"
     }))
   ];
-  const collectionUrls = collections.filter((c) => !COLLECTION_DENYLIST.has(c.handle) && !navCollectionHandles.has(c.handle)).map((c) => {
+  const collectionUrls = collections.filter((c) => !COLLECTION_DENYLIST.has(c.handle) && !CANONICAL_ALIASED_HANDLES.has(c.handle) && !navCollectionHandles.has(c.handle)).map((c) => {
     const images = c.image?.url ? [{ loc: c.image.url, title: c.image.altText?.trim() || c.handle.replace(/-/g, " ") }] : [];
     return {
       loc: `${BASE2}/collections/${c.handle}`,
@@ -21893,6 +22112,8 @@ var init_sitemap_server = __esm({
     init_db_server();
     init_gsc_index_server();
     init_sitemap_xml();
+    init_collection_canonical_aliases();
+    init_category_page_server();
     init_schema();
     sql11 = neon5(process.env["DATABASE_URL"]);
     BAD_VERDICT_STATES = [
@@ -22057,14 +22278,14 @@ var init_indexnow_bulk_server = __esm({
 });
 
 // app/lib/ask-emma-vocab.server.ts
-import { createClient as createClient5 } from "@sanity/client";
-function client2(write = false) {
-  if (!projectId5) return null;
+import { createClient as createClient6 } from "@sanity/client";
+function client3(write = false) {
+  if (!projectId6) return null;
   const token = process.env["SANITY_API_TOKEN"];
-  return createClient5({
-    projectId: projectId5,
-    dataset: dataset5,
-    apiVersion: apiVersion5,
+  return createClient6({
+    projectId: projectId6,
+    dataset: dataset6,
+    apiVersion: apiVersion6,
     useCdn: !write,
     ...token ? { token } : {}
   });
@@ -22073,42 +22294,42 @@ function activeMattersVocab() {
   return [...MATTERS_V2];
 }
 async function getAskEmmaVocabulary() {
-  const c = client2(false);
+  const c = client3(false);
   if (!c) {
     return {
-      mood: FALLBACK.mood,
-      audience: FALLBACK.audience,
+      mood: FALLBACK2.mood,
+      audience: FALLBACK2.audience,
       matters: activeMattersVocab()
     };
   }
   try {
     const doc = await c.fetch(`*[_id == $id][0]{
       mood, audience, matters
-    }`, { id: SINGLETON_ID });
+    }`, { id: SINGLETON_ID2 });
     return {
-      mood: doc?.["mood"]?.length ? doc["mood"] : FALLBACK.mood,
-      audience: doc?.["audience"]?.length ? doc["audience"] : FALLBACK.audience,
+      mood: doc?.["mood"]?.length ? doc["mood"] : FALLBACK2.mood,
+      audience: doc?.["audience"]?.length ? doc["audience"] : FALLBACK2.audience,
       matters: activeMattersVocab()
     };
   } catch (err2) {
     console.error("[ask-emma-vocab] fetch failed, using fallback:", err2);
     return {
-      mood: FALLBACK.mood,
-      audience: FALLBACK.audience,
+      mood: FALLBACK2.mood,
+      audience: FALLBACK2.audience,
       matters: activeMattersVocab()
     };
   }
 }
-var projectId5, dataset5, apiVersion5, SINGLETON_ID, FALLBACK;
+var projectId6, dataset6, apiVersion6, SINGLETON_ID2, FALLBACK2;
 var init_ask_emma_vocab_server = __esm({
   "app/lib/ask-emma-vocab.server.ts"() {
     "use strict";
     init_discovery();
-    projectId5 = process.env["SANITY_PROJECT_ID"];
-    dataset5 = process.env["SANITY_DATASET"] ?? "production";
-    apiVersion5 = "2024-10-01";
-    SINGLETON_ID = "singleton.askEmmaVocabulary";
-    FALLBACK = {
+    projectId6 = process.env["SANITY_PROJECT_ID"];
+    dataset6 = process.env["SANITY_DATASET"] ?? "production";
+    apiVersion6 = "2024-10-01";
+    SINGLETON_ID2 = "singleton.askEmmaVocabulary";
+    FALLBACK2 = {
       mood: ["slow-and-intimate", "playful", "adventurous", "romantic", "indulgent", "curious", "comforting", "energetic", "bold", "sensual", "spontaneous", "tender"],
       audience: ["solo", "couples", "long-distance", "first-time", "date-night", "self-gift", "gift-idea", "anniversary", "bachelorette", "just-curious"],
       matters: [...MATTERS_V2]
@@ -22122,15 +22343,15 @@ __export(seo_research_server_exports, {
   isPolicyTermRisk: () => isPolicyTermRisk,
   runKeywordResearch: () => runKeywordResearch
 });
-import { createClient as createClient6 } from "@sanity/client";
+import { createClient as createClient7 } from "@sanity/client";
 import Anthropic2 from "@anthropic-ai/sdk";
 import { createHash as createHash5 } from "node:crypto";
 function getWriteClient2() {
-  if (!projectId6) return null;
-  return createClient6({
-    projectId: projectId6,
-    dataset: dataset6,
-    apiVersion: apiVersion6,
+  if (!projectId7) return null;
+  return createClient7({
+    projectId: projectId7,
+    dataset: dataset7,
+    apiVersion: apiVersion7,
     useCdn: false,
     token: process.env["SANITY_API_TOKEN"],
     perspective: "raw"
@@ -22560,14 +22781,14 @@ async function runKeywordResearch(opts) {
     durationMs: Date.now() - start
   };
 }
-var projectId6, dataset6, apiVersion6, MODEL_FAST2, RESEARCH_LIMIT, ANTHROPIC_KEY, COMPETITOR_TERM_RE, MEDICAL_CLAIM_RE, DFS_LOGIN, DFS_PASSWORD, DFS_AUTH_B64, DFS_BASE, CATALOG_SUMMARY, AUTO_REJECT_THRESHOLD, AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_MIN_VOLUME;
+var projectId7, dataset7, apiVersion7, MODEL_FAST2, RESEARCH_LIMIT, ANTHROPIC_KEY, COMPETITOR_TERM_RE, MEDICAL_CLAIM_RE, DFS_LOGIN, DFS_PASSWORD, DFS_AUTH_B64, DFS_BASE, CATALOG_SUMMARY, AUTO_REJECT_THRESHOLD, AUTO_APPROVE_THRESHOLD, AUTO_APPROVE_MIN_VOLUME;
 var init_seo_research_server = __esm({
   "app/lib/seo-research.server.ts"() {
     "use strict";
     init_ask_emma_vocab_server();
-    projectId6 = process.env["SANITY_PROJECT_ID"];
-    dataset6 = process.env["SANITY_DATASET"] ?? "production";
-    apiVersion6 = "2024-10-01";
+    projectId7 = process.env["SANITY_PROJECT_ID"];
+    dataset7 = process.env["SANITY_DATASET"] ?? "production";
+    apiVersion7 = "2024-10-01";
     MODEL_FAST2 = "claude-haiku-4-5-20251001";
     RESEARCH_LIMIT = 80;
     ANTHROPIC_KEY = process.env["ANTHROPIC_API_KEY"]?.trim();
@@ -23408,152 +23629,6 @@ var init_cost_sync_server = __esm({
       dropsDetected: 0,
       variantsRepriced: 0,
       errors: []
-    };
-  }
-});
-
-// app/lib/dial-registry.server.ts
-import { createClient as createClient7 } from "@sanity/client";
-function client3(write = false) {
-  if (!projectId7) return null;
-  const token = process.env["SANITY_API_TOKEN"];
-  return createClient7({
-    projectId: projectId7,
-    dataset: dataset7,
-    apiVersion: apiVersion7,
-    useCdn: !write,
-    ...token ? { token } : {}
-  });
-}
-async function getDialRegistry() {
-  const c = client3(false);
-  if (!c) return { ...FALLBACK2 };
-  try {
-    const projection = REGISTRY_FIELD_NAMES.join(", ");
-    const doc = await c.fetch(
-      `*[_id == $id][0]{ ${projection} }`,
-      { id: SINGLETON_ID2 }
-    );
-    const out = {};
-    for (const type of Object.keys(TYPE_TO_FIELD)) {
-      const field = TYPE_TO_FIELD[type];
-      let labels = doc?.[field] ?? [];
-      if (type === "vibrator") {
-        labels = [
-          ...labels,
-          ...doc?.["airPulsation"] ?? [],
-          ...doc?.["wand"] ?? []
-        ];
-        labels = Array.from(new Set(labels));
-      }
-      if (labels.length > 0) {
-        out[type] = labels;
-      } else if (FALLBACK2[type]) {
-        out[type] = FALLBACK2[type];
-      }
-    }
-    return out;
-  } catch (err2) {
-    console.error("[dial-registry] fetch failed, using fallback:", err2);
-    return { ...FALLBACK2 };
-  }
-}
-async function getDialLabelsForType(type) {
-  const reg = await getDialRegistry();
-  return reg[type] ?? [];
-}
-async function getDialTaxonomy() {
-  const empty = {};
-  const c = client3(false);
-  if (!c) return empty;
-  try {
-    const projection = REGISTRY_FIELD_NAMES.join(", ");
-    const doc = await c.fetch(
-      `*[_id == $id][0]{ ${projection} }`,
-      { id: TAXONOMY_SINGLETON_ID }
-    );
-    if (!doc) return empty;
-    const out = {};
-    for (const type of Object.keys(TYPE_TO_FIELD)) {
-      const field = TYPE_TO_FIELD[type];
-      let entries = Array.isArray(doc[field]) ? doc[field] : [];
-      if (type === "vibrator") {
-        const merged = [
-          ...entries,
-          ...Array.isArray(doc["airPulsation"]) ? doc["airPulsation"] : [],
-          ...Array.isArray(doc["wand"]) ? doc["wand"] : []
-        ];
-        const seen = /* @__PURE__ */ new Set();
-        entries = [];
-        for (const entry of merged) {
-          if (!entry?.label || seen.has(entry.label)) continue;
-          seen.add(entry.label);
-          entries.push(entry);
-        }
-      }
-      if (entries.length > 0) out[type] = entries;
-    }
-    return out;
-  } catch (err2) {
-    console.error("[dial-registry] taxonomy fetch failed, returning empty:", err2);
-    return empty;
-  }
-}
-async function appendDialLabel(type, label) {
-  const trimmed = label.trim();
-  if (!trimmed) throw new Error("label cannot be empty");
-  const c = client3(true);
-  if (!c) throw new Error("Sanity client unavailable \u2014 set SANITY_PROJECT_ID and SANITY_API_TOKEN");
-  const current = await getDialLabelsForType(type);
-  const exists = current.some((x) => x.toLowerCase() === trimmed.toLowerCase());
-  if (exists) return current;
-  const field = TYPE_TO_FIELD[type];
-  if (!field) {
-    throw new Error(`No Sanity dialRegistry field mapped for product type "${type}". Run the Sanity dialRegistry migration before appending labels for this type.`);
-  }
-  const next = [...current, trimmed];
-  await c.patch(SINGLETON_ID2).set({ [field]: next }).commit();
-  return next;
-}
-var projectId7, dataset7, apiVersion7, SINGLETON_ID2, TAXONOMY_SINGLETON_ID, TYPE_TO_FIELD, REGISTRY_FIELD_NAMES, FALLBACK2;
-var init_dial_registry_server = __esm({
-  "app/lib/dial-registry.server.ts"() {
-    "use strict";
-    projectId7 = process.env["SANITY_PROJECT_ID"];
-    dataset7 = process.env["SANITY_DATASET"] ?? "production";
-    apiVersion7 = "2024-10-01";
-    SINGLETON_ID2 = "singleton.dialRegistry";
-    TAXONOMY_SINGLETON_ID = "singleton.dialTaxonomy";
-    TYPE_TO_FIELD = {
-      vibrator: "vibrator",
-      dildo: "dildo",
-      anal: "anal",
-      bondage: "bondage",
-      "cock-ring": "cockRing",
-      stroker: "stroker",
-      couples: "couples",
-      harness: "harness",
-      extender: "extender",
-      pump: "pump",
-      lube: "lube",
-      massage: "massage",
-      enhancer: "enhancer",
-      wear: "wear",
-      condom: "condom",
-      wellness: "wellness",
-      novelty: "novelty",
-      "book-media": "bookMedia",
-      "sex-machine": "sexMachine"
-    };
-    REGISTRY_FIELD_NAMES = [
-      ...Object.values(TYPE_TO_FIELD),
-      "airPulsation",
-      "wand"
-    ];
-    FALLBACK2 = {
-      vibrator: ["Intensity", "Quietness", "Pattern variety", "Buildup speed", "Battery life", "Learning curve"],
-      lube: ["Slipperiness", "Longevity", "Taste-safe", "Body-safe", "Tidy-up", "Skin feel"],
-      wear: ["Fit", "Softness", "Washability", "Discretion", "Adjustability", "Occasion"]
     };
   }
 });
