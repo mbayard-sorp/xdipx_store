@@ -49,7 +49,7 @@ export function PanelLargeRow({
               onClick={() => onPanelClick?.(dataAttr, panel.href)}
               className={[
                 'relative flex min-h-[154px] overflow-hidden md:h-[240px]',
-                'rounded-2xl md:rounded-[22px]',
+                'rounded-[22px]',
                 ruled ? 'border border-line bg-paper-2' : s.bg,
                 panelInteractionClasses(!ruled && s.darkGround),
               ].join(' ')}
@@ -59,7 +59,7 @@ export function PanelLargeRow({
                 <div>
                   {panel.kicker ? (
                     <span
-                      className={`mb-2 block text-[9px] uppercase tracking-[0.16em] md:text-[11px] ${ruled ? 'text-ink-4' : s.accent}`}
+                      className={`mb-2 block text-[11px] uppercase tracking-[0.18em] ${ruled ? 'text-ink-4' : s.accent}`}
                       style={MONO}
                     >
                       {panel.kicker}
@@ -81,8 +81,10 @@ export function PanelLargeRow({
                   ) : null}
                 </div>
                 {arrowText ? (
+                  // The deck's ONE coral spend (§3 budget): the dark panel's CTA.
+                  // Light grounds keep ink so coral stays a single primary.
                   <span
-                    className={`inline-flex items-center gap-1.5 text-[13px] font-semibold md:text-[14px] ${ruled ? 'text-ink' : s.text}`}
+                    className={`inline-flex items-center gap-1.5 text-[13px] font-semibold md:text-[14px] ${ruled ? 'text-ink' : s.darkGround ? 'text-coral' : s.text}`}
                     style={BODY}
                   >
                     {arrowText}
@@ -109,11 +111,15 @@ export function PanelLargeRow({
                   />
                 </div>
               ) : panel.mark && isMarkName(panel.mark) ? (
+                // Empty state: no reserved art column (which read as an
+                // unfinished plate) — the copy zone keeps the full width and
+                // the mark sits anchored to the CTA baseline, scaled to a real
+                // graphic element (design-critic cold start).
                 <div
-                  className={`pointer-events-none flex w-[34%] shrink-0 items-center justify-center ${ruled ? 'text-ink-4' : s.accent}`}
+                  className={`pointer-events-none absolute bottom-4 right-4 md:bottom-6 md:right-6 ${ruled ? 'text-ink-4' : s.accent}`}
                 >
-                  <span className="transition-transform duration-150 ease-out group-hover:translate-x-0.5">
-                    <PanelMark name={panel.mark} size={44} strokeWidth={1.4} />
+                  <span className="block transition-transform duration-150 ease-out group-hover:translate-x-0.5">
+                    <PanelMark name={panel.mark} size={72} strokeWidth={1.2} />
                   </span>
                 </div>
               ) : null}

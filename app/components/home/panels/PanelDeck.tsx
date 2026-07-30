@@ -5,6 +5,7 @@ import { PanelLargeRow } from './PanelLarge'
 import { PanelSmallRow } from './PanelSmall'
 
 const MONO = { fontFamily: 'var(--font-mono)' } as const
+const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 450 } as const
 
 /**
  * The eight-door deck — the homepage's discovery layer, rendered directly
@@ -23,16 +24,22 @@ export function PanelDeck({ deck }: { deck: ResolvedPanelDeck }) {
   const onPanelClick = (dataAttr: string, href: string) => trackPanelClick(dataAttr, href)
 
   return (
-    <section className="bg-paper py-8 md:py-12" aria-label="Browse by category">
-      <div className="mx-auto max-w-[1120px] px-[18px] md:px-7">
+    <section className="bg-paper-2 py-16 md:py-20" aria-label="Browse by category">
+      <div className="mx-auto max-w-[1320px] px-6 md:px-16">
         {deck.eyebrow ? (
           <span
-            className="mb-4 block text-[10px] uppercase tracking-[0.18em] text-ink-4 md:mb-5 md:text-[11px]"
+            className="mb-3 block text-[11px] uppercase tracking-[0.18em] text-ink-4"
             style={MONO}
           >
             {deck.eyebrow}
           </span>
         ) : null}
+        <h2
+          className="mb-9 text-[1.9rem] leading-[1.08] tracking-[-0.01em] text-ink md:text-[2.9rem]"
+          style={DISPLAY}
+        >
+          Pick your <em className="brand">door</em>.
+        </h2>
 
         <div className="flex flex-col gap-2 md:gap-3.5">
           {rows.map((row, rowIndex) => {

@@ -6,7 +6,7 @@ import { PanelMark, isMarkName } from './marks'
 import { panelDataAttr, panelInteractionClasses, surfaceStyle } from './surfaces'
 
 const MONO = { fontFamily: 'var(--font-mono)' } as const
-const BODY = { fontFamily: 'var(--font-body)' } as const
+const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 450 } as const
 
 /**
  * The evergreen aisle doors: Pleasure / Play / Body / Wear.
@@ -18,8 +18,9 @@ const BODY = { fontFamily: 'var(--font-body)' } as const
  * (the empty state), so an unfilled deck still has rhythm instead of grey
  * plates.
  *
- * Grid per the handoff: 4-up at every width, 1:1 at 375 → 1.24:1 from md,
- * 2-up below 320px. Fixed aspect boxes mean an image can never shift layout.
+ * Grid: 2-up below md (a 4-up at 375px renders ~78px tiles whose art is
+ * unreadable — design-critic cold start), 4-up from md at 1.24:1. Fixed
+ * aspect boxes mean an image can never shift layout.
  */
 export function PanelSquareRow({
   items,
@@ -37,7 +38,7 @@ export function PanelSquareRow({
   if (items.length === 0) return null
 
   return (
-    <div className="grid grid-cols-2 gap-2 min-[320px]:grid-cols-4 md:gap-3.5">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3.5">
       {items.map((tile, i) => {
         const s = surfaceStyle(tile.surface)
         const ruled = theme === 'ruled'
@@ -50,7 +51,7 @@ export function PanelSquareRow({
               onClick={() => onPanelClick?.(dataAttr, tile.href)}
               className={[
                 'relative flex aspect-square flex-col justify-between overflow-hidden p-3 md:aspect-[1.24/1] md:p-4',
-                'rounded-xl md:rounded-[20px]',
+                'rounded-[22px]',
                 ruled ? 'border border-line bg-paper-2' : s.bg,
                 panelInteractionClasses(!ruled && s.darkGround),
               ].join(' ')}
@@ -61,28 +62,35 @@ export function PanelSquareRow({
                 </span>
               ) : null}
 
-              {/* Art zone. Cutout still when the team shipped one; mark as the
-                  empty state. The image is decorative next to the label, so it
-                  carries empty alt unless the editor wrote one. */}
-              <div className="pointer-events-none flex flex-1 items-center justify-center">
-                {tile.imageUrl ? (
+              {/* Art zone. The still is generated ON the tile's own tint, so it
+                  bleeds edge to edge (top + sides) with the label zone below on
+                  the flat tint — one ground per tile, no inner photo plate
+                  (design-critic cold start). Mark is the empty state. The image
+                  is decorative next to the label, so it carries empty alt
+                  unless the editor wrote one. */}
+              {tile.imageUrl ? (
+                <div className="pointer-events-none relative -mx-3 -mt-3 flex-1 overflow-hidden md:-mx-4 md:-mt-4">
                   <OptimizedImage
                     src={tile.imageUrl}
                     alt={tile.imageAlt ?? ''}
-                    width={280}
-                    height={280}
-                    className="max-h-full w-auto max-w-[78%] object-contain transition-transform duration-150 ease-out group-hover:translate-x-0.5"
+                    width={480}
+                    height={480}
+                    className="absolute inset-0 h-full w-full object-cover"
                   />
-                ) : tile.mark && isMarkName(tile.mark) ? (
-                  <span className={`${ruled ? 'text-ink-4' : s.accent} transition-transform duration-150 ease-out group-hover:translate-x-0.5`}>
-                    <PanelMark name={tile.mark} size={30} />
-                  </span>
-                ) : null}
-              </div>
+                </div>
+              ) : (
+                <div className="pointer-events-none flex flex-1 items-center justify-center">
+                  {tile.mark && isMarkName(tile.mark) ? (
+                    <span className={`${ruled ? 'text-ink-4' : s.accent} transition-transform duration-150 ease-out group-hover:translate-x-0.5`}>
+                      <PanelMark name={tile.mark} size={30} />
+                    </span>
+                  ) : null}
+                </div>
+              )}
 
               <span
-                className={`text-[13px] font-semibold leading-none md:text-[15px] ${ruled ? 'text-ink' : s.text}`}
-                style={BODY}
+                className={`pt-2 text-[22px] leading-none tracking-[-0.01em] md:text-[24px] ${ruled ? 'text-ink' : s.text}`}
+                style={DISPLAY}
               >
                 {tile.label}
               </span>
