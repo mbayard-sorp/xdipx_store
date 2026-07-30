@@ -292,3 +292,68 @@ pricing_changes rows are a stale 05-13 artifact not a live queue, no outcome ins
 suggestions (loop step 5 unimplemented), no external uptime check (all monitors run on Vercel itself),
 review_invites never created, `video_team_enabled` correctly parked but its blocker list is stale in both
 directions (migration 065 IS applied, BLOB token is NOT in prod env).
+
+---
+
+## Post-merge verification, 2026-07-30
+
+The eight PRs implementing this evaluation (#390, #391, #393, #394, #395, #396, #398, #399) were
+re-audited against code, production data, the live Shopify Admin API, and the live scheduler. This
+section records what held and what did not, so the next reader does not have to re-derive it.
+
+### Confirmed correct — do not re-litigate
+
+- **The Shopify surface in the profit rewrite.** `ordersCount(query:, limit:)` returning `{count}`,
+  `metafields(first:, namespace:)` on `Order`, and `variant.inventoryItem.unitCost` were all
+  executed live against the store and work. `read_inventory` is granted. The metafield key limit is
+  2-64 characters, not 30, and the longest real SKU is 7, so `profit_<sku>` was never at risk.
+  `financial_status:paid` excludes refunded and partially-refunded orders, so `status:any` does not
+  inflate revenue.
+- **`priority >= 3` is the low tail, not inverted.** `SEVERITY_PRIORITY` is `{P0:1 … P3:4}`, the
+  queue index is ASC, and the data agrees.
+- **The two rewritten triggers lost no configuration.** Empty `mcp_connections` tracks
+  `created_via: meta_mcp`, not the rewrite; three untouched siblings from the same cohort are also
+  empty. Model, allowed tools, sources, outcomes and notifications are all intact.
+- **Every live cron matches this manifest.** Checked trigger by trigger.
+- **The out-of-band sweep works.** Tickets #43 and #70 reached `applied`.
+- **Deleting the `deal_history` rollup broke nothing.** No live surface read those columns; they
+  summed to zero across 4,698 rows.
+
+### Confirmed wrong, and being fixed
+
+| Finding | Fix |
+|---|---|
+| The emma-aside crawler gate is deployed and still spending: 19 paid calls across 17 products in the 10 minutes after deploy | #401 |
+| `?force=1` on the owner digest dismisses production rows | #402 |
+| The promised `pricing_audit_log` prune was never written and the drop was never disclosed | #403 |
+| The sameness auto-close bypasses the `ALLOWED` transition map | #404 |
+| `server/cron.*.ts` handlers are unprotected while `server/cron.ts` is protected | #405 |
+| A batch of doc contradictions and phantom references, including a design gate declaring a tool that exists nowhere | #406 |
+
+### Numbers in this document and its PRs that were wrong
+
+- **"~47% of all metered spend (~$40/month)"** for `emma-aside`. Actual: **26.8% and $20.15** over
+  the last 30 days. The figure was quoted onward into #395's commit message and two source files.
+- **"wrote no rows at all on both 2026-07-28 and 07-29."** 2026-07-28 wrote **4,705 rows** at 14:44
+  via a manual rescue; only 07-29 went unpriced. The distinction is the entire reason
+  `trigger='batch_catchup'` exists.
+- **"rows #55-59 re-filed verbatim as #108-115."** Five of the eight match a prior milestone slug;
+  #111, #114 and #115 are new, and the text was updated rather than verbatim. The duplication is
+  real; the citation overstates it.
+- **3,566 calls across 2,709 distinct products on 2026-07-21** is exact. So is **52 approved
+  `process` rows**, **four muted sameness slots**, the **~200-minute** content lock, and run 122
+  skipping on `run_in_progress`.
+
+### Still open at the time of writing
+
+- **No Shopify order webhook has ever reached the app.** `order_line_items`, `review_invites`,
+  `product_copurchase` and `referrals` all hold zero rows, and both real orders carry no `xdipx`
+  metafields. Everything downstream of that wire is correct code that has never executed. This is
+  the single most consequential item in this document and it is an owner action in Shopify Admin.
+- **`daily_profit_summary` reads $0 lifetime.** The Phase D purge removed the six fake `SEED-%` rows
+  on 2026-07-30 but the backfill did not follow, so the table now under-reports instead of
+  over-reporting. Run `scripts/backfill-profit-summary.ts --from 2026-04-10` (not the default
+  2026-07-23, which silently excludes order #1001 of 2026-04-10).
+- **Phase 0's configuration half never ran**: 0 of 5 valve/cap writes, 0 of 4 suggestion-hygiene
+  items. `strategy_team_max_runs` is 6 against six scheduled Monday runs.
+- **The two half-enabled trend lanes are still half-enabled**, valves on, no triggers.
