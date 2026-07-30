@@ -41,7 +41,7 @@ import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { buildSocialMeta } from '~/lib/social-meta'
 import { heroPreloadTag } from '~/lib/image-preload'
-import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
+import { BRAND_TITLE, BRAND_DESCRIPTION, BRAND_NAME } from '~/lib/brand'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { normalizeProductHandles } from '~/lib/product-handles'
 
@@ -401,7 +401,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   // Legacy daily-deal home: the product-specific SEO title stays the strongest
   // signal; homeSeo's description is the fallback when the deal has none.
   const { deal } = data
-  const title = `${deal.seoTitle} | ${BRAND_TITLE}`
+  // BRAND_NAME, not BRAND_TITLE: BRAND_TITLE already contains a `|` separator,
+  // so composing with it here would emit a double-pipe title well past 60 chars.
+  const title = `${deal.seoTitle} | ${BRAND_NAME}`
   const description = deal.metaDescription || seoDescription
   const heroPreload = heroPreloadTag(deal.images[0]?.url)
   return [
@@ -414,7 +416,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
       title,
       description,
       url: canonical,
-      image: deal.images[0]?.url ?? null,
+      // An explicit homeSeo OG override wins, same precedence as variants a/b.
+      image: seoOgImage ?? deal.images[0]?.url ?? null,
       type: 'website',
       imageAlt: deal.seoTitle,
     }),

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
 import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, GlossaryTerm, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig, HomeSeo, StorefrontHomeLayout, StorefrontHomeSection } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
-import { cached, invalidateCache } from '~/lib/kv.server'
+import { cached, invalidateCache, kvDel } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
 import { normalizeProductHandles, type ProductHandleEntry } from '~/lib/product-handles'
 import { optimizeSanityImageUrls, sanityImageUrl } from '~/lib/sanity-image'
@@ -2215,9 +2215,37 @@ const HOME_SEO_GROQ = `
   }
 `
 
+/**
+ * The literal KV key behind `getHomeSeo`. `cached()` does not namespace keys,
+ * so this string IS the KV key. Exported so the purge endpoint and the tests
+ * cannot drift from the reader.
+ */
+export const HOME_SEO_KV_KEY = 'sanity:home-seo'
+
+/**
+ * Bust both cache tiers for the homepage SERP snippet.
+ *
+ * `invalidateCache` clears the in-process L1 map and ONLY on the serverless
+ * instance that runs this call; `kvDel` clears the shared L2 entry (TTL+60s,
+ * so 360s here). Both are required. Mirrors `invalidateGa4Cache()`.
+ *
+ * This matters most for the negative case: `getHomeSeo` returns null when the
+ * singleton is unpublished, and `cached()` memoizes that null too, so the very
+ * first publish keeps serving brand fallbacks for up to 360s without a purge.
+ *
+ * It does NOT make a publish visible immediately. The homepage is edge-cached
+ * (`s-maxage=900, stale-while-revalidate=3600`, see storefront-home.server.ts)
+ * and there is no CDN purge API. This makes the ORIGIN fresh; the edge window
+ * is unchanged.
+ */
+export async function invalidateHomeSeoCache(): Promise<void> {
+  invalidateCache(HOME_SEO_KV_KEY)
+  await kvDel(HOME_SEO_KV_KEY)
+}
+
 export async function getHomeSeo(): Promise<HomeSeo | null> {
   if (!projectId) return null
-  return cached('sanity:home-seo', 300, async () => {
+  return cached(HOME_SEO_KV_KEY, 300, async () => {
     try {
       const client = getClient()
       if (!client) return null

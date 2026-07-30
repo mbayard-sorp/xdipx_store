@@ -1,4 +1,4 @@
-import { BRAND_DESCRIPTION, BRAND_TITLE } from '~/lib/brand'
+import { BRAND_DESCRIPTION, BRAND_NAME } from '~/lib/brand'
 
 interface OrganizationStructuredDataProps {
   sameAs?: string[]
@@ -9,7 +9,9 @@ export function OrganizationStructuredData({ sameAs = [] }: OrganizationStructur
     '@context':   'https://schema.org',
     '@type':      'OnlineStore',
     '@id':        'https://xdipx.com/#organization',
-    name:         BRAND_TITLE,
+    // The brand entity, not the tagline. This is what Google matches the brand
+    // on for the knowledge panel; the tagline lives in `slogan` below.
+    name:         BRAND_NAME,
     alternateName: 'xdipx.com',
     url:          'https://xdipx.com',
     logo: {

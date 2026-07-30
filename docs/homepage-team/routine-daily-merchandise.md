@@ -232,6 +232,45 @@ If you looked at a row and are deliberately not acting (out of scope, no longer 
 post `{"op":"note", ...}` saying which and why, and leave the status alone. Never close a row you did
 not actually execute: a false `applied` is worse than an aging row, because it looks handled.
 
+## Step 2e: Homepage SERP snippet review (read-only, every run)
+
+`singleton.homeSeo` is the homepage `<title>` and `<meta name="description">`, the single
+most-seen string on the site. **You are its sole writer.** No other agent writes this document;
+it carries no ownership marker, so a second writer is a silent race.
+
+This step is a read. Publishing is Step 5c and is conditional.
+
+**Read the published doc.** Pin the perspective explicitly. The draft's `_updatedAt` moves whenever
+anyone opens Studio, so a drafts-perspective read gives you the wrong clock:
+
+```bash
+npx tsx scripts/sanity-content-cli.ts query \
+  --query '*[_id == "singleton.homeSeo"][0]{seoTitle, seoDescription, ogImageUrl, note, _updatedAt}'
+```
+
+**Read the live tags:**
+
+```bash
+curl -s https://xdipx.com/ -H 'User-Agent: Mozilla/5.0' \
+  | grep -Eo '<title>[^<]*</title>|<meta name="description" content="[^"]*"'
+```
+
+**Report three facts in the run summary, every run, even when nothing changes:**
+
+1. Is the singleton populated, or is the site running on the `app/lib/brand.ts` fallbacks?
+2. Does the live HTML match the published doc?
+3. How many days since `_updatedAt` on the published doc.
+
+**The unpublished-save trap.** Saving in Studio is not publishing, and the site reads the
+`published` perspective, so a draft is invisible. If a draft exists whose fields differ from the
+published doc, **say so loudly in the summary and file a suggestion**, and do **not** publish
+someone else's draft blind. You do not know what it was for. This is not hypothetical: the document
+sat as an all-null unpublished draft from 2026-07-24 to 2026-07-30 and nothing surfaced it.
+
+**"Reviewed, no change" must never touch Sanity.** Record it as a `decision` event. A `note`-only
+patch still moves `_updatedAt`, which would silently reset the 28-day floor from a non-change.
+`_updatedAt` is the floor clock; team events are the review record. Do not make one field do both.
+
 ## Step 3 — Emma proposes, the orchestrator scores
 
 Run `emma-copywriter` (inside this routine, Max-billed, **not** via the site's copy endpoint) over
@@ -523,6 +562,78 @@ rendering, not a gap to fill with invented content.
 via createIfNotExists, all in `draft`. The routine never re-seeds; going live is publishing a doc
 to `status: 'live'` deliberately, one page at a time per the Phase E plan.
 
+## Step 5c: Homepage SERP snippet publish (CONDITIONAL, not a per-run surface)
+
+**Skip this step on almost every run.** It is not part of the mandatory per-run surface list and a
+run that skips it is complete. Step 2e (the read) is what happens daily.
+
+### When you may write
+
+Exactly four triggers. Everything else is HOLD.
+
+1. The active brief carries an authorising `HOMESEO:` line (see below).
+2. The published doc is empty or blank and the site is running on brand fallbacks.
+3. The live snippet violates the voice charter (em-dash, urgency, banned CTA, wrong billing descriptor).
+4. The live snippet is factually wrong (describes a returns window, a claim, or a catalog we do not have).
+
+### The authorising directive
+
+Briefs are one free-form markdown field, so the token is exact and line-anchored. Only this
+authorises a rotation, case-sensitive, at the start of a line, in the newest `status='active'` brief:
+
+```
+HOMESEO: ROTATE week=YYYY-MM-DD
+```
+
+`week=` **must equal that brief row's own `weekStart`.** Without this the directive is standing:
+briefs stay `active` until superseded and this routine runs daily, so one line would re-authorise a
+rotation every day for a week. The week binding makes it consume-once, checked against `_updatedAt`.
+
+**Default deny.** No token, a malformed token, a mismatched `week=`, or more than one matching line
+is HOLD plus a filed suggestion. Never ROTATE on an ambiguous read. Only the first matching line counts.
+
+### The 28-day floor
+
+At most one `seoTitle` change per 28 days, measured from `_updatedAt` on the **published** doc.
+Exempt: the initial seed, a charter violation, and a factual error. Without those exemptions the
+first publish would block its own corrective rotation for a month.
+
+### Writing it
+
+1. `emma-copywriter` drafts, `emma-empathy-reviewer` gates. BLOCK stops the write. REVISE means apply
+   the rewrite and re-gate.
+2. **Enforce `seoTitle` ≤ 60 and `seoDescription` ≤ 155 in your own code before writing.** The schema
+   uses `Rule.max().warning()`, and more to the point Studio validation does not run at all for
+   `sanity-content-cli.ts` writes at any severity. A Studio pass is not proof and there is no
+   server-side backstop.
+3. `ogImageUrl`: prefer leaving it blank so the featured hero image wins. If you must set it, the
+   asset must be **permanently hosted, publicly fetchable, and already exactly 1200x630**. It is a
+   plain URL string, not an asset reference: `buildSocialMeta` (`app/lib/social-meta.ts:41,61`) pipes
+   it through Shopify-flavoured resize params and then declares 1200x630 regardless, so a wrong-sized
+   or non-Shopify URL makes the declared dimensions a lie. Never a signed or expiring URL: fal.ai
+   URLs die in 24h and a dead OG image breaks the social card sitewide.
+4. Patch the copy fields **and** `note` in ONE transaction, then publish, then verify:
+
+```bash
+npx tsx scripts/sanity-content-cli.ts patch --id singleton.homeSeo --set '{"seoTitle":"...","seoDescription":"...","note":"<trigger> <YYYY-MM-DD>"}' --dry-run
+npx tsx scripts/sanity-content-cli.ts patch --id singleton.homeSeo --set '{...}'
+npx tsx scripts/sanity-content-cli.ts publish --id singleton.homeSeo
+```
+
+Never leave a draft. A patched-but-unpublished document is invisible to the site and is the exact
+failure this whole duty exists to prevent. If the document has never had a published version, use
+`create-or-replace` then `publish`; the schema's `__experimental_actions` omits `create`, so Studio
+cannot mint it.
+
+5. **Purge, then verify.** Immediately after publishing:
+
+```bash
+curl -s -X POST "$BASE_URL/api/revalidate/home-seo" -H "x-team-secret: $TEAM_TOKEN"
+```
+
+6. Post a `decision` event naming the trigger, the evidence, and the old and new strings **in full**.
+   Not "updated".
+
 ## Step 6 — Record spend
 
 For any Max reasoning tokens (so the dashboard shows token counts at $0):
@@ -578,6 +689,33 @@ document rejected the whole `contentBlocks` promise, so every Sanity-driven sect
 rendered its hardcoded fallback. The old gate ("HTTP 200 plus the hero renders") passed anyway,
 because the hero is not deferred. Three consecutive days of published merchandising were invisible to
 every visitor while the team reported success, and the owner found it before the team did.
+
+**Homepage SERP snippet specifically (only when Step 5c actually wrote):** the shortcut above does
+**not** work for this surface. `POST /cron/warm-homepage-b` rebuilds the storefront payload blob, and
+`homeSeo` is not in that blob: the loader fetches it independently
+(`app/routes/_layout._index.tsx:120`) behind its own 300s KV entry. Warming refreshes nothing here.
+Verify in three layers instead, each with its own verdict:
+
+1. **Sanity truth.** Re-query the published doc. A mismatch is a real publish failure.
+2. **Origin truth, no waiting.** After calling `POST /api/revalidate/home-seo`, fetch
+   `https://xdipx.com/?variant=b&rt=<runId>-<epoch>`. The CDN cache key includes the query string, so
+   a unique `rt=` is a guaranteed origin render. Assert `<title>` and the meta description exactly.
+   **A mismatch here is a real failure** and gets filed: it means either the write did not land or
+   the cache did not clear. This is the layer that makes the write verifiable at all.
+3. **Anonymous edge truth.** Plain `https://xdipx.com/`. Read the `x-vercel-cache` and `age` response
+   headers rather than guessing from a clock. `HIT` with the old title is propagation pending and is
+   **not** a failure. `MISS` or `REVALIDATED` with the old title **is** a failure, because the origin
+   was consulted and still produced the old value.
+
+Report as "homeSeo published and verified at origin; anonymous HTML propagation pending, 900s edge
+plus SWR." Never report success on layer 3 alone, and never retry-hammer layer 3.
+
+Note the purge endpoint buys less than it looks like: `invalidateCache` is L1-only and only on the
+instance that served the call, so on other warm instances it saves roughly the 60s gap between the
+L1 (300s) and L2 (360s) TTLs. Its real job is making layer 2 deterministic, not making propagation
+fast. It does matter for the very first publish, though: `cached()` memoizes the `null` that
+`getHomeSeo` returns while the singleton is unpublished, so without a purge the first publish keeps
+serving brand fallbacks for up to 360s.
 
 **Hero check specifically:** confirm the hero against the Sanity source of truth
 (`singleton.emmaHero` / `singleton.emmaHeroStorefront`) as well as the rendered page. If Sanity

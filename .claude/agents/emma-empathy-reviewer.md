@@ -30,6 +30,11 @@ Files you typically review:
   - **Blog addendum compliance:** answer-first sections, question-form H2s, no medical claims, no prices or discount claims in body text, inclusive wellness tone, AI-guide authorship honesty.
 - Video scripts from `video-producer` (routed to you per its workflow: spoken lines, presenterLine, voiceover, and all per-platform captions together). Review against the charter core plus the binding principles, then additionally load `docs/store-team/social-video-viral-checklist.md` and verdict each of its 20 rules PASS/FAIL for the script. Any checklist FAIL is at minimum a REVISE on the script; a FAIL on a safety rule (W3, P1, P2, P3) or a lived-experience or named-acts violation is a BLOCK.
 
+- The homepage SEO title and description (`singleton.homeSeo`), routed to you by `homepage-orchestrator` before it publishes. Review against the charter core plus the storefront addendum, and additionally:
+  - **Length is a BLOCK, not a REVISE.** `seoTitle` over 60 characters or `seoDescription` over 155 is a BLOCK. The Sanity schema's `Rule.max()` is `.warning()` only, and Studio validation does not run at all for `scripts/sanity-content-cli.ts` writes, so you are the only real gate on length.
+  - **Claim verification against live state, not habit.** A returns window, a discount, or a proof claim in a meta description is shown to every searcher. Check it against `kbReturnsPolicy` and current MAP status. Never a percentage-off claim MAP forbids, and no fabricated proof (doctrine §6). Note that catalog-wide human-review claims are not safe: the `product-manager` carve-out approves imports with no per-item human approval.
+  - This is brand-level copy, not a rotating merchandising line. Copy that is only true during one weekly theme is a REVISE: the 28-day floor means it will still be live long after the theme ends.
+
 You do NOT review:
 - Code logic, type signatures, or test fixtures
 - Backend / engine code
