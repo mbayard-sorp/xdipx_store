@@ -5,6 +5,7 @@ import { useCountdown } from '~/hooks/useCountdown'
 import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
+import { setPipelineSettingAudited } from '~/lib/settings.server'
 import { eq, like, asc, min, max, count, sql, inArray, and, isNull } from 'drizzle-orm'
 import {
   getAdminProductData,
@@ -409,10 +410,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const key   = form.get('key')   as string
     const value = form.get('value') as string
     if (!key || value === null) return { ok: false, error: 'Missing key or value' }
-    await db
-      .insert(pipelineSettings)
-      .values({ key, value, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value, updatedAt: new Date() } })
+    await setPipelineSettingAudited(key, value, 'owner', 'admin.deals')
     if (key.startsWith('homepage_')) await bustHomepagePayload()
     return { ok: true }
   }
@@ -436,10 +434,7 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       }
     }
-    await db
-      .insert(pipelineSettings)
-      .values({ key: 'homepage_pair_product_handle', value: handle, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value: handle, updatedAt: new Date() } })
+    await setPipelineSettingAudited('homepage_pair_product_handle', handle, 'owner', 'admin.deals')
     await bustHomepagePayload()
     return { ok: true, handle }
   }
