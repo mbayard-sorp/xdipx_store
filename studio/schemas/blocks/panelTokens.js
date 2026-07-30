@@ -8,13 +8,15 @@
 // doctrine amendment from the owner, not a token invented in a component schema.
 // Rhythm comes from the ink panel instead (doctrine §7, "one dark card per row").
 
+// Solid coral and plum grounds are NOT offered: both are outside the §4 ground
+// lock and their 12-13px secondary lines fail AA on those fills (design-critic
+// cold-start verdict, 2026-07-29). The renderer aliases any legacy value to the
+// matching tint. Ink stays: it is the deck's one dark card per row (§7).
 export const SURFACES = [
   { title: 'Blush (coral-soft)', value: 'blush' },
   { title: 'Lilac (plum-soft)', value: 'lilac' },
   { title: 'Stone (paper-3)', value: 'stone' },
   { title: 'Paper', value: 'paper' },
-  { title: 'Plum (solid)', value: 'plum' },
-  { title: 'Coral (solid)', value: 'coral' },
   { title: 'Ink (solid)', value: 'ink' },
 ]
 

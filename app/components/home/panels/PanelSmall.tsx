@@ -43,7 +43,7 @@ export function PanelSmallRow({
               onClick={() => onPanelClick?.(dataAttr, panel.href)}
               className={[
                 'flex h-16 items-center justify-between gap-3 px-4 md:h-[88px] md:px-5',
-                'rounded-[14px] md:rounded-2xl',
+                'rounded-[8px]',
                 ruled ? 'border border-line bg-paper-2' : s.bg,
                 panelInteractionClasses(!ruled && s.darkGround),
               ].join(' ')}

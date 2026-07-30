@@ -20,14 +20,24 @@ export interface SurfaceStyle {
   darkGround: boolean
 }
 
+// Kickers and marks are quiet chrome (§2: kickers set in ink-4, or white/70 on
+// a dark ground) — coral is budgeted (§3, one primary per viewport) and is
+// spent ONCE per deck, on the dark panel's CTA (see PanelLarge), never on
+// accents. `plum` and `coral` grounds are off the §4 ground lock and their
+// white/70 secondary lines fail AA on those fills, so the tokens alias to
+// their tint equivalents rather than rendering a solid that the doctrine
+// forbids (design-critic cold-start verdict, 2026-07-29).
+const BLUSH: SurfaceStyle = { bg: 'bg-coral-soft', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false }
+const LILAC: SurfaceStyle = { bg: 'bg-plum-soft', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false }
+
 export const PANEL_SURFACES: Record<PanelSurface, SurfaceStyle> = {
-  blush: { bg: 'bg-coral-soft', text: 'text-ink', accent: 'text-coral', muted: 'text-ink-3', darkGround: false },
-  lilac: { bg: 'bg-plum-soft', text: 'text-ink', accent: 'text-plum', muted: 'text-ink-3', darkGround: false },
-  stone: { bg: 'bg-paper-3', text: 'text-ink', accent: 'text-ink-3', muted: 'text-ink-3', darkGround: false },
-  paper: { bg: 'bg-paper-2 border border-line', text: 'text-ink', accent: 'text-ink-3', muted: 'text-ink-3', darkGround: false },
-  plum: { bg: 'bg-plum', text: 'text-white', accent: 'text-white/80', muted: 'text-white/70', darkGround: true },
-  coral: { bg: 'bg-coral', text: 'text-white', accent: 'text-white/80', muted: 'text-white/70', darkGround: true },
-  ink: { bg: 'bg-ink', text: 'text-white', accent: 'text-coral-2', muted: 'text-white/60', darkGround: true },
+  blush: BLUSH,
+  lilac: LILAC,
+  stone: { bg: 'bg-paper-3', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
+  paper: { bg: 'bg-paper-2 border border-line', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
+  plum: LILAC,
+  coral: BLUSH,
+  ink: { bg: 'bg-ink', text: 'text-white', accent: 'text-white/70', muted: 'text-white/60', darkGround: true },
 }
 
 export function surfaceStyle(surface: PanelSurface | string | undefined): SurfaceStyle {
