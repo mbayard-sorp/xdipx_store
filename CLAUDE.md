@@ -150,7 +150,7 @@ app/
     imagen.server.ts       ← Google Imagen wrapper
     klaviyo.server.ts      ← Klaviyo API wrapper
     feed-processor.server.ts ← Nalpac CSV fetch + scoring
-    deal-activator.server.ts ← Midnight deal rotation
+    deal-rotator.server.ts   ← Midnight deal rotation (route is /cron/deal-activator)
     profit.server.ts       ← Profit calculation + DB writes
     db.server.ts           ← Neon + Drizzle client
     kv.server.ts           ← Vercel KV client
@@ -163,7 +163,6 @@ app/
     _layout.tsx            ← Store layout (Navbar, Footer, TrustBar)
     _layout._index.tsx     ← Homepage (variant-resolved: storefront 'b' / Compass 'a' / legacy)
     _layout.discover.tsx   ← "The Compass" discovery finder (standalone)
-    _layout.checkout-extras.tsx
     _layout.products.$slug.tsx  ← Canonical product URL
     _layout.vault.tsx
     _layout.vault.$slug.tsx
@@ -173,7 +172,7 @@ app/
     _layout.about.tsx
     admin.tsx              ← Admin layout (auth guard)
     admin._index.tsx
-    admin.login.tsx
+    admin_.login.tsx       ← underscore escapes flat-route nesting under admin.tsx
     admin.queue.tsx
     admin.deals.tsx
     api.generate-copy.tsx
@@ -269,7 +268,7 @@ React Router v7 framework mode IS the same framework as Shopify Oxygen/Hydrogen.
 
 - [ ] Age gate renders before all content, persists 30 days
 - [ ] Homepage Emma hero loads from Shopify via loader (no countdown surface)
-- [ ] "I'll take it ♥" → checkout-extras → Shopify checkout end-to-end
+- [ ] "I'll take it ♥" → cart → Shopify checkout end-to-end
 - [ ] Email subscribe posts to Klaviyo
 - [ ] Admin: login, queue, deal editor, AI generation, approval toggle
 - [ ] Cron rotates pick at midnight (infra only — UI never surfaces timing)
