@@ -7,7 +7,7 @@
 
 import { db } from './db.server'
 import { pricingAuditLog, pipelineSettings } from '../../db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import {
   computePrice,
   computeDiscontinuedPrice,
@@ -668,4 +668,63 @@ export async function recomputeCatalog(opts: {
 
   counts.durationMs = Date.now() - startedAt
   return counts
+}
+
+// ---------------------------------------------------------------------------
+// Retention
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a prunable audit row is kept.
+ *
+ * The table grows about 5,000 rows a day from the full-catalog recompute and
+ * had no retention at all, sitting at 310,170 rows. A 90-day prune was promised
+ * alongside the recompute alarm and never shipped, so this closes that.
+ */
+export const PRICING_AUDIT_RETENTION_DAYS = 90
+
+/**
+ * The only statuses the prune may delete.
+ *
+ * This is an allowlist rather than a blocklist on purpose. `applied` and
+ * `auto_applied` rows ARE the price-change history this table exists to be, and
+ * `pending` is a live approval-queue row the pricing sweep still reads with no
+ * date floor: deleting an old one would destroy an unanswered decision rather
+ * than surface it. Only the two noise statuses go.
+ *
+ * That is not a small carve-out. Measured on 2026-07-30, `skipped_no_change`
+ * and `rejected` are 297,730 of 310,170 rows, so pruning only these still
+ * removes 96% of the growth while keeping 100% of the actual audit trail.
+ * A new status added to AuditStatus later is retained by default, which is the
+ * right way for this list to fail.
+ */
+export const PRUNABLE_AUDIT_STATUSES: readonly string[] = ['skipped_no_change', 'rejected']
+
+/**
+ * Rows deleted per call. The first real prune has a large backlog to clear and
+ * this handler shares the cron's maxDuration with a full-catalog recompute, so
+ * it takes a bite rather than the whole table. The job runs daily; a backlog
+ * drains over a few days without ever risking the recompute it rides on.
+ */
+const PRUNE_CHUNK = 20_000
+
+/**
+ * Delete aged-out noise rows. Returns how many went.
+ *
+ * Callers should treat a throw as non-fatal: a recompute that succeeded must
+ * not be reported as failed because housekeeping did not.
+ */
+export async function prunePricingAuditLog(): Promise<number> {
+  const res = await db.execute(sql`
+    DELETE FROM pricing_audit_log
+     WHERE id IN (
+       SELECT id
+         FROM pricing_audit_log
+        WHERE occurred_at < now() - make_interval(days => ${PRICING_AUDIT_RETENTION_DAYS})
+          AND status = ANY (${sql.raw(`ARRAY['${PRUNABLE_AUDIT_STATUSES.join("','")}']`)})
+        ORDER BY id
+        LIMIT ${PRUNE_CHUNK}
+     )
+     RETURNING id`)
+  return (res.rows ?? []).length
 }

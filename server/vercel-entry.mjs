@@ -9142,13 +9142,16 @@ var init_pricing_velocity_server = __esm({
 var pricing_apply_v2_server_exports = {};
 __export(pricing_apply_v2_server_exports, {
   DEFAULT_MODE_THRESHOLD: () => DEFAULT_MODE_THRESHOLD,
+  PRICING_AUDIT_RETENTION_DAYS: () => PRICING_AUDIT_RETENTION_DAYS,
+  PRUNABLE_AUDIT_STATUSES: () => PRUNABLE_AUDIT_STATUSES,
   decideStatus: () => decideStatus,
   dryRunRuleChange: () => dryRunRuleChange,
   getModeThresholds: () => getModeThresholds,
+  prunePricingAuditLog: () => prunePricingAuditLog,
   recomputeCatalog: () => recomputeCatalog,
   recomputeVariant: () => recomputeVariant
 });
-import { eq as eq3 } from "drizzle-orm";
+import { eq as eq3, sql as sql2 } from "drizzle-orm";
 async function getModeThresholds() {
   const merged = { ...DEFAULT_MODE_THRESHOLD };
   try {
@@ -9515,7 +9518,21 @@ async function recomputeCatalog(opts) {
   counts.durationMs = Date.now() - startedAt;
   return counts;
 }
-var DEFAULT_MODE_THRESHOLD, MODE_THRESHOLD, TEST_SKU_PREFIX, DRY_RUN_CAP, DRY_RUN_SAMPLES;
+async function prunePricingAuditLog() {
+  const res = await db.execute(sql2`
+    DELETE FROM pricing_audit_log
+     WHERE id IN (
+       SELECT id
+         FROM pricing_audit_log
+        WHERE occurred_at < now() - make_interval(days => ${PRICING_AUDIT_RETENTION_DAYS})
+          AND status = ANY (${sql2.raw(`ARRAY['${PRUNABLE_AUDIT_STATUSES.join("','")}']`)})
+        ORDER BY id
+        LIMIT ${PRUNE_CHUNK}
+     )
+     RETURNING id`);
+  return (res.rows ?? []).length;
+}
+var DEFAULT_MODE_THRESHOLD, MODE_THRESHOLD, TEST_SKU_PREFIX, DRY_RUN_CAP, DRY_RUN_SAMPLES, PRICING_AUDIT_RETENTION_DAYS, PRUNABLE_AUDIT_STATUSES, PRUNE_CHUNK;
 var init_pricing_apply_v2_server = __esm({
   "app/lib/pricing-apply-v2.server.ts"() {
     "use strict";
@@ -9536,6 +9553,9 @@ var init_pricing_apply_v2_server = __esm({
     TEST_SKU_PREFIX = /^XDX-TEST-/i;
     DRY_RUN_CAP = 5e3;
     DRY_RUN_SAMPLES = 10;
+    PRICING_AUDIT_RETENTION_DAYS = 90;
+    PRUNABLE_AUDIT_STATUSES = ["skipped_no_change", "rejected"];
+    PRUNE_CHUNK = 2e4;
   }
 });
 
@@ -9791,7 +9811,7 @@ __export(team_server_exports, {
   updateRun: () => updateRun
 });
 import { timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq as eq4, gte, inArray as inArray2, lt, lte, ne, sql as sql2 } from "drizzle-orm";
+import { and, asc, desc, eq as eq4, gte, inArray as inArray2, lt, lte, ne, sql as sql3 } from "drizzle-orm";
 function assertTeamAuth(request) {
   const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
   const auth = request.headers.get("authorization") ?? "";
@@ -9813,7 +9833,7 @@ async function getTeamConfig(team) {
 }
 async function getTeamConfigUncached(team) {
   const keys = teamKeys(team);
-  const rows = await db.select().from(pipelineSettings).where(sql2`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
+  const rows = await db.select().from(pipelineSettings).where(sql3`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
   const map = new Map(rows.map((r) => [r.key, r.value]));
   const d = TEAM_DEFAULTS[team];
   const cfg = {
@@ -9867,7 +9887,7 @@ async function counterRead(key, sumFromDb) {
 async function getTodaySpendCents(team) {
   return counterRead(teamSpendKvKey(team, utcDay()), async () => {
     const res = await db.execute(
-      sql2`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
+      sql3`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
           FROM api_token_log
           WHERE ts >= current_date AND feature LIKE ${team + "-%"}`
     );
@@ -9877,8 +9897,8 @@ async function getTodaySpendCents(team) {
 }
 async function getTodayRunCount(team, excludeRunId) {
   const res = await db.execute(
-    excludeRunId == null ? sql2`SELECT COUNT(*)::int AS n FROM homepage_team_runs
-            WHERE started_at >= current_date AND team = ${team}` : sql2`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+    excludeRunId == null ? sql3`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+            WHERE started_at >= current_date AND team = ${team}` : sql3`SELECT COUNT(*)::int AS n FROM homepage_team_runs
             WHERE started_at >= current_date AND team = ${team} AND id <> ${excludeRunId}`
   );
   return Number(res.rows?.[0]?.n ?? 0);
@@ -9886,7 +9906,7 @@ async function getTodayRunCount(team, excludeRunId) {
 async function getTodayImageCount() {
   return counterRead(teamImagesKvKey(utcDay()), async () => {
     const res = await db.execute(
-      sql2`SELECT COALESCE(SUM(request_count), 0)::int AS n
+      sql3`SELECT COALESCE(SUM(request_count), 0)::int AS n
           FROM api_token_log
           WHERE ts >= current_date AND feature = 'homepage-images'`
     );
@@ -9898,7 +9918,7 @@ async function isRunInProgress(team, excludeRunId) {
   const conditions = [
     eq4(homepageTeamRuns.team, team),
     eq4(homepageTeamRuns.status, "running"),
-    sql2`${lastActivityAt} >= ${since}`
+    sql3`${lastActivityAt} >= ${since}`
   ];
   if (excludeRunId !== void 0) conditions.push(ne(homepageTeamRuns.id, excludeRunId));
   const [row] = await db.select({ id: homepageTeamRuns.id }).from(homepageTeamRuns).where(and(...conditions)).limit(1);
@@ -9910,7 +9930,7 @@ async function expireStaleRuns() {
     status: "failed",
     error: `auto-expired: no recorded activity for ${RUN_IDLE_TIMEOUT_MIN} minutes`,
     finishedAt: /* @__PURE__ */ new Date()
-  }).where(and(eq4(homepageTeamRuns.status, "running"), sql2`${lastActivityAt} < ${cutoff}`));
+  }).where(and(eq4(homepageTeamRuns.status, "running"), sql3`${lastActivityAt} < ${cutoff}`));
 }
 async function gate(team, excludeRunId) {
   if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
@@ -9962,7 +9982,7 @@ async function updateRun(id, u) {
   if (u.prUrl !== void 0) patch["prUrl"] = u.prUrl;
   if (u.error !== void 0) patch["error"] = u.error;
   if (u.finished) patch["finishedAt"] = /* @__PURE__ */ new Date();
-  if (u.incrementAttempt) patch["attemptCount"] = sql2`${homepageTeamRuns.attemptCount} + 1`;
+  if (u.incrementAttempt) patch["attemptCount"] = sql3`${homepageTeamRuns.attemptCount} + 1`;
   if (Object.keys(patch).length === 0) return;
   await db.update(homepageTeamRuns).set(patch).where(eq4(homepageTeamRuns.id, id));
 }
@@ -10025,7 +10045,7 @@ async function createSuggestionDetailed(s) {
   if (!s.dedupeKey) return { id: 0, deduped: false };
   const [live] = await db.select({ id: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and(
     eq4(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
-    sql2`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
+    sql3`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
   )).limit(1);
   return { id: live?.id ?? 0, deduped: !!live };
 }
@@ -10158,7 +10178,7 @@ async function transitionSuggestion(id, to, actor, opts = {}) {
   const now = /* @__PURE__ */ new Date();
   const patch = { status: to, updatedAt: now };
   if (rule.incrementAttempt || opts.incrementAttempt) {
-    patch["attemptCount"] = sql2`${homepageTeamSuggestions.attemptCount} + 1`;
+    patch["attemptCount"] = sql3`${homepageTeamSuggestions.attemptCount} + 1`;
   }
   if (opts.lastError !== void 0) patch["lastError"] = opts.lastError;
   if (to === "approved") {
@@ -10208,13 +10228,13 @@ async function expireStaleClaims() {
   return res.length;
 }
 function buildClaimQuery(c) {
-  const conds = [sql2`c.status = ${c.from}`];
-  if (c.id != null) conds.push(sql2`c.id = ${c.id}`);
-  if (c.filter.kind) conds.push(sql2`c.kind = ${c.filter.kind}`);
-  if (c.filter.team) conds.push(sql2`c.team = ${c.filter.team}`);
-  if (c.filter.targetTeam) conds.push(sql2`c.target_team = ${c.filter.targetTeam}`);
-  conds.push(sql2`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`);
-  return sql2`
+  const conds = [sql3`c.status = ${c.from}`];
+  if (c.id != null) conds.push(sql3`c.id = ${c.id}`);
+  if (c.filter.kind) conds.push(sql3`c.kind = ${c.filter.kind}`);
+  if (c.filter.team) conds.push(sql3`c.team = ${c.filter.team}`);
+  if (c.filter.targetTeam) conds.push(sql3`c.target_team = ${c.filter.targetTeam}`);
+  conds.push(sql3`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`);
+  return sql3`
     UPDATE homepage_team_suggestions AS s
        SET status           = 'in_progress',
            assignee         = ${c.assignee},
@@ -10224,7 +10244,7 @@ function buildClaimQuery(c) {
      WHERE s.id = (
        SELECT c.id
          FROM homepage_team_suggestions AS c
-        WHERE ${sql2.join(conds, sql2` AND `)}
+        WHERE ${sql3.join(conds, sql3` AND `)}
         ORDER BY c.priority ASC, c.created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -10340,7 +10360,7 @@ async function listSocialPosts(status, limit = 50, reviewStatus) {
   return (conditions.length ? q.where(and(...conditions)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
 }
 async function getSocialFrequencies() {
-  const rows = await db.select().from(pipelineSettings).where(sql2`${pipelineSettings.key} LIKE 'social_freq_%'`);
+  const rows = await db.select().from(pipelineSettings).where(sql3`${pipelineSettings.key} LIKE 'social_freq_%'`);
   const map = new Map(rows.map((r) => [r.key, r.value]));
   const out = {};
   for (const p of SOCIAL_PLATFORMS) {
@@ -10390,7 +10410,7 @@ var init_team_server = __esm({
     init_schema();
     init_team_keys();
     RUN_IDLE_TIMEOUT_MIN = 240;
-    lastActivityAt = sql2`GREATEST(
+    lastActivityAt = sql3`GREATEST(
   ${homepageTeamRuns.startedAt},
   COALESCE(
     (SELECT MAX(${homepageTeamEvents.ts}) FROM ${homepageTeamEvents}
@@ -10928,7 +10948,7 @@ __export(feed_processor_server_exports, {
   scoreProduct: () => scoreProduct
 });
 import { parse } from "csv-parse/sync";
-import { sql as sql3, eq as eq6 } from "drizzle-orm";
+import { sql as sql4, eq as eq6 } from "drizzle-orm";
 async function getPipelineSetting(key) {
   try {
     const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq6(pipelineSettings.key, key)).limit(1);
@@ -11067,7 +11087,7 @@ async function dailyFeedProcessor() {
     db.select({
       sku: dealHistory.sku,
       categories: dealHistory.categories
-    }).from(dealHistory).orderBy(sql3`${dealHistory.dealDate} DESC`).limit(90),
+    }).from(dealHistory).orderBy(sql4`${dealHistory.dealDate} DESC`).limit(90),
     getPipelineSetting("blockedBrands")
   ]);
   const recentSkus = new Set(history.map((h) => h.sku));
@@ -12209,10 +12229,10 @@ async function logVideoCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql19 } = await import("drizzle-orm");
+  const { sql: sql20 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql19`SELECT * FROM api_token_daily
+    sql20`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -12220,11 +12240,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql19 } = await import("drizzle-orm");
+  const { sql: sql20 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql19`
+    sql20`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -18412,14 +18432,14 @@ async function closeStaleSamenessTickets(changedSlots, day) {
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { homepageTeamSuggestions: homepageTeamSuggestions2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { and: and10, eq: eq29, inArray: inArray9, sql: sql19 } = await import("drizzle-orm");
+    const { and: and10, eq: eq29, inArray: inArray9, sql: sql20 } = await import("drizzle-orm");
     const { makeDedupeKey: makeDedupeKey2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
     const keys = changedSlots.map((s) => makeDedupeKey2("sameness", s));
     const closed = await db2.update(homepageTeamSuggestions2).set({
       status: "applied",
       updatedAt: /* @__PURE__ */ new Date(),
       lastError: null,
-      suggestion: sql19`${homepageTeamSuggestions2.suggestion} || ${`
+      suggestion: sql20`${homepageTeamSuggestions2.suggestion} || ${`
 
 Resolved ${day}: the slot changed, so the freshness rule is satisfied. Closed automatically by /cron/homepage-healthcheck.`}`
     }).where(and10(
@@ -19049,7 +19069,7 @@ __export(profit_server_exports, {
   writeProfitSummary: () => writeProfitSummary,
   yesterdayUtc: () => yesterdayUtc
 });
-import { and as and4, eq as eq12, gte as gte2, like, lt as lt2, sql as sql4 } from "drizzle-orm";
+import { and as and4, eq as eq12, gte as gte2, like, lt as lt2, sql as sql5 } from "drizzle-orm";
 function yesterdayUtc(now = Date.now()) {
   return new Date(now - 864e5).toISOString().slice(0, 10);
 }
@@ -19137,12 +19157,12 @@ async function writeProfitSummary(targetDate) {
   }).onConflictDoUpdate({
     target: dailyProfitSummary.summaryDate,
     set: {
-      totalOrders: sql4`excluded.total_orders`,
-      totalRevenue: sql4`excluded.total_revenue`,
-      totalCogs: sql4`excluded.total_cogs`,
-      totalProfit: sql4`excluded.total_profit`,
-      avgOrderValue: sql4`excluded.avg_order_value`,
-      cogsMissingUnits: sql4`excluded.cogs_missing_units`
+      totalOrders: sql5`excluded.total_orders`,
+      totalRevenue: sql5`excluded.total_revenue`,
+      totalCogs: sql5`excluded.total_cogs`,
+      totalProfit: sql5`excluded.total_profit`,
+      avgOrderValue: sql5`excluded.avg_order_value`,
+      cogsMissingUnits: sql5`excluded.cogs_missing_units`
     }
   });
   return totals;
@@ -19174,7 +19194,7 @@ async function deleteSeedProfitRows() {
   return deleted.length;
 }
 async function getDashboardStats(days = 30) {
-  const rows = await db.select().from(dailyProfitSummary).orderBy(sql4`${dailyProfitSummary.summaryDate} DESC`).limit(days);
+  const rows = await db.select().from(dailyProfitSummary).orderBy(sql5`${dailyProfitSummary.summaryDate} DESC`).limit(days);
   const total2 = rows.reduce((acc, r) => ({
     revenue: acc.revenue + parseFloat(r.totalRevenue ?? "0"),
     profit: acc.profit + parseFloat(r.totalProfit ?? "0"),
@@ -19376,8 +19396,8 @@ async function getProductReviews(shopifyProductId, opts = {}) {
   const reviewQ = `SELECT r.* FROM reviews r WHERE r.shopify_product_id = $1 AND r.status = $2 ${filterClause} ORDER BY ${orderBy} LIMIT $3 OFFSET $4`;
   const countQ = `SELECT COUNT(*) as total FROM reviews r WHERE r.shopify_product_id = $1 AND r.status = $2 ${filterClause}`;
   const [rows, countRows] = await Promise.all([
-    sql5(reviewQ, [shopifyProductId, status, perPage, offset]),
-    sql5(countQ, [shopifyProductId, status])
+    sql6(reviewQ, [shopifyProductId, status, perPage, offset]),
+    sql6(countQ, [shopifyProductId, status])
   ]);
   if (rows.length === 0) {
     const empty = { reviews: [], total: 0 };
@@ -19386,8 +19406,8 @@ async function getProductReviews(shopifyProductId, opts = {}) {
   }
   const reviewIds = rows.map((r) => r["id"]);
   const [mediaRows, attrRows] = await Promise.all([
-    sql5`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`,
-    sql5`SELECT * FROM review_attribute_ratings WHERE review_id = ANY(${reviewIds})`
+    sql6`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`,
+    sql6`SELECT * FROM review_attribute_ratings WHERE review_id = ANY(${reviewIds})`
   ]);
   const mediaByReview = /* @__PURE__ */ new Map();
   for (const m of mediaRows) {
@@ -19420,7 +19440,7 @@ async function getProductAggregate(shopifyProductId) {
   const ck = `aggregate:v1:${shopifyProductId}`;
   const hit = await kvGetMemo(ck, 60);
   if (hit) return hit;
-  const rows = await sql5`
+  const rows = await sql6`
     SELECT * FROM review_aggregates WHERE shopify_product_id = ${shopifyProductId}
   `;
   if (!rows[0]) return null;
@@ -19466,13 +19486,13 @@ async function getAdminReviewQueue(filters = {}) {
   const countQuery = `SELECT COUNT(*) as total FROM reviews r ${whereClause}`;
   const allParams = [...params, perPage, offset];
   const [rows, countRows] = await Promise.all([
-    sql5(baseQuery, allParams),
-    sql5(countQuery, params)
+    sql6(baseQuery, allParams),
+    sql6(countQuery, params)
   ]);
   if (rows.length === 0) return { reviews: [], total: 0 };
   const typedRows = rows;
   const reviewIds = typedRows.map((r) => r["id"]);
-  const mediaRows = await sql5`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`;
+  const mediaRows = await sql6`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`;
   const mediaByReview = /* @__PURE__ */ new Map();
   for (const m of mediaRows) {
     const rid2 = m["review_id"];
@@ -19489,7 +19509,7 @@ async function getAdminReviewQueue(filters = {}) {
 }
 async function getReviewStats() {
   const [countRows, avgRows, inviteRows, conversionRows] = await Promise.all([
-    sql5`
+    sql6`
       SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE status = 'pending')  as pending,
@@ -19498,12 +19518,12 @@ async function getReviewStats() {
         COUNT(*) FILTER (WHERE status = 'spam')     as spam
       FROM reviews
     `,
-    sql5`
+    sql6`
       SELECT COALESCE(AVG(rating) FILTER (WHERE status = 'approved'), 0) as avg_rating
       FROM reviews
     `,
-    sql5`SELECT COUNT(*) as sent FROM review_invites`,
-    sql5`SELECT COUNT(*) as completed FROM review_invites WHERE status = 'completed'`
+    sql6`SELECT COUNT(*) as sent FROM review_invites`,
+    sql6`SELECT COUNT(*) as completed FROM review_invites WHERE status = 'completed'`
   ]);
   const c = countRows[0];
   const total2 = parseInt(c?.["total"] ?? "0", 10);
@@ -19526,7 +19546,7 @@ async function getReviewStats() {
   };
 }
 async function getReviewsPerDay() {
-  const rows = await sql5`
+  const rows = await sql6`
     SELECT
       date_trunc('day', created_at)::date::text as date,
       COUNT(*) as count
@@ -19541,7 +19561,7 @@ async function getReviewsPerDay() {
   }));
 }
 async function getProductsWithReviews() {
-  const rows = await sql5`
+  const rows = await sql6`
     SELECT
       shopify_product_id,
       total_count,
@@ -19560,7 +19580,7 @@ async function getProductsWithReviews() {
   }));
 }
 async function createReview(input) {
-  const rows = await sql5`
+  const rows = await sql6`
     INSERT INTO reviews (
       shopify_product_id, shopify_order_id, shopify_customer_id,
       reviewer_name, reviewer_email, rating, title, body,
@@ -19588,7 +19608,7 @@ async function createReview(input) {
   const review = rowToReview(rows[0]);
   if (input.attributeRatings && Object.keys(input.attributeRatings).length > 0) {
     for (const [name, rating] of Object.entries(input.attributeRatings)) {
-      await sql5`
+      await sql6`
         INSERT INTO review_attribute_ratings (review_id, attribute_name, rating)
         VALUES (${review.id}, ${name}, ${rating})
       `;
@@ -19597,14 +19617,14 @@ async function createReview(input) {
   if (input.mediaUrls && input.mediaUrls.length > 0) {
     for (let i = 0; i < input.mediaUrls.length; i++) {
       const m = input.mediaUrls[i];
-      await sql5`
+      await sql6`
         INSERT INTO review_media (review_id, media_type, url, thumbnail_url, sort_order)
         VALUES (${review.id}, ${m.mediaType}, ${m.url}, ${m.thumbnailUrl ?? null}, ${i})
       `;
     }
   }
   if (input.inviteToken) {
-    await sql5`
+    await sql6`
       UPDATE review_invites
       SET status = 'completed', completed_at = now()
       WHERE invite_token = ${input.inviteToken}::uuid
@@ -19614,7 +19634,7 @@ async function createReview(input) {
   return review;
 }
 async function updateReviewStatus(id, status, opts = {}) {
-  const rows = await sql5`
+  const rows = await sql6`
     UPDATE reviews
     SET
       status         = ${status},
@@ -19628,7 +19648,7 @@ async function updateReviewStatus(id, status, opts = {}) {
   return rowToReview(rows[0]);
 }
 async function updateReviewAI(id, ai) {
-  await sql5`
+  await sql6`
     UPDATE reviews
     SET
       ai_sentiment = ${ai.aiSentiment},
@@ -19639,7 +19659,7 @@ async function updateReviewAI(id, ai) {
   `;
 }
 async function updateReviewReply(id, replyBody) {
-  const rows = await sql5`
+  const rows = await sql6`
     UPDATE reviews
     SET reply_body = ${replyBody}, reply_at = now(), updated_at = now()
     WHERE id = ${id}::uuid
@@ -19648,16 +19668,16 @@ async function updateReviewReply(id, replyBody) {
   return rowToReview(rows[0]);
 }
 async function updateReviewFeatured(id, isFeatured) {
-  await sql5`
+  await sql6`
     UPDATE reviews SET is_featured = ${isFeatured}, updated_at = now() WHERE id = ${id}::uuid
   `;
 }
 async function deleteReview(id) {
-  await sql5`DELETE FROM reviews WHERE id = ${id}::uuid`;
+  await sql6`DELETE FROM reviews WHERE id = ${id}::uuid`;
 }
 async function voteHelpful(id, vote) {
   const col = vote === "yes" ? "helpful_yes" : "helpful_no";
-  const rows = await sql5(
+  const rows = await sql6(
     `UPDATE reviews SET ${col} = ${col} + 1, updated_at = now() WHERE id = $1::uuid RETURNING helpful_yes, helpful_no`,
     [id]
   );
@@ -19668,19 +19688,19 @@ async function voteHelpful(id, vote) {
   };
 }
 async function getReviewById(id) {
-  const rows = await sql5`SELECT * FROM reviews WHERE id = ${id}::uuid`;
+  const rows = await sql6`SELECT * FROM reviews WHERE id = ${id}::uuid`;
   if (!rows[0]) return null;
   const review = rowToReview(rows[0]);
   const [mediaRows, attrRows] = await Promise.all([
-    sql5`SELECT * FROM review_media WHERE review_id = ${id}::uuid ORDER BY sort_order`,
-    sql5`SELECT * FROM review_attribute_ratings WHERE review_id = ${id}::uuid`
+    sql6`SELECT * FROM review_media WHERE review_id = ${id}::uuid ORDER BY sort_order`,
+    sql6`SELECT * FROM review_attribute_ratings WHERE review_id = ${id}::uuid`
   ]);
   review.media = mediaRows.map((m) => rowToMedia(m));
   review.attributeRatings = attrRows.map((a) => rowToAttributeRating(a));
   return review;
 }
 async function createInvite(input) {
-  const rows = input.sendAfter ? await sql5`
+  const rows = input.sendAfter ? await sql6`
         INSERT INTO review_invites (
           shopify_order_id, shopify_customer_id, shopify_product_id,
           reviewer_email, reviewer_name, status, send_after
@@ -19694,7 +19714,7 @@ async function createInvite(input) {
           ${input.sendAfter.toISOString()}
         )
         RETURNING *
-      ` : await sql5`
+      ` : await sql6`
         INSERT INTO review_invites (
           shopify_order_id, shopify_customer_id, shopify_product_id,
           reviewer_email, reviewer_name
@@ -19710,7 +19730,7 @@ async function createInvite(input) {
   return rowToInvite(rows[0]);
 }
 async function getDueScheduledInvites(limit = 200) {
-  const rows = await sql5`
+  const rows = await sql6`
     SELECT * FROM review_invites
     WHERE status = 'scheduled' AND send_after <= now()
     ORDER BY send_after ASC
@@ -19719,33 +19739,33 @@ async function getDueScheduledInvites(limit = 200) {
   return rows.map((r) => rowToInvite(r));
 }
 async function markInviteSent(id) {
-  await sql5`
+  await sql6`
     UPDATE review_invites SET status = 'sent', sent_at = now() WHERE id = ${id}::uuid
   `;
 }
 async function getInviteByToken(token) {
-  const rows = await sql5`
+  const rows = await sql6`
     SELECT * FROM review_invites WHERE invite_token = ${token}::uuid
   `;
   if (!rows[0]) return null;
   return rowToInvite(rows[0]);
 }
 async function markInviteClicked(token) {
-  await sql5`
+  await sql6`
     UPDATE review_invites
     SET clicked_at = COALESCE(clicked_at, now()), status = 'clicked'
     WHERE invite_token = ${token}::uuid AND status NOT IN ('completed', 'expired')
   `;
 }
 async function markInviteOpened(token) {
-  await sql5`
+  await sql6`
     UPDATE review_invites
     SET opened_at = COALESCE(opened_at, now()), status = CASE WHEN status = 'sent' THEN 'opened' ELSE status END
     WHERE invite_token = ${token}::uuid
   `;
 }
 async function getPendingReminderInvites() {
-  const rows = await sql5`
+  const rows = await sql6`
     SELECT * FROM review_invites
     WHERE sent_at < now() - interval '5 days'
       AND reminder_sent_at IS NULL
@@ -19754,12 +19774,12 @@ async function getPendingReminderInvites() {
   return rows.map((r) => rowToInvite(r));
 }
 async function markReminderSent(id) {
-  await sql5`
+  await sql6`
     UPDATE review_invites SET reminder_sent_at = now() WHERE id = ${id}::uuid
   `;
 }
 async function getInviteStats() {
-  const rows = await sql5`
+  const rows = await sql6`
     SELECT
       COUNT(*) as sent,
       COUNT(*) FILTER (WHERE status IN ('opened','clicked','completed')) as opened,
@@ -19778,12 +19798,12 @@ async function getInviteStats() {
 async function getPaginatedInvites(page = 1, perPage = 20) {
   const offset = (page - 1) * perPage;
   const [rows, countRows] = await Promise.all([
-    sql5`
+    sql6`
       SELECT * FROM review_invites
       ORDER BY sent_at DESC
       LIMIT ${perPage} OFFSET ${offset}
     `,
-    sql5`SELECT COUNT(*) as total FROM review_invites`
+    sql6`SELECT COUNT(*) as total FROM review_invites`
   ]);
   return {
     invites: rows.map((r) => rowToInvite(r)),
@@ -19791,7 +19811,7 @@ async function getPaginatedInvites(page = 1, perPage = 20) {
   };
 }
 async function getReviewSettings() {
-  const rows = await sql5`SELECT * FROM review_settings WHERE id = 1`;
+  const rows = await sql6`SELECT * FROM review_settings WHERE id = 1`;
   const r = rows[0] ?? {};
   return {
     autoApprove: r["auto_approve"] ?? false,
@@ -19810,7 +19830,7 @@ async function getReviewSettings() {
   };
 }
 async function updateReviewSettings(settings) {
-  await sql5`
+  await sql6`
     UPDATE review_settings SET
       auto_approve           = COALESCE(${settings.autoApprove ?? null}::boolean, auto_approve),
       spam_threshold         = COALESCE(${settings.spamThreshold ?? null}::numeric, spam_threshold),
@@ -19843,15 +19863,15 @@ async function getReviewsForExport(filters = {}) {
     params.push(productId);
   }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await sql5(`SELECT * FROM reviews ${where} ORDER BY created_at DESC`, params);
+  const rows = await sql6(`SELECT * FROM reviews ${where} ORDER BY created_at DESC`, params);
   return rows.map((r) => rowToReview(r));
 }
-var sql5;
+var sql6;
 var init_reviews_server = __esm({
   "app/lib/reviews.server.ts"() {
     "use strict";
     init_kv_server();
-    sql5 = neon2(process.env["DATABASE_URL"]);
+    sql6 = neon2(process.env["DATABASE_URL"]);
   }
 });
 
@@ -20288,7 +20308,7 @@ async function runGscSnapshot() {
   }
   const topQueries = mapRows(queryRows, "query");
   const topPages = mapRows(pageRows, "page");
-  await sql6`
+  await sql7`
     INSERT INTO gsc_snapshots (period_start, period_end, totals, top_queries, top_pages, sitemaps)
     VALUES (
       ${periodStart}, ${periodEnd},
@@ -20310,11 +20330,11 @@ async function runGscSnapshot() {
     }
   };
 }
-var sql6, SCOPE, TOKEN_URL, DEFAULT_SITE;
+var sql7, SCOPE, TOKEN_URL, DEFAULT_SITE;
 var init_gsc_server = __esm({
   "app/lib/gsc.server.ts"() {
     "use strict";
-    sql6 = neon3(process.env["DATABASE_URL"]);
+    sql7 = neon3(process.env["DATABASE_URL"]);
     SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
     TOKEN_URL = "https://oauth2.googleapis.com/token";
     DEFAULT_SITE = "sc-domain:xdipx.com";
@@ -20417,15 +20437,15 @@ async function runGscIndexSweep(opts = {}) {
   if (entries.length === 0) throw new Error("sitemap parsed to zero URLs; refusing to flag everything absent");
   const urls = entries.map((e) => e.url);
   const lastmods = entries.map((e) => e.lastmod);
-  await sql7`
+  await sql8`
     INSERT INTO gsc_url_inspections (url, sitemap_lastmod)
     SELECT u, m FROM unnest(${urls}::text[], ${lastmods}::text[]) AS t(u, m)
     ON CONFLICT (url) DO UPDATE
       SET in_sitemap = TRUE, sitemap_lastmod = EXCLUDED.sitemap_lastmod`;
-  await sql7`
+  await sql8`
     UPDATE gsc_url_inspections SET in_sitemap = FALSE
     WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`;
-  const batch = await sql7`
+  const batch = await sql8`
     SELECT url, coverage_state, verdict FROM gsc_url_inspections
     WHERE in_sitemap OR coverage_state = ANY(${DEAD_VERDICT_STATES}::text[])
     ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
@@ -20457,7 +20477,7 @@ async function runGscIndexSweep(opts = {}) {
       const isIndexed = r.verdict === "PASS";
       if (row.verdict !== null && !wasIndexed && isIndexed) newlyIndexed++;
       if (wasIndexed && !isIndexed) newlyDropped++;
-      await sql7`
+      await sql8`
         UPDATE gsc_url_inspections SET
           verdict = ${r.verdict ?? null},
           coverage_state = ${newCoverage},
@@ -20477,7 +20497,7 @@ async function runGscIndexSweep(opts = {}) {
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batch.length) }, () => worker()));
   const quotaUsedToday = inspected > 0 ? await kvIncrBy(quotaKey, inspected) : used;
-  const aggRows = await sql7`
+  const aggRows = await sql8`
     SELECT
       count(*) FILTER (WHERE in_sitemap)::int AS sitemap_urls,
       count(*) FILTER (WHERE in_sitemap AND last_inspected_at IS NOT NULL)::int AS inspected_urls,
@@ -20491,7 +20511,7 @@ async function runGscIndexSweep(opts = {}) {
                        AND google_canonical <> user_canonical)::int AS canonical_mismatches
     FROM gsc_url_inspections`;
   const agg = aggRows[0];
-  await sql7`
+  await sql8`
     INSERT INTO gsc_index_daily (
       day, sitemap_urls, inspected_urls, indexed_count, crawled_not_indexed,
       discovered_not_indexed, other_not_indexed, canonical_mismatches,
@@ -20530,13 +20550,13 @@ async function runGscIndexSweep(opts = {}) {
     }
   };
 }
-var sql7, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
+var sql8, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
 var init_gsc_index_server = __esm({
   "app/lib/gsc-index.server.ts"() {
     "use strict";
     init_gsc_server();
     init_kv_server();
-    sql7 = neon4(process.env["DATABASE_URL"]);
+    sql8 = neon4(process.env["DATABASE_URL"]);
     DEAD_VERDICT_STATES = ["Not found (404)", "Soft 404", "Server error (5xx)"];
     INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
     DAILY_QUOTA_CEILING = 1900;
@@ -20555,7 +20575,7 @@ __export(seo_daily_server_exports, {
   isoWeek: () => isoWeek,
   runSeoDaily: () => runSeoDaily
 });
-import { sql as sql8 } from "drizzle-orm";
+import { sql as sql9 } from "drizzle-orm";
 function delta(a, b) {
   return typeof a === "number" && typeof b === "number" ? a - b : null;
 }
@@ -20636,7 +20656,7 @@ async function coverageCounters() {
     enrichedDistinctProducts: null
   };
   try {
-    const res = await db.execute(sql8`
+    const res = await db.execute(sql9`
       SELECT
         jsonb_array_length(index_json::jsonb)::int AS total,
         (SELECT count(*)::int FROM jsonb_array_elements(index_json::jsonb) e
@@ -20647,7 +20667,7 @@ async function coverageCounters() {
           WHERE e->>'imageUrl' IS NOT NULL AND e->>'imageUrl' <> '') AS has_image
       FROM discovery_index_payload WHERE version = 'v7' LIMIT 1`);
     const row = (res.rows ?? [])[0];
-    const enrichRes = await db.execute(sql8`
+    const enrichRes = await db.execute(sql9`
       SELECT count(DISTINCT product_id)::int AS n FROM product_enrichment_cache`);
     const enriched = (enrichRes.rows ?? [])[0];
     return {
@@ -20676,17 +20696,17 @@ async function runSeoDaily() {
     }
   };
   const today = await guard("gsc_index_daily latest", async () => {
-    const r = await db.execute(sql8`SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
+    const r = await db.execute(sql9`SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
     return (r.rows ?? [])[0] ?? null;
   }, null);
   const weekAgo = await guard("gsc_index_daily week-ago", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily
       WHERE day <= now()::date - 7 ORDER BY day DESC LIMIT 1`);
     return (r.rows ?? [])[0] ?? null;
   }, null);
   const transitions = await guard("coverage transitions", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT
         count(*) FILTER (
           WHERE verdict = 'PASS'
@@ -20701,7 +20721,7 @@ async function runSeoDaily() {
     return { cleared: num2(row?.["cleared"]), regressed: num2(row?.["regressed"]), total: num2(row?.["total"]) };
   }, { cleared: 0, regressed: 0, total: 0 });
   const verdictCounts = await guard("verdict breakdown", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT COALESCE(coverage_state, 'unknown') AS state, count(*)::int AS n
       FROM gsc_url_inspections WHERE in_sitemap GROUP BY 1 ORDER BY 2 DESC`);
     const out = {};
@@ -20712,12 +20732,12 @@ async function runSeoDaily() {
   }, {});
   const serverErrors = verdictCounts["Server error (5xx)"] ?? 0;
   const indexnowPushed24h = await guard("indexnow ledger", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT count(*)::int AS n FROM indexnow_pings WHERE pinged_at >= now() - interval '24 hours'`);
     return num2((r.rows ?? [])[0]?.n);
   }, 0);
   const snapshot = await guard("gsc_snapshots", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT captured_at::text AS captured_at, period_start::text AS period_start,
              period_end::text AS period_end, totals
       FROM gsc_snapshots ORDER BY captured_at DESC LIMIT 1`);
@@ -20821,7 +20841,7 @@ async function runSeoDaily() {
     errors
   };
   await guard("persist seo_coverage_daily", async () => {
-    await db.execute(sql8`
+    await db.execute(sql9`
       INSERT INTO seo_coverage_daily (
         day, discovery_total, has_type_dial, has_mood, has_image,
         enriched_distinct_products, notes
@@ -20843,7 +20863,7 @@ async function runSeoDaily() {
 }
 async function getLatestSeoDaily() {
   try {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT day::text AS day, notes FROM seo_coverage_daily ORDER BY day DESC LIMIT 1`);
     const row = (r.rows ?? [])[0];
     if (!row) return null;
@@ -20868,7 +20888,7 @@ var init_seo_daily_server = __esm({
     INDEXED_DROP_PCT = 5;
     NEWLY_DROPPED_MAX = 20;
     SERVER_ERROR_MAX = 10;
-    INDEX_DAILY_COLS = sql8`
+    INDEX_DAILY_COLS = sql9`
   day::text AS day, sitemap_urls, inspected_urls, indexed_count,
   crawled_not_indexed, discovered_not_indexed, other_not_indexed,
   canonical_mismatches, newly_indexed, newly_dropped`;
@@ -20890,7 +20910,7 @@ __export(owner_digest_server_exports, {
   renderTicketsSection: () => renderTicketsSection,
   runOwnerDigest: () => runOwnerDigest
 });
-import { sql as sql9 } from "drizzle-orm";
+import { sql as sql10 } from "drizzle-orm";
 function esc(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -21056,7 +21076,7 @@ function parseRenderTruth(raw) {
 async function gatherShipped() {
   const items = [];
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT l.suggestion_id AS ticket_id, l.ref, l.updated_at::text AS at,
              COALESCE(s.kind, 'code') AS kind, COALESCE(s.suggestion, '') AS suggestion
       FROM suggestion_links l
@@ -21078,7 +21098,7 @@ async function gatherShipped() {
     console.warn("[owner-digest] suggestion_links unavailable (migration 070?):", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT id, kind, suggestion, apply_ref, updated_at::text AS at
       FROM homepage_team_suggestions
       WHERE status = 'applied' AND updated_at >= now() - interval '24 hours'
@@ -21132,7 +21152,7 @@ async function gatherHomepageNow() {
   }
   let renderTickets = [];
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT id, status, suggestion
       FROM homepage_team_suggestions
       WHERE dedupe_key LIKE 'render:%' AND status NOT IN ('applied', 'dismissed')
@@ -21174,23 +21194,23 @@ async function gatherTicketMetrics(statusCounts) {
   };
   try {
     const [openedRes, closedRes, blockedRes, oldestRes, finalRes, blockedRowsRes] = await Promise.all([
-      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE created_at >= now() - interval '24 hours' GROUP BY kind`),
-      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE status IN ('applied', 'dismissed')
                         AND updated_at >= now() - interval '24 hours' GROUP BY kind`),
-      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE status = 'blocked' GROUP BY kind`),
-      db.execute(sql9`SELECT id, suggestion,
+      db.execute(sql10`SELECT id, suggestion,
                             EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
                        FROM homepage_team_suggestions
                       WHERE status = 'approved' ORDER BY created_at ASC LIMIT 1`),
-      db.execute(sql9`SELECT id, status, kind, attempt_count, last_error, suggestion
+      db.execute(sql10`SELECT id, status, kind, attempt_count, last_error, suggestion
                        FROM homepage_team_suggestions
                       WHERE attempt_count = ${MAX_TICKET_ATTEMPTS - 1}
                         AND status NOT IN ('applied', 'dismissed')
                       ORDER BY priority ASC, updated_at DESC LIMIT 10`),
-      db.execute(sql9`SELECT id, status, kind, attempt_count, last_error, suggestion
+      db.execute(sql10`SELECT id, status, kind, attempt_count, last_error, suggestion
                        FROM homepage_team_suggestions
                       WHERE status = 'blocked'
                       ORDER BY priority ASC, updated_at DESC LIMIT 8`)
@@ -21216,7 +21236,7 @@ async function gatherTicketMetrics(statusCounts) {
 }
 async function ageOutStaleSuggestions() {
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       UPDATE homepage_team_suggestions
          SET status = 'dismissed',
              decided_by = 'system',
@@ -21237,16 +21257,16 @@ async function ageOutStaleSuggestions() {
 async function gatherOwnerQueue(agedOut) {
   const out = { rows: [], totalCount: 0, agedOut };
   try {
-    const kinds = sql9.join(OWNER_DECISION_KINDS.map((k) => sql9`${k}`), sql9`, `);
+    const kinds = sql10.join(OWNER_DECISION_KINDS.map((k) => sql10`${k}`), sql10`, `);
     const [listRes, countRes] = await Promise.all([
-      db.execute(sql9`
+      db.execute(sql10`
         SELECT id, kind, team, target_team, decided_by, suggestion,
                EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
           FROM homepage_team_suggestions
          WHERE status = 'approved' AND kind IN (${kinds})
          ORDER BY created_at ASC
          LIMIT 30`),
-      db.execute(sql9`
+      db.execute(sql10`
         SELECT COUNT(*)::int AS n
           FROM homepage_team_suggestions
          WHERE status = 'approved' AND kind IN (${kinds})`)
@@ -21278,7 +21298,7 @@ async function gatherOpsWatch() {
     agentRetired: []
   };
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT COUNT(*)::int AS n,
              EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 86400 AS oldest_days
         FROM social_posts
@@ -21294,7 +21314,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] social draft sweep failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT COUNT(*)::int AS n
         FROM pricing_audit_log
        WHERE trigger = 'batch'
@@ -21305,7 +21325,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] pricing batch check failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT EXTRACT(epoch FROM now() - MAX(created_at))::float8 / 3600 AS age_hours
         FROM product_enrichment_cache`);
     const raw = (res.rows ?? [])[0]?.["age_hours"];
@@ -21314,7 +21334,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] enrichment age check failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT COUNT(DISTINCT s.id)::int AS n
         FROM homepage_team_suggestions s
         JOIN suggestion_links l ON l.suggestion_id = s.id AND l.kind = 'pr'
@@ -21325,7 +21345,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] stranded-ticket count failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT id, kind, suggestion
         FROM homepage_team_suggestions
        WHERE status = 'dismissed'
@@ -21348,7 +21368,7 @@ async function gatherOpsWatch() {
 async function gatherEscalations() {
   const out = { protectedPrs: [], exhausted: [] };
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT l.suggestion_id AS ticket_id, l.ref, l.state,
              COALESCE(s.suggestion, '') AS suggestion
       FROM suggestion_links l
@@ -21369,7 +21389,7 @@ async function gatherEscalations() {
     console.warn("[owner-digest] protected-PR sweep failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT id, status, kind, attempt_count, last_error, suggestion
         FROM homepage_team_suggestions
        WHERE attempt_count >= ${MAX_TICKET_ATTEMPTS}
@@ -21387,7 +21407,7 @@ async function runOwnerDigest(opts = {}) {
     const first = await kvSetNX(`owner-digest:sent:${day}`, String(Date.now()), 26 * 3600);
     if (!first) return { sent: false, skipped: "already sent today (pass force=1 to re-send)" };
   }
-  const profitRes = await db.execute(sql9`
+  const profitRes = await db.execute(sql10`
     SELECT summary_date::text AS day,
            COALESCE(total_orders, 0)::int AS orders,
            COALESCE(total_revenue, 0)::float8 AS revenue,
@@ -21398,7 +21418,7 @@ async function runOwnerDigest(opts = {}) {
     LIMIT 8`);
   const profit = profitRes.rows ?? [];
   const yesterday = profit[0];
-  const runsRes = await db.execute(sql9`
+  const runsRes = await db.execute(sql10`
     SELECT team, run_type, status, started_at::text AS started_at, error, summary
     FROM homepage_team_runs
     WHERE started_at >= now() - interval '24 hours'
@@ -21406,7 +21426,7 @@ async function runOwnerDigest(opts = {}) {
     LIMIT 40`);
   const runs = runsRes.rows ?? [];
   const failures = runs.filter((r) => r.status === "failed");
-  const suggRes = await db.execute(sql9`
+  const suggRes = await db.execute(sql10`
     SELECT status, COUNT(*)::int AS n, MIN(created_at)::text AS oldest
     FROM homepage_team_suggestions
     GROUP BY status`);
@@ -21433,7 +21453,7 @@ async function runOwnerDigest(opts = {}) {
     console.warn("[owner-digest] seo-daily unavailable:", String(err2).slice(0, 200));
   }
   try {
-    const droppedRes = await db.execute(sql9`
+    const droppedRes = await db.execute(sql10`
       SELECT url, previous_coverage_state, coverage_state
       FROM gsc_url_inspections
       WHERE coverage_changed_at >= now() - interval '24 hours'
@@ -21445,7 +21465,7 @@ async function runOwnerDigest(opts = {}) {
     console.warn("[owner-digest] index-monitor tables unavailable (migration 064 not applied?):", String(err2).slice(0, 200));
   }
   try {
-    const ticketRes = await db.execute(sql9`
+    const ticketRes = await db.execute(sql10`
       SELECT id, priority, status, suggestion, dedupe_key
       FROM homepage_team_suggestions
       WHERE created_at >= now() - interval '24 hours' AND dedupe_key LIKE 'seo:%'
@@ -21654,7 +21674,7 @@ import { neon as neon5 } from "@neondatabase/serverless";
 import { eq as eq13 } from "drizzle-orm";
 async function getUrlHealth() {
   try {
-    const rows = await sql10`
+    const rows = await sql11`
       SELECT url, coverage_state, last_crawl_time FROM gsc_url_inspections
       WHERE coverage_state = ANY(${BAD_VERDICT_STATES}::text[])
     `;
@@ -21829,7 +21849,7 @@ async function assembleSegments() {
   segments.push(...chunkSegments("products", clean(productUrls), PRODUCTS_PER_SEGMENT));
   return segments;
 }
-var sql10, BAD_VERDICT_STATES, PRODUCTS_PER_SEGMENT, PAGE_SLUG_DENYLIST, COLLECTION_DENYLIST, memo, MEMO_TTL_MS;
+var sql11, BAD_VERDICT_STATES, PRODUCTS_PER_SEGMENT, PAGE_SLUG_DENYLIST, COLLECTION_DENYLIST, memo, MEMO_TTL_MS;
 var init_sitemap_server = __esm({
   "app/lib/sitemap.server.ts"() {
     "use strict";
@@ -21839,7 +21859,7 @@ var init_sitemap_server = __esm({
     init_gsc_index_server();
     init_sitemap_xml();
     init_schema();
-    sql10 = neon5(process.env["DATABASE_URL"]);
+    sql11 = neon5(process.env["DATABASE_URL"]);
     BAD_VERDICT_STATES = [
       "Excluded by \u2018noindex\u2019 tag",
       "Duplicate without user-selected canonical",
@@ -21909,8 +21929,8 @@ async function recentlyPinged(urls) {
   if (urls.length === 0) return /* @__PURE__ */ new Set();
   try {
     const { neon: neon6 } = await import("@neondatabase/serverless");
-    const sql19 = neon6(process.env["DATABASE_URL"]);
-    const rows = await sql19`
+    const sql20 = neon6(process.env["DATABASE_URL"]);
+    const rows = await sql20`
       SELECT url FROM indexnow_pings
       WHERE url = ANY(${urls}::text[])
         AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')
@@ -21924,8 +21944,8 @@ async function recentlyPinged(urls) {
 async function recordPushed(urls, batchId, statusCode) {
   if (urls.length === 0) return;
   const { neon: neon6 } = await import("@neondatabase/serverless");
-  const sql19 = neon6(process.env["DATABASE_URL"]);
-  await sql19`
+  const sql20 = neon6(process.env["DATABASE_URL"]);
+  await sql20`
     INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
     SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
     FROM unnest(${urls}::text[]) AS t(u)
@@ -23162,7 +23182,7 @@ var init_pricing_apply_server = __esm({
 });
 
 // app/lib/pricing-webhook.server.ts
-import { eq as eq15, sql as sql11 } from "drizzle-orm";
+import { eq as eq15, sql as sql12 } from "drizzle-orm";
 async function setPipelineSetting(key, value) {
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -23183,7 +23203,7 @@ var init_pricing_webhook_server = __esm({
 });
 
 // app/lib/cost-sync.server.ts
-import { inArray as inArray4, sql as sql12 } from "drizzle-orm";
+import { inArray as inArray4, sql as sql13 } from "drizzle-orm";
 function round23(n) {
   return Math.round(n * 100) / 100;
 }
@@ -23267,17 +23287,17 @@ async function runNalpacCostSync(opts) {
         await db.insert(nalpacPriceHistory).values(chunk).onConflictDoUpdate({
           target: nalpacPriceHistory.sku,
           set: {
-            wholesale: sql12`excluded.wholesale`,
-            msrp: sql12`excluded.msrp`,
-            mapPrice: sql12`excluded.map_price`,
-            salePrice: sql12`excluded.sale_price`,
-            qty: sql12`excluded.qty`,
-            nalpacDiscountPct: sql12`excluded.nalpac_discount_pct`,
-            inTop100: sql12`excluded.in_top100`,
-            inNew: sql12`excluded.in_new`,
-            inSale: sql12`excluded.in_sale`,
-            observedAt: sql12`excluded.observed_at`,
-            syncedAt: sql12`excluded.synced_at`
+            wholesale: sql13`excluded.wholesale`,
+            msrp: sql13`excluded.msrp`,
+            mapPrice: sql13`excluded.map_price`,
+            salePrice: sql13`excluded.sale_price`,
+            qty: sql13`excluded.qty`,
+            nalpacDiscountPct: sql13`excluded.nalpac_discount_pct`,
+            inTop100: sql13`excluded.in_top100`,
+            inNew: sql13`excluded.in_new`,
+            inSale: sql13`excluded.in_sale`,
+            observedAt: sql13`excluded.observed_at`,
+            syncedAt: sql13`excluded.synced_at`
           }
         });
       } catch (err2) {
@@ -24465,7 +24485,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and5, asc as asc4, eq as eq17, inArray as inArray5, isNull as isNull2, sql as sql13 } from "drizzle-orm";
+import { and as and5, asc as asc4, eq as eq17, inArray as inArray5, isNull as isNull2, sql as sql14 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -24654,7 +24674,7 @@ async function detectImportEnrichStall(enabled) {
   try {
     const cutoff = new Date(Date.now() - STALL_AGE_HOURS * 3600 * 1e3);
     const rows = await db.select({
-      anchor: sql13`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
+      anchor: sql14`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
     }).from(importCandidates).where(and5(
       eq17(importCandidates.status, "imported"),
       isNull2(importCandidates.enrichedAt),
@@ -24692,7 +24712,7 @@ async function collectEnrichmentBatch() {
     eq17(importCandidates.status, "imported"),
     isNull2(importCandidates.enrichedAt),
     isNull2(importCandidates.enrichFailedAt),
-    sql13`${importCandidates.enrichBatchId} IS NOT NULL`
+    sql14`${importCandidates.enrichBatchId} IS NOT NULL`
   )).orderBy(asc4(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
@@ -24754,7 +24774,7 @@ async function publishEnrichedProducts() {
     categories: dealHistory.categories
   }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
     eq17(importCandidates.status, "imported"),
-    sql13`${importCandidates.enrichedAt} IS NOT NULL`,
+    sql14`${importCandidates.enrichedAt} IS NOT NULL`,
     isNull2(importCandidates.publishedAt)
   ));
   let published = 0;
@@ -26567,7 +26587,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and6, eq as eq21, inArray as inArray7, sql as sql14 } from "drizzle-orm";
+import { and as and6, eq as eq21, inArray as inArray7, sql as sql15 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -26839,7 +26859,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql14`count(*)::int` }).from(importCandidates).where(and6(eq21(importCandidates.status, "imported"), eq21(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql15`count(*)::int` }).from(importCandidates).where(and6(eq21(importCandidates.status, "imported"), eq21(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -26860,7 +26880,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
   }).from(importCandidates).where(and6(
     eq21(importCandidates.status, "pending"),
     inArray7(importCandidates.masterKey, cappedKeys)
-  )).orderBy(importCandidates.tier, sql14`${importCandidates.dealScore} DESC NULLS LAST`);
+  )).orderBy(importCandidates.tier, sql15`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
     if (!tierOk || c.needsReview) return false;
@@ -26996,20 +27016,20 @@ async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
   const query = db.select().from(importCandidates).where(inArray7(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
-    sql14`${importCandidates.dealScore} DESC NULLS LAST`
+    sql15`${importCandidates.dealScore} DESC NULLS LAST`
   );
   if (limit != null) return query.limit(limit);
   return query;
 }
 async function getCatalogOpportunities() {
-  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql14`${dealHistory.brand} IS NOT NULL`);
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql15`${dealHistory.brand} IS NOT NULL`);
   const brandCount = /* @__PURE__ */ new Map();
   for (const r of brandRows) {
     if (!r.brand) continue;
     brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
   }
   const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
-  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql14`${dealHistory.categories} IS NOT NULL`);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql15`${dealHistory.categories} IS NOT NULL`);
   const catCount = /* @__PURE__ */ new Map();
   for (const r of catRows) {
     for (const cat of r.categories ?? []) {
@@ -27039,7 +27059,7 @@ async function getCatalogOpportunities() {
   return { brandCoverage, categoryCoverage, brandOpportunities };
 }
 async function getRecentImportRuns(limit) {
-  return db.select().from(importMonitorRuns).orderBy(sql14`${importMonitorRuns.startedAt} DESC`).limit(limit);
+  return db.select().from(importMonitorRuns).orderBy(sql15`${importMonitorRuns.startedAt} DESC`).limit(limit);
 }
 async function updateCandidateStatus(id, status, opts = {}) {
   const now = /* @__PURE__ */ new Date();
@@ -27555,7 +27575,7 @@ __export(ticket_out_of_band_sweep_server_exports, {
   isMergedOutOfBand: () => isMergedOutOfBand,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and7, desc as desc2, eq as eq22, lt as lt3, sql as sql15 } from "drizzle-orm";
+import { and as and7, desc as desc2, eq as eq22, lt as lt3, sql as sql16 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
@@ -27625,7 +27645,7 @@ async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
 }
 async function countStrandedVerifiedTickets() {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const [row] = await db.select({ n: sql15`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
+  const [row] = await db.select({ n: sql16`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
     eq22(homepageTeamSuggestions.status, "verified"),
     eq22(suggestionLinks.kind, "pr"),
     lt3(homepageTeamSuggestions.updatedAt, cutoff)
@@ -27732,7 +27752,7 @@ __export(release_engine_server_exports, {
   summarizeSmoke: () => summarizeSmoke,
   utcDay: () => utcDay3
 });
-import { and as and8, desc as desc4, eq as eq24, sql as sql16 } from "drizzle-orm";
+import { and as and8, desc as desc4, eq as eq24, sql as sql17 } from "drizzle-orm";
 function utcDay3(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -28075,7 +28095,7 @@ async function runSelfCheck(opts = {}) {
 async function resolveTicketForPr(pr) {
   const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and8(
     eq24(suggestionLinks.kind, "pr"),
-    sql16`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
+    sql17`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
   const match = direct.find((l) => prNumberFromRef(l.ref) === pr.number);
   if (match) return loadTicketFacts(match.suggestionId);
@@ -29518,7 +29538,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq26, and as and9, inArray as inArray8, desc as desc5, isNotNull, ne as ne3, sql as sql17 } from "drizzle-orm";
+import { eq as eq26, and as and9, inArray as inArray8, desc as desc5, isNotNull, ne as ne3, sql as sql18 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -29645,7 +29665,7 @@ async function frameReviewEnabled() {
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
   const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and9(
-    sql17`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
+    sql18`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
     eq26(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
     inArray8(videoJobs.stage, FRAME_APPROVED_STAGES),
@@ -30516,7 +30536,14 @@ async function handlePricingBatchRecompute(req, res) {
         `[cron:pricing-batch-recompute] only ${result.total} products considered (expected >= ${EXPECTED_MIN_PRODUCTS})`
       );
     }
-    res.json({ ok: true, trigger, ...result });
+    let pruned = 0;
+    try {
+      const { prunePricingAuditLog: prunePricingAuditLog2 } = await Promise.resolve().then(() => (init_pricing_apply_v2_server(), pricing_apply_v2_server_exports));
+      pruned = await prunePricingAuditLog2();
+    } catch (e) {
+      console.warn("[cron:pricing-batch-recompute] audit-log prune skipped (ignored):", e);
+    }
+    res.json({ ok: true, trigger, pruned, ...result });
   } catch (err2) {
     console.error("[cron:pricing-batch-recompute]", err2);
     await alertPricingFailure(err2, trigger);
@@ -31199,7 +31226,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq28, sql as sql18 } from "drizzle-orm";
+import { eq as eq28, sql as sql19 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -31264,7 +31291,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql18`${productCopurchase.count} + 1`,
+              count: sql19`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });

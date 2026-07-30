@@ -1,6 +1,10 @@
 // Unit tests for decideStatus (pure function, no DB/Shopify).
 import { describe, it, expect } from 'vitest'
-import { decideStatus } from './pricing-apply-v2.server'
+import {
+  PRICING_AUDIT_RETENTION_DAYS,
+  PRUNABLE_AUDIT_STATUSES,
+  decideStatus,
+} from './pricing-apply-v2.server'
 
 const BASE = {
   map:         24.99,
@@ -78,5 +82,38 @@ describe('TEST_SKU_PREFIX exclusion regex', () => {
   })
   it('does NOT match empty string', () => {
     expect(re.test('')).toBe(false)
+  })
+})
+
+/**
+ * The prune's safety rule. The DELETE itself needs a database, so what is
+ * pinned here is the thing that would actually cause harm if it drifted: which
+ * statuses are eligible at all.
+ */
+describe('pricing_audit_log retention', () => {
+  it('never prunes the real price-change history', () => {
+    // These two ARE the audit trail this table exists to be. `applied` is not
+    // in AuditStatus but exists on 8,708 legacy prod rows, so it is asserted
+    // by literal rather than by type.
+    expect(PRUNABLE_AUDIT_STATUSES).not.toContain('applied')
+    expect(PRUNABLE_AUDIT_STATUSES).not.toContain('auto_applied')
+  })
+
+  it('never prunes a pending approval', () => {
+    // The pricing sweep reads pending rows with no date floor. Deleting an old
+    // one destroys an unanswered decision instead of surfacing it.
+    expect(PRUNABLE_AUDIT_STATUSES).not.toContain('pending')
+  })
+
+  it('prunes exactly the two noise statuses, and is an allowlist', () => {
+    // Allowlist, not blocklist: a status added to AuditStatus later is retained
+    // by default, which is the direction this should fail in.
+    expect([...PRUNABLE_AUDIT_STATUSES].sort()).toEqual(['rejected', 'skipped_no_change'])
+  })
+
+  it('keeps a retention window longer than any reporting window', () => {
+    // The owner digest's pricing check reads yesterday only; nothing in the app
+    // reads further back than a quarter.
+    expect(PRICING_AUDIT_RETENTION_DAYS).toBeGreaterThanOrEqual(90)
   })
 })
