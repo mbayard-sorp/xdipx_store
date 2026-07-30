@@ -1,8 +1,9 @@
 /**
  * Drop-page H1 masthead. Same shape as CategoryMasthead plus a small mono
- * "period" chip (e.g. "This week", "July drop"). Coral-soft ground tint,
- * the drop pages read warmer than the evergreen category pages. Image is the
- * LCP candidate and stays outside Reveal.
+ * "period" kicker (e.g. "This week", "July drop"). New reads warm on a
+ * coral-soft tint; Sale takes `tone="quiet"` — the same composition on
+ * paper-3, because the quiet treatment is the whole art direction there.
+ * Image is the LCP candidate and stays outside Reveal.
  */
 
 import { OptimizedImage } from '~/components/store/OptimizedImage'
@@ -12,14 +13,20 @@ import { MONO, DISPLAY, BODY, renderEmphasizedHeadline } from './consts'
 
 type Block = Extract<ResolvedCategoryBlock, { _type: 'dropMasthead' }>
 
-export function DropMasthead({ block }: { block: Block }) {
+export type DropTone = 'tinted' | 'quiet'
+
+export function DropMasthead({ block, tone = 'tinted' }: { block: Block; tone?: DropTone | undefined }) {
   return (
-    <section id={block.anchorId} data-block={block._type} className="bg-coral-soft">
+    <section
+      id={block.anchorId}
+      data-block={block._type}
+      className={tone === 'quiet' ? 'bg-paper-3' : 'bg-coral-soft'}
+    >
       <div className="mx-auto max-w-[1320px] px-6 py-10 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] md:items-center md:gap-14 md:px-16 md:py-16">
         <Reveal variant="up" disabled className="min-w-0">
           {block.period && (
             <span
-              className="mb-4 inline-block rounded-full bg-paper/70 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-ink-3"
+              className="mb-4 block text-[11px] uppercase tracking-[0.18em] text-ink-4"
               style={MONO}
             >
               {block.period}

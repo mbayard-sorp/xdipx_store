@@ -10,7 +10,7 @@
 import { Fragment } from 'react'
 import type { ResolvedCategoryBlock } from '~/types/cms'
 import { CategoryMasthead } from './CategoryMasthead'
-import { DropMasthead } from './DropMasthead'
+import { DropMasthead, type DropTone } from './DropMasthead'
 import { ShelfNav } from './ShelfNav'
 import { SensationLegend } from './SensationLegend'
 import { EditorialFeature } from './EditorialFeature'
@@ -28,12 +28,12 @@ import { ComingSoon } from './ComingSoon'
 /** Renders one resolved block. Exported for callers that already iterate
  *  their own list (kept internal-only for now; `CategoryBlockRenderer` below
  *  is the route-facing entry point). */
-function renderOne(block: ResolvedCategoryBlock) {
+function renderOne(block: ResolvedCategoryBlock, dropTone?: DropTone) {
   switch (block._type) {
     case 'categoryMasthead':
       return <CategoryMasthead block={block} />
     case 'dropMasthead':
-      return <DropMasthead block={block} />
+      return <DropMasthead block={block} tone={dropTone} />
     case 'shelfNav':
       return <ShelfNav block={block} />
     case 'sensationLegend':
@@ -70,11 +70,18 @@ function renderOne(block: ResolvedCategoryBlock) {
  * order. One `<Fragment key>` per block, matching how StorefrontHome
  * composes its own band list.
  */
-export function CategoryBlockRenderer({ blocks }: { blocks: ResolvedCategoryBlock[] }) {
+export function CategoryBlockRenderer({
+  blocks,
+  dropTone,
+}: {
+  blocks: ResolvedCategoryBlock[]
+  /** Sale renders its dropMasthead on the quiet paper ground; New stays tinted. */
+  dropTone?: DropTone
+}) {
   return (
     <>
       {blocks.map(block => (
-        <Fragment key={block.key}>{renderOne(block)}</Fragment>
+        <Fragment key={block.key}>{renderOne(block, dropTone)}</Fragment>
       ))}
     </>
   )

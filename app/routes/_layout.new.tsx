@@ -112,10 +112,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 }
 
+/** Blocks that belong above the product grid; everything else (email capture,
+    trust strip, FAQ, learn strip) closes the page below it. The newest-product
+    page's second beat must be the products, not a form. */
+const PRE_GRID_BLOCK_TYPES = new Set(['dropMasthead', 'justLanded', 'dropTimeline'])
+
 export default function NewArrivalsPage() {
   const { deals, hasNextPage, page, canonical, hasProducts, dropBlocks } = useLoaderData<typeof loader>()
   const isCanonicalPage = page === 1
   const merchandised = !!dropBlocks?.length
+  const preGridBlocks = dropBlocks?.filter(b => PRE_GRID_BLOCK_TYPES.has(b._type)) ?? []
+  const postGridBlocks = dropBlocks?.filter(b => !PRE_GRID_BLOCK_TYPES.has(b._type)) ?? []
 
   const breadcrumbItems = [
     { name: 'Home', href: '/' },
@@ -158,9 +165,9 @@ export default function NewArrivalsPage() {
 
       {/* The drop masthead carries the H1 when the merchandised layer is
           live; rendering both would put two h1 elements on the page. */}
-      {merchandised && dropBlocks ? (
+      {merchandised ? (
         <div className="mb-8">
-          <CategoryBlockRenderer blocks={dropBlocks} />
+          <CategoryBlockRenderer blocks={preGridBlocks} />
         </div>
       ) : (
         <header className="mb-6">
@@ -171,6 +178,21 @@ export default function NewArrivalsPage() {
           {isCanonicalPage && (
             <p className="mt-3 max-w-2xl text-ink-3">{INTRO}</p>
           )}
+        </header>
+      )}
+
+      {/* The grid gets a name of its own on the merchandised page — every set
+          on the aisle pages is labeled, and an unlabeled wall of product reads
+          unfinished next to them. */}
+      {merchandised && hasProducts && (
+        <header className="mb-6">
+          <p className="kicker mb-2 text-ink-4">Just landed</p>
+          <h2
+            className="text-[1.6rem] leading-[1.15] tracking-[-0.01em] text-ink md:text-[2.1rem]"
+            style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
+          >
+            The newest picks on the shelf.
+          </h2>
         </header>
       )}
 
@@ -214,6 +236,13 @@ export default function NewArrivalsPage() {
           </Link>
         )}
       </nav>
+
+      {/* Closers (email capture, trust, FAQ) belong after the products. */}
+      {merchandised && postGridBlocks.length > 0 && (
+        <div className="mt-12">
+          <CategoryBlockRenderer blocks={postGridBlocks} />
+        </div>
+      )}
     </div>
   )
 }

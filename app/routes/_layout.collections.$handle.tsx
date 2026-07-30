@@ -426,7 +426,12 @@ export default function CollectionPage() {
 
       {merchandised && categoryBlocks ? (
         <div className="mb-8">
-          <CategoryBlockRenderer blocks={categoryBlocks} />
+          {/* Sale is a merchandising moment with a quiet mandate: its
+              dropMasthead renders on paper, not the tinted band New uses. */}
+          <CategoryBlockRenderer
+            blocks={categoryBlocks}
+            dropTone={handle === 'on-sale' ? 'quiet' : 'tinted'}
+          />
         </div>
       ) : null}
 
@@ -541,6 +546,7 @@ export default function CollectionPage() {
                 >
                   <VaultCard
                     deal={deal}
+                    quiet={handle === 'on-sale'}
                     {...(starred[deal.handle] ? { starred: { reason: starred[deal.handle]! } } : {})}
                   />
                 </div>

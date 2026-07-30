@@ -62,7 +62,11 @@ export function robotsContent(opts: { index?: boolean; follow?: boolean } = {}):
 }
 
 export function pageTitle(parts: Array<string | null | undefined>): string {
-  const filtered = parts.filter((p): p is string => !!p && p.trim().length > 0)
+  // Sanity-authored titles sometimes arrive already suffixed ("Play … | xdipx");
+  // strip that before appending so no title ever reads "… | xdipx | xdipx".
+  const filtered = parts
+    .map(p => p?.replace(/\s*\|\s*xdipx\s*$/i, ''))
+    .filter((p): p is string => !!p && p.trim().length > 0)
   if (filtered.length === 0) return 'xdipx'
   if (filtered[filtered.length - 1] !== 'xdipx') filtered.push('xdipx')
   return filtered.join(' | ')
