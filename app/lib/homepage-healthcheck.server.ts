@@ -731,6 +731,16 @@ export async function renderTruth(
 
     if (fileTickets) {
       result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate)
+      // Close the sameness tickets for slots that DID change. The dedupe key is
+      // undated on purpose ("one open conversation until the slot changes"),
+      // but nothing ever ended the conversation, so an open row kept holding
+      // the key and suppressed re-detection for that slot indefinitely. Four
+      // slots were muted this way. Closing them here is what makes the undated
+      // key safe.
+      const changed = Object.keys(fingerprint).filter(
+        slot => fingerprint[slot] !== '' && !sameSlots.includes(slot),
+      )
+      await closeStaleSamenessTickets(changed, today)
     }
     await persistLatestRenderTruth(result)
     return result
@@ -799,6 +809,53 @@ async function fileRenderTruthTickets(
   }
 
   return ids
+}
+
+/**
+ * End the conversation for slots that changed today.
+ *
+ * The sameness tickets use an undated dedupe key so a slot that stays stale
+ * stays one row rather than accumulating one a day. The unique index that
+ * enforces that excludes only `applied` and `dismissed`, so an open row holds
+ * the key: once a sameness ticket was filed and never closed, the detector
+ * could not file another one for that slot ever again. Four slots were silently
+ * muted this way, which is the freshness alarm being off precisely when
+ * merchandising most needed it.
+ *
+ * A slot that changed is self-evidently fixed, so its row is closed with
+ * evidence rather than waiting for a human to notice a resolved alarm.
+ */
+async function closeStaleSamenessTickets(changedSlots: string[], day: string): Promise<void> {
+  if (changedSlots.length === 0) return
+  try {
+    const { db } = await import('~/lib/db.server')
+    const { homepageTeamSuggestions } = await import('../../db/schema')
+    const { and, eq, inArray, sql } = await import('drizzle-orm')
+    const { makeDedupeKey } = await import('~/lib/detection-tickets.server')
+
+    const keys = changedSlots.map(s => makeDedupeKey('sameness', s))
+    const closed = await db
+      .update(homepageTeamSuggestions)
+      .set({
+        status: 'applied',
+        updatedAt: new Date(),
+        lastError: null,
+        suggestion: sql`${homepageTeamSuggestions.suggestion} || ${`\n\nResolved ${day}: the slot changed, so the freshness rule is satisfied. Closed automatically by /cron/homepage-healthcheck.`}`,
+      })
+      .where(and(
+        inArray(homepageTeamSuggestions.dedupeKey, keys),
+        eq(homepageTeamSuggestions.kind, 'process'),
+        inArray(homepageTeamSuggestions.status, ['proposed', 'approved']),
+      ))
+      .returning({ id: homepageTeamSuggestions.id })
+
+    if (closed.length > 0) {
+      console.log(`[render-truth] closed ${closed.length} resolved sameness ticket(s): ${closed.map(c => `#${c.id}`).join(', ')}`)
+    }
+  } catch (err) {
+    // Never let bookkeeping break the healthcheck that hosts it.
+    console.warn('[render-truth] sameness ticket close failed (ignored)', err)
+  }
 }
 
 /** Open (or comment on an existing) P0 GitHub issue. Self-contained REST call. */
