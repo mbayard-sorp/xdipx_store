@@ -167,3 +167,70 @@ describe('getPanelDeck — shape hardening', () => {
     expect(await getPanelDeck()).toBeNull()
   })
 })
+
+describe('getPanelDeck — imagery on every row kind', () => {
+  // The GROQ projects imageUrl/imageAlt once, for every item in every row, and
+  // `baseTile` copies them onto the resolved tile regardless of row type. Small
+  // rows started rendering that art zone on 2026-07-30, so the contract they
+  // depend on is asserted here rather than assumed.
+  it('carries imageUrl and imageAlt onto large and small rows, not just squares', async () => {
+    collections([['on-sale', 4]])
+    mockClient({
+      theme: 'tint',
+      rows: [
+        {
+          _type: 'panelRowLarge',
+          _key: 'larges',
+          items: [
+            tile('Discover', { kind: 'route', route: '/discover' }, {
+              imageUrl: 'https://cdn.example/discover.jpg',
+              imageAlt: 'abstract black form on collage fields',
+              kicker: 'Where to begin',
+            }),
+          ],
+        },
+        {
+          _type: 'panelRowSmall',
+          _key: 'smalls',
+          items: [
+            tile('On sale', { kind: 'collection', collectionHandle: 'on-sale' }, {
+              imageUrl: 'https://cdn.example/sale.jpg',
+              imageAlt: 'a smooth teal curve',
+              meta: 'Good things, quietly marked down',
+            }),
+          ],
+        },
+      ],
+    })
+
+    const deck = await getPanelDeck()
+    expect(deck?.rows.map(r => r.kind)).toEqual(['large', 'small'])
+    expect(deck?.rows[0]?.items[0]).toMatchObject({
+      imageUrl: 'https://cdn.example/discover.jpg',
+      imageAlt: 'abstract black form on collage fields',
+    })
+    expect(deck?.rows[1]?.items[0]).toMatchObject({
+      imageUrl: 'https://cdn.example/sale.jpg',
+      imageAlt: 'a smooth teal curve',
+    })
+  })
+
+  it('leaves imageUrl null on a small row with no image, so the mark still renders', async () => {
+    collections([['on-sale', 4]])
+    mockClient({
+      theme: 'tint',
+      rows: [
+        {
+          _type: 'panelRowSmall',
+          _key: 'smalls',
+          items: [
+            tile('On sale', { kind: 'collection', collectionHandle: 'on-sale' }, { mark: 'tag' }),
+          ],
+        },
+      ],
+    })
+
+    const deck = await getPanelDeck()
+    expect(deck?.rows[0]?.items[0]).toMatchObject({ imageUrl: null, imageAlt: null, mark: 'tag' })
+  })
+})

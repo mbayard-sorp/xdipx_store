@@ -17,6 +17,15 @@ const BODY = { fontFamily: 'var(--font-body)' } as const
  * zone, so a photograph can fill its half edge to edge without the label ever
  * depending on it for contrast — the pattern that replaced the text-over-
  * packshot overlay the owner rejected on 2026-07-20.
+ *
+ * The art zone always bleeds to the card edge — never an inset plate inside the
+ * rectangle (owner direction 2026-07-30). What makes a bleed work on any ground
+ * is the image itself: these are abstract compositions built out of a real
+ * product, filling the frame edge to edge with form and tint, so there is no
+ * backdrop to butt against the card and no seam to hide. On a light ground the
+ * composition is built on the panel's own tint and the seam simply dissolves;
+ * on ink, the composition carries its own dark passages, so the boundary reads
+ * as a crop rather than as a pale rectangle laid on top.
  */
 export function PanelLargeRow({
   items,
