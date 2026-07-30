@@ -21,7 +21,9 @@ missing from the checkout, STOP and report instead of writing copy.
   `CRON_SECRET`). Sent on every API call as `x-team-secret: $HOMEPAGE_TEAM_TOKEN` (or
   `Authorization: Bearer $HOMEPAGE_TEAM_TOKEN`).
 - `BASE_URL` is the deployed site origin (e.g. `https://xdipx.com`).
-- Hard `maxTurns` (~12–16). If you loop without converging, stop and report — do not re-run yourself.
+- Hard `maxTurns` (~24–28; raised from ~12–16 at the Phase E handover, 2026-07-29, when Step 5b
+  added the merchandised pages to this run's scope). If you loop without converging, stop and
+  report — do not re-run yourself.
 
 The four endpoints, all secret-guarded:
 
