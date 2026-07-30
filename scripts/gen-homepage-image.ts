@@ -10,9 +10,16 @@
  *     --prompt "..." --alt "..." \
  *     --target tile --block-key <blockKey> --tile-key <tileKey> \
  *     --ref-image <shopify-product-photo-url> \
+ *     [--doc-id categoryPage-pleasure] \
  *     [--no-ref --no-ref-reason "abstract mood band, no product target"] \
  *     [--only fal|imagen] [--caller media-manager/wayfinder] \
  *     [--images-so-far 3] [--dry-run]
+ *
+ * --doc-id targets a document other than the homepage singleton (the panel
+ * deck 'singleton.panelDeck', a 'categoryPage-*' or 'dropPage-*' doc). The
+ * gate, cap, and spend row are IDENTICAL regardless of target — every image
+ * bills feature 'homepage-images' against the homepage team's daily budget.
+ * Deck tiles use --target tile with --block-key <rowKey> --tile-key <itemKey>.
  *
  * --ref-image is REQUIRED (FLUX Kontext places the real product in the scene).
  * Omitting it needs an explicit --no-ref plus --no-ref-reason; the reason is
@@ -61,12 +68,13 @@ async function main() {
   const noRef       = hasFlag('no-ref')
   const noRefReason = arg('no-ref-reason')
   const caller      = arg('caller') ?? 'media-manager'
+  const docId       = arg('doc-id')
   const imagesSoFar = Number(arg('images-so-far') ?? '0')
   const runId       = arg('run-id')
   const dryRun      = hasFlag('dry-run')
 
   if (!prompt || !alt || !targetKind || !blockKey) {
-    console.error('Usage: gen-homepage-image.ts --prompt <p> --alt <a> --target block|tile|promo --block-key <k> [--tile-key <k>] [--ref-image <url>] [--only fal|imagen] [--caller <c>] [--images-so-far <n>] [--run-id <n>] [--dry-run]')
+    console.error('Usage: gen-homepage-image.ts --prompt <p> --alt <a> --target block|tile|promo --block-key <k> [--tile-key <k>] [--doc-id <sanity-doc-id>] [--ref-image <url>] [--only fal|imagen] [--caller <c>] [--images-so-far <n>] [--run-id <n>] [--dry-run]')
     process.exit(1)
   }
   if (targetKind === 'tile' && !tileKey) {
@@ -125,7 +133,7 @@ async function main() {
   if (dryRun) {
     console.log(JSON.stringify({
       dryRun: true,
-      plan: { prompt, alt, target, only: only ?? 'fal-then-imagen', caller, ...(refImage ? { refImage } : { noRefReason }) },
+      plan: { prompt, alt, target, ...(docId ? { docId } : {}), only: only ?? 'fal-then-imagen', caller, ...(refImage ? { refImage } : { noRefReason }) },
     }))
     process.exit(0)
   }
@@ -139,6 +147,7 @@ async function main() {
     prompt,
     alt,
     target,
+    ...(docId ? { docId } : {}),
     caller,
     ...(only || refImage ? { gen: { ...(only ? { only } : {}), ...(refImage ? { refImageUrl: refImage } : {}) } } : {}),
   })
@@ -166,6 +175,7 @@ async function main() {
       ? { url: manifest.url, alt: manifest.alt, assetId: manifest.assetId, kind: 'image' }
       : null,
     target: manifest.target,
+    ...(docId ? { docId } : {}),
     source: { provider: manifest.provider, model: manifest.model, prompt, ...(refImage ? { refImage } : { noRefReason }) },
     spend: { posted: spendPosted, model: manifest.model, count: 1 },
     placed: manifest.placed,

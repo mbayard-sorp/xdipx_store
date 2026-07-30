@@ -15,6 +15,8 @@
 import type { LoaderFunctionArgs, MetaDescriptor, MetaFunction } from 'react-router'
 import { useLoaderData, Link } from 'react-router'
 import { getProductsByTagPaged } from '~/lib/shopify.server'
+import { getDropPage } from '~/lib/category-page.server'
+import { CategoryBlockRenderer } from '~/components/category/CategoryBlockRenderer'
 import { canonicalUrl, pageTitle, robotsContent, truncateForMeta } from '~/lib/seo'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import { VaultCard } from '~/components/store/VaultCard'
@@ -81,7 +83,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10))
 
-  const { deals, hasNextPage } = await getProductsByTagPaged(TAG, page, PAGE_SIZE)
+  const [{ deals, hasNextPage }, dropPage] = await Promise.all([
+    getProductsByTagPaged(TAG, page, PAGE_SIZE),
+    // Merchandised layer (dropPage doc, status live). Canonical page-1 only;
+    // null keeps today's rendering byte for byte.
+    page === 1 ? getDropPage('new').catch(() => null) : Promise.resolve(null),
+  ])
   const hasProducts = deals.length > 0
 
   // Canonical: page 1 is the bare URL; deeper pages self-canonicalize at
@@ -101,12 +108,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     page,
     canonical,
     hasProducts,
+    dropBlocks: dropPage?.blocks ?? null,
   }
 }
 
 export default function NewArrivalsPage() {
-  const { deals, hasNextPage, page, canonical, hasProducts } = useLoaderData<typeof loader>()
+  const { deals, hasNextPage, page, canonical, hasProducts, dropBlocks } = useLoaderData<typeof loader>()
   const isCanonicalPage = page === 1
+  const merchandised = !!dropBlocks?.length
 
   const breadcrumbItems = [
     { name: 'Home', href: '/' },
@@ -147,15 +156,23 @@ export default function NewArrivalsPage() {
 
       <Breadcrumbs items={breadcrumbItems} className="mb-4" />
 
-      <header className="mb-6">
-        <p className="kicker text-coral mb-2">Just added</p>
-        <h1 className="text-3xl md:text-4xl font-bold text-ink font-display">
-          {H1}{page > 1 ? ` (Page ${page})` : ''}
-        </h1>
-        {isCanonicalPage && (
-          <p className="mt-3 max-w-2xl text-ink-3">{INTRO}</p>
-        )}
-      </header>
+      {/* The drop masthead carries the H1 when the merchandised layer is
+          live; rendering both would put two h1 elements on the page. */}
+      {merchandised && dropBlocks ? (
+        <div className="mb-8">
+          <CategoryBlockRenderer blocks={dropBlocks} />
+        </div>
+      ) : (
+        <header className="mb-6">
+          <p className="kicker text-coral mb-2">Just added</p>
+          <h1 className="text-3xl md:text-4xl font-bold text-ink font-display">
+            {H1}{page > 1 ? ` (Page ${page})` : ''}
+          </h1>
+          {isCanonicalPage && (
+            <p className="mt-3 max-w-2xl text-ink-3">{INTRO}</p>
+          )}
+        </header>
+      )}
 
       {hasProducts ? (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

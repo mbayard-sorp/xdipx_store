@@ -89,6 +89,45 @@ const KONTEXT_ASPECT: Record<string, string> = {
   landscape_16_9: '16:9',
 }
 
+/**
+ * Kontext resolution_mode aspects with their numeric ratio, used to map a
+ * caller's `{width,height}` object to the nearest supported aspect. Deduped from
+ * KONTEXT_ASPECT (square/square_hd both map to 1:1).
+ */
+const KONTEXT_ASPECT_RATIOS: ReadonlyArray<{ aspect: string; ratio: number }> = [
+  { aspect: '9:16', ratio: 9 / 16 },
+  { aspect: '3:4',  ratio: 3 / 4 },
+  { aspect: '1:1',  ratio: 1 },
+  { aspect: '4:3',  ratio: 4 / 3 },
+  { aspect: '16:9', ratio: 16 / 9 },
+]
+
+/**
+ * Resolve the Kontext `resolution_mode` for a caller's `imageSize`. The Kontext
+ * endpoint has no `image_size` parameter, so it can only take a string aspect.
+ * A `{width,height}` object used to fall through to a hardcoded `'16:9'`, which
+ * silently generated the wrong aspect (a 4:3 brief came back 16:9 with no
+ * error). Map the object form to the nearest supported aspect by ratio instead,
+ * and throw on genuinely unmappable input rather than defaulting.
+ */
+export function kontextResolutionMode(
+  imageSize: string | { width: number; height: number },
+): string {
+  if (typeof imageSize === 'string') {
+    const aspect = KONTEXT_ASPECT[imageSize]
+    if (!aspect) throw new Error(`fal Kontext: unmapped image_size "${imageSize}"`)
+    return aspect
+  }
+  const { width, height } = imageSize
+  if (!(width > 0) || !(height > 0)) {
+    throw new Error(`fal Kontext: invalid image_size {width:${width},height:${height}}`)
+  }
+  const ratio = width / height
+  return KONTEXT_ASPECT_RATIOS.reduce((best, cand) =>
+    Math.abs(cand.ratio - ratio) < Math.abs(best.ratio - ratio) ? cand : best,
+  ).aspect
+}
+
 /** Default endpoint: FLUX dev balances quality and cost for editorial scenes. */
 const DEFAULT_FAL_IMAGE_MODEL = process.env['FAL_IMAGE_MODEL']?.trim() || 'fal-ai/flux/dev'
 
@@ -138,7 +177,7 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
         prompt:                opts.prompt,
         image_url:             opts.refImageUrl,
         num_images:            count,
-        resolution_mode:       typeof image_size === 'string' ? (KONTEXT_ASPECT[image_size] ?? '16:9') : '16:9',
+        resolution_mode:       kontextResolutionMode(image_size),
         enable_safety_checker: false,
       }
     : {

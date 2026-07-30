@@ -88,19 +88,56 @@ describe('resolveBandOrder — Sanity layout to render order', () => {
     ])
   })
 
-  it('ignores unknown bands and non-band sections', () => {
+  it('ignores unknown bands and unknown section types', () => {
     // A layout published against a newer schema degrades to the bands this
     // deploy understands rather than rendering nothing.
     const layout = {
       sections: [
         band('hero'),
         band('somethingFromTheFuture'),
-        { _type: 'panelDeckSection', enabled: true },
         { _type: 'homeMoodPills', enabled: true },
         band('faq'),
       ],
     }
     expect(resolveBandOrder(layout)).toEqual(['hero', 'faq'])
+  })
+
+  it('places the deck where the layout puts its marker', () => {
+    const layout = {
+      sections: [
+        band('hero'),
+        { _type: 'panelDeckSection', enabled: true },
+        band('anchorGrid'),
+      ],
+    }
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'panelDeck', 'anchorGrid'])
+  })
+
+  it('drops a disabled deck marker', () => {
+    const layout = {
+      sections: [band('hero'), { _type: 'panelDeckSection', enabled: false }, band('faq')],
+    }
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'faq'])
+  })
+
+  it('never lets the deck sit above the hero', () => {
+    // Nothing outranks the largest paint element, the deck included.
+    const layout = {
+      sections: [{ _type: 'panelDeckSection', enabled: true }, band('hero'), band('faq')],
+    }
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'panelDeck', 'faq'])
+  })
+
+  it('renders the deck at most once', () => {
+    const layout = {
+      sections: [
+        band('hero'),
+        { _type: 'panelDeckSection', enabled: true },
+        { _type: 'panelDeckSection', enabled: true },
+        band('faq'),
+      ],
+    }
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'panelDeck', 'faq'])
   })
 
   it('renders a band at most once', () => {
@@ -109,6 +146,7 @@ describe('resolveBandOrder — Sanity layout to render order', () => {
   })
 
   it('falls back when a layout contains no usable band', () => {
+    // A deck marker alone is not a homepage.
     const layout = { sections: [{ _type: 'panelDeckSection', enabled: true }] }
     expect(resolveBandOrder(layout)).toEqual(DEFAULT_BAND_ORDER)
   })
