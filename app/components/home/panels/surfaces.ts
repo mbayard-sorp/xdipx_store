@@ -27,16 +27,17 @@ export interface SurfaceStyle {
 // white/70 secondary lines fail AA on those fills, so the tokens alias to
 // their tint equivalents rather than rendering a solid that the doctrine
 // forbids (design-critic cold-start verdict, 2026-07-29).
-const BLUSH: SurfaceStyle = { bg: 'bg-coral-soft', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false }
-const LILAC: SurfaceStyle = { bg: 'bg-plum-soft', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false }
+// Every light panel is hairline-framed (§3 "cards get a hairline border-line";
+// §6 "hairline-framed") so a tile whose fill matches the band never dissolves
+// into it. Ink is borderless — it carries its own contrast.
+const BLUSH: SurfaceStyle = { bg: 'bg-coral-soft border border-line', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false }
+const LILAC: SurfaceStyle = { bg: 'bg-plum-soft border border-line', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false }
 
 export const PANEL_SURFACES: Record<PanelSurface, SurfaceStyle> = {
   blush: BLUSH,
   lilac: LILAC,
-  stone: { bg: 'bg-paper-3', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
-  // Borderless like every other fill — a hairline here made the paper tiles
-  // read as a different card class from their siblings in the same row.
-  paper: { bg: 'bg-paper-2', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
+  stone: { bg: 'bg-paper-3 border border-line', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
+  paper: { bg: 'bg-paper-2 border border-line', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
   plum: LILAC,
   coral: BLUSH,
   ink: { bg: 'bg-ink', text: 'text-white', accent: 'text-white/70', muted: 'text-white/60', darkGround: true },
