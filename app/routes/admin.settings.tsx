@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react
 import { useLoaderData, useFetcher } from 'react-router'
 import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
+import { setPipelineSettingAudited } from '~/lib/settings.server'
 import { kvGet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import { orchestrateDealPipeline } from '~/lib/deal-pipeline.server'
 import { paginateAllProductsForSanity } from '~/lib/shopify.server'
@@ -62,10 +63,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const value = form.get('value') as string
     if (!key || value === null) return { ok: false, error: 'Missing key or value' }
 
-    await db
-      .insert(pipelineSettings)
-      .values({ key, value, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value, updatedAt: new Date() } })
+    await setPipelineSettingAudited(key, value, 'owner', 'admin.settings')
 
     // Changing feed URL invalidates the cached feed
     if (key === 'feedUrl') {

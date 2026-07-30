@@ -22,9 +22,10 @@ import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { and, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { homepageTeamSuggestions, pipelineSettings, suggestionLinks } from '../../db/schema'
+import { setPipelineSettingAudited } from '~/lib/settings.server'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import {
-  gate, getTeamConfig, getValve, invalidateTeamSettingsCache, listRecentRuns, listRunEvents,
+  gate, getTeamConfig, getValve, listRecentRuns, listRunEvents,
   listSuggestions, decideSuggestion, retireSuggestion, transitionSuggestion, listBriefs,
   listAdCampaigns, decideAdCampaign,
   type TeamConfig, type GateResult, type TicketStatus,
@@ -268,13 +269,13 @@ export async function action({ request }: ActionFunctionArgs) {
     ...Object.values(RELEASE_ENGINE_KEYS),
   ])
 
+  // Routed through the audited write path so a valve flip is attributable
+  // afterward. Before migration 072 there was no actor column at all, and four
+  // auto-approve valves changed within 31 seconds on 2026-07-18 with no way to
+  // prove who did it. Also busts the 60s config cache so kill-switch flips land
+  // immediately rather than up to a minute later.
   async function upsertSetting(key: string, value: string) {
-    await db
-      .insert(pipelineSettings)
-      .values({ key, value })
-      .onConflictDoUpdate({ target: pipelineSettings.key, set: { value, updatedAt: new Date() } })
-    // Bust the 60s config/valve cache so kill-switch flips land immediately.
-    await invalidateTeamSettingsCache()
+    await setPipelineSettingAudited(key, value, 'owner', 'admin.homepage-team')
   }
 
   if (intent === 'save' || intent === 'toggle') {

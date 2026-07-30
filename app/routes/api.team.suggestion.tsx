@@ -13,6 +13,9 @@
  *   { op: 'transition', id, to, actor, note?, links?, lastError? }
  *       -> { ok: true, suggestion }
  *   { op: 'get', id } -> { suggestion, links, events }
+ *   { op: 'rekind', id, kind, actor, note? } -> { ok: true, suggestion }
+ *   { op: 'retire', id, actor, note } -> { ok: true, suggestion }
+ *   { op: 'note', id, ref } -> { ok: true }
  *
  * Lifecycle (app/lib/team.server.ts ALLOWED is the single source of truth):
  *   proposed -> approved (owner, or the acting team's auto-approve valve)
@@ -29,10 +32,13 @@
 
 import type { ActionFunctionArgs } from 'react-router'
 import {
+  addSuggestionNote,
+  agentRetireSuggestion,
   assertTeamAuth,
   claimSuggestion,
   createSuggestionDetailed,
   getTicket,
+  rekindSuggestion,
   isTeamId,
   isTicketActor,
   isTicketStatus,
@@ -181,6 +187,59 @@ export async function action({ request }: ActionFunctionArgs) {
       lastError: typeof b['lastError'] === 'string' ? b['lastError'] : undefined,
     })
     return Response.json({ ok: true, suggestion })
+  }
+
+  // Re-file a misfiled row under a kind that actually has an executor. One-way
+  // by construction (see rekindSuggestion): allowing the reverse direction would
+  // let agent-editor rekind an inconvenient instruction row into a retirable
+  // kind and then retire it.
+  if (b['op'] === 'rekind') {
+    if (typeof b['id'] !== 'number') {
+      return new Response('Bad Request: id required', { status: 400 })
+    }
+    if (typeof b['kind'] !== 'string') {
+      return new Response('Bad Request: kind required', { status: 400 })
+    }
+    if (!isTicketActor(b['actor'])) {
+      return new Response("Bad Request: actor must be 'owner' | 'auto' | 'system' | 'agent:<slug>'", { status: 400 })
+    }
+    const suggestion = await rekindSuggestion(
+      b['id'],
+      b['kind'],
+      b['actor'],
+      typeof b['note'] === 'string' ? b['note'] : undefined,
+    )
+    return Response.json({ ok: true, suggestion })
+  }
+
+  // agent-editor retiring an approved row with no executor, during its hygiene
+  // pass. The kind fence lives in the ALLOWED map, not here.
+  if (b['op'] === 'retire') {
+    if (typeof b['id'] !== 'number') {
+      return new Response('Bad Request: id required', { status: 400 })
+    }
+    if (!isTicketActor(b['actor'])) {
+      return new Response("Bad Request: actor must be 'owner' | 'auto' | 'system' | 'agent:<slug>'", { status: 400 })
+    }
+    if (typeof b['note'] !== 'string' || b['note'].trim().length === 0) {
+      // A retirement with no stated reason is indistinguishable from a mistake.
+      return new Response('Bad Request: note required (say why it is being retired)', { status: 400 })
+    }
+    const suggestion = await agentRetireSuggestion(b['id'], b['actor'], b['note'])
+    return Response.json({ ok: true, suggestion })
+  }
+
+  // Record what a run did to a row it could not close, so the next reader sees
+  // the history instead of re-deriving it.
+  if (b['op'] === 'note') {
+    if (typeof b['id'] !== 'number') {
+      return new Response('Bad Request: id required', { status: 400 })
+    }
+    if (typeof b['ref'] !== 'string' || b['ref'].trim().length === 0) {
+      return new Response('Bad Request: ref required', { status: 400 })
+    }
+    await addSuggestionNote(b['id'], b['ref'])
+    return Response.json({ ok: true })
   }
 
   if (b['op'] === 'get') {
