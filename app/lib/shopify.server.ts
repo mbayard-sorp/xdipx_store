@@ -1960,8 +1960,17 @@ export async function getCollectionDeals(
   `, { handle, first: limit, after, sortKey, reverse })
 
   if (!data.collection) return { deals: [], hasNextPage: false }
+  // A product whose `deal_status` metafield is `archived` returns 410 Gone at
+  // its PDP (see _layout.products.$slug.tsx). Smart collections match on
+  // Shopify-native rules (e.g. on-sale = compare_at_price > 0) and can't see
+  // the xdipx metafield, so an editorially-archived product keeps appearing on
+  // the shelf and links to a dead PDP. Drop those before they become cards —
+  // the same `archived` rule getIndexableProductHandles applies to the sitemap.
+  // hasNextPage still reflects the raw collection, so pagination is unaffected.
   return {
-    deals: data.collection.products.edges.map(e => nodeToVaultDeal(e.node)),
+    deals: data.collection.products.edges
+      .filter(e => parseMetafield(e.node.metafields, 'deal_status') !== 'archived')
+      .map(e => nodeToVaultDeal(e.node)),
     hasNextPage: data.collection.products.pageInfo.hasNextPage,
   }
 }
