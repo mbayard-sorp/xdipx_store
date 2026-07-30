@@ -85,7 +85,7 @@ transition table, including every allowed actor and the 409 behaviour, lives in
 |---|---|
 | `proposed` | **Owner only**, to `approved` or `dismissed`. A per-team auto-approve valve can do this at creation time. No agent may. |
 | `approved` | A dev or editor agent claims it to `in_progress` under a lease. The owner may dismiss it. |
-| `in_progress` | The assignee agent, to `pr_open` or `blocked`. `system` returns it to `approved` when the lease expires. |
+| `in_progress` | The assignee agent, to `pr_open` or `blocked`. `system` returns it to `approved` when the lease expires. A bounce back into this status renews the lease, so a bounced ticket stays with its assignee instead of being reaped before the pass that has to fix it. |
 | `pr_open` | `qa-reviewer`, to `in_review`. `agent-editor` may go straight to `applied` for docs-kind rows (the legacy path, preserved). |
 | `in_review` | `qa-reviewer` only: `verified` with evidence, or bounce to `in_progress` with a concrete `last_error` and an attempt consumed. |
 | `verified` | `system` only, that is the release engine: `applied` after merge and smoke, or back to `in_progress` on failure. |
@@ -131,7 +131,9 @@ Escalation is an email to **mike@xdipx.com** via `sendOwnerEmail`
 
 1. A **protected-path PR** exists. Labelled `needs-owner`, emailed once, never merged by the engine.
 2. A ticket reaches its **third failed attempt**. It goes `blocked` and the email carries the last
-   three errors.
+   three errors. The release engine owns this for every bouncer: inline on its own merge, deploy, or
+   smoke failure, and via an hourly sweep for tickets QA bounced three times, since QA has no
+   `blocked` edge in the transition map and no escalation channel.
 3. A **revert PR itself fails CI**. Automatic mitigation has failed.
 4. The engine **circuit-breaks**: two rollbacks in one day flips `release_engine_enabled` off.
 5. The **owner-decision queue has an item older than seven days**, surfaced by the daily digest.

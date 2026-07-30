@@ -73,7 +73,7 @@ export const TEAM_DEFAULTS: Record<TeamId, { dailyCents: number; maxRunsPerDay: 
   social:   { dailyCents: 500,  maxRunsPerDay: 2 },
   ads:      { dailyCents: 500,  maxRunsPerDay: 1 },
   email:    { dailyCents: 500,  maxRunsPerDay: 1 },
-  strategy: { dailyCents: 300,  maxRunsPerDay: 1 },
+  strategy: { dailyCents: 1500, maxRunsPerDay: 8 }, // 6 routines on a Monday (Weekly Strategy, R-DEV x2, R-QA, Cost Review, Apply Pass) + 2 slots of headroom; the cap counts run rows, not successes (074)
   content:  { dailyCents: 500,  maxRunsPerDay: 3 }, // 3rd run = gate-retry headroom on double days (Sat trend-scout, Sun SEO curation, Wed podcast); budget covers the accuracy gate's web verification (068)
   product:  { dailyCents: 300,  maxRunsPerDay: 1 }, // daily import-queue drain (SQL + curl, ~$0)
   video:    { dailyCents: 2000, maxRunsPerDay: 1 }, // fal video generation is metered; $20/day ceiling, ~3 videos/week planned

@@ -119,18 +119,25 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
        "lastError":"npm test fails: app/lib/foo.test.ts \"resolves the slug\" expected /products/x, received /vault/x. Also StorefrontHome.tsx:212 fetches in useEffect; must move to the loader."}'
 ```
 
-A bounce increments `attempt_count`. At three attempts the ticket is blocked and escalated to the
-owner, so spend the extra minute making the first bounce complete. If you find a second, unrelated
-problem, list it in the same `last_error` rather than bouncing twice.
+A bounce increments `attempt_count` and hands the ticket back to its assignee under a fresh
+six-hour lease, so the 20:00 dev pass finds it still `in_progress` and still theirs. At three
+attempts the release engine's hourly sweep blocks the ticket and emails the owner. Spend the extra
+minute making the first bounce complete: you get three, and the third one ends in the owner's inbox.
+If you find a second, unrelated problem, list it in the same `last_error` rather than bouncing
+twice.
 
 Findings that are real but **out of scope for this PR** are filed as new tickets, not held against
 the diff in front of you:
+
+The create op takes `category` and `suggestion`, not `title` and `body`. A row missing either is a
+`400 Bad Request: category and suggestion required`, so the finding is lost rather than filed.
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"create","team":"homepage","kind":"code","dedupeKey":"qa:<slug>","priority":3,
-       "title":"...","body":"..."}'
+       "category":"<short label, e.g. rendering>",
+       "suggestion":"<what is wrong, where, and what done looks like>"}'
 ```
 
 ## Step 7 — Retro + spend + finish

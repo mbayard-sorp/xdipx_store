@@ -80,13 +80,19 @@ still burns a slot, and the cap must be sized above the scheduled count, not equ
 
 | Key | Required | Scheduled runs on the busiest day | Headroom |
 |---|---|---|---|
-| `strategy_team_max_runs` | **8** | 6 on Monday: Weekly Strategy 12:00, R-DEV 14:00, R-QA 15:30, R-DEV 20:00, Cost Review 21:00, Apply Pass 22:00 | 2 |
+| `strategy_team_max_runs` | **8** (seeded by 074) | 6 on Monday: Weekly Strategy 12:00, R-DEV 14:00, R-QA 15:30, R-DEV 20:00, Cost Review 21:00, Apply Pass 22:00 | 2 |
 | `content_team_max_runs` | **3** | 2 on Sat / Sun / Wed: content-writer 15:00 plus trend-scout 19:00, SEO curation 19:00, or podcast review 19:05 | 1 |
 | `social_team_max_runs` | **3** | 2-3: Social Drafts daily 14:00, Business Research Thu 16:00, Social Trend Scout Mon 17:00 | 0-1 |
 
-As of 2026-07-30 production has `strategy_team_max_runs=6` (one short of Monday's own schedule, so
-the 22:00 Apply Pass is one skip away from being locked out) and `social_team_max_runs` unset, which
-defaults to 2. Both are owner writes on `/admin`.
+`strategy_team_max_runs` sat at a hand-written **6** in production until migration 074, one short of
+Monday's own schedule, so the 22:00 Apply Pass was one skipped run away from being locked out. 074
+versions it at 8 and also writes `strategy_team_daily_cents` (1500), which **no migration had ever
+seeded** — the busiest team on the board was running on the `TEAM_DEFAULTS` fallback of 300 cents, a
+number chosen when `team=strategy` meant one advisory retro a week. Budget is checked *before* the
+run cap in `gate()`, so that shortfall surfaced as `over_budget`, not `over_run_cap`.
+
+`social_team_max_runs` is still unset and defaults to 2 against a 3-run busiest day. That one is an
+owner write on `/admin`, or the next migration to touch the social valves.
 
 Migration 068 versions `content_team_max_runs` at 3 (previously an unversioned 2026-07-21 prod
 hand-edit) alongside `content_team_daily_cents` at 500, sized for the sex-wellness-reviewer accuracy

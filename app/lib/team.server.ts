@@ -1046,6 +1046,15 @@ async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Pr
 }
 
 /**
+ * Lease granted to the assignee when a ticket is bounced back to `in_progress`.
+ *
+ * Long enough to survive until the next dev pass (a QA bounce at ~15:40 has to
+ * still be held at 20:00), short enough that a dead agent releases the row the
+ * same day. See the renewal in transitionSuggestion for why this exists at all.
+ */
+export const BOUNCE_LEASE_SEC = 6 * 3600
+
+/**
  * Guarded ticket transition. Throws a 404 Response when the ticket is gone and
  * a 409 when the (from, to, actor) triple is not in ALLOWED — including the
  * case where the row moved underneath us between the read and the write, since
@@ -1095,6 +1104,19 @@ export async function transitionSuggestion(
   if (to === 'verified') {
     patch['verifiedBy'] = actor
     patch['verifiedAt'] = now
+  }
+  // A bounce (`in_review` or `verified` -> `in_progress`) hands the ticket back
+  // to the agent that still holds it, but under a lease that expired hours ago:
+  // nothing on this edge used to touch claim_expires_at, so the row landed in
+  // `in_progress` already stale. The next expireStaleClaims() sweep then reaped
+  // it to `approved` and cleared the assignee, and since that sweep runs inside
+  // gate(), the 20:00 dev pass's OWN gate call was what emptied the bounced
+  // queue it then went looking for. Renew the lease so the bounce survives to
+  // the pass that has to act on it. Only when a claim exists: an unassigned row
+  // has no holder to grant time to, and `-> approved` above still clears it.
+  if (to === 'in_progress' && row.assignee) {
+    patch['claimedAt'] = now
+    patch['claimExpiresAt'] = new Date(now.getTime() + BOUNCE_LEASE_SEC * 1000)
   }
   // decided_by/decided_at record the triage decision and the retirement. A
   // later system move (lease release, unblock) must not overwrite who triaged.
