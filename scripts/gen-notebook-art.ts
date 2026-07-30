@@ -22,6 +22,7 @@
  *   masthead → singleton.notebookSettings.mastheadImage (+ mastheadImageAlt)
  *   category → blogCategoryExtras.<slug>.headerImage    (+ headerImageAlt)
  *   series   → blogSeries.<slug>.coverImage             (+ coverImageAlt)
+ *   hero     → blogPost (by <slug>) .heroImage          (+ heroImageAlt)
  *   spot     → no Sanity target; local files only (drop into posts via Studio)
  *
  * Env: FAL_KEY (or Imagen creds) for generation; SANITY_PROJECT_ID +
@@ -45,7 +46,7 @@ function hasFlag(name: string): boolean {
   return process.argv.includes(`--${name}`)
 }
 
-type Surface = 'masthead' | 'category' | 'series' | 'spot'
+type Surface = 'masthead' | 'category' | 'series' | 'spot' | 'hero'
 
 // Shared prompt prefix from the image brief — every surface prepends this.
 const SHARED_PREFIX =
@@ -56,10 +57,11 @@ const SHARED_PREFIX =
   'not moody, not dark. '
 
 /**
- * fal's FLUX Kontext (ref-image) endpoint ignores a {width,height} object and
- * only honors a string image_size enum for aspect (see KONTEXT_ASPECT in
- * app/lib/fal.server.ts); an object silently falls back to 16:9. So each surface
- * carries the string enum nearest its pixel `size`, used on the --ref-image path.
+ * fal's FLUX Kontext (ref-image) endpoint has no image_size param and only takes
+ * a string aspect (resolution_mode; see fal.server.ts). fal now maps a
+ * {width,height} object to the nearest aspect, but each surface still carries an
+ * explicit string enum for the --ref-image path so the intended aspect is stated
+ * outright rather than inferred from pixels.
  */
 type KontextAspect = 'landscape_16_9' | 'landscape_4_3' | 'portrait_4_3' | 'portrait_16_9' | 'square_hd'
 
@@ -117,6 +119,17 @@ const SURFACES: Record<Surface, SurfaceSpec> = {
     defaultPrompt: () =>
       `${SHARED_PREFIX}single-subject editorial still life, one soft accent tint in the daylight, simple clean composition, room to breathe.`,
   },
+  // Daily post hero (image-brief §0): the heroImage on every Notebook blogPost,
+  // the highest-volume surface. Landscape ~4:3 (1200 x 900). The archetype
+  // (product hero vs human hero) is decided per post by the hero router on the
+  // post's category, which this script does not know, so the default prompt is a
+  // safe generic editorial hero; the daily routine passes an explicit --prompt.
+  hero: {
+    size: { width: 1200, height: 900 },
+    aspect: 'landscape_4_3',
+    defaultPrompt: () =>
+      `${SHARED_PREFIX}editorial hero photograph for a Notebook article, a clear single focal subject in soft directional daylight, calm negative space around the subject with room for a headline, unembarrassed and inviting.`,
+  },
 }
 
 async function generate(surface: Surface, slug: string | undefined, opts: {
@@ -169,7 +182,7 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
     console.error('--upload is not supported for --surface spot (spot art is placed per-post via Studio)')
     process.exit(1)
   }
-  if ((surface === 'category' || surface === 'series') && !slug) {
+  if ((surface === 'category' || surface === 'series' || surface === 'hero') && !slug) {
     console.error(`--slug is required for --surface ${surface}`)
     process.exit(1)
   }
@@ -227,6 +240,23 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
     return
   }
 
+  if (surface === 'hero') {
+    // The blogPost already exists (the content routine created it); resolve it by
+    // slug and patch heroImage. Never createIfNotExists — that would mint an empty
+    // post. Prefer the published doc over its draft (order puts non-drafts first).
+    const postId = await client.fetch<string | null>(
+      `*[_type == "blogPost" && slug.current == $slug] | order(_id in path("drafts.**") asc)[0]._id`,
+      { slug },
+    )
+    if (!postId) {
+      console.error(`No blogPost with slug "${slug}" exists — create the post first.`)
+      process.exit(1)
+    }
+    await client.patch(postId).set({ heroImage: imageRef, heroImageAlt: alt }).commit()
+    console.log(JSON.stringify({ placed: true, target: `${postId}.heroImage`, assetId, url }))
+    return
+  }
+
   // series
   const docId = `blogSeries.${slug}`
   const existing = await client.fetch<string | null>(`*[_id == $id][0]._id`, { id: docId })
@@ -250,10 +280,10 @@ async function main() {
   const dryRun = hasFlag('dry-run')
 
   if (!surface || !(surface in SURFACES)) {
-    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--dry-run]')
+    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--dry-run]')
     process.exit(1)
   }
-  if ((surface === 'category' || surface === 'series') && !slug) {
+  if ((surface === 'category' || surface === 'series' || surface === 'hero') && !slug) {
     console.error(`--slug is required for --surface ${surface}`)
     process.exit(1)
   }
