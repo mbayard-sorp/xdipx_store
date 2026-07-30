@@ -12,6 +12,7 @@ import { AskEmmaRail, matchesAskEmmaFilters } from '~/components/store/AskEmmaRa
 import { EmmaDiscoveryRail } from '~/components/store/EmmaDiscoveryRail'
 import { EmmaEncouragementStrip } from '~/components/store/EmmaEncouragementStrip'
 import { LetMeLookAgainCTA } from '~/components/store/LetMeLookAgainCTA'
+import { trackViewItemList, trackSelectItem, type GA4Item } from '~/lib/analytics.client'
 import { Breadcrumbs } from '~/components/seo/Breadcrumbs'
 import { CollectionStructuredData } from '~/components/seo/CollectionStructuredData'
 import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredData'
@@ -259,6 +260,19 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   }
 }
 
+function toCollectionGA4Item(
+  deal: { handle: string; seoTitle: string; brand?: string | null; dealPrice: number },
+  index: number,
+): GA4Item {
+  return {
+    item_id: deal.handle,
+    item_name: deal.seoTitle,
+    ...(deal.brand ? { item_brand: deal.brand } : {}),
+    price: deal.dealPrice,
+    index,
+  }
+}
+
 export default function CollectionPage() {
   const {
     deals,
@@ -292,6 +306,20 @@ export default function CollectionPage() {
     ? (categoryBlocks!.find(b => b._type === 'faqBlock') ?? null)
     : null
   const [params, setParams] = useSearchParams()
+
+  // GA4: this route sold products with zero analytics while it was a plain
+  // grid. Now it is the panel deck's landing surface, so the middle hop gets
+  // measured: one view_item_list per page view, select_item per card click.
+  // The ref dedupes StrictMode double-effects and client-side param churn.
+  const listId = `collection:${handle}`
+  const firedListKey = useRef('')
+  useEffect(() => {
+    const key = `${handle}:${page}`
+    if (firedListKey.current === key || deals.length === 0) return
+    firedListKey.current = key
+    trackViewItemList(listId, listId, deals.slice(0, 24).map((d, i) => toCollectionGA4Item(d, i)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handle, page])
   const [starred, setStarred] = useState<Record<string, string>>({})
 
   const filtered = useMemo(
@@ -506,12 +534,16 @@ export default function CollectionPage() {
           )}
           {filtered.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {filtered.map(deal => (
-                <VaultCard
+              {filtered.map((deal, i) => (
+                <div
                   key={deal.id}
-                  deal={deal}
-                  {...(starred[deal.handle] ? { starred: { reason: starred[deal.handle]! } } : {})}
-                />
+                  onClickCapture={() => trackSelectItem(listId, listId, toCollectionGA4Item(deal, i), i)}
+                >
+                  <VaultCard
+                    deal={deal}
+                    {...(starred[deal.handle] ? { starred: { reason: starred[deal.handle]! } } : {})}
+                  />
+                </div>
               ))}
             </div>
           ) : deals.length > 0 ? (
