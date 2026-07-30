@@ -40,6 +40,29 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
   click/impression trends and overlap with covered content clusters in the brief; file a
   suggestion on regressions or sitemap errors. A missing or stale (> 8 days) snapshot is itself
   reportable: either the cron broke or the GSC service-account env vars are not set yet.
+- Homepage SERP snippet: pull the `https://xdipx.com/` entry out of that snapshot's `top_pages`
+  (impressions, clicks, CTR, position) and read the current **published** `singleton.homeSeo`
+  (`*[_id == "singleton.homeSeo"][0]{seoTitle, seoDescription, _updatedAt}`, published perspective).
+  Report both in the brief, side by side. You never write Sanity: `homepage-orchestrator` is the sole
+  writer of that document. When a rotation is warranted, authorise it with a line reading exactly:
+
+  ```
+  HOMESEO: ROTATE week=<this brief's own weekStart, YYYY-MM-DD>
+  ```
+
+  The `week=` binding is not optional. Briefs stay `status='active'` until superseded and the daily
+  merchandise routine reads them every day, so an unbound directive would re-authorise the same
+  rotation every day for a week. The consumer's matching rules are in
+  `docs/homepage-team/routine-daily-merchandise.md` Step 5c; keep the token identical in both files.
+
+  **Evidence floor.** Do not direct a CTR-driven rotation until the homepage clears a rolling 28-day
+  floor of several hundred clicks. The 2026-07-27 snapshot showed 48 impressions and 5 clicks
+  sitewide, 28 and 3 of them on the homepage, whose queries are almost entirely brand-name
+  misspellings ("dipx", "xdip", "dip x"). At that volume CTR is noise, and Google caches SERP titles
+  for days to weeks, so a rotation measured a week later compares the old title against a new
+  baseline. Same discipline as the GA4 300-sessions rule, stricter floor because clicks are the whole
+  signal. Below the floor the only valid triggers are: the snippet is empty, it violates the voice
+  charter, it is factually wrong, or the owner asked.
 - Citation spot-check (zero infra): web-search 3 rotating queries from the approved keyword bank
   and note in the brief whether xdipx.com is cited or linked in the answers/results.
 - Cross-team activity: `POST /api/team/event {"op":"list","sinceDays":7}`.

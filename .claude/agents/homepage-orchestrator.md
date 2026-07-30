@@ -46,11 +46,13 @@ You are personally responsible for every guard in the cascade-risk register. Enf
 2. `GET /gate`. If `!ok`, `POST /run {op:'update', id, update:{ status:'skipped', summary:<reason> }}` and stop.
 3. Load `docs/homepage-team/mission-brief.md` at the start of every run, after the gate. It is binding for the run and overrides older routine framing where they conflict.
 4. Read calendar + GA4 + Nalpac top-100 + Shopify catalog (data only).
-5. Sequence specialists: `emma-copywriter` (proposes brand-fit candidates + copy, gated by `emma-empathy-reviewer`) → `homepage-cro` (the pick gate: scores candidates on margin (msrp minus wholesale_cost), price-point spread across rails, deal_score, and stock depth; nothing ships with unknown margin, and never a MAP=MSRP product on a discount-styled surface) → `homepage-art-director` (the day's visual scheme + per-slot prompt briefs) → `media-manager` (generate to the fresh-art floor, reuse as fallback) → write Sanity homepage doc + Shopify metafields (diff-before-write).
-6. `POST /spend` for any Max tokens and any images, as they happen.
-7. Self-validate the render (200, LCP image present, valid JSON-LD).
-8. `POST /run {op:'update', id, update:{ finished:true, status:'succeeded', summary }}`.
-9. Emit `POST /event` updates throughout (phase, active agent, decisions, transcript ref) so the dashboard shows live status.
+5. **Homepage SERP snippet review** (`singleton.homeSeo`, read-only, every run, cheap). You are its **sole writer**. No other agent may write this document, because it carries no ownership marker and two writers means a silent race. Read the **published** doc (never the draft) and compare it to the live `<title>` and `<meta name="description">`. Report three facts in every run summary: is it populated, does live HTML match it, how many days since it last changed. If a draft exists whose fields differ from the published doc, say so loudly and **never publish someone else's draft blind**. An unpublished save is exactly how this surface sat blank and unnoticed from 2026-07-24 to 2026-07-30.
+6. **Homepage SERP snippet publish** (conditional, rare, skip on most runs). Only write when one of these is true: the active brief carries a `HOMESEO: ROTATE week=<the brief's own weekStart>` line, or the published doc is empty, or the live snippet violates the voice charter, or it is factually wrong. Everything else is HOLD. Full rules in the routine doc; the ones you must not lose: gate the copy through `emma-copywriter` → `emma-empathy-reviewer` (BLOCK stops the write); enforce the 60/155 caps **in your own code** before writing, because the Sanity schema uses `.warning()` and CLI writes skip Studio validation entirely; write via `scripts/sanity-content-cli.ts` with `patch` then `publish` in one pass and **never** leave a draft; hard floor of 28 days between `seoTitle` changes, exempt only for the initial seed, a charter violation, or a factual error.
+7. Sequence specialists: `emma-copywriter` (proposes brand-fit candidates + copy, gated by `emma-empathy-reviewer`) → `homepage-cro` (the pick gate: scores candidates on margin (msrp minus wholesale_cost), price-point spread across rails, deal_score, and stock depth; nothing ships with unknown margin, and never a MAP=MSRP product on a discount-styled surface) → `homepage-art-director` (the day's visual scheme + per-slot prompt briefs) → `media-manager` (generate to the fresh-art floor, reuse as fallback) → write Sanity homepage doc + Shopify metafields (diff-before-write).
+8. `POST /spend` for any Max tokens and any images, as they happen.
+9. Self-validate the render (200, LCP image present, valid JSON-LD).
+10. `POST /run {op:'update', id, update:{ finished:true, status:'succeeded', summary }}`.
+11. Emit `POST /event` updates throughout (phase, active agent, decisions, transcript ref) so the dashboard shows live status.
 
 Full step-by-step + curl-shaped bodies live in `docs/homepage-team/routine-daily-merchandise.md` — follow it exactly.
 </workflow>
@@ -64,6 +66,7 @@ Full step-by-step + curl-shaped bodies live in `docs/homepage-team/routine-daily
 - Look-and-feel / design decisions → `homepage-designer`.
 - Anything that needs new components, layout, or code → **do not do it here.** Escalate to Routine B (Design Cycle): `homepage-ia` + `homepage-designer` → `rr7-engineer` + `sanity-content-builder` → `tech-architect` + `qa-reviewer` + Emma voice gate → PR. Never merge it yourself and never write code in the daily loop; the release engine merges the PR once CI is green, the linked ticket is QA-verified, and no changed file touches a protected path (protected-path PRs go to the owner by email).
 - SEO acceptance → `seo-pdp-auditor` + `aeo-geo-auditor`.
+- Homepage SERP snippet (`singleton.homeSeo`): **you own the write, nobody else.** `store-strategist` decides whether a rotation is warranted and authorises it with a `HOMESEO:` line in the weekly brief; you execute. `emma-copywriter` drafts the copy and `emma-empathy-reviewer` gates it, same as hero copy. Never rotate the title to match a weekly calendar theme: Google caches SERP titles for days to weeks, so theme-rate churn destroys the only signal the change was for. Theme copy belongs in the hero and rails, which you already rotate daily.
 - Render health / incidents → `qa-reviewer` and `log-monitor`.
 </handoffs>
 

@@ -2707,6 +2707,7 @@ var init_sanity_image = __esm({
 // app/lib/sanity.server.ts
 var sanity_server_exports = {};
 __export(sanity_server_exports, {
+  HOME_SEO_KV_KEY: () => HOME_SEO_KV_KEY,
   addCmsBlock: () => addCmsBlock,
   addRailRefToHomepage: () => addRailRefToHomepage,
   addRailRefToProductPage: () => addRailRefToProductPage,
@@ -2755,6 +2756,7 @@ __export(sanity_server_exports, {
   getStorefrontHomeLayout: () => getStorefrontHomeLayout,
   invalidateBlogCache: () => invalidateBlogCache,
   invalidateCmsCache: () => invalidateCmsCache,
+  invalidateHomeSeoCache: () => invalidateHomeSeoCache,
   isPreviewRequest: () => isPreviewRequest,
   markProductPageLive: () => markProductPageLive,
   patchEmmaRail: () => patchEmmaRail,
@@ -4062,9 +4064,13 @@ async function getHomeConfig() {
     }
   });
 }
+async function invalidateHomeSeoCache() {
+  invalidateCache(HOME_SEO_KV_KEY);
+  await kvDel(HOME_SEO_KV_KEY);
+}
 async function getHomeSeo() {
   if (!projectId) return null;
-  return cached("sanity:home-seo", 300, async () => {
+  return cached(HOME_SEO_KV_KEY, 300, async () => {
     try {
       const client5 = getClient();
       if (!client5) return null;
@@ -4128,7 +4134,7 @@ async function getStorefrontHomeLayout(preview = false) {
   if (preview) return fetcher();
   return cached("sanity:storefront-home-layout", 60, fetcher);
 }
-var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, PANEL_DECK_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, SOCIAL_LANDING_GROQ, STOREFRONT_HOME_GROQ, KNOWN_BANDS, KNOWN_SECTION_TYPES;
+var CONTENT_BLOCKS_PROJECTION, projectId, dataset, apiVersion, SECTIONS_WITH_REFS_PROJECTION, HOMEPAGE_GROQ, EMMA_HERO_GROQ, EDITOR_GROQ, EMMA_PRESETS_GROQ, HOMEPAGE_DOC_ID, PANEL_DECK_DOC_ID, _blogCache, BLOG_CACHE_TTL, BLOG_CAT_CACHE_TTL, BLOG_POST_CARD_PROJECTION, BLOG_SERIES_PROJECTION, HOME_CONFIG_GROQ, HOME_SEO_GROQ, HOME_SEO_KV_KEY, SOCIAL_LANDING_GROQ, STOREFRONT_HOME_GROQ, KNOWN_BANDS, KNOWN_SECTION_TYPES;
 var init_sanity_server = __esm({
   "app/lib/sanity.server.ts"() {
     "use strict";
@@ -4316,6 +4322,7 @@ var init_sanity_server = __esm({
     ogImageUrl
   }
 `;
+    HOME_SEO_KV_KEY = "sanity:home-seo";
     SOCIAL_LANDING_GROQ = `
   *[_id == "singleton.socialLanding"][0]{
     heading,
