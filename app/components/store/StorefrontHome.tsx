@@ -454,13 +454,22 @@ function ProductGrid({
   rail,
   eyebrow = "What's working",
   heading,
-  seeAllHref = '/collections/best-sellers',
+  // No default destination. A See-all that points somewhere the section did
+  // not actually rank sends visitors to a page with none of the products they
+  // just saw (the /collections/best-sellers mismatch, ticket #441). When no
+  // valid destination is configured the grid renders NO See-all rather than a
+  // wrong one: a section with no exit is better than one that breaks its
+  // promise. The real ranked destination is follow-up work (scopes 2-6).
+  seeAllHref,
   seeAllLabel = 'See all →',
 }: {
   rail: Rail
   eyebrow?: string
   heading?: string
-  seeAllHref?: string
+  // `string | undefined` (not just `?`) so callers may pass an explicit
+  // undefined destination under exactOptionalPropertyTypes; undefined means
+  // "render no See-all", see the seeAllHref note above.
+  seeAllHref?: string | undefined
   seeAllLabel?: string
 }) {
   if (!rail.items.length) return null
@@ -491,13 +500,15 @@ function ProductGrid({
                 : <>Most picked, <em className="em">right now</em>.</>}
             </h2>
           </div>
-          <Link
-            to={seeAllHref}
-            className="hidden text-[15px] font-medium text-ink link-coral md:inline-block"
-            style={BODY}
-          >
-            {seeAllLabel}
-          </Link>
+          {seeAllHref && (
+            <Link
+              to={seeAllHref}
+              className="hidden text-[15px] font-medium text-ink link-coral md:inline-block"
+              style={BODY}
+            >
+              {seeAllLabel}
+            </Link>
+          )}
         </Reveal>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-5">
@@ -516,13 +527,15 @@ function ProductGrid({
           ))}
         </div>
 
-        <Link
-          to={seeAllHref}
-          className="mt-7 inline-block text-[15px] font-medium text-ink link-coral md:hidden"
-          style={BODY}
-        >
-          {seeAllLabel}
-        </Link>
+        {seeAllHref && (
+          <Link
+            to={seeAllHref}
+            className="mt-7 inline-block text-[15px] font-medium text-ink link-coral md:hidden"
+            style={BODY}
+          >
+            {seeAllLabel}
+          </Link>
+        )}
       </div>
     </section>
   )
@@ -1325,7 +1338,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
           rail={teamRailToGridRail(firstTeamRailProducts)}
           eyebrow={firstTeamRail.eyebrow || "What's working"}
           heading={firstTeamRail.heading}
-          seeAllHref={firstTeamRail.ctaLink || '/collections/best-sellers'}
+          seeAllHref={firstTeamRail.ctaLink || undefined}
           seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}
         />
       ) : (
