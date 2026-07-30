@@ -314,6 +314,107 @@ to the `16:9` default for the ref-image (Kontext) code path specifically. Always
 `imageSize: 'landscape_4_3'` (the string) for this surface, exactly as the scaffold above already
 says — never a `{width,height}` object when `refImageUrl` is set.
 
+## Panel square tile (1:1, deck square row): Archetype B (product cutout still)
+
+Deck squares are product cutout stills on the tile's own tint ground (owner decision 2026-07-29:
+Archetype B on the 4 squares, richer photo reserved for the large panels). Scaffold (always with
+`--ref-image` = the product's Shopify photo; `--doc-id singleton.panelDeck`):
+
+> The {product} as a clean single-product cutout still, bold and centered on a flat solid
+> {coral-soft | plum-soft | paper-2 | paper-3} seamless tint ground matching the tile, soft even
+> studio light, one crisp shadow, square crop, generous negative space around the product, premium
+> sexual-wellness catalog photography, single product only, no text, no words, no letters
+
+The tile's label is typeset by the site, never in the image. One product per tile; the glyph marks
+are the empty-state fallback, never a layer on top of a photo.
+
+**Keepers:**
+
+**Rejects:** multiple products in one square; props competing with the product; any tint outside
+the ground lock.
+
+## Panel large (wide, deck large row): Archetype C (in-situ bright scene)
+
+The two large panels may carry a richer editorial photo. Private-space setting per the
+collection-imagery rule: a private room, human presence or product in use-adjacent context, never a
+housewares still-life. Scaffold (`--ref-image` when the panel links a product; `--doc-id
+singleton.panelDeck`):
+
+> {Sunlit private bedroom or bathroom scene with the {product} placed naturally in it | hands
+> reaching toward the {product} on rumpled linen | silk on skin with the {product} nearby}, bright
+> warm daylight, {coral | plum} accent tones, editorial fashion photography, intimate and
+> confident, tasteful crop (no exposed genitalia, no nipples), generous negative space in the
+> {zone} for the site-set label, no text, no words, no letters
+
+**Keepers:**
+
+**Rejects:** empty styled rooms with no product and no human presence (housewares); dim or
+candlelit grading.
+
+## Panel small (deck small row): quiet minimal still
+
+The small panels stay quiet: paper or ink ground, minimal subject, the deck's resting beats.
+Scaffold (`--ref-image` when product-linked, else `--no-ref` with reason; `--doc-id
+singleton.panelDeck`):
+
+> {The {product} small and off-center | a single quiet detail: a curve of silicone, a fold of
+> silk} on a flat solid {paper | paper-2 | ink} ground, soft even light, one idea in the frame,
+> abundant negative space, restrained premium catalog photography, minimal and calm, no text, no
+> words, no letters
+
+**Keepers:**
+
+**Rejects:** busy compositions; more than one subject; coral or plum grounds (the small panels are
+the quiet ones).
+
+## categoryMasthead (wide, per category page): archetype per the lock table below
+
+Each category page's masthead is locked to an archetype (doctrine §4). Private space + human
+presence per the collection-imagery rule; never housewares. Scaffold (always with `--doc-id
+categoryPage-<handle>`; `--ref-image` whenever the masthead features a product):
+
+| Category | Archetype lock | Subject direction |
+|---|---|---|
+| pleasure | **B** product still | Hero product bold on a tint ground, cutout-still discipline |
+| play | **A** intimate scene | Hands on product, playful tension, private-space setting |
+| body | **B/D** texture and product | Product plus macro texture (skin, silicone, water) |
+| wear | **A/C** fabric and human presence | Lingerie or wear on a body, private room, daylight |
+| discover | **D** editorial collage | Metaphor macro or editorial composition, curiosity-forward |
+
+> {Per the category's lock row above: subject direction}, bright high-key daylight, {coral-soft |
+> plum-soft | paper} ground where a ground applies, private-space setting with human presence
+> where the lock calls for it, editorial premium campaign photography, tasteful and non-explicit,
+> generous negative space in the {zone} for the site-set masthead type, no text, no words, no
+> letters
+
+**Keepers:**
+
+**Rejects:** an archetype off the category's lock row; housewares still-lifes; empty rooms.
+
+## dropMasthead (wide, New / Sale pages): Archetype B or C, no urgency shapes
+
+Drop mastheads state a calendar fact visually, never manufacture pressure. **Hard ban on urgency
+shapes: no clocks, no countdown motifs, no starbursts, no burst badges, no ticking or timer
+imagery of any kind.** Sale takes the quiet treatment (paper-3 ground, restrained). Scaffold
+(`--doc-id dropPage-<routeKey>`; `--ref-image` when a real arriving product leads):
+
+> {The newly landed {product} bold on a {coral-soft | plum-soft | paper} ground | a quiet
+> restrained still on paper-3 for Sale}, soft even studio light, one crisp shadow, calm and
+> confident, premium campaign photography, nothing hurried in the frame, no clocks, no countdown
+> motifs, no starbursts, no burst badges, no text, no words, no letters
+
+**Keepers:**
+
+**Rejects:** any urgency shape (see the ban); discount-led visual drama on Sale; coral shouting on
+the Sale masthead.
+
+## Shelf cards (category page shelves): no generated art, ever
+
+Shelf product cards on category pages render the product's real Shopify packshot, exactly like
+`emmaCuratedRail` cards on the homepage. **Never generate art for a shelf card.** There is no
+scaffold because there is no generation; if a shelf product's packshot is broken, flag it for
+`product-manager` data hygiene rather than papering over it with generated art.
+
 ## Known failure classes (append as they are found)
 
 Two reproducible ways a generation gets rejected, both hit on 2026-07-27. Read

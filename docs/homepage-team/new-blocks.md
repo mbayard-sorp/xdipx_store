@@ -65,6 +65,26 @@ Section 10. If a dedicated block is preferred over `richText`:
 
 ---
 
+## Category / drop / panel block recipe (merchandised pages)
+
+The merchandised category pages (`categoryPage-*`), drop pages (`dropPage-*`), and the panel deck
+(`singleton.panelDeck`) have their own block families. Adding a new block type to them follows the
+same additive-only rule, with this wiring:
+
+1. **Schema:** new block types live under `studio/schemas/blocks/category/` (or alongside the panel
+   family for deck rows), one file per type, plain-object style like the rest of the studio schemas.
+   Never modify an existing schema file.
+2. **Register** the new type in `studio/schemaTypes/index.js`.
+3. **Resolver:** add a matching resolver entry in `app/lib/category-page.server.ts` (per-block
+   `withTimeout` + catch, so one bad block costs itself and never the page).
+4. **Component + renderer:** add the component under `app/components/category/` and a case in
+   `CategoryBlockRenderer` (unknown types render null). Deck rows instead get their panel component
+   under the panel family.
+5. **Deploy the schema manually.** New types REQUIRE `cd studio && npx sanity schema deploy` before
+   any content can be authored against them. This is an owner/engineer terminal step: the
+   `deploy_schema` MCP tool is denied, and no routine can run this. A PR that adds a block type is
+   not usable until this step happens.
+
 ## Explicitly NOT new blocks
 
 - Section 3 "Meet Emma" → reuse `editorBio` (reads `singleton.editor`).
