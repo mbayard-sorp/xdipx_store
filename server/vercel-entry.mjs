@@ -5627,7 +5627,7 @@ async function getCollectionDeals(handle, page = 1, limit = 20, sort = "manual")
   `, { handle, first: limit, after, sortKey, reverse });
   if (!data.collection) return { deals: [], hasNextPage: false };
   return {
-    deals: data.collection.products.edges.map((e) => nodeToVaultDeal(e.node)),
+    deals: data.collection.products.edges.filter((e) => parseMetafield(e.node.metafields, "deal_status") !== "archived").map((e) => nodeToVaultDeal(e.node)),
     hasNextPage: data.collection.products.pageInfo.hasNextPage
   };
 }
