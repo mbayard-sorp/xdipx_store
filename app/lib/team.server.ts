@@ -600,6 +600,14 @@ export interface SuggestionListFilter {
   /** Any-of kind filter (070). */
   kinds?: readonly string[] | undefined
   assignee?: string | undefined
+  /**
+   * Any-of dedupe-key filter. Exists so a detector that files rows under a
+   * known key can find them again to close them: before this, the only
+   * key-to-id lookup in the codebase was inlined inside createSuggestionDetailed
+   * and unexported, so the one caller that needed it went around the transition
+   * map with a bulk UPDATE instead.
+   */
+  dedupeKeys?: readonly string[] | undefined
   updatedSince?: Date | undefined
   limit?: number | undefined
   /**
@@ -622,6 +630,9 @@ export async function listSuggestions(filter: SuggestionListFilter = {}) {
   }
   if (filter.kinds?.length) {
     conditions.push(inArray(homepageTeamSuggestions.kind, [...filter.kinds]))
+  }
+  if (filter.dedupeKeys?.length) {
+    conditions.push(inArray(homepageTeamSuggestions.dedupeKey, [...filter.dedupeKeys]))
   }
   if (filter.assignee) conditions.push(eq(homepageTeamSuggestions.assignee, filter.assignee))
   if (filter.updatedSince) {
@@ -880,6 +891,16 @@ export const RUN_CLOSE_ACTORS: readonly TicketActor[] = [
 /** Operational kinds a daily run may close once it has executed the ask. */
 export const RUN_CLOSE_KINDS: readonly string[] = ['process', 'strategy']
 
+/**
+ * Kinds a detector may close on its own evidence, as actor `system`.
+ *
+ * Narrower than RUN_CLOSE_KINDS on purpose. This edge is not "a human-equivalent
+ * judged the work done", it is "the machine that raised the alarm observed the
+ * condition clear", so it is fenced to the one kind detectors actually file.
+ * Nothing here can close an instruction, a code ticket, or a strategy row.
+ */
+export const DETECTOR_SELF_CLOSE_KINDS: readonly string[] = ['process']
+
 export interface TransitionRule {
   to: TicketStatus
   /**
@@ -900,6 +921,13 @@ const OWNER_DISMISS: TransitionRule = { to: 'dismissed', actors: ['owner'] }
 export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> = {
   proposed: [
     { to: 'approved', actors: ['owner', 'auto'] },
+    // A detector closing its own alarm because the condition it reported has
+    // demonstrably cleared. Reachable only by `system` and only for `process`,
+    // and it has to exist at `proposed` as well as `approved`: a detector row
+    // on a team without auto-approve never reaches `approved`, and while it
+    // sits open it holds the undated dedupe key, so the detector can never file
+    // for that slot again. That is how four homepage freshness slots went mute.
+    { to: 'applied', actors: ['system'], kinds: DETECTOR_SELF_CLOSE_KINDS },
     OWNER_DISMISS,
   ],
   approved: [
@@ -907,6 +935,11 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // A daily routine executed the ask in this run: close it so it is not
     // re-read tomorrow. Operational kinds only.
     { to: 'applied', actors: RUN_CLOSE_ACTORS, kinds: RUN_CLOSE_KINDS },
+    // Same detector self-close, from the status auto-approve actually puts
+    // these rows in. Kept as its own rule rather than adding `system` to
+    // RUN_CLOSE_ACTORS, which would also hand the release engine the ability to
+    // close `strategy` rows it has no business touching.
+    { to: 'applied', actors: ['system'], kinds: DETECTOR_SELF_CLOSE_KINDS },
     // agent-editor's hygiene pass retiring a row with no executor. Kinds are
     // fenced so it can never dismiss the instruction rows aimed at itself.
     { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_RETIRE_KINDS },
