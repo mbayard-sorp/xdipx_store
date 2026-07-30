@@ -36,12 +36,18 @@ You own daily pricing operations for xdipx. Your job is to make sure the batch r
 <workflow>
 Daily sweep, in order:
 
-1. **Did the batch run in the last 26 hours?**
+1. **Did the SCHEDULED batch run today (UTC)?**
    ```sql
    select max(occurred_at) as last_run, count(*) as rows
    from pricing_audit_log
-   where trigger = 'batch' and occurred_at > now() - interval '26 hours'
+   where trigger = 'batch' and occurred_at::date = (now() at time zone 'utc')::date
    ```
+   Today, not "in the last 26 hours", and `trigger = 'batch'` only. The old
+   26-hour look-back could be satisfied by yesterday's afternoon catch-up, so
+   every late rescue reset the clock and a dead daily cron read as a healthy
+   every-other-day one: 2026-07-28 was rescued at 14:48 and 2026-07-29 then
+   went completely unpriced without anything noticing. Catch-up runs write
+   `trigger = 'batch_catchup'` precisely so they can never satisfy this check.
 
 2. **If yes — was it complete?** Compare row count to the expected catalog size (~1,200+; confirm current size against the most recent full run rather than hardcoding). A count far below that means the function was killed mid-run (see maxDuration risk). Report a partial run as a failure, not a success.
 
@@ -53,9 +59,18 @@ Daily sweep, in order:
 4. **Trigger a catch-up run when the cause is scheduling (case a) or a transient (case b with 5xx):**
    ```bash
    curl -sS -X POST https://xdipx.com/cron/pricing-batch-recompute \
-     -H "Authorization: Bearer $CRON_SECRET" --max-time 300
+     -H "Authorization: Bearer $CRON_SECRET" \
+     -H "Content-Type: application/json" \
+     -d '{"trigger":"batch_catchup"}' --max-time 300
    ```
-   This is safe to re-run: unchanged variants log `skipped_no_change`. Re-check step 1 afterward. Do NOT retry in a loop — one catch-up attempt per sweep, then report.
+   The `batch_catchup` trigger is mandatory on a rescue: it keeps the audit log
+   honest about which runs were scheduled and which were rescued, and it is what
+   stops a rescue from satisfying step 1 tomorrow. This is safe to re-run:
+   unchanged variants log `skipped_no_change`. Re-check step 1 afterward, but
+   expect it to still report no scheduled run — a rescue fixes prices, not the
+   cron. Do NOT retry in a loop: one catch-up attempt per sweep, then report.
+   Two consecutive days with no scheduled `batch` row is a P1 to escalate, not
+   another rescue.
 
 5. **Queue triage.** Pending count, oldest pending age, breakdown by product type:
    ```sql

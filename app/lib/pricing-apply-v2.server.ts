@@ -136,7 +136,13 @@ async function getApprovalMode(): Promise<ApprovalMode> {
 export interface RecomputeVariantParams {
   /** Shopify variant GID, e.g. "gid://shopify/ProductVariant/12345" */
   variantId: string
-  trigger:   'webhook' | 'batch' | 'manual' | 'clearance_ladder'
+  /**
+   * What caused this recompute. `batch_catchup` is a rescue run the pricing-ops
+   * agent fires after noticing the scheduled 07:00 pass produced nothing; it is
+   * kept distinct from `batch` so a rescue can never be mistaken for (or
+   * satisfy the check for) a healthy scheduled run.
+   */
+  trigger:   'webhook' | 'batch' | 'manual' | 'clearance_ladder' | 'batch_catchup'
 }
 
 export interface RecomputeVariantResult {
@@ -623,7 +629,7 @@ export interface RecomputeCatalogResult {
  * and recompute each. Returns aggregate counts.
  */
 export async function recomputeCatalog(opts: {
-  trigger: 'batch' | 'manual'
+  trigger: 'batch' | 'manual' | 'batch_catchup'
 }): Promise<RecomputeCatalogResult> {
   const { bulkFetchProductsForPricing } = await import('./shopify.server')
   const startedAt = Date.now()

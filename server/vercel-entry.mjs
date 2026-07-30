@@ -9539,6 +9539,1137 @@ var init_pricing_apply_v2_server = __esm({
   }
 });
 
+// app/lib/content-slot.ts
+function contentSlotForDate(d) {
+  const weekday = d.toLocaleDateString("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "long"
+  });
+  const slot = SLOT_BY_WEEKDAY[weekday] ?? ["guides", null];
+  return { weekday, expectedCategory: slot[0], fallbackCategory: slot[1] };
+}
+var SLOT_BY_WEEKDAY;
+var init_content_slot = __esm({
+  "app/lib/content-slot.ts"() {
+    "use strict";
+    SLOT_BY_WEEKDAY = {
+      Monday: ["guides", null],
+      Tuesday: ["real-talk", null],
+      Wednesday: ["guides", null],
+      Thursday: ["podcast-notes", "care"],
+      Friday: ["real-talk", null],
+      Saturday: ["care", null],
+      Sunday: ["comparisons", "wellness-basics"]
+    };
+  }
+});
+
+// app/lib/homepage-team-keys.ts
+var TEAM_KEYS;
+var init_homepage_team_keys = __esm({
+  "app/lib/homepage-team-keys.ts"() {
+    "use strict";
+    TEAM_KEYS = {
+      enabled: "homepage_team_enabled",
+      dailyCents: "homepage_team_daily_cents",
+      buildCents: "homepage_team_build_cents",
+      maxImagesPerDay: "homepage_team_max_images",
+      maxRunsPerDay: "homepage_team_max_runs"
+    };
+  }
+});
+
+// app/lib/team-keys.ts
+var team_keys_exports = {};
+__export(team_keys_exports, {
+  CONTENT_EXTRA_KEYS: () => CONTENT_EXTRA_KEYS,
+  CONTENT_MAX_IMAGES_DEFAULT: () => CONTENT_MAX_IMAGES_DEFAULT,
+  HOMEPAGE_EXTRA_KEYS: () => HOMEPAGE_EXTRA_KEYS,
+  SCENE_KIT: () => SCENE_KIT,
+  SOCIAL_FREQ_DEFAULTS: () => SOCIAL_FREQ_DEFAULTS,
+  SOCIAL_PLATFORMS: () => SOCIAL_PLATFORMS,
+  SOCIAL_REVIEW_STATUSES: () => SOCIAL_REVIEW_STATUSES,
+  TEAM_DEFAULTS: () => TEAM_DEFAULTS,
+  TEAM_IDS: () => TEAM_IDS,
+  VALVE_KEYS: () => VALVE_KEYS,
+  VIDEO_EXTRA_KEYS: () => VIDEO_EXTRA_KEYS,
+  VIDEO_FORMULAS: () => VIDEO_FORMULAS,
+  VIDEO_MAX_COST_CENTS_DEFAULT: () => VIDEO_MAX_COST_CENTS_DEFAULT,
+  VIDEO_METRIC_FIELDS: () => VIDEO_METRIC_FIELDS,
+  isTeamId: () => isTeamId,
+  socialFreqKey: () => socialFreqKey,
+  teamFromFeature: () => teamFromFeature,
+  teamImagesKvKey: () => teamImagesKvKey,
+  teamKeys: () => teamKeys,
+  teamSpendKvKey: () => teamSpendKvKey
+});
+function isTeamId(v) {
+  return typeof v === "string" && TEAM_IDS.includes(v);
+}
+function teamSpendKvKey(team, utcDay4) {
+  return `team:spend:${team}:${utcDay4}`;
+}
+function teamImagesKvKey(utcDay4) {
+  return `team:images:homepage:${utcDay4}`;
+}
+function teamFromFeature(feature) {
+  const i = feature.indexOf("-");
+  if (i <= 0) return null;
+  const prefix = feature.slice(0, i);
+  return isTeamId(prefix) ? prefix : null;
+}
+function teamKeys(team) {
+  return {
+    enabled: `${team}_team_enabled`,
+    dailyCents: `${team}_team_daily_cents`,
+    maxRunsPerDay: `${team}_team_max_runs`,
+    autoApproveSuggestions: `${team}_team_auto_approve_suggestions`
+  };
+}
+function socialFreqKey(platform) {
+  return `social_freq_${platform}`;
+}
+var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, CONTENT_MAX_IMAGES_DEFAULT, VIDEO_EXTRA_KEYS, VIDEO_MAX_COST_CENTS_DEFAULT, VIDEO_FORMULAS, VIDEO_METRIC_FIELDS, SCENE_KIT_NOTE, SCENE_KIT, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
+var init_team_keys = __esm({
+  "app/lib/team-keys.ts"() {
+    "use strict";
+    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product", "video"];
+    TEAM_DEFAULTS = {
+      homepage: { dailyCents: 1500, maxRunsPerDay: 4 },
+      social: { dailyCents: 500, maxRunsPerDay: 2 },
+      ads: { dailyCents: 500, maxRunsPerDay: 1 },
+      email: { dailyCents: 500, maxRunsPerDay: 1 },
+      strategy: { dailyCents: 300, maxRunsPerDay: 1 },
+      content: { dailyCents: 500, maxRunsPerDay: 3 },
+      // 3rd run = gate-retry headroom on double days (Sat trend-scout, Sun SEO curation, Wed podcast); budget covers the accuracy gate's web verification (068)
+      product: { dailyCents: 300, maxRunsPerDay: 1 },
+      // daily import-queue drain (SQL + curl, ~$0)
+      video: { dailyCents: 2e3, maxRunsPerDay: 1 }
+      // fal video generation is metered; $20/day ceiling, ~3 videos/week planned
+    };
+    HOMEPAGE_EXTRA_KEYS = {
+      buildCents: "homepage_team_build_cents",
+      maxImagesPerDay: "homepage_team_max_images"
+    };
+    CONTENT_EXTRA_KEYS = {
+      maxImagesPerDay: "content_team_max_images"
+    };
+    CONTENT_MAX_IMAGES_DEFAULT = 0;
+    VIDEO_EXTRA_KEYS = {
+      maxCostCents: "video_team_max_cost_cents",
+      frameReview: "video_frame_review"
+    };
+    VIDEO_MAX_COST_CENTS_DEFAULT = 600;
+    VIDEO_FORMULAS = [
+      "myth-busting",
+      "unboxing",
+      "before-after",
+      "hook-problem-payoff",
+      "three-things",
+      "grwm",
+      "pov-testimonial",
+      // Named shows from the social-video strategy (docs/store-team/
+      // social-video-strategy-DRAFT.md §3) plus the between-episodes tentpole slot.
+      "ten-second-fix",
+      "the-one-thing",
+      "translate-the-feeling",
+      "brand-tentpole"
+    ];
+    VIDEO_METRIC_FIELDS = ["hookRetentionPct", "saves", "shares", "profileTaps", "utmClicks"];
+    SCENE_KIT_NOTE = "All scenes are doctrine archetype C and ground-locked (coral-soft/plum-soft/paper). No product ever appears in a talking-head frame; product visuals are b-roll cutaways or post-composited stills. The identity source is Emma's canonical photo, resolved fresh from the Sanity editor singleton by the pipeline; scene frames are per-scene compositions from it, owner-approved once, then reused.";
+    SCENE_KIT = [
+      { slug: "couch-cozy", label: "Couch Cozy", status: "core", note: SCENE_KIT_NOTE },
+      { slug: "vanity-bright", label: "Vanity Bright", status: "core", note: SCENE_KIT_NOTE },
+      { slug: "kitchen-counter-casual", label: "Kitchen Counter Casual", status: "core", note: SCENE_KIT_NOTE },
+      { slug: "closet-edit", label: "Closet Edit", status: "stretch", note: SCENE_KIT_NOTE },
+      { slug: "out-and-about-stoop", label: "Out-and-About Stoop", status: "stretch", note: SCENE_KIT_NOTE },
+      { slug: "reading-nook", label: "Reading Nook", status: "stretch", note: SCENE_KIT_NOTE }
+    ];
+    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook", "youtube", "linkedin"];
+    SOCIAL_FREQ_DEFAULTS = {
+      x: 1,
+      instagram: 1,
+      tiktok: 1,
+      facebook: 0,
+      youtube: 0,
+      // video-only platform; drafts come from the video pipeline, not the daily text routine
+      linkedin: 0
+      // authority posts drafted only from pending researchBrief docs (brand voice, not Emma); owner opts in
+    };
+    SOCIAL_REVIEW_STATUSES = ["pending_review", "approved", "needs_changes", "rejected"];
+    VALVE_KEYS = {
+      socialAutopost: "social_team_autopost",
+      suggestionApply: "suggestion_apply_enabled",
+      contentAutopublish: "content_team_autopublish",
+      keywordResearch: "keyword_research_enabled",
+      seoCuration: "seo_curation_enabled",
+      // Trend scout: kill switch for the weekly Saturday trend-scout routine
+      // (community-discourse research that proposes trendTopicBrief docs for the
+      // seo-curator's Sunday planning; research-only, never writes posts).
+      trendScout: "trend_scout_enabled",
+      // Social trend scout: kill switch for the weekly social-format trend-scout
+      // routine (TikTok/IG format + sound research that files trend briefs the
+      // video-producer can act on; propose-only, never posts). Mirrors trendScout;
+      // migration seeding lives with the agent-side rollout.
+      socialTrendScout: "social_trend_scout_enabled",
+      reviewsPdp: "reviews_pdp_enabled",
+      // Video autopublish: even with the video team enabled, platform posting stays
+      // manual until this AND the per-platform publisher env keys are both set.
+      videoAutopublish: "video_team_autopublish"
+    };
+  }
+});
+
+// app/lib/team.server.ts
+var team_server_exports = {};
+__export(team_server_exports, {
+  AGENT_EDITOR_APPLY_KINDS: () => AGENT_EDITOR_APPLY_KINDS,
+  AGENT_RETIRE_KINDS: () => AGENT_RETIRE_KINDS,
+  ALLOWED: () => ALLOWED,
+  CLAIMANT_ACTORS: () => CLAIMANT_ACTORS,
+  CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
+  CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
+  REKIND_ACTORS: () => REKIND_ACTORS,
+  REKIND_FROM_KINDS: () => REKIND_FROM_KINDS,
+  REKIND_TO_KINDS: () => REKIND_TO_KINDS,
+  RUN_CLOSE_ACTORS: () => RUN_CLOSE_ACTORS,
+  RUN_CLOSE_KINDS: () => RUN_CLOSE_KINDS,
+  SUGGESTION_LIST_MAX: () => SUGGESTION_LIST_MAX,
+  TEAM_DEFAULTS: () => TEAM_DEFAULTS,
+  TEAM_IDS: () => TEAM_IDS,
+  TERMINAL_TICKET_STATUSES: () => TERMINAL_TICKET_STATUSES,
+  TICKET_STATUSES: () => TICKET_STATUSES,
+  VALVE_KEYS: () => VALVE_KEYS,
+  addSuggestionNote: () => addSuggestionNote,
+  agentRetireSuggestion: () => agentRetireSuggestion,
+  assertTeamAuth: () => assertTeamAuth,
+  buildClaimQuery: () => buildClaimQuery,
+  claimSuggestion: () => claimSuggestion,
+  createAdCampaign: () => createAdCampaign,
+  createDraftSocialPost: () => createDraftSocialPost,
+  createSuggestion: () => createSuggestion,
+  createSuggestionDetailed: () => createSuggestionDetailed,
+  decideAdCampaign: () => decideAdCampaign,
+  decideSuggestion: () => decideSuggestion,
+  expireStaleClaims: () => expireStaleClaims,
+  expireStaleRuns: () => expireStaleRuns,
+  findTransitionRule: () => findTransitionRule,
+  gate: () => gate,
+  getActiveBrief: () => getActiveBrief,
+  getSocialFrequencies: () => getSocialFrequencies,
+  getTeamConfig: () => getTeamConfig,
+  getTicket: () => getTicket,
+  getTodayImageCount: () => getTodayImageCount,
+  getTodayRunCount: () => getTodayRunCount,
+  getTodaySpendCents: () => getTodaySpendCents,
+  getValve: () => getValve,
+  invalidateTeamSettingsCache: () => invalidateTeamSettingsCache,
+  isRunInProgress: () => isRunInProgress,
+  isTeamId: () => isTeamId,
+  isTicketActor: () => isTicketActor,
+  isTicketStatus: () => isTicketStatus,
+  isTransitionAllowed: () => isTransitionAllowed,
+  listAdCampaigns: () => listAdCampaigns,
+  listBriefs: () => listBriefs,
+  listCalendar: () => listCalendar,
+  listRecentEvents: () => listRecentEvents,
+  listRecentRuns: () => listRecentRuns,
+  listRunEvents: () => listRunEvents,
+  listSocialPosts: () => listSocialPosts,
+  listSuggestions: () => listSuggestions,
+  markSuggestion: () => markSuggestion,
+  proposeCalendarEvent: () => proposeCalendarEvent,
+  publishBrief: () => publishBrief,
+  recordEvent: () => recordEvent,
+  rekindSuggestion: () => rekindSuggestion,
+  rescheduleSocialPost: () => rescheduleSocialPost,
+  retireSuggestion: () => retireSuggestion,
+  reviewSocialPost: () => reviewSocialPost,
+  startRun: () => startRun,
+  teamKeys: () => teamKeys,
+  transitionSuggestion: () => transitionSuggestion,
+  updateRun: () => updateRun
+});
+import { timingSafeEqual } from "node:crypto";
+import { and, asc, desc, eq as eq4, gte, inArray as inArray2, lt, lte, ne, sql as sql2 } from "drizzle-orm";
+function assertTeamAuth(request) {
+  const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
+  const auth = request.headers.get("authorization") ?? "";
+  const provided = request.headers.get("x-team-secret") ?? auth.replace(/^Bearer\s+/i, "");
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  const ok = expected.length > 0 && a.length === b.length && timingSafeEqual(a, b);
+  if (!ok) {
+    throw new Response("Unauthorized", { status: 401 });
+  }
+}
+function num(v, fallback) {
+  if (v == null) return fallback;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+async function getTeamConfig(team) {
+  return cached(`team:cfg:${team}`, SETTINGS_CACHE_TTL_SEC, () => getTeamConfigUncached(team));
+}
+async function getTeamConfigUncached(team) {
+  const keys = teamKeys(team);
+  const rows = await db.select().from(pipelineSettings).where(sql2`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const d = TEAM_DEFAULTS[team];
+  const cfg = {
+    team,
+    enabled: (map.get(keys.enabled) ?? "false") === "true",
+    dailyCents: num(map.get(keys.dailyCents), d.dailyCents),
+    maxRunsPerDay: num(map.get(keys.maxRunsPerDay), d.maxRunsPerDay),
+    autoApproveSuggestions: (map.get(keys.autoApproveSuggestions) ?? "false") === "true"
+  };
+  if (team === "homepage") {
+    cfg.buildCents = num(map.get(TEAM_KEYS.buildCents), 1e4);
+    cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12);
+  } else if (team === "content") {
+    cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT);
+  } else if (team === "video") {
+    cfg.maxCostCents = num(map.get(VIDEO_EXTRA_KEYS.maxCostCents), VIDEO_MAX_COST_CENTS_DEFAULT);
+  }
+  return cfg;
+}
+async function getValve(key) {
+  return cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
+    const [row] = await db.select().from(pipelineSettings).where(eq4(pipelineSettings.key, key)).limit(1);
+    return row?.value === "true";
+  });
+}
+async function invalidateTeamSettingsCache() {
+  invalidateCache("team:cfg:");
+  invalidateCache("team:valve:");
+  const keys = [
+    ...TEAM_IDS.map((t) => `team:cfg:${t}`),
+    ...Object.values(VALVE_KEYS).map((k) => `team:valve:${k}`)
+  ];
+  await Promise.all(keys.map((k) => kvDel(k)));
+}
+function utcDay() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+async function counterRead(key, sumFromDb) {
+  const seedKey = `${key}:seededAt`;
+  const [count, seededAt] = await Promise.all([kvGet(key), kvGet(seedKey)]);
+  if (typeof count === "number" && typeof seededAt === "number" && Date.now() - seededAt < SPEND_RESEED_MS) {
+    return count;
+  }
+  const fresh = await sumFromDb();
+  await Promise.all([
+    kvSet(key, fresh, SPEND_KV_TTL_SEC),
+    kvSet(seedKey, Date.now(), SPEND_KV_TTL_SEC)
+  ]);
+  return fresh;
+}
+async function getTodaySpendCents(team) {
+  return counterRead(teamSpendKvKey(team, utcDay()), async () => {
+    const res = await db.execute(
+      sql2`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
+          FROM api_token_log
+          WHERE ts >= current_date AND feature LIKE ${team + "-%"}`
+    );
+    const dollars = Number(res.rows?.[0]?.dollars ?? 0);
+    return Math.round(dollars * 100);
+  });
+}
+async function getTodayRunCount(team, excludeRunId) {
+  const res = await db.execute(
+    excludeRunId == null ? sql2`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+            WHERE started_at >= current_date AND team = ${team}` : sql2`SELECT COUNT(*)::int AS n FROM homepage_team_runs
+            WHERE started_at >= current_date AND team = ${team} AND id <> ${excludeRunId}`
+  );
+  return Number(res.rows?.[0]?.n ?? 0);
+}
+async function getTodayImageCount() {
+  return counterRead(teamImagesKvKey(utcDay()), async () => {
+    const res = await db.execute(
+      sql2`SELECT COALESCE(SUM(request_count), 0)::int AS n
+          FROM api_token_log
+          WHERE ts >= current_date AND feature = 'homepage-images'`
+    );
+    return Number(res.rows?.[0]?.n ?? 0);
+  });
+}
+async function isRunInProgress(team, excludeRunId) {
+  const since = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 6e4);
+  const conditions = [
+    eq4(homepageTeamRuns.team, team),
+    eq4(homepageTeamRuns.status, "running"),
+    sql2`${lastActivityAt} >= ${since}`
+  ];
+  if (excludeRunId !== void 0) conditions.push(ne(homepageTeamRuns.id, excludeRunId));
+  const [row] = await db.select({ id: homepageTeamRuns.id }).from(homepageTeamRuns).where(and(...conditions)).limit(1);
+  return !!row;
+}
+async function expireStaleRuns() {
+  const cutoff = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 6e4);
+  await db.update(homepageTeamRuns).set({
+    status: "failed",
+    error: `auto-expired: no recorded activity for ${RUN_IDLE_TIMEOUT_MIN} minutes`,
+    finishedAt: /* @__PURE__ */ new Date()
+  }).where(and(eq4(homepageTeamRuns.status, "running"), sql2`${lastActivityAt} < ${cutoff}`));
+}
+async function gate(team, excludeRunId) {
+  if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
+    await Promise.all([expireStaleRuns(), expireStaleClaims()]);
+  }
+  const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
+    getTeamConfig(team),
+    getTodaySpendCents(team),
+    getTodayRunCount(team, excludeRunId),
+    team === "homepage" ? getTodayImageCount() : Promise.resolve(0),
+    isRunInProgress(team, excludeRunId),
+    getActiveBriefId(),
+    team === "content" ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(void 0)
+  ]);
+  const remainingCents = Math.max(0, cfg.dailyCents - spentCents);
+  const maxImagesPerDay = cfg.maxImagesPerDay ?? 0;
+  const base = {
+    team,
+    enabled: cfg.enabled,
+    dailyCents: cfg.dailyCents,
+    spentCents,
+    remainingCents,
+    runsToday,
+    maxRunsPerDay: cfg.maxRunsPerDay,
+    imagesToday,
+    maxImagesPerDay,
+    activeBriefId: briefId,
+    ...autopublish !== void 0 ? { valves: { autopublish } } : {},
+    ...team === "content" ? { contentSlot: contentSlotForDate(/* @__PURE__ */ new Date()) } : {}
+  };
+  if (!cfg.enabled) return { ...base, ok: false, reason: "disabled" };
+  if (inProgress) return { ...base, ok: false, reason: "run_in_progress" };
+  if (remainingCents <= 0) return { ...base, ok: false, reason: "over_budget" };
+  if (runsToday >= cfg.maxRunsPerDay) return { ...base, ok: false, reason: "over_run_cap" };
+  if (team === "homepage" && imagesToday >= maxImagesPerDay)
+    return { ...base, ok: false, reason: "over_image_cap" };
+  return { ...base, ok: true };
+}
+async function startRun(team, runType) {
+  const [row] = await db.insert(homepageTeamRuns).values({ team, runType, status: "running" }).returning({ id: homepageTeamRuns.id });
+  return row.id;
+}
+async function updateRun(id, u) {
+  const patch = {};
+  if (u.status) patch["status"] = u.status;
+  if (u.currentPhase !== void 0) patch["currentPhase"] = u.currentPhase;
+  if (u.currentAgent !== void 0) patch["currentAgent"] = u.currentAgent;
+  if (u.summary !== void 0) patch["summary"] = u.summary;
+  if (u.prUrl !== void 0) patch["prUrl"] = u.prUrl;
+  if (u.error !== void 0) patch["error"] = u.error;
+  if (u.finished) patch["finishedAt"] = /* @__PURE__ */ new Date();
+  if (u.incrementAttempt) patch["attemptCount"] = sql2`${homepageTeamRuns.attemptCount} + 1`;
+  if (Object.keys(patch).length === 0) return;
+  await db.update(homepageTeamRuns).set(patch).where(eq4(homepageTeamRuns.id, id));
+}
+async function recordEvent(e) {
+  await db.insert(homepageTeamEvents).values({
+    runId: e.runId,
+    eventType: e.eventType,
+    summary: e.summary,
+    agentRole: e.agentRole ?? null,
+    phase: e.phase ?? null,
+    transcriptRef: e.transcriptRef ?? null
+  });
+}
+async function listRecentRuns(team, limit = 25) {
+  const q = db.select().from(homepageTeamRuns);
+  return (team ? q.where(eq4(homepageTeamRuns.team, team)) : q).orderBy(desc(homepageTeamRuns.startedAt)).limit(limit);
+}
+async function listRunEvents(runId) {
+  return db.select().from(homepageTeamEvents).where(eq4(homepageTeamEvents.runId, runId)).orderBy(homepageTeamEvents.ts);
+}
+async function listRecentEvents(team, sinceDays = 7, limit = 500) {
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 6e4);
+  const conditions = [gte(homepageTeamEvents.ts, since)];
+  if (team) conditions.push(eq4(homepageTeamRuns.team, team));
+  return db.select({
+    id: homepageTeamEvents.id,
+    runId: homepageTeamEvents.runId,
+    team: homepageTeamRuns.team,
+    ts: homepageTeamEvents.ts,
+    agentRole: homepageTeamEvents.agentRole,
+    phase: homepageTeamEvents.phase,
+    eventType: homepageTeamEvents.eventType,
+    summary: homepageTeamEvents.summary
+  }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq4(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
+}
+async function createSuggestion(s) {
+  const res = await createSuggestionDetailed(s);
+  return res.deduped ? 0 : res.id;
+}
+async function createSuggestionDetailed(s) {
+  const actingTeam = s.targetTeam ?? s.team;
+  const autoApprove = await getTeamConfig(actingTeam).then((c) => c.autoApproveSuggestions).catch(() => false);
+  const [row] = await db.insert(homepageTeamSuggestions).values({
+    team: s.team,
+    targetTeam: s.targetTeam ?? null,
+    runId: s.runId ?? null,
+    category: s.category,
+    kind: s.kind ?? "process",
+    suggestion: s.suggestion,
+    estSavingsUsd: String(s.estSavingsUsd ?? 0),
+    cxRisk: s.cxRisk ?? "low",
+    status: autoApprove ? "approved" : "proposed",
+    decidedBy: autoApprove ? "auto" : null,
+    decidedAt: autoApprove ? /* @__PURE__ */ new Date() : null,
+    priority: s.priority ?? 3,
+    dedupeKey: s.dedupeKey ?? null,
+    dueAt: s.dueAt == null ? null : new Date(s.dueAt)
+  }).onConflictDoNothing().returning({ id: homepageTeamSuggestions.id });
+  if (row?.id) return { id: row.id, deduped: false };
+  if (!s.dedupeKey) return { id: 0, deduped: false };
+  const [live] = await db.select({ id: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and(
+    eq4(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
+    sql2`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
+  )).limit(1);
+  return { id: live?.id ?? 0, deduped: !!live };
+}
+async function listSuggestions(filter = {}) {
+  const conditions = [];
+  if (filter.team) conditions.push(eq4(homepageTeamSuggestions.team, filter.team));
+  if (filter.targetTeam) conditions.push(eq4(homepageTeamSuggestions.targetTeam, filter.targetTeam));
+  if (filter.status) conditions.push(eq4(homepageTeamSuggestions.status, filter.status));
+  if (filter.statuses?.length) {
+    conditions.push(inArray2(homepageTeamSuggestions.status, [...filter.statuses]));
+  }
+  if (filter.kinds?.length) {
+    conditions.push(inArray2(homepageTeamSuggestions.kind, [...filter.kinds]));
+  }
+  if (filter.assignee) conditions.push(eq4(homepageTeamSuggestions.assignee, filter.assignee));
+  if (filter.updatedSince) {
+    conditions.push(gte(homepageTeamSuggestions.updatedAt, filter.updatedSince));
+  }
+  const order = filter.orderBy === "priority" ? [asc(homepageTeamSuggestions.priority), asc(homepageTeamSuggestions.createdAt)] : filter.orderBy === "age" ? [asc(homepageTeamSuggestions.createdAt)] : [desc(homepageTeamSuggestions.createdAt)];
+  const limit = Math.min(SUGGESTION_LIST_MAX, Math.max(1, filter.limit ?? 100));
+  const q = db.select().from(homepageTeamSuggestions);
+  return (conditions.length ? q.where(and(...conditions)) : q).orderBy(...order).limit(limit);
+}
+async function decideSuggestion(id, status) {
+  await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and(eq4(homepageTeamSuggestions.id, id), eq4(homepageTeamSuggestions.status, "proposed")));
+}
+async function retireSuggestion(id) {
+  await db.update(homepageTeamSuggestions).set({ status: "dismissed", decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and(eq4(homepageTeamSuggestions.id, id), eq4(homepageTeamSuggestions.status, "approved")));
+}
+async function rekindSuggestion(id, toKind, actor, note) {
+  if (!isTicketActor(actor) || !REKIND_ACTORS.includes(actor)) {
+    throw new Response(`Forbidden: actor '${String(actor)}' may not rekind`, { status: 403 });
+  }
+  if (!REKIND_TO_KINDS.includes(toKind)) {
+    throw new Response(
+      `Bad Request: cannot rekind to '${toKind}' (allowed: ${REKIND_TO_KINDS.join(", ")})`,
+      { status: 400 }
+    );
+  }
+  const [row] = await db.select().from(homepageTeamSuggestions).where(eq4(homepageTeamSuggestions.id, id)).limit(1);
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
+  if (!REKIND_FROM_KINDS.includes(row.kind ?? "")) {
+    throw new Response(
+      `Conflict: only ${REKIND_FROM_KINDS.join("/")} rows may be rekinded, suggestion ${id} is '${row.kind}'`,
+      { status: 409 }
+    );
+  }
+  if (TERMINAL_TICKET_STATUSES.includes(row.status ?? "")) {
+    throw new Response(`Conflict: suggestion ${id} is ${row.status}`, { status: 409 });
+  }
+  const fromKind = row.kind;
+  const updated = await db.update(homepageTeamSuggestions).set({ kind: toKind, updatedAt: /* @__PURE__ */ new Date() }).where(and(eq4(homepageTeamSuggestions.id, id), eq4(homepageTeamSuggestions.kind, fromKind))).returning();
+  if (updated.length === 0) {
+    throw new Response(`Conflict: suggestion ${id} changed underneath the rekind`, { status: 409 });
+  }
+  await addTicketLinks(id, [{
+    kind: "note",
+    ref: `rekind ${fromKind} -> ${toKind} by ${actor}${note ? `: ${note}` : ""}`,
+    state: updated[0].status ?? void 0
+  }]);
+  return updated[0];
+}
+async function agentRetireSuggestion(id, actor, note) {
+  return transitionSuggestion(id, "dismissed", actor, { note });
+}
+async function addSuggestionNote(id, ref) {
+  const [row] = await db.select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status }).from(homepageTeamSuggestions).where(eq4(homepageTeamSuggestions.id, id)).limit(1);
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
+  await addTicketLinks(id, [{ kind: "note", ref, state: row.status ?? void 0 }]);
+}
+async function markSuggestion(id, status, applyRef) {
+  const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
+  const res = await db.update(homepageTeamSuggestions).set({ status, applyRef, updatedAt: /* @__PURE__ */ new Date() }).where(and(eq4(homepageTeamSuggestions.id, id), eq4(homepageTeamSuggestions.status, allowedFrom))).returning({ id: homepageTeamSuggestions.id });
+  if (res.length === 0) {
+    throw new Response(
+      `Conflict: suggestion ${id} is not in '${allowedFrom}' (agents cannot move rows out of 'proposed')`,
+      { status: 409 }
+    );
+  }
+}
+function isTicketStatus(v) {
+  return typeof v === "string" && TICKET_STATUSES.includes(v);
+}
+function isTicketActor(v) {
+  return typeof v === "string" && (v === "owner" || v === "auto" || v === "system" || AGENT_ACTOR_RE.test(v));
+}
+function findTransitionRule(from, to, actor, ctx = {}) {
+  for (const rule of ALLOWED[from] ?? []) {
+    if (rule.to !== to) continue;
+    const actorOk = rule.actors.some(
+      (a) => a === "assignee" ? !!ctx.assignee && ctx.assignee === actor : a === actor
+    );
+    if (!actorOk) continue;
+    if (rule.kinds && !rule.kinds.includes(ctx.kind ?? "")) continue;
+    return rule;
+  }
+  return null;
+}
+function isTransitionAllowed(from, to, actor, ctx = {}) {
+  return findTransitionRule(from, to, actor, ctx) !== null;
+}
+async function addTicketLinks(id, links) {
+  if (links.length === 0) return;
+  await db.insert(suggestionLinks).values(
+    links.map((l) => ({
+      suggestionId: id,
+      kind: l.kind.slice(0, 12),
+      ref: l.ref,
+      state: l.state ? l.state.slice(0, 16) : null
+    }))
+  );
+}
+async function transitionSuggestion(id, to, actor, opts = {}) {
+  if (!isTicketStatus(to)) {
+    throw new Response(`Bad Request: unknown status '${String(to)}'`, { status: 400 });
+  }
+  if (!isTicketActor(actor)) {
+    throw new Response(`Bad Request: unknown actor '${String(actor)}'`, { status: 400 });
+  }
+  const [row] = await db.select().from(homepageTeamSuggestions).where(eq4(homepageTeamSuggestions.id, id)).limit(1);
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
+  const from = row.status;
+  const rule = findTransitionRule(from, to, actor, { assignee: row.assignee, kind: row.kind });
+  if (!rule) {
+    throw new Response(
+      `Conflict: '${from}' -> '${to}' is not permitted for actor '${actor}' on suggestion ${id}`,
+      { status: 409 }
+    );
+  }
+  const now = /* @__PURE__ */ new Date();
+  const patch = { status: to, updatedAt: now };
+  if (rule.incrementAttempt || opts.incrementAttempt) {
+    patch["attemptCount"] = sql2`${homepageTeamSuggestions.attemptCount} + 1`;
+  }
+  if (opts.lastError !== void 0) patch["lastError"] = opts.lastError;
+  if (to === "approved") {
+    patch["assignee"] = null;
+    patch["claimedAt"] = null;
+    patch["claimExpiresAt"] = null;
+  }
+  if (to === "verified") {
+    patch["verifiedBy"] = actor;
+    patch["verifiedAt"] = now;
+  }
+  if (from === "proposed" || to === "dismissed") {
+    patch["decidedBy"] = actor;
+    patch["decidedAt"] = now;
+  }
+  if (to === "applied" && !row.applyRef) {
+    const pr = opts.links?.find((l) => l.kind === "pr");
+    if (pr) patch["applyRef"] = pr.ref;
+  }
+  const guards = [eq4(homepageTeamSuggestions.id, id), eq4(homepageTeamSuggestions.status, from)];
+  if (rule.actors.includes("assignee")) {
+    guards.push(eq4(homepageTeamSuggestions.assignee, actor));
+  }
+  const updated = await db.update(homepageTeamSuggestions).set(patch).where(and(...guards)).returning();
+  if (updated.length === 0) {
+    throw new Response(
+      `Conflict: suggestion ${id} changed underneath the '${from}' -> '${to}' transition`,
+      { status: 409 }
+    );
+  }
+  const links = [...opts.links ?? []];
+  if (opts.note) links.push({ kind: "note", ref: opts.note, state: to });
+  await addTicketLinks(id, links);
+  return updated[0];
+}
+async function expireStaleClaims() {
+  const res = await db.update(homepageTeamSuggestions).set({
+    status: "approved",
+    assignee: null,
+    claimedAt: null,
+    claimExpiresAt: null,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(and(
+    eq4(homepageTeamSuggestions.status, "in_progress"),
+    lt(homepageTeamSuggestions.claimExpiresAt, /* @__PURE__ */ new Date())
+  )).returning({ id: homepageTeamSuggestions.id });
+  return res.length;
+}
+function buildClaimQuery(c) {
+  const conds = [sql2`c.status = ${c.from}`];
+  if (c.id != null) conds.push(sql2`c.id = ${c.id}`);
+  if (c.filter.kind) conds.push(sql2`c.kind = ${c.filter.kind}`);
+  if (c.filter.team) conds.push(sql2`c.team = ${c.filter.team}`);
+  if (c.filter.targetTeam) conds.push(sql2`c.target_team = ${c.filter.targetTeam}`);
+  conds.push(sql2`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`);
+  return sql2`
+    UPDATE homepage_team_suggestions AS s
+       SET status           = 'in_progress',
+           assignee         = ${c.assignee},
+           claimed_at       = now(),
+           claim_expires_at = now() + make_interval(secs => ${c.leaseSeconds}),
+           updated_at       = now()
+     WHERE s.id = (
+       SELECT c.id
+         FROM homepage_team_suggestions AS c
+        WHERE ${sql2.join(conds, sql2` AND `)}
+        ORDER BY c.priority ASC, c.created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+     )
+    RETURNING s.id AS id`;
+}
+async function claimSuggestion(input, exec = defaultExecutor) {
+  if (!isTicketActor(input.assignee)) {
+    throw new Response(`Bad Request: unknown actor '${String(input.assignee)}'`, { status: 400 });
+  }
+  const from = input.filter?.status ?? "approved";
+  if (!isTicketStatus(from)) {
+    throw new Response(`Bad Request: unknown status '${String(from)}'`, { status: 400 });
+  }
+  if (!isTransitionAllowed(from, "in_progress", input.assignee)) {
+    throw new Response(
+      `Conflict: actor '${input.assignee}' may not claim a '${from}' ticket`,
+      { status: 409 }
+    );
+  }
+  const leaseSeconds = Math.min(
+    CLAIM_LEASE_MAX_SEC,
+    Math.max(60, Math.floor(input.leaseSeconds ?? CLAIM_LEASE_DEFAULT_SEC))
+  );
+  const res = await exec(buildClaimQuery({
+    assignee: input.assignee,
+    leaseSeconds,
+    from,
+    id: input.id,
+    filter: input.filter ?? {}
+  }));
+  const id = Number(res.rows?.[0]?.id ?? 0);
+  return id > 0 ? { empty: false, id } : { empty: true };
+}
+async function getTicket(id) {
+  const [suggestion] = await db.select().from(homepageTeamSuggestions).where(eq4(homepageTeamSuggestions.id, id)).limit(1);
+  if (!suggestion) return null;
+  const links = await db.select().from(suggestionLinks).where(eq4(suggestionLinks.suggestionId, id)).orderBy(desc(suggestionLinks.createdAt)).limit(50);
+  const events = suggestion.runId == null ? [] : await db.select().from(homepageTeamEvents).where(eq4(homepageTeamEvents.runId, suggestion.runId)).orderBy(desc(homepageTeamEvents.ts)).limit(20);
+  return { suggestion, links, events };
+}
+async function getActiveBrief() {
+  const [row] = await db.select().from(strategyBriefs).where(eq4(strategyBriefs.status, "active")).orderBy(desc(strategyBriefs.createdAt)).limit(1);
+  return row ?? null;
+}
+async function getActiveBriefId() {
+  return cached(
+    "team:brief:active-id",
+    SETTINGS_CACHE_TTL_SEC,
+    async () => (await getActiveBrief())?.id ?? null
+  );
+}
+async function publishBrief(input) {
+  await db.update(strategyBriefs).set({ status: "superseded" }).where(eq4(strategyBriefs.status, "active"));
+  const [row] = await db.insert(strategyBriefs).values({
+    weekStart: input.weekStart,
+    brief: input.brief,
+    metricsJson: input.metricsJson ?? null,
+    status: "active",
+    createdBy: input.createdBy ?? "store-strategist"
+  }).returning({ id: strategyBriefs.id });
+  invalidateCache("team:brief:");
+  await kvDel("team:brief:active-id");
+  return row.id;
+}
+async function listBriefs(limit = 12) {
+  return db.select().from(strategyBriefs).orderBy(desc(strategyBriefs.createdAt)).limit(limit);
+}
+async function createAdCampaign(c) {
+  const [row] = await db.insert(adCampaigns).values({
+    platform: c.platform,
+    name: c.name,
+    objective: c.objective,
+    plannedDailyCents: c.plannedDailyCents ?? 0,
+    plannedTotalCents: c.plannedTotalCents ?? null,
+    audienceJson: c.audienceJson ?? null,
+    creativeJson: c.creativeJson ?? null,
+    policyCheck: c.policyCheck,
+    runId: c.runId ?? null,
+    status: "proposed"
+  }).returning({ id: adCampaigns.id });
+  return row.id;
+}
+async function listAdCampaigns(status, limit = 50) {
+  const q = db.select().from(adCampaigns);
+  return (status ? q.where(eq4(adCampaigns.status, status)) : q).orderBy(desc(adCampaigns.createdAt)).limit(limit);
+}
+async function decideAdCampaign(id, status) {
+  await db.update(adCampaigns).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(and(eq4(adCampaigns.id, id), eq4(adCampaigns.status, "proposed")));
+}
+async function createDraftSocialPost(p) {
+  const [row] = await db.insert(socialPosts).values({
+    platform: p.platform,
+    postType: p.postType,
+    tweetText: p.tweetText,
+    mediaUrls: p.mediaUrls ?? null,
+    dealHistoryId: p.dealHistoryId ?? null,
+    status: "draft",
+    createdBy: "agent",
+    reviewStatus: "pending_review",
+    scheduledFor: p.scheduledFor ?? null,
+    reworkedFrom: p.reworkedFrom ?? null,
+    videoJobId: p.videoJobId ?? null,
+    posterUrl: p.posterUrl ?? null
+  }).returning({ id: socialPosts.id });
+  return row.id;
+}
+async function listSocialPosts(status, limit = 50, reviewStatus) {
+  const conditions = [];
+  if (status) conditions.push(eq4(socialPosts.status, status));
+  if (reviewStatus) conditions.push(eq4(socialPosts.reviewStatus, reviewStatus));
+  const q = db.select().from(socialPosts);
+  return (conditions.length ? q.where(and(...conditions)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
+}
+async function getSocialFrequencies() {
+  const rows = await db.select().from(pipelineSettings).where(sql2`${pipelineSettings.key} LIKE 'social_freq_%'`);
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const out = {};
+  for (const p of SOCIAL_PLATFORMS) {
+    out[p] = num(map.get(socialFreqKey(p)), SOCIAL_FREQ_DEFAULTS[p]);
+  }
+  return out;
+}
+async function reviewSocialPost(id, input) {
+  const result = await db.update(socialPosts).set({
+    reviewStatus: input.reviewStatus,
+    feedback: input.feedback ?? null,
+    editedText: input.editedText ?? null,
+    reviewedBy: input.reviewedBy,
+    reviewedAt: /* @__PURE__ */ new Date()
+  }).where(and(eq4(socialPosts.id, id), ne(socialPosts.status, "posted"))).returning({ id: socialPosts.id });
+  return result.length > 0;
+}
+async function rescheduleSocialPost(id, scheduledFor) {
+  await db.update(socialPosts).set({ scheduledFor }).where(eq4(socialPosts.id, id));
+}
+async function listCalendar(from, to) {
+  const conditions = [];
+  if (from) conditions.push(gte(marketingCalendar.eventDate, from));
+  if (to) conditions.push(lte(marketingCalendar.eventDate, to));
+  const q = db.select().from(marketingCalendar);
+  return (conditions.length ? q.where(and(...conditions)) : q).orderBy(marketingCalendar.eventDate).limit(200);
+}
+async function proposeCalendarEvent(input) {
+  const [row] = await db.insert(marketingCalendar).values({
+    eventDate: input.eventDate,
+    name: input.name,
+    type: input.type ?? "promo",
+    theme: input.theme ?? null,
+    status: "planned"
+  }).returning({ id: marketingCalendar.id });
+  return row.id;
+}
+var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
+var init_team_server = __esm({
+  "app/lib/team.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_content_slot();
+    init_homepage_team_keys();
+    init_kv_server();
+    init_team_keys();
+    init_schema();
+    init_team_keys();
+    RUN_IDLE_TIMEOUT_MIN = 240;
+    lastActivityAt = sql2`GREATEST(
+  ${homepageTeamRuns.startedAt},
+  COALESCE(
+    (SELECT MAX(${homepageTeamEvents.ts}) FROM ${homepageTeamEvents}
+      WHERE ${homepageTeamEvents.runId} = ${homepageTeamRuns.id}),
+    ${homepageTeamRuns.startedAt}
+  )
+)`;
+    SETTINGS_CACHE_TTL_SEC = 60;
+    SPEND_KV_TTL_SEC = 26 * 3600;
+    SPEND_RESEED_MS = 15 * 6e4;
+    SUGGESTION_LIST_MAX = 200;
+    REKIND_FROM_KINDS = ["process"];
+    REKIND_TO_KINDS = ["instructions", "code"];
+    REKIND_ACTORS = ["owner", "agent:agent-editor"];
+    TICKET_STATUSES = [
+      "proposed",
+      "approved",
+      "in_progress",
+      "pr_open",
+      "in_review",
+      "verified",
+      "applied",
+      "blocked",
+      "dismissed"
+    ];
+    TERMINAL_TICKET_STATUSES = ["applied", "dismissed"];
+    AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/;
+    AGENT_EDITOR_APPLY_KINDS = ["instructions", "agent-def", "config"];
+    CLAIMANT_ACTORS = ["agent:rr7-engineer", "agent:agent-editor"];
+    AGENT_RETIRE_KINDS = ["process", "strategy", "program"];
+    RUN_CLOSE_ACTORS = [
+      "agent:homepage-orchestrator",
+      "agent:content-writer",
+      "agent:social-media-manager",
+      "agent:product-manager",
+      "agent:store-strategist"
+    ];
+    RUN_CLOSE_KINDS = ["process", "strategy"];
+    OWNER_DISMISS = { to: "dismissed", actors: ["owner"] };
+    ALLOWED = {
+      proposed: [
+        { to: "approved", actors: ["owner", "auto"] },
+        OWNER_DISMISS
+      ],
+      approved: [
+        { to: "in_progress", actors: CLAIMANT_ACTORS },
+        // A daily routine executed the ask in this run: close it so it is not
+        // re-read tomorrow. Operational kinds only.
+        { to: "applied", actors: RUN_CLOSE_ACTORS, kinds: RUN_CLOSE_KINDS },
+        // agent-editor's hygiene pass retiring a row with no executor. Kinds are
+        // fenced so it can never dismiss the instruction rows aimed at itself.
+        { to: "dismissed", actors: ["agent:agent-editor"], kinds: AGENT_RETIRE_KINDS },
+        OWNER_DISMISS
+      ],
+      in_progress: [
+        { to: "pr_open", actors: ["assignee"] },
+        { to: "blocked", actors: ["assignee", "system"] },
+        // Lease expiry releases the ticket back onto the unassigned queue.
+        { to: "approved", actors: ["system"] },
+        OWNER_DISMISS
+      ],
+      pr_open: [
+        { to: "in_review", actors: ["agent:qa-reviewer"] },
+        // The legacy agent-editor docs path, preserved verbatim.
+        { to: "applied", actors: ["agent:agent-editor"], kinds: AGENT_EDITOR_APPLY_KINDS },
+        OWNER_DISMISS
+      ],
+      in_review: [
+        { to: "verified", actors: ["agent:qa-reviewer"] },
+        // FAIL bounce: back to the assignee with a reason, one attempt spent.
+        { to: "in_progress", actors: ["agent:qa-reviewer"], incrementAttempt: true },
+        OWNER_DISMISS
+      ],
+      verified: [
+        // Release engine only, post-merge and post-smoke.
+        { to: "applied", actors: ["system"] },
+        // Merge, deploy, or smoke failed: bounce and spend an attempt.
+        { to: "in_progress", actors: ["system"], incrementAttempt: true },
+        OWNER_DISMISS
+      ],
+      blocked: [
+        { to: "approved", actors: ["owner", "system"] },
+        OWNER_DISMISS
+      ],
+      applied: [],
+      dismissed: []
+    };
+    CLAIM_LEASE_DEFAULT_SEC = 1200;
+    CLAIM_LEASE_MAX_SEC = 6 * 3600;
+    defaultExecutor = async (query) => await db.execute(query);
+  }
+});
+
+// app/lib/detection-tickets.server.ts
+var detection_tickets_server_exports = {};
+__export(detection_tickets_server_exports, {
+  MAX_DEDUPE_KEY_LENGTH: () => MAX_DEDUPE_KEY_LENGTH,
+  fileDetectionTicket: () => fileDetectionTicket,
+  hashToken: () => hashToken,
+  makeDedupeKey: () => makeDedupeKey,
+  priorityFromSeverity: () => priorityFromSeverity
+});
+function priorityFromSeverity(severity) {
+  return SEVERITY_PRIORITY[severity] ?? 3;
+}
+function hashToken(input) {
+  let h = 5381;
+  for (let i = 0; i < input.length; i++) {
+    h = (h << 5) + h + input.charCodeAt(i) >>> 0;
+  }
+  return h.toString(36);
+}
+function slugPart(part) {
+  return part.toLowerCase().replace(/[^a-z0-9._/-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
+}
+function makeDedupeKey(...parts) {
+  const joined = parts.filter((p) => p !== null && p !== void 0 && String(p).length > 0).map((p) => slugPart(String(p))).filter((p) => p.length > 0).join(":");
+  if (joined.length <= MAX_DEDUPE_KEY_LENGTH) return joined;
+  const suffix = `~${hashToken(joined)}`;
+  return `${joined.slice(0, MAX_DEDUPE_KEY_LENGTH - suffix.length)}${suffix}`;
+}
+async function fileDetectionTicket(input) {
+  try {
+    const id = await createSuggestion({
+      team: "homepage",
+      targetTeam: input.targetTeam ?? "homepage",
+      category: input.category ?? "other",
+      kind: input.kind ?? "code",
+      suggestion: input.suggestion,
+      cxRisk: input.priority <= 2 ? "high" : "low",
+      priority: input.priority,
+      dedupeKey: input.dedupeKey
+    });
+    if (!id) {
+      console.info(`[${input.detector}] ticket deduped on "${input.dedupeKey}"`);
+      return 0;
+    }
+    const links = (input.links ?? []).filter((l) => l.ref);
+    if (links.length > 0) {
+      await db.insert(suggestionLinks).values(
+        links.map((l) => ({
+          suggestionId: id,
+          kind: l.kind.slice(0, 12),
+          ref: l.ref,
+          state: l.state ? l.state.slice(0, 16) : null
+        }))
+      );
+    }
+    console.info(`[${input.detector}] filed ticket #${id} (${input.dedupeKey}, P${input.priority})`);
+    return id;
+  } catch (err2) {
+    console.error(`[${input.detector}] filing ticket "${input.dedupeKey}" failed (ignored):`, err2);
+    return 0;
+  }
+}
+var MAX_DEDUPE_KEY_LENGTH, SEVERITY_PRIORITY;
+var init_detection_tickets_server = __esm({
+  "app/lib/detection-tickets.server.ts"() {
+    "use strict";
+    init_team_server();
+    init_db_server();
+    init_schema();
+    MAX_DEDUPE_KEY_LENGTH = 64;
+    SEVERITY_PRIORITY = {
+      P0: 1,
+      P1: 2,
+      P2: 3,
+      P3: 4
+    };
+  }
+});
+
+// app/lib/twilio.server.ts
+async function sendSms(to, body) {
+  const sid = process.env["TWILIO_ACCOUNT_SID"];
+  const token = process.env["TWILIO_AUTH_TOKEN"];
+  const from = process.env["TWILIO_PHONE_NUMBER"];
+  if (!sid || !token || !from) throw new Error("Twilio env vars not set");
+  const auth = Buffer.from(`${sid}:${token}`).toString("base64");
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({ To: to, From: from, Body: body }).toString()
+  });
+  if (!res.ok) {
+    const err2 = await res.text().catch(() => "");
+    throw new Error(`Twilio SMS send failed (${res.status}): ${err2}`);
+  }
+  const json2 = await res.json();
+  return json2.sid;
+}
+var init_twilio_server = __esm({
+  "app/lib/twilio.server.ts"() {
+    "use strict";
+  }
+});
+
+// app/lib/owner-alerts.server.ts
+var owner_alerts_server_exports = {};
+__export(owner_alerts_server_exports, {
+  escapeHtml: () => escapeHtml,
+  ownerAlertEmails: () => ownerAlertEmails,
+  sendOwnerEmail: () => sendOwnerEmail,
+  sendOwnerSms: () => sendOwnerSms
+});
+function ownerAlertEmails() {
+  const raw = process.env["OWNER_ALERT_EMAILS"];
+  if (!raw) return DEFAULT_RECIPIENTS;
+  const list = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return list.length > 0 ? list : DEFAULT_RECIPIENTS;
+}
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+async function sendOwnerEmail(subject, html, opts = {}) {
+  const host = process.env["ZOHO_SMTP_HOST"] ?? "smtp.zoho.com";
+  const port2 = parseInt(process.env["ZOHO_SMTP_PORT"] ?? "465", 10);
+  const user = process.env["ZOHO_SMTP_USER"];
+  const pass = process.env["ZOHO_SMTP_PASS"];
+  const from = process.env["EMAIL_FROM"] ?? "hello@xdipx.com";
+  if (!user || !pass) {
+    console.warn("[owner-alerts] ZOHO_SMTP_USER or ZOHO_SMTP_PASS not set. Skipping email send.");
+    return { sent: false, error: "SMTP credentials not configured" };
+  }
+  let nm = null;
+  try {
+    nm = await import("nodemailer");
+    nm = nm?.default ?? nm;
+  } catch (err2) {
+    console.warn("[owner-alerts] nodemailer could not be loaded. Skipping email send.", err2);
+    return { sent: false, error: `nodemailer could not be loaded: ${String(err2)}` };
+  }
+  try {
+    const transporter = nm.createTransport({
+      host,
+      port: port2,
+      secure: port2 === 465,
+      auth: { user, pass }
+    });
+    await transporter.sendMail({
+      from: `"${opts.fromName ?? "xdipx ops"}" <${from}>`,
+      to: ownerAlertEmails().join(", "),
+      subject,
+      html
+    });
+    return { sent: true };
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
+    console.error("[owner-alerts] SMTP send failed:", msg);
+    return { sent: false, error: msg };
+  }
+}
+async function sendOwnerSms(body) {
+  const to = process.env["OWNER_ALERT_PHONE"];
+  if (!to) {
+    console.warn("[owner-alerts] OWNER_ALERT_PHONE not set. Skipping SMS.");
+    return { sent: false, error: "OWNER_ALERT_PHONE not set" };
+  }
+  try {
+    await sendSms(to, body.length > 320 ? `${body.slice(0, 317)}...` : body);
+    return { sent: true };
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
+    console.error("[owner-alerts] SMS send failed:", msg);
+    return { sent: false, error: msg };
+  }
+}
+var DEFAULT_RECIPIENTS;
+var init_owner_alerts_server = __esm({
+  "app/lib/owner-alerts.server.ts"() {
+    "use strict";
+    init_twilio_server();
+    DEFAULT_RECIPIENTS = ["mike@xdipx.com", "mikebayard@me.com"];
+  }
+});
+
 // app/lib/attribution.server.ts
 import { parse as parseCookie, serialize as serializeCookie } from "cookie";
 function getFbCookies(request) {
@@ -9710,9 +10841,9 @@ var init_meta_capi_server = __esm({
 });
 
 // app/lib/ga4-config.server.ts
-import { eq as eq4 } from "drizzle-orm";
+import { eq as eq5 } from "drizzle-orm";
 async function fetchFromDb() {
-  const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq4(pipelineSettings.key, "ga4MeasurementId")).limit(1);
+  const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq5(pipelineSettings.key, "ga4MeasurementId")).limit(1);
   return rows[0]?.value?.trim() ?? "";
 }
 async function resolveGa4() {
@@ -9797,10 +10928,10 @@ __export(feed_processor_server_exports, {
   scoreProduct: () => scoreProduct
 });
 import { parse } from "csv-parse/sync";
-import { sql as sql2, eq as eq5 } from "drizzle-orm";
+import { sql as sql3, eq as eq6 } from "drizzle-orm";
 async function getPipelineSetting(key) {
   try {
-    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq5(pipelineSettings.key, key)).limit(1);
+    const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq6(pipelineSettings.key, key)).limit(1);
     return rows[0]?.value ?? null;
   } catch {
     return null;
@@ -9936,7 +11067,7 @@ async function dailyFeedProcessor() {
     db.select({
       sku: dealHistory.sku,
       categories: dealHistory.categories
-    }).from(dealHistory).orderBy(sql2`${dealHistory.dealDate} DESC`).limit(90),
+    }).from(dealHistory).orderBy(sql3`${dealHistory.dealDate} DESC`).limit(90),
     getPipelineSetting("blockedBrands")
   ]);
   const recentSkus = new Set(history.map((h) => h.sku));
@@ -9983,7 +11114,7 @@ async function archiveDiscontinuedProducts(skus) {
       const rows = await db.select({
         shopifyProductId: dealHistory.shopifyProductId,
         status: dealHistory.status
-      }).from(dealHistory).where(eq5(dealHistory.sku, sku)).limit(1);
+      }).from(dealHistory).where(eq6(dealHistory.sku, sku)).limit(1);
       const row = rows[0];
       if (!row) {
         result.notImported++;
@@ -9998,7 +11129,7 @@ async function archiveDiscontinuedProducts(skus) {
         continue;
       }
       const archived = await archiveShopifyProduct2(row.shopifyProductId, "discontinued by manufacturer");
-      await db.update(dealHistory).set({ status: "archived" }).where(eq5(dealHistory.sku, sku));
+      await db.update(dealHistory).set({ status: "archived" }).where(eq6(dealHistory.sku, sku));
       if (upsertProductPage2 && archived?.handle) {
         try {
           await upsertProductPage2({
@@ -10881,147 +12012,6 @@ ${CONVERSATIONAL_ADDENDUM}`;
     EMMA_VOICE_SUPPORT = `${EMMA_VOICE_CORE}
 
 ${SUPPORT_ADDENDUM}`;
-  }
-});
-
-// app/lib/team-keys.ts
-var team_keys_exports = {};
-__export(team_keys_exports, {
-  CONTENT_EXTRA_KEYS: () => CONTENT_EXTRA_KEYS,
-  CONTENT_MAX_IMAGES_DEFAULT: () => CONTENT_MAX_IMAGES_DEFAULT,
-  HOMEPAGE_EXTRA_KEYS: () => HOMEPAGE_EXTRA_KEYS,
-  SCENE_KIT: () => SCENE_KIT,
-  SOCIAL_FREQ_DEFAULTS: () => SOCIAL_FREQ_DEFAULTS,
-  SOCIAL_PLATFORMS: () => SOCIAL_PLATFORMS,
-  SOCIAL_REVIEW_STATUSES: () => SOCIAL_REVIEW_STATUSES,
-  TEAM_DEFAULTS: () => TEAM_DEFAULTS,
-  TEAM_IDS: () => TEAM_IDS,
-  VALVE_KEYS: () => VALVE_KEYS,
-  VIDEO_EXTRA_KEYS: () => VIDEO_EXTRA_KEYS,
-  VIDEO_FORMULAS: () => VIDEO_FORMULAS,
-  VIDEO_MAX_COST_CENTS_DEFAULT: () => VIDEO_MAX_COST_CENTS_DEFAULT,
-  VIDEO_METRIC_FIELDS: () => VIDEO_METRIC_FIELDS,
-  isTeamId: () => isTeamId,
-  socialFreqKey: () => socialFreqKey,
-  teamFromFeature: () => teamFromFeature,
-  teamImagesKvKey: () => teamImagesKvKey,
-  teamKeys: () => teamKeys,
-  teamSpendKvKey: () => teamSpendKvKey
-});
-function isTeamId(v) {
-  return typeof v === "string" && TEAM_IDS.includes(v);
-}
-function teamSpendKvKey(team, utcDay4) {
-  return `team:spend:${team}:${utcDay4}`;
-}
-function teamImagesKvKey(utcDay4) {
-  return `team:images:homepage:${utcDay4}`;
-}
-function teamFromFeature(feature) {
-  const i = feature.indexOf("-");
-  if (i <= 0) return null;
-  const prefix = feature.slice(0, i);
-  return isTeamId(prefix) ? prefix : null;
-}
-function teamKeys(team) {
-  return {
-    enabled: `${team}_team_enabled`,
-    dailyCents: `${team}_team_daily_cents`,
-    maxRunsPerDay: `${team}_team_max_runs`,
-    autoApproveSuggestions: `${team}_team_auto_approve_suggestions`
-  };
-}
-function socialFreqKey(platform) {
-  return `social_freq_${platform}`;
-}
-var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, CONTENT_MAX_IMAGES_DEFAULT, VIDEO_EXTRA_KEYS, VIDEO_MAX_COST_CENTS_DEFAULT, VIDEO_FORMULAS, VIDEO_METRIC_FIELDS, SCENE_KIT_NOTE, SCENE_KIT, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, SOCIAL_REVIEW_STATUSES, VALVE_KEYS;
-var init_team_keys = __esm({
-  "app/lib/team-keys.ts"() {
-    "use strict";
-    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product", "video"];
-    TEAM_DEFAULTS = {
-      homepage: { dailyCents: 1500, maxRunsPerDay: 4 },
-      social: { dailyCents: 500, maxRunsPerDay: 2 },
-      ads: { dailyCents: 500, maxRunsPerDay: 1 },
-      email: { dailyCents: 500, maxRunsPerDay: 1 },
-      strategy: { dailyCents: 300, maxRunsPerDay: 1 },
-      content: { dailyCents: 500, maxRunsPerDay: 3 },
-      // 3rd run = gate-retry headroom on double days (Sat trend-scout, Sun SEO curation, Wed podcast); budget covers the accuracy gate's web verification (068)
-      product: { dailyCents: 300, maxRunsPerDay: 1 },
-      // daily import-queue drain (SQL + curl, ~$0)
-      video: { dailyCents: 2e3, maxRunsPerDay: 1 }
-      // fal video generation is metered; $20/day ceiling, ~3 videos/week planned
-    };
-    HOMEPAGE_EXTRA_KEYS = {
-      buildCents: "homepage_team_build_cents",
-      maxImagesPerDay: "homepage_team_max_images"
-    };
-    CONTENT_EXTRA_KEYS = {
-      maxImagesPerDay: "content_team_max_images"
-    };
-    CONTENT_MAX_IMAGES_DEFAULT = 0;
-    VIDEO_EXTRA_KEYS = {
-      maxCostCents: "video_team_max_cost_cents",
-      frameReview: "video_frame_review"
-    };
-    VIDEO_MAX_COST_CENTS_DEFAULT = 600;
-    VIDEO_FORMULAS = [
-      "myth-busting",
-      "unboxing",
-      "before-after",
-      "hook-problem-payoff",
-      "three-things",
-      "grwm",
-      "pov-testimonial",
-      // Named shows from the social-video strategy (docs/store-team/
-      // social-video-strategy-DRAFT.md §3) plus the between-episodes tentpole slot.
-      "ten-second-fix",
-      "the-one-thing",
-      "translate-the-feeling",
-      "brand-tentpole"
-    ];
-    VIDEO_METRIC_FIELDS = ["hookRetentionPct", "saves", "shares", "profileTaps", "utmClicks"];
-    SCENE_KIT_NOTE = "All scenes are doctrine archetype C and ground-locked (coral-soft/plum-soft/paper). No product ever appears in a talking-head frame; product visuals are b-roll cutaways or post-composited stills. The identity source is Emma's canonical photo, resolved fresh from the Sanity editor singleton by the pipeline; scene frames are per-scene compositions from it, owner-approved once, then reused.";
-    SCENE_KIT = [
-      { slug: "couch-cozy", label: "Couch Cozy", status: "core", note: SCENE_KIT_NOTE },
-      { slug: "vanity-bright", label: "Vanity Bright", status: "core", note: SCENE_KIT_NOTE },
-      { slug: "kitchen-counter-casual", label: "Kitchen Counter Casual", status: "core", note: SCENE_KIT_NOTE },
-      { slug: "closet-edit", label: "Closet Edit", status: "stretch", note: SCENE_KIT_NOTE },
-      { slug: "out-and-about-stoop", label: "Out-and-About Stoop", status: "stretch", note: SCENE_KIT_NOTE },
-      { slug: "reading-nook", label: "Reading Nook", status: "stretch", note: SCENE_KIT_NOTE }
-    ];
-    SOCIAL_PLATFORMS = ["x", "instagram", "tiktok", "facebook", "youtube", "linkedin"];
-    SOCIAL_FREQ_DEFAULTS = {
-      x: 1,
-      instagram: 1,
-      tiktok: 1,
-      facebook: 0,
-      youtube: 0,
-      // video-only platform; drafts come from the video pipeline, not the daily text routine
-      linkedin: 0
-      // authority posts drafted only from pending researchBrief docs (brand voice, not Emma); owner opts in
-    };
-    SOCIAL_REVIEW_STATUSES = ["pending_review", "approved", "needs_changes", "rejected"];
-    VALVE_KEYS = {
-      socialAutopost: "social_team_autopost",
-      suggestionApply: "suggestion_apply_enabled",
-      contentAutopublish: "content_team_autopublish",
-      keywordResearch: "keyword_research_enabled",
-      seoCuration: "seo_curation_enabled",
-      // Trend scout: kill switch for the weekly Saturday trend-scout routine
-      // (community-discourse research that proposes trendTopicBrief docs for the
-      // seo-curator's Sunday planning; research-only, never writes posts).
-      trendScout: "trend_scout_enabled",
-      // Social trend scout: kill switch for the weekly social-format trend-scout
-      // routine (TikTok/IG format + sound research that files trend briefs the
-      // video-producer can act on; propose-only, never posts). Mirrors trendScout;
-      // migration seeding lives with the agent-side rollout.
-      socialTrendScout: "social_trend_scout_enabled",
-      reviewsPdp: "reviews_pdp_enabled",
-      // Video autopublish: even with the video team enabled, platform posting stays
-      // manual until this AND the per-platform publisher env keys are both set.
-      videoAutopublish: "video_team_autopublish"
-    };
   }
 });
 
@@ -14181,7 +15171,7 @@ __export(twitter_server_exports, {
 });
 import OAuth from "oauth-1.0a";
 import crypto2 from "node:crypto";
-import { eq as eq6 } from "drizzle-orm";
+import { eq as eq7 } from "drizzle-orm";
 function getOAuth() {
   return new OAuth({
     consumer: {
@@ -14422,7 +15412,7 @@ async function postManualTweet(text2, imageUrl, dealHistoryId) {
   }
 }
 async function postApprovedDraft(postId) {
-  const [post] = await db.select().from(socialPosts).where(eq6(socialPosts.id, postId)).limit(1);
+  const [post] = await db.select().from(socialPosts).where(eq7(socialPosts.id, postId)).limit(1);
   if (!post || post.status !== "draft" || post.reviewStatus !== "approved") {
     return { ok: false, error: "Post not found or not an approved draft" };
   }
@@ -14444,18 +15434,18 @@ async function postApprovedDraft(postId) {
       status: "posted",
       postedAt: /* @__PURE__ */ new Date(),
       errorMessage: null
-    }).where(eq6(socialPosts.id, postId));
+    }).where(eq7(socialPosts.id, postId));
     return { ok: true, tweetId: tweet.id, tweetText: text2 };
   } catch (err2) {
     const errorMessage = err2 instanceof Error ? err2.message : String(err2);
-    await db.update(socialPosts).set({ errorMessage }).where(eq6(socialPosts.id, postId));
+    await db.update(socialPosts).set({ errorMessage }).where(eq7(socialPosts.id, postId));
     return { ok: false, error: errorMessage };
   }
 }
 async function deleteAndLogTweet(postId, externalPostId) {
   try {
     await deleteTweet(externalPostId);
-    await db.update(socialPosts).set({ status: "deleted" }).where(eq6(socialPosts.id, postId));
+    await db.update(socialPosts).set({ status: "deleted" }).where(eq7(socialPosts.id, postId));
     return { ok: true };
   } catch (err2) {
     const errorMessage = err2 instanceof Error ? err2.message : String(err2);
@@ -14463,7 +15453,7 @@ async function deleteAndLogTweet(postId, externalPostId) {
   }
 }
 async function retryFailedPost(postId) {
-  const [post] = await db.select().from(socialPosts).where(eq6(socialPosts.id, postId)).limit(1);
+  const [post] = await db.select().from(socialPosts).where(eq7(socialPosts.id, postId)).limit(1);
   if (!post || post.status !== "failed") {
     return { ok: false, error: "Post not found or not in failed state" };
   }
@@ -14474,11 +15464,11 @@ async function retryFailedPost(postId) {
       status: "posted",
       postedAt: /* @__PURE__ */ new Date(),
       errorMessage: null
-    }).where(eq6(socialPosts.id, postId));
+    }).where(eq7(socialPosts.id, postId));
     return { ok: true, tweetId: tweet.id, tweetText: post.tweetText };
   } catch (err2) {
     const errorMessage = err2 instanceof Error ? err2.message : String(err2);
-    await db.update(socialPosts).set({ errorMessage }).where(eq6(socialPosts.id, postId));
+    await db.update(socialPosts).set({ errorMessage }).where(eq7(socialPosts.id, postId));
     return { ok: false, error: errorMessage };
   }
 }
@@ -15126,11 +16116,11 @@ var init_discovery_tags = __esm({
 });
 
 // app/lib/discovery-rules.server.ts
-import { eq as eq7, and, asc } from "drizzle-orm";
+import { eq as eq8, and as and2, asc as asc2 } from "drizzle-orm";
 async function getActiveDiscoveryRules() {
   const cached2 = await kvGet(RULES_CACHE_KEY);
   if (cached2 && Array.isArray(cached2)) return cached2;
-  const rows = await db.select().from(discoveryRules).where(eq7(discoveryRules.active, true)).orderBy(asc(discoveryRules.ruleType), asc(discoveryRules.sortOrder), asc(discoveryRules.id));
+  const rows = await db.select().from(discoveryRules).where(eq8(discoveryRules.active, true)).orderBy(asc2(discoveryRules.ruleType), asc2(discoveryRules.sortOrder), asc2(discoveryRules.id));
   const rules = rows.map(rowToRule);
   await kvSet(RULES_CACHE_KEY, rules, RULES_TTL_SECONDS);
   return rules;
@@ -15138,7 +16128,7 @@ async function getActiveDiscoveryRules() {
 async function getInventoryMin() {
   const cached2 = await kvGet(INVENTORY_MIN_CACHE_KEY);
   if (typeof cached2 === "number") return cached2;
-  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq7(pipelineSettings.key, "discovery_inventory_min")).limit(1);
+  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq8(pipelineSettings.key, "discovery_inventory_min")).limit(1);
   const parsed = row.length && row[0] ? parseInt(row[0].value, 10) : 0;
   const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   await kvSet(INVENTORY_MIN_CACHE_KEY, value, INVENTORY_MIN_CACHE_TTL);
@@ -15348,7 +16338,7 @@ __export(discovery_server_exports, {
   triggerDiscoveryRebuild: () => triggerDiscoveryRebuild,
   writeDiscoveryIndexDurable: () => writeDiscoveryIndexDurable
 });
-import { eq as eq8 } from "drizzle-orm";
+import { eq as eq9 } from "drizzle-orm";
 function dialToSubcategory(dial) {
   switch (dial) {
     case "vibrator":
@@ -15620,7 +16610,7 @@ function writeL1Memo(index2, vocab) {
 }
 async function readDiscoveryIndexDurable() {
   try {
-    const [row] = await db.select().from(discoveryIndexPayload).where(eq8(discoveryIndexPayload.version, INDEX_VERSION)).limit(1);
+    const [row] = await db.select().from(discoveryIndexPayload).where(eq9(discoveryIndexPayload.version, INDEX_VERSION)).limit(1);
     if (!row) return null;
     const index2 = row.indexJson;
     const vocab = row.vocabJson;
@@ -15951,7 +16941,7 @@ __export(homepage_payload_server_exports, {
   writeHomepagePayloadA: () => writeHomepagePayloadA,
   writeHomepagePayloadB: () => writeHomepagePayloadB
 });
-import { eq as eq9 } from "drizzle-orm";
+import { eq as eq10 } from "drizzle-orm";
 async function buildHomeContentBlocks() {
   const cmsData = await withTimeout(
     getHomepageSections(),
@@ -16088,7 +17078,7 @@ async function readHomepagePayloadA() {
     console.warn("[homepage-payload] KV read failed, trying Neon:", err2);
   }
   try {
-    const [row] = await db.select().from(homepagePayload).where(eq9(homepagePayload.variant, "a")).limit(1);
+    const [row] = await db.select().from(homepagePayload).where(eq10(homepagePayload.variant, "a")).limit(1);
     if (row && row.version === HOMEPAGE_PAYLOAD_VERSION && row.payload) {
       const payload = row.payload;
       void kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
@@ -16185,7 +17175,7 @@ async function readHomepagePayloadB() {
     console.warn("[homepage-payload:b] KV read failed, trying Neon:", err2);
   }
   try {
-    const [row] = await db.select().from(homepagePayload).where(eq9(homepagePayload.variant, "b")).limit(1);
+    const [row] = await db.select().from(homepagePayload).where(eq10(homepagePayload.variant, "b")).limit(1);
     if (row && row.version === HOMEPAGE_PAYLOAD_B_VERSION && row.payload) {
       const payload = row.payload;
       void kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
@@ -16284,7 +17274,7 @@ __export(deal_rotator_server_exports, {
   rotateDeal: () => rotateDeal,
   transitionToVaultPricing: () => transitionToVaultPricing
 });
-import { eq as eq10, ne, and as and2, isNull, asc as asc2, inArray as inArray2 } from "drizzle-orm";
+import { eq as eq11, ne as ne2, and as and3, isNull, asc as asc3, inArray as inArray3 } from "drizzle-orm";
 function estDate(offsetDays = 0) {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
   return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -16297,7 +17287,7 @@ function pastDealTag(dealDate) {
   return `past-daily-deal-${mm}-${yyyy.slice(2)}`;
 }
 async function getVaultDiscountPct() {
-  const [row] = await db.select().from(pipelineSettings).where(eq10(pipelineSettings.key, "vaultDiscountPct")).limit(1);
+  const [row] = await db.select().from(pipelineSettings).where(eq11(pipelineSettings.key, "vaultDiscountPct")).limit(1);
   const pct = parseFloat(row?.value ?? "25");
   return isNaN(pct) ? 25 : Math.max(5, Math.min(60, pct));
 }
@@ -16353,7 +17343,7 @@ async function transitionToVaultPricing(deal) {
     status: "archived",
     completedAt: /* @__PURE__ */ new Date(),
     vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null
-  }).where(and2(eq10(dealHistory.id, deal.id), eq10(dealHistory.status, "live")));
+  }).where(and3(eq11(dealHistory.id, deal.id), eq11(dealHistory.status, "live")));
   try {
     const { archiveHomepageRailsForDeal: archiveHomepageRailsForDeal2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
     const { archived } = await archiveHomepageRailsForDeal2(deal.shopifyProductId);
@@ -16366,24 +17356,24 @@ async function transitionToVaultPricing(deal) {
 }
 async function activateDeal(deal) {
   if (!deal.shopifyProductId) return;
-  const blockingJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and2(
-    eq10(batchJobs.gatesDealId, deal.id),
-    inArray2(batchJobs.status, ["queued", "submitted", "processing", "applying"])
+  const blockingJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and3(
+    eq11(batchJobs.gatesDealId, deal.id),
+    inArray3(batchJobs.status, ["queued", "submitted", "processing", "applying"])
   ));
   if (blockingJobs.length > 0) {
     console.log(`[deal-rotator] enrichment in flight for deal ${deal.id} \u2014 deferring activation (${blockingJobs.length} blocking job(s))`);
     return;
   }
-  const failedJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and2(eq10(batchJobs.gatesDealId, deal.id), eq10(batchJobs.status, "failed")));
+  const failedJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and3(eq11(batchJobs.gatesDealId, deal.id), eq11(batchJobs.status, "failed")));
   if (failedJobs.length > 0) {
     console.warn(`[deal-rotator] WARN gated enrichment failed for deal ${deal.id}; activating with stale/partial copy (degraded-enrichment path)`);
   }
-  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and2(eq10(dealHistory.id, deal.id), ne(dealHistory.status, "live"))).returning({ id: dealHistory.id });
+  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and3(eq11(dealHistory.id, deal.id), ne2(dealHistory.status, "live"))).returning({ id: dealHistory.id });
   if (claimed.length === 0) {
     console.log(`[deal-rotator] deal ${deal.id} already live \u2014 skipping duplicate activation`);
     return;
   }
-  const anyGatingJob = await db.select({ id: batchJobs.id, status: batchJobs.status }).from(batchJobs).where(eq10(batchJobs.gatesDealId, deal.id)).limit(1);
+  const anyGatingJob = await db.select({ id: batchJobs.id, status: batchJobs.status }).from(batchJobs).where(eq11(batchJobs.gatesDealId, deal.id)).limit(1);
   const skipInlineHero = anyGatingJob.length > 0;
   const numericId = deal.shopifyProductId.replace("gid://shopify/Product/", "");
   await activateShopifyProduct(numericId);
@@ -16473,7 +17463,7 @@ async function activateDeal(deal) {
   await db.update(dealHistory).set({
     activatedAt: /* @__PURE__ */ new Date(),
     dealDate: estDate(0)
-  }).where(eq10(dealHistory.id, deal.id));
+  }).where(eq11(dealHistory.id, deal.id));
   await kvSet(KV_KEYS.dealOfDay, {
     sku: deal.sku,
     title: deal.seoTitle,
@@ -16510,16 +17500,16 @@ async function activateDeal(deal) {
   }
 }
 async function rotateDeal() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq10(dealHistory.status, "live")).limit(1);
+  const [liveDeal] = await db.select().from(dealHistory).where(eq11(dealHistory.status, "live")).limit(1);
   if (liveDeal) {
     await transitionToVaultPricing(liveDeal);
   }
   const [nextDeal] = await db.select().from(dealHistory).where(
-    and2(
-      eq10(dealHistory.status, "queued"),
+    and3(
+      eq11(dealHistory.status, "queued"),
       isNull(dealHistory.completedAt)
     )
-  ).orderBy(asc2(dealHistory.sortOrder)).limit(1);
+  ).orderBy(asc3(dealHistory.sortOrder)).limit(1);
   if (nextDeal) {
     await activateDeal(nextDeal);
     let liveHandle = null;
@@ -16555,7 +17545,7 @@ async function rotateDeal() {
   };
 }
 async function isLiveDealSoldOut() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq10(dealHistory.status, "live")).limit(1);
+  const [liveDeal] = await db.select().from(dealHistory).where(eq11(dealHistory.status, "live")).limit(1);
   if (!liveDeal?.shopifyProductId) return { soldOut: false, dealId: null };
   const numericId = liveDeal.shopifyProductId.replace("gid://shopify/Product/", "");
   let product;
@@ -16584,889 +17574,6 @@ var init_deal_rotator_server = __esm({
     init_shopify_server();
     init_klaviyo_server();
     init_kv_server();
-  }
-});
-
-// app/lib/content-slot.ts
-function contentSlotForDate(d) {
-  const weekday = d.toLocaleDateString("en-US", {
-    timeZone: "America/Los_Angeles",
-    weekday: "long"
-  });
-  const slot = SLOT_BY_WEEKDAY[weekday] ?? ["guides", null];
-  return { weekday, expectedCategory: slot[0], fallbackCategory: slot[1] };
-}
-var SLOT_BY_WEEKDAY;
-var init_content_slot = __esm({
-  "app/lib/content-slot.ts"() {
-    "use strict";
-    SLOT_BY_WEEKDAY = {
-      Monday: ["guides", null],
-      Tuesday: ["real-talk", null],
-      Wednesday: ["guides", null],
-      Thursday: ["podcast-notes", "care"],
-      Friday: ["real-talk", null],
-      Saturday: ["care", null],
-      Sunday: ["comparisons", "wellness-basics"]
-    };
-  }
-});
-
-// app/lib/homepage-team-keys.ts
-var TEAM_KEYS;
-var init_homepage_team_keys = __esm({
-  "app/lib/homepage-team-keys.ts"() {
-    "use strict";
-    TEAM_KEYS = {
-      enabled: "homepage_team_enabled",
-      dailyCents: "homepage_team_daily_cents",
-      buildCents: "homepage_team_build_cents",
-      maxImagesPerDay: "homepage_team_max_images",
-      maxRunsPerDay: "homepage_team_max_runs"
-    };
-  }
-});
-
-// app/lib/team.server.ts
-var team_server_exports = {};
-__export(team_server_exports, {
-  AGENT_EDITOR_APPLY_KINDS: () => AGENT_EDITOR_APPLY_KINDS,
-  AGENT_RETIRE_KINDS: () => AGENT_RETIRE_KINDS,
-  ALLOWED: () => ALLOWED,
-  CLAIMANT_ACTORS: () => CLAIMANT_ACTORS,
-  CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
-  CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
-  REKIND_ACTORS: () => REKIND_ACTORS,
-  REKIND_FROM_KINDS: () => REKIND_FROM_KINDS,
-  REKIND_TO_KINDS: () => REKIND_TO_KINDS,
-  RUN_CLOSE_ACTORS: () => RUN_CLOSE_ACTORS,
-  RUN_CLOSE_KINDS: () => RUN_CLOSE_KINDS,
-  SUGGESTION_LIST_MAX: () => SUGGESTION_LIST_MAX,
-  TEAM_DEFAULTS: () => TEAM_DEFAULTS,
-  TEAM_IDS: () => TEAM_IDS,
-  TERMINAL_TICKET_STATUSES: () => TERMINAL_TICKET_STATUSES,
-  TICKET_STATUSES: () => TICKET_STATUSES,
-  VALVE_KEYS: () => VALVE_KEYS,
-  addSuggestionNote: () => addSuggestionNote,
-  agentRetireSuggestion: () => agentRetireSuggestion,
-  assertTeamAuth: () => assertTeamAuth,
-  buildClaimQuery: () => buildClaimQuery,
-  claimSuggestion: () => claimSuggestion,
-  createAdCampaign: () => createAdCampaign,
-  createDraftSocialPost: () => createDraftSocialPost,
-  createSuggestion: () => createSuggestion,
-  createSuggestionDetailed: () => createSuggestionDetailed,
-  decideAdCampaign: () => decideAdCampaign,
-  decideSuggestion: () => decideSuggestion,
-  expireStaleClaims: () => expireStaleClaims,
-  expireStaleRuns: () => expireStaleRuns,
-  findTransitionRule: () => findTransitionRule,
-  gate: () => gate,
-  getActiveBrief: () => getActiveBrief,
-  getSocialFrequencies: () => getSocialFrequencies,
-  getTeamConfig: () => getTeamConfig,
-  getTicket: () => getTicket,
-  getTodayImageCount: () => getTodayImageCount,
-  getTodayRunCount: () => getTodayRunCount,
-  getTodaySpendCents: () => getTodaySpendCents,
-  getValve: () => getValve,
-  invalidateTeamSettingsCache: () => invalidateTeamSettingsCache,
-  isRunInProgress: () => isRunInProgress,
-  isTeamId: () => isTeamId,
-  isTicketActor: () => isTicketActor,
-  isTicketStatus: () => isTicketStatus,
-  isTransitionAllowed: () => isTransitionAllowed,
-  listAdCampaigns: () => listAdCampaigns,
-  listBriefs: () => listBriefs,
-  listCalendar: () => listCalendar,
-  listRecentEvents: () => listRecentEvents,
-  listRecentRuns: () => listRecentRuns,
-  listRunEvents: () => listRunEvents,
-  listSocialPosts: () => listSocialPosts,
-  listSuggestions: () => listSuggestions,
-  markSuggestion: () => markSuggestion,
-  proposeCalendarEvent: () => proposeCalendarEvent,
-  publishBrief: () => publishBrief,
-  recordEvent: () => recordEvent,
-  rekindSuggestion: () => rekindSuggestion,
-  rescheduleSocialPost: () => rescheduleSocialPost,
-  retireSuggestion: () => retireSuggestion,
-  reviewSocialPost: () => reviewSocialPost,
-  startRun: () => startRun,
-  teamKeys: () => teamKeys,
-  transitionSuggestion: () => transitionSuggestion,
-  updateRun: () => updateRun
-});
-import { timingSafeEqual } from "node:crypto";
-import { and as and3, asc as asc3, desc, eq as eq11, gte, inArray as inArray3, lt, lte, ne as ne2, sql as sql3 } from "drizzle-orm";
-function assertTeamAuth(request) {
-  const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
-  const auth = request.headers.get("authorization") ?? "";
-  const provided = request.headers.get("x-team-secret") ?? auth.replace(/^Bearer\s+/i, "");
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  const ok = expected.length > 0 && a.length === b.length && timingSafeEqual(a, b);
-  if (!ok) {
-    throw new Response("Unauthorized", { status: 401 });
-  }
-}
-function num(v, fallback) {
-  if (v == null) return fallback;
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-async function getTeamConfig(team) {
-  return cached(`team:cfg:${team}`, SETTINGS_CACHE_TTL_SEC, () => getTeamConfigUncached(team));
-}
-async function getTeamConfigUncached(team) {
-  const keys = teamKeys(team);
-  const rows = await db.select().from(pipelineSettings).where(sql3`${pipelineSettings.key} LIKE ${team + "_team_%"}`);
-  const map = new Map(rows.map((r) => [r.key, r.value]));
-  const d = TEAM_DEFAULTS[team];
-  const cfg = {
-    team,
-    enabled: (map.get(keys.enabled) ?? "false") === "true",
-    dailyCents: num(map.get(keys.dailyCents), d.dailyCents),
-    maxRunsPerDay: num(map.get(keys.maxRunsPerDay), d.maxRunsPerDay),
-    autoApproveSuggestions: (map.get(keys.autoApproveSuggestions) ?? "false") === "true"
-  };
-  if (team === "homepage") {
-    cfg.buildCents = num(map.get(TEAM_KEYS.buildCents), 1e4);
-    cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12);
-  } else if (team === "content") {
-    cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT);
-  } else if (team === "video") {
-    cfg.maxCostCents = num(map.get(VIDEO_EXTRA_KEYS.maxCostCents), VIDEO_MAX_COST_CENTS_DEFAULT);
-  }
-  return cfg;
-}
-async function getValve(key) {
-  return cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
-    const [row] = await db.select().from(pipelineSettings).where(eq11(pipelineSettings.key, key)).limit(1);
-    return row?.value === "true";
-  });
-}
-async function invalidateTeamSettingsCache() {
-  invalidateCache("team:cfg:");
-  invalidateCache("team:valve:");
-  const keys = [
-    ...TEAM_IDS.map((t) => `team:cfg:${t}`),
-    ...Object.values(VALVE_KEYS).map((k) => `team:valve:${k}`)
-  ];
-  await Promise.all(keys.map((k) => kvDel(k)));
-}
-function utcDay() {
-  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-}
-async function counterRead(key, sumFromDb) {
-  const seedKey = `${key}:seededAt`;
-  const [count, seededAt] = await Promise.all([kvGet(key), kvGet(seedKey)]);
-  if (typeof count === "number" && typeof seededAt === "number" && Date.now() - seededAt < SPEND_RESEED_MS) {
-    return count;
-  }
-  const fresh = await sumFromDb();
-  await Promise.all([
-    kvSet(key, fresh, SPEND_KV_TTL_SEC),
-    kvSet(seedKey, Date.now(), SPEND_KV_TTL_SEC)
-  ]);
-  return fresh;
-}
-async function getTodaySpendCents(team) {
-  return counterRead(teamSpendKvKey(team, utcDay()), async () => {
-    const res = await db.execute(
-      sql3`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
-          FROM api_token_log
-          WHERE ts >= current_date AND feature LIKE ${team + "-%"}`
-    );
-    const dollars = Number(res.rows?.[0]?.dollars ?? 0);
-    return Math.round(dollars * 100);
-  });
-}
-async function getTodayRunCount(team, excludeRunId) {
-  const res = await db.execute(
-    excludeRunId == null ? sql3`SELECT COUNT(*)::int AS n FROM homepage_team_runs
-            WHERE started_at >= current_date AND team = ${team}` : sql3`SELECT COUNT(*)::int AS n FROM homepage_team_runs
-            WHERE started_at >= current_date AND team = ${team} AND id <> ${excludeRunId}`
-  );
-  return Number(res.rows?.[0]?.n ?? 0);
-}
-async function getTodayImageCount() {
-  return counterRead(teamImagesKvKey(utcDay()), async () => {
-    const res = await db.execute(
-      sql3`SELECT COALESCE(SUM(request_count), 0)::int AS n
-          FROM api_token_log
-          WHERE ts >= current_date AND feature = 'homepage-images'`
-    );
-    return Number(res.rows?.[0]?.n ?? 0);
-  });
-}
-async function isRunInProgress(team, excludeRunId) {
-  const since = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 6e4);
-  const conditions = [
-    eq11(homepageTeamRuns.team, team),
-    eq11(homepageTeamRuns.status, "running"),
-    sql3`${lastActivityAt} >= ${since}`
-  ];
-  if (excludeRunId !== void 0) conditions.push(ne2(homepageTeamRuns.id, excludeRunId));
-  const [row] = await db.select({ id: homepageTeamRuns.id }).from(homepageTeamRuns).where(and3(...conditions)).limit(1);
-  return !!row;
-}
-async function expireStaleRuns() {
-  const cutoff = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 6e4);
-  await db.update(homepageTeamRuns).set({
-    status: "failed",
-    error: `auto-expired: no recorded activity for ${RUN_IDLE_TIMEOUT_MIN} minutes`,
-    finishedAt: /* @__PURE__ */ new Date()
-  }).where(and3(eq11(homepageTeamRuns.status, "running"), sql3`${lastActivityAt} < ${cutoff}`));
-}
-async function gate(team, excludeRunId) {
-  if (await kvSetNX("team:expire-stale:throttle", String(Date.now()), 300)) {
-    await Promise.all([expireStaleRuns(), expireStaleClaims()]);
-  }
-  const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
-    getTeamConfig(team),
-    getTodaySpendCents(team),
-    getTodayRunCount(team, excludeRunId),
-    team === "homepage" ? getTodayImageCount() : Promise.resolve(0),
-    isRunInProgress(team, excludeRunId),
-    getActiveBriefId(),
-    team === "content" ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(void 0)
-  ]);
-  const remainingCents = Math.max(0, cfg.dailyCents - spentCents);
-  const maxImagesPerDay = cfg.maxImagesPerDay ?? 0;
-  const base = {
-    team,
-    enabled: cfg.enabled,
-    dailyCents: cfg.dailyCents,
-    spentCents,
-    remainingCents,
-    runsToday,
-    maxRunsPerDay: cfg.maxRunsPerDay,
-    imagesToday,
-    maxImagesPerDay,
-    activeBriefId: briefId,
-    ...autopublish !== void 0 ? { valves: { autopublish } } : {},
-    ...team === "content" ? { contentSlot: contentSlotForDate(/* @__PURE__ */ new Date()) } : {}
-  };
-  if (!cfg.enabled) return { ...base, ok: false, reason: "disabled" };
-  if (inProgress) return { ...base, ok: false, reason: "run_in_progress" };
-  if (remainingCents <= 0) return { ...base, ok: false, reason: "over_budget" };
-  if (runsToday >= cfg.maxRunsPerDay) return { ...base, ok: false, reason: "over_run_cap" };
-  if (team === "homepage" && imagesToday >= maxImagesPerDay)
-    return { ...base, ok: false, reason: "over_image_cap" };
-  return { ...base, ok: true };
-}
-async function startRun(team, runType) {
-  const [row] = await db.insert(homepageTeamRuns).values({ team, runType, status: "running" }).returning({ id: homepageTeamRuns.id });
-  return row.id;
-}
-async function updateRun(id, u) {
-  const patch = {};
-  if (u.status) patch["status"] = u.status;
-  if (u.currentPhase !== void 0) patch["currentPhase"] = u.currentPhase;
-  if (u.currentAgent !== void 0) patch["currentAgent"] = u.currentAgent;
-  if (u.summary !== void 0) patch["summary"] = u.summary;
-  if (u.prUrl !== void 0) patch["prUrl"] = u.prUrl;
-  if (u.error !== void 0) patch["error"] = u.error;
-  if (u.finished) patch["finishedAt"] = /* @__PURE__ */ new Date();
-  if (u.incrementAttempt) patch["attemptCount"] = sql3`${homepageTeamRuns.attemptCount} + 1`;
-  if (Object.keys(patch).length === 0) return;
-  await db.update(homepageTeamRuns).set(patch).where(eq11(homepageTeamRuns.id, id));
-}
-async function recordEvent(e) {
-  await db.insert(homepageTeamEvents).values({
-    runId: e.runId,
-    eventType: e.eventType,
-    summary: e.summary,
-    agentRole: e.agentRole ?? null,
-    phase: e.phase ?? null,
-    transcriptRef: e.transcriptRef ?? null
-  });
-}
-async function listRecentRuns(team, limit = 25) {
-  const q = db.select().from(homepageTeamRuns);
-  return (team ? q.where(eq11(homepageTeamRuns.team, team)) : q).orderBy(desc(homepageTeamRuns.startedAt)).limit(limit);
-}
-async function listRunEvents(runId) {
-  return db.select().from(homepageTeamEvents).where(eq11(homepageTeamEvents.runId, runId)).orderBy(homepageTeamEvents.ts);
-}
-async function listRecentEvents(team, sinceDays = 7, limit = 500) {
-  const since = new Date(Date.now() - sinceDays * 24 * 60 * 6e4);
-  const conditions = [gte(homepageTeamEvents.ts, since)];
-  if (team) conditions.push(eq11(homepageTeamRuns.team, team));
-  return db.select({
-    id: homepageTeamEvents.id,
-    runId: homepageTeamEvents.runId,
-    team: homepageTeamRuns.team,
-    ts: homepageTeamEvents.ts,
-    agentRole: homepageTeamEvents.agentRole,
-    phase: homepageTeamEvents.phase,
-    eventType: homepageTeamEvents.eventType,
-    summary: homepageTeamEvents.summary
-  }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq11(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and3(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
-}
-async function createSuggestion(s) {
-  const res = await createSuggestionDetailed(s);
-  return res.deduped ? 0 : res.id;
-}
-async function createSuggestionDetailed(s) {
-  const actingTeam = s.targetTeam ?? s.team;
-  const autoApprove = await getTeamConfig(actingTeam).then((c) => c.autoApproveSuggestions).catch(() => false);
-  const [row] = await db.insert(homepageTeamSuggestions).values({
-    team: s.team,
-    targetTeam: s.targetTeam ?? null,
-    runId: s.runId ?? null,
-    category: s.category,
-    kind: s.kind ?? "process",
-    suggestion: s.suggestion,
-    estSavingsUsd: String(s.estSavingsUsd ?? 0),
-    cxRisk: s.cxRisk ?? "low",
-    status: autoApprove ? "approved" : "proposed",
-    decidedBy: autoApprove ? "auto" : null,
-    decidedAt: autoApprove ? /* @__PURE__ */ new Date() : null,
-    priority: s.priority ?? 3,
-    dedupeKey: s.dedupeKey ?? null,
-    dueAt: s.dueAt == null ? null : new Date(s.dueAt)
-  }).onConflictDoNothing().returning({ id: homepageTeamSuggestions.id });
-  if (row?.id) return { id: row.id, deduped: false };
-  if (!s.dedupeKey) return { id: 0, deduped: false };
-  const [live] = await db.select({ id: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and3(
-    eq11(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
-    sql3`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
-  )).limit(1);
-  return { id: live?.id ?? 0, deduped: !!live };
-}
-async function listSuggestions(filter = {}) {
-  const conditions = [];
-  if (filter.team) conditions.push(eq11(homepageTeamSuggestions.team, filter.team));
-  if (filter.targetTeam) conditions.push(eq11(homepageTeamSuggestions.targetTeam, filter.targetTeam));
-  if (filter.status) conditions.push(eq11(homepageTeamSuggestions.status, filter.status));
-  if (filter.statuses?.length) {
-    conditions.push(inArray3(homepageTeamSuggestions.status, [...filter.statuses]));
-  }
-  if (filter.kinds?.length) {
-    conditions.push(inArray3(homepageTeamSuggestions.kind, [...filter.kinds]));
-  }
-  if (filter.assignee) conditions.push(eq11(homepageTeamSuggestions.assignee, filter.assignee));
-  if (filter.updatedSince) {
-    conditions.push(gte(homepageTeamSuggestions.updatedAt, filter.updatedSince));
-  }
-  const order = filter.orderBy === "priority" ? [asc3(homepageTeamSuggestions.priority), asc3(homepageTeamSuggestions.createdAt)] : filter.orderBy === "age" ? [asc3(homepageTeamSuggestions.createdAt)] : [desc(homepageTeamSuggestions.createdAt)];
-  const limit = Math.min(SUGGESTION_LIST_MAX, Math.max(1, filter.limit ?? 100));
-  const q = db.select().from(homepageTeamSuggestions);
-  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(...order).limit(limit);
-}
-async function decideSuggestion(id, status) {
-  await db.update(homepageTeamSuggestions).set({ status, decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "proposed")));
-}
-async function retireSuggestion(id) {
-  await db.update(homepageTeamSuggestions).set({ status: "dismissed", decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "approved")));
-}
-async function rekindSuggestion(id, toKind, actor, note) {
-  if (!isTicketActor(actor) || !REKIND_ACTORS.includes(actor)) {
-    throw new Response(`Forbidden: actor '${String(actor)}' may not rekind`, { status: 403 });
-  }
-  if (!REKIND_TO_KINDS.includes(toKind)) {
-    throw new Response(
-      `Bad Request: cannot rekind to '${toKind}' (allowed: ${REKIND_TO_KINDS.join(", ")})`,
-      { status: 400 }
-    );
-  }
-  const [row] = await db.select().from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
-  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
-  if (!REKIND_FROM_KINDS.includes(row.kind ?? "")) {
-    throw new Response(
-      `Conflict: only ${REKIND_FROM_KINDS.join("/")} rows may be rekinded, suggestion ${id} is '${row.kind}'`,
-      { status: 409 }
-    );
-  }
-  if (TERMINAL_TICKET_STATUSES.includes(row.status ?? "")) {
-    throw new Response(`Conflict: suggestion ${id} is ${row.status}`, { status: 409 });
-  }
-  const fromKind = row.kind;
-  const updated = await db.update(homepageTeamSuggestions).set({ kind: toKind, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.kind, fromKind))).returning();
-  if (updated.length === 0) {
-    throw new Response(`Conflict: suggestion ${id} changed underneath the rekind`, { status: 409 });
-  }
-  await addTicketLinks(id, [{
-    kind: "note",
-    ref: `rekind ${fromKind} -> ${toKind} by ${actor}${note ? `: ${note}` : ""}`,
-    state: updated[0].status ?? void 0
-  }]);
-  return updated[0];
-}
-async function agentRetireSuggestion(id, actor, note) {
-  return transitionSuggestion(id, "dismissed", actor, { note });
-}
-async function addSuggestionNote(id, ref) {
-  const [row] = await db.select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status }).from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
-  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
-  await addTicketLinks(id, [{ kind: "note", ref, state: row.status ?? void 0 }]);
-}
-async function markSuggestion(id, status, applyRef) {
-  const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
-  const res = await db.update(homepageTeamSuggestions).set({ status, applyRef, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, allowedFrom))).returning({ id: homepageTeamSuggestions.id });
-  if (res.length === 0) {
-    throw new Response(
-      `Conflict: suggestion ${id} is not in '${allowedFrom}' (agents cannot move rows out of 'proposed')`,
-      { status: 409 }
-    );
-  }
-}
-function isTicketStatus(v) {
-  return typeof v === "string" && TICKET_STATUSES.includes(v);
-}
-function isTicketActor(v) {
-  return typeof v === "string" && (v === "owner" || v === "auto" || v === "system" || AGENT_ACTOR_RE.test(v));
-}
-function findTransitionRule(from, to, actor, ctx = {}) {
-  for (const rule of ALLOWED[from] ?? []) {
-    if (rule.to !== to) continue;
-    const actorOk = rule.actors.some(
-      (a) => a === "assignee" ? !!ctx.assignee && ctx.assignee === actor : a === actor
-    );
-    if (!actorOk) continue;
-    if (rule.kinds && !rule.kinds.includes(ctx.kind ?? "")) continue;
-    return rule;
-  }
-  return null;
-}
-function isTransitionAllowed(from, to, actor, ctx = {}) {
-  return findTransitionRule(from, to, actor, ctx) !== null;
-}
-async function addTicketLinks(id, links) {
-  if (links.length === 0) return;
-  await db.insert(suggestionLinks).values(
-    links.map((l) => ({
-      suggestionId: id,
-      kind: l.kind.slice(0, 12),
-      ref: l.ref,
-      state: l.state ? l.state.slice(0, 16) : null
-    }))
-  );
-}
-async function transitionSuggestion(id, to, actor, opts = {}) {
-  if (!isTicketStatus(to)) {
-    throw new Response(`Bad Request: unknown status '${String(to)}'`, { status: 400 });
-  }
-  if (!isTicketActor(actor)) {
-    throw new Response(`Bad Request: unknown actor '${String(actor)}'`, { status: 400 });
-  }
-  const [row] = await db.select().from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
-  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
-  const from = row.status;
-  const rule = findTransitionRule(from, to, actor, { assignee: row.assignee, kind: row.kind });
-  if (!rule) {
-    throw new Response(
-      `Conflict: '${from}' -> '${to}' is not permitted for actor '${actor}' on suggestion ${id}`,
-      { status: 409 }
-    );
-  }
-  const now = /* @__PURE__ */ new Date();
-  const patch = { status: to, updatedAt: now };
-  if (rule.incrementAttempt || opts.incrementAttempt) {
-    patch["attemptCount"] = sql3`${homepageTeamSuggestions.attemptCount} + 1`;
-  }
-  if (opts.lastError !== void 0) patch["lastError"] = opts.lastError;
-  if (to === "approved") {
-    patch["assignee"] = null;
-    patch["claimedAt"] = null;
-    patch["claimExpiresAt"] = null;
-  }
-  if (to === "verified") {
-    patch["verifiedBy"] = actor;
-    patch["verifiedAt"] = now;
-  }
-  if (from === "proposed" || to === "dismissed") {
-    patch["decidedBy"] = actor;
-    patch["decidedAt"] = now;
-  }
-  if (to === "applied" && !row.applyRef) {
-    const pr = opts.links?.find((l) => l.kind === "pr");
-    if (pr) patch["applyRef"] = pr.ref;
-  }
-  const guards = [eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, from)];
-  if (rule.actors.includes("assignee")) {
-    guards.push(eq11(homepageTeamSuggestions.assignee, actor));
-  }
-  const updated = await db.update(homepageTeamSuggestions).set(patch).where(and3(...guards)).returning();
-  if (updated.length === 0) {
-    throw new Response(
-      `Conflict: suggestion ${id} changed underneath the '${from}' -> '${to}' transition`,
-      { status: 409 }
-    );
-  }
-  const links = [...opts.links ?? []];
-  if (opts.note) links.push({ kind: "note", ref: opts.note, state: to });
-  await addTicketLinks(id, links);
-  return updated[0];
-}
-async function expireStaleClaims() {
-  const res = await db.update(homepageTeamSuggestions).set({
-    status: "approved",
-    assignee: null,
-    claimedAt: null,
-    claimExpiresAt: null,
-    updatedAt: /* @__PURE__ */ new Date()
-  }).where(and3(
-    eq11(homepageTeamSuggestions.status, "in_progress"),
-    lt(homepageTeamSuggestions.claimExpiresAt, /* @__PURE__ */ new Date())
-  )).returning({ id: homepageTeamSuggestions.id });
-  return res.length;
-}
-function buildClaimQuery(c) {
-  const conds = [sql3`c.status = ${c.from}`];
-  if (c.id != null) conds.push(sql3`c.id = ${c.id}`);
-  if (c.filter.kind) conds.push(sql3`c.kind = ${c.filter.kind}`);
-  if (c.filter.team) conds.push(sql3`c.team = ${c.filter.team}`);
-  if (c.filter.targetTeam) conds.push(sql3`c.target_team = ${c.filter.targetTeam}`);
-  conds.push(sql3`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`);
-  return sql3`
-    UPDATE homepage_team_suggestions AS s
-       SET status           = 'in_progress',
-           assignee         = ${c.assignee},
-           claimed_at       = now(),
-           claim_expires_at = now() + make_interval(secs => ${c.leaseSeconds}),
-           updated_at       = now()
-     WHERE s.id = (
-       SELECT c.id
-         FROM homepage_team_suggestions AS c
-        WHERE ${sql3.join(conds, sql3` AND `)}
-        ORDER BY c.priority ASC, c.created_at ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-     )
-    RETURNING s.id AS id`;
-}
-async function claimSuggestion(input, exec = defaultExecutor) {
-  if (!isTicketActor(input.assignee)) {
-    throw new Response(`Bad Request: unknown actor '${String(input.assignee)}'`, { status: 400 });
-  }
-  const from = input.filter?.status ?? "approved";
-  if (!isTicketStatus(from)) {
-    throw new Response(`Bad Request: unknown status '${String(from)}'`, { status: 400 });
-  }
-  if (!isTransitionAllowed(from, "in_progress", input.assignee)) {
-    throw new Response(
-      `Conflict: actor '${input.assignee}' may not claim a '${from}' ticket`,
-      { status: 409 }
-    );
-  }
-  const leaseSeconds = Math.min(
-    CLAIM_LEASE_MAX_SEC,
-    Math.max(60, Math.floor(input.leaseSeconds ?? CLAIM_LEASE_DEFAULT_SEC))
-  );
-  const res = await exec(buildClaimQuery({
-    assignee: input.assignee,
-    leaseSeconds,
-    from,
-    id: input.id,
-    filter: input.filter ?? {}
-  }));
-  const id = Number(res.rows?.[0]?.id ?? 0);
-  return id > 0 ? { empty: false, id } : { empty: true };
-}
-async function getTicket(id) {
-  const [suggestion] = await db.select().from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
-  if (!suggestion) return null;
-  const links = await db.select().from(suggestionLinks).where(eq11(suggestionLinks.suggestionId, id)).orderBy(desc(suggestionLinks.createdAt)).limit(50);
-  const events = suggestion.runId == null ? [] : await db.select().from(homepageTeamEvents).where(eq11(homepageTeamEvents.runId, suggestion.runId)).orderBy(desc(homepageTeamEvents.ts)).limit(20);
-  return { suggestion, links, events };
-}
-async function getActiveBrief() {
-  const [row] = await db.select().from(strategyBriefs).where(eq11(strategyBriefs.status, "active")).orderBy(desc(strategyBriefs.createdAt)).limit(1);
-  return row ?? null;
-}
-async function getActiveBriefId() {
-  return cached(
-    "team:brief:active-id",
-    SETTINGS_CACHE_TTL_SEC,
-    async () => (await getActiveBrief())?.id ?? null
-  );
-}
-async function publishBrief(input) {
-  await db.update(strategyBriefs).set({ status: "superseded" }).where(eq11(strategyBriefs.status, "active"));
-  const [row] = await db.insert(strategyBriefs).values({
-    weekStart: input.weekStart,
-    brief: input.brief,
-    metricsJson: input.metricsJson ?? null,
-    status: "active",
-    createdBy: input.createdBy ?? "store-strategist"
-  }).returning({ id: strategyBriefs.id });
-  invalidateCache("team:brief:");
-  await kvDel("team:brief:active-id");
-  return row.id;
-}
-async function listBriefs(limit = 12) {
-  return db.select().from(strategyBriefs).orderBy(desc(strategyBriefs.createdAt)).limit(limit);
-}
-async function createAdCampaign(c) {
-  const [row] = await db.insert(adCampaigns).values({
-    platform: c.platform,
-    name: c.name,
-    objective: c.objective,
-    plannedDailyCents: c.plannedDailyCents ?? 0,
-    plannedTotalCents: c.plannedTotalCents ?? null,
-    audienceJson: c.audienceJson ?? null,
-    creativeJson: c.creativeJson ?? null,
-    policyCheck: c.policyCheck,
-    runId: c.runId ?? null,
-    status: "proposed"
-  }).returning({ id: adCampaigns.id });
-  return row.id;
-}
-async function listAdCampaigns(status, limit = 50) {
-  const q = db.select().from(adCampaigns);
-  return (status ? q.where(eq11(adCampaigns.status, status)) : q).orderBy(desc(adCampaigns.createdAt)).limit(limit);
-}
-async function decideAdCampaign(id, status) {
-  await db.update(adCampaigns).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(adCampaigns.id, id), eq11(adCampaigns.status, "proposed")));
-}
-async function createDraftSocialPost(p) {
-  const [row] = await db.insert(socialPosts).values({
-    platform: p.platform,
-    postType: p.postType,
-    tweetText: p.tweetText,
-    mediaUrls: p.mediaUrls ?? null,
-    dealHistoryId: p.dealHistoryId ?? null,
-    status: "draft",
-    createdBy: "agent",
-    reviewStatus: "pending_review",
-    scheduledFor: p.scheduledFor ?? null,
-    reworkedFrom: p.reworkedFrom ?? null,
-    videoJobId: p.videoJobId ?? null,
-    posterUrl: p.posterUrl ?? null
-  }).returning({ id: socialPosts.id });
-  return row.id;
-}
-async function listSocialPosts(status, limit = 50, reviewStatus) {
-  const conditions = [];
-  if (status) conditions.push(eq11(socialPosts.status, status));
-  if (reviewStatus) conditions.push(eq11(socialPosts.reviewStatus, reviewStatus));
-  const q = db.select().from(socialPosts);
-  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(desc(socialPosts.createdAt)).limit(limit);
-}
-async function getSocialFrequencies() {
-  const rows = await db.select().from(pipelineSettings).where(sql3`${pipelineSettings.key} LIKE 'social_freq_%'`);
-  const map = new Map(rows.map((r) => [r.key, r.value]));
-  const out = {};
-  for (const p of SOCIAL_PLATFORMS) {
-    out[p] = num(map.get(socialFreqKey(p)), SOCIAL_FREQ_DEFAULTS[p]);
-  }
-  return out;
-}
-async function reviewSocialPost(id, input) {
-  const result = await db.update(socialPosts).set({
-    reviewStatus: input.reviewStatus,
-    feedback: input.feedback ?? null,
-    editedText: input.editedText ?? null,
-    reviewedBy: input.reviewedBy,
-    reviewedAt: /* @__PURE__ */ new Date()
-  }).where(and3(eq11(socialPosts.id, id), ne2(socialPosts.status, "posted"))).returning({ id: socialPosts.id });
-  return result.length > 0;
-}
-async function rescheduleSocialPost(id, scheduledFor) {
-  await db.update(socialPosts).set({ scheduledFor }).where(eq11(socialPosts.id, id));
-}
-async function listCalendar(from, to) {
-  const conditions = [];
-  if (from) conditions.push(gte(marketingCalendar.eventDate, from));
-  if (to) conditions.push(lte(marketingCalendar.eventDate, to));
-  const q = db.select().from(marketingCalendar);
-  return (conditions.length ? q.where(and3(...conditions)) : q).orderBy(marketingCalendar.eventDate).limit(200);
-}
-async function proposeCalendarEvent(input) {
-  const [row] = await db.insert(marketingCalendar).values({
-    eventDate: input.eventDate,
-    name: input.name,
-    type: input.type ?? "promo",
-    theme: input.theme ?? null,
-    status: "planned"
-  }).returning({ id: marketingCalendar.id });
-  return row.id;
-}
-var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
-var init_team_server = __esm({
-  "app/lib/team.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_content_slot();
-    init_homepage_team_keys();
-    init_kv_server();
-    init_team_keys();
-    init_schema();
-    init_team_keys();
-    RUN_IDLE_TIMEOUT_MIN = 240;
-    lastActivityAt = sql3`GREATEST(
-  ${homepageTeamRuns.startedAt},
-  COALESCE(
-    (SELECT MAX(${homepageTeamEvents.ts}) FROM ${homepageTeamEvents}
-      WHERE ${homepageTeamEvents.runId} = ${homepageTeamRuns.id}),
-    ${homepageTeamRuns.startedAt}
-  )
-)`;
-    SETTINGS_CACHE_TTL_SEC = 60;
-    SPEND_KV_TTL_SEC = 26 * 3600;
-    SPEND_RESEED_MS = 15 * 6e4;
-    SUGGESTION_LIST_MAX = 200;
-    REKIND_FROM_KINDS = ["process"];
-    REKIND_TO_KINDS = ["instructions", "code"];
-    REKIND_ACTORS = ["owner", "agent:agent-editor"];
-    TICKET_STATUSES = [
-      "proposed",
-      "approved",
-      "in_progress",
-      "pr_open",
-      "in_review",
-      "verified",
-      "applied",
-      "blocked",
-      "dismissed"
-    ];
-    TERMINAL_TICKET_STATUSES = ["applied", "dismissed"];
-    AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/;
-    AGENT_EDITOR_APPLY_KINDS = ["instructions", "agent-def", "config"];
-    CLAIMANT_ACTORS = ["agent:rr7-engineer", "agent:agent-editor"];
-    AGENT_RETIRE_KINDS = ["process", "strategy", "program"];
-    RUN_CLOSE_ACTORS = [
-      "agent:homepage-orchestrator",
-      "agent:content-writer",
-      "agent:social-media-manager",
-      "agent:product-manager",
-      "agent:store-strategist"
-    ];
-    RUN_CLOSE_KINDS = ["process", "strategy"];
-    OWNER_DISMISS = { to: "dismissed", actors: ["owner"] };
-    ALLOWED = {
-      proposed: [
-        { to: "approved", actors: ["owner", "auto"] },
-        OWNER_DISMISS
-      ],
-      approved: [
-        { to: "in_progress", actors: CLAIMANT_ACTORS },
-        // A daily routine executed the ask in this run: close it so it is not
-        // re-read tomorrow. Operational kinds only.
-        { to: "applied", actors: RUN_CLOSE_ACTORS, kinds: RUN_CLOSE_KINDS },
-        // agent-editor's hygiene pass retiring a row with no executor. Kinds are
-        // fenced so it can never dismiss the instruction rows aimed at itself.
-        { to: "dismissed", actors: ["agent:agent-editor"], kinds: AGENT_RETIRE_KINDS },
-        OWNER_DISMISS
-      ],
-      in_progress: [
-        { to: "pr_open", actors: ["assignee"] },
-        { to: "blocked", actors: ["assignee", "system"] },
-        // Lease expiry releases the ticket back onto the unassigned queue.
-        { to: "approved", actors: ["system"] },
-        OWNER_DISMISS
-      ],
-      pr_open: [
-        { to: "in_review", actors: ["agent:qa-reviewer"] },
-        // The legacy agent-editor docs path, preserved verbatim.
-        { to: "applied", actors: ["agent:agent-editor"], kinds: AGENT_EDITOR_APPLY_KINDS },
-        OWNER_DISMISS
-      ],
-      in_review: [
-        { to: "verified", actors: ["agent:qa-reviewer"] },
-        // FAIL bounce: back to the assignee with a reason, one attempt spent.
-        { to: "in_progress", actors: ["agent:qa-reviewer"], incrementAttempt: true },
-        OWNER_DISMISS
-      ],
-      verified: [
-        // Release engine only, post-merge and post-smoke.
-        { to: "applied", actors: ["system"] },
-        // Merge, deploy, or smoke failed: bounce and spend an attempt.
-        { to: "in_progress", actors: ["system"], incrementAttempt: true },
-        OWNER_DISMISS
-      ],
-      blocked: [
-        { to: "approved", actors: ["owner", "system"] },
-        OWNER_DISMISS
-      ],
-      applied: [],
-      dismissed: []
-    };
-    CLAIM_LEASE_DEFAULT_SEC = 1200;
-    CLAIM_LEASE_MAX_SEC = 6 * 3600;
-    defaultExecutor = async (query) => await db.execute(query);
-  }
-});
-
-// app/lib/detection-tickets.server.ts
-var detection_tickets_server_exports = {};
-__export(detection_tickets_server_exports, {
-  MAX_DEDUPE_KEY_LENGTH: () => MAX_DEDUPE_KEY_LENGTH,
-  fileDetectionTicket: () => fileDetectionTicket,
-  hashToken: () => hashToken,
-  makeDedupeKey: () => makeDedupeKey,
-  priorityFromSeverity: () => priorityFromSeverity
-});
-function priorityFromSeverity(severity) {
-  return SEVERITY_PRIORITY[severity] ?? 3;
-}
-function hashToken(input) {
-  let h = 5381;
-  for (let i = 0; i < input.length; i++) {
-    h = (h << 5) + h + input.charCodeAt(i) >>> 0;
-  }
-  return h.toString(36);
-}
-function slugPart(part) {
-  return part.toLowerCase().replace(/[^a-z0-9._/-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
-}
-function makeDedupeKey(...parts) {
-  const joined = parts.filter((p) => p !== null && p !== void 0 && String(p).length > 0).map((p) => slugPart(String(p))).filter((p) => p.length > 0).join(":");
-  if (joined.length <= MAX_DEDUPE_KEY_LENGTH) return joined;
-  const suffix = `~${hashToken(joined)}`;
-  return `${joined.slice(0, MAX_DEDUPE_KEY_LENGTH - suffix.length)}${suffix}`;
-}
-async function fileDetectionTicket(input) {
-  try {
-    const id = await createSuggestion({
-      team: "homepage",
-      targetTeam: input.targetTeam ?? "homepage",
-      category: input.category ?? "other",
-      kind: input.kind ?? "code",
-      suggestion: input.suggestion,
-      cxRisk: input.priority <= 2 ? "high" : "low",
-      priority: input.priority,
-      dedupeKey: input.dedupeKey
-    });
-    if (!id) {
-      console.info(`[${input.detector}] ticket deduped on "${input.dedupeKey}"`);
-      return 0;
-    }
-    const links = (input.links ?? []).filter((l) => l.ref);
-    if (links.length > 0) {
-      await db.insert(suggestionLinks).values(
-        links.map((l) => ({
-          suggestionId: id,
-          kind: l.kind.slice(0, 12),
-          ref: l.ref,
-          state: l.state ? l.state.slice(0, 16) : null
-        }))
-      );
-    }
-    console.info(`[${input.detector}] filed ticket #${id} (${input.dedupeKey}, P${input.priority})`);
-    return id;
-  } catch (err2) {
-    console.error(`[${input.detector}] filing ticket "${input.dedupeKey}" failed (ignored):`, err2);
-    return 0;
-  }
-}
-var MAX_DEDUPE_KEY_LENGTH, SEVERITY_PRIORITY;
-var init_detection_tickets_server = __esm({
-  "app/lib/detection-tickets.server.ts"() {
-    "use strict";
-    init_team_server();
-    init_db_server();
-    init_schema();
-    MAX_DEDUPE_KEY_LENGTH = 64;
-    SEVERITY_PRIORITY = {
-      P0: 1,
-      P1: 2,
-      P2: 3,
-      P3: 4
-    };
   }
 });
 
@@ -17902,113 +18009,6 @@ var init_storefront_home_server = __esm({
   }
 });
 
-// app/lib/twilio.server.ts
-async function sendSms(to, body) {
-  const sid = process.env["TWILIO_ACCOUNT_SID"];
-  const token = process.env["TWILIO_AUTH_TOKEN"];
-  const from = process.env["TWILIO_PHONE_NUMBER"];
-  if (!sid || !token || !from) throw new Error("Twilio env vars not set");
-  const auth = Buffer.from(`${sid}:${token}`).toString("base64");
-  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({ To: to, From: from, Body: body }).toString()
-  });
-  if (!res.ok) {
-    const err2 = await res.text().catch(() => "");
-    throw new Error(`Twilio SMS send failed (${res.status}): ${err2}`);
-  }
-  const json2 = await res.json();
-  return json2.sid;
-}
-var init_twilio_server = __esm({
-  "app/lib/twilio.server.ts"() {
-    "use strict";
-  }
-});
-
-// app/lib/owner-alerts.server.ts
-var owner_alerts_server_exports = {};
-__export(owner_alerts_server_exports, {
-  escapeHtml: () => escapeHtml,
-  ownerAlertEmails: () => ownerAlertEmails,
-  sendOwnerEmail: () => sendOwnerEmail,
-  sendOwnerSms: () => sendOwnerSms
-});
-function ownerAlertEmails() {
-  const raw = process.env["OWNER_ALERT_EMAILS"];
-  if (!raw) return DEFAULT_RECIPIENTS;
-  const list = raw.split(",").map((s) => s.trim()).filter(Boolean);
-  return list.length > 0 ? list : DEFAULT_RECIPIENTS;
-}
-function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-async function sendOwnerEmail(subject, html, opts = {}) {
-  const host = process.env["ZOHO_SMTP_HOST"] ?? "smtp.zoho.com";
-  const port2 = parseInt(process.env["ZOHO_SMTP_PORT"] ?? "465", 10);
-  const user = process.env["ZOHO_SMTP_USER"];
-  const pass = process.env["ZOHO_SMTP_PASS"];
-  const from = process.env["EMAIL_FROM"] ?? "hello@xdipx.com";
-  if (!user || !pass) {
-    console.warn("[owner-alerts] ZOHO_SMTP_USER or ZOHO_SMTP_PASS not set. Skipping email send.");
-    return { sent: false, error: "SMTP credentials not configured" };
-  }
-  let nm = null;
-  try {
-    nm = await import("nodemailer");
-    nm = nm?.default ?? nm;
-  } catch (err2) {
-    console.warn("[owner-alerts] nodemailer could not be loaded. Skipping email send.", err2);
-    return { sent: false, error: `nodemailer could not be loaded: ${String(err2)}` };
-  }
-  try {
-    const transporter = nm.createTransport({
-      host,
-      port: port2,
-      secure: port2 === 465,
-      auth: { user, pass }
-    });
-    await transporter.sendMail({
-      from: `"${opts.fromName ?? "xdipx ops"}" <${from}>`,
-      to: ownerAlertEmails().join(", "),
-      subject,
-      html
-    });
-    return { sent: true };
-  } catch (err2) {
-    const msg = err2 instanceof Error ? err2.message : String(err2);
-    console.error("[owner-alerts] SMTP send failed:", msg);
-    return { sent: false, error: msg };
-  }
-}
-async function sendOwnerSms(body) {
-  const to = process.env["OWNER_ALERT_PHONE"];
-  if (!to) {
-    console.warn("[owner-alerts] OWNER_ALERT_PHONE not set. Skipping SMS.");
-    return { sent: false, error: "OWNER_ALERT_PHONE not set" };
-  }
-  try {
-    await sendSms(to, body.length > 320 ? `${body.slice(0, 317)}...` : body);
-    return { sent: true };
-  } catch (err2) {
-    const msg = err2 instanceof Error ? err2.message : String(err2);
-    console.error("[owner-alerts] SMS send failed:", msg);
-    return { sent: false, error: msg };
-  }
-}
-var DEFAULT_RECIPIENTS;
-var init_owner_alerts_server = __esm({
-  "app/lib/owner-alerts.server.ts"() {
-    "use strict";
-    init_twilio_server();
-    DEFAULT_RECIPIENTS = ["mike@xdipx.com", "mikebayard@me.com"];
-  }
-});
-
 // app/lib/homepage-healthcheck.server.ts
 var homepage_healthcheck_server_exports = {};
 __export(homepage_healthcheck_server_exports, {
@@ -18350,6 +18350,10 @@ async function renderTruth(opts = {}) {
     }
     if (fileTickets) {
       result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate);
+      const changed = Object.keys(fingerprint).filter(
+        (slot) => fingerprint[slot] !== "" && !sameSlots.includes(slot)
+      );
+      await closeStaleSamenessTickets(changed, today);
     }
     await persistLatestRenderTruth(result);
     return result;
@@ -18402,6 +18406,33 @@ The merchandise routine's freshness rule designates this slot as must-change dai
     );
   }
   return ids;
+}
+async function closeStaleSamenessTickets(changedSlots, day) {
+  if (changedSlots.length === 0) return;
+  try {
+    const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
+    const { homepageTeamSuggestions: homepageTeamSuggestions2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const { and: and10, eq: eq29, inArray: inArray9, sql: sql19 } = await import("drizzle-orm");
+    const { makeDedupeKey: makeDedupeKey2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+    const keys = changedSlots.map((s) => makeDedupeKey2("sameness", s));
+    const closed = await db2.update(homepageTeamSuggestions2).set({
+      status: "applied",
+      updatedAt: /* @__PURE__ */ new Date(),
+      lastError: null,
+      suggestion: sql19`${homepageTeamSuggestions2.suggestion} || ${`
+
+Resolved ${day}: the slot changed, so the freshness rule is satisfied. Closed automatically by /cron/homepage-healthcheck.`}`
+    }).where(and10(
+      inArray9(homepageTeamSuggestions2.dedupeKey, keys),
+      eq29(homepageTeamSuggestions2.kind, "process"),
+      inArray9(homepageTeamSuggestions2.status, ["proposed", "approved"])
+    )).returning({ id: homepageTeamSuggestions2.id });
+    if (closed.length > 0) {
+      console.log(`[render-truth] closed ${closed.length} resolved sameness ticket(s): ${closed.map((c) => `#${c.id}`).join(", ")}`);
+    }
+  } catch (err2) {
+    console.warn("[render-truth] sameness ticket close failed (ignored)", err2);
+  }
 }
 async function openHealthcheckIssue(title, body) {
   const token = process.env["GITHUB_TOKEN"];
@@ -30472,14 +30503,62 @@ import { Router } from "express";
 import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 
 // server/cron.pricing-batch-recompute.ts
-async function handlePricingBatchRecompute(_req, res) {
+var EXPECTED_MIN_PRODUCTS = 800;
+async function handlePricingBatchRecompute(req, res) {
+  const body = req.body ?? {};
+  const isCatchup = body.trigger === "batch_catchup" || String(req.query["trigger"] ?? "") === "batch_catchup";
+  const trigger = isCatchup ? "batch_catchup" : "batch";
   try {
     const { recomputeCatalog: recomputeCatalog2 } = await Promise.resolve().then(() => (init_pricing_apply_v2_server(), pricing_apply_v2_server_exports));
-    const result = await recomputeCatalog2({ trigger: "batch" });
-    res.json({ ok: true, ...result });
+    const result = await recomputeCatalog2({ trigger });
+    if (result.total > 0 && result.total < EXPECTED_MIN_PRODUCTS) {
+      console.warn(
+        `[cron:pricing-batch-recompute] only ${result.total} products considered (expected >= ${EXPECTED_MIN_PRODUCTS})`
+      );
+    }
+    res.json({ ok: true, trigger, ...result });
   } catch (err2) {
     console.error("[cron:pricing-batch-recompute]", err2);
-    res.status(500).json({ error: String(err2) });
+    await alertPricingFailure(err2, trigger);
+    res.status(500).json({ error: String(err2), trigger });
+  }
+}
+async function alertPricingFailure(err2, trigger) {
+  const detail = err2 instanceof Error ? `${err2.message}
+${err2.stack ?? ""}` : String(err2);
+  try {
+    const { Sentry: Sentry2 } = await Promise.resolve().then(() => (init_sentry_server(), sentry_server_exports));
+    Sentry2.captureException(
+      err2 instanceof Error ? err2 : new Error(`pricing batch recompute failed: ${detail}`),
+      { tags: { cron: "pricing-batch-recompute", severity: "P1", trigger } }
+    );
+  } catch (e) {
+    console.error("[cron:pricing-batch-recompute] Sentry capture failed (ignored):", e);
+  }
+  try {
+    const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2, priorityFromSeverity: priorityFromSeverity2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+    await fileDetectionTicket2({
+      detector: "pricing-batch",
+      // Undated: one open conversation until the recompute is healthy again.
+      dedupeKey: makeDedupeKey2("pricing", "batch-recompute"),
+      priority: priorityFromSeverity2("P1"),
+      category: "other",
+      kind: "code",
+      suggestion: "The pricing batch recompute (/cron/pricing-batch-recompute, 07:00 UTC) threw and wrote no pricing rows.\n\nEvery product keeps whatever price it already had, and the pricing-ops sweep can only catch up once per day.\n\nError:\n" + detail.slice(0, 1200)
+    });
+  } catch (e) {
+    console.error("[cron:pricing-batch-recompute] ticket filing failed (ignored):", e);
+  }
+  try {
+    const { sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+    await sendOwnerEmail2(
+      "[P1] xdipx pricing batch recompute failed",
+      `<p>The ${trigger === "batch_catchup" ? "catch-up" : "07:00 UTC scheduled"} pricing recompute threw before writing any rows.</p>
+       <pre style="font-family:monospace;white-space:pre-wrap;font-size:12px;">${escapeHtml2(detail.slice(0, 1500))}</pre>
+       <p>Prices are unchanged from the last successful run. The daily pricing sweep will attempt one catch-up.</p>`
+    );
+  } catch (e) {
+    console.error("[cron:pricing-batch-recompute] owner email failed (ignored):", e);
   }
 }
 

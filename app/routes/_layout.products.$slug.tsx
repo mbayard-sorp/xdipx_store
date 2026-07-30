@@ -33,6 +33,7 @@ import { getCartIdFromCookie } from '~/lib/cart.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getCart } from '~/lib/shopify.server'
 import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
+import { isCrawlerRequest } from '~/lib/crawler-ua.server'
 import { parseBrowseCookie, buildBrowseCookie } from '~/lib/browse-history.server'
 // EmmaContextualAside / Skeleton no longer used — Emma's take now lives inside
 // the SEO summary grid via EmmaTakeBody (defined below).
@@ -315,7 +316,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const cartId = getCartIdFromCookie(request)
   const previousBrowseIds = parseBrowseCookie(request)
   const otherBrowseIds = previousBrowseIds.filter(id => id !== deal.shopifyProductId).slice(0, 4)
-  const hasPersonalization = !!cartId || otherBrowseIds.length > 0 || customerGid !== null
+  // Crawlers are served the static aside above and nothing more. The browse
+  // history that makes a visitor look personalizable comes from a cookie this
+  // very loader sets, so a cookie-retaining crawler accumulates one and starts
+  // qualifying: one overnight catalog walk on 2026-07-21 spent 3,566 Haiku
+  // calls across 2,709 products, and this surface became ~47% of all metered
+  // API spend on a site seeing ~26 human sessions a week. Skipping it costs a
+  // crawler nothing, since the stable static aside is the copy that should be
+  // indexed anyway.
+  const looksAutomated = isCrawlerRequest(request)
+  const hasPersonalization =
+    !looksAutomated && (!!cartId || otherBrowseIds.length > 0 || customerGid !== null)
 
   const emmaAsidePromise: Promise<EmmaAsideResult> | null = hasPersonalization
     ? (async (): Promise<EmmaAsideResult> => {
