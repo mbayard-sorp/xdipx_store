@@ -31,6 +31,12 @@ export function buildBrowseCookie(currentId: string, previousIds: string[]): str
     path: '/',
     sameSite: 'lax',
     secure: process.env['NODE_ENV'] === 'production',
-    maxAge: 60 * 60 * 24 * 30,       // 30 days
+    // 7 days, not 30. This cookie is what qualifies a visitor for a paid Emma
+    // generation on the PDP, so its lifetime is a spend surface: a client that
+    // retains it farms personalization for as long as it lasts, which is how a
+    // single overnight catalog walk on 2026-07-21 stayed "personalized" across
+    // 2,709 products. A week covers a real shopper returning to compare, and
+    // recency is what makes browse context worth anything in the copy anyway.
+    maxAge: 60 * 60 * 24 * 7,
   })
 }

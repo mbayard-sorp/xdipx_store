@@ -33,8 +33,9 @@ import { getCartIdFromCookie } from '~/lib/cart.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getCart } from '~/lib/shopify.server'
 import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
-import { isCrawlerRequest } from '~/lib/crawler-ua.server'
+import { isCrawlerRequest, qualifiesForPaidAside } from '~/lib/crawler-ua.server'
 import { parseBrowseCookie, buildBrowseCookie } from '~/lib/browse-history.server'
+import { checkRateLimit } from '~/lib/rate-limit.server'
 // EmmaContextualAside / Skeleton no longer used — Emma's take now lives inside
 // the SEO summary grid via EmmaTakeBody (defined below).
 import { getFallbackAside } from '~/lib/emma-aside-templates'
@@ -320,13 +321,34 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // history that makes a visitor look personalizable comes from a cookie this
   // very loader sets, so a cookie-retaining crawler accumulates one and starts
   // qualifying: one overnight catalog walk on 2026-07-21 spent 3,566 Haiku
-  // calls across 2,709 products, and this surface became ~47% of all metered
-  // API spend on a site seeing ~26 human sessions a week. Skipping it costs a
-  // crawler nothing, since the stable static aside is the copy that should be
-  // indexed anyway.
-  const looksAutomated = isCrawlerRequest(request)
-  const hasPersonalization =
-    !looksAutomated && (!!cartId || otherBrowseIds.length > 0 || customerGid !== null)
+  // calls across 2,709 products, and this surface became roughly a quarter of
+  // all metered API spend on a site seeing ~26 human sessions a week. Skipping
+  // it costs a crawler nothing, since the stable static aside is the copy that
+  // should be indexed anyway.
+  //
+  // Three independent gates, because each one alone is defeatable. The
+  // user-agent check loses to a spoofed Chrome UA — and it did: the same
+  // burst pattern continued after the UA gate deployed on 2026-07-29. The
+  // browse-count threshold is 2, not 1, because a single retained cookie used
+  // to qualify a client on its second page, which is exactly the shape of a
+  // catalog walk. The IP rate limit is the same primitive every sibling Emma
+  // surface already uses (api.emma-cart, api.emma-tagline, api.emma-discovery);
+  // this loader was the one paid Emma surface with no IP gate at all.
+  //
+  // None of these is the guarantee. checkRateLimit fails open on a KV error and
+  // no-ops entirely without KV configured, so the hard stop on the bill remains
+  // DAILY_BUDGET_CEIL in emma-aside.server.ts.
+  const wantsPersonalization = qualifiesForPaidAside({
+    looksAutomated: isCrawlerRequest(request),
+    hasCart:        !!cartId,
+    browseCount:    otherBrowseIds.length,
+    isLoggedIn:     customerGid !== null,
+  })
+  // Only spend a KV round-trip on requests that would otherwise generate.
+  const withinRate = wantsPersonalization
+    ? (await checkRateLimit(request, 'emma-aside', 12, 3600)).ok
+    : false
+  const hasPersonalization = wantsPersonalization && withinRate
 
   const emmaAsidePromise: Promise<EmmaAsideResult> | null = hasPersonalization
     ? (async (): Promise<EmmaAsideResult> => {
