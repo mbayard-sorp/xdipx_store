@@ -332,24 +332,44 @@ em.brand {
    map of what is live today so the next stacking change can reason about
    the whole page instead of guessing. Keep it updated when you add or move
    a fixed-position element; a full token migration is a separate ticket.
+   Values below are the storefront stacking context (_layout.tsx and its
+   children); admin routes (`admin.tsx`) never render alongside the
+   storefront shell, so admin's own z-[100]/[200]/[300] modal layers are a
+   separate context and are not listed here.
 
-   40  MegaMenu backdrop (Navbar), EmmaSidekick mobile launcher,
-       AskEmmaRail mobile backdrop, admin modal backdrops
+   40  MegaMenu backdrop (Navbar, desktop dropdown), EmmaSidekick mobile
+       launcher, AskEmmaRail mobile backdrop
    50  Most modals/drawers/toasts (default Tailwind z-50): ReadingProgress,
-       ConfirmDialog, MegaMenu panel, admin dialogs, ReviewDrawer
-   54  PDP sticky mobile buy bar (_layout.products.$slug.tsx) -- must sit
-       below the mobile tab bar (55) so the tab bar always wins where they
-       could ever overlap
-   55  MobileTabBar / MobileExploreMenu tab bar (bottom nav, 56px + safe
-       area) -- the one nav that is always on screen on mobile
-   56  CookieConsent banner -- deliberately above the tab bar and the buy
-       bar so it is never visually clipped by either; its own buttons must
-       always be fully tappable
+       ConfirmDialog, Toast (default variant), ReviewDrawer, AskEmmaRail
+       panel, MegaMenu panel (desktop)
+   54  PDP sticky mobile buy bar (_layout.products.$slug.tsx) and
+       MobileExploreMenu's dimming backdrop -- tied on purpose. The
+       backdrop mounts after the route Outlet in _layout.tsx, so at equal
+       z-index it still paints on top and dims the buy bar. Both must stay
+       below the tab bar (55).
+   55  MobileExploreMenu's own bottom tab bar (bottom nav, 56px + safe
+       area) -- the one nav always on screen on mobile. AskEmmaWidget's
+       floating launcher button is also z-[55], offset further up the
+       screen (bottom-[120px]) so the two never spatially overlap.
+       NOTE: MobileTabBar.tsx defines its own z-[55] tab bar but is dead
+       code -- not imported anywhere in the app -- do not treat it as live
+       when reasoning about the real stacking order.
+   56  MobileExploreMenu's category drill-down flyout dialog, which pops
+       up above the tab bar when a tab is tapped
+   57  CookieConsent banner -- deliberately above both the tab bar (55)
+       and MobileExploreMenu's flyout dialog (56) so it is never visually
+       clipped by either, whichever the user is interacting with; its own
+       buttons must always be fully tappable
    58  AccountMobileTabs (account area only)
-   59  AccountMobileHeader, Navbar mobile-menu backdrop
-   60  Navbar (sticky header), CartDrawer, AskEmmaWidget panel, search
-       drawers (_layout.search.tsx, _layout.view-all.tsx), Toast (center)
-   65  Navbar mobile-menu backdrop (above the sticky header)
-   66  Navbar mobile-menu panel
+   59  AccountMobileHeader (account area only), CartDrawer's own backdrop
+       (Navbar.tsx, cart-open state) -- unrelated components, coincidental
+       tie; they never render at the same time
+   60  Navbar (sticky header), CartDrawer panel, AskEmmaWidget panel,
+       Toast (center variant), search drawers (_layout.search.tsx,
+       _layout.view-all.tsx)
+   65  Navbar mobile hamburger-menu backdrop (drawer-open state, above the
+       sticky header)
+   66  Navbar mobile hamburger-menu panel
    70  Navbar account dropdown
+   80  SearchBar desktop results dropdown and mobile search overlay
    ──────────────────────────────────────────────────────────────────── */

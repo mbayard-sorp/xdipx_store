@@ -46,9 +46,11 @@ export function CookieConsent() {
       // bottom offset clears the fixed mobile tab bar (56px + safe-area,
       // see MobileExploreMenu z-[55]) with an 16px gap, instead of the old
       // bottom-4 which sat the card's own buttons half behind the nav.
-      // z-[56] sits just above the tab bar so the banner (and its buttons)
-      // are never occluded; see the z-index scale note in app.css.
-      className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] left-4 right-4 md:bottom-4 md:left-auto md:right-6 md:max-w-sm z-[56] bg-ink text-white rounded-2xl p-5 shadow-2xl fade-in"
+      // z-[57] sits above both the tab bar (55) and MobileExploreMenu's
+      // own category flyout dialog (56) so the banner and its buttons are
+      // never occluded, however the user is interacting with the bottom
+      // nav; see the z-index scale note in app.css.
+      className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] left-4 right-4 md:bottom-4 md:left-auto md:right-6 md:max-w-sm z-[57] bg-ink text-white rounded-2xl p-5 shadow-2xl fade-in"
       role="dialog"
       aria-modal="true"
       aria-label="Cookie consent"
