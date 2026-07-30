@@ -58,6 +58,13 @@ describe('matchProtectedGlobs', () => {
     ['package.json', 'dependencies'],
     ['package-lock.json', 'lockfile'],
     ['server/cron.ts', 'cron auth block'],
+    // The handler, not just the auth block that admits callers to it. This was
+    // unprotected while the exact-name entry above claimed to cover "who can
+    // trigger every scheduled job". The second entry is a name that does not
+    // exist yet, asserted on purpose: the point of the glob over the exact
+    // filename is that the NEXT handler is protected the day it is written.
+    ['server/cron.pricing-batch-recompute.ts', 'a scheduled job handler'],
+    ['server/cron.some-future-job.ts', 'a handler nobody has written yet'],
     ['app/lib/release-engine.server.ts', 'the engine itself'],
     ['app/lib/github.server.ts', 'the gateway itself'],
     ['app/lib/settings.server.ts', 'the audited valve write path'],
