@@ -11,13 +11,17 @@ type Block = Extract<ResolvedCategoryBlock, { _type: 'makersNote' }>
 export function MakersNote({ block }: { block: Block }) {
   return (
     <section id={block.anchorId} data-block={block._type} className="bg-paper py-12 md:py-16">
-      <Reveal variant="up" className="mx-auto max-w-[65ch] px-6 md:px-16">
+      {/* Aligned to the page grid like every other band — a centered narrow
+          column reads as an axis break between the left-set masthead and grid. */}
+      <Reveal variant="up" className="mx-auto max-w-[1320px] px-6 md:px-16">
+        <div className="max-w-[65ch]">
         <h2 className="mb-4 text-[1.6rem] leading-[1.15] tracking-[-0.01em] text-ink md:text-[2.1rem]" style={DISPLAY}>
           {block.heading}
         </h2>
-        <p className="whitespace-pre-line text-[15.5px] leading-relaxed text-ink-3" style={BODY}>
-          {block.body}
-        </p>
+          <p className="whitespace-pre-line text-[15.5px] leading-relaxed text-ink-3" style={BODY}>
+            {block.body}
+          </p>
+        </div>
       </Reveal>
     </section>
   )

@@ -8,9 +8,14 @@ import { abbreviate, buildPieGradient } from './CircleOptionSelector'
 interface VaultCardProps {
   deal: VaultDeal
   starred?: { reason: string }
+  /** Sale-page treatment: price in ink, no savings line. The markdown stays
+      honest via the struck MSRP; the card just stops shouting it (doctrine §3
+      coral budget — the quiet Sale art direction is decorative if every card
+      below it does discount drama). */
+  quiet?: boolean
 }
 
-export function VaultCard({ deal, starred }: VaultCardProps) {
+export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
   const discount = deal.msrp > 0
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
@@ -126,7 +131,7 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
           </h3>
 
           <div className="flex items-center gap-2 mt-auto pt-2">
-            <span className="text-coral font-bold">
+            <span className={`${quiet ? 'text-ink' : 'text-coral'} font-bold`}>
               {deal.priceMin != null && deal.priceMax != null && deal.priceMax > deal.priceMin
                 ? `$${deal.priceMin.toFixed(2)}–$${deal.priceMax.toFixed(2)}`
                 : `$${deal.dealPrice.toFixed(2)}`}
@@ -146,8 +151,8 @@ export function VaultCard({ deal, starred }: VaultCardProps) {
               : null
             const hasPriceRange =
               deal.priceMin != null && deal.priceMax != null && deal.priceMax > deal.priceMin
-            const showFlatSavings  = discount > 0 && !hasPriceRange
-            const showRangeSavings = hasPriceRange && (deal.maxSavingsAmount ?? 0) > 0
+            const showFlatSavings  = !quiet && discount > 0 && !hasPriceRange
+            const showRangeSavings = !quiet && hasPriceRange && (deal.maxSavingsAmount ?? 0) > 0
             if (!showFlatSavings && !showRangeSavings && !sizes && !colors) return null
             return (
               <div className="flex items-center gap-2 mt-1">
