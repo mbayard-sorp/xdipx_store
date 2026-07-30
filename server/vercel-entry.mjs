@@ -9837,9 +9837,9 @@ function isDiscontinued(product) {
     if (/\bdiscontinued\b/i.test(f)) return true;
     if (/\b(DISC|DC)\b/.test(f)) return true;
   }
-  const desc4 = product["Product Description"] ?? "";
-  if (/\bdiscontinued by manufacturer\b/i.test(desc4)) return true;
-  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc4)) return true;
+  const desc6 = product["Product Description"] ?? "";
+  if (/\bdiscontinued by manufacturer\b/i.test(desc6)) return true;
+  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc6)) return true;
   return false;
 }
 function parseCategories(raw) {
@@ -11219,10 +11219,10 @@ async function logVideoCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql17 } = await import("drizzle-orm");
+  const { sql: sql19 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql17`SELECT * FROM api_token_daily
+    sql19`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -11230,11 +11230,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql17 } = await import("drizzle-orm");
+  const { sql: sql19 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql17`
+    sql19`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -16631,16 +16631,24 @@ var init_homepage_team_keys = __esm({
 var team_server_exports = {};
 __export(team_server_exports, {
   AGENT_EDITOR_APPLY_KINDS: () => AGENT_EDITOR_APPLY_KINDS,
+  AGENT_RETIRE_KINDS: () => AGENT_RETIRE_KINDS,
   ALLOWED: () => ALLOWED,
   CLAIMANT_ACTORS: () => CLAIMANT_ACTORS,
   CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
   CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
+  REKIND_ACTORS: () => REKIND_ACTORS,
+  REKIND_FROM_KINDS: () => REKIND_FROM_KINDS,
+  REKIND_TO_KINDS: () => REKIND_TO_KINDS,
+  RUN_CLOSE_ACTORS: () => RUN_CLOSE_ACTORS,
+  RUN_CLOSE_KINDS: () => RUN_CLOSE_KINDS,
   SUGGESTION_LIST_MAX: () => SUGGESTION_LIST_MAX,
   TEAM_DEFAULTS: () => TEAM_DEFAULTS,
   TEAM_IDS: () => TEAM_IDS,
   TERMINAL_TICKET_STATUSES: () => TERMINAL_TICKET_STATUSES,
   TICKET_STATUSES: () => TICKET_STATUSES,
   VALVE_KEYS: () => VALVE_KEYS,
+  addSuggestionNote: () => addSuggestionNote,
+  agentRetireSuggestion: () => agentRetireSuggestion,
   assertTeamAuth: () => assertTeamAuth,
   buildClaimQuery: () => buildClaimQuery,
   claimSuggestion: () => claimSuggestion,
@@ -16680,6 +16688,7 @@ __export(team_server_exports, {
   proposeCalendarEvent: () => proposeCalendarEvent,
   publishBrief: () => publishBrief,
   recordEvent: () => recordEvent,
+  rekindSuggestion: () => rekindSuggestion,
   rescheduleSocialPost: () => rescheduleSocialPost,
   retireSuggestion: () => retireSuggestion,
   reviewSocialPost: () => reviewSocialPost,
@@ -16952,6 +16961,47 @@ async function decideSuggestion(id, status) {
 }
 async function retireSuggestion(id) {
   await db.update(homepageTeamSuggestions).set({ status: "dismissed", decidedBy: "owner", decidedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.status, "approved")));
+}
+async function rekindSuggestion(id, toKind, actor, note) {
+  if (!isTicketActor(actor) || !REKIND_ACTORS.includes(actor)) {
+    throw new Response(`Forbidden: actor '${String(actor)}' may not rekind`, { status: 403 });
+  }
+  if (!REKIND_TO_KINDS.includes(toKind)) {
+    throw new Response(
+      `Bad Request: cannot rekind to '${toKind}' (allowed: ${REKIND_TO_KINDS.join(", ")})`,
+      { status: 400 }
+    );
+  }
+  const [row] = await db.select().from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
+  if (!REKIND_FROM_KINDS.includes(row.kind ?? "")) {
+    throw new Response(
+      `Conflict: only ${REKIND_FROM_KINDS.join("/")} rows may be rekinded, suggestion ${id} is '${row.kind}'`,
+      { status: 409 }
+    );
+  }
+  if (TERMINAL_TICKET_STATUSES.includes(row.status ?? "")) {
+    throw new Response(`Conflict: suggestion ${id} is ${row.status}`, { status: 409 });
+  }
+  const fromKind = row.kind;
+  const updated = await db.update(homepageTeamSuggestions).set({ kind: toKind, updatedAt: /* @__PURE__ */ new Date() }).where(and3(eq11(homepageTeamSuggestions.id, id), eq11(homepageTeamSuggestions.kind, fromKind))).returning();
+  if (updated.length === 0) {
+    throw new Response(`Conflict: suggestion ${id} changed underneath the rekind`, { status: 409 });
+  }
+  await addTicketLinks(id, [{
+    kind: "note",
+    ref: `rekind ${fromKind} -> ${toKind} by ${actor}${note ? `: ${note}` : ""}`,
+    state: updated[0].status ?? void 0
+  }]);
+  return updated[0];
+}
+async function agentRetireSuggestion(id, actor, note) {
+  return transitionSuggestion(id, "dismissed", actor, { note });
+}
+async function addSuggestionNote(id, ref) {
+  const [row] = await db.select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status }).from(homepageTeamSuggestions).where(eq11(homepageTeamSuggestions.id, id)).limit(1);
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
+  await addTicketLinks(id, [{ kind: "note", ref, state: row.status ?? void 0 }]);
 }
 async function markSuggestion(id, status, applyRef) {
   const allowedFrom = status === "pr_open" ? "approved" : "pr_open";
@@ -17235,7 +17285,7 @@ async function proposeCalendarEvent(input) {
   }).returning({ id: marketingCalendar.id });
   return row.id;
 }
-var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
+var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
 var init_team_server = __esm({
   "app/lib/team.server.ts"() {
     "use strict";
@@ -17259,6 +17309,9 @@ var init_team_server = __esm({
     SPEND_KV_TTL_SEC = 26 * 3600;
     SPEND_RESEED_MS = 15 * 6e4;
     SUGGESTION_LIST_MAX = 200;
+    REKIND_FROM_KINDS = ["process"];
+    REKIND_TO_KINDS = ["instructions", "code"];
+    REKIND_ACTORS = ["owner", "agent:agent-editor"];
     TICKET_STATUSES = [
       "proposed",
       "approved",
@@ -17274,6 +17327,15 @@ var init_team_server = __esm({
     AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/;
     AGENT_EDITOR_APPLY_KINDS = ["instructions", "agent-def", "config"];
     CLAIMANT_ACTORS = ["agent:rr7-engineer", "agent:agent-editor"];
+    AGENT_RETIRE_KINDS = ["process", "strategy", "program"];
+    RUN_CLOSE_ACTORS = [
+      "agent:homepage-orchestrator",
+      "agent:content-writer",
+      "agent:social-media-manager",
+      "agent:product-manager",
+      "agent:store-strategist"
+    ];
+    RUN_CLOSE_KINDS = ["process", "strategy"];
     OWNER_DISMISS = { to: "dismissed", actors: ["owner"] };
     ALLOWED = {
       proposed: [
@@ -17282,6 +17344,12 @@ var init_team_server = __esm({
       ],
       approved: [
         { to: "in_progress", actors: CLAIMANT_ACTORS },
+        // A daily routine executed the ask in this run: close it so it is not
+        // re-read tomorrow. Operational kinds only.
+        { to: "applied", actors: RUN_CLOSE_ACTORS, kinds: RUN_CLOSE_KINDS },
+        // agent-editor's hygiene pass retiring a row with no executor. Kinds are
+        // fenced so it can never dismiss the instruction rows aimed at itself.
+        { to: "dismissed", actors: ["agent:agent-editor"], kinds: AGENT_RETIRE_KINDS },
         OWNER_DISMISS
       ],
       in_progress: [
@@ -19797,8 +19865,8 @@ async function followWithCookies(startUrl, maxHops = 12) {
     const getSetCookie = res.headers.getSetCookie;
     for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
       const pair = sc.split(";")[0] ?? "";
-      const eq27 = pair.indexOf("=");
-      if (eq27 > 0) jar.set(pair.slice(0, eq27).trim(), pair.slice(eq27 + 1).trim());
+      const eq29 = pair.indexOf("=");
+      if (eq29 > 0) jar.set(pair.slice(0, eq29).trim(), pair.slice(eq29 + 1).trim());
     }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
@@ -21454,8 +21522,8 @@ async function recentlyPinged(urls) {
   if (urls.length === 0) return /* @__PURE__ */ new Set();
   try {
     const { neon: neon6 } = await import("@neondatabase/serverless");
-    const sql17 = neon6(process.env["DATABASE_URL"]);
-    const rows = await sql17`
+    const sql19 = neon6(process.env["DATABASE_URL"]);
+    const rows = await sql19`
       SELECT url FROM indexnow_pings
       WHERE url = ANY(${urls}::text[])
         AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')
@@ -21469,8 +21537,8 @@ async function recentlyPinged(urls) {
 async function recordPushed(urls, batchId, statusCode) {
   if (urls.length === 0) return;
   const { neon: neon6 } = await import("@neondatabase/serverless");
-  const sql17 = neon6(process.env["DATABASE_URL"]);
-  await sql17`
+  const sql19 = neon6(process.env["DATABASE_URL"]);
+  await sql19`
     INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
     SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
     FROM unnest(${urls}::text[]) AS t(u)
@@ -25416,8 +25484,8 @@ function stateFor(ps, p, taxonomy) {
 async function maybeActivateGatedDeal(jobId, gatesDealId) {
   try {
     const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq27 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq27(dealHistory2.id, gatesDealId)).limit(1);
+    const { eq: eq29 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq29(dealHistory2.id, gatesDealId)).limit(1);
     const deal = rows[0];
     if (!deal) {
       console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
@@ -27090,6 +27158,156 @@ var init_github_server = __esm({
   }
 });
 
+// app/lib/ticket-out-of-band-sweep.server.ts
+var ticket_out_of_band_sweep_server_exports = {};
+__export(ticket_out_of_band_sweep_server_exports, {
+  SWEEP_MAX_TICKETS: () => SWEEP_MAX_TICKETS,
+  SWEEP_MIN_AGE_MINUTES: () => SWEEP_MIN_AGE_MINUTES,
+  countStrandedVerifiedTickets: () => countStrandedVerifiedTickets,
+  findStrandedVerifiedTickets: () => findStrandedVerifiedTickets,
+  isMergedOutOfBand: () => isMergedOutOfBand,
+  sweepOutOfBandMerges: () => sweepOutOfBandMerges
+});
+import { and as and6, desc as desc2, eq as eq22, lt as lt2, sql as sql15 } from "drizzle-orm";
+async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
+  const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
+  const rows = await db.select({
+    ticketId: homepageTeamSuggestions.id,
+    ref: suggestionLinks.ref,
+    linkedAt: suggestionLinks.createdAt
+  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and6(
+    eq22(homepageTeamSuggestions.status, "verified"),
+    eq22(suggestionLinks.kind, "pr"),
+    lt2(homepageTeamSuggestions.updatedAt, cutoff)
+  )).orderBy(homepageTeamSuggestions.updatedAt, desc2(suggestionLinks.createdAt));
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const row of rows) {
+    if (seen.has(row.ticketId)) continue;
+    const prNumber = prNumberFromRef(row.ref);
+    if (prNumber === null) continue;
+    seen.add(row.ticketId);
+    out.push({ ticketId: row.ticketId, prNumber, prRef: row.ref });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+function isMergedOutOfBand(pr) {
+  return pr.merged === true;
+}
+async function markPrLinkMerged(ticketId, prRef) {
+  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and6(
+    eq22(suggestionLinks.suggestionId, ticketId),
+    eq22(suggestionLinks.kind, "pr"),
+    eq22(suggestionLinks.ref, prRef)
+  ));
+}
+async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
+  const result = { checked: 0, applied: [], errors: [] };
+  let candidates;
+  try {
+    candidates = await findStrandedVerifiedTickets(limit);
+  } catch (err2) {
+    result.errors.push(`candidate query failed: ${String(err2)}`);
+    return result;
+  }
+  if (candidates.length === 0) return result;
+  for (const c of candidates) {
+    result.checked += 1;
+    try {
+      const pr = await getPullRequest(c.prNumber, "out-of-band-sweep");
+      if (!pr.ok || !pr.data) {
+        result.errors.push(`PR #${c.prNumber}: ${pr.ok ? "no data" : pr.error}`);
+        continue;
+      }
+      if (!isMergedOutOfBand(pr.data)) continue;
+      await transitionSuggestion(c.ticketId, "applied", "system", {
+        note: `merged out-of-band (PR #${c.prNumber} was already merged when the engine reconciled it)`,
+        links: [{ kind: "pr", ref: pr.data.htmlUrl, state: "merged" }]
+      });
+      await markPrLinkMerged(c.ticketId, c.prRef);
+      result.applied.push(c.ticketId);
+      console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`);
+    } catch (err2) {
+      const msg = String(err2);
+      if (msg.includes("409")) continue;
+      result.errors.push(`ticket #${c.ticketId}: ${msg}`);
+    }
+  }
+  return result;
+}
+async function countStrandedVerifiedTickets() {
+  const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
+  const [row] = await db.select({ n: sql15`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and6(
+    eq22(homepageTeamSuggestions.status, "verified"),
+    eq22(suggestionLinks.kind, "pr"),
+    lt2(homepageTeamSuggestions.updatedAt, cutoff)
+  ));
+  return row?.n ?? 0;
+}
+var LOG, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES;
+var init_ticket_out_of_band_sweep_server = __esm({
+  "app/lib/ticket-out-of-band-sweep.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_github_server();
+    init_release_engine_server();
+    init_team_server();
+    LOG = "[out-of-band-sweep]";
+    SWEEP_MAX_TICKETS = 5;
+    SWEEP_MIN_AGE_MINUTES = 60;
+  }
+});
+
+// app/lib/settings.server.ts
+var settings_server_exports = {};
+__export(settings_server_exports, {
+  recentSettingChanges: () => recentSettingChanges,
+  setPipelineSettingAudited: () => setPipelineSettingAudited
+});
+import { desc as desc3, eq as eq23, gte as gte2 } from "drizzle-orm";
+async function setPipelineSettingAudited(key, value, actor, source) {
+  const [existing] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq23(pipelineSettings.key, key)).limit(1);
+  const oldValue = existing?.value ?? null;
+  await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
+    target: pipelineSettings.key,
+    set: { value, updatedAt: /* @__PURE__ */ new Date() }
+  });
+  try {
+    await db.insert(settingsAuditLog).values({
+      key,
+      oldValue,
+      newValue: value,
+      actor,
+      source: source.slice(0, 64)
+    });
+  } catch (err2) {
+    console.error("[settings] audit insert failed", { key, actor, source, err: err2 });
+  }
+  await invalidateTeamSettingsCache();
+  return { key, oldValue, newValue: value, unchanged: oldValue === value };
+}
+async function recentSettingChanges(sinceHours = 24, limit = 20) {
+  const since = new Date(Date.now() - sinceHours * 36e5);
+  return db.select({
+    key: settingsAuditLog.key,
+    oldValue: settingsAuditLog.oldValue,
+    newValue: settingsAuditLog.newValue,
+    actor: settingsAuditLog.actor,
+    source: settingsAuditLog.source,
+    changedAt: settingsAuditLog.changedAt
+  }).from(settingsAuditLog).where(gte2(settingsAuditLog.changedAt, since)).orderBy(desc3(settingsAuditLog.changedAt)).limit(limit);
+}
+var init_settings_server = __esm({
+  "app/lib/settings.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_team_server();
+  }
+});
+
 // app/lib/release-engine.server.ts
 var release_engine_server_exports = {};
 __export(release_engine_server_exports, {
@@ -27127,7 +27345,7 @@ __export(release_engine_server_exports, {
   summarizeSmoke: () => summarizeSmoke,
   utcDay: () => utcDay3
 });
-import { and as and6, desc as desc2, eq as eq22 } from "drizzle-orm";
+import { and as and7, desc as desc4, eq as eq24, sql as sql16 } from "drizzle-orm";
 function utcDay3(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -27392,7 +27610,7 @@ async function listProductionDeployments(limit = 20) {
     `/v6/deployments?projectId=${encodeURIComponent(cfg.projectId)}&target=production&limit=${limit}${cfg.teamQs}`
   );
   if (!res.ok || !res.data) {
-    console.warn(`${LOG} vercel deployments fetch failed: ${res.error}`);
+    console.warn(`${LOG2} vercel deployments fetch failed: ${res.error}`);
     return [];
   }
   return (res.data.deployments ?? []).map(toDeployment);
@@ -27463,20 +27681,27 @@ async function runSelfCheck(opts = {}) {
     await kvSet(KEYS.selfCheck, { ok: true, at: Date.now() }, 3600);
     return { ok: true, problems: [] };
   }
-  console.error(`${LOG} CONFIG ERROR, refusing to run:
+  console.error(`${LOG2} CONFIG ERROR, refusing to run:
   - ${problems.join("\n  - ")}`);
   return { ok: false, problems };
 }
 async function resolveTicketForPr(pr) {
-  const linked = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(eq22(suggestionLinks.kind, "pr")).orderBy(desc2(suggestionLinks.createdAt)).limit(500);
-  const match = linked.find((l) => prNumberFromRef(l.ref) === pr.number);
+  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and7(
+    eq24(suggestionLinks.kind, "pr"),
+    sql16`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
+  )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
+  const match = direct.find((l) => prNumberFromRef(l.ref) === pr.number);
   if (match) return loadTicketFacts(match.suggestionId);
   const titleId = parseTicketRefFromTitle(pr.title);
   if (titleId === null) return null;
-  const otherPr = linked.find((l) => l.suggestionId === titleId && prNumberFromRef(l.ref) !== pr.number);
+  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and7(
+    eq24(suggestionLinks.kind, "pr"),
+    eq24(suggestionLinks.suggestionId, titleId)
+  )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
+  const otherPr = claimed.find((l) => prNumberFromRef(l.ref) !== pr.number);
   if (otherPr) {
     console.warn(
-      `${LOG} PR #${pr.number} title claims ticket #${titleId}, but that ticket links PR ${otherPr.ref}. Refusing the title reference.`
+      `${LOG2} PR #${pr.number} title claims ticket #${titleId}, but that ticket links PR ${otherPr.ref}. Refusing the title reference.`
     );
     return null;
   }
@@ -27488,22 +27713,22 @@ async function loadTicketFacts(id) {
     status: homepageTeamSuggestions.status,
     kind: homepageTeamSuggestions.kind,
     attemptCount: homepageTeamSuggestions.attemptCount
-  }).from(homepageTeamSuggestions).where(eq22(homepageTeamSuggestions.id, id)).limit(1);
+  }).from(homepageTeamSuggestions).where(eq24(homepageTeamSuggestions.id, id)).limit(1);
   if (!row) return null;
   return { id: row.id, status: row.status, kind: row.kind, attemptCount: row.attemptCount };
 }
 async function escalate(kind, dedupeKey, subject, html, dryRun) {
   if (dryRun) {
-    console.log(`${LOG} [dry-run] would escalate (${kind}) ${dedupeKey}: ${subject}`);
+    console.log(`${LOG2} [dry-run] would escalate (${kind}) ${dedupeKey}: ${subject}`);
     return false;
   }
   const first = await kvSetNX(`${dedupeKey}:${kind}`, String(Date.now()), 7 * 24 * 3600);
   if (!first) {
-    console.log(`${LOG} escalation (${kind}) already sent for ${dedupeKey}, not re-sending`);
+    console.log(`${LOG2} escalation (${kind}) already sent for ${dedupeKey}, not re-sending`);
     return false;
   }
   const res = await sendOwnerEmail(subject, html, { fromName: "xdipx release engine" });
-  if (!res.sent) console.warn(`${LOG} escalation email not sent: ${res.error}`);
+  if (!res.sent) console.warn(`${LOG2} escalation email not sent: ${res.error}`);
   return res.sent;
 }
 function emailShell(title, rows, body) {
@@ -27535,7 +27760,7 @@ async function runReleaseEngineCycle(opts = {}) {
     return await cycleBody(dryRun);
   } catch (err2) {
     const msg = err2 instanceof Error ? err2.message : String(err2);
-    console.error(`${LOG} cycle threw`, err2);
+    console.error(`${LOG2} cycle threw`, err2);
     return { ...result, ok: false, message: `cycle error: ${msg}`, errors: [msg] };
   } finally {
     const held = await kvGet(KEYS.lock);
@@ -27546,6 +27771,7 @@ async function cycleBody(dryRun) {
   const result = baseResult(dryRun);
   const self = await runSelfCheck();
   if (!self.ok) {
+    await alertSelfCheckFailure(self.problems, dryRun);
     return {
       ...result,
       ok: false,
@@ -27556,6 +27782,7 @@ async function cycleBody(dryRun) {
   }
   const pending = await kvGet(KEYS.pending);
   if (pending) return resolvePending(pending, dryRun);
+  if (!dryRun) await maybeSweepOutOfBand();
   const day = utcDay3();
   const rollbacks = Number(await kvGet(KEYS.rollbacks(day)) ?? 0);
   if (shouldTripCircuit(rollbacks)) {
@@ -27589,7 +27816,7 @@ async function cycleBody(dryRun) {
     const decision = evaluatePullRequest(facts);
     decisions.push(decision);
     console.log(
-      `${LOG}${dryRun ? " [dry-run]" : ""} PR #${decision.prNumber} (${decision.headRef}) -> ${decision.action} [${decision.code}]: ${decision.reason}`
+      `${LOG2}${dryRun ? " [dry-run]" : ""} PR #${decision.prNumber} (${decision.headRef}) -> ${decision.action} [${decision.code}]: ${decision.reason}`
     );
     if (decision.action === "escalate-protected") {
       await handleProtected(summary, decision, dryRun);
@@ -27620,7 +27847,7 @@ async function gatherFacts(summary) {
   const pr = full.ok ? full.data : summary;
   const files = await listPullRequestFiles(pr.number, "release-engine");
   if (!files.ok) {
-    console.warn(`${LOG} cannot read changed files for PR #${pr.number}, skipping: ${files.error}`);
+    console.warn(`${LOG2} cannot read changed files for PR #${pr.number}, skipping: ${files.error}`);
     return null;
   }
   const classification = classifyChangedFiles(files.data);
@@ -27629,7 +27856,7 @@ async function gatherFacts(summary) {
   );
   const checksRes = await getChecksForRef(pr.headSha, "release-engine");
   if (!checksRes.ok) {
-    console.warn(`${LOG} cannot read checks for PR #${pr.number}, skipping: ${checksRes.error}`);
+    console.warn(`${LOG2} cannot read checks for PR #${pr.number}, skipping: ${checksRes.error}`);
     return null;
   }
   const checks = {};
@@ -27638,7 +27865,7 @@ async function gatherFacts(summary) {
   try {
     ticket = await resolveTicketForPr(pr);
   } catch (err2) {
-    console.warn(`${LOG} ticket resolution failed for PR #${pr.number}`, err2);
+    console.warn(`${LOG2} ticket resolution failed for PR #${pr.number}`, err2);
   }
   return {
     number: pr.number,
@@ -27653,10 +27880,48 @@ async function gatherFacts(summary) {
     ticket
   };
 }
+async function alertSelfCheckFailure(problems, dryRun) {
+  if (dryRun) return;
+  const first = await kvSetNX(KEYS.selfCheckAlert(utcDay3()), String(Date.now()), 26 * 3600);
+  if (!first) return;
+  await sendOwnerEmail(
+    "[xdipx] release engine is not running: config error",
+    emailShell(
+      "The release engine failed its self-check, so nothing is being merged",
+      [["Problems", problems.join("; ") || "unknown"]],
+      `<p>Every agent PR is waiting until this is fixed. The most common cause is an expired
+      <code>GITHUB_TOKEN</code> in the Vercel project environment.</p>
+      <p>This message is sent once a day while the condition lasts.</p>`
+    )
+  );
+}
+async function maybeSweepOutOfBand() {
+  const hour = (/* @__PURE__ */ new Date()).toISOString().slice(0, 13);
+  const last = await kvGet(KEYS.sweepHour);
+  if (last === hour) return;
+  await kvSet(KEYS.sweepHour, hour);
+  try {
+    const { sweepOutOfBandMerges: sweepOutOfBandMerges2 } = await Promise.resolve().then(() => (init_ticket_out_of_band_sweep_server(), ticket_out_of_band_sweep_server_exports));
+    const swept = await sweepOutOfBandMerges2();
+    if (swept.applied.length > 0) {
+      console.log(`${LOG2} out-of-band sweep applied tickets: ${swept.applied.join(", ")}`);
+    }
+    for (const err2 of swept.errors) console.warn(`${LOG2} sweep: ${err2}`);
+  } catch (err2) {
+    console.error(`${LOG2} out-of-band sweep failed`, err2);
+  }
+}
 async function handleProtected(pr, decision, dryRun) {
   if (!dryRun && !pr.labels.includes(NEEDS_OWNER_LABEL)) {
     const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], "release-engine");
-    if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`);
+    if (!labelled.ok) console.warn(`${LOG2} could not label PR #${pr.number}: ${labelled.error}`);
+  }
+  if (!dryRun && decision.ticketId !== null) {
+    await addTicketLink(decision.ticketId, {
+      kind: "pr",
+      ref: pr.htmlUrl,
+      state: "needs-owner"
+    });
   }
   await escalate(
     "protected",
@@ -27703,15 +27968,41 @@ Gate: ${decision.reason}`,
     context: "release-engine"
   });
   if (!merged.ok) {
-    console.error(`${LOG} merge of PR #${pr.number} failed: ${merged.error}`);
+    console.error(`${LOG2} merge of PR #${pr.number} failed: ${merged.error}`);
+    const attempts = await kvIncr(KEYS.mergeFail(pr.number));
+    if (attempts >= MAX_MERGE_ATTEMPTS) {
+      if (!pr.labels.includes(NEEDS_OWNER_LABEL)) {
+        const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], "release-engine");
+        if (!labelled.ok) console.warn(`${LOG2} could not label PR #${pr.number}: ${labelled.error}`);
+      }
+      await escalate(
+        "merge-attempts",
+        KEYS.escalated(pr.number),
+        `[xdipx] PR #${pr.number} cannot be merged after ${attempts} attempts`,
+        emailShell(
+          "The release engine gave up merging a PR",
+          [
+            ["PR", `#${pr.number} ${pr.title}`],
+            ["Branch", pr.headRef],
+            ["Attempts", String(attempts)],
+            ["Last error", merged.error]
+          ],
+          `<p>The gate keeps saying this PR is mergeable and GitHub keeps refusing. It now carries the
+          <code>${escapeHtml(NEEDS_OWNER_LABEL)}</code> label, so the engine will skip it from here on:
+          <a href="${escapeHtml(pr.htmlUrl)}">${escapeHtml(pr.htmlUrl)}</a></p>`
+        ),
+        false
+      );
+    }
     return {
       ...result,
       ok: false,
       decisions,
-      message: `merge failed for PR #${pr.number}: ${merged.error}`,
+      message: `merge failed for PR #${pr.number} (attempt ${attempts}): ${merged.error}`,
       errors: [merged.error]
     };
   }
+  await kvDel(KEYS.mergeFail(pr.number));
   await kvIncr(KEYS.merges(day));
   const pending = {
     prNumber: pr.number,
@@ -27722,7 +28013,7 @@ Gate: ${decision.reason}`,
     ticketId: decision.ticketId
   };
   await kvSet(KEYS.pending, pending);
-  console.log(`${LOG} merged PR #${pr.number} as ${merged.data.sha}, awaiting production deploy`);
+  console.log(`${LOG2} merged PR #${pr.number} as ${merged.data.sha}, awaiting production deploy`);
   if (decision.ticketId !== null) {
     await addTicketLink(decision.ticketId, { kind: "commit", ref: merged.data.sha, state: "merged" });
   }
@@ -27751,7 +28042,7 @@ async function resolvePending(pending, dryRun) {
       });
     }
     const smoke = await runReleaseSmoke();
-    console.log(`${LOG} smoke for PR #${pending.prNumber}: ${smoke.evidence}`);
+    console.log(`${LOG2} smoke for PR #${pending.prNumber}: ${smoke.evidence}`);
     if (smoke.ok) return applySuccess(pending, smoke, dryRun);
     return failAndRollback(pending, smoke.evidence, dryRun);
   }
@@ -27789,7 +28080,7 @@ async function applySuccess(pending, smoke, dryRun) {
       });
     } catch (err2) {
       const msg = err2 instanceof Response ? `${err2.status} ${await err2.text()}` : String(err2);
-      console.warn(`${LOG} could not apply ticket #${pending.ticketId}: ${msg}`);
+      console.warn(`${LOG2} could not apply ticket #${pending.ticketId}: ${msg}`);
       errors.push(msg);
     }
   }
@@ -27808,7 +28099,7 @@ async function applySuccess(pending, smoke, dryRun) {
 async function failAndRollback(pending, evidence, dryRun) {
   const result = baseResult(dryRun);
   const errors = [];
-  console.error(`${LOG} release of PR #${pending.prNumber} FAILED: ${evidence}`);
+  console.error(`${LOG2} release of PR #${pending.prNumber} FAILED: ${evidence}`);
   if (dryRun) {
     return {
       ...result,
@@ -27891,7 +28182,7 @@ Production was already re-promoted to ${promotedTo}. This PR restores the tree f
 async function bounceTicket(ticketId, lastError, pr, dryRun) {
   if (ticketId === null) return;
   if (dryRun) {
-    console.log(`${LOG} [dry-run] would bounce ticket #${ticketId}: ${lastError}`);
+    console.log(`${LOG2} [dry-run] would bounce ticket #${ticketId}: ${lastError}`);
     return;
   }
   let attemptCount = 0;
@@ -27903,7 +28194,7 @@ async function bounceTicket(ticketId, lastError, pr, dryRun) {
     attemptCount = row.attemptCount;
   } catch (err2) {
     const msg = err2 instanceof Response ? `${err2.status}` : String(err2);
-    console.warn(`${LOG} could not bounce ticket #${ticketId} (${msg})`);
+    console.warn(`${LOG2} could not bounce ticket #${ticketId} (${msg})`);
     return;
   }
   if (!shouldBlockForAttempts(attemptCount)) return;
@@ -27913,7 +28204,7 @@ async function bounceTicket(ticketId, lastError, pr, dryRun) {
       lastError: lastError.slice(0, 2e3)
     });
   } catch (err2) {
-    console.warn(`${LOG} could not block ticket #${ticketId}`, err2);
+    console.warn(`${LOG2} could not block ticket #${ticketId}`, err2);
   }
   const ticket = await getTicket(ticketId).catch(() => null);
   const recentErrors = (ticket?.links ?? []).filter((l) => l.kind === "note").slice(0, 3).map((l) => l.ref);
@@ -27944,7 +28235,7 @@ async function addTicketLink(ticketId, link2) {
       state: link2.state ? link2.state.slice(0, 16) : null
     });
   } catch (err2) {
-    console.warn(`${LOG} could not add ${link2.kind} link to ticket #${ticketId}`, err2);
+    console.warn(`${LOG2} could not add ${link2.kind} link to ticket #${ticketId}`, err2);
   }
 }
 async function markPrLinksMerged(pending) {
@@ -27954,28 +28245,31 @@ async function markPrLinksState(pending, state) {
   if (pending.ticketId === null) return;
   try {
     await db.update(suggestionLinks).set({ state: state.slice(0, 16), updatedAt: /* @__PURE__ */ new Date() }).where(
-      and6(
-        eq22(suggestionLinks.suggestionId, pending.ticketId),
-        eq22(suggestionLinks.kind, "pr"),
-        eq22(suggestionLinks.ref, pending.prUrl)
+      and7(
+        eq24(suggestionLinks.suggestionId, pending.ticketId),
+        eq24(suggestionLinks.kind, "pr"),
+        eq24(suggestionLinks.ref, pending.prUrl)
       )
     );
   } catch (err2) {
-    console.warn(`${LOG} could not update link state for ticket #${pending.ticketId}`, err2);
+    console.warn(`${LOG2} could not update link state for ticket #${pending.ticketId}`, err2);
   }
 }
 async function setReleaseEngineEnabled(value) {
   try {
-    await db.insert(pipelineSettings).values({ key: "release_engine_enabled", value: String(value) }).onConflictDoUpdate({
-      target: pipelineSettings.key,
-      set: { value: String(value), updatedAt: /* @__PURE__ */ new Date() }
-    });
-    console.error(`${LOG} circuit breaker: release_engine_enabled set to false`);
+    const { setPipelineSettingAudited: setPipelineSettingAudited2 } = await Promise.resolve().then(() => (init_settings_server(), settings_server_exports));
+    await setPipelineSettingAudited2(
+      "release_engine_enabled",
+      String(value),
+      "system",
+      "release-engine:circuit-breaker"
+    );
+    console.error(`${LOG2} circuit breaker: release_engine_enabled set to false`);
   } catch (err2) {
-    console.error(`${LOG} could not flip release_engine_enabled off`, err2);
+    console.error(`${LOG2} could not flip release_engine_enabled off`, err2);
   }
 }
-var LOG, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS;
+var LOG2, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS, MAX_MERGE_ATTEMPTS;
 var init_release_engine_server = __esm({
   "app/lib/release-engine.server.ts"() {
     "use strict";
@@ -27988,7 +28282,7 @@ var init_release_engine_server = __esm({
     init_kv_server();
     init_owner_alerts_server();
     init_team_server();
-    LOG = "[release-engine]";
+    LOG2 = "[release-engine]";
     AGENT_BRANCH_PREFIXES = ["agents/", "ticket/", "claude/", "phase1/", "tonight/"];
     REVERT_BRANCH_PREFIX = "revert/pr-";
     REQUIRED_CHECK = "check";
@@ -28016,8 +28310,15 @@ var init_release_engine_server = __esm({
       selfCheck: "release-engine:self-check-ok",
       merges: (day) => `release-engine:merges:${day}`,
       rollbacks: (day) => `release-engine:rollbacks:${day}`,
-      escalated: (pr) => `release-engine:escalated:pr-${pr}`
+      escalated: (pr) => `release-engine:escalated:pr-${pr}`,
+      /** Consecutive failed merge attempts for one PR. Cleared on success. */
+      mergeFail: (pr) => `release-engine:merge-fail:pr-${pr}`,
+      /** Once-a-day dedupe for the config-error email. */
+      selfCheckAlert: (day) => `release-engine:self-check-alert:${day}`,
+      /** Marks the cycle that last ran the out-of-band reconciliation sweep. */
+      sweepHour: "release-engine:sweep-hour"
     };
+    MAX_MERGE_ATTEMPTS = 3;
   }
 });
 
@@ -28795,10 +29096,10 @@ var init_avatar_script = __esm({
 });
 
 // app/lib/ivr-voice.server.ts
-import { eq as eq23 } from "drizzle-orm";
+import { eq as eq25 } from "drizzle-orm";
 async function getActiveIvrVoiceId() {
   try {
-    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq23(ivrVoices.active, true)).limit(1);
+    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq25(ivrVoices.active, true)).limit(1);
     if (rows[0]?.voiceId) return rows[0].voiceId;
   } catch (err2) {
     console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err2);
@@ -28830,7 +29131,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq24, and as and7, inArray as inArray8, desc as desc3, isNotNull, ne as ne3, sql as sql15 } from "drizzle-orm";
+import { eq as eq26, and as and8, inArray as inArray8, desc as desc5, isNotNull, ne as ne3, sql as sql17 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -28904,14 +29205,14 @@ async function advanceInflightVideoJobs(opts = {}) {
       if (outcome === "parked") result.parked++;
     } catch (err2) {
       console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err2);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.jobId, job.jobId));
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -28956,13 +29257,13 @@ async function frameReviewEnabled() {
   return v !== "false";
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
-  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and7(
-    sql15`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
-    eq24(videoJobs.presenter, presenter),
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and8(
+    sql17`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
+    eq26(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
     inArray8(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
-  )).orderBy(desc3(videoJobs.createdAt)).limit(1);
+  )).orderBy(desc5(videoJobs.createdAt)).limit(1);
   return row?.frameId ?? null;
 }
 async function advanceSceneFrame(job) {
@@ -28975,13 +29276,13 @@ async function advanceSceneFrame(job) {
     if (!reusableJob) {
       throw new Error("reuseFrameAssetId applies only to avatar/talking-head jobs");
     }
-    const [asset] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, reuseId)).limit(1);
+    const [asset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, reuseId)).limit(1);
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
-    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and7(
-      eq24(videoJobs.sceneFrameAssetId, reuseId),
-      eq24(videoJobs.presenter, job.presenter),
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and8(
+      eq26(videoJobs.sceneFrameAssetId, reuseId),
+      eq26(videoJobs.presenter, job.presenter),
       inArray8(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
@@ -29071,7 +29372,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -29156,7 +29457,7 @@ async function advanceClipAvatar(job, spec) {
     if ((Number(job.costUsd) + clipCost + ttsCost) * 100 > maxCents) {
       throw new Error(`Accrued + avatar render cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const frameBuf = await blobFetchToBuffer(frame.blobUrl);
     const imageUrl = await uploadToFalStorage(frameBuf, "image/jpeg", `frame-${job.jobId}.jpg`);
@@ -29250,7 +29551,7 @@ async function advanceLipsync(job) {
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq24(mediaAssets.videoJobId, jobRowId)).orderBy(desc3(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq26(mediaAssets.videoJobId, jobRowId)).orderBy(desc5(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
@@ -29298,7 +29599,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -29312,7 +29613,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq24(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq26(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -29324,29 +29625,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq24(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq24(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq24(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -29366,12 +29667,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq24(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq24(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -29398,14 +29699,14 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
 async function recordVideoMetrics(jobRowId, platform, metrics) {
   const submitted = Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== void 0));
   if (!Object.keys(submitted).length) return;
-  const [job] = await db.select().from(videoJobs).where(eq24(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const existing = (job.metricsJson ?? {})[platform] ?? {};
   const merged = { ...job.metricsJson ?? {}, [platform]: { ...existing, ...submitted } };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq24(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
-  const jobs = await db.select().from(videoJobs).orderBy(desc3(videoJobs.createdAt)).limit(limit);
+  const jobs = await db.select().from(videoJobs).orderBy(desc5(videoJobs.createdAt)).limit(limit);
   if (!jobs.length) return [];
   const jobIds = jobs.map((j) => j.id);
   const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray8(mediaAssets.videoJobId, jobIds));
@@ -29578,7 +29879,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq25 } from "drizzle-orm";
+import { eq as eq27 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -29699,7 +30000,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq25(returns.id, row.id)).returning();
+    }).where(eq27(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err2) {
     console.error("[returns] db update threw", err2);
@@ -29707,7 +30008,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq25(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq27(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -29738,7 +30039,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq25(returns.id, row.id));
+  }).where(eq27(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -29747,13 +30048,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq25(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq27(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq25(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq27(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq25(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq27(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -29839,16 +30140,16 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and8, eq: eq27, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and8(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and9, eq: eq29, isNull: isNull3, lt: lt3 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and9(isNull3(metaCapiFailures2.resolvedAt), lt3(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq27(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq29(metaCapiFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq27(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq29(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -29863,16 +30164,16 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and8, eq: eq27, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and8(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and9, eq: eq29, isNull: isNull3, lt: lt3 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and9(isNull3(ga4PurchaseFailures2.resolvedAt), lt3(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
       if (result.ok) {
-        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq27(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq29(ga4PurchaseFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq27(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq29(ga4PurchaseFailures2.id, row.id));
       }
     }
     return resolved;
@@ -30463,7 +30764,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq26, sql as sql16 } from "drizzle-orm";
+import { eq as eq28, sql as sql18 } from "drizzle-orm";
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
   if (!secret) return false;
@@ -30503,10 +30804,10 @@ async function handleOrderCreated(order) {
       }
     }).catch((err2) => console.error("[webhook] metafield write failed:", err2));
     const dealHistoryUpdate = db2.update(dealHistory).set({
-      unitsSold: db2.$count(dealHistory, eq26(dealHistory.sku, lineItem.sku)),
+      unitsSold: db2.$count(dealHistory, eq28(dealHistory.sku, lineItem.sku)),
       totalRevenue: String(parseFloat(lineItem.price) * lineItem.quantity),
       totalProfit: String(profit * lineItem.quantity)
-    }).where(eq26(dealHistory.sku, lineItem.sku)).catch(() => {
+    }).where(eq28(dealHistory.sku, lineItem.sku)).catch(() => {
     });
     await Promise.all([metafieldWrite, dealHistoryUpdate]);
   }));
@@ -30534,7 +30835,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql16`${productCopurchase.count} + 1`,
+              count: sql18`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
@@ -30739,7 +31040,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq26(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq28(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];

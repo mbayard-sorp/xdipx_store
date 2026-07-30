@@ -40,10 +40,10 @@
  * so release-engine.test.ts can hammer it without a network or a database.
  */
 
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { db } from '~/lib/db.server'
-import { homepageTeamSuggestions, pipelineSettings, suggestionLinks } from '../../db/schema'
+import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
 import {
   addLabels,
   classifyChangedFiles,
@@ -142,7 +142,20 @@ const KEYS = {
   merges: (day: string) => `release-engine:merges:${day}`,
   rollbacks: (day: string) => `release-engine:rollbacks:${day}`,
   escalated: (pr: number) => `release-engine:escalated:pr-${pr}`,
+  /** Consecutive failed merge attempts for one PR. Cleared on success. */
+  mergeFail: (pr: number) => `release-engine:merge-fail:pr-${pr}`,
+  /** Once-a-day dedupe for the config-error email. */
+  selfCheckAlert: (day: string) => `release-engine:self-check-alert:${day}`,
+  /** Marks the cycle that last ran the out-of-band reconciliation sweep. */
+  sweepHour: 'release-engine:sweep-hour',
 } as const
+
+/**
+ * A PR whose merge keeps failing is escalated rather than retried forever.
+ * Without this the engine re-attempted the same merge every ten minutes
+ * indefinitely, since a merge failure wrote no state at all.
+ */
+const MAX_MERGE_ATTEMPTS = 3
 
 export function utcDay(now = Date.now()): string {
   return new Date(now).toISOString().slice(0, 10)
@@ -757,20 +770,38 @@ export async function runSelfCheck(opts: { force?: boolean } = {}): Promise<Self
  * DIFFERENT PR: a title must not be able to borrow another ticket's QA verdict.
  */
 export async function resolveTicketForPr(pr: PullRequestSummary): Promise<TicketFacts | null> {
-  const linked = await db
+  // Match this PR's links directly. This used to pull the most recent 500 pr
+  // links and scan them in memory, which quietly stops finding older tickets
+  // once the table passes that mark.
+  const direct = await db
     .select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref })
     .from(suggestionLinks)
-    .where(eq(suggestionLinks.kind, 'pr'))
+    .where(and(
+      eq(suggestionLinks.kind, 'pr'),
+      sql`${suggestionLinks.ref} LIKE ${'%/pull/' + pr.number} OR ${suggestionLinks.ref} = ${'#' + pr.number}`,
+    ))
     .orderBy(desc(suggestionLinks.createdAt))
-    .limit(500)
+    .limit(20)
 
-  const match = linked.find((l) => prNumberFromRef(l.ref) === pr.number)
+  const match = direct.find((l) => prNumberFromRef(l.ref) === pr.number)
   if (match) return loadTicketFacts(match.suggestionId)
 
   const titleId = parseTicketRefFromTitle(pr.title)
   if (titleId === null) return null
 
-  const otherPr = linked.find((l) => l.suggestionId === titleId && prNumberFromRef(l.ref) !== pr.number)
+  // The title claims a ticket. Refuse it if that ticket already links a
+  // different PR, so an untrusted title cannot borrow another ticket's verdict.
+  const claimed = await db
+    .select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref })
+    .from(suggestionLinks)
+    .where(and(
+      eq(suggestionLinks.kind, 'pr'),
+      eq(suggestionLinks.suggestionId, titleId),
+    ))
+    .orderBy(desc(suggestionLinks.createdAt))
+    .limit(20)
+
+  const otherPr = claimed.find((l) => prNumberFromRef(l.ref) !== pr.number)
   if (otherPr) {
     console.warn(
       `${LOG} PR #${pr.number} title claims ticket #${titleId}, but that ticket links PR ${otherPr.ref}. Refusing the title reference.`,
@@ -799,7 +830,7 @@ async function loadTicketFacts(id: number): Promise<TicketFacts | null> {
 // Escalation
 // ---------------------------------------------------------------------------
 
-type EscalationKind = 'protected' | 'attempts' | 'revert-ci' | 'circuit'
+type EscalationKind = 'protected' | 'attempts' | 'merge-attempts' | 'revert-ci' | 'circuit'
 
 /**
  * One email per PR per escalation kind, deduped in KV for a week. Without this
@@ -923,6 +954,10 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
 
   const self = await runSelfCheck()
   if (!self.ok) {
+    // A silent config error stops every merge. The GitHub token expiring in
+    // July took roughly two days to notice because nothing announced it, so
+    // the engine now tells the owner once a day that it is not working.
+    await alertSelfCheckFailure(self.problems, dryRun)
     return {
       ...result,
       ok: false,
@@ -935,6 +970,11 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
   // A merge in flight owns the engine until its deploy and smoke resolve.
   const pending = await kvGet<PendingMerge>(KEYS.pending)
   if (pending) return resolvePending(pending, dryRun)
+
+  // Reconcile hand-merged tickets roughly hourly, not on all 144 daily cycles:
+  // a verified ticket with an unmerged PR would otherwise be re-queried every
+  // ten minutes forever against an API that has already failed silently once.
+  if (!dryRun) await maybeSweepOutOfBand()
 
   const day = utcDay()
   const rollbacks = Number((await kvGet<number>(KEYS.rollbacks(day))) ?? 0)
@@ -1051,10 +1091,68 @@ async function gatherFacts(summary: PullRequestSummary): Promise<PullRequestFact
   }
 }
 
+/**
+ * Announce a config error to the owner, once per UTC day.
+ *
+ * Deliberately not deduped per problem text: the owner needs to know the engine
+ * is down, not to receive a message for each distinct symptom.
+ */
+async function alertSelfCheckFailure(problems: readonly string[], dryRun: boolean): Promise<void> {
+  if (dryRun) return
+  const first = await kvSetNX(KEYS.selfCheckAlert(utcDay()), String(Date.now()), 26 * 3600)
+  if (!first) return
+  await sendOwnerEmail(
+    '[xdipx] release engine is not running: config error',
+    emailShell(
+      'The release engine failed its self-check, so nothing is being merged',
+      [['Problems', problems.join('; ') || 'unknown']],
+      `<p>Every agent PR is waiting until this is fixed. The most common cause is an expired
+      <code>GITHUB_TOKEN</code> in the Vercel project environment.</p>
+      <p>This message is sent once a day while the condition lasts.</p>`,
+    ),
+  )
+}
+
+/**
+ * Run the out-of-band merge sweep at most once an hour. The hour marker is
+ * stored rather than a TTL lock so a missed cycle simply sweeps on the next
+ * one instead of waiting out a lease.
+ */
+async function maybeSweepOutOfBand(): Promise<void> {
+  const hour = new Date().toISOString().slice(0, 13)
+  const last = await kvGet<string>(KEYS.sweepHour)
+  if (last === hour) return
+  await kvSet(KEYS.sweepHour, hour)
+
+  try {
+    const { sweepOutOfBandMerges } = await import('~/lib/ticket-out-of-band-sweep.server')
+    const swept = await sweepOutOfBandMerges()
+    if (swept.applied.length > 0) {
+      console.log(`${LOG} out-of-band sweep applied tickets: ${swept.applied.join(', ')}`)
+    }
+    for (const err of swept.errors) console.warn(`${LOG} sweep: ${err}`)
+  } catch (err) {
+    // Reconciliation is a bookkeeping nicety; never let it stop a release.
+    console.error(`${LOG} out-of-band sweep failed`, err)
+  }
+}
+
 async function handleProtected(pr: PullRequestSummary, decision: ReleaseDecision, dryRun: boolean): Promise<void> {
   if (!dryRun && !pr.labels.includes(NEEDS_OWNER_LABEL)) {
     const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], 'release-engine')
     if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
+  }
+  // Record the stop on the ticket itself. The owner digest builds its
+  // escalation list from pr links in state 'needs-owner'; nothing wrote that
+  // state before, so that section could never show anything. Only possible for
+  // PRs that resolve to a ticket — an ad-hoc protected PR still gets the label
+  // and the email, but has no row to hang a link on.
+  if (!dryRun && decision.ticketId !== null) {
+    await addTicketLink(decision.ticketId, {
+      kind: 'pr',
+      ref: pr.htmlUrl,
+      state: 'needs-owner',
+    })
   }
   await escalate(
     'protected',
@@ -1111,15 +1209,44 @@ async function mergeOne(
   })
   if (!merged.ok) {
     console.error(`${LOG} merge of PR #${pr.number} failed: ${merged.error}`)
+    // Count the failure. A merge that cannot succeed (a rule GitHub enforces
+    // and the gate does not model, say) used to be retried every ten minutes
+    // forever with no record and no escalation.
+    const attempts = await kvIncr(KEYS.mergeFail(pr.number))
+    if (attempts >= MAX_MERGE_ATTEMPTS) {
+      if (!pr.labels.includes(NEEDS_OWNER_LABEL)) {
+        const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], 'release-engine')
+        if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
+      }
+      await escalate(
+        'merge-attempts',
+        KEYS.escalated(pr.number),
+        `[xdipx] PR #${pr.number} cannot be merged after ${attempts} attempts`,
+        emailShell(
+          'The release engine gave up merging a PR',
+          [
+            ['PR', `#${pr.number} ${pr.title}`],
+            ['Branch', pr.headRef],
+            ['Attempts', String(attempts)],
+            ['Last error', merged.error],
+          ],
+          `<p>The gate keeps saying this PR is mergeable and GitHub keeps refusing. It now carries the
+          <code>${escapeHtml(NEEDS_OWNER_LABEL)}</code> label, so the engine will skip it from here on:
+          <a href="${escapeHtml(pr.htmlUrl)}">${escapeHtml(pr.htmlUrl)}</a></p>`,
+        ),
+        false,
+      )
+    }
     return {
       ...result,
       ok: false,
       decisions,
-      message: `merge failed for PR #${pr.number}: ${merged.error}`,
+      message: `merge failed for PR #${pr.number} (attempt ${attempts}): ${merged.error}`,
       errors: [merged.error],
     }
   }
 
+  await kvDel(KEYS.mergeFail(pr.number))
   await kvIncr(KEYS.merges(day))
   const pending: PendingMerge = {
     prNumber: pr.number,
@@ -1452,13 +1579,13 @@ async function markPrLinksState(pending: PendingMerge, state: string): Promise<v
  */
 async function setReleaseEngineEnabled(value: false): Promise<void> {
   try {
-    await db
-      .insert(pipelineSettings)
-      .values({ key: 'release_engine_enabled', value: String(value) })
-      .onConflictDoUpdate({
-        target: pipelineSettings.key,
-        set: { value: String(value), updatedAt: new Date() },
-      })
+    const { setPipelineSettingAudited } = await import('~/lib/settings.server')
+    await setPipelineSettingAudited(
+      'release_engine_enabled',
+      String(value),
+      'system',
+      'release-engine:circuit-breaker',
+    )
     console.error(`${LOG} circuit breaker: release_engine_enabled set to false`)
   } catch (err) {
     console.error(`${LOG} could not flip release_engine_enabled off`, err)
