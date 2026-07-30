@@ -30,6 +30,9 @@ import {
   type TeamConfig, type GateResult, type TicketStatus,
 } from '~/lib/team.server'
 import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
+import { getClient } from '~/lib/sanity.server'
+import { kvGet } from '~/lib/kv.server'
+import { CATEGORY_HEALTH_LATEST_KEY, type CategoryHealthResult } from '~/lib/category-healthcheck.server'
 
 /**
  * Release-engine controls. Deliberately NOT added to VALVE_KEYS: that constant
@@ -94,6 +97,20 @@ interface TicketFilter {
   assignee: string
 }
 
+/** One merchandised page doc, joined with its latest healthcheck verdict. */
+interface MerchPageRow {
+  id: string
+  title: string | null
+  /** The storefront path this doc enriches. */
+  surface: string
+  status: string
+  blocks: number
+  updatedAt: string | null
+  /** null = no sweep has covered this path yet (e.g. doc not live). */
+  healthy: boolean | null
+  problems: string[]
+}
+
 interface LoaderData {
   team: TeamId
   config: TeamConfig
@@ -119,6 +136,9 @@ interface LoaderData {
   videoFrameReview: boolean
   releaseEngine: boolean
   releaseEngineMaxMerges: number
+  /** Homepage tab only: merchandised category/drop pages + last sweep time. */
+  merchPages: MerchPageRow[]
+  merchHealthAt: string | null
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
@@ -243,11 +263,56 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     }
   }
 
+  // Merchandised pages (homepage tab only): every categoryPage/dropPage doc,
+  // joined with the last report-only sweep's verdict for its surface.
+  let merchPages: MerchPageRow[] = []
+  let merchHealthAt: string | null = null
+  if (team === 'homepage') {
+    const client = getClient(false)
+    const [docs, health] = await Promise.all([
+      client
+        ? client.fetch<Array<{
+            _id: string
+            title: string | null
+            handle: string | null
+            routeKey: string | null
+            status: string | null
+            blocks: number | null
+            updatedAt: string | null
+          }>>(
+            `*[_type in ["categoryPage", "dropPage"]] | order(_type asc, _id asc) {
+              _id, title, "handle": shopifyCollectionHandle, routeKey, status,
+              "blocks": count(blocks), "updatedAt": _updatedAt
+            }`,
+          ).catch(() => [])
+        : Promise.resolve([]),
+      kvGet<CategoryHealthResult & { at?: string }>(CATEGORY_HEALTH_LATEST_KEY).catch(() => null),
+    ])
+    const verdictByPath = new Map((health?.checks ?? []).map(c => [c.path, c]))
+    merchHealthAt = health?.at ?? null
+    merchPages = docs.map(d => {
+      const surface = d.routeKey
+        ? (d.routeKey === 'new' ? '/new' : '/collections/on-sale')
+        : `/collections/${d.handle ?? ''}`
+      const verdict = verdictByPath.get(surface)
+      return {
+        id: d._id,
+        title: d.title,
+        surface,
+        status: d.status ?? 'draft',
+        blocks: d.blocks ?? 0,
+        updatedAt: d.updatedAt,
+        healthy: verdict ? verdict.ok : null,
+        problems: verdict?.problems ?? [],
+      }
+    })
+  }
+
   return {
     team, config, migrated, gateResult, runs, selectedRun, suggestions, ticketLinks, filter,
     kindOptions, assigneeOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
-    videoFrameReview, releaseEngine, releaseEngineMaxMerges,
+    videoFrameReview, releaseEngine, releaseEngineMaxMerges, merchPages, merchHealthAt,
   }
 }
 
@@ -381,7 +446,7 @@ export default function AgentTeamsPage() {
     suggestions, ticketLinks, filter, kindOptions, assigneeOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
     seoCuration, trendScout, videoAutopublish, videoFrameReview,
-    releaseEngine, releaseEngineMaxMerges,
+    releaseEngine, releaseEngineMaxMerges, merchPages, merchHealthAt,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -583,6 +648,72 @@ export default function AgentTeamsPage() {
             tone={gateResult.ok ? 'ok' : 'warn'}
           />
         </div>
+      )}
+
+      {/* ── Merchandised pages (homepage team's owned surfaces) ──────────── */}
+      {team === 'homepage' && merchPages.length > 0 && (
+        <section>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <h2 className="kicker">Merchandised pages</h2>
+            <p className="text-xs text-ink-4">
+              {merchHealthAt
+                ? <>Last sweep <span className="font-mono">{fmtAge(merchHealthAt)}</span> ago (rides /cron/homepage-healthcheck)</>
+                : 'No sweep recorded yet — the check rides /cron/homepage-healthcheck.'}
+            </p>
+          </div>
+          <ResponsiveTable>
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="text-left text-xs text-ink-4 border-b border-line">
+                  <th className="py-2 pr-3 font-normal">Page</th>
+                  <th className="py-2 pr-3 font-normal">Surface</th>
+                  <th className="py-2 pr-3 font-normal">Status</th>
+                  <th className="py-2 pr-3 font-normal">Blocks</th>
+                  <th className="py-2 pr-3 font-normal">Updated</th>
+                  <th className="py-2 font-normal">Health</th>
+                </tr>
+              </thead>
+              <tbody>
+                {merchPages.map(p => (
+                  <tr key={p.id} className="border-b border-line-2 align-top">
+                    <td className="py-2 pr-3 text-ink">{p.title ?? p.id}</td>
+                    <td className="py-2 pr-3">
+                      <a href={p.surface} target="_blank" rel="noreferrer" className="font-mono text-xs text-ink-3 hover:text-ink underline">
+                        {p.surface}
+                      </a>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        p.status === 'live' ? 'bg-sage/15 text-sage'
+                        : p.status === 'archived' ? 'bg-paper-3 text-ink-4'
+                        : 'bg-plum-soft text-plum'
+                      }`}>
+                        {p.status}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-ink-3">{p.blocks}</td>
+                    <td className="py-2 pr-3 text-ink-3">{fmtAge(p.updatedAt)}</td>
+                    <td className="py-2">
+                      {p.healthy === null ? (
+                        <span className="text-xs text-ink-4">{p.status === 'live' ? 'not swept yet' : '—'}</span>
+                      ) : p.healthy ? (
+                        <span className="text-xs font-semibold text-sage">OK</span>
+                      ) : (
+                        <span className="text-xs font-semibold text-coral" title={p.problems.join('; ')}>
+                          FAILING · {p.problems[0] ?? 'see Sentry'}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ResponsiveTable>
+          <p className="text-xs text-ink-4 mt-2">
+            Draft pages render nothing on the storefront; flipping status to live in Sanity is the publish,
+            setting it back to draft is the rollback. The sweep is report-only (Sentry + tickets, no auto-recovery).
+          </p>
+        </section>
       )}
 
       {/* ── Strategy brief ───────────────────────────────────────────────── */}
