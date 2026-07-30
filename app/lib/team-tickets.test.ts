@@ -115,9 +115,11 @@ const ALLOWED_FOR_CODE_TICKET: Array<[TicketStatus, TicketStatus, TicketActor[]]
   ['in_progress', 'approved',    ['system']],                       // lease expiry
   ['in_progress', 'dismissed',   ['owner']],
   ['pr_open',     'in_review',   ['agent:qa-reviewer']],
+  ['pr_open',     'applied',     ['system']],                       // out-of-band reconciliation
   ['pr_open',     'dismissed',   ['owner']],
   ['in_review',   'verified',    ['agent:qa-reviewer']],
   ['in_review',   'in_progress', ['agent:qa-reviewer']],            // FAIL bounce
+  ['in_review',   'applied',     ['system']],                       // out-of-band reconciliation
   ['in_review',   'dismissed',   ['owner']],
   ['verified',    'applied',     ['system']],
   ['verified',    'in_progress', ['system']],                       // smoke bounce
@@ -151,15 +153,24 @@ describe('ALLOWED transition matrix', () => {
     expect(wrong).toEqual([])
   })
 
-  it('opens pr_open -> applied to agent-editor only, and only for its own kinds', () => {
+  it('opens pr_open -> applied to agent-editor (own kinds) and system (reconciliation) only', () => {
     for (const kind of AGENT_EDITOR_APPLY_KINDS) {
       expect(isTransitionAllowed('pr_open', 'applied', 'agent:agent-editor', { kind })).toBe(true)
     }
     for (const kind of ['code', 'process', 'campaign', 'promo']) {
       expect(isTransitionAllowed('pr_open', 'applied', 'agent:agent-editor', { kind })).toBe(false)
     }
-    for (const actor of ACTORS.filter(a => a !== 'agent:agent-editor')) {
+    // `system` is the out-of-band sweep, and unlike agent-editor it is not fenced
+    // by kind: a hand-merged PR strands a ticket of any kind, and the sweep only
+    // ever acts on a PR GitHub reports as already merged.
+    for (const kind of [...AGENT_EDITOR_APPLY_KINDS, 'code', 'process']) {
+      expect(isTransitionAllowed('pr_open', 'applied', 'system', { kind })).toBe(true)
+      expect(isTransitionAllowed('in_review', 'applied', 'system', { kind })).toBe(true)
+    }
+    const others = ACTORS.filter(a => a !== 'agent:agent-editor' && a !== 'system')
+    for (const actor of others) {
       expect(isTransitionAllowed('pr_open', 'applied', actor, { kind: 'agent-def' })).toBe(false)
+      expect(isTransitionAllowed('in_review', 'applied', actor, { kind: 'agent-def' })).toBe(false)
     }
   })
 

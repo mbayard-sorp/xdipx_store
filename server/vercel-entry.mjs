@@ -10506,12 +10506,29 @@ var init_team_server = __esm({
         { to: "in_review", actors: ["agent:qa-reviewer"] },
         // The legacy agent-editor docs path, preserved verbatim.
         { to: "applied", actors: ["agent:agent-editor"], kinds: AGENT_EDITOR_APPLY_KINDS },
+        // Out-of-band reconciliation. See the note on the `in_review` edge below.
+        { to: "applied", actors: ["system"] },
         OWNER_DISMISS
       ],
       in_review: [
         { to: "verified", actors: ["agent:qa-reviewer"] },
         // FAIL bounce: back to the assignee with a reason, one attempt spent.
         { to: "in_progress", actors: ["agent:qa-reviewer"], incrementAttempt: true },
+        // Out-of-band reconciliation, same edge as `pr_open` above.
+        //
+        // `applied` means "the fix is live on xdipx.com". The engine earns that
+        // claim by merging, deploying, and smoking. The sweep earns it a different
+        // way: it asks GitHub whether the linked PR is already merged, and only a
+        // `merged: true` from GitHub itself lets it write this edge. Nothing here
+        // can mark unmerged work as shipped.
+        //
+        // Without these two edges a PR the owner merges by hand strands its ticket
+        // forever, because the only exits from `pr_open`/`in_review` were QA and an
+        // owner dismissal. Tickets #291, #323 and #441 sat exactly this way while
+        // their PRs (#413, #414, #420) were live in production, and R-DEV then
+        // spent later passes re-diagnosing incidents that had already shipped.
+        // The sweep only ever moves a ticket in the direction reality already went.
+        { to: "applied", actors: ["system"] },
         OWNER_DISMISS
       ],
       verified: [
@@ -27688,6 +27705,7 @@ var init_github_server = __esm({
 // app/lib/ticket-out-of-band-sweep.server.ts
 var ticket_out_of_band_sweep_server_exports = {};
 __export(ticket_out_of_band_sweep_server_exports, {
+  SWEEPABLE_STATUSES: () => SWEEPABLE_STATUSES,
   SWEEP_MAX_TICKETS: () => SWEEP_MAX_TICKETS,
   SWEEP_MIN_AGE_MINUTES: () => SWEEP_MIN_AGE_MINUTES,
   countStrandedVerifiedTickets: () => countStrandedVerifiedTickets,
@@ -27695,7 +27713,7 @@ __export(ticket_out_of_band_sweep_server_exports, {
   isMergedOutOfBand: () => isMergedOutOfBand,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and7, desc as desc2, eq as eq22, lt as lt3, sql as sql16 } from "drizzle-orm";
+import { and as and7, desc as desc2, eq as eq22, inArray as inArray8, lt as lt3, sql as sql16 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
@@ -27703,7 +27721,7 @@ async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
     ref: suggestionLinks.ref,
     linkedAt: suggestionLinks.createdAt
   }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
-    eq22(homepageTeamSuggestions.status, "verified"),
+    inArray8(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
     eq22(suggestionLinks.kind, "pr"),
     lt3(homepageTeamSuggestions.updatedAt, cutoff)
   )).orderBy(homepageTeamSuggestions.updatedAt, desc2(suggestionLinks.createdAt));
@@ -27766,13 +27784,13 @@ async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
 async function countStrandedVerifiedTickets() {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const [row] = await db.select({ n: sql16`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
-    eq22(homepageTeamSuggestions.status, "verified"),
+    inArray8(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
     eq22(suggestionLinks.kind, "pr"),
     lt3(homepageTeamSuggestions.updatedAt, cutoff)
   ));
   return row?.n ?? 0;
 }
-var LOG, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES;
+var LOG, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES, SWEEPABLE_STATUSES;
 var init_ticket_out_of_band_sweep_server = __esm({
   "app/lib/ticket-out-of-band-sweep.server.ts"() {
     "use strict";
@@ -27784,6 +27802,7 @@ var init_ticket_out_of_band_sweep_server = __esm({
     LOG = "[out-of-band-sweep]";
     SWEEP_MAX_TICKETS = 5;
     SWEEP_MIN_AGE_MINUTES = 60;
+    SWEEPABLE_STATUSES = ["verified", "in_review", "pr_open"];
   }
 });
 
@@ -29693,7 +29712,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq26, and as and9, inArray as inArray8, desc as desc5, isNotNull, ne as ne3, sql as sql18 } from "drizzle-orm";
+import { eq as eq26, and as and9, inArray as inArray9, desc as desc5, isNotNull, ne as ne3, sql as sql18 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -29753,7 +29772,7 @@ async function enqueueVideoJob(args) {
 }
 async function advanceInflightVideoJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 5;
-  const rows = await db.select().from(videoJobs).where(inArray8(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(videoJobs).where(inArray9(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, done: 0, failed: 0, parked: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.videoPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS2);
@@ -29823,7 +29842,7 @@ async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
     sql18`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
     eq26(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
-    inArray8(videoJobs.stage, FRAME_APPROVED_STAGES),
+    inArray9(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
   )).orderBy(desc5(videoJobs.createdAt)).limit(1);
   return row?.frameId ?? null;
@@ -29845,7 +29864,7 @@ async function advanceSceneFrame(job) {
     const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and9(
       eq26(videoJobs.sceneFrameAssetId, reuseId),
       eq26(videoJobs.presenter, job.presenter),
-      inArray8(videoJobs.stage, FRAME_APPROVED_STAGES)
+      inArray9(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
       throw new Error(`reuseFrameAssetId ${reuseId} has never been approved for presenter '${job.presenter}' (no matching job carried it past the frame gate)`);
@@ -30271,7 +30290,7 @@ async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc5(videoJobs.createdAt)).limit(limit);
   if (!jobs.length) return [];
   const jobIds = jobs.map((j) => j.id);
-  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray8(mediaAssets.videoJobId, jobIds));
+  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray9(mediaAssets.videoJobId, jobIds));
   return jobs.map((job) => {
     const own = assets.filter((a) => a.videoJobId === job.id);
     const finalAsset = own.find((a) => a.id === job.finalAssetId) ?? null;

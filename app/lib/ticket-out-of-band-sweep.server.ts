@@ -9,10 +9,17 @@
  * stays `verified` forever. Tickets #43 and #70 shipped on 2026-07-29 and were
  * stranded exactly this way, and zero code tickets had ever reached `applied`.
  *
- * This sweep is the reconciliation step: for tickets sitting in `verified`, ask
- * GitHub whether the linked PR is already merged, and if so record the truth.
- * It can only ever close a ticket whose PR GitHub itself reports as merged, so
- * there is no path here to mark unmerged work as shipped.
+ * This sweep is the reconciliation step: for a stranded ticket, ask GitHub
+ * whether the linked PR is already merged, and if so record the truth. It can
+ * only ever close a ticket whose PR GitHub itself reports as merged, so there is
+ * no path here to mark unmerged work as shipped.
+ *
+ * `verified` was originally the only status swept, which assumed every ticket
+ * reaches the engine through QA. Most do not: a hand-merged PR leaves its ticket
+ * wherever it stood at merge time, and for R-DEV's work that is usually
+ * `pr_open`. Tickets #291, #323 and #441 sat in `pr_open` with their PRs live in
+ * production, invisible to both this sweep and the digest's stranded count.
+ * See SWEEPABLE_STATUSES.
  *
  * Lives outside release-engine.server.ts on purpose. The engine's own file
  * documents a fixed safety model at the top and is a protected path; keeping
@@ -21,7 +28,7 @@
  * owner-merged change every time.
  */
 
-import { and, desc, eq, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
 import { getPullRequest, type PullRequestSummary } from './github.server'
@@ -40,6 +47,23 @@ export const SWEEP_MAX_TICKETS = 5
  */
 export const SWEEP_MIN_AGE_MINUTES = 60
 
+/**
+ * Statuses a ticket can be stranded in when its PR merges without the engine.
+ *
+ * `verified` was the original and only case, on the assumption that everything
+ * reaches `applied` through QA. It does not. When the owner merges a PR by hand
+ * the ticket never leaves the status it was in at merge time, and for R-DEV's
+ * work that is `pr_open` (QA has not looked yet) or `in_review` (QA is midway).
+ * Both are terminal in practice: the only other exits are a QA verdict on a PR
+ * that no longer exists, or an owner dismissal.
+ *
+ * `in_progress` is deliberately excluded. A ticket there has an active lease and
+ * an assignee mid-edit; a PR link on it may be a superseded earlier attempt, and
+ * closing it out from under the agent would race real work. Lease expiry already
+ * returns those to `approved`.
+ */
+export const SWEEPABLE_STATUSES = ['verified', 'in_review', 'pr_open'] as const
+
 export interface SweepResult {
   checked: number
   applied: number[]
@@ -53,7 +77,7 @@ interface Candidate {
 }
 
 /**
- * Verified tickets older than the grace period, paired with the most recent PR
+ * Stranded tickets older than the grace period, paired with the most recent PR
  * they link. Oldest first: the longest-stranded ticket is the one most likely
  * to be genuinely merged.
  */
@@ -69,7 +93,7 @@ export async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS): Pr
     .from(homepageTeamSuggestions)
     .innerJoin(suggestionLinks, eq(suggestionLinks.suggestionId, homepageTeamSuggestions.id))
     .where(and(
-      eq(homepageTeamSuggestions.status, 'verified'),
+      inArray(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
       eq(suggestionLinks.kind, 'pr'),
       lt(homepageTeamSuggestions.updatedAt, cutoff),
     ))
@@ -156,9 +180,10 @@ export async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS): Promise<S
 }
 
 /**
- * How many verified tickets are currently stranded, ignoring the cap. Used by
- * the owner digest so a systemic reconciliation failure is visible rather than
- * silently capped at five a cycle.
+ * How many tickets are currently stranded, ignoring the cap. Used by the owner
+ * digest so a systemic reconciliation failure is visible rather than silently
+ * capped at five a cycle. Counts the same statuses the sweep acts on, so the
+ * reported number and the work queue cannot drift apart.
  */
 export async function countStrandedVerifiedTickets(): Promise<number> {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 60_000)
@@ -167,7 +192,7 @@ export async function countStrandedVerifiedTickets(): Promise<number> {
     .from(homepageTeamSuggestions)
     .innerJoin(suggestionLinks, eq(suggestionLinks.suggestionId, homepageTeamSuggestions.id))
     .where(and(
-      eq(homepageTeamSuggestions.status, 'verified'),
+      inArray(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
       eq(suggestionLinks.kind, 'pr'),
       lt(homepageTeamSuggestions.updatedAt, cutoff),
     ))
