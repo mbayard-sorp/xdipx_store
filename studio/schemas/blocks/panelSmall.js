@@ -1,10 +1,17 @@
 import { SURFACES, MARKS } from './panelTokens'
+import { withImageGenerator } from '../../lib/withImageGenerator'
 
 // Small horizontal panel — the deck's utilities (Notebook, Sale).
 //
-// Sale stays the quietest panel in the deck: paper or ink, a mono figure, never
-// coral. A discount door given equal weight to the category doors trains
-// discount-shopping on a brand positioned on curation.
+// These rows carry a full-bleed art zone (owner direction 2026-07-30), on the
+// same copy-zone/art-zone split as panelLarge so the label never sits on
+// photography. Sale still stays the quietest panel in the deck: paper ground,
+// never coral, no urgency shapes. A discount door given equal weight to the
+// category doors trains discount-shopping on a brand positioned on curation, and
+// a third of a 64px row is not equal weight to a full square tile.
+//
+// The art zone renders at roughly 64px, where an image is a silhouette and a
+// colour and nothing else — brief abstract product macros, not packshots.
 export default {
   name: 'panelSmall',
   title: 'Small horizontal panel',
@@ -37,9 +44,12 @@ export default {
       name: 'mark',
       title: 'Mark',
       type: 'string',
+      description: 'Empty state. Ignored once an image is set.',
       options: { list: MARKS },
-      hidden: ({ parent }) => !!parent?.figure,
+      hidden: ({ parent }) => !!parent?.figure || !!parent?.image,
     },
+    // AI image generation — adds imagePrompt sibling + wraps 'image' input
+    ...withImageGenerator('image'),
     {
       name: 'surface',
       title: 'Surface',
@@ -56,6 +66,6 @@ export default {
     },
   ],
   preview: {
-    select: { title: 'label', subtitle: 'meta' },
+    select: { title: 'label', subtitle: 'meta', media: 'image' },
   },
 }

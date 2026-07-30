@@ -333,39 +333,116 @@ are the empty-state fallback, never a layer on top of a photo.
 **Rejects:** multiple products in one square; props competing with the product; any tint outside
 the ground lock.
 
-## Panel large (wide, deck large row): Archetype C (in-situ bright scene)
+## Panel large — art zone (42% column, deck large row): abstract composition from a product
 
-The two large panels may carry a richer editorial photo. Private-space setting per the
-collection-imagery rule: a private room, human presence or product in use-adjacent context, never a
-housewares still-life. Scaffold (`--ref-image` when the panel links a product; `--doc-id
-singleton.panelDeck`):
+**`--image-size` is mandatory on every deck generation.** The CLI defaults to `landscape_16_9`,
+and a 16:9 source dropped into a portrait art zone under `object-cover` loses most of its width, so
+a brief composed for a tall slot comes back cropped to nothing with no error anywhere. Pass
+`--image-size portrait_4_3` for this surface.
 
-> {Sunlit private bedroom or bathroom scene with the {product} placed naturally in it | hands
-> reaching toward the {product} on rumpled linen | silk on skin with the {product} nearby}, bright
-> warm daylight, {coral | plum} accent tones, editorial fashion photography, intimate and
-> confident, tasteful crop (no exposed genitalia, no nipples), generous negative space in the
-> {zone} for the site-set label, no text, no words, no letters
+There is no wide image slot on this panel. `PanelLarge.tsx` renders exactly one image, into the art
+zone: 42% of the panel's fluid width against a fixed 240px height, so the aspect swings with the
+viewport (≈0.89 at 375px, ≈0.55 at 768px, ≈0.77 at 1024px, ≈1.03 at 1320px), all center-cropped.
+`portrait_4_3` sits near the middle of that range. Compose vertically and keep everything that
+carries the idea inside the central half of the frame width.
 
-**Keepers:**
+**The art zone always bleeds to the card edge. Never an inset plate inside the rectangle**
+(owner direction 2026-07-30).
 
-**Rejects:** empty styled rooms with no product and no human presence (housewares); dim or
-candlelit grading.
+**Brief an abstract composition built out of a real product, not a packshot.** This is the rule that
+makes a bleed work on any ground, and it was arrived at the hard way (see Rejects). A packshot brings
+a backdrop with it, and a backdrop in a full-bleed zone butts against the card as a visible plane. An
+abstract composition — hard-edged colour fields, an extreme macro, a form cropped by the frame edges —
+has no backdrop at all, so the boundary reads as a crop.
 
-## Panel small (deck small row): quiet minimal still
+- **Light ground: ground-match.** Build the composition on the panel's own tint (`blush` →
+  coral-soft `#FFE6DD`, `lilac` → plum-soft, `stone` → paper-3, `paper` → paper-2) and the seam
+  disappears completely. Same "one ground per tile" trick `PanelSquareRow` documents.
+- **Ink ground: let the composition carry its own dark passages.** Ink is the only panel where
+  ground-matching is impossible, because the ground lock holds no ink-adjacent tint. Do not solve it
+  by darkening the backdrop — that is the near-black look §4.3 retires. Solve it by giving the frame
+  internal geometry and a dark subject: on-lock tints become graphic *fields inside* the composition
+  rather than a ground behind a subject, and a dark product anchors it.
 
-The small panels stay quiet: paper or ink ground, minimal subject, the deck's resting beats.
-Scaffold (`--ref-image` when product-linked, else `--no-ref` with reason; `--doc-id
-singleton.panelDeck`):
+> Abstract editorial art photograph, bright and high-key, shot like a luxury campaign, confident and
+> tasteful, non-explicit. TALL VERTICAL PORTRAIT COMPOSITION THAT FILLS THE ENTIRE FRAME EDGE TO EDGE
+> WITH NO EMPTY BACKGROUND ANYWHERE. {A hard-edged geometric collage of overlapping flat colour
+> fields, broad blocks and diagonal bands of {coral-soft | plum-soft | paper}, each band running off
+> the edges of the frame | An extreme close crop of the {product} so close it reads as pure
+> sculptural form, its curves swelling across the whole frame}. {The {product}, ENORMOUS AND CROPPED
+> BY THE FRAME EDGES, running the full height of the composition; keep its shape, colour and finish
+> exactly as the reference image, every surface completely blank and unprinted}. {Optional: one
+> length of sage-green SATIN FABRIC RIBBON, clearly cloth with visible folds and a soft sheen,
+> sweeping across the frame as a single curved line and running off both edges}. Flat graphic light,
+> crisp edges, no vignette, no gradient, no colour wash, no seamless studio backdrop, no visible
+> tabletop, no horizon. Hyper-real material rendering, tack sharp, one idea in the frame.
 
-> {The {product} small and off-center | a single quiet detail: a curve of silicone, a fold of
-> silk} on a flat solid {paper | paper-2 | ink} ground, soft even light, one idea in the frame,
-> abundant negative space, restrained premium catalog photography, minimal and calm, no text, no
-> words, no letters
+Negative tail, on top of the mandatory list: `no empty background, no small object in a large empty
+frame, no drop shadow on a seamless backdrop`
 
-**Keepers:**
+**Keepers:** Black Tie Affair Mini Wand (`tie-affair-mini-wand`, bare-product ref `99256B.jpg`) as a
+matte black form laid on a diagonal across flat lilac and cream collage fields, filling the frame →
+`image-373cf25f931b54317a762fdc64e6a4b4009f4b13-880x1184-jpg` (`lg-discover`, ink ground: the
+first brief in four that held on an ink card).
+Adam & Eve Lilac Licks (`adam-eve-lilac-licks`, bare-product ref `96203B.jpg`) as an abstract close
+crop with a sage satin ribbon spiralling through the frame on a ground-matched coral-soft field →
+`image-8c0d886282f96208eede8f71845d6ecb57d81fd1-880x1184-jpg` (`lg-new`, blush ground: the seam
+dissolves entirely).
 
-**Rejects:** busy compositions; more than one subject; coral or plum grounds (the small panels are
-the quiet ones).
+**Rejects:** the in-situ private-room scaffold this section used to carry (it briefed a wide photo
+into a slot that has no wide photo). Any landscape composition (the crop eats it). **And the whole
+packshot-on-a-ground family for the ink panel, retired 2026-07-30 after four rounds mocked at 375px:**
+a full-strength lavender ground sat well against ink but left the §4 ground lock; correcting it to
+near-white on-lock read as a glaring pale plate glued on the ink card; "fills the frame" crop
+language on the same brief was ignored by Kontext, which dropped the ribbon instead; and an extreme
+macro with no backdrop killed the seam but landed squarely in the retired near-black moody look. The
+generalisable lesson is in the scaffold above: on ink, brief an abstract composition, not a subject
+on a ground.
+
+## Panel small — art zone (deck small row, renders at ~64px): abstract product macro
+
+Owner direction 2026-07-30 replaced this surface's "no imagery" rule. The small rows now carry a
+**full-bleed art zone** on the same copy-zone/art-zone split as `PanelLarge`, so the label keeps the
+flat ground and text never sits on photography. Generate at `--image-size square_hd` (the zone is
+roughly 1:1 at 375px, ~1.25 at `md`).
+
+**At ~64px an image is a silhouette and a colour. Nothing else.** One bold simple form, reading
+instantly at thumbnail size, no fine detail and no small parts. Pick the reference on silhouette
+legibility before anything else: rings, forks, and blocky symmetrical forms survive; slim or busy
+objects do not. Ground-match to the row's own surface (`stone` → paper-3, `paper` → paper-2).
+
+Sale keeps its quiet, which is the part of the old rule that was always load-bearing: paper ground,
+never coral, and no urgency shapes at all (no clocks, no bursts, no percentage marks). A discount
+door with the same visual weight as the category doors trains discount-shopping on a brand
+positioned on curation — a third of a 64px row is not that weight, a full tile would be.
+
+> Abstract editorial EXTREME MACRO photograph, SQUARE CROP, bright high-key, calm and restrained.
+> THE SUBJECT COMPLETELY FILLS THE FRAME EDGE TO EDGE WITH NO BACKGROUND VISIBLE. Shot so close that
+> the {product} reads only as abstract form: {one smooth curved section sweeping through the frame |
+> a form splitting into two rounded tips}, reaching off all four edges. Keep the exact colour and
+> finish of the reference image. The visible surface is COMPLETELY SMOOTH, BLANK AND UNMARKED. ONE
+> SINGLE BOLD SIMPLE FORM ONLY, reading instantly at thumbnail size, no fine detail, no small parts.
+> Soft even light raking across the material, one gentle shadow, no vignette, no gradient, no colour
+> wash, no seamless studio backdrop, no visible tabletop. Hyper-real material rendering, tack sharp.
+
+Negative tail, on top of the mandatory list: `no molded text, no embossed text, no engraved
+characters, no compliance markings, no CE mark, no UKCA mark, no symbols, no icons, no buttons, no
+control panel, no busy detail, no empty background`
+
+**Keepers:** Emperor Rechargeable Vibrating Ring (`renegade-emperor-vibrating-ring`, ref
+`83082_c65c89a2....jpg`) cropped to one smooth teal arc →
+`image-dcf693da8b7c2cb3ea1bb5872fc953839e9b060b-1024x1024-jpg` (`sm-sale`).
+Crave Duet Flex (`crave-duet-flex-black`, ref `A00476A.jpg`) cropped to the black fork →
+`image-3eaa7b43b54ae557fade5eeef27ce8f0db83f4cd-1024x1024-jpg` (`sm-notebook`).
+
+**Rejects:** the `ink` ground this section used to offer — **ink is not in the §4 ground lock**, and
+the doctrine outranks this file. Busy compositions; more than one subject; coral on the Sale row.
+**Moulded lettering carried in from the reference photo:** the first Sale round came back with the
+ring's `CE`/`UKCA` compliance characters legible in frame, which is text in the pixels (§4.4).
+Kontext faithfully reproduces any lettering moulded into a product, so crop past it and negative-
+prompt it explicitly. **A literal notebook on the Notebook door:** §4.3 and the mission brief name
+notebooks by name in the retired housewares class, so the one door called Notebook is the one door
+that must not show one — brief a designed object with a legible silhouette instead.
 
 ## categoryMasthead (wide, per category page): archetype per the lock table below
 

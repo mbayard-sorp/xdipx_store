@@ -10,10 +10,18 @@
  *     --prompt "..." --alt "..." \
  *     --target tile --block-key <blockKey> --tile-key <tileKey> \
  *     --ref-image <shopify-product-photo-url> \
+ *     [--image-size portrait_4_3] \
  *     [--doc-id categoryPage-pleasure] \
  *     [--no-ref --no-ref-reason "abstract mood band, no product target"] \
  *     [--only fal|imagen] [--caller media-manager/wayfinder] \
  *     [--images-so-far 3] [--dry-run]
+ *
+ * --image-size picks the generated aspect. It matters more than it looks: the
+ * generator defaults to `landscape_16_9`, and a 16:9 source dropped into a
+ * portrait art zone under `object-cover` loses most of its width, so a brief
+ * composed for a tall slot silently came back cropped to nothing. Pass the
+ * aspect the surface actually renders — `portrait_4_3` for the panel deck's
+ * 42% art column, `square_hd` for square tiles and the small-row chips.
  *
  * --doc-id targets a document other than the homepage singleton (the panel
  * deck 'singleton.panelDeck', a 'categoryPage-*' or 'dropPage-*' doc). The
@@ -64,6 +72,7 @@ async function main() {
   const blockKey    = arg('block-key')
   const tileKey     = arg('tile-key')
   const only        = arg('only') as 'fal' | 'imagen' | undefined
+  const imageSize   = arg('image-size')
   const refImage    = arg('ref-image')
   const noRef       = hasFlag('no-ref')
   const noRefReason = arg('no-ref-reason')
@@ -74,11 +83,18 @@ async function main() {
   const dryRun      = hasFlag('dry-run')
 
   if (!prompt || !alt || !targetKind || !blockKey) {
-    console.error('Usage: gen-homepage-image.ts --prompt <p> --alt <a> --target block|tile|promo --block-key <k> [--tile-key <k>] [--doc-id <sanity-doc-id>] [--ref-image <url>] [--only fal|imagen] [--caller <c>] [--images-so-far <n>] [--run-id <n>] [--dry-run]')
+    console.error('Usage: gen-homepage-image.ts --prompt <p> --alt <a> --target block|tile|promo --block-key <k> [--tile-key <k>] [--doc-id <sanity-doc-id>] [--ref-image <url>] [--image-size <s>] [--only fal|imagen] [--caller <c>] [--images-so-far <n>] [--run-id <n>] [--dry-run]')
     process.exit(1)
   }
   if (targetKind === 'tile' && !tileKey) {
     console.error('--tile-key is required when --target tile')
+    process.exit(1)
+  }
+  // Validate here rather than letting fal.server throw mid-generation: by then
+  // the gate round-trip is already spent.
+  const IMAGE_SIZES = ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9']
+  if (imageSize && !IMAGE_SIZES.includes(imageSize)) {
+    console.error(`--image-size must be one of: ${IMAGE_SIZES.join(', ')}`)
     process.exit(1)
   }
   // Ref-image-first rule (design-elevation p3-img-gate): a merchandising image
@@ -133,7 +149,7 @@ async function main() {
   if (dryRun) {
     console.log(JSON.stringify({
       dryRun: true,
-      plan: { prompt, alt, target, ...(docId ? { docId } : {}), only: only ?? 'fal-then-imagen', caller, ...(refImage ? { refImage } : { noRefReason }) },
+      plan: { prompt, alt, target, ...(docId ? { docId } : {}), only: only ?? 'fal-then-imagen', imageSize: imageSize ?? 'landscape_16_9 (default)', caller, ...(refImage ? { refImage } : { noRefReason }) },
     }))
     process.exit(0)
   }
@@ -149,7 +165,15 @@ async function main() {
     target,
     ...(docId ? { docId } : {}),
     caller,
-    ...(only || refImage ? { gen: { ...(only ? { only } : {}), ...(refImage ? { refImageUrl: refImage } : {}) } } : {}),
+    ...(only || refImage || imageSize
+      ? {
+          gen: {
+            ...(only ? { only } : {}),
+            ...(refImage ? { refImageUrl: refImage } : {}),
+            ...(imageSize ? { imageSize } : {}),
+          },
+        }
+      : {}),
   })
 
   // ── 5. Post spend once — this script is the single owner of the row ──────
@@ -176,7 +200,7 @@ async function main() {
       : null,
     target: manifest.target,
     ...(docId ? { docId } : {}),
-    source: { provider: manifest.provider, model: manifest.model, prompt, ...(refImage ? { refImage } : { noRefReason }) },
+    source: { provider: manifest.provider, model: manifest.model, prompt, ...(imageSize ? { imageSize } : {}), ...(refImage ? { refImage } : { noRefReason }) },
     spend: { posted: spendPosted, model: manifest.model, count: 1 },
     placed: manifest.placed,
   }))
