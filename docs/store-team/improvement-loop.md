@@ -42,7 +42,8 @@ read [`operating-system.md`](./operating-system.md).
  │    Approved rows of kind instructions|agent-def|config become ONE PR   │
  │    PER SUGGESTION editing only .claude/agents/*.md and routine/mission │
  │    docs. Row moves approved → pr_open (applyRef = PR URL).             │
- │    Kind code → left for a human to task rr7-engineer.                  │
+ │    Kind code → claimed by R-DEV (rr7-engineer) on its next pass and    │
+ │    turned into a ticket/<id> PR; QA verifies before the engine merges. │
  │    Kind campaign|promo|program → executed by the owner directly        │
  │    (Klaviyo send, Shopify code, program decision) — no PR needed.      │
  └──────────────┬─────────────────────────────────────────────────────────┘
@@ -100,7 +101,7 @@ proposed → approved → in_progress → pr_open → in_review → verified →
 | `pr_open` → `in_review` | `agent:qa-reviewer` | `{op:'transition'}` |
 | `pr_open` → `applied` | `agent:agent-editor`, and only for kind `instructions`/`agent-def`/`config` | `{op:'mark'}` (preserved for backward compatibility) |
 | `in_review` → `verified` | `agent:qa-reviewer` | `{op:'transition'}` with evidence in the note |
-| `in_review` → `in_progress` | `agent:qa-reviewer` (FAIL bounce) | `{op:'transition'}` with `lastError`; increments `attempt_count` |
+| `in_review` → `in_progress` | `agent:qa-reviewer` (FAIL bounce) | `{op:'transition'}` with `lastError`; increments `attempt_count` and renews the assignee's lease (`BOUNCE_LEASE_SEC`) so the next dev pass still finds it |
 | `verified` → `applied` | `system` (the release engine, post-merge and post-smoke only) | release engine |
 | `verified` → `in_progress` | `system` (merge, deploy, or smoke failure) | release engine; increments `attempt_count` |
 | `blocked` → `approved` | owner, or `system` when the blocker clears | dashboard / engine |
@@ -120,7 +121,7 @@ never before. "Acting team" = the suggestion's `target_team`, or the proposer wh
 | `strategy` | cross-team strategic calls | feeds the next brief |
 | `instructions` / `agent-def` | edits to agent defs or routine/mission docs | **agent-editor PR** |
 | `config` | doc-level config (playbooks), never `pipeline_settings` values | agent-editor PR |
-| `code` | needs engineering | human tasks `rr7-engineer` (Routine-B-style PR) |
+| `code` | needs engineering | **R-DEV claims it automatically** (`rr7-engineer`, 14:00 + 20:00), one `ticket/<id>` PR, QA-verified, engine-merged |
 | `campaign` | a full email campaign brief | owner executes in Klaviyo |
 | `promo` | a designed discount/sale (MAP-checked) | owner mints the code in Shopify |
 | `program` | referral/loyalty mechanics | owner decides; code parts become `code` rows |
@@ -136,9 +137,21 @@ execution path is untouched:
 - `instructions` / `agent-def` / `config` → still become an agent-editor **PR** (and only when
   `suggestion_apply_enabled` is also on), merged by the release engine after CI and the allowlist
   check, or by the owner when the diff touches a protected path.
-- `campaign` / `promo` / `code` / `program` → still **executed by hand** by the owner
-  (Klaviyo send, Shopify code, engineering task). Auto-approve just clears them from the
-  triage queue; nothing runs unattended.
+- `campaign` / `promo` / `program` → still **executed by hand** by the owner (Klaviyo send, Shopify
+  code, program decision). Auto-approve just clears them from the triage queue.
+- `code` → **no longer a human hand-off.** This line used to sit with the row above and said an
+  engineering task waited for the owner to assign it. Since R-DEV went live (2026-07-28) an approved
+  `code` row is claimed by `rr7-engineer` on the next 14:00 or 20:00 pass without anyone asking. With
+  `strategy_team_auto_approve_suggestions` on and `release_engine_enabled` on, the full path from an
+  agent filing a `code` row to that change running on xdipx.com has **no human step in it**.
+
+  That is the intended design, not an oversight, and the gates that remain are real: CI, the
+  protected-path classifier reading the GitHub file list, QA's `verified` verdict, the daily merge
+  cap, and post-deploy smoke with automatic revert. But "nothing runs unattended" stopped being true
+  for `code` on that date, and a safety property nobody can state correctly is not one you can rely
+  on. To restore the owner gate on engineering work specifically, flip
+  `strategy_team_auto_approve_suggestions` off: `code` rows then wait in `proposed` for a triage
+  click, and R-DEV only ever claims from `approved`.
 
 **Rollout:** as of 2026-07-29, auto-approve is ON for all five active teams (homepage, content,
 product, social, strategy) by owner decision. The four non-homepage valves were in fact flipped on
@@ -158,7 +171,10 @@ things is true:
    `.env*`, `package.json`, or the release engine's own files in the diff. The engine labels the PR
    `needs-owner`, emails once (deduped per PR), and never merges it. Only the owner merges those.
 2. **A ticket reaches its third failed attempt.** The row goes to `blocked` and the email carries
-   the ticket, its PRs, and the last three `last_error` values.
+   the ticket, its PRs, and the last three `last_error` values. This is the release engine's job for
+   every bouncer, not just its own: it bounces on merge/deploy/smoke failure and blocks inline, and
+   an hourly sweep catches tickets QA bounced to three attempts (QA has no `blocked` edge and no
+   escalation channel of its own).
 3. **A revert PR itself fails CI.** The automatic mitigation has failed and main may be unhealthy.
 4. **The engine circuit-breaks.** Two rollbacks in one day flips `release_engine_enabled` to false
    and emails. The store keeps running; merges stop until the owner turns it back on.
@@ -191,14 +207,17 @@ hit, a routine that skipped at the gate. Those are ordinary states with an owner
 - **The apply path has a kill switch** (`suggestion_apply_enabled`, default off) independent of any
   team's enablement, and each team's triage automation has its own
   (`{team}_team_auto_approve_suggestions`, default off).
-- **The apply pass needs run-cap headroom:** the Apply Pass and Cost Review share `team=strategy`
-  with Monday's Weekly Strategy run, and the gate's run cap counts per team, not per run type.
-  `strategy_team_max_runs` must be **8**: Monday schedules six runs as `team=strategy` (R-DEV
-  twice, R-QA once, plus Weekly Strategy, Cost Review, and the Apply Pass), and the cap counts every
-  run row whether or not it succeeded, so six scheduled runs need more than six slots. Otherwise the
-  later Monday runs skip `over_run_cap`
-  and approved suggestions silently never become PRs (this exact failure hid every apply run
-  from 2026-07-07 to 2026-07-21).
+- **The apply pass needs run-cap AND budget headroom:** the Apply Pass and Cost Review share
+  `team=strategy` with Monday's Weekly Strategy run, R-DEV's two passes, and R-QA, and the gate's
+  ceilings count per team, not per run type. `strategy_team_max_runs` must be **8** against six
+  scheduled Monday runs, because the cap counts every run row whether or not it succeeded.
+  `strategy_team_daily_cents` must cover two coding passes plus a review pass, and `gate()` checks
+  the budget **before** the run cap, so an under-sized budget shows up as `over_budget` on the later
+  runs and reads like a spend problem rather than an unset valve. Migration 074 versions both (1500
+  cents, 8 runs); before it, neither key had ever been written and both fell back to defaults sized
+  for one advisory retro a week. Otherwise the later Monday runs skip and approved suggestions
+  silently never become PRs (this exact failure, with the cap at 1, hid every apply run from
+  2026-07-07 to 2026-07-21).
 - **agent-editor's file allowlist is hard:** agent defs and team docs only — no app code, schema,
   workflows, settings, or secrets, and it must refuse suggestions that would weaken money valves,
   voice gates, MAP rules, or this loop itself.

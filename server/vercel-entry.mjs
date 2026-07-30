@@ -9659,7 +9659,8 @@ var init_team_keys = __esm({
       social: { dailyCents: 500, maxRunsPerDay: 2 },
       ads: { dailyCents: 500, maxRunsPerDay: 1 },
       email: { dailyCents: 500, maxRunsPerDay: 1 },
-      strategy: { dailyCents: 300, maxRunsPerDay: 1 },
+      strategy: { dailyCents: 1500, maxRunsPerDay: 8 },
+      // 6 routines on a Monday (Weekly Strategy, R-DEV x2, R-QA, Cost Review, Apply Pass) + 2 slots of headroom; the cap counts run rows, not successes (074)
       content: { dailyCents: 500, maxRunsPerDay: 3 },
       // 3rd run = gate-retry headroom on double days (Sat trend-scout, Sun SEO curation, Wed podcast); budget covers the accuracy gate's web verification (068)
       product: { dailyCents: 300, maxRunsPerDay: 1 },
@@ -9746,6 +9747,7 @@ __export(team_server_exports, {
   AGENT_EDITOR_APPLY_KINDS: () => AGENT_EDITOR_APPLY_KINDS,
   AGENT_RETIRE_KINDS: () => AGENT_RETIRE_KINDS,
   ALLOWED: () => ALLOWED,
+  BOUNCE_LEASE_SEC: () => BOUNCE_LEASE_SEC,
   CLAIMANT_ACTORS: () => CLAIMANT_ACTORS,
   CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
   CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
@@ -10194,6 +10196,10 @@ async function transitionSuggestion(id, to, actor, opts = {}) {
     patch["verifiedBy"] = actor;
     patch["verifiedAt"] = now;
   }
+  if (to === "in_progress" && row.assignee) {
+    patch["claimedAt"] = now;
+    patch["claimExpiresAt"] = new Date(now.getTime() + BOUNCE_LEASE_SEC * 1e3);
+  }
   if (from === "proposed" || to === "dismissed") {
     patch["decidedBy"] = actor;
     patch["decidedAt"] = now;
@@ -10402,7 +10408,7 @@ async function proposeCalendarEvent(input) {
   }).returning({ id: marketingCalendar.id });
   return row.id;
 }
-var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, DETECTOR_SELF_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
+var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, DETECTOR_SELF_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, BOUNCE_LEASE_SEC, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
 var init_team_server = __esm({
   "app/lib/team.server.ts"() {
     "use strict";
@@ -10515,6 +10521,7 @@ var init_team_server = __esm({
       applied: [],
       dismissed: []
     };
+    BOUNCE_LEASE_SEC = 6 * 3600;
     CLAIM_LEASE_DEFAULT_SEC = 1200;
     CLAIM_LEASE_MAX_SEC = 6 * 3600;
     defaultExecutor = async (query) => await db.execute(query);
@@ -28218,6 +28225,7 @@ async function cycleBody(dryRun) {
       errors: self.problems
     };
   }
+  await maybeSweepExhaustedTickets(dryRun);
   const pending = await kvGet(KEYS.pending);
   if (pending) return resolvePending(pending, dryRun);
   if (!dryRun) await maybeSweepOutOfBand();
@@ -28347,6 +28355,35 @@ async function maybeSweepOutOfBand() {
     for (const err2 of swept.errors) console.warn(`${LOG2} sweep: ${err2}`);
   } catch (err2) {
     console.error(`${LOG2} out-of-band sweep failed`, err2);
+  }
+}
+async function maybeSweepExhaustedTickets(dryRun) {
+  if (dryRun) return;
+  const hour = (/* @__PURE__ */ new Date()).toISOString().slice(0, 13);
+  if (await kvGet(KEYS.exhaustedHour) === hour) return;
+  await kvSet(KEYS.exhaustedHour, hour);
+  let rows = [];
+  try {
+    const res = await db.execute(sql17`
+      SELECT id, attempt_count, last_error
+        FROM homepage_team_suggestions
+       WHERE status = 'in_progress'
+         AND attempt_count >= ${MAX_TICKET_ATTEMPTS2}
+       ORDER BY priority ASC, updated_at ASC
+       LIMIT 20`);
+    rows = res.rows ?? [];
+  } catch (err2) {
+    console.error(`${LOG2} exhausted-ticket sweep failed`, err2);
+    return;
+  }
+  for (const row of rows) {
+    const id = Number(row["id"] ?? 0);
+    if (!Number.isInteger(id) || id <= 0) continue;
+    await blockExhaustedTicket(
+      id,
+      Number(row["attempt_count"] ?? MAX_TICKET_ATTEMPTS2),
+      typeof row["last_error"] === "string" && row["last_error"] ? row["last_error"] : "no error recorded on the ticket"
+    );
   }
 }
 async function handleProtected(pr, decision, dryRun) {
@@ -28636,6 +28673,9 @@ async function bounceTicket(ticketId, lastError, pr, dryRun) {
     return;
   }
   if (!shouldBlockForAttempts(attemptCount)) return;
+  await blockExhaustedTicket(ticketId, attemptCount, lastError);
+}
+async function blockExhaustedTicket(ticketId, attemptCount, lastError) {
   try {
     await transitionSuggestion(ticketId, "blocked", "system", {
       note: `blocked after ${attemptCount} fix attempts`,
@@ -28754,7 +28794,9 @@ var init_release_engine_server = __esm({
       /** Once-a-day dedupe for the config-error email. */
       selfCheckAlert: (day) => `release-engine:self-check-alert:${day}`,
       /** Marks the cycle that last ran the out-of-band reconciliation sweep. */
-      sweepHour: "release-engine:sweep-hour"
+      sweepHour: "release-engine:sweep-hour",
+      /** Marks the cycle that last swept tickets that burned every fix attempt. */
+      exhaustedHour: "release-engine:exhausted-sweep-hour"
     };
     MAX_MERGE_ATTEMPTS = 3;
   }

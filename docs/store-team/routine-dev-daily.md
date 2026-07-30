@@ -26,26 +26,40 @@ RUN_ID=$(curl -s -X POST "$BASE_URL/api/team/run" \
 curl -s "$BASE_URL/api/team/gate?team=strategy&excludeRun=$RUN_ID" -H "x-team-secret: $TEAM_TOKEN"
 ```
 
-## Step 1 — Claim work (max 3 tickets)
+## Step 1 — Claim work (one at a time, max 3 per pass)
 
 Claim atomically. Never pick a ticket by reading the list and then marking it; two passes would
 collide. The claim op takes a lease, so a ticket you claim and abandon returns to `approved` on its
 own.
 
+**Claim one ticket, take it all the way to Step 3, then come back here for the next.** Do not claim
+three up front. Every claim starts its lease immediately, so a batch of three puts tickets 2 and 3
+on the clock while you are still reading ticket 1 — and the lease is not advisory. When it expires,
+`expireStaleClaims()` returns the row to `approved` and clears the assignee, which means your
+`in_progress → pr_open` transition at the end of Step 3 comes back **409** and the PR you just
+opened has no ticket to authorise it. The release engine then skips that PR as `ticket-not-verified`
+for good, and the next pass re-implements the same ticket on a second branch.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"claim","assignee":"agent:rr7-engineer","leaseSeconds":1200,
+  -d '{"op":"claim","assignee":"agent:rr7-engineer","leaseSeconds":10800,
        "filter":{"kind":"code","status":"approved"}}'
 ```
 
-Repeat up to **3 times**. `{"empty":true}` or a 409 means there is nothing claimable; that is a
-clean, successful, short run, not a failure. Claims come back in priority order (1 is P0), oldest
-first within a priority.
+`leaseSeconds: 10800` is three hours, sized for one ticket including `typecheck`, `test`, and
+`build`. The endpoint caps a lease at six hours. Do not lower it to save time; nothing is waiting on
+the lease, and a lease that expires mid-ticket costs a whole PR.
 
-**On the 20:00 pass, claim bounced tickets first.** A bounced ticket is one sitting in
-`in_progress` with a `last_error` and an `attempt_count` above zero, assigned to you. List those
-before claiming anything new:
+Repeat the claim up to **3 times per pass**, once per completed ticket. `{"empty":true}` or a 409
+means there is nothing claimable; that is a clean, successful, short run, not a failure. Claims come
+back in priority order (1 is P0), oldest first within a priority.
+
+**On the 20:00 pass, work bounced tickets first.** A bounced ticket is one sitting in
+`in_progress` with a `last_error` and an `attempt_count` above zero, assigned to you. It is already
+yours — QA's bounce renews the lease for six hours, so you do **not** claim it again; you read it,
+fix it, and transition it to `pr_open` exactly as in Step 3. List those before claiming anything
+new:
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
@@ -55,6 +69,10 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 
 Read `last_error` before you touch the code. It is QA's or the engine's concrete reason, and it is
 usually the whole fix.
+
+A bounced ticket counts against this pass's limit of 3 like any other. A ticket that has burned all
+three attempts is blocked and escalated by the release engine within the hour, so if you see one at
+`attempt_count` 3 still assigned to you, leave it: the owner has it now.
 
 ## Step 2 — Protected paths: stop, do not code
 

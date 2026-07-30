@@ -148,6 +148,8 @@ const KEYS = {
   selfCheckAlert: (day: string) => `release-engine:self-check-alert:${day}`,
   /** Marks the cycle that last ran the out-of-band reconciliation sweep. */
   sweepHour: 'release-engine:sweep-hour',
+  /** Marks the cycle that last swept tickets that burned every fix attempt. */
+  exhaustedHour: 'release-engine:exhausted-sweep-hour',
 } as const
 
 /**
@@ -967,6 +969,11 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
     }
   }
 
+  // Ahead of every early return below: a ticket that has burned all three
+  // attempts should stop consuming dev-pass claim slots whether or not the
+  // engine is mid-merge, circuit-broken, or capped out for the day.
+  await maybeSweepExhaustedTickets(dryRun)
+
   // A merge in flight owns the engine until its deploy and smoke resolve.
   const pending = await kvGet<PendingMerge>(KEYS.pending)
   if (pending) return resolvePending(pending, dryRun)
@@ -1134,6 +1141,51 @@ async function maybeSweepOutOfBand(): Promise<void> {
   } catch (err) {
     // Reconciliation is a bookkeeping nicety; never let it stop a release.
     console.error(`${LOG} out-of-band sweep failed`, err)
+  }
+}
+
+/**
+ * Hourly backstop: block and escalate any ticket that has burned every fix
+ * attempt, whichever agent spent them.
+ *
+ * Only `in_progress` is swept, because it is the only status with a `->
+ * blocked` edge in the transition map, and (since the bounce lease renewal in
+ * team.server.ts) it is where a bounced ticket actually sits. A row that has
+ * already moved on to `pr_open` is someone's live work and is left alone; if it
+ * bounces again it comes straight back here.
+ */
+async function maybeSweepExhaustedTickets(dryRun: boolean): Promise<void> {
+  if (dryRun) return
+  const hour = new Date().toISOString().slice(0, 13)
+  if ((await kvGet<string>(KEYS.exhaustedHour)) === hour) return
+  await kvSet(KEYS.exhaustedHour, hour)
+
+  let rows: Array<Record<string, unknown>> = []
+  try {
+    const res = await db.execute(sql`
+      SELECT id, attempt_count, last_error
+        FROM homepage_team_suggestions
+       WHERE status = 'in_progress'
+         AND attempt_count >= ${MAX_TICKET_ATTEMPTS}
+       ORDER BY priority ASC, updated_at ASC
+       LIMIT 20`)
+    rows = (res.rows ?? []) as Array<Record<string, unknown>>
+  } catch (err) {
+    // Housekeeping must never stop a release.
+    console.error(`${LOG} exhausted-ticket sweep failed`, err)
+    return
+  }
+
+  for (const row of rows) {
+    const id = Number(row['id'] ?? 0)
+    if (!Number.isInteger(id) || id <= 0) continue
+    await blockExhaustedTicket(
+      id,
+      Number(row['attempt_count'] ?? MAX_TICKET_ATTEMPTS),
+      typeof row['last_error'] === 'string' && row['last_error']
+        ? row['last_error']
+        : 'no error recorded on the ticket',
+    )
   }
 }
 
@@ -1499,7 +1551,27 @@ async function bounceTicket(
   }
 
   if (!shouldBlockForAttempts(attemptCount)) return
+  await blockExhaustedTicket(ticketId, attemptCount, lastError)
+}
 
+/**
+ * Block a ticket that has burned every fix attempt, and tell the owner once.
+ *
+ * Split out of bounceTicket because the engine's own `verified -> in_progress`
+ * bounce is not the only one that spends an attempt: QA's `in_review ->
+ * in_progress` FAIL bounce walks the same attempt-incrementing edge from inside
+ * the R-QA routine, which has no path to `blocked` and no escalation channel.
+ * Three docs promised this block happened for any third failure; only the
+ * engine's path implemented it, so a ticket QA failed three times cycled dev ->
+ * QA -> dev forever and took one of the dev pass's three claim slots with it
+ * every time. maybeSweepExhaustedTickets is the backstop for every other
+ * bouncer; this is the shared tail both call.
+ */
+async function blockExhaustedTicket(
+  ticketId: number,
+  attemptCount: number,
+  lastError: string,
+): Promise<void> {
   try {
     await transitionSuggestion(ticketId, 'blocked', 'system', {
       note: `blocked after ${attemptCount} fix attempts`,

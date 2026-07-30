@@ -70,6 +70,7 @@ vi.mock('~/lib/kv.server', () => ({
 import {
   ALLOWED,
   AGENT_EDITOR_APPLY_KINDS,
+  BOUNCE_LEASE_SEC,
   CLAIM_LEASE_DEFAULT_SEC,
   TICKET_STATUSES,
   buildClaimQuery,
@@ -204,6 +205,26 @@ describe('ALLOWED transition matrix', () => {
     expect(findTransitionRule('verified', 'in_progress', 'system')!.incrementAttempt).toBe(true)
     expect(findTransitionRule('approved', 'in_progress', 'agent:rr7-engineer')!.incrementAttempt)
       .toBeUndefined()
+  })
+
+  // The release engine's exhausted-ticket sweep queries `status = 'in_progress'`
+  // and nothing else, because that is the only status `system` can block from.
+  // If the map ever grows another `-> blocked` edge, the sweep silently stops
+  // covering it, so pin the fact here rather than in a comment over there.
+  it('lets system block only from in_progress, which is what the sweep relies on', () => {
+    const blockable = TICKET_STATUSES.filter(from =>
+      ALLOWED[from].some(r => r.to === 'blocked' && r.actors.includes('system')))
+    expect(blockable).toEqual(['in_progress'])
+  })
+
+  // Both bounce edges land in in_progress, so an exhausted ticket is always
+  // sitting where the sweep can reach it.
+  it('lands every attempt-spending bounce in in_progress', () => {
+    for (const from of TICKET_STATUSES) {
+      for (const rule of ALLOWED[from]) {
+        if (rule.incrementAttempt) expect(rule.to).toBe('in_progress')
+      }
+    }
   })
 
   it('lets a daily run close an operational row it acted on, and nothing else', () => {
@@ -348,6 +369,44 @@ describe('transitionSuggestion', () => {
     seedTicket({ status: 'verified' })
     await transitionSuggestion(42, 'in_progress', 'system', { lastError: 'smoke: / returned 500' })
     expect(h.state.patches[0]!['attemptCount']).toBeDefined()
+  })
+
+  // A bounce used to leave claim_expires_at at whatever the original claim set,
+  // hours in the past. expireStaleClaims() then reaped the row to `approved`
+  // and cleared the assignee — and because that sweep runs inside gate(), the
+  // 20:00 dev pass's own gate call emptied the bounced queue it then went
+  // looking for. The renewal is what makes "claim bounced tickets first" real.
+  it('renews the assignee lease on a QA bounce so the next dev pass still holds it', async () => {
+    seedTicket({ status: 'in_review' })
+    const before = Date.now()
+    await transitionSuggestion(42, 'in_progress', 'agent:qa-reviewer', { lastError: 'tests red' })
+    const patch = h.state.patches[0]!
+    expect(patch['claimedAt']).toBeInstanceOf(Date)
+    const expires = patch['claimExpiresAt'] as Date
+    expect(expires).toBeInstanceOf(Date)
+    expect(expires.getTime()).toBeGreaterThanOrEqual(before + BOUNCE_LEASE_SEC * 1000)
+  })
+
+  it('renews the lease on a release-engine bounce too', async () => {
+    seedTicket({ status: 'verified' })
+    await transitionSuggestion(42, 'in_progress', 'system', { lastError: 'smoke: / returned 500' })
+    expect(h.state.patches[0]!['claimExpiresAt']).toBeInstanceOf(Date)
+  })
+
+  // Nothing to hold: granting a lease with a null assignee would create a row
+  // that neither an agent owns nor the reaper can free on schedule.
+  it('grants no lease when the bounced row has no assignee', async () => {
+    seedTicket({ status: 'in_review', assignee: null })
+    await transitionSuggestion(42, 'in_progress', 'agent:qa-reviewer', { lastError: 'tests red' })
+    const patch = h.state.patches[0]!
+    expect(patch['claimExpiresAt']).toBeUndefined()
+    expect(patch['claimedAt']).toBeUndefined()
+  })
+
+  it('still clears the lease when a ticket goes the other way, to approved', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'approved', 'system', { note: 'lease expired' })
+    expect(h.state.patches[0]!['claimExpiresAt']).toBeNull()
   })
 
   it('releases the claim whenever a ticket returns to approved', async () => {
