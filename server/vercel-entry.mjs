@@ -20848,9 +20848,13 @@ var init_seo_daily_server = __esm({
 var owner_digest_server_exports = {};
 __export(owner_digest_server_exports, {
   MAX_TICKET_ATTEMPTS: () => MAX_TICKET_ATTEMPTS,
+  OWNER_DECISION_KINDS: () => OWNER_DECISION_KINDS,
+  ageOutStaleSuggestions: () => ageOutStaleSuggestions,
   parseRenderTruth: () => parseRenderTruth,
   renderEscalationsSection: () => renderEscalationsSection,
   renderHomepageNowSection: () => renderHomepageNowSection,
+  renderOpsWatchSection: () => renderOpsWatchSection,
+  renderOwnerQueueSection: () => renderOwnerQueueSection,
   renderShippedSection: () => renderShippedSection,
   renderTicketsSection: () => renderTicketsSection,
   runOwnerDigest: () => runOwnerDigest
@@ -20932,7 +20936,59 @@ function renderTicketsSection(m) {
   if (m.finalAttempt.length) {
     parts.push(`<p style="margin:6px 0 2px;color:${WARN};">On the last attempt (${MAX_TICKET_ATTEMPTS} of ${MAX_TICKET_ATTEMPTS}), one more failure escalates:</p><ul style="margin:0 0 4px;padding-left:18px;">${m.finalAttempt.map((t) => `<li>#${t.id} (${esc(t.status)}) ${esc(clip(t.suggestion, 110))}${t.lastError ? `<br><span style="color:${MUTED};">${esc(clip(t.lastError, 140))}</span>` : ""}</li>`).join("")}</ul>`);
   }
+  if (m.blockedRows.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${WARN};">Blocked, with the reason:</p><ul style="margin:0 0 4px;padding-left:18px;">${m.blockedRows.map((t) => `<li>#${t.id} (${esc(t.kind)}) ${esc(clip(t.suggestion, 110))}${t.lastError ? `<br><span style="color:${MUTED};">${esc(clip(t.lastError, 160))}</span>` : ""}</li>`).join("")}</ul>`);
+  }
   parts.push(`<p style="margin:6px 0 0;color:${MUTED};">All statuses: ${m.statusCounts || "none"}</p>`);
+  return parts.join("");
+}
+function renderOwnerQueueSection(f) {
+  const parts = [];
+  if (f.agedOut > 0) {
+    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} untargeted row${f.agedOut === 1 ? "" : "s"} aged out automatically (21 days, low priority, no team).</p>`);
+  }
+  if (f.rows.length === 0) {
+    parts.push(`<p style="margin:0;color:${GOOD};">Nothing waiting on a decision from you.</p>`);
+    return parts.join("");
+  }
+  const stale = f.rows.filter((r) => r.ageDays >= STALE_QUEUE_DAYS).length;
+  parts.push(`<p style="margin:0 0 6px;">${f.totalCount} row${f.totalCount === 1 ? "" : "s"} need a decision${stale > 0 ? ` &middot; <span style="color:${WARN};">${stale} older than ${STALE_QUEUE_DAYS} days</span>` : ""}.</p>`);
+  parts.push(`<table style="border-collapse:collapse;">${f.rows.map((r) => {
+    const ageColor = r.ageDays >= STALE_QUEUE_DAYS ? WARN : MUTED;
+    const target = r.targetTeam && r.targetTeam !== r.team ? `${esc(r.team)}&rarr;${esc(r.targetTeam)}` : esc(r.team);
+    return `<tr>
+      <td style="padding:2px 8px 2px 0;">#${r.id}</td>
+      <td style="padding:2px 8px;">${esc(r.kind)}</td>
+      <td style="padding:2px 8px;color:${MUTED};">${target}</td>
+      <td style="padding:2px 8px;color:${ageColor};">${r.ageDays}d</td>
+      <td style="padding:2px 0;">${esc(clip(r.suggestion, 120))}${r.autoApproved ? ` <span style="color:${MUTED};">(auto)</span>` : ""}</td>
+    </tr>`;
+  }).join("")}</table>`);
+  if (f.totalCount > f.rows.length) {
+    parts.push(`<p style="margin:6px 0 0;color:${MUTED};">and ${f.totalCount - f.rows.length} more &middot; full list at /admin/homepage-team</p>`);
+  }
+  return parts.join("");
+}
+function renderOpsWatchSection(f) {
+  const parts = [];
+  if (f.socialDrafts.count > 0) {
+    const old = f.socialDrafts.oldestDays ?? 0;
+    const color = old >= 3 ? WARN : MUTED;
+    parts.push(`<p style="margin:0 0 4px;color:${color};">${f.socialDrafts.count} social draft${f.socialDrafts.count === 1 ? "" : "s"} awaiting review${old > 0 ? `, oldest ${old} day${old === 1 ? "" : "s"}` : ""} &middot; /admin/socials${old >= 3 ? " &mdash; the social team stops drafting while this backs up" : ""}</p>`);
+  } else {
+    parts.push(`<p style="margin:0 0 4px;color:${MUTED};">No social drafts waiting.</p>`);
+  }
+  parts.push(f.pricingBatchRows > 0 ? `<p style="margin:0 0 4px;color:${GOOD};">Pricing recompute ran yesterday (${f.pricingBatchRows} audit rows).</p>` : `<p style="margin:0 0 4px;color:${BAD};"><strong>No scheduled pricing recompute yesterday.</strong> The 07:00 UTC batch wrote nothing; catch-up runs do not count.</p>`);
+  if (f.enrichmentAgeHours !== null) {
+    const stale = f.enrichmentAgeHours > 48;
+    parts.push(`<p style="margin:0 0 4px;color:${stale ? WARN : MUTED};">Newest enrichment ${Math.round(f.enrichmentAgeHours)}h ago${stale ? " &mdash; the enrich stage may be stalled" : ""}</p>`);
+  }
+  if (f.strandedVerified > 0) {
+    parts.push(`<p style="margin:0 0 4px;color:${WARN};">${f.strandedVerified} verified ticket${f.strandedVerified === 1 ? "" : "s"} not yet reconciled to applied.</p>`);
+  }
+  if (f.agentRetired.length > 0) {
+    parts.push(`<p style="margin:6px 0 2px;color:${MUTED};">Retired by agent-editor in the last 7 days (undo by re-approving in /admin):</p><ul style="margin:0;padding-left:18px;color:${MUTED};">${f.agentRetired.map((r) => `<li>#${r.id} (${esc(r.kind)}) ${esc(clip(r.suggestion, 100))}</li>`).join("")}</ul>`);
+  }
   return parts.join("");
 }
 function renderEscalationsSection(e) {
@@ -21082,10 +21138,11 @@ async function gatherTicketMetrics(statusCounts) {
     blocked: {},
     oldestApproved: null,
     finalAttempt: [],
+    blockedRows: [],
     statusCounts
   };
   try {
-    const [openedRes, closedRes, blockedRes, oldestRes, finalRes] = await Promise.all([
+    const [openedRes, closedRes, blockedRes, oldestRes, finalRes, blockedRowsRes] = await Promise.all([
       db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE created_at >= now() - interval '24 hours' GROUP BY kind`),
       db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
@@ -21101,7 +21158,11 @@ async function gatherTicketMetrics(statusCounts) {
                        FROM homepage_team_suggestions
                       WHERE attempt_count = ${MAX_TICKET_ATTEMPTS - 1}
                         AND status NOT IN ('applied', 'dismissed')
-                      ORDER BY priority ASC, updated_at DESC LIMIT 10`)
+                      ORDER BY priority ASC, updated_at DESC LIMIT 10`),
+      db.execute(sql9`SELECT id, status, kind, attempt_count, last_error, suggestion
+                       FROM homepage_team_suggestions
+                      WHERE status = 'blocked'
+                      ORDER BY priority ASC, updated_at DESC LIMIT 8`)
     ]);
     const oldest = (oldestRes.rows ?? [])[0];
     return {
@@ -21114,12 +21175,144 @@ async function gatherTicketMetrics(statusCounts) {
         suggestion: String(oldest["suggestion"] ?? "")
       } : null,
       finalAttempt: toAttemptRows(finalRes.rows ?? []),
+      blockedRows: toAttemptRows(blockedRowsRes.rows ?? []),
       statusCounts
     };
   } catch (err2) {
     console.warn("[owner-digest] ticket metrics unavailable (migration 070?):", String(err2).slice(0, 200));
     return empty;
   }
+}
+async function ageOutStaleSuggestions() {
+  try {
+    const res = await db.execute(sql9`
+      UPDATE homepage_team_suggestions
+         SET status = 'dismissed',
+             decided_by = 'system',
+             decided_at = now(),
+             updated_at = now()
+       WHERE status = 'approved'
+         AND kind IN ('process', 'strategy')
+         AND priority >= 3
+         AND target_team IS NULL
+         AND updated_at < now() - interval '21 days'
+       RETURNING id`);
+    return (res.rows ?? []).length;
+  } catch (err2) {
+    console.warn("[owner-digest] suggestion ager skipped:", String(err2).slice(0, 200));
+    return 0;
+  }
+}
+async function gatherOwnerQueue(agedOut) {
+  const out = { rows: [], totalCount: 0, agedOut };
+  try {
+    const kinds = sql9.join(OWNER_DECISION_KINDS.map((k) => sql9`${k}`), sql9`, `);
+    const [listRes, countRes] = await Promise.all([
+      db.execute(sql9`
+        SELECT id, kind, team, target_team, decided_by, suggestion,
+               EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
+          FROM homepage_team_suggestions
+         WHERE status = 'approved' AND kind IN (${kinds})
+         ORDER BY created_at ASC
+         LIMIT 30`),
+      db.execute(sql9`
+        SELECT COUNT(*)::int AS n
+          FROM homepage_team_suggestions
+         WHERE status = 'approved' AND kind IN (${kinds})`)
+    ]);
+    out.rows = (listRes.rows ?? []).map((r) => {
+      const row = r;
+      return {
+        id: Number(row["id"] ?? 0),
+        kind: String(row["kind"] ?? ""),
+        team: String(row["team"] ?? ""),
+        targetTeam: row["target_team"] == null ? null : String(row["target_team"]),
+        ageDays: Math.round(Number(row["age_days"] ?? 0)),
+        suggestion: String(row["suggestion"] ?? ""),
+        autoApproved: String(row["decided_by"] ?? "") === "auto"
+      };
+    });
+    out.totalCount = Number((countRes.rows ?? [])[0]?.["n"] ?? out.rows.length);
+  } catch (err2) {
+    console.warn("[owner-digest] owner queue unavailable:", String(err2).slice(0, 200));
+  }
+  return out;
+}
+async function gatherOpsWatch() {
+  const out = {
+    socialDrafts: { count: 0, oldestDays: null },
+    pricingBatchRows: 0,
+    enrichmentAgeHours: null,
+    strandedVerified: 0,
+    agentRetired: []
+  };
+  try {
+    const res = await db.execute(sql9`
+      SELECT COUNT(*)::int AS n,
+             EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 86400 AS oldest_days
+        FROM social_posts
+       WHERE status = 'draft' AND review_status IN ('pending_review', 'needs_changes')`);
+    const row = (res.rows ?? [])[0];
+    if (row) {
+      out.socialDrafts = {
+        count: Number(row["n"] ?? 0),
+        oldestDays: row["oldest_days"] == null ? null : Math.round(Number(row["oldest_days"]))
+      };
+    }
+  } catch (err2) {
+    console.warn("[owner-digest] social draft sweep failed:", String(err2).slice(0, 200));
+  }
+  try {
+    const res = await db.execute(sql9`
+      SELECT COUNT(*)::int AS n
+        FROM pricing_audit_log
+       WHERE trigger = 'batch'
+         AND occurred_at >= (now()::date - interval '1 day')
+         AND occurred_at <  now()::date`);
+    out.pricingBatchRows = Number((res.rows ?? [])[0]?.["n"] ?? 0);
+  } catch (err2) {
+    console.warn("[owner-digest] pricing batch check failed:", String(err2).slice(0, 200));
+  }
+  try {
+    const res = await db.execute(sql9`
+      SELECT EXTRACT(epoch FROM now() - MAX(created_at))::float8 / 3600 AS age_hours
+        FROM product_enrichment_cache`);
+    const raw = (res.rows ?? [])[0]?.["age_hours"];
+    out.enrichmentAgeHours = raw == null ? null : Number(raw);
+  } catch (err2) {
+    console.warn("[owner-digest] enrichment age check failed:", String(err2).slice(0, 200));
+  }
+  try {
+    const res = await db.execute(sql9`
+      SELECT COUNT(DISTINCT s.id)::int AS n
+        FROM homepage_team_suggestions s
+        JOIN suggestion_links l ON l.suggestion_id = s.id AND l.kind = 'pr'
+       WHERE s.status = 'verified'
+         AND s.updated_at < now() - interval '1 hour'`);
+    out.strandedVerified = Number((res.rows ?? [])[0]?.["n"] ?? 0);
+  } catch (err2) {
+    console.warn("[owner-digest] stranded-ticket count failed:", String(err2).slice(0, 200));
+  }
+  try {
+    const res = await db.execute(sql9`
+      SELECT id, kind, suggestion
+        FROM homepage_team_suggestions
+       WHERE status = 'dismissed'
+         AND decided_by LIKE 'agent:%'
+         AND decided_at >= now() - interval '7 days'
+       ORDER BY decided_at DESC LIMIT 10`);
+    out.agentRetired = (res.rows ?? []).map((r) => {
+      const row = r;
+      return {
+        id: Number(row["id"] ?? 0),
+        kind: String(row["kind"] ?? ""),
+        suggestion: String(row["suggestion"] ?? "")
+      };
+    });
+  } catch (err2) {
+    console.warn("[owner-digest] agent-retired sweep failed:", String(err2).slice(0, 200));
+  }
+  return out;
 }
 async function gatherEscalations() {
   const out = { protectedPrs: [], exhausted: [] };
@@ -21231,16 +21424,39 @@ async function runOwnerDigest(opts = {}) {
     console.warn("[owner-digest] ticket columns unavailable (migration 070 not applied?):", String(err2).slice(0, 200));
   }
   const statusCountsLine = sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ");
-  const [shipped, homepageNow, ticketMetrics, escalations] = await Promise.all([
+  const agedOut = await ageOutStaleSuggestions();
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation] = await Promise.all([
     gatherShipped(),
     gatherHomepageNow(),
     gatherTicketMetrics(statusCountsLine),
-    gatherEscalations()
+    gatherEscalations(),
+    gatherOwnerQueue(agedOut),
+    gatherOpsWatch(),
+    // Best-effort: this one calls Shopify, and a digest that does not send is
+    // worse than a digest missing one line.
+    getProfitReconciliation().catch((err2) => {
+      console.warn("[owner-digest] profit reconciliation failed:", String(err2).slice(0, 200));
+      return null;
+    })
   ]);
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length;
   const ordersY = yesterday?.orders ?? 0;
   const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}${needsOwner > 0 ? `, ${needsOwner} need${needsOwner === 1 ? "s" : ""} you` : ""}`;
   const profitRows = profit.map((p) => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? "")}</td></tr>`).join("");
+  const reconLine = (() => {
+    if (!reconciliation) {
+      return `<p style="margin:6px 0 0;color:${MUTED};">Could not reconcile against Shopify this run.</p>`;
+    }
+    const r = reconciliation;
+    const cogsNote = r.cogsMissingUnits > 0 ? ` <span style="color:${WARN};">Cost unknown on ${r.cogsMissingUnits} unit${r.cogsMissingUnits === 1 ? "" : "s"}, so margin is a floor, not a figure.</span>` : "";
+    if (!r.summaryExists) {
+      return `<p style="margin:6px 0 0;color:${BAD};">No summary row for ${esc(r.date)}, but Shopify reports ${r.shopifyPaidOrders} paid order${r.shopifyPaidOrders === 1 ? "" : "s"}.</p>`;
+    }
+    if (!r.match) {
+      return `<p style="margin:6px 0 0;color:${BAD};"><strong>Mismatch on ${esc(r.date)}:</strong> Shopify says ${r.shopifyPaidOrders} paid order${r.shopifyPaidOrders === 1 ? "" : "s"}, the summary says ${r.summaryOrders}.</p>${cogsNote ? `<p style="margin:2px 0 0;">${cogsNote}</p>` : ""}`;
+    }
+    return `<p style="margin:6px 0 0;color:${GOOD};">Reconciled: Shopify and the summary agree on ${r.shopifyPaidOrders} paid order${r.shopifyPaidOrders === 1 ? "" : "s"} for ${esc(r.date)}.${cogsNote}</p>`;
+  })();
   const runRows = runs.map((r) => `<tr><td style="padding:2px 10px 2px 0;">${esc(r.team)}</td><td style="padding:2px 10px;">${esc(r.run_type)}</td><td style="padding:2px 10px;color:${r.status === "failed" ? "#d93a15" : r.status === "succeeded" ? "#1c7c43" : "#6f645c"};">${esc(r.status)}</td><td style="padding:2px 0;">${esc((r.error ?? r.summary ?? "").slice(0, 140))}</td></tr>`).join("");
   const gateRows = gates.map((g) => `<tr><td style="padding:2px 10px 2px 0;">${esc(g.team)}</td><td style="padding:2px 10px;">${g.enabled ? "on" : '<span style="color:#d93a15;">off</span>'}</td><td style="padding:2px 10px;">${g.runsToday}/${g.maxRunsPerDay} runs</td><td style="padding:2px 0;">$${(g.spentCents / 100).toFixed(2)} / $${(g.dailyCents / 100).toFixed(2)}</td></tr>`).join("");
   const valveRows = valveEntries.map(([name, on]) => `<tr><td style="padding:2px 10px 2px 0;">${esc(name)}</td><td style="padding:2px 0;">${on ? "on" : "off"}</td></tr>`).join("");
@@ -21283,7 +21499,9 @@ async function runOwnerDigest(opts = {}) {
       ${section(`Escalations${needsOwner > 0 ? ` (${needsOwner})` : ""}`, renderEscalationsSection(escalations))}
       ${section(`Shipped, last 24h (${shipped.length})`, renderShippedSection(shipped))}
       ${section("Homepage now", renderHomepageNowSection(homepageNow))}
-      ${section("Orders and profit (last 8 days)", `<table style="border-collapse:collapse;">${profitRows || "<tr><td>no rows</td></tr>"}</table>`)}
+      ${section(`Needs a decision from you${ownerQueue.totalCount > 0 ? ` (${ownerQueue.totalCount})` : ""}`, renderOwnerQueueSection(ownerQueue))}
+      ${section("Orders and profit (last 8 days)", `<table style="border-collapse:collapse;">${profitRows || "<tr><td>no rows</td></tr>"}</table>${reconLine}`)}
+      ${section("Ops watch", renderOpsWatchSection(opsWatch))}
       ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || "<tr><td>no runs</td></tr>"}</table>`)}
       ${section("Team gates", `<table style="border-collapse:collapse;">${gateRows}</table>`)}
       ${section("Valves", `<table style="border-collapse:collapse;">${valveRows}</table>`)}
@@ -21296,9 +21514,11 @@ async function runOwnerDigest(opts = {}) {
     </div>
   </body>`;
   const res = await sendOwnerEmail(subject, html, { fromName: "xdipx daily digest" });
-  return res.sent ? { sent: true, subject } : { sent: false, ...res.error !== void 0 ? { error: res.error } : {} };
+  if (res.sent) return { sent: true, subject };
+  if (!opts.force) await kvDel(`owner-digest:sent:${day}`);
+  throw new Error(`owner digest send failed: ${res.error ?? "unknown error"}`);
 }
-var GOOD, WARN, BAD, MUTED, MAX_TICKET_ATTEMPTS, RENDER_TRUTH_KEYS;
+var GOOD, WARN, BAD, MUTED, MAX_TICKET_ATTEMPTS, OWNER_DECISION_KINDS, STALE_QUEUE_DAYS, RENDER_TRUTH_KEYS;
 var init_owner_digest_server = __esm({
   "app/lib/owner-digest.server.ts"() {
     "use strict";
@@ -21307,12 +21527,21 @@ var init_owner_digest_server = __esm({
     init_team_keys();
     init_tracker_server();
     init_owner_alerts_server();
+    init_profit_server();
     init_kv_server();
     GOOD = "#1c7c43";
     WARN = "#b57d0a";
     BAD = "#d93a15";
     MUTED = "#6f645c";
     MAX_TICKET_ATTEMPTS = 3;
+    OWNER_DECISION_KINDS = [
+      "process",
+      "strategy",
+      "program",
+      "campaign",
+      "promo"
+    ];
+    STALE_QUEUE_DAYS = 7;
     RENDER_TRUTH_KEYS = [
       "homepage:render-truth:latest",
       "homepage:healthcheck:render-truth",

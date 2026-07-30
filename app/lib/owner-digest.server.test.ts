@@ -4,10 +4,14 @@ import {
   parseRenderTruth,
   renderEscalationsSection,
   renderHomepageNowSection,
+  renderOpsWatchSection,
+  renderOwnerQueueSection,
   renderShippedSection,
   renderTicketsSection,
   type EscalationFacts,
   type HomepageNowFacts,
+  type OpsWatchFacts,
+  type OwnerQueueRow,
   type TicketMetrics,
 } from '~/lib/owner-digest.server'
 
@@ -146,6 +150,7 @@ describe('renderTicketsSection', () => {
     blocked: {},
     oldestApproved: { id: 77, ageDays: 5, suggestion: 'Wire the Compass CTA to /discover' },
     finalAttempt: [],
+    blockedRows: [],
     statusCounts: 'proposed: 4 &middot; approved: 2',
   }
 
@@ -176,6 +181,116 @@ describe('renderTicketsSection', () => {
 
   it('keeps the legacy status-count line', () => {
     expect(renderTicketsSection(base)).toContain('proposed: 4')
+  })
+
+  it('names blocked tickets and why, not just how many', () => {
+    // A count tells the owner a number; only the rows tell him whether the
+    // block is his to clear (protected path) or the agent's to retry.
+    const html = renderTicketsSection({
+      ...base,
+      blocked: { code: 1 },
+      blockedRows: [{ id: 91, status: 'blocked', kind: 'code', attemptCount: 0, lastError: 'touches app/lib/checkout-probe.server.ts', suggestion: 'Fix the browser checkout probe' }],
+    })
+    expect(html).toContain('#91')
+    expect(html).toContain('touches app/lib/checkout-probe.server.ts')
+  })
+})
+
+describe('renderOwnerQueueSection', () => {
+  const row = (over: Partial<OwnerQueueRow> = {}): OwnerQueueRow => ({
+    id: 52, kind: 'process', team: 'strategy', targetTeam: 'homepage',
+    ageDays: 9, suggestion: 'Swap the out-of-stock SKU out of the hero rail',
+    autoApproved: true, ...over,
+  })
+
+  it('says plainly when nothing needs a decision', () => {
+    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: 0 })
+    expect(html).toContain('Nothing waiting on a decision')
+  })
+
+  it('lists every waiting row, not just the oldest one', () => {
+    // The line this replaced named only the oldest row while 52 others sat
+    // behind it, including live merchandising defects.
+    const html = renderOwnerQueueSection({
+      rows: [row({ id: 52 }), row({ id: 53 }), row({ id: 54 })],
+      totalCount: 3,
+      agedOut: 0,
+    })
+    expect(html).toContain('#52')
+    expect(html).toContain('#53')
+    expect(html).toContain('#54')
+    expect(html).toContain('3 rows need a decision')
+  })
+
+  it('flags rows older than a week and marks auto-approved ones', () => {
+    const html = renderOwnerQueueSection({ rows: [row({ ageDays: 9 })], totalCount: 1, agedOut: 0 })
+    expect(html).toContain('1 older than 7 days')
+    expect(html).toContain('9d')
+    expect(html).toContain('(auto)')
+  })
+
+  it('shows the routing when a row was filed at another team', () => {
+    const html = renderOwnerQueueSection({
+      rows: [row({ team: 'strategy', targetTeam: 'homepage' })], totalCount: 1, agedOut: 0,
+    })
+    expect(html).toContain('strategy&rarr;homepage')
+  })
+
+  it('reports the overflow rather than silently truncating', () => {
+    const html = renderOwnerQueueSection({ rows: [row()], totalCount: 31, agedOut: 0 })
+    expect(html).toContain('and 30 more')
+  })
+
+  it('reports what the ager closed on its own', () => {
+    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: 4 })
+    expect(html).toContain('4 untargeted rows aged out')
+  })
+})
+
+describe('renderOpsWatchSection', () => {
+  const base: OpsWatchFacts = {
+    socialDrafts: { count: 0, oldestDays: null },
+    pricingBatchRows: 4900,
+    enrichmentAgeHours: 6,
+    strandedVerified: 0,
+    agentRetired: [],
+  }
+
+  it('warns that a social backlog stops the team drafting', () => {
+    const html = renderOpsWatchSection({ ...base, socialDrafts: { count: 18, oldestDays: 15 } })
+    expect(html).toContain('18 social drafts awaiting review')
+    expect(html).toContain('oldest 15 days')
+    expect(html).toContain('stops drafting')
+  })
+
+  it('calls a missing pricing recompute a failure, not silence', () => {
+    const html = renderOpsWatchSection({ ...base, pricingBatchRows: 0 })
+    expect(html).toContain('No scheduled pricing recompute yesterday')
+    // Catch-up runs must not be able to satisfy the check.
+    expect(html).toContain('catch-up runs do not count')
+  })
+
+  it('confirms a healthy recompute', () => {
+    expect(renderOpsWatchSection(base)).toContain('Pricing recompute ran yesterday')
+  })
+
+  it('flags a stalled enrich stage but stays quiet when it is fresh', () => {
+    expect(renderOpsWatchSection({ ...base, enrichmentAgeHours: 220 })).toContain('may be stalled')
+    expect(renderOpsWatchSection(base)).not.toContain('may be stalled')
+  })
+
+  it('surfaces unreconciled verified tickets', () => {
+    expect(renderOpsWatchSection({ ...base, strandedVerified: 2 }))
+      .toContain('2 verified tickets not yet reconciled')
+  })
+
+  it('lists what an agent retired, so the new power stays reviewable', () => {
+    const html = renderOpsWatchSection({
+      ...base,
+      agentRetired: [{ id: 9, kind: 'process', suggestion: 'Stale run observation from 07-12' }],
+    })
+    expect(html).toContain('#9')
+    expect(html).toContain('Retired by agent-editor')
   })
 })
 
