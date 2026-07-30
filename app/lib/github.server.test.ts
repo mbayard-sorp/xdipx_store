@@ -60,6 +60,7 @@ describe('matchProtectedGlobs', () => {
     ['server/cron.ts', 'cron auth block'],
     ['app/lib/release-engine.server.ts', 'the engine itself'],
     ['app/lib/github.server.ts', 'the gateway itself'],
+    ['app/lib/settings.server.ts', 'the audited valve write path'],
   ]
 
   for (const [path, why] of protectedPaths) {

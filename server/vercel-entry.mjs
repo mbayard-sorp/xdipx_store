@@ -93,6 +93,7 @@ __export(schema_exports, {
   referrals: () => referrals,
   returns: () => returns,
   seoCoverageDaily: () => seoCoverageDaily,
+  settingsAuditLog: () => settingsAuditLog,
   smsAgeConsent: () => smsAgeConsent,
   smsConversations: () => smsConversations,
   smsMessages: () => smsMessages,
@@ -128,7 +129,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, checkoutProbeRuns, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, ga4PurchaseFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, suggestionLinks, indexnowPings, seoCoverageDaily, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, settingsAuditLog, checkoutProbeRuns, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, ga4PurchaseFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, suggestionLinks, indexnowPings, seoCoverageDaily, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -208,12 +209,24 @@ var init_schema = __esm({
       totalProfit: decimal("total_profit", { precision: 10, scale: 2 }),
       avgOrderValue: decimal("avg_order_value", { precision: 10, scale: 2 }),
       featuredSku: varchar("featured_sku", { length: 20 }),
-      adSpend: decimal("ad_spend", { precision: 10, scale: 2 }).default("0").notNull()
+      adSpend: decimal("ad_spend", { precision: 10, scale: 2 }).default("0").notNull(),
+      // Migration 073: units whose wholesale cost could not be resolved from any
+      // source. Excluded from totalCogs rather than counted as free stock.
+      cogsMissingUnits: integer("cogs_missing_units").default(0).notNull()
     });
     pipelineSettings = pgTable("pipeline_settings", {
       key: varchar("key", { length: 50 }).primaryKey(),
       value: text("value").notNull(),
       updatedAt: timestamp("updated_at").defaultNow()
+    });
+    settingsAuditLog = pgTable("settings_audit_log", {
+      id: bigserial("id", { mode: "number" }).primaryKey(),
+      key: varchar("key", { length: 50 }).notNull(),
+      oldValue: text("old_value"),
+      newValue: text("new_value").notNull(),
+      actor: varchar("actor", { length: 32 }).notNull(),
+      source: varchar("source", { length: 64 }).notNull(),
+      changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow()
     });
     checkoutProbeRuns = pgTable("checkout_probe_runs", {
       id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -27056,6 +27069,11 @@ var init_github_server = __esm({
       // Valve and spend definitions beyond the two named files.
       "app/lib/homepage-team.server.ts",
       "app/lib/homepage-team-keys.ts",
+      // The audited write path for every pipeline_settings key, including the
+      // release engine's own enable flag. A change here can weaken or bypass the
+      // attribution trail on the store's entire safety boundary, so it needs the
+      // owner's eyes even though the file itself is small.
+      "app/lib/settings.server.ts",
       // The cron auth block lives here; a change to it is a change to who can
       // trigger every scheduled job.
       "server/cron.ts",
