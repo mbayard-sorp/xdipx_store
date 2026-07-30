@@ -19,6 +19,10 @@
 import { getClient } from '~/lib/sanity.server'
 import { cached } from '~/lib/kv.server'
 import { withTimeout } from '~/lib/with-timeout.server'
+import { db } from '~/lib/db.server'
+import { pipelineSettings } from '../../db/schema'
+import { eq } from 'drizzle-orm'
+import { HOMEPAGE_EXTRA_KEYS } from '~/lib/team-keys'
 import {
   getCollectionList,
   getCollectionProducts,
@@ -469,10 +473,35 @@ async function resolveBlocks(rawBlocks: RawBlock[]): Promise<ResolvedCategoryBlo
   })
 }
 
+/**
+ * Owner kill switch for the whole merchandised layer, independent of Sanity:
+ * only the literal 'false' disables (default-ON, so a missing row never hides
+ * live pages). Checked OUTSIDE the page cache so a flip acts within the 60s
+ * settings TTL instead of waiting out each page's TTL; the `team:valve:`
+ * prefix keeps it inside invalidateTeamSettingsCache()'s blast radius, so the
+ * admin toggle lands immediately. Fails open — a DB blip must not strip
+ * merchandising from every page.
+ */
+async function categoryPagesEnabled(): Promise<boolean> {
+  try {
+    return await cached(`team:valve:${HOMEPAGE_EXTRA_KEYS.categoryPagesEnabled}`, 60, async () => {
+      const [row] = await db
+        .select()
+        .from(pipelineSettings)
+        .where(eq(pipelineSettings.key, HOMEPAGE_EXTRA_KEYS.categoryPagesEnabled))
+        .limit(1)
+      return row?.value !== 'false'
+    })
+  } catch {
+    return true
+  }
+}
+
 export async function getCategoryPage(
   handle: string,
   preview = false,
 ): Promise<ResolvedCategoryPage | null> {
+  if (!(await categoryPagesEnabled())) return null
   const fetcher = async (): Promise<ResolvedCategoryPage | null> => {
     try {
       const client = getClient(false, preview)
@@ -501,6 +530,7 @@ export async function getDropPage(
   routeKey: 'new' | 'on-sale',
   preview = false,
 ): Promise<ResolvedDropPage | null> {
+  if (!(await categoryPagesEnabled())) return null
   const fetcher = async (): Promise<ResolvedDropPage | null> => {
     try {
       const client = getClient(false, preview)

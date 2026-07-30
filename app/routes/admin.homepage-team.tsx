@@ -139,6 +139,7 @@ interface LoaderData {
   /** Homepage tab only: merchandised category/drop pages + last sweep time. */
   merchPages: MerchPageRow[]
   merchHealthAt: string | null
+  categoryPagesOn: boolean
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
@@ -151,7 +152,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, releaseEngineRow] = await Promise.all([
+  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, categoryPagesOn, releaseEngineRow] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
@@ -162,6 +163,11 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     // Frame review is not a VALVE_KEYS member (it defaults ON, unlike the
     // ship-OFF valves) — read it directly from pipeline_settings.
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.frameReview)).limit(1)
+      .then(rows => rows[0]?.value !== 'false')
+      .catch(() => true),
+    // Merchandised-pages rendering: default-ON kill switch, same direct-read
+    // reasoning as frame review.
+    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, HOMEPAGE_EXTRA_KEYS.categoryPagesEnabled)).limit(1)
       .then(rows => rows[0]?.value !== 'false')
       .catch(() => true),
     // Release-engine settings: read directly, same reason as frame review.
@@ -313,6 +319,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     kindOptions, assigneeOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
     videoFrameReview, releaseEngine, releaseEngineMaxMerges, merchPages, merchHealthAt,
+    categoryPagesOn,
   }
 }
 
@@ -446,7 +453,7 @@ export default function AgentTeamsPage() {
     suggestions, ticketLinks, filter, kindOptions, assigneeOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
     seoCuration, trendScout, videoAutopublish, videoFrameReview,
-    releaseEngine, releaseEngineMaxMerges, merchPages, merchHealthAt,
+    releaseEngine, releaseEngineMaxMerges, merchPages, merchHealthAt, categoryPagesOn,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -544,6 +551,14 @@ export default function AgentTeamsPage() {
           on={config.autoApproveSuggestions}
         />
 
+        {team === 'homepage' && (
+          <ValveRow
+            label={`Merchandised pages are ${categoryPagesOn ? 'ON' : 'OFF'}`}
+            detail="Fast kill for ALL merchandised category/drop page rendering, independent of Sanity: OFF makes every surface serve its plain collection fallback within the settings TTL. Per-page rollback stays the doc's own status flip in Sanity. Default is ON; only flip this off if the whole layer is misbehaving."
+            settingKey={HOMEPAGE_EXTRA_KEYS.categoryPagesEnabled}
+            on={categoryPagesOn}
+          />
+        )}
         {team === 'social' && (
           <>
             <ValveRow

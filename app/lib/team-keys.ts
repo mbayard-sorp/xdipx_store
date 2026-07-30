@@ -83,6 +83,14 @@ export const TEAM_DEFAULTS: Record<TeamId, { dailyCents: number; maxRunsPerDay: 
 export const HOMEPAGE_EXTRA_KEYS = {
   buildCents:      'homepage_team_build_cents',
   maxImagesPerDay: 'homepage_team_max_images',
+  /**
+   * Fast kill for the merchandised category/drop page rendering, independent
+   * of Sanity: when 'false', the category resolver returns null and every
+   * surface serves its plain fallback. DEFAULT-ON semantics (only the literal
+   * 'false' disables) so a missing row never hides live pages; per-page
+   * rollback remains the doc's own status flip.
+   */
+  categoryPagesEnabled: 'homepage_category_pages_enabled',
 } as const
 
 /**
