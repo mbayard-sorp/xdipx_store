@@ -9749,6 +9749,7 @@ __export(team_server_exports, {
   CLAIMANT_ACTORS: () => CLAIMANT_ACTORS,
   CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
   CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
+  DETECTOR_SELF_CLOSE_KINDS: () => DETECTOR_SELF_CLOSE_KINDS,
   REKIND_ACTORS: () => REKIND_ACTORS,
   REKIND_FROM_KINDS: () => REKIND_FROM_KINDS,
   REKIND_TO_KINDS: () => REKIND_TO_KINDS,
@@ -10059,6 +10060,9 @@ async function listSuggestions(filter = {}) {
   }
   if (filter.kinds?.length) {
     conditions.push(inArray2(homepageTeamSuggestions.kind, [...filter.kinds]));
+  }
+  if (filter.dedupeKeys?.length) {
+    conditions.push(inArray2(homepageTeamSuggestions.dedupeKey, [...filter.dedupeKeys]));
   }
   if (filter.assignee) conditions.push(eq4(homepageTeamSuggestions.assignee, filter.assignee));
   if (filter.updatedSince) {
@@ -10398,7 +10402,7 @@ async function proposeCalendarEvent(input) {
   }).returning({ id: marketingCalendar.id });
   return row.id;
 }
-var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
+var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, DETECTOR_SELF_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
 var init_team_server = __esm({
   "app/lib/team.server.ts"() {
     "use strict";
@@ -10449,10 +10453,18 @@ var init_team_server = __esm({
       "agent:store-strategist"
     ];
     RUN_CLOSE_KINDS = ["process", "strategy"];
+    DETECTOR_SELF_CLOSE_KINDS = ["process"];
     OWNER_DISMISS = { to: "dismissed", actors: ["owner"] };
     ALLOWED = {
       proposed: [
         { to: "approved", actors: ["owner", "auto"] },
+        // A detector closing its own alarm because the condition it reported has
+        // demonstrably cleared. Reachable only by `system` and only for `process`,
+        // and it has to exist at `proposed` as well as `approved`: a detector row
+        // on a team without auto-approve never reaches `approved`, and while it
+        // sits open it holds the undated dedupe key, so the detector can never file
+        // for that slot again. That is how four homepage freshness slots went mute.
+        { to: "applied", actors: ["system"], kinds: DETECTOR_SELF_CLOSE_KINDS },
         OWNER_DISMISS
       ],
       approved: [
@@ -10460,6 +10472,11 @@ var init_team_server = __esm({
         // A daily routine executed the ask in this run: close it so it is not
         // re-read tomorrow. Operational kinds only.
         { to: "applied", actors: RUN_CLOSE_ACTORS, kinds: RUN_CLOSE_KINDS },
+        // Same detector self-close, from the status auto-approve actually puts
+        // these rows in. Kept as its own rule rather than adding `system` to
+        // RUN_CLOSE_ACTORS, which would also hand the release engine the ability to
+        // close `strategy` rows it has no business touching.
+        { to: "applied", actors: ["system"], kinds: DETECTOR_SELF_CLOSE_KINDS },
         // agent-editor's hygiene pass retiring a row with no executor. Kinds are
         // fenced so it can never dismiss the instruction rows aimed at itself.
         { to: "dismissed", actors: ["agent:agent-editor"], kinds: AGENT_RETIRE_KINDS },
@@ -18430,25 +18447,27 @@ The merchandise routine's freshness rule designates this slot as must-change dai
 async function closeStaleSamenessTickets(changedSlots, day) {
   if (changedSlots.length === 0) return;
   try {
-    const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-    const { homepageTeamSuggestions: homepageTeamSuggestions2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { and: and10, eq: eq29, inArray: inArray9, sql: sql20 } = await import("drizzle-orm");
+    const { listSuggestions: listSuggestions2, transitionSuggestion: transitionSuggestion2 } = await Promise.resolve().then(() => (init_team_server(), team_server_exports));
     const { makeDedupeKey: makeDedupeKey2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
     const keys = changedSlots.map((s) => makeDedupeKey2("sameness", s));
-    const closed = await db2.update(homepageTeamSuggestions2).set({
-      status: "applied",
-      updatedAt: /* @__PURE__ */ new Date(),
-      lastError: null,
-      suggestion: sql20`${homepageTeamSuggestions2.suggestion} || ${`
-
-Resolved ${day}: the slot changed, so the freshness rule is satisfied. Closed automatically by /cron/homepage-healthcheck.`}`
-    }).where(and10(
-      inArray9(homepageTeamSuggestions2.dedupeKey, keys),
-      eq29(homepageTeamSuggestions2.kind, "process"),
-      inArray9(homepageTeamSuggestions2.status, ["proposed", "approved"])
-    )).returning({ id: homepageTeamSuggestions2.id });
+    const open = await listSuggestions2({
+      dedupeKeys: keys,
+      kinds: ["process"],
+      statuses: ["proposed", "approved"]
+    });
+    const note = `Resolved ${day}: the slot changed, so the freshness rule is satisfied. Closed automatically by /cron/homepage-healthcheck.`;
+    const closed = [];
+    for (const row of open) {
+      try {
+        await transitionSuggestion2(row.id, "applied", "system", { note });
+        closed.push(row.id);
+      } catch (err2) {
+        if (String(err2).includes("409")) continue;
+        console.warn(`[render-truth] could not close sameness ticket #${row.id} (ignored)`, err2);
+      }
+    }
     if (closed.length > 0) {
-      console.log(`[render-truth] closed ${closed.length} resolved sameness ticket(s): ${closed.map((c) => `#${c.id}`).join(", ")}`);
+      console.log(`[render-truth] closed ${closed.length} resolved sameness ticket(s): ${closed.map((id) => `#${id}`).join(", ")}`);
     }
   } catch (err2) {
     console.warn("[render-truth] sameness ticket close failed (ignored)", err2);

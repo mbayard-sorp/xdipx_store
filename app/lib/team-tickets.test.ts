@@ -81,6 +81,7 @@ import {
   markSuggestion,
   transitionSuggestion,
   AGENT_RETIRE_KINDS,
+  DETECTOR_SELF_CLOSE_KINDS,
   REKIND_FROM_KINDS,
   REKIND_TO_KINDS,
   RUN_CLOSE_ACTORS,
@@ -582,5 +583,50 @@ describe('claimSuggestion', () => {
     expect(seen[1]![1]).toBe(60)
     await claimSuggestion({ assignee: 'agent:rr7-engineer', leaseSeconds: 999_999 }, exec)
     expect(seen[2]![1]).toBe(6 * 3600)
+  })
+})
+
+/**
+ * The detector self-close edge. A detector that raised an alarm may close it
+ * when the condition it reported has demonstrably cleared, without a human and
+ * without going around the map.
+ *
+ * The reason it has to exist at all: the uniqueness index on dedupe_key excludes
+ * only `applied` and `dismissed`, so an open sameness row holds its undated key
+ * and the detector can never file for that slot again. Four homepage freshness
+ * slots were muted exactly that way. Before this edge, the healthcheck reached
+ * `applied` with a bulk db.update that walked two transitions ALLOWED forbids.
+ */
+describe('detector self-close edge', () => {
+  it('lets system close a process row from both proposed and approved', () => {
+    // Both, because a team without auto-approve leaves detector rows at
+    // `proposed`, and a held key mutes the slot the same either way.
+    expect(isTransitionAllowed('proposed', 'applied', 'system', { kind: 'process' })).toBe(true)
+    expect(isTransitionAllowed('approved', 'applied', 'system', { kind: 'process' })).toBe(true)
+  })
+
+  it('fences the edge to process, so it cannot close work with a real executor', () => {
+    for (const kind of ['code', 'instructions', 'agent-def', 'config', 'strategy']) {
+      expect(isTransitionAllowed('proposed', 'applied', 'system', { kind })).toBe(false)
+      expect(isTransitionAllowed('approved', 'applied', 'system', { kind })).toBe(false)
+    }
+    expect(DETECTOR_SELF_CLOSE_KINDS).toEqual(['process'])
+  })
+
+  it('grants the edge to system only', () => {
+    for (const actor of ACTORS.filter(a => a !== 'system')) {
+      expect(isTransitionAllowed('proposed', 'applied', actor, { kind: 'process' })).toBe(false)
+    }
+  })
+
+  it('does not widen RUN_CLOSE_ACTORS as a side effect', () => {
+    // Adding 'system' there would have been the smaller diff, and would also
+    // have handed the release engine the ability to close `strategy` rows.
+    expect(RUN_CLOSE_ACTORS).not.toContain('system')
+    expect(isTransitionAllowed('approved', 'applied', 'system', { kind: 'strategy' })).toBe(false)
+  })
+
+  it('leaves applied terminal', () => {
+    expect(ALLOWED['applied']).toEqual([])
   })
 })

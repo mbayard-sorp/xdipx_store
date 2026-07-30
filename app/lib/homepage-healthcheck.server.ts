@@ -828,29 +828,42 @@ async function fileRenderTruthTickets(
 async function closeStaleSamenessTickets(changedSlots: string[], day: string): Promise<void> {
   if (changedSlots.length === 0) return
   try {
-    const { db } = await import('~/lib/db.server')
-    const { homepageTeamSuggestions } = await import('../../db/schema')
-    const { and, eq, inArray, sql } = await import('drizzle-orm')
+    const { listSuggestions, transitionSuggestion } = await import('~/lib/team.server')
     const { makeDedupeKey } = await import('~/lib/detection-tickets.server')
 
+    // Every close goes through the ALLOWED map, which team.server calls the
+    // single arbiter of transition authority. The first version of this
+    // function did a bulk db.update straight to 'applied', which walked two
+    // edges the map forbids and skipped decided_by, the note link, and the
+    // status guard. The map now carries a fenced `system` + `process` edge for
+    // exactly this, so the arbiter stays the only place authority is defined.
     const keys = changedSlots.map(s => makeDedupeKey('sameness', s))
-    const closed = await db
-      .update(homepageTeamSuggestions)
-      .set({
-        status: 'applied',
-        updatedAt: new Date(),
-        lastError: null,
-        suggestion: sql`${homepageTeamSuggestions.suggestion} || ${`\n\nResolved ${day}: the slot changed, so the freshness rule is satisfied. Closed automatically by /cron/homepage-healthcheck.`}`,
-      })
-      .where(and(
-        inArray(homepageTeamSuggestions.dedupeKey, keys),
-        eq(homepageTeamSuggestions.kind, 'process'),
-        inArray(homepageTeamSuggestions.status, ['proposed', 'approved']),
-      ))
-      .returning({ id: homepageTeamSuggestions.id })
+    const open = await listSuggestions({
+      dedupeKeys: keys,
+      kinds: ['process'],
+      statuses: ['proposed', 'approved'],
+    })
+
+    const note =
+      `Resolved ${day}: the slot changed, so the freshness rule is satisfied. `
+      + 'Closed automatically by /cron/homepage-healthcheck.'
+
+    const closed: number[] = []
+    for (const row of open) {
+      try {
+        await transitionSuggestion(row.id, 'applied', 'system', { note })
+        closed.push(row.id)
+      } catch (err) {
+        // transitionSuggestion throws rather than returning, and a 409 here
+        // just means something else moved the row first. Per-row, so one slot
+        // losing a race cannot stop the others from closing.
+        if (String(err).includes('409')) continue
+        console.warn(`[render-truth] could not close sameness ticket #${row.id} (ignored)`, err)
+      }
+    }
 
     if (closed.length > 0) {
-      console.log(`[render-truth] closed ${closed.length} resolved sameness ticket(s): ${closed.map(c => `#${c.id}`).join(', ')}`)
+      console.log(`[render-truth] closed ${closed.length} resolved sameness ticket(s): ${closed.map(id => `#${id}`).join(', ')}`)
     }
   } catch (err) {
     // Never let bookkeeping break the healthcheck that hosts it.
