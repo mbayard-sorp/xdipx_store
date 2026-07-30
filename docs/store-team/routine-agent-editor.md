@@ -68,6 +68,15 @@ rekinds and 10 retires per run** so a bad judgement call is small and reviewable
 
 ## Step 2 — Implement (per suggestion, max 15 per run)
 
+**The per-run PR cap is 15, and that is the only number.** It is not 5. Earlier runs stopped at 5
+and wrote "run cap" next to it; there is no 5-PR rule anywhere, and stopping there left the lane
+running at a third of capacity while the actionable backlog grew (18 → 38 → 65 in three weeks). You
+are expected to work *to* the cap: keep opening one PR per actionable suggestion until you hit 15 or
+the actionable queue is empty. A short run is legitimate only when the queue was genuinely small or
+the remaining rows are all non-actionable (code, refusals, too-vague, already-satisfied) — never
+because you decided to stop early. Wall-clock is not the constraint: past runs averaged ~2 minutes
+per PR, so a full 15-PR run is ~30 minutes of Max.
+
 1. Read the suggestion and the files it names. Too vague to implement faithfully → leave it
    approved, post a `decision` event saying what's missing.
 2. Branch `agents/suggestion-<id>` from the default branch.
@@ -114,3 +123,9 @@ post a `decision` event; the row stays `pr_open` for the owner to dismiss or re-
 
 Log tokens (`feature:'strategy-apply'`), then the final run update: table of suggestion id | files |
 PR URL (or skipped + why), conflicts flagged.
+
+**Honesty line (required).** The final run summary must state, in one line, three numbers:
+**actionable-backlog-at-start**, **PRs-opened**, and **the cap (15)**. This makes a lane running
+below capacity visible in the summary itself instead of buried in a parenthetical. If PRs-opened is
+well under both the backlog and the cap, say why in the same line (queue drained, remaining rows
+non-actionable, conflicts, or run cut short).
