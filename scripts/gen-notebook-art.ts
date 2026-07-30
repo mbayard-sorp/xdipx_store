@@ -245,7 +245,7 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
     // slug and patch heroImage. Never createIfNotExists — that would mint an empty
     // post. Prefer the published doc over its draft (order puts non-drafts first).
     const postId = await client.fetch<string | null>(
-      `*[_type == "blogPost" && slug.current == $slug] | order(_id in path("drafts.**") asc)[0]._id`,
+      `*[_type == "blogPost" && slug.current == $slug] | order((_id in path("drafts.**")) asc)[0]._id`,
       { slug },
     )
     if (!postId) {
