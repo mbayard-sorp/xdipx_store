@@ -23,7 +23,8 @@ import { gate, getValve, TEAM_IDS } from '~/lib/team.server'
 import { VALVE_KEYS } from '~/lib/team-keys'
 import { getTrackers, latestOwnerAsks } from '~/lib/tracker.server'
 import { sendOwnerEmail } from '~/lib/owner-alerts.server'
-import { kvGet, kvSetNX } from '~/lib/kv.server'
+import { getProfitReconciliation } from '~/lib/profit.server'
+import { kvDel, kvGet, kvSetNX } from '~/lib/kv.server'
 import type { SeoDailyResult } from '~/lib/seo-daily.server'
 import type { EditorialTilesBlock, EmmaCuratedRailBlock } from '~/types/cms'
 
@@ -222,6 +223,12 @@ export interface TicketMetrics {
   oldestApproved: { id: number; ageDays: number; suggestion: string } | null
   /** Tickets on their final attempt: one more failure escalates. */
   finalAttempt: TicketAttemptRow[]
+  /**
+   * The blocked tickets themselves, not just the count by kind. A count tells
+   * the owner a number; only the rows tell him whether the block is his to
+   * clear (a protected path) or the agent's to retry.
+   */
+  blockedRows: TicketAttemptRow[]
   /** Legacy status counts line, preserved verbatim from the original digest. */
   statusCounts: string
 }
@@ -248,7 +255,128 @@ export function renderTicketsSection(m: TicketMetrics): string {
   if (m.finalAttempt.length) {
     parts.push(`<p style="margin:6px 0 2px;color:${WARN};">On the last attempt (${MAX_TICKET_ATTEMPTS} of ${MAX_TICKET_ATTEMPTS}), one more failure escalates:</p><ul style="margin:0 0 4px;padding-left:18px;">${m.finalAttempt.map(t => `<li>#${t.id} (${esc(t.status)}) ${esc(clip(t.suggestion, 110))}${t.lastError ? `<br><span style="color:${MUTED};">${esc(clip(t.lastError, 140))}</span>` : ''}</li>`).join('')}</ul>`)
   }
+  if (m.blockedRows.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${WARN};">Blocked, with the reason:</p><ul style="margin:0 0 4px;padding-left:18px;">${m.blockedRows.map(t => `<li>#${t.id} (${esc(t.kind)}) ${esc(clip(t.suggestion, 110))}${t.lastError ? `<br><span style="color:${MUTED};">${esc(clip(t.lastError, 160))}</span>` : ''}</li>`).join('')}</ul>`)
+  }
   parts.push(`<p style="margin:6px 0 0;color:${MUTED};">All statuses: ${m.statusCounts || 'none'}</p>`)
+  return parts.join('')
+}
+
+/* ── Section 6: The owner's decision queue ─────────────────────────────────── */
+
+export interface OwnerQueueRow {
+  id: number
+  kind: string
+  team: string
+  targetTeam: string | null
+  ageDays: number
+  suggestion: string
+  autoApproved: boolean
+}
+
+export interface OwnerQueueFacts {
+  rows: OwnerQueueRow[]
+  /** Total matching rows, which may exceed what is shown. */
+  totalCount: number
+  /** Rows auto-dismissed by the ager on this run. */
+  agedOut: number
+}
+
+/**
+ * Everything sitting `approved` in a kind no automation will ever execute.
+ *
+ * This replaces a single line that named only the oldest approved row. That
+ * line was technically true and practically useless: 52 `process` rows had
+ * accumulated behind it, including live merchandising defects filed nine days
+ * earlier, and the digest showed exactly one of them. The taxonomy routes these
+ * kinds to "the owner acts directly", and with auto-approve on they never pass
+ * through a triage click either, so this table is the only place they surface.
+ */
+export const OWNER_DECISION_KINDS: readonly string[] = [
+  'process', 'strategy', 'program', 'campaign', 'promo',
+]
+
+/** Rows older than this are called out: nothing here should age quietly. */
+const STALE_QUEUE_DAYS = 7
+
+export function renderOwnerQueueSection(f: OwnerQueueFacts): string {
+  const parts: string[] = []
+  if (f.agedOut > 0) {
+    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} untargeted row${f.agedOut === 1 ? '' : 's'} aged out automatically (21 days, low priority, no team).</p>`)
+  }
+  if (f.rows.length === 0) {
+    parts.push(`<p style="margin:0;color:${GOOD};">Nothing waiting on a decision from you.</p>`)
+    return parts.join('')
+  }
+
+  const stale = f.rows.filter(r => r.ageDays >= STALE_QUEUE_DAYS).length
+  parts.push(`<p style="margin:0 0 6px;">${f.totalCount} row${f.totalCount === 1 ? '' : 's'} need a decision${stale > 0 ? ` &middot; <span style="color:${WARN};">${stale} older than ${STALE_QUEUE_DAYS} days</span>` : ''}.</p>`)
+  parts.push(`<table style="border-collapse:collapse;">${f.rows.map(r => {
+    const ageColor = r.ageDays >= STALE_QUEUE_DAYS ? WARN : MUTED
+    const target = r.targetTeam && r.targetTeam !== r.team ? `${esc(r.team)}&rarr;${esc(r.targetTeam)}` : esc(r.team)
+    return `<tr>
+      <td style="padding:2px 8px 2px 0;">#${r.id}</td>
+      <td style="padding:2px 8px;">${esc(r.kind)}</td>
+      <td style="padding:2px 8px;color:${MUTED};">${target}</td>
+      <td style="padding:2px 8px;color:${ageColor};">${r.ageDays}d</td>
+      <td style="padding:2px 0;">${esc(clip(r.suggestion, 120))}${r.autoApproved ? ` <span style="color:${MUTED};">(auto)</span>` : ''}</td>
+    </tr>`
+  }).join('')}</table>`)
+  if (f.totalCount > f.rows.length) {
+    parts.push(`<p style="margin:6px 0 0;color:${MUTED};">and ${f.totalCount - f.rows.length} more &middot; full list at /admin/homepage-team</p>`)
+  }
+  return parts.join('')
+}
+
+/* ── Section 7: Ops watchdogs ──────────────────────────────────────────────── */
+
+export interface OpsWatchFacts {
+  /** Draft social posts awaiting review, and how old the oldest one is. */
+  socialDrafts: { count: number; oldestDays: number | null }
+  /** Whether yesterday got a scheduled pricing recompute at all. */
+  pricingBatchRows: number
+  /** Hours since the newest enrichment row, or null when unknown. */
+  enrichmentAgeHours: number | null
+  /** Tickets whose merged PR the engine has not reconciled. */
+  strandedVerified: number
+  /** Suggestions an agent retired in the last 7 days. */
+  agentRetired: Array<{ id: number; kind: string; suggestion: string }>
+}
+
+/**
+ * The quiet failures. Each line exists because the thing it watches broke once
+ * and nothing said so: the social lane self-throttled to zero output for ten
+ * consecutive runs while 18 drafts sat unreviewed, the 07:00 pricing recompute
+ * produced nothing on two of three days, and enrichment stalled for nine days.
+ */
+export function renderOpsWatchSection(f: OpsWatchFacts): string {
+  const parts: string[] = []
+
+  if (f.socialDrafts.count > 0) {
+    const old = f.socialDrafts.oldestDays ?? 0
+    const color = old >= 3 ? WARN : MUTED
+    parts.push(`<p style="margin:0 0 4px;color:${color};">${f.socialDrafts.count} social draft${f.socialDrafts.count === 1 ? '' : 's'} awaiting review${old > 0 ? `, oldest ${old} day${old === 1 ? '' : 's'}` : ''} &middot; /admin/socials${old >= 3 ? ' &mdash; the social team stops drafting while this backs up' : ''}</p>`)
+  } else {
+    parts.push(`<p style="margin:0 0 4px;color:${MUTED};">No social drafts waiting.</p>`)
+  }
+
+  parts.push(f.pricingBatchRows > 0
+    ? `<p style="margin:0 0 4px;color:${GOOD};">Pricing recompute ran yesterday (${f.pricingBatchRows} audit rows).</p>`
+    : `<p style="margin:0 0 4px;color:${BAD};"><strong>No scheduled pricing recompute yesterday.</strong> The 07:00 UTC batch wrote nothing; catch-up runs do not count.</p>`)
+
+  if (f.enrichmentAgeHours !== null) {
+    const stale = f.enrichmentAgeHours > 48
+    parts.push(`<p style="margin:0 0 4px;color:${stale ? WARN : MUTED};">Newest enrichment ${Math.round(f.enrichmentAgeHours)}h ago${stale ? ' &mdash; the enrich stage may be stalled' : ''}</p>`)
+  }
+
+  if (f.strandedVerified > 0) {
+    parts.push(`<p style="margin:0 0 4px;color:${WARN};">${f.strandedVerified} verified ticket${f.strandedVerified === 1 ? '' : 's'} not yet reconciled to applied.</p>`)
+  }
+
+  if (f.agentRetired.length > 0) {
+    parts.push(`<p style="margin:6px 0 2px;color:${MUTED};">Retired by agent-editor in the last 7 days (undo by re-approving in /admin):</p><ul style="margin:0;padding-left:18px;color:${MUTED};">${f.agentRetired.map(r => `<li>#${r.id} (${esc(r.kind)}) ${esc(clip(r.suggestion, 100))}</li>`).join('')}</ul>`)
+  }
+
   return parts.join('')
 }
 
@@ -438,10 +566,11 @@ function toAttemptRows(rows: Array<Record<string, unknown>>): TicketAttemptRow[]
 
 async function gatherTicketMetrics(statusCounts: string): Promise<TicketMetrics> {
   const empty: TicketMetrics = {
-    opened: {}, closed: {}, blocked: {}, oldestApproved: null, finalAttempt: [], statusCounts,
+    opened: {}, closed: {}, blocked: {}, oldestApproved: null,
+    finalAttempt: [], blockedRows: [], statusCounts,
   }
   try {
-    const [openedRes, closedRes, blockedRes, oldestRes, finalRes] = await Promise.all([
+    const [openedRes, closedRes, blockedRes, oldestRes, finalRes, blockedRowsRes] = await Promise.all([
       db.execute(sql`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE created_at >= now() - interval '24 hours' GROUP BY kind`),
       db.execute(sql`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
@@ -458,6 +587,10 @@ async function gatherTicketMetrics(statusCounts: string): Promise<TicketMetrics>
                       WHERE attempt_count = ${MAX_TICKET_ATTEMPTS - 1}
                         AND status NOT IN ('applied', 'dismissed')
                       ORDER BY priority ASC, updated_at DESC LIMIT 10`),
+      db.execute(sql`SELECT id, status, kind, attempt_count, last_error, suggestion
+                       FROM homepage_team_suggestions
+                      WHERE status = 'blocked'
+                      ORDER BY priority ASC, updated_at DESC LIMIT 8`),
     ])
     const oldest = (oldestRes.rows ?? [])[0] as Record<string, unknown> | undefined
     return {
@@ -472,12 +605,172 @@ async function gatherTicketMetrics(statusCounts: string): Promise<TicketMetrics>
           }
         : null,
       finalAttempt: toAttemptRows((finalRes.rows ?? []) as Array<Record<string, unknown>>),
+      blockedRows: toAttemptRows((blockedRowsRes.rows ?? []) as Array<Record<string, unknown>>),
       statusCounts,
     }
   } catch (err) {
     console.warn('[owner-digest] ticket metrics unavailable (migration 070?):', String(err).slice(0, 200))
     return empty
   }
+}
+
+/**
+ * Auto-dismiss suggestions nobody is ever going to act on.
+ *
+ * Inflow of owner-decision rows runs at roughly 30 a week and there was no
+ * drain at all, so the pile only grew. Rather than ask the owner (or a weekly
+ * agent pass) to grind through it, the clearly-abandoned tail closes itself:
+ * low priority, no target team, and untouched for three weeks. Anything a
+ * producer bothered to route at a team, or marked urgent, is exempt and stays
+ * for a human. Returns how many it closed so the digest can say so.
+ */
+export async function ageOutStaleSuggestions(): Promise<number> {
+  try {
+    const res = await db.execute(sql`
+      UPDATE homepage_team_suggestions
+         SET status = 'dismissed',
+             decided_by = 'system',
+             decided_at = now(),
+             updated_at = now()
+       WHERE status = 'approved'
+         AND kind IN ('process', 'strategy')
+         AND priority >= 3
+         AND target_team IS NULL
+         AND updated_at < now() - interval '21 days'
+       RETURNING id`)
+    return (res.rows ?? []).length
+  } catch (err) {
+    console.warn('[owner-digest] suggestion ager skipped:', String(err).slice(0, 200))
+    return 0
+  }
+}
+
+async function gatherOwnerQueue(agedOut: number): Promise<OwnerQueueFacts> {
+  const out: OwnerQueueFacts = { rows: [], totalCount: 0, agedOut }
+  try {
+    const kinds = sql.join(OWNER_DECISION_KINDS.map(k => sql`${k}`), sql`, `)
+    const [listRes, countRes] = await Promise.all([
+      db.execute(sql`
+        SELECT id, kind, team, target_team, decided_by, suggestion,
+               EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
+          FROM homepage_team_suggestions
+         WHERE status = 'approved' AND kind IN (${kinds})
+         ORDER BY created_at ASC
+         LIMIT 30`),
+      db.execute(sql`
+        SELECT COUNT(*)::int AS n
+          FROM homepage_team_suggestions
+         WHERE status = 'approved' AND kind IN (${kinds})`),
+    ])
+    out.rows = (listRes.rows ?? []).map(r => {
+      const row = r as Record<string, unknown>
+      return {
+        id: Number(row['id'] ?? 0),
+        kind: String(row['kind'] ?? ''),
+        team: String(row['team'] ?? ''),
+        targetTeam: row['target_team'] == null ? null : String(row['target_team']),
+        ageDays: Math.round(Number(row['age_days'] ?? 0)),
+        suggestion: String(row['suggestion'] ?? ''),
+        autoApproved: String(row['decided_by'] ?? '') === 'auto',
+      }
+    })
+    out.totalCount = Number((countRes.rows ?? [])[0]?.['n'] ?? out.rows.length)
+  } catch (err) {
+    console.warn('[owner-digest] owner queue unavailable:', String(err).slice(0, 200))
+  }
+  return out
+}
+
+async function gatherOpsWatch(): Promise<OpsWatchFacts> {
+  const out: OpsWatchFacts = {
+    socialDrafts: { count: 0, oldestDays: null },
+    pricingBatchRows: 0,
+    enrichmentAgeHours: null,
+    strandedVerified: 0,
+    agentRetired: [],
+  }
+
+  // Social review backlog. The social team stops drafting entirely once this
+  // builds up, so a silent backlog reads as a silent team.
+  try {
+    const res = await db.execute(sql`
+      SELECT COUNT(*)::int AS n,
+             EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 86400 AS oldest_days
+        FROM social_posts
+       WHERE status = 'draft' AND review_status IN ('pending_review', 'needs_changes')`)
+    const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+    if (row) {
+      out.socialDrafts = {
+        count: Number(row['n'] ?? 0),
+        oldestDays: row['oldest_days'] == null ? null : Math.round(Number(row['oldest_days'])),
+      }
+    }
+  } catch (err) {
+    console.warn('[owner-digest] social draft sweep failed:', String(err).slice(0, 200))
+  }
+
+  // Did the 07:00 UTC recompute actually run yesterday? Catch-up runs write
+  // trigger='batch_catchup' precisely so they cannot satisfy this check.
+  try {
+    const res = await db.execute(sql`
+      SELECT COUNT(*)::int AS n
+        FROM pricing_audit_log
+       WHERE trigger = 'batch'
+         AND occurred_at >= (now()::date - interval '1 day')
+         AND occurred_at <  now()::date`)
+    out.pricingBatchRows = Number((res.rows ?? [])[0]?.['n'] ?? 0)
+  } catch (err) {
+    console.warn('[owner-digest] pricing batch check failed:', String(err).slice(0, 200))
+  }
+
+  try {
+    const res = await db.execute(sql`
+      SELECT EXTRACT(epoch FROM now() - MAX(created_at))::float8 / 3600 AS age_hours
+        FROM product_enrichment_cache`)
+    const raw = (res.rows ?? [])[0]?.['age_hours']
+    out.enrichmentAgeHours = raw == null ? null : Number(raw)
+  } catch (err) {
+    console.warn('[owner-digest] enrichment age check failed:', String(err).slice(0, 200))
+  }
+
+  // Tickets QA verified but nothing ever closed. Queried here rather than
+  // imported from the release engine's sweep so this line keeps reporting even
+  // if the engine is off, which is precisely when the number would grow.
+  try {
+    const res = await db.execute(sql`
+      SELECT COUNT(DISTINCT s.id)::int AS n
+        FROM homepage_team_suggestions s
+        JOIN suggestion_links l ON l.suggestion_id = s.id AND l.kind = 'pr'
+       WHERE s.status = 'verified'
+         AND s.updated_at < now() - interval '1 hour'`)
+    out.strandedVerified = Number((res.rows ?? [])[0]?.['n'] ?? 0)
+  } catch (err) {
+    console.warn('[owner-digest] stranded-ticket count failed:', String(err).slice(0, 200))
+  }
+
+  // Agents can now retire rows with no executor. Showing what they retired is
+  // what keeps that power reviewable instead of merely convenient.
+  try {
+    const res = await db.execute(sql`
+      SELECT id, kind, suggestion
+        FROM homepage_team_suggestions
+       WHERE status = 'dismissed'
+         AND decided_by LIKE 'agent:%'
+         AND decided_at >= now() - interval '7 days'
+       ORDER BY decided_at DESC LIMIT 10`)
+    out.agentRetired = (res.rows ?? []).map(r => {
+      const row = r as Record<string, unknown>
+      return {
+        id: Number(row['id'] ?? 0),
+        kind: String(row['kind'] ?? ''),
+        suggestion: String(row['suggestion'] ?? ''),
+      }
+    })
+  } catch (err) {
+    console.warn('[owner-digest] agent-retired sweep failed:', String(err).slice(0, 200))
+  }
+
+  return out
 }
 
 async function gatherEscalations(): Promise<EscalationFacts> {
@@ -609,12 +902,24 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // degrades to "not reported", because a digest that does not send is worse
   // than a digest with one thin section.
   const statusCountsLine = sugg.map(s => `${esc(s.status)}: ${s.n}`).join(' &middot; ')
-  const [shipped, homepageNow, ticketMetrics, escalations] = await Promise.all([
-    gatherShipped(),
-    gatherHomepageNow(),
-    gatherTicketMetrics(statusCountsLine),
-    gatherEscalations(),
-  ])
+  // The ager runs before the queue is read so the email reports the pile as it
+  // stands after the sweep, not as it stood before.
+  const agedOut = await ageOutStaleSuggestions()
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation] =
+    await Promise.all([
+      gatherShipped(),
+      gatherHomepageNow(),
+      gatherTicketMetrics(statusCountsLine),
+      gatherEscalations(),
+      gatherOwnerQueue(agedOut),
+      gatherOpsWatch(),
+      // Best-effort: this one calls Shopify, and a digest that does not send is
+      // worse than a digest missing one line.
+      getProfitReconciliation().catch((err): null => {
+        console.warn('[owner-digest] profit reconciliation failed:', String(err).slice(0, 200))
+        return null
+      }),
+    ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
 
   // ── Compose ───────────────────────────────────────────────────────────────
@@ -624,6 +929,26 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   const profitRows = profit
     .map(p => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? '')}</td></tr>`)
     .join('')
+
+  // Reconciliation against Shopify's own count. This exists because the table
+  // reported $0 on real paid orders for a month and nothing ever contradicted
+  // it: no agent, no cron, and no human asked Shopify whether zero was true.
+  const reconLine = (() => {
+    if (!reconciliation) {
+      return `<p style="margin:6px 0 0;color:${MUTED};">Could not reconcile against Shopify this run.</p>`
+    }
+    const r = reconciliation
+    const cogsNote = r.cogsMissingUnits > 0
+      ? ` <span style="color:${WARN};">Cost unknown on ${r.cogsMissingUnits} unit${r.cogsMissingUnits === 1 ? '' : 's'}, so margin is a floor, not a figure.</span>`
+      : ''
+    if (!r.summaryExists) {
+      return `<p style="margin:6px 0 0;color:${BAD};">No summary row for ${esc(r.date)}, but Shopify reports ${r.shopifyPaidOrders} paid order${r.shopifyPaidOrders === 1 ? '' : 's'}.</p>`
+    }
+    if (!r.match) {
+      return `<p style="margin:6px 0 0;color:${BAD};"><strong>Mismatch on ${esc(r.date)}:</strong> Shopify says ${r.shopifyPaidOrders} paid order${r.shopifyPaidOrders === 1 ? '' : 's'}, the summary says ${r.summaryOrders}.</p>${cogsNote ? `<p style="margin:2px 0 0;">${cogsNote}</p>` : ''}`
+    }
+    return `<p style="margin:6px 0 0;color:${GOOD};">Reconciled: Shopify and the summary agree on ${r.shopifyPaidOrders} paid order${r.shopifyPaidOrders === 1 ? '' : 's'} for ${esc(r.date)}.${cogsNote}</p>`
+  })()
 
   const runRows = runs
     .map(r => `<tr><td style="padding:2px 10px 2px 0;">${esc(r.team)}</td><td style="padding:2px 10px;">${esc(r.run_type)}</td><td style="padding:2px 10px;color:${r.status === 'failed' ? '#d93a15' : r.status === 'succeeded' ? '#1c7c43' : '#6f645c'};">${esc(r.status)}</td><td style="padding:2px 0;">${esc((r.error ?? r.summary ?? '').slice(0, 140))}</td></tr>`)
@@ -704,7 +1029,9 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section(`Escalations${needsOwner > 0 ? ` (${needsOwner})` : ''}`, renderEscalationsSection(escalations))}
       ${section(`Shipped, last 24h (${shipped.length})`, renderShippedSection(shipped))}
       ${section('Homepage now', renderHomepageNowSection(homepageNow))}
-      ${section('Orders and profit (last 8 days)', `<table style="border-collapse:collapse;">${profitRows || '<tr><td>no rows</td></tr>'}</table>`)}
+      ${section(`Needs a decision from you${ownerQueue.totalCount > 0 ? ` (${ownerQueue.totalCount})` : ''}`, renderOwnerQueueSection(ownerQueue))}
+      ${section('Orders and profit (last 8 days)', `<table style="border-collapse:collapse;">${profitRows || '<tr><td>no rows</td></tr>'}</table>${reconLine}`)}
+      ${section('Ops watch', renderOpsWatchSection(opsWatch))}
       ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || '<tr><td>no runs</td></tr>'}</table>`)}
       ${section('Team gates', `<table style="border-collapse:collapse;">${gateRows}</table>`)}
       ${section('Valves', `<table style="border-collapse:collapse;">${valveRows}</table>`)}
@@ -718,5 +1045,12 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   </body>`
 
   const res = await sendOwnerEmail(subject, html, { fromName: 'xdipx daily digest' })
-  return res.sent ? { sent: true, subject } : { sent: false, ...(res.error !== undefined ? { error: res.error } : {}) }
+  if (res.sent) return { sent: true, subject }
+
+  // The day slot was claimed before composing, to stop a double cron
+  // invocation sending twice. If the send itself failed, give the slot back and
+  // throw so the cron returns 500 instead of a cheerful 200: a digest that
+  // silently did not send is the same failure class as the ones it reports on.
+  if (!opts.force) await kvDel(`owner-digest:sent:${day}`)
+  throw new Error(`owner digest send failed: ${res.error ?? 'unknown error'}`)
 }
