@@ -47,7 +47,10 @@ collections; the writer verifies stock before embedding).
 
 One `podcastReviewBrief`, status `pending`, `createdBy` = run id, `_id` =
 `podcastReviewBrief-<show-slug>-<episode-slug>`, `createIfNotExists` via the Sanity MCP tools.
-Include `suggestedTitle` (answer-shaped) and the episode URL.
+Include `suggestedTitle` (answer-shaped) and a **verified episode-specific permalink** as
+`episodeUrl` — the page for *this* episode, not the show-level feed or platform page. If only a
+show-level URL exists, store it but say so in `sourceQuality`/notes; never pass a show page off as the
+episode link.
 
 ## Step 6 — Finish
 
