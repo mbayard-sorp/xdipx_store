@@ -956,12 +956,29 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     { to: 'in_review', actors: ['agent:qa-reviewer'] },
     // The legacy agent-editor docs path, preserved verbatim.
     { to: 'applied', actors: ['agent:agent-editor'], kinds: AGENT_EDITOR_APPLY_KINDS },
+    // Out-of-band reconciliation. See the note on the `in_review` edge below.
+    { to: 'applied', actors: ['system'] },
     OWNER_DISMISS,
   ],
   in_review: [
     { to: 'verified', actors: ['agent:qa-reviewer'] },
     // FAIL bounce: back to the assignee with a reason, one attempt spent.
     { to: 'in_progress', actors: ['agent:qa-reviewer'], incrementAttempt: true },
+    // Out-of-band reconciliation, same edge as `pr_open` above.
+    //
+    // `applied` means "the fix is live on xdipx.com". The engine earns that
+    // claim by merging, deploying, and smoking. The sweep earns it a different
+    // way: it asks GitHub whether the linked PR is already merged, and only a
+    // `merged: true` from GitHub itself lets it write this edge. Nothing here
+    // can mark unmerged work as shipped.
+    //
+    // Without these two edges a PR the owner merges by hand strands its ticket
+    // forever, because the only exits from `pr_open`/`in_review` were QA and an
+    // owner dismissal. Tickets #291, #323 and #441 sat exactly this way while
+    // their PRs (#413, #414, #420) were live in production, and R-DEV then
+    // spent later passes re-diagnosing incidents that had already shipped.
+    // The sweep only ever moves a ticket in the direction reality already went.
+    { to: 'applied', actors: ['system'] },
     OWNER_DISMISS,
   ],
   verified: [
