@@ -16,6 +16,12 @@ from its 15:08 UTC start, which was silently skipping the 16:00 podcast run (run
 strategy runs both fired at 20:00 Mondays. Coverage checking is now derived from this file rather
 than from a hardcoded routine range — see `routine-weekly-strategy.md` step 4.
 
+Trigger changes applied to the scheduler the same day, so this file and the scheduler agree: podcast
+review Wed 16:05 -> `5 19 * * 3`; SEO curation Sun 16:00 -> `0 19 * * 0`; Apply Pass Mon 20:00 ->
+`0 22 * * 1` (it collided with R-DEV's 20:00 pass, both `team=strategy`); a second Apply Pass created
+for Thursdays (`trig_01EQSUudJsye3bxAhncdBf1b`); and the Weekly Strategy prompt reissued so its
+coverage check derives scope from this table instead of naming routine numbers.
+
 Status 2026-07-23 (automation-drift audit fixes): all 14 routines then existing had triggers. Routine 11
 (Off-site Scout) was created this day (`trig_0131NQ3PLTRpcgdMU4wdoxh8`, Tue 16:00 UTC). Routine 12
 (Podcast Review) had drifted to a daily cron and was corrected back to Wednesday (`5 16 * * 3`, the
@@ -106,7 +112,7 @@ spend via `POST https://xdipx.com/api/homepage-team/spend` under the team's feat
 | # | Name | Cron (UTC) | Team / feature label | Playbook | Extra prompt clauses |
 |---|---|---|---|---|---|
 | 1 | xdipx — Weekly Strategy | `0 12 * * 1` | strategy / `strategy-weekly` | `docs/store-team/routine-weekly-strategy.md` | Run as store-strategist with the inventory-sentinel, promo-manager, loyalty-referral-manager, product-manager, and program-manager sub-steps. Advisory only: publish the brief (including program-manager's Program Status section), file/route suggestions, never operate (program-manager's docs-only tracker PR on `pm/tracker-<date>` is the one allowed write, and it is merged by the release engine after CI, never by the agent). |
-| 2 | xdipx — Apply Pass (agent-editor) | `0 22 * * 1` and `0 22 * * 4` (Mon + Thu) | strategy / `strategy-apply` | `docs/store-team/routine-agent-editor.md` | Step 0: if `suggestion_apply_enabled` is not `'true'`, exit without starting a run. Owner-APPROVED suggestions of kind instructions/agent-def/config only; one minimal-diff PR per suggestion on branch `agents/suggestion-<id>`; max 15/run, twice weekly (Mon + Thu); allowlisted files only; NEVER merge or push to the default branch (the release engine merges the PR once CI and the `agent-allowlist` check are green, and stops for the owner on protected paths); refuse anything that weakens valves, the voice gate, MAP, or the loop's human gates. |
+| 2 | xdipx — Apply Pass (agent-editor) | `0 22 * * 1` (`trig_018kKMQRtD6a5XPUJu5aVPK5`) and `0 22 * * 4` (`trig_01EQSUudJsye3bxAhncdBf1b`) | strategy / `strategy-apply` | `docs/store-team/routine-agent-editor.md` | Step 0: if `suggestion_apply_enabled` is not `'true'`, exit without starting a run. Owner-APPROVED suggestions of kind instructions/agent-def/config only; one minimal-diff PR per suggestion on branch `agents/suggestion-<id>`; max 15/run, twice weekly (Mon + Thu); allowlisted files only; NEVER merge or push to the default branch (the release engine merges the PR once CI and the `agent-allowlist` check are green, and stops for the owner on protected paths); refuse anything that weakens valves, the voice gate, MAP, or the loop's human gates. |
 | 3 | xdipx — Cost Review (process-optimizer) | `0 21 * * 1` | strategy / `strategy-cost-review` | `.claude/agents/process-optimizer.md` + `docs/store-team/improvement-loop.md` | Read recent runs/events/`api_token_log` cost + outcomes across every team; file suggestion rows with estimated $ savings and an explicit CX-risk note. Propose only; no self-rewiring. |
 | 4 | xdipx — Ads Proposals | `0 13 * * 2` | ads / `ads-planning` | `docs/store-team/routine-ads-weekly.md` | PROPOSE-ONLY: write `ad_campaigns` proposals with a substantive policyCheck citing `docs/ads-policy.md`; never create/edit/activate/boost anything on any platform; you spend no money, ever. Max 3 proposals/run. |
 | 5 | xdipx — Email Briefs | `0 15 * * 2` | email / `email-planning` | `docs/store-team/routine-email-weekly.md` | PLAN-ONLY: file campaign briefs as suggestions (kind campaign) for the owner to execute in Klaviyo; send nothing. Max 2 briefs/run. |
