@@ -948,3 +948,55 @@ export interface ResolvedDropPage {
   routeKey: 'new' | 'on-sale'
   blocks: ResolvedCategoryBlock[]
 }
+
+// ─── Panel deck (resolved) ───────────────────────────────────────────────────
+// Singleton: singleton.panelDeck, resolved server-side by getPanelDeck().
+//
+// Everything here is already a renderable value: hrefs resolved from
+// panelLink (dead collection handles dropped at build time), image assets
+// resolved to URLs, blogPost references resolved to slugs. JSON-safe — this
+// shape rides the homepage payload blob.
+
+export type PanelSurface =
+  | 'blush'
+  | 'lilac'
+  | 'stone'
+  | 'paper'
+  | 'plum'
+  | 'coral'
+  | 'ink'
+
+export type PanelDeckTheme = 'tint' | 'photo' | 'ruled'
+
+export interface ResolvedPanelTile {
+  key: string
+  label: string
+  surface: PanelSurface
+  mark: string | null
+  imageUrl: string | null
+  imageAlt: string | null
+  href: string
+}
+
+export interface ResolvedPanelLarge extends ResolvedPanelTile {
+  kicker: string | null
+  blurb: string | null
+  ctaLabel: string | null
+}
+
+export interface ResolvedPanelSmall extends ResolvedPanelTile {
+  meta: string | null
+  figure: string | null
+}
+
+export type ResolvedPanelRow =
+  | { kind: 'square'; key: string; items: ResolvedPanelTile[] }
+  | { kind: 'large'; key: string; items: ResolvedPanelLarge[] }
+  | { kind: 'small'; key: string; items: ResolvedPanelSmall[] }
+
+export interface ResolvedPanelDeck {
+  eyebrow: string | null
+  theme: PanelDeckTheme
+  showOrdinals: boolean
+  rows: ResolvedPanelRow[]
+}

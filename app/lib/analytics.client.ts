@@ -205,6 +205,27 @@ export function trackHomeScrollDepth(section: 'meet-emma' | 'couples') {
   gtag('event', 'home_scroll_depth', { home_section: section })
 }
 
+/**
+ * Fired when a panel-deck door is clicked. `dataAttr` is the panel's
+ * `data-panel` coordinate, `{theme}/{rowIndex}/{itemIndex}/{label}` — the DOM
+ * attribute alone never reaches GA4, which is why this event exists.
+ *
+ * NOTE for the launch checklist: panel_id / panel_position / panel_kind /
+ * panel_destination must be registered as event-scoped custom dimensions in
+ * the GA4 admin (an owner-only action) or these parameters are collected but
+ * unreadable in reports, exactly like home_scroll_depth's parameter was.
+ */
+export function trackPanelClick(dataAttr: string, href: string) {
+  const [theme = '', row = '', item = '', label = ''] = dataAttr.split('/')
+  gtag('event', 'panel_click', {
+    panel_id: dataAttr,
+    panel_position: `${row}/${item}`,
+    panel_kind: theme,
+    panel_label: label,
+    panel_destination: href,
+  })
+}
+
 export function trackChipToggle(params: {
   group: 'mood' | 'audience' | 'matters' | 'category'
   value: string
