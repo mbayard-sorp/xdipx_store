@@ -395,10 +395,32 @@ function trustStripItems(block?: TrustBarBlock | undefined): TrustStripItem[] {
    from the buried rail zone to a bright, static grid immediately after the
    trust strip, so the page opens with a wall of clickable product. */
 
-/** Render a heading with its last word in the italic plum emphasis style,
-    matching the editorial headline treatment across the page. */
-function EmphasizedHeading({ text }: { text: string }) {
+/** Split a heading around the first occurrence of an emphasis word/phrase.
+    Returns null when the emphasis is absent from the heading, so callers can
+    render the heading plain instead of appending a stray, unspaced <em> to
+    the end. Uses indexOf/slice (not split) so a heading containing the
+    emphasis word more than once is never truncated -- only the first
+    occurrence is wrapped, and everything after it (including any repeat)
+    survives in `after`. */
+export function emphasisParts(text: string, emphasis: string): { before: string; match: string; after: string } | null {
+  const idx = text.indexOf(emphasis)
+  if (idx === -1) return null
+  return { before: text.slice(0, idx), match: emphasis, after: text.slice(idx + emphasis.length) }
+}
+
+/** Render a heading with a given word/phrase italicized in the plum emphasis
+    style, matching the editorial headline treatment across the page. When
+    `emphasis` is omitted, falls back to italicizing the last word. When
+    `emphasis` is provided but not actually present in `text`, renders the
+    heading plain -- no <em> is appended, so a mismatched Sanity emphasis
+    field can never garble the published heading. */
+function EmphasizedHeading({ text, emphasis }: { text: string; emphasis?: string }) {
   const trimmed = text.trim()
+  if (emphasis) {
+    const parts = emphasisParts(trimmed, emphasis)
+    if (!parts) return <>{trimmed}</>
+    return <>{parts.before}<em className="em">{parts.match}</em>{parts.after}</>
+  }
   const trailing = trimmed.match(/[.?!]$/)?.[0] ?? ''
   const core = trailing ? trimmed.slice(0, -1) : trimmed
   const words = core.split(' ')
@@ -655,19 +677,11 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
   const eyebrow = block?.eyebrow || 'Where to begin'
   const heading = block?.heading || 'Find your way in.'
   const emphasis = block?.emphasis || 'way'
-  // Render the heading with the emphasis word italicized, matching the
-  // hardcoded fallback's `Find your <em>way</em> in.` structure.
-  const headingParts = heading.includes(emphasis)
-    ? heading.split(emphasis)
-    : [heading, '']
 
   const promo = block?.promo
   const promoEyebrow = promo?.eyebrow || 'Discover You'
   const promoHeading = promo?.heading || 'Not sure where you land? Discover You.'
   const promoEmphasis = promo?.emphasis || 'Discover'
-  const promoHeadingParts = promoHeading.includes(promoEmphasis)
-    ? promoHeading.split(promoEmphasis)
-    : [promoHeading, '']
   const promoBody = promo?.body
     || "Answer a few quiet questions and Emma narrows it down to a few that fit."
   const promoCtaLabel = promo?.ctaLabel || 'Find your fit →'
@@ -688,7 +702,7 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
               className="mb-9 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]"
               style={DISPLAY}
             >
-              {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
+              <EmphasizedHeading text={heading} emphasis={emphasis} />
             </h2>
           </Reveal>
 
@@ -763,7 +777,7 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
                   {promoEyebrow}
                 </p>
                 <h3 className="mb-3 text-[1.7rem] leading-[1.1] text-ink md:text-[2.5rem]" style={DISPLAY}>
-                  {promoHeadingParts[0]}<em className="em">{promoEmphasis}</em>{promoHeadingParts[1]}
+                  <EmphasizedHeading text={promoHeading} emphasis={promoEmphasis} />
                 </h3>
                 <p className="max-w-[46ch] text-[16px] leading-relaxed text-ink-3" style={BODY}>
                   {promoBody}
@@ -910,7 +924,6 @@ function PhotoBand({
 }) {
   const heading = block?.heading || 'Better together.'
   const emphasis = 'together'
-  const headingParts = heading.includes(emphasis) ? heading.split(emphasis) : [heading, '']
   const body = block?.body
     || 'A few things designed for shared control, made for playing together rather than solo.'
   const ctaLabel = block?.ctaLabel && HERO_CTA_WHITELIST.includes(block.ctaLabel) ? block.ctaLabel : 'Show me'
@@ -949,7 +962,7 @@ function PhotoBand({
             className="text-[2.1rem] leading-[1.05] tracking-[-0.01em] md:text-[3.2rem]"
             style={{ ...DISPLAY, color: hasImage ? 'white' : 'var(--color-ink)' }}
           >
-            {headingParts[0]}<em className="em">{emphasis}</em>{headingParts[1]}
+            <EmphasizedHeading text={heading} emphasis={emphasis} />
           </h2>
           {hasImage && (
             <p className="mt-3 max-w-[42ch] text-[15px] leading-relaxed text-white/85" style={BODY}>

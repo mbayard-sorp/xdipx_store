@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { BAND_NAMES, DEFAULT_BAND_ORDER, resolveBandOrder } from './StorefrontHome'
+import { BAND_NAMES, DEFAULT_BAND_ORDER, resolveBandOrder, emphasisParts } from './StorefrontHome'
 
 /**
  * The storefront's band order used to be implicit in the JSX. Now it is data,
@@ -149,5 +149,32 @@ describe('resolveBandOrder — Sanity layout to render order', () => {
     // A deck marker alone is not a homepage.
     const layout = { sections: [{ _type: 'panelDeckSection', enabled: true }] }
     expect(resolveBandOrder(layout)).toEqual(DEFAULT_BAND_ORDER)
+  })
+})
+
+describe('emphasisParts — heading/emphasis split for <EmphasizedHeading>', () => {
+  // Ticket #461: a published emphasis word absent from its heading used to
+  // render as a stray, unspaced <em> appended to the end of the sentence
+  // ("...favorites?safe"). null tells the caller to render the heading plain.
+  it('returns null when the emphasis word is absent from the heading', () => {
+    expect(emphasisParts('Not sure which glide belongs with your favorites?', 'safe')).toBeNull()
+  })
+
+  it('splits around the emphasis word when present', () => {
+    expect(emphasisParts('Find your way in.', 'way')).toEqual({
+      before: 'Find your ',
+      match: 'way',
+      after: ' in.',
+    })
+  })
+
+  // A heading containing the emphasis word twice must not be truncated: the
+  // old String.split() produced 3+ parts and everything past index 1 was
+  // silently dropped.
+  it('does not truncate a heading containing the emphasis word twice', () => {
+    const parts = emphasisParts('Stay safe, stay safe with us.', 'safe')
+    expect(parts).not.toBeNull()
+    expect(parts!.before + parts!.match + parts!.after).toBe('Stay safe, stay safe with us.')
+    expect(parts!.after).toContain('safe')
   })
 })
