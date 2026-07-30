@@ -20975,7 +20975,9 @@ function renderTicketsSection(m) {
 }
 function renderOwnerQueueSection(f) {
   const parts = [];
-  if (f.agedOut > 0) {
+  if (f.agedOut === null) {
+    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">Forced send: the stale-row ager did not run, so nothing was dismissed.</p>`);
+  } else if (f.agedOut > 0) {
     parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} untargeted row${f.agedOut === 1 ? "" : "s"} aged out automatically (21 days, low priority, no team).</p>`);
   }
   if (f.rows.length === 0) {
@@ -21455,7 +21457,7 @@ async function runOwnerDigest(opts = {}) {
     console.warn("[owner-digest] ticket columns unavailable (migration 070 not applied?):", String(err2).slice(0, 200));
   }
   const statusCountsLine = sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ");
-  const agedOut = await ageOutStaleSuggestions();
+  const agedOut = opts.force ? null : await ageOutStaleSuggestions();
   const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation] = await Promise.all([
     gatherShipped(),
     gatherHomepageNow(),

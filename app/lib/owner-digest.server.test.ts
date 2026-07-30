@@ -245,6 +245,20 @@ describe('renderOwnerQueueSection', () => {
     const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: 4 })
     expect(html).toContain('4 untargeted rows aged out')
   })
+
+  it('says the ager was skipped on a forced send, rather than reporting zero', () => {
+    // null and 0 mean different things: "did not run" versus "ran, found
+    // nothing". A forced test send must not read as a clean nightly sweep.
+    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: null })
+    expect(html).toContain('the stale-row ager did not run')
+    expect(html).not.toContain('aged out automatically')
+  })
+
+  it('stays silent when the ager ran and closed nothing', () => {
+    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: 0 })
+    expect(html).not.toContain('aged out')
+    expect(html).not.toContain('did not run')
+  })
 })
 
 describe('renderOpsWatchSection', () => {
