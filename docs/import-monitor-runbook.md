@@ -1,6 +1,6 @@
 # Nalpac Import Monitor — Daily Run Runbook
 
-*Last updated: 2026-05-20. Operating doc for the in-app Nalpac import automation: the daily run, the data it produces, the /admin surfaces, the controls, and the phased automation path.*
+*Last updated: 2026-07-29. Operating doc for the in-app Nalpac import automation: the scheduled run, the data it produces, the /admin surfaces, the controls, and the phased automation path.*
 
 > **Scope note.** This is the **in-app** system (Vercel cron + React Router v7 + Neon). It is fully self-contained and **independent of the standalone Python "Nalpac Reports" pipeline** in `~/Documents/xdipx.com/Nalpac Reports/`. That pipeline keeps running on its own for local deep-dive review; nothing here reads from or writes to it.
 
@@ -23,7 +23,7 @@ Fetch + 4-feed merge is the existing `fetchAllNalpacFeeds()` (`app/lib/nalpac-fe
 
 ---
 
-## 2. The daily run (`runImportMonitor()` — `app/lib/import-monitor.server.ts`)
+## 2. The scheduled run (`runImportMonitor()` — `app/lib/import-monitor.server.ts`)
 
 1. Open an `import_monitor_runs` audit row (`started_at`, `source` = `cron` | `manual`).
 2. Fetch all 4 feeds; `feeds_ok` = no fetch errors.
@@ -66,6 +66,7 @@ Nalpac's feed is flat (one row per sellable SKU); our store needs one product wi
 ## 3. Schedule & triggers
 
 - **Cron:** `POST /cron/import-monitor`, `vercel.json` schedule `0 8 * * *` (08:00 UTC — after the 07:00 pricing cron, so the warm feed cache is reused). Protected by the shared `x-cron-secret` / `CRON_SECRET` guard.
+- **Actual cadence is Mon/Wed/Fri, not daily.** The cron fires every day, but the handler exits early on days outside `import_monitor_run_days`, which is `1,3,5` in production (`server/cron.ts` reads the valve and returns `skipped: not_scheduled_today`). The vercel.json schedule alone therefore overstates how often discovery runs, and anything downstream that assumes a fresh queue every morning — notably the 09:00 UTC daily product routine — works from the last discovery pass on Tue/Thu/Sat/Sun. The value is an unversioned production hand-edit; no migration seeds it.
 - **In-handler gates** (Vercel schedules are static): skips if `import_monitor_enabled = 'false'` (kill switch) or if today's `getUTCDay()` isn't in `import_monitor_run_days` (CSV of UTC day numbers, default all 7).
 - **Manual:** the **Trigger now** button on `/admin/imports` → `POST /api/import-monitor/run` → `runImportMonitor({ source: 'manual' })`.
 
@@ -127,7 +128,7 @@ Enrichment runs through `submitFullEnrichmentBatch` / `collectFullEnrichmentBatc
 | Key | Default | Meaning |
 |---|---|---|
 | `import_monitor_enabled` | `true` | Kill switch |
-| `import_monitor_run_days` | `0,1,2,3,4,5,6` | UTC day numbers to run (0 = Sun) |
+| `import_monitor_run_days` | `0,1,2,3,4,5,6` (code default; **production is `1,3,5`**) | UTC day numbers to run (0 = Sun). Set by hand in prod, not by any migration. |
 | `import_monitor_phase` | `1` | Automation phase |
 | `import_monitor_max_candidates` | `300` | Max master candidates written per run (ranked by `gap_score`) |
 | `import_monitor_watch_score_delta` | `0.10` | Score jump to resurface a watched candidate |
