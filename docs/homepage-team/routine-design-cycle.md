@@ -88,6 +88,14 @@ plus the retired-route denylist stand.
   prototype — not just polish of existing sections. Judge concepts by whether a visitor learns
   something about what fits them while moving toward a product. Log rejected concepts + reasons so
   ambition compounds across cycles.
+- **While traffic-gated, keep the cycle cheap: bank design capital, defer expensive builds.** With
+  GA4 far below the 300-sessions/week weighting threshold, no shipped homepage change is currently
+  GA4-measurable, so big asset-generation or new-machinery builds (fal.ai imagery waves, interactive
+  finders, a reviews slot) would ship to almost no one. While sessions < 300/week the ambition
+  mandate is satisfied by **wires / prototypes + cheap, certain real-defect fixes**; expensive
+  asset-generation and new-machinery builds wait until either traffic returns or the change is
+  cheap-and-certain. This is not a call to stop inventing — it is a call to bank ambition as design
+  proposals now and spend build / fal.ai budget when it can actually be seen.
 
 ### 2. Prototype on a branch
 
