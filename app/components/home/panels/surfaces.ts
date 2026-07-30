@@ -34,7 +34,9 @@ export const PANEL_SURFACES: Record<PanelSurface, SurfaceStyle> = {
   blush: BLUSH,
   lilac: LILAC,
   stone: { bg: 'bg-paper-3', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
-  paper: { bg: 'bg-paper-2 border border-line', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
+  // Borderless like every other fill — a hairline here made the paper tiles
+  // read as a different card class from their siblings in the same row.
+  paper: { bg: 'bg-paper-2', text: 'text-ink', accent: 'text-ink-4', muted: 'text-ink-3', darkGround: false },
   plum: LILAC,
   coral: BLUSH,
   ink: { bg: 'bg-ink', text: 'text-white', accent: 'text-white/70', muted: 'text-white/60', darkGround: true },

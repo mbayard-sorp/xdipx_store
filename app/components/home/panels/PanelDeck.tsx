@@ -25,7 +25,7 @@ export function PanelDeck({ deck }: { deck: ResolvedPanelDeck }) {
 
   return (
     <section className="bg-paper-2 py-16 md:py-20" aria-label="Browse by category">
-      <div className="mx-auto max-w-[1200px] px-6 md:px-16">
+      <div className="mx-auto max-w-[1320px] px-6 md:px-16">
         {deck.eyebrow ? (
           <span
             className="mb-3 block text-[11px] uppercase tracking-[0.18em] text-ink-4"
@@ -35,7 +35,7 @@ export function PanelDeck({ deck }: { deck: ResolvedPanelDeck }) {
           </span>
         ) : null}
         <h2
-          className="mb-6 text-[28px] leading-[1.08] tracking-[-0.01em] text-ink md:mb-8 md:text-[38px]"
+          className="mb-9 text-[1.9rem] leading-[1.08] tracking-[-0.01em] text-ink md:text-[2.9rem]"
           style={DISPLAY}
         >
           Pick your <em className="brand">door</em>.

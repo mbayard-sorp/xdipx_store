@@ -59,7 +59,7 @@ export function PanelLargeRow({
                 <div>
                   {panel.kicker ? (
                     <span
-                      className={`mb-2 block text-[11px] uppercase tracking-[0.16em] ${ruled ? 'text-ink-4' : s.accent}`}
+                      className={`mb-2 block text-[11px] uppercase tracking-[0.18em] ${ruled ? 'text-ink-4' : s.accent}`}
                       style={MONO}
                     >
                       {panel.kicker}
@@ -84,7 +84,7 @@ export function PanelLargeRow({
                   // The deck's ONE coral spend (§3 budget): the dark panel's CTA.
                   // Light grounds keep ink so coral stays a single primary.
                   <span
-                    className={`inline-flex items-center gap-1.5 text-[13px] font-semibold md:text-[14px] ${ruled ? 'text-ink' : s.darkGround ? 'text-coral-2' : s.text}`}
+                    className={`inline-flex items-center gap-1.5 text-[13px] font-semibold md:text-[14px] ${ruled ? 'text-ink' : s.darkGround ? 'text-coral' : s.text}`}
                     style={BODY}
                   >
                     {arrowText}
