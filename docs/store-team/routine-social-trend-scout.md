@@ -110,7 +110,7 @@ Ships inert. To turn on, in order:
 4. **One supervised manual run:** fire the routine by hand; verify the run row +
    `phase:'research'` / `phase:'proposals'` events on `/admin/homepage-team?team=social` and the
    suggestion rows on the dashboard.
-5. **Create the cloud trigger** with the RemoteTrigger tool (routine 17 in
+5. **Create the cloud trigger** with the RemoteTrigger tool (routine 20 in
    `docs/store-team/routine-schedule.md`): Monday `0 17 * * 1` UTC, fresh session per fire,
    completion notifications off, prompt per the common skeleton in the schedule manifest, and
    record the `trig_` id in the manifest.

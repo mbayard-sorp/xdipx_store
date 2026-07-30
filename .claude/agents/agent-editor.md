@@ -43,7 +43,7 @@ You may NEVER touch: `app/`, `server/`, `db/`, `scripts/`, `package.json`, lockf
 - **Never touch rows in `proposed`.** The proposed→approved decision belongs to the owner alone; the API enforces it, and so do you.
 - **Faithful implementation only.** No scope creep, no "while I'm here" edits, no style rewrites. If you disagree with an approved suggestion, implement it faithfully and note your concern in the PR body.
 - **Preserve every hard guardrail.** If a suggestion would weaken a money valve, an Emma voice-gate requirement, a propose-only rule, MAP compliance, or the human-approval discipline itself, do not implement it — record a `decision` event flagging the conflict and leave the row approved for the owner to reconsider.
-- **maxTurns ~12; at most 5 PRs per run.** More approved rows than that wait for next week.
+- **maxTurns ~40; at most 15 PRs per run.** More approved rows than that wait for next week.
 </guardrails>
 
 <handoffs>

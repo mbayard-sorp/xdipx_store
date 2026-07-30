@@ -140,8 +140,7 @@ execution path is untouched:
   (Klaviyo send, Shopify code, engineering task). Auto-approve just clears them from the
   triage queue; nothing runs unattended.
 
-**Rollout:** homepage is ON (owner direction, 2026-07-17), paired with
-`suggestion_apply_enabled` ON. Every other team defaults OFF. Auto-approved rows carry an
+**Rollout:** **As of 2026-07-29 auto-approve is ON for all five active teams** (homepage, content, product, social, strategy), by owner decision. The four non-homepage valves were in fact flipped on 2026-07-18; the docs said otherwise for eleven days, which is why valve writes are now recorded in `settings_audit_log` (migration 072) with an actor and a source. Auto-approved rows carry an
 `auto` badge on the dashboard so the automated decisions stay auditable. To pull a team
 back to manual triage, flip its valve off — in-flight `approved` rows are unaffected.
 
@@ -176,9 +175,10 @@ hit, a routine that skipped at the gate. Those are ordinary states with an owner
   its own process approved against rules the agent cannot edit. Two rules make that real: the
   protected-path classifier runs on the changed-file list from the GitHub API rather than on any
   text an agent wrote, and `.github/` plus the release engine's own files are themselves protected,
-  so no agent PR can loosen the gates. (With auto-approve off — the default for all teams but
-  homepage — the triage click is the owner's, and with `release_engine_enabled` off the merge is
-  the owner's too.)
+  so no agent PR can loosen the gates. (Auto-approve is now on for all five active teams, so the
+  owner's triage click is no longer the gate on the instruction path; CI, the file allowlist, the
+  protected-path classifier, and the daily merge cap are. When `release_engine_enabled` is off the
+  merge is the owner's too.)
 - **The merge path has its own kill switch** (`release_engine_enabled`, default off, on the strategy
   tab of `/admin/homepage-team`) plus a daily merge cap (`release_engine_max_merges_per_day`).
   Turning it off restores owner-merges-everything with no other change.
@@ -190,7 +190,7 @@ hit, a routine that skipped at the gate. Those are ordinary states with an owner
   (`{team}_team_auto_approve_suggestions`, default off).
 - **The apply pass needs run-cap headroom:** the Apply Pass and Cost Review share `team=strategy`
   with Monday's Weekly Strategy run, and the gate's run cap counts per team, not per run type.
-  `strategy_team_max_runs` must stay at **3** or the later two Monday runs skip `over_run_cap`
+  `strategy_team_max_runs` must be **8** (R-DEV runs twice daily and R-QA once, all as `team=strategy`, alongside the three loop runs) or the later two Monday runs skip `over_run_cap`
   and approved suggestions silently never become PRs (this exact failure hid every apply run
   from 2026-07-07 to 2026-07-21).
 - **agent-editor's file allowlist is hard:** agent defs and team docs only — no app code, schema,
@@ -198,3 +198,14 @@ hit, a routine that skipped at the gate. Those are ordinary states with an owner
   voice gates, MAP rules, or this loop itself.
 - **Everything is visible:** suggestions, decisions, PRs, and retro events all surface on the
   dashboard; spend on `/admin/usage`.
+
+## What does NOT belong on the bus
+
+A suggestion is an **ask**: something a lane can execute and then close. Reports are not asks. 22 of
+the 52 approved `process` rows that piled up were weekly summaries, coverage reports, and retros —
+rows that could never reach a terminal state because there was nothing to do, so they aged forever
+and buried the rows that did need a decision.
+
+File a report as a run **event** (`POST /api/team/event`), which is already the retro channel and is
+free. Reserve suggestion rows for work with an owner and an end state. If a report contains an ask,
+file the ask as its own row and keep the narrative in the event.

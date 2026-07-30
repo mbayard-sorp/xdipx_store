@@ -274,3 +274,26 @@ The routine ships inert. To turn it on, in order:
 **Kill-switch drill:** flipping `content_team_enabled` off stops runs at the gate (Step 1 skips
 honestly). Flipping `content_team_autopublish` off degrades to draft-only without stopping the
 routine: posts keep landing in Sanity as drafts for the owner to publish.
+
+
+## Inbound suggestions (read your own mail)
+
+Other agents file findings *at* this team, and before 2026-07-29 no routine read them: the playbooks
+only ever wrote suggestions, so routed findings aged in `approved` forever.
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"list","targetTeam":"content","status":"approved","orderBy":"age"}'
+```
+
+Act on up to **3 per run**, oldest first, and only what this run can actually execute within the
+gates it already obeys. Close each one you did execute so tomorrow's run does not re-read it:
+
+```bash
+-d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:content-writer","note":"<what changed>"}'
+```
+
+Looked but deliberately did not act (out of scope, no longer true, needs code)? Post
+`{"op":"note", ...}` with which and why and leave the status alone. Never close a row you did not
+execute: a false `applied` looks handled and is worse than an aging row.

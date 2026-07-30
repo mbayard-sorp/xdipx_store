@@ -104,9 +104,15 @@ Skip this step Tuesday through Sunday. On Mondays, run both of these in order be
    idea worth adapting, and one thing we will do this week that none of them do. The memo must
    change something concrete this week (the theme, a rail concept, a tile, or a Routine B backlog
    item). Recon that changes nothing is a wasted step.
-2. **Set the week's theme.** Invoke `merch-calendar` to set or confirm this week's theme in
-   `marketing_calendar` per mission brief section 3. Themes are editorial curricula, not sales
-   events; the recon memo from the previous step feeds this decision.
+2. **Set the week's theme, and keep the runway stocked.** Invoke `merch-calendar` to set or confirm
+   this week's theme in `marketing_calendar` per mission brief section 3. Themes are editorial
+   curricula, not sales events; the recon memo from the previous step feeds this decision.
+
+   Same step, before you finish: ensure at least **4 future weeks** of `planned` rows exist, and
+   propose new ones if not. Nothing else refreshes this table — the last row was minted 2026-07-07
+   and the runway ran to 2026-09-07, after which every routine that reads "today's theme" would have
+   found nothing. Also close out past-dated rows still marked `active` so the calendar states what is
+   true today.
 
 ## Step 2 — Read context (data only)
 
@@ -141,6 +147,32 @@ curl -s -X POST "$BASE_URL/api/homepage-team/event" \
   live price against MAP (`mapAllowsAdvertisedDiscount` in `gmc-metafields.server.ts`) before you
   frame it as cheaper; and no urgency/countdown framing (voice charter). A real lower price is a
   fact you may state plainly, not a scarcity play.
+
+## Step 2d — Inbound suggestions (read your own mail)
+
+Other agents file findings *at* this team and, until 2026-07-29, nothing ever read them. This
+playbook only ever wrote suggestions. inventory-sentinel's out-of-stock carousel findings (#52-54,
+filed 07-20) sat approved and unexecuted for nine days while the routine ran daily.
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"list","targetTeam":"homepage","status":"approved","orderBy":"age"}'
+```
+
+Act on up to **3 per run**, oldest first, and only ones this run can actually do: a product swap, a
+copy fix, an image change — content, within the gates that already govern Step 5. Anything needing
+code or layout is not yours; leave it for the ticket lane.
+
+**Close what you acted on.** A row you executed must not be re-read tomorrow:
+
+```bash
+-d '{"op":"transition","id":52,"to":"applied","actor":"agent:homepage-orchestrator","note":"swapped OOS SKU out of the Nº02 rail, replaced with <handle>"}'
+```
+
+If you looked at a row and are deliberately not acting (out of scope, no longer true, needs code),
+post `{"op":"note", ...}` saying which and why, and leave the status alone. Never close a row you did
+not actually execute: a false `applied` is worse than an aging row, because it looks handled.
 
 ## Step 2b — Yesterday's scoreboard
 

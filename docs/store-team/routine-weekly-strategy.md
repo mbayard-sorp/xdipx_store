@@ -80,10 +80,24 @@ curl -s -X POST "$BASE_URL/api/team/event" \
    (`pm/tracker-<date>`, merged by the release engine after CI, never by the PM) when rows
    changed, and hands the strategist a
    **Program Status** section (overall RAG + top risks + owner asks per program) to include
-   verbatim in the brief. It also verifies **routine coverage**: each expected scheduled routine
-   (1–14 in `routine-schedule.md`) posted a run in the last 7 days (`homepage_team_runs`); file a
-   `process` suggestion for any that silently stopped firing (the daily product routine #14 is easy
-   to miss — a stalled drain backs the queue up quietly).
+   verbatim in the brief. It also verifies **routine coverage**, and the scope is *derived from
+   `routine-schedule.md`, never enumerated here*:
+
+   - Read every routine row in `docs/store-team/routine-schedule.md`. For each, decide whether it is
+     **expected to run**: a trigger id is recorded, or its gating valve is on.
+   - Expected-to-run with no `homepage_team_runs` row in the last 7 days → file a `process`
+     suggestion. A stalled drain backs its queue up quietly (the daily product routine is the
+     easiest to miss).
+   - **Gating valve ON but no trigger id recorded** → also a mandatory `process` suggestion. This is
+     the half-enabled state: on 2026-07-28 the trend-scout and social-trend-scout valves were turned
+     on and their triggers were never created, so two lanes were live-but-dead and three downstream
+     consumers starved with nothing reporting it.
+   - Valve off AND no trigger → expected-missing, exempt, say nothing.
+
+   Never hardcode routine numbers in this step or in the trigger prompt. That list has gone stale
+   twice (it read "2-14" while the manifest listed 19 routines, so everything added after 2026-07-23
+   was outside the watchdog's scope by construction), and a coverage check that cannot see a new
+   lane is worse than none, because it reports "zero misses" either way.
 
 Each posts its own events under `$RUN_ID` with its `agentRole`.
 
