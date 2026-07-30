@@ -4526,11 +4526,11 @@ async function adminGraphQL(query, variables) {
     },
     body: JSON.stringify({ query, variables })
   });
-  const MAX_ATTEMPTS4 = 4;
+  const MAX_ATTEMPTS5 = 4;
   for (let attempt = 1; ; attempt++) {
     const res = await doFetch();
     if (res.status === 429) {
-      if (attempt >= MAX_ATTEMPTS4) throw new Error("Shopify Admin GraphQL error: 429");
+      if (attempt >= MAX_ATTEMPTS5) throw new Error("Shopify Admin GraphQL error: 429");
       const retryAfter = Number(res.headers.get("retry-after")) || 1;
       await new Promise((r) => setTimeout(r, Math.min(retryAfter * 1e3, 5e3)));
       continue;
@@ -4540,7 +4540,7 @@ async function adminGraphQL(query, variables) {
     const throttled = body.errors?.some(
       (e) => e.extensions?.code === "THROTTLED" || /throttled/i.test(e.message)
     );
-    if (throttled && attempt < MAX_ATTEMPTS4) {
+    if (throttled && attempt < MAX_ATTEMPTS5) {
       const cost = body.extensions?.cost;
       const needed = (cost?.requestedQueryCost ?? 0) - (cost?.throttleStatus?.currentlyAvailable ?? 0);
       const restoreRate = cost?.throttleStatus?.restoreRate ?? 0;
@@ -18525,12 +18525,203 @@ var init_homepage_healthcheck_server = __esm({
   }
 });
 
+// app/lib/category-healthcheck.server.ts
+var category_healthcheck_server_exports = {};
+__export(category_healthcheck_server_exports, {
+  CATEGORY_HEALTH_LATEST_KEY: () => CATEGORY_HEALTH_LATEST_KEY,
+  runCategoryHealthcheck: () => runCategoryHealthcheck
+});
+async function persistLatest(result) {
+  try {
+    await kvSet(CATEGORY_HEALTH_LATEST_KEY, { ...result, at: (/* @__PURE__ */ new Date()).toISOString() });
+  } catch (err2) {
+    console.warn("[category-healthcheck] latest snapshot failed", err2);
+  }
+}
+function siteOrigin2() {
+  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
+  return base.replace(/\/$/, "") || "https://xdipx.com";
+}
+function countJsonLdType(html, type) {
+  let count = 0;
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    try {
+      const json2 = JSON.parse((m[1] ?? "").trim());
+      const t = json2["@type"];
+      if (t === type || Array.isArray(t) && t.includes(type)) count += 1;
+    } catch {
+    }
+  }
+  return count;
+}
+async function checkPageOnce2(exp, attempt) {
+  const bust = `__healthcheck=${Date.now()}-${attempt}`;
+  const url = `${siteOrigin2()}${exp.path}${exp.path.includes("?") ? "&" : "?"}${bust}`;
+  const problems = [];
+  let status = 0;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS2);
+    const res = await fetch(url, {
+      headers: { "user-agent": "xdipx-category-healthcheck" },
+      signal: ctrl.signal
+    }).finally(() => clearTimeout(timer));
+    status = res.status;
+    const body = await res.text();
+    if (status !== 200) problems.push(`HTTP ${status}`);
+    if (body.length < MIN_BODY_BYTES2) problems.push(`body too small (${body.length} bytes)`);
+    if (!/<\/html>/i.test(body)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
+    for (const marker of exp.markers) {
+      if (!body.includes(marker)) {
+        problems.push(`missing ${marker} (merchandised layer not rendering \u2014 fallback served)`);
+      }
+    }
+    if (exp.surface !== "deck") {
+      const faqNodes = countJsonLdType(body, "FAQPage");
+      if (faqNodes > 1) problems.push(`${faqNodes} FAQPage JSON-LD nodes (must dedupe to one)`);
+    }
+  } catch (err2) {
+    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
+  }
+  return { path: exp.path, surface: exp.surface, status, ok: problems.length === 0, problems, hardFail: status >= 500 };
+}
+async function checkPage2(exp) {
+  let best = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS3; attempt++) {
+    const c = await checkPageOnce2(exp, attempt);
+    if (c.ok) return c;
+    if (!best || c.problems.length < best.problems.length) best = c;
+    if (attempt < MAX_ATTEMPTS3) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS3));
+    }
+  }
+  return best;
+}
+async function fetchLiveDocs() {
+  const client5 = getClient(false);
+  if (!client5) return { categories: [], drops: [] };
+  try {
+    const rows = await client5.fetch(
+      `{
+        "categories": *[_type == "categoryPage" && status == "live"].shopifyCollectionHandle,
+        "drops": *[_type == "dropPage" && status == "live"].routeKey,
+      }`
+    );
+    return {
+      categories: (rows?.categories ?? []).filter((h) => typeof h === "string" && h.length > 0),
+      drops: (rows?.drops ?? []).filter((r) => r === "new" || r === "on-sale")
+    };
+  } catch (err2) {
+    console.error("[category-healthcheck] live-doc query failed:", err2);
+    return { categories: [], drops: [] };
+  }
+}
+async function runCategoryHealthcheck() {
+  const { categories, drops } = await fetchLiveDocs();
+  const expectations = [
+    ...categories.map((handle) => ({
+      path: `/collections/${handle}`,
+      surface: "category",
+      markers: ['data-block="categoryMasthead"']
+    })),
+    ...drops.map((routeKey) => ({
+      path: routeKey === "new" ? "/new" : "/collections/on-sale",
+      surface: "drop",
+      markers: ['data-block="dropMasthead"']
+    }))
+  ];
+  try {
+    const payload = await readHomepagePayloadB();
+    const deckPlaced = (payload?.layout?.sections ?? []).some(
+      (s) => s._type === "panelDeckSection" && s.enabled !== false
+    );
+    if (payload?.panelDeck && deckPlaced) {
+      expectations.push({
+        // ?variant=b pins the storefront render so the assertion holds whatever
+        // the served default is mid-rollout.
+        path: "/?variant=b",
+        surface: "deck",
+        markers: ["data-panel="]
+      });
+    }
+  } catch (err2) {
+    console.warn("[category-healthcheck] payload read failed (deck check skipped):", err2);
+  }
+  const liveDocs = categories.length + drops.length;
+  if (expectations.length === 0) {
+    const empty = { ok: true, liveDocs, checks: [], alerted: false };
+    await persistLatest(empty);
+    return empty;
+  }
+  const checks = await Promise.all(expectations.map(checkPage2));
+  const healthy = checks.every((c) => c.ok);
+  if (healthy) {
+    const green = { ok: true, liveDocs, checks, alerted: false };
+    await persistLatest(green);
+    return green;
+  }
+  const failed = checks.filter((c) => !c.ok);
+  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
+  const hard = failed.some((c) => c.hardFail);
+  Sentry.captureException(
+    new Error(`Category healthcheck ${hard ? "failed" : "soft-degraded"} \u2014 ${summary}`),
+    {
+      tags: { healthcheck: "category-pages", severity: hard ? "P1" : "P3" },
+      extra: { checks }
+    }
+  );
+  const result = { ok: false, liveDocs, checks, alerted: true };
+  try {
+    const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2, priorityFromSeverity: priorityFromSeverity2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+    result.ticketsFiled = [];
+    for (const c of failed) {
+      result.ticketsFiled.push(
+        await fileDetectionTicket2({
+          detector: "category-healthcheck",
+          dedupeKey: makeDedupeKey2("category-page", c.path),
+          priority: priorityFromSeverity2(c.hardFail ? "P1" : "P3"),
+          category: "other",
+          kind: "code",
+          suggestion: `Merchandised-page healthcheck failing on ${c.path} (HTTP ${c.status}).
+
+Problems:
+${c.problems.map((p) => `- ${p}`).join("\n")}
+
+Detected inside /cron/homepage-healthcheck against ${siteOrigin2()}. If the masthead marker is missing, the live Sanity doc is not reaching the page: check the category resolver logs, then the doc itself. Unpublishing the doc (status back to draft) is the rollback. Re-run the cron to confirm.`,
+          links: [{ kind: "url", ref: `${siteOrigin2()}${c.path}`, state: "failed" }]
+        })
+      );
+    }
+  } catch (err2) {
+    console.error("[category-healthcheck] ticket filing failed (ignored):", err2);
+  }
+  await persistLatest(result);
+  return result;
+}
+var CATEGORY_HEALTH_LATEST_KEY, FETCH_TIMEOUT_MS2, MIN_BODY_BYTES2, MAX_ATTEMPTS3, RETRY_BACKOFF_MS3;
+var init_category_healthcheck_server = __esm({
+  "app/lib/category-healthcheck.server.ts"() {
+    "use strict";
+    init_sentry_server();
+    init_sanity_server();
+    init_homepage_payload_server();
+    init_kv_server();
+    CATEGORY_HEALTH_LATEST_KEY = "category-pages:healthcheck:latest";
+    FETCH_TIMEOUT_MS2 = 12e3;
+    MIN_BODY_BYTES2 = 1e3;
+    MAX_ATTEMPTS3 = 3;
+    RETRY_BACKOFF_MS3 = 1500;
+  }
+});
+
 // app/lib/notebook-healthcheck.server.ts
 var notebook_healthcheck_server_exports = {};
 __export(notebook_healthcheck_server_exports, {
   runNotebookHealthcheck: () => runNotebookHealthcheck
 });
-function siteOrigin2() {
+function siteOrigin3() {
   const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
   return base.replace(/\/$/, "") || "https://xdipx.com";
 }
@@ -18553,14 +18744,14 @@ function extractJsonLd2(html) {
   }
   return { parsed, scripts, types };
 }
-async function checkPageOnce2(exp, attempt) {
+async function checkPageOnce3(exp, attempt) {
   const bust = `__healthcheck=${Date.now()}-${attempt}`;
-  const url = `${siteOrigin2()}${exp.path}${exp.path.includes("?") ? "&" : "?"}${bust}`;
+  const url = `${siteOrigin3()}${exp.path}${exp.path.includes("?") ? "&" : "?"}${bust}`;
   const problems = [];
   let status = 0;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS2);
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS3);
     const res = await fetch(url, {
       headers: { "user-agent": "xdipx-notebook-healthcheck" },
       signal: ctrl.signal
@@ -18573,7 +18764,7 @@ async function checkPageOnce2(exp, attempt) {
       if (!ct.includes("text/markdown")) problems.push(`content-type "${ct}" is not text/markdown`);
       if (body.length < 200) problems.push(`markdown body too small (${body.length} bytes)`);
     } else {
-      if (body.length < MIN_BODY_BYTES2) problems.push(`body too small (${body.length} bytes)`);
+      if (body.length < MIN_BODY_BYTES3) problems.push(`body too small (${body.length} bytes)`);
       if (!/<img[\s>]/i.test(body)) problems.push("no <img> (hero/card images likely missing)");
       if (!/<\/html>/i.test(body)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
       const { parsed, scripts, types } = extractJsonLd2(body);
@@ -18588,14 +18779,14 @@ async function checkPageOnce2(exp, attempt) {
   }
   return { path: exp.path, status, ok: problems.length === 0, problems, hardFail: status >= 500 };
 }
-async function checkPage2(exp) {
+async function checkPage3(exp) {
   let best = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS3; attempt++) {
-    const c = await checkPageOnce2(exp, attempt);
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS4; attempt++) {
+    const c = await checkPageOnce3(exp, attempt);
     if (c.ok) return c;
     if (!best || c.problems.length < best.problems.length) best = c;
-    if (attempt < MAX_ATTEMPTS3) {
-      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS3));
+    if (attempt < MAX_ATTEMPTS4) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS4));
     }
   }
   return best;
@@ -18656,7 +18847,7 @@ async function runNotebookHealthcheck() {
     ] : [],
     ...categorySlug ? [{ path: `/notebook/category/${categorySlug}` }] : []
   ];
-  const checks = await Promise.all(expectations.map(checkPage2));
+  const checks = await Promise.all(expectations.map(checkPage3));
   const healthy = checks.every((c) => c.ok);
   if (healthy) {
     return { ok: true, checks, alerted: false };
@@ -18688,8 +18879,8 @@ async function runNotebookHealthcheck() {
 Problems:
 ${c.problems.map((p) => `- ${p}`).join("\n")}
 
-Detected by /cron/notebook-healthcheck against ${siteOrigin2()}. Fix the page, then re-run the cron to confirm it renders with images and valid JSON-LD.`,
-          links: [{ kind: "url", ref: `${siteOrigin2()}${c.path}`, state: "failed" }]
+Detected by /cron/notebook-healthcheck against ${siteOrigin3()}. Fix the page, then re-run the cron to confirm it renders with images and valid JSON-LD.`,
+          links: [{ kind: "url", ref: `${siteOrigin3()}${c.path}`, state: "failed" }]
         })
       );
     }
@@ -18698,7 +18889,7 @@ Detected by /cron/notebook-healthcheck against ${siteOrigin2()}. Fix the page, t
   }
   if (hard) {
     const issueBody = [
-      `Notebook healthcheck failed against ${siteOrigin2()}.`,
+      `Notebook healthcheck failed against ${siteOrigin3()}.`,
       "",
       "**Problems**",
       summary,
@@ -18717,16 +18908,16 @@ Detected by /cron/notebook-healthcheck against ${siteOrigin2()}. Fix the page, t
   }
   return result;
 }
-var FETCH_TIMEOUT_MS2, MIN_BODY_BYTES2, MAX_ATTEMPTS3, RETRY_BACKOFF_MS3;
+var FETCH_TIMEOUT_MS3, MIN_BODY_BYTES3, MAX_ATTEMPTS4, RETRY_BACKOFF_MS4;
 var init_notebook_healthcheck_server = __esm({
   "app/lib/notebook-healthcheck.server.ts"() {
     "use strict";
     init_sentry_server();
     init_sanity_server();
-    FETCH_TIMEOUT_MS2 = 12e3;
-    MIN_BODY_BYTES2 = 1e3;
-    MAX_ATTEMPTS3 = 3;
-    RETRY_BACKOFF_MS3 = 1500;
+    FETCH_TIMEOUT_MS3 = 12e3;
+    MIN_BODY_BYTES3 = 1e3;
+    MAX_ATTEMPTS4 = 3;
+    RETRY_BACKOFF_MS4 = 1500;
   }
 });
 
@@ -19548,7 +19739,7 @@ function baseUrl(override) {
 }
 async function checkUrl(url, opts = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS3);
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS4);
   try {
     const res = await fetch(url, {
       redirect: "follow",
@@ -19557,7 +19748,7 @@ async function checkUrl(url, opts = {}) {
     });
     const body = await res.text();
     if (res.status !== 200) return { status: res.status, ok: false, detail: `HTTP ${res.status}`, body };
-    const minBytes = opts.minBytes ?? MIN_BODY_BYTES3;
+    const minBytes = opts.minBytes ?? MIN_BODY_BYTES4;
     if (body.length < minBytes) return { status: res.status, ok: false, detail: `body ${body.length} < ${minBytes} bytes`, body };
     for (const marker of opts.markers ?? []) {
       if (!body.toLowerCase().includes(marker.toLowerCase())) {
@@ -19576,7 +19767,7 @@ async function followWithCookies(startUrl, maxHops = 12) {
   let url = startUrl;
   for (let hop = 0; hop < maxHops; hop++) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS3);
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS4);
     let res;
     try {
       const cookie = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
@@ -19717,7 +19908,7 @@ PROTECTED PATH: checkout, payment, and cart are owner-only. Do not open an autom
   }).returning({ id: checkoutProbeRuns.id });
   return { rowId: inserted[0]?.id ?? 0, alerted, ticketId };
 }
-var FETCH_TIMEOUT_MS3, MIN_BODY_BYTES3, ALERT_THROTTLE_SECONDS, PROBE_UA;
+var FETCH_TIMEOUT_MS4, MIN_BODY_BYTES4, ALERT_THROTTLE_SECONDS, PROBE_UA;
 var init_checkout_probe_server = __esm({
   "app/lib/checkout-probe.server.ts"() {
     "use strict";
@@ -19727,8 +19918,8 @@ var init_checkout_probe_server = __esm({
     init_kv_server();
     init_shopify_server();
     init_owner_alerts_server();
-    FETCH_TIMEOUT_MS3 = 12e3;
-    MIN_BODY_BYTES3 = 1e3;
+    FETCH_TIMEOUT_MS4 = 12e3;
+    MIN_BODY_BYTES4 = 1e3;
     ALERT_THROTTLE_SECONDS = 6 * 3600;
     PROBE_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   }
@@ -27113,7 +27304,7 @@ async function runReleaseSmoke() {
   });
   const handle = await resolveSmokeHandle(truth.slate?.heroHandle ?? null);
   if (handle) {
-    const pdp = await checkUrl(`${siteOrigin3()}/products/${handle}`, { markers: ['name="variantId"'] });
+    const pdp = await checkUrl(`${siteOrigin4()}/products/${handle}`, { markers: ['name="variantId"'] });
     checks.push({
       name: `pdp:${handle}`,
       ok: pdp.ok,
@@ -27130,7 +27321,7 @@ async function runReleaseSmoke() {
   });
   return summarizeSmoke(checks);
 }
-function siteOrigin3() {
+function siteOrigin4() {
   const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
   return base.replace(/\/+$/, "") || "https://xdipx.com";
 }
@@ -29625,13 +29816,13 @@ function safeEqual(a, b) {
   return timingSafeEqual2(ab, bb);
 }
 async function drainMetaCapiFailures() {
-  const MAX_ATTEMPTS4 = 5;
+  const MAX_ATTEMPTS5 = 5;
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
     const { and: and8, eq: eq27, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and8(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS4))).limit(100);
+    const rows = await db2.select().from(metaCapiFailures2).where(and8(isNull3(metaCapiFailures2.resolvedAt), lt2(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
@@ -29649,13 +29840,13 @@ async function drainMetaCapiFailures() {
   }
 }
 async function drainGa4Failures() {
-  const MAX_ATTEMPTS4 = 5;
+  const MAX_ATTEMPTS5 = 5;
   try {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
     const { and: and8, eq: eq27, isNull: isNull3, lt: lt2 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and8(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS4))).limit(100);
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and8(isNull3(ga4PurchaseFailures2.resolvedAt), lt2(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
@@ -29711,7 +29902,15 @@ function createCronRoutes() {
     try {
       const { runHomepageHealthcheck: runHomepageHealthcheck2 } = await Promise.resolve().then(() => (init_homepage_healthcheck_server(), homepage_healthcheck_server_exports));
       const result = await runHomepageHealthcheck2();
-      res.status(result.ok ? 200 : 503).json(result);
+      let categoryPages = null;
+      try {
+        const { runCategoryHealthcheck: runCategoryHealthcheck2 } = await Promise.resolve().then(() => (init_category_healthcheck_server(), category_healthcheck_server_exports));
+        categoryPages = await runCategoryHealthcheck2();
+      } catch (err2) {
+        console.error("[cron:homepage-healthcheck] category sweep failed:", err2);
+        categoryPages = { error: String(err2) };
+      }
+      res.status(result.ok ? 200 : 503).json({ ...result, categoryPages });
     } catch (err2) {
       console.error("[cron:homepage-healthcheck]", err2);
       res.status(500).json({ error: String(err2) });

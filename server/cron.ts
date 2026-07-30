@@ -162,9 +162,21 @@ export function createCronRoutes() {
     try {
       const { runHomepageHealthcheck } = await import('../app/lib/homepage-healthcheck.server.js')
       const result = await runHomepageHealthcheck()
+      // Report-only sweep of the merchandised category/drop pages (and the
+      // deck once flipped) rides the same schedule. It alerts through Sentry
+      // and the ticket bus, never through the cron status: the 503 below is
+      // reserved for the homepage, whose failure has a rollback path.
+      let categoryPages: unknown = null
+      try {
+        const { runCategoryHealthcheck } = await import('../app/lib/category-healthcheck.server.js')
+        categoryPages = await runCategoryHealthcheck()
+      } catch (err) {
+        console.error('[cron:homepage-healthcheck] category sweep failed:', err)
+        categoryPages = { error: String(err) }
+      }
       // Non-2xx on failure so Vercel cron + monitoring surface it (recovery,
       // if any, already happened inside runHomepageHealthcheck).
-      res.status(result.ok ? 200 : 503).json(result)
+      res.status(result.ok ? 200 : 503).json({ ...result, categoryPages })
     } catch (err) {
       console.error('[cron:homepage-healthcheck]', err)
       res.status(500).json({ error: String(err) })
