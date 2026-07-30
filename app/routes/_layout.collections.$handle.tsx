@@ -6,6 +6,7 @@ import { getCollectionPage, getEmmaPresets, getBlogPosts, getNotebookPostsForPro
 import { getCategoryPage, getDropPage } from '~/lib/category-page.server'
 import { CategoryBlockRenderer } from '~/components/category/CategoryBlockRenderer'
 import { canonicalUrl, pageTitle, robotsContent, truncateForMeta } from '~/lib/seo'
+import { COLLECTION_CANONICAL_ALIASES } from '~/lib/collection-canonical-aliases'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import { VaultCard } from '~/components/store/VaultCard'
 import { AskEmmaRail, matchesAskEmmaFilters } from '~/components/store/AskEmmaRail'
@@ -204,13 +205,19 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   const heroImageAlt = sanity?.heroImageAlt || collection.image?.altText || h1
 
   // Canonical strategy:
+  //  - Aliased handle: this collection is a near-duplicate of another browse
+  //    surface (e.g. just-dropped → /new). Every page/variant canonicalizes to
+  //    that surface so Google indexes one page, not a duplicate pair. The URL
+  //    keeps working — only the canonical points away.
   //  - Page > 1: self-canonical at ?page=N (each page is its own document).
   //  - Page 1, with sort: canonical to the bare /collections/$handle (sort is
   //    a faceting param, not a new document).
   //  - Filters applied: canonical still points to the bare URL — combined
   //    with `noindex,follow` above this consolidates faceted variants.
-  const canonical =
-    page > 1
+  const canonicalAlias = COLLECTION_CANONICAL_ALIASES[handle]
+  const canonical = canonicalAlias
+    ? canonicalUrl({ path: canonicalAlias })
+    : page > 1
       ? canonicalUrl({
           path: `/collections/${handle}`,
           searchParams: new URLSearchParams({ page: String(page) }),

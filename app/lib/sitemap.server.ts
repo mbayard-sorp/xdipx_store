@@ -42,6 +42,8 @@ import {
   PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ,
   type SitemapImage, type SitemapSegment, type SitemapUrl, type UrlHealth,
 } from '~/lib/sitemap-xml'
+import { CANONICAL_ALIASED_HANDLES } from '~/lib/collection-canonical-aliases'
+import { getDropPageUpdatedAt } from '~/lib/category-page.server'
 import { dealHistory } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 
@@ -158,7 +160,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
       return fallback
     })
 
-  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles] = await Promise.all([
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles, newDropLastmod] = await Promise.all([
     guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
     guard(getBlogCategories(), [], 'getBlogCategories'),
     guard(getAllBlogSeries(), [], 'getAllBlogSeries'),
@@ -170,6 +172,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     guard(getMainMenu(), [], 'getMainMenu'),
     getUrlHealth(),
     guard(getIndexableProductHandles(), null, 'getIndexableProductHandles'),
+    guard(getDropPageUpdatedAt('new'), undefined, 'getDropPageUpdatedAt(new)'),
   ])
 
   const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0]!.dealDate) : null
@@ -225,7 +228,10 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     // zero products (thin content); the rest of the time it is a fully
     // indexable page, so omitting it left it with no submission path and
     // almost no inbound links. Listed above generic PLPs, below the nav.
-    { loc: `${BASE}/new`,         lastmod: today, changefreq: 'daily',  priority: NEW_ARRIVALS_PRIORITY },
+    // lastmod is the merchandised dropPage doc's real edit date (the
+    // tiered-rotation refreshes), not a per-build "today" floor that told Google
+    // the page changed every crawl; undefined when no live doc exists.
+    { loc: `${BASE}/new`,         lastmod: newDropLastmod, changefreq: 'daily',  priority: NEW_ARRIVALS_PRIORITY },
     { loc: `${BASE}/discover`,    lastmod: today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${BASE}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${BASE}/notebook`,    lastmod: today, changefreq: 'weekly', priority: '0.5' },
@@ -276,10 +282,14 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
 
   // ── collections: /collections/$handle ────────────────────────────────────
   // Helps xdipx rank for category queries (e.g. "wand vibrators"). Skip the
-  // Shopify `frontpage` default, any handle that duplicates a clean URL, and
-  // any handle already promoted at priority 0.9 via the nav block.
+  // Shopify `frontpage` default, any handle that duplicates a clean URL, any
+  // handle that canonicalizes elsewhere (e.g. just-dropped → /new; submitting a
+  // URL that rel=canonicals to another page wastes crawl budget), and any handle
+  // already promoted at priority 0.9 via the nav block.
   const collectionUrls: SitemapUrl[] = collections
-    .filter(c => !COLLECTION_DENYLIST.has(c.handle) && !navCollectionHandles.has(c.handle))
+    .filter(c => !COLLECTION_DENYLIST.has(c.handle)
+      && !CANONICAL_ALIASED_HANDLES.has(c.handle)
+      && !navCollectionHandles.has(c.handle))
     .map(c => {
       const images: SitemapImage[] = c.image?.url
         ? [{ loc: c.image.url, title: c.image.altText?.trim() || c.handle.replace(/-/g, ' ') }]
