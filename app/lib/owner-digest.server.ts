@@ -278,8 +278,12 @@ export interface OwnerQueueFacts {
   rows: OwnerQueueRow[]
   /** Total matching rows, which may exceed what is shown. */
   totalCount: number
-  /** Rows auto-dismissed by the ager on this run. */
-  agedOut: number
+  /**
+   * Rows auto-dismissed by the ager on this run, or `null` when the ager did
+   * not run at all because this was a forced (test) send. Null and zero mean
+   * different things and the email says which.
+   */
+  agedOut: number | null
 }
 
 /**
@@ -301,7 +305,9 @@ const STALE_QUEUE_DAYS = 7
 
 export function renderOwnerQueueSection(f: OwnerQueueFacts): string {
   const parts: string[] = []
-  if (f.agedOut > 0) {
+  if (f.agedOut === null) {
+    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">Forced send: the stale-row ager did not run, so nothing was dismissed.</p>`)
+  } else if (f.agedOut > 0) {
     parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} untargeted row${f.agedOut === 1 ? '' : 's'} aged out automatically (21 days, low priority, no team).</p>`)
   }
   if (f.rows.length === 0) {
@@ -645,7 +651,7 @@ export async function ageOutStaleSuggestions(): Promise<number> {
   }
 }
 
-async function gatherOwnerQueue(agedOut: number): Promise<OwnerQueueFacts> {
+async function gatherOwnerQueue(agedOut: number | null): Promise<OwnerQueueFacts> {
   const out: OwnerQueueFacts = { rows: [], totalCount: 0, agedOut }
   try {
     const kinds = sql.join(OWNER_DECISION_KINDS.map(k => sql`${k}`), sql`, `)
@@ -904,7 +910,13 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   const statusCountsLine = sugg.map(s => `${esc(s.status)}: ${s.n}`).join(' &middot; ')
   // The ager runs before the queue is read so the email reports the pile as it
   // stands after the sweep, not as it stood before.
-  const agedOut = await ageOutStaleSuggestions()
+  //
+  // Never on a forced send. `force` exists to re-send while testing (see the
+  // route doc in server/cron.ts), and the ager is a production write: dismissing
+  // real rows as a side effect of checking whether the email renders is exactly
+  // the kind of invisible mutation this digest was built to surface. The nightly
+  // scheduled run is the only thing that ages anything out.
+  const agedOut = opts.force ? null : await ageOutStaleSuggestions()
   const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation] =
     await Promise.all([
       gatherShipped(),
