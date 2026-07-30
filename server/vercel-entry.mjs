@@ -27517,8 +27517,10 @@ var init_github_server = __esm({
       "app/lib/github.server.ts",
       // --- widenings (same intent, this repo's real filenames) ---
       // Any file whose name mentions checkout or cart, at any depth: catches
-      // app/routes/_layout.checkout-extras.tsx, app/routes/api.cart.tsx,
+      // app/routes/admin.checkout-upsells.tsx, app/routes/api.cart.tsx,
       // app/lib/cart.server.ts, and future money-path files nobody remembers to add.
+      // (This comment used to cite app/routes/_layout.checkout-extras.tsx, which
+      // does not exist in the repo. The glob was always fine; the example was not.)
       "**/*checkout*",
       "**/*cart*",
       // Valve and spend definitions beyond the two named files.
@@ -27531,7 +27533,15 @@ var init_github_server = __esm({
       "app/lib/settings.server.ts",
       // The cron auth block lives here; a change to it is a change to who can
       // trigger every scheduled job.
-      "server/cron.ts",
+      //
+      // The glob covers the siblings too, because the entry was previously an exact
+      // filename while the handlers it authorises live in server/cron.<job>.ts. That
+      // meant server/cron.pricing-batch-recompute.ts and every other scheduled
+      // handler was unprotected, which contradicts the reason this line exists: the
+      // auth block only decides who may *call* a job, and the job itself is where
+      // the money and the writes are. A single `*` never crosses a directory
+      // boundary, so this stays scoped to server/.
+      "server/cron*.ts",
       // Lockfile is the other half of package.json for supply chain.
       "package-lock.json",
       "**/package.json",
