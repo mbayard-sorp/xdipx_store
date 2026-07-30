@@ -148,32 +148,6 @@ curl -s -X POST "$BASE_URL/api/homepage-team/event" \
   frame it as cheaper; and no urgency/countdown framing (voice charter). A real lower price is a
   fact you may state plainly, not a scarcity play.
 
-## Step 2d — Inbound suggestions (read your own mail)
-
-Other agents file findings *at* this team and, until 2026-07-29, nothing ever read them. This
-playbook only ever wrote suggestions. inventory-sentinel's out-of-stock carousel findings (#52-54,
-filed 07-20) sat approved and unexecuted for nine days while the routine ran daily.
-
-```bash
-curl -s -X POST "$BASE_URL/api/team/suggestion" \
-  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"list","targetTeam":"homepage","status":"approved","orderBy":"age"}'
-```
-
-Act on up to **3 per run**, oldest first, and only ones this run can actually do: a product swap, a
-copy fix, an image change — content, within the gates that already govern Step 5. Anything needing
-code or layout is not yours; leave it for the ticket lane.
-
-**Close what you acted on.** A row you executed must not be re-read tomorrow:
-
-```bash
--d '{"op":"transition","id":52,"to":"applied","actor":"agent:homepage-orchestrator","note":"swapped OOS SKU out of the Nº02 rail, replaced with <handle>"}'
-```
-
-If you looked at a row and are deliberately not acting (out of scope, no longer true, needs code),
-post `{"op":"note", ...}` saying which and why, and leave the status alone. Never close a row you did
-not actually execute: a false `applied` is worse than an aging row, because it looks handled.
-
 ## Step 2b — Yesterday's scoreboard
 
 Before picking anything new, score what was featured yesterday:
@@ -225,6 +199,36 @@ sparse-data rule blocks *optimizing on noise*: you may not swap a slot because y
 sessions said so. The sameness diff mandates *editorial cadence*: the page changes because a shop
 window changes, decided on margin, theme, and judgment. Sparse traffic changes HOW you pick; it
 never licenses shipping yesterday's page again.
+
+## Step 2d — Inbound suggestions (read your own mail)
+
+Other agents file findings *at* this team and, until 2026-07-29, nothing ever read them. This
+playbook only ever wrote suggestions. inventory-sentinel's out-of-stock carousel findings (#52-54,
+filed 07-20) sat approved and unexecuted for nine days while the routine ran daily.
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"list","targetTeam":"homepage","status":"approved","orderBy":"age"}'
+```
+
+Act on up to **3 per run**, oldest first, and only ones this run can actually do: a product swap, a
+copy fix, an image change — content, within the gates that already govern Step 5. Anything needing
+code or layout is not yours; leave it for the ticket lane.
+
+**Close what you acted on.** A row you executed must not be re-read tomorrow:
+
+```bash
+-d '{"op":"transition","id":52,"to":"applied","actor":"agent:homepage-orchestrator","note":"swapped OOS SKU out of the Nº02 rail, replaced with <handle>"}'
+```
+Only `process` and `strategy` rows can be closed this way (`RUN_CLOSE_KINDS`). A `campaign`,
+`promo`, `instructions`, or `code` row returns 409 — those have their own executor, or the owner's,
+and are not yours to end. Note them instead.
+
+
+If you looked at a row and are deliberately not acting (out of scope, no longer true, needs code),
+post `{"op":"note", ...}` saying which and why, and leave the status alone. Never close a row you did
+not actually execute: a false `applied` is worse than an aging row, because it looks handled.
 
 ## Step 3 — Emma proposes, the orchestrator scores
 

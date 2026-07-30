@@ -76,6 +76,32 @@ volume explains, name the likely cause (`import_enrich_enabled` off, enrich batc
 newly-published products worth a merchandising push → suggestion `targetTeam:'homepage'`, `kind:'strategy'`
 (you propose the feature; the homepage team's gate decides).
 
+## Step 4b: Inbound suggestions (read your own mail)
+
+Other agents file findings *at* this team, and before 2026-07-29 no routine read them: the playbooks
+only ever wrote suggestions, so routed findings aged in `approved` forever.
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"list","targetTeam":"product","status":"approved","orderBy":"age"}'
+```
+
+Act on up to **3 per run**, oldest first, and only what this run can actually execute within the
+gates it already obeys. Close each one you did execute so tomorrow's run does not re-read it:
+
+```bash
+-d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:product-manager","note":"<what changed>"}'
+```
+Only `process` and `strategy` rows can be closed this way (`RUN_CLOSE_KINDS`). A `campaign`,
+`promo`, `instructions`, or `code` row returns 409 — those have their own executor, or the owner's,
+and are not yours to end. Note them instead.
+
+
+Looked but deliberately did not act (out of scope, no longer true, needs code)? Post
+`{"op":"note", ...}` with which and why and leave the status alone. Never close a row you did not
+execute: a false `applied` looks handled and is worse than an aging row.
+
 ## Step 5: Report + finish
 
 Post one `decision` event under your `$RUN_ID` (`agentRole:'product-manager'`): queue depth,
@@ -114,26 +140,3 @@ The routine ships inert. To turn it on, in order:
 report-only. During the initial backlog drain, the owner may temporarily raise
 `product_team_max_runs` or `product_manager_max_actions_per_run` — one daily run of 20 actions drains
 a multi-hundred backlog slowly.
-
-
-## Inbound suggestions (read your own mail)
-
-Other agents file findings *at* this team, and before 2026-07-29 no routine read them: the playbooks
-only ever wrote suggestions, so routed findings aged in `approved` forever.
-
-```bash
-curl -s -X POST "$BASE_URL/api/team/suggestion" \
-  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"list","targetTeam":"product","status":"approved","orderBy":"age"}'
-```
-
-Act on up to **3 per run**, oldest first, and only what this run can actually execute within the
-gates it already obeys. Close each one you did execute so tomorrow's run does not re-read it:
-
-```bash
--d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:product-manager","note":"<what changed>"}'
-```
-
-Looked but deliberately did not act (out of scope, no longer true, needs code)? Post
-`{"op":"note", ...}` with which and why and leave the status alone. Never close a row you did not
-execute: a false `applied` looks handled and is worse than an aging row.

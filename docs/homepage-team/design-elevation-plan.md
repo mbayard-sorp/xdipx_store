@@ -124,6 +124,13 @@ QA). It reviews **screenshots, not code**:
 
 ### 2.2 Screenshot + visual-regression harness
 
+> **NOT BUILT, and not scheduled.** Nothing in this subsection exists: there is no
+> `scripts/design-snapshots.ts`, no `tests/visual/` directory, and no Playwright dependency in
+> `package.json`. The capture pipeline that would have delivered it was cut by the owner on
+> 2026-07-30. Read the rest of this subsection as a design sketch for whenever it is revived, not
+> as a description of anything running today.
+
+
 - Playwright script (`scripts/design-snapshots.ts`, Chromium is pre-installed in the agent
   environment) captures the homepage, `/discover`, one PDP, and the design gallery at
   375/768/1440, light payloads, animations disabled via reduced-motion.
@@ -192,8 +199,9 @@ Best-in-market design *feels* fast and works for everyone:
   once, in the analytics layer, not per-component) + per-module PDP click-through. The mission
   brief's 70% product-link ratio finally gets an outcome metric: which modules *earn* their
   clicks.
-- **Design changelog:** every Routine A publish and Routine B merge appends one line + screenshot
-  reference to `docs/homepage-team/design-changelog.md`. Retros correlate changelog entries with
+- **Design changelog (NOT BUILT):** the intent is that every Routine A publish and Routine B merge
+  appends one line plus a screenshot reference to `docs/homepage-team/design-changelog.md`. That
+  file does not exist and nothing writes it. Retros correlate changelog entries with
   GA4 deltas (still ≥300 sessions/week before weighting, per existing rule).
 - **Critic scores as a time series:** `design-critic` verdicts land as `/event` rows; the
   dashboard charts average rubric score per week. The number should go up. If it plateaus below

@@ -22,7 +22,7 @@ If the charter file is missing from your checkout, STOP and report instead of dr
 </voice>
 
 <authorized_actions>
-You can take these actions via Shopify Admin (through patterns in `app/lib/shopify.server.ts`, `app/lib/customer-api.server.ts`, `app/lib/draft-orders.server.ts`):
+You can take these actions via Shopify Admin, following the patterns in `app/lib/shopify.server.ts` and `app/lib/customer-api.server.ts`. There is no `app/lib/draft-orders.server.ts`; the `draft_orders` table exists but draft-order logic lives in `shopify.server.ts`, `app/lib/ai-agent/tools.server.ts`, and `app/routes/admin.phone-orders.tsx`:
 
 - **Order lookup** by email, order number, or last-4 of card.
 - **Refunds** up to the order total — full refund first if product defective or never delivered.

@@ -7,8 +7,9 @@ buzz) and propose 3-5 `trendTopicBrief` docs in Sanity. The Sunday SEO-curation 
 judges them: adopt into the `seoContentBrief` queue, skip with a reason, or expire when stale.
 
 RESEARCH-ONLY: this routine never writes `blogPost`, `seoContentBrief`, or keyword docs, never
-publishes, and generates no images. Runs on the **Max subscription**. Recommended cadence: weekly,
-Saturday 16:00 UTC (the day before Sunday planning). Never call the site's Anthropic-keyed
+publishes, and generates no images. Runs on the **Max subscription**. Cadence: weekly,
+**Saturday 19:00 UTC** (`0 19 * * 6`), the day before Sunday planning. Not 16:00: the content
+team's in-progress lock runs up to ~200 minutes from its 15:00 start and would swallow the run. Never call the site's Anthropic-keyed
 endpoints; the site is for data reads, gating, run/event recording, and spend logging only. Sanity
 reads/writes go through the Sanity MCP tools.
 
@@ -110,7 +111,11 @@ Ships inert. To turn on, in order:
    `phase:'research'` / `phase:'proposals'` events on `/admin/homepage-team?team=content` and the
    pending briefs in Sanity Studio.
 5. **Create the cloud trigger** (routine 16 in `docs/store-team/routine-schedule.md`): Saturday
-   `0 16 * * 6` UTC, and record the `trig_` id in the manifest.
+   `0 19 * * 6` UTC, and record the `trig_` id in the manifest. Use 19:00, not the 16:00 this step
+   said until 2026-07-29 — 16:00 collides with the content team's in-progress lock, and the
+   manifest has said 19:00 since the retime. `trend_scout_enabled` has been `true` in production
+   since 2026-07-28 with no trigger behind it, so this step is the one thing standing between the
+   valve and a lane that actually runs.
 6. **Next Sunday**, confirm the curation run's `phase:'trend-review'` event shows the briefs
    judged (adopted/skipped/expired).
 
