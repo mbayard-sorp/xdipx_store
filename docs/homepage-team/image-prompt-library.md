@@ -389,7 +389,29 @@ categoryPage-<handle>`; `--ref-image` whenever the masthead features a product):
 
 **Keepers:**
 
-**Rejects:** an archetype off the category's lock row; housewares still-lifes; empty rooms.
+- play (A): "A pair of hands gently stretching the black satin eye mask blindfold from the
+  reference image between them, playful tension, resting over completely plain rumpled white
+  bed linen, warm high-key daylight from a window ... every surface completely blank and
+  unprinted" → `8d79412e19294fb4623e27be10ca0757989e37ed` (2026-07-29). The "every surface
+  completely blank and unprinted" clause is what stopped an invented brand mark from filling
+  the negative space.
+- body (D): "Macro editorial photograph of two gentle hands resting on a bare shoulder and
+  upper back, the skin soft with a warm healthy glow that catches bright high-key daylight,
+  soft coral warm tones ... no bottle, no packaging" → `a061fcc2dfc62c38cdba337338378fa72f3d0bfc`
+  (2026-07-29). No-ref with reason: lube/oil labels fail the no-text rule, so the masthead
+  shows the act.
+- wear (A/C): "A woman wearing the black lace lingerie set from the reference image,
+  photographed from behind, framed from shoulders to waist ... bright warm white bedroom with
+  sheer curtains, quiet confidence" → `971f7753a11149b3362e8b7a869714d3e10cfd33` (2026-07-29).
+  The back view is the reliable path to tasteful human presence for wear.
+
+**Rejects:** an archetype off the category's lock row; housewares still-lifes; empty rooms;
+invented brand marks materializing in the negative space (2026-07-29, play — demand "every
+surface completely blank and unprinted" in the prompt, not just the no-text negative tail);
+full-figure posed pin-up on a bed for wear (2026-07-29 — reads stock glamour, off the v3
+palette; crop tighter or shoot from behind); "no face visible" torso-crop phrasing (2026-07-29 —
+fal returns content_policy_violation on headless-body wording, and the Imagen fallback is dead
+with billing disabled; say "photographed from behind" instead).
 
 ## dropMasthead (wide, New / Sale pages): Archetype B or C, no urgency shapes
 
@@ -404,6 +426,15 @@ imagery of any kind.** Sale takes the quiet treatment (paper-3 ground, restraine
 > motifs, no starbursts, no burst badges, no text, no words, no letters
 
 **Keepers:**
+
+- new (B): "Take only the lilac silicone vibrator out of the retail packaging in the reference
+  image and photograph the bare product itself, standing bold and centered on a very pale
+  blush-pink near-white seamless studio backdrop, no box, no packaging, no card" →
+  `f4e7bcd4d7432dc2a6fef58f964747b23c741adc` (2026-07-29). Kontext reliably lifts a product
+  off its packaging card when told in exactly these terms.
+- on-sale (B, quiet): "resting on its side on a quiet warm off-white paper seamless backdrop,
+  restrained and calm, soft even studio light, one soft shadow, understated ... no discount
+  drama" → `a15cf616d2b07ef46159aa00d04cfc8c8db4dcf5` (2026-07-29).
 
 **Rejects:** any urgency shape (see the ban); discount-led visual drama on Sale; coral shouting on
 the Sale masthead.
