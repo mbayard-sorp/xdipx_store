@@ -544,35 +544,57 @@ function MeetEmma({ photoUrl, photoAlt }: { photoUrl?: string | null; photoAlt?:
   const alt = photoAlt || 'Emma, the editorial AI guide for xdipx'
   return (
     <section id="meet-emma" ref={seenRef} className="bg-paper-2 py-16 md:py-20">
-        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-10 px-6 md:gap-16 md:px-16">
-          <Reveal variant="scale" className="min-w-[240px] max-w-[420px] flex-1">
-            <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-lg)] bg-paper-3 ring-[6px] ring-sage/15">
+        {/* Owner direction 2026-07-30: the portrait is demoted from a co-equal
+            420px column to a byline plate, because doctrine §2 already declares
+            the words are the art in this band ("pull-quotes are typographic
+            art, not caption text") and the old proportion contradicted that.
+            `minmax(0,1fr)` on the copy track is load-bearing: a bare `1fr` lets
+            long unbreakable display type blow past the container. */}
+        <div className="mx-auto max-w-[1320px] px-6 md:grid md:grid-cols-[200px_minmax(0,1fr)] md:items-start md:gap-x-10 md:px-16 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-x-16">
+          {/* Numeral + kicker span both tracks, so the small portrait reads as
+              deliberate rather than shrunken and its top edge keys to the
+              pull-quote's cap line. */}
+          <Reveal variant="up" className="mb-6 md:col-span-2 md:mb-9">
+            <SectionNumeral n="04" className="mb-3 block" />
+            <p className="text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
+              Meet Emma
+            </p>
+          </Reveal>
+          {/* `fade`, not `scale`: doctrine §5 scopes scale to hero-adjacent
+              plates, and a 3% scale on a 128px box is sub-pixel theatre. The
+              ring holds at ~2% of rendered width at every breakpoint, because a
+              fixed 6px mat turns into a chunky avatar border as the plate
+              shrinks. Radius steps down to the chip token on mobile for the
+              same reason: 22px on a 128px plate reads halfway to a circle. */}
+          <Reveal variant="fade" index={2} className="mb-6 w-[128px] md:mb-0 md:w-full">
+            <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-sm)] bg-paper-3 ring-2 ring-sage/20 md:rounded-[var(--radius-lg)] md:ring-4 md:ring-sage/15">
               <OptimizedImage
                 src={src}
                 alt={alt}
-                widths={[420, 840]}
-                fallbackWidth={840}
-                sizes="(max-width: 768px) 100vw, 420px"
+                widths={[128, 256, 288, 400, 520]}
+                fallbackWidth={288}
+                sizes="(min-width: 1024px) 260px, (min-width: 768px) 200px, 128px"
                 className="h-full w-full object-cover"
               />
             </div>
           </Reveal>
-          <Reveal variant="up" className="min-w-[300px] flex-1">
-            <SectionNumeral n="04" className="mb-3 block" />
-            <p className="mb-5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
-              Meet Emma
-            </p>
-            <p
-              className="text-[1.9rem] leading-[1.16] tracking-[-0.01em] text-ink md:text-[2.9rem]"
+          <Reveal variant="up" index={1} className="min-w-0">
+            {/* Promoted from <p> to <h2>: every other major band on this page
+                carries a real h2, and with the portrait demoted this line is
+                both the band's typographic art and its keyword surface. The
+                28ch cap keeps it a three-line stack instead of flattening into
+                a banner across the 868px copy track at 1320+. */}
+            <h2
+              className="text-[1.9rem] leading-[1.16] tracking-[-0.01em] text-ink md:max-w-[28ch] md:text-[2.7rem] lg:text-[2.9rem]"
               style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 450 }}
             >
               <span className="mr-1 not-italic text-coral" aria-hidden="true">♥</span>
-              I know the catalog cold, every spec and the review patterns behind it, so I can
-              point you to what actually <em className="em">fits</em>.
-            </p>
+              I'm here to help you find what's actually <em className="em">right</em> for you,
+              whatever that looks like.
+            </h2>
             <p className="mt-6 max-w-[48ch] text-[16.5px] leading-relaxed text-ink-3" style={BODY}>
-              I'm an AI guide, so I don't get embarrassed and I don't have a shelf to push. Tell me a
-              little about what you're after and I'll do the reading for you.
+              Tell me a little about what you want, and I'll match it against the specs and the
+              reviews. No wrong answers, just a little help finding your fit.
             </p>
             {/* Goes straight to /discover. It used to anchor-scroll to the Nº 09
                 band, whose own button carried the SAME "Find your fit →" label
