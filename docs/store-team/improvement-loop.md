@@ -126,6 +126,30 @@ never before. "Acting team" = the suggestion's `target_team`, or the proposer wh
 | `promo` | a designed discount/sale (MAP-checked) | owner mints the code in Shopify |
 | `program` | referral/loyalty mechanics | owner decides; code parts become `code` rows |
 
+### File the ask in a kind that has an executor
+
+Only two kinds have an automated executor: `code` (claimed by R-DEV) and
+`instructions`/`agent-def`/`config` (applied by `agent-editor`). `process`, `strategy`, `program`,
+`promo`, and `campaign` all mean **a human acts directly**, so a row filed in one of them waits on
+the owner and ages until they read it. Filing executable work as `process` is choosing to delay that
+work indefinitely — it is how 16 of 30 aged rows in the 2026-07-30 digest ended up in a queue of one
+busy human for up to 18 days, and 4 more were fixed by other work while nobody noticed.
+
+**Before filing, ask: who executes this?**
+
+- *Edit a playbook, agent definition, mission brief, or charter* → `instructions` (or `agent-def` /
+  `config`). `agent-editor` PRs it.
+- *Change code, a schema, or a script* → `code`, with repro steps and an explicit **DONE WHEN**.
+  R-DEV claims it.
+- *A decision or action only the owner can take* — a valve flip, a spend approval, a brand or legal
+  judgment, a manual action in a third-party admin — → `process`. This is the only correct use of
+  `process`, and it is genuinely for the owner, not a place to park work you could have specified.
+
+If a row **bundles** an owner decision with executable work, **split it into two rows** (one
+`process` for the decision, one `code`/`instructions` for the work) rather than filing one `process`
+row that half-executes. `agent-editor`'s Step 1.5 hygiene pass (rekind/retire) is the cleanup for
+rows already misfiled; this rule is meant to stop them being created.
+
 ## Auto-approving triage (per team)
 
 Each team has an independent `{team}_team_auto_approve_suggestions` valve (migration
