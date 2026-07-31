@@ -40,7 +40,7 @@ export default defineConfig({
               .icon(() => '🧱')
               .child(S.document().schemaType('storefrontHome').documentId('singleton.storefrontHome')),
             S.listItem()
-              .title('Panel deck (eight doors)')
+              .title('Panel deck')
               .id('panelDeck')
               .icon(() => '🚪')
               .child(S.document().schemaType('panelDeck').documentId('singleton.panelDeck')),

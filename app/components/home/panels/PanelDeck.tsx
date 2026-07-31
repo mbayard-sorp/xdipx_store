@@ -8,7 +8,7 @@ const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 450 } as const
 
 /**
- * The eight-door deck — the homepage's discovery layer, rendered directly
+ * The door deck — the homepage's discovery layer, rendered directly
  * below the headliner (never above it: the hero owns the H1 and the LCP
  * image, so the deck's entrance animation can never touch the largest paint).
  *
@@ -16,10 +16,25 @@ const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 450 } as const
  * grounds and chrome. Content, order, and theme all come resolved on the
  * payload blob, so this component does no fetching and renders SSR-final.
  * An empty deck renders nothing at all — no placeholder, no empty band.
+ *
+ * Any number of rows of any kind stack here in editorial order, so nothing in
+ * this component may assume a row count or a panel count.
  */
 export function PanelDeck({ deck }: { deck: ResolvedPanelDeck }) {
   const rows = deck.rows.filter(r => r.items.length > 0)
   if (rows.length === 0) return null
+
+  // Ruled-theme ordinals run 01, 02, 03… across every square panel in the deck,
+  // so each square row needs to know how many squares preceded it. Rows are
+  // unbounded and carry variable item counts, so this cannot be derived from the
+  // row index.
+  const squareOrdinalStarts = new Map<string, number>()
+  let squaresSoFar = 0
+  for (const row of rows) {
+    if (row.kind !== 'square') continue
+    squareOrdinalStarts.set(row.key, squaresSoFar)
+    squaresSoFar += row.items.length
+  }
 
   const onPanelClick = (dataAttr: string, href: string) => trackPanelClick(dataAttr, href)
 
@@ -51,6 +66,7 @@ export function PanelDeck({ deck }: { deck: ResolvedPanelDeck }) {
                     items={row.items}
                     theme={deck.theme}
                     rowIndex={rowIndex}
+                    ordinalStart={squareOrdinalStarts.get(row.key) ?? 0}
                     showOrdinals={deck.showOrdinals && deck.theme === 'ruled'}
                     onPanelClick={onPanelClick}
                   />

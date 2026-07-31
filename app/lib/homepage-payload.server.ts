@@ -597,7 +597,7 @@ export interface HomepagePayloadB {
    */
   layout: StorefrontHomeLayout | null
   /**
-   * The eight-door deck from `singleton.panelDeck`, destinations validated
+   * The door deck from `singleton.panelDeck`, destinations validated
    * against the live collection list at build time (a typo cannot ship a dead
    * door). Null = no deck published, which renders nothing. The layout's
    * `panelDeckSection` marker decides WHERE it renders; this field is only
