@@ -12,6 +12,16 @@ compound; this file is where they stop evaporating.
 - All scaffolds inherit `docs/design-doctrine.md` §4: real product via `--ref-image` (FLUX
   Kontext) wherever a product is featured or linked; bright/high-key light; v3 palette; nothing
   a premium lingerie campaign could not run.
+- **`--ref-image` vs `--no-ref` by what the surface links to.** FLUX Kontext faithfully reproduces
+  the product **label text** from the Shopify reference photo, which violates the no-text-in-pixels
+  rule and, on a surface that links to a whole collection, also misleads by pinning one SKU's label.
+  So: a surface that links to a **single product** uses `--ref-image` (the real product is the
+  subject) **and** the prompt + negative brief must add explicit blank/unlabeled-surface language
+  (see the §0-P note about legible label being the exception only where the real packshot is the
+  point). A surface that links to a **collection or `/discover`** defaults to `--no-ref` with
+  unlabeled bottles/forms — reserve `--ref-image` for single-product targets. This stops runs
+  shipping or re-rolling label-text images on collection/discover surfaces (one wasted generation on
+  the Discover promo, run 116).
 - **Declare the archetype first.** Every generation names one doctrine §4 archetype before
   prompting — A hand-on-product, B color-block still, C in-situ bright scene, D metaphor
   macro — and uses the scaffold tagged with it below. **Ground lock:** backdrops only from
