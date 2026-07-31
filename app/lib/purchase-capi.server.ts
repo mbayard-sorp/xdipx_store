@@ -115,6 +115,15 @@ export interface PurchaseSendResult {
  * must never be the reason a conversion goes unreported.
  */
 export async function sendPurchaseWithLedger(order: PurchaseOrder): Promise<PurchaseSendResult> {
+  // A payload with no usable order id is not a sale. Without this guard a
+  // malformed or probe request produced event_id "purchase_undefined" and sent
+  // it: observed on 2026-07-31, where Meta rejected it with a 400 for having no
+  // usable customer information. Meta catching it is luck, not a design. An id
+  // is also the dedup key, so a send without one could never be reconciled.
+  if (!order.id || order.id === 'undefined' || order.id === 'null') {
+    return { ok: false, orderId: order.id || '(missing)', skipped: 'no order id' }
+  }
+
   const event = buildPurchaseEvent(order)
 
   try {

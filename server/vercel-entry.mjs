@@ -22905,6 +22905,9 @@ function isWithinMetaEventWindow(order, nowMs = Date.now()) {
   return nowMs - order.createdAtMs < META_MAX_EVENT_AGE_MS;
 }
 async function sendPurchaseWithLedger(order) {
+  if (!order.id || order.id === "undefined" || order.id === "null") {
+    return { ok: false, orderId: order.id || "(missing)", skipped: "no order id" };
+  }
   const event = buildPurchaseEvent(order);
   try {
     await db.insert(metaCapiFailures).values({

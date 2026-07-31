@@ -74,6 +74,25 @@ describe('sendPurchaseWithLedger', () => {
     expect(order).toEqual(['ledger', 'send'])
   })
 
+  it('refuses to send a payload with no order id', async () => {
+    // Observed 2026-07-31: a probe body produced event_id "purchase_undefined"
+    // and was actually transmitted. Meta rejected it with a 400, which was luck
+    // rather than design. An id is also the dedup key, so a send without one
+    // could never be reconciled.
+    const res = await sendPurchaseWithLedger({ ...ORDER, id: '' })
+
+    expect(sendCapiEvent).not.toHaveBeenCalled()
+    expect(insertValues).not.toHaveBeenCalled()
+    expect(res.ok).toBe(false)
+    expect(res.skipped).toBe('no order id')
+  })
+
+  it('refuses the literal string undefined, which is what String(undefined) yields', async () => {
+    const res = await sendPurchaseWithLedger({ ...ORDER, id: 'undefined' })
+    expect(sendCapiEvent).not.toHaveBeenCalled()
+    expect(res.skipped).toBe('no order id')
+  })
+
   it('reports a failed send and does not claim success', async () => {
     sendCapiEvent.mockResolvedValue({ ok: false, error: 'Meta CAPI 400' })
     const res = await sendPurchaseWithLedger(ORDER)
