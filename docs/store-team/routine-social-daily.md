@@ -74,6 +74,11 @@ body, and 4b's arousal/act-description lines still bind on Instagram/TikTok/X. R
 mechanism-only phrasing for surfaces where the charter actually requires restraint (paid-ad
 creative).
 
+**Never gate by experience.** Do not frame a product as "not a first toy", "for advanced users",
+or otherwise assume where the reader is on their journey — it violates the charter's
+no-experience-assumed trust canon (`docs/emma-voice.md`). Describe the build and who it suits by
+mechanism ("dual-density build known for a grounded feel"), never by an implied skill tier.
+
 **LinkedIn is a different lane** (`postType:"authority"`, quota `social_freq_linkedin`):
 
 - Drafted ONLY from a `pending` researchBrief. No pending brief → skip LinkedIn honestly this run;
