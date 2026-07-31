@@ -69,6 +69,20 @@ export default {
             : 'Must be a bare product handle, lowercase letters, digits, and hyphens only (no slashes or spaces)'
         }),
     },
+    {
+      name: 'anchorCollectionHandle',
+      title: 'Anchor grid collection (the Nº 03 product wall)',
+      type: 'string',
+      description:
+        'Shopify COLLECTION handle (no /collections/ prefix) that fills the promoted Nº 03 product wall. The band shows this collection in its curated (manual) order, so merchandising controls which products lead the page instead of the raw discovery ranking. Leave unset to use the default best-sellers collection. Falls back to the discovery best-of only when the collection is empty or unreachable.',
+      validation: Rule =>
+        Rule.custom(value => {
+          if (value == null || value === '') return true
+          return /^[a-z0-9][a-z0-9-]*$/.test(value)
+            ? true
+            : 'Must be a bare collection handle, lowercase letters, digits, and hyphens only (no slashes or spaces)'
+        }),
+    },
   ],
   preview: {
     select: { label: 'primaryCtaLabel', link: 'primaryCtaLink', pinned: 'featuredProductHandle' },

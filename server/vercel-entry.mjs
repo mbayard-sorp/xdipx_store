@@ -4264,7 +4264,7 @@ var init_sanity_server = __esm({
   "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
     primaryCtaLabel, primaryCtaLink,
     secondaryCtaLabel, secondaryCtaLink,
-    featuredProductHandle
+    featuredProductHandle, anchorCollectionHandle
   }
 }
 `;
@@ -16987,6 +16987,7 @@ var init_discovery_server = __esm({
 // app/lib/homepage-payload.server.ts
 var homepage_payload_server_exports = {};
 __export(homepage_payload_server_exports, {
+  DEFAULT_ANCHOR_COLLECTION_HANDLE: () => DEFAULT_ANCHOR_COLLECTION_HANDLE,
   HOMEPAGE_PAYLOAD_B_KV_KEY: () => HOMEPAGE_PAYLOAD_B_KV_KEY,
   HOMEPAGE_PAYLOAD_B_VERSION: () => HOMEPAGE_PAYLOAD_B_VERSION,
   HOMEPAGE_PAYLOAD_KV_KEY: () => HOMEPAGE_PAYLOAD_KV_KEY,
@@ -16998,6 +16999,7 @@ __export(homepage_payload_server_exports, {
   buildHomeContentBlocks: () => buildHomeContentBlocks,
   buildHomeContentBlocksLean: () => buildHomeContentBlocksLean,
   buildHomepagePayloadA: () => buildHomepagePayloadA,
+  getAnchorCollectionProducts: () => getAnchorCollectionProducts,
   invalidateHomepagePayloadA: () => invalidateHomepagePayloadA,
   invalidateHomepagePayloadB: () => invalidateHomepagePayloadB,
   readHomepagePayloadA: () => readHomepagePayloadA,
@@ -17081,6 +17083,19 @@ function toLeanCardProduct(p) {
   if (p.brand !== void 0) lean.brand = p.brand;
   if (p.videos && p.videos.length > 0) lean.videos = [p.videos[0]];
   return lean;
+}
+async function getAnchorCollectionProducts(handle, limit = 12) {
+  const h = (handle ?? "").trim() || DEFAULT_ANCHOR_COLLECTION_HANDLE;
+  try {
+    const products = await getCollectionProducts(h, limit);
+    return products.map(toLeanCardProduct);
+  } catch (err2) {
+    console.warn(
+      `[homepage-payload:b] anchor collection "${h}" fetch failed, falling back to discovery best-of:`,
+      err2
+    );
+    return [];
+  }
 }
 async function buildHomeContentBlocksLean() {
   const { sections, carouselProductMap } = await buildHomeContentBlocks();
@@ -17296,7 +17311,7 @@ function triggerHomepageWarmB() {
   }).catch(() => {
   });
 }
-var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS, VARIANT_B_SECTION_TYPES, HOMEPAGE_PAYLOAD_B_VERSION, HOMEPAGE_PAYLOAD_B_KV_KEY;
+var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS, VARIANT_B_SECTION_TYPES, DEFAULT_ANCHOR_COLLECTION_HANDLE, HOMEPAGE_PAYLOAD_B_VERSION, HOMEPAGE_PAYLOAD_B_KV_KEY;
 var init_homepage_payload_server = __esm({
   "app/lib/homepage-payload.server.ts"() {
     "use strict";
@@ -17329,7 +17344,8 @@ var init_homepage_payload_server = __esm({
       // published block feeds BOTH the visible accordion and the FAQPage JSON-LD.
       "homepageFaq"
     ];
-    HOMEPAGE_PAYLOAD_B_VERSION = "b5";
+    DEFAULT_ANCHOR_COLLECTION_HANDLE = "best-sellers";
+    HOMEPAGE_PAYLOAD_B_VERSION = "b6";
     HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
   }
 });
@@ -17937,6 +17953,9 @@ function hydrateStorefrontPayloadB(payload) {
   return {
     variant: "b",
     rails,
+    // Curated collection order is merchandising, not a rotation set, so it is
+    // passed through verbatim (no per-bucket reshuffle like `rails`).
+    anchorProducts: payload.anchorProducts ?? [],
     emmaHero: payload.emmaHero,
     emmaPhotoUrl: payload.emmaPhotoUrl,
     emmaPhotoAlt: payload.emmaPhotoAlt,
@@ -18025,11 +18044,13 @@ async function buildHomepagePayloadB() {
       );
     }
   }
+  const anchorProducts = await getAnchorCollectionProducts(emmaHero?.anchorCollectionHandle);
   const sensationMap = await getSensationMapData();
   return {
     version: HOMEPAGE_PAYLOAD_B_VERSION,
     variant: "b",
     rails,
+    anchorProducts,
     total: railsResult.total,
     pinnedProduct,
     emmaHero,

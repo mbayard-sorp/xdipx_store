@@ -95,15 +95,16 @@ describe('VARIANT_B_SECTION_TYPES', () => {
 })
 
 describe('HOMEPAGE_PAYLOAD_B_VERSION', () => {
-  it('is past b4, so blobs built before the panelDeck field miss', () => {
+  it('is past b5, so blobs built before the anchorProducts field miss', () => {
     // The blob is read verbatim from KV and Neon. Shipping a new payload shape
     // without bumping this serves the OLD shape until the caches expire, and
-    // none of the new content appears live. b5 added `panelDeck`: a b4 blob has
-    // no such field, so the deck would stay invisible after the team published
-    // it.
-    expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b3')
+    // none of the new content appears live. b5 added `panelDeck`; b6 added
+    // `anchorProducts` (ticket #464): a b5 blob has no such field, so the Nº 03
+    // grid would keep rendering the discovery best-of after the team pointed it
+    // at a collection.
     expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b4')
-    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b5')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b5')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b6')
   })
 
   it('embeds the version in the KV key so old blobs cannot be read back', () => {

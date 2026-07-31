@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { BAND_NAMES, DEFAULT_BAND_ORDER, resolveBandOrder, emphasisParts } from './StorefrontHome'
+import {
+  BAND_NAMES,
+  DEFAULT_BAND_ORDER,
+  resolveBandOrder,
+  emphasisParts,
+  ANCHOR_GRID_DEFAULT_EYEBROW,
+  ANCHOR_GRID_DEFAULT_HEADING,
+  ANCHOR_GRID_DEFAULT_EMPHASIS,
+} from './StorefrontHome'
 
 /**
  * The storefront's band order used to be implicit in the JSX. Now it is data,
@@ -176,5 +184,40 @@ describe('emphasisParts — heading/emphasis split for <EmphasizedHeading>', () 
     expect(parts).not.toBeNull()
     expect(parts!.before + parts!.match + parts!.after).toBe('Stay safe, stay safe with us.')
     expect(parts!.after).toContain('safe')
+  })
+})
+
+describe('Nº 03 anchor grid default heading — no fabricated proof (ticket #464)', () => {
+  // The band's contents are a merchandised collection, not sales data (GA4
+  // showed ~1 purchase in 90 days). The default eyebrow/heading must therefore
+  // NOT assert purchase volume, popularity, or "most/top/best/trending", which
+  // is exactly what "What's working" / "Most picked, right now" did and what
+  // design-doctrine §6 ("never fabricate proof") forbids. This pins the rule,
+  // not the exact words, so approved editorial copy can still evolve.
+  const PROOF_CLAIM =
+    /\b(most|#1|no\.?\s*1|top|best[\s-]?sell\w*|bestsell\w*|trending|popular\w*|selling|sold|purchas\w*|what'?s working|hottest|favou?rite)\b/i
+
+  it('the default eyebrow makes no popularity/volume claim', () => {
+    expect(ANCHOR_GRID_DEFAULT_EYEBROW).not.toMatch(PROOF_CLAIM)
+    expect(ANCHOR_GRID_DEFAULT_EYEBROW).not.toContain('—')
+  })
+
+  it('the default heading makes no popularity/volume claim', () => {
+    expect(ANCHOR_GRID_DEFAULT_HEADING).not.toMatch(PROOF_CLAIM)
+    expect(ANCHOR_GRID_DEFAULT_HEADING).not.toContain('—')
+  })
+
+  it('the emphasis phrase is actually present in the heading (renders cleanly)', () => {
+    // EmphasizedHeading drops the <em> entirely when the emphasis word is
+    // absent, so a mismatch would silently strip the plum styling.
+    expect(ANCHOR_GRID_DEFAULT_HEADING).toContain(ANCHOR_GRID_DEFAULT_EMPHASIS)
+    expect(emphasisParts(ANCHOR_GRID_DEFAULT_HEADING, ANCHOR_GRID_DEFAULT_EMPHASIS)).not.toBeNull()
+  })
+
+  it('the retired strings would have tripped the proof-claim matcher', () => {
+    // Guards the guard: the exact copy this ticket removed must still be caught,
+    // so the matcher cannot rot into a no-op that passes anything.
+    expect('Most picked, right now.').toMatch(PROOF_CLAIM)
+    expect("What's working").toMatch(PROOF_CLAIM)
   })
 })

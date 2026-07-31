@@ -520,6 +520,12 @@ export interface EmmaHeroSettings {
   // set, the storefront hero image and peek link pin to this product handle
   // instead of rotating with the discovery shuffle. Unset = rotating behavior.
   featuredProductHandle?: string
+  // Anchor grid source, also merged in from singleton.emmaHeroStorefront. A
+  // Shopify COLLECTION handle whose products fill the promoted Nº 03 grid in
+  // curated order, instead of the raw discovery best-of ranking. Unset =
+  // default best-sellers collection; empty/unreachable collection = discovery
+  // best-of fallback.
+  anchorCollectionHandle?: string
 }
 
 // v2 redesign — Emma persona singleton (avatar + display name)

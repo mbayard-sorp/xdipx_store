@@ -23,6 +23,10 @@ vi.mock('~/lib/homepage-payload.server', async () => {
     reshuffleRailsWithSeed: actual.reshuffleRailsWithSeed,
     HOMEPAGE_PAYLOAD_B_VERSION: actual.HOMEPAGE_PAYLOAD_B_VERSION,
     buildHomeContentBlocksLean: vi.fn(() => Promise.resolve({ sections: [], carouselProductMap: {} })),
+    // Anchor-collection fetch (ticket #464) hits Shopify, which is not mocked in
+    // this suite; stub it to an empty set so the build path falls back to the
+    // discovery best-of, exactly like a cold/empty collection would.
+    getAnchorCollectionProducts: vi.fn(() => Promise.resolve([])),
     // Default to a blob MISS so assembleStorefrontHome takes the live-build
     // path and the upstream stubs below are the thing under test.
     readHomepagePayloadB: vi.fn(() => Promise.resolve(null)),
@@ -206,6 +210,7 @@ function payload(over: Partial<HomepagePayloadB> = {}): HomepagePayloadB {
     version: HOMEPAGE_PAYLOAD_B_VERSION,
     variant: 'b',
     rails: [rail('Pleasure', ['a', 'b']), rail('Play', ['c', 'd'])],
+    anchorProducts: [],
     total: 4,
     pinnedProduct: null,
     emmaHero: null,
@@ -260,6 +265,25 @@ describe('hydrateStorefrontPayloadB', () => {
     expect(data.variant).toBe('b')
     expect(data.rails).toHaveLength(2)
     expect(data.sensationMap).toEqual(p.sensationMap)
+  })
+
+  it('passes the anchor collection products through verbatim (ticket #464)', () => {
+    // Curated collection order is merchandising, not a rotation set, so it must
+    // reach the component unchanged (never reshuffled like `rails`).
+    const anchor = [
+      { id: 'gid://shopify/Product/anchor-1', handle: 'anchor-1', title: 'Anchor One', price: 12, images: [] },
+      { id: 'gid://shopify/Product/anchor-2', handle: 'anchor-2', title: 'Anchor Two', price: 34, images: [] },
+    ]
+    const data = hydrateStorefrontPayloadB(payload({ anchorProducts: anchor }))
+    expect(data.anchorProducts).toEqual(anchor)
+  })
+
+  it('defaults anchorProducts to [] when the blob predates the field', () => {
+    // Defensive: a malformed/older blob without the field must not crash the
+    // pure hydrate; the component then falls back to the discovery best-of.
+    const legacy = payload()
+    delete (legacy as { anchorProducts?: unknown }).anchorProducts
+    expect(hydrateStorefrontPayloadB(legacy).anchorProducts).toEqual([])
   })
 
   it('survives an empty (degraded) payload without throwing', () => {

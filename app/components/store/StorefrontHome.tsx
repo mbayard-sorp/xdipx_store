@@ -390,10 +390,12 @@ function trustStripItems(block?: TrustBarBlock | undefined): TrustStripItem[] {
 /* ── 3 · Meet Emma ─────────────────────────────────────────────────────────
    Who she is, in her own AI-guide voice (E-E-A-T + brand trust). */
 
-/* ── Nº 03 · "Most picked, right now" — promoted primary grid ──────────────
-   The single biggest structural change: the anchor best-seller set moves up
+/* ── Nº 03 · "A good place to start" — promoted primary grid ───────────────
+   The single biggest structural change: the anchor product set moves up
    from the buried rail zone to a bright, static grid immediately after the
-   trust strip, so the page opens with a wall of clickable product. */
+   trust strip, so the page opens with a wall of clickable product. Its source
+   is the team's curated anchor collection (default best-sellers), falling back
+   to the discovery best-of when that collection is empty or unreachable. */
 
 /** Split a heading around the first occurrence of an emphasis word/phrase.
     Returns null when the emphasis is absent from the heading, so callers can
@@ -472,9 +474,22 @@ function teamRailToGridRail(products: LeanCardProduct[]): Rail {
   }
 }
 
+/**
+ * Default eyebrow / heading for the Nº 03 anchor grid. Editorial-curation
+ * framing, deliberately NOT a popularity or sales-volume claim: the band's
+ * contents are a merchandised collection, not sales data (GA4 showed ~1
+ * purchase in 90 days), so the old "What's working" / "Most picked, right now"
+ * overstated proof the store cannot back (ticket #464, design-doctrine §6
+ * "never fabricate proof"). Exported so a test can pin the no-proof-claim rule;
+ * merchandising still overrides both via the team rail's own eyebrow/heading.
+ */
+export const ANCHOR_GRID_DEFAULT_EYEBROW = 'Worth a look'
+export const ANCHOR_GRID_DEFAULT_HEADING = 'A good place to start, chosen with care.'
+export const ANCHOR_GRID_DEFAULT_EMPHASIS = 'chosen with care'
+
 function ProductGrid({
   rail,
-  eyebrow = "What's working",
+  eyebrow = ANCHOR_GRID_DEFAULT_EYEBROW,
   heading,
   // No default destination. A See-all that points somewhere the section did
   // not actually rank sends visitors to a page with none of the products they
@@ -519,7 +534,7 @@ function ProductGrid({
             <h2 className="text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]" style={DISPLAY}>
               {heading
                 ? <EmphasizedHeading text={heading} />
-                : <>Most picked, <em className="em">right now</em>.</>}
+                : <EmphasizedHeading text={ANCHOR_GRID_DEFAULT_HEADING} emphasis={ANCHOR_GRID_DEFAULT_EMPHASIS} />}
             </h2>
           </div>
           {seeAllHref && (
@@ -1249,7 +1264,7 @@ export function resolveBandOrder(layout?: { sections: { _type: string; band?: st
   return ordered[0] === 'hero' ? ordered : ['hero', ...ordered.filter(b => b !== 'hero')]
 }
 
-export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout, panelDeck }: StorefrontData) {
+export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout, panelDeck }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
   // per page view; the localStorage flag distinguishes first-time visitors.
   useEffect(() => {
@@ -1269,7 +1284,16 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
   // same rail again when there's only one populated) stays the calm scroller
   // so the two sections never render an identical product set back to back.
   const populatedRails = rails.filter(r => r.items.length > 0)
-  const gridRail = populatedRails[0]
+  // Nº 03 anchor grid source. The team's curated collection (default
+  // best-sellers, resolved at build time into `anchorProducts`) is the primary
+  // source so the page's most prominent wall is a merchandised selection tied
+  // to the day, not the raw discovery ranking with a "most picked" claim behind
+  // it (ticket #464). The discovery best-of (`rails[0]`) is the cold-start /
+  // empty-collection fallback, i.e. the prior behaviour.
+  const collectionAnchorRail = anchorProducts.length > 0
+    ? teamRailToGridRail(anchorProducts)
+    : undefined
+  const gridRail = collectionAnchorRail ?? populatedRails[0]
   // slice(1) with no "or the same rail again" fallback: the old expression fed
   // rails[0] to BOTH the Nº 03 grid and the Nº 06 scroller whenever only one
   // rail was populated, printing the identical product set twice on one page.
@@ -1308,9 +1332,9 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
   const notebookBlocks = teamSections.filter(b => b._type === TEAM_NOTEBOOK_TYPE)
 
   // ── Nº 03 anchor grid vs the first team rail ────────────────────────────
-  // The anchor grid ("Most picked, right now") used to be displaced by ANY
+  // The anchor grid ("A good place to start") used to be displaced by ANY
   // published team rail, so a single curated rail silently deleted the page's
-  // bestseller wall and the homepage ended up leading with a $9.99 lube. The
+  // anchor wall and the homepage ended up leading with a $9.99 lube. The
   // anchor now always renders; the team rail renders after it. A deliberate
   // takeover is still possible via the rail's additive `replacesAnchor` flag,
   // which defaults to false.
@@ -1330,13 +1354,14 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
   const bands: Record<BandName, ReactNode> = {
     hero: <Hero featured={featured} emmaHero={emmaHero} trustBar={trustBarBlock} />,
 
-    /* Nº 03 · Most picked, right now — the discovery best-of anchor as a
-       bright static grid. This ALWAYS renders now, whether or not the team
-       published a rail, because it is the page's bestseller wall and the
-       reason a first-time visitor sees proven product above the fold-ish.
-       It is only skipped when a rail explicitly claims the slot
-       (`replacesAnchor`), or when every discovery rail is empty (cold KV),
-       in which case nothing renders here and the page still reads complete. */
+    /* Nº 03 · A good place to start — the curated anchor collection (default
+       best-sellers, discovery best-of fallback) as a bright static grid. This
+       ALWAYS renders now, whether or not the team published a rail, because it
+       is the page's anchor product wall and the reason a first-time visitor
+       sees curated product above the fold-ish. It is only skipped when a rail
+       explicitly claims the slot (`replacesAnchor`), or when both the anchor
+       collection and every discovery rail are empty (cold KV / outage), in
+       which case nothing renders here and the page still reads complete. */
     anchorGrid: !replacesAnchor && anchorRail ? <ProductGrid rail={anchorRail} /> : null,
 
     /* The team's first `emmaCuratedRail`. With `replacesAnchor` it takes the
@@ -1349,7 +1374,7 @@ export function StorefrontHome({ featured, rails, contentBlocks, emmaHero, emmaP
       replacesAnchor && firstTeamRailProducts.length > 0 ? (
         <ProductGrid
           rail={teamRailToGridRail(firstTeamRailProducts)}
-          eyebrow={firstTeamRail.eyebrow || "What's working"}
+          eyebrow={firstTeamRail.eyebrow || ANCHOR_GRID_DEFAULT_EYEBROW}
           heading={firstTeamRail.heading}
           seeAllHref={firstTeamRail.ctaLink || undefined}
           seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}

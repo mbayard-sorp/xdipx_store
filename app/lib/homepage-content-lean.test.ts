@@ -17,14 +17,17 @@ vi.mock('~/lib/shopify.server', () => ({
 }))
 
 import { getHomepageSections } from '~/lib/sanity.server'
-import { getProductsByHandles } from '~/lib/shopify.server'
+import { getProductsByHandles, getCollectionProducts } from '~/lib/shopify.server'
 import {
   buildHomeContentBlocksLean,
+  getAnchorCollectionProducts,
+  DEFAULT_ANCHOR_COLLECTION_HANDLE,
   VARIANT_B_SECTION_TYPES,
 } from './homepage-payload.server'
 
 const mockGetHomepageSections = vi.mocked(getHomepageSections)
 const mockGetProductsByHandles = vi.mocked(getProductsByHandles)
+const mockGetCollectionProducts = vi.mocked(getCollectionProducts)
 
 /** Full Shopify `Product` fixture — deliberately fat (variants, tags, every
  *  image) so the test can assert the lean map strips it down. */
@@ -237,5 +240,32 @@ describe('buildHomeContentBlocksLean', () => {
     // assertion just confirms the fixture object exists.
     const _check: import('~/types').LeanCardProduct = {} as Product
     expect(_check).toBeDefined()
+  })
+})
+
+describe('getAnchorCollectionProducts — Nº 03 grid source (ticket #464)', () => {
+  it('reads from the configured collection handle, slimmed to lean cards', async () => {
+    mockGetCollectionProducts.mockResolvedValue([makeFatProduct('a'), makeFatProduct('b')])
+    const lean = await getAnchorCollectionProducts('curated-picks')
+    expect(mockGetCollectionProducts).toHaveBeenCalledWith('curated-picks', expect.any(Number))
+    expect(lean.map(p => p.handle)).toEqual(['a', 'b'])
+    // Slimmed: the fat Product's variants never ride along in the payload.
+    expect(JSON.stringify(lean)).not.toContain('"variants"')
+  })
+
+  it('defaults to the best-sellers collection when the handle is unset/blank', async () => {
+    mockGetCollectionProducts.mockResolvedValue([makeFatProduct('x')])
+    await getAnchorCollectionProducts(undefined)
+    expect(mockGetCollectionProducts).toHaveBeenCalledWith(DEFAULT_ANCHOR_COLLECTION_HANDLE, expect.any(Number))
+    mockGetCollectionProducts.mockClear()
+    await getAnchorCollectionProducts('   ')
+    expect(mockGetCollectionProducts).toHaveBeenCalledWith(DEFAULT_ANCHOR_COLLECTION_HANDLE, expect.any(Number))
+  })
+
+  it('degrades to [] on an empty collection or a failed Shopify leg (discovery fallback)', async () => {
+    mockGetCollectionProducts.mockResolvedValue([])
+    expect(await getAnchorCollectionProducts('empty-one')).toEqual([])
+    mockGetCollectionProducts.mockRejectedValue(new Error('shopify down'))
+    expect(await getAnchorCollectionProducts('best-sellers')).toEqual([])
   })
 })
