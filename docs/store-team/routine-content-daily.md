@@ -102,9 +102,15 @@ Otherwise pick, in order, logging the source as a `step` event:
 3. The next unwritten entry in the content-plan §3 backlog.
 4. The strategy brief's content section.
 
-When a brief is chosen: patch it `status:'drafted'` immediately (idempotent claim; a crashed run
-leaves it drafted, and the curator re-queues stale drafted briefs weekly), and carry its
-`targetQuery`, keyword refs, `embedHints`, and `internalLinks` into Step 4.
+When a brief is chosen: patch it `status:'drafted'` immediately **and `publish_documents` on it**
+(idempotent claim; a crashed run leaves it drafted, and the curator re-queues stale drafted briefs
+weekly), and carry its `targetQuery`, keyword refs, `embedHints`, and `internalLinks` into Step 4.
+
+> **Every Sanity write is `patch` THEN `publish_documents`.** A Sanity MCP `patch` writes to
+> `drafts.<id>` only; the change is invisible to the live site and to any published-perspective GROQ
+> read until `publish_documents` is called on that id. A claim, a status flip, or a closeout that was
+> patched but never published is a no-op that will keep resurfacing. This applies to every Sanity
+> write in Steps 3, 4, and 6.
 
 Before drafting anything, GROQ-check the slug:
 
@@ -211,7 +217,9 @@ cycle count (the accuracy event also records citation count and `web: ok|degrade
 Only when Step 5 ended in PASS from BOTH gates, a `heroImage` is attached (Step 4; mandatory on
 every published post), **and** Step 1's `valves.autopublish` is `true`:
 
-1. Patch the doc: `status` → `'published'` (keep `publishedAt` as set in Step 4).
+1. Patch the doc: `status` → `'published'` (keep `publishedAt` as set in Step 4), **then
+   `publish_documents` on the blogPost id** — the patch alone leaves the post in `drafts.<id>` and it
+   never goes live.
 2. Flush the blog caches:
 
 ```bash
@@ -222,7 +230,11 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
 
 3. If the topic came from a brief: patch the brief `status` → `'published'` and set
    `publishedPost` to a reference to the blogPost doc. A `podcastReviewBrief` gets
-   `status` → `'published'` and `blogPostRef` set to the post's slug.
+   `status` → `'published'` and `blogPostRef` set to the post's slug. **Then `publish_documents` on
+   the brief id**, and immediately verify with a published-perspective read
+   (`*[_id == "<briefId>"][0].status` must return `"published"`). A brief patched-but-not-published
+   stays queued and will be re-picked every day until someone notices — this is exactly what
+   stranded two briefs whose posts had been live since 07-25 and 07-29.
 
 Valve off, either verdict not PASS, or no hero image could be produced → leave the post as a Sanity
 draft, post an event saying exactly that, re-queue the brief if one was claimed
