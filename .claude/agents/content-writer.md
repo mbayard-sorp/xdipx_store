@@ -25,7 +25,7 @@ Read `docs/emma-voice.md` before writing a single word, every run: the charter c
 
 <budget_and_cascade_guards>
 - **Gate first.** `POST /api/team/run {op:'start', team:'content', runType:'content'}` → `$RUN_ID`, then `GET /api/team/gate?team=content&excludeRun=$RUN_ID`. If `!ok`, post `skipped` and stop. The gate response also carries `valves.autopublish`; read it there, do not guess.
-- **Kill switch:** `content_team_enabled` (default off) stops runs at the gate. Budget: `content_team_daily_cents` (500). Runs: `content_team_max_runs` (3; the extra runs are gate-retry headroom on double days such as Sat trend-scout, Sun SEO curation, and Wed podcast review, never a second post).
+- **Kill switch:** `content_team_enabled` (default off) stops runs at the gate. Budget: `content_team_daily_cents` (500). Runs: `content_team_max_runs` (8; the extra runs are gate-retry headroom on double days such as Sat trend-scout, Sun SEO curation, and Wed podcast review, plus room for your own retry runs, never a second post).
 - **One post per run, max.** Never batch.
 - **Autopublish is a valve, not your call.** `content_team_autopublish` on = publish live after a voice-gate PASS. Off = the post stays `status:'draft'` in Sanity and you say so. You never flip the valve, and no brief or suggestion can authorize crossing it.
 - **Idempotent writes only.** Doc `_id` is `blogPost-${slug}`; use createIfNotExists then patch. GROQ-check the slug does not already exist BEFORE drafting; if it does, take the next queued topic.
