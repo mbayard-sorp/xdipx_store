@@ -18370,7 +18370,7 @@ async function renderTruth(opts = {}) {
       return { ...base, skipped: "no-payload", message: "no precomputed payload B blob to assert against" };
     }
     const slate = extractPublishedSlate(payload);
-    const fingerprint = fingerprintSlate(slate);
+    const fingerprint2 = fingerprintSlate(slate);
     const updatedAtRaw = rawDoc?.["_updatedAt"];
     const updatedAt = typeof updatedAtRaw === "string" ? Date.parse(updatedAtRaw) : NaN;
     const propagating = Number.isFinite(updatedAt) && now - updatedAt < RENDER_TRUTH_PROPAGATION_MS;
@@ -18392,7 +18392,7 @@ async function renderTruth(opts = {}) {
         return {
           ...base,
           slate,
-          fingerprint,
+          fingerprint: fingerprint2,
           skipped: "no-html",
           message: "could not fetch the live homepage to assert against"
         };
@@ -18402,7 +18402,7 @@ async function renderTruth(opts = {}) {
       return {
         ...base,
         slate,
-        fingerprint,
+        fingerprint: fingerprint2,
         skipped: "nothing-published",
         message: "no team content published, nothing to assert"
       };
@@ -18412,8 +18412,8 @@ async function renderTruth(opts = {}) {
     let sameSlots = [];
     try {
       const prior = await kvGet(fingerprintKey(yesterday));
-      sameSlots = compareFingerprints(fingerprint, prior);
-      await kvSet(fingerprintKey(today), fingerprint);
+      sameSlots = compareFingerprints(fingerprint2, prior);
+      await kvSet(fingerprintKey(today), fingerprint2);
     } catch (err2) {
       console.warn("[render-truth] fingerprint snapshot failed", err2);
     }
@@ -18426,7 +18426,7 @@ async function renderTruth(opts = {}) {
       missing,
       fallbacks,
       slate,
-      fingerprint,
+      fingerprint: fingerprint2,
       sameSlots,
       ok: failed.length === 0,
       skipped: propagating && failed.length > 0 ? "propagating" : null
@@ -18439,8 +18439,8 @@ async function renderTruth(opts = {}) {
     }
     if (fileTickets) {
       result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate);
-      const changed = Object.keys(fingerprint).filter(
-        (slot) => fingerprint[slot] !== "" && !sameSlots.includes(slot)
+      const changed = Object.keys(fingerprint2).filter(
+        (slot) => fingerprint2[slot] !== "" && !sameSlots.includes(slot)
       );
       await closeStaleSamenessTickets(changed, today);
     }
@@ -22852,6 +22852,7 @@ var init_seo_research_server = __esm({
 // app/lib/log-monitor.server.ts
 var log_monitor_server_exports = {};
 __export(log_monitor_server_exports, {
+  fetchRecentLogs: () => fetchRecentLogs,
   runLogMonitor: () => runLogMonitor
 });
 import Anthropic3 from "@anthropic-ai/sdk";
@@ -23107,6 +23108,179 @@ Group identical stack traces into one entry with occurrence count. Do not over-r
         required: ["groups", "suppressedNoiseCount"]
       }
     };
+  }
+});
+
+// app/lib/purchase-watcher.server.ts
+var purchase_watcher_server_exports = {};
+__export(purchase_watcher_server_exports, {
+  evaluatePurchaseWatch: () => evaluatePurchaseWatch,
+  runPurchaseWatcher: () => runPurchaseWatcher
+});
+import { and as and5, inArray as inArray4, isNull as isNull2, lt as lt3 } from "drizzle-orm";
+function fingerprint(ids) {
+  return [...new Set(ids)].sort().join(",");
+}
+function evaluatePurchaseWatch(input) {
+  const { recentPaidOrders, gapOrderIds, staleCapiOrderIds, staleGa4OrderIds, stubMarkerSeen, prior } = input;
+  let gapStrikes = prior.gapStrikes;
+  const gapPresent = recentPaidOrders !== null && recentPaidOrders > 0 && gapOrderIds.length > 0;
+  if (recentPaidOrders !== null) {
+    gapStrikes = gapPresent ? Math.min(prior.gapStrikes + 1, GAP_STRIKE_CAP) : 0;
+  }
+  const gapSustained = gapStrikes >= GAP_STRIKE_THRESHOLD;
+  const webhookDead = gapSustained || stubMarkerSeen;
+  const p0Alert = webhookDead && !prior.p0Alerted;
+  const p0Reasons = [];
+  if (stubMarkerSeen) {
+    p0Reasons.push("Shopify orders/create is hitting the React Router fallback stub \u2014 a webhook subscription is misconfigured and orders are being swallowed (no profit metafields, no CAPI, no GA4).");
+  }
+  if (gapSustained) {
+    p0Reasons.push(
+      `Shopify reports ${recentPaidOrders} paid order(s) in the last ${RECENT_WINDOW_MINUTES} min, but ${gapOrderIds.length} left no order_line_items row across ${GAP_STRIKE_THRESHOLD} consecutive runs \u2014 the order-created webhook is not processing live orders. Missing: ${gapOrderIds.slice(0, 10).join(", ")}.`
+    );
+  }
+  const staleAll = [...staleCapiOrderIds, ...staleGa4OrderIds];
+  const p1Fingerprint = fingerprint(staleAll);
+  const p1HasNews = staleAll.length > 0 && p1Fingerprint !== prior.p1Fingerprint;
+  const p1Alert = p1HasNews && !p0Alert;
+  const p1Reasons = [];
+  if (staleCapiOrderIds.length > 0) {
+    p1Reasons.push(`${staleCapiOrderIds.length} Meta CAPI Purchase send(s) unresolved for over ${STALE_MINUTES} min (orders ${staleCapiOrderIds.slice(0, 10).join(", ")}).`);
+  }
+  if (staleGa4OrderIds.length > 0) {
+    p1Reasons.push(`${staleGa4OrderIds.length} GA4 Purchase send(s) unresolved for over ${STALE_MINUTES} min (orders ${staleGa4OrderIds.slice(0, 10).join(", ")}).`);
+  }
+  return {
+    next: {
+      gapStrikes,
+      // Latch the P0 flag while the fault persists so we page once per episode;
+      // clearing it on recovery re-arms the alert for the next episode.
+      p0Alerted: webhookDead,
+      // Advance the P1 fingerprint only when we actually emailed, so a set that
+      // grows later still re-alerts, but the identical set does not.
+      p1Fingerprint: p1Alert ? p1Fingerprint : staleAll.length > 0 ? prior.p1Fingerprint : ""
+    },
+    p0Alert,
+    p0Reason: p0Reasons.join(" "),
+    p1Alert,
+    p1Reason: p1Reasons.join(" ")
+  };
+}
+async function loadState() {
+  const raw = await kvGet(STATE_KEY).catch(() => null);
+  if (!raw) return { ...EMPTY_STATE2 };
+  return {
+    gapStrikes: typeof raw.gapStrikes === "number" ? raw.gapStrikes : 0,
+    p0Alerted: raw.p0Alerted === true,
+    p1Fingerprint: typeof raw.p1Fingerprint === "string" ? raw.p1Fingerprint : ""
+  };
+}
+async function fetchRecentPaidOrderIds(now) {
+  try {
+    const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+    const sinceIso = new Date(now - RECENT_WINDOW_MINUTES * 6e4).toISOString();
+    const query = `created_at:>='${sinceIso}' financial_status:paid status:any`;
+    const res = await adminGraphQL2(
+      `query RecentPaidOrders($query: String!) {
+        orders(first: 50, query: $query, sortKey: CREATED_AT, reverse: true) {
+          nodes { legacyResourceId }
+        }
+      }`,
+      { query }
+    );
+    return (res.orders?.nodes ?? []).map((n) => n.legacyResourceId ? String(n.legacyResourceId) : "").filter(Boolean);
+  } catch (err2) {
+    console.warn("[purchase-watcher] recent-orders scan failed (treating scanned as unknown):", String(err2).slice(0, 200));
+    return null;
+  }
+}
+async function findGapOrderIds(orderIds) {
+  if (orderIds.length === 0) return [];
+  const rows = await db.selectDistinct({ id: orderLineItems.shopifyOrderId }).from(orderLineItems).where(inArray4(orderLineItems.shopifyOrderId, orderIds));
+  const processed = new Set(rows.map((r) => r.id));
+  return orderIds.filter((id) => !processed.has(id));
+}
+async function detectStubMarker() {
+  try {
+    const { fetchRecentLogs: fetchRecentLogs2 } = await Promise.resolve().then(() => (init_log_monitor_server(), log_monitor_server_exports));
+    const logs = await fetchRecentLogs2({ windowMinutes: RECENT_WINDOW_MINUTES });
+    return logs.some((l) => l.message.includes(STUB_MARKER));
+  } catch (err2) {
+    console.warn("[purchase-watcher] log scan for stub marker failed (skipping check 4):", String(err2).slice(0, 200));
+    return false;
+  }
+}
+async function runPurchaseWatcher(now = Date.now()) {
+  const staleBefore = new Date(now - STALE_MINUTES * 6e4);
+  const [prior, recentIds, staleCapiRows, staleGa4Rows] = await Promise.all([
+    loadState(),
+    fetchRecentPaidOrderIds(now),
+    db.select({ id: metaCapiFailures.orderId }).from(metaCapiFailures).where(and5(isNull2(metaCapiFailures.resolvedAt), lt3(metaCapiFailures.createdAt, staleBefore))).catch((err2) => {
+      console.warn("[purchase-watcher] meta_capi_failures query failed:", String(err2).slice(0, 200));
+      return [];
+    }),
+    db.select({ id: ga4PurchaseFailures.orderId }).from(ga4PurchaseFailures).where(and5(isNull2(ga4PurchaseFailures.resolvedAt), lt3(ga4PurchaseFailures.createdAt, staleBefore))).catch((err2) => {
+      console.warn("[purchase-watcher] ga4_purchase_failures query failed:", String(err2).slice(0, 200));
+      return [];
+    })
+  ]);
+  const gapOrderIds = recentIds && recentIds.length > 0 ? await findGapOrderIds(recentIds) : [];
+  const stubMarkerSeen = await detectStubMarker();
+  const staleCapiOrderIds = staleCapiRows.map((r) => r.id);
+  const staleGa4OrderIds = staleGa4Rows.map((r) => r.id);
+  const decision = evaluatePurchaseWatch({
+    recentPaidOrders: recentIds === null ? null : recentIds.length,
+    gapOrderIds,
+    staleCapiOrderIds,
+    staleGa4OrderIds,
+    stubMarkerSeen,
+    prior
+  });
+  await kvSet(STATE_KEY, decision.next).catch(
+    (err2) => console.warn("[purchase-watcher] KV state write failed:", String(err2).slice(0, 200))
+  );
+  if (decision.p0Alert) {
+    const { sendOwnerEmail: sendOwnerEmail2, sendOwnerSms: sendOwnerSms2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+    await sendOwnerSms2(`xdipx P0: purchase webhook path appears DEAD with live orders. ${decision.p0Reason}`.slice(0, 300));
+    await sendOwnerEmail2(
+      "[P0] xdipx conversion tracking: purchase webhook path appears dead",
+      `<p>The server-side Purchase conversion path is not delivering while the store has live orders.</p><p>${escapeHtml2(decision.p0Reason)}</p>`,
+      { fromName: "xdipx ops" }
+    );
+  } else if (decision.p1Alert) {
+    const { sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+    await sendOwnerEmail2(
+      "[P1] xdipx conversion tracking: unresolved Purchase send failures",
+      `<p>Individual Purchase conversions have failed to send and remain unresolved.</p><p>${escapeHtml2(decision.p1Reason)}</p>`,
+      { fromName: "xdipx ops" }
+    );
+  }
+  return {
+    scanned: recentIds === null ? null : recentIds.length,
+    gapOrderIds,
+    staleCapi: staleCapiOrderIds.length,
+    staleGa4: staleGa4OrderIds.length,
+    stubMarkerSeen,
+    gapStrikes: decision.next.gapStrikes,
+    p0Alerted: decision.p0Alert,
+    p1Alerted: decision.p1Alert
+  };
+}
+var RECENT_WINDOW_MINUTES, STALE_MINUTES, GAP_STRIKE_THRESHOLD, GAP_STRIKE_CAP, STATE_KEY, STUB_MARKER, EMPTY_STATE2;
+var init_purchase_watcher_server = __esm({
+  "app/lib/purchase-watcher.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_kv_server();
+    init_schema();
+    RECENT_WINDOW_MINUTES = 60;
+    STALE_MINUTES = 60;
+    GAP_STRIKE_THRESHOLD = 2;
+    GAP_STRIKE_CAP = GAP_STRIKE_THRESHOLD + 1;
+    STATE_KEY = "purchase-watcher:state";
+    STUB_MARKER = "[rr-webhook] orders/create hit the fallback stub";
+    EMPTY_STATE2 = { gapStrikes: 0, p0Alerted: false, p1Fingerprint: "" };
   }
 });
 
@@ -23497,7 +23671,7 @@ var init_pricing_webhook_server = __esm({
 });
 
 // app/lib/cost-sync.server.ts
-import { inArray as inArray4, sql as sql13 } from "drizzle-orm";
+import { inArray as inArray5, sql as sql13 } from "drizzle-orm";
 function round23(n) {
   return Math.round(n * 100) / 100;
 }
@@ -23527,7 +23701,7 @@ async function runNalpacCostSync(opts) {
     if (carriedInFeed.length === 0) return result;
     const dropPctRaw = await getPipelineSetting("import_monitor_watch_price_drop_pct");
     const dropPct = parseFloat(dropPctRaw ?? "0.10") || 0.1;
-    const priorRows = await db.select().from(nalpacPriceHistory).where(inArray4(nalpacPriceHistory.sku, carriedInFeed));
+    const priorRows = await db.select().from(nalpacPriceHistory).where(inArray5(nalpacPriceHistory.sku, carriedInFeed));
     const priorBySku = new Map(priorRows.map((r) => [r.sku, r]));
     const today = todayIso();
     const now = /* @__PURE__ */ new Date();
@@ -24633,7 +24807,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and5, asc as asc4, eq as eq17, inArray as inArray5, isNull as isNull2, sql as sql14 } from "drizzle-orm";
+import { and as and6, asc as asc4, eq as eq17, inArray as inArray6, isNull as isNull3, sql as sql14 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -24779,11 +24953,11 @@ function passesQualityGate(writes) {
   return true;
 }
 async function submitEnrichmentBatch(cap, opts = {}) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
     eq17(importCandidates.status, "imported"),
-    isNull2(importCandidates.enrichedAt),
-    isNull2(importCandidates.enrichBatchId),
-    isNull2(importCandidates.enrichFailedAt)
+    isNull3(importCandidates.enrichedAt),
+    isNull3(importCandidates.enrichBatchId),
+    isNull3(importCandidates.enrichFailedAt)
   )).orderBy(asc4(importCandidates.id)).limit(cap);
   const valid = rows.filter((r) => Boolean(r.productId));
   if (valid.length === 0) return { submitted: 0, batchIds: [], reason: "no_unenriched" };
@@ -24810,7 +24984,7 @@ async function submitEnrichmentBatch(cap, opts = {}) {
     }
     if (inputs.length === 0) continue;
     const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT });
-    await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray5(importCandidates.id, candidateIds));
+    await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray6(importCandidates.id, candidateIds));
     batchIds.push(batchId);
     submittedTotal += inputs.length;
     console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`);
@@ -24823,11 +24997,11 @@ async function detectImportEnrichStall(enabled) {
     const cutoff = new Date(Date.now() - STALL_AGE_HOURS * 3600 * 1e3);
     const rows = await db.select({
       anchor: sql14`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
-    }).from(importCandidates).where(and5(
+    }).from(importCandidates).where(and6(
       eq17(importCandidates.status, "imported"),
-      isNull2(importCandidates.enrichedAt),
-      isNull2(importCandidates.enrichBatchId),
-      isNull2(importCandidates.enrichFailedAt)
+      isNull3(importCandidates.enrichedAt),
+      isNull3(importCandidates.enrichBatchId),
+      isNull3(importCandidates.enrichFailedAt)
     ));
     const anchors = rows.map((r) => new Date(r.anchor)).filter((d) => !Number.isNaN(d.getTime()) && d < cutoff);
     const stuck = anchors.length;
@@ -24856,10 +25030,10 @@ async function collectEnrichmentBatch() {
     batchId: importCandidates.enrichBatchId,
     productId: dealHistory.shopifyProductId,
     enrichAttempts: importCandidates.enrichAttempts
-  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
+  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
     eq17(importCandidates.status, "imported"),
-    isNull2(importCandidates.enrichedAt),
-    isNull2(importCandidates.enrichFailedAt),
+    isNull3(importCandidates.enrichedAt),
+    isNull3(importCandidates.enrichFailedAt),
     sql14`${importCandidates.enrichBatchId} IS NOT NULL`
   )).orderBy(asc4(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
@@ -24920,10 +25094,10 @@ async function publishEnrichedProducts() {
     sku: dealHistory.sku,
     title: dealHistory.seoTitle,
     categories: dealHistory.categories
-  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
+  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
     eq17(importCandidates.status, "imported"),
     sql14`${importCandidates.enrichedAt} IS NOT NULL`,
-    isNull2(importCandidates.publishedAt)
+    isNull3(importCandidates.publishedAt)
   ));
   let published = 0;
   let failed = 0;
@@ -25526,7 +25700,7 @@ __export(batch_orchestrator_server_exports, {
 });
 import { createHash as createHash6, randomUUID as randomUUID2 } from "node:crypto";
 import Anthropic7 from "@anthropic-ai/sdk";
-import { eq as eq19, inArray as inArray6 } from "drizzle-orm";
+import { eq as eq19, inArray as inArray7 } from "drizzle-orm";
 function getClient3() {
   return new Anthropic7({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
@@ -25580,7 +25754,7 @@ async function enqueueBatchJob(args) {
 }
 async function advanceInflightJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 10;
-  const rows = await db.select().from(batchJobs).where(inArray6(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(batchJobs).where(inArray7(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, submitted: 0, applied: 0, done: 0, failed: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.enrichmentPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS);
@@ -26735,7 +26909,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and6, eq as eq21, inArray as inArray7, sql as sql15 } from "drizzle-orm";
+import { and as and7, eq as eq21, inArray as inArray8, sql as sql15 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -26902,7 +27076,7 @@ async function runImportMonitor(opts = {}) {
       status: importCandidates.status,
       watchScore: importCandidates.watchScore,
       watchPrice: importCandidates.watchPrice
-    }).from(importCandidates).where(inArray7(importCandidates.masterKey, cappedKeys)) : [];
+    }).from(importCandidates).where(inArray8(importCandidates.masterKey, cappedKeys)) : [];
     const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r]));
     let candidatesNew = 0;
     let candidatesResurfaced = 0;
@@ -27007,7 +27181,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql15`count(*)::int` }).from(importCandidates).where(and6(eq21(importCandidates.status, "imported"), eq21(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql15`count(*)::int` }).from(importCandidates).where(and7(eq21(importCandidates.status, "imported"), eq21(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -27025,9 +27199,9 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
     msrp: importCandidates.msrp,
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
-  }).from(importCandidates).where(and6(
+  }).from(importCandidates).where(and7(
     eq21(importCandidates.status, "pending"),
-    inArray7(importCandidates.masterKey, cappedKeys)
+    inArray8(importCandidates.masterKey, cappedKeys)
   )).orderBy(importCandidates.tier, sql15`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
@@ -27123,7 +27297,7 @@ async function stageMasterCandidatesBySkus(skus, opts) {
     }
   }
   const masterKeys = [...mastersToDo];
-  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray7(importCandidates.masterKey, masterKeys)) : [];
+  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray8(importCandidates.masterKey, masterKeys)) : [];
   const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r.status]));
   let staged = 0;
   let skippedCarried = 0;
@@ -27162,7 +27336,7 @@ async function stageMasterCandidatesBySkus(skus, opts) {
 }
 async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
-  const query = db.select().from(importCandidates).where(inArray7(importCandidates.status, statuses)).orderBy(
+  const query = db.select().from(importCandidates).where(inArray8(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
     sql15`${importCandidates.dealScore} DESC NULLS LAST`
   );
@@ -27189,7 +27363,7 @@ async function getCatalogOpportunities() {
     brand: importCandidates.brand,
     tier: importCandidates.tier,
     dealScore: importCandidates.dealScore
-  }).from(importCandidates).where(inArray7(importCandidates.status, ["pending", "watching"]));
+  }).from(importCandidates).where(inArray8(importCandidates.status, ["pending", "watching"]));
   const oppMap = /* @__PURE__ */ new Map();
   for (const r of pendingRows) {
     if (!r.brand) continue;
@@ -27734,17 +27908,17 @@ __export(ticket_out_of_band_sweep_server_exports, {
   isMergedOutOfBand: () => isMergedOutOfBand,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and7, desc as desc2, eq as eq22, inArray as inArray8, lt as lt3, sql as sql16 } from "drizzle-orm";
+import { and as and8, desc as desc2, eq as eq22, inArray as inArray9, lt as lt4, sql as sql16 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
     ticketId: homepageTeamSuggestions.id,
     ref: suggestionLinks.ref,
     linkedAt: suggestionLinks.createdAt
-  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
-    inArray8(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and8(
+    inArray9(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
     eq22(suggestionLinks.kind, "pr"),
-    lt3(homepageTeamSuggestions.updatedAt, cutoff)
+    lt4(homepageTeamSuggestions.updatedAt, cutoff)
   )).orderBy(homepageTeamSuggestions.updatedAt, desc2(suggestionLinks.createdAt));
   const seen = /* @__PURE__ */ new Set();
   const out = [];
@@ -27762,7 +27936,7 @@ function isMergedOutOfBand(pr) {
   return pr.merged === true;
 }
 async function markPrLinkMerged(ticketId, prRef) {
-  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and7(
+  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and8(
     eq22(suggestionLinks.suggestionId, ticketId),
     eq22(suggestionLinks.kind, "pr"),
     eq22(suggestionLinks.ref, prRef)
@@ -27804,10 +27978,10 @@ async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
 }
 async function countStrandedVerifiedTickets() {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const [row] = await db.select({ n: sql16`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
-    inArray8(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+  const [row] = await db.select({ n: sql16`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and8(
+    inArray9(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
     eq22(suggestionLinks.kind, "pr"),
-    lt3(homepageTeamSuggestions.updatedAt, cutoff)
+    lt4(homepageTeamSuggestions.updatedAt, cutoff)
   ));
   return row?.n ?? 0;
 }
@@ -27912,7 +28086,7 @@ __export(release_engine_server_exports, {
   summarizeSmoke: () => summarizeSmoke,
   utcDay: () => utcDay3
 });
-import { and as and8, desc as desc4, eq as eq24, sql as sql17 } from "drizzle-orm";
+import { and as and9, desc as desc4, eq as eq24, sql as sql17 } from "drizzle-orm";
 function utcDay3(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -28253,7 +28427,7 @@ async function runSelfCheck(opts = {}) {
   return { ok: false, problems };
 }
 async function resolveTicketForPr(pr) {
-  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and8(
+  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
     eq24(suggestionLinks.kind, "pr"),
     sql17`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
@@ -28261,7 +28435,7 @@ async function resolveTicketForPr(pr) {
   if (match) return loadTicketFacts(match.suggestionId);
   const titleId = parseTicketRefFromTitle(pr.title);
   if (titleId === null) return null;
-  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and8(
+  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
     eq24(suggestionLinks.kind, "pr"),
     eq24(suggestionLinks.suggestionId, titleId)
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
@@ -28845,7 +29019,7 @@ async function markPrLinksState(pending, state) {
   if (pending.ticketId === null) return;
   try {
     await db.update(suggestionLinks).set({ state: state.slice(0, 16), updatedAt: /* @__PURE__ */ new Date() }).where(
-      and8(
+      and9(
         eq24(suggestionLinks.suggestionId, pending.ticketId),
         eq24(suggestionLinks.kind, "pr"),
         eq24(suggestionLinks.ref, pending.prUrl)
@@ -29733,7 +29907,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq26, and as and9, inArray as inArray9, desc as desc5, isNotNull, ne as ne3, sql as sql18 } from "drizzle-orm";
+import { eq as eq26, and as and10, inArray as inArray10, desc as desc5, isNotNull, ne as ne3, sql as sql18 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -29793,7 +29967,7 @@ async function enqueueVideoJob(args) {
 }
 async function advanceInflightVideoJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 5;
-  const rows = await db.select().from(videoJobs).where(inArray9(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(videoJobs).where(inArray10(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, done: 0, failed: 0, parked: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.videoPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS2);
@@ -29859,11 +30033,11 @@ async function frameReviewEnabled() {
   return v !== "false";
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
-  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and9(
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and10(
     sql18`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
     eq26(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
-    inArray9(videoJobs.stage, FRAME_APPROVED_STAGES),
+    inArray10(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
   )).orderBy(desc5(videoJobs.createdAt)).limit(1);
   return row?.frameId ?? null;
@@ -29882,10 +30056,10 @@ async function advanceSceneFrame(job) {
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
-    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and9(
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and10(
       eq26(videoJobs.sceneFrameAssetId, reuseId),
       eq26(videoJobs.presenter, job.presenter),
-      inArray9(videoJobs.stage, FRAME_APPROVED_STAGES)
+      inArray10(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
       throw new Error(`reuseFrameAssetId ${reuseId} has never been approved for presenter '${job.presenter}' (no matching job carried it past the frame gate)`);
@@ -30311,7 +30485,7 @@ async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc5(videoJobs.createdAt)).limit(limit);
   if (!jobs.length) return [];
   const jobIds = jobs.map((j) => j.id);
-  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray9(mediaAssets.videoJobId, jobIds));
+  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray10(mediaAssets.videoJobId, jobIds));
   return jobs.map((job) => {
     const own = assets.filter((a) => a.videoJobId === job.id);
     const finalAsset = own.find((a) => a.id === job.finalAssetId) ?? null;
@@ -30797,8 +30971,8 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and10, eq: eq29, isNull: isNull3, lt: lt4 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and10(isNull3(metaCapiFailures2.resolvedAt), lt4(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
@@ -30821,8 +30995,8 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and10, eq: eq29, isNull: isNull3, lt: lt4 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and10(isNull3(ga4PurchaseFailures2.resolvedAt), lt4(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
@@ -31082,7 +31256,14 @@ function createCronRoutes() {
       const rawWindow = req.body?.windowMinutes ?? (req.query["windowMinutes"] ? Number(req.query["windowMinutes"]) : void 0);
       const windowMinutes = typeof rawWindow === "number" && !isNaN(rawWindow) ? rawWindow : 15;
       const result = await runLogMonitor2({ windowMinutes });
-      res.json({ ok: true, ...result });
+      let purchaseWatch = null;
+      try {
+        const { runPurchaseWatcher: runPurchaseWatcher2 } = await Promise.resolve().then(() => (init_purchase_watcher_server(), purchase_watcher_server_exports));
+        purchaseWatch = await runPurchaseWatcher2();
+      } catch (watchErr) {
+        console.error("[cron:log-monitor] purchase-watcher failed (ignored):", watchErr);
+      }
+      res.json({ ok: true, ...result, purchaseWatch });
     } catch (err2) {
       console.error("[cron:log-monitor]", err2);
       res.status(500).json({ error: String(err2) });

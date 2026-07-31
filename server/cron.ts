@@ -490,7 +490,20 @@ export function createCronRoutes() {
       const rawWindow = req.body?.windowMinutes ?? (req.query['windowMinutes'] ? Number(req.query['windowMinutes']) : undefined)
       const windowMinutes = typeof rawWindow === 'number' && !isNaN(rawWindow) ? rawWindow : 15
       const result = await runLogMonitor({ windowMinutes })
-      res.json({ ok: true, ...result })
+
+      // Conversion-delivery watcher (ticket #590). Rides the same 15-min cadence
+      // but is independent of log classification, so a failure here must never
+      // break the log-monitor response. Fire it, capture its own result, and
+      // report both.
+      let purchaseWatch: unknown = null
+      try {
+        const { runPurchaseWatcher } = await import('../app/lib/purchase-watcher.server.js')
+        purchaseWatch = await runPurchaseWatcher()
+      } catch (watchErr) {
+        console.error('[cron:log-monitor] purchase-watcher failed (ignored):', watchErr)
+      }
+
+      res.json({ ok: true, ...result, purchaseWatch })
     } catch (err) {
       console.error('[cron:log-monitor]', err)
       res.status(500).json({ error: String(err) })
