@@ -296,7 +296,7 @@ function scoreCandidates(args: DiscoveryArgs): ScoredPick[] {
   return scored.slice(0, 3)
 }
 
-function buildFallback(args: DiscoveryArgs): Omit<DiscoveryResult, 'source'> {
+export function buildFallback(args: DiscoveryArgs): Omit<DiscoveryResult, 'source'> {
   const name = args.firstName?.trim() || 'friend'
   const greeting = `Hey ${name}, quick note`
   const cartRef    = args.cartTitles?.[0]
@@ -311,7 +311,7 @@ function buildFallback(args: DiscoveryArgs): Omit<DiscoveryResult, 'source'> {
   } else if (args.query) {
     narrator = `I'm combing through "${args.query}" picks right now. I'll star the ones worth a second look.`
   } else if (args.collection) {
-    narrator = `I've been wandering this shelf too. I'll mark the ones I keep reaching for.`
+    narrator = `The specs and the reviews tell most of the story here. I'll star the ones that hold up under both.`
   } else {
     narrator = `I'll watch as you scroll and star anything that feels like you.`
   }
@@ -320,7 +320,7 @@ function buildFallback(args: DiscoveryArgs): Omit<DiscoveryResult, 'source'> {
   if (starredHandles.length === 0) {
     starredHandles = args.candidates.slice(0, 2).map(c => ({
       handle: c.handle,
-      reason: 'Been testing this one. A reliable pick.',
+      reason: 'Specs and reviews back it as a reliable pick.',
     }))
   }
 
