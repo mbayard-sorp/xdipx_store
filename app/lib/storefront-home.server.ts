@@ -14,6 +14,7 @@
 import { getDiscoveryIndex, getDiscoveryRails } from '~/lib/discovery.server'
 import {
   buildHomeContentBlocksLean,
+  getAnchorCollectionProducts,
   readHomepagePayloadB,
   writeHomepagePayloadB,
   triggerHomepageWarmB,
@@ -27,6 +28,7 @@ import { getEmmaHeroSettings, getBlogPosts, getEditor, getStorefrontHomeLayout }
 import { getPanelDeck } from '~/lib/panel-deck.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
+import type { LeanCardProduct } from '~/types'
 import type { EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout, ResolvedPanelDeck } from '~/types/cms'
 
 const EMMA_HERO_TIMEOUT_MS = 4000
@@ -52,6 +54,15 @@ export interface StorefrontData {
   variant: 'b'
   /** Discovery category rails (Pleasure/Play/Body/Wear) — "best of" per category. */
   rails: Rail[]
+  /**
+   * Products for the promoted Nº 03 anchor grid, from the team's curated
+   * `anchorCollectionHandle` collection (default best-sellers), resolved at
+   * build time. StorefrontHome renders this wall instead of the discovery
+   * best-of so the page's most prominent band is a merchandised selection, not
+   * an unbacked "most picked" claim (ticket #464). Empty (`[]`) falls back to
+   * the discovery best-of (`rails[0]`), i.e. the prior behaviour.
+   */
+  anchorProducts: LeanCardProduct[]
   /** Top hero feature set — the lead product from each populated rail. */
   featured: DiscoveryProduct[]
   /** Total products surfaced across the rails (a soft "X products" signal). */
@@ -246,6 +257,9 @@ export function hydrateStorefrontPayloadB(payload: HomepagePayloadB): Storefront
   return {
     variant: 'b',
     rails,
+    // Curated collection order is merchandising, not a rotation set, so it is
+    // passed through verbatim (no per-bucket reshuffle like `rails`).
+    anchorProducts: payload.anchorProducts ?? [],
     emmaHero: payload.emmaHero,
     emmaPhotoUrl: payload.emmaPhotoUrl,
     emmaPhotoAlt: payload.emmaPhotoAlt,
@@ -354,6 +368,15 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     }
   }
 
+  // Nº 03 anchor grid source: the team's curated collection (default
+  // best-sellers), resolved to lean cards HERE at build time so the read path
+  // stays a pure blob hydrate. This depends on the resolved emmaHero (its
+  // anchorCollectionHandle), so it runs after the Promise.all rather than
+  // inside it. Off the request path (warm cron / cold miss only), and
+  // getCollectionProducts is itself cached. Empty on a missing/empty collection
+  // or a failed Shopify leg → the component falls back to the discovery best-of.
+  const anchorProducts = await getAnchorCollectionProducts(emmaHero?.anchorCollectionHandle)
+
   // Sensation Map (Nº 07). Reads the discovery index, already warmed into the
   // L1 memo by the getDiscoveryRails call above, so this is an in-memory hit and
   // never a second KV round-trip. Degrades to an empty payload (band skipped)
@@ -364,6 +387,7 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     version: HOMEPAGE_PAYLOAD_B_VERSION,
     variant: 'b',
     rails,
+    anchorProducts,
     total: railsResult.total,
     pinnedProduct,
     emmaHero,

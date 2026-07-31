@@ -211,6 +211,38 @@ function toLeanCardProduct(p: Product): LeanCardProduct {
 }
 
 /**
+ * Default collection filling the promoted Nº 03 anchor grid when the team has
+ * not pinned one via `singleton.emmaHeroStorefront.anchorCollectionHandle`.
+ */
+export const DEFAULT_ANCHOR_COLLECTION_HANDLE = 'best-sellers'
+
+/**
+ * Resolve the Nº 03 anchor grid's products from the team's curated collection
+ * (default best-sellers), in the collection's MANUAL order, slimmed to
+ * `LeanCardProduct` for the hydration payload. Sourcing the page's most
+ * prominent product wall from a merchandised collection rather than the raw
+ * discovery ranking is what lets its heading drop the unbacked purchase-volume
+ * claim (ticket #464). Degrades to `[]` on an empty collection or a failed
+ * Shopify leg, so the caller falls back to the discovery best-of unchanged.
+ */
+export async function getAnchorCollectionProducts(
+  handle: string | undefined | null,
+  limit = 12,
+): Promise<LeanCardProduct[]> {
+  const h = (handle ?? '').trim() || DEFAULT_ANCHOR_COLLECTION_HANDLE
+  try {
+    const products = await getCollectionProducts(h, limit)
+    return products.map(toLeanCardProduct)
+  } catch (err) {
+    console.warn(
+      `[homepage-payload:b] anchor collection "${h}" fetch failed, falling back to discovery best-of:`,
+      err,
+    )
+    return []
+  }
+}
+
+/**
  * Variant-b-only slim of `buildHomeContentBlocks()`: filters `sections` down
  * to `VARIANT_B_SECTION_TYPES`, prunes `carouselProductMap` to only the
  * surviving `emmaCuratedRail` blocks' keys (the only surviving section type
@@ -497,7 +529,7 @@ export function reshuffleRailsWithSeed(rails: Rail[], seed: number): Rail[] {
  *     stay invisible after the team published it. Null = no deck, which is the
  *     launch state.
  */
-export const HOMEPAGE_PAYLOAD_B_VERSION = 'b5'
+export const HOMEPAGE_PAYLOAD_B_VERSION = 'b6'
 
 /** KV key for the precomputed storefront blob. Versioned. */
 export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`
@@ -520,6 +552,19 @@ export interface HomepagePayloadB {
    * full-index read this precompute exists to eliminate. Null = rotating hero.
    */
   pinnedProduct: DiscoveryProduct | null
+  /**
+   * Products for the promoted Nº 03 anchor grid, sourced from the team's
+   * `anchorCollectionHandle` collection (default best-sellers) in its curated
+   * MANUAL order, resolved to `LeanCardProduct` AT BUILD TIME. This decouples
+   * the page's most prominent product wall from the raw discovery ranking so it
+   * can no longer surface products unrelated to the day's theme, and its heading
+   * no longer implies a purchase-volume claim the store cannot back (ticket
+   * #464). Empty (`[]`) when the collection is unset-and-missing, empty, or the
+   * Shopify leg failed — StorefrontHome then falls back to the discovery best-of
+   * (`rails[0]`), i.e. the prior behaviour. Not reshuffled: a curated collection
+   * keeps its merchandised order.
+   */
+  anchorProducts: LeanCardProduct[]
   emmaHero: EmmaHeroSettings | null
   emmaPhotoUrl: string | null
   emmaPhotoAlt: string | null
