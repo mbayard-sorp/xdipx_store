@@ -27390,6 +27390,7 @@ function toSummary(p) {
     number: p.number,
     title: p.title,
     state: p.state,
+    nodeId: p.node_id ?? "",
     draft: p.draft ?? false,
     merged: p.merged ?? false,
     mergeable: p.mergeable ?? null,
@@ -27485,6 +27486,30 @@ async function getChecksForRef(sha, context = "github") {
       allGreen: checks.length > 0 && pending.length === 0 && failing.length === 0
     }
   };
+}
+async function githubGraphQL(query, variables = {}, context = "github") {
+  const res = await githubRequest(
+    "https://api.github.com/graphql",
+    { method: "POST", body: { query, variables }, context }
+  );
+  if (!res.ok) return res;
+  const { data, errors } = res.data;
+  if (errors && errors.length > 0) {
+    const msg = errors.map((e) => e.message ?? "unknown").join("; ");
+    return err(res.status, `GitHub GraphQL: ${msg}`);
+  }
+  if (data === void 0 || data === null) {
+    return err(res.status, "GitHub GraphQL returned no data");
+  }
+  return { ok: true, status: res.status, data };
+}
+async function markPullRequestReadyForReview(nodeId, context = "github") {
+  if (!nodeId) return err(0, "markPullRequestReadyForReview called without a node id");
+  const res = await githubGraphQL(MARK_READY_MUTATION, { id: nodeId }, context);
+  if (!res.ok) return res;
+  const pr = res.data.markPullRequestReadyForReview?.pullRequest;
+  if (!pr) return err(res.status, "GitHub GraphQL: mutation returned no pull request");
+  return { ok: true, status: res.status, data: pr };
 }
 async function squashMergePullRequest(number, opts = {}) {
   return githubRequest(
@@ -27657,7 +27682,7 @@ function classifyChangedFiles(files) {
     matches
   };
 }
-var API_BASE, TIMEOUT_MS, MAX_FILE_PAGES, FAILING_CONCLUSIONS, PROTECTED_GLOBS, RE_SPECIALS, COMPILED, UNRESOLVED_PATH_GLOB;
+var API_BASE, TIMEOUT_MS, MAX_FILE_PAGES, FAILING_CONCLUSIONS, MARK_READY_MUTATION, PROTECTED_GLOBS, RE_SPECIALS, COMPILED, UNRESOLVED_PATH_GLOB;
 var init_github_server = __esm({
   "app/lib/github.server.ts"() {
     "use strict";
@@ -27665,6 +27690,12 @@ var init_github_server = __esm({
     TIMEOUT_MS = 2e4;
     MAX_FILE_PAGES = 30;
     FAILING_CONCLUSIONS = /* @__PURE__ */ new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"]);
+    MARK_READY_MUTATION = `
+mutation MarkReady($id: ID!) {
+  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+    pullRequest { number isDraft }
+  }
+}`;
     PROTECTED_GLOBS = [
       // --- policy list ---
       "**/checkout*",
@@ -27884,10 +27915,12 @@ __export(release_engine_server_exports, {
   DEFAULT_MAX_MERGES_PER_DAY: () => DEFAULT_MAX_MERGES_PER_DAY,
   DEPLOY_TIMEOUT_MS: () => DEPLOY_TIMEOUT_MS,
   MAX_TICKET_ATTEMPTS: () => MAX_TICKET_ATTEMPTS2,
+  MAX_UNDRAFTS_PER_CYCLE: () => MAX_UNDRAFTS_PER_CYCLE,
   NEEDS_OWNER_LABEL: () => NEEDS_OWNER_LABEL,
   REQUIRED_CHECK: () => REQUIRED_CHECK,
   REVERT_BRANCH_PREFIX: () => REVERT_BRANCH_PREFIX,
   ROLLBACK_CIRCUIT_LIMIT: () => ROLLBACK_CIRCUIT_LIMIT,
+  autoReadyOnDraft: () => autoReadyOnDraft,
   checkState: () => checkState,
   dailyCapReached: () => dailyCapReached,
   evaluatePullRequest: () => evaluatePullRequest,
@@ -27927,6 +27960,9 @@ function isEligibleBranch(headRef) {
 }
 function requiresAllowlistCheck(headRef) {
   return headRef.startsWith("agents/");
+}
+function autoReadyOnDraft(headRef) {
+  return headRef.startsWith("agents/") || headRef.startsWith("ticket/");
 }
 function isDocsOnly(paths) {
   if (paths.length === 0) return false;
@@ -27983,6 +28019,14 @@ function evaluatePullRequest(facts) {
     return { ...base, action: "skip", code: "needs-owner-label", reason: `labelled ${NEEDS_OWNER_LABEL}` };
   }
   if (facts.draft) {
+    if (autoReadyOnDraft(facts.headRef)) {
+      return {
+        ...base,
+        action: "undraft",
+        code: "draft-auto-ready",
+        reason: `draft PR on the ${facts.headRef.split("/")[0]}/ lane, marking it ready for review`
+      };
+    }
     return { ...base, action: "skip", code: "draft", reason: "draft PR" };
   }
   if (facts.mergeableState === "dirty") {
@@ -28378,6 +28422,8 @@ async function cycleBody(dryRun) {
     return ra !== rb ? ra - rb : a.number - b.number;
   });
   const decisions = [];
+  const undraftErrors = [];
+  let undrafted = 0;
   for (const summary of candidates) {
     const facts = await gatherFacts(summary);
     if (!facts) continue;
@@ -28388,6 +28434,18 @@ async function cycleBody(dryRun) {
     );
     if (decision.action === "escalate-protected") {
       await handleProtected(summary, decision, dryRun);
+      continue;
+    }
+    if (decision.action === "undraft") {
+      if (undrafted >= MAX_UNDRAFTS_PER_CYCLE) {
+        console.warn(
+          `${LOG2} undraft cap reached (${MAX_UNDRAFTS_PER_CYCLE}/cycle), PR #${summary.number} waits for the next cycle`
+        );
+        continue;
+      }
+      undrafted += 1;
+      const problem = await undraftOne(summary, dryRun);
+      if (problem) undraftErrors.push(problem);
       continue;
     }
     if (decision.code === "ci-red" && decision.isRevert) {
@@ -28408,7 +28466,30 @@ async function cycleBody(dryRun) {
     }
     return mergeOne(summary, decision, decisions, day);
   }
-  return { ...result, decisions, message: `${decisions.length} open PR(s) evaluated, nothing merged` };
+  const undraftNote = undrafted > 0 ? `, ${undrafted} taken out of draft` : "";
+  return {
+    ...result,
+    // A failed undraft is reported rather than swallowed. Silence is what made
+    // the original stall invisible, and a backstop that fails quietly is just a
+    // slower version of the same bug.
+    ...undraftErrors.length > 0 ? { ok: false, errors: undraftErrors } : {},
+    decisions,
+    message: `${decisions.length} open PR(s) evaluated, nothing merged${undraftNote}`
+  };
+}
+async function undraftOne(pr, dryRun) {
+  if (dryRun) {
+    console.log(`${LOG2} [dry-run] would mark PR #${pr.number} (${pr.headRef}) ready for review`);
+    return null;
+  }
+  const ready = await markPullRequestReadyForReview(pr.nodeId, "release-engine");
+  if (!ready.ok) {
+    const problem = `could not mark PR #${pr.number} ready for review: ${ready.error}`;
+    console.warn(`${LOG2} ${problem}`);
+    return problem;
+  }
+  console.log(`${LOG2} marked PR #${pr.number} (${pr.headRef}) ready for review, it is gated on the next cycle`);
+  return null;
 }
 async function gatherFacts(summary) {
   const full = await getPullRequest(summary.number, "release-engine");
@@ -28869,7 +28950,7 @@ async function setReleaseEngineEnabled(value) {
     console.error(`${LOG2} could not flip release_engine_enabled off`, err2);
   }
 }
-var LOG2, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS, MAX_MERGE_ATTEMPTS;
+var LOG2, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, MAX_UNDRAFTS_PER_CYCLE, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS, MAX_MERGE_ATTEMPTS;
 var init_release_engine_server = __esm({
   "app/lib/release-engine.server.ts"() {
     "use strict";
@@ -28900,6 +28981,7 @@ var init_release_engine_server = __esm({
     MAX_TICKET_ATTEMPTS2 = 3;
     ROLLBACK_CIRCUIT_LIMIT = 2;
     DEFAULT_MAX_MERGES_PER_DAY = 6;
+    MAX_UNDRAFTS_PER_CYCLE = 5;
     DEPLOY_TIMEOUT_MS = 15 * 6e4;
     POLL_BUDGET_MS = 6e4;
     POLL_INTERVAL_MS = 6e3;
