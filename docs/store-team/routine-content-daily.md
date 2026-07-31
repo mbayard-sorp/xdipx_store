@@ -185,10 +185,15 @@ One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
 Two reviewers, both binding, sequenced so a cheap voice failure never spends the accuracy pass:
 
-1. **Voice gate first.** Run the full draft (title, excerpt, body, SEO fields, embed CTA labels)
-   through `emma-empathy-reviewer` against the charter + blog addendum. A voice **BLOCK** on
-   sight → the post stays `status:'draft'`, file the suggestion row, skip the accuracy gate
-   entirely, and go to Step 7.
+1. **Voice gate first.** Run the full draft through `emma-empathy-reviewer` against the charter +
+   blog addendum, **naming every section explicitly** so none is silently skipped: title, excerpt,
+   body, **the Frequently-Asked-Questions block**, SEO fields, and embed CTA labels. Any rule the
+   gate enforces per-post or per-section (the aphorism-as-closer cap is the live example) must be
+   **counted across the whole document on this first pass** — the FAQ block included. Because the
+   routine allows exactly one shared rewrite (item 3), a defect first discovered in cycle 2 is
+   unfixable by construction and converts straight to a BLOCK; a section that was never audited in
+   cycle 1 is that trap. A voice **BLOCK** on sight → the post stays `status:'draft'`, file the
+   suggestion row, skip the accuracy gate entirely, and go to Step 7.
 2. **Accuracy gate.** Otherwise run the same draft through `sex-wellness-reviewer` (it
    web-verifies external claims: anatomy/physiology, "research shows" statistics, materials and
    safety, realistic expectations, terminology).
