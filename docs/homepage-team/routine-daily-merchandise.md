@@ -438,6 +438,17 @@ Every merchandise run touches all of these, not just the hero and rails:
    `ctaLink` silently falls back to `/collections/best-sellers`, which is why a lube rail's "See all"
    landed on best sellers on 2026-07-27. **A published rail with a blank `ctaLink` is a
    definition-of-done failure.**
+   **Destination continuity is a hard rule for EVERY See-all on the page, not just team-published
+   rails.** The Nº 03 "Most picked" anchor grid is auto-generated and its See-all is hardcoded in
+   `app/components/store/StorefrontHome.tsx`, so this playbook rule cannot reach it — a companion
+   code ticket owns that path. For every See-all the run controls, its destination must CONTAIN the
+   module's own products; `/collections/best-sellers` is not an acceptable fallback for any module,
+   because best-seller order is a different ranking from the discovery index and is structurally
+   guaranteed to mismatch. **Definition of done, every run:** after publishing, fetch the live
+   homepage and, for each See-all, fetch its destination and assert at least one of the module's own
+   handles appears on destination page 1. Report the check in the run summary; a failure blocks the
+   run's done state. When no destination genuinely contains the set, ship the module with **no**
+   See-all rather than point it somewhere plausible.
 3. **Wayfinder mosaic tiles** — refresh `tiles[]` (art, labels, links) every run. **At least two of
    the tiles target collections rather than individual products**: the page needs image-led entry
    doors into categories, not three deep links to single PDPs.
