@@ -116,6 +116,9 @@ export interface PullRequestSummary {
   number: number
   title: string
   state: string
+  /** GraphQL global node id. Empty string when the REST payload omitted it.
+   *  Required by `markPullRequestReadyForReview`, which has no REST equivalent. */
+  nodeId: string
   draft: boolean
   merged: boolean
   /** null while GitHub is still computing the merge commit. */
@@ -136,6 +139,7 @@ interface RawPull {
   number: number
   title: string
   state: string
+  node_id?: string
   draft?: boolean
   merged?: boolean
   mergeable?: boolean | null
@@ -154,6 +158,7 @@ function toSummary(p: RawPull): PullRequestSummary {
     number: p.number,
     title: p.title,
     state: p.state,
+    nodeId: p.node_id ?? '',
     draft: p.draft ?? false,
     merged: p.merged ?? false,
     mergeable: p.mergeable ?? null,
@@ -392,6 +397,73 @@ export function sanitizePreviewPath(raw: unknown): string | null {
   // a path, `javascript:` is not, and neither is worth allowing here).
   if (/[a-z][a-z0-9+.-]*:/i.test(p.split('?')[0] ?? '')) return null
   return p
+}
+
+// ---------------------------------------------------------------------------
+// GraphQL
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal GraphQL client. Exists for exactly one reason: taking a pull request
+ * out of draft has no REST equivalent. `draft` is read-only on
+ * `PATCH /pulls/{n}`, and `markPullRequestReadyForReview` is GraphQL-only.
+ *
+ * GraphQL answers 200 with an `errors` array rather than a non-2xx status, so a
+ * failed mutation would otherwise read as success. That is collapsed here: any
+ * `errors` entry becomes `ok: false` with the messages joined, matching the REST
+ * helpers' contract so callers need no special case.
+ */
+export async function githubGraphQL<T>(
+  query: string,
+  variables: Record<string, unknown> = {},
+  context = 'github',
+): Promise<GithubResult<T>> {
+  const res = await githubRequest<{ data?: T; errors?: Array<{ message?: string }> }>(
+    'https://api.github.com/graphql',
+    { method: 'POST', body: { query, variables }, context },
+  )
+  if (!res.ok) return res
+  const { data, errors } = res.data
+  if (errors && errors.length > 0) {
+    const msg = errors.map((e) => e.message ?? 'unknown').join('; ')
+    return err(res.status, `GitHub GraphQL: ${msg}`)
+  }
+  if (data === undefined || data === null) {
+    return err(res.status, 'GitHub GraphQL returned no data')
+  }
+  return { ok: true, status: res.status, data }
+}
+
+const MARK_READY_MUTATION = `
+mutation MarkReady($id: ID!) {
+  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+    pullRequest { number isDraft }
+  }
+}`
+
+/**
+ * Take a PR out of draft.
+ *
+ * `nodeId` is the GraphQL global id from the REST payload's `node_id`, carried
+ * on `PullRequestSummary.nodeId`. An empty id is a caller bug rather than an
+ * API failure, so it is rejected here instead of being sent to GitHub as
+ * `null`, which the mutation would reject with a less obvious message.
+ *
+ * Idempotent from the caller's side: re-running it on an already-open PR is a
+ * no-op that still answers `ok`, so a retry after a partial cycle is safe.
+ */
+export async function markPullRequestReadyForReview(
+  nodeId: string,
+  context = 'github',
+): Promise<GithubResult<{ number: number; isDraft: boolean }>> {
+  if (!nodeId) return err(0, 'markPullRequestReadyForReview called without a node id')
+  const res = await githubGraphQL<{
+    markPullRequestReadyForReview: { pullRequest: { number: number; isDraft: boolean } | null } | null
+  }>(MARK_READY_MUTATION, { id: nodeId }, context)
+  if (!res.ok) return res
+  const pr = res.data.markPullRequestReadyForReview?.pullRequest
+  if (!pr) return err(res.status, 'GitHub GraphQL: mutation returned no pull request')
+  return { ok: true, status: res.status, data: pr }
 }
 
 // ---------------------------------------------------------------------------
