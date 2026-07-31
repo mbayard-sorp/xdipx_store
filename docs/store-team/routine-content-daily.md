@@ -37,8 +37,9 @@ and **stop**: skip honestly, never work around the gate. If `ok:true`, capture
 computes today's weekday in PT and the matching category slot; it is
 authoritative for Step 3. Never compute the weekday yourself. The gate enforces the
 `content_team_enabled` kill switch, `content_team_daily_cents` (500), and `content_team_max_runs`
-(3; the extra runs are gate-retry headroom on double days (Sat trend-scout, Sun SEO curation,
-Wed podcast review), never a second post; migration 068 versions both values).
+(8; the extra runs are gate-retry headroom on double days (Sat trend-scout, Sun SEO curation,
+Wed podcast review) plus writer-retry headroom, never a second post; migration 068 versions the
+budget, 075 the cap).
 
 ## Step 2: Load doctrine + context (data only)
 
