@@ -8,10 +8,11 @@ import { abbreviate, buildPieGradient } from './CircleOptionSelector'
 interface VaultCardProps {
   deal: VaultDeal
   starred?: { reason: string }
-  /** Sale-page treatment: price in ink, no savings line. The markdown stays
+  /** Sale-page treatment: suppress the "You save" line. The markdown stays
       honest via the struck MSRP; the card just stops shouting it (doctrine §3
       coral budget — the quiet Sale art direction is decorative if every card
-      below it does discount drama). */
+      below it does discount drama). The price is ink for every card now
+      (ticket #336), so this no longer controls price colour. */
   quiet?: boolean
 }
 
@@ -53,11 +54,11 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
   }
 
   return (
-    <article className="bg-white rounded-2xl overflow-hidden shadow-sm card-lift group relative h-full flex flex-col">
+    <article className="bg-paper rounded-2xl overflow-hidden border border-line card-lift group relative h-full flex flex-col">
       {starred && (
         <div className="absolute top-2 left-2 z-10 group/starred">
           <span
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-coral text-paper text-[11px] font-semibold shadow-sm"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sage text-ink text-[11px] font-semibold shadow-sm"
             style={{ fontFamily: 'var(--font-display)' }}
             aria-label={`Emma's pick: ${starred.reason}`}
           >
@@ -96,7 +97,7 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
               aria-label={`Add ${deal.seoTitle} to cart`}
               className={[
                 'absolute bottom-2 right-2 z-10 inline-flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1.5 text-white text-xs font-bold shadow-md transition-all',
-                justAdded ? 'bg-sage scale-105' : 'bg-coral hover:bg-coral/90 hover:scale-105',
+                justAdded ? 'bg-sage scale-105' : 'bg-ink hover:bg-ink/90 hover:scale-105',
                 addToCart.state !== 'idle' ? 'opacity-70' : '',
               ].join(' ')}
               style={{ fontFamily: 'var(--font-display)' }}
@@ -122,16 +123,21 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
         </div>
 
         <div className="p-4 flex flex-col flex-1">
-          <p className="text-ink/50 text-xs uppercase tracking-wide mb-1">{deal.brand}</p>
+          <p
+            className="text-[13px] uppercase tracking-[0.12em] text-ink-4 mb-1"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            {deal.brand}
+          </p>
           <h3
-            className="font-semibold text-ink text-sm leading-snug line-clamp-2 group-hover:text-coral transition-colors"
+            className="font-semibold text-ink text-sm leading-snug line-clamp-2 group-hover:text-plum transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             {deal.seoTitle}
           </h3>
 
           <div className="flex items-center gap-2 mt-auto pt-2">
-            <span className={`${quiet ? 'text-ink' : 'text-coral'} font-bold`}>
+            <span className="text-ink font-bold">
               {deal.priceMin != null && deal.priceMax != null && deal.priceMax > deal.priceMin
                 ? `$${deal.priceMin.toFixed(2)}–$${deal.priceMax.toFixed(2)}`
                 : `$${deal.dealPrice.toFixed(2)}`}
