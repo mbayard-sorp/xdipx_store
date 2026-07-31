@@ -66,3 +66,26 @@ spend** endpoints. Reasoning still runs on the **Max subscription**; the routine
 must never call the site's Anthropic-keyed copy/enrich endpoints (that would flip
 free Max work to metered). See `docs/homepage-team/routine-daily-merchandise.md`
 and `mission-brief.md`.
+
+## 5. What is NOT reachable in the scheduled cloud runner (and the fallback)
+
+Several capabilities are **structurally unavailable** in the scheduled cloud
+sandbox. Every run used to re-probe and re-record the same absences from scratch
+(GA4 MCP, direct Postgres, the screenshot design gate), which wastes a
+probe-and-record cycle per capability per run and clutters the dashboard with
+"unavailable" decision events. Treat the table below as the standing reality and
+use the fallback directly — do not re-probe, and record an absence only if the
+fallback itself fails.
+
+| Not reachable in the cloud runner | Why | Use instead |
+|---|---|---|
+| **Direct Postgres / Neon socket** | egress policy blocks the DB port | Read scoreboard / `daily_profit_summary` / settings over the **HTTPS team API**; never open a DB socket. |
+| **GA4 MCP** (`google-analytics`) | not connected in the scheduled runner | Treat as unavailable unless a run confirms it is connected. Per strategy brief, GA4 is unused below 300 sessions/week anyway — run on margin math and say so. |
+| **Claude_Preview design gate** (composed-page screenshot) | MCP not wired into the cloud runner, and headless Chromium cannot reach the live site through the sandbox proxy | The **degraded per-image heuristic doctrine check is the STANDING path**, not a per-run surprise. Note it once and move on. |
+| **Shopify Admin creds** | absent in the runner | Skip probes and dep-installs whose only purpose is reaching Admin; use the **Storefront API** metafields (`namespace:"xdipx"`) with `SHOPIFY_STOREFRONT_ACCESS_TOKEN` for margin/handle reads. |
+
+**Honest counterweight (not a cost cut):** the design gate genuinely not running
+on any cloud publish is a quality-gate **gap**. The real fix is *connecting*
+Claude_Preview (or a server-side render-to-image endpoint) in the runner — a
+separate owner/eng ask, not permanently skipping it. This section only removes
+the wasted re-probe and documents today's reality.
