@@ -2498,21 +2498,58 @@ export async function addLinesToCart(
 }
 
 /**
- * Set custom attributes on a cart. Used to tag carts for Shopify Automatic
- * Discount rules (e.g. pair_bundle=live triggers a pre-configured % off rule).
+ * Merge custom attributes onto a cart. Used to tag carts for Shopify Automatic
+ * Discount rules (e.g. pair_bundle=live triggers a pre-configured % off rule)
+ * and to carry attribution (_fbp, _fbc, _ga_cid, utm) across the domain
+ * boundary into the order's note_attributes, which is the only channel that
+ * survives the handoff to Shopify's checkout.
+ *
+ * Merge, not replace. Shopify's cartAttributesUpdate overwrites the entire
+ * attribute set, so the previous read-free implementation silently dropped
+ * whatever it did not happen to be passed. A second add-to-cart after a cookie
+ * expired would wipe the attribution captured by the first, and the order would
+ * arrive unattributable.
+ *
+ * userErrors are read and thrown. They used to be requested and ignored, so a
+ * rejected mutation was indistinguishable from a successful one.
  */
 export async function setCartAttributes(
   cartId: string,
   attributes: { key: string; value: string }[],
 ): Promise<void> {
-  await storefront(`
+  // Read current attributes with a dedicated query rather than widening
+  // CART_FRAGMENT, which every cart read shares.
+  let existing: { key: string; value: string }[] = []
+  try {
+    const current = await storefront<{ cart: { attributes: { key: string; value: string | null }[] } | null }>(`
+      query CartAttributes($cartId: ID!) {
+        cart(id: $cartId) { attributes { key value } }
+      }
+    `, { cartId })
+    existing = (current.cart?.attributes ?? [])
+      .filter((a): a is { key: string; value: string } => typeof a.value === 'string')
+  } catch {
+    // A failed read must not cost us the write. Worst case we fall back to the
+    // old replace behavior for this call.
+  }
+
+  const merged = new Map<string, string>()
+  for (const a of existing)   merged.set(a.key, a.value)
+  for (const a of attributes) merged.set(a.key, a.value)
+
+  const data = await storefront<{ cartAttributesUpdate: { userErrors: { field: string[] | null; message: string }[] } }>(`
     mutation CartAttributesUpdate($cartId: ID!, $attributes: [AttributeInput!]!) {
       cartAttributesUpdate(cartId: $cartId, attributes: $attributes) {
         cart { id }
         userErrors { field message }
       }
     }
-  `, { cartId, attributes })
+  `, { cartId, attributes: Array.from(merged, ([key, value]) => ({ key, value })) })
+
+  const errs = data.cartAttributesUpdate?.userErrors ?? []
+  if (errs.length > 0) {
+    throw new Error(`cartAttributesUpdate: ${errs.map(e => `${(e.field ?? []).join('.')} ${e.message}`).join('; ')}`)
+  }
 }
 
 export async function removeFromCart(cartId: string, lineIds: string[]): Promise<Cart> {

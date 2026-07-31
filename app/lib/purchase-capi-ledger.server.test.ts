@@ -1,0 +1,187 @@
+/**
+ * Ledger and reconciliation behavior for the Purchase sender.
+ *
+ * The pure payload helpers are covered in purchase-capi.server.test.ts. What is
+ * exercised here is the part that actually failed in production: whether a
+ * conversion still goes out when the bookkeeping around it misbehaves.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+const sendCapiEvent = vi.fn()
+const adminGraphQL = vi.fn()
+
+// Chainable drizzle stubs. Each terminal call resolves, and the whole query
+// builder is replaceable per test so we can make the ledger throw on demand.
+const insertValues = vi.fn()
+const updateWhere = vi.fn()
+const selectWhere = vi.fn()
+
+const db = {
+  insert: () => ({ values: (...a: unknown[]) => insertValues(...a) }),
+  update: () => ({ set: () => ({ where: (...a: unknown[]) => updateWhere(...a) }) }),
+  select: () => ({ from: () => ({ where: (...a: unknown[]) => selectWhere(...a) }) }),
+}
+
+vi.mock('./db.server', () => ({ db: new Proxy({}, { get: (_t, k) => (db as never)[k] }) }))
+vi.mock('../../db/schema', () => ({
+  metaCapiFailures: { orderId: 'order_id', resolvedAt: 'resolved_at' },
+}))
+vi.mock('./meta-capi.server', () => ({ sendCapiEvent: (...a: unknown[]) => sendCapiEvent(...a) }))
+vi.mock('./shopify.server', () => ({ adminGraphQL: (...a: unknown[]) => adminGraphQL(...a) }))
+
+import { sendPurchaseWithLedger, reconcilePurchases, type PurchaseOrder } from './purchase-capi.server'
+
+const ORDER: PurchaseOrder = {
+  id: '123', totalPrice: 10, currency: 'USD', productIds: ['9'], numItems: 1,
+  fbp: null, fbc: null, clientIp: null, userAgent: null, createdAtMs: Date.now(),
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  insertValues.mockReturnValue({ onConflictDoNothing: () => Promise.resolve() })
+  updateWhere.mockResolvedValue(undefined)
+  selectWhere.mockResolvedValue([])
+  sendCapiEvent.mockResolvedValue({ ok: true })
+})
+
+describe('sendPurchaseWithLedger', () => {
+  it('sends even when the ledger insert throws', async () => {
+    // The exact production shape this guards: migration 041 unapplied, so the
+    // table does not exist. Bookkeeping must never cost a conversion.
+    insertValues.mockImplementation(() => { throw new Error('relation "meta_capi_failures" does not exist') })
+
+    const res = await sendPurchaseWithLedger(ORDER)
+
+    expect(sendCapiEvent).toHaveBeenCalledTimes(1)
+    expect(res.ok).toBe(true)
+  })
+
+  it('sends even when the ledger update throws afterwards', async () => {
+    updateWhere.mockRejectedValue(new Error('connection reset'))
+    const res = await sendPurchaseWithLedger(ORDER)
+    expect(res.ok).toBe(true)
+  })
+
+  it('writes the ledger row BEFORE calling Meta', async () => {
+    // Ordering is the whole point: a row written only on failure cannot tell
+    // you that a send was ever attempted.
+    const order: string[] = []
+    insertValues.mockImplementation(() => { order.push('ledger'); return { onConflictDoNothing: () => Promise.resolve() } })
+    sendCapiEvent.mockImplementation(() => { order.push('send'); return Promise.resolve({ ok: true }) })
+
+    await sendPurchaseWithLedger(ORDER)
+
+    expect(order).toEqual(['ledger', 'send'])
+  })
+
+  it('refuses to send a payload with no order id', async () => {
+    // Observed 2026-07-31: a probe body produced event_id "purchase_undefined"
+    // and was actually transmitted. Meta rejected it with a 400, which was luck
+    // rather than design. An id is also the dedup key, so a send without one
+    // could never be reconciled.
+    const res = await sendPurchaseWithLedger({ ...ORDER, id: '' })
+
+    expect(sendCapiEvent).not.toHaveBeenCalled()
+    expect(insertValues).not.toHaveBeenCalled()
+    expect(res.ok).toBe(false)
+    expect(res.skipped).toBe('no order id')
+  })
+
+  it('refuses the literal string undefined, which is what String(undefined) yields', async () => {
+    const res = await sendPurchaseWithLedger({ ...ORDER, id: 'undefined' })
+    expect(sendCapiEvent).not.toHaveBeenCalled()
+    expect(res.skipped).toBe('no order id')
+  })
+
+  it('reports a failed send and does not claim success', async () => {
+    sendCapiEvent.mockResolvedValue({ ok: false, error: 'Meta CAPI 400' })
+    const res = await sendPurchaseWithLedger(ORDER)
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain('400')
+  })
+
+  it('surfaces a skipped send distinctly from a failed one', async () => {
+    sendCapiEvent.mockResolvedValue({ ok: false, skipped: 'no META_PIXEL_ID' })
+    const res = await sendPurchaseWithLedger(ORDER)
+    expect(res.ok).toBe(false)
+    expect(res.skipped).toContain('META_PIXEL_ID')
+  })
+})
+
+describe('reconcilePurchases', () => {
+  const shopifyOrder = (id: string, createdAt: string) => ({
+    id: `gid://shopify/Order/${id}`,
+    createdAt,
+    clientIp: '1.2.3.4',
+    currentTotalPriceSet: { shopMoney: { amount: '25.00', currencyCode: 'USD' } },
+    customAttributes: [{ key: '_fbp', value: 'fb.1.1.1' }],
+    lineItems: { nodes: [{ quantity: 1, product: { id: 'gid://shopify/Product/9' } }] },
+  })
+
+  it('skips orders that already have a resolved ledger row', async () => {
+    adminGraphQL.mockResolvedValue({ orders: { nodes: [shopifyOrder('111', new Date().toISOString())] } })
+    selectWhere.mockResolvedValue([{ orderId: '111', resolvedAt: new Date() }])
+
+    const r = await reconcilePurchases()
+
+    expect(r.gaps).toEqual([])
+    expect(sendCapiEvent).not.toHaveBeenCalled()
+  })
+
+  it('treats an unresolved row as a gap and retries it', async () => {
+    adminGraphQL.mockResolvedValue({ orders: { nodes: [shopifyOrder('222', new Date().toISOString())] } })
+    selectWhere.mockResolvedValue([{ orderId: '222', resolvedAt: null }])
+
+    const r = await reconcilePurchases()
+
+    expect(r.gaps).toEqual(['222'])
+    expect(r.sent).toEqual(['222'])
+  })
+
+  it('sends nothing in dryRun but still reports the gap', async () => {
+    adminGraphQL.mockResolvedValue({ orders: { nodes: [shopifyOrder('333', new Date().toISOString())] } })
+
+    const r = await reconcilePurchases({ dryRun: true })
+
+    expect(r.gaps).toEqual(['333'])
+    expect(r.sent).toEqual([])
+    expect(sendCapiEvent).not.toHaveBeenCalled()
+  })
+
+  it('refuses to send orders outside Meta 7 day window', async () => {
+    const old = new Date(Date.now() - 9 * 86400_000).toISOString()
+    adminGraphQL.mockResolvedValue({ orders: { nodes: [shopifyOrder('444', old)] } })
+
+    const r = await reconcilePurchases()
+
+    expect(r.tooOld).toEqual(['444'])
+    expect(r.sent).toEqual([])
+    expect(sendCapiEvent).not.toHaveBeenCalled()
+  })
+
+  it('reuses the webhook event id exactly, which is the dedup guarantee', async () => {
+    adminGraphQL.mockResolvedValue({ orders: { nodes: [shopifyOrder('555', new Date().toISOString())] } })
+
+    await reconcilePurchases()
+
+    expect(sendCapiEvent.mock.calls[0]![0]).toMatchObject({ event_id: 'purchase_555' })
+  })
+
+  it('bails without sending when the ledger read fails', async () => {
+    // A ledger read failure must not be read as "every order is a gap" and
+    // trigger a send storm.
+    adminGraphQL.mockResolvedValue({ orders: { nodes: [shopifyOrder('666', new Date().toISOString())] } })
+    selectWhere.mockRejectedValue(new Error('db down'))
+
+    const r = await reconcilePurchases()
+
+    expect(sendCapiEvent).not.toHaveBeenCalled()
+    expect(r.sent).toEqual([])
+  })
+
+  it('returns an empty result when the Shopify query fails', async () => {
+    adminGraphQL.mockRejectedValue(new Error('Shopify 500'))
+    const r = await reconcilePurchases()
+    expect(r).toMatchObject({ scanned: 0, gaps: [], sent: [] })
+  })
+})

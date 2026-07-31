@@ -6,6 +6,7 @@ import { StatusPill } from '~/components/account/StatusPill'
 import { OrderTrackingStepper } from '~/components/account/OrderTrackingStepper'
 import { addLinesToCart, createCart, getCart } from '~/lib/shopify.server'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
+import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import type { OrderDetail } from '~/lib/shopify.server'
 import { isOrderWithinReturnWindow } from '~/lib/returns.server'
 import type { AccountOutletContext } from './_layout.account'
@@ -82,6 +83,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return { error: 'Some items are no longer available. Please add them manually.' }
     }
   }
+
+  // Reorder goes cart to checkout in one action, the shortest path to revenue
+  // in the store, and it used to carry no attribution at all: the resulting
+  // order reached the webhook with empty note_attributes, so it was invisible
+  // to Meta CAPI, GA4 and Klaviyo alike. Non-fatal by design.
+  await applyAttributionAttrs(cartId, request)
 
   const checkoutUrl = cart?.checkoutUrl ?? (await getCart(cartId))?.checkoutUrl
   if (!checkoutUrl) return { error: 'Could not start checkout. Please try again.' }

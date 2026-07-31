@@ -31,6 +31,7 @@ import { getCustomerToken } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import { getCartIdFromCookie } from '~/lib/cart.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
+import { isCapiEligible } from '~/lib/capi-eligibility.server'
 import { getCart } from '~/lib/shopify.server'
 import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
 import { isCrawlerRequest, qualifiesForPaidAside } from '~/lib/crawler-ua.server'
@@ -391,10 +392,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const browseCookieHeader = buildBrowseCookie(deal.shopifyProductId, previousBrowseIds)
 
   // Generate dedup id shared with the browser pixel. ViewContent failure is non-fatal.
-  const viewContentEventId = fireCapiEvent(request, 'ViewContent', {
-    contentIds: [deal.shopifyProductId],
-    value:      deal.dealPrice,
-  })
+  // Crawlers, scrapers and hover-prefetches all run this loader, and each one
+  // used to mint a conversion event. A null id suppresses BOTH sides: no CAPI
+  // send here, and the client effect skips the browser pixel, so the dedup
+  // contract holds either way.
+  const viewContentEventId = isCapiEligible(request)
+    ? fireCapiEvent(request, 'ViewContent', {
+        contentIds: [deal.shopifyProductId],
+        value:      deal.dealPrice,
+      })
+    : null
 
   return data(
     {

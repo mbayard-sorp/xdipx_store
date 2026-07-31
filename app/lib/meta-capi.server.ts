@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { getMarketingConsent } from './consent.server'
-import { getFbCookies, getClientIP } from './attribution.server'
+import { getFbCookies, getClientIPOrNull } from './attribution.server'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +65,7 @@ export function fireCapiEvent(
   const eventId = generateEventId()
   const consentGranted = getMarketingConsent(request)
   const { fbp, fbc } = getFbCookies(request)
+  const clientIp = getClientIPOrNull(request)
 
   void sendCapiEvent(
     {
@@ -73,7 +74,9 @@ export function fireCapiEvent(
       event_time:    Math.floor(Date.now() / 1000),
       action_source: 'website',
       user_data: {
-        client_ip_address: getClientIP(request),
+        // Omitted rather than placeheld when unknown: a junk IP inflates Meta's
+        // match-key coverage while matching nobody.
+        ...(clientIp ? { client_ip_address: clientIp } : {}),
         client_user_agent: request.headers.get('user-agent') ?? undefined,
         fbp,
         fbc,
@@ -101,21 +104,24 @@ export function fireCapiEvent(
  * user_data before sending. Non-PII signals (ip, ua, fbp, fbc, custom_data)
  * are still sent so Meta can do probabilistic matching without personal data.
  *
- * No-ops silently when META_PIXEL_ID or META_CAPI_TOKEN are absent so local
- * dev without Meta creds never throws.
+ * Reports missing credentials as { ok: false, skipped } rather than success.
+ * This used to return { ok: true } and send nothing, which meant a
+ * misconfigured production environment looked identical to a delivered
+ * conversion and never enqueued a retry. Callers must treat `skipped` as
+ * "not delivered, but do not burn a retry attempt on it".
  *
  * NEVER throws. Returns { ok: false, error } on failure; the caller owns
  * durability (fire-and-forget for ViewContent/AddToCart; retry for Purchase).
  */
 export async function sendCapiEvent(
   event: CapiEvent,
-  opts: { consentGranted: boolean },
-): Promise<{ ok: boolean; error?: string }> {
+  opts: { consentGranted: boolean; testMode?: boolean },
+): Promise<{ ok: boolean; error?: string; skipped?: string }> {
   const pixelId = process.env['META_PIXEL_ID']
   const token   = process.env['META_CAPI_TOKEN']
 
-  // No-op in dev/missing-creds environments.
-  if (!pixelId || !token) return { ok: true }
+  if (!pixelId) return { ok: false, skipped: 'no META_PIXEL_ID' }
+  if (!token)   return { ok: false, skipped: 'no META_CAPI_TOKEN' }
 
   // Strip PII when consent not confirmed.
   const user_data: CapiUserData = { ...event.user_data }
@@ -137,8 +143,23 @@ export async function sendCapiEvent(
     access_token: token,
   }
 
+  // Test events are opt-in per call, never ambient. Attaching test_event_code
+  // to a live send diverts it into Events Manager's Test Events tab and out of
+  // the production dataset, so a stray env var in production would silently
+  // stop all conversion collection.
+  //
+  // NODE_ENV is the wrong signal on Vercel: it is 'production' for preview
+  // deployments too, so a preview build with real Meta credentials would post
+  // LIVE conversions into the production dataset. VERCEL_ENV is the one that
+  // distinguishes them, same as app/lib/botid.server.ts does and for the same
+  // reason. Off Vercel (local, CI), fall back to NODE_ENV.
   const testCode = process.env['META_TEST_EVENT_CODE']
-  if (testCode) payload['test_event_code'] = testCode
+  const vercelEnv = process.env['VERCEL_ENV']
+  const isRealProduction = vercelEnv
+    ? vercelEnv === 'production'
+    : process.env['NODE_ENV'] === 'production'
+  const wantsTest = opts.testMode === true || !isRealProduction
+  if (testCode && wantsTest) payload['test_event_code'] = testCode
 
   try {
     const res = await fetch(
@@ -153,6 +174,22 @@ export async function sendCapiEvent(
       const text = await res.text().catch(() => '')
       return { ok: false, error: `Meta CAPI ${res.status}: ${text}` }
     }
+
+    // A 200 is not proof of acceptance. Meta answers 200 with
+    // { events_received: 0 } plus a `messages` array when it drops an event for
+    // a payload problem, which is exactly the silent failure this whole module
+    // exists to stop.
+    const body = await res.json().catch(() => null) as
+      { events_received?: number; messages?: unknown[]; fbtrace_id?: string } | null
+
+    if (body && typeof body.events_received === 'number' && body.events_received < 1) {
+      const messages = Array.isArray(body.messages) ? JSON.stringify(body.messages).slice(0, 300) : ''
+      return { ok: false, error: `Meta CAPI accepted 0 events${messages ? `: ${messages}` : ''}` }
+    }
+    if (body && Array.isArray(body.messages) && body.messages.length > 0) {
+      return { ok: false, error: `Meta CAPI warning: ${JSON.stringify(body.messages).slice(0, 300)}` }
+    }
+
     return { ok: true }
   } catch (err) {
     return { ok: false, error: String(err) }

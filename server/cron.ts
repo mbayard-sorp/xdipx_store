@@ -36,6 +36,13 @@ async function drainMetaCapiFailures(): Promise<number> {
           .set({ resolvedAt: new Date(), attempts: row.attempts + 1 })
           .where(eq(metaCapiFailures.id, row.id))
         resolved++
+      } else if (result.skipped) {
+        // Missing credentials is an environment problem, not a bad payload.
+        // Burning an attempt would exhaust the retry budget on rows that were
+        // never actually sent, so record the reason and leave attempts alone.
+        await db.update(metaCapiFailures)
+          .set({ lastError: result.skipped })
+          .where(eq(metaCapiFailures.id, row.id))
       } else {
         await db.update(metaCapiFailures)
           .set({ attempts: row.attempts + 1, lastError: result.error ?? 'unknown' })
@@ -206,16 +213,26 @@ export function createCronRoutes() {
    * Schedule: 12:05 AM — write daily profit summary to Neon
    */
   cronRoute('/profit-summary', async (_req, res) => {
+    // The drains are independent of the summary. They used to share its try
+    // block, so a profit-summary failure silently skipped every queued
+    // conversion retry for the day.
+    let summaryError: string | null = null
     try {
       const { writeProfitSummary } = await import('../app/lib/profit.server.js')
       await writeProfitSummary()
-      const capiRetried = await drainMetaCapiFailures()
-      const ga4Retried = await drainGa4Failures()
-      res.json({ ok: true, capiRetried, ga4Retried })
     } catch (err) {
+      summaryError = String(err)
       console.error('[cron:profit-summary]', err)
-      res.status(500).json({ error: String(err) })
     }
+
+    const capiRetried = await drainMetaCapiFailures()
+    const ga4Retried = await drainGa4Failures()
+
+    if (summaryError) {
+      res.status(500).json({ error: summaryError, capiRetried, ga4Retried })
+      return
+    }
+    res.json({ ok: true, capiRetried, ga4Retried })
   })
 
   /**
@@ -485,14 +502,48 @@ export function createCronRoutes() {
    * Body (optional): { windowMinutes?: number }
    */
   cronRoute('/log-monitor', async (req, res) => {
+    // Purchase reconciliation rides this cron because it is the only existing
+    // every-15-minutes slot and vercel.json is a protected path. Kept in its
+    // own try so a reconcile problem can never take down log monitoring.
+    let purchaseReconcile: unknown = null
+    try {
+      const { reconcilePurchases } = await import('../app/lib/purchase-capi.server.js')
+      const r = await reconcilePurchases({ sinceHours: 26 })
+      purchaseReconcile = { scanned: r.scanned, gaps: r.gaps.length, sent: r.sent.length, failed: r.failed.length, tooOld: r.tooOld.length }
+    } catch (err) {
+      console.error('[cron:log-monitor] purchase reconcile error:', err)
+    }
+
     try {
       const { runLogMonitor } = await import('../app/lib/log-monitor.server.js')
       const rawWindow = req.body?.windowMinutes ?? (req.query['windowMinutes'] ? Number(req.query['windowMinutes']) : undefined)
       const windowMinutes = typeof rawWindow === 'number' && !isNaN(rawWindow) ? rawWindow : 15
       const result = await runLogMonitor({ windowMinutes })
-      res.json({ ok: true, ...result })
+      res.json({ ok: true, ...result, purchaseReconcile })
     } catch (err) {
       console.error('[cron:log-monitor]', err)
+      res.status(500).json({ error: String(err), purchaseReconcile })
+    }
+  })
+
+  /**
+   * POST /cron/purchase-reconcile
+   * Query/body: { sinceHours?: number, dryRun?: boolean }
+   * On-demand Meta CAPI Purchase reconciliation. Sends a Purchase for every
+   * paid Shopify order with no resolved ledger row. Idempotent by construction
+   * (deterministic purchase_<orderId> event id), so it is always safe to run.
+   * No vercel.json cron entry: the sweep also rides /cron/log-monitor.
+   */
+  router.post('/purchase-reconcile', guard, async (req, res) => {
+    try {
+      const { reconcilePurchases } = await import('../app/lib/purchase-capi.server.js')
+      const rawSince = req.body?.sinceHours ?? (req.query['sinceHours'] ? Number(req.query['sinceHours']) : undefined)
+      const sinceHours = typeof rawSince === 'number' && !isNaN(rawSince) ? rawSince : 26
+      const dryRun = req.body?.dryRun === true || req.query['dryRun'] === '1' || req.query['dryRun'] === 'true'
+      const result = await reconcilePurchases({ sinceHours, dryRun })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:purchase-reconcile]', err)
       res.status(500).json({ error: String(err) })
     }
   })
