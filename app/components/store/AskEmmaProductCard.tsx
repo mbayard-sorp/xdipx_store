@@ -19,7 +19,7 @@ export function AskEmmaProductCard({ card, onTellMore }: Props) {
         <Link
           to={card.url}
           onClick={() => onTellMore?.(card)}
-          aria-label={`${card.title} — open product page`}
+          aria-label={`${card.title}, open product page`}
           className="group flex flex-1 items-center gap-3 min-w-0 text-left"
         >
           <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-cream-2">

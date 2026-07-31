@@ -32,7 +32,7 @@ const STORAGE_KEY = 'xdipx:emma:state:v1'
 const TAGLINE_KEY = 'xdipx:emma:tagline:v2'
 const TAGLINE_TTL_MS = 5 * 60 * 1000
 const DEFAULT_TAGLINE = 'here to help you find what you\u2019re into \u2665'
-const GREETING = "Hey — I'm Emma. Tell me what you're curious about and I'll show you what's good today. ♥"
+const GREETING = "Hey, I'm Emma. Tell me what you're curious about and I'll show you what's good today. ♥"
 
 // iMessage-ish cadence. The typing pill is shown for at least MIN_TYPING_MS, then
 // the text reveals at REVEAL_CPS chars/sec up to REVEAL_MAX_MS.
@@ -194,7 +194,7 @@ export function AskEmmaWidget() {
     // to the generic "brain blanked" — the pills are the answer.
     const fallback = quickReply
       ? "Pick one and I'll take it from there ♥"
-      : "Sorry — I hit a snag. Try that again?"
+      : "Sorry, I hit a snag. Try that again?"
     const reply = (data.reply && data.reply.trim()) || fallback
 
     const elapsed = Date.now() - submittedAtRef.current

@@ -132,9 +132,9 @@ export function EmmaDiscoveryRail({
 
   const greeting =
     data?.greeting ??
-    (customerFirstName ? `Hey ${customerFirstName} — quick note` : 'Hey friend — quick note')
+    (customerFirstName ? `Hey ${customerFirstName}, quick note` : 'Hey friend, quick note')
 
-  const narrator = data?.narrator ?? (loading ? '' : 'Settling in — I\'ll star anything good.')
+  const narrator = data?.narrator ?? (loading ? '' : 'Settling in. I\'ll star anything good.')
 
   const showRecent = recentViews.length > 0
 
