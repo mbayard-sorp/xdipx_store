@@ -47,6 +47,7 @@ import {
   NEEDS_OWNER_LABEL,
   REQUIRED_CHECK,
   ROLLBACK_CIRCUIT_LIMIT,
+  autoReadyOnDraft,
   checkState,
   dailyCapReached,
   evaluatePullRequest,
@@ -130,6 +131,24 @@ describe('branch predicates', () => {
   it('does not gate a code ticket branch on the docs allowlist', () => {
     expect(isAgentBranch('ticket/43')).toBe(true)
     expect(requiresAllowlistCheck('ticket/43')).toBe(false)
+  })
+
+  // Auto-undraft is deliberately narrower than isAgentBranch: it covers the two
+  // machine lanes whose only terminal state is an open PR, and nothing an owner
+  // might have drafted on purpose.
+  it('auto-undrafts only the machine lanes', () => {
+    for (const ref of ['agents/suggestion-1', 'ticket/43']) {
+      expect(autoReadyOnDraft(ref)).toBe(true)
+    }
+    for (const ref of ['claude/foo', 'phase1/x', 'tonight/hotfix', 'revert/pr-9', 'main', 'agent/typo']) {
+      expect(autoReadyOnDraft(ref)).toBe(false)
+    }
+  })
+
+  it('never auto-undrafts a branch the engine would not consider at all', () => {
+    for (const ref of ['main', 'feature/x', 'renovate/deps', 'ticketing/x']) {
+      expect(autoReadyOnDraft(ref) && !isEligibleBranch(ref)).toBe(false)
+    }
   })
 })
 
@@ -311,8 +330,50 @@ describe('evaluatePullRequest: gates', () => {
     expect(d.code).toBe('needs-owner-label')
   })
 
-  it('skips drafts', () => {
-    expect(evaluatePullRequest(facts({ draft: true })).code).toBe('draft')
+  // Draft handling. A PR opened from a cloud session is drafted by the harness,
+  // and a draft is invisible to every gate below it, so on the machine lanes the
+  // engine undrafts rather than skipping. See `autoReadyOnDraft`.
+  it('takes an agents/ draft out of draft instead of skipping it forever', () => {
+    const d = evaluatePullRequest(facts({ draft: true, headRef: DOCS_BRANCH }))
+    expect(d.action).toBe('undraft')
+    expect(d.code).toBe('draft-auto-ready')
+  })
+
+  it('takes a ticket/ draft out of draft', () => {
+    const d = evaluatePullRequest(facts({ draft: true, headRef: 'ticket/41' }))
+    expect(d.action).toBe('undraft')
+    expect(d.code).toBe('draft-auto-ready')
+  })
+
+  it('still skips a draft on an owner-attended lane', () => {
+    for (const headRef of ['claude/some-session', 'phase1/thing', 'tonight/thing']) {
+      const d = evaluatePullRequest(facts({ draft: true, headRef }))
+      expect(d.action).toBe('skip')
+      expect(d.code).toBe('draft')
+    }
+  })
+
+  it('never merges in the same decision that undrafts, however green the PR is', () => {
+    // Identical facts to the default green fixture except for the draft flag:
+    // the only difference in outcome must be undraft-instead-of-merge, so the
+    // merge can only happen on a later cycle against freshly read facts.
+    expect(evaluatePullRequest(facts({})).action).toBe('merge')
+    expect(evaluatePullRequest(facts({ draft: true })).action).toBe('undraft')
+  })
+
+  it('leaves a drafted protected PR to the owner rather than undrafting it', () => {
+    const d = evaluatePullRequest(
+      facts({ draft: true, headRef: DOCS_BRANCH, changedPaths: ['db/schema.ts'] }),
+    )
+    expect(d.action).toBe('escalate-protected')
+  })
+
+  it('does not undraft a PR the owner already claimed with the needs-owner label', () => {
+    const d = evaluatePullRequest(
+      facts({ draft: true, headRef: DOCS_BRANCH, labels: [NEEDS_OWNER_LABEL] }),
+    )
+    expect(d.action).toBe('skip')
+    expect(d.code).toBe('needs-owner-label')
   })
 
   it('skips a PR that conflicts with the base branch', () => {

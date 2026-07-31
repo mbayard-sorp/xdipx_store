@@ -1,35 +1,15 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
-import { addToCart, addLinesToCart, createCart, getCart, getCustomerProfile, getAccessoryProducts, removeFromCart, setCartAttributes, updateCartLine } from '~/lib/shopify.server'
+import { addToCart, addLinesToCart, createCart, getCart, getCustomerProfile, getAccessoryProducts, removeFromCart, updateCartLine } from '~/lib/shopify.server'
 import { getBundleByHandle, bundleCartLines } from '~/lib/bundles.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { deriveEmmaCartContext } from '~/lib/emma-cart.server'
-import { getFbCookies, getGaClientId, getStoredRefCode, getStoredUTM } from '~/lib/attribution.server'
+import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getMarketingConsent } from '~/lib/consent.server'
 import { trackAddedToCart } from '~/lib/klaviyo.server'
-
-// Attribution cart attributes (_fbp/_fbc/_ga_cid/_utm_*/_ref_code). Written on
-// every add so they survive into order.note_attributes for the order webhook
-// (CAPI, GA4 MP, Klaviyo UTM properties). Only present cookies are written.
-function attributionCartAttrs(request: Request): { key: string; value: string }[] {
-  const { fbp, fbc } = getFbCookies(request)
-  const gaCid = getGaClientId(request)
-  const utm = getStoredUTM(request)
-  const refCode = getStoredRefCode(request)
-  const attrs: { key: string; value: string }[] = []
-  if (fbp) attrs.push({ key: '_fbp', value: fbp })
-  if (fbc) attrs.push({ key: '_fbc', value: fbc })
-  if (gaCid) attrs.push({ key: '_ga_cid', value: gaCid })
-  if (utm?.source)   attrs.push({ key: '_utm_source',   value: utm.source })
-  if (utm?.medium)   attrs.push({ key: '_utm_medium',   value: utm.medium })
-  if (utm?.campaign) attrs.push({ key: '_utm_campaign', value: utm.campaign })
-  if (utm?.content)  attrs.push({ key: '_utm_content',  value: utm.content })
-  if (refCode) attrs.push({ key: '_ref_code', value: refCode })
-  return attrs
-}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cartId = getCartIdFromCookie(request)
@@ -90,10 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     // Write attribution cookies (_fbp/_fbc/_ga_cid/_utm_*/_ref_code) as cart
     // attributes so they flow to order.note_attributes for the order webhook.
-    const fbAttrs = attributionCartAttrs(request)
-    if (fbAttrs.length > 0) {
-      try { await setCartAttributes(cartId, fbAttrs) } catch { /* non-fatal */ }
-    }
+    await applyAttributionAttrs(cartId, request)
     // Generate dedup id and fire AddToCart CAPI fire-and-forget.
     const addToCartEventId = fireCapiEvent(request, 'AddToCart', {
       contentIds: [productId],
@@ -149,13 +126,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const cartTag = (form.get('cartTag') as string | null)?.trim()
     // Write attribution cookies as cart attributes alongside any cartTag so
     // they reach order.note_attributes for the order webhook.
-    const extraAttrs: { key: string; value: string }[] = []
-    if (cartTag) extraAttrs.push({ key: cartTag, value: 'live' })
-    extraAttrs.push(...attributionCartAttrs(request))
-    if (extraAttrs.length > 0 && cartId) {
-      try {
-        await setCartAttributes(cartId, extraAttrs)
-      } catch { /* attribute is a nice-to-have — don't fail the add */ }
+    if (cartId) {
+      await applyAttributionAttrs(cartId, request, cartTag ? [{ key: cartTag, value: 'live' }] : [])
     }
     // Generate dedup id and fire AddToCart CAPI fire-and-forget.
     const totalValue = lines.reduce((sum, l) => {
@@ -196,6 +168,9 @@ export async function action({ request }: ActionFunctionArgs) {
         return Response.json({ ok: false, error: 'Could not add bundle' }, { status: 400, headers })
       }
     }
+    // Bundles used to skip attribution entirely, so a bundle purchase arrived
+    // at the order webhook with empty note_attributes and no way to credit it.
+    await applyAttributionAttrs(cartId, request)
     return Response.json({ ok: true, bundleTag: bundle.bundleTag }, { headers })
   }
 

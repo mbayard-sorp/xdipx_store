@@ -54,6 +54,7 @@ import {
   isGithubConfigured,
   listOpenPullRequests,
   listPullRequestFiles,
+  markPullRequestReadyForReview,
   normalizeChangedPath,
   openPullRequest,
   squashMergePullRequest,
@@ -122,6 +123,17 @@ export const MAX_TICKET_ATTEMPTS = 3
 export const ROLLBACK_CIRCUIT_LIMIT = 2
 
 export const DEFAULT_MAX_MERGES_PER_DAY = 6
+
+/**
+ * Drafts the engine will take out of draft in a single cycle.
+ *
+ * Not a safety gate — undrafting merges nothing and every downstream gate still
+ * runs — just a bound on how much a pathological state can do to the GitHub API
+ * in one invocation. The realistic backlog is a handful of PRs from one agent
+ * pass; 18 was the worst case observed, and on a ten-minute cron that clears in
+ * four cycles.
+ */
+export const MAX_UNDRAFTS_PER_CYCLE = 5
 
 /** How long a merged PR may take to deploy and pass smoke before it is a failure. */
 export const DEPLOY_TIMEOUT_MS = 15 * 60_000
@@ -197,12 +209,13 @@ export interface PullRequestFacts {
   ticket: TicketFacts | null
 }
 
-export type ReleaseAction = 'merge' | 'wait' | 'skip' | 'bounce' | 'escalate-protected'
+export type ReleaseAction = 'merge' | 'wait' | 'skip' | 'bounce' | 'escalate-protected' | 'undraft'
 
 export type ReleaseReasonCode =
   | 'protected'
   | 'needs-owner-label'
   | 'draft'
+  | 'draft-auto-ready'
   | 'conflict'
   | 'ci-red'
   | 'ci-pending'
@@ -256,6 +269,31 @@ export function isEligibleBranch(headRef: string): boolean {
  */
 export function requiresAllowlistCheck(headRef: string): boolean {
   return headRef.startsWith('agents/')
+}
+
+/**
+ * Branch namespaces where a draft PR is always an accident, so the engine takes
+ * it out of draft itself instead of skipping it forever.
+ *
+ * Why this exists: a PR opened from a Claude Code cloud session is created as a
+ * draft by the harness, and `evaluatePullRequest` skips drafts before it reads
+ * CI, the allowlist, or the ticket. On 2026-07-30 that stranded 15 green
+ * suggestion PRs and 3 QA-verified ticket PRs for a day. The failure is silent
+ * in a way the other gates are not: CI is fully green, so no check, dashboard,
+ * or run summary reports anything wrong, and the only symptom is a queue that
+ * grows. The playbooks now require `gh pr ready` (routine-agent-editor.md step
+ * 5, routine-dev-daily.md step 5b); this is the backstop for when an agent does
+ * not follow them, which is the normal case eventually.
+ *
+ * Deliberately narrower than `AGENT_BRANCH_PREFIXES`. `agents/*` and `ticket/*`
+ * are machine lanes whose only terminal state is an open PR, so a draft there
+ * carries no intent. `claude/*`, `phase1/*`, and `tonight/*` are owner-attended
+ * sessions where a draft is plausibly deliberate work-in-progress, and
+ * `revert/pr-*` is opened by this engine and never drafted. Undrafting someone
+ * else's WIP is a small rudeness the backstop does not need to commit.
+ */
+export function autoReadyOnDraft(headRef: string): boolean {
+  return headRef.startsWith('agents/') || headRef.startsWith('ticket/')
 }
 
 /** Every changed path is on the agent-editor docs allowlist. Empty = false: an
@@ -346,7 +384,20 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
     return { ...base, action: 'skip', code: 'needs-owner-label', reason: `labelled ${NEEDS_OWNER_LABEL}` }
   }
 
+  // A draft is invisible to every gate below, so it is resolved before them.
+  // On a machine lane the engine takes it out of draft and re-evaluates it on
+  // the next cycle; everywhere else a draft still means hands off. Undrafting
+  // is not an approval and merges nothing: the PR still has to clear CI, the
+  // allowlist, the ticket, and mergeability on that next pass.
   if (facts.draft) {
+    if (autoReadyOnDraft(facts.headRef)) {
+      return {
+        ...base,
+        action: 'undraft',
+        code: 'draft-auto-ready',
+        reason: `draft PR on the ${facts.headRef.split('/')[0]}/ lane, marking it ready for review`,
+      }
+    }
     return { ...base, action: 'skip', code: 'draft', reason: 'draft PR' }
   }
 
@@ -1015,6 +1066,8 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
   })
 
   const decisions: ReleaseDecision[] = []
+  const undraftErrors: string[] = []
+  let undrafted = 0
   for (const summary of candidates) {
     const facts = await gatherFacts(summary)
     if (!facts) continue
@@ -1026,6 +1079,22 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
 
     if (decision.action === 'escalate-protected') {
       await handleProtected(summary, decision, dryRun)
+      continue
+    }
+    // Undrafting is not a merge and does not consume the one-merge-per-cycle
+    // budget: it costs one cheap mutation and only restores the PR to the state
+    // its author meant to leave it in. `continue` so the PR is re-read and fully
+    // gated on the next cycle rather than merged on stale facts from this one.
+    if (decision.action === 'undraft') {
+      if (undrafted >= MAX_UNDRAFTS_PER_CYCLE) {
+        console.warn(
+          `${LOG} undraft cap reached (${MAX_UNDRAFTS_PER_CYCLE}/cycle), PR #${summary.number} waits for the next cycle`,
+        )
+        continue
+      }
+      undrafted += 1
+      const problem = await undraftOne(summary, dryRun)
+      if (problem) undraftErrors.push(problem)
       continue
     }
     if (decision.code === 'ci-red' && decision.isRevert) {
@@ -1049,7 +1118,40 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
     return mergeOne(summary, decision, decisions, day)
   }
 
-  return { ...result, decisions, message: `${decisions.length} open PR(s) evaluated, nothing merged` }
+  const undraftNote = undrafted > 0 ? `, ${undrafted} taken out of draft` : ''
+  return {
+    ...result,
+    // A failed undraft is reported rather than swallowed. Silence is what made
+    // the original stall invisible, and a backstop that fails quietly is just a
+    // slower version of the same bug.
+    ...(undraftErrors.length > 0 ? { ok: false, errors: undraftErrors } : {}),
+    decisions,
+    message: `${decisions.length} open PR(s) evaluated, nothing merged${undraftNote}`,
+  }
+}
+
+/**
+ * Take one PR out of draft. Returns null on success, or the problem string when
+ * GitHub refused, for the caller to surface on the run result.
+ *
+ * Failure is never fatal to the cycle: the PR stays a draft and is retried on
+ * the next one, exactly as if the backstop did not exist. The realistic failure
+ * is a token without `pull_requests: write`, which is worth seeing in the run
+ * output rather than discovering a day later through another stalled queue.
+ */
+async function undraftOne(pr: PullRequestSummary, dryRun: boolean): Promise<string | null> {
+  if (dryRun) {
+    console.log(`${LOG} [dry-run] would mark PR #${pr.number} (${pr.headRef}) ready for review`)
+    return null
+  }
+  const ready = await markPullRequestReadyForReview(pr.nodeId, 'release-engine')
+  if (!ready.ok) {
+    const problem = `could not mark PR #${pr.number} ready for review: ${ready.error}`
+    console.warn(`${LOG} ${problem}`)
+    return problem
+  }
+  console.log(`${LOG} marked PR #${pr.number} (${pr.headRef}) ready for review, it is gated on the next cycle`)
+  return null
 }
 
 /** Assemble the decision inputs for one PR. Returns null when GitHub will not

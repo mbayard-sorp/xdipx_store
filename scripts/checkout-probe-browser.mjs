@@ -14,6 +14,8 @@
  * Env: BASE_URL, CRON_SECRET (required), PROBE_PRODUCT_HANDLE (optional),
  * PLAYWRIGHT_MODULE (absolute path to the isolated playwright install).
  */
+import { pathToFileURL } from 'node:url'
+
 const BASE = (process.env.BASE_URL || 'https://xdipx.com').replace(/\/+$/, '')
 const SECRET = process.env.CRON_SECRET
 const HANDLE = process.env.PROBE_PRODUCT_HANDLE || ''
@@ -40,7 +42,28 @@ async function report(result) {
   }
 }
 
-const { chromium } = await import(PW)
+/**
+ * Playwright ships CommonJS. When PLAYWRIGHT_MODULE points at an absolute path
+ * (which it does in CI, so the isolated install never touches the repo's
+ * lockfile), `await import(path)` hands back a namespace whose named exports
+ * come from cjs-module-lexer, and the lexer cannot see through playwright's
+ * `module.exports = {...}`. `chromium` lands on `.default`, not on the
+ * namespace, so destructuring it yields undefined and the very next line throws
+ * "Cannot read properties of undefined (reading 'launch')".
+ *
+ * That is what the browser tier reported as `probe-crash` every day from
+ * 2026-07-25 to 2026-07-30 while the HTTP tier stayed green, so the deepest
+ * check of the money path was dark for six days and said so only in a message
+ * nobody could act on. Read both shapes, and if neither is there, say which
+ * module failed instead of dereferencing undefined.
+ */
+const pwNamespace = await import(PW.startsWith('/') ? pathToFileURL(PW).href : PW)
+const chromium = pwNamespace.chromium ?? pwNamespace.default?.chromium
+if (!chromium) {
+  push('probe-crash', false, `playwright module at ${PW} exposed no chromium export`)
+  await report({ ok: false, failedStep: 'probe-crash', steps, durationMs: Date.now() - started })
+  process.exit(1)
+}
 
 let browser
 let ok = true
@@ -71,9 +94,60 @@ try {
       }
       const res = await page.goto(pdpUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
       const good = !!res && res.status() === 200
+      // Wait for hydration before touching anything. The add-to-cart control is
+      // a React Router fetcher.Form: until the client bundle takes over, the
+      // same click is a native form POST that navigates the browser to the raw
+      // /api/cart JSON response. Clicking too early makes the probe measure the
+      // unhydrated fallback rather than the path a shopper actually walks.
+      await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {})
       push('pdp', good, good ? pdpUrl : `HTTP ${res ? res.status() : 'none'}`)
       if (!good) throw new Error('stop')
     } catch (e) { if (e.message !== 'stop') push('pdp', false, e.message); ok = false }
+  }
+
+  // 3b. Pick a variant, when the product has options.
+  //
+  // A multi-variant PDP renders its add-to-cart button disabled and labelled
+  // "Pick a size"/"Pick a volume" until an option is chosen, and the option
+  // control is a 56px CircleOptionSelector that opens a listbox on click. A
+  // probe that skips this step fails at add-to-cart on every multi-variant
+  // product, which is a property of the probe and not of the store. Whether it
+  // hit one was pure luck of which product was featured that day.
+  //
+  // Non-fatal: single-variant products expose no trigger and go straight
+  // through, so absence is recorded as "single variant", not as a failure.
+  if (ok) {
+    try {
+      // The option selectors are siblings of the cart form, not children of it:
+      // the PDP renders them and the form side by side in one flex row. Scope to
+      // that shared parent so we never pick up the navbar or chat triggers.
+      const triggers = page.locator('form[action="/api/cart"]').first()
+        .locator('xpath=..').locator('button[aria-expanded]')
+      const count = await triggers.count()
+      if (count === 0) {
+        push('pick-variant', true, 'single variant')
+      } else {
+        let picked = 0
+        for (let i = 0; i < count; i++) {
+          const trigger = triggers.nth(i)
+          const label = (await trigger.getAttribute('aria-label')) || `option ${i + 1}`
+          await trigger.scrollIntoViewIfNeeded()
+          await trigger.click({ timeout: 10000 })
+          // The listbox animates in (AnimatePresence), so the options exist
+          // before they are stable enough to click. Wait for the container
+          // first, then for an enabled option.
+          await page.locator('[role="listbox"]').first().waitFor({ timeout: 10000 })
+          const option = page.locator('[role="option"]:not([disabled])').first()
+          await option.waitFor({ state: 'visible', timeout: 10000 })
+          await option.click()
+          picked++
+          await page.waitForTimeout(400)
+          void label
+        }
+        push('pick-variant', picked === count, `${picked}/${count} option axes selected`)
+        if (picked !== count) ok = false
+      }
+    } catch (e) { push('pick-variant', false, e.message); ok = false }
   }
 
   // 4. Add to cart.
@@ -82,14 +156,25 @@ try {
       const addBtn = page.getByRole('button', { name: /add to cart|i'll take it|take it/i }).first()
       await addBtn.waitFor({ timeout: 15000 })
       await addBtn.click()
-      push('add-to-cart', true)
+      // The add is a fetcher POST to /api/cart; the drawer opens only once it
+      // resolves. Wait for the drawer rather than assuming the click alone
+      // means the line landed in the cart.
+      await page.locator('#cart-drawer').waitFor({ state: 'visible', timeout: 20000 })
+      push('add-to-cart', true, 'cart drawer opened')
     } catch (e) { push('add-to-cart', false, e.message); ok = false }
   }
 
   // 5. Age confirm, if the click-through gate is shown (non-fatal if absent).
+  //
+  // The gate renders *inside* the cart drawer at add-to-cart time, in front of
+  // the checkout link, so this step is on the critical path and not the
+  // afterthought its position suggests. The live button reads "Yes, let me in ♥",
+  // which the previous pattern (/enter ♥|enter|18 or older|yes.*18/) did not
+  // match: "18" appears in the drawer's question text, never in the button's
+  // accessible name. Match the label that ships.
   if (ok) {
     try {
-      const confirm = page.getByRole('button', { name: /enter ♥|enter|18 or older|yes.*18/i }).first()
+      const confirm = page.getByRole('button', { name: /let me in|enter ♥|18 or older|yes.*18/i }).first()
       if (await confirm.isVisible({ timeout: 4000 }).catch(() => false)) {
         await confirm.click()
         push('age-confirm', true, 'confirmed')
@@ -108,6 +193,10 @@ try {
         page.waitForURL(/\/checkouts?\/|myshopify\.com|shopify/i, { timeout: 30000 }),
         checkout.click(),
       ])
+      // Shopify's hosted checkout renders its contact fields client-side and is
+      // materially slower than any page we serve. Let it settle before step 7
+      // asserts, so a slow checkout reads as slow rather than as missing.
+      await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {})
       push('checkout-nav', true, page.url().split('?')[0])
     } catch (e) { push('checkout-nav', false, e.message); ok = false }
   }

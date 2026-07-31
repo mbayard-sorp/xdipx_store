@@ -2,7 +2,10 @@ import { parse as parseCookie, serialize as serializeCookie } from 'cookie'
 
 const UTM_COOKIE = '__xdipx_utm'
 const REF_COOKIE = '__xdipx_ref'
+const FBC_COOKIE = '_fbc'
 const THIRTY_DAYS = 60 * 60 * 24 * 30
+/** Meta's own _fbc lifetime. Matching it keeps our cookie and theirs in sync. */
+const NINETY_DAYS = 60 * 60 * 24 * 90
 
 export interface UTMData {
   source:   string | null
@@ -51,6 +54,63 @@ export function captureUTM(request: Request): { utm: UTMData | null; refCode: st
   return { utm, refCode, cookies: setCookies }
 }
 
+/**
+ * The `_fbc` cookie value Meta expects: `fb.<subdomainIndex>.<creationMs>.<fbclid>`.
+ *
+ * Two details are load-bearing and easy to get wrong:
+ *
+ * - subdomainIndex is 1, counting from the top-level domain (0 = .com,
+ *   1 = xdipx.com, 2 = www.xdipx.com). fbevents.js writes at the registrable
+ *   domain, so 1 is what it uses. A mismatch makes fbevents.js write a SECOND
+ *   _fbc cookie, and which one gets read afterwards is not deterministic.
+ * - the timestamp is MILLISECONDS. Seconds precision degrades or invalidates
+ *   the click attribution.
+ */
+export function buildFbc(fbclid: string, nowMs: number = Date.now()): string {
+  return `fb.1.${nowMs}.${fbclid}`
+}
+
+/**
+ * The cookie Domain attribute for the current host, or null when it must be
+ * omitted. Vercel preview hosts are on a public suffix (the browser rejects a
+ * Domain there) and localhost has no registrable domain.
+ */
+export function fbCookieDomain(request: Request): string | null {
+  let host: string
+  try { host = new URL(request.url).hostname } catch { return null }
+  if (host === 'xdipx.com' || host.endsWith('.xdipx.com')) return '.xdipx.com'
+  return null
+}
+
+/**
+ * Capture `fbclid` from an ad click into the `_fbc` cookie.
+ *
+ * Without this there is no click-level Meta attribution at all: fbevents.js is
+ * the only other thing that writes _fbc, and it is deferred behind first
+ * interaction and boots consent-revoked, so a shopper who lands from an ad and
+ * buys is invisible as a conversion from that ad.
+ *
+ * Last click wins, with a refreshed timestamp. Writes nothing when the param
+ * is absent, so ordinary requests stay Set-Cookie free and edge-cacheable
+ * (a URL bearing fbclid is unique per click and was never a shared cache entry
+ * to begin with).
+ */
+export function captureFbClickId(request: Request, nowMs: number = Date.now()): string[] {
+  let fbclid: string | null
+  try { fbclid = new URL(request.url).searchParams.get('fbclid') } catch { return [] }
+  if (!fbclid) return []
+
+  const domain = fbCookieDomain(request)
+  return [serializeCookie(FBC_COOKIE, buildFbc(fbclid, nowMs), {
+    httpOnly: false, // fbevents.js must be able to read it
+    path: '/',
+    sameSite: 'lax', // an ad click is a top-level cross-site navigation
+    maxAge: NINETY_DAYS,
+    ...(domain ? { domain } : {}),
+    ...(process.env['NODE_ENV'] === 'production' ? { secure: true } : {}),
+  })]
+}
+
 export function getStoredUTM(request: Request): UTMData | null {
   const cookies = parseCookie(request.headers.get('Cookie') ?? '')
   if (!cookies[UTM_COOKIE]) return null
@@ -93,11 +153,24 @@ export function getGaClientId(request: Request): string | null {
 }
 
 export function getClientIP(request: Request): string {
-  return (
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    request.headers.get('x-real-ip') ??
-    '0.0.0.0'
-  )
+  return getClientIPOrNull(request) ?? '0.0.0.0'
+}
+
+/**
+ * The real client IP, or null when it cannot be determined.
+ *
+ * getClientIP's '0.0.0.0' placeholder is right for the consent audit log
+ * (hashIP needs a value and a stable "unknown" bucket is fine there), but it is
+ * actively harmful in a CAPI payload: Meta counts it as 100% IP coverage while
+ * it matches nobody, so Event Match Quality reads healthy when it is not.
+ * Conversion senders should omit the field instead.
+ */
+export function getClientIPOrNull(request: Request): string | null {
+  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+  if (forwarded) return forwarded
+  const real = request.headers.get('x-real-ip')?.trim()
+  if (real) return real
+  return null
 }
 
 export function hashIP(ip: string): string {

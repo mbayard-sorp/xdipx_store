@@ -20,7 +20,6 @@ import { getBundleByHandle }                    from '~/lib/bundles.server'
 import { getProductReviews, getProductAggregate } from '~/lib/reviews.server'
 import { getEmmaContextRows }    from '~/lib/emma-rails.server'
 import { getCartIdFromCookie }   from '~/lib/cart.server'
-import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getSwatchMap }          from '~/lib/swatches.server'
 import { EmmaHero }              from '~/components/store/EmmaHero'
 import { BundleHero }            from '~/components/store/BundleHero'
@@ -38,7 +37,6 @@ import type { Product } from '~/types'
 import { categoryToLegacyString } from '~/types'
 import type { ProductCarouselBlock, TrustBarBlock as TrustBarBlockType } from '~/types/cms'
 import { trackViewItem, trackViewItemList, trackDealView, type GA4Item } from '~/lib/analytics.client'
-import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { buildSocialMeta } from '~/lib/social-meta'
 import { heroPreloadTag } from '~/lib/image-preload'
 import { BRAND_TITLE, BRAND_DESCRIPTION, BRAND_NAME } from '~/lib/brand'
@@ -316,17 +314,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       viewers: 0, soldToday: 0, cmsData, carouselProductMap,
       emmaHero: null, pairDeal: null, homepageSettings, pairBundleDeal: null,
       emmaContextRows: [], pairSwatches: {} as Record<string, string>,
-      viewContentEventId: null as string | null,
       seo,
     }
     return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
   }
 
-  // Generate a dedup id shared with the browser pixel. ViewContent failure is non-fatal.
-  const viewContentEventId = fireCapiEvent(request, 'ViewContent', {
-    contentIds: [deal.shopifyProductId],
-    value:      deal.dealPrice,
-  })
+  // No ViewContent here. A homepage visit is not a product detail view: it
+  // fired for every visitor regardless of interest, doubled the ViewContent
+  // count, and taught Meta that the featured product is viewed by everyone,
+  // which corrupts the product-level signal retargeting depends on.
 
   const value = {
     variant: 'legacy' as const,
@@ -337,7 +333,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     aggregate: aggregate ?? null,
     emmaHero, pairDeal, homepageSettings, pairBundleDeal,
     emmaContextRows, pairSwatches,
-    viewContentEventId,
     seo,
   }
   return isAdmin ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
@@ -490,19 +485,6 @@ export default function Homepage() {
     }
     trackViewItem(item, deal.dealPrice)
     trackDealView(deal.handle, deal.seoTitle, deal.dealPrice)
-  }, [deal?.handle])
-
-  // ── Meta Pixel: ViewContent (fire-once side-effect, not data fetching) ───
-  // viewContentEventId was generated server-side so the browser pixel and
-  // server CAPI share the same id for Meta-side deduplication.
-  const { viewContentEventId } = loaderData
-  useEffect(() => {
-    if (!deal || !viewContentEventId) return
-    trackFbViewContent(
-      { content_ids: [deal.shopifyProductId], value: deal.dealPrice, currency: 'USD' },
-      viewContentEventId,
-    )
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deal?.handle])
 
   useEffect(() => {
