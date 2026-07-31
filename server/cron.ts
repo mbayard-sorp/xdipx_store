@@ -502,9 +502,27 @@ export function createCronRoutes() {
    * Body (optional): { windowMinutes?: number }
    */
   cronRoute('/log-monitor', async (req, res) => {
-    // Purchase reconciliation rides this cron because it is the only existing
-    // every-15-minutes slot and vercel.json is a protected path. Kept in its
-    // own try so a reconcile problem can never take down log monitoring.
+    // Three independent jobs share this route because it is the only existing
+    // every-15-minutes slot and vercel.json is a protected path. Each gets its
+    // own try: none of them may take down another, and in particular neither
+    // conversion job may be skipped because log classification failed.
+    //
+    // Order is deliberate. The watcher observes delivery health from
+    // order_line_items (did the webhook handler run at all), then the reconciler
+    // heals CAPI delivery via meta_capi_failures. They read different tables, so
+    // healing cannot mask the alarm, which is the failure mode that let the
+    // Purchase outage run for two months.
+
+    // 1. Conversion-delivery watcher (ticket #590). Owns the P0 alerting path.
+    let purchaseWatch: unknown = null
+    try {
+      const { runPurchaseWatcher } = await import('../app/lib/purchase-watcher.server.js')
+      purchaseWatch = await runPurchaseWatcher()
+    } catch (err) {
+      console.error('[cron:log-monitor] purchase-watcher failed (ignored):', err)
+    }
+
+    // 2. Purchase reconciliation. Sends any Purchase the webhook did not.
     let purchaseReconcile: unknown = null
     try {
       const { reconcilePurchases } = await import('../app/lib/purchase-capi.server.js')
@@ -514,15 +532,16 @@ export function createCronRoutes() {
       console.error('[cron:log-monitor] purchase reconcile error:', err)
     }
 
+    // 3. Log classification.
     try {
       const { runLogMonitor } = await import('../app/lib/log-monitor.server.js')
       const rawWindow = req.body?.windowMinutes ?? (req.query['windowMinutes'] ? Number(req.query['windowMinutes']) : undefined)
       const windowMinutes = typeof rawWindow === 'number' && !isNaN(rawWindow) ? rawWindow : 15
       const result = await runLogMonitor({ windowMinutes })
-      res.json({ ok: true, ...result, purchaseReconcile })
+      res.json({ ok: true, ...result, purchaseWatch, purchaseReconcile })
     } catch (err) {
       console.error('[cron:log-monitor]', err)
-      res.status(500).json({ error: String(err), purchaseReconcile })
+      res.status(500).json({ error: String(err), purchaseWatch, purchaseReconcile })
     }
   })
 

@@ -119,7 +119,7 @@ export interface LogMonitorRunResult {
  * URLs in this function and verify with `vercel logs --json` if classification
  * suddenly stops returning groups after a platform update.
  */
-async function fetchRecentLogs({ windowMinutes }: { windowMinutes: number }): Promise<LogLine[]> {
+export async function fetchRecentLogs({ windowMinutes }: { windowMinutes: number }): Promise<LogLine[]> {
   const token     = process.env['VERCEL_TOKEN']
   const projectId = process.env['VERCEL_PROJECT_ID']
   const teamId    = process.env['VERCEL_TEAM_ID']
