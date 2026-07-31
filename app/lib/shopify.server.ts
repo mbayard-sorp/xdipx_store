@@ -7089,6 +7089,32 @@ function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][numbe
 const PRICING_FETCH_PAGE_SIZE = 50
 const PRICING_FETCH_PAGE_DELAY_MS = 500
 
+// A single throttled page must not abandon the whole daily recompute. Because
+// bulkFetchProductsForPricing reads every page up front (recomputeCatalog only
+// enters its per-variant loop afterward), one exhausted retry throws all the
+// way out and the recompute writes zero pricing rows — the 2026-07-30 failure.
+// adminGraphQL already makes 4 short (<=5s) THROTTLED retries per call; when
+// those are spent it throws "Throttled". Here we give the leaky bucket a
+// longer, escalating rest and re-fetch the same page before giving up. The
+// batch runs once daily at 07:00 UTC, so tens of seconds of extra wait is free,
+// and a non-throttle error still fails fast and unchanged.
+const PRICING_FETCH_THROTTLE_RETRIES = 4
+const PRICING_FETCH_THROTTLE_BACKOFF_MS = 5000
+
+async function fetchPricingPageWithBackoff(
+  variables: { first: number; after: string | null; query: string },
+): Promise<PricingQueryResult> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await adminGraphQL<PricingQueryResult>(PRICING_PRODUCTS_QUERY, variables)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (attempt > PRICING_FETCH_THROTTLE_RETRIES || !/throttl/i.test(message)) throw err
+      await new Promise(r => setTimeout(r, attempt * PRICING_FETCH_THROTTLE_BACKOFF_MS))
+    }
+  }
+}
+
 export async function bulkFetchProductsForPricing(opts?: {
   cursor?: string | null
   limit?: number
@@ -7104,7 +7130,7 @@ export async function bulkFetchProductsForPricing(opts?: {
     }
     firstPage = false
 
-    const data = await adminGraphQL<PricingQueryResult>(PRICING_PRODUCTS_QUERY, {
+    const data = await fetchPricingPageWithBackoff({
       first: pageSize,
       after: cursor ?? null,
       query: 'metafields.xdipx.nalpac_sku:*',

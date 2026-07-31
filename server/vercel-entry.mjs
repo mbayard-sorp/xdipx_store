@@ -8457,6 +8457,17 @@ function parsePricingSnapshot(raw) {
     }
   };
 }
+async function fetchPricingPageWithBackoff(variables) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await adminGraphQL(PRICING_PRODUCTS_QUERY, variables);
+    } catch (err2) {
+      const message = err2 instanceof Error ? err2.message : String(err2);
+      if (attempt > PRICING_FETCH_THROTTLE_RETRIES || !/throttl/i.test(message)) throw err2;
+      await new Promise((r) => setTimeout(r, attempt * PRICING_FETCH_THROTTLE_BACKOFF_MS));
+    }
+  }
+}
 async function bulkFetchProductsForPricing(opts) {
   const pageSize = opts?.limit ?? PRICING_FETCH_PAGE_SIZE;
   let cursor = opts?.cursor ?? null;
@@ -8467,7 +8478,7 @@ async function bulkFetchProductsForPricing(opts) {
       await new Promise((r) => setTimeout(r, PRICING_FETCH_PAGE_DELAY_MS));
     }
     firstPage = false;
-    const data = await adminGraphQL(PRICING_PRODUCTS_QUERY, {
+    const data = await fetchPricingPageWithBackoff({
       first: pageSize,
       after: cursor ?? null,
       query: "metafields.xdipx.nalpac_sku:*"
@@ -8590,7 +8601,7 @@ async function getProductMetafieldDebug(numericProductId) {
     emmaHero: result.metafields.find((m) => m.key === "emma_hero") ?? null
   };
 }
-var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CATALOG_PAGE_CAP, GMC_FEED_METAFIELDS_FRAGMENT, GMC_FEED_CARD_FRAGMENT, CART_FRAGMENT, XDIPX_LOCATION_IDS, XDIPX_PUBLICATION_NAMES, XDIPX_EXCLUDED_PUBLICATION_NAMES, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, PRICING_FETCH_PAGE_SIZE, PRICING_FETCH_PAGE_DELAY_MS, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
+var READ_TTL, COLLECTION_CURSOR_TTL, STOREFRONT_ENDPOINT, ADMIN_ENDPOINT, ADMIN_GQL_ENDPOINT, METAFIELDS_FRAGMENT, PRODUCT_CORE_FRAGMENT, CARD_METAFIELDS_FRAGMENT, PRODUCT_CARD_FRAGMENT, LEGACY_DIAL_LABELS, CATALOG_PAGE_CAP, GMC_FEED_METAFIELDS_FRAGMENT, GMC_FEED_CARD_FRAGMENT, CART_FRAGMENT, XDIPX_LOCATION_IDS, XDIPX_PUBLICATION_NAMES, XDIPX_EXCLUDED_PUBLICATION_NAMES, CUSTOMER_ADDRESS_FRAGMENT, STOREFRONT_ORDER_LEAN_FRAGMENT, SUBSCRIPTION_CONTRACT_FRAGMENT, SEARCH_PRODUCT_FRAGMENT, _primaryLocationId, PRICING_PRODUCTS_QUERY, PRICING_FETCH_PAGE_SIZE, PRICING_FETCH_PAGE_DELAY_MS, PRICING_FETCH_THROTTLE_RETRIES, PRICING_FETCH_THROTTLE_BACKOFF_MS, VARIANTS_BY_SKU_QUERY, PRODUCT_TYPES_QUERY, PRODUCT_TYPES_CACHE_KEY, PRODUCT_TYPES_CACHE_TTL;
 var init_shopify_server = __esm({
   "app/lib/shopify.server.ts"() {
     "use strict";
@@ -8962,6 +8973,8 @@ var init_shopify_server = __esm({
 `;
     PRICING_FETCH_PAGE_SIZE = 50;
     PRICING_FETCH_PAGE_DELAY_MS = 500;
+    PRICING_FETCH_THROTTLE_RETRIES = 4;
+    PRICING_FETCH_THROTTLE_BACKOFF_MS = 5e3;
     VARIANTS_BY_SKU_QUERY = `
   query VariantsBySkus($query: String!, $first: Int!) {
     productVariants(first: $first, query: $query) {
