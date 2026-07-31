@@ -26,12 +26,15 @@ export function PanelSquareRow({
   items,
   theme,
   rowIndex,
+  ordinalStart = 0,
   showOrdinals,
   onPanelClick,
 }: {
   items: ResolvedPanelTile[]
   theme: PanelDeckTheme
   rowIndex: number
+  /** How many square panels precede this row in the deck. Ordinals continue from it. */
+  ordinalStart?: number
   showOrdinals: boolean
   onPanelClick?: (dataAttr: string, href: string) => void
 }) {
@@ -58,7 +61,7 @@ export function PanelSquareRow({
             >
               {showOrdinals && ruled ? (
                 <span className={`text-[10px] tracking-[0.16em] ${s.muted}`} style={MONO} aria-hidden="true">
-                  {String(rowIndex * 4 + i + 1).padStart(2, '0')}
+                  {String(ordinalStart + i + 1).padStart(2, '0')}
                 </span>
               ) : null}
 

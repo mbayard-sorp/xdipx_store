@@ -141,7 +141,7 @@ export interface StorefrontData {
    * makes an unpublished layout a no-op.
    */
   layout: StorefrontHomeLayout | null
-  /** The eight-door deck, resolved. Null = not published; renders nothing. */
+  /** The door deck, resolved. Null = not published; renders nothing. */
   panelDeck: ResolvedPanelDeck | null
 }
 

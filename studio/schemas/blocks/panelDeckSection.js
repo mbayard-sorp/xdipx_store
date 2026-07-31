@@ -21,7 +21,7 @@ export default {
   preview: {
     select: { enabled: 'enabled' },
     prepare: ({ enabled }) => ({
-      title: 'Panel deck (eight doors)',
+      title: 'Panel deck',
       subtitle: enabled ? 'Visible' : 'Hidden',
     }),
   },

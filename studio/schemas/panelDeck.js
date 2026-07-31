@@ -1,12 +1,14 @@
-// Panel deck singleton — the eight doors below the storefront headliner.
+// Panel deck singleton — the doors below the storefront headliner.
 //
 // Additive: nothing existing is modified. The deck is placed on the page by the
 // `storefrontHome` layout singleton, so publishing this document alone changes
 // nothing until the layout enables its section. That two-step is the flip and
 // the rollback both.
 //
-// Rows are an ordered array, so which panels sit where is editorial and needs no
-// deploy. What is NOT editable here is the deck's position relative to the rest
+// Rows are an unbounded ordered array, so how many rows of each kind there are
+// and which panels sit where is editorial and needs no deploy: rows stack down
+// the page in the order listed. What is NOT editable here is the deck's
+// position relative to the rest
 // of the page shell: moving the headliner would move the LCP element and break
 // the zero-CLS contract, so macro section order stays a reviewed-PR decision
 // (docs/homepage-team/routine-design-cycle.md IA fence).
@@ -45,7 +47,7 @@ export default {
       title: 'Number the panels',
       type: 'boolean',
       initialValue: false,
-      description: 'Ruled theme only. Numbers panels 01-08.',
+      description: 'Ruled theme only. Numbers the square panels 01, 02, 03… in row order.',
       hidden: ({ parent }) => parent?.theme !== 'ruled',
     },
     {
@@ -53,8 +55,9 @@ export default {
       title: 'Rows',
       type: 'array',
       of: [{ type: 'panelSquareRow' }, { type: 'panelRowLarge' }, { type: 'panelRowSmall' }],
-      description: 'Default order is squares, then large, then small. Any order renders.',
-      validation: (Rule) => Rule.required().min(1).max(5),
+      description:
+        'Default order is squares, then large, then small. Any order renders, and any number of rows of each kind: they stack down the page in the order listed here.',
+      validation: (Rule) => Rule.required().min(1),
     },
   ],
   preview: {

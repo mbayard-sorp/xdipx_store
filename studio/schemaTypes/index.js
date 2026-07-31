@@ -96,7 +96,7 @@ import kbBrandFaq          from '../schemas/kbBrandFaq.js'
 // (additive; existing schemas untouched).
 import socialLanding       from '../schemas/socialLanding.js'
 
-// Panel deck — the eight doors below the storefront headliner. Deck singleton
+// Panel deck — the doors below the storefront headliner. Deck singleton
 // plus its row/tile object types. Additive; placed on the page by the
 // storefrontHome layout singleton, so nothing renders until that enables it.
 import panelLink           from '../schemas/blocks/panelLink.js'
@@ -246,7 +246,7 @@ export const schemaTypes = [
   kbBrandFaq,
   // Social bio-link landing (/social), featured product + Emma blurb. Singleton.
   socialLanding,
-  // Panel deck — eight doors below the headliner. Singleton + object types.
+  // Panel deck — doors below the headliner. Singleton + object types.
   panelDeck,
   panelLink,
   panelTile,
