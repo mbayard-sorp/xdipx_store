@@ -49,6 +49,16 @@ orthogonal — you can be enabled-to-run but off-to-execute.
 
 ## Step 3: Judge + execute
 
+**Before approving, gate approval VOLUME on downstream enrich health.** Run the Step 4 health check
+first: read `max(enriched_at)` and the `status='imported' AND enriched_at IS NULL` backlog depth. An
+approval only creates a Shopify draft; while enrich is dark those drafts never reach the live
+storefront, so filling the 20-action cap into a stalled enricher grows an un-enriched pile without
+producing sellable catalog (mission-brief stop-doing: throughput is not progress). If the enricher is
+demonstrably stalled — nothing enriched in the last 24-48h while imports keep flowing — **throttle
+approvals to theme-critical picks only** and lead the run by re-flagging the enrich stall, rather than
+filling the cap. When enrich is keeping pace, approve normally up to the cap. Approval volume is gated
+on downstream health, not just on the per-run action cap.
+
 For each candidate apply editorial + strategic judgment (catalog fit, current theme, image quality,
 brand quality, needs-review complexity). **Margin is not a factor** (`<financial_stance>`). Decide
 approve / reject (with reason) / watch, then execute with the **bulk `ids` form**, one call per intent:
