@@ -104,6 +104,19 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
 5. Open the PR (never merge it yourself; the release engine does that once the gates pass): title
    `agents: apply suggestion #<id> — <summary>`; body quotes the
    suggestion verbatim + est. savings + cx_risk + rationale for the exact edit.
+
+   **Then mark it ready for review, in the same step, before you move on:**
+
+   ```bash
+   gh pr ready <PR number>
+   ```
+
+   This is not optional and it is not the owner's job. A draft PR is invisible to the release
+   engine: its gate returns `skip / code:'draft'` before it evaluates CI, the allowlist, or the
+   ticket, so a drafted PR waits forever no matter how green it is. When you open a PR from a
+   cloud session the harness creates it as a draft by default, which is how 15 fully-green
+   suggestion PRs sat unmerged for a day on 2026-07-30. Confirm the PR reads "Open", not
+   "Draft", before you mark the row `pr_open`.
 6. Mark it:
 
 ```bash

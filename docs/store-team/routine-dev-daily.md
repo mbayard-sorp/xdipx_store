@@ -148,6 +148,20 @@ git add server/vercel-entry.mjs && git commit -m "chore: rebuild vercel entry ar
    asked for, what you changed and why, the local verification output, and anything the reviewer
    should look at first. **Never merge it. Never push to `main`.**
 
+5b. **Mark the PR ready for review, or it never reaches the engine.**
+
+```bash
+gh pr ready <PR number>          # then confirm it reads "Open", not "Draft"
+```
+
+   A draft PR is invisible to the release engine. Its gate returns `skip / code:'draft'` before it
+   evaluates CI, the allowlist, or the ticket, so a drafted PR waits forever however green it is and
+   however cleanly QA verified it. When you open a PR from a cloud session the harness creates it as
+   a draft by default, which is how three QA-verified ticket PRs and fifteen suggestion PRs sat
+   unmerged on 2026-07-30. Alongside the missing artifact rebuild in step 4b, this is one of the two
+   ways a technically-correct agent PR silently never reaches the engine — with the difference that
+   this one leaves CI fully green, so nothing anywhere looks wrong.
+
 6. Transition the ticket:
 
 ```bash
@@ -188,7 +202,8 @@ detectors, other agents, and scraped error text all feed the bus.
 
 ## Hard rules
 
-- **Never merge, never push to the default branch.** Your terminal state is an open PR.
+- **Never merge, never push to the default branch.** Your terminal state is an open PR — *open*,
+  not draft. Leaving it drafted is the same as never opening it.
 - **Never touch a protected path.** Block the ticket instead.
 - **One ticket, one branch, one PR.** Granular so the engine and the owner can reject granularly.
 - **Max 3 tickets per pass.** More waits for the next pass.
