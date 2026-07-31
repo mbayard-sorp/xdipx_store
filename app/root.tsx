@@ -23,7 +23,7 @@ import newsreaderLatinWoff2 from '@fontsource-variable/newsreader/files/newsread
 import dmSansLatinWoff2 from '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2?url'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { SITE_ORIGIN } from '~/lib/social-meta'
-import { captureUTM } from '~/lib/attribution.server'
+import { captureUTM, captureFbClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 
 const BOTID_PROTECTED_ROUTES = [
@@ -142,10 +142,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // most requests stay Set-Cookie-free (and edge-cacheable).
   const { utm, refCode, cookies: utmCookies } = captureUTM(request)
 
+  // Meta ad clicks arrive with ?fbclid=. Turning that into the _fbc cookie here
+  // is the only click-level attribution the store has: fbevents.js would
+  // otherwise be the sole writer, and it boots consent-revoked and deferred, so
+  // it routinely misses the landing request entirely. Same Set-Cookie-free
+  // property as the UTM capture: nothing is written unless the param is present.
+  const fbcCookies = captureFbClickId(request)
+
   const ga4 = await resolveGa4()
 
   const headers = new Headers()
   for (const cookie of utmCookies) headers.append('Set-Cookie', cookie)
+  for (const cookie of fbcCookies) headers.append('Set-Cookie', cookie)
 
   return data({
     utm,
@@ -202,6 +210,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const analyticsBootstrap = [
     (ga4Id || gtmId)
       ? `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});`
+      : '',
+    // Mint _fbp ourselves before the fbq stub. fbevents.js is the only other
+    // writer and it boots consent-revoked and deferred behind first
+    // interaction, which left _fbp coverage at 1.6% and Event Match Quality at
+    // 3/10. Written client-side deliberately: doing it in the loader would
+    // attach a Set-Cookie to the first response of every new session and knock
+    // the homepage and every PDP out of the edge cache (see the loader comment
+    // above). Format matches fbevents.js exactly (fb.1.<ms>.<rand>, subdomain
+    // index 1 = registrable domain) so it adopts this cookie rather than
+    // writing a competing second one. Never overwrites an existing value.
+    pixelId
+      ? `!function(){try{var m=document.cookie.match(/(?:^|; )_fbp=([^;]*)/);if(m&&/^fb\\.1\\.\\d{13}\\.\\d+$/.test(decodeURIComponent(m[1])))return;var v='fb.1.'+Date.now()+'.'+Math.round(Math.random()*2147483647);var d=location.hostname.indexOf('xdipx.com')>-1?'; domain=.xdipx.com':'';var s=location.protocol==='https:'?'; secure':'';document.cookie='_fbp='+v+'; path=/; max-age=7776000; samesite=lax'+d+s}catch(e){}}();`
       : '',
     pixelId
       ? `!function(f){if(f.fbq)return;var n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[]}(window);fbq('consent','revoke');fbq('init','${pixelId}');`

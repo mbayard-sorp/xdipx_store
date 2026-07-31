@@ -1,0 +1,335 @@
+/**
+ * Meta CAPI Purchase: delivery, ledger, and reconciliation.
+ *
+ * Why this module exists. Purchase is the only conversion event with no browser
+ * pixel counterpart (the shopper is on Shopify's checkout domain when it
+ * happens), so the order webhook is the sole real-time path. On 2026-07-31 an
+ * audit found zero Purchase events had ever reached Meta: the webhook has never
+ * fired at all, order_line_items was empty for every order ever placed, and no
+ * failure row was ever written because the send is never attempted.
+ *
+ * That failure mode is the design constraint. A webhook that was never
+ * registered cannot be fixed by making the webhook handler better, so delivery
+ * is built on two independent legs:
+ *
+ *   1. The webhook calls sendPurchaseWithLedger before responding to Shopify.
+ *   2. A reconciler sweeps paid Shopify orders and sends whatever the ledger
+ *      has no resolved row for.
+ *
+ * Both produce the identical deterministic event id, so Meta dedupes them and
+ * running both is free. The ledger is written BEFORE the send, not only on
+ * failure, so "we tried" is recorded even when the process dies mid-flight.
+ *
+ * Server-only. Never throws; every entry point returns a result object.
+ */
+import { eq, inArray } from 'drizzle-orm'
+import { db } from './db.server'
+import { metaCapiFailures } from '../../db/schema'
+import { sendCapiEvent, type CapiEvent } from './meta-capi.server'
+
+/** Meta rejects events older than this, so reconciliation cannot help beyond it. */
+const META_MAX_EVENT_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * A Purchase in the shape this module needs, normalized away from whichever
+ * Shopify surface it came from. The webhook delivers REST snake_case; the
+ * reconciler delivers GraphQL camelCase. Neither shape leaks past its adapter.
+ */
+export interface PurchaseOrder {
+  /** Numeric Shopify order id as a string. Drives the dedup event id. */
+  id:           string
+  totalPrice:   number
+  currency:     string
+  /** Shopify product ids (not variant ids), matching the catalog feed. */
+  productIds:   string[]
+  numItems:     number
+  fbp:          string | null
+  fbc:          string | null
+  clientIp:     string | null
+  userAgent:    string | null
+  /** Order creation time in ms. Reconciliation must report when the sale
+   *  happened, not when the sweep noticed it. */
+  createdAtMs:  number
+}
+
+// ─── Event construction ───────────────────────────────────────────────────────
+
+/**
+ * Build the CAPI payload. Pure, so the dedup contract is testable without
+ * network or database.
+ *
+ * The event id is `purchase_<orderId>` and nothing else. That is what makes the
+ * webhook leg and the reconciler leg collapse into one conversion on Meta's
+ * side, and what makes a Shopify webhook retry idempotent.
+ */
+export function buildPurchaseEvent(order: PurchaseOrder): CapiEvent {
+  const user_data: CapiEvent['user_data'] = {
+    fbp: order.fbp,
+    fbc: order.fbc,
+  }
+  // Omit rather than send a placeholder. A junk value reads as 100% coverage in
+  // Event Match Quality while matching nobody, which is worse than a gap.
+  if (order.clientIp)  user_data.client_ip_address = order.clientIp
+  if (order.userAgent) user_data.client_user_agent = order.userAgent
+
+  return {
+    event_name:    'Purchase',
+    event_id:      `purchase_${order.id}`,
+    event_time:    Math.floor(order.createdAtMs / 1000),
+    action_source: 'website',
+    user_data,
+    custom_data: {
+      content_ids:  order.productIds,
+      content_type: 'product',
+      value:        order.totalPrice,
+      currency:     order.currency,
+      num_items:    order.numItems,
+    },
+  }
+}
+
+/** True when the order is still inside Meta's accepted event window. */
+export function isWithinMetaEventWindow(order: PurchaseOrder, nowMs: number = Date.now()): boolean {
+  return nowMs - order.createdAtMs < META_MAX_EVENT_AGE_MS
+}
+
+// ─── Ledger-backed send ───────────────────────────────────────────────────────
+
+export interface PurchaseSendResult {
+  ok:       boolean
+  orderId:  string
+  /** Set when the send was deliberately not attempted. */
+  skipped?: string
+  error?:   string
+}
+
+/**
+ * Send one Purchase, recording the attempt in `meta_capi_failures` first.
+ *
+ * The table name reads as a failure log because that is all it used to hold.
+ * It is now the outbox: a row appears when a send is attempted and gets
+ * `resolvedAt` when it lands. An unresolved row is therefore either in flight
+ * or genuinely stuck, and the reconciler can tell the difference from a gap.
+ *
+ * Every ledger write is individually guarded. The ledger is bookkeeping; it
+ * must never be the reason a conversion goes unreported.
+ */
+export async function sendPurchaseWithLedger(order: PurchaseOrder): Promise<PurchaseSendResult> {
+  const event = buildPurchaseEvent(order)
+
+  try {
+    await db.insert(metaCapiFailures)
+      .values({
+        orderId:   order.id,
+        eventId:   event.event_id,
+        payload:   event,
+        attempts:  0,
+        lastError: null,
+      })
+      .onConflictDoNothing({ target: metaCapiFailures.orderId })
+  } catch (err) {
+    console.error('[purchase-capi] ledger insert failed, sending anyway', order.id, err)
+  }
+
+  const result = await sendCapiEvent(event, { consentGranted: false })
+
+  try {
+    if (result.ok) {
+      await db.update(metaCapiFailures)
+        .set({ resolvedAt: new Date(), lastError: null })
+        .where(eq(metaCapiFailures.orderId, order.id))
+    } else {
+      await db.update(metaCapiFailures)
+        .set({ lastError: result.error ?? result.skipped ?? 'unknown' })
+        .where(eq(metaCapiFailures.orderId, order.id))
+    }
+  } catch (err) {
+    console.error('[purchase-capi] ledger update failed', order.id, err)
+  }
+
+  if (result.ok) return { ok: true, orderId: order.id }
+  return {
+    ok:      false,
+    orderId: order.id,
+    ...(result.skipped ? { skipped: result.skipped } : {}),
+    ...(result.error   ? { error: result.error }     : {}),
+  }
+}
+
+// ─── Webhook adapter ──────────────────────────────────────────────────────────
+
+/** The REST orders/create fields this module reads. */
+export interface WebhookOrderShape {
+  id:               number
+  total_price:      string
+  currency?:        string
+  created_at?:      string
+  browser_ip?:      string
+  client_details?:  { user_agent?: string; browser_ip?: string } | null
+  line_items?:      { product_id?: number; quantity?: number }[]
+  note_attributes?: { name: string; value: string }[]
+}
+
+export function fromWebhookOrder(order: WebhookOrderShape, nowMs: number = Date.now()): PurchaseOrder {
+  const noteAttr = (name: string) =>
+    order.note_attributes?.find(a => a.name === name)?.value || null
+
+  const lineItems = order.line_items ?? []
+  const createdAt = order.created_at ? Date.parse(order.created_at) : NaN
+
+  return {
+    id:          String(order.id),
+    totalPrice:  parseFloat(order.total_price) || 0,
+    currency:    order.currency || 'USD',
+    productIds:  lineItems.map(li => (li.product_id ? String(li.product_id) : '')).filter(Boolean),
+    numItems:    lineItems.reduce((n, li) => n + (li.quantity || 0), 0),
+    fbp:         noteAttr('_fbp'),
+    fbc:         noteAttr('_fbc'),
+    // Shopify records the checkout session's IP and UA. Same shopper, same
+    // browser, and action_source is 'website', so these are the correct values
+    // for this event. No new data is collected to obtain them.
+    clientIp:    order.client_details?.browser_ip || order.browser_ip || null,
+    userAgent:   order.client_details?.user_agent || null,
+    createdAtMs: Number.isFinite(createdAt) ? createdAt : nowMs,
+  }
+}
+
+// ─── Reconciliation ───────────────────────────────────────────────────────────
+
+/** adminGraphQL unwraps the GraphQL envelope and returns `data` directly. */
+interface AdminOrdersResponse {
+  orders: {
+    nodes: Array<{
+      id:              string
+      createdAt:       string
+      currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }
+      customAttributes: Array<{ key: string; value: string }>
+      clientIp:        string | null
+      lineItems: { nodes: Array<{ quantity: number; product: { id: string } | null }> }
+    }>
+  }
+}
+
+const RECONCILE_ORDERS_QUERY = `
+  query PurchaseReconcile($query: String!) {
+    orders(first: 50, query: $query, sortKey: CREATED_AT, reverse: true) {
+      nodes {
+        id
+        createdAt
+        clientIp
+        currentTotalPriceSet { shopMoney { amount currencyCode } }
+        customAttributes { key value }
+        lineItems(first: 100) { nodes { quantity product { id } } }
+      }
+    }
+  }
+`
+
+/** `gid://shopify/Order/123` -> `123`. */
+export function numericOrderId(gid: string): string {
+  const tail = gid.split('/').pop() ?? gid
+  return tail
+}
+
+export interface ReconcileResult {
+  scanned:   number
+  gaps:      string[]
+  sent:      string[]
+  failed:    Array<{ orderId: string; error: string }>
+  tooOld:    string[]
+  dryRun:    boolean
+}
+
+/**
+ * Find paid orders with no resolved ledger row and send their Purchase events.
+ *
+ * This is the leg that works when the webhook does not, which as of 2026-07-31
+ * is the actual production state. It is safe to run on a short interval: the
+ * deterministic event id means a double send is a no-op on Meta's side, and the
+ * ledger keeps the Shopify query result from turning into repeated traffic.
+ */
+export async function reconcilePurchases(
+  opts: { sinceHours?: number; dryRun?: boolean } = {},
+): Promise<ReconcileResult> {
+  const sinceHours = opts.sinceHours ?? 26
+  const dryRun     = opts.dryRun ?? false
+  const out: ReconcileResult = { scanned: 0, gaps: [], sent: [], failed: [], tooOld: [], dryRun }
+
+  const sinceIso = new Date(Date.now() - sinceHours * 3600_000).toISOString()
+  const search   = `created_at:>='${sinceIso}' financial_status:paid status:any`
+
+  type AdminOrderNode = AdminOrdersResponse['orders']['nodes'][number]
+  let orders: AdminOrderNode[]
+  try {
+    const { adminGraphQL } = await import('./shopify.server')
+    const res = await adminGraphQL<AdminOrdersResponse>(RECONCILE_ORDERS_QUERY, { query: search })
+    orders = res?.orders?.nodes ?? []
+  } catch (err) {
+    console.error('[purchase-capi] reconcile: Shopify query failed', err)
+    return out
+  }
+
+  out.scanned = orders.length
+  if (orders.length === 0) return out
+
+  const ids = orders.map(o => numericOrderId(o.id))
+
+  // Only a RESOLVED row proves delivery. An unresolved row means a previous
+  // attempt did not land, so it stays a gap and gets retried here.
+  let resolved = new Set<string>()
+  try {
+    const rows = await db
+      .select({ orderId: metaCapiFailures.orderId, resolvedAt: metaCapiFailures.resolvedAt })
+      .from(metaCapiFailures)
+      .where(inArray(metaCapiFailures.orderId, ids))
+    resolved = new Set(rows.filter(r => r.resolvedAt != null).map(r => r.orderId))
+  } catch (err) {
+    // A ledger read failure must not cause a send storm. Bail rather than
+    // treat every order as a gap.
+    console.error('[purchase-capi] reconcile: ledger read failed, skipping run', err)
+    return out
+  }
+
+  for (const o of orders) {
+    const id = numericOrderId(o.id)
+    if (resolved.has(id)) continue
+
+    const attr = (key: string) => o.customAttributes.find(a => a.key === key)?.value || null
+    const order: PurchaseOrder = {
+      id,
+      totalPrice:  parseFloat(o.currentTotalPriceSet.shopMoney.amount) || 0,
+      currency:    o.currentTotalPriceSet.shopMoney.currencyCode || 'USD',
+      productIds:  o.lineItems.nodes.map(li => (li.product ? numericOrderId(li.product.id) : '')).filter(Boolean),
+      numItems:    o.lineItems.nodes.reduce((n, li) => n + (li.quantity || 0), 0),
+      fbp:         attr('_fbp'),
+      fbc:         attr('_fbc'),
+      clientIp:    o.clientIp,
+      userAgent:   null, // Not exposed on the Admin order object.
+      createdAtMs: Date.parse(o.createdAt),
+    }
+
+    out.gaps.push(id)
+
+    if (!isWithinMetaEventWindow(order)) {
+      out.tooOld.push(id)
+      continue
+    }
+    if (dryRun) continue
+
+    const result = await sendPurchaseWithLedger(order)
+    if (result.ok) out.sent.push(id)
+    else out.failed.push({ orderId: id, error: result.error ?? result.skipped ?? 'unknown' })
+  }
+
+  // A gap is not just something to fix, it is evidence the real-time path is
+  // broken. Say so loudly; the reconciler papering over it is what let this go
+  // unnoticed for months.
+  if (out.gaps.length > 0) {
+    console.warn(
+      `[purchase-capi] reconcile found ${out.gaps.length} unreported purchase(s): ${out.gaps.join(', ')}` +
+      ' — the order-created webhook is not delivering.',
+    )
+  }
+
+  return out
+}

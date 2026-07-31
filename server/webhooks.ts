@@ -1,7 +1,14 @@
 import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
-import { ga4PurchaseFailures, metaCapiFailures, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
+import { ga4PurchaseFailures, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
 import { eq, sql } from 'drizzle-orm'
+
+/**
+ * Ceiling on the pre-response conversion sends. Shopify gives a webhook 5s
+ * before it counts as failed and starts retrying; two Graph API POSTs are
+ * normally well under 300ms.
+ */
+const PURCHASE_SIGNAL_TIMEOUT_MS = 2500
 
 // ─── HMAC verification ────────────────────────────────────────────────────
 
@@ -42,31 +49,123 @@ interface ShopifyOrder {
   email: string
   total_price: string
   currency?: string
+  created_at?: string
   line_items: ShopifyLineItem[]
   note_attributes?: ShopifyNoteAttribute[]
   customer?: { id: number }
+  // Shopify records the checkout session's network context. Forwarding it to
+  // Meta costs nothing and no new data is collected: same shopper, same
+  // browser, and the Purchase event's action_source is already 'website'.
+  browser_ip?: string
+  client_details?: { user_agent?: string; browser_ip?: string } | null
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────
 
 /**
+ * The revenue-critical half of orders/create: tell Meta and GA4 a sale happened.
+ *
+ * This runs BEFORE the webhook responds, deliberately. It used to sit ~110
+ * lines deep inside the fire-and-forget enrichment work that starts after
+ * res.json(), which meant two independent ways to lose a conversion: any
+ * unguarded await above it aborted the whole function, and Vercel makes no
+ * promise that post-response work runs at all (there is no waitUntil here, and
+ * the deployment is fluid compute).
+ *
+ * Kept deliberately small and dependency-light so it comfortably fits inside
+ * Shopify's 5s webhook budget. Everything that can wait is in
+ * handleOrderCreated.
+ */
+async function handlePurchaseSignals(order: ShopifyOrder): Promise<void> {
+  // The two destinations are independent, so run them concurrently: serially
+  // they stack latency against the pre-response ceiling for no reason.
+  await Promise.allSettled([sendMetaPurchase(order), sendGa4Purchase_(order)])
+}
+
+async function sendMetaPurchase(order: ShopifyOrder): Promise<void> {
+  // Meta CAPI. Dedup is by a stable event_id derived from the order id, so a
+  // Shopify retry and the reconciliation sweep collapse into one conversion.
+  // The webhook has no browser consent state, so this is the PII-free path.
+  try {
+    const { fromWebhookOrder, sendPurchaseWithLedger } = await import('../app/lib/purchase-capi.server.js')
+    const result = await sendPurchaseWithLedger(fromWebhookOrder(order))
+    if (!result.ok) {
+      console.error('[webhook:order-created] Meta CAPI Purchase not delivered:', result.error ?? result.skipped)
+    }
+  } catch (err) {
+    console.error('[webhook:order-created] Meta CAPI Purchase block error:', err)
+  }
+}
+
+async function sendGa4Purchase_(order: ShopifyOrder): Promise<void> {
+  // GA4 Measurement Protocol. GA4 is the stack's analytics of record for
+  // strategy and ads decisions, but the client funnel ends at begin_checkout
+  // (checkout is on Shopify's domain), so the conversion is sent server-side
+  // alongside the CAPI event. GA4 dedupes ecommerce on transaction_id.
+  try {
+    const { sendGa4Purchase } = await import('../app/lib/ga4-mp.server.js')
+    const gaCid = order.note_attributes?.find(a => a.name === '_ga_cid')?.value || null
+    const lineItems = order.line_items ?? []
+    const gaEvent = {
+      transactionId: String(order.id),
+      value:         parseFloat(order.total_price) || 0,
+      currency:      order.currency || 'USD',
+      items: lineItems.map(li => ({
+        item_id:   li.product_id ? String(li.product_id) : (li.sku || String(li.variant_id ?? '')),
+        item_name: li.title,
+        price:     parseFloat(li.price) || 0,
+        quantity:  li.quantity || 0,
+      })),
+      clientId: gaCid,
+    }
+    const gaResult = await sendGa4Purchase(gaEvent)
+    if (!gaResult.ok && !gaResult.skipped) {
+      const { db } = await import('../app/lib/db.server.js')
+      await db.insert(ga4PurchaseFailures)
+        .values({ orderId: String(order.id), payload: gaEvent, attempts: 1, lastError: gaResult.error ?? 'unknown' })
+        .onConflictDoNothing({ target: ga4PurchaseFailures.orderId })
+      console.error('[webhook:order-created] GA4 purchase failed, queued for retry:', gaResult.error)
+    }
+  } catch (err) {
+    console.error('[webhook:order-created] GA4 purchase block error:', err)
+  }
+}
+
+/**
  * orders/create — Item 1 (Day-1 non-negotiable): write wholesale cost per order.
  * Also captures referral code.
+ *
+ * Best-effort enrichment. Runs after the response, so a failure here costs
+ * profit attribution and co-purchase data, never a conversion event.
  */
 async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
-  const { db } = await import('../app/lib/db.server.js')
-  const { getWholesaleCostBySKU, getHandleByProductId, shopifyAdmin } = await import('../app/lib/shopify.server.js')
+  // A module that fails to load is a deployment problem, not an order problem.
+  // Unguarded, these two lines aborted every downstream step silently.
+  let db: Awaited<typeof import('../app/lib/db.server.js')>['db']
+  let getWholesaleCostBySKU: Awaited<typeof import('../app/lib/shopify.server.js')>['getWholesaleCostBySKU']
+  let getHandleByProductId: Awaited<typeof import('../app/lib/shopify.server.js')>['getHandleByProductId']
+  let shopifyAdmin: Awaited<typeof import('../app/lib/shopify.server.js')>['shopifyAdmin']
+  try {
+    ;({ db } = await import('../app/lib/db.server.js'))
+    ;({ getWholesaleCostBySKU, getHandleByProductId, shopifyAdmin } = await import('../app/lib/shopify.server.js'))
+  } catch (err) {
+    console.error('[webhook:order-created] enrichment imports failed, skipping enrichment', err)
+    return
+  }
+
+  const orderLines = order.line_items ?? []
 
   // Resolve handles for each line item (used for copurchase rollup).
   const resolvedHandles: (string | null)[] = await Promise.all(
-    order.line_items.map(li =>
+    orderLines.map(li =>
       li.product_id ? getHandleByProductId(li.product_id).catch(() => null) : Promise.resolve(null),
     ),
   )
 
   // Per-line-item work is independent — parallelize to keep the webhook
-  // inside Shopify's retry budget on multi-item orders.
-  await Promise.all(order.line_items.map(async lineItem => {
+  // inside Shopify's retry budget on multi-item orders. allSettled, not all:
+  // one throwing line item must not take down the rest of the enrichment.
+  await Promise.allSettled(orderLines.map(async lineItem => {
     const cost   = await getWholesaleCostBySKU(lineItem.sku).catch(() => 0)
     const profit = parseFloat(lineItem.price) - cost
 
@@ -97,7 +196,7 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
 
   // Persist raw line items for analytics + copurchase rollups
   try {
-    const rows = order.line_items.map((li, i) => ({
+    const rows = orderLines.map((li, i) => ({
       shopifyOrderId:   String(order.id),
       shopifyProductId: li.product_id ? String(li.product_id) : '',
       handle:           resolvedHandles[i] ?? null,
@@ -150,96 +249,19 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
   // Capture ToS acceptance
   const tosVersion = order.note_attributes?.find(a => a.name === 'tos_version')?.value
   if (tosVersion && order.customer?.id) {
-    const { logTosAcceptance } = await import('../app/lib/consent.server.js')
-    // We don't have the original Request here; stub IP
-    const fakeRequest = new Request('https://xdipx.com')
-    await logTosAcceptance(fakeRequest, {
-      customerId: String(order.customer.id),
-      email:      order.email,
-      tosVersion,
-      method:     'checkout',
-    }).catch(() => {})
-  }
-
-  // ─── Meta CAPI Purchase event ─────────────────────────────────────────────
-  // Revenue-critical conversion signal. No browser pixel counterpart here (the
-  // shopper has left the storefront), so dedup is by a stable event_id derived
-  // from the order id (idempotent on Shopify webhook retries). The webhook has
-  // no browser consent state, so we send the PII-free path (no hashed email);
-  // value/currency/content_ids only. On failure we enqueue for the cron drain.
-  try {
-    const { sendCapiEvent } = await import('../app/lib/meta-capi.server.js')
-    const fbp = order.note_attributes?.find(a => a.name === '_fbp')?.value || null
-    const fbc = order.note_attributes?.find(a => a.name === '_fbc')?.value || null
-    const eventId  = `purchase_${order.id}`
-    const numItems = order.line_items.reduce((n, li) => n + (li.quantity || 0), 0)
-    const contentIds = order.line_items
-      .map(li => (li.product_id ? String(li.product_id) : ''))
-      .filter(Boolean)
-
-    const event = {
-      event_name:    'Purchase' as const,
-      event_id:      eventId,
-      event_time:    Math.floor(Date.now() / 1000),
-      action_source: 'website' as const,
-      user_data:     { fbp, fbc },
-      custom_data:   {
-        content_ids:  contentIds,
-        content_type: 'product' as const,
-        value:        parseFloat(order.total_price) || 0,
-        currency:     order.currency || 'USD',
-        num_items:    numItems,
-      },
+    try {
+      const { logTosAcceptance } = await import('../app/lib/consent.server.js')
+      // We don't have the original Request here; stub IP
+      const fakeRequest = new Request('https://xdipx.com')
+      await logTosAcceptance(fakeRequest, {
+        customerId: String(order.customer.id),
+        email:      order.email,
+        tosVersion,
+        method:     'checkout',
+      }).catch(() => {})
+    } catch (err) {
+      console.error('[webhook:order-created] ToS logging failed', err)
     }
-
-    // consentGranted: false → PII-free (no email) per the launch consent policy.
-    const result = await sendCapiEvent(event, { consentGranted: false })
-    if (!result.ok) {
-      await db.insert(metaCapiFailures)
-        .values({
-          orderId:   String(order.id),
-          eventId,
-          payload:   event,
-          attempts:  1,
-          lastError: result.error ?? 'unknown',
-        })
-        .onConflictDoNothing({ target: metaCapiFailures.orderId })
-      console.error('[webhook:order-created] Meta CAPI Purchase failed, queued for retry:', result.error)
-    }
-  } catch (err) {
-    console.error('[webhook:order-created] Meta CAPI Purchase block error:', err)
-  }
-
-  // ─── GA4 Measurement Protocol Purchase ─────────────────────────────────────
-  // GA4 is the stack's analytics of record for strategy/ads decisions, but the
-  // client funnel ends at begin_checkout (checkout is on Shopify's domain), so
-  // the conversion is sent server-side here alongside the CAPI event. GA4
-  // dedupes ecommerce on transaction_id, so this is idempotent on webhook
-  // retries. On failure we enqueue for the profit-summary cron drain.
-  try {
-    const { sendGa4Purchase } = await import('../app/lib/ga4-mp.server.js')
-    const gaCid = order.note_attributes?.find(a => a.name === '_ga_cid')?.value || null
-    const gaEvent = {
-      transactionId: String(order.id),
-      value:         parseFloat(order.total_price) || 0,
-      currency:      order.currency || 'USD',
-      items: order.line_items.map(li => ({
-        item_id:   li.product_id ? String(li.product_id) : (li.sku || String(li.variant_id ?? '')),
-        item_name: li.title,
-        price:     parseFloat(li.price) || 0,
-        quantity:  li.quantity || 0,
-      })),
-      clientId: gaCid,
-    }
-    const gaResult = await sendGa4Purchase(gaEvent)
-    if (!gaResult.ok && !gaResult.skipped) {
-      await db.insert(ga4PurchaseFailures)
-        .values({ orderId: String(order.id), payload: gaEvent, attempts: 1, lastError: gaResult.error ?? 'unknown' })
-        .onConflictDoNothing({ target: ga4PurchaseFailures.orderId })
-      console.error('[webhook:order-created] GA4 purchase failed, queued for retry:', gaResult.error)
-    }
-  } catch (err) {
-    console.error('[webhook:order-created] GA4 purchase block error:', err)
   }
 
   // ─── Klaviyo Placed Order ──────────────────────────────────────────────────
@@ -268,7 +290,7 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
         value:       parseFloat(order.total_price) || 0,
         currency:    order.currency || 'USD',
         ...(Object.keys(attribution).length > 0 ? { attribution } : {}),
-        items: order.line_items.map(li => ({
+        items: (order.line_items ?? []).map(li => ({
           productTitle: li.title,
           ...(li.variant_id ? { variantId: String(li.variant_id) } : {}),
           price:        parseFloat(li.price) || 0,
@@ -488,12 +510,31 @@ export function createWebhookRoutes() {
       return
     }
 
-    const order = JSON.parse((req.body as Buffer).toString()) as ShopifyOrder
+    let order: ShopifyOrder
+    try {
+      order = JSON.parse((req.body as Buffer).toString()) as ShopifyOrder
+    } catch (err) {
+      // An unparseable body used to throw inside an async Express handler,
+      // which writes no response at all and leaves Shopify to time out.
+      console.error('[webhook:order-created] unparseable body', err)
+      res.status(400).json({ error: 'Bad Request' })
+      return
+    }
 
-    // Respond immediately — Shopify expects < 5s
+    // Send the conversion signals BEFORE responding. Shopify's budget is 5s and
+    // this is two HTTP POSTs, so the ceiling is a guard against a pathological
+    // stall, not an expected path. If it does trip, the send keeps running and
+    // the reconciliation sweep catches the order within 15 minutes anyway.
+    await Promise.race([
+      handlePurchaseSignals(order).catch(err =>
+        console.error('[webhook:order-created] purchase signals', err),
+      ),
+      new Promise<void>(resolve => setTimeout(resolve, PURCHASE_SIGNAL_TIMEOUT_MS)),
+    ])
+
     res.json({ ok: true })
 
-    // Process async (fire and forget — errors logged, not bubbled)
+    // Enrichment is best-effort and explicitly allowed to be lost.
     handleOrderCreated(order).catch(err =>
       console.error('[webhook:order-created]', err),
     )
