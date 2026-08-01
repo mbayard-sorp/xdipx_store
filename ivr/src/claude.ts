@@ -26,8 +26,9 @@ const MODEL = 'claude-haiku-4-5-20251001'
 // Claude actually generates more.
 const MAX_TOKENS = 800
 // Single-turn flow can need: searchProducts -> getProductDetails ->
-// lookupReturningCustomer -> createDraftOrder -> final text. 4 was too tight
-// and Claude bailed before reaching createDraftOrder. 6 leaves headroom.
+// lookupReturningCustomer -> createDraftOrder -> final text, plus retries
+// with broader queries. Generous ceiling; the soft token budget and call
+// duration guards bound runaway loops before this does.
 const MAX_TOOL_HOPS = 20
 
 // Haiku sometimes narrates "sending it right over" without actually emitting
