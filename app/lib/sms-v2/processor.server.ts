@@ -19,7 +19,7 @@
  * The contract still matches processSmsMessage byte-for-byte on outputs
  * (ProcessSmsResult). v2's dark-launch path is byte-identical to v1.
  */
-import { processSmsMessage } from '~/lib/sms-processor.server'
+import { processSmsMessage, isComplianceKeyword, isOptedOut } from '~/lib/sms-processor.server'
 import { getOrCreateConversation, applyStateWrites } from './conversation.server'
 import { classifyIntent } from './intent-classifier.server'
 import { withTurnLogging, withTurnLoggingForStageResponse } from './turn-logger.server'
@@ -44,6 +44,25 @@ export async function processSmsMessageV2(
   input: Parameters<typeof processSmsMessage>[0],
 ): Promise<Awaited<ReturnType<typeof processSmsMessage>>> {
   const phone = input.from.trim()
+
+  // --- Step 0: carrier compliance short-circuit ---
+  // STOP/START/HELP keywords and opted-out numbers are handled by v1's
+  // compliance branches BEFORE any stage dispatch. Every v2 stage now has a
+  // handler, so without this check a STOP would be routed to a sales-stage
+  // handler instead of recording the opt-out. Compliance must not depend on
+  // conversation state.
+  try {
+    if (isComplianceKeyword(input.body) || (await isOptedOut(phone))) {
+      return withTurnLogging(input, processSmsMessage, 'v2', {
+        stageIn: 'COMPLIANCE',
+        stageOut: 'COMPLIANCE',
+      })
+    }
+  } catch (err) {
+    // Fail open into v1, which re-runs its own compliance checks.
+    console.error('[processor-v2] compliance short-circuit failed — falling back to v1', err)
+    return processSmsMessage(input)
+  }
 
   // --- Step 1: Get or create conversation (with rotation logic) ---
   let conversation: Awaited<ReturnType<typeof getOrCreateConversation>>

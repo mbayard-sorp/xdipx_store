@@ -11,6 +11,7 @@ import { normalizeTag } from './tag-normalize'
 import { applyMapRule, type DisplayPrice } from './ai-agent/tools.server'
 import { getProductsByHandles, searchProducts as shopifySearch } from './shopify.server'
 import { normalizeForTTS } from './tts-normalize'
+import { cached } from './kv.server'
 import type { Product } from '~/types'
 
 // ─── Sanity client (read-only, CDN) ──────────────────────────────────────────
@@ -24,6 +25,31 @@ function getSanityClient() {
   const token = process.env['SANITY_API_TOKEN']
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return createClient({ projectId, dataset, apiVersion, useCdn: true, token } as any)
+}
+
+// ─── Cached GROQ fetch ───────────────────────────────────────────────────────
+// Voice and SMS turns hit this module on every search hop, and on a phone
+// call every extra round-trip is audible dead air. Candidate pools change on
+// catalog publish cadence (minutes-to-hours), not per turn, so a short TTL is
+// safe: price/stock freshness comes from the Shopify hydration layer, which
+// has its own cache. Randomized ranking runs on top of the cached pool, so
+// consecutive calls still vary their pitches.
+const GROQ_CACHE_TTL_SECONDS = 180
+
+function hashKey(s: string): string {
+  // djb2 — tiny, stable, good enough for cache-key dedup (not security).
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
+async function cachedGroqFetch<T>(
+  client: NonNullable<ReturnType<typeof getSanityClient>>,
+  groq: string,
+  params: Record<string, unknown>,
+): Promise<T> {
+  const key = `ivr:groq:v1:${hashKey(`${groq}|${JSON.stringify(params)}`)}`
+  return cached(key, GROQ_CACHE_TTL_SECONDS, () => client.fetch<T>(groq, params) as Promise<T>)
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -277,9 +303,9 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
       tagline
     }`
 
-    const sanityResults = await client.fetch<
+    const sanityResults = await cachedGroqFetch<
       { handle: string; title: string; category: string | null; tagline: string | null }[]
-    >(groq, groqParams)
+    >(client, groq, groqParams)
 
     if (!sanityResults || sanityResults.length === 0) {
       if (strictCategory) {
@@ -289,7 +315,7 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
           // Re-query with only base conditions to check if unfiltered results exist
           const baseFilter = baseConditions.join(' && ')
           const baseGroq = `*[${baseFilter}] [0...1] { "handle": shopifyHandle }`
-          const baseCheck = await client.fetch<{ handle: string }[]>(baseGroq, groqParams)
+          const baseCheck = await cachedGroqFetch<{ handle: string }[]>(client, baseGroq, groqParams)
           const reason = baseCheck.length > 0 ? 'filtered-to-zero' : 'no-base-results'
           return { cards: [], reason }
         }
@@ -495,9 +521,9 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
       tagline
     }`
 
-    const sanityResults = await client.fetch<
+    const sanityResults = await cachedGroqFetch<
       { handle: string; title: string; category: string | null; tagline: string | null }[]
-    >(groq, groqParams)
+    >(client, groq, groqParams)
 
     if (!sanityResults || sanityResults.length === 0) {
       // Determine whether this is "filtered-to-zero" or truly "no base results".
@@ -513,7 +539,7 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
         )
         const baseFilter = baseConditions.join(' && ')
         const baseGroq = `*[${baseFilter}] [0...1] { "handle": shopifyHandle }`
-        const baseCheck = await client.fetch<{ handle: string }[]>(baseGroq, groqParams)
+        const baseCheck = await cachedGroqFetch<{ handle: string }[]>(client, baseGroq, groqParams)
         const reason = baseCheck.length > 0 ? 'filtered-to-zero' : 'no-base-results'
         return { cards: [], reason }
       }

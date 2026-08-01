@@ -46,9 +46,9 @@ import { executePostCheckoutStage } from './stages/post-checkout.server'
  * All other pairs: return currentStage unchanged.
  *
  * Note: STOP_HELP_START and OPT_OUT-shaped intents are NOT pre-transitioned
- * here. The Twilio webhook catches the carrier-required STOP/HELP/START
- * keywords upstream of stage dispatch and routes them through v1's
- * processSmsMessage, which is the carrier-required compliance path. We
+ * here. processSmsMessageV2 short-circuits carrier-required STOP/HELP/START
+ * keywords (and opted-out numbers) to v1's processSmsMessage BEFORE stage
+ * dispatch — see the Step 0 compliance block in processor.server.ts. We
  * deliberately leave that on v1 — it's well-tested and shouldn't drift.
  */
 export function pickEffectiveStage(currentStage: Stage, intent: IntentResult): Stage {
