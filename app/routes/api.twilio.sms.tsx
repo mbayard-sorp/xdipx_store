@@ -12,7 +12,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
-import { processSmsMessage, isComplianceKeyword, type SmsSegment } from '~/lib/sms-processor.server'
+import { processSmsMessage, isComplianceKeyword, isOptedOut, type SmsSegment } from '~/lib/sms-processor.server'
 import { getKillSwitch } from '~/lib/team.server'
 import { VALVE_KEYS } from '~/lib/team-keys'
 import { processSmsMessageV2 } from '~/lib/sms-v2/processor.server'
@@ -40,6 +40,12 @@ function repliesTwiml(segments: SmsSegment[]): string {
 
 const EMPTY_TWIML = `<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>`
 
+// Static (never AI-generated) holding reply for the sms_agent_enabled-off
+// state. Honest about the channel being down, points at a human, no promises
+// about timing, no em-dashes. Emma-empathy-reviewed 2026-08-01.
+const AGENT_OFF_HOLDING_REPLY =
+  "Hey, this is xdipx. We can't text back right now, but you can reach us at hello@xdipx.com or xdipx.com. Thanks for your patience."
+
 export async function action({ request }: ActionFunctionArgs) {
   try {
     return await handleSmsAction(request)
@@ -64,18 +70,22 @@ async function handleSmsAction(request: Request): Promise<Response> {
   const input = { from, body, twilioSid, simulated: false }
 
   // Kill switch (076): when sms_agent_enabled is 'false' the conversational
-  // agent goes silent, but carrier-required STOP/HELP/START keywords still
-  // route through v1's compliance path — an off switch must never make an
-  // opt-out request go unrecorded. Fail-open read: missing row or slow DB
-  // keeps the channel live.
+  // agent is off, but carrier-required STOP/HELP/START keywords still route
+  // through v1's compliance path — an off switch must never make an opt-out
+  // request go unrecorded. Everyone else gets one static holding reply
+  // (emma-empathy-reviewer: dead air on a support channel reads as being
+  // ignored or judged; a brief honest pointer to a human closes the loop).
+  // Opted-out numbers stay silent — they revoked consent to receive texts.
+  // Fail-open read: missing row or slow DB keeps the channel live.
   if (!(await getKillSwitch(VALVE_KEYS.smsAgentEnabled))) {
     if (isComplianceKeyword(body)) {
       const complianceResult = await withTurnLogging(input, processSmsMessage, 'v1')
       if (complianceResult.replies.length === 0) return twiml(EMPTY_TWIML)
       return twiml(repliesTwiml(complianceResult.replies))
     }
-    console.warn(`[sms] sms_agent_enabled=false — silent for from=${from}`)
-    return twiml(EMPTY_TWIML)
+    if (await isOptedOut(from)) return twiml(EMPTY_TWIML)
+    console.warn(`[sms] sms_agent_enabled=false — holding reply for from=${from}`)
+    return twiml(repliesTwiml([{ body: AGENT_OFF_HOLDING_REPLY }]))
   }
 
   // v2 owns its own turn-logging (per-stage observability is built into
