@@ -11,6 +11,8 @@ import {
   reserveSessionBudget,
 } from '~/lib/emma-budget.server'
 import { pickWebPipelineVersion } from '~/lib/sms-v2/web-pipeline-flag.server'
+import { getKillSwitch } from '~/lib/team.server'
+import { VALVE_KEYS } from '~/lib/team-keys'
 import { processWebMessageV2 } from '~/lib/sms-v2/adapters/web.server'
 import { kvGet, kvSet } from '~/lib/kv.server'
 
@@ -75,6 +77,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // 4. Global daily token ceiling — friendly nap response, no 5xx.
   if (!(await isWithinDailyCeiling())) {
+    return Response.json({ reply: NAP_REPLY, products: [], history: [] })
+  }
+
+  // 4.5. Owner kill switch (076): chat_enabled='false' in pipeline_settings
+  // turns the widget's replies off instantly, no redeploy. Fail-open read —
+  // a missing row or slow DB keeps chat live. Same friendly copy as the
+  // budget nap; never a 5xx.
+  if (!(await getKillSwitch(VALVE_KEYS.chatEnabled))) {
     return Response.json({ reply: NAP_REPLY, products: [], history: [] })
   }
 
