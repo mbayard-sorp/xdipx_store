@@ -82,7 +82,10 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
       properties: {
         query: { type: 'string', description: "Short search words. Prefer 1–2 words (e.g. 'wand', 'lube', 'couple kit'). Don't paste the caller's full sentence." },
         limit: { type: 'number', description: '1–5, default 3. Keep low on phone — you can only say a few aloud.' },
-        collection: { type: 'string', description: 'Collection handle to filter by if the caller mentioned one (e.g. "vibrators", "lubricants", "bondage"). Use the handle from listCollections.' },
+        category: { type: 'string', enum: ['for-him', 'for-her', 'couples'], description: 'Audience filter, only when the caller said who it is for.' },
+        productTypeDial: { type: 'string', enum: ['vibrator', 'dildo', 'anal', 'bondage', 'cock-ring', 'stroker', 'couples', 'harness', 'extender', 'pump', 'lube', 'massage', 'enhancer', 'wear', 'condom', 'wellness', 'novelty', 'book-media', 'sex-machine'], description: 'Filter to one product type when the caller clearly named it. A wand is productTypeDial vibrator + productSubtypeDial wand; a plug is anal + plug.' },
+        productSubtypeDial: { type: 'string', description: "Subtype within the type (e.g. 'wand', 'plug', 'water-based'). Only applied when productTypeDial is also set." },
+        mattersTags: { type: 'array', items: { type: 'string' }, description: "Preference tags the caller actually said, e.g. 'quiet', 'waterproof', 'beginner-friendly'." },
         priceMax: { type: 'number', description: 'Max price in dollars if the caller gave a budget.' },
       },
       required: ['query'],
@@ -100,7 +103,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
         experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Experience level if the caller mentioned it.' },
         useCase: { type: 'array', items: { type: 'string', enum: ['solo', 'couples', 'date-night', 'gift', 'travel'] }, description: 'Use-case tags.' },
         features: { type: 'array', items: { type: 'string', enum: ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] }, description: 'Feature tags the caller asked about.' },
-        collection: { type: 'string', description: 'Collection handle to narrow results. Use the handle from listCollections.' },
+        category: { type: 'string', enum: ['for-him', 'for-her', 'couples'], description: 'Audience filter, only when the caller said who it is for.' },
         priceMax: { type: 'number', description: 'Max price in dollars.' },
         limit: { type: 'number', description: '1–5, default 3. Keep low on phone.' },
       },
@@ -139,6 +142,21 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     description:
       "List the browsable collections on xdipx. Use when the caller asks what we sell, what categories we have, or when you want to suggest they browse a specific collection.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'findCollection',
+    description:
+      "Find the best-matching collection (category or brand) for what the caller asked about, and get a few preview products from it. Use when the caller names a broad category ('lingerie', 'bondage', 'anal') or a brand ('Lelo', 'Lovense'). Always prefer this over saying we don't carry something — the store carries lingerie, apparel, bondage, restraints, and every major brand.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: "Category or brand words from the caller, e.g. 'lingerie', 'Lelo'." },
+        limit: { type: 'number', description: 'Max collections to return. 1–3. Default 2.' },
+        previewCount: { type: 'number', description: 'Preview products per collection. 1–4. Default 3.' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'lookupReturningCustomer',
@@ -239,6 +257,7 @@ export async function runTool(
     case 'recommendSimilar':
     case 'getProductDetails':
     case 'listCollections':
+    case 'findCollection':
     case 'lookupReturningCustomer':
     case 'createDraftOrder': {
       const baseInput = (_input ?? {}) as Record<string, unknown>

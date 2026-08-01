@@ -50,12 +50,12 @@ export const DISCOVERY_AGENT_TOOLS: Anthropic.Tool[] = [
         },
         category: {
           type: 'string',
-          description: "Optional product-type filter — one of 'vibrator', 'lube', 'plug', 'wand', 'dildo', 'wear', 'anal'. Maps to the productTypeDial in the catalog. Only set this when you're sure of the category — passing the wrong one filters out everything.",
+          description: "Optional product-type filter — one of 'vibrator', 'lube', 'plug', 'wand', 'dildo', 'wear', 'anal'. Mapped to the catalog's productTypeDial (+ subtype where needed, e.g. wand, plug). Only set this when you're sure of the category — passing the wrong one filters out everything.",
         },
         matters: {
           type: 'array',
           items: { type: 'string' },
-          description: "Optional preference tags such as 'quiet', 'beginner-friendly', 'waterproof', 'travel-ready'. Pass through what the customer actually said — don't invent tags they didn't mention.",
+          description: "Optional preference tags such as 'quiet', 'beginner-friendly', 'waterproof', 'travel-ready'. Matched against the product's enriched mattersTags. Pass through what the customer actually said — don't invent tags they didn't mention.",
         },
         priceMax: {
           type: 'number',
@@ -244,6 +244,41 @@ function audienceToCategory(audience: string | undefined): string | undefined {
 }
 
 /**
+ * Map the model-facing category vocabulary onto real productTypeDial (+
+ * subtype) values. 'wand' and 'plug' are not dial values — a wand is a
+ * vibrator subtype and a plug is an anal subtype — so passing them straight
+ * through as productTypeDial filters every search to zero.
+ */
+const CATEGORY_TO_DIAL: Record<string, { productTypeDial: string; productSubtypeDial?: string }> = {
+  vibrator: { productTypeDial: 'vibrator' },
+  lube: { productTypeDial: 'lube' },
+  dildo: { productTypeDial: 'dildo' },
+  wear: { productTypeDial: 'wear' },
+  anal: { productTypeDial: 'anal' },
+  wand: { productTypeDial: 'vibrator', productSubtypeDial: 'wand' },
+  plug: { productTypeDial: 'anal', productSubtypeDial: 'plug' },
+}
+
+export function categoryToDial(
+  category: string | undefined,
+): { productTypeDial: string; productSubtypeDial?: string } | undefined {
+  if (!category) return undefined
+  const key = category.trim().toLowerCase()
+  const mapped = CATEGORY_TO_DIAL[key]
+  if (mapped) return mapped
+  // Unknown value from the model: pass through as a dial only if it is a real
+  // dial value; otherwise drop the filter rather than guaranteeing zero results.
+  return VALID_DIALS.has(key) ? { productTypeDial: key } : undefined
+}
+
+// Full productTypeDial vocabulary — studio/schemas/productPage.js.
+const VALID_DIALS = new Set([
+  'vibrator', 'dildo', 'anal', 'bondage', 'cock-ring', 'stroker', 'couples',
+  'harness', 'extender', 'pump', 'lube', 'massage', 'enhancer', 'wear',
+  'condom', 'wellness', 'novelty', 'book-media', 'sex-machine',
+])
+
+/**
  * Map an IvrProductCard into the JSON-friendly shape the agent reads. Keep
  * fields tight — the model burns tokens on whatever we hand it.
  */
@@ -293,12 +328,13 @@ export async function runDiscoveryTool(
         ? priceMaxRaw
         : undefined
 
+      const dialFilter = categoryToDial(categoryRaw)
       const opts: Parameters<typeof searchForIvrWithDiagnostics>[0] = {
         query,
         limit: 3,
         ...(audienceToCategory(audienceRaw) !== undefined && { category: audienceToCategory(audienceRaw) }),
-        ...(categoryRaw && categoryRaw.length > 0 && { productTypeDial: categoryRaw }),
-        ...(mattersRaw && mattersRaw.length > 0 && { tags: mattersRaw }),
+        ...(dialFilter ?? {}),
+        ...(mattersRaw && mattersRaw.length > 0 && { mattersTags: mattersRaw }),
         ...(priceMax !== undefined && { priceMax }),
       }
 
