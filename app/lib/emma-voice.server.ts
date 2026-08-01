@@ -16,8 +16,8 @@
  *
  * Non-Node-fs consumers (evals harness, the standalone `ivr/` package,
  * one-off `tsx` scripts run from a different cwd) have their own copy or fs
- * read — see the header comments in `evals/judge/prompt.ts`,
- * `ivr/src/emma-note.ts`, and `scripts/enrich-ivr-tags.ts`.
+ * read — see the header comments in `evals/judge/prompt.ts` and
+ * `ivr/src/emma-note.ts`.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

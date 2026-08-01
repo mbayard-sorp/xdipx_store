@@ -52,7 +52,7 @@ const VOICEMAIL_INTROS = {
   anonymous:
     "Hey, you've reached ex-dip-ex. I can't pick up live calls from a blocked number, but leave a message with a callback number after the beep and we'll get right back to you.",
   unavailable:
-    "Hey, you've reached ex-dip-ex. Our live line is having a moment, but leave a message after the beep and we'll get back to you as soon as we can.",
+    "Hey, you've reached ex-dip-ex. We can't take live calls right now, but leave a message after the beep and we'll get back to you as soon as we can.",
 } as const
 
 function voicemailTwiml(
