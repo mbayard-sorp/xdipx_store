@@ -79,14 +79,17 @@ export interface StorefrontData {
    */
   emmaHero: EmmaHeroSettings | null
   /**
-   * Full-size Meet Emma portrait (Nº 04). The canonical photorealistic editor
-   * photo from `singleton.editor.photo` (`getEditor().photoUrl`), rendered at the
-   * 420px 4/5 slot. Null on a Sanity outage/cold leg, in which case MeetEmma
-   * falls back to the bundled `/emma.webp` (the illustrated portrait). This
-   * replaces the previously hardcoded `/emma.webp` src so the section shows the
-   * same real portrait `/about` already uses instead of the Compass-era
-   * illustration. `emmaPhotoAlt` comes from `photo.alt` (content-team owned,
-   * currently null → the component supplies a default).
+   * Meet Emma portrait (Nº 04). Prefers the additive homepage-only situational
+   * portrait `singleton.editor.homepagePhoto` (`getEditor().homepagePhotoUrl`)
+   * and falls back to the canonical editor photo `singleton.editor.photo`
+   * (`getEditor().photoUrl`), the same asset `/about` uses. Null on a Sanity
+   * outage/cold leg, in which case MeetEmma falls back to the bundled
+   * `/emma.webp` (the illustrated portrait). The homepagePhoto preference is
+   * scoped to this surface only: /about and the video pipeline identity anchor
+   * (getEditorPhotoUrl) stay on `photo`, so a homepage-portrait swap never
+   * re-portraits /about or the video frames. `emmaPhotoAlt` prefers
+   * `homepagePhoto.alt` then `photo.alt` (content-team owned, may be null → the
+   * component supplies a default).
    */
   emmaPhotoUrl: string | null
   emmaPhotoAlt: string | null
@@ -391,8 +394,13 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     total: railsResult.total,
     pinnedProduct,
     emmaHero,
-    emmaPhotoUrl: editor?.photoUrl ?? null,
-    emmaPhotoAlt: editor?.photoAlt ?? null,
+    // Nº 04 prefers the additive homepage-only situational portrait
+    // (`editor.homepagePhoto`) and falls back to the canonical `photo`. Only
+    // this homepage surface reads homepagePhoto; /about and the video
+    // pipeline's identity anchor (getEditorPhotoUrl) stay on `photo`, so a
+    // homepage-portrait swap never re-portraits /about or the video frames.
+    emmaPhotoUrl: editor?.homepagePhotoUrl ?? editor?.photoUrl ?? null,
+    emmaPhotoAlt: editor?.homepagePhotoAlt ?? editor?.photoAlt ?? null,
     contentBlocks, // resolved above — team-managed Sanity surface, lean/slimmed for variant b
     notebookPosts: notebook.posts,
     sensationMap,
