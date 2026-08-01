@@ -7,6 +7,7 @@
  */
 import { createClient } from '@sanity/client'
 import { buildQueryPatterns, fieldMatchAny } from './search.server'
+import { normalizeTag } from './tag-normalize'
 import { applyMapRule, type DisplayPrice } from './ai-agent/tools.server'
 import { getProductsByHandles, searchProducts as shopifySearch } from './shopify.server'
 import { normalizeForTTS } from './tts-normalize'
@@ -49,7 +50,13 @@ export interface IvrSearchOpts {
   category?: string | undefined
   priceMax?: number | undefined
   tags?: string[] | undefined
-  /** Filter to a specific productTypeDial value (e.g. 'vibrator', 'wear', 'plug'). */
+  /**
+   * Preference tags matched against the enriched `mattersTags` field (slugified
+   * via normalizeTag before querying). Distinct from `tags`, which matches the
+   * raw Nalpac editorial categories.
+   */
+  mattersTags?: string[] | undefined
+  /** Filter to a specific productTypeDial value (e.g. 'vibrator', 'wear', 'anal'). */
   productTypeDial?: string | undefined
   /** Filter to a specific productSubtypeDial value. Only applied when productTypeDial is also set. */
   productSubtypeDial?: string | undefined
@@ -166,7 +173,7 @@ const STRICT_CATEGORY_TERMS = new Set([
  * with a looser filter.
  */
 export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<SearchDiagnostics> {
-  const { query, limit = 3, category, priceMax, tags, productTypeDial, productSubtypeDial } = opts
+  const { query, limit = 3, category, priceMax, tags, mattersTags, productTypeDial, productSubtypeDial } = opts
   const client = getSanityClient()
 
   if (!client) {
@@ -185,7 +192,9 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
 
   // Track whether any extra filters beyond the base keyword are active so we
   // can distinguish "filtered-to-zero" from "no-base-results" below.
-  const hasExtraFilters = Boolean(category || priceMax != null || (tags && tags.length > 0) || productTypeDial)
+  const hasExtraFilters = Boolean(
+    category || priceMax != null || (tags && tags.length > 0) || (mattersTags && mattersTags.length > 0) || productTypeDial,
+  )
 
   try {
     const patterns = buildQueryPatterns(query)
@@ -199,6 +208,7 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
     const baseConditions: string[] = [
       '_type == "productPage"',
       'archived != true',
+      'hiddenUntilLive != true',
     ]
 
     const titleMatch = fieldMatchAny('title', paramNames)
@@ -228,6 +238,17 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
       for (let i = 0; i < tags.length; i++) {
         filterConditions.push(`$tag${i} in tags`)
         groqParams[`tag${i}`] = tags[i]
+      }
+    }
+    if (mattersTags && mattersTags.length > 0) {
+      // OR across preference tags: a product matching any stated preference
+      // stays in the pool. AND-ing here starves results — un-enriched products
+      // have empty mattersTags and preferences are soft signals, not hard specs.
+      const slugged = mattersTags.map((t) => normalizeTag(t)).filter(Boolean)
+      if (slugged.length > 0) {
+        const orClauses = slugged.map((_, i) => `$mt${i} in mattersTags`)
+        filterConditions.push(`(${orClauses.join(' || ')})`)
+        slugged.forEach((t, i) => { groqParams[`mt${i}`] = t })
       }
     }
     if (productTypeDial) {
@@ -403,6 +424,7 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
     const conditions: string[] = [
       '_type == "productPage"',
       'archived != true',
+      'hiddenUntilLive != true',
     ]
     const groqParams: Record<string, unknown> = {}
     const boostClauses: string[] = []

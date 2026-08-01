@@ -82,6 +82,9 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
         limit: { type: 'number', description: 'Max results to return. 1–5. Default 5.' },
         category: { type: 'string', enum: ['for-him', 'for-her', 'couples'], description: 'Filter by audience tag. Multi-select on the doc — this filter matches any product that has the given tag among its category array.' },
         priceMax: { type: 'number', description: 'Max price in dollars.' },
+        productTypeDial: { type: 'string', enum: ['vibrator', 'dildo', 'anal', 'bondage', 'cock-ring', 'stroker', 'couples', 'harness', 'extender', 'pump', 'lube', 'massage', 'enhancer', 'wear', 'condom', 'wellness', 'novelty', 'book-media', 'sex-machine'], description: 'Filter to one product type. Only set when the user clearly named a type — the wrong value filters out everything.' },
+        productSubtypeDial: { type: 'string', description: "Subtype within the productTypeDial (e.g. 'wand' under vibrator, 'plug' under anal, 'water-based' under lube). Only applied when productTypeDial is also set." },
+        mattersTags: { type: 'array', items: { type: 'string' }, description: "Preference tags the user actually stated, e.g. 'quiet', 'waterproof', 'beginner-friendly'. Matched against enriched product tags." },
       },
       required: ['query'],
       additionalProperties: false,
@@ -344,7 +347,20 @@ export async function runQaTool(
       if (!query) return { ok: false, error: 'empty query' }
       const category = input['category'] ? String(input['category']).trim() : undefined
       const priceMax = input['priceMax'] != null ? Number(input['priceMax']) : undefined
-      const cards = await searchForIvr({ query, limit, category, priceMax })
+      const productTypeDial = input['productTypeDial'] ? String(input['productTypeDial']).trim() : undefined
+      const productSubtypeDial = input['productSubtypeDial'] ? String(input['productSubtypeDial']).trim() : undefined
+      const mattersTags = Array.isArray(input['mattersTags'])
+        ? (input['mattersTags'] as unknown[]).filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        : undefined
+      const cards = await searchForIvr({
+        query,
+        limit,
+        category,
+        priceMax,
+        productTypeDial,
+        ...(productTypeDial && productSubtypeDial ? { productSubtypeDial } : {}),
+        ...(mattersTags && mattersTags.length > 0 ? { mattersTags } : {}),
+      })
       return { ok: true, data: { query, results: cards } }
     }
 

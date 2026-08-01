@@ -361,9 +361,11 @@ export async function searchAll(params: {
   }
 
   if (experience.length > 0) {
-    // Any selected experience level matches (OR)
-    const expConditions = experience.map((_, i) => `ivrExperience == $exp${i}`).join(' || ')
-    experienceClauses.push(`(${expConditions})`)
+    // Any selected experience level matches (OR). ivrExperience is a string[]
+    // post-Phase-2; an empty array means "no level constraint" and matches
+    // every filter (same semantics as ivr-search.server.ts).
+    const expConditions = experience.map((_, i) => `$exp${i} in ivrExperience`).join(' || ')
+    experienceClauses.push(`(count(ivrExperience) == 0 || ${expConditions})`)
     experience.forEach((e, i) => { groqParams[`exp${i}`] = e })
   }
 
@@ -606,7 +608,7 @@ async function computeFacets(
       tagRows: { tags: string[] | null }[]
       vendorRows: { vendor: string | null }[]
       featureRows: { ivrFeatures: string[] | null }[]
-      experienceRows: { ivrExperience: string | null }[]
+      experienceRows: { ivrExperience: string[] | null }[]
       priceRows: { price: number | null }[]
     }
     const tagCounts: Record<string, number> = {}
@@ -642,7 +644,9 @@ async function computeFacets(
       for (const f of seen) featureCounts[f] = (featureCounts[f] ?? 0) + 1
     }
     for (const r of combined.experienceRows) {
-      if (r.ivrExperience) experienceCounts[r.ivrExperience] = (experienceCounts[r.ivrExperience] ?? 0) + 1
+      if (!r.ivrExperience) continue
+      const seen = new Set(r.ivrExperience)
+      for (const e of seen) experienceCounts[e] = (experienceCounts[e] ?? 0) + 1
     }
     for (const r of combined.priceRows) {
       const p = r.price ?? 0
@@ -738,11 +742,11 @@ export async function predictiveSearchUnified(query: string): Promise<Predictive
       pages: { title: string; slug: string }[]
       blogPosts: { title: string; slug: string }[]
     }>(`{
-      "products": *[_type == "productPage" && ${productMatchAny}] | score(${productBoosts}) [0...6] {
+      "products": *[_type == "productPage" && archived != true && hiddenUntilLive != true && ${productMatchAny}] | score(${productBoosts}) [0...6] {
         "handle": shopifyHandle, title, previewImageUrl, vendor, category
       },
-      "totalProducts": count(*[_type == "productPage" && ${productFullMatchAny}]),
-      "categoryRows": *[_type == "productPage" && ${productFullMatchAny} && count(category) > 0]{ category },
+      "totalProducts": count(*[_type == "productPage" && archived != true && hiddenUntilLive != true && ${productFullMatchAny}]),
+      "categoryRows": *[_type == "productPage" && archived != true && hiddenUntilLive != true && ${productFullMatchAny} && count(category) > 0]{ category },
       "pages": *[_type == "page" && (${anyTitle} || ${anySeoTitle})] [0...3] {
         title, "slug": slug.current
       },
