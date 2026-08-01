@@ -131,14 +131,10 @@ function num(s: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+// Legacy *_MS env fallback lives at the call sites in getIvrConfig (a missing
+// DB row falls back to legacyDurationEnv). This function only converts an
+// admin-entered minutes value.
 function minutesToMs(s: string, key: IvrConfigKey): number {
-  // If the legacy *_MS env var is set and there's no DB override, prefer it
-  // so existing deploys don't change behavior at rollout.
-  const legacy = legacyDurationEnv(key)
-  if (legacy != null && !ENV_OVERRIDES[key]) {
-    // Only fall back to legacy when the resolved value equals the default
-    // (i.e., neither DB nor a new env override was provided).
-  }
   const minutes = Number(s)
   if (!Number.isFinite(minutes)) return Number(IVR_CONFIG_DEFAULTS[key]) * 60_000
   return Math.round(minutes * 60_000)

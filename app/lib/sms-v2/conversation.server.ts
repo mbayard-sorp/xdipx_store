@@ -243,7 +243,7 @@ export async function getOrCreateConversation(
     }
     stage = 'DISCOVERY'
     console.info(
-      `[conversation] 6h stage TTL: ${row.stage} → DISCOVERY for phone=${phone} intent=${newIntent}`,
+      `[conversation] stage TTL (24h + foreign intent): ${row.stage} → DISCOVERY for phone=${phone} intent=${newIntent}`,
     )
   }
 
