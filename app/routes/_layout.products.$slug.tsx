@@ -62,7 +62,7 @@ import { VariantSelector, resolveVariant } from '~/components/store/VariantSelec
 import { CircleOptionSelector } from '~/components/store/CircleOptionSelector'
 import { ProductSummaryGrid } from '~/components/store/ProductSummaryGrid'
 import { getSwatchMap } from '~/lib/swatches.server'
-// import { StockIndicator } from '~/components/store/StockIndicator'  // hidden — restore with stock indicator block
+import { StockIndicator } from '~/components/store/StockIndicator'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
 import { SubscriptionSelector } from '~/components/store/SubscriptionSelector'
 import { getSubscriptionPrice, getBestSubscriptionOffer } from '~/lib/selling-plan'
@@ -748,7 +748,18 @@ function ProductPage() {
     return `Pick a ${missing.join(' and ')}`
   })()
   const inStock  = isDigital ? true : (selectedVariant?.availableForSale ?? (multiVariant ? false : deal.qty > 0))
-  void (selectedVariant?.quantityAvailable ?? deal.qty)  // qty kept for hidden StockIndicator restore
+  // Stock count for the StockIndicator trust signal. Prefer the selected
+  // variant's real count over the stale deal-level qty on multi-variant
+  // products; fall back to deal.qty only when no variant is resolved yet.
+  const selectedQty = selectedVariant?.quantityAvailable ?? deal.qty
+  // Drive the indicator off the SAME purchasability signal as the waitlist
+  // path below, so the label can never contradict the CTA: an out-of-stock
+  // variant reads "Sold out" (and the waitlist button wins below), and an
+  // in-stock variant never reads "Sold out". A still-sellable variant with a
+  // 0/untracked count reads "In stock", never a fabricated "Almost gone"
+  // (the voice charter bans scarcity theater; a real thin count is a fair
+  // trust signal). Values above 10 render as "In stock".
+  const stockIndicatorQty = inStock ? (selectedQty > 0 ? selectedQty : 11) : 0
   const discount = deal.msrp > 0 && deal.msrp > price
     ? Math.round(((deal.msrp - price) / deal.msrp) * 100)
     : 0
@@ -921,9 +932,9 @@ function ProductPage() {
             {needsSelection && (
               <span className="text-[13px] text-muted italic">Pick a size to see availability</span>
             )}
-            {/* Stock indicator hidden — uncomment to restore.
-            {!needsSelection && <StockIndicator qty={qty} isDigital={isDigital} />}
-            */}
+            {!needsSelection && (
+              <StockIndicator qty={stockIndicatorQty} isDigital={isDigital} />
+            )}
           </div>
 
           {/* Subscription teaser */}
