@@ -10,7 +10,7 @@
  * All keys are <= varchar(50) (pipeline_settings.key constraint).
  */
 
-export const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content', 'product', 'video'] as const
+export const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content', 'product', 'video', 'support'] as const
 export type TeamId = (typeof TEAM_IDS)[number]
 
 export function isTeamId(v: unknown): v is TeamId {
@@ -77,6 +77,7 @@ export const TEAM_DEFAULTS: Record<TeamId, { dailyCents: number; maxRunsPerDay: 
   content:  { dailyCents: 500,  maxRunsPerDay: 8 }, // double days (Sat trend-scout, Sun SEO curation, Wed podcast) plus writer-retry headroom; the cap counts run rows, not successes, and a retry day burned all 3 slots before the Wed podcast run could open (075). Budget covers the accuracy gate's web verification (068) and is still the real ceiling
   product:  { dailyCents: 300,  maxRunsPerDay: 1 }, // daily import-queue drain (SQL + curl, ~$0)
   video:    { dailyCents: 2000, maxRunsPerDay: 1 }, // fal video generation is metered; $20/day ceiling, ~3 videos/week planned
+  support:  { dailyCents: 300,  maxRunsPerDay: 2 }, // daily conversation-quality review over IVR/SMS/chat transcripts + one retry slot; the cap counts run rows, not successes
 }
 
 /** Homepage-only extras (kept from the original TEAM_KEYS set). */
@@ -239,4 +240,13 @@ export const VALVE_KEYS = {
   // Video autopublish: even with the video team enabled, platform posting stays
   // manual until this AND the per-platform publisher env keys are both set.
   videoAutopublish:   'video_team_autopublish',
+  // Conversation-surface kill switches (076). These are FAIL-OPEN: the live
+  // channels stay up when the row is missing or the DB is slow — read them
+  // with getKillSwitch(), not getValve(). Flipping one to 'false' is the
+  // owner's instant, no-redeploy off switch for that channel's AI agent.
+  // chat_enabled gates the Ask Emma web widget's /api/ask-emma replies;
+  // sms_agent_enabled gates conversational SMS replies (carrier-required
+  // STOP/HELP/START compliance keeps working even when it is off).
+  chatEnabled:        'chat_enabled',
+  smsAgentEnabled:    'sms_agent_enabled',
 } as const

@@ -12,7 +12,9 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
-import { processSmsMessage, type SmsSegment } from '~/lib/sms-processor.server'
+import { processSmsMessage, isComplianceKeyword, type SmsSegment } from '~/lib/sms-processor.server'
+import { getKillSwitch } from '~/lib/team.server'
+import { VALVE_KEYS } from '~/lib/team-keys'
 import { processSmsMessageV2 } from '~/lib/sms-v2/processor.server'
 import { withTurnLogging } from '~/lib/sms-v2/turn-logger.server'
 import { pickPipelineVersion } from '~/lib/sms-v2/pipeline-flag.server'
@@ -60,6 +62,21 @@ async function handleSmsAction(request: Request): Promise<Response> {
 
   const version = pickPipelineVersion(from)
   const input = { from, body, twilioSid, simulated: false }
+
+  // Kill switch (076): when sms_agent_enabled is 'false' the conversational
+  // agent goes silent, but carrier-required STOP/HELP/START keywords still
+  // route through v1's compliance path — an off switch must never make an
+  // opt-out request go unrecorded. Fail-open read: missing row or slow DB
+  // keeps the channel live.
+  if (!(await getKillSwitch(VALVE_KEYS.smsAgentEnabled))) {
+    if (isComplianceKeyword(body)) {
+      const complianceResult = await withTurnLogging(input, processSmsMessage, 'v1')
+      if (complianceResult.replies.length === 0) return twiml(EMPTY_TWIML)
+      return twiml(repliesTwiml(complianceResult.replies))
+    }
+    console.warn(`[sms] sms_agent_enabled=false — silent for from=${from}`)
+    return twiml(EMPTY_TWIML)
+  }
 
   // v2 owns its own turn-logging (per-stage observability is built into
   // processSmsMessageV2 in Phase 5.5). v1 is unchanged — the route wraps it
