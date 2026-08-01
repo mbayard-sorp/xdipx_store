@@ -174,13 +174,11 @@ export async function action({ request }: ActionFunctionArgs) {
     reply = await processVoiceMessageV2(input)
   } catch (err) {
     console.error('[engine-turn] processVoiceMessageV2 crashed', err)
-    return Response.json(
-      {
-        ssml: '<speak>Sorry, I ran into a problem. Please try again.</speak>',
-        prompts: { kind: 'say-and-listen' },
-      } satisfies VoiceReply,
-      { status: 200 }, // 200 so the Fly bridge doesn't trigger a v1 fallback on a 5xx
-    )
+    // 5xx on crash so the Fly bridge falls through to its local v1 loop.
+    // Returning a 200 apology here made every v2 outage invisible: the caller
+    // got "try again" loops instead of a working v1 conversation, and the
+    // fallback path never fired.
+    return Response.json({ error: 'engine_crashed' }, { status: 500 })
   }
 
   return Response.json(reply, { status: 200 })

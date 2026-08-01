@@ -17,9 +17,23 @@ import { splitSmsReplyForMms, type SmsSegment } from '~/lib/sms-reply-segments.s
 
 export type { SmsSegment } from '~/lib/sms-reply-segments.server'
 
-const STOP_WORDS = new Set(['stop', 'stopall', 'unsubscribe', 'cancel', 'end', 'quit', 'revoke'])
-const START_WORDS = new Set(['start', 'unstop', 'subscribe'])
-const HELP_WORDS = new Set(['help', 'info'])
+// Exported so the v2 processor can short-circuit compliance keywords to this
+// file's handling BEFORE any stage dispatch. Carrier compliance (TCPA/CTIA)
+// must never depend on which stage handler happens to be active.
+export const STOP_WORDS = new Set(['stop', 'stopall', 'unsubscribe', 'cancel', 'end', 'quit', 'revoke'])
+export const START_WORDS = new Set(['start', 'unstop', 'subscribe'])
+export const HELP_WORDS = new Set(['help', 'info'])
+
+/** Normalize an inbound body to the bare keyword shape the compliance sets use. */
+export function complianceKeyword(body: string): string {
+  return body.trim().toLowerCase().replace(/[^a-z]/g, '')
+}
+
+/** True when the body is a STOP/START/HELP carrier-compliance keyword. */
+export function isComplianceKeyword(body: string): boolean {
+  const k = complianceKeyword(body)
+  return STOP_WORDS.has(k) || START_WORDS.has(k) || HELP_WORDS.has(k)
+}
 const AGE_CONFIRM_RE = /^(y|ya|yes|yep|yup|sure|ok|okay|confirm|im18|iam18|18|18plus)$/i
 
 export const HELP_REPLY =
@@ -191,7 +205,9 @@ async function hasAgeConsent(phone: string): Promise<boolean> {
   }
 }
 
-async function isOptedOut(phone: string): Promise<boolean> {
+// Exported for the v2 processor's compliance short-circuit: opted-out numbers
+// must stay silent regardless of which pipeline or stage handler is active.
+export async function isOptedOut(phone: string): Promise<boolean> {
   try {
     const rows = await db.select({ id: smsOptouts.id }).from(smsOptouts).where(eq(smsOptouts.phone, phone)).limit(1)
     return rows.length > 0

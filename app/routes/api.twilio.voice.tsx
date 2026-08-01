@@ -43,13 +43,28 @@ const REJECT_TWIML = `<?xml version="1.0" encoding="UTF-8"?>
   <Hangup/>
 </Response>`
 
-function afterHoursTwiml(maxLengthSec: number): string {
+// Voicemail intros per branch. The reason the caller can't reach the live
+// agent differs — telling an anonymous midday caller "we're closed" reads as
+// a lie, so each gate gets honest copy.
+const VOICEMAIL_INTROS = {
+  afterHours:
+    "Hey, you've reached ex-dip-ex. We're closed right now but leave a message after the beep and we'll get back to you first thing.",
+  anonymous:
+    "Hey, you've reached ex-dip-ex. I can't pick up live calls from a blocked number, but leave a message with a callback number after the beep and we'll get right back to you.",
+  unavailable:
+    "Hey, you've reached ex-dip-ex. Our live line is having a moment, but leave a message after the beep and we'll get back to you as soon as we can.",
+} as const
+
+function voicemailTwiml(
+  maxLengthSec: number,
+  intro: string = VOICEMAIL_INTROS.afterHours,
+): string {
   const appUrl = process.env['APP_URL'] ?? ''
   const cb = appUrl ? `${appUrl}/api/twilio/recording-status` : '/api/twilio/recording-status'
   const safeMax = Number.isFinite(maxLengthSec) && maxLengthSec > 0 ? Math.min(maxLengthSec, 600) : 120
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">${xmlEscape(normalizeForTTS("Hey — you've reached ex-dip-ex. We're closed right now but leave a message after the beep and we'll get back to you first thing."))}</Say>
+  <Say voice="Polly.Joanna">${xmlEscape(normalizeForTTS(intro))}</Say>
   <Record maxLength="${safeMax}" playBeep="true" trim="trim-silence" recordingStatusCallback="${xmlEscape(cb)}"/>
   <Say voice="Polly.Joanna">${xmlEscape(normalizeForTTS('Thanks — talk soon.'))}</Say>
   <Hangup/>
@@ -222,7 +237,7 @@ export async function action({ request }: ActionFunctionArgs) {
         undefined,
         'recordRejectedCall.anonymous',
       )
-      return twiml(afterHoursTwiml(config.voicemailMaxLengthSec))
+      return twiml(voicemailTwiml(config.voicemailMaxLengthSec, VOICEMAIL_INTROS.anonymous))
     }
 
     if (fromNumber && (await withTimeout(isRateLimited(fromNumber, config), 2000, false, 'isRateLimited'))) {
@@ -244,7 +259,7 @@ export async function action({ request }: ActionFunctionArgs) {
         undefined,
         'recordRejectedCall.after_hours',
       )
-      return twiml(afterHoursTwiml(config.voicemailMaxLengthSec))
+      return twiml(voicemailTwiml(config.voicemailMaxLengthSec, VOICEMAIL_INTROS.afterHours))
     }
 
     const greeting = await getGreeting()
@@ -252,14 +267,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const xml = buildTwiml(greeting, voiceId, config)
     // Missing env → no valid ConversationRelay TwiML; send caller to voicemail
     // rather than letting Twilio play a generic "application error" message.
-    if (!xml) return twiml(afterHoursTwiml(config.voicemailMaxLengthSec))
+    if (!xml) return twiml(voicemailTwiml(config.voicemailMaxLengthSec, VOICEMAIL_INTROS.unavailable))
     return twiml(xml)
   } catch (err) {
     // Never throw out of this action — Twilio would serve its generic error
     // message or (worse) Vercel returns FUNCTION_INVOCATION_FAILED. Always
     // return a valid TwiML voicemail response so the caller gets heard.
     console.error('[ivr] voice action crashed — falling back to voicemail', err)
-    return twiml(afterHoursTwiml(120))
+    return twiml(voicemailTwiml(120, VOICEMAIL_INTROS.unavailable))
   }
 }
 
@@ -334,5 +349,5 @@ export async function loader({ request: _request }: LoaderFunctionArgs) {
   }
   const voiceId = await getActiveIvrVoiceId()
   const xml = buildTwiml('Hi, thanks for calling xdipx. How can I help you today?', voiceId)
-  return twiml(xml ?? afterHoursTwiml(120))
+  return twiml(xml ?? voicemailTwiml(120, VOICEMAIL_INTROS.unavailable))
 }
