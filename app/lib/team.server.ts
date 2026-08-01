@@ -189,6 +189,30 @@ export async function getValve(key: (typeof VALVE_KEYS)[keyof typeof VALVE_KEYS]
 }
 
 /**
+ * FAIL-OPEN kill-switch read for the live conversation channels (chat_enabled,
+ * sms_agent_enabled). Unlike getValve — which treats a missing row as OFF —
+ * a kill switch only trips when the row is explicitly 'false': a missing row,
+ * an unapplied migration, or a slow/erroring DB must never take a customer
+ * channel down. Same 60s cache; admin writes bust it via
+ * invalidateTeamSettingsCache().
+ */
+export async function getKillSwitch(key: (typeof VALVE_KEYS)[keyof typeof VALVE_KEYS]): Promise<boolean> {
+  try {
+    return await cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
+      const [row] = await db
+        .select()
+        .from(pipelineSettings)
+        .where(eq(pipelineSettings.key, key))
+        .limit(1)
+      return row?.value !== 'false'
+    })
+  } catch (err) {
+    console.error(`[team] kill-switch read failed for ${key} — failing open`, err)
+    return true
+  }
+}
+
+/**
  * Bust the team config/valve caches after an admin settings write, both the
  * per-instance L1 and the shared KV L2, so toggles land immediately instead
  * of within the TTL.

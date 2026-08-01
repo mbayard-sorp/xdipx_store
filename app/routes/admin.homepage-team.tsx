@@ -80,6 +80,7 @@ const TEAM_LABELS: Record<TeamId, string> = {
   content:  'Content',
   product:  'Product',
   video:    'Video',
+  support:  'Support',
 }
 
 interface TicketLink {

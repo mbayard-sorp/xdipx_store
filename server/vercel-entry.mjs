@@ -9690,7 +9690,7 @@ var TEAM_IDS, TEAM_DEFAULTS, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, CONTENT_MA
 var init_team_keys = __esm({
   "app/lib/team-keys.ts"() {
     "use strict";
-    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product", "video"];
+    TEAM_IDS = ["homepage", "social", "ads", "email", "strategy", "content", "product", "video", "support"];
     TEAM_DEFAULTS = {
       homepage: { dailyCents: 1500, maxRunsPerDay: 4 },
       social: { dailyCents: 500, maxRunsPerDay: 2 },
@@ -9702,8 +9702,10 @@ var init_team_keys = __esm({
       // double days (Sat trend-scout, Sun SEO curation, Wed podcast) plus writer-retry headroom; the cap counts run rows, not successes, and a retry day burned all 3 slots before the Wed podcast run could open (075). Budget covers the accuracy gate's web verification (068) and is still the real ceiling
       product: { dailyCents: 300, maxRunsPerDay: 1 },
       // daily import-queue drain (SQL + curl, ~$0)
-      video: { dailyCents: 2e3, maxRunsPerDay: 1 }
+      video: { dailyCents: 2e3, maxRunsPerDay: 1 },
       // fal video generation is metered; $20/day ceiling, ~3 videos/week planned
+      support: { dailyCents: 300, maxRunsPerDay: 2 }
+      // daily conversation-quality review over IVR/SMS/chat transcripts + one retry slot; the cap counts run rows, not successes
     };
     HOMEPAGE_EXTRA_KEYS = {
       buildCents: "homepage_team_build_cents",
@@ -9773,7 +9775,16 @@ var init_team_keys = __esm({
       reviewsPdp: "reviews_pdp_enabled",
       // Video autopublish: even with the video team enabled, platform posting stays
       // manual until this AND the per-platform publisher env keys are both set.
-      videoAutopublish: "video_team_autopublish"
+      videoAutopublish: "video_team_autopublish",
+      // Conversation-surface kill switches (076). These are FAIL-OPEN: the live
+      // channels stay up when the row is missing or the DB is slow — read them
+      // with getKillSwitch(), not getValve(). Flipping one to 'false' is the
+      // owner's instant, no-redeploy off switch for that channel's AI agent.
+      // chat_enabled gates the Ask Emma web widget's /api/ask-emma replies;
+      // sms_agent_enabled gates conversational SMS replies (carrier-required
+      // STOP/HELP/START compliance keeps working even when it is off).
+      chatEnabled: "chat_enabled",
+      smsAgentEnabled: "sms_agent_enabled"
     };
   }
 });
@@ -9816,6 +9827,7 @@ __export(team_server_exports, {
   findTransitionRule: () => findTransitionRule,
   gate: () => gate,
   getActiveBrief: () => getActiveBrief,
+  getKillSwitch: () => getKillSwitch,
   getSocialFrequencies: () => getSocialFrequencies,
   getTeamConfig: () => getTeamConfig,
   getTicket: () => getTicket,
@@ -9898,6 +9910,17 @@ async function getValve(key) {
     const [row] = await db.select().from(pipelineSettings).where(eq4(pipelineSettings.key, key)).limit(1);
     return row?.value === "true";
   });
+}
+async function getKillSwitch(key) {
+  try {
+    return await cached(`team:valve:${key}`, SETTINGS_CACHE_TTL_SEC, async () => {
+      const [row] = await db.select().from(pipelineSettings).where(eq4(pipelineSettings.key, key)).limit(1);
+      return row?.value !== "false";
+    });
+  } catch (err2) {
+    console.error(`[team] kill-switch read failed for ${key} \u2014 failing open`, err2);
+    return true;
+  }
 }
 async function invalidateTeamSettingsCache() {
   invalidateCache("team:cfg:");
