@@ -42,7 +42,7 @@ export default function FrequentlyBoughtWith({ products }: FrequentlyBoughtWithP
                 {p.title}
               </h3>
               <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-coral font-bold text-sm">${p.price.toFixed(2)}</span>
+                <span className="text-ink font-bold text-sm">${p.price.toFixed(2)}</span>
                 {p.compareAtPrice && p.compareAtPrice > p.price && (
                   <span className="text-ink/40 text-xs line-through">${p.compareAtPrice.toFixed(2)}</span>
                 )}

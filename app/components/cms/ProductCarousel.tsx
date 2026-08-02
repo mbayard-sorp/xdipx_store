@@ -69,7 +69,7 @@ export function ProductCarousel({
         <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
           <div className="min-w-0 flex-1">
             {eyebrow && (
-              <Reveal as="p" variant="up" index={0} className={`text-xs font-semibold uppercase tracking-widest mb-1 ${dark ? 'text-white/60' : 'text-sage'}`}>
+              <Reveal as="p" variant="up" index={0} className={`text-xs font-semibold uppercase tracking-[0.18em] mb-1 ${dark ? 'text-white/60' : 'text-ink-3'}`}>
                 {eyebrow}
               </Reveal>
             )}
@@ -117,7 +117,7 @@ export function ProductCarousel({
                 className={`text-sm font-semibold transition-colors ml-1 shrink-0 whitespace-nowrap ${
                   dark
                     ? 'text-white/80 hover:text-white'
-                    : 'text-sage hover:text-sun'
+                    : 'text-plum hover:text-plum-2'
                 }`}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
