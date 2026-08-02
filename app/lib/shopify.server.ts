@@ -2655,6 +2655,50 @@ export async function getProductVariantGids(shopifyProductId: string): Promise<s
   return (product?.variants ?? []).map(v => `gid://shopify/ProductVariant/${v.id}`)
 }
 
+/**
+ * Resolve an inventory_item_id (as delivered by an inventory_levels/update
+ * webhook) to its parent product's storefront-facing fields. Returns null when
+ * the item has no variant or product (e.g. a deleted product) so callers can
+ * skip quietly. Used by the inventory webhook's back-in-stock branch.
+ */
+export async function getProductByInventoryItemId(
+  inventoryItemId: string,
+): Promise<{ handle: string; title: string; imageUrl?: string; price?: number } | null> {
+  const gid = inventoryItemId.startsWith('gid://')
+    ? inventoryItemId
+    : `gid://shopify/InventoryItem/${inventoryItemId}`
+  const data = await adminGraphQL<{
+    inventoryItem: {
+      variant: {
+        price: string | null
+        product: { handle: string; title: string; featuredImage: { url: string } | null } | null
+      } | null
+    } | null
+  }>(
+    `query ProductByInventoryItem($id: ID!) {
+      inventoryItem(id: $id) {
+        variant {
+          price
+          product { handle title featuredImage { url } }
+        }
+      }
+    }`,
+    { id: gid },
+  )
+
+  const product = data.inventoryItem?.variant?.product
+  if (!product?.handle) return null
+
+  const result: { handle: string; title: string; imageUrl?: string; price?: number } = {
+    handle: product.handle,
+    title:  product.title,
+  }
+  if (product.featuredImage?.url) result.imageUrl = product.featuredImage.url
+  const price = data.inventoryItem?.variant?.price ? parseFloat(data.inventoryItem.variant.price) : NaN
+  if (Number.isFinite(price)) result.price = price
+  return result
+}
+
 export async function updateVariantPricing(variantGid: string, price: string, compareAtPrice: string, wholesaleCost?: string): Promise<void> {
   const id = variantGid.replace('gid://shopify/ProductVariant/', '')
   const { variant } = await shopifyAdmin<{ variant: { inventory_item_id: string } }>(`/variants/${id}.json`, 'PUT', {
