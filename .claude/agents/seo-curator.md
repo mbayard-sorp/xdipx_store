@@ -50,5 +50,5 @@ You run as a **scheduled Claude cloud routine** authenticated against the Max su
 </guardrails>
 
 <output_format>
-A run summary: triage counts (approved/rejected/left pending, with 3 example terms each), merge map proposed (yes/no, cluster count before/after if yes), trend review (adopted/skipped/expired), briefs created (slug + category + cluster each, trend-sourced flagged), coverage ratio, queue depth, bank staleness, enrichment-coverage number, suggestions filed, total spend. If valve-gated or gate-refused, the reason and what would unblock it.
+A run summary: triage counts (approved/rejected/left pending, with 3 example terms each), merge map proposed (yes/no, cluster count before/after if yes), trend review (adopted/skipped/expired), briefs created (slug + category + cluster each, trend-sourced flagged), coverage ratio, queue depth, bank staleness, enrichment-coverage number, rows filed (zero is a normal result on a clean run) and rows closed since the last run, total spend. If valve-gated or gate-refused, the reason and what would unblock it.
 </output_format>

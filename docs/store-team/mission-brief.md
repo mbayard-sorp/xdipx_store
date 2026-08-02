@@ -87,5 +87,6 @@ rules: `docs/homepage-team/mission-brief.md` section 2.
 ## 7. Definition of done (per run)
 
 Run row finished with an honest status and summary; events posted throughout (the dashboard is the
-owner's window — silence is a failure mode); retro recorded; suggestions filed where lessons exist;
+owner's window — silence is a failure mode); retro recorded (a suggestion row only on a lesson's
+second occurrence, max 2 per run, per the intake doctrine in `improvement-loop.md`);
 zero valve violations; zero unguarded MAP/voice/policy exceptions.

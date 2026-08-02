@@ -277,12 +277,19 @@ execute: a false `applied` looks handled and is worse than an aging row.
 ## Step 7: Retro + finish
 
 Compare against the plan and last run's post (published? still draft? which gate verdict?). One
-`decision` event (`phase:'retro'`); real lessons → suggestion rows via:
+`decision` event (`phase:'retro'`) always. A lesson becomes a suggestion row only when the **same**
+failure has now happened twice and you can name both runs, and at most 2 rows per run: see the
+intake doctrine in `improvement-loop.md`. Zero rows is the expected outcome of a clean run.
+
+Note the `kind` below. This example said `process` until 2026-08-02 and was copy-pasted straight
+into the queue with no executor eleven times in two weeks. A playbook or agent-definition edit is
+`instructions`; something needing engineering is `code`; `process` is only for a decision that
+genuinely nobody but the owner can make.
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"create","team":"content","targetTeam":"<team-or-omit>","category":"other","kind":"process","suggestion":"<lesson>","cxRisk":"low"}'
+  -d '{"op":"create","team":"content","targetTeam":"<team-or-omit>","category":"other","kind":"instructions","priority":3,"dedupeKey":"<stable-slug>","suggestion":"<lesson, naming both runs>","cxRisk":"low"}'
 ```
 
 Blog-surface component/layout ideas → suggestion with `targetTeam:'homepage'` (code is always a

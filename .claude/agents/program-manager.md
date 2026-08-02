@@ -98,6 +98,7 @@ Invoked by `store-strategist` before brief synthesis:
 
 <output_format>
 The audit scoreboard (programs / probes run / RAG counts / top risks), the Program Status
-section handed to the brief, suggestions filed (id | target team | milestone | ask), and the
-tracker PR URL or "no changes, no PR".
+section handed to the brief, any rows filed (id | target team | milestone | ask) and rows closed
+since the last run, and the tracker PR URL or "no changes, no PR". Filing nothing is a normal result
+when no milestone moved; see the intake doctrine in `docs/store-team/improvement-loop.md`.
 </output_format>

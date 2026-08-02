@@ -1,8 +1,9 @@
 # Routine — Apply Pass (agent-editor)
 
 The playbook for the scheduled apply pass — the hands of the improvement loop. Entry agent:
-`agent-editor`. Turns **owner-approved** instruction-kind suggestions into **one PR per
-suggestion**; never merges its own PR and never pushes to the default branch; never touches code,
+`agent-editor`. Turns **owner-approved** instruction-kind suggestions into **one PR per target
+file**, batching every approved row that edits the same file (Step 2); never merges its own PR and
+never pushes to the default branch; never touches code,
 schema, settings, or secrets. Gated by the `suggestion_apply_enabled` valve (default off) on top of
 the strategy team's gate.
 
@@ -37,8 +38,18 @@ owner's to execute).
 The bus accumulates rows no lane will ever execute. `kind` used to be write-once, so a row filed as
 `process` when it was really instruction or code work could never reach the lane that would have
 done it, and nothing could close a row in a kind with no automated executor. 52 approved `process`
-rows built up that way with zero completions ever. Two ops fix it; use them first, capped at **10
-rekinds and 10 retires per run** so a bad judgement call is small and reviewable.
+rows built up that way with zero completions ever. Two ops fix it; use them first, capped at **25
+rekinds and 25 retires per run**, and **work to the cap** the same way Step 2 tells you to work to
+the 15-PR ceiling.
+
+The cap was 10/10 until 2026-08-02 and had never once bound: run 134 did 8 rekinds and 8 retires
+against it and stopped short of both. The constraint was caution, not the number. Raising it is the
+cheapest lever on the whole bus, because this is the **only** drain that exists for
+`process`/`strategy`/`program`, and because a rekind does not merely close a row, it moves the row
+into a lane that has an executor (`process` → `instructions` for you, `process` → `code` for R-DEV).
+It converts dead inventory into drainable inventory at roughly 20k tokens an op, with no PR, no CI,
+and no deploy. If you hit 25 of either, say so in the run summary so the ceiling can be raised again
+on evidence.
 
 1. List the approved rows in the three kinds you may dispose of — `process`, `strategy`, `program`
    (`AGENT_RETIRE_KINDS` in `app/lib/team.server.ts`). One call per kind:
@@ -66,7 +77,37 @@ rekinds and 10 retires per run** so a bad judgement call is small and reviewable
 4. **Never retire** a row that names a live customer-facing defect (out-of-stock product in a live
    slot, a broken page, a money-path bug) even if it is old. Rekind those to `code` instead.
 
-## Step 2 — Implement (per suggestion, max 15 per run)
+## Step 2 — Implement (batched by target file, max 15 PRs per run)
+
+**Batch by target file, not one PR per suggestion.** This is the single biggest throughput change
+available to this lane and it costs nothing. On 2026-08-02, 31 actionable homepage and content rows
+resolved to just eight target files: `routine-daily-merchandise.md` alone was named by 13 rows,
+`mission-brief.md` by 6, `routine-content-daily.md` by 5. One PR per row would have spent the entire
+15-PR budget on two files and left the rest for the following week; batched, the same 31 rows are
+about nine PRs and the queue actually drains.
+
+How to batch safely:
+
+1. Group the actionable rows by the file each one edits. A row naming two files belongs to both
+   groups; see the half-applied rule below.
+2. One branch and one PR per **target file**, named `agents/suggestion-<lowest-id>`, with every
+   batched ticket id in the PR title and body.
+3. `{"op":"mark","id":<each id>,"status":"pr_open","applyRef":"<the same PR URL>"}` for **every**
+   row in the batch. Several tickets may link the same PR ref: `SWEEPABLE_STATUSES` in
+   `app/lib/ticket-out-of-band-sweep.server.ts` includes `pr_open`, and the hourly sweep matches on
+   `suggestion_links`, so all of them reconcile to `applied` when that one PR merges. This is
+   verified behaviour, not an assumption.
+4. Batch only rows that genuinely agree. Two rows proposing contradictory edits to the same
+   paragraph do not go in one PR; implement the better one and leave the other approved with a
+   `decision` event explaining the conflict.
+
+**A half-applied row is a failed row.** When a suggestion names more than one file, either change
+every file it names in that PR, or do not mark it `pr_open` at all. Tickets #120, #423 and #474 each
+named two targets, shipped exactly the first, and stranded: two of them sat in `in_progress` with a
+cleared assignee for days, invisible to both this pass and R-DEV, because `expireStaleClaims()`
+compares `claim_expires_at < now()` and a NULL lease never satisfies that. If you can only do part
+of a row, implement the part you can and leave the row **approved** with a `decision` event naming
+the file still outstanding.
 
 **The per-run PR cap is 15, and that is the only number.** It is not 5. Earlier runs stopped at 5
 and wrote "run cap" next to it; there is no 5-PR rule anywhere, and stopping there left the lane

@@ -69,5 +69,5 @@ Read `docs/emma-voice.md` before writing a single word, every run — plus its s
 </guardrails>
 
 <output_format>
-A run summary: drafts written (platform, one-line content, voice-gate result, media used), retro verdict on last run's drafts, suggestions filed, and total spend (usually $0). If gated out, the reason and what would unblock it.
+A run summary: drafts written (platform, one-line content, voice-gate result, media used), retro verdict on last run's drafts, rows filed (zero is a normal result on a clean run) and rows closed since the last run, and total spend (usually $0). If gated out, the reason and what would unblock it.
 </output_format>

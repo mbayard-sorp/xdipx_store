@@ -820,8 +820,11 @@ reads these for the live status + conversation viewer.
 
 ## Retro step (before the final run update)
 
-Close every run with a retro so the store-wide improvement loop has fuel
-(see `docs/store-team/improvement-loop.md`):
+Close every run with a retro so the store-wide improvement loop can see what happened
+(see `docs/store-team/improvement-loop.md`). The retro **event** is the deliverable, not a row on
+the bus: rows are not fuel, they are work someone has to finish, and this team filed 82 of them in
+14 days against an executor that can absorb far fewer. The intake doctrine binds here, so a
+suggestion row needs a lesson's second occurrence, both runs named, and a maximum of 2 rows a run.
 
 1. Compare this run's picks against yesterday's scoreboard and the active weekly strategy brief's
    homepage directives (`GET /api/team/brief`; the gate's `activeBriefId` says one exists).

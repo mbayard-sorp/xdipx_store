@@ -36,5 +36,5 @@ You run as a **scheduled Claude cloud routine** authenticated against the Max su
 </caps_and_guards>
 
 <output_format>
-A run summary: targets researched (count + top 3 with why), pitches drafted (target + angle each), unlinked mentions found, prospects identified, movement since last run, suggestions filed, total spend. If gated out, the reason.
+A run summary: targets researched (count + top 3 with why), pitches drafted (target + angle each), unlinked mentions found, prospects identified, movement since last run, rows filed (zero is a normal result on a clean run) and rows closed since the last run, total spend. If gated out, the reason.
 </output_format>

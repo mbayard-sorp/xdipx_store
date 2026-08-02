@@ -187,5 +187,5 @@ Log Max tokens (`POST /api/homepage-team/spend {"kind":"tokens","source":"agent-
 ```bash
 curl -s -X POST "$BASE_URL/api/team/run" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"update","id":'$RUN_ID',"update":{"finished":true,"status":"succeeded","summary":"<brief focus + N suggestions + top retro verdicts>"}}'
+  -d '{"op":"update","id":'$RUN_ID',"update":{"finished":true,"status":"succeeded","summary":"<brief focus + rows CLOSED since last run + top retro verdicts>"}}'
 ```
