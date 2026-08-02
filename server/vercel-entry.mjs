@@ -2833,6 +2833,8 @@ async function getEditor(preview = false) {
         role: raw.role ?? "Editor",
         photoUrl: raw.photoUrl ?? null,
         photoAlt: raw.photoAlt ?? null,
+        homepagePhotoUrl: raw.homepagePhotoUrl ?? null,
+        homepagePhotoAlt: raw.homepagePhotoAlt ?? null,
         shortBio: raw.shortBio ?? null,
         longBio: raw.longBio ?? null,
         picksSince: raw.picksSince ?? null,
@@ -4274,6 +4276,8 @@ var init_sanity_server = __esm({
     role,
     "photoUrl": photo.asset->url,
     "photoAlt": photo.alt,
+    "homepagePhotoUrl": homepagePhoto.asset->url,
+    "homepagePhotoAlt": homepagePhoto.alt,
     shortBio,
     longBio,
     "picksSince": picksSince,
@@ -18130,8 +18134,13 @@ async function buildHomepagePayloadB() {
     total: railsResult.total,
     pinnedProduct,
     emmaHero,
-    emmaPhotoUrl: editor?.photoUrl ?? null,
-    emmaPhotoAlt: editor?.photoAlt ?? null,
+    // Nº 04 prefers the additive homepage-only situational portrait
+    // (`editor.homepagePhoto`) and falls back to the canonical `photo`. Only
+    // this homepage surface reads homepagePhoto; /about and the video
+    // pipeline's identity anchor (getEditorPhotoUrl) stay on `photo`, so a
+    // homepage-portrait swap never re-portraits /about or the video frames.
+    emmaPhotoUrl: editor?.homepagePhotoUrl ?? editor?.photoUrl ?? null,
+    emmaPhotoAlt: editor?.homepagePhotoAlt ?? editor?.photoAlt ?? null,
     contentBlocks,
     // resolved above — team-managed Sanity surface, lean/slimmed for variant b
     notebookPosts: notebook.posts,

@@ -953,7 +953,7 @@ function ProductPage() {
           {/* Price */}
           <div className="flex items-center gap-3 flex-wrap">
             <span
-              className="text-4xl font-black text-coral"
+              className="text-4xl font-black text-ink"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               ${price.toFixed(2)}
@@ -978,7 +978,7 @@ function ProductPage() {
             <p className="text-sm text-ink/70">
               or <span className="font-semibold text-ink">${subscriptionOffer.price.toFixed(2)}</span>{' '}
               with subscription ·{' '}
-              <span className="text-coral font-semibold">save {subscriptionOffer.discountPct}%</span>{' '}
+              <span className="text-plum font-semibold">save {subscriptionOffer.discountPct}%</span>{' '}
               <span className="text-sage" aria-hidden="true">♥</span>
             </p>
           )}

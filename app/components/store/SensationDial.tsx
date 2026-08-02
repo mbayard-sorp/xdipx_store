@@ -119,7 +119,10 @@ export function SensationDial({
                   key={i}
                   className={[
                     'h-2.5 w-10 rounded-full transition-colors',
-                    i < value ? 'bg-coral' : 'bg-cream-2',
+                    // Coral marks only the active (topmost reached) segment so the
+                    // dial spends one coral pip per row, not five. Lower filled
+                    // segments read as ink-3; the empty track is line-2.
+                    i === value - 1 ? 'bg-coral' : i < value ? 'bg-ink-3' : 'bg-line-2',
                   ].join(' ')}
                   aria-hidden="true"
                 />

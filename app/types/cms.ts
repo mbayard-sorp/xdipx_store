@@ -541,6 +541,13 @@ export interface Editor {
   role: string
   photoUrl: string | null
   photoAlt: string | null
+  /**
+   * Additive, homepage-only situational portrait (Nº 04 Meet Emma band). Null
+   * when unset; the homepage loader falls back to `photoUrl`. Not consumed by
+   * /about or the video pipeline identity anchor, which stay on `photoUrl`.
+   */
+  homepagePhotoUrl: string | null
+  homepagePhotoAlt: string | null
   shortBio: string | null
   longBio: unknown[] | null
   picksSince: string | null

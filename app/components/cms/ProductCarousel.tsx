@@ -62,11 +62,14 @@ export function ProductCarousel({
   return (
     <section className={`py-12 px-4 ${bgClass}`}>
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-end justify-between mb-6">
-          <div>
+        {/* Header — flex-wrap + gap so the CTA drops onto its own row instead of
+            colliding with the heading at narrow widths (390px / the 375px floor);
+            min-w-0 lets the heading column shrink, shrink-0 + whitespace-nowrap
+            keep the CTA a single unbroken line (ticket #468). */}
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
+          <div className="min-w-0 flex-1">
             {eyebrow && (
-              <Reveal as="p" variant="up" index={0} className={`text-xs font-semibold uppercase tracking-widest mb-1 ${dark ? 'text-white/60' : 'text-sage'}`}>
+              <Reveal as="p" variant="up" index={0} className={`text-xs font-semibold uppercase tracking-[0.18em] mb-1 ${dark ? 'text-white/60' : 'text-ink-3'}`}>
                 {eyebrow}
               </Reveal>
             )}
@@ -80,7 +83,7 @@ export function ProductCarousel({
               {heading}
             </Reveal>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {/* Arrow buttons — carousel only, desktop only */}
             {layout === 'carousel' && (
               <>
@@ -111,10 +114,10 @@ export function ProductCarousel({
             {ctaLink && (
               <Link
                 to={ctaLink}
-                className={`text-sm font-semibold transition-colors ml-1 ${
+                className={`text-sm font-semibold transition-colors ml-1 shrink-0 whitespace-nowrap ${
                   dark
                     ? 'text-white/80 hover:text-white'
-                    : 'text-sage hover:text-sun'
+                    : 'text-plum hover:text-plum-2'
                 }`}
                 style={{ fontFamily: 'var(--font-display)' }}
               >

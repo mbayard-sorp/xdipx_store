@@ -8,6 +8,7 @@ import { Link } from 'react-router'
 import { trackSelectItem } from '~/lib/analytics.client'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { abbreviate, buildPieGradient } from '~/components/store/CircleOptionSelector'
+import { showDiscountBadge } from '~/lib/discount-badge'
 import type { DiscoveryProduct } from '~/types/discovery'
 
 interface ProductCardProps {
@@ -74,12 +75,13 @@ export function ProductCard({ product, index, listId, listName }: ProductCardPro
         {(() => {
           const { price, priceMax, compareAtPrice, colorValues, sizeValues } = product
           const hasRange = priceMax != null && priceMax > price
-          // Struck price whenever there's any markdown; "You save" line only when
-          // the rounded discount is ≥ 1% (mirrors VaultCard — avoids "$0.01 (0%)").
+          // Struck price whenever there's any markdown; the "You save" line only
+          // once the rounded discount clears MIN_DISCOUNT_BADGE_PCT (ticket #467,
+          // mirrors VaultCard and the home rails — no "1% off" theatre).
           const hasCompare = !hasRange && compareAtPrice != null && compareAtPrice > price
           const save = hasCompare ? compareAtPrice! - price : 0
           const pct = hasCompare ? Math.round((save / compareAtPrice!) * 100) : 0
-          const showSaveLine = hasCompare && pct > 0
+          const showSaveLine = hasCompare && showDiscountBadge(pct)
 
           const colors = colorValues.length > 1 ? colorValues : null
           const sizes = sizeValues.length > 1 ? sizeValues : null
