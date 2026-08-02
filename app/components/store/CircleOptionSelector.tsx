@@ -139,6 +139,13 @@ interface CircleOptionSelectorProps {
   swatches?:         Record<string, string>
   variants:          ProductVariant[]
   selectedOptions:   Record<string, string>
+  /**
+   * When this number changes to a non-zero value the selector opens and scrolls
+   * itself into view. The PDP bumps it (only on the first still-unselected axis)
+   * when a shopper taps the buy CTA before choosing, so the tap guides them to
+   * the control instead of doing nothing. Undefined/0 = no request.
+   */
+  openRequestNonce?: number
 }
 
 export function CircleOptionSelector({
@@ -151,9 +158,18 @@ export function CircleOptionSelector({
   swatches,
   variants,
   selectedOptions,
+  openRequestNonce,
 }: CircleOptionSelectorProps) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+
+  // Open + reveal on an external request (buy-CTA tapped before a choice was
+  // made). Guarded on a non-zero nonce so it never fires on mount.
+  useEffect(() => {
+    if (!openRequestNonce) return
+    setOpen(true)
+    wrapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [openRequestNonce])
 
   useEffect(() => {
     if (!open) return
@@ -188,23 +204,20 @@ export function CircleOptionSelector({
       : { background: buildPieGradient(values, swatches) }
     : { background: buildSizeSegmentGradient(values) }
 
-  // Clock-position offsets for size labels: item 0 at 12 o'clock, then evenly
-  // spaced clockwise. Radius is ~17px inside a 56px circle (28px outer radius
-  // minus border + label half-height).
-  const labelRadius = 16
-  const labelPositions = values.map((_, i) => {
-    // 2 values → 9 o'clock + 3 o'clock so they sit side-by-side, not stacked
-    if (values.length === 2) {
-      return { x: i === 0 ? -labelRadius : labelRadius, y: 0 }
-    }
-    const angle = (2 * Math.PI * i) / values.length
-    const x = Math.sin(angle) * labelRadius
-    const y = -Math.cos(angle) * labelRadius
-    return { x, y }
-  })
-
+  // Visible axis label ("Size" / "Volume" / "Color") shown above the trigger.
+  // Replaces the old 9px in-circle clock faces, which were illegible and below
+  // both the 12px type floor and AA contrast. The circle now carries only a
+  // legible glyph (size) or the colour pie (colour); identity lives in this
+  // label.
   return (
-    <div ref={wrapRef} className="relative shrink-0">
+    <div className="flex flex-col items-center gap-1 shrink-0">
+      <span
+        className="text-[12px] font-semibold uppercase leading-none tracking-wide text-ink/70"
+        style={{ fontFamily: 'var(--font-body)' }}
+      >
+        {optionName}
+      </span>
+      <div ref={wrapRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -223,26 +236,17 @@ export function CircleOptionSelector({
       >
         {isColor ? null : (
           <>
-            {/* Clock-position size labels — only shown when nothing is selected.
-                Once the user picks a size, all small labels disappear and only
-                the big center label remains. */}
-            {!selected && values.map((val, i) => {
-              const pos = labelPositions[i]!
-              return (
-                <span
-                  key={val}
-                  className="absolute z-10 text-[9px] font-bold uppercase leading-none pointer-events-none select-none text-ink/60"
-                  style={{
-                    fontFamily: 'var(--font-display)',
-                    left: '50%',
-                    top: '50%',
-                    transform: `translate(-50%, -50%) translate(${pos.x}px, ${pos.y}px)`,
-                  }}
-                >
-                  {abbreviate(val)}
-                </span>
-              )
-            })}
+            {/* Nothing selected: a single legible chevron glyph signals the
+                circle opens a chooser. The old 9px per-size clock faces are
+                gone; the axis name now reads from the label above the trigger. */}
+            {!selected && (
+              <span
+                aria-hidden="true"
+                className="relative z-10 text-base leading-none text-ink/60 pointer-events-none select-none"
+              >
+                ▾
+              </span>
+            )}
 
             {/* Big center label once a size is selected. Shrinks 1pt when the
                 abbreviation is 4+ chars (e.g. XXXL) so it still fits the circle. */}
@@ -275,7 +279,7 @@ export function CircleOptionSelector({
             style={{ transformOrigin: 'bottom center' }}
           >
             <div
-              className="w-full text-[11px] uppercase tracking-wider text-muted px-1 mb-0.5"
+              className="w-full text-xs uppercase tracking-wider text-muted px-1 mb-0.5"
               style={{ fontFamily: 'var(--font-display)' }}
             >
               Select {optionName}
@@ -302,7 +306,7 @@ export function CircleOptionSelector({
                     title={val}
                     aria-label={`${val}${available ? '' : exists ? ' (out of stock)' : ' (unavailable)'}`}
                     className={[
-                      'relative w-9 h-9 rounded-full border-2 transition-all',
+                      'relative w-11 h-11 rounded-full border-2 transition-all',
                       isActive
                         ? 'border-coral ring-2 ring-coral/30'
                         : 'border-line hover:border-coral/60',
@@ -333,7 +337,7 @@ export function CircleOptionSelector({
                   }}
                   title={val}
                   className={[
-                    'min-w-[36px] h-9 px-2 rounded-full border text-xs font-bold transition-colors flex items-center justify-center',
+                    'min-w-[44px] min-h-[44px] px-2 rounded-full border text-xs font-bold transition-colors flex items-center justify-center',
                     isActive
                       ? 'border-coral bg-coral text-white'
                       : available
@@ -351,6 +355,7 @@ export function CircleOptionSelector({
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   )
 }

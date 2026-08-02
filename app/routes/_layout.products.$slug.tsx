@@ -659,6 +659,24 @@ function ProductPage() {
     const seed: Record<string, string> = {}
     if (urlVariant) {
       for (const opt of urlVariant.selectedOptions) seed[opt.name] = opt.value
+      return seed
+    }
+    // Auto-preselect ONLY when the shopper has no real choice to make: a single
+    // option axis on which exactly one value is actually buyable. Then seeding
+    // it is not a guess, and the CTA is live on landing instead of a dead
+    // control. Never when several values are available (picking the first would
+    // ship a size nobody chose), and never on multi-axis products, where a
+    // default risks adding the wrong combination to the cart.
+    if (options.length === 1) {
+      const axis = options[0]!.name
+      const buyable = variants.filter(v => v.availableForSale)
+      const values = new Set(
+        buyable.map(v => v.selectedOptions.find(o => o.name === axis)?.value).filter(Boolean),
+      )
+      if (values.size === 1) {
+        const [val] = [...values]
+        if (val) seed[axis] = val
+      }
     }
     return seed
   })
@@ -666,6 +684,11 @@ function ProductPage() {
   const [activeImg,     setActiveImg]     = useState(0)
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
   const [showSticky,    setShowSticky]    = useState(false)
+  // Guided-selection feedback for the buy CTA. `openReqNonce` bumps to ask the
+  // target selector to open + scroll into view; `selectAlert` is the announced,
+  // visible message shown under the buy row after a premature tap.
+  const [openReqNonce, setOpenReqNonce] = useState(0)
+  const [selectAlert, setSelectAlert] = useState<string | null>(null)
   const ctaRef = useRef<HTMLButtonElement>(null)
 
   // Build unified gallery: hero video (9:16) → first image → videos → remaining images
@@ -695,6 +718,9 @@ function ProductPage() {
 
   const handleSelectionChange = useCallback((next: Record<string, string>) => {
     setSelectedOptions(next)
+    // Any deliberate choice clears a prior "choose a …" prompt so the standing
+    // hint (recomputed for whatever axis is still missing) takes over.
+    setSelectAlert(null)
 
     // For gallery preview, try exact match first; fall back to any variant that
     // matches the color axis (so picking Sage swaps the image even if size is
@@ -746,6 +772,19 @@ function ProductPage() {
       .sort((a, b) => order(a) - order(b))
     if (missing.length === 0) return 'Pick an option'
     return `Pick a ${missing.join(' and ')}`
+  })()
+  // First still-unselected circle axis (size before colour), used to target the
+  // guided-open when a shopper taps the CTA before choosing.
+  const firstMissingAxis: string | undefined = (() => {
+    const rank = (n: string) =>
+      /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(n) ? 0
+      : /^colou?r$/i.test(n) ? 1 : 2
+    return [...options]
+      .filter(o => {
+        const isCircle = /^colou?r$/i.test(o.name) || /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(o.name)
+        return isCircle && !selectedOptions[o.name]
+      })
+      .sort((a, b) => rank(a.name) - rank(b.name))[0]?.name
   })()
   const inStock  = isDigital ? true : (selectedVariant?.availableForSale ?? (multiVariant ? false : deal.qty > 0))
   // Stock count for the StockIndicator trust signal. Prefer the selected
@@ -929,9 +968,6 @@ function ProductPage() {
                 </span>
               </>
             )}
-            {needsSelection && (
-              <span className="text-[13px] text-muted italic">Pick a size to see availability</span>
-            )}
             {!needsSelection && (
               <StockIndicator qty={stockIndicatorQty} isDigital={isDigital} />
             )}
@@ -976,7 +1012,7 @@ function ProductPage() {
               one is out of stock and the waitlist UI is showing instead.
               max-w-md keeps this row aligned under the SensationDial above
               so the buy controls visually sit within the dial's width. */}
-          <div className="flex items-stretch gap-2 max-w-md">
+          <div className="flex items-end gap-2 max-w-md">
             {multiVariant && [...options].sort((a, b) => {
               const rank = (n: string) =>
                 /^(size|volume|capacity|length|fl\.?\s*oz)$/i.test(n) ? 0
@@ -993,6 +1029,7 @@ function ProductPage() {
                   optionName={opt.name}
                   values={opt.values}
                   {...(selectedOptions[opt.name] ? { selected: selectedOptions[opt.name] } : {})}
+                  {...(opt.name === firstMissingAxis ? { openRequestNonce: openReqNonce } : {})}
                   onSelect={(v) => handleSelectionChange({ ...selectedOptions, [opt.name]: v })}
                   onClear={() => {
                     const { [opt.name]: _drop, ...rest } = selectedOptions
@@ -1016,13 +1053,23 @@ function ProductPage() {
                 <button
                   ref={ctaRef}
                   type="submit"
-                  disabled={isPending || needsSelection}
-                  className={[
-                    'flex-1 py-4 rounded-full font-bold text-lg transition-all',
-                    needsSelection
-                      ? 'bg-ink/10 text-ink/50 cursor-not-allowed'
-                      : 'bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20',
-                  ].join(' ')}
+                  disabled={isPending}
+                  onClick={(e) => {
+                    // Live, not dead: before a choice is made the CTA no longer
+                    // ships disabled (which fired no event and failed AA). It
+                    // intercepts the submit, opens the first unpicked selector,
+                    // and announces why, so a tap always produces feedback.
+                    if (needsSelection) {
+                      e.preventDefault()
+                      setSelectAlert(
+                        firstMissingAxis
+                          ? `Choose a ${firstMissingAxis.toLowerCase()} to continue.`
+                          : 'Choose an option to continue.',
+                      )
+                      setOpenReqNonce(n => n + 1)
+                    }
+                  }}
+                  className="flex-1 py-4 rounded-full font-bold text-lg transition-all bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 disabled:opacity-60 disabled:hover:scale-100"
                   style={{ fontFamily: 'var(--font-display)' }}
                 >
                   {needsSelection
@@ -1054,6 +1101,21 @@ function ProductPage() {
               </div>
             )}
           </div>
+
+          {/* Selection hint, moved here from beside the price so it sits right
+              under the control it refers to. `role="alert"` + the key swap make
+              the message announce again when a premature CTA tap replaces the
+              standing hint with the "choose a …" prompt. */}
+          {needsSelection && (
+            <p
+              key={selectAlert ? 'alert' : 'hint'}
+              role="alert"
+              className={`text-[13px] ${selectAlert ? 'text-coral font-medium' : 'text-ink/70'}`}
+              style={{ fontFamily: 'var(--font-body)' }}
+            >
+              {selectAlert ?? `${pickLabel} to see availability.`}
+            </p>
+          )}
 
           {/* Non-color/size axis fallback (rare): render legacy selector.
               Skip color/size/volume/etc — those already render as circles above. */}
