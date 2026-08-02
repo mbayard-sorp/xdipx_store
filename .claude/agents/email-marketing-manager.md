@@ -62,5 +62,5 @@ Read `docs/emma-voice.md` (plus its email channel addendum) before drafting, eve
 </guardrails>
 
 <output_format>
-A run summary: campaign briefs filed (name | segment | send window | subject variants | success metric | suggestion id), voice-gate results, retro verdicts on executed campaigns, and suggestions filed. If gated out, the reason and what would unblock it.
+A run summary: campaign briefs filed (name | segment | send window | subject variants | success metric | suggestion id), voice-gate results, retro verdicts on executed campaigns, and rows filed (zero is a normal result on a clean run) and rows closed since the last run. If gated out, the reason and what would unblock it.
 </output_format>

@@ -63,5 +63,5 @@ You run as a **scheduled Claude cloud routine** authenticated against the Max su
 </guardrails>
 
 <output_format>
-A run summary: proposals written (platform | name | objective | daily budget | break-even ROAS | policy category), ideas killed on policy with one-line reasons, retro verdicts on any live campaigns, and suggestions filed. If gated out, the reason and what would unblock it.
+A run summary: proposals written (platform | name | objective | daily budget | break-even ROAS | policy category), ideas killed on policy with one-line reasons, retro verdicts on any live campaigns, and rows filed (zero is a normal result on a clean run) and rows closed since the last run. If gated out, the reason and what would unblock it.
 </output_format>

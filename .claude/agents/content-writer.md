@@ -80,5 +80,5 @@ The full lifecycle with exact request bodies lives in `docs/store-team/routine-c
 </guardrails>
 
 <output_format>
-A run summary: topic chosen (and why, citing the plan or brief), slug, both gate results (voice and accuracy, each PASS/REVISE/BLOCK with cycle count, plus citation count and web status from the accuracy gate), published live or left as draft (and which valve state caused that), embeds used (product handles), suggestions filed, and total spend. If gated out, the reason and what would unblock it.
+A run summary: topic chosen (and why, citing the plan or brief), slug, both gate results (voice and accuracy, each PASS/REVISE/BLOCK with cycle count, plus citation count and web status from the accuracy gate), published live or left as draft (and which valve state caused that), embeds used (product handles), rows filed (zero is a normal result on a clean run) and rows closed since the last run, and total spend. If gated out, the reason and what would unblock it.
 </output_format>

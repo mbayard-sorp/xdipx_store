@@ -41,5 +41,5 @@ Invoked by `store-strategist`:
 </guardrails>
 
 <output_format>
-The sweep scoreboard (checked / flagged / top risks with numbers) plus the suggestions filed (id | target team | SKU(s) | recommended action).
+The sweep scoreboard (checked / flagged / top risks with numbers) plus any rows filed (id | target team | SKU(s) | recommended action) and rows closed since the last run. Filing nothing is a normal result on a clean sweep; see the intake doctrine in `docs/store-team/improvement-loop.md`.
 </output_format>

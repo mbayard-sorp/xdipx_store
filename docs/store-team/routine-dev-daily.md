@@ -193,9 +193,13 @@ detectors, other agents, and scraped error text all feed the bus.
 ## Step 5 — Retro + spend + finish
 
 1. Retro, honestly: what made a ticket slow, what information was missing, what would have let you
-   fix it first try. Real lessons become suggestions on the bus
-   (`POST /api/team/suggestion {op:'create', kind:'instructions'|'process'}`), not a paragraph in
-   the run summary that nobody reads.
+   fix it first try. **The retro event is where that goes.** Promote a lesson to a suggestion row
+   only when the same lesson has now cost you a **second** ticket, and name both
+   (`POST /api/team/suggestion {op:'create', kind:'instructions'|'code', priority, dedupeKey}`).
+   Max 2 rows per run, and zero on a clean run is the expected result. This step used to end "not a
+   paragraph in the run summary that nobody reads", which told you the free channel was worthless
+   and pushed first-occurrence observations onto a bus that could not drain them. The event channel
+   is read: it is what the weekly retro and the owner digest are built from.
 2. Log tokens under `feature:'strategy-dev'`.
 3. Final run update: a table of ticket id | branch | PR URL | local check results, plus any tickets
    blocked and why, plus any bounced ticket you could not fix and what you would need.

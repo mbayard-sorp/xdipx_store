@@ -48,7 +48,7 @@ plus 3 category queries derived from the approved keyword bank's biggest cluster
 roundup/listicle that ranks or gets cited, record: publisher, URL, last-updated, submission or
 affiliate path if visible, competitors listed. One `step` event with the target table.
 
-## Step 3: Proposals (max 6 suggestion rows per run)
+## Step 3: Proposals (ceiling of 6 suggestion rows per run, not a target)
 
 For the 3-5 strongest targets, one suggestion row each:
 
@@ -67,9 +67,12 @@ prospects (same row format, angle-labeled).
 
 ## Step 4: Summary + finish
 
-One summary suggestion row (kind `process`): targets reviewed, pitches filed, movement since last
-run (new citations spotted in search results, prior pitches landed/dismissed), and the single
-highest-leverage next step. Log spend (feature `strategy-offsite`), then finish the run with an
+One `decision` **event** (`phase:'retro'`), never a suggestion row: targets reviewed, pitches filed,
+movement since last run (new citations spotted in search results, prior pitches landed/dismissed),
+and the single highest-leverage next step. A summary is a report, and reports do not go on the bus
+(see the intake doctrine in `improvement-loop.md`). This step filed a `process` row every week into
+a kind with no executor, which is how the owner-decision lane grew faster than anyone could read it.
+Log spend (feature `strategy-offsite`), then finish the run with an
 honest summary.
 
 ## Appendix: Enablement

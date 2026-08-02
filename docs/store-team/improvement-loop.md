@@ -258,3 +258,38 @@ and buried the rows that did need a decision.
 File a report as a run **event** (`POST /api/team/event`), which is already the retro channel and is
 free. Reserve suggestion rows for work with an owner and an end state. If a report contains an ask,
 file the ask as its own row and keep the narrative in the event.
+
+## Intake doctrine: two strikes, two rows
+
+Binding on every routine's retro step. Cite this section by name rather than restating it.
+
+The bus reached 192 open rows on 2026-08-02 because filing was free and closing was not. Measured
+over the preceding 14 days: **241 rows in, 94 closed, net +10.5 a day**. Against that, the executors
+have hard ceilings, and the sum of them is smaller than intake:
+
+| Lane | Executor | Ceiling | Intake over the same 14 days |
+|---|---|---|---|
+| `code` | R-DEV, 3 per pass, 2 passes a day | 42/wk | 39/wk filed, 15/wk actually drained |
+| `instructions` / `agent-def` / `config` | Apply Pass, 15 PRs per run | 30/wk | 45/wk |
+| `process` / `strategy` / `program` / `promo` / `campaign` | none; Step 1.5 disposal only | 50/wk of rekind+retire | 37/wk |
+
+A triage of all 192 found 37 rows already fixed or moot, 21 duplicates, and 21 filed in a kind with
+no executor. **Four rows in ten could never have reached a terminal state.** These four rules exist
+to stop manufacturing them.
+
+1. **Two strikes.** File a lesson only when the same failure has now happened **twice** and you can
+   name both runs. A first occurrence is a run event, not a row.
+2. **Two rows.** File at most **2 suggestion rows per run**. If a run produced more lessons than
+   that, file the two highest-priority and put the rest in the retro event.
+3. **Zero is the expected outcome of a clean run.** A run summary must never report a suggestion
+   count as an achievement, and no `<output_format>` should imply that filing nothing is a gap.
+4. **Set `priority` and `dedupeKey` on every row you file.** Both default silently and both were
+   inert on 2026-08-02: 186 of 243 rows sat at the default priority 3, so "priority order" was
+   really arrival order, and 110 had no dedupe key, so a recurring signal stacked a fresh row every
+   run instead of reopening one. A row worth filing is worth ranking against the rows already there.
+
+What filing is measured on is what agents optimise. Before 2026-08-02, eleven agent definitions
+carried `suggestions filed` as a required line in `<output_format>` and **nothing anywhere measured
+whether a filed row ever reached `applied`**. Filing was scored, closing was not, and the queue
+behaved exactly as that scoring predicts. If you add a metric to a retro step, make it a closure
+metric.

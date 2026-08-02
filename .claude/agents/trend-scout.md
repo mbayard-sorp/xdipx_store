@@ -52,5 +52,5 @@ You run as a **scheduled Claude cloud routine** authenticated against the Max su
 </guardrails>
 
 <output_format>
-Run summary: lanes scanned (with source counts), briefs written (topic + suggested category + evidence quality each), topics considered and dropped (one line why), backlog state, suggestions filed, total spend. If valve-gated or gate-refused, the reason and what would unblock it.
+Run summary: lanes scanned (with source counts), briefs written (topic + suggested category + evidence quality each), topics considered and dropped (one line why), backlog state, rows filed (zero is a normal result on a clean run) and rows closed since the last run, total spend. If valve-gated or gate-refused, the reason and what would unblock it.
 </output_format>
