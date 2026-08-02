@@ -9,6 +9,7 @@
 
 import { Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
+import { showDiscountBadge } from '~/lib/discount-badge'
 import type { DiscoveryProduct } from '~/types/discovery'
 
 function fmt(n: number): string {
@@ -55,8 +56,10 @@ export function StorefrontProductCard({ product, priority = false, onSelect, flu
         )}
         {/* Ink, not coral: the doctrine's coral budget reserves coral for the
             one primary CTA per viewport, and a grid of coral % badges reads
-            as a discount wall (design-critic BLOCK finding, 2026-07-20). */}
-        {onSale && savePct > 0 && (
+            as a discount wall (design-critic BLOCK finding, 2026-07-20).
+            Floor at MIN_DISCOUNT_BADGE_PCT so a "1% off" badge never sits beside
+            real markdowns (ticket #467); the struck price below still shows. */}
+        {onSale && showDiscountBadge(savePct) && (
           <span
             className="absolute left-3 top-3 rounded-full bg-ink px-2.5 py-1 text-[11px] font-semibold text-paper"
             style={{ fontFamily: 'var(--font-body)' }}
