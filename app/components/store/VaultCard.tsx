@@ -4,6 +4,7 @@ import type { VaultDeal } from '~/types'
 import { HeartButton } from './HeartButton'
 import { CardMediaCarousel } from './CardMediaCarousel'
 import { abbreviate, buildPieGradient } from './CircleOptionSelector'
+import { showDiscountBadge } from '~/lib/discount-badge'
 
 interface VaultCardProps {
   deal: VaultDeal
@@ -157,8 +158,11 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
               : null
             const hasPriceRange =
               deal.priceMin != null && deal.priceMax != null && deal.priceMax > deal.priceMin
-            const showFlatSavings  = !quiet && discount > 0 && !hasPriceRange
-            const showRangeSavings = !quiet && hasPriceRange && (deal.maxSavingsAmount ?? 0) > 0
+            // Floor both savings lines at MIN_DISCOUNT_BADGE_PCT (ticket #467) so
+            // a "You save $1.01 (1%)" line never appears; the struck MSRP above
+            // still carries the markdown below the floor.
+            const showFlatSavings  = !quiet && showDiscountBadge(discount) && !hasPriceRange
+            const showRangeSavings = !quiet && hasPriceRange && (deal.maxSavingsAmount ?? 0) > 0 && showDiscountBadge(deal.maxSavingsPercent ?? 0)
             if (!showFlatSavings && !showRangeSavings && !sizes && !colors) return null
             return (
               <div className="flex items-center gap-2 mt-1">
