@@ -85,8 +85,8 @@ function SummaryCard({ href, eyebrow, body, bodyHtml, bodySlot, className = '', 
           etc.) — the H2 hierarchy gives Google explicit topic clusters
           instead of inferring structure from styled divs. */}
       <h2
-        className="text-[11px] uppercase tracking-wider text-coral mb-2 font-medium"
-        style={{ fontFamily: 'var(--font-display)' }}
+        className="text-[11px] uppercase tracking-[0.18em] text-ink-3 mb-2 font-medium"
+        style={{ fontFamily: 'var(--font-mono)' }}
       >
         {eyebrow}
       </h2>
