@@ -39,6 +39,7 @@ import { PanelDeck } from '~/components/home/panels/PanelDeck'
 import {
   trackViewItemList,
   trackSelectItem,
+  trackSelectPromotion,
   trackCtaClick,
   trackHomeVariantView,
   trackHomeScrollDepth,
@@ -512,6 +513,22 @@ function ProductGrid({
   if (!rail.items.length) return null
   const items = rail.items.slice(0, 8)
 
+  // GA4: See-all clicks fire select_promotion with native params so the Nº 03
+  // funnel is readable end to end (view_item_list → select_promotion → …)
+  // without a custom dimension. cta_click cannot serve this: its link_url
+  // dimension ships empty, so a See-all click is indistinguishable from any
+  // other CTA. `creativeSlot` is what separates the desktop header link from
+  // the mobile below-grid link. This grid is the Nº 03 slot by construction
+  // (see the hardcoded most-picked-grid list id below), so the promotion ids
+  // are fixed here, matching that hardcoding.
+  const fireSeeAllPromotion = (creativeSlot: 'header' | 'below-grid') =>
+    trackSelectPromotion({
+      promotionId: 'most-picked-see-all',
+      promotionName: 'Most picked, right now',
+      creativeSlot,
+      locationId: 'home-no3',
+    })
+
   // GA4: fire view_item_list once per page view when the grid renders.
   const firedView = useRef(false)
   useEffect(() => {
@@ -540,6 +557,7 @@ function ProductGrid({
           {seeAllHref && (
             <Link
               to={seeAllHref}
+              onClick={() => fireSeeAllPromotion('header')}
               className="hidden text-[15px] font-medium text-ink link-coral md:inline-block"
               style={BODY}
             >
@@ -567,6 +585,7 @@ function ProductGrid({
         {seeAllHref && (
           <Link
             to={seeAllHref}
+            onClick={() => fireSeeAllPromotion('below-grid')}
             className="mt-7 inline-block text-[15px] font-medium text-ink link-coral md:hidden"
             style={BODY}
           >

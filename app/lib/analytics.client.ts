@@ -125,6 +125,26 @@ export function trackSelectItem(listId: string, listName: string, item: GA4Item,
   })
 }
 
+// ─── E-commerce: select_promotion ─────────────────────────────────────────────
+// Native GA4 promotion params only (promotion_id, promotion_name, creative_slot,
+// location_id all report for free), so a promotion click is measurable without
+// registering a custom dimension. Used for the Nº 03 "Most picked" See-all links,
+// which cta_click could not distinguish (its link_url dimension ships empty).
+
+export function trackSelectPromotion(params: {
+  promotionId: string
+  promotionName: string
+  creativeSlot?: string
+  locationId?: string
+}) {
+  gtag('event', 'select_promotion', {
+    promotion_id: params.promotionId,
+    promotion_name: params.promotionName,
+    creative_slot: params.creativeSlot,
+    location_id: params.locationId,
+  })
+}
+
 // ─── E-commerce: add_to_cart ──────────────────────────────────────────────────
 
 export function trackAddToCart(item: GA4Item, value?: number, currency = 'USD') {
