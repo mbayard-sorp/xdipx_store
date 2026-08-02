@@ -4447,6 +4447,7 @@ __export(shopify_server_exports, {
   getPairingCandidates: () => getPairingCandidates,
   getProductAdminImages: () => getProductAdminImages,
   getProductByHandle: () => getProductByHandle,
+  getProductByInventoryItemId: () => getProductByInventoryItemId,
   getProductDetailForEmma: () => getProductDetailForEmma,
   getProductHandleById: () => getProductHandleById,
   getProductImagesForSitemap: () => getProductImagesForSitemap,
@@ -6055,6 +6056,30 @@ async function getProductVariantGids(shopifyProductId) {
   const numericId = shopifyProductId.replace("gid://shopify/Product/", "");
   const { product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`);
   return (product?.variants ?? []).map((v) => `gid://shopify/ProductVariant/${v.id}`);
+}
+async function getProductByInventoryItemId(inventoryItemId) {
+  const gid = inventoryItemId.startsWith("gid://") ? inventoryItemId : `gid://shopify/InventoryItem/${inventoryItemId}`;
+  const data = await adminGraphQL(
+    `query ProductByInventoryItem($id: ID!) {
+      inventoryItem(id: $id) {
+        variant {
+          price
+          product { handle title featuredImage { url } }
+        }
+      }
+    }`,
+    { id: gid }
+  );
+  const product = data.inventoryItem?.variant?.product;
+  if (!product?.handle) return null;
+  const result = {
+    handle: product.handle,
+    title: product.title
+  };
+  if (product.featuredImage?.url) result.imageUrl = product.featuredImage.url;
+  const price = data.inventoryItem?.variant?.price ? parseFloat(data.inventoryItem.variant.price) : NaN;
+  if (Number.isFinite(price)) result.price = price;
+  return result;
 }
 async function updateVariantPricing(variantGid, price, compareAtPrice, wholesaleCost) {
   const id = variantGid.replace("gid://shopify/ProductVariant/", "");
@@ -11350,6 +11375,7 @@ __export(klaviyo_server_exports, {
   trackStartedCheckout: () => trackStartedCheckout,
   trackWishlistAdded: () => trackWishlistAdded,
   trackWishlistRemoved: () => trackWishlistRemoved,
+  triggerBackInStock: () => triggerBackInStock,
   triggerDailyDealEmail: () => triggerDailyDealEmail,
   unsubscribeAll: () => unsubscribeAll,
   unsubscribeFromList: () => unsubscribeFromList,
@@ -11515,6 +11541,20 @@ async function triggerDailyDealEmail(deal) {
       }
     }
   });
+}
+async function triggerBackInStock(product) {
+  try {
+    await trackEvent("broadcast@xdipx.com", "Back in Stock", {
+      product_handle: product.handle,
+      product_title: product.title ?? null,
+      image_url: product.imageUrl ?? null,
+      price: product.price ?? null,
+      product_url: `https://xdipx.com/products/${product.handle}`,
+      back_in_stock_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  } catch (err2) {
+    console.error("[klaviyo.triggerBackInStock] failed:", err2 instanceof Error ? err2.message : err2);
+  }
 }
 function knownListIds() {
   const ids = [
@@ -32211,15 +32251,37 @@ async function handleProductUpdated(product) {
   await purgeMarkdownCache2(product.handle);
   console.log(`[webhook:product-updated] purged markdown + PDP cache for ${product.handle}`);
 }
+function inventoryLevelKey(inventoryItemId) {
+  return `invlevel:${inventoryItemId}`;
+}
+function isRestockCrossing(prev, current) {
+  return prev !== null && prev <= 0 && current > 0;
+}
 async function handleInventoryUpdate(level) {
-  if (level.available > 0) return;
-  const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
-  const { soldOut } = await isLiveDealSoldOut2();
-  if (soldOut) {
-    console.log("[webhook:inventory-update] Live deal sold out \u2014 rotating to next deal");
-    const result = await rotateDeal2();
-    console.log("[webhook:inventory-update] Rotation result:", result);
+  const { kvGet: kvGet2, kvSet: kvSet2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+  const key = inventoryLevelKey(level.inventory_item_id);
+  const prev = await kvGet2(key);
+  await kvSet2(key, level.available);
+  if (level.available <= 0) {
+    const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
+    const { soldOut } = await isLiveDealSoldOut2();
+    if (soldOut) {
+      console.log("[webhook:inventory-update] Live deal sold out \u2014 rotating to next deal");
+      const result = await rotateDeal2();
+      console.log("[webhook:inventory-update] Rotation result:", result);
+    }
+    return;
   }
+  if (!isRestockCrossing(prev, level.available)) return;
+  const { getProductByInventoryItemId: getProductByInventoryItemId2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const product = await getProductByInventoryItemId2(String(level.inventory_item_id));
+  if (!product) {
+    console.warn(`[webhook:inventory-update] restock crossing but no product for inventory_item ${level.inventory_item_id}`);
+    return;
+  }
+  const { triggerBackInStock: triggerBackInStock2 } = await Promise.resolve().then(() => (init_klaviyo_server(), klaviyo_server_exports));
+  await triggerBackInStock2(product);
+  console.log(`[webhook:inventory-update] back-in-stock fired for ${product.handle} (available ${level.available})`);
 }
 async function handleReturnsUpdate(payload) {
   const returnGid = payload.admin_graphql_api_id ?? `gid://shopify/Return/${payload.id}`;
