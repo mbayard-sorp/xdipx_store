@@ -9,7 +9,6 @@ export default {
   // /__manifest calls at all, and no client-side failure path when the
   // endpoint is unreachable (a failed fetcher-triggered discovery escalates
   // to the root error boundary and blanks the page).
-  // Keep react-router.config.js in sync — it is a legacy duplicate of this file.
   routeDiscovery: { mode: 'initial' },
   future: {
     unstable_optimizeDeps: true,
