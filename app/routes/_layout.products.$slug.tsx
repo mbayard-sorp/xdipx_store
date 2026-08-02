@@ -661,15 +661,22 @@ function ProductPage() {
       for (const opt of urlVariant.selectedOptions) seed[opt.name] = opt.value
       return seed
     }
-    // Auto-preselect ONLY when there is exactly one option axis: choosing the
-    // sole in-stock variant is unambiguous, so the CTA is live on landing
-    // instead of a dead control. Never on multi-axis (2+ axes), where a default
-    // risks adding the wrong combination to the cart.
+    // Auto-preselect ONLY when the shopper has no real choice to make: a single
+    // option axis on which exactly one value is actually buyable. Then seeding
+    // it is not a guess, and the CTA is live on landing instead of a dead
+    // control. Never when several values are available (picking the first would
+    // ship a size nobody chose), and never on multi-axis products, where a
+    // default risks adding the wrong combination to the cart.
     if (options.length === 1) {
       const axis = options[0]!.name
-      const firstAvailable = variants.find(v => v.availableForSale) ?? variants[0]
-      const val = firstAvailable?.selectedOptions.find(o => o.name === axis)?.value
-      if (val) seed[axis] = val
+      const buyable = variants.filter(v => v.availableForSale)
+      const values = new Set(
+        buyable.map(v => v.selectedOptions.find(o => o.name === axis)?.value).filter(Boolean),
+      )
+      if (values.size === 1) {
+        const [val] = [...values]
+        if (val) seed[axis] = val
+      }
     }
     return seed
   })
