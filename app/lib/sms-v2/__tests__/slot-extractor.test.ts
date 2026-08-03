@@ -192,6 +192,39 @@ describe('price extraction', () => {
     const r = await extract('something under $100')
     expect(r.slots.priceMax).toBe(100)
   })
+
+  it.each([
+    ['under 50 dollars', 50],
+    ['keep it under 80', 80],
+    ['my budget is 120', 120],
+    ['up to 200', 200],
+    ['no more than 75', 75],
+    ['about 60 bucks', 60],
+    ['$45', 45],
+    ['30 dollars', 30],
+  ])('recognises a real budget: "%s" → %i', async (text, expected) => {
+    const r = await extract(text)
+    expect(r.slots.priceMax).toBe(expected)
+  })
+
+  // Regression: the numeric pattern made both the budget cue and the "$"
+  // optional, so ANY bare 2-3 digit number became a price ceiling. A live
+  // caller ended up with priceMax=10 pinned to their phone number and was told
+  // their results were "all above your ten dollar budget" on a later call where
+  // they never mentioned money at all.
+  it.each([
+    'my order number is 10 4 2',
+    'i have 10 minutes',
+    'i am 45 and new to this',
+    'the 10 inch one',
+    'we have been together 10 years',
+    'i want the 10 speed vibrator',
+    'rated 10 out of 10',
+    'i am shopping for a new vibrator',
+  ])('does not invent a budget from a bare number: "%s"', async (text) => {
+    const r = await extract(text)
+    expect(r.slots.priceMax).toBeUndefined()
+  })
 })
 
 // ---------------------------------------------------------------------------

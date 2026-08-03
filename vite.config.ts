@@ -30,12 +30,27 @@ export default defineConfig({
   },
   plugins: [
     tailwindcss(),
-    // Generates metric-matched "* Variable Fallback" @font-face rules from the
-    // self-hosted @fontsource faces so the fallback→webfont swap causes no CLS.
-    // The generated family names are referenced in app.css --font-* stacks.
+    // Generates metric-matched fallback @font-face rules from the self-hosted
+    // @fontsource faces so the fallback→webfont swap causes no reflow (and so
+    // the swap does not register a fresh, larger LCP candidate).
+    //
+    // The `family` fontaine hands us is NOT stable across modes: in dev it is
+    // the @font-face family from the fontsource CSS ("DM Sans Variable"), and
+    // in the production build it is derived from the font file basename
+    // ("DM", from dm-sans-latin-wght-normal.woff2). A naive
+    // `${family} Fallback` therefore emits "DM Sans Variable Fallback" in dev
+    // and "DM Fallback" in prod, so any single name written into the app.css
+    // --font-* stacks is guaranteed to be wrong in one of the two — which is
+    // how the metric-matched layer silently went dead in production.
+    //
+    // Normalising away the Variable/Sans/Mono qualifiers collapses both inputs
+    // onto one name, so the stacks in app.css resolve in dev and prod alike.
+    // If you change this, re-check both:
+    //   grep -o 'font-family:[A-Za-z ]*Fallback' build/client/assets/app-*.css
+    //   and the same query against the dev server's stylesheet.
     FontaineTransform.vite({
       fallbacks: ['system-ui', 'Arial', 'Times New Roman'],
-      fallbackName: (family) => `${family} Fallback`,
+      fallbackName: (family) => `${family.replace(/\s*\b(Variable|Sans|Mono)\b/g, '').trim()} Fallback`,
     }),
     reactRouter(),
     tsconfigPaths(),

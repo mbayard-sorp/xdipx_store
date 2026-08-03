@@ -137,8 +137,21 @@ export function mergeSlots(
 ): Partial<DiscoverySlots> {
   const merged: Partial<DiscoverySlots> = { ...existing }
 
-  // Single-value fields: incoming overrides if defined
-  if (incoming.category !== undefined)  merged.category  = incoming.category
+  // Single-value fields: incoming overrides if defined.
+  //
+  // subtype is scoped to its category: 'plug' only means something under
+  // 'anal', 'wand' only under 'vibrator'. When the category changes and the
+  // new message doesn't supply a subtype, the old one is not just stale, it is
+  // contradictory — a live conversation carried category=vibrator alongside
+  // subtype=plug, which reaches searchProducts as productTypeDial=vibrator +
+  // productSubtypeDial=plug and filters every result to zero. Drop it.
+  if (incoming.category !== undefined) {
+    const categoryChanged = incoming.category !== existing.category
+    merged.category = incoming.category
+    if (categoryChanged && incoming.subtype === undefined) {
+      delete merged.subtype
+    }
+  }
   if (incoming.subtype  !== undefined)  merged.subtype   = incoming.subtype
   if (incoming.audience !== undefined)  merged.audience  = incoming.audience
   if (incoming.experience !== undefined) merged.experience = incoming.experience

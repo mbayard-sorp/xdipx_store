@@ -416,18 +416,60 @@ interface ShopifyInventoryLevel {
   available: number
 }
 
+/** KV key holding the last-observed `available` for one inventory item, so the
+ *  next update can tell a routine change apart from a sold-out -> in-stock
+ *  crossing. */
+function inventoryLevelKey(inventoryItemId: number): string {
+  return `invlevel:${inventoryItemId}`
+}
+
+/**
+ * Pure: did availability cross from sold-out to in-stock? True only when the
+ * previous observed level was known and non-positive and the current level is
+ * positive. A null `prev` (never observed) is deliberately NOT a crossing, so
+ * the first webhook we ever see for an item, and routine positive updates
+ * (e.g. 50 -> 49), never fire a back-in-stock notification.
+ */
+export function isRestockCrossing(prev: number | null, current: number): boolean {
+  return prev !== null && prev <= 0 && current > 0
+}
+
 async function handleInventoryUpdate(level: ShopifyInventoryLevel): Promise<void> {
-  // Only care if available hit zero
-  if (level.available > 0) return
+  const { kvGet, kvSet } = await import('../app/lib/kv.server.js')
+  const key = inventoryLevelKey(level.inventory_item_id)
+  const prev = await kvGet<number>(key)
+  // Record the current level first so any future crossing is detectable, even
+  // if the notification path below throws.
+  await kvSet(key, level.available)
 
-  const { isLiveDealSoldOut, rotateDeal } = await import('../app/lib/deal-rotator.server.js')
-  const { soldOut } = await isLiveDealSoldOut()
-
-  if (soldOut) {
-    console.log('[webhook:inventory-update] Live deal sold out — rotating to next deal')
-    const result = await rotateDeal()
-    console.log('[webhook:inventory-update] Rotation result:', result)
+  // Sold-out path (existing behaviour): rotate the daily deal off a sold-out
+  // live deal.
+  if (level.available <= 0) {
+    const { isLiveDealSoldOut, rotateDeal } = await import('../app/lib/deal-rotator.server.js')
+    const { soldOut } = await isLiveDealSoldOut()
+    if (soldOut) {
+      console.log('[webhook:inventory-update] Live deal sold out — rotating to next deal')
+      const result = await rotateDeal()
+      console.log('[webhook:inventory-update] Rotation result:', result)
+    }
+    return
   }
+
+  // Restock path (new): only on a genuine sold-out -> in-stock crossing, notify
+  // everyone waiting on this product. Firing on every positive update would
+  // spam; the crossing guard limits us to the transition that matters.
+  if (!isRestockCrossing(prev, level.available)) return
+
+  const { getProductByInventoryItemId } = await import('../app/lib/shopify.server.js')
+  const product = await getProductByInventoryItemId(String(level.inventory_item_id))
+  if (!product) {
+    console.warn(`[webhook:inventory-update] restock crossing but no product for inventory_item ${level.inventory_item_id}`)
+    return
+  }
+
+  const { triggerBackInStock } = await import('../app/lib/klaviyo.server.js')
+  await triggerBackInStock(product)
+  console.log(`[webhook:inventory-update] back-in-stock fired for ${product.handle} (available ${level.available})`)
 }
 
 // ─── Returns: tracking + auto-refund ──────────────────────────────────────

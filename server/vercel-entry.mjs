@@ -4447,6 +4447,7 @@ __export(shopify_server_exports, {
   getPairingCandidates: () => getPairingCandidates,
   getProductAdminImages: () => getProductAdminImages,
   getProductByHandle: () => getProductByHandle,
+  getProductByInventoryItemId: () => getProductByInventoryItemId,
   getProductDetailForEmma: () => getProductDetailForEmma,
   getProductHandleById: () => getProductHandleById,
   getProductImagesForSitemap: () => getProductImagesForSitemap,
@@ -6055,6 +6056,30 @@ async function getProductVariantGids(shopifyProductId) {
   const numericId = shopifyProductId.replace("gid://shopify/Product/", "");
   const { product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`);
   return (product?.variants ?? []).map((v) => `gid://shopify/ProductVariant/${v.id}`);
+}
+async function getProductByInventoryItemId(inventoryItemId) {
+  const gid = inventoryItemId.startsWith("gid://") ? inventoryItemId : `gid://shopify/InventoryItem/${inventoryItemId}`;
+  const data = await adminGraphQL(
+    `query ProductByInventoryItem($id: ID!) {
+      inventoryItem(id: $id) {
+        variant {
+          price
+          product { handle title featuredImage { url } }
+        }
+      }
+    }`,
+    { id: gid }
+  );
+  const product = data.inventoryItem?.variant?.product;
+  if (!product?.handle) return null;
+  const result = {
+    handle: product.handle,
+    title: product.title
+  };
+  if (product.featuredImage?.url) result.imageUrl = product.featuredImage.url;
+  const price = data.inventoryItem?.variant?.price ? parseFloat(data.inventoryItem.variant.price) : NaN;
+  if (Number.isFinite(price)) result.price = price;
+  return result;
 }
 async function updateVariantPricing(variantGid, price, compareAtPrice, wholesaleCost) {
   const id = variantGid.replace("gid://shopify/ProductVariant/", "");
@@ -11350,6 +11375,7 @@ __export(klaviyo_server_exports, {
   trackStartedCheckout: () => trackStartedCheckout,
   trackWishlistAdded: () => trackWishlistAdded,
   trackWishlistRemoved: () => trackWishlistRemoved,
+  triggerBackInStock: () => triggerBackInStock,
   triggerDailyDealEmail: () => triggerDailyDealEmail,
   unsubscribeAll: () => unsubscribeAll,
   unsubscribeFromList: () => unsubscribeFromList,
@@ -11515,6 +11541,20 @@ async function triggerDailyDealEmail(deal) {
       }
     }
   });
+}
+async function triggerBackInStock(product) {
+  try {
+    await trackEvent("broadcast@xdipx.com", "Back in Stock", {
+      product_handle: product.handle,
+      product_title: product.title ?? null,
+      image_url: product.imageUrl ?? null,
+      price: product.price ?? null,
+      product_url: `https://xdipx.com/products/${product.handle}`,
+      back_in_stock_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  } catch (err2) {
+    console.error("[klaviyo.triggerBackInStock] failed:", err2 instanceof Error ? err2.message : err2);
+  }
 }
 function knownListIds() {
   const ids = [
@@ -25064,9 +25104,13 @@ var init_product_type_server = __esm({
 // app/lib/import-enrich.server.ts
 var import_enrich_server_exports = {};
 __export(import_enrich_server_exports, {
+  ENRICH_MAX_ATTEMPTS: () => ENRICH_MAX_ATTEMPTS,
+  STUCK_BATCH_MAX_HOURS: () => STUCK_BATCH_MAX_HOURS,
   applyFullEnrichmentWrites: () => applyFullEnrichmentWrites,
   collectEnrichmentBatch: () => collectEnrichmentBatch,
+  decideEnrichFailure: () => decideEnrichFailure,
   detectImportEnrichStall: () => detectImportEnrichStall,
+  isBatchClaimStuck: () => isBatchClaimStuck,
   publishEnrichedProducts: () => publishEnrichedProducts,
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
@@ -25216,6 +25260,15 @@ function passesQualityGate(writes) {
   if (!checkDialSpread(writes.sensationDialV2?.items).ok) return false;
   return true;
 }
+function decideEnrichFailure(currentAttempts) {
+  const enrichAttempts = currentAttempts + 1;
+  return enrichAttempts < ENRICH_MAX_ATTEMPTS ? { action: "retry", enrichAttempts } : { action: "park", enrichAttempts };
+}
+function isBatchClaimStuck(claimedAt, now, maxHours = STUCK_BATCH_MAX_HOURS) {
+  if (!claimedAt) return false;
+  const ageHours = (now.getTime() - claimedAt.getTime()) / 36e5;
+  return ageHours >= maxHours;
+}
 async function submitEnrichmentBatch(cap, opts = {}) {
   const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq18(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
     eq18(importCandidates.status, "imported"),
@@ -25288,12 +25341,23 @@ async function detectImportEnrichStall(enabled) {
     return { stuck: 0, oldestHours: null, alerted: false };
   }
 }
+async function applyEnrichFailure(candidate, reason) {
+  const disp = decideEnrichFailure(candidate.enrichAttempts);
+  if (disp.action === "retry") {
+    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
+    console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- re-queued for retry`);
+  } else {
+    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
+    console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- parked, needs manual review`);
+  }
+}
 async function collectEnrichmentBatch() {
   const rows = await db.select({
     id: importCandidates.id,
     batchId: importCandidates.enrichBatchId,
     productId: dealHistory.shopifyProductId,
-    enrichAttempts: importCandidates.enrichAttempts
+    enrichAttempts: importCandidates.enrichAttempts,
+    claimedAt: importCandidates.updatedAt
   }).from(importCandidates).innerJoin(dealHistory, eq18(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
     eq18(importCandidates.status, "imported"),
     isNull3(importCandidates.enrichedAt),
@@ -25302,7 +25366,7 @@ async function collectEnrichmentBatch() {
   )).orderBy(asc4(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
-    return { enriched: 0, failed: 0, stillPending: 0 };
+    return { enriched: 0, failed: 0, stillPending: 0, recovered: 0 };
   }
   const byBatch = /* @__PURE__ */ new Map();
   for (const c of pending) {
@@ -25313,10 +25377,33 @@ async function collectEnrichmentBatch() {
   let enrichedTotal = 0;
   let failedTotal = 0;
   let stillPending = 0;
+  let recoveredTotal = 0;
+  const now = /* @__PURE__ */ new Date();
   for (const [batchId, candidates] of byBatch) {
-    const collected = await collectFullEnrichmentBatch(batchId);
+    let collected;
+    try {
+      collected = await collectFullEnrichmentBatch(batchId);
+    } catch (err2) {
+      const reason = `batch collect error: ${err2 instanceof Error ? err2.message : String(err2)}`;
+      for (const candidate of candidates) {
+        await applyEnrichFailure(candidate, reason);
+        failedTotal++;
+      }
+      console.error(`[import-enrich] collectFullEnrichmentBatch threw for batch ${batchId}; ${candidates.length} candidate(s) routed to retry/park:`, err2);
+      continue;
+    }
     if (!collected.ended) {
-      stillPending += candidates.length;
+      const stuck = [];
+      const live = [];
+      for (const c of candidates) (isBatchClaimStuck(c.claimedAt, now) ? stuck : live).push(c);
+      for (const candidate of stuck) {
+        await applyEnrichFailure(candidate, `batch stuck in '${collected.status}' past ${STUCK_BATCH_MAX_HOURS}h`);
+        recoveredTotal++;
+      }
+      stillPending += live.length;
+      if (stuck.length) {
+        console.warn(`[import-enrich] batch ${batchId} stuck in '${collected.status}'; aged out ${stuck.length} candidate(s) for resubmit, ${live.length} still in flight`);
+      }
       continue;
     }
     for (const candidate of candidates) {
@@ -25337,19 +25424,12 @@ async function collectEnrichmentBatch() {
         enrichedTotal++;
         continue;
       }
-      const attempts = candidate.enrichAttempts + 1;
       const reason = batchFailure?.error ?? (!writes ? "no result in batch" : "quality gate failed");
-      if (attempts < ENRICH_MAX_ATTEMPTS) {
-        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
-        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- re-queued for retry`);
-      } else {
-        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
-        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- parked, needs manual review`);
-      }
+      await applyEnrichFailure(candidate, reason);
       failedTotal++;
     }
   }
-  return { enriched: enrichedTotal, failed: failedTotal, stillPending };
+  return { enriched: enrichedTotal, failed: failedTotal, stillPending, recovered: recoveredTotal };
 }
 async function publishEnrichedProducts() {
   const rows = await db.select({
@@ -25411,7 +25491,7 @@ async function runImportEnrichTick(opts = {}) {
   const submit = collect.stillPending === 0 ? await submitEnrichmentBatch(await getBatchCap(), { deadline }) : { submitted: 0, batchIds: [], reason: "batch_in_flight" };
   return { ok: true, stall, collect, publish, submit };
 }
-var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, BRIEF_CHUNK_SIZE, TICK_BUDGET_MS, STALL_COUNT_THRESHOLD, STALL_AGE_HOURS, ed, edA, ENRICH_MAX_ATTEMPTS;
+var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, BRIEF_CHUNK_SIZE, TICK_BUDGET_MS, STALL_COUNT_THRESHOLD, STALL_AGE_HOURS, ed, edA, ENRICH_MAX_ATTEMPTS, STUCK_BATCH_MAX_HOURS;
 var init_import_enrich_server = __esm({
   "app/lib/import-enrich.server.ts"() {
     "use strict";
@@ -25435,6 +25515,7 @@ var init_import_enrich_server = __esm({
     ed = (s) => s == null ? s : stripDashes(s);
     edA = (a) => a?.map(stripDashes);
     ENRICH_MAX_ATTEMPTS = 2;
+    STUCK_BATCH_MAX_HOURS = 26;
   }
 });
 
@@ -28198,12 +28279,16 @@ __export(ticket_out_of_band_sweep_server_exports, {
   SWEEPABLE_STATUSES: () => SWEEPABLE_STATUSES,
   SWEEP_MAX_TICKETS: () => SWEEP_MAX_TICKETS,
   SWEEP_MIN_AGE_MINUTES: () => SWEEP_MIN_AGE_MINUTES,
+  classifyTicketPrMatches: () => classifyTicketPrMatches,
   countStrandedVerifiedTickets: () => countStrandedVerifiedTickets,
+  findMergedPrForTicket: () => findMergedPrForTicket,
+  findStrandedLinklessTickets: () => findStrandedLinklessTickets,
   findStrandedVerifiedTickets: () => findStrandedVerifiedTickets,
   isMergedOutOfBand: () => isMergedOutOfBand,
+  referencesTicketId: () => referencesTicketId,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and8, desc as desc2, eq as eq23, inArray as inArray10, lt as lt4, sql as sql16 } from "drizzle-orm";
+import { and as and8, desc as desc2, eq as eq23, inArray as inArray10, lt as lt4, notExists, sql as sql16 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
@@ -28227,8 +28312,54 @@ async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   }
   return out;
 }
+async function findStrandedLinklessTickets(limit = SWEEP_MAX_TICKETS) {
+  const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
+  const rows = await db.select({ ticketId: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and8(
+    inArray10(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+    lt4(homepageTeamSuggestions.updatedAt, cutoff),
+    notExists(
+      db.select({ one: sql16`1` }).from(suggestionLinks).where(and8(
+        eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
+        eq23(suggestionLinks.kind, "pr")
+      ))
+    )
+  )).orderBy(homepageTeamSuggestions.updatedAt).limit(limit);
+  return rows.map((r) => r.ticketId);
+}
 function isMergedOutOfBand(pr) {
   return pr.merged === true;
+}
+function referencesTicketId(text2, ticketId) {
+  return new RegExp(`ticket #${ticketId}(?!\\d)`, "i").test(text2);
+}
+function classifyTicketPrMatches(prs, ticketId) {
+  const matched = /* @__PURE__ */ new Set();
+  for (const pr of prs) {
+    if (!pr.isPullRequest) continue;
+    if (referencesTicketId(`${pr.title}
+${pr.body}`, ticketId)) matched.add(pr.number);
+  }
+  const numbers = [...matched].sort((a, b) => a - b);
+  if (numbers.length === 0) return { kind: "none" };
+  if (numbers.length > 1) return { kind: "ambiguous", prNumbers: numbers };
+  return { kind: "match", prNumber: numbers[0] };
+}
+async function findMergedPrForTicket(ticketId, context = "out-of-band-sweep") {
+  const cfg = getGithubConfig(context);
+  if (!cfg) return { kind: "error", error: "GITHUB_TOKEN/OWNER/REPO not set" };
+  const q = `repo:${cfg.owner}/${cfg.repo} type:pr is:merged "ticket #${ticketId}"`;
+  const res = await githubRequest(
+    `/search/issues?per_page=${SEARCH_PER_PAGE}&q=${encodeURIComponent(q)}`,
+    { context }
+  );
+  if (!res.ok) return { kind: "error", error: res.error };
+  const prs = (res.data.items ?? []).map((it) => ({
+    number: it.number,
+    title: it.title ?? "",
+    body: it.body ?? "",
+    isPullRequest: Boolean(it.pull_request)
+  }));
+  return classifyTicketPrMatches(prs, ticketId);
 }
 async function markPrLinkMerged(ticketId, prRef) {
   await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and8(
@@ -28237,36 +28368,68 @@ async function markPrLinkMerged(ticketId, prRef) {
     eq23(suggestionLinks.ref, prRef)
   ));
 }
+async function applyCandidateIfMerged(c, result) {
+  try {
+    const pr = await getPullRequest(c.prNumber, "out-of-band-sweep");
+    if (!pr.ok || !pr.data) {
+      result.errors.push(`PR #${c.prNumber}: ${pr.ok ? "no data" : pr.error}`);
+      return;
+    }
+    if (!isMergedOutOfBand(pr.data)) return;
+    await transitionSuggestion(c.ticketId, "applied", "system", {
+      note: `merged out-of-band (PR #${c.prNumber} was already merged when the engine reconciled it)`,
+      links: [{ kind: "pr", ref: pr.data.htmlUrl, state: "merged" }]
+    });
+    if (c.prRef) await markPrLinkMerged(c.ticketId, c.prRef);
+    result.applied.push(c.ticketId);
+    console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`);
+  } catch (err2) {
+    const msg = String(err2);
+    if (msg.includes("409")) return;
+    result.errors.push(`ticket #${c.ticketId}: ${msg}`);
+  }
+}
 async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
   const result = { checked: 0, applied: [], errors: [] };
-  let candidates;
+  let linked = [];
   try {
-    candidates = await findStrandedVerifiedTickets(limit);
+    linked = await findStrandedVerifiedTickets(limit);
   } catch (err2) {
     result.errors.push(`candidate query failed: ${String(err2)}`);
-    return result;
   }
-  if (candidates.length === 0) return result;
-  for (const c of candidates) {
+  for (const c of linked) {
+    if (result.checked >= limit) break;
     result.checked += 1;
+    await applyCandidateIfMerged(c, result);
+  }
+  const remaining = limit - result.checked;
+  if (remaining > 0) {
+    let linkless = [];
     try {
-      const pr = await getPullRequest(c.prNumber, "out-of-band-sweep");
-      if (!pr.ok || !pr.data) {
-        result.errors.push(`PR #${c.prNumber}: ${pr.ok ? "no data" : pr.error}`);
-        continue;
-      }
-      if (!isMergedOutOfBand(pr.data)) continue;
-      await transitionSuggestion(c.ticketId, "applied", "system", {
-        note: `merged out-of-band (PR #${c.prNumber} was already merged when the engine reconciled it)`,
-        links: [{ kind: "pr", ref: pr.data.htmlUrl, state: "merged" }]
-      });
-      await markPrLinkMerged(c.ticketId, c.prRef);
-      result.applied.push(c.ticketId);
-      console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`);
+      linkless = await findStrandedLinklessTickets(remaining);
     } catch (err2) {
-      const msg = String(err2);
-      if (msg.includes("409")) continue;
-      result.errors.push(`ticket #${c.ticketId}: ${msg}`);
+      result.errors.push(`link-less candidate query failed: ${String(err2)}`);
+    }
+    for (const ticketId of linkless) {
+      if (result.checked >= limit) break;
+      result.checked += 1;
+      const lookup = await findMergedPrForTicket(ticketId);
+      switch (lookup.kind) {
+        case "error":
+          result.errors.push(`ticket #${ticketId}: PR search failed: ${lookup.error}`);
+          break;
+        case "none":
+          console.log(`${LOG} ticket #${ticketId}: no merged PR references it, leaving as-is`);
+          break;
+        case "ambiguous":
+          console.log(
+            `${LOG} ticket #${ticketId}: ambiguous, ${lookup.prNumbers.length} merged PRs reference it (${lookup.prNumbers.map((n) => `#${n}`).join(", ")}), leaving as-is`
+          );
+          break;
+        case "match":
+          await applyCandidateIfMerged({ ticketId, prNumber: lookup.prNumber }, result);
+          break;
+      }
     }
   }
   return result;
@@ -28280,7 +28443,7 @@ async function countStrandedVerifiedTickets() {
   ));
   return row?.n ?? 0;
 }
-var LOG, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES, SWEEPABLE_STATUSES;
+var LOG, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES, SWEEPABLE_STATUSES, SEARCH_PER_PAGE;
 var init_ticket_out_of_band_sweep_server = __esm({
   "app/lib/ticket-out-of-band-sweep.server.ts"() {
     "use strict";
@@ -28293,6 +28456,7 @@ var init_ticket_out_of_band_sweep_server = __esm({
     SWEEP_MAX_TICKETS = 5;
     SWEEP_MIN_AGE_MINUTES = 60;
     SWEEPABLE_STATUSES = ["verified", "in_review", "pr_open"];
+    SEARCH_PER_PAGE = 20;
   }
 });
 
@@ -32211,15 +32375,37 @@ async function handleProductUpdated(product) {
   await purgeMarkdownCache2(product.handle);
   console.log(`[webhook:product-updated] purged markdown + PDP cache for ${product.handle}`);
 }
+function inventoryLevelKey(inventoryItemId) {
+  return `invlevel:${inventoryItemId}`;
+}
+function isRestockCrossing(prev, current) {
+  return prev !== null && prev <= 0 && current > 0;
+}
 async function handleInventoryUpdate(level) {
-  if (level.available > 0) return;
-  const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
-  const { soldOut } = await isLiveDealSoldOut2();
-  if (soldOut) {
-    console.log("[webhook:inventory-update] Live deal sold out \u2014 rotating to next deal");
-    const result = await rotateDeal2();
-    console.log("[webhook:inventory-update] Rotation result:", result);
+  const { kvGet: kvGet2, kvSet: kvSet2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
+  const key = inventoryLevelKey(level.inventory_item_id);
+  const prev = await kvGet2(key);
+  await kvSet2(key, level.available);
+  if (level.available <= 0) {
+    const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
+    const { soldOut } = await isLiveDealSoldOut2();
+    if (soldOut) {
+      console.log("[webhook:inventory-update] Live deal sold out \u2014 rotating to next deal");
+      const result = await rotateDeal2();
+      console.log("[webhook:inventory-update] Rotation result:", result);
+    }
+    return;
   }
+  if (!isRestockCrossing(prev, level.available)) return;
+  const { getProductByInventoryItemId: getProductByInventoryItemId2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const product = await getProductByInventoryItemId2(String(level.inventory_item_id));
+  if (!product) {
+    console.warn(`[webhook:inventory-update] restock crossing but no product for inventory_item ${level.inventory_item_id}`);
+    return;
+  }
+  const { triggerBackInStock: triggerBackInStock2 } = await Promise.resolve().then(() => (init_klaviyo_server(), klaviyo_server_exports));
+  await triggerBackInStock2(product);
+  console.log(`[webhook:inventory-update] back-in-stock fired for ${product.handle} (available ${level.available})`);
 }
 async function handleReturnsUpdate(payload) {
   const returnGid = payload.admin_graphql_api_id ?? `gid://shopify/Return/${payload.id}`;

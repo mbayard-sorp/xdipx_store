@@ -284,6 +284,39 @@ describe('mergeSlots', () => {
     expect(result.isAdviceRequest).toBe(true)
   })
 
+  // Regression: a live conversation carried category='vibrator' alongside a
+  // stale subtype='plug' from an earlier turn. That pair reaches search as
+  // productTypeDial=vibrator + productSubtypeDial=plug and filters every
+  // candidate to zero, which the caller experiences as "it couldn't complete
+  // my search".
+  it('subtype: dropped when the category changes and no new subtype arrives', () => {
+    const result = mergeSlots({ category: 'anal', subtype: 'plug' }, { category: 'vibrator' })
+    expect(result.category).toBe('vibrator')
+    expect(result.subtype).toBeUndefined()
+  })
+
+  it('subtype: replaced when the category changes and a new subtype arrives', () => {
+    const result = mergeSlots(
+      { category: 'anal', subtype: 'plug' },
+      { category: 'vibrator', subtype: 'wand' },
+    )
+    expect(result.category).toBe('vibrator')
+    expect(result.subtype).toBe('wand')
+  })
+
+  it('subtype: kept when the category is unchanged', () => {
+    const result = mergeSlots(
+      { category: 'vibrator', subtype: 'wand' },
+      { category: 'vibrator' },
+    )
+    expect(result.subtype).toBe('wand')
+  })
+
+  it('subtype: kept when the incoming message names no category', () => {
+    const result = mergeSlots({ category: 'anal', subtype: 'plug' }, { audience: 'for-her' })
+    expect(result.subtype).toBe('plug')
+  })
+
   it('single-value field: incoming wins if present', () => {
     const result = mergeSlots({ audience: 'for-her' }, { audience: 'for-him' })
     expect(result.audience).toBe('for-him')
