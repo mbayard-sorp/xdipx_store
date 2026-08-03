@@ -261,6 +261,36 @@ export async function triggerDailyDealEmail(deal: {
   })
 }
 
+/**
+ * Fire a "Back in Stock" event when a product's availability crosses from
+ * sold-out to in-stock. Mirrors triggerDailyDealEmail's broadcast pattern: one
+ * event on the broadcast profile carries the product handle, and the Klaviyo
+ * "Back in Stock" flow fans it out to the waitlist profiles that recorded a
+ * "Waitlist Signup" event for this same handle (see subscribeToWaitlist). This
+ * is the notification path for already-captured buyer intent that had no trigger
+ * before. Swallow-and-log: a Klaviyo hiccup must never fail the inventory
+ * webhook that calls it.
+ */
+export async function triggerBackInStock(product: {
+  handle: string
+  title?: string
+  imageUrl?: string
+  price?: number
+}): Promise<void> {
+  try {
+    await trackEvent('broadcast@xdipx.com', 'Back in Stock', {
+      product_handle:   product.handle,
+      product_title:    product.title ?? null,
+      image_url:        product.imageUrl ?? null,
+      price:            product.price ?? null,
+      product_url:      `https://xdipx.com/products/${product.handle}`,
+      back_in_stock_at: new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error('[klaviyo.triggerBackInStock] failed:', err instanceof Error ? err.message : err)
+  }
+}
+
 // ─── Preference management (Phase 0B) ─────────────────────────────────────
 //
 // These functions back the /account/preferences surface: look up a profile,
