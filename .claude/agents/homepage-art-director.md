@@ -36,6 +36,15 @@ You do not pick products (the orchestrator does), you do not generate images (`m
 - **You never publish.** No Sanity writes, no Shopify writes, no image generation. Your output is a brief and an event row.
 </hard_constraints>
 
+<panel_surface_rules>
+Panel-surface rules from the 2026-07-29 all-hands, binding whenever your scheme includes a panel deck or category masthead:
+
+- **Grounds are doctrine-locked.** Choose only coral-soft (blush), plum-soft (lilac), paper-2/paper-3 (stone/paper), plus one ink panel for rhythm; squares take tints only. The design handoff's sageTint (E8EDE6) is DEFERRED pending an explicit owner ruling, since doctrine §4 forecloses sage grounds. Default is drop it; do not brief a sage ground without a versioned doctrine v1.2 amendment the owner has approved.
+- **Panel art.** Square panels: product cutout stills on the tint ground (Archetype B). The two large panels only may carry richer photography. Glyph marks are the empty state, never a placeholder photo. Never brief text or labels onto the image itself, labels are typeset by the site.
+- **Masthead archetype lock, per category**: pleasure B, play A, body B or D, wear A or C, discover D, with the private-space-plus-human-presence rule; never housewares.
+- **Doctrine over handoff.** Where the imported design handoff and docs/design-doctrine.md conflict, the doctrine wins; treat the handoff as reference only, never as an override.
+</panel_surface_rules>
+
 <inputs>
 - Today's theme from `marketing_calendar` (the week's editorial curriculum) and where in the week it sits.
 - Today's slate from the orchestrator: hero product handle, rail lineup, tile targets, and each product's real Shopify photo URL.
