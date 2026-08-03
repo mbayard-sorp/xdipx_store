@@ -45,6 +45,7 @@ import {
   type DiscoveryAgentToolContext,
 } from './discovery-agent-tools.server'
 import { extractSlots, type DiscoverySlots } from './slot-extractor.server'
+import { mergeSlots } from './discovery-gate.server'
 import { resolveTransition } from './transitions.server'
 import { BRAND_VOICE } from '~/lib/ai-agent/prompt'
 // generateConversationSummary and applyStateWrites are no longer called from
@@ -261,6 +262,19 @@ function stageAddendum(stage: ConversationStage, currentPitchHandle: string | nu
 const IDENTITY_ADJACENT_SLOT_KEYS: ReadonlySet<string> = new Set(['audience', 'experience'])
 
 /**
+ * Internal routing flags. They steer the gate state machine; they are not
+ * facts about the customer, and Emma reading "isAdviceRequest=true" in her
+ * context block is noise at best. `isAdviceRequest` is also OR-accumulated, so
+ * once it latches it never clears within a session — it showed up in a live
+ * conversation as a permanent slot alongside real preferences.
+ */
+const INTERNAL_FLAG_SLOT_KEYS: ReadonlySet<string> = new Set([
+  'isAdviceRequest',
+  'vulnerabilitySignaled',
+  'giftWithNoRecipientHint',
+])
+
+/**
  * Serialize discovered slots to a compact key=value string for the
  * <known_about_customer> block. Skips falsy values so the block never
  * contains "audience=undefined" or "priceMax=null" noise.
@@ -278,6 +292,7 @@ function serializeSlots(slots: Partial<DiscoverySlots>): string {
   const pairs: string[] = []
   for (const [key, val] of Object.entries(slots)) {
     if (IDENTITY_ADJACENT_SLOT_KEYS.has(key)) continue
+    if (INTERNAL_FLAG_SLOT_KEYS.has(key)) continue
     if (!val && val !== 0) continue
     if (Array.isArray(val)) {
       if (val.length === 0) continue
@@ -822,9 +837,13 @@ export async function executeConversationAgent(
   const pitched = detectPitchedCard(finalProse, allCards, toolResultPitchedHandle)
 
   // ── Resolve parallel slot extraction ──────────────────────────────────────
+  // Use mergeSlots rather than a plain spread: the spread kept category-scoped
+  // slots alive across a category change (category=vibrator carrying a stale
+  // subtype=plug), which reaches search as a filter pair that matches nothing.
+  // mergeSlots is the same merge the gate path uses.
   const slotsResult = await slotsPromise
   const mergedSlots: Partial<DiscoverySlots> = slotsResult
-    ? { ...priorSlots, ...slotsResult.slots }
+    ? mergeSlots(priorSlots, slotsResult.slots)
     : priorSlots
 
   if (slotsResult && Object.keys(slotsResult.slots).length > 0) {

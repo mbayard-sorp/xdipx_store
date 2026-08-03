@@ -149,6 +149,29 @@ async function tryEnrichCustomer(phone: string): Promise<{
 }
 
 // ---------------------------------------------------------------------------
+// Summary bridging
+// ---------------------------------------------------------------------------
+
+const SUMMARY_BRIDGE_PREFIX = 'From a previous conversation: '
+// Matches one or more stacked bridge prefixes at the head of a summary.
+const STACKED_BRIDGE_PREFIX_RE = /^(?:From a previous conversation:\s*)+/i
+
+/**
+ * Prefix a carried-forward summary exactly once.
+ *
+ * Every 24h rotation re-prefixed whatever was already stored, so a summary that
+ * survived six rotations arrived at the model as "From a previous conversation:
+ * From a previous conversation: ... Customer is purchasing ...". That burns
+ * context on nothing and reads to the model as six distinct prior sessions.
+ * Strip any prefixes already present before adding ours.
+ */
+export function bridgeSummary(priorSummary: string | null | undefined): string | null {
+  const stripped = (priorSummary ?? '').replace(STACKED_BRIDGE_PREFIX_RE, '').trim()
+  if (!stripped) return null
+  return `${SUMMARY_BRIDGE_PREFIX}${stripped}`
+}
+
+// ---------------------------------------------------------------------------
 // Main: getOrCreateConversation
 // ---------------------------------------------------------------------------
 
@@ -208,15 +231,23 @@ export async function getOrCreateConversation(
   let updates: Partial<typeof smsConversations.$inferInsert> = { lastActiveAt: now }
   let stage = row.stage as Stage
 
-  // 24h session rotation: new UUID + reset to RECONNECT.
+  // 24h session rotation: new UUID + reset to RECONNECT + clear session-scoped
+  // shopping state.
+  //
   // The conversation_summary is copied forward as a context bridge so the agent
-  // can greet a returning customer without being a stranger. Only copy if there
-  // is a real summary — guard against writing "From a previous conversation: null".
+  // can greet a returning customer without being a stranger. Everything else
+  // that describes *this shopping trip* is cleared: it is scoped to a session,
+  // not to a phone number.
+  //
+  // This used to rotate the id and stage while leaving discoveredSlots intact,
+  // so a slot captured weeks earlier kept steering brand-new conversations. A
+  // caller who opened with "I'm shopping for a new vibrator" was answered
+  // against a stale priceMax=10 and subtype=plug from a previous session; Emma
+  // told them their results were "all above your ten dollar budget" for a
+  // budget they never named on that call.
   if (row.lastActiveAt < twentyFourHoursAgo) {
     const priorSummary = (row as unknown as { conversationSummary?: string | null }).conversationSummary ?? null
-    const bridgedSummary: string | null = priorSummary
-      ? `From a previous conversation: ${priorSummary}`
-      : null
+    const bridgedSummary: string | null = bridgeSummary(priorSummary)
     updates = {
       ...updates,
       // Drizzle's uuid default generates a new UUID when we don't specify one,
@@ -227,9 +258,18 @@ export async function getOrCreateConversation(
       // Bridge the summary forward; pitchedHandlesLog is intentionally NOT
       // carried over — a 24h gap justifies a fresh pitch slate.
       ...(bridgedSummary !== null && { conversationSummary: bridgedSummary }),
+      // Session-scoped state — cleared so the new conversation starts clean.
+      // Identity columns (customerGid, customerFirstName, customerDefaultZip)
+      // are deliberately NOT touched: those belong to the person, not the trip.
+      discoveredSlots: {},
+      discoveryState: null,
+      pitchedHandlesLog: null,
+      currentPitchHandle: null,
+      currentUpsellHandle: null,
+      pendingPdpUrl: null,
     }
     stage = 'RECONNECT'
-    console.info(`[conversation] 24h rotation for phone=${phone} new stage=RECONNECT summaryBridged=${bridgedSummary !== null}`)
+    console.info(`[conversation] 24h rotation for phone=${phone} new stage=RECONNECT summaryBridged=${bridgedSummary !== null} sessionStateCleared=true`)
   }
   // Stage TTL check (Task 0.8: 24h + confidence gate — see shouldResetStage).
   else if (

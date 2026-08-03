@@ -60,6 +60,13 @@ export class Session {
   /** True once createDraftOrder has been invoked this call. Guards the
    *  send-intent trap in claude.ts from firing twice. */
   createdDraftOrderThisCall = false
+  /** True once the v2 engine has answered at least one turn on this call.
+   *  After that we never hand the call back to the v1 local agent: v1 has a
+   *  different system prompt and a different tool set (findCollection /
+   *  listCollections), so a mid-call swap makes Emma audibly change personality
+   *  and start reading collections at a caller who was mid-search. A retry
+   *  prompt is a better outcome than answering with the wrong brain. */
+  v2Engaged = false
   /** Reason we'll log on WS close, if we end the call ourselves. */
   endReason: CallEndReason = 'user_hangup'
   /** Admin-configured prompts + farewells, resolved once at session start. */
