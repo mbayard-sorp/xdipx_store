@@ -56,13 +56,23 @@
   --color-butter:       #FFE28C;       /* unchanged */
 
   /* ─── Type ─────────────────────────────────────── */
-  /* '* Variable Fallback' families are generated at build time by fontaine
-     (vite.config.ts) with size-adjust/ascent/descent overrides matched to the
-     real webfont, so the fallback→webfont swap produces no CLS. */
-  --font-display: 'Newsreader Variable', 'Newsreader Variable Fallback', 'Times New Roman', Georgia, serif;
-  --font-body:    'DM Sans Variable', 'DM Sans Variable Fallback', system-ui, sans-serif;
-  --font-mono:    'JetBrains Mono Variable', 'JetBrains Mono Variable Fallback', ui-monospace, monospace;
-  --font-script:  'Caveat Variable', 'Caveat Variable Fallback', cursive;
+  /* Fallback families are generated at build time by fontaine (vite.config.ts)
+     with size-adjust/ascent/descent overrides matched to the real webfont, so
+     the fallback→webfont swap produces no reflow and no late LCP candidate.
+
+     The names below must match what fontaine actually emits. It derives the
+     fallback family from the font FILE basename, not from the @font-face
+     family, so @fontsource-variable/newsreader yields 'Newsreader Fallback'
+     and dm-sans yields 'DM Fallback' — the 'Variable' / 'Sans Variable'
+     suffixes are dropped. Naming these '* Variable Fallback' silently pointed
+     the whole stack at families that do not exist, which put every text node
+     on unadjusted Times New Roman / system-ui until the webfont landed and
+     then reflowed it. Verify with:
+       grep -o 'font-family:[A-Za-z ]*Fallback' build/client/assets/app-*.css */
+  --font-display: 'Newsreader Variable', 'Newsreader Fallback', 'Times New Roman', Georgia, serif;
+  --font-body:    'DM Sans Variable', 'DM Fallback', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono Variable', 'JetBrains Fallback', ui-monospace, monospace;
+  --font-script:  'Caveat Variable', 'Caveat Fallback', cursive;
 
   /* ─── Radii ────────────────────────────────────── */
   --radius-sm:  8px;

@@ -59,9 +59,17 @@ function SentryInit() {
     // Set the guard before the dynamic import resolves so a StrictMode
     // double-mount can't race two Sentry.init() calls.
     ;(window as unknown as { __sentryInit: boolean }).__sentryInit = true
+    // Destructure `init` out of the dynamic import — do NOT bind the module
+    // namespace. `import('@sentry/react').then((Sentry) => ...)` makes Rollup
+    // retain EVERY export, which drags in replayIntegration, replayCanvas,
+    // feedback and browserTracing (and with Replay, all of rrweb) even though
+    // none of them are passed to init() below. Measured on the live chunk:
+    // namespace form = 463,652 bytes raw / ~149 KiB transfer; destructured
+    // form = ~89,000 bytes raw. Same SDK, same call, 5x the bytes.
+    // WebVitalsReport below already uses the destructured form; match it.
     const run = () => {
-      import('@sentry/react').then((Sentry) => {
-        Sentry.init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0.1 })
+      import('@sentry/react').then(({ init }) => {
+        init({ dsn, environment: import.meta.env.MODE, tracesSampleRate: 0.1 })
       })
     }
     const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
