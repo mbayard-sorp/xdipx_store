@@ -68,8 +68,6 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       return undefined
     })(),
-    dealStatus:       body['dealStatus']       as string | undefined,
-    dealDate:         body['dealDate']         as string | undefined,
     originalPrice:    body['originalPrice']    as number | undefined,
     wholesaleCost:    body['wholesaleCost']    as number | undefined,
     mapPrice:         body['mapPrice']         as number | undefined,

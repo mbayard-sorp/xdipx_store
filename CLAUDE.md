@@ -45,11 +45,11 @@ No hardcoded product data anywhere except `db/seed.ts`. All product data comes f
 
 ### Admin = Approval Only
 
-AI generates content; humans approve. The `admin/deals` route is the deal editor with the approval toggle. **Never** auto-publish a deal without `deal_status: approved` in Shopify metafield.
+AI generates content; humans approve. The `admin/deals` route is the product editor. Imported products stay Shopify-DRAFT until the enrich→publish step; the `import_enrich_enabled` valve is the gate.
 
-**Carve-out — autonomous homepage merchandising team:** the homepage team (see `docs/homepage-team/`) MAY auto-publish *content-only* homepage changes (featured product rotation, Emma copy refresh, image swaps, section reorder via Sanity) without per-change approval, within the `/admin/homepage-team` kill switch + daily $ budget. Any *code/layout/component* change still goes through a reviewable PR, which the release engine merges only after the gates below pass. Daily-deal publishing keeps its `deal_status: approved` gate unchanged.
+**Carve-out — autonomous homepage merchandising team:** the homepage team (see `docs/homepage-team/`) MAY auto-publish *content-only* homepage changes (featured product rotation, Emma copy refresh, image swaps, section reorder via Sanity) without per-change approval, within the `/admin/homepage-team` kill switch + daily $ budget. Any *code/layout/component* change still goes through a reviewable PR, which the release engine merges only after the gates below pass. Daily deals are retired, so the old `deal_status: approved` gate no longer exists; product publishing is gated by `import_enrich_enabled` instead.
 
-**Merge policy: the release engine.** Agent PRs are merged by the release engine, not by the agents themselves. No agent ever merges or pushes to the default branch; every change is a reviewable PR. The release engine, a server-side cron, squash-merges an agent PR only when CI is green (typecheck, tests, build), the linked ticket is QA-verified for code changes or allowlist-verified for docs changes, and no changed file touches a protected path. Protected paths (checkout and payment, cart, database migrations and schema, auth and session, team valves and spend controls, CI and deploy config, and the release engine itself) always stop and escalate to the owner by email; only the owner merges those. After merging, the engine waits for the production deploy, runs smoke checks, and reverts automatically on failure. A ticket that fails three fix attempts is blocked and escalated to mike@xdipx.com. The kill switch is the `release_engine_enabled` valve; when it is off, every agent PR waits for the owner exactly as before. Money valves are unchanged by this policy: `deal_status` approval, video frame review, and social autopost remain owner-gated. See `docs/store-team/operating-system.md`.
+**Merge policy: the release engine.** Agent PRs are merged by the release engine, not by the agents themselves. No agent ever merges or pushes to the default branch; every change is a reviewable PR. The release engine, a server-side cron, squash-merges an agent PR only when CI is green (typecheck, tests, build), the linked ticket is QA-verified for code changes or allowlist-verified for docs changes, and no changed file touches a protected path. Protected paths (checkout and payment, cart, database migrations and schema, auth and session, team valves and spend controls, CI and deploy config, and the release engine itself) always stop and escalate to the owner by email; only the owner merges those. After merging, the engine waits for the production deploy, runs smoke checks, and reverts automatically on failure. A ticket that fails three fix attempts is blocked and escalated to mike@xdipx.com. The kill switch is the `release_engine_enabled` valve; when it is off, every agent PR waits for the owner exactly as before. Money valves are unchanged by this policy: `import_enrich_enabled`, video frame review, and social autopost remain owner-gated. See `docs/store-team/operating-system.md`.
 
 **Carve-out — product import queue:** the `product-manager` agent MAY approve/reject/watch `import_candidates` on its own editorial judgment with no per-item human approval, calling `POST /api/team/import-candidate-action` (team-token auth, not an admin session). Gated by the `product_manager_enabled` kill switch (default off) and a `product_manager_max_actions_per_run` cap, both editable on `/admin/imports`. This is explicit store-owner direction: margin is not a gate on imports (see `docs/product-import-spec.md` and `docs/import-monitor-runbook.md`), and repeated manual approval of import candidates was an unwanted friction point. The downstream enrich→publish step (draft → live on the storefront) stays behind the separate, still-manual `import_enrich_enabled` switch shared with Phase 2 auto-import — flipping both switches on is what makes the whole import→live path unattended.
 
@@ -149,8 +149,7 @@ app/
     claude.server.ts       ← Anthropic API wrapper
     imagen.server.ts       ← Google Imagen wrapper
     klaviyo.server.ts      ← Klaviyo API wrapper
-    feed-processor.server.ts ← Nalpac CSV fetch + scoring
-    deal-rotator.server.ts   ← Midnight deal rotation (route is /cron/deal-activator)
+    feed-processor.server.ts ← Nalpac CSV fetch + scoring + discontinued sweep
     profit.server.ts       ← Profit calculation + DB writes
     db.server.ts           ← Neon + Drizzle client
     kv.server.ts           ← Vercel KV client
@@ -203,8 +202,9 @@ db/
 ## Shopify Metafields
 
 **Namespace: `xdipx`** on Product objects:
-- `is_daily_deal`, `deal_date`, `deal_status` (pending_approval|approved|live|archived)
 - `original_price`, `wholesale_cost`, `map_price`, `deal_score`
+
+**Retired 2026-08-03 — do not reintroduce:** `is_daily_deal`, `deal_date`, `deal_status`. They were daily-deal bookkeeping. `deal_status: 'archived'` gated the PDP into a 410, which killed 17 active, sellable products, and also suppressed them from the sitemap and collection shelves. All values were cleared catalog-wide and every writer was removed; the definitions remain in Shopify as empty shells. A product being gone is expressed by Shopify's own `product.status = ARCHIVED`, which drops it from the Storefront API so the PDP 404s on its own.
 - `tagline`, `full_story`, `works_for_him`, `works_for_her`, `feature_bullets` (JSON)
 - `accessory_product_ids` (JSON), `mood_image_url`, `category`, `nalpac_sku`, `seo_meta_description`
 
@@ -222,15 +222,14 @@ db/
 2. Homepage renders deal inline — does NOT redirect to `/products/{slug}`
 3. Homepage canonical: `https://xdipx.com/` (points to itself)
 4. Vault links to `/products/{slug}` — no duplicate content
-5. Recycled products reuse same URL with updated `deal_date` — 200 response
+5. A product that returns to the catalog reuses the same URL — 200 response
 6. Shopify product `handle` = SEO slug — set explicitly on import, **never auto-generate**
 
 ## Cron Schedule
 
 | Route | Schedule | Action |
 |---|---|---|
-| `/cron/daily-feed-processor` | 11:45 PM | Fetch Nalpac CSV, score products, stage tomorrow's deal |
-| `/cron/deal-activator` | 11:59 PM | Archive today → activate tomorrow → trigger Klaviyo |
+| `/cron/discontinued-sweep` | 11:45 PM | Fetch Nalpac CSV, archive products the feed now marks discontinued |
 | `/cron/profit-summary` | 12:05 AM | Write daily_profit_summary to Neon |
 
 Cron routes protected by `x-cron-secret` header matching `CRON_SECRET` env var.

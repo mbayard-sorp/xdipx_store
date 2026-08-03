@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mapAllowsAdvertisedDiscount, salePriceEffectiveDate } from './gmc-metafields.server'
+import { mapAllowsAdvertisedDiscount } from './gmc-metafields.server'
 
 describe('mapAllowsAdvertisedDiscount', () => {
   it('allows a discount when there is no MAP (0 or absent)', () => {
@@ -30,42 +30,3 @@ describe('mapAllowsAdvertisedDiscount', () => {
   })
 })
 
-describe('salePriceEffectiveDate', () => {
-  const duringWindow = new Date('2026-05-16T12:00:00-07:00')
-
-  it('formats the two-day PT window when now falls inside it', () => {
-    expect(salePriceEffectiveDate('2026-05-16', duringWindow)).toBe(
-      '2026-05-16T00:00-07:00/2026-05-17T23:59-07:00',
-    )
-    // Second day of the window still counts
-    expect(salePriceEffectiveDate('2026-05-16', new Date('2026-05-17T23:00:00-07:00'))).toBe(
-      '2026-05-16T00:00-07:00/2026-05-17T23:59-07:00',
-    )
-  })
-
-  it('accepts full ISO strings by slicing the date part', () => {
-    expect(salePriceEffectiveDate('2026-05-16T00:00:00Z', duringWindow)).toBe(
-      '2026-05-16T00:00-07:00/2026-05-17T23:59-07:00',
-    )
-  })
-
-  it('returns null for a future scheduling slot (the 2027-02-02 feed bug)', () => {
-    expect(salePriceEffectiveDate('2027-02-02', new Date('2026-07-09T12:00:00-07:00'))).toBeNull()
-  })
-
-  it('returns null once the window has passed', () => {
-    expect(salePriceEffectiveDate('2026-05-16', new Date('2026-05-18T00:30:00-07:00'))).toBeNull()
-  })
-
-  it('rolls the window end across month boundaries', () => {
-    expect(salePriceEffectiveDate('2026-01-31', new Date('2026-02-01T12:00:00-07:00'))).toBe(
-      '2026-01-31T00:00-07:00/2026-02-01T23:59-07:00',
-    )
-  })
-
-  it('returns null for empty or malformed input', () => {
-    expect(salePriceEffectiveDate('', duringWindow)).toBeNull()
-    expect(salePriceEffectiveDate('not-a-date', duringWindow)).toBeNull()
-    expect(salePriceEffectiveDate('05/16/2026', duringWindow)).toBeNull()
-  })
-})

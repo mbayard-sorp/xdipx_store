@@ -5,7 +5,6 @@ import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 import { setPipelineSettingAudited } from '~/lib/settings.server'
 import { kvGet, kvDel, KV_KEYS } from '~/lib/kv.server'
-import { orchestrateDealPipeline } from '~/lib/deal-pipeline.server'
 import { paginateAllProductsForSanity } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { resolveGa4, invalidateGa4Cache } from '~/lib/ga4-config.server'
@@ -133,11 +132,6 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
-  if (intent === 'run-pipeline') {
-    const minMarginPct = Math.min(Math.max(parseFloat(form.get('minMargin') as string ?? '40'), 0), 99) / 100
-    const result = await orchestrateDealPipeline(minMarginPct)
-    return { ok: true, pipeline: result }
-  }
 
   if (intent === 'sync-sanity') {
     try {
@@ -177,7 +171,6 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminSettingsPage() {
   const { settings, feedTimestamp, candidateCount, ga4 } = useLoaderData<typeof loader>()
   const fetcher         = useFetcher<typeof action>()
-  const pipelineFetcher = useFetcher<typeof action>()
   const ga4Fetcher      = useFetcher<typeof action>()
 
   const ga4Ping = ga4Fetcher.data && 'ga4Ping' in ga4Fetcher.data
@@ -193,10 +186,6 @@ export default function AdminSettingsPage() {
         hasApiSecret?: boolean
         checkedAt?: string
       } }).ga4Ping
-    : null
-
-  const pipelineResult = pipelineFetcher.data && 'pipeline' in pipelineFetcher.data
-    ? pipelineFetcher.data.pipeline
     : null
 
   const syncResult = fetcher.data && 'syncSanity' in fetcher.data
@@ -412,8 +401,8 @@ export default function AdminSettingsPage() {
           Pipeline
         </h2>
         <p className="text-sm text-ink/60">
-          Manually run the full pipeline: fetch feed → select deal → create Shopify product →
-          generate AI copy → push metafields → stage for review.
+          Settings for the Nalpac import and enrichment pipeline. The "Run Pipeline Now" button
+          is gone with daily deals — it staged tomorrow's deal, which nothing consumes any more.
         </p>
 
         {/* Enrichment Mode toggle — controls how the cron-driven Nalpac
@@ -458,62 +447,6 @@ export default function AdminSettingsPage() {
           description="Only select products with at least this much profit per unit (deal price − wholesale cost). Enter a dollar amount, e.g. 10 for $10 minimum."
         />
 
-        <div className="pt-2 border-t border-cream-2">
-          <pipelineFetcher.Form method="post" className="flex flex-col gap-3 md:flex-row md:items-end">
-            <input type="hidden" name="intent" value="run-pipeline" />
-            <div>
-              <label className="block text-xs font-semibold text-ink/50 mb-1">
-                Min Gross Margin
-              </label>
-              <div className="relative w-full md:w-28">
-                <input
-                  type="number"
-                  name="minMargin"
-                  defaultValue="40"
-                  min="0"
-                  max="99"
-                  step="1"
-                  className="w-full border border-cream-2 rounded-xl pl-3 pr-7 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sage/30"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-ink/40">%</span>
-              </div>
-            </div>
-            <button
-              type="submit"
-              disabled={pipelineFetcher.state !== 'idle'}
-              className="w-full md:w-auto text-sm font-semibold px-5 py-2.5 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
-            >
-              {pipelineFetcher.state !== 'idle' ? '⏳ Running…' : '▶ Run Pipeline Now'}
-            </button>
-          </pipelineFetcher.Form>
-        </div>
-
-        {pipelineResult && (
-          <div className={`rounded-xl p-4 text-sm space-y-1 ${pipelineResult.staged ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
-            {pipelineResult.staged ? (
-              <>
-                <p>
-                  ✓ Staged <strong>{pipelineResult.sku}</strong> for{' '}
-                  <strong>{pipelineResult.dealDate}</strong> — ready for review in the Deal Queue.
-                </p>
-                {pipelineResult.copyJobId && (
-                  <p className="text-xs text-green-600">
-                    Copy generation queued.{' '}
-                    <a
-                      href={`/admin/async-jobs?jobId=${pipelineResult.copyJobId}`}
-                      className="underline font-semibold"
-                    >
-                      Track batch job
-                    </a>
-                    {' '}— fields apply automatically when the batch completes.
-                  </p>
-                )}
-              </>
-            ) : (
-              <p>⚠ Pipeline did not stage a deal: {pipelineResult.reason}</p>
-            )}
-          </div>
-        )}
       </section>
 
       {/* ── Sanity Sync ──────────────────────────────────────────────────────── */}

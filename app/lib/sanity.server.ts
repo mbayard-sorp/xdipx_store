@@ -849,8 +849,8 @@ export async function patchProductPageByProductId(
  * WS2c — clear the `hiddenUntilLive` import-stub flag the moment a product's
  * underlying Shopify record activates. Called from `activateShopifyProduct`
  * (app/lib/shopify.server.ts) — the universal chokepoint every activation
- * path (import publish, deal-rotator daily activation, admin queue
- * force-activate) already funnels through — so a draft-stage import stub
+ * path (import publish, admin force-activate) already funnels through — so a
+ * draft-stage import stub
  * stops leaking into sitemap.xml / on-site search the moment it becomes
  * purchasable, regardless of which path activated it.
  */

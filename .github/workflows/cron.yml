@@ -6,7 +6,7 @@ name: Cron manual dispatch
 # workflow carried the schedules for a while. Verified July 2026: Vercel cron
 # IS invoking every configured job on the exact schedule (GET requests,
 # cache=BYPASS, in the runtime logs), which made the schedules here a source
-# of double-firing — deal-activator ran at 23:59 via Vercel and again up to
+# of double-firing — the nightly job ran at 23:59 via Vercel and again up to
 # two hours later via a delayed GitHub run. The schedule triggers were
 # therefore removed; vercel.json's `crons` block is authoritative again.
 #
@@ -28,11 +28,9 @@ on:
         type: choice
         options:
           - all
-          - daily-feed-processor
-          - deal-activator
+          - discontinued-sweep
           - profit-summary
           - review-reminders
-          - inventory-check
           - keyword-research
           - log-monitor
           - pricing-batch-recompute
@@ -67,7 +65,7 @@ jobs:
             # its own monthly schedule, is valve-gated server-side
             # (keyword_research_enabled), and stays individually
             # dispatchable via the target dropdown.
-            paths='daily-feed-processor deal-activator profit-summary review-reminders inventory-check log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller homepage-healthcheck notebook-healthcheck aeo-surface-check warm warm-discovery-index'
+            paths='discontinued-sweep profit-summary review-reminders log-monitor pricing-batch-recompute import-monitor import-enrich enrichment-batch-poller homepage-healthcheck notebook-healthcheck aeo-surface-check warm warm-discovery-index'
           else
             paths="$t"
           fi
