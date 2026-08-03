@@ -21194,7 +21194,7 @@ function renderOwnerQueueSection(f) {
   if (f.agedOut === null) {
     parts.push(`<p style="margin:0 0 6px;color:${MUTED};">Forced send: the stale-row ager did not run, so nothing was dismissed.</p>`);
   } else if (f.agedOut > 0) {
-    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} untargeted row${f.agedOut === 1 ? "" : "s"} aged out automatically (21 days, low priority, no team).</p>`);
+    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} stale row${f.agedOut === 1 ? "" : "s"} aged out automatically (21 days old, low priority).</p>`);
   }
   if (f.rows.length === 0) {
     parts.push(`<p style="margin:0;color:${GOOD};">Nothing waiting on a decision from you.</p>`);
@@ -21443,8 +21443,7 @@ async function ageOutStaleSuggestions() {
        WHERE status = 'approved'
          AND kind IN ('process', 'strategy')
          AND priority >= 3
-         AND target_team IS NULL
-         AND updated_at < now() - interval '21 days'
+         AND created_at < now() - interval '21 days'
        RETURNING id`);
     return (res.rows ?? []).length;
   } catch (err2) {

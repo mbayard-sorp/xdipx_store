@@ -308,7 +308,7 @@ export function renderOwnerQueueSection(f: OwnerQueueFacts): string {
   if (f.agedOut === null) {
     parts.push(`<p style="margin:0 0 6px;color:${MUTED};">Forced send: the stale-row ager did not run, so nothing was dismissed.</p>`)
   } else if (f.agedOut > 0) {
-    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} untargeted row${f.agedOut === 1 ? '' : 's'} aged out automatically (21 days, low priority, no team).</p>`)
+    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} stale row${f.agedOut === 1 ? '' : 's'} aged out automatically (21 days old, low priority).</p>`)
   }
   if (f.rows.length === 0) {
     parts.push(`<p style="margin:0;color:${GOOD};">Nothing waiting on a decision from you.</p>`)
@@ -626,9 +626,23 @@ async function gatherTicketMetrics(statusCounts: string): Promise<TicketMetrics>
  * Inflow of owner-decision rows runs at roughly 30 a week and there was no
  * drain at all, so the pile only grew. Rather than ask the owner (or a weekly
  * agent pass) to grind through it, the clearly-abandoned tail closes itself:
- * low priority, no target team, and untouched for three weeks. Anything a
- * producer bothered to route at a team, or marked urgent, is exempt and stays
- * for a human. Returns how many it closed so the digest can say so.
+ * low priority and three weeks old. Anything marked urgent, or of a kind that
+ * carries real defect/roadmap work, is exempt and stays for a human. Returns
+ * how many it closed so the digest can say so.
+ *
+ * Clock: this keys off `created_at`, NOT `updated_at`. `updated_at` is bumped by
+ * claims, QA bounces, lease expiries and dedupe hits, and migration 070
+ * backfilled it across every pre-existing row, so an `updated_at` window matched
+ * zero rows on a queue whose real age (created_at) reached 20 days (ticket #879).
+ * `created_at` only moves when a row is genuinely new, so the age it measures is
+ * the age a human perceives.
+ *
+ * Scope: rows routed at a team (`target_team IS NOT NULL`) are no longer exempt
+ * (ticket #879) — a cross-team row abandoned for three weeks is as dead as an
+ * untargeted one. The exemption for live customer-facing defect work is carried
+ * entirely by the `kind`/`priority` filters below: a defect is filed as `code`
+ * (never `process`/`strategy`) and/or at P0-P2 (`priority < 3`), so it is never
+ * in this predicate's reach.
  */
 export async function ageOutStaleSuggestions(): Promise<number> {
   try {
@@ -641,8 +655,7 @@ export async function ageOutStaleSuggestions(): Promise<number> {
        WHERE status = 'approved'
          AND kind IN ('process', 'strategy')
          AND priority >= 3
-         AND target_team IS NULL
-         AND updated_at < now() - interval '21 days'
+         AND created_at < now() - interval '21 days'
        RETURNING id`)
     return (res.rows ?? []).length
   } catch (err) {
