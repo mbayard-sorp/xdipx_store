@@ -36,6 +36,10 @@ function estimateIvrCost(opts: {
   return Math.round(cost * 1e5) / 1e5
 }
 
+// Warn once, not once per hop — a missing DATABASE_URL on the Fly machine is a
+// deploy-config fact, not a per-call event.
+let warnedMissingDbUrl = false
+
 export async function logIvrTokens(opts: {
   inputTokens:          number
   outputTokens:         number
@@ -45,7 +49,18 @@ export async function logIvrTokens(opts: {
 }): Promise<void> {
   try {
     const dbUrl = process.env['DATABASE_URL'] ?? process.env['POSTGRES_URL']
-    if (!dbUrl) return // no DB configured in this environment
+    if (!dbUrl) {
+      // This used to return in total silence. call_log.tokens_total shows the
+      // v1 path burning 17k-78k tokens per call while api_token_log holds zero
+      // rows with feature='ivr' — the spend was real and completely invisible.
+      if (!warnedMissingDbUrl) {
+        warnedMissingDbUrl = true
+        console.warn(
+          '[ivr/token-log] DATABASE_URL/POSTGRES_URL not set — IVR token spend will NOT be recorded in api_token_log',
+        )
+      }
+      return
+    }
     const sql = neon(dbUrl)
     const cacheCreation = opts.cacheCreationTokens ?? 0
     const cacheRead     = opts.cacheReadTokens     ?? 0

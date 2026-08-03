@@ -282,11 +282,29 @@ function handlePromptV2(ws: WebSocket, session: Session, voicePrompt: string): v
     callSid: session.callSid,
   }).then((reply) => {
     if (!reply) {
-      // v2 engine unavailable — fall through to v1.
-      console.warn(`[ivr] v2 engine unavailable callSid=${session.callSid} — falling back to v1`)
+      // v2 engine unavailable. Falling back to v1 is only safe on the FIRST
+      // turn, before v2 has established the conversation. Once v2 has answered,
+      // the caller is mid-thread with an engine that has different memory, a
+      // different system prompt, and a different tool set — v1 owns
+      // findCollection/listCollections, which v2 deliberately does not expose.
+      // Swapping engines mid-call is what made a stalled product search turn
+      // into an out-of-nowhere collection readout. Ask the caller to repeat
+      // instead and stay on v2.
+      if (session.v2Engaged) {
+        console.warn(
+          `[ivr] v2 engine unavailable callSid=${session.callSid} — staying on v2 (mid-call), asking caller to repeat`,
+        )
+        if (ws.readyState === ws.OPEN) {
+          sendText(ws, "Sorry, that one took me a second too long. Say that again for me?", true)
+        }
+        armInterTurnSilence(ws, session)
+        return
+      }
+      console.warn(`[ivr] v2 engine unavailable callSid=${session.callSid} — falling back to v1 (first turn)`)
       handlePromptV1(ws, session, voicePrompt)
       return
     }
+    session.v2Engaged = true
 
     const elapsed = Date.now() - started
     console.log(`[ivr] v2 reply callSid=${session.callSid} elapsed=${elapsed}ms hangup=${reply.hangup ?? false}`)

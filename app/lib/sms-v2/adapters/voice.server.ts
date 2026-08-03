@@ -31,6 +31,7 @@ import { classifyIntent } from '../intent-classifier.server'
 import { pickEffectiveStage, dispatchStage } from '../stage-dispatch.server'
 import { buildEmmaContextWithCrossChannel } from '../cross-channel.server'
 import { sendSms } from '~/lib/twilio.server'
+import { normalizeForTTS } from '~/lib/tts-normalize'
 import { db } from '~/lib/db.server'
 import { smsTurns } from '../../../../db/schema'
 import type { Stage, StageResponse } from '../types.server'
@@ -107,7 +108,15 @@ function stripUrlsForVoice(prose: string): string {
 function proseToSsmlContent(prose: string): string {
   return prose
     .split(/\n\n+/)
-    .map((para) => ssmlEscape(stripUrlsForVoice(para.replace(/\n/g, ' ').trim())))
+    .map((para) => {
+      const flattened = para.replace(/\n/g, ' ').trim()
+      // Order matters: strip URLs first (they can contain digits and dots that
+      // the price rewriter would otherwise mangle), spell prices next, then run
+      // the shared TTS normalizer, which the v2 voice path was skipping
+      // entirely — markdown, em-dashes, smart quotes and emoji from the model
+      // were reaching ElevenLabs verbatim.
+      return ssmlEscape(normalizeForTTS(spellPricesForVoice(stripUrlsForVoice(flattened))))
+    })
     .filter(Boolean)
     .join(' <break time="500ms"/> ')
 }
@@ -136,6 +145,70 @@ function isNegative(text: string): boolean {
 // ---------------------------------------------------------------------------
 
 const CONTINUE_VIA_TEXT = "Or text me back at this number anytime to keep going."
+
+// ---------------------------------------------------------------------------
+// Latency warning threshold
+// ---------------------------------------------------------------------------
+
+/**
+ * Above this, the turn is at risk of exceeding the Fly bridge's hard timeout
+ * (IVR_V2_TIMEOUT_MS, default 12s) and being discarded on the caller's end.
+ * Kept slightly under the bridge timeout so the warning fires before the cliff.
+ */
+const VOICE_LATENCY_WARN_MS = Number(process.env['VOICE_LATENCY_WARN_MS'] ?? 9_000)
+
+// ---------------------------------------------------------------------------
+// Price → spoken words
+// ---------------------------------------------------------------------------
+
+const ONES = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+  'seventeen', 'eighteen', 'nineteen',
+]
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
+
+/** Spell an integer 0-999 as words. */
+function intToWords(n: number): string {
+  if (n < 20) return ONES[n]!
+  if (n < 100) {
+    const t = TENS[Math.floor(n / 10)]!
+    const r = n % 10
+    return r === 0 ? t : `${t}-${ONES[r]!}`
+  }
+  const h = `${ONES[Math.floor(n / 100)]!} hundred`
+  const r = n % 100
+  return r === 0 ? h : `${h} ${intToWords(r)}`
+}
+
+/**
+ * Speak a dollar amount the way a person would.
+ *
+ *   $155.99 → "one hundred fifty-five ninety-nine"
+ *   $24.00  → "twenty-four dollars"
+ *
+ * ElevenLabs reads "$155.99" as digits and a literal decimal point, which is
+ * how a caller ended up hearing a product pitch that sounded like a catalog
+ * being read at them. The IVR system prompt has always required prices as
+ * words; the v2 voice path just never enforced it on the product-card line or
+ * on prices the model wrote into its prose.
+ */
+export function priceToSpokenWords(raw: string | number): string {
+  const amount = typeof raw === 'number' ? raw : Number(String(raw).replace(/[^0-9.]/g, ''))
+  if (!Number.isFinite(amount) || amount < 0 || amount >= 1000) return String(raw)
+  const dollars = Math.floor(amount)
+  const cents = Math.round((amount - dollars) * 100)
+  if (cents === 0) return `${intToWords(dollars)} dollars`
+  const centWords = cents < 10 ? `oh ${ONES[cents]!}` : intToWords(cents)
+  return `${intToWords(dollars)} ${centWords}`
+}
+
+/** Rewrite every "$NN.NN" / "$NN" occurrence in prose as spoken words. */
+function spellPricesForVoice(text: string): string {
+  return text.replace(/\$\s?(\d{1,3}(?:\.\d{1,2})?)\b/g, (_m, num: string) =>
+    priceToSpokenWords(num),
+  )
+}
 
 /**
  * Wrap SSML inner content in a <speak> root element.
@@ -192,9 +265,11 @@ async function stageResponseToVoiceReply(
     //    next turn picks it up if the caller affirms.
     if (seg.productCard) {
       const card = seg.productCard
+      // card.price arrives formatted as "$155.99". Spoken as digits it sounds
+      // like a price tag being read out; spelled as words it sounds like Emma.
       const spoken = card.price
-        ? `${ssmlEscape(card.title)}, ${ssmlEscape(card.price)}`
-        : ssmlEscape(card.title)
+        ? `${ssmlEscape(normalizeForTTS(card.title))}, ${ssmlEscape(priceToSpokenWords(card.price))}`
+        : ssmlEscape(normalizeForTTS(card.title))
       ssmlParts.push(spoken)
       if (card.pdpUrl) {
         pendingPdpUrlWrite = card.pdpUrl
@@ -274,7 +349,16 @@ async function logVoiceTurn(opts: {
   inputTokens?: number | undefined
   outputTokens?: number | undefined
   latencyMs: number
+  /**
+   * Stage telemetry. Voice used to drop all of this on the floor — 177 logged
+   * voice turns carried zero tool_calls, zero errors and zero metadata, while
+   * SMS logged tool calls on half its turns. When a caller reported a search
+   * that went nowhere there was no record of what was searched, so make voice
+   * log the same columns SMS does.
+   */
+  telemetry?: StageResponse['telemetry'] | undefined
 }): Promise<void> {
+  const t = opts.telemetry
   try {
     await db.insert(smsTurns).values({
       phone: opts.callerPhone,
@@ -294,6 +378,12 @@ async function logVoiceTurn(opts: {
       ...(opts.outputTokens !== undefined && { outputTokens: opts.outputTokens }),
       latencyMs: opts.latencyMs,
       pipelineVersion: 'v2-voice',
+      ...(t?.toolCalls !== undefined && { toolCalls: t.toolCalls }),
+      ...(t?.fabricationCaught !== undefined && { fabricationCaught: t.fabricationCaught }),
+      ...(t?.softBeat !== undefined && { softBeat: t.softBeat }),
+      ...(t?.toolBudgetExhausted !== undefined && { toolBudgetExhausted: t.toolBudgetExhausted }),
+      ...(t?.searchRepeatedPitch !== undefined && { searchRepeatedPitch: t.searchRepeatedPitch }),
+      ...(t?.gateAdvance !== undefined && { metadata: { gateAdvance: t.gateAdvance } }),
     })
   } catch (err) {
     // Non-fatal — don't fail the turn over logging.
@@ -432,6 +522,12 @@ export async function processVoiceMessageV2(
         ...(writes.customerGid         !== undefined && { customerGid:         writes.customerGid }),
         ...(writes.discoveryState      !== undefined && { discoveryState:      writes.discoveryState }),
         ...(writes.discoveredSlots     !== undefined && { discoveredSlots:     writes.discoveredSlots }),
+        // These two were silently dropped on the voice path. pitchedHandlesLog
+        // is what the search tool's dedup reads, so without persisting it Emma
+        // could re-pitch the same product every turn of a call; the summary is
+        // the agent's memory bridge across the history window.
+        ...(writes.pitchedHandlesLog   !== undefined && { pitchedHandlesLog:   writes.pitchedHandlesLog }),
+        ...(writes.conversationSummary !== undefined && { conversationSummary: writes.conversationSummary }),
       })
 
       const built = await stageResponseToVoiceReply(stageResp, callerPhone)
@@ -479,7 +575,19 @@ export async function processVoiceMessageV2(
     ...(stageResp?.telemetry.inputTokens !== undefined && { inputTokens: stageResp.telemetry.inputTokens }),
     ...(stageResp?.telemetry.outputTokens !== undefined && { outputTokens: stageResp.telemetry.outputTokens }),
     latencyMs,
+    ...(stageResp?.telemetry !== undefined && { telemetry: stageResp.telemetry }),
   })
+
+  // The Fly bridge gives up on a turn after IVR_V2_TIMEOUT_MS. When we blow
+  // past that the caller never hears this reply, yet the state writes above
+  // have already landed — so the conversation advances a stage the caller
+  // doesn't know about. Log it loudly; it is the single most useful signal for
+  // "the call went sideways and nobody knows why".
+  if (latencyMs > VOICE_LATENCY_WARN_MS) {
+    console.warn(
+      `[voice-adapter] slow turn callSid=${callSid} latencyMs=${latencyMs} stage=${stageLabel}->${stageResp?.stageOut ?? stageLabel} — may have exceeded the Fly bridge timeout; caller may not have heard this reply`,
+    )
+  }
 
   return voiceReply
 }

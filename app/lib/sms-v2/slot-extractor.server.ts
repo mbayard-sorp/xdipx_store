@@ -385,6 +385,16 @@ function extractMatters(norm: string): string[] {
 
 // ── 5. Price ──────────────────────────────────────────────────────────────────
 
+// Budget cues that must appear immediately before a number for it to count as
+// a price ceiling. "$50" and "50 dollars" also qualify via the patterns below.
+const BUDGET_CUE = String.raw`(?:under|below|less\s+than|no\s+more\s+than|at\s+most|up\s+to|max(?:imum)?(?:\s+of)?|budget\s+(?:of|is|around)?|keep\s+it\s+(?:under|below)|spend(?:ing)?\s+(?:about|around|up\s+to)?|around|about)`
+
+// Units that follow a number in ordinary speech and prove it is NOT money.
+// Phone ASR produces plenty of these ("the 10 inch one", "10 speed", "we've
+// been together 10 years"), and every one of them used to become a budget.
+const NON_PRICE_UNIT =
+  /^\s*(?:inch|inches|in|cm|mm|millimet|centimet|foot|feet|ft|minute|min|hour|hr|day|week|month|year|yr|second|sec|speed|mode|pattern|function|setting|percent|%|o'?clock|am|pm|star|out\s+of|piece|pack|count|ct|oz|ounce|ml|gram|g\b|inch(?:es)?|degree)/i
+
 function extractPriceMax(norm: string): number | undefined {
   // Pattern: "under $50", "less than $50", "$50", "under fifty"
   // Explicit word amounts
@@ -405,20 +415,37 @@ function extractPriceMax(norm: string): number | undefined {
     }
   }
 
-  // Numeric: look for "under $NNN", "less than $NNN", or bare "$NNN"
-  const re = /(?:under|less\s+than\s*)?\$?(\d{2,3})\b/g
+  // Numeric. A bare number is NOT a budget — it needs one of:
+  //   1. a leading budget cue      ("under 50", "up to 200", "my budget is 80")
+  //   2. a currency symbol         ("$50")
+  //   3. a trailing money noun     ("50 dollars", "80 bucks")
+  //
+  // The old pattern made the cue and the "$" both optional, so ANY 2-3 digit
+  // number in the utterance became a price ceiling. That is how a caller who
+  // never mentioned money ended up with priceMax=10 pinned to their phone
+  // number, and — because the slot persisted across sessions — kept it for
+  // weeks. See the accompanying fix in conversation.server.ts.
+  const re = new RegExp(
+    String.raw`(?:\b${BUDGET_CUE}\s+\$?(\d{2,3})\b)` +      // cue-led
+      String.raw`|(?:\$(\d{2,3})\b)` +                       // $-led
+      String.raw`|(?:\b(\d{2,3})\s*(?:dollars?|bucks?|usd)\b)`, // money-noun-trailed
+    'gi',
+  )
+
   let match: RegExpExecArray | null
-  let found: number | undefined
   while ((match = re.exec(norm)) !== null) {
-    const raw = match[1]
+    const raw = match[1] ?? match[2] ?? match[3]
     if (raw === undefined) continue
+
+    // Reject when a non-price unit follows the digits ("under 10 minutes").
+    const tail = norm.slice(match.index + match[0].length)
+    if (NON_PRICE_UNIT.test(tail)) continue
+
     const val = parseInt(raw, 10)
-    if (val >= 10 && val <= 500) {
-      // Prefer the first valid match
-      if (found === undefined) found = val
-    }
+    // Prefer the first valid match.
+    if (val >= 10 && val <= 500) return val
   }
-  return found
+  return undefined
 }
 
 // ── 6. Advice shape ───────────────────────────────────────────────────────────
