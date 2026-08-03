@@ -77,6 +77,13 @@ execute switch is off: report your would-be decisions in the event and stop; do 
 filing suggestions. The cap now counts approvals correctly (approvals stamp `reviewed_by` /
 `reviewed_at`), so it is a real per-day ceiling on your total actions.
 
+**Approve-timeout handling.** Each approve intent creates a real Shopify draft (roughly 12-15 seconds
+per candidate), so even chunked at 10 per request a full-cap batch can exceed the client/serverless
+timeout (~2 minutes) mid-chunk. If an approve `curl` times out, do not blind-resubmit the same ids.
+First verify DB state (`import_candidates.status`, `reviewed_by='product-manager-agent'`,
+`reviewed_at::date = today`), then resubmit only the ids still pending, otherwise you double-approve
+and burn cap. Use `curl --max-time 280` on approve calls.
+
 ## Step 4: Downstream health
 
 Check `import_candidates.status='imported' AND enriched_at IS NULL` (stuck in enrich) and
