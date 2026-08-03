@@ -7,8 +7,11 @@
 import { isShopifyCdn } from '~/lib/shopify-image'
 import { isSanityCdn, sanityImageUrl, sanityImageSrcSet } from '~/lib/sanity-image'
 
-// Same widths as OptimizedImage's DEFAULT_WIDTHS.
-const PRELOAD_WIDTHS = [480, 768, 1024, 1600]
+// Same widths as OptimizedImage's DEFAULT_WIDTHS — KEEP THE TWO LISTS IDENTICAL.
+// The preload's imagesrcset must offer the exact candidate <picture> will pick
+// (see the DEFAULT_WIDTHS note there); 640 is the throttled-mobile right-size
+// for the ~100vw storefront hero (ticket #603).
+const PRELOAD_WIDTHS = [480, 640, 768, 1024, 1600]
 const DEFAULT_SIZES = '(max-width: 768px) 100vw, 50vw'
 
 type PreloadLinkTag = {

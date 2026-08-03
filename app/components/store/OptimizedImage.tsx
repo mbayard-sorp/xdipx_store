@@ -8,7 +8,16 @@ import { isSanityCdn, sanityImageUrl, sanityImageSrcSet } from '~/lib/sanity-ima
 
 // Matches the hero-preload srcset widths in the homepage + PDP meta() helpers
 // so a preloaded AVIF candidate is an exact cache hit for what <picture> picks.
-const DEFAULT_WIDTHS = [480, 768, 1024, 1600]
+// KEEP IN SYNC with PRELOAD_WIDTHS in ~/lib/image-preload — a candidate the
+// <picture> can pick but the preload can't (or vice versa) turns the preloaded
+// LCP hero into a second, uncredited fetch.
+// 640 sits between 480 and 768 for the throttled-mobile LCP case (ticket #603):
+// the storefront hero fills ~100vw, so a 412px-CSS mobile viewport at DPR ~1.5-1.75
+// needs ~620-720 device px. Without 640 the browser rounds UP to 768w and ships
+// an oversized hero over slow 4G; 640w is the right-sized candidate and shaves
+// the hero's bytes on exactly the surface the mobile LCP budget measures. Larger
+// (1024/1600) still cover high-DPR phones and desktop unchanged.
+const DEFAULT_WIDTHS = [480, 640, 768, 1024, 1600]
 
 interface OptimizedImageProps {
   src: string

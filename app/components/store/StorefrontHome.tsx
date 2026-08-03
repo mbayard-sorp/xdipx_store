@@ -569,9 +569,21 @@ function ProductGrid({
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-5">
           {items.map((it, i) => (
             <Reveal key={it.product.id} variant="up" index={i}>
+              {/* No `priority` on any grid card. This grid always renders below
+                  the Hero and trust strip, so its first image is never the LCP
+                  (the Hero's featured[0] image is, and it is the only image the
+                  page should fetchpriority=high). Marking the grid's first card
+                  priority was harmless only while the grid was sourced from the
+                  discovery best-of, because gridRail[0] was then the SAME
+                  product as featured[0] and the browser deduped the two eager
+                  fetches into one. Once Nº 03 began sourcing a separate curated
+                  collection (ticket #464), the grid's first image became a
+                  DIFFERENT URL, so an eager fetchpriority=high card started
+                  racing the Hero LCP image for the mobile connection and pushed
+                  median LCP onto the 5500ms budget line (ticket #603). Lazy is
+                  correct here: the wall sits at/just below the fold. */}
               <StorefrontProductCard
                 product={it.product}
-                priority={i === 0}
                 fluid
                 onSelect={() => trackSelectItem(
                   'most-picked-grid', 'most-picked-grid',
