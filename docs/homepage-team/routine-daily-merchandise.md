@@ -475,6 +475,12 @@ Unpublish everything else (unpublished docs keep their drafts, so this is revers
 fits the theme, draft a new preset with emma-copywriter (label + narratorCopy voice-gated, tags from
 live vocab only), verify matches, publish it in place of one of the 5.
 
+**Theme-change checkpoint (mandatory, not optional re-curation).** On any day Step 1c changed this
+week's theme, explicitly verify, and record the verification: at most 5 `emmaPreset` docs are
+published, each matching the new theme, and each landing on 3+ live products via
+`scripts/dump-discovery-vocab.ts`. Presets are easy to leave over from the prior theme after a
+changeover; skipping this checkpoint because nothing looked obviously stale is how they linger.
+
 **Snapshot the current doc revision first** (last-good for healthcheck rollback).
 **Diff before write:** patch only changed fields; skip no-op publishes. **Content only** — never change
 URLs, canonical, section structure, or components here (that is Routine B, PR-gated).
@@ -512,6 +518,20 @@ routine: structure and components stay Routine B.
   deck tiles via `--target tile --block-key <rowKey> --tile-key <itemKey> --doc-id
   singleton.panelDeck`, category blocks via `--target block --block-key <blockKey> --doc-id
   categoryPage-<handle>`. `--ref-image` stays required (or `--no-ref --no-ref-reason`).
+- **Theme-change day override: health sweep only.** On a day Step 1c changed this week's theme,
+  Step 5b is scoped to the health sweep only; defer the day's scheduled category deep-refresh pair
+  to the next non-changeover run and record the deferral as a `decision` event. This is a defined
+  branch, not an ad-hoc shortfall, because the homepage-wide theme transition plus the Step 4
+  fresh-art floor reliably consumes this run's turn budget on changeover days.
+
+### Shelf-lead curation rule (deep refresh only)
+
+The first row of every shelf and grid on a merchandised page leads with high-key packshots on pale
+grounds that match the page register, and one SKU appears on at most one shelf per page (dedupe
+shelf assignments across the page). Reorder so cleaner brand packshots lead; gym-supplement or
+packaging-style shots, and dark supplier-lifestyle photos, sit deeper on the shelf or get swapped
+for a lighter brand alternate. When a calendar theme is active, that page's natural aisle expresses
+the theme in at least one visible element.
 
 ### Start-of-run assertion: did yesterday's publish land?
 
