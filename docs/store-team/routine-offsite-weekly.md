@@ -40,6 +40,9 @@ curl -s "$BASE_URL/api/team/gate?team=strategy&excludeRun=$RUN_ID" -H "x-team-se
    ANY non-terminal status, not just `proposed`. Auto-approve writes new rows straight to `approved`,
    so a `proposed`-only check silently never matches and the same pitch is re-filed every week. Pass
    an undated `dedupeKey` per target domain so the bus enforces it too.
+6. `docs/store-team/outreach-prospects.md` (owner-supplied, vetted guest-post targets), if present.
+   Prioritize drafting pitches for its READY rows before researching new targets in Step 2; for rows
+   already pitched, file an update-propose status note instead of a new pitch.
 
 ## Step 2: Target research
 
@@ -47,6 +50,9 @@ Web-search, at minimum: "best places to buy sex toys online", "best online sex t
 plus 3 category queries derived from the approved keyword bank's biggest clusters. For each
 roundup/listicle that ranks or gets cited, record: publisher, URL, last-updated, submission or
 affiliate path if visible, competitors listed. One `step` event with the target table.
+
+Also pick 2-3 brands xdipx actually carries (Shopify vendor field is the source of truth) and find
+their partner/affiliate/where-to-buy/stockist pages and marketing contact.
 
 ## Step 3: Proposals (ceiling of 6 suggestion rows per run, not a target)
 
@@ -63,7 +69,10 @@ XDIPX billing, discreet shipping); no prices or discounts (MAP); no medical clai
 human product testing; ready to send from hello@xdipx.com with zero edits.
 
 Also propose, when found: unlinked-mention reclamations and expert-quote / creator-collaboration
-prospects (same row format, angle-labeled).
+prospects (same row format, angle-labeled), and brand-partner pitches for the brands identified
+above (who xdipx is, that we carry and editorially feature their products, and an ask to be listed
+as a stockist or included in their where-to-buy, or a reciprocal link or social mention) — same row
+format and the same policy note as OFFSITE PITCH rows, still propose-only.
 
 ## Step 4: Summary + finish
 
