@@ -558,6 +558,18 @@ quiet private room" cleared it immediately on the first retry. If a slot returns
 black twice, change the phrasing before spending a third call, and prefer naming
 the fabric, the light, and the surface over naming the fluid or the bed.
 
+**Known-garble products (default straight to the real-photo fallback, do not
+spend a Kontext round):** We-Vibe Sync Go Turquoise Couples Vibrator
+(`we-vibe-sync-go-turquoise`, see the §0-P Notebook rejects above); Magic Wand
+Mini HV-135 Rechargeable Massager (`magic-wand-mini-hv-135-rechargeable-massager`) —
+with `--ref-image` pointed at the real Shopify photo, Kontext reproduced the
+product's shape, color, and silhouette correctly but garbled its small "magic
+wand MINI" wordmark into illegible invented cursive, and the garble persisted
+even with an explicit blank-surface negative prompt. Same failure class as
+We-Vibe Sync Go: Kontext cannot hold product shape and a blank product surface
+at the same time on branded bodies. Any branded-wordmark product should default
+to the real-photo fallback path rather than attempt Kontext.
+
 ---
 
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
