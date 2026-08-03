@@ -28239,12 +28239,16 @@ __export(ticket_out_of_band_sweep_server_exports, {
   SWEEPABLE_STATUSES: () => SWEEPABLE_STATUSES,
   SWEEP_MAX_TICKETS: () => SWEEP_MAX_TICKETS,
   SWEEP_MIN_AGE_MINUTES: () => SWEEP_MIN_AGE_MINUTES,
+  classifyTicketPrMatches: () => classifyTicketPrMatches,
   countStrandedVerifiedTickets: () => countStrandedVerifiedTickets,
+  findMergedPrForTicket: () => findMergedPrForTicket,
+  findStrandedLinklessTickets: () => findStrandedLinklessTickets,
   findStrandedVerifiedTickets: () => findStrandedVerifiedTickets,
   isMergedOutOfBand: () => isMergedOutOfBand,
+  referencesTicketId: () => referencesTicketId,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and8, desc as desc2, eq as eq23, inArray as inArray10, lt as lt4, sql as sql16 } from "drizzle-orm";
+import { and as and8, desc as desc2, eq as eq23, inArray as inArray10, lt as lt4, notExists, sql as sql16 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
@@ -28268,8 +28272,54 @@ async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   }
   return out;
 }
+async function findStrandedLinklessTickets(limit = SWEEP_MAX_TICKETS) {
+  const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
+  const rows = await db.select({ ticketId: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and8(
+    inArray10(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+    lt4(homepageTeamSuggestions.updatedAt, cutoff),
+    notExists(
+      db.select({ one: sql16`1` }).from(suggestionLinks).where(and8(
+        eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
+        eq23(suggestionLinks.kind, "pr")
+      ))
+    )
+  )).orderBy(homepageTeamSuggestions.updatedAt).limit(limit);
+  return rows.map((r) => r.ticketId);
+}
 function isMergedOutOfBand(pr) {
   return pr.merged === true;
+}
+function referencesTicketId(text2, ticketId) {
+  return new RegExp(`ticket #${ticketId}(?!\\d)`, "i").test(text2);
+}
+function classifyTicketPrMatches(prs, ticketId) {
+  const matched = /* @__PURE__ */ new Set();
+  for (const pr of prs) {
+    if (!pr.isPullRequest) continue;
+    if (referencesTicketId(`${pr.title}
+${pr.body}`, ticketId)) matched.add(pr.number);
+  }
+  const numbers = [...matched].sort((a, b) => a - b);
+  if (numbers.length === 0) return { kind: "none" };
+  if (numbers.length > 1) return { kind: "ambiguous", prNumbers: numbers };
+  return { kind: "match", prNumber: numbers[0] };
+}
+async function findMergedPrForTicket(ticketId, context = "out-of-band-sweep") {
+  const cfg = getGithubConfig(context);
+  if (!cfg) return { kind: "error", error: "GITHUB_TOKEN/OWNER/REPO not set" };
+  const q = `repo:${cfg.owner}/${cfg.repo} type:pr is:merged "ticket #${ticketId}"`;
+  const res = await githubRequest(
+    `/search/issues?per_page=${SEARCH_PER_PAGE}&q=${encodeURIComponent(q)}`,
+    { context }
+  );
+  if (!res.ok) return { kind: "error", error: res.error };
+  const prs = (res.data.items ?? []).map((it) => ({
+    number: it.number,
+    title: it.title ?? "",
+    body: it.body ?? "",
+    isPullRequest: Boolean(it.pull_request)
+  }));
+  return classifyTicketPrMatches(prs, ticketId);
 }
 async function markPrLinkMerged(ticketId, prRef) {
   await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and8(
@@ -28278,36 +28328,68 @@ async function markPrLinkMerged(ticketId, prRef) {
     eq23(suggestionLinks.ref, prRef)
   ));
 }
+async function applyCandidateIfMerged(c, result) {
+  try {
+    const pr = await getPullRequest(c.prNumber, "out-of-band-sweep");
+    if (!pr.ok || !pr.data) {
+      result.errors.push(`PR #${c.prNumber}: ${pr.ok ? "no data" : pr.error}`);
+      return;
+    }
+    if (!isMergedOutOfBand(pr.data)) return;
+    await transitionSuggestion(c.ticketId, "applied", "system", {
+      note: `merged out-of-band (PR #${c.prNumber} was already merged when the engine reconciled it)`,
+      links: [{ kind: "pr", ref: pr.data.htmlUrl, state: "merged" }]
+    });
+    if (c.prRef) await markPrLinkMerged(c.ticketId, c.prRef);
+    result.applied.push(c.ticketId);
+    console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`);
+  } catch (err2) {
+    const msg = String(err2);
+    if (msg.includes("409")) return;
+    result.errors.push(`ticket #${c.ticketId}: ${msg}`);
+  }
+}
 async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
   const result = { checked: 0, applied: [], errors: [] };
-  let candidates;
+  let linked = [];
   try {
-    candidates = await findStrandedVerifiedTickets(limit);
+    linked = await findStrandedVerifiedTickets(limit);
   } catch (err2) {
     result.errors.push(`candidate query failed: ${String(err2)}`);
-    return result;
   }
-  if (candidates.length === 0) return result;
-  for (const c of candidates) {
+  for (const c of linked) {
+    if (result.checked >= limit) break;
     result.checked += 1;
+    await applyCandidateIfMerged(c, result);
+  }
+  const remaining = limit - result.checked;
+  if (remaining > 0) {
+    let linkless = [];
     try {
-      const pr = await getPullRequest(c.prNumber, "out-of-band-sweep");
-      if (!pr.ok || !pr.data) {
-        result.errors.push(`PR #${c.prNumber}: ${pr.ok ? "no data" : pr.error}`);
-        continue;
-      }
-      if (!isMergedOutOfBand(pr.data)) continue;
-      await transitionSuggestion(c.ticketId, "applied", "system", {
-        note: `merged out-of-band (PR #${c.prNumber} was already merged when the engine reconciled it)`,
-        links: [{ kind: "pr", ref: pr.data.htmlUrl, state: "merged" }]
-      });
-      await markPrLinkMerged(c.ticketId, c.prRef);
-      result.applied.push(c.ticketId);
-      console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`);
+      linkless = await findStrandedLinklessTickets(remaining);
     } catch (err2) {
-      const msg = String(err2);
-      if (msg.includes("409")) continue;
-      result.errors.push(`ticket #${c.ticketId}: ${msg}`);
+      result.errors.push(`link-less candidate query failed: ${String(err2)}`);
+    }
+    for (const ticketId of linkless) {
+      if (result.checked >= limit) break;
+      result.checked += 1;
+      const lookup = await findMergedPrForTicket(ticketId);
+      switch (lookup.kind) {
+        case "error":
+          result.errors.push(`ticket #${ticketId}: PR search failed: ${lookup.error}`);
+          break;
+        case "none":
+          console.log(`${LOG} ticket #${ticketId}: no merged PR references it, leaving as-is`);
+          break;
+        case "ambiguous":
+          console.log(
+            `${LOG} ticket #${ticketId}: ambiguous, ${lookup.prNumbers.length} merged PRs reference it (${lookup.prNumbers.map((n) => `#${n}`).join(", ")}), leaving as-is`
+          );
+          break;
+        case "match":
+          await applyCandidateIfMerged({ ticketId, prNumber: lookup.prNumber }, result);
+          break;
+      }
     }
   }
   return result;
@@ -28321,7 +28403,7 @@ async function countStrandedVerifiedTickets() {
   ));
   return row?.n ?? 0;
 }
-var LOG, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES, SWEEPABLE_STATUSES;
+var LOG, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES, SWEEPABLE_STATUSES, SEARCH_PER_PAGE;
 var init_ticket_out_of_band_sweep_server = __esm({
   "app/lib/ticket-out-of-band-sweep.server.ts"() {
     "use strict";
@@ -28334,6 +28416,7 @@ var init_ticket_out_of_band_sweep_server = __esm({
     SWEEP_MAX_TICKETS = 5;
     SWEEP_MIN_AGE_MINUTES = 60;
     SWEEPABLE_STATUSES = ["verified", "in_review", "pr_open"];
+    SEARCH_PER_PAGE = 20;
   }
 });
 

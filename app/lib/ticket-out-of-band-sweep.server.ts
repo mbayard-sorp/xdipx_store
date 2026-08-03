@@ -21,6 +21,17 @@
  * production, invisible to both this sweep and the digest's stranded count.
  * See SWEEPABLE_STATUSES.
  *
+ * A second stranding mode has the same cause but no link to follow. The
+ * candidate query used to join through `suggestion_links`, so a ticket moved to
+ * `pr_open` without a PR link produced no candidate and could never be closed,
+ * even after its fix shipped. Tickets #432, #433 and #434 shipped in PR #417 and
+ * sat stranded exactly this way. For those the sweep falls back to searching
+ * merged PRs for one whose title or body references the ticket id (the R-DEV
+ * convention is `agents: ticket #<id>: ...`). A single confident match is
+ * treated identically to a linked candidate; zero or more than one match does
+ * nothing, so the fallback can never guess. See findStrandedLinklessTickets and
+ * findMergedPrForTicket.
+ *
  * Lives outside release-engine.server.ts on purpose. The engine's own file
  * documents a fixed safety model at the top and is a protected path; keeping
  * the query, the cap, and the transition here means the cadence and matching
@@ -28,10 +39,10 @@
  * owner-merged change every time.
  */
 
-import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, lt, notExists, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
-import { getPullRequest, type PullRequestSummary } from './github.server'
+import { getGithubConfig, getPullRequest, githubRequest, type PullRequestSummary } from './github.server'
 import { prNumberFromRef } from './release-engine.server'
 import { transitionSuggestion } from './team.server'
 
@@ -73,7 +84,9 @@ export interface SweepResult {
 interface Candidate {
   ticketId: number
   prNumber: number
-  prRef: string
+  /** The `suggestion_links` ref this candidate came from. Absent for a link-less
+   *  candidate resolved by searching merged PRs, which has no link row to flip. */
+  prRef?: string
 }
 
 /**
@@ -113,12 +126,122 @@ export async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS): Pr
 }
 
 /**
+ * Stranded tickets older than the grace period that carry no `pr` link at all.
+ * These are invisible to findStrandedVerifiedTickets, whose inner join drops any
+ * row without a link. Returns bare ticket ids, oldest first; the caller resolves
+ * each to a PR by searching merged PRs.
+ */
+export async function findStrandedLinklessTickets(limit = SWEEP_MAX_TICKETS): Promise<number[]> {
+  const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 60_000)
+
+  const rows = await db
+    .select({ ticketId: homepageTeamSuggestions.id })
+    .from(homepageTeamSuggestions)
+    .where(and(
+      inArray(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+      lt(homepageTeamSuggestions.updatedAt, cutoff),
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(suggestionLinks)
+          .where(and(
+            eq(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
+            eq(suggestionLinks.kind, 'pr'),
+          )),
+      ),
+    ))
+    .orderBy(homepageTeamSuggestions.updatedAt)
+    .limit(limit)
+
+  return rows.map((r) => r.ticketId)
+}
+
+/**
  * Decide from a PR summary whether its ticket shipped out of band. Pure, so
  * the rule is testable without GitHub: merged means shipped, anything else
  * (open, closed-unmerged) leaves the ticket alone.
  */
 export function isMergedOutOfBand(pr: Pick<PullRequestSummary, 'merged'>): boolean {
   return pr.merged === true
+}
+
+/**
+ * True when `text` references ticket `<id>` by the R-DEV convention `ticket #<id>`.
+ * The negative lookahead is the whole point: `ticket #43` must not match inside
+ * `ticket #431`, or a link-less ticket could be closed against the wrong PR.
+ */
+export function referencesTicketId(text: string, ticketId: number): boolean {
+  return new RegExp(`ticket #${ticketId}(?!\\d)`, 'i').test(text)
+}
+
+/** A merged PR as returned by the GitHub issue-search API, reduced to what the
+ *  match decision needs. `isPullRequest` filters out issues, which the same
+ *  endpoint also returns. */
+export interface SearchedPr {
+  number: number
+  title: string
+  body: string
+  isPullRequest: boolean
+}
+
+/** The result of looking for the one merged PR that closed a link-less ticket. */
+export type TicketPrLookup =
+  | { kind: 'match'; prNumber: number }
+  | { kind: 'none' }
+  | { kind: 'ambiguous'; prNumbers: number[] }
+  | { kind: 'error'; error: string }
+
+/**
+ * Pure classifier: given the merged PRs a search surfaced, decide whether
+ * exactly one confidently references this ticket. Kept separate from the GitHub
+ * call so the match rule is testable without a network (the DB here is
+ * production and off-limits to tests). Distinct PR numbers only, so the same PR
+ * appearing twice is not mistaken for ambiguity.
+ */
+export function classifyTicketPrMatches(prs: readonly SearchedPr[], ticketId: number): TicketPrLookup {
+  const matched = new Set<number>()
+  for (const pr of prs) {
+    if (!pr.isPullRequest) continue
+    if (referencesTicketId(`${pr.title}\n${pr.body}`, ticketId)) matched.add(pr.number)
+  }
+  const numbers = [...matched].sort((a, b) => a - b)
+  if (numbers.length === 0) return { kind: 'none' }
+  if (numbers.length > 1) return { kind: 'ambiguous', prNumbers: numbers }
+  return { kind: 'match', prNumber: numbers[0]! }
+}
+
+/** Cap on search results fetched per link-less ticket. Bounds one GitHub call. */
+const SEARCH_PER_PAGE = 20
+
+interface RawSearchResponse {
+  items?: Array<{ number: number; title?: string; body?: string | null; pull_request?: unknown }>
+}
+
+/**
+ * Find the single merged PR that references a link-less ticket, if there is
+ * exactly one. Narrows to merged PRs in the search query, then applies the
+ * strict in-code matcher so a fuzzy full-text hit cannot close a ticket on its
+ * own. Zero or more than one match returns `none` / `ambiguous`; the caller
+ * still runs the same GitHub merged check before transitioning.
+ */
+export async function findMergedPrForTicket(ticketId: number, context = 'out-of-band-sweep'): Promise<TicketPrLookup> {
+  const cfg = getGithubConfig(context)
+  if (!cfg) return { kind: 'error', error: 'GITHUB_TOKEN/OWNER/REPO not set' }
+
+  const q = `repo:${cfg.owner}/${cfg.repo} type:pr is:merged "ticket #${ticketId}"`
+  const res = await githubRequest<RawSearchResponse>(
+    `/search/issues?per_page=${SEARCH_PER_PAGE}&q=${encodeURIComponent(q)}`,
+    { context },
+  )
+  if (!res.ok) return { kind: 'error', error: res.error }
+
+  const prs: SearchedPr[] = (res.data.items ?? []).map((it) => ({
+    number: it.number,
+    title: it.title ?? '',
+    body: it.body ?? '',
+    isPullRequest: Boolean(it.pull_request),
+  }))
+  return classifyTicketPrMatches(prs, ticketId)
 }
 
 /** Flip any `pr` link rows for this ticket to `merged` so the digest agrees. */
@@ -134,45 +257,94 @@ async function markPrLinkMerged(ticketId: number, prRef: string): Promise<void> 
 }
 
 /**
+ * Confirm a candidate's PR is merged and, if so, transition the ticket to
+ * `applied`. Shared by the linked and link-less paths so both run the identical
+ * GitHub merged check and transition. Never throws: a 409 means the ticket
+ * already moved and is ignored; anything else is collected.
+ */
+async function applyCandidateIfMerged(c: Candidate, result: SweepResult): Promise<void> {
+  try {
+    const pr = await getPullRequest(c.prNumber, 'out-of-band-sweep')
+    if (!pr.ok || !pr.data) {
+      result.errors.push(`PR #${c.prNumber}: ${pr.ok ? 'no data' : pr.error}`)
+      return
+    }
+    if (!isMergedOutOfBand(pr.data)) return
+
+    await transitionSuggestion(c.ticketId, 'applied', 'system', {
+      note: `merged out-of-band (PR #${c.prNumber} was already merged when the engine reconciled it)`,
+      links: [{ kind: 'pr', ref: pr.data.htmlUrl, state: 'merged' }],
+    })
+    // Only linked candidates have an existing link row to reconcile; the
+    // transition above records the link for a link-less candidate.
+    if (c.prRef) await markPrLinkMerged(c.ticketId, c.prRef)
+    result.applied.push(c.ticketId)
+    console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`)
+  } catch (err) {
+    // A 409 here is normal and not worth alarming on: it means the ticket
+    // moved (the engine got there first, or the owner dismissed it).
+    const msg = String(err)
+    if (msg.includes('409')) return
+    result.errors.push(`ticket #${c.ticketId}: ${msg}`)
+  }
+}
+
+/**
  * One sweep. Safe to call on every engine cycle; the caller throttles it.
  * Never throws: a GitHub hiccup must not take down the release cycle, so
  * failures are collected and reported.
+ *
+ * Linked candidates are processed first (one GitHub call each), then any
+ * remaining budget is spent on link-less tickets resolved by PR search. The
+ * total tickets touched stays bounded by `limit`, so the GitHub calls one cycle
+ * can make stay bounded too.
  */
 export async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS): Promise<SweepResult> {
   const result: SweepResult = { checked: 0, applied: [], errors: [] }
 
-  let candidates: Candidate[]
+  let linked: Candidate[] = []
   try {
-    candidates = await findStrandedVerifiedTickets(limit)
+    linked = await findStrandedVerifiedTickets(limit)
   } catch (err) {
     result.errors.push(`candidate query failed: ${String(err)}`)
-    return result
   }
-  if (candidates.length === 0) return result
 
-  for (const c of candidates) {
+  for (const c of linked) {
+    if (result.checked >= limit) break
     result.checked += 1
-    try {
-      const pr = await getPullRequest(c.prNumber, 'out-of-band-sweep')
-      if (!pr.ok || !pr.data) {
-        result.errors.push(`PR #${c.prNumber}: ${pr.ok ? 'no data' : pr.error}`)
-        continue
-      }
-      if (!isMergedOutOfBand(pr.data)) continue
+    await applyCandidateIfMerged(c, result)
+  }
 
-      await transitionSuggestion(c.ticketId, 'applied', 'system', {
-        note: `merged out-of-band (PR #${c.prNumber} was already merged when the engine reconciled it)`,
-        links: [{ kind: 'pr', ref: pr.data.htmlUrl, state: 'merged' }],
-      })
-      await markPrLinkMerged(c.ticketId, c.prRef)
-      result.applied.push(c.ticketId)
-      console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`)
+  const remaining = limit - result.checked
+  if (remaining > 0) {
+    let linkless: number[] = []
+    try {
+      linkless = await findStrandedLinklessTickets(remaining)
     } catch (err) {
-      // A 409 here is normal and not worth alarming on: it means the ticket
-      // moved (the engine got there first, or the owner dismissed it).
-      const msg = String(err)
-      if (msg.includes('409')) continue
-      result.errors.push(`ticket #${c.ticketId}: ${msg}`)
+      result.errors.push(`link-less candidate query failed: ${String(err)}`)
+    }
+
+    for (const ticketId of linkless) {
+      if (result.checked >= limit) break
+      result.checked += 1
+      const lookup = await findMergedPrForTicket(ticketId)
+      switch (lookup.kind) {
+        case 'error':
+          result.errors.push(`ticket #${ticketId}: PR search failed: ${lookup.error}`)
+          break
+        case 'none':
+          console.log(`${LOG} ticket #${ticketId}: no merged PR references it, leaving as-is`)
+          break
+        case 'ambiguous':
+          console.log(
+            `${LOG} ticket #${ticketId}: ambiguous, ${lookup.prNumbers.length} merged PRs reference it ` +
+              `(${lookup.prNumbers.map((n) => `#${n}`).join(', ')}), leaving as-is`,
+          )
+          break
+        case 'match':
+          await applyCandidateIfMerged({ ticketId, prNumber: lookup.prNumber }, result)
+          break
+      }
     }
   }
 
