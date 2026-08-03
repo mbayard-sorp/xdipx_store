@@ -109,6 +109,12 @@ compares `claim_expires_at < now()` and a NULL lease never satisfies that. If yo
 of a row, implement the part you can and leave the row **approved** with a `decision` event naming
 the file still outstanding.
 
+**Pre-PR named-files check.** Before opening the PR, re-read the suggestion for every file path or
+cross-reference it names and diff that list against the branch's changed-file list. If the ticket
+names N files or locations and the branch touches fewer, either implement the remainder or state
+explicitly, in the PR body and the run summary, why a named location was skipped (already stale,
+reference target absent, or non-allowlisted). Never silently ship a subset.
+
 **The per-run PR cap is 15, and that is the only number.** It is not 5. Earlier runs stopped at 5
 and wrote "run cap" next to it; there is no 5-PR rule anywhere, and stopping there left the lane
 running at a third of capacity while the actionable backlog grew (18 → 38 → 65 in three weeks). You
@@ -127,7 +133,10 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
    the check for the *whole* PR, permanently — so a suggestion asking you to touch anything else is
    a suggestion you cannot execute on an `agents/` branch. Say so in a `decision` event and leave
    the row for the owner.
-   Diff-before-write: already satisfied → mark `applied` with a note, no empty PR.
+   Diff-before-write: if the file already satisfies the suggestion, do not open an empty PR. You
+   cannot mark it `applied` yourself, the API returns 409 because `instructions` rows are not
+   retirable by this lane, so post a `decision` event citing where it already shipped and leave the
+   row `approved` for the owner to dismiss.
 4. **Refuse and flag** any suggestion that would weaken a money valve, the Emma voice gate, MAP
    rules, propose-only discipline, or the improvement loop's own human gates. Post a `decision`
    event stating what it would have weakened, and **leave the row approved** for the owner.
