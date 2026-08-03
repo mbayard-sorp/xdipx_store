@@ -25064,9 +25064,13 @@ var init_product_type_server = __esm({
 // app/lib/import-enrich.server.ts
 var import_enrich_server_exports = {};
 __export(import_enrich_server_exports, {
+  ENRICH_MAX_ATTEMPTS: () => ENRICH_MAX_ATTEMPTS,
+  STUCK_BATCH_MAX_HOURS: () => STUCK_BATCH_MAX_HOURS,
   applyFullEnrichmentWrites: () => applyFullEnrichmentWrites,
   collectEnrichmentBatch: () => collectEnrichmentBatch,
+  decideEnrichFailure: () => decideEnrichFailure,
   detectImportEnrichStall: () => detectImportEnrichStall,
+  isBatchClaimStuck: () => isBatchClaimStuck,
   publishEnrichedProducts: () => publishEnrichedProducts,
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
@@ -25216,6 +25220,15 @@ function passesQualityGate(writes) {
   if (!checkDialSpread(writes.sensationDialV2?.items).ok) return false;
   return true;
 }
+function decideEnrichFailure(currentAttempts) {
+  const enrichAttempts = currentAttempts + 1;
+  return enrichAttempts < ENRICH_MAX_ATTEMPTS ? { action: "retry", enrichAttempts } : { action: "park", enrichAttempts };
+}
+function isBatchClaimStuck(claimedAt, now, maxHours = STUCK_BATCH_MAX_HOURS) {
+  if (!claimedAt) return false;
+  const ageHours = (now.getTime() - claimedAt.getTime()) / 36e5;
+  return ageHours >= maxHours;
+}
 async function submitEnrichmentBatch(cap, opts = {}) {
   const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq18(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
     eq18(importCandidates.status, "imported"),
@@ -25288,12 +25301,23 @@ async function detectImportEnrichStall(enabled) {
     return { stuck: 0, oldestHours: null, alerted: false };
   }
 }
+async function applyEnrichFailure(candidate, reason) {
+  const disp = decideEnrichFailure(candidate.enrichAttempts);
+  if (disp.action === "retry") {
+    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
+    console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- re-queued for retry`);
+  } else {
+    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
+    console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- parked, needs manual review`);
+  }
+}
 async function collectEnrichmentBatch() {
   const rows = await db.select({
     id: importCandidates.id,
     batchId: importCandidates.enrichBatchId,
     productId: dealHistory.shopifyProductId,
-    enrichAttempts: importCandidates.enrichAttempts
+    enrichAttempts: importCandidates.enrichAttempts,
+    claimedAt: importCandidates.updatedAt
   }).from(importCandidates).innerJoin(dealHistory, eq18(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
     eq18(importCandidates.status, "imported"),
     isNull3(importCandidates.enrichedAt),
@@ -25302,7 +25326,7 @@ async function collectEnrichmentBatch() {
   )).orderBy(asc4(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
-    return { enriched: 0, failed: 0, stillPending: 0 };
+    return { enriched: 0, failed: 0, stillPending: 0, recovered: 0 };
   }
   const byBatch = /* @__PURE__ */ new Map();
   for (const c of pending) {
@@ -25313,10 +25337,33 @@ async function collectEnrichmentBatch() {
   let enrichedTotal = 0;
   let failedTotal = 0;
   let stillPending = 0;
+  let recoveredTotal = 0;
+  const now = /* @__PURE__ */ new Date();
   for (const [batchId, candidates] of byBatch) {
-    const collected = await collectFullEnrichmentBatch(batchId);
+    let collected;
+    try {
+      collected = await collectFullEnrichmentBatch(batchId);
+    } catch (err2) {
+      const reason = `batch collect error: ${err2 instanceof Error ? err2.message : String(err2)}`;
+      for (const candidate of candidates) {
+        await applyEnrichFailure(candidate, reason);
+        failedTotal++;
+      }
+      console.error(`[import-enrich] collectFullEnrichmentBatch threw for batch ${batchId}; ${candidates.length} candidate(s) routed to retry/park:`, err2);
+      continue;
+    }
     if (!collected.ended) {
-      stillPending += candidates.length;
+      const stuck = [];
+      const live = [];
+      for (const c of candidates) (isBatchClaimStuck(c.claimedAt, now) ? stuck : live).push(c);
+      for (const candidate of stuck) {
+        await applyEnrichFailure(candidate, `batch stuck in '${collected.status}' past ${STUCK_BATCH_MAX_HOURS}h`);
+        recoveredTotal++;
+      }
+      stillPending += live.length;
+      if (stuck.length) {
+        console.warn(`[import-enrich] batch ${batchId} stuck in '${collected.status}'; aged out ${stuck.length} candidate(s) for resubmit, ${live.length} still in flight`);
+      }
       continue;
     }
     for (const candidate of candidates) {
@@ -25337,19 +25384,12 @@ async function collectEnrichmentBatch() {
         enrichedTotal++;
         continue;
       }
-      const attempts = candidate.enrichAttempts + 1;
       const reason = batchFailure?.error ?? (!writes ? "no result in batch" : "quality gate failed");
-      if (attempts < ENRICH_MAX_ATTEMPTS) {
-        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
-        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- re-queued for retry`);
-      } else {
-        await db.update(importCandidates).set({ enrichAttempts: attempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
-        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- parked, needs manual review`);
-      }
+      await applyEnrichFailure(candidate, reason);
       failedTotal++;
     }
   }
-  return { enriched: enrichedTotal, failed: failedTotal, stillPending };
+  return { enriched: enrichedTotal, failed: failedTotal, stillPending, recovered: recoveredTotal };
 }
 async function publishEnrichedProducts() {
   const rows = await db.select({
@@ -25411,7 +25451,7 @@ async function runImportEnrichTick(opts = {}) {
   const submit = collect.stillPending === 0 ? await submitEnrichmentBatch(await getBatchCap(), { deadline }) : { submitted: 0, batchIds: [], reason: "batch_in_flight" };
   return { ok: true, stall, collect, publish, submit };
 }
-var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, BRIEF_CHUNK_SIZE, TICK_BUDGET_MS, STALL_COUNT_THRESHOLD, STALL_AGE_HOURS, ed, edA, ENRICH_MAX_ATTEMPTS;
+var VALID_IVR_EXPERIENCE, DEFAULT_BATCH_CAP, BRIEF_CHUNK_SIZE, TICK_BUDGET_MS, STALL_COUNT_THRESHOLD, STALL_AGE_HOURS, ed, edA, ENRICH_MAX_ATTEMPTS, STUCK_BATCH_MAX_HOURS;
 var init_import_enrich_server = __esm({
   "app/lib/import-enrich.server.ts"() {
     "use strict";
@@ -25435,6 +25475,7 @@ var init_import_enrich_server = __esm({
     ed = (s) => s == null ? s : stripDashes(s);
     edA = (a) => a?.map(stripDashes);
     ENRICH_MAX_ATTEMPTS = 2;
+    STUCK_BATCH_MAX_HOURS = 26;
   }
 });
 

@@ -293,7 +293,54 @@ function passesQualityGate(writes: ProductWrites): boolean {
 
 /** Bounded retry cap: after this many failed enrichment attempts, a candidate
  *  is parked (enrich_failed_at set) instead of re-submitted. */
-const ENRICH_MAX_ATTEMPTS = 2
+export const ENRICH_MAX_ATTEMPTS = 2
+
+/**
+ * A real Anthropic Message Batch always reaches `ended` within its 24h SLA.
+ * A batch still unfinished well past that (canceled, expired, or one whose id
+ * we can no longer retrieve) is dead: its candidates would otherwise sit
+ * `stillPending` forever and, because a new submit is gated on
+ * `stillPending === 0`, freeze the entire enrich→publish pipeline behind one
+ * stuck batch. Past this age we treat the claim as failed and route it through
+ * the normal retry/park path so it can re-submit against a fresh batch.
+ */
+export const STUCK_BATCH_MAX_HOURS = 26
+
+/** What to do with one candidate after a failed or stuck batch collection. */
+export type EnrichFailureDisposition =
+  | { action: 'retry'; enrichAttempts: number }
+  | { action: 'park';  enrichAttempts: number }
+
+/**
+ * Pure retry-vs-park decision, shared by the per-product quality-gate failure
+ * path and the new stuck/errored-batch recovery paths. Below the attempt cap a
+ * candidate is re-queued (enrich_batch_id cleared) for one more try; at the cap
+ * it is parked (enrich_failed_at set). Extracted so the decision is unit-tested
+ * without a database.
+ */
+export function decideEnrichFailure(currentAttempts: number): EnrichFailureDisposition {
+  const enrichAttempts = currentAttempts + 1
+  return enrichAttempts < ENRICH_MAX_ATTEMPTS
+    ? { action: 'retry', enrichAttempts }
+    : { action: 'park',  enrichAttempts }
+}
+
+/**
+ * Pure: has a claimed-but-uncollected candidate's batch been in flight long
+ * enough to be presumed dead? `claimedAt` is the row's last update, stamped
+ * when its enrich_batch_id was set and untouched until collection. Null anchors
+ * (never seen in practice) are treated as not-stuck so a missing timestamp can
+ * never trigger a spurious recovery.
+ */
+export function isBatchClaimStuck(
+  claimedAt: Date | null | undefined,
+  now: Date,
+  maxHours: number = STUCK_BATCH_MAX_HOURS,
+): boolean {
+  if (!claimedAt) return false
+  const ageHours = (now.getTime() - claimedAt.getTime()) / 3_600_000
+  return ageHours >= maxHours
+}
 
 /**
  * Find imported-but-unenriched products and submit ONE Anthropic full-enrichment
@@ -453,13 +500,39 @@ export async function detectImportEnrichStall(enabled: boolean): Promise<{ stuck
  * for one retry. At the cap, enrich_failed_at is set and enrich_batch_id is
  * left alone -- the row is parked, neither re-submitted nor published.
  */
-export async function collectEnrichmentBatch(): Promise<{ enriched: number; failed: number; stillPending: number }> {
+/**
+ * Apply a failed/stuck-batch disposition to one candidate: below the retry cap,
+ * clear enrich_batch_id so submitEnrichmentBatch re-selects it for a fresh
+ * batch; at the cap, park it (enrich_failed_at). Mirrors the inline handling the
+ * per-product quality-gate path used before this was extracted, so the retry/
+ * park behaviour there is unchanged.
+ */
+async function applyEnrichFailure(
+  candidate: { id: number; productId: string; enrichAttempts: number },
+  reason: string,
+): Promise<void> {
+  const disp = decideEnrichFailure(candidate.enrichAttempts)
+  if (disp.action === 'retry') {
+    await db.update(importCandidates)
+      .set({ enrichAttempts: disp.enrichAttempts, enrichBatchId: null, updatedAt: new Date() })
+      .where(eq(importCandidates.id, candidate.id))
+    console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- re-queued for retry`)
+  } else {
+    await db.update(importCandidates)
+      .set({ enrichAttempts: disp.enrichAttempts, enrichFailedAt: new Date(), updatedAt: new Date() })
+      .where(eq(importCandidates.id, candidate.id))
+    console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- parked, needs manual review`)
+  }
+}
+
+export async function collectEnrichmentBatch(): Promise<{ enriched: number; failed: number; stillPending: number; recovered: number }> {
   const rows = await db
     .select({
       id:             importCandidates.id,
       batchId:        importCandidates.enrichBatchId,
       productId:      dealHistory.shopifyProductId,
       enrichAttempts: importCandidates.enrichAttempts,
+      claimedAt:      importCandidates.updatedAt,
     })
     .from(importCandidates)
     .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
@@ -471,11 +544,11 @@ export async function collectEnrichmentBatch(): Promise<{ enriched: number; fail
     ))
     .orderBy(asc(importCandidates.id))
 
-  const pending = rows.filter((r): r is { id: number; batchId: string; productId: string; enrichAttempts: number } =>
+  const pending = rows.filter((r): r is { id: number; batchId: string; productId: string; enrichAttempts: number; claimedAt: Date } =>
     Boolean(r.batchId) && Boolean(r.productId))
 
   if (pending.length === 0) {
-    return { enriched: 0, failed: 0, stillPending: 0 }
+    return { enriched: 0, failed: 0, stillPending: 0, recovered: 0 }
   }
 
   const byBatch = new Map<string, typeof pending>()
@@ -488,11 +561,47 @@ export async function collectEnrichmentBatch(): Promise<{ enriched: number; fail
   let enrichedTotal = 0
   let failedTotal   = 0
   let stillPending  = 0
+  let recoveredTotal = 0
+  const now = new Date()
 
   for (const [batchId, candidates] of byBatch) {
-    const collected = await collectFullEnrichmentBatch(batchId)
+    // Recovery guard: isolate each batch. A single un-retrievable batch id
+    // (Anthropic 404 after batch/result expiry, an invalid id, or a transient
+    // API error) makes retrieve() throw. Before this guard that throw
+    // propagated out of collectEnrichmentBatch and killed the whole tick, so
+    // publish and submit never ran and every candidate froze behind one poison
+    // batch. Now the failure is contained to its own batch and its candidates
+    // are routed through the normal retry/park path, which re-submits them
+    // against a fresh batch (or parks them at the cap).
+    let collected: Awaited<ReturnType<typeof collectFullEnrichmentBatch>>
+    try {
+      collected = await collectFullEnrichmentBatch(batchId)
+    } catch (err) {
+      const reason = `batch collect error: ${err instanceof Error ? err.message : String(err)}`
+      for (const candidate of candidates) {
+        await applyEnrichFailure(candidate, reason)
+        failedTotal++
+      }
+      console.error(`[import-enrich] collectFullEnrichmentBatch threw for batch ${batchId}; ${candidates.length} candidate(s) routed to retry/park:`, err)
+      continue
+    }
+
     if (!collected.ended) {
-      stillPending += candidates.length
+      // A real batch always ends within 24h. One still unfinished past
+      // STUCK_BATCH_MAX_HOURS is dead; age its candidates out through the
+      // failure path so a resubmit can happen, instead of counting them
+      // stillPending forever and blocking every future submit.
+      const stuck: typeof candidates = []
+      const live:  typeof candidates = []
+      for (const c of candidates) (isBatchClaimStuck(c.claimedAt, now) ? stuck : live).push(c)
+      for (const candidate of stuck) {
+        await applyEnrichFailure(candidate, `batch stuck in '${collected.status}' past ${STUCK_BATCH_MAX_HOURS}h`)
+        recoveredTotal++
+      }
+      stillPending += live.length
+      if (stuck.length) {
+        console.warn(`[import-enrich] batch ${batchId} stuck in '${collected.status}'; aged out ${stuck.length} candidate(s) for resubmit, ${live.length} still in flight`)
+      }
       continue
     }
 
@@ -519,24 +628,13 @@ export async function collectEnrichmentBatch(): Promise<{ enriched: number; fail
         continue
       }
 
-      const attempts = candidate.enrichAttempts + 1
       const reason = batchFailure?.error ?? (!writes ? 'no result in batch' : 'quality gate failed')
-      if (attempts < ENRICH_MAX_ATTEMPTS) {
-        await db.update(importCandidates)
-          .set({ enrichAttempts: attempts, enrichBatchId: null, updatedAt: new Date() })
-          .where(eq(importCandidates.id, candidate.id))
-        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- re-queued for retry`)
-      } else {
-        await db.update(importCandidates)
-          .set({ enrichAttempts: attempts, enrichFailedAt: new Date(), updatedAt: new Date() })
-          .where(eq(importCandidates.id, candidate.id))
-        console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${attempts} failed (${reason}) -- parked, needs manual review`)
-      }
+      await applyEnrichFailure(candidate, reason)
       failedTotal++
     }
   }
 
-  return { enriched: enrichedTotal, failed: failedTotal, stillPending }
+  return { enriched: enrichedTotal, failed: failedTotal, stillPending, recovered: recoveredTotal }
 }
 
 /**
