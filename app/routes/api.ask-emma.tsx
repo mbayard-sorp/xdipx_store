@@ -200,15 +200,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const headers = new Headers()
       if (sessionHandle?.setCookieHeader) headers.append('Set-Cookie', sessionHandle.setCookieHeader)
 
-      // v2 engine handles its own cart creation via checkout stage handler.
-      // No newCartId from v2 — cart is created inside the stage handler and the
-      // checkout URL is embedded in the reply prose. cartUpdated flag signals
+      // When the checkout stage minted a fresh cart for a shopper with no
+      // cart cookie, persist it here; without this the drawer opens empty
+      // while the lines sit in an orphaned cart. cartUpdated still signals
       // the client to revalidate the cart loader.
+      if (result.newCartId) headers.append('Set-Cookie', setCartCookie(result.newCartId))
 
       // ADR-003 Sub-decision E: include cookieId in the response so the client
       // can persist it to localStorage and send it back as a fallback on subsequent
       // requests if the HttpOnly cookie is lost during navigation.
-      const { usage: _usage, ...clientPayload } = result
+      const { usage: _usage, newCartId: _newCartId, ...clientPayload } = result
       const v2Payload = sessionHandle?.cookieId
         ? { ...clientPayload, sessionId: sessionHandle.cookieId }
         : clientPayload

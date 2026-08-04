@@ -47,6 +47,8 @@ export interface ChatReply {
   quickReply?: QuickReplyPayload
   /** Signals that Emma added something to the site cart. Client should revalidate the cart loader and open the drawer. */
   cartUpdated?: boolean
+  /** New Shopify cart id minted this turn for a shopper with no cart cookie. Server-only; the route persists it via Set-Cookie and strips it from the client payload. */
+  newCartId?: string
   /** Total Anthropic token usage across all hops in this reply. Server-only; not sent to the client. */
   usage?: { inputTokens: number; outputTokens: number }
 }
