@@ -104,8 +104,10 @@ Trend `suggestedTerms` missing from the keyword bank go into the Step 6 report (
 ## Step 5: Plan the week's briefs (cap 7)
 
 Slots, from `docs/store-team/content-plan.md`: Mon guide (theme-synced to the active
-`marketing_calendar` theme when one applies), Tue comparison, Wed guide, Thu care, Fri guide,
-Sat wellness-basics, Sun comparison.
+`marketing_calendar` theme when one applies), Wed guide, Sat wellness-basics, Sun comparison.
+`plannedFor` is assigned only to Mon, Wed, Sat, and Sun. Tue and Fri are real-talk slots and Thu is
+podcast-notes per the content plan, and none of those slots can take a guides/comparisons/care/
+wellness-basics brief, so the week's briefs are spread across Mon/Wed/Sat/Sun only.
 
 Eligible clusters: `status == 'active'`, approved count ≥ 3, not covered (no published brief
 references it), no queued brief already. Category inference from the cluster's keyword shapes
