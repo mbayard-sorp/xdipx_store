@@ -3075,7 +3075,10 @@ async function upsertProductPage(params) {
   if (params.productTypeDial !== void 0) searchFields.productTypeDial = params.productTypeDial;
   if (params.moodTags !== void 0) searchFields.moodTags = params.moodTags;
   if (params.audienceTags !== void 0) searchFields.audienceTags = params.audienceTags;
-  if (params.mattersTags !== void 0) searchFields.mattersTags = params.mattersTags;
+  if (params.mattersTags !== void 0) {
+    searchFields.mattersTags = params.mattersTags;
+    searchFields.mattersTagsNormalized = normalizeTagList(params.mattersTags);
+  }
   if (params.ivrExperience !== void 0) searchFields.ivrExperience = params.ivrExperience;
   if (params.ivrUseCase !== void 0) searchFields.ivrUseCase = params.ivrUseCase;
   if (params.ivrFeatures !== void 0) searchFields.ivrFeatures = params.ivrFeatures;

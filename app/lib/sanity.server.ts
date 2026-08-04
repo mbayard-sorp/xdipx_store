@@ -747,7 +747,13 @@ export async function upsertProductPage(params: {
   if (params.productTypeDial !== undefined) searchFields.productTypeDial = params.productTypeDial
   if (params.moodTags !== undefined) searchFields.moodTags = params.moodTags
   if (params.audienceTags !== undefined) searchFields.audienceTags = params.audienceTags
-  if (params.mattersTags !== undefined) searchFields.mattersTags = params.mattersTags
+  if (params.mattersTags !== undefined) {
+    searchFields.mattersTags = params.mattersTags
+    // Keep mattersTagsNormalized in lockstep — same canonical slugifier the
+    // conversation search filter uses, so stored values and query params can
+    // never drift apart on casing again (ticket #1256).
+    searchFields.mattersTagsNormalized = normalizeTagList(params.mattersTags)
+  }
   if (params.ivrExperience !== undefined) searchFields.ivrExperience = params.ivrExperience
   if (params.ivrUseCase !== undefined) searchFields.ivrUseCase = params.ivrUseCase
   if (params.ivrFeatures !== undefined) searchFields.ivrFeatures = params.ivrFeatures

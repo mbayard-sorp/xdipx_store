@@ -407,6 +407,17 @@ export default {
       options: { layout: 'tags' },
       readOnly: true,
     },
+    {
+      name: 'mattersTagsNormalized',
+      title: '🤖 Matters Tags (filter index)',
+      type: 'array',
+      group: 'emma',
+      description: 'Canonical slug form of every entry in `mattersTags`, computed via `app/lib/tag-normalize.ts` — the same slugifier conversation search queries with. Derived field — DO NOT edit directly. Populated by upsertProductPage and scripts/backfill-matters-tags-normalized.ts.',
+      of: [{ type: 'string' }],
+      options: { layout: 'tags' },
+      readOnly: true,
+      hidden: true,
+    },
 
     // ── IVR / Voice Discovery ─────────────────────────────────────────────────
     // ivrMood removed — duplicated moodTags. IVR search now reads moodTags directly.
