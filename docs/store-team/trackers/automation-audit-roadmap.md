@@ -42,6 +42,21 @@ W2 — email plumbing live, enrichment queue drained, alerting live. W6 — ≥1
 
 ## Status log
 
+### 2026-08-03 (program-manager, run 162). Overall stays RED. No row changes.
+
+Re-probed all 25 milestones. No RAG changes this week; overall stays **RED**. The six P0 REDs all carried unmoved:
+
+- **p0-1-email** — `app/lib/klaviyo.server.ts` still has no campaign-execution functions; `email_team_enabled` still OFF.
+- **p0-2-restock** — no back-in-stock Klaviyo path; `handleInventoryUpdate` unchanged in shape.
+- **p0-3-enrich** — enrich/publish chain still dead; known cheap root cause (custom_id length) unfixed ~3 weeks. This is the #1 catalog blocker; imported SKUs never reach the storefront.
+- **p0-4-reviews** — 0 review invites ever sent; valve correctly still off.
+- **p0-7-valves** — L1–L9 checklist still never recorded in this log (the owner half keeps it RED). Note: the PDP now carries active in-stock/sold-out label logic (`_layout.products.$slug.tsx` ~L795-800), so the stock-indicator half of the probe may have progressed — worth a closer re-verify next audit — but the L1–L9 owner action is unchanged.
+- **p0-8-links** — `_layout._index.tsx` still hardcodes `ctaLink="/for-him"` (L691) and `ctaLink="/for-her"` (L699); both 301-hop via `RETIRED_ROUTE_TARGETS`.
+
+P1 milestones (W6 = 2026-08-17) not yet due. Reminder: **p2-10-tierc-trust-review** revisit date (~2026-08-12) and the **p1-2-compare/p1-6-llms/p1-7-frontdoor** W5 targets (2026-08-10) are one week out — next audit is the last clean check before those hit. No new suggestions filed (every P0 RED is already covered on the bus by an approved row; the gap is execution/owner, not suggestion volume).
+
+**Asks for the owner (carried, unmoved):** (1) p0-7-valves L1–L9 checklist (~30 min) is still the cheapest unblock in the roadmap. (2) p0-2-restock and p0-8-links remain ~1-hour zero-risk fixes — good R-DEV / apply-pass candidates. (3) p0-3-enrich's known root cause has sat unfixed for ~3 weeks and is blocking the entire import→live path.
+
 ### 2026-07-27 (program-manager, run 100). Overall stays RED.
 
 Re-probed all 25 milestones. Four rows changed:

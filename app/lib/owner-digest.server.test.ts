@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { PgDialect } from 'drizzle-orm/pg-core'
+
+// ageOutStaleSuggestions() runs raw SQL, so we mock the db client and assert the
+// query it emits. `db.execute` is captured through a hoisted mock so vi.mock (which
+// vitest lifts above the imports) can wire it before owner-digest.server loads.
+const executeMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+
 import {
   MAX_TICKET_ATTEMPTS,
+  ageOutStaleSuggestions,
   parseRenderTruth,
   renderEscalationsSection,
   renderHomepageNowSection,
@@ -243,7 +252,7 @@ describe('renderOwnerQueueSection', () => {
 
   it('reports what the ager closed on its own', () => {
     const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: 4 })
-    expect(html).toContain('4 untargeted rows aged out')
+    expect(html).toContain('4 stale rows aged out')
   })
 
   it('says the ager was skipped on a forced send, rather than reporting zero', () => {
@@ -349,5 +358,52 @@ describe('renderEscalationsSection', () => {
     })
     expect(html).toContain('2 PRs waiting on you')
     expect(html).toContain('2 tickets out of attempts')
+  })
+})
+
+describe('ageOutStaleSuggestions', () => {
+  // No DB harness in this suite, so we render the emitted SQL and assert its
+  // shape. That is exactly what the ticket #879 DONE-WHEN turns on: the window
+  // must key off created_at, not updated_at.
+  function emittedSql(): string {
+    const passed = executeMock.mock.calls[0]?.[0]
+    return new PgDialect().sqlToQuery(passed).sql
+  }
+
+  it('ages a row out on created_at, so a fresh updated_at cannot save it', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [{ id: 41 }, { id: 42 }] })
+
+    const closed = await ageOutStaleSuggestions()
+    expect(closed).toBe(2)
+
+    const query = emittedSql()
+    // The stale clock is created_at (the age a human perceives), not updated_at
+    // (bumped by claims/bounces/lease-expiry/dedupe — the bug being fixed). A row
+    // whose updated_at is fresh but whose created_at is > 21 days is still matched
+    // because the predicate never looks at updated_at in the WHERE.
+    expect(query).toMatch(/created_at\s*<\s*now\(\)\s*-\s*interval\s*'21 days'/)
+    expect(query).not.toMatch(/updated_at\s*<\s*now\(\)\s*-\s*interval/)
+  })
+
+  it('no longer exempts rows routed at a team, but keeps the defect exemption', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    await ageOutStaleSuggestions()
+
+    const query = emittedSql()
+    // target_team restriction dropped: a cross-team row can now age out.
+    expect(query).not.toMatch(/target_team/)
+    // Customer-facing-defect exemption preserved via kind + priority: a defect is
+    // filed as `code` (not process/strategy) and/or P0-P2 (priority < 3).
+    expect(query).toMatch(/kind\s+in\s*\(\s*'process',\s*'strategy'\s*\)/i)
+    expect(query).toMatch(/priority\s*>=\s*3/)
+    expect(query).toMatch(/status\s*=\s*'approved'/)
+  })
+
+  it('returns 0 when the query fails rather than throwing', async () => {
+    executeMock.mockReset()
+    executeMock.mockRejectedValue(new Error('db down'))
+    await expect(ageOutStaleSuggestions()).resolves.toBe(0)
   })
 })

@@ -38,6 +38,8 @@ queue without bypassing it.
 
 Slugs and titles are answer-shaped to match how people phrase questions to an LLM. Collection handles are representative of the 24 live collections and must be validated against the live list before linking. No prices in any body copy.
 
+**Standing rule (added 2026-08-03).** Validate every section-3 collection handle against the live collection list before linking; `couples` and `vibrators` are verified 200. `/collections/remote` (referenced in rows 6, 22, 25, and 27) returned 404 as of 2026-07-17; verify the handle before linking rather than assuming it still resolves.
+
 | # | Slug | Working title | Category | Target query | Embed (handles / types) | Internal links |
 |---|---|---|---|---|---|---|
 | 1 | how-to-choose-your-first-sex-toy | How Do You Choose Your First Sex Toy? | guides | "what sex toy should I buy first" | beginner bullet, small air-pulse, glass | /collections/vibrators, /collections/air-pulse-suction |
@@ -217,6 +219,10 @@ Format rules added 2026-07-21 (owner-approved):
   or Studio. Reading order is lightest-topic-first rather than beginner-first.
 - **Clinician line is mandatory on † topics.** Rows marked † below border on health; the "worth
   seeing a clinician if…" line in the root-cause section is required, not judgment-call, on those.
+- **Clinician line also applies without the dagger (added 2026-08-03).** Care/hygiene Real Talk
+  topics that touch bacteria, irritation, or infection risk carry the "worth seeing a clinician
+  if…" line even when the row is not marked †. Write it in on the first draft; do not spend a
+  shared rewrite cycle adding it later.
 
 Topic bank (30; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
 extend freely — additions need a slug, problem, and target query):

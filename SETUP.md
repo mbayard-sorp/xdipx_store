@@ -268,24 +268,21 @@ Or connect via GitHub → Vercel will auto-deploy on push to main.
 
 ---
 
-## 16. First Deal Setup
+## 16. First Product Setup
 
 1. Log in to `/admin` with your `ADMIN_PASSWORD`
 2. Go to **AI Generator** → paste a Nalpac product's data → generate all copy
 3. Create a product in Shopify admin with the generated copy
 4. Set the xdipx metafields on the product:
-   - `deal_status` → `approved`
-   - `deal_date` → tomorrow's date (YYYY-MM-DD)
    - `wholesale_cost` → your cost from Nalpac
    - `original_price` → MSRP from Nalpac
-   - Set variant `price` to your deal price, `compare_at_price` to MSRP
-5. Add the product to the `daily-deal` collection and tag it `deal-status-approved`
-6. Go to **Today's Deal** in admin → confirm everything looks right → click Approve
+   - `nalpac_sku` → the Nalpac SKU
+   - Set variant `price` to your selling price, `compare_at_price` to MSRP
+5. Set the Shopify product status to **Active** so the Storefront API serves it
 
-**At midnight**, the `deal-activator` cron will:
-1. Activate the approved deal (set `deal-status-live` tag)
-2. Archive the previous deal
-3. Trigger the Klaviyo daily deal email
+Daily deals are retired: there is no `deal_status` / `deal_date` metafield, no
+`deal-status-*` tag, and no midnight rotation. A product is live when Shopify
+says it is active, and gone when Shopify says it is archived.
 
 ---
 

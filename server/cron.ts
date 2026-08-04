@@ -129,31 +129,20 @@ export function createCronRoutes() {
   ) => router.route(path).get(guard, handler).post(guard, handler)
 
   /**
-   * POST /cron/daily-feed-processor
-   * Schedule: 11:45 PM — fetch Nalpac feed, score products, stage top candidates
+   * GET|POST /cron/discontinued-sweep
+   * Schedule: 11:45 PM — archive products the Nalpac feed now marks discontinued.
+   *
+   * Replaces /cron/daily-feed-processor, which also scored the feed and staged
+   * the next daily deal. Daily deals are retired; the sweep is the part worth
+   * keeping. /cron/deal-activator (rotation) is gone entirely.
    */
-  cronRoute('/daily-feed-processor', async (_req, res) => {
+  cronRoute('/discontinued-sweep', async (_req, res) => {
     try {
-      const { dailyFeedProcessor } = await import('../app/lib/feed-processor.server.js')
-      const result = await dailyFeedProcessor()
-      res.json({ ok: true, topCandidates: result.topCandidates.length, needsImagen: result.needsImagen.length })
+      const { runDiscontinuedSweep } = await import('../app/lib/feed-processor.server.js')
+      const result = await runDiscontinuedSweep()
+      res.json({ ok: true, ...result.discontinuedSweep })
     } catch (err) {
-      console.error('[cron:daily-feed-processor]', err)
-      res.status(500).json({ error: String(err) })
-    }
-  })
-
-  /**
-   * POST /cron/deal-activator
-   * Schedule: 11:59 PM — archive today's deal, activate tomorrow's, trigger Klaviyo
-   */
-  cronRoute('/deal-activator', async (_req, res) => {
-    try {
-      const { rotateDeal } = await import('../app/lib/deal-rotator.server.js')
-      const result = await rotateDeal()
-      res.json({ ok: true, ...result })
-    } catch (err) {
-      console.error('[cron:deal-activator]', err)
+      console.error('[cron:discontinued-sweep]', err)
       res.status(500).json({ error: String(err) })
     }
   })
@@ -851,27 +840,10 @@ export function createCronRoutes() {
     }
   })
 
-  /**
-   * POST /cron/inventory-check
-   * Schedule: every 5 min — check if live deal is sold out, rotate if so
-   */
-  cronRoute('/inventory-check', async (_req, res) => {
-    try {
-      const { isLiveDealSoldOut, rotateDeal } = await import('../app/lib/deal-rotator.server.js')
-      const { soldOut } = await isLiveDealSoldOut()
-
-      if (soldOut) {
-        console.log('[cron:inventory-check] Live deal sold out — rotating')
-        const result = await rotateDeal()
-        res.json({ ok: true, rotated: true, ...result })
-      } else {
-        res.json({ ok: true, rotated: false })
-      }
-    } catch (err) {
-      console.error('[cron:inventory-check]', err)
-      res.status(500).json({ error: String(err) })
-    }
-  })
+  // /cron/inventory-check is retired. Its only job was polling the live daily
+  // deal for sell-out and rotating to the next queued deal. Back-in-stock
+  // notifications do not come from here — they fire from the Shopify inventory
+  // webhook in server/webhooks.ts, which is untouched.
 
   /**
    * POST /cron/warm-discovery-index

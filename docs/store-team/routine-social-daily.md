@@ -40,6 +40,17 @@ curl -s -X POST "$BASE_URL/api/team/run" \
    `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
    adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).
 
+## Step 2b — Backlog self-throttle
+
+Using the Step 2 item 6 review-outcomes list, count `pending_review` rows and check whether any
+row was reviewed (`approved`/`needs_changes`/`rejected`) in roughly the last 3 days. If unreviewed
+`pending_review` drafts exceed **9** (about 3 days of quota) with **zero** owner reviews in that
+window, throttle this run: draft **at most 1 new post** this run (or skip new drafting entirely),
+prioritize the current theme's pick over anything evergreen if you do draft, and record an honest
+`event` surfacing the backlog size and age to the owner. Reworks (Step 2.5) and Step 7b suggestion
+handling still run as normal. This only sizes down *new* drafting; it never touches draft-only
+status, the voice gate, or `social_team_autopost`.
+
 ## Step 2.5 — Rework pass (before any new drafting)
 
 ```bash
@@ -89,6 +100,23 @@ mechanism ("dual-density build known for a grounded feel"), never by an implied 
 - After the draft row is written, patch the brief: `status:'used'`, `usedByPostId` = the new
   `social_posts` id. One post per brief.
 - LinkedIn drafts count toward the ≤6 run cap like any other platform.
+
+## Featured Brand of the Week
+
+A standing series, not a daily task. Source of truth for the current brand: the Shopify `vendor`
+field, kept aligned with the homepage featured-brand rail and the `marketing_calendar`.
+
+- **Cadence:** one feature post per platform per week for the current brand, tagging the brand.
+- **Otherwise reactive only:** quote or reshare the brand's own education content with credit when
+  they post something real. Not a standing content type to draft from scratch daily.
+- **Explicitly NOT daily @-tagging.** Repeated daily @-tags of the same brand read as spam to the
+  platforms and to the brand's own social team, and conflict with the Instagram/TikTok
+  editorial-only posture in `docs/ads-policy.md` §Organic social.
+- **X gets the most latitude** for direct @mentions; Instagram/TikTok/LinkedIn stay conservative
+  per their addenda.
+- Draft-only like every other post, and counts toward the ≤6 run cap and the platform's daily
+  quota. The point is reciprocal notice from the brand's social team (links, reshares, traffic),
+  not volume.
 
 ## Step 4 — Two gates, both mandatory
 

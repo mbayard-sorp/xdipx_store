@@ -29,12 +29,8 @@
   ],
   "crons": [
     {
-      "path": "/cron/daily-feed-processor",
+      "path": "/cron/discontinued-sweep",
       "schedule": "45 23 * * *"
-    },
-    {
-      "path": "/cron/deal-activator",
-      "schedule": "59 23 * * *"
     },
     {
       "path": "/cron/profit-summary",
@@ -43,10 +39,6 @@
     {
       "path": "/cron/review-reminders",
       "schedule": "0 9 * * *"
-    },
-    {
-      "path": "/cron/inventory-check",
-      "schedule": "*/15 * * * *"
     },
     {
       "path": "/cron/log-monitor",

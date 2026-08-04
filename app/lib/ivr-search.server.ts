@@ -35,6 +35,9 @@ function getSanityClient() {
 // has its own cache. Randomized ranking runs on top of the cached pool, so
 // consecutive calls still vary their pitches.
 const GROQ_CACHE_TTL_SECONDS = 180
+// Empty pools expire fast: a transient Sanity blip or a query that raced an
+// enrichment window must not pin "we don't carry that" for 3-4 minutes.
+const GROQ_EMPTY_TTL_SECONDS = 30
 
 function hashKey(s: string): string {
   // djb2 — tiny, stable, good enough for cache-key dedup (not security).
@@ -49,7 +52,7 @@ async function cachedGroqFetch<T>(
   params: Record<string, unknown>,
 ): Promise<T> {
   const key = `ivr:groq:v1:${hashKey(`${groq}|${JSON.stringify(params)}`)}`
-  return cached(key, GROQ_CACHE_TTL_SECONDS, () => client.fetch<T>(groq, params) as Promise<T>)
+  return cached(key, GROQ_CACHE_TTL_SECONDS, () => client.fetch<T>(groq, params) as Promise<T>, GROQ_EMPTY_TTL_SECONDS)
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -117,6 +120,20 @@ export interface SearchDiagnostics {
    *                         network error). Shopify fallback may have been used.
    */
   reason: 'matched' | 'filtered-to-zero' | 'no-base-results' | 'sanity-unavailable'
+}
+
+// ─── priceMax (post-hydration) ───────────────────────────────────────────────
+// productPage has no price field (prices live in Shopify and change daily), so
+// a GROQ `price <= $priceMax` clause compares against a missing field, which
+// is false for every doc: any priceMax query returned zero rows. The filter
+// now runs after Shopify hydration against live prices. The GROQ pool widens
+// 3x (hard cap 60) when priceMax is set so the post-filter has headroom.
+function pricedPoolSize(normalPool: number, priceMax: number | undefined): number {
+  return priceMax != null ? Math.min(normalPool * 3, 60) : normalPool
+}
+
+function applyPriceMax(cards: IvrProductCard[], priceMax: number | undefined): IvrProductCard[] {
+  return priceMax != null ? cards.filter((c) => c.price <= priceMax) : cards
 }
 
 // ─── Shopify product → compact IVR card ──────────────────────────────────────
@@ -203,7 +220,8 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
   const client = getSanityClient()
 
   if (!client) {
-    const cards = shuffle(await shopifyFallback(query, Math.max(limit * 2, 8))).slice(0, limit)
+    const pool = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
+    const cards = shuffle(pool).slice(0, limit)
     return { cards, reason: 'sanity-unavailable' }
   }
 
@@ -212,7 +230,7 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
   // have similar scores; shuffling them gives variety without sacrificing
   // quality. The first few results (relevance > everything else) stay near
   // the top thanks to the score ordering before we fetch.
-  const candidatePool = Math.max(limit * 3, 12)
+  const candidatePool = pricedPoolSize(Math.max(limit * 3, 12), priceMax)
 
   const strictCategory = STRICT_CATEGORY_TERMS.has(query.trim().toLowerCase())
 
@@ -256,10 +274,7 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
       filterConditions.push('$cat in category')
       groqParams.cat = category
     }
-    if (priceMax != null) {
-      filterConditions.push('price <= $priceMax')
-      groqParams.priceMax = priceMax
-    }
+    // priceMax intentionally absent from GROQ: applied post-hydration below.
     if (tags && tags.length > 0) {
       for (let i = 0; i < tags.length; i++) {
         filterConditions.push(`$tag${i} in tags`)
@@ -323,7 +338,7 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
       }
       // Non-strict path: try Shopify fallback. If we had extra filters and
       // Shopify is also empty, classify as filtered-to-zero when filters were active.
-      const fallback = await shopifyFallback(query, Math.max(limit * 2, 8))
+      const fallback = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
       if (fallback.length === 0 && hasExtraFilters) {
         return { cards: [], reason: 'filtered-to-zero' }
       }
@@ -345,15 +360,19 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
       cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
     }
 
-    // Rank by margin × inventory, with enough randomness to keep variety.
-    // Sanity has already filtered for context relevance (the candidate pool
-    // is "products that match this query"); within that pool, prefer items
-    // that make us money AND are sellable.
-    const ranked = marginWeightedSelect(cards, limit)
+    // Live-price budget filter, then rank by margin × inventory with enough
+    // randomness to keep variety. Sanity has already filtered for context
+    // relevance (the candidate pool is "products that match this query");
+    // within that pool, prefer items that make us money AND are sellable.
+    const priced = applyPriceMax(cards, priceMax)
+    const ranked = marginWeightedSelect(priced, limit)
+    // A non-empty hydrated pool emptied by the price filter is honestly
+    // filtered-to-zero, which existing zero-card handling already reports.
     return { cards: ranked, reason: ranked.length > 0 ? 'matched' : 'filtered-to-zero' }
   } catch (err) {
     console.error('[ivr-search] Sanity search failed, falling back to Shopify:', err)
-    const cards = marginWeightedSelect(await shopifyFallback(query, Math.max(limit * 2, 8)), limit)
+    const pool = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
+    const cards = marginWeightedSelect(pool, limit)
     return { cards, reason: 'sanity-unavailable' }
   }
 }
@@ -495,11 +514,7 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
       groqParams.cat = category
     }
 
-    if (priceMax != null) {
-      conditions.push('price <= $priceMax')
-      groqParams.priceMax = priceMax
-    }
-
+    // priceMax intentionally absent from GROQ: applied post-hydration below.
     if (productTypeDial) {
       conditions.push('productTypeDial == $typeDial')
       groqParams.typeDial = productTypeDial
@@ -514,7 +529,7 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
       ? `| score(${boostClauses.join(', ')})`
       : ''
 
-    const groq = `*[${filter}] ${scoreClause} [0...${limit}] {
+    const groq = `*[${filter}] ${scoreClause} [0...${pricedPoolSize(limit, priceMax)}] {
       "handle": shopifyHandle,
       title,
       category,
@@ -558,7 +573,9 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
       cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
     }
 
-    return { cards, reason: cards.length > 0 ? 'matched' : 'filtered-to-zero' }
+    const priced = applyPriceMax(cards, priceMax).slice(0, limit)
+    // Cards existed but the live-price filter emptied them: filtered-to-zero.
+    return { cards: priced, reason: priced.length > 0 ? 'matched' : 'filtered-to-zero' }
   } catch (err) {
     console.error('[ivr-search] Sanity discover failed:', err)
     return { cards: [], reason: 'sanity-unavailable' }

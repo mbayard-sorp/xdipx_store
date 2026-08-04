@@ -747,7 +747,13 @@ export async function upsertProductPage(params: {
   if (params.productTypeDial !== undefined) searchFields.productTypeDial = params.productTypeDial
   if (params.moodTags !== undefined) searchFields.moodTags = params.moodTags
   if (params.audienceTags !== undefined) searchFields.audienceTags = params.audienceTags
-  if (params.mattersTags !== undefined) searchFields.mattersTags = params.mattersTags
+  if (params.mattersTags !== undefined) {
+    searchFields.mattersTags = params.mattersTags
+    // Keep mattersTagsNormalized in lockstep — same canonical slugifier the
+    // conversation search filter uses, so stored values and query params can
+    // never drift apart on casing again (ticket #1256).
+    searchFields.mattersTagsNormalized = normalizeTagList(params.mattersTags)
+  }
   if (params.ivrExperience !== undefined) searchFields.ivrExperience = params.ivrExperience
   if (params.ivrUseCase !== undefined) searchFields.ivrUseCase = params.ivrUseCase
   if (params.ivrFeatures !== undefined) searchFields.ivrFeatures = params.ivrFeatures
@@ -849,8 +855,8 @@ export async function patchProductPageByProductId(
  * WS2c — clear the `hiddenUntilLive` import-stub flag the moment a product's
  * underlying Shopify record activates. Called from `activateShopifyProduct`
  * (app/lib/shopify.server.ts) — the universal chokepoint every activation
- * path (import publish, deal-rotator daily activation, admin queue
- * force-activate) already funnels through — so a draft-stage import stub
+ * path (import publish, admin force-activate) already funnels through — so a
+ * draft-stage import stub
  * stops leaking into sitemap.xml / on-site search the moment it becomes
  * purchasable, regardless of which path activated it.
  */

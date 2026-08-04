@@ -180,6 +180,25 @@ rejected/flagged terms are the avoid list:
 
 Use `embedHints` only after verifying the handles are in stock; use `internalLinks` where natural.
 
+**Fresh-language pre-check (mandatory, before Step 5):** `emma-empathy-reviewer` has no Sanity
+access and cannot see cross-post reuse, so this check runs here, not at the gate.
+
+1. GROQ prior posts in the same topic cluster (same `category`, or the brief's keyword cluster
+   when the topic came from a brief):
+
+```groq
+*[_type == "blogPost" && category._ref == $categoryId && slug.current != $slug]
+  | order(publishedAt desc)[0...10]{title, "slug": slug.current, body}
+```
+
+2. Diff the draft sentence-level against those posts' `body` text.
+3. Rewrite any recycled sentence or phrase BEFORE submitting the draft to the voice gate in Step 5.
+
+**Aphorism-as-closer pre-flight (mandatory, before Step 5):** scan every sentence in the draft for
+the shape [demonstrative or abstract noun phrase] + [is/are] + [the/what] + [defining clause].
+List the hits with their section, then cut back to the caps (3 per post, 1 per section, never 2 in
+a paragraph) before submitting to the voice gate.
+
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
 ## Step 5: Dual gate (voice + accuracy; mandatory, no publish path without both)
@@ -197,16 +216,39 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    suggestion row, skip the accuracy gate entirely, and go to Step 7.
 2. **Accuracy gate.** Otherwise run the same draft through `sex-wellness-reviewer` (it
    web-verifies external claims: anatomy/physiology, "research shows" statistics, materials and
-   safety, realistic expectations, terminology).
+   safety, realistic expectations, terminology). Only a voice **BLOCK** short-circuits this gate;
+   a voice **REVISE** still runs here, on the unmodified v1 draft, BEFORE any rewriting begins, so
+   the single shared rewrite in item 3 carries both gates' feedback together.
 3. **One shared rewrite cycle.** Merge BOTH gates' REVISE feedback into exactly one rewrite,
-   then re-run both gates once. A second non-PASS from either is treated as BLOCK. **Change only
-   the strings a gate actually flagged** — no cosmetic edits ride along. Any string carrying a
-   safety enumeration ("no motor, battery, or electronics inside"), a material limit, or a
-   never/only instruction is **frozen** unless the ACCURACY gate asked for that exact change: a
-   battery-plus-switch DC-motor toy is arguably not "electronic", so a purely cosmetic reword can
-   flip an accuracy PASS to BLOCK and cost the whole post (run 92). The fresh-language rule
-   (content-plan §7) does **not** apply to safety enumerations — an exact repeated safety phrase
-   across posts is correct and preferable to a fresh but looser paraphrase.
+   then re-run both gates once, unless the selective re-run carve-out below applies. A second
+   non-PASS from either is treated as BLOCK. **Change only the strings a gate actually flagged**
+   — no cosmetic edits ride along, except the minimum surrounding sentences needed to satisfy a
+   paragraph-scoped or section-scoped cap (the aphorism-as-closer cap is the live example); a
+   qualifying rewrite must de-construct the banned pattern rather than swap words inside it. Any
+   string carrying a safety enumeration ("no motor, battery, or electronics inside"), a material
+   limit, or a never/only instruction is **frozen exactly as today** unless the ACCURACY gate asked
+   for that exact change: a battery-plus-switch DC-motor toy is arguably not "electronic", so a
+   purely cosmetic reword can flip an accuracy PASS to BLOCK and cost the whole post (run 92). The
+   fresh-language rule (content-plan §7) does **not** apply to safety enumerations — an exact
+   repeated safety phrase across posts is correct and preferable to a fresh but looser paraphrase.
+   - **Gate precedence when the two gates' feedback conflicts:** on a factual or safety claim the
+     accuracy gate wins; on register and phrasing the voice gate wins; a mandatory charter element
+     (for example the clinician hand-off line content-plan §8B requires on health-adjacent Real
+     Talk topics) is never a valid gate objection from either gate.
+   - **Cross-gate self-check before resubmitting:** for every REWRITTEN string, check it against
+     the OTHER gate's criteria too. Does this new sentence assert a spec, a comparative, a
+     frequency, or an outcome that was not there before? This catches a voice fix that introduces
+     an accuracy defect, and an accuracy fix that introduces a voice defect.
+   - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
+     aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
+     count any newly added first-person sentences.
+   - First-person solidarity-voice seams must use a concrete subject ("I start everyone from...",
+     "I would rather you owned...") and must avoid the "This is / That is [defining clause]"
+     shape, which itself creates an aphorism-as-closer.
+   - **Selective re-run carve-out:** if one gate PASSed clean and the shared rewrite provably
+     touches no string that gate verified, re-run only the gate that returned REVISE and carry the
+     clean gate's verdict and citations forward unchanged. The mandatory dual re-run above still
+     applies whenever the rewrite touches any accuracy-verified or frozen safety string.
 4. **BLOCK** (from either gate, either cycle) → the post stays `status:'draft'`, and you file a
    suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons.
 5. **Sources insertion (mechanical, after the final PASS).** The accuracy gate returns 0-2

@@ -28,7 +28,7 @@ import { upsertProductPage } from '~/lib/sanity.server'
 import type { BulkImportRow, BulkVariantRow, MasterProductGroup } from '~/types'
 import type { ProductScore } from '~/types'
 
-// ─── Category inference (mirrors deal-pipeline.server.ts) ─────────────────────
+// ─── Category inference ───────────────────────────────────────────────────────
 
 /** Phase 2 — multi-select inference. Returns an array of audience tags. */
 function inferCategory(categories: string[]): Array<'for-him' | 'for-her' | 'couples'> {
@@ -324,8 +324,8 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
     // 6. Insert DB row FIRST so we have a deal id to pass as gatesDealId when
     //    enqueuing the enrichment job (spec E1: the gate only works if the job row
     //    carries the deal id). dealDate is still NOT NULL on the schema, so a
-    //    sentinel is required; queue activation reads status='queued' ORDER BY
-    //    sortOrder ASC (see deal-rotator.server.ts).
+    //    sentinel is required. It is a DB column only — no deal_date metafield
+    //    is written to Shopify any more.
     const [{ maxSort = 0 } = {}] = await db
       .select({ maxSort: max(dealHistory.sortOrder) })
       .from(dealHistory)
@@ -390,8 +390,6 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
       tags:               editorialTagsFrom(categories),
       category,
       sectionTags:        [deriveSection({ productTypeDial: undefined, categories, title: masterRow['Product Title'] })],
-      dealStatus:         'pending_approval',
-      dealDate:           '2099-12-31',
       originalPrice:      msrp,
       wholesaleCost:      wholesale,
       mapPrice:           map,
@@ -572,8 +570,6 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
       tags:             editorialTagsFrom(categories),
       category,
       sectionTags:      [deriveSection({ categories, title: masterRow['Product Title'] })],
-      dealStatus:       'pending_approval',
-      dealDate:         '2099-12-31',
       originalPrice:    msrp,
       wholesaleCost:    wholesale,
       mapPrice:         map,
@@ -809,8 +805,6 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
     seoTitle,
     tags:               editorialTagsFrom(rawProduct.categories),
     category,
-    dealStatus:         'pending_approval',
-    dealDate:           '2099-12-31',
     originalPrice:      rawProduct.msrp,
     wholesaleCost:      rawProduct.wholesaleCost,
     mapPrice:           rawProduct.mapPrice ?? 0,
