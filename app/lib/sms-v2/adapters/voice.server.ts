@@ -33,6 +33,7 @@ import { buildEmmaContextWithCrossChannel } from '../cross-channel.server'
 import { sendSms } from '~/lib/twilio.server'
 import { normalizeForTTS } from '~/lib/tts-normalize'
 import { db } from '~/lib/db.server'
+import { like } from 'drizzle-orm'
 import { smsTurns } from '../../../../db/schema'
 import type { Stage, StageResponse } from '../types.server'
 
@@ -138,6 +139,99 @@ function isAffirmative(text: string): boolean {
 
 function isNegative(text: string): boolean {
   return NEGATIVE_RE.test(text.trim())
+}
+
+// ---------------------------------------------------------------------------
+// Per-call session freshness
+// ---------------------------------------------------------------------------
+//
+// sms_conversations rotates session-scoped shopping state on a 24h gap. That
+// boundary is right for SMS, where a thread genuinely is one long conversation,
+// and wrong for voice, where each call is a discrete session that ends when the
+// caller hangs up.
+//
+// Call CAc0f0860abd080f9dd0ec3b39a3cd7585 opened 21.5h after the previous call
+// — inside the 24h window, so nothing rotated. The caller said "I'm looking for
+// a vibrator for my wife and I" and Emma answered from the PREVIOUS call's
+// abandoned PRESENTATION stage: she pitched the We-Vibe Chorus Pro instantly,
+// with no search and no discovery, because currentPitchHandle was still set
+// from a call that had ended in a hangup a day earlier.
+//
+// A new callSid with no recent activity starts a fresh shopping slate. The
+// window stays generous enough to preserve a real cross-channel handoff (text
+// Emma, then call her a few minutes later to keep going).
+const SESSION_FRESH_MS = Number(process.env['IVR_SESSION_FRESH_MS'] ?? 2 * 60 * 60 * 1000)
+
+/**
+ * True when this is the first turn we've logged for `callSid`. logVoiceTurn
+ * writes twilioMessageSid as `call:{callSid}:{timestamp}`, so the prefix scopes
+ * a lookup to one call without a schema change.
+ */
+async function isFirstTurnOfCall(callSid: string): Promise<boolean> {
+  if (!callSid) return false
+  const rows = await db
+    .select({ id: smsTurns.id })
+    .from(smsTurns)
+    .where(like(smsTurns.twilioMessageSid, `call:${callSid}:%`))
+    .limit(1)
+  return rows.length === 0
+}
+
+// ---------------------------------------------------------------------------
+// Redundant-readback suppression
+// ---------------------------------------------------------------------------
+//
+// The stage handlers hand us prose AND a structured productCard. On SMS both
+// are useful: the prose sells, the card renders as a link preview. On a phone
+// call they collapse into one stream of speech, and the adapter used to append
+// the card readback and the permission question unconditionally. When the
+// model's prose had already named the product, said the price and asked about
+// the link — which is the normal case — the caller heard all three twice:
+//
+//   "...I'd start with the Luster Anal Plug Set 3 Piece Beginner Kit at thirty
+//    nine ninety nine. Three graduated sizes... Want me to text you that link
+//    too?  <break/>  Luster Anal Plug Set 3 Piece Beginner Kit, thirty-nine
+//    ninety-nine  <break/>  Want me to text you the link?"
+//
+// That is call CAc0f0860abd080f9dd0ec3b39a3cd7585, the last turn the caller
+// heard before hanging up. The readback is a fallback for when the prose did
+// NOT name the product, not a guaranteed suffix.
+
+/** Words that carry no identifying signal when matching a title against prose. */
+const TITLE_STOPWORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'for', 'with', 'of', 'in', 'on', 'set', 'kit',
+  'piece', 'pack', 'pc', 'inch', 'size', 'black', 'pink', 'purple', 'blue', 'red',
+  'satin', 'silicone', 'couples', 'couple', 'vibrator', 'plug', 'toy', 'beginner',
+])
+
+function titleTokens(title: string): string[] {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !TITLE_STOPWORDS.has(w))
+}
+
+/**
+ * True when the prose already identifies this product well enough that reading
+ * the full catalog title again is noise. Matches on the title's distinctive
+ * tokens (brand + model), not an exact string compare — the model paraphrases
+ * ("the We Vibe Chorus Pro" for "Satin Black We Vibe Chorus Pro Couples
+ * Vibrator") and an exact compare would never fire.
+ */
+export function proseNamesProduct(prose: string, title: string): boolean {
+  const tokens = titleTokens(title)
+  if (!tokens.length) return false
+  const haystack = prose.toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+  const hits = tokens.filter((t) => new RegExp(`\\b${t}\\b`).test(haystack)).length
+  return hits / tokens.length >= 0.6
+}
+
+/** True when the prose already asked permission to text the link. */
+export function proseAsksToText(prose: string): boolean {
+  return /\b(text|send)\b[^.?!]{0,40}\b(link|it|that|you)\b[^.?!]{0,40}\?|\bwant me to (text|send)\b/i.test(
+    prose,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -255,25 +349,34 @@ async function stageResponseToVoiceReply(
   let pendingPdpUrlWrite: string | null | undefined = undefined
 
   for (const seg of stageResp.segments) {
+    const prose = seg.prose.trim()
+
     // 1. Prose — convert to SSML (URLs stripped inside proseToSsmlContent)
-    if (seg.prose.trim()) {
-      ssmlParts.push(proseToSsmlContent(seg.prose))
+    if (prose) {
+      ssmlParts.push(proseToSsmlContent(prose))
     }
 
-    // 2. Product card — IVR can't show images; speak title + price, ASK
+    // 2. Product card — IVR can't show images, so the title + price are spoken
+    //    as a FALLBACK for prose that didn't already name them, and we ASK
     //    permission before texting the pdpUrl. Save pdpUrl as pending; the
     //    next turn picks it up if the caller affirms.
     if (seg.productCard) {
       const card = seg.productCard
       // card.price arrives formatted as "$155.99". Spoken as digits it sounds
       // like a price tag being read out; spelled as words it sounds like Emma.
-      const spoken = card.price
-        ? `${ssmlEscape(normalizeForTTS(card.title))}, ${ssmlEscape(priceToSpokenWords(card.price))}`
-        : ssmlEscape(normalizeForTTS(card.title))
-      ssmlParts.push(spoken)
+      if (!prose || !proseNamesProduct(prose, card.title)) {
+        const spoken = card.price
+          ? `${ssmlEscape(normalizeForTTS(card.title))}, ${ssmlEscape(priceToSpokenWords(card.price))}`
+          : ssmlEscape(normalizeForTTS(card.title))
+        ssmlParts.push(spoken)
+      }
       if (card.pdpUrl) {
+        // The pending write is unconditional even when we stay silent — the
+        // caller's next "yes" still has to resolve to this URL.
         pendingPdpUrlWrite = card.pdpUrl
-        ssmlParts.push("Want me to text you the link?")
+        if (!prose || !proseAsksToText(prose)) {
+          ssmlParts.push("Want me to text you the link?")
+        }
       }
     }
 
@@ -357,6 +460,12 @@ async function logVoiceTurn(opts: {
    * log the same columns SMS does.
    */
   telemetry?: StageResponse['telemetry'] | undefined
+  /**
+   * Turn-level failures that happen outside a stage handler, so they have no
+   * StageResponse telemetry to ride along on (e.g. the pending-PDP link SMS
+   * failing to send). Written to sms_turns.errors.
+   */
+  errors?: unknown[] | undefined
 }): Promise<void> {
   const t = opts.telemetry
   try {
@@ -384,6 +493,7 @@ async function logVoiceTurn(opts: {
       ...(t?.toolBudgetExhausted !== undefined && { toolBudgetExhausted: t.toolBudgetExhausted }),
       ...(t?.searchRepeatedPitch !== undefined && { searchRepeatedPitch: t.searchRepeatedPitch }),
       ...(t?.gateAdvance !== undefined && { metadata: { gateAdvance: t.gateAdvance } }),
+      ...(opts.errors?.length ? { errors: opts.errors } : {}),
     })
   } catch (err) {
     // Non-fatal — don't fail the turn over logging.
@@ -422,6 +532,32 @@ export async function processVoiceMessageV2(
     }
   }
 
+  // --- Step 1.5: New call → fresh shopping slate ---
+  // Identity (customerGid, name, zip) and conversationSummary are deliberately
+  // left alone: those describe the person, not this shopping trip.
+  try {
+    const lastActive = (conversation as { lastActiveAt?: Date | null }).lastActiveAt
+    const staleMs = lastActive ? Date.now() - new Date(lastActive).getTime() : Infinity
+    if (staleMs > SESSION_FRESH_MS && (await isFirstTurnOfCall(callSid))) {
+      await applyStateWrites(callerPhone, {
+        stage: 'RECONNECT',
+        discoveredSlots: {},
+        discoveryState: null,
+        pitchedHandlesLog: null,
+        currentPitchHandle: null,
+        currentUpsellHandle: null,
+        pendingPdpUrl: null,
+      })
+      conversation = await getOrCreateConversation(callerPhone)
+      console.info(
+        `[voice-adapter] new call → session state cleared callSid=${callSid} staleMs=${staleMs}`,
+      )
+    }
+  } catch (err) {
+    // Non-fatal — a stale slate is worse than this failing, but not fatal.
+    console.warn('[voice-adapter] new-call session reset failed', err)
+  }
+
   // --- Step 2: Classify intent ---
   let intentResult: Awaited<ReturnType<typeof classifyIntent>>
   try {
@@ -449,31 +585,48 @@ export async function processVoiceMessageV2(
   if (conversation.pendingPdpUrl) {
     const pendingUrl = conversation.pendingPdpUrl
     if (isAffirmative(customerText)) {
+      // "Just texted it" used to be spoken unconditionally: sendSms threw into
+      // a catch that only console.warn'd, and Emma told the caller the link was
+      // on its way regardless. A failed send left them staring at a phone that
+      // never buzzed, with nothing on the call to say so. Only claim the send
+      // that actually happened.
+      let sent = true
       try {
         await sendSms(callerPhone, `Here's the link: ${pendingUrl}`)
       } catch (err) {
+        sent = false
         console.warn(`[voice-adapter] outbound SMS for pending pdpUrl failed callerPhone=${callerPhone}`, err)
       }
-      try {
-        await applyStateWrites(callerPhone, { pendingPdpUrl: null })
-      } catch {
-        // Non-fatal — pending URL clears next turn at worst.
+      if (sent) {
+        try {
+          await applyStateWrites(callerPhone, { pendingPdpUrl: null })
+        } catch {
+          // Non-fatal — pending URL clears next turn at worst.
+        }
       }
+      // On failure the pending URL is deliberately LEFT set, so another "yes"
+      // retries the send instead of resolving to nothing.
+      const ssml = wrapSsml(
+        sent
+          ? `Just texted it. Want me to find anything else? ${CONTINUE_VIA_TEXT}`
+          : `That text didn't want to go through just now. Say the word and I'll try again, or I can keep looking with you.`,
+      )
       const latencyMs = Date.now() - started
       await logVoiceTurn({
         callerPhone,
         conversationId: conversation.conversationId,
         callSid,
         customerText,
-        ssml: wrapSsml(`Just texted it. Want me to find anything else? ${CONTINUE_VIA_TEXT}`),
+        ssml,
         stageIn: conversation.stage as string,
         stageOut: conversation.stage as string,
         intent: intentResult.intent,
         intentConfidence: intentResult.confidence,
         latencyMs,
+        ...(sent ? {} : { errors: ['pending_pdp_sms_send_failed'] }),
       })
       return {
-        ssml: wrapSsml(`Just texted it. Want me to find anything else? ${CONTINUE_VIA_TEXT}`),
+        ssml,
         prompts: { kind: 'say-and-listen' },
       }
     }
