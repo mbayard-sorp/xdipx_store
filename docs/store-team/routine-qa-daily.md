@@ -62,9 +62,9 @@ What you are looking for, in rough order of how often it matters:
 4. **Protected paths.** If the diff touches one, the engine will stop and email the owner anyway,
    but say so in your note so the owner knows what they are looking at.
 5. **Mobile-first.** Layout work is verified at 375px first, not as an afterthought.
-6. **Voice and pixels.** Customer-facing copy against `docs/emma-voice.md` (no em-dashes, no "Buy
-   now", CTA whitelist, Emma has no lived experience, XDIPX descriptor, no countdowns). Visual work
-   against `docs/design-doctrine.md` and the v3 tokens.
+6. **Voice and visual pixels.** Customer-facing copy against `docs/emma-voice.md` (no em-dashes, no
+   "Buy now", CTA whitelist, Emma has no lived experience, XDIPX descriptor, no countdowns). Visual
+   work against `docs/design-doctrine.md` and the v3 tokens.
 7. **Sanity schema is additive only.** A modified existing schema file is a bounce.
 
 ## Step 4 — Run static checks
@@ -108,7 +108,23 @@ For anything that changes rendering, fetch the affected routes and confirm the e
 actually present in the HTML. "The build passed" is not evidence that a page renders. That
 distinction is exactly what a three-day homepage breakage cost us once.
 
+**The lighthouse check.** Per `.github/workflows/lighthouse.yml`, "Lighthouse stays NON-required for
+merge": it is informational, not a gate. (a) If the PR diff has no rendering surface, no
+`app/components` or `app/routes` changes touching markup or styles, a failing lighthouse check
+alongside a green `check` job is not disqualifying; note it and move on. (b) If the PR is itself
+attempting to fix the sitewide lighthouse regression (currently ticket #603 and any successor),
+lighthouse must be evaluated as real evidence rather than noise, since it is that ticket's own
+done-when, and `lighthouserc.json`'s 5-run median aggregation means a single failing run on that PR
+is signal.
+
 ## Step 6 — Verdict
+
+**Conversion tracking.** Once per run, not per ticket: confirm (1) no unresolved
+`meta_capi_failures` or `ga4_purchase_failures` rows older than one hour; (2) if any paid Shopify
+order landed in the last 24h, it has a resolved ledger row; (3) `POST /cron/purchase-reconcile` with
+`dryRun: true` reports zero gaps for orders inside the Meta 7-day window. Zero Purchase events is
+not a failure on a day with zero orders; this check is orders-versus-reported, never an absolute
+count.
 
 **PASS needs evidence.** A verdict of `verified` without the specific things you checked is worse
 than no verdict, because the engine merges on it.
@@ -130,6 +146,13 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -d '{"op":"transition","id":<id>,"to":"in_progress","actor":"agent:qa-reviewer",
        "lastError":"npm test fails: app/lib/foo.test.ts \"resolves the slug\" expected /products/x, received /vault/x. Also StorefrontHome.tsx:212 fetches in useEffect; must move to the loader."}'
 ```
+
+**Confirm every transition landed.** After either call above, immediately re-read the row with
+`{"op":"get","id":<id>}` and confirm the returned `status` and `verifiedBy` (or `lastError` and
+`attemptCount` for a bounce) match what you just sent, before reporting the verdict in the run
+summary or to the coordinator. If the re-read does not reflect the intended state, retry the
+transition and re-check; do not report a verdict as delivered until the get-based re-read confirms
+it landed.
 
 A bounce increments `attempt_count` and hands the ticket back to its assignee under a fresh
 six-hour lease, so the 20:00 dev pass finds it still `in_progress` and still theirs. At three
