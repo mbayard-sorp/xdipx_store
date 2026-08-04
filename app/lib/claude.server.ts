@@ -141,6 +141,26 @@ function buildLegacySystemBlocks(): ReadonlyArray<{ text: string; cache?: boolea
 }
 
 /**
+ * Wrap a plain system string as a single `cache_control: ephemeral` block.
+ *
+ * The high-volume Haiku copy paths (`generateWithSystem` for asides,
+ * `generateEmmaTagline`) send a system prompt that is ~90% a static
+ * voice-charter prefix, and each caller's system string is constant across a
+ * burst (a catalog-wide regen sweep hits the same string thousands of times).
+ * Sending it as a plain string re-bills the whole charter at full input price
+ * every call. Tagging it once lets the second and later calls of a burst read
+ * the charter from the 5-minute ephemeral cache at ~10% of input price.
+ *
+ * One block, so the model sees byte-identical system text (no multi-block
+ * concatenation to reason about). A prefix below the model's cache minimum
+ * silently won't cache — no error, no output change — so this is safe even
+ * where a given surface's system is too short to qualify.
+ */
+function cacheableSystem(system: string): Anthropic.TextBlockParam[] {
+  return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+}
+
+/**
  * Module-level accumulator for per-tool token counts. callClaude adds to it;
  * the orchestrator's executeTool dispatch drains it after each tool call so
  * the totals can be attributed to the right ToolCallTrace entry. Cache fields
@@ -212,7 +232,9 @@ export async function generateWithSystem(opts: {
   const call = client.messages.create({
     model,
     max_tokens: maxTokens,
-    system,
+    // Cache the static voice-charter prefix this system carries (B3.3 fix):
+    // byte-identical model input, cache-read pricing on burst repeats.
+    system: cacheableSystem(system),
     messages: [{ role: 'user', content: user }],
   })
   const msg = timeoutMs
@@ -2004,7 +2026,9 @@ Return ONLY the tagline text, nothing else.`
     const msg = await client.messages.create({
       model: MODEL_FAST,
       max_tokens: 80,
-      system,
+      // Cache the static charter prefix this system carries (B3.3 fix):
+      // byte-identical model input, cache-read pricing on burst repeats.
+      system: cacheableSystem(system),
       messages: [{ role: 'user', content: user }],
     })
     const block = msg.content[0]
