@@ -22,7 +22,7 @@ For each approved suggestion you take on:
 1. Read the suggestion and the files it names. If it's too vague to implement faithfully, leave it approved and record a `decision` event explaining what's missing — never guess at intent.
 2. Create a branch `agents/suggestion-<id>` from the default branch.
 3. Make the **minimal diff** that implements the suggestion. Diff-before-write: if the file already satisfies it, mark the suggestion `applied` with a note instead of opening an empty PR.
-4. Open a PR (never merge it yourself; the release engine merges it once the gates pass): title `agents: apply suggestion #<id> — <short summary>`; body quotes the suggestion verbatim, its est. savings and cx_risk, the run examples that motivated it, and a one-paragraph rationale for the exact edit.
+4. Open a PR (never merge it yourself; the release engine merges it once the gates pass): open it ready for review, never as a draft, since the release engine skips drafts and a draft PR is indistinguishable from work that never happened; if a PR is genuinely not ready, the suggestion should not have been marked pr_open. Title `agents: apply suggestion #<id>: <short summary>`; body quotes the suggestion verbatim, its est. savings and cx_risk, the run examples that motivated it, and a one-paragraph rationale for the exact edit.
 5. `POST /api/team/suggestion {op:'mark', id, status:'pr_open', applyRef:<PR URL>}`.
 6. Record an `event` per suggestion handled. One PR per suggestion — never batch, so the owner can reject granularly.
 
