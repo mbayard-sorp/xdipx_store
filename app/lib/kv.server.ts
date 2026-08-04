@@ -280,17 +280,30 @@ const _g2 = globalThis as unknown as { __readCache?: Map<string, CacheEntry<unkn
 if (!_g2.__readCache) _g2.__readCache = new Map()
 const readCache = _g2.__readCache
 
+/** "Empty" for emptyTtlSeconds purposes: null, undefined, or a zero-length
+ * array. Objects and falsy scalars (false, 0, '') are NOT empty — plenty of
+ * call sites legitimately cache those as steady-state values. */
+function isEmptyCacheValue(data: unknown): boolean {
+  return data == null || (Array.isArray(data) && data.length === 0)
+}
+
 export async function cached<T>(
   key: string,
   ttlSeconds: number,
   fn: () => Promise<T>,
+  // Opt-in negative-result TTL. When set, entries whose data is null/undefined
+  // or an empty array expire after this many seconds instead of ttlSeconds,
+  // so a transient upstream failure can't pin "no results" for the full TTL.
+  // Default undefined = behavior identical to before for every other caller.
+  emptyTtlSeconds?: number,
 ): Promise<T> {
-  const ttlMs  = ttlSeconds * 1000
-  const now    = Date.now()
-  const l1     = readCache.get(key) as CacheEntry<T> | undefined
-  if (l1 && now - l1.ts < ttlMs) return l1.data
+  const now = Date.now()
+  const effectiveTtlMs = (data: unknown): number =>
+    (emptyTtlSeconds !== undefined && isEmptyCacheValue(data) ? emptyTtlSeconds : ttlSeconds) * 1000
+  const l1 = readCache.get(key) as CacheEntry<T> | undefined
+  if (l1 && now - l1.ts < effectiveTtlMs(l1.data)) return l1.data
   const l2 = await kvGet<CacheEntry<T>>(key)
-  if (l2 && now - l2.ts < ttlMs) {
+  if (l2 && now - l2.ts < effectiveTtlMs(l2.data)) {
     readCache.set(key, l2)
     return l2.data
   }
@@ -299,7 +312,10 @@ export async function cached<T>(
   readCache.set(key, entry)
   // Slightly longer KV TTL than L1 TTL — lets new instances warm from KV
   // before hitting origin even if L1 expired.
-  await kvSet(key, entry, ttlSeconds + 60)
+  const kvTtl = emptyTtlSeconds !== undefined && isEmptyCacheValue(data)
+    ? emptyTtlSeconds + 60
+    : ttlSeconds + 60
+  await kvSet(key, entry, kvTtl)
   return data
 }
 

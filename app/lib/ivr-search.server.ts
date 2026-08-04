@@ -35,6 +35,9 @@ function getSanityClient() {
 // has its own cache. Randomized ranking runs on top of the cached pool, so
 // consecutive calls still vary their pitches.
 const GROQ_CACHE_TTL_SECONDS = 180
+// Empty pools expire fast: a transient Sanity blip or a query that raced an
+// enrichment window must not pin "we don't carry that" for 3-4 minutes.
+const GROQ_EMPTY_TTL_SECONDS = 30
 
 function hashKey(s: string): string {
   // djb2 — tiny, stable, good enough for cache-key dedup (not security).
@@ -49,7 +52,7 @@ async function cachedGroqFetch<T>(
   params: Record<string, unknown>,
 ): Promise<T> {
   const key = `ivr:groq:v1:${hashKey(`${groq}|${JSON.stringify(params)}`)}`
-  return cached(key, GROQ_CACHE_TTL_SECONDS, () => client.fetch<T>(groq, params) as Promise<T>)
+  return cached(key, GROQ_CACHE_TTL_SECONDS, () => client.fetch<T>(groq, params) as Promise<T>, GROQ_EMPTY_TTL_SECONDS)
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
