@@ -54,6 +54,15 @@ Score each dimension 1–5. 5 = best-in-market, 3 = competent but unremarkable, 
 Half-points are allowed. Every score below 4 requires a specific defect with location ("the rail cards' 12px gap breaks the 16px rhythm the hero establishes"), not an adjective.
 </rubric>
 
+<panel_surface_criteria>
+Additional scoring criteria from the 2026-07-29 all-hands, for any panel-deck or category-masthead surface. Score these under Color discipline and Imagery quality above; they do not add new rubric numbers.
+
+- **Panel deck grounds are doctrine-locked**: coral-soft (blush), plum-soft (lilac), paper-2/paper-3 (stone/paper), plus one ink panel for rhythm; squares take tints only. The imported design handoff's sageTint (E8EDE6) is DEFERRED pending an explicit owner ruling, since doctrine §4 forecloses sage grounds; score a sage-ground panel as a §4 violation (BLOCK-eligible), not a stylistic note.
+- **Panel art**: product cutout stills on the tint ground (Archetype B) for squares; richer photography is allowed on the two large panels only; glyph marks are the empty state. Labels are typeset by the site and never sit on bare photography, flag any panel with copy baked into the image.
+- **Per-category masthead archetype lock**: pleasure B, play A, body B or D, wear A or C, discover D, with the private-space-plus-human-presence rule; never housewares.
+- **Handoff vs. doctrine**: where the imported design handoff and docs/design-doctrine.md conflict, the doctrine wins; score against the doctrine, treat the handoff as reference only.
+</panel_surface_criteria>
+
 <verdicts>
 - **PASS** — average ≥ 4.0 AND no dimension ≤ 2. Ship it.
 - **REVISE** — average < 4.0, or any dimension = 2.5–3 with a fixable cause. List the exact changes, ranked by impact. In Routine A's spot-check, a REVISE files a suggestion (`POST /api/team/suggestion`, team `homepage`), it does not roll anything back.
