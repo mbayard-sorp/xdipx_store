@@ -12550,6 +12550,9 @@ async function buildEmmaSystemBlocks(brandVoiceOverride) {
 function buildLegacySystemBlocks() {
   return [{ text: SYSTEM_PROMPT, cache: true }];
 }
+function cacheableSystem(system) {
+  return [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
+}
 function drainToolTokens() {
   const out = _toolTokenAccumulator;
   _toolTokenAccumulator = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
@@ -12570,7 +12573,9 @@ async function generateWithSystem(opts) {
   const call = client.messages.create({
     model,
     max_tokens: maxTokens,
-    system,
+    // Cache the static voice-charter prefix this system carries (B3.3 fix):
+    // byte-identical model input, cache-read pricing on burst repeats.
+    system: cacheableSystem(system),
     messages: [{ role: "user", content: user }]
   });
   const msg = timeoutMs ? await Promise.race([
@@ -13897,7 +13902,9 @@ Return ONLY the tagline text, nothing else.`;
     const msg = await client.messages.create({
       model: MODEL_FAST,
       max_tokens: 80,
-      system,
+      // Cache the static charter prefix this system carries (B3.3 fix):
+      // byte-identical model input, cache-read pricing on burst repeats.
+      system: cacheableSystem(system),
       messages: [{ role: "user", content: user }]
     });
     const block = msg.content[0];
