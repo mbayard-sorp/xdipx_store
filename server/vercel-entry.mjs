@@ -1696,20 +1696,24 @@ async function kvSetNX(key, value, exSeconds) {
   memSet(key, value, exSeconds);
   return true;
 }
-async function cached(key, ttlSeconds, fn) {
-  const ttlMs = ttlSeconds * 1e3;
+function isEmptyCacheValue(data) {
+  return data == null || Array.isArray(data) && data.length === 0;
+}
+async function cached(key, ttlSeconds, fn, emptyTtlSeconds) {
   const now = Date.now();
+  const effectiveTtlMs = (data2) => (emptyTtlSeconds !== void 0 && isEmptyCacheValue(data2) ? emptyTtlSeconds : ttlSeconds) * 1e3;
   const l1 = readCache.get(key);
-  if (l1 && now - l1.ts < ttlMs) return l1.data;
+  if (l1 && now - l1.ts < effectiveTtlMs(l1.data)) return l1.data;
   const l2 = await kvGet(key);
-  if (l2 && now - l2.ts < ttlMs) {
+  if (l2 && now - l2.ts < effectiveTtlMs(l2.data)) {
     readCache.set(key, l2);
     return l2.data;
   }
   const data = await fn();
   const entry = { data, ts: now };
   readCache.set(key, entry);
-  await kvSet(key, entry, ttlSeconds + 60);
+  const kvTtl = emptyTtlSeconds !== void 0 && isEmptyCacheValue(data) ? emptyTtlSeconds + 60 : ttlSeconds + 60;
+  await kvSet(key, entry, kvTtl);
   return data;
 }
 async function kvGetMemo(key, l1TtlSeconds) {
