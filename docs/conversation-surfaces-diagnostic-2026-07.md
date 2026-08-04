@@ -1,5 +1,7 @@
 # Conversation Surfaces Diagnostic — IVR, SMS, Emma Chat
 
+> **Superseded 2026-08-04** by `docs/audits/conversation-channels-product-lookup-audit-2026-08-04.md`. Findings A1, A2, A3, A4, A5, A7, A8 and the caching gap are fixed; the newer audit re-verifies the rest and adds live-data findings not covered here.
+
 **Date:** 2026-07-31
 **Scope:** Full diagnostic of the IVR's (and SMS/chat's) ability to search the catalog and respond to a customer, plus readiness to join the improvement loop. No fixes applied; this is the input to a phased fix/maintenance plan.
 
