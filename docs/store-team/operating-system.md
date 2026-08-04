@@ -214,12 +214,18 @@ Verified 2026-07-30: `release_engine_enabled` is `true`, the daily cap is 12, an
 merged autonomously — tickets #43, #70 and #152 reached `applied` through it, and PR #421 was
 squash-merged by it with no owner involvement at all.
 
-Genuinely not built, as of 2026-07-30:
+Built since, on 2026-08-04: **ADR-008 steps 2, 3 and 4**, after the owner said yes. A ticket-less PR
+on an eligible branch now gets a ticket auto-filed at `pr_open`
+(`app/lib/release-ticket-autofile.server.ts`), so it reaches QA instead of waiting for the owner
+forever; a companion sweep retires those tickets when their PR is closed unmerged; `fix/` and `pm/`
+joined `AGENT_BRANCH_PREFIXES`; and `CLAUDE.md` now tells an interactive session to file its own
+ticket when it opens a PR. No gate moved: the auto-filed row lands at `pr_open` like any other, QA
+still has to verify it, and protected-path PRs are never auto-filed.
+
+Genuinely not built, as of 2026-08-04:
 
 - **The theme gate.** Still blocked, and honestly so: `design-critic` cannot obtain a screenshot in a
   scheduled run and correctly abstains. It only runs when the owner invokes it interactively.
-- **Auto-filing a ticket for a ticket-less PR.** See §9: this is the largest remaining hole and it is
-  designed but undecided (`docs/adr/ADR-008-owner-out-of-merge-path.md`, steps 2 and 4).
 
 When you implement one of these, move its row out of this section in the same PR. When you find a row
 here that is already built, delete it in the same PR — a stale "not built" row is worse than no
@@ -232,10 +238,12 @@ section, because it actively misleads.
 Two structural facts, both measured on 2026-07-30. Neither is a bug in the release engine; both are
 limits of what it was scoped to see. Read this before concluding the engine is broken.
 
-**Fact one: most PRs are outside the engine's jurisdiction by construction.** The engine considers
-only branches under `agents/`, `ticket/`, `claude/`, `phase1/`, `tonight/` or `revert/pr-`, and for
-anything that is not a revert or docs-only it additionally requires a linked ticket in status
-`verified`. Classifying the last 60 merged PRs against those rules:
+**Fact one: most PRs were outside the engine's jurisdiction by construction. Largely fixed
+2026-08-04, and the measurements below are the pre-fix baseline.** The engine considers only branches
+under `agents/`, `ticket/`, `claude/`, `phase1/`, `tonight/`, `fix/`, `pm/` or `revert/pr-` (the last
+two prefixes added by ADR-008 step 4), and for anything that is not a revert or docs-only it
+additionally requires a linked ticket in status `verified`. Classifying the last 60 merged PRs
+against the rules as they stood on 2026-07-30:
 
 | | count | why the engine never merged it |
 |---|---|---|
@@ -243,10 +251,17 @@ anything that is not a revert or docs-only it additionally requires a linked tic
 | Eligible branch, no ticket reference in the title | 35 (58%) | decision `skip`, code `no-ticket` |
 | Actual candidates | 7 (12%) | |
 
-The cause is origin, not quality: most work is born in an owner-attended session, which produces a
-branch and a PR but never a bus row, so the PR can never acquire the `verified` ticket the engine
-demands. **A change that is never ticketed can never be merged by the engine.** If you want a fix to
-ship without the owner, it has to enter through the bus.
+The cause was origin, not quality: most work is born in an owner-attended session, which produces a
+branch and a PR but never a bus row, so the PR could never acquire the `verified` ticket the engine
+demands.
+
+**This no longer holds.** Since 2026-08-04 the engine auto-files a ticket at `pr_open` for any
+eligible PR it declines for `no-ticket` (ADR-008 step 2), so a change that was never ticketed now
+enters the bus by itself and goes to QA. Prefer filing your own ticket anyway, per the convention in
+`CLAUDE.md`: you know the priority, category, and acceptance criteria, and the fallback has to guess
+all three. Note what did **not** change: the auto-filed ticket lands at `pr_open`, so QA still has to
+verify it before the engine will merge, and a protected-path PR is never auto-filed. Re-measure the
+table above before quoting the 58% figure again.
 
 **Fact two: protected-path work has no agent lane at all.** `routine-dev-daily.md` Step 2 requires
 R-DEV to transition a ticket to `blocked` rather than write a line of code when any changed file is
@@ -292,20 +307,29 @@ broken.
 | Stuck because | Signal the owner gets |
 |---|---|
 | Protected path | `needs-owner` label, one email, a digest row. **Loud, correct.** |
-| No linked `verified` ticket | A `no-ticket` or `ticket-not-verified` line in the engine's per-cycle decision log. **Quiet, but discoverable.** |
+| No linked `verified` ticket | Auto-filed a ticket since 2026-08-04, so it moves to QA on its own. **Self-clearing.** |
 | **Ineligible branch prefix** | **Nothing at all.** |
 
 The third row is the one that matters. `listOpenPullRequests` filters by prefix before any
 `PullRequestFacts` object is built, so an ineligible PR is never evaluated, never labelled, never
 emailed, never logged by number, and never reaches the digest. It is invisible to every observability
 surface at once, and it can sit for a month without anything saying so. **Silence from the engine
-means "not looked at", never "looked at and fine".** Until this is fixed, an open PR on a prefix
-outside `AGENT_BRANCH_PREFIXES` plus `revert/pr-` is owner-only work whether or not anyone noticed.
+means "not looked at", never "looked at and fine".** An open PR on a prefix outside
+`AGENT_BRANCH_PREFIXES` plus `revert/pr-` is owner-only work whether or not anyone noticed.
 
-Verified instance: `pm/tracker-*`, the program-manager's weekly tracker PR. `pm/` is not an eligible
-prefix, and separately the allowlist regex `docs/store-team/[^/]+\.md` does not cross into
-`docs/store-team/trackers/`. **No tracker PR has ever been merged by the engine.** Both playbooks
-claimed otherwise until 2026-08-04.
+ADR-008 step 4 added `fix/` and `pm/` to that list on 2026-08-04, which fixes the two known
+instances. It does not fix the class. The next prefix somebody invents will be silent in exactly the
+same way, because the gap is that a filtered-out PR is never recorded anywhere, not that the list was
+missing two entries. Treat "add the prefix" as the workaround and a signal for dropped PRs as the
+real fix, still unbuilt.
+
+Verified instance, the one that motivated the change: `pm/tracker-*`, the program-manager's weekly
+tracker PR. `pm/` was not an eligible prefix, and separately the allowlist regex
+`docs/store-team/[^/]+\.md` does not cross into `docs/store-team/trackers/`. **No tracker PR had ever
+been merged by the engine**, while two playbooks said the engine merged them. Both were corrected on
+2026-08-04. The allowlist regex is still narrow, and deliberately: with `pm/` eligible, a tracker PR
+now travels the ordinary ticket-and-QA path rather than a docs carve-out, which is the conservative
+of the two routes.
 
 ### The QA cadence asymmetry
 

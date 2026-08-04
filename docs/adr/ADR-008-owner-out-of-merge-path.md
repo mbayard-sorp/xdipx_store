@@ -14,10 +14,15 @@ merged by the owner. That is a finding of this ADR, not an oversight in it.
 
 | Step | State |
 |---|---|
-| 1. Widen the reconciliation sweep to `pr_open`/`in_review` | **Implemented** in this PR |
-| 2. Auto-file a ticket for ticket-less eligible PRs | Proposed, needs an owner yes |
-| 3. Self-service filing convention | Proposed, follows step 2 |
-| 4. Add `fix/` to the branch prefixes | Proposed, needs an owner yes |
+| 1. Widen the reconciliation sweep to `pr_open`/`in_review` | **Implemented** 2026-07-30 |
+| 2. Auto-file a ticket for ticket-less eligible PRs | **Implemented** 2026-08-04 |
+| 3. Self-service filing convention | **Implemented** 2026-08-04 |
+| 4. Add `fix/` to the branch prefixes | **Implemented** 2026-08-04, and `pm/` with it |
+
+**Status as of 2026-08-04: accepted in full.** The owner said yes to steps 2, 3 and 4 on
+2026-08-04, five days after they were written. All three shipped in the same owner-attended session,
+which is the only lane permitted to author the protected-path halves. See the addendum at the foot of
+this document for what changed in the design between proposal and implementation.
 
 ---
 

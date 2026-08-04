@@ -1,0 +1,188 @@
+/**
+ * ADR-008 step 2: give a ticket-less PR a ticket, so the release engine is
+ * allowed to look at it.
+ *
+ * ## Why this file exists at all
+ *
+ * `evaluatePullRequest` refuses to merge an eligible PR without a linked ticket
+ * in status `verified`. That rule is correct and is not changed here. The
+ * problem it creates is upstream: work born in an owner-attended Claude Code
+ * session produces a branch and a PR but never touches the bus, so the PR can
+ * never acquire the ticket the engine demands, and the owner merges it by hand
+ * forever. Measured on 2026-07-30, 35 of the last 60 merged PRs were on eligible
+ * branches carrying no ticket reference at all.
+ *
+ * ## Why it is a separate file
+ *
+ * `release-engine.server.ts` is a protected path, so every future tuning of this
+ * logic would otherwise cost the owner a hand-merge. Keeping the tunable part
+ * here means it travels the normal release lane like any other change. The
+ * engine holds exactly one call into this module.
+ *
+ * ## Where the skip list went
+ *
+ * ADR-008 specified a list of conditions to skip: reverts, drafts, `needs-owner`,
+ * protected paths, the docs carve-out, and PRs that already resolve a ticket.
+ * None of them are re-implemented here. Calling this at the single point where
+ * `evaluatePullRequest` has already returned `no-ticket` gets all of them for
+ * free, because each one produces a different decision code earlier in that
+ * function:
+ *
+ * | ADR skip condition        | already handled by                       |
+ * |---------------------------|------------------------------------------|
+ * | revert branch             | `revert` bypasses the ticket check        |
+ * | draft                     | `code: 'draft'`                          |
+ * | `needs-owner` label       | `code: 'needs-owner-label'`               |
+ * | protected path            | `action: 'escalate-protected'`            |
+ * | docs-only on `agents/*`   | `docsCarveOut` skips the ticket check     |
+ * | already has a ticket      | `code: 'ticket-not-verified'`             |
+ *
+ * Re-deriving them here would be a second copy of the gate order, free to drift
+ * from the real one. The single caller is the enforcement point instead.
+ *
+ * One consequence worth stating: a PR with red CI never reaches the ticket check,
+ * so it gets no ticket until CI goes green. That is intended. So is the draft
+ * case: `claude/*` is not in the auto-undraft lane, so an owner draft stays
+ * ticket-less until it is marked ready for review, which is the moment the work
+ * stops being work-in-progress.
+ */
+
+import { and, eq, like, sql } from 'drizzle-orm'
+
+import { db } from '~/lib/db.server'
+import { homepageTeamSuggestions } from '../../db/schema'
+import { getPullRequest } from '~/lib/github.server'
+import { autofileDedupeKey, fileTicketForOpenPr, transitionSuggestion } from '~/lib/team.server'
+
+const LOG = '[release-autofile]'
+
+/** `dedupe_key` prefix that marks a row this module created. The abandoned-PR
+ *  sweep matches on it so it can never retire a ticket it did not file. */
+export const AUTOFILE_DEDUPE_PREFIX = 'autofile:pr-'
+
+export interface AutofiledTicket {
+  prNumber: number
+  ticketId: number
+  /** False when an existing live ticket already held this PR's dedupe key. */
+  created: boolean
+}
+
+/**
+ * File a ticket for one PR the engine just declined for `no-ticket`.
+ *
+ * Returns the ticket, or null when nothing was written (dry run, or the insert
+ * was deduped and no live row came back). Never throws: a failure here must not
+ * take down the release cycle, since the cycle's real job is merging and this is
+ * a convenience that can retry in ten minutes.
+ */
+export async function autoFileTicketForPr(
+  pr: { number: number; title: string; htmlUrl: string; headRef: string },
+  dryRun = false,
+): Promise<AutofiledTicket | null> {
+  if (dryRun) {
+    console.log(`${LOG} [dry-run] would file a ticket for PR #${pr.number} (${pr.headRef})`)
+    return null
+  }
+  try {
+    const ticketId = await fileTicketForOpenPr({
+      prNumber: pr.number,
+      prUrl:    pr.htmlUrl,
+      prTitle:  pr.title,
+      headRef:  pr.headRef,
+    })
+    if (ticketId === 0) {
+      // Already filed on an earlier cycle and still live. Silent by design:
+      // this is the steady state for every cycle between filing and QA.
+      return null
+    }
+    console.log(
+      `${LOG} filed ticket #${ticketId} at pr_open for PR #${pr.number} (${pr.headRef}), awaiting QA`,
+    )
+    return { prNumber: pr.number, ticketId, created: true }
+  } catch (err) {
+    console.warn(`${LOG} could not file a ticket for PR #${pr.number}`, err)
+    return null
+  }
+}
+
+/**
+ * Retire auto-filed tickets whose PR was closed without being merged.
+ *
+ * The symmetric counterpart to `sweepOutOfBandMerges`. That one recognises work
+ * that shipped; this one recognises work that was abandoned. Without it every
+ * closed-unmerged PR leaves a ticket parked at `pr_open` forever, and QA spends
+ * passes reviewing PRs that no longer exist.
+ *
+ * Restricted twice over. The query only selects rows whose `dedupe_key` carries
+ * the autofile prefix, so a ticket an agent or the owner filed is out of scope
+ * no matter what its PR did. And a row is only retired after GitHub reports the
+ * PR `closed` with `merged !== true` — a merged PR is left alone for
+ * `sweepOutOfBandMerges` to move to `applied`, which is the opposite verdict and
+ * belongs to the other sweep.
+ */
+export async function dismissTicketsForClosedUnmergedPrs(
+  dryRun = false,
+): Promise<{ checked: number; dismissed: number; errors: string[] }> {
+  const out = { checked: 0, dismissed: 0, errors: [] as string[] }
+
+  let rows: { id: number; dedupeKey: string | null }[] = []
+  try {
+    rows = await db
+      .select({ id: homepageTeamSuggestions.id, dedupeKey: homepageTeamSuggestions.dedupeKey })
+      .from(homepageTeamSuggestions)
+      .where(and(
+        eq(homepageTeamSuggestions.status, 'pr_open'),
+        like(homepageTeamSuggestions.dedupeKey, `${AUTOFILE_DEDUPE_PREFIX}%`),
+      ))
+      .orderBy(sql`${homepageTeamSuggestions.id} ASC`)
+      .limit(50)
+  } catch (err) {
+    out.errors.push(`cannot list auto-filed tickets: ${String(err)}`)
+    return out
+  }
+
+  for (const row of rows) {
+    const prNumber = prNumberFromAutofileKey(row.dedupeKey)
+    if (prNumber === null) continue
+    out.checked += 1
+
+    const res = await getPullRequest(prNumber, 'release-engine')
+    // Fail closed: an API error is not evidence the PR was abandoned. Leave the
+    // ticket where it is and try again on the next sweep.
+    if (!res.ok) {
+      out.errors.push(`PR #${prNumber}: ${res.error}`)
+      continue
+    }
+    if (res.data.state !== 'closed') continue
+    if (res.data.merged) continue  // sweepOutOfBandMerges owns this one
+
+    if (dryRun) {
+      console.log(`${LOG} [dry-run] would dismiss ticket #${row.id} (PR #${prNumber} closed unmerged)`)
+      continue
+    }
+    try {
+      await transitionSuggestion(row.id, 'dismissed', 'system', {
+        note: `PR #${prNumber} was closed without being merged, so this auto-filed ticket has no work left to track.`,
+      })
+      out.dismissed += 1
+      console.log(`${LOG} dismissed ticket #${row.id}, PR #${prNumber} closed unmerged`)
+    } catch (err) {
+      out.errors.push(`ticket #${row.id}: ${String(err)}`)
+    }
+  }
+  return out
+}
+
+/** Recover the PR number from an autofile dedupe key. Null when the key is not
+ *  one of ours or has been tampered with into an unparseable shape. */
+export function prNumberFromAutofileKey(key: string | null | undefined): number | null {
+  if (!key || !key.startsWith(AUTOFILE_DEDUPE_PREFIX)) return null
+  const raw = key.slice(AUTOFILE_DEDUPE_PREFIX.length)
+  if (!/^\d+$/.test(raw)) return null
+  const n = Number(raw)
+  return Number.isSafeInteger(n) && n > 0 ? n : null
+}
+
+/** Re-exported so callers building a key do not need to reach into
+ *  team.server.ts, which is a protected path and should stay a thin surface. */
+export { autofileDedupeKey }

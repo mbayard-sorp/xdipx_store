@@ -9843,6 +9843,7 @@ __export(team_server_exports, {
   addSuggestionNote: () => addSuggestionNote,
   agentRetireSuggestion: () => agentRetireSuggestion,
   assertTeamAuth: () => assertTeamAuth,
+  autofileDedupeKey: () => autofileDedupeKey,
   buildClaimQuery: () => buildClaimQuery,
   claimSuggestion: () => claimSuggestion,
   createAdCampaign: () => createAdCampaign,
@@ -9853,6 +9854,7 @@ __export(team_server_exports, {
   decideSuggestion: () => decideSuggestion,
   expireStaleClaims: () => expireStaleClaims,
   expireStaleRuns: () => expireStaleRuns,
+  fileTicketForOpenPr: () => fileTicketForOpenPr,
   findTransitionRule: () => findTransitionRule,
   gate: () => gate,
   getActiveBrief: () => getActiveBrief,
@@ -10140,6 +10142,33 @@ async function createSuggestionDetailed(s) {
     sql3`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
   )).limit(1);
   return { id: live?.id ?? 0, deduped: !!live };
+}
+async function fileTicketForOpenPr(input) {
+  const [row] = await db.insert(homepageTeamSuggestions).values({
+    team: "strategy",
+    category: "other",
+    kind: "code",
+    // The PR title is opaque text here, never executed, and rendered through
+    // escapeHtml downstream like every other suggestion body.
+    suggestion: `Auto-filed for PR #${input.prNumber} (${input.headRef}), which had no linked ticket. Title: ${input.prTitle}
+
+The work is already done and the PR is open. QA should review the diff and the rendered preview as normal, then verify or bounce. DONE WHEN: QA has recorded a verdict on ${input.prUrl}.`,
+    status: "pr_open",
+    // `auto` matches how the auto-approve valves record a non-human decision.
+    decidedBy: "auto",
+    // The owner is the only actor who can move a bounced ticket back to
+    // `pr_open` after pushing a fix, and this work came from his session.
+    assignee: "owner",
+    applyRef: input.prUrl,
+    priority: 3,
+    dedupeKey: autofileDedupeKey(input.prNumber)
+  }).onConflictDoNothing().returning({ id: homepageTeamSuggestions.id });
+  if (!row?.id) return 0;
+  await addTicketLinks(row.id, [{ kind: "pr", ref: input.prUrl, state: "open" }]);
+  return row.id;
+}
+function autofileDedupeKey(prNumber) {
+  return `autofile:pr-${prNumber}`;
 }
 async function listSuggestions(filter = {}) {
   const conditions = [];
@@ -10590,6 +10619,20 @@ var init_team_server = __esm({
         { to: "applied", actors: ["agent:agent-editor"], kinds: AGENT_EDITOR_APPLY_KINDS },
         // Out-of-band reconciliation. See the note on the `in_review` edge below.
         { to: "applied", actors: ["system"] },
+        // Abandoned-PR cleanup for ADR-008 step 2 (`dismissTicketsForClosedUnmergedPrs`).
+        // Without it an auto-filed ticket whose PR is closed unmerged sits at
+        // `pr_open` forever, and the autofile backstop turns into a litter machine.
+        //
+        // Two things bound this edge. It fires only when GitHub itself reports the
+        // PR closed with `merged !== true`, so it follows reality rather than
+        // deciding it. And its sole caller restricts the update to rows whose
+        // `dedupe_key` starts with `autofile:pr-`, so it can only ever retire
+        // tickets the autofile pass created, never one an agent or the owner filed.
+        //
+        // This is not a gate weakening: `dismissed` is terminal and ships nothing.
+        // The worst case is a closed work item, not a bad deploy, and the PR being
+        // closed unmerged is what makes that the right outcome.
+        { to: "dismissed", actors: ["system"] },
         OWNER_DISMISS
       ],
       in_review: [
@@ -12397,10 +12440,10 @@ async function logVideoCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql20 } = await import("drizzle-orm");
+  const { sql: sql21 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql20`SELECT * FROM api_token_daily
+    sql21`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -12408,11 +12451,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql20 } = await import("drizzle-orm");
+  const { sql: sql21 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql20`
+    sql21`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -20239,8 +20282,8 @@ async function followWithCookies(startUrl, maxHops = 12) {
     const getSetCookie = res.headers.getSetCookie;
     for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
       const pair = sc.split(";")[0] ?? "";
-      const eq30 = pair.indexOf("=");
-      if (eq30 > 0) jar.set(pair.slice(0, eq30).trim(), pair.slice(eq30 + 1).trim());
+      const eq31 = pair.indexOf("=");
+      if (eq31 > 0) jar.set(pair.slice(0, eq31).trim(), pair.slice(eq31 + 1).trim());
     }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
@@ -22348,8 +22391,8 @@ async function recentlyPinged(urls) {
   if (urls.length === 0) return /* @__PURE__ */ new Set();
   try {
     const { neon: neon6 } = await import("@neondatabase/serverless");
-    const sql20 = neon6(process.env["DATABASE_URL"]);
-    const rows = await sql20`
+    const sql21 = neon6(process.env["DATABASE_URL"]);
+    const rows = await sql21`
       SELECT url FROM indexnow_pings
       WHERE url = ANY(${urls}::text[])
         AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')
@@ -22363,8 +22406,8 @@ async function recentlyPinged(urls) {
 async function recordPushed(urls, batchId, statusCode) {
   if (urls.length === 0) return;
   const { neon: neon6 } = await import("@neondatabase/serverless");
-  const sql20 = neon6(process.env["DATABASE_URL"]);
-  await sql20`
+  const sql21 = neon6(process.env["DATABASE_URL"]);
+  await sql21`
     INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
     SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
     FROM unnest(${urls}::text[]) AS t(u)
@@ -26558,8 +26601,8 @@ function stateFor(ps, p, taxonomy) {
 async function maybeActivateGatedDeal(jobId, gatesDealId) {
   try {
     const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq30 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq30(dealHistory2.id, gatesDealId)).limit(1);
+    const { eq: eq31 } = await import("drizzle-orm");
+    const rows = await db.select().from(dealHistory2).where(eq31(dealHistory2.id, gatesDealId)).limit(1);
     const deal = rows[0];
     if (!deal) {
       console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
@@ -28273,6 +28316,99 @@ mutation MarkReady($id: ID!) {
   }
 });
 
+// app/lib/release-ticket-autofile.server.ts
+var release_ticket_autofile_server_exports = {};
+__export(release_ticket_autofile_server_exports, {
+  AUTOFILE_DEDUPE_PREFIX: () => AUTOFILE_DEDUPE_PREFIX,
+  autoFileTicketForPr: () => autoFileTicketForPr,
+  autofileDedupeKey: () => autofileDedupeKey,
+  dismissTicketsForClosedUnmergedPrs: () => dismissTicketsForClosedUnmergedPrs,
+  prNumberFromAutofileKey: () => prNumberFromAutofileKey
+});
+import { and as and8, eq as eq23, like as like2, sql as sql16 } from "drizzle-orm";
+async function autoFileTicketForPr(pr, dryRun = false) {
+  if (dryRun) {
+    console.log(`${LOG} [dry-run] would file a ticket for PR #${pr.number} (${pr.headRef})`);
+    return null;
+  }
+  try {
+    const ticketId = await fileTicketForOpenPr({
+      prNumber: pr.number,
+      prUrl: pr.htmlUrl,
+      prTitle: pr.title,
+      headRef: pr.headRef
+    });
+    if (ticketId === 0) {
+      return null;
+    }
+    console.log(
+      `${LOG} filed ticket #${ticketId} at pr_open for PR #${pr.number} (${pr.headRef}), awaiting QA`
+    );
+    return { prNumber: pr.number, ticketId, created: true };
+  } catch (err2) {
+    console.warn(`${LOG} could not file a ticket for PR #${pr.number}`, err2);
+    return null;
+  }
+}
+async function dismissTicketsForClosedUnmergedPrs(dryRun = false) {
+  const out = { checked: 0, dismissed: 0, errors: [] };
+  let rows = [];
+  try {
+    rows = await db.select({ id: homepageTeamSuggestions.id, dedupeKey: homepageTeamSuggestions.dedupeKey }).from(homepageTeamSuggestions).where(and8(
+      eq23(homepageTeamSuggestions.status, "pr_open"),
+      like2(homepageTeamSuggestions.dedupeKey, `${AUTOFILE_DEDUPE_PREFIX}%`)
+    )).orderBy(sql16`${homepageTeamSuggestions.id} ASC`).limit(50);
+  } catch (err2) {
+    out.errors.push(`cannot list auto-filed tickets: ${String(err2)}`);
+    return out;
+  }
+  for (const row of rows) {
+    const prNumber = prNumberFromAutofileKey(row.dedupeKey);
+    if (prNumber === null) continue;
+    out.checked += 1;
+    const res = await getPullRequest(prNumber, "release-engine");
+    if (!res.ok) {
+      out.errors.push(`PR #${prNumber}: ${res.error}`);
+      continue;
+    }
+    if (res.data.state !== "closed") continue;
+    if (res.data.merged) continue;
+    if (dryRun) {
+      console.log(`${LOG} [dry-run] would dismiss ticket #${row.id} (PR #${prNumber} closed unmerged)`);
+      continue;
+    }
+    try {
+      await transitionSuggestion(row.id, "dismissed", "system", {
+        note: `PR #${prNumber} was closed without being merged, so this auto-filed ticket has no work left to track.`
+      });
+      out.dismissed += 1;
+      console.log(`${LOG} dismissed ticket #${row.id}, PR #${prNumber} closed unmerged`);
+    } catch (err2) {
+      out.errors.push(`ticket #${row.id}: ${String(err2)}`);
+    }
+  }
+  return out;
+}
+function prNumberFromAutofileKey(key) {
+  if (!key || !key.startsWith(AUTOFILE_DEDUPE_PREFIX)) return null;
+  const raw = key.slice(AUTOFILE_DEDUPE_PREFIX.length);
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+var LOG, AUTOFILE_DEDUPE_PREFIX;
+var init_release_ticket_autofile_server = __esm({
+  "app/lib/release-ticket-autofile.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_github_server();
+    init_team_server();
+    LOG = "[release-autofile]";
+    AUTOFILE_DEDUPE_PREFIX = "autofile:pr-";
+  }
+});
+
 // app/lib/ticket-out-of-band-sweep.server.ts
 var ticket_out_of_band_sweep_server_exports = {};
 __export(ticket_out_of_band_sweep_server_exports, {
@@ -28288,16 +28424,16 @@ __export(ticket_out_of_band_sweep_server_exports, {
   referencesTicketId: () => referencesTicketId,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and8, desc as desc2, eq as eq23, inArray as inArray10, lt as lt4, notExists, sql as sql16 } from "drizzle-orm";
+import { and as and9, desc as desc2, eq as eq24, inArray as inArray10, lt as lt4, notExists, sql as sql17 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
     ticketId: homepageTeamSuggestions.id,
     ref: suggestionLinks.ref,
     linkedAt: suggestionLinks.createdAt
-  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and8(
+  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq24(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and9(
     inArray10(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
-    eq23(suggestionLinks.kind, "pr"),
+    eq24(suggestionLinks.kind, "pr"),
     lt4(homepageTeamSuggestions.updatedAt, cutoff)
   )).orderBy(homepageTeamSuggestions.updatedAt, desc2(suggestionLinks.createdAt));
   const seen = /* @__PURE__ */ new Set();
@@ -28314,13 +28450,13 @@ async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
 }
 async function findStrandedLinklessTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const rows = await db.select({ ticketId: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and8(
+  const rows = await db.select({ ticketId: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and9(
     inArray10(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
     lt4(homepageTeamSuggestions.updatedAt, cutoff),
     notExists(
-      db.select({ one: sql16`1` }).from(suggestionLinks).where(and8(
-        eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
-        eq23(suggestionLinks.kind, "pr")
+      db.select({ one: sql17`1` }).from(suggestionLinks).where(and9(
+        eq24(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
+        eq24(suggestionLinks.kind, "pr")
       ))
     )
   )).orderBy(homepageTeamSuggestions.updatedAt).limit(limit);
@@ -28362,10 +28498,10 @@ async function findMergedPrForTicket(ticketId, context = "out-of-band-sweep") {
   return classifyTicketPrMatches(prs, ticketId);
 }
 async function markPrLinkMerged(ticketId, prRef) {
-  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and8(
-    eq23(suggestionLinks.suggestionId, ticketId),
-    eq23(suggestionLinks.kind, "pr"),
-    eq23(suggestionLinks.ref, prRef)
+  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and9(
+    eq24(suggestionLinks.suggestionId, ticketId),
+    eq24(suggestionLinks.kind, "pr"),
+    eq24(suggestionLinks.ref, prRef)
   ));
 }
 async function applyCandidateIfMerged(c, result) {
@@ -28382,7 +28518,7 @@ async function applyCandidateIfMerged(c, result) {
     });
     if (c.prRef) await markPrLinkMerged(c.ticketId, c.prRef);
     result.applied.push(c.ticketId);
-    console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`);
+    console.log(`${LOG2} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`);
   } catch (err2) {
     const msg = String(err2);
     if (msg.includes("409")) return;
@@ -28419,11 +28555,11 @@ async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
           result.errors.push(`ticket #${ticketId}: PR search failed: ${lookup.error}`);
           break;
         case "none":
-          console.log(`${LOG} ticket #${ticketId}: no merged PR references it, leaving as-is`);
+          console.log(`${LOG2} ticket #${ticketId}: no merged PR references it, leaving as-is`);
           break;
         case "ambiguous":
           console.log(
-            `${LOG} ticket #${ticketId}: ambiguous, ${lookup.prNumbers.length} merged PRs reference it (${lookup.prNumbers.map((n) => `#${n}`).join(", ")}), leaving as-is`
+            `${LOG2} ticket #${ticketId}: ambiguous, ${lookup.prNumbers.length} merged PRs reference it (${lookup.prNumbers.map((n) => `#${n}`).join(", ")}), leaving as-is`
           );
           break;
         case "match":
@@ -28436,14 +28572,14 @@ async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
 }
 async function countStrandedVerifiedTickets() {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const [row] = await db.select({ n: sql16`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and8(
+  const [row] = await db.select({ n: sql17`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq24(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and9(
     inArray10(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
-    eq23(suggestionLinks.kind, "pr"),
+    eq24(suggestionLinks.kind, "pr"),
     lt4(homepageTeamSuggestions.updatedAt, cutoff)
   ));
   return row?.n ?? 0;
 }
-var LOG, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES, SWEEPABLE_STATUSES, SEARCH_PER_PAGE;
+var LOG2, SWEEP_MAX_TICKETS, SWEEP_MIN_AGE_MINUTES, SWEEPABLE_STATUSES, SEARCH_PER_PAGE;
 var init_ticket_out_of_band_sweep_server = __esm({
   "app/lib/ticket-out-of-band-sweep.server.ts"() {
     "use strict";
@@ -28452,7 +28588,7 @@ var init_ticket_out_of_band_sweep_server = __esm({
     init_github_server();
     init_release_engine_server();
     init_team_server();
-    LOG = "[out-of-band-sweep]";
+    LOG2 = "[out-of-band-sweep]";
     SWEEP_MAX_TICKETS = 5;
     SWEEP_MIN_AGE_MINUTES = 60;
     SWEEPABLE_STATUSES = ["verified", "in_review", "pr_open"];
@@ -28466,9 +28602,9 @@ __export(settings_server_exports, {
   recentSettingChanges: () => recentSettingChanges,
   setPipelineSettingAudited: () => setPipelineSettingAudited
 });
-import { desc as desc3, eq as eq24, gte as gte3 } from "drizzle-orm";
+import { desc as desc3, eq as eq25, gte as gte3 } from "drizzle-orm";
 async function setPipelineSettingAudited(key, value, actor, source) {
-  const [existing] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq24(pipelineSettings.key, key)).limit(1);
+  const [existing] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq25(pipelineSettings.key, key)).limit(1);
   const oldValue = existing?.value ?? null;
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -28547,7 +28683,7 @@ __export(release_engine_server_exports, {
   summarizeSmoke: () => summarizeSmoke,
   utcDay: () => utcDay3
 });
-import { and as and9, desc as desc4, eq as eq25, sql as sql17 } from "drizzle-orm";
+import { and as and10, desc as desc4, eq as eq26, sql as sql18 } from "drizzle-orm";
 function utcDay3(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -28823,7 +28959,7 @@ async function listProductionDeployments(limit = 20) {
     `/v6/deployments?projectId=${encodeURIComponent(cfg.projectId)}&target=production&limit=${limit}${cfg.teamQs}`
   );
   if (!res.ok || !res.data) {
-    console.warn(`${LOG2} vercel deployments fetch failed: ${res.error}`);
+    console.warn(`${LOG3} vercel deployments fetch failed: ${res.error}`);
     return [];
   }
   return (res.data.deployments ?? []).map(toDeployment);
@@ -28894,27 +29030,27 @@ async function runSelfCheck(opts = {}) {
     await kvSet(KEYS.selfCheck, { ok: true, at: Date.now() }, 3600);
     return { ok: true, problems: [] };
   }
-  console.error(`${LOG2} CONFIG ERROR, refusing to run:
+  console.error(`${LOG3} CONFIG ERROR, refusing to run:
   - ${problems.join("\n  - ")}`);
   return { ok: false, problems };
 }
 async function resolveTicketForPr(pr) {
-  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
-    eq25(suggestionLinks.kind, "pr"),
-    sql17`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
+  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and10(
+    eq26(suggestionLinks.kind, "pr"),
+    sql18`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
   const match = direct.find((l) => prNumberFromRef(l.ref) === pr.number);
   if (match) return loadTicketFacts(match.suggestionId);
   const titleId = parseTicketRefFromTitle(pr.title);
   if (titleId === null) return null;
-  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
-    eq25(suggestionLinks.kind, "pr"),
-    eq25(suggestionLinks.suggestionId, titleId)
+  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and10(
+    eq26(suggestionLinks.kind, "pr"),
+    eq26(suggestionLinks.suggestionId, titleId)
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
   const otherPr = claimed.find((l) => prNumberFromRef(l.ref) !== pr.number);
   if (otherPr) {
     console.warn(
-      `${LOG2} PR #${pr.number} title claims ticket #${titleId}, but that ticket links PR ${otherPr.ref}. Refusing the title reference.`
+      `${LOG3} PR #${pr.number} title claims ticket #${titleId}, but that ticket links PR ${otherPr.ref}. Refusing the title reference.`
     );
     return null;
   }
@@ -28926,22 +29062,22 @@ async function loadTicketFacts(id) {
     status: homepageTeamSuggestions.status,
     kind: homepageTeamSuggestions.kind,
     attemptCount: homepageTeamSuggestions.attemptCount
-  }).from(homepageTeamSuggestions).where(eq25(homepageTeamSuggestions.id, id)).limit(1);
+  }).from(homepageTeamSuggestions).where(eq26(homepageTeamSuggestions.id, id)).limit(1);
   if (!row) return null;
   return { id: row.id, status: row.status, kind: row.kind, attemptCount: row.attemptCount };
 }
 async function escalate(kind, dedupeKey, subject, html, dryRun) {
   if (dryRun) {
-    console.log(`${LOG2} [dry-run] would escalate (${kind}) ${dedupeKey}: ${subject}`);
+    console.log(`${LOG3} [dry-run] would escalate (${kind}) ${dedupeKey}: ${subject}`);
     return false;
   }
   const first = await kvSetNX(`${dedupeKey}:${kind}`, String(Date.now()), 7 * 24 * 3600);
   if (!first) {
-    console.log(`${LOG2} escalation (${kind}) already sent for ${dedupeKey}, not re-sending`);
+    console.log(`${LOG3} escalation (${kind}) already sent for ${dedupeKey}, not re-sending`);
     return false;
   }
   const res = await sendOwnerEmail(subject, html, { fromName: "xdipx release engine" });
-  if (!res.sent) console.warn(`${LOG2} escalation email not sent: ${res.error}`);
+  if (!res.sent) console.warn(`${LOG3} escalation email not sent: ${res.error}`);
   return res.sent;
 }
 function emailShell(title, rows, body) {
@@ -28973,7 +29109,7 @@ async function runReleaseEngineCycle(opts = {}) {
     return await cycleBody(dryRun);
   } catch (err2) {
     const msg = err2 instanceof Error ? err2.message : String(err2);
-    console.error(`${LOG2} cycle threw`, err2);
+    console.error(`${LOG3} cycle threw`, err2);
     return { ...result, ok: false, message: `cycle error: ${msg}`, errors: [msg] };
   } finally {
     const held = await kvGet(KEYS.lock);
@@ -29032,7 +29168,7 @@ async function cycleBody(dryRun) {
     const decision = evaluatePullRequest(facts);
     decisions.push(decision);
     console.log(
-      `${LOG2}${dryRun ? " [dry-run]" : ""} PR #${decision.prNumber} (${decision.headRef}) -> ${decision.action} [${decision.code}]: ${decision.reason}`
+      `${LOG3}${dryRun ? " [dry-run]" : ""} PR #${decision.prNumber} (${decision.headRef}) -> ${decision.action} [${decision.code}]: ${decision.reason}`
     );
     if (decision.action === "escalate-protected") {
       await handleProtected(summary, decision, dryRun);
@@ -29041,7 +29177,7 @@ async function cycleBody(dryRun) {
     if (decision.action === "undraft") {
       if (undrafted >= MAX_UNDRAFTS_PER_CYCLE) {
         console.warn(
-          `${LOG2} undraft cap reached (${MAX_UNDRAFTS_PER_CYCLE}/cycle), PR #${summary.number} waits for the next cycle`
+          `${LOG3} undraft cap reached (${MAX_UNDRAFTS_PER_CYCLE}/cycle), PR #${summary.number} waits for the next cycle`
         );
         continue;
       }
@@ -29055,6 +29191,10 @@ async function cycleBody(dryRun) {
     }
     if (decision.action === "bounce") {
       await bounceTicket(decision.ticketId, decision.lastError ?? decision.reason, summary, dryRun);
+      continue;
+    }
+    if (decision.code === "no-ticket") {
+      await autoFileTicketForPr(summary, dryRun);
       continue;
     }
     if (decision.action !== "merge") continue;
@@ -29081,16 +29221,16 @@ async function cycleBody(dryRun) {
 }
 async function undraftOne(pr, dryRun) {
   if (dryRun) {
-    console.log(`${LOG2} [dry-run] would mark PR #${pr.number} (${pr.headRef}) ready for review`);
+    console.log(`${LOG3} [dry-run] would mark PR #${pr.number} (${pr.headRef}) ready for review`);
     return null;
   }
   const ready = await markPullRequestReadyForReview(pr.nodeId, "release-engine");
   if (!ready.ok) {
     const problem = `could not mark PR #${pr.number} ready for review: ${ready.error}`;
-    console.warn(`${LOG2} ${problem}`);
+    console.warn(`${LOG3} ${problem}`);
     return problem;
   }
-  console.log(`${LOG2} marked PR #${pr.number} (${pr.headRef}) ready for review, it is gated on the next cycle`);
+  console.log(`${LOG3} marked PR #${pr.number} (${pr.headRef}) ready for review, it is gated on the next cycle`);
   return null;
 }
 async function gatherFacts(summary) {
@@ -29098,7 +29238,7 @@ async function gatherFacts(summary) {
   const pr = full.ok ? full.data : summary;
   const files = await listPullRequestFiles(pr.number, "release-engine");
   if (!files.ok) {
-    console.warn(`${LOG2} cannot read changed files for PR #${pr.number}, skipping: ${files.error}`);
+    console.warn(`${LOG3} cannot read changed files for PR #${pr.number}, skipping: ${files.error}`);
     return null;
   }
   const classification = classifyChangedFiles(files.data);
@@ -29107,7 +29247,7 @@ async function gatherFacts(summary) {
   );
   const checksRes = await getChecksForRef(pr.headSha, "release-engine");
   if (!checksRes.ok) {
-    console.warn(`${LOG2} cannot read checks for PR #${pr.number}, skipping: ${checksRes.error}`);
+    console.warn(`${LOG3} cannot read checks for PR #${pr.number}, skipping: ${checksRes.error}`);
     return null;
   }
   const checks = {};
@@ -29116,7 +29256,7 @@ async function gatherFacts(summary) {
   try {
     ticket = await resolveTicketForPr(pr);
   } catch (err2) {
-    console.warn(`${LOG2} ticket resolution failed for PR #${pr.number}`, err2);
+    console.warn(`${LOG3} ticket resolution failed for PR #${pr.number}`, err2);
   }
   return {
     number: pr.number,
@@ -29155,11 +29295,21 @@ async function maybeSweepOutOfBand() {
     const { sweepOutOfBandMerges: sweepOutOfBandMerges2 } = await Promise.resolve().then(() => (init_ticket_out_of_band_sweep_server(), ticket_out_of_band_sweep_server_exports));
     const swept = await sweepOutOfBandMerges2();
     if (swept.applied.length > 0) {
-      console.log(`${LOG2} out-of-band sweep applied tickets: ${swept.applied.join(", ")}`);
+      console.log(`${LOG3} out-of-band sweep applied tickets: ${swept.applied.join(", ")}`);
     }
-    for (const err2 of swept.errors) console.warn(`${LOG2} sweep: ${err2}`);
+    for (const err2 of swept.errors) console.warn(`${LOG3} sweep: ${err2}`);
   } catch (err2) {
-    console.error(`${LOG2} out-of-band sweep failed`, err2);
+    console.error(`${LOG3} out-of-band sweep failed`, err2);
+  }
+  try {
+    const { dismissTicketsForClosedUnmergedPrs: dismissTicketsForClosedUnmergedPrs2 } = await Promise.resolve().then(() => (init_release_ticket_autofile_server(), release_ticket_autofile_server_exports));
+    const closed = await dismissTicketsForClosedUnmergedPrs2();
+    if (closed.dismissed > 0) {
+      console.log(`${LOG3} abandoned-PR sweep dismissed ${closed.dismissed} auto-filed ticket(s)`);
+    }
+    for (const err2 of closed.errors) console.warn(`${LOG3} abandoned-PR sweep: ${err2}`);
+  } catch (err2) {
+    console.error(`${LOG3} abandoned-PR sweep failed`, err2);
   }
 }
 async function maybeSweepExhaustedTickets(dryRun) {
@@ -29169,7 +29319,7 @@ async function maybeSweepExhaustedTickets(dryRun) {
   await kvSet(KEYS.exhaustedHour, hour);
   let rows = [];
   try {
-    const res = await db.execute(sql17`
+    const res = await db.execute(sql18`
       SELECT id, attempt_count, last_error
         FROM homepage_team_suggestions
        WHERE status = 'in_progress'
@@ -29178,7 +29328,7 @@ async function maybeSweepExhaustedTickets(dryRun) {
        LIMIT 20`);
     rows = res.rows ?? [];
   } catch (err2) {
-    console.error(`${LOG2} exhausted-ticket sweep failed`, err2);
+    console.error(`${LOG3} exhausted-ticket sweep failed`, err2);
     return;
   }
   for (const row of rows) {
@@ -29194,7 +29344,7 @@ async function maybeSweepExhaustedTickets(dryRun) {
 async function handleProtected(pr, decision, dryRun) {
   if (!dryRun && !pr.labels.includes(NEEDS_OWNER_LABEL)) {
     const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], "release-engine");
-    if (!labelled.ok) console.warn(`${LOG2} could not label PR #${pr.number}: ${labelled.error}`);
+    if (!labelled.ok) console.warn(`${LOG3} could not label PR #${pr.number}: ${labelled.error}`);
   }
   if (!dryRun && decision.ticketId !== null) {
     await addTicketLink(decision.ticketId, {
@@ -29248,12 +29398,12 @@ Gate: ${decision.reason}`,
     context: "release-engine"
   });
   if (!merged.ok) {
-    console.error(`${LOG2} merge of PR #${pr.number} failed: ${merged.error}`);
+    console.error(`${LOG3} merge of PR #${pr.number} failed: ${merged.error}`);
     const attempts = await kvIncr(KEYS.mergeFail(pr.number));
     if (attempts >= MAX_MERGE_ATTEMPTS) {
       if (!pr.labels.includes(NEEDS_OWNER_LABEL)) {
         const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], "release-engine");
-        if (!labelled.ok) console.warn(`${LOG2} could not label PR #${pr.number}: ${labelled.error}`);
+        if (!labelled.ok) console.warn(`${LOG3} could not label PR #${pr.number}: ${labelled.error}`);
       }
       await escalate(
         "merge-attempts",
@@ -29293,7 +29443,7 @@ Gate: ${decision.reason}`,
     ticketId: decision.ticketId
   };
   await kvSet(KEYS.pending, pending);
-  console.log(`${LOG2} merged PR #${pr.number} as ${merged.data.sha}, awaiting production deploy`);
+  console.log(`${LOG3} merged PR #${pr.number} as ${merged.data.sha}, awaiting production deploy`);
   if (decision.ticketId !== null) {
     await addTicketLink(decision.ticketId, { kind: "commit", ref: merged.data.sha, state: "merged" });
   }
@@ -29322,7 +29472,7 @@ async function resolvePending(pending, dryRun) {
       });
     }
     const smoke = await runReleaseSmoke();
-    console.log(`${LOG2} smoke for PR #${pending.prNumber}: ${smoke.evidence}`);
+    console.log(`${LOG3} smoke for PR #${pending.prNumber}: ${smoke.evidence}`);
     if (smoke.ok) return applySuccess(pending, smoke, dryRun);
     return failAndRollback(pending, smoke.evidence, dryRun);
   }
@@ -29360,7 +29510,7 @@ async function applySuccess(pending, smoke, dryRun) {
       });
     } catch (err2) {
       const msg = err2 instanceof Response ? `${err2.status} ${await err2.text()}` : String(err2);
-      console.warn(`${LOG2} could not apply ticket #${pending.ticketId}: ${msg}`);
+      console.warn(`${LOG3} could not apply ticket #${pending.ticketId}: ${msg}`);
       errors.push(msg);
     }
   }
@@ -29379,7 +29529,7 @@ async function applySuccess(pending, smoke, dryRun) {
 async function failAndRollback(pending, evidence, dryRun) {
   const result = baseResult(dryRun);
   const errors = [];
-  console.error(`${LOG2} release of PR #${pending.prNumber} FAILED: ${evidence}`);
+  console.error(`${LOG3} release of PR #${pending.prNumber} FAILED: ${evidence}`);
   if (dryRun) {
     return {
       ...result,
@@ -29462,7 +29612,7 @@ Production was already re-promoted to ${promotedTo}. This PR restores the tree f
 async function bounceTicket(ticketId, lastError, pr, dryRun) {
   if (ticketId === null) return;
   if (dryRun) {
-    console.log(`${LOG2} [dry-run] would bounce ticket #${ticketId}: ${lastError}`);
+    console.log(`${LOG3} [dry-run] would bounce ticket #${ticketId}: ${lastError}`);
     return;
   }
   let attemptCount = 0;
@@ -29474,7 +29624,7 @@ async function bounceTicket(ticketId, lastError, pr, dryRun) {
     attemptCount = row.attemptCount;
   } catch (err2) {
     const msg = err2 instanceof Response ? `${err2.status}` : String(err2);
-    console.warn(`${LOG2} could not bounce ticket #${ticketId} (${msg})`);
+    console.warn(`${LOG3} could not bounce ticket #${ticketId} (${msg})`);
     return;
   }
   if (!shouldBlockForAttempts(attemptCount)) return;
@@ -29487,7 +29637,7 @@ async function blockExhaustedTicket(ticketId, attemptCount, lastError) {
       lastError: lastError.slice(0, 2e3)
     });
   } catch (err2) {
-    console.warn(`${LOG2} could not block ticket #${ticketId}`, err2);
+    console.warn(`${LOG3} could not block ticket #${ticketId}`, err2);
   }
   const ticket = await getTicket(ticketId).catch(() => null);
   const recentErrors = (ticket?.links ?? []).filter((l) => l.kind === "note").slice(0, 3).map((l) => l.ref);
@@ -29518,7 +29668,7 @@ async function addTicketLink(ticketId, link2) {
       state: link2.state ? link2.state.slice(0, 16) : null
     });
   } catch (err2) {
-    console.warn(`${LOG2} could not add ${link2.kind} link to ticket #${ticketId}`, err2);
+    console.warn(`${LOG3} could not add ${link2.kind} link to ticket #${ticketId}`, err2);
   }
 }
 async function markPrLinksMerged(pending) {
@@ -29528,14 +29678,14 @@ async function markPrLinksState(pending, state) {
   if (pending.ticketId === null) return;
   try {
     await db.update(suggestionLinks).set({ state: state.slice(0, 16), updatedAt: /* @__PURE__ */ new Date() }).where(
-      and9(
-        eq25(suggestionLinks.suggestionId, pending.ticketId),
-        eq25(suggestionLinks.kind, "pr"),
-        eq25(suggestionLinks.ref, pending.prUrl)
+      and10(
+        eq26(suggestionLinks.suggestionId, pending.ticketId),
+        eq26(suggestionLinks.kind, "pr"),
+        eq26(suggestionLinks.ref, pending.prUrl)
       )
     );
   } catch (err2) {
-    console.warn(`${LOG2} could not update link state for ticket #${pending.ticketId}`, err2);
+    console.warn(`${LOG3} could not update link state for ticket #${pending.ticketId}`, err2);
   }
 }
 async function setReleaseEngineEnabled(value) {
@@ -29547,12 +29697,12 @@ async function setReleaseEngineEnabled(value) {
       "system",
       "release-engine:circuit-breaker"
     );
-    console.error(`${LOG2} circuit breaker: release_engine_enabled set to false`);
+    console.error(`${LOG3} circuit breaker: release_engine_enabled set to false`);
   } catch (err2) {
-    console.error(`${LOG2} could not flip release_engine_enabled off`, err2);
+    console.error(`${LOG3} could not flip release_engine_enabled off`, err2);
   }
 }
-var LOG2, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, MAX_UNDRAFTS_PER_CYCLE, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS, MAX_MERGE_ATTEMPTS;
+var LOG3, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, MAX_UNDRAFTS_PER_CYCLE, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS, MAX_MERGE_ATTEMPTS;
 var init_release_engine_server = __esm({
   "app/lib/release-engine.server.ts"() {
     "use strict";
@@ -29565,8 +29715,17 @@ var init_release_engine_server = __esm({
     init_kv_server();
     init_owner_alerts_server();
     init_team_server();
-    LOG2 = "[release-engine]";
-    AGENT_BRANCH_PREFIXES = ["agents/", "ticket/", "claude/", "phase1/", "tonight/"];
+    init_release_ticket_autofile_server();
+    LOG3 = "[release-engine]";
+    AGENT_BRANCH_PREFIXES = [
+      "agents/",
+      "ticket/",
+      "claude/",
+      "phase1/",
+      "tonight/",
+      "fix/",
+      "pm/"
+    ];
     REVERT_BRANCH_PREFIX = "revert/pr-";
     REQUIRED_CHECK = "check";
     ALLOWLIST_CHECK_NAMES = ["allowlist", "agent-allowlist"];
@@ -30382,10 +30541,10 @@ var init_avatar_script = __esm({
 });
 
 // app/lib/ivr-voice.server.ts
-import { eq as eq26 } from "drizzle-orm";
+import { eq as eq27 } from "drizzle-orm";
 async function getActiveIvrVoiceId() {
   try {
-    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq26(ivrVoices.active, true)).limit(1);
+    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq27(ivrVoices.active, true)).limit(1);
     if (rows[0]?.voiceId) return rows[0].voiceId;
   } catch (err2) {
     console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err2);
@@ -30417,7 +30576,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq27, and as and10, inArray as inArray11, desc as desc5, isNotNull, ne as ne3, sql as sql18 } from "drizzle-orm";
+import { eq as eq28, and as and11, inArray as inArray11, desc as desc5, isNotNull, ne as ne3, sql as sql19 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -30491,14 +30650,14 @@ async function advanceInflightVideoJobs(opts = {}) {
       if (outcome === "parked") result.parked++;
     } catch (err2) {
       console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err2);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.jobId, job.jobId));
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -30543,9 +30702,9 @@ async function frameReviewEnabled() {
   return v !== "false";
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
-  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and10(
-    sql18`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
-    eq27(videoJobs.presenter, presenter),
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and11(
+    sql19`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
+    eq28(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
     inArray11(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
@@ -30562,13 +30721,13 @@ async function advanceSceneFrame(job) {
     if (!reusableJob) {
       throw new Error("reuseFrameAssetId applies only to avatar/talking-head jobs");
     }
-    const [asset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, reuseId)).limit(1);
+    const [asset] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, reuseId)).limit(1);
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
-    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and10(
-      eq27(videoJobs.sceneFrameAssetId, reuseId),
-      eq27(videoJobs.presenter, job.presenter),
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and11(
+      eq28(videoJobs.sceneFrameAssetId, reuseId),
+      eq28(videoJobs.presenter, job.presenter),
       inArray11(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
@@ -30658,7 +30817,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -30743,7 +30902,7 @@ async function advanceClipAvatar(job, spec) {
     if ((Number(job.costUsd) + clipCost + ttsCost) * 100 > maxCents) {
       throw new Error(`Accrued + avatar render cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const frameBuf = await blobFetchToBuffer(frame.blobUrl);
     const imageUrl = await uploadToFalStorage(frameBuf, "image/jpeg", `frame-${job.jobId}.jpg`);
@@ -30837,7 +30996,7 @@ async function advanceLipsync(job) {
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq27(mediaAssets.videoJobId, jobRowId)).orderBy(desc5(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq28(mediaAssets.videoJobId, jobRowId)).orderBy(desc5(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
@@ -30885,7 +31044,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -30899,7 +31058,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq27(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq28(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -30911,29 +31070,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq28(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq28(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -30953,12 +31112,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq28(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -30985,11 +31144,11 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
 async function recordVideoMetrics(jobRowId, platform, metrics) {
   const submitted = Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== void 0));
   if (!Object.keys(submitted).length) return;
-  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq28(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const existing = (job.metricsJson ?? {})[platform] ?? {};
   const merged = { ...job.metricsJson ?? {}, [platform]: { ...existing, ...submitted } };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc5(videoJobs.createdAt)).limit(limit);
@@ -31165,7 +31324,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq28 } from "drizzle-orm";
+import { eq as eq29 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -31286,7 +31445,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq28(returns.id, row.id)).returning();
+    }).where(eq29(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err2) {
     console.error("[returns] db update threw", err2);
@@ -31294,7 +31453,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq28(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq29(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -31325,7 +31484,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq28(returns.id, row.id));
+  }).where(eq29(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -31334,13 +31493,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq28(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq29(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq28(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq29(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq28(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq29(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -31481,18 +31640,18 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and11, eq: eq30, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and12, eq: eq31, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and12(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq30(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq31(metaCapiFailures2.id, row.id));
         resolved++;
       } else if (result.skipped) {
-        await db2.update(metaCapiFailures2).set({ lastError: result.skipped }).where(eq30(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ lastError: result.skipped }).where(eq31(metaCapiFailures2.id, row.id));
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq30(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq31(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -31507,16 +31666,16 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and11, eq: eq30, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and12, eq: eq31, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and12(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
       if (result.ok) {
-        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq30(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq31(ga4PurchaseFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq30(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq31(ga4PurchaseFailures2.id, row.id));
       }
     }
     return resolved;
@@ -32140,7 +32299,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto3 from "node:crypto";
-import { eq as eq29, sql as sql19 } from "drizzle-orm";
+import { eq as eq30, sql as sql20 } from "drizzle-orm";
 var PURCHASE_SIGNAL_TIMEOUT_MS = 2500;
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
@@ -32258,7 +32417,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql19`${productCopurchase.count} + 1`,
+              count: sql20`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
@@ -32429,7 +32588,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq29(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq30(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];

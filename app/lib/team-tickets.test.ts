@@ -116,7 +116,11 @@ const ALLOWED_FOR_CODE_TICKET: Array<[TicketStatus, TicketStatus, TicketActor[]]
   ['in_progress', 'dismissed',   ['owner']],
   ['pr_open',     'in_review',   ['agent:qa-reviewer']],
   ['pr_open',     'applied',     ['system']],                       // out-of-band reconciliation
-  ['pr_open',     'dismissed',   ['owner']],
+  // ADR-008 step 2: the abandoned-PR sweep retires an auto-filed ticket whose
+  // PR was closed unmerged. `system` here is dismissTicketsForClosedUnmergedPrs
+  // and nothing else; it restricts itself to rows whose dedupe_key starts with
+  // `autofile:pr-`, which the matrix cannot express. Terminal and ships nothing.
+  ['pr_open',     'dismissed',   ['owner', 'system']],
   ['in_review',   'verified',    ['agent:qa-reviewer']],
   ['in_review',   'in_progress', ['agent:qa-reviewer']],            // FAIL bounce
   ['in_review',   'applied',     ['system']],                       // out-of-band reconciliation
