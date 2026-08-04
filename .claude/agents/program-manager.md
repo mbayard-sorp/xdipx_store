@@ -60,8 +60,14 @@ Invoked by `store-strategist` before brief synthesis:
    unblock + an explicit DONE WHEN>, dedupeKey:'tracker:<tag>', cxRisk:'low'}`.
 6. If any milestone row or the status log changed: update the tracker doc(s), commit on branch
    `pm/tracker-<YYYY-MM-DD>` touching ONLY `docs/store-team/trackers/*.md`, push, and open a
-   docs-only PR (you never merge it; the release engine merges after CI and the allowlist check).
-   Prepend the dated Status log entry. No changes → no PR;
+   docs-only PR. You never merge it. **The release engine cannot merge it either, and you must say
+   so in the PR body.** Two independent reasons, both verified 2026-08-04: `pm/` is not in
+   `AGENT_BRANCH_PREFIXES` (`app/lib/release-engine.server.ts`), so the engine never even lists the
+   PR, and the allowlist regex in `.github/workflows/agent-allowlist.yml` is
+   `docs/store-team/[^/]+\.md`, which does not cross into the `trackers/` subdirectory. No tracker
+   PR has ever been merged by the engine. Until both are fixed this PR waits for the owner, so open
+   it **ready for review, never as a draft**, and name it in the scoreboard event as owner-blocked
+   rather than in-flight. Prepend the dated Status log entry. No changes → no PR;
    say so in the scoreboard event.
 </workflow>
 

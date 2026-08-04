@@ -242,3 +242,74 @@ opportunistically after each incident rather than trying to make the QA verdict 
 
 See the option list (a)–(f) above; (a)+(e) are the shipped core, (c) is a convention layered on top,
 (b) is narrowed to one prefix, (d) and (f) are explicitly not built.
+
+---
+
+# Addendum, 2026-08-04: what five days of running taught us
+
+Written after the owner asked, again, "is the code release automation working? I see a backlog of
+PRs. I don't want to be the bottleneck." Steps 2, 3 and 4 above were still unshipped, having waited
+five days for an owner decision that was never explicitly asked for as a decision. That delay is
+itself the finding: **the fix for the owner being a bottleneck was blocked on the owner.** If nothing
+else in this addendum is acted on, ask the question as a yes-or-no next time.
+
+## The engine is working. Measured, not assumed.
+
+Between 22:30 UTC 2026-08-03 and 01:31 UTC 2026-08-04 the engine merged seven PRs autonomously, one
+every 30 minutes, with no owner involvement. `release_engine_enabled` is on and the merge lane is
+healthy. The perceived backlog was three unrelated things read as one list. See
+`operating-system.md` §10 for the drain-rate arithmetic, which is now written down so this question
+has a standing answer.
+
+## Three findings this ADR did not anticipate
+
+**Finding A: the silent branch-prefix drop is worse than the ticket-less-PR problem.** ADR-008 treats
+prefix ineligibility as a merge problem to be solved by widening the list. It is first an
+*observability* problem. `listOpenPullRequests` filters by prefix before building any
+`PullRequestFacts`, so an ineligible PR produces no label, no email, no decision-log line and no
+digest row. Protected-path PRs escalate loudly and ticket-less PRs at least log; this bucket is
+silent everywhere simultaneously. Silence is indistinguishable from "the automation is broken", which
+is exactly the reading the owner arrived at. **Fix the signal before widening the list.** A PR the
+engine has decided not to touch should say so somewhere the owner reads.
+
+**Finding B: the program-manager tracker lane has never worked, and two playbooks said it did.**
+`pm/tracker-<date>` is not an eligible prefix, and independently the allowlist regex
+`docs/store-team/[^/]+\.md` does not cross into the `trackers/` subdirectory, so the lane is dead on
+two counts. Zero tracker PRs have ever merged. `routine-weekly-strategy.md` and `program-manager.md`
+both asserted the release engine merged them; both were corrected 2026-08-04. This is the failure
+mode the operating-system honesty rule exists to prevent, reappearing in playbooks rather than in
+that document. Worth noting what it cost: the tracker is how multi-week program status reaches the
+owner, so the one surface that reports whether deferred scope is landing could not update itself.
+
+**Finding C: R-QA's cadence does not match R-DEV's.** R-DEV runs at 14:00 and 20:00 UTC, R-QA only at
+15:30. A `code` ticket cannot reach `verified` without QA, so the entire 20:00 dev pass waits about
+19 hours. Pass two structurally cannot land same-day, and no gate is doing this, it is just a gap
+between two cron expressions. This is the cheapest latency win available and it touches no protected
+path: it is a trigger schedule, not code.
+
+## What changed in the recommendation
+
+**Step 2 (autofile) is still right, but size the claim down.** Since 2026-07-29, auto-approve and
+`suggestion_apply_enabled` are on for all five teams and R-DEV self-claims `code` tickets onto
+`ticket/<id>` branches, so more agent output now arrives pre-ticketed than when the 58% figure was
+measured. The remaining gap is concentrated in the owner's own interactive `claude/*` sessions.
+Re-measure before quoting 58% again.
+
+**Step 4 changes shape.** Do not keep adding prefixes reactively one at a time. `pm/` is a second
+instance of a bucket this ADR explicitly declined to solve broadly, which means the pattern recurred
+and the reasoning for narrowing should be revisited. Add `pm/` and `fix/` for *visibility*, and treat
+undrafting as a separate, narrower decision: `pm/` and `claude/` are owner-attended lanes where a
+draft is plausibly deliberate work in progress, so leave them out of `autoReadyOnDraft`.
+
+## Explicitly not recommended
+
+**A fast lane that skips deploy and smoke for docs-only merges.** It would raise throughput and it is
+a real weakening of the smoke gate's one clean invariant, which is that it runs on every merge with
+no exceptions. That uniformity is itself a safety property. If the owner wants it, that is an
+attended decision with the tradeoff stated, not a throughput tweak.
+
+**Merging more than one PR per cycle, or shortening the cron.** Both increase production deploy
+frequency and consume the two-rollback circuit breaker faster. A burst of merges against a flaky
+smoke check would trip the breaker and disable the engine, which is the opposite of the goal.
+
+**Widening `PROTECTED_GLOBS`, in either direction.** Nothing here needs it.

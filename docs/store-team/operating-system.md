@@ -261,6 +261,61 @@ config, valve plumbing — all protected. Getting the owner out of the merge pat
 finite number of owner merges up front. That cost is one-time and correct; it is not the recurring
 tax, and it is not a reason to widen the protected list.
 
+## 10. How fast the engine actually drains, and why a queue is not a stall
+
+Measured 2026-08-04. Read this before concluding from a list of open PRs that anything is broken.
+
+**The engine merges one PR per cycle, not one per cron tick.** `runReleaseCycle` returns immediately
+after `mergeOne`, and the merged PR then occupies the `awaiting-deploy` phase across subsequent
+cycles until the production deploy is READY and post-deploy smoke passes. The cron is `*/10`, but a
+full merge plus deploy plus smoke costs about three cycles. **Observed steady-state throughput is one
+merge every 30 minutes, roughly 2 per hour**, confirmed by seven consecutive merges landing at 22:30,
+23:01, 23:30, 00:00, 00:30, 01:01 and 01:31 UTC.
+
+This is a deliberate design property, not a defect. Every merge, including a docs-only one, pays a
+full production deploy and smoke run, and merges are serialized so that a failing smoke check reverts
+exactly one change. Do not "fix" the queue by merging more per cycle or shortening the interval:
+both raise deploy frequency and burn the two-rollbacks-per-day circuit breaker
+(`ROLLBACK_CIRCUIT_LIMIT`) faster, which turns the engine off entirely.
+
+**What this means for the queue.** `agent-editor` opens its apply PRs in a burst, up to the 15-PR cap
+in its playbook, typically within a few minutes of each other. The engine drains them at 2 per hour
+against a daily cap of 12. **A burst of 8 PRs appearing at once and taking four hours to clear is the
+system working correctly.** Same-day landing is not a property the docs lane has ever had, and the
+apply cap and the drain rate were set independently of each other.
+
+### Three ways a PR can be stuck, and how loud each one is
+
+Ranked by how likely you are to find out. This asymmetry is the real reason a healthy engine can look
+broken.
+
+| Stuck because | Signal the owner gets |
+|---|---|
+| Protected path | `needs-owner` label, one email, a digest row. **Loud, correct.** |
+| No linked `verified` ticket | A `no-ticket` or `ticket-not-verified` line in the engine's per-cycle decision log. **Quiet, but discoverable.** |
+| **Ineligible branch prefix** | **Nothing at all.** |
+
+The third row is the one that matters. `listOpenPullRequests` filters by prefix before any
+`PullRequestFacts` object is built, so an ineligible PR is never evaluated, never labelled, never
+emailed, never logged by number, and never reaches the digest. It is invisible to every observability
+surface at once, and it can sit for a month without anything saying so. **Silence from the engine
+means "not looked at", never "looked at and fine".** Until this is fixed, an open PR on a prefix
+outside `AGENT_BRANCH_PREFIXES` plus `revert/pr-` is owner-only work whether or not anyone noticed.
+
+Verified instance: `pm/tracker-*`, the program-manager's weekly tracker PR. `pm/` is not an eligible
+prefix, and separately the allowlist regex `docs/store-team/[^/]+\.md` does not cross into
+`docs/store-team/trackers/`. **No tracker PR has ever been merged by the engine.** Both playbooks
+claimed otherwise until 2026-08-04.
+
+### The QA cadence asymmetry
+
+R-DEV runs twice a day, 14:00 and 20:00 UTC. R-QA runs once, at 15:30 UTC. A `kind:'code'` ticket
+cannot reach `verified` without a QA pass, so **every PR from the 20:00 dev pass waits about 19 hours
+for review**, while the 14:00 pass gets reviewed within 90 minutes. Pass two structurally cannot land
+same-day. Verified instance: PR #477 opened 20:25 UTC on 2026-08-03, CI green on the required `check`
+job, and could not be looked at until 15:30 UTC the next day. This is a scheduling gap, not a gate
+doing its job.
+
 ## A note on owner email, 2026-07-28
 
 Every alert in this document routes through `sendOwnerEmail`, and until 2026-07-28 not one had
