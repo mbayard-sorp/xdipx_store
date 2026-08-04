@@ -67,6 +67,10 @@ import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { KV_KEYS, kvDel, kvGet, kvIncr, kvSet, kvSetNX } from '~/lib/kv.server'
 import { escapeHtml, sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { getTicket, transitionSuggestion, type TicketStatus } from '~/lib/team.server'
+// One-directional: the autofile module imports team.server and github.server,
+// never this file, so there is no cycle. Keeping the tunable half of ADR-008
+// step 2 out of this protected file is the point (see that module's header).
+import { autoFileTicketForPr } from '~/lib/release-ticket-autofile.server'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -82,8 +86,28 @@ const LOG = '[release-engine]'
  * outside agent-editor's docs allowlist. Code fixes from R-DEV live on
  * `ticket/<id>` so they are gated by CI plus a QA-verified ticket instead of by
  * a docs allowlist that was never written for them. See `requiresAllowlistCheck`.
+ *
+ * `fix/` and `pm/` were added by ADR-008 step 4 (2026-08-04). This widens what
+ * the engine LOOKS AT, and nothing else: every gate downstream is unchanged, so
+ * a PR on either prefix still needs green CI, a clean protected-path
+ * classification, and a QA-verified ticket before it can merge.
+ *
+ * The reason to widen is not throughput, it is silence. `listOpenPullRequests`
+ * filters on these prefixes before a `PullRequestFacts` object is built, so a PR
+ * outside them is never evaluated, never labelled, never logged by number, and
+ * never reaches the owner digest. A protected-path PR escalates loudly and a
+ * ticket-less PR at least logs; an ineligible prefix is invisible to every
+ * observability surface at once. `pm/tracker-<date>` proved the cost: the
+ * program-manager's weekly PR was documented in two playbooks as "merged by the
+ * release engine", and no tracker PR had ever merged.
+ *
+ * Note what is NOT here. Adding a prefix to this list does not add it to
+ * `autoReadyOnDraft`, and must not: see that function for why an owner-attended
+ * lane keeps its drafts.
  */
-export const AGENT_BRANCH_PREFIXES: readonly string[] = ['agents/', 'ticket/', 'claude/', 'phase1/', 'tonight/']
+export const AGENT_BRANCH_PREFIXES: readonly string[] = [
+  'agents/', 'ticket/', 'claude/', 'phase1/', 'tonight/', 'fix/', 'pm/',
+]
 
 /** Revert branches the engine opens for itself. */
 export const REVERT_BRANCH_PREFIX = 'revert/pr-'
@@ -1104,6 +1128,17 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
       await bounceTicket(decision.ticketId, decision.lastError ?? decision.reason, summary, dryRun)
       continue
     }
+    // ADR-008 step 2. The single enforcement point for autofile: by the time a
+    // decision reads `no-ticket`, every condition the ADR listed as a skip has
+    // already been checked by `evaluatePullRequest` above (protected path,
+    // draft, needs-owner, the docs carve-out, an existing ticket, red CI). See
+    // the table in release-ticket-autofile.server.ts. Filing here does not merge
+    // anything now: the ticket lands at `pr_open`, QA reviews it, and the engine
+    // reconsiders the PR on a later cycle once it is `verified`.
+    if (decision.code === 'no-ticket') {
+      await autoFileTicketForPr(summary, dryRun)
+      continue
+    }
     if (decision.action !== 'merge') continue
 
     // ONE merge per cycle, and in dry-run zero.
@@ -1243,6 +1278,21 @@ async function maybeSweepOutOfBand(): Promise<void> {
   } catch (err) {
     // Reconciliation is a bookkeeping nicety; never let it stop a release.
     console.error(`${LOG} out-of-band sweep failed`, err)
+  }
+
+  // ADR-008 step 2's companion. `sweepOutOfBandMerges` above recognises work
+  // that shipped; this recognises work that was abandoned. Same hourly cadence,
+  // same isolation: an auto-filed ticket left parked at `pr_open` is untidy, not
+  // urgent, and must never cost a merge.
+  try {
+    const { dismissTicketsForClosedUnmergedPrs } = await import('~/lib/release-ticket-autofile.server')
+    const closed = await dismissTicketsForClosedUnmergedPrs()
+    if (closed.dismissed > 0) {
+      console.log(`${LOG} abandoned-PR sweep dismissed ${closed.dismissed} auto-filed ticket(s)`)
+    }
+    for (const err of closed.errors) console.warn(`${LOG} abandoned-PR sweep: ${err}`)
+  } catch (err) {
+    console.error(`${LOG} abandoned-PR sweep failed`, err)
   }
 }
 

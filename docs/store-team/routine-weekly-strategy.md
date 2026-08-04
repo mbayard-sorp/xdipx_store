@@ -104,8 +104,10 @@ curl -s -X POST "$BASE_URL/api/team/event" \
    on the bus), files a suggestion **only when a milestone genuinely needs work done** and then in
    an executable kind (`code` for R-DEV, `instructions` for agent-editor, **never** `process`) with
    `dedupeKey:'tracker:<milestone-tag>'` so a re-file is a no-op, opens a docs-only tracker PR
-   (`pm/tracker-<date>`, merged by the release engine after CI, never by the PM) when rows
-   changed, and hands the strategist a
+   (`pm/tracker-<date>`, never merged by the PM, and **not merged by the release engine either**:
+   the `pm/` prefix is not engine-eligible and the allowlist does not cover
+   `docs/store-team/trackers/`, so the PR waits for the owner. See `program-manager.md` step 6)
+   when rows changed, and hands the strategist a
    **Program Status** section (overall RAG + top risks + owner asks per program) to include
    verbatim in the brief. It also verifies **routine coverage**, and the scope is *derived from
    `routine-schedule.md`, never enumerated here*:

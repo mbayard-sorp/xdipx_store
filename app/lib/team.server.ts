@@ -615,6 +615,83 @@ export async function createSuggestionDetailed(
   return { id: live?.id ?? 0, deduped: !!live }
 }
 
+/**
+ * ADR-008 step 2. File a ticket for a PR that already exists and carries none.
+ *
+ * The release engine refuses to merge an eligible PR without a linked ticket in
+ * status `verified`. Work born in an owner-attended session never touches the
+ * bus, so it can never acquire that ticket, and the owner merges it by hand
+ * forever. This is the backstop that gives such a PR a bus row so QA can review
+ * it and the engine can then merge it.
+ *
+ * Deliberately NOT a `transitionSuggestion` call: there is no prior status to
+ * transition from. It is a raw insert at `pr_open`, which is the literal truth
+ * (a PR is open, waiting on QA). Routing it through `proposed → approved →
+ * in_progress` would be theatre, since the work is already done and there is no
+ * claim to make.
+ *
+ * This writes no new capability into the merge path. The row lands at `pr_open`,
+ * and every gate downstream is unchanged: QA still has to verify it, the
+ * protected-path classifier still runs first, CI still has to be green. All it
+ * removes is the state where a PR is structurally unreviewable.
+ *
+ * Idempotency comes from `dedupeKey`, not from a GitHub label: the partial-
+ * unique index from migration 070 covers rows whose status is not applied or
+ * dismissed, so a second call for the same PR is swallowed by
+ * `onConflictDoNothing` while the first ticket is still live. That also means a
+ * ticket the owner dismisses will be re-filed if the PR is still open and still
+ * ticket-less, which is correct: dismissing the ticket does not close the PR.
+ *
+ * Returns the new ticket id, or 0 when the insert was deduped.
+ */
+export async function fileTicketForOpenPr(input: {
+  prNumber: number
+  prUrl: string
+  prTitle: string
+  headRef: string
+}): Promise<number> {
+  const [row] = await db
+    .insert(homepageTeamSuggestions)
+    .values({
+      team:       'strategy',
+      category:   'other',
+      kind:       'code',
+      // The PR title is opaque text here, never executed, and rendered through
+      // escapeHtml downstream like every other suggestion body.
+      suggestion:
+        `Auto-filed for PR #${input.prNumber} (${input.headRef}), which had no linked ticket. ` +
+        `Title: ${input.prTitle}\n\n` +
+        `The work is already done and the PR is open. QA should review the diff and the ` +
+        `rendered preview as normal, then verify or bounce. DONE WHEN: QA has recorded a ` +
+        `verdict on ${input.prUrl}.`,
+      status:     'pr_open',
+      // `auto` matches how the auto-approve valves record a non-human decision.
+      decidedBy:  'auto',
+      // The owner is the only actor who can move a bounced ticket back to
+      // `pr_open` after pushing a fix, and this work came from his session.
+      assignee:   'owner',
+      applyRef:   input.prUrl,
+      priority:   3,
+      dedupeKey:  autofileDedupeKey(input.prNumber),
+    })
+    .onConflictDoNothing()
+    .returning({ id: homepageTeamSuggestions.id })
+
+  if (!row?.id) return 0
+
+  // The link table is what `resolveTicketForPr` reads first and trusts most, so
+  // the engine finds this ticket on its next cycle without going near the title
+  // parser.
+  await addTicketLinks(row.id, [{ kind: 'pr', ref: input.prUrl, state: 'open' }])
+  return row.id
+}
+
+/** Stable dedupe key for an auto-filed ticket. Also the marker that lets the
+ *  abandoned-PR sweep restrict itself to rows it created. */
+export function autofileDedupeKey(prNumber: number): string {
+  return `autofile:pr-${prNumber}`
+}
+
 export interface SuggestionListFilter {
   team?: TeamId | undefined
   targetTeam?: TeamId | undefined
@@ -982,6 +1059,20 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     { to: 'applied', actors: ['agent:agent-editor'], kinds: AGENT_EDITOR_APPLY_KINDS },
     // Out-of-band reconciliation. See the note on the `in_review` edge below.
     { to: 'applied', actors: ['system'] },
+    // Abandoned-PR cleanup for ADR-008 step 2 (`dismissTicketsForClosedUnmergedPrs`).
+    // Without it an auto-filed ticket whose PR is closed unmerged sits at
+    // `pr_open` forever, and the autofile backstop turns into a litter machine.
+    //
+    // Two things bound this edge. It fires only when GitHub itself reports the
+    // PR closed with `merged !== true`, so it follows reality rather than
+    // deciding it. And its sole caller restricts the update to rows whose
+    // `dedupe_key` starts with `autofile:pr-`, so it can only ever retire
+    // tickets the autofile pass created, never one an agent or the owner filed.
+    //
+    // This is not a gate weakening: `dismissed` is terminal and ships nothing.
+    // The worst case is a closed work item, not a bad deploy, and the PR being
+    // closed unmerged is what makes that the right outcome.
+    { to: 'dismissed', actors: ['system'] },
     OWNER_DISMISS,
   ],
   in_review: [

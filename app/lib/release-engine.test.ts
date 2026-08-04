@@ -38,6 +38,13 @@ vi.mock('~/lib/owner-alerts.server', () => ({
   escapeHtml: (s: string) => s,
 }))
 vi.mock('~/lib/team.server', () => ({ transitionSuggestion: vi.fn(), getTicket: vi.fn() }))
+// ADR-008 step 2. Mocked here because this file is about the engine's decision
+// logic; the autofile module's own behaviour is tested in
+// release-ticket-autofile.test.ts.
+vi.mock('~/lib/release-ticket-autofile.server', () => ({
+  autoFileTicketForPr: vi.fn(async () => null),
+  dismissTicketsForClosedUnmergedPrs: vi.fn(async () => ({ checked: 0, dismissed: 0, errors: [] })),
+}))
 
 import { classifyChangedFiles } from '~/lib/github.server'
 import {
@@ -104,11 +111,26 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
 
 describe('branch predicates', () => {
   it('recognises every agent branch prefix and nothing else', () => {
-    for (const ref of ['agents/suggestion-1', 'ticket/43', 'claude/foo', 'phase1/release-engine', 'tonight/hotfix']) {
+    for (const ref of [
+      'agents/suggestion-1', 'ticket/43', 'claude/foo', 'phase1/release-engine', 'tonight/hotfix',
+      // ADR-008 step 4, 2026-08-04.
+      'fix/pricing-audit-log-prune', 'pm/tracker-2026-08-03',
+    ]) {
       expect(isAgentBranch(ref)).toBe(true)
     }
-    for (const ref of ['main', 'feature/x', 'agent/typo', 'ticketing/x', 'renovate/deps']) {
+    for (const ref of ['main', 'feature/x', 'agent/typo', 'ticketing/x', 'renovate/deps', 'fixture/x', 'pmx/y']) {
       expect(isAgentBranch(ref)).toBe(false)
+    }
+  })
+
+  // The whole point of ADR-008 step 4 is visibility, not permission. A widened
+  // prefix must not pick up the docs carve-out, which would let a tracker PR
+  // merge with no ticket and no QA.
+  it('widens what the engine looks at without widening any gate', () => {
+    for (const ref of ['fix/pricing-audit-log-prune', 'pm/tracker-2026-08-03']) {
+      expect(isEligibleBranch(ref)).toBe(true)
+      expect(requiresAllowlistCheck(ref)).toBe(false)
+      expect(autoReadyOnDraft(ref)).toBe(false)
     }
   })
 
@@ -140,7 +162,12 @@ describe('branch predicates', () => {
     for (const ref of ['agents/suggestion-1', 'ticket/43']) {
       expect(autoReadyOnDraft(ref)).toBe(true)
     }
-    for (const ref of ['claude/foo', 'phase1/x', 'tonight/hotfix', 'revert/pr-9', 'main', 'agent/typo']) {
+    for (const ref of [
+      'claude/foo', 'phase1/x', 'tonight/hotfix', 'revert/pr-9', 'main', 'agent/typo',
+      // Added to AGENT_BRANCH_PREFIXES by ADR-008 step 4 and deliberately NOT
+      // here: both are owner-attended lanes where a draft is plausibly WIP.
+      'fix/wip', 'pm/tracker-2026-08-03',
+    ]) {
       expect(autoReadyOnDraft(ref)).toBe(false)
     }
   })
