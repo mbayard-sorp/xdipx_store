@@ -8,6 +8,14 @@ import { panelDataAttr, panelInteractionClasses, surfaceStyle } from './surfaces
 const MONO = { fontFamily: 'var(--font-mono)' } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
 
+// The art zone is a silhouette at w-[38%] mobile / w-[34%] from md: ~61px CSS
+// at 412px, never more than ~214px on desktop. The hero defaults would fetch a
+// 768w image for it. This is decorative macro art where colour and shape are
+// all that read, so a small ladder topping out at 280w is plenty, and the sizes
+// stays deliberately conservative to hold the byte budget.
+const ART_WIDTHS = [120, 160, 200, 280]
+const ART_SIZES = '(min-width: 768px) 11vw, 17vw'
+
 /**
  * The deck's utilities (Notebook, Sale): one line, and either a trailing figure
  * or mark or a full-bleed art zone.
@@ -89,6 +97,8 @@ export function PanelSmallRow({
                     alt={panel.imageAlt ?? ''}
                     width={320}
                     height={320}
+                    sizes={ART_SIZES}
+                    widths={ART_WIDTHS}
                     className="absolute inset-0 h-full w-full object-cover"
                   />
                 </span>

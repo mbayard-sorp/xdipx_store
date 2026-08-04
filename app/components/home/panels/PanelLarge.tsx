@@ -9,6 +9,13 @@ const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 450 } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
 
+// The art zone is w-[42%] of a large panel: ~42vw of the viewport at 1-up
+// (below sm) and ~21vw at 2-up (from sm). Left on the hero defaults it would
+// fetch a 768w image for a box that is ~268px at 412px and ~277px at desktop.
+// A real sizes plus a ladder that tops out at 640w right-sizes the request.
+const ART_WIDTHS = [200, 280, 360, 480, 640]
+const ART_SIZES = '(min-width: 640px) 21vw, 42vw'
+
 /**
  * The deck's merchandising drivers (Discover, New): the two panels with room
  * for a kicker, a blurb, and richer photography.
@@ -116,6 +123,8 @@ export function PanelLargeRow({
                     alt={panel.imageAlt ?? ''}
                     width={480}
                     height={480}
+                    sizes={ART_SIZES}
+                    widths={ART_WIDTHS}
                     className="absolute inset-0 h-full w-full object-cover"
                   />
                 </div>
