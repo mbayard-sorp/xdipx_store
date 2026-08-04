@@ -5,6 +5,7 @@
 
 import {
   getProductsByTag,
+  getRecentProducts,
   getCollectionProducts,
   getProductsByHandles,
 } from '~/lib/shopify.server'
@@ -79,7 +80,7 @@ export function createRailGenState(excludeHandles: string[] = []): RailGenState 
  * Build a candidate pool for the deal. Tries (in order):
  *   1. Shopify tags `audience-*` / `mood-*` (only present if the sync writes them)
  *   2. The deal's `category` tag (e.g. tag:for-her, tag:couples) — these DO exist
- *   3. Vault products (`tag:deal-status-archived`) — broad evergreen pool
+ *   3. Recently-updated products — broad evergreen pool
  * Always returns something non-empty unless the catalog is truly empty.
  * Capped at ~60 products.
  */
@@ -110,11 +111,13 @@ export async function buildCandidatePool(deal: Deal, partner?: Deal): Promise<Ca
     }
   }
 
-  // Fallback: vault products. Vault is the largest known-good pool of products
-  // we've already curated past — perfect cross-sell candidates.
+  // Fallback: the broad catalog, newest first. This used to be the vault
+  // (`tag:deal-status-archived`), which only ever held products that had cycled
+  // through the retired daily-deal rotation — a pool that stops growing and
+  // eventually empties.
   if (pool.length < 8) {
-    const vault = await getProductsByTag('deal-status-archived', 40).catch(() => [])
-    for (const p of vault) {
+    const recent = await getRecentProducts(40).catch(() => [])
+    for (const p of recent) {
       if (seen.has(p.handle)) continue
       seen.add(p.handle)
       pool.push(toCandidate(p))

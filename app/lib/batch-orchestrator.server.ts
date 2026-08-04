@@ -662,11 +662,10 @@ async function advanceJob(job: BatchJobRow): Promise<AdvanceOutcome> {
       })
 
       if (pending.length === 0) {
-        // Gate: activate a gated deal if this job gates one.
-        if (job.gatesDealId) {
-          await maybeActivateGatedDeal(job.jobId, job.gatesDealId)
-        }
-
+        // `gatesDealId` used to trigger daily-deal activation here. Daily deals
+        // are retired; the column survives only as a job -> deal_history link
+        // shown on /admin/async-jobs. Imported products are published by the
+        // import-enrich cron, not from this path.
         const anyHardError = Object.values(runnerState).some(ps => ps.status === 'error')
         const finalStatus  = anyHardError ? 'failed' : 'done'
         await db
@@ -877,50 +876,6 @@ function stateFor(
     writes:       ps.writes as Partial<ProductWrites>,
     telemetry:    ps.telemetry as OrchestratorTelemetry,
     finished:     ps.finished,
-  }
-}
-
-// ─── Deal-gate helper ─────────────────────────────────────────────────────────
-
-/**
- * Called when a gated job reaches applying->done. Looks up the gated deal and
- * calls activateDeal if it is not already live. Goes through the same
- * activateDeal path so the double-activation guard (deal_status already 'live')
- * covers both the midnight cron and this poller path (spec E1).
- */
-async function maybeActivateGatedDeal(jobId: string, gatesDealId: number): Promise<void> {
-  try {
-    const { dealHistory } = await import('../../db/schema')
-    const { eq } = await import('drizzle-orm')
-    const rows = await db
-      .select()
-      .from(dealHistory)
-      .where(eq(dealHistory.id, gatesDealId))
-      .limit(1)
-
-    const deal = rows[0]
-    if (!deal) {
-      console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`)
-      return
-    }
-    if (deal.status === 'live') {
-      // Double-activation guard: already live (midnight cron beat us here). No-op.
-      return
-    }
-
-    const { activateDeal } = await import('~/lib/deal-rotator.server')
-    await activateDeal({
-      id:               deal.id,
-      shopifyProductId: deal.shopifyProductId,
-      sku:              deal.sku,
-      seoTitle:         deal.seoTitle,
-      dealPrice:        deal.dealPrice ?? null,
-      msrp:             deal.msrp     ?? null,
-      wholesaleCost:    deal.wholesaleCost ?? null,
-    })
-    console.log(`[batch-orchestrator] job ${jobId} gated deal ${gatesDealId} activated`)
-  } catch (err) {
-    console.error(`[batch-orchestrator] maybeActivateGatedDeal for job ${jobId} deal ${gatesDealId} failed:`, err)
   }
 }
 

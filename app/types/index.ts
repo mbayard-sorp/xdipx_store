@@ -258,8 +258,6 @@ export interface Deal {
   /** Phase 2 — multi-select. Empty array = unspecified. The legacy single-value
    *  `'both'` is now expressed as `['for-him', 'for-her']`. */
   category: Array<'for-him' | 'for-her' | 'couples'>
-  dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
-  dealDate: string
   qty: number
   accessoryProductIds: string[]
   metaDescription: string
@@ -371,14 +369,12 @@ export interface VaultDeal {
   id: string
   handle: string
   seoTitle: string
-  dealDate: string
   dealPrice: number
   msrp: number
   images: ProductImage[]
   brand: string
   /** Phase 2 — multi-select audience tags. Empty array = unspecified. */
   category: Array<'for-him' | 'for-her' | 'couples'>
-  dealStatus: 'draft' | 'scheduled' | 'live' | 'archived'
   qty: number
   defaultVariantId?:    string | null
   hasMultipleVariants?: boolean
@@ -431,8 +427,6 @@ export interface VaultDeal {
   gmcLabel4?:    string | null
   /** xdipx.deal_score — numeric 0-100 score used for custom_label_2 tier derivation */
   dealScore?: number | null
-  /** xdipx.is_daily_deal — true when this product is the active daily deal */
-  isDailyDeal?: boolean
 }
 
 // ─── Bundles ──────────────────────────────────────────────────────────────

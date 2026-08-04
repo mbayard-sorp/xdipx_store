@@ -185,8 +185,8 @@ function ProgressPhase({
         )}
         {job.status === 'done' && (
           <>
-            <Link to="/admin/queue" className="text-orange-600 text-sm font-medium hover:underline">
-              View in Queue →
+            <Link to="/admin/deals" className="text-orange-600 text-sm font-medium hover:underline">
+              View in Deals →
             </Link>
             <button
               onClick={onReset}

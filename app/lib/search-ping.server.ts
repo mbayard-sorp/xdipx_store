@@ -153,8 +153,8 @@ export async function submitIndexNow(
 
 /**
  * Original fire-and-forget entry point. Unchanged contract: takes paths,
- * returns void, never throws. Call sites in deal-rotator, api.revalidate.blog,
- * and api.webhooks.sanity-publish depend on exactly this shape.
+ * returns void, never throws. Call sites in api.revalidate.blog and
+ * api.webhooks.sanity-publish depend on exactly this shape.
  */
 export async function pingSearchEngines(paths: string[]): Promise<void> {
   try {

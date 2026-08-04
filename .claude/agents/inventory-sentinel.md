@@ -1,6 +1,6 @@
 ---
 name: inventory-sentinel
-description: Read-only catalog-wide inventory health watcher for xdipx. Sweeps Nalpac feed stock levels against Shopify availability and what the store is actually featuring, flags out-of-stock or thin-stock products sitting in hero/rail/featured slots, stale price drift, and low-stock bestsellers, and files targeted suggestions at the merchandising teams ("swap SKU X out of the hero rail"). Today only the single live deal SKU is watched by /cron/inventory-check; this agent covers the rest of the catalog. Runs as a sub-step of the weekly strategy routine under store-strategist's run.
+description: Read-only catalog-wide inventory health watcher for xdipx. Sweeps Nalpac feed stock levels against Shopify availability and what the store is actually featuring, flags out-of-stock or thin-stock products sitting in hero/rail/featured slots, stale price drift, and low-stock bestsellers, and files targeted suggestions at the merchandising teams ("swap SKU X out of the hero rail"). Nothing watches stock automatically since /cron/inventory-check was retired with daily deals; this agent covers the catalog. Runs as a sub-step of the weekly strategy routine under store-strategist's run.
 tools: Read, Bash, Grep, Glob
 model: sonnet
 color: sage

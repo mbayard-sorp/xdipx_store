@@ -5,11 +5,9 @@ import {
   gmcCustomLabel0,
   gmcCustomLabel1,
   gmcCustomLabel2,
-  gmcCustomLabel3,
   gmcCustomLabel4,
   mapAllowsAdvertisedDiscount,
   parseSpecValue,
-  salePriceEffectiveDate,
 } from '~/lib/gmc-metafields.server'
 import { cached } from '~/lib/kv.server'
 import type { VaultDeal } from '~/types'
@@ -108,11 +106,10 @@ function toEntry(d: VaultDeal): string {
     d.dealPrice < originalPriceNum &&
     mapAllowsAdvertisedDiscount(d.mapPrice, d.mapRestricted ?? false, originalPriceNum)
   ) {
+    // No <g:sale_price_effective_date>: it was derived from the xdipx.deal_date
+    // metafield, a daily-deal scheduling slot that is retired. A sale_price with
+    // no date range means "active now", which matches what checkout charges.
     salePriceTag = `\n      <g:sale_price>${fmtPrice(d.dealPrice)}</g:sale_price>`
-    const effDate = salePriceEffectiveDate(d.dealDate)
-    if (effDate) {
-      salePriceTag += `\n      <g:sale_price_effective_date>${effDate}</g:sale_price_effective_date>`
-    }
   }
 
   // GMC attribute fields -- only emit when present
@@ -126,7 +123,7 @@ function toEntry(d: VaultDeal): string {
   const label0 = opt(d.gmcLabel0) || gmcCustomLabel0(opt(d.productTypeDial) || null)
   const label1 = opt(d.gmcLabel1) || gmcCustomLabel1(d.audienceTags ?? [])
   const label2 = opt(d.gmcLabel2) || gmcCustomLabel2(d.dealScore ?? null)
-  const label3 = opt(d.gmcLabel3) || gmcCustomLabel3(d.isDailyDeal ?? false)
+  const label3 = opt(d.gmcLabel3)
   const label4 = opt(d.gmcLabel4) || gmcCustomLabel4(d.dealPrice)
 
   const colorVal    = opt(d.gmcColor)    || parseSpecValue(d.specifications ?? [], 'color')    || ''
