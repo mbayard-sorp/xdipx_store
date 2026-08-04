@@ -8,6 +8,14 @@ import { panelDataAttr, panelInteractionClasses, surfaceStyle } from './surfaces
 const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 450 } as const
 
+// Square tiles render ~178 CSS px wide at 375-412px (2-up) and ~307px from md
+// (4-up, deck capped at 1320px). Without an override OptimizedImage applies the
+// hero defaults (sizes 100vw/50vw, smallest rendition 480w), so a browser asks
+// the CDN for a 768w image for a box that never exceeds ~310px. A real sizes
+// plus a tile-scale ladder lets it pick a rendition sized to the box instead.
+const SQUARE_WIDTHS = [200, 260, 320, 400, 520]
+const SQUARE_SIZES = '(min-width: 768px) 23vw, 44vw'
+
 /**
  * The evergreen aisle doors: Pleasure / Play / Body / Wear.
  *
@@ -78,6 +86,8 @@ export function PanelSquareRow({
                     alt={tile.imageAlt ?? ''}
                     width={480}
                     height={480}
+                    sizes={SQUARE_SIZES}
+                    widths={SQUARE_WIDTHS}
                     className="absolute inset-0 h-full w-full object-cover"
                   />
                 </div>
