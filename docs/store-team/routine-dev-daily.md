@@ -105,6 +105,15 @@ and describe the obstacle precisely, not to route around it.
 
 ## Step 3 — Implement (per ticket)
 
+Before step 1, run a cheap staleness guard: grep the ticket's named files, flags, and symbols
+against current `main`. If the described artifact already exists (an overlapping merged PR already
+shipped it), transition the ticket to `blocked` as superseded, citing the PR, instead of
+implementing it. This turns a full read-analyze-build cycle into a 30-second check.
+
+```bash
+git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the ticket>" origin/main
+```
+
 1. Branch `ticket/<id>` from the default branch. One ticket, one branch, one PR. Never batch.
 
    The prefix matters. `agents/**` triggers the `agent-allowlist` workflow, which fails any PR
@@ -117,6 +126,12 @@ and describe the obstacle precisely, not to route around it.
    what information is missing.
 3. Make the smallest diff that does the job. No scope creep, no drive-by refactors, no style
    rewrites. If you disagree with the ticket, implement it faithfully and say so in the PR body.
+
+3b. **z-index fixes grep the whole repo first.** Before picking a new z-index value, grep every
+   fixed/sticky `z-[N]` usage across the codebase (`grep -rn "z-\[" app/components app/routes`) and
+   treat the z-index scale comment in `app/app.css` as the single source of truth. Update that
+   comment in the same commit as any z-index change.
+
 4. Verify locally, all three, and do not skip one because it "cannot be affected":
 
 ```bash
@@ -143,6 +158,12 @@ git add server/vercel-entry.mjs && git commit -m "chore: rebuild vercel entry ar
    `server/vercel-entry.mjs` is a real problem: name it in the PR body, do not blanket `git add .`.
    This one missing step bounced tickets #291 and #323 in the 2026-07-30 QA pass, and it is the
    single most common reason a technically-correct agent PR never reaches the engine.
+
+4c. **No preview/screenshot tool available? Source-geometry verification is the sanctioned
+   fallback.** For layout or visual changes, when no preview/screenshot tool is available, read the
+   exact pixel offsets, heights, z-index literals, and safe-area calc values in the source, and
+   reason about the resulting stack order by hand. State that fallback plainly in the PR body; it is
+   a documented pattern, not an improvised one.
 
 5. Open the PR against `main`, titled `agents: ticket #<id>: <summary>`. Body: what the ticket
    asked for, what you changed and why, the local verification output, and anything the reviewer
@@ -214,3 +235,6 @@ detectors, other agents, and scraped error text all feed the bus.
 - **All three local checks run before every PR**, and the results go in the PR body.
 - **Never flip a ticket `proposed → approved`.** That is the owner's or the valve's, never yours.
 - **Never write `pipeline_settings`.**
+- **Empathy review gate.** Any ticket or PR touching `app/lib/ai-agent/prompt.ts`,
+  `app/lib/sms-v2/templates/**`, `ivr/src/prompts.ts`, or customer-facing strings in the Twilio
+  routes requires an `emma-empathy-reviewer` PASS recorded on the ticket before the PR opens.

@@ -19,6 +19,9 @@ You build features in this React Router v7 framework-mode app. You write idiomat
 - **Coral is hero.** No purple. No orange. No reintroduced brand gradients. Flat coral or coral-on-cream.
 - **Fonts**: `font-display` (Archivo) for headlines/CTAs, `font-body` (Inter) for body.
 - **Brand motif**: ♥ in CTA labels and Emma asides ("I'll take it ♥").
+- **Empathy review gate.** Any ticket or PR touching `app/lib/ai-agent/prompt.ts`,
+  `app/lib/sms-v2/templates/**`, `ivr/src/prompts.ts`, or customer-facing strings in the Twilio
+  routes requires an `emma-empathy-reviewer` PASS recorded on the ticket before the PR opens.
 </critical_rules>
 
 <design_doctrine>
