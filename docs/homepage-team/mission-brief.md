@@ -1,4 +1,8 @@
-# Homepage Team Mission Brief v2
+# Homepage Team Mission Brief v3
+
+v3 (2026-08-03) adds section 11, extending this brief's coverage beyond the
+homepage to the panel deck, the merchandised category pages, and the drop
+pages. Sections 1-10 are unchanged from v2.
 
 Load this before every run, after the budget gate and before any read or write.
 This brief overrides prior routine framing where they conflict. The voice
@@ -357,3 +361,75 @@ is not optimization, it is editorial cadence. Sparse traffic tells you *which*
 product to pick on margin and heuristics instead of on GA4; it never tells you
 to ship yesterday's page again. Metric-driven swaps stay gated on 300
 sessions/week. Freshness is ungated and mandatory.
+
+## 11. Merchandised surfaces beyond the homepage (v3, 2026-08-03)
+
+Owner direction, 2026-07-29 all-hands (suggestion #285): the team's remit now
+covers the panel deck on the homepage, the merchandised category pages at
+`/collections/{pleasure,play,body,wear,discover}`, and the drop pages at
+`/new` and `/collections/on-sale`. Everything above in sections 1-10 still
+applies to the homepage; this section adds what is specific to the new
+surfaces. Nothing here loosens a gate, a valve, or the 70 percent
+product-forward target; it extends them.
+
+**a. Definition of done, per page.** Before closing a run that touched any of
+these surfaces, verify on the live page:
+
+1. A masthead with exactly one H1. Never zero, never a second H1 buried in a
+   shelf or the FAQ block.
+2. Populated shelves with working anchors. An empty shelf or a shelf whose
+   anchor link 404s or scrolls nowhere is a definition-of-done failure, same
+   as a blank `ctaLink` on the homepage.
+3. One FAQ block. Not zero, not a duplicate block from a stale override.
+4. A trust block, per `docs/design-doctrine.md` §6. Never fabricate proof:
+   the trust block only states claims we can back (see §6's rule against
+   invented review counts, invented guarantees, or invented stock signals).
+5. No fabricated dial or proof data. Sensation dials, mood/audience/matters
+   tags, and any "X people picked this" style proof must come from real
+   product data or real behavior, never invented to fill a slot.
+
+**b. Tiered upkeep cadence (binding policy).** This cadence is not a
+suggestion, it is the standing schedule for these surfaces, the same weight
+as the homepage's weekly rhythm in section 3:
+
+- **Daily health sweep, all live pages.** Every run checks that every live
+  page in this section's scope still passes the definition of done in (a):
+  masthead H1, shelf anchors, FAQ block, trust block, no fabricated data.
+- **Category pages: 2 deep-refreshed per day on a 3-day cycle.** Across
+  `pleasure`, `play`, `body`, `wear`, `discover`, refresh two per day so
+  every category page gets a deep refresh at least once every three days.
+- **Monday theme pass on all.** On the Monday run, after the homepage theme
+  is set (section 3), pass the week's theme across every category and drop
+  page in scope so merchandising reads as one coherent week, not a homepage
+  theme with stale category pages underneath.
+- **New and Sale auto-populate.** `/new` and `/collections/on-sale` populate
+  from their `sourceRule`, not manual curation. The team's job on these two
+  is a weekly masthead refresh, not shelf-by-shelf picking.
+- **Art cadence differs by surface.** Category page art refreshes weekly.
+  Drop page art (`/new`, `/collections/on-sale`) is event-driven, tied to
+  what actually changed in the sourced set, not a fixed calendar day. The
+  homepage keeps its existing daily fresh-art floor from section 2 unchanged.
+
+**c. The 70 percent product-forward target, restated for the new fold.** The
+section 1 target applies here too, with two additions specific to the new
+surfaces:
+
+- At least 3 direct PDP links above email capture on every page in scope.
+- At least 1 direct PDP link above the panel deck.
+- Deck doors are capped at the schema composition: 4 squares, 2 large,
+  2 small. Never exceed the schema's slot counts to fit in an extra door.
+
+**d. Panel order is navigation, not daily merchandising.** The order of
+doors in the panel deck is an information-architecture decision, not a
+content refresh. Deck reshuffles are rare and owned by Routine B, the same
+way a rail reorder that changes IA goes through Routine B elsewhere in this
+brief. Daily and weekly merchandising runs may refresh art, copy, and the
+populated shelves behind a door; they may not reorder the deck.
+
+**e. Discover-door disambiguation.** `/collections/discover` (the Discover
+category page, in scope for this section) is not the same surface as
+`/discover` (the Compass finder, governed by section 1 and section 7). When
+the panel deck or any merchandising surface links a "Discover" door, link it
+to `/collections/discover`, the collection page, not to the Compass finder.
+Conflating the two sends visitors to the wrong experience for what the door
+promised.
