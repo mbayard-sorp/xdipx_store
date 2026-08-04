@@ -143,6 +143,10 @@ export interface StageResponse {
     pillOptions?: string[] | undefined
   }>
   stateWrites: ConversationStateWrites
+  /** Set when the checkout stage minted a NEW Shopify cart for a web shopper
+   *  who had no cart cookie. The web route must persist it via Set-Cookie or
+   *  the lines land in a cart the browser can never see again. */
+  createdCartId?: string | undefined
   telemetry: {
     intent: Intent
     intentConfidence: number

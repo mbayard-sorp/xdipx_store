@@ -2,7 +2,7 @@ import { parse } from 'csv-parse/sync'
 import { kvGet, kvSet, KV_KEYS } from './kv.server'
 import { db } from './db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
-import { sql, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type { NalpacProduct, ProductScore } from '~/types'
 
 const FEED_TTL = 23 * 60 * 60 // 23 hours
@@ -254,56 +254,23 @@ export interface DiscontinuedSweepResult {
   errors:        Array<{ sku: string; message: string }>
 }
 
-export async function dailyFeedProcessor(): Promise<{
-  topCandidates: ProductScore[]
-  needsImagen: string[]
+/**
+ * Nightly catalog hygiene: find every SKU the Nalpac feed now marks
+ * discontinued and archive the matching already-imported product.
+ *
+ * This used to be one step of `dailyFeedProcessor`, which also scored the feed
+ * and staged the next day's daily deal into KV. Daily deals are retired, so the
+ * scoring half is gone and only the sweep remains. `scoreProduct` is still
+ * exported for the product-manager chat tools.
+ */
+export async function runDiscontinuedSweep(): Promise<{
   discontinuedSkus: string[]
   discontinuedSweep: DiscontinuedSweepResult
 }> {
-  const [products, history, blockedBrandsSetting] = await Promise.all([
-    fetchNalpacFeed(),
-    db.select({
-      sku:        dealHistory.sku,
-      categories: dealHistory.categories,
-    })
-    .from(dealHistory)
-    .orderBy(sql`${dealHistory.dealDate} DESC`)
-    .limit(90),
-    getPipelineSetting('blockedBrands'),
-  ])
+  const products = await fetchNalpacFeed()
 
-  const recentSkus       = new Set(history.map(h => h.sku))
-  const recentCategories = history.map(h => (h.categories ?? []) as string[])
-  const blockedBrands    = new Set(
-    (blockedBrandsSetting ?? '')
-      .split(',')
-      .map(b => b.toLowerCase().trim())
-      .filter(Boolean),
-  )
+  const discontinuedSkus = products.filter(isDiscontinued).map(p => p.SKU)
 
-  // Surface discontinued SKUs separately — they're filtered out of scoring
-  // (eligible products only) but we still want the cron to archive matching
-  // already-imported products downstream.
-  const discontinuedSkus: string[] = []
-  const eligibleProducts: NalpacProduct[] = []
-  for (const p of products) {
-    if (isDiscontinued(p)) {
-      discontinuedSkus.push(p.SKU)
-    } else {
-      eligibleProducts.push(p)
-    }
-  }
-
-  const scores = eligibleProducts
-    .map(p => scoreProduct(p, recentSkus, recentCategories, blockedBrands))
-    .filter((s): s is ProductScore => s !== null)
-    .sort((a, b) => b.score - a.score)
-
-  // Store top candidates in KV for admin queue
-  const topCandidates = scores.slice(0, 30)
-  await kvSet('feed:top-candidates', topCandidates, FEED_TTL)
-
-  // Sweep discontinued products: archive matching already-imported items.
   const discontinuedSweep = await archiveDiscontinuedProducts(discontinuedSkus)
   console.info(
     `[feed-processor] discontinued sweep: ${discontinuedSweep.flagged} flagged, ` +
@@ -311,12 +278,7 @@ export async function dailyFeedProcessor(): Promise<{
     `${discontinuedSweep.notImported} not-imported, ${discontinuedSweep.errors.length} errors`,
   )
 
-  return {
-    topCandidates,
-    needsImagen: getSKUsNeedingImagen(),
-    discontinuedSkus,
-    discontinuedSweep,
-  }
+  return { discontinuedSkus, discontinuedSweep }
 }
 
 /**

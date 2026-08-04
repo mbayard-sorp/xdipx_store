@@ -1,7 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher, useSearchParams, redirect } from 'react-router'
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { useCountdown } from '~/hooks/useCountdown'
 import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { dealHistory, pipelineSettings } from '../../db/schema'
@@ -339,30 +338,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true }
   }
 
-  if (intent === 'force-live') {
-    const id = parseInt(form.get('id') as string)
-
-    // Vault whatever is currently live
-    const [liveNow] = await db.select().from(dealHistory).where(eq(dealHistory.status, 'live')).limit(1)
-    if (liveNow && liveNow.id !== id && liveNow.shopifyProductId) {
-      const { transitionToVaultPricing } = await import('~/lib/deal-rotator.server')
-      await transitionToVaultPricing(liveNow)
-    }
-
-    // Route through activateDeal so configured dealPrice is pushed to variant.
-    const [target] = await db.select().from(dealHistory).where(eq(dealHistory.id, id)).limit(1)
-    if (target) {
-      const { activateDeal } = await import('~/lib/deal-rotator.server')
-      await activateDeal(target)
-    }
-    return { ok: true }
-  }
-
-  if (intent === 'force-rotate') {
-    const { rotateDeal } = await import('~/lib/deal-rotator.server')
-    const result = await rotateDeal()
-    return { ok: true, rotated: result }
-  }
+  // The `force-live` and `force-rotate` intents are gone with daily deals. They
+  // drove activateDeal / transitionToVaultPricing, which rewrote variant prices
+  // and the deal_status metafield, and fired a Klaviyo daily-deal email.
 
   if (intent === 'backfill-from-shopify') {
     const { products: shopifyProducts, totalScanned } = await fetchAllDealProducts()
@@ -380,15 +358,16 @@ export async function action({ request }: ActionFunctionArgs) {
     const maxResult = await db.select({ maxSort: max(dealHistory.sortOrder) }).from(dealHistory)
     const startOrder = (maxResult[0]?.maxSort ?? 0) + 1
 
-    // Sort by dealDate ascending so earlier deals get lower sortOrder
-    newProducts.sort((a, b) => (a.dealDate ?? '2099-12-31').localeCompare(b.dealDate ?? '2099-12-31'))
+    // Stable order: by SKU. This used to sort on the deal_date metafield, which
+    // is retired — every row now lands on the same '2099-12-31' DB sentinel.
+    newProducts.sort((a, b) => (a.nalpacSku ?? a.sku).localeCompare(b.nalpacSku ?? b.sku))
 
     const rows = newProducts.map((p, i) => ({
       sku:              p.nalpacSku ?? p.sku,
       seoTitle:         p.title,
       brand:            p.vendor,
       categories:       p.category ? [p.category] : [],
-      dealDate:         p.dealDate ?? '2099-12-31',
+      dealDate:         '2099-12-31',
       wholesaleCost:    p.wholesaleCost?.toFixed(2) ?? null,
       dealPrice:        p.dealPrice?.toFixed(2) ?? null,
       msrp:             p.msrp?.toFixed(2) ?? null,
@@ -492,7 +471,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Push pricing to every Shopify variant so the storefront reflects the
     // change immediately. Previously this only staged the config in Drizzle
-    // and deferred the push to activateDeal() — mismatch with editorial UX.
+    // and deferred the push to the deal activator — mismatch with editorial UX.
     if (dealPriceNum > 0) {
       try {
         const variantGids = await getProductVariantGids(productIdRaw)
@@ -1594,29 +1573,21 @@ function PairSlotCard({ pairProduct, onDrop, onClear }: {
 
 // ─── Live Deal Card ─────────────────────────────────────────────────────
 
-function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBottom }: {
+/**
+ * Read-only view of whatever deal_history row is still flagged `live`.
+ *
+ * Daily deals are retired: nothing rotates and nothing can be dragged here to
+ * go live any more, because that path rewrote prices and the deal_status
+ * metafield and fired a Klaviyo daily-deal email. Bump-to-bottom stays — it is
+ * plain queue ordering, which the import pipeline still uses.
+ */
+function LiveDealCard({ liveDealRow, shopifyData, onClick, onBumpToBottom }: {
   liveDealRow: { id: number; seoTitle: string | null; sku: string; brand: string | null; shopifyProductId: string | null; unitsAvailable: number | null; dealPrice: string | null; msrp: string | null; wholesaleCost: string | null } | null
   shopifyData: { price?: number | null; images?: string[] } | null
-  onDrop: (dealId: number) => void
   onClick: () => void
   onBumpToBottom: (dealId: number) => void
 }) {
-  const { timeLeft, mounted, isUrgent } = useCountdown()
-  const [dragOver, setDragOver] = useState(false)
   const [bumpDragOver, setBumpDragOver] = useState(false)
-  const pad = (n: number) => String(n).padStart(2, '0')
-
-  const dropHandlers = {
-    onDragOver: (e: DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(true) },
-    onDragEnter: () => setDragOver(true),
-    onDragLeave: () => setDragOver(false),
-    onDrop: (e: DragEvent) => {
-      e.preventDefault()
-      setDragOver(false)
-      const id = parseInt(e.dataTransfer.getData('text/plain'))
-      if (!isNaN(id)) onDrop(id)
-    },
-  }
 
   const bumpDropHandlers = {
     onDragOver: (e: DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setBumpDragOver(true) },
@@ -1633,14 +1604,9 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
 
   if (!liveDealRow) {
     return (
-      <div
-        className={`mb-5 border-2 border-dashed rounded-2xl p-8 text-center transition-all ${
-          dragOver ? 'border-sage ring-2 ring-sage bg-sage/5' : 'border-ink/20'
-        }`}
-        {...dropHandlers}
-      >
+      <div className="mb-5 border-2 border-dashed border-ink/20 rounded-2xl p-8 text-center">
         <p className="text-sm font-medium text-ink/40">No deal is currently live</p>
-        <p className="text-xs text-ink/30 mt-1">Drag a deal here to go live</p>
+        <p className="text-xs text-ink/30 mt-1">Daily deals are retired — nothing rotates.</p>
       </div>
     )
   }
@@ -1653,13 +1619,12 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
 
   return (
     <div className="mb-5 flex gap-3">
-      {/* Live deal info — clickable to open editor */}
+      {/* Last live deal — clickable to open editor */}
       <div
-        className={`flex-1 bg-white rounded-2xl shadow-sm p-5 transition-all cursor-pointer hover:shadow-md ${dragOver ? 'ring-2 ring-sage' : ''}`}
+        className="flex-1 bg-white rounded-2xl shadow-sm p-5 transition-all cursor-pointer hover:shadow-md"
         onClick={onClick}
-        {...dropHandlers}
       >
-        <p className="text-[10px] font-bold uppercase tracking-wide text-coral mb-3">Live Now</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-coral mb-3">Last Live Deal</p>
         <div className="flex items-center gap-4">
           {thumbUrl ? (
             <img src={thumbUrl} alt="" className="w-20 h-20 object-cover rounded-xl shrink-0" />
@@ -1684,14 +1649,6 @@ function LiveDealCard({ liveDealRow, shopifyData, onDrop, onClick, onBumpToBotto
               <span className="text-ink/60 tabular-nums">{liveDealRow.unitsAvailable ?? 0} units</span>
             </div>
           </div>
-          {mounted && (
-            <div className={`text-right shrink-0 ${isUrgent ? 'text-coral' : 'text-ink'}`}>
-              <p className="text-2xl font-bold tabular-nums" style={{ fontFamily: 'var(--font-display)' }}>
-                {pad(timeLeft.hours)}:{pad(timeLeft.minutes)}:{pad(timeLeft.seconds)}
-              </p>
-              <p className="text-[10px] text-ink/40 uppercase tracking-wide">remaining</p>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1759,18 +1716,6 @@ export default function AdminDealsPage() {
   const sortResult = confirmFetcher.data && 'sorted' in confirmFetcher.data
     ? confirmFetcher.data as { sorted: boolean; rowCount?: number }
     : null
-
-  function handleLiveCardDrop(dealId: number) {
-    const deal = deals.find(d => d.id === dealId)
-    if (!deal?.shopifyProductId) return
-    setPendingConfirm({
-      intent: 'force-live',
-      id: deal.id,
-      shopifyProductId: deal.shopifyProductId,
-      label: 'Force Live',
-      message: `Force "${deal.seoTitle ?? deal.sku}" live now? The current live deal moves to vault pricing.`,
-    })
-  }
 
   function handleBumpToBottom(dealId: number) {
     moveFetcher.submit(
@@ -1959,7 +1904,6 @@ export default function AdminDealsPage() {
       <LiveDealCard
         liveDealRow={liveDealRow}
         shopifyData={liveDealRow?.shopifyProductId ? shopifyDataMap[liveDealRow.shopifyProductId] ?? null : null}
-        onDrop={handleLiveCardDrop}
         onClick={() => { if (liveDealRow) openEditor(liveDealRow.id) }}
         onBumpToBottom={handleBumpToBottom}
       />

@@ -268,8 +268,6 @@ async function main() {
       worksForHer:      htmlToPT(mf(p, 'works_for_her')),
       moodImageUrl:     mf(p, 'mood_image_url') || undefined,
       category:         mf(p, 'category')       || undefined,
-      dealStatus:       mf(p, 'deal_status')    || undefined,
-      dealDate:         mf(p, 'deal_date')      || undefined,
       nalpacSku:        mf(p, 'nalpac_sku')     || undefined,
       originalPrice:    mfNum(p, 'original_price'),
       wholesaleCost:    mfNum(p, 'wholesale_cost'),

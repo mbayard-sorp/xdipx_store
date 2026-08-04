@@ -227,6 +227,7 @@ export async function executeCheckoutStage(
   let cartUrl: string
   let cartItems: Array<{ handle: string; quantity: number }>
   let fabricationNote: string | undefined
+  let createdCartId: string | undefined
   // Web channel UX differs from SMS: instead of minting a fresh checkout cart
   // and pasting the URL into chat prose, we add to the SHOPPER'S existing
   // cart cookie when one is present. The chat widget then dispatches the
@@ -247,6 +248,10 @@ export async function executeCheckoutStage(
     } else {
       const cart = await createCartWithLines(lines)
       cartUrl = cart.checkoutUrl
+      // A web shopper with no cart cookie just got a brand-new cart. Surface
+      // its id so the route can Set-Cookie it; otherwise the drawer opens on
+      // an empty cart while this one is orphaned.
+      if (isWeb) createdCartId = cart.id
     }
 
     // Fabrication safety check — if the URL doesn't look real, log loudly.
@@ -362,6 +367,7 @@ export async function executeCheckoutStage(
       },
     ],
     stateWrites,
+    createdCartId,
     telemetry: {
       intent: intent.intent,
       intentConfidence: intent.confidence,

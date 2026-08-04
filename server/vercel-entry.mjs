@@ -1696,20 +1696,24 @@ async function kvSetNX(key, value, exSeconds) {
   memSet(key, value, exSeconds);
   return true;
 }
-async function cached(key, ttlSeconds, fn) {
-  const ttlMs = ttlSeconds * 1e3;
+function isEmptyCacheValue(data) {
+  return data == null || Array.isArray(data) && data.length === 0;
+}
+async function cached(key, ttlSeconds, fn, emptyTtlSeconds) {
   const now = Date.now();
+  const effectiveTtlMs = (data2) => (emptyTtlSeconds !== void 0 && isEmptyCacheValue(data2) ? emptyTtlSeconds : ttlSeconds) * 1e3;
   const l1 = readCache.get(key);
-  if (l1 && now - l1.ts < ttlMs) return l1.data;
+  if (l1 && now - l1.ts < effectiveTtlMs(l1.data)) return l1.data;
   const l2 = await kvGet(key);
-  if (l2 && now - l2.ts < ttlMs) {
+  if (l2 && now - l2.ts < effectiveTtlMs(l2.data)) {
     readCache.set(key, l2);
     return l2.data;
   }
   const data = await fn();
   const entry = { data, ts: now };
   readCache.set(key, entry);
-  await kvSet(key, entry, ttlSeconds + 60);
+  const kvTtl = emptyTtlSeconds !== void 0 && isEmptyCacheValue(data) ? emptyTtlSeconds + 60 : ttlSeconds + 60;
+  await kvSet(key, entry, kvTtl);
   return data;
 }
 async function kvGetMemo(key, l1TtlSeconds) {
@@ -3071,7 +3075,10 @@ async function upsertProductPage(params) {
   if (params.productTypeDial !== void 0) searchFields.productTypeDial = params.productTypeDial;
   if (params.moodTags !== void 0) searchFields.moodTags = params.moodTags;
   if (params.audienceTags !== void 0) searchFields.audienceTags = params.audienceTags;
-  if (params.mattersTags !== void 0) searchFields.mattersTags = params.mattersTags;
+  if (params.mattersTags !== void 0) {
+    searchFields.mattersTags = params.mattersTags;
+    searchFields.mattersTagsNormalized = normalizeTagList(params.mattersTags);
+  }
   if (params.ivrExperience !== void 0) searchFields.ivrExperience = params.ivrExperience;
   if (params.ivrUseCase !== void 0) searchFields.ivrUseCase = params.ivrUseCase;
   if (params.ivrFeatures !== void 0) searchFields.ivrFeatures = params.ivrFeatures;
@@ -4421,7 +4428,6 @@ __export(shopify_server_exports, {
   getAccessoryProductsAdmin: () => getAccessoryProductsAdmin,
   getAdminProductData: () => getAdminProductData,
   getAdminProductPrices: () => getAdminProductPrices,
-  getApprovedDeal: () => getApprovedDeal,
   getBonusDeal: () => getBonusDeal,
   getCart: () => getCart,
   getCollection: () => getCollection,
@@ -4438,6 +4444,7 @@ __export(shopify_server_exports, {
   getDealByHandle: () => getDealByHandle,
   getDealByShopifyId: () => getDealByShopifyId,
   getDistinctProductTypes: () => getDistinctProductTypes,
+  getFeaturedProductHandle: () => getFeaturedProductHandle,
   getFeedCatalogProducts: () => getFeedCatalogProducts,
   getFeedDeals: () => getFeedDeals,
   getHandleByProductId: () => getHandleByProductId,
@@ -4459,7 +4466,7 @@ __export(shopify_server_exports, {
   getProductsByTagPaged: () => getProductsByTagPaged,
   getProductsByTypesOrTag: () => getProductsByTypesOrTag,
   getProductsForMerge: () => getProductsForMerge,
-  getRecentVaultDeals: () => getRecentVaultDeals,
+  getRecentProducts: () => getRecentProducts,
   getReturn: () => getReturn,
   getReturnableFulfillments: () => getReturnableFulfillments,
   getShopifyCollections: () => getShopifyCollections,
@@ -4467,7 +4474,6 @@ __export(shopify_server_exports, {
   getStorefrontCollections: () => getStorefrontCollections,
   getStorefrontCustomer: () => getStorefrontCustomer,
   getVariantCost: () => getVariantCost,
-  getVaultDeals: () => getVaultDeals,
   getWholesaleCostBySKU: () => getWholesaleCostBySKU,
   loginWithSocialIdentity: () => loginWithSocialIdentity,
   paginateAllProductsForSanity: () => paginateAllProductsForSanity,
@@ -4485,7 +4491,6 @@ __export(shopify_server_exports, {
   searchProducts: () => searchProducts,
   sendDraftOrderInvoice: () => sendDraftOrderInvoice,
   setCartAttributes: () => setCartAttributes,
-  setDealStatus: () => setDealStatus,
   setHeroVideoMetafield: () => setHeroVideoMetafield,
   setMediaAsPrimary: () => setMediaAsPrimary,
   setMetafield: () => setMetafield,
@@ -4608,13 +4613,11 @@ function nodeToVaultDeal(node) {
     id: node.id,
     handle: node.handle,
     seoTitle: node.title,
-    dealDate: parseMetafield(mf, "deal_date"),
     dealPrice,
     msrp: parseFloat(parseMetafield(mf, "original_price") || (variant?.compareAtPrice?.amount ?? "0")),
     images: parseImages(node.images.edges),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, "category")),
-    dealStatus: "archived",
     qty: variant?.quantityAvailable ?? 0,
     defaultVariantId: variant?.id ?? null,
     hasMultipleVariants: variantEdges.length > 1,
@@ -4843,8 +4846,6 @@ function nodeToDeal(node) {
     mapPrice: parseFloat(parseMetafield(mf, "map_price") || "0"),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, "category")),
-    dealStatus: parseMetafield(mf, "deal_status") || "live",
-    dealDate: parseMetafield(mf, "deal_date"),
     qty: variant?.quantityAvailable ?? 0,
     tags: node.tags ?? [],
     accessoryProductIds: parseMetafieldJSON(mf, "accessory_product_ids", []),
@@ -4893,18 +4894,21 @@ function nodeToDeal(node) {
     ...node.updatedAt ? { updatedAt: node.updatedAt } : {}
   };
 }
+async function getFeaturedProductHandle() {
+  try {
+    const { getEmmaHeroSettings: getEmmaHeroSettings2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
+    const hero = await getEmmaHeroSettings2();
+    return hero?.featuredProductHandle ?? null;
+  } catch (err2) {
+    console.error("[shopify] getFeaturedProductHandle failed:", err2);
+    return null;
+  }
+}
 async function getDailyDeal() {
-  const search = await storefront(`
-    query GetDailyDealHandle {
-      products(first: 1, query: "tag:deal-status-live") {
-        edges { node { handle } }
-      }
-    }
-  `);
-  const handle = search.products.edges[0]?.node.handle;
+  const handle = await getFeaturedProductHandle();
   if (!handle) return null;
   const data = await storefront(`
-    query GetDailyDeal($handle: String!) {
+    query GetFeaturedProduct($handle: String!) {
       product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
     }
   `, { handle });
@@ -4912,32 +4916,7 @@ async function getDailyDeal() {
   return nodeToDeal(data.product);
 }
 async function getLiveDealHandle() {
-  const search = await storefront(`
-    query GetLiveDealHandle {
-      products(first: 1, query: "tag:deal-status-live") {
-        edges { node { handle } }
-      }
-    }
-  `).catch(() => null);
-  return search?.products.edges[0]?.node.handle ?? null;
-}
-async function getApprovedDeal() {
-  const search = await storefront(`
-    query GetApprovedDealHandle {
-      products(first: 1, query: "tag:deal-status-approved") {
-        edges { node { handle } }
-      }
-    }
-  `);
-  const handle = search.products.edges[0]?.node.handle;
-  if (!handle) return null;
-  const data = await storefront(`
-    query GetApprovedDeal($handle: String!) {
-      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
-    }
-  `, { handle });
-  if (!data.product) return null;
-  return nodeToDeal(data.product);
+  return getFeaturedProductHandle();
 }
 async function getProductByHandle(handle) {
   return cached(`shopify:p:${handle}`, READ_TTL, async () => {
@@ -5040,8 +5019,6 @@ async function getDealByShopifyIdUncached(id) {
     mapPrice: parseFloat(mfVal("map_price") || "0"),
     brand: product.vendor,
     category: parseCategory(mfVal("category")),
-    dealStatus: mfVal("deal_status") || "pending",
-    dealDate: mfVal("deal_date"),
     qty: variant?.inventory_quantity ?? 0,
     tags: product.tags ? product.tags.split(", ").filter(Boolean) : [],
     accessoryProductIds: mfJSON("accessory_product_ids", []),
@@ -5137,6 +5114,18 @@ async function getProductsByTag(tag, limit = 6) {
     return data.products.edges.map((e) => nodeToProduct(e.node));
   });
 }
+async function getRecentProducts(limit = 40) {
+  return cached(`shopify:recent:${limit}`, READ_TTL, async () => {
+    const data = await storefront(`
+      query GetRecentProducts($first: Int!) {
+        products(first: $first, sortKey: UPDATED_AT, reverse: true) {
+          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+        }
+      }
+    `, { first: limit });
+    return data.products.edges.map((e) => nodeToProduct(e.node));
+  });
+}
 async function getProductsByTypesOrTag(types, tag, limit = 6) {
   const typesKey = [...types].sort().join("|");
   return cached(`shopify:types-or-tag:${typesKey}:${tag}:${limit}`, READ_TTL, async () => {
@@ -5185,7 +5174,7 @@ async function getPairingCandidates(opts) {
   const limit = Math.max(1, Math.min(opts.limit ?? 3, 8));
   const selfId = opts.shopifyProductId.replace("gid://shopify/Product/", "");
   const seen = /* @__PURE__ */ new Set([selfId]);
-  const toCandidate2 = (p) => {
+  const toCandidate = (p) => {
     const numericId = p.id.replace("gid://shopify/Product/", "");
     if (seen.has(numericId)) return null;
     seen.add(numericId);
@@ -5205,7 +5194,7 @@ async function getPairingCandidates(opts) {
     try {
       const inCollection = await getCollectionProducts(opts.primaryCollectionHandle, 6);
       for (const p of inCollection) {
-        const c = toCandidate2(p);
+        const c = toCandidate(p);
         if (c) out.push(c);
         if (out.length >= limit) return out;
       }
@@ -5217,7 +5206,7 @@ async function getPairingCandidates(opts) {
     try {
       const byCategory = await getProductsByTag(primaryCategoryTag, 8);
       for (const p of byCategory) {
-        const c = toCandidate2(p);
+        const c = toCandidate(p);
         if (c) out.push(c);
         if (out.length >= limit) return out;
       }
@@ -5230,7 +5219,7 @@ async function getPairingCandidates(opts) {
         const slug = sub.toLowerCase().replace(/\s+/g, "-");
         const bySub = await getProductsByTag(`cat:${slug}`, 6);
         for (const p of bySub) {
-          const c = toCandidate2(p);
+          const c = toCandidate(p);
           if (c) out.push(c);
           if (out.length >= limit) return out;
         }
@@ -5249,16 +5238,12 @@ async function getIndexableProductHandles() {
         products(first: $first, after: $after) {
           pageInfo { hasNextPage endCursor }
           edges {
-            node {
-              handle
-              dealStatus: metafield(namespace: "xdipx", key: "deal_status") { value }
-            }
+            node { handle }
           }
         }
       }
     `, { first: 250, after: cursor });
     for (const edge of data.products.edges) {
-      if (edge.node.dealStatus?.value === "archived") continue;
       handles.add(edge.node.handle);
     }
     if (!data.products.pageInfo.hasNextPage) return handles;
@@ -5382,33 +5367,6 @@ async function getBonusDeal() {
     return nodeToProduct(node);
   });
 }
-async function getRecentVaultDeals(limit = 7) {
-  const data = await storefront(`
-    query GetVaultDeals($first: Int!) {
-      products(first: $first, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
-        edges { node { ${PRODUCT_CARD_FRAGMENT} } }
-      }
-    }
-  `, { first: limit });
-  return data.products.edges.map((e) => nodeToVaultDeal(e.node));
-}
-async function getVaultDeals(page = 1, limit = 20) {
-  const data = await storefront(`
-    query GetVaultPage($first: Int!, $after: String) {
-      products(first: $first, after: $after, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
-        pageInfo { hasNextPage }
-        edges {
-          cursor
-          node { ${PRODUCT_CARD_FRAGMENT} }
-        }
-      }
-    }
-  `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null });
-  return {
-    deals: data.products.edges.map((e) => nodeToVaultDeal(e.node)),
-    hasNextPage: data.products.pageInfo.hasNextPage
-  };
-}
 function parseMetafieldByNsKey(metafields, namespace, key) {
   return metafields.find((m) => m?.namespace === namespace && m?.key === key)?.value ?? null;
 }
@@ -5438,9 +5396,7 @@ function nodeToFeedDeal(node) {
   const mapRestricted = parseMetafieldByNsKey(mf, "xdipx", "map_restricted") === "true";
   const productTypeDial = parseMetafieldByNsKey(mf, "xdipx", "product_type_dial");
   const dealScoreRaw = parseMetafieldByNsKey(mf, "xdipx", "deal_score");
-  const isDailyDealRaw = parseMetafieldByNsKey(mf, "xdipx", "is_daily_deal");
   const dealScoreNum = dealScoreRaw ? parseFloat(dealScoreRaw) : null;
-  const isDailyDeal = isDailyDealRaw === "true";
   const gmcCategory = parseMetafieldByNsKey(mf, "mm-google-shopping", "google_product_category");
   const gmcAgeGroup = parseMetafieldByNsKey(mf, "mm-google-shopping", "age_group");
   const gmcGender = parseMetafieldByNsKey(mf, "mm-google-shopping", "gender");
@@ -5457,13 +5413,11 @@ function nodeToFeedDeal(node) {
     id: node.id,
     handle: node.handle,
     seoTitle: node.title,
-    dealDate: parseMetafield(mf, "deal_date"),
     dealPrice,
     msrp: parseFloat(originalPrice || (variant?.compareAtPrice?.amount ?? "0")),
     images: parseImages(node.images.edges),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, "category")),
-    dealStatus: "archived",
     qty: variant?.quantityAvailable ?? 0,
     defaultVariantId: variant?.id ?? null,
     hasMultipleVariants: variantEdges.length > 1,
@@ -5494,14 +5448,13 @@ function nodeToFeedDeal(node) {
     ...gmcLabel2 != null ? { gmcLabel2 } : {},
     ...gmcLabel3 != null ? { gmcLabel3 } : {},
     ...gmcLabel4 != null ? { gmcLabel4 } : {},
-    ...dealScoreNum !== null && !isNaN(dealScoreNum) ? { dealScore: dealScoreNum } : {},
-    isDailyDeal
+    ...dealScoreNum !== null && !isNaN(dealScoreNum) ? { dealScore: dealScoreNum } : {}
   };
 }
 async function getFeedDeals(after = null, limit = 50) {
   const data = await storefront(`
     query GetFeedPage($first: Int!, $after: String) {
-      products(first: $first, after: $after, query: "tag:deal-status-archived OR tag:deal-status-live", sortKey: UPDATED_AT, reverse: true) {
+      products(first: $first, after: $after, sortKey: UPDATED_AT, reverse: true) {
         pageInfo { hasNextPage endCursor }
         edges {
           node { ${GMC_FEED_CARD_FRAGMENT} }
@@ -5632,7 +5585,7 @@ async function getCollectionDeals(handle, page = 1, limit = 20, sort = "manual")
   `, { handle, first: limit, after, sortKey, reverse });
   if (!data.collection) return { deals: [], hasNextPage: false };
   return {
-    deals: data.collection.products.edges.filter((e) => parseMetafield(e.node.metafields, "deal_status") !== "archived").map((e) => nodeToVaultDeal(e.node)),
+    deals: data.collection.products.edges.map((e) => nodeToVaultDeal(e.node)),
     hasNextPage: data.collection.products.pageInfo.hasNextPage
   };
 }
@@ -6092,17 +6045,6 @@ async function updateVariantPricing(variantGid, price, compareAtPrice, wholesale
     });
   }
 }
-async function setDealStatus(productId, status) {
-  const numericId = productId.replace("gid://shopify/Product/", "");
-  await updateProductMetafield(productId, "deal_status", status);
-  const { product } = await shopifyAdmin(`/products/${numericId}.json`);
-  if (!product) throw new Error(`Product ${numericId} not found when setting deal status`);
-  const currentTags = product.tags.split(", ").filter((t) => !t.startsWith("deal-status-"));
-  currentTags.push(`deal-status-${status}`);
-  await shopifyAdmin(`/products/${numericId}.json`, "PUT", {
-    product: { id: numericId, tags: currentTags.join(", ") }
-  });
-}
 async function archiveShopifyProduct(productId, reason) {
   const numericId = productId.replace("gid://shopify/Product/", "");
   const gid = `gid://shopify/Product/${numericId}`;
@@ -6119,7 +6061,6 @@ async function archiveShopifyProduct(productId, reason) {
     throw new Error(`archiveShopifyProduct: ${errs}`);
   }
   const handle = updateResult.productUpdate.product?.handle ?? await getProductHandleById(numericId);
-  await setDealStatus(productId, "archived");
   if (reason) {
     console.info(`[archiveShopifyProduct] ${numericId} archived: ${reason}`);
   }
@@ -6239,8 +6180,6 @@ async function pushProductToShopify(doc) {
       type: "single_line_text_field"
     });
   }
-  add("deal_status", doc.dealStatus, "single_line_text_field");
-  add("deal_date", doc.dealDate, "date");
   add("nalpac_sku", doc.nalpacSku, "single_line_text_field");
   add("original_price", doc.originalPrice?.toString(), "number_decimal");
   add("wholesale_cost", doc.wholesaleCost?.toString(), "number_decimal");
@@ -6554,7 +6493,6 @@ async function createShopifyProductWithVariants(master, variants, optionNames, h
   const tags = [
     `brand:${master.brand.toLowerCase().replace(/\s+/g, "-")}`,
     `nalpac-sku-${master.sku}`,
-    "deal-status-pending",
     ...master.msrp < 25 ? ["price:under-25"] : master.msrp < 50 ? ["price:25-50"] : master.msrp < 100 ? ["price:50-100"] : ["price:100-plus"],
     ...master.categories.map((c) => `cat:${c.toLowerCase().replace(/\s+/g, "-")}`)
   ];
@@ -7627,7 +7565,7 @@ async function fetchAllDealProducts() {
     for (const node of page.nodes) {
       const mf = node.metafields.nodes;
       const mfVal = (key) => mf.find((m) => m.key === key)?.value ?? "";
-      if (!mfVal("deal_status") && !mfVal("nalpac_sku")) continue;
+      if (!mfVal("nalpac_sku")) continue;
       const numericId = node.id.replace("gid://shopify/Product/", "");
       const variant = node.variants.nodes[0];
       const wholesaleCost = parseFloat(mfVal("wholesale_cost"));
@@ -7641,7 +7579,6 @@ async function fetchAllDealProducts() {
         title: node.title,
         vendor: node.vendor,
         ...mfVal("category") ? { category: mfVal("category") } : {},
-        ...mfVal("deal_date") ? { dealDate: mfVal("deal_date") } : {},
         ...!isNaN(wholesaleCost) ? { wholesaleCost } : {},
         dealPrice: parseFloat(variant?.price ?? "0"),
         ...!isNaN(msrp) ? { msrp } : {},
@@ -8093,9 +8030,6 @@ function buildShopifyQuery(input) {
   }
   if (typeof input.priceMax === "number") {
     clauses.push(`variants.price:<=${input.priceMax}`);
-  }
-  if (input.excludeArchivedDeals) {
-    clauses.push("-tag:deal-status-archived");
   }
   return clauses.join(" AND ");
 }
@@ -8667,8 +8601,6 @@ var init_shopify_server = __esm({
     { namespace: "xdipx", key: "works_for_him" }
     { namespace: "xdipx", key: "works_for_her" }
     { namespace: "xdipx", key: "box_contents" }
-    { namespace: "xdipx", key: "deal_status" }
-    { namespace: "xdipx", key: "deal_date" }
     { namespace: "xdipx", key: "deal_score" }
     { namespace: "xdipx", key: "wholesale_cost" }
     { namespace: "xdipx", key: "map_price" }
@@ -8769,10 +8701,8 @@ var init_shopify_server = __esm({
 `;
     CARD_METAFIELDS_FRAGMENT = `
   metafields(identifiers: [
-    { namespace: "xdipx", key: "deal_date" }
     { namespace: "xdipx", key: "original_price" }
     { namespace: "xdipx", key: "category" }
-    { namespace: "xdipx", key: "deal_status" }
     { namespace: "xdipx", key: "mood_tags" }
     { namespace: "xdipx", key: "audience_tags" }
     { namespace: "xdipx", key: "matters_tags" }
@@ -8816,7 +8746,6 @@ var init_shopify_server = __esm({
     CATALOG_PAGE_CAP = 40;
     GMC_FEED_METAFIELDS_FRAGMENT = `
   metafields(identifiers: [
-    { namespace: "xdipx", key: "deal_date" }
     { namespace: "xdipx", key: "original_price" }
     { namespace: "xdipx", key: "map_price" }
     { namespace: "xdipx", key: "map_restricted" }
@@ -8831,7 +8760,6 @@ var init_shopify_server = __esm({
     { namespace: "xdipx", key: "specifications" }
     { namespace: "xdipx", key: "product_type_dial" }
     { namespace: "xdipx", key: "deal_score" }
-    { namespace: "xdipx", key: "is_daily_deal" }
     { namespace: "mm-google-shopping", key: "google_product_category" }
     { namespace: "mm-google-shopping", key: "age_group" }
     { namespace: "mm-google-shopping", key: "gender" }
@@ -11091,17 +11019,17 @@ __export(feed_processor_server_exports, {
   archiveDiscontinuedProducts: () => archiveDiscontinuedProducts,
   buildTags: () => buildTags,
   cleanDescription: () => cleanDescription,
-  dailyFeedProcessor: () => dailyFeedProcessor,
   deriveSection: () => deriveSection,
   fetchNalpacFeed: () => fetchNalpacFeed,
   getPipelineSetting: () => getPipelineSetting,
   getSKUsNeedingImagen: () => getSKUsNeedingImagen,
   isDiscontinued: () => isDiscontinued,
   parseCategories: () => parseCategories,
+  runDiscontinuedSweep: () => runDiscontinuedSweep,
   scoreProduct: () => scoreProduct
 });
 import { parse } from "csv-parse/sync";
-import { sql as sql4, eq as eq6 } from "drizzle-orm";
+import { eq as eq6 } from "drizzle-orm";
 async function getPipelineSetting(key) {
   try {
     const rows = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq6(pipelineSettings.key, key)).limit(1);
@@ -11234,42 +11162,14 @@ function scoreProduct(product, recentSkus, recentCategories, blockedBrands = /* 
     categories
   };
 }
-async function dailyFeedProcessor() {
-  const [products, history, blockedBrandsSetting] = await Promise.all([
-    fetchNalpacFeed(),
-    db.select({
-      sku: dealHistory.sku,
-      categories: dealHistory.categories
-    }).from(dealHistory).orderBy(sql4`${dealHistory.dealDate} DESC`).limit(90),
-    getPipelineSetting("blockedBrands")
-  ]);
-  const recentSkus = new Set(history.map((h) => h.sku));
-  const recentCategories = history.map((h) => h.categories ?? []);
-  const blockedBrands = new Set(
-    (blockedBrandsSetting ?? "").split(",").map((b) => b.toLowerCase().trim()).filter(Boolean)
-  );
-  const discontinuedSkus = [];
-  const eligibleProducts = [];
-  for (const p of products) {
-    if (isDiscontinued(p)) {
-      discontinuedSkus.push(p.SKU);
-    } else {
-      eligibleProducts.push(p);
-    }
-  }
-  const scores = eligibleProducts.map((p) => scoreProduct(p, recentSkus, recentCategories, blockedBrands)).filter((s) => s !== null).sort((a, b) => b.score - a.score);
-  const topCandidates = scores.slice(0, 30);
-  await kvSet("feed:top-candidates", topCandidates, FEED_TTL);
+async function runDiscontinuedSweep() {
+  const products = await fetchNalpacFeed();
+  const discontinuedSkus = products.filter(isDiscontinued).map((p) => p.SKU);
   const discontinuedSweep = await archiveDiscontinuedProducts(discontinuedSkus);
   console.info(
     `[feed-processor] discontinued sweep: ${discontinuedSweep.flagged} flagged, ${discontinuedSweep.archived} archived, ${discontinuedSweep.alreadyArchived} already-archived, ${discontinuedSweep.notImported} not-imported, ${discontinuedSweep.errors.length} errors`
   );
-  return {
-    topCandidates,
-    needsImagen: getSKUsNeedingImagen(),
-    discontinuedSkus,
-    discontinuedSweep
-  };
+  return { discontinuedSkus, discontinuedSweep };
 }
 async function archiveDiscontinuedProducts(skus) {
   const result = {
@@ -11353,6 +11253,3660 @@ var init_feed_processor_server = __esm({
       { section: "body", words: ["lubricant", "lube", "massage oil", "massage candle", "candle", "arousal", "desensitiz", "enhancer", "oral enhancer", "cleaner", "toy cleaner", "pheromone", "wipe", "hygiene", "douche", "enema", "kegel", "extender", "cbd", "supplement", " pill", "gummies", "gummy", "gel", "cream", "lotion", "balm", "spray", "oil", "powder", "edible body"] }
     ];
     SKU_NEEDS_IMAGEN = /* @__PURE__ */ new Set();
+  }
+});
+
+// app/lib/with-timeout.server.ts
+async function withTimeout(p, ms, fallback, label = "op") {
+  let timer;
+  const timeout = new Promise((resolve4) => {
+    timer = setTimeout(() => {
+      console.warn(`[with-timeout] ${label} timed out after ${ms}ms \u2014 using fallback`);
+      resolve4(fallback);
+    }, ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+var init_with_timeout_server = __esm({
+  "app/lib/with-timeout.server.ts"() {
+    "use strict";
+  }
+});
+
+// app/types/discovery.ts
+var MATTERS_V1, MATTERS_V2, MATTERS, CATEGORIES, DEFAULT_BUDGET, EMPTY_STATE;
+var init_discovery = __esm({
+  "app/types/discovery.ts"() {
+    "use strict";
+    MATTERS_V1 = [
+      "Beginner-Friendly",
+      "Body-Safe Silicone",
+      "Discreet Design",
+      "First-Time",
+      "Hands-Free",
+      "Rechargeable",
+      "Soft-Touch",
+      "Travel-Size",
+      "Waterproof",
+      "App-Controlled",
+      "Whisper-Quiet",
+      "Plus-Size-Friendly"
+    ];
+    MATTERS_V2 = [
+      "Beginner-friendly",
+      "Whisper-quiet",
+      "Waterproof",
+      "Travel-ready",
+      "Discreet",
+      "Hands-free",
+      "Remote-controlled",
+      "Plus-size friendly",
+      "Easy to clean",
+      "Rechargeable",
+      "Soft-touch",
+      "Latex-free"
+    ];
+    MATTERS = [...MATTERS_V1, ...MATTERS_V2];
+    CATEGORIES = ["Pleasure", "Play", "Body", "Wear"];
+    DEFAULT_BUDGET = 200;
+    EMPTY_STATE = {
+      mood: [],
+      audience: [],
+      matters: [],
+      budget: DEFAULT_BUDGET,
+      step: 0
+    };
+  }
+});
+
+// app/lib/discovery-emma.ts
+function scoreProduct2(p, s) {
+  let score2 = 0;
+  for (const m of s.mood) if (p.mood.includes(m)) score2 += SCORE_MOOD;
+  for (const a of s.audience) if (p.audience.includes(a)) score2 += SCORE_AUDIENCE;
+  for (const k of s.matters) if (p.matters.includes(k)) score2 += SCORE_MATTERS;
+  return score2;
+}
+function computeAvailable(index2, s) {
+  const moods = /* @__PURE__ */ new Set();
+  const audiences = /* @__PURE__ */ new Set();
+  const matters = /* @__PURE__ */ new Set();
+  const hasMood = s.mood.length > 0;
+  const hasAudience = s.audience.length > 0;
+  const hasMatters = s.matters.length > 0;
+  for (const p of index2) {
+    const okMood = !hasMood || s.mood.some((m) => p.mood.includes(m));
+    const okAudience = !hasAudience || s.audience.some((a) => p.audience.includes(a));
+    const okMatters = !hasMatters || s.matters.some((k) => p.matters.includes(k));
+    if (okAudience && okMatters) for (const m of p.mood) moods.add(m);
+    if (okMood && okMatters) for (const a of p.audience) audiences.add(a);
+    if (okMood && okAudience) for (const k of p.matters) matters.add(k);
+  }
+  return { moods, audiences, matters };
+}
+function availableToArrays(a) {
+  return {
+    moods: Array.from(a.moods),
+    audiences: Array.from(a.audiences),
+    matters: Array.from(a.matters)
+  };
+}
+function mulberry32(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = t + 1831565813 >>> 0;
+    let r = t;
+    r = Math.imul(r ^ r >>> 15, r | 1);
+    r ^= r + Math.imul(r ^ r >>> 7, r | 61);
+    return ((r ^ r >>> 14) >>> 0) / 4294967296;
+  };
+}
+function seededShuffle(arr, seed) {
+  const rand = mulberry32(seed);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp3 = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp3;
+  }
+}
+function rankRails(products, state, opts = {}) {
+  const { perRail = 4, dropEmpty = false, seed } = opts;
+  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const filtered = products.filter((p) => p.price <= state.budget);
+  const buckets = {
+    Pleasure: [],
+    Play: [],
+    Body: [],
+    Wear: []
+  };
+  const totals = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
+  const aggScore = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
+  for (const p of filtered) {
+    const score2 = hasAny ? scoreProduct2(p, state) : 0;
+    buckets[p.category].push({ product: p, score: score2 });
+    totals[p.category] += 1;
+    aggScore[p.category] += score2;
+  }
+  for (let ci = 0; ci < CATEGORIES.length; ci++) {
+    const cat = CATEGORIES[ci];
+    if (!hasAny && seed !== void 0) {
+      seededShuffle(buckets[cat], (seed ^ (ci + 1) * 2654435761) >>> 0);
+    } else {
+      buckets[cat].sort((a, b) => b.score - a.score);
+    }
+  }
+  const order = [...CATEGORIES];
+  if (hasAny) {
+    order.sort((a, b) => {
+      const diff = aggScore[b] - aggScore[a];
+      if (diff !== 0) return diff;
+      return CATEGORIES.indexOf(a) - CATEGORIES.indexOf(b);
+    });
+  }
+  const rails = order.map((cat) => ({
+    category: cat,
+    score: aggScore[cat],
+    total: totals[cat],
+    items: buckets[cat].slice(0, perRail)
+  }));
+  return dropEmpty ? rails.filter((r) => r.items.length > 0) : rails;
+}
+function rankSingleRail(products, state, category, offset, limit) {
+  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const filtered = products.filter((p) => p.price <= state.budget && p.category === category);
+  const scored = filtered.map((p) => ({
+    product: p,
+    score: hasAny ? scoreProduct2(p, state) : 0
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return { items: scored.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(0, limit)), total: scored.length };
+}
+var SCORE_MOOD, SCORE_AUDIENCE, SCORE_MATTERS;
+var init_discovery_emma = __esm({
+  "app/lib/discovery-emma.ts"() {
+    "use strict";
+    init_discovery();
+    SCORE_MOOD = 3;
+    SCORE_AUDIENCE = 2;
+    SCORE_MATTERS = 2;
+  }
+});
+
+// app/lib/discovery-tags.ts
+function normalizeTag2(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  return trimmed.toLowerCase().split(/(\s+|-)/).map((part) => {
+    if (/^\s+$/.test(part) || part === "-") return part;
+    if (part.length === 0) return part;
+    return part[0].toUpperCase() + part.slice(1);
+  }).join("");
+}
+var init_discovery_tags = __esm({
+  "app/lib/discovery-tags.ts"() {
+    "use strict";
+  }
+});
+
+// app/lib/discovery-rules.server.ts
+import { eq as eq7, and as and2, asc as asc2 } from "drizzle-orm";
+async function getActiveDiscoveryRules() {
+  const cached2 = await kvGet(RULES_CACHE_KEY);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  const rows = await db.select().from(discoveryRules).where(eq7(discoveryRules.active, true)).orderBy(asc2(discoveryRules.ruleType), asc2(discoveryRules.sortOrder), asc2(discoveryRules.id));
+  const rules = rows.map(rowToRule);
+  await kvSet(RULES_CACHE_KEY, rules, RULES_TTL_SECONDS);
+  return rules;
+}
+async function getInventoryMin() {
+  const cached2 = await kvGet(INVENTORY_MIN_CACHE_KEY);
+  if (typeof cached2 === "number") return cached2;
+  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq7(pipelineSettings.key, "discovery_inventory_min")).limit(1);
+  const parsed = row.length && row[0] ? parseInt(row[0].value, 10) : 0;
+  const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  await kvSet(INVENTORY_MIN_CACHE_KEY, value, INVENTORY_MIN_CACHE_TTL);
+  return value;
+}
+function rowToRule(row) {
+  return {
+    id: row.id,
+    ruleType: row.ruleType,
+    ruleValue: row.ruleValue,
+    category: row.category ?? null,
+    sortOrder: row.sortOrder,
+    notes: row.notes ?? null,
+    active: row.active,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+function applyRules(products, rules, inventoryMin) {
+  if (rules.length === 0 && inventoryMin === 0) return products;
+  const excludeHandles = /* @__PURE__ */ new Set();
+  const excludeTypes = [];
+  const excludeKeywords = [];
+  const priceFloors = [];
+  const priceCeilings = [];
+  for (const rule of rules) {
+    switch (rule.ruleType) {
+      case "exclude_product":
+        excludeHandles.add(rule.ruleValue);
+        break;
+      case "exclude_product_type":
+        excludeTypes.push({ value: rule.ruleValue.trim().toLowerCase(), category: rule.category });
+        break;
+      case "exclude_keyword":
+        excludeKeywords.push(rule.ruleValue.toLowerCase());
+        break;
+      case "exclude_price_min": {
+        const n = parseFloat(rule.ruleValue);
+        if (Number.isFinite(n)) priceFloors.push(n);
+        break;
+      }
+      case "exclude_price_max": {
+        const n = parseFloat(rule.ruleValue);
+        if (Number.isFinite(n)) priceCeilings.push(n);
+        break;
+      }
+    }
+  }
+  return products.filter((p) => {
+    if (excludeHandles.has(p.handle)) return false;
+    if (p.productType) {
+      const productTypeLc = p.productType.trim().toLowerCase();
+      for (const et of excludeTypes) {
+        if (et.value === productTypeLc && (et.category === null || et.category === p.category)) {
+          return false;
+        }
+      }
+    }
+    const lowerTitle = p.title.toLowerCase();
+    for (const kw of excludeKeywords) {
+      if (lowerTitle.includes(kw)) return false;
+    }
+    for (const floor of priceFloors) {
+      if (p.price < floor) return false;
+    }
+    for (const ceiling of priceCeilings) {
+      if (p.price > ceiling) return false;
+    }
+    if (inventoryMin > 0 && p.totalInventory !== null && p.totalInventory < inventoryMin) {
+      return false;
+    }
+    return true;
+  });
+}
+function fillFallbacks(rail, rules, filteredIndex, perRail, alreadyIncludedIds = /* @__PURE__ */ new Set(), collectionPinIds = {}, honoraryProductsByCategory = {}) {
+  const slots = perRail - rail.items.length;
+  if (slots <= 0) return rail;
+  const byHandle = /* @__PURE__ */ new Map();
+  const byId = /* @__PURE__ */ new Map();
+  for (const p of filteredIndex) {
+    byHandle.set(p.handle, p);
+    byId.set(p.id, p);
+  }
+  for (const p of honoraryProductsByCategory[rail.category] ?? []) {
+    if (!byId.has(p.id)) byId.set(p.id, p);
+  }
+  const inRail = new Set(rail.items.map((sp) => sp.product.handle));
+  const inRailIds = new Set(rail.items.map((sp) => sp.product.id));
+  const pins = rules.filter((r) => r.ruleType === "pin_fallback" && r.category === rail.category).sort((a, b) => a.sortOrder - b.sortOrder);
+  const extras = [];
+  const usedIds = /* @__PURE__ */ new Set();
+  for (const pin of pins) {
+    if (extras.length >= slots) break;
+    const product = byHandle.get(pin.ruleValue);
+    if (!product) continue;
+    if (inRail.has(product.handle)) continue;
+    if (alreadyIncludedIds.has(product.id)) continue;
+    if (usedIds.has(product.id)) continue;
+    extras.push({ product, score: 0 });
+    usedIds.add(product.id);
+  }
+  const collectionIds = collectionPinIds[rail.category] ?? [];
+  for (const id of collectionIds) {
+    if (extras.length >= slots) break;
+    const product = byId.get(id);
+    if (!product) continue;
+    if (product.category !== rail.category) continue;
+    if (inRailIds.has(product.id)) continue;
+    if (alreadyIncludedIds.has(product.id)) continue;
+    if (usedIds.has(product.id)) continue;
+    extras.push({ product, score: 0 });
+    usedIds.add(product.id);
+  }
+  if (extras.length === 0) return rail;
+  return {
+    ...rail,
+    items: [...rail.items, ...extras],
+    total: rail.total + extras.length
+  };
+}
+function cleanCollectionHandle(input) {
+  if (!input) return "";
+  let s = input.trim().toLowerCase();
+  const protoMatch = s.match(/^https?:\/\/[^/]+(.*)$/);
+  if (protoMatch && protoMatch[1] !== void 0) s = protoMatch[1];
+  s = s.replace(/^\/+collections\/+/, "").replace(/^\/+/, "");
+  const stop = s.search(/[?#/]/);
+  if (stop !== -1) s = s.slice(0, stop);
+  return s;
+}
+async function resolveCollectionPins(rules, fetcher) {
+  const collectionPins = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category !== null).sort((a, b) => a.sortOrder - b.sortOrder);
+  if (collectionPins.length === 0) return {};
+  const handleCache = /* @__PURE__ */ new Map();
+  const result = {};
+  for (const pin of collectionPins) {
+    const handle = cleanCollectionHandle(pin.ruleValue);
+    if (!handle || !pin.category) continue;
+    let ids = handleCache.get(handle);
+    if (!ids) {
+      ids = await fetcher(handle);
+      handleCache.set(handle, ids);
+    }
+    const seen = new Set(result[pin.category] ?? []);
+    const merged = result[pin.category] ?? [];
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      merged.push(id);
+    }
+    result[pin.category] = merged;
+  }
+  return result;
+}
+function autoLoosen(category, state, filteredIndex, perRail) {
+  const withoutMatters = { ...state, matters: [] };
+  const r1 = rankSingleRail(filteredIndex, withoutMatters, category, 0, perRail);
+  if (r1.items.length > 0) {
+    return { items: r1.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  const withoutAudience = { ...withoutMatters, audience: [] };
+  const r2 = rankSingleRail(filteredIndex, withoutAudience, category, 0, perRail);
+  if (r2.items.length > 0) {
+    return { items: r2.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  const withoutMood = { ...withoutAudience, mood: [] };
+  const r3 = rankSingleRail(filteredIndex, withoutMood, category, 0, perRail);
+  if (r3.items.length > 0) {
+    return { items: r3.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
+  }
+  return null;
+}
+var RULES_CACHE_KEY, RULES_TTL_SECONDS, INVENTORY_MIN_CACHE_KEY, INVENTORY_MIN_CACHE_TTL;
+var init_discovery_rules_server = __esm({
+  "app/lib/discovery-rules.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_discovery_emma();
+    init_discovery_server();
+    RULES_CACHE_KEY = "discovery:rules:v1";
+    RULES_TTL_SECONDS = 5 * 60;
+    INVENTORY_MIN_CACHE_KEY = "discovery:inventory-min:v1";
+    INVENTORY_MIN_CACHE_TTL = 5 * 60;
+  }
+});
+
+// app/lib/discovery.server.ts
+var discovery_server_exports = {};
+__export(discovery_server_exports, {
+  INDEX_KEY: () => INDEX_KEY,
+  INDEX_TTL_SECONDS: () => INDEX_TTL_SECONDS,
+  VOCAB_KEY: () => VOCAB_KEY,
+  VOCAB_TTL_SECONDS: () => VOCAB_TTL_SECONDS,
+  buildDiscoveryIndex: () => buildDiscoveryIndex,
+  computeVocab: () => computeVocab,
+  fetchHonoraryProducts: () => fetchHonoraryProducts,
+  getDiscoveryIndex: () => getDiscoveryIndex,
+  getDiscoveryRailPage: () => getDiscoveryRailPage,
+  getDiscoveryRails: () => getDiscoveryRails,
+  getDiscoveryVocab: () => getDiscoveryVocab,
+  getHonoraryProductsForPin: () => getHonoraryProductsForPin,
+  getProductIdsByCollectionHandle: () => getProductIdsByCollectionHandle,
+  invalidateDiscoveryIndex: () => invalidateDiscoveryIndex,
+  reportTagCoverage: () => reportTagCoverage,
+  triggerDiscoveryRebuild: () => triggerDiscoveryRebuild,
+  writeDiscoveryIndexDurable: () => writeDiscoveryIndexDurable
+});
+import { eq as eq8 } from "drizzle-orm";
+function dialToSubcategory(dial) {
+  switch (dial) {
+    case "vibrator":
+      return "Vibrators";
+    case "dildo":
+      return "Dildos";
+    case "anal":
+      return "Anal";
+    case "cock-ring":
+    case "stroker":
+    case "extender":
+    case "pump":
+    case "sex-machine":
+      return "For Him";
+    case "bondage":
+      return "Bondage & Kink";
+    case "couples":
+      return "Couples";
+    case "lube":
+      return "Lubricants";
+    case "massage":
+      return "Massage";
+    case "enhancer":
+    case "wellness":
+      return "Wellness";
+    case "wear":
+      return "Lingerie";
+    case "harness":
+      return "Accessories";
+    default:
+      return null;
+  }
+}
+function cleanTagList(arr) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const raw of arr) {
+    const v = normalizeTag2(raw);
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+function classifyOptionValues(options) {
+  let colorValues = [];
+  let sizeValues = [];
+  for (const o of options) {
+    const name = o.name.toLowerCase();
+    const values = o.optionValues.map((v) => v.name.trim()).filter(Boolean);
+    if (/colou?r/.test(name)) colorValues = values;
+    else if (/size|length/.test(name)) sizeValues = values;
+  }
+  return { colorValues, sizeValues };
+}
+function derivePricingAndOptions(n, price) {
+  const maxRaw = Number(n.priceRangeV2.maxVariantPrice?.amount);
+  const priceMax = Number.isFinite(maxRaw) && maxRaw > price ? maxRaw : null;
+  const originalRaw = Number(n.originalPriceRaw?.value);
+  const compareRaw = Number(n.compareAtPriceRange?.minVariantCompareAtPrice?.amount);
+  const msrp = Number.isFinite(originalRaw) && originalRaw > 0 ? originalRaw : Number.isFinite(compareRaw) ? compareRaw : NaN;
+  const compareAtPrice = Number.isFinite(msrp) && msrp > price ? msrp : null;
+  const { colorValues, sizeValues } = classifyOptionValues(n.options ?? []);
+  return { priceMax, compareAtPrice, colorValues, sizeValues };
+}
+function parseListMetafield(value) {
+  if (!value) return [];
+  if (value.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+function nodeToDiscoveryProduct(n, categoryMap) {
+  const category = categoryMap.get(n.id);
+  if (!category) return null;
+  const price = Number(n.priceRangeV2.minVariantPrice.amount);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const dial = n.productTypeDial?.value ?? "";
+  const subcategory = dialToSubcategory(dial) ?? category;
+  const mood = cleanTagList(parseListMetafield(n.moodTagsRaw?.value));
+  const audience = cleanTagList(parseListMetafield(n.audienceTagsRaw?.value));
+  const matters = cleanTagList(parseListMetafield(n.mattersTagsRaw?.value));
+  const productType = (n.productType ?? "").trim() || null;
+  const productTypeDial = dial || null;
+  const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price);
+  return {
+    id: n.id,
+    handle: n.handle,
+    title: n.title,
+    defaultVariantId: n.variants?.nodes?.[0]?.id ?? null,
+    price,
+    priceMax,
+    compareAtPrice,
+    colorValues,
+    sizeValues,
+    imageUrl: n.featuredImage?.url ?? null,
+    imageAlt: n.featuredImage?.altText ?? null,
+    category,
+    subcategory,
+    brand: (n.vendor ?? "").trim() || null,
+    mood,
+    audience,
+    matters,
+    totalInventory: n.totalInventory ?? null,
+    productType,
+    productTypeDial
+  };
+}
+async function fetchCollectionProductIds(collectionGid) {
+  const ids = /* @__PURE__ */ new Set();
+  let cursor = null;
+  while (true) {
+    const data = await adminGraphQL(
+      COLLECTION_PRODUCTS_QUERY,
+      { id: collectionGid, cursor }
+    );
+    const page = data.collection?.products;
+    if (!page) break;
+    for (const n of page.nodes) ids.add(n.id);
+    if (!page.pageInfo.hasNextPage) break;
+    cursor = page.pageInfo.endCursor;
+    if (!cursor) break;
+  }
+  return ids;
+}
+async function getProductIdsByCollectionHandle(handle) {
+  const key = handle.trim().toLowerCase();
+  if (!key) return [];
+  const cacheKey3 = collectionHandleKey(key);
+  const cached2 = await kvGet(cacheKey3);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  let ids = [];
+  try {
+    const data = await adminGraphQL(
+      COLLECTION_BY_HANDLE_QUERY,
+      { handle: key }
+    );
+    const gid = data.collectionByHandle?.id;
+    if (gid) {
+      const set = await fetchCollectionProductIds(gid);
+      ids = Array.from(set);
+    }
+  } catch (err2) {
+    console.error("[discovery] getProductIdsByCollectionHandle error for", key, err2);
+    return [];
+  }
+  await kvSet(cacheKey3, ids, COLLECTION_HANDLE_CACHE_TTL);
+  return ids;
+}
+async function fetchHonoraryProducts(ids, category) {
+  if (ids.length === 0) return [];
+  const out = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const batch = ids.slice(i, i + 100);
+    let resp;
+    try {
+      resp = await adminGraphQL(NODES_BY_IDS_QUERY, { ids: batch });
+    } catch (err2) {
+      console.error("[discovery] fetchHonoraryProducts batch failed:", err2);
+      continue;
+    }
+    for (const node of resp.nodes) {
+      if (!node || node.status !== "ACTIVE") continue;
+      const price = Number(node.priceRangeV2.minVariantPrice.amount);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const dial = node.productTypeDial?.value ?? "";
+      const subcategory = dialToSubcategory(dial) ?? category;
+      const productType = (node.productType ?? "").trim() || null;
+      const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price);
+      out.push({
+        id: node.id,
+        handle: node.handle,
+        title: node.title,
+        defaultVariantId: node.variants?.nodes?.[0]?.id ?? null,
+        price,
+        priceMax,
+        compareAtPrice,
+        colorValues,
+        sizeValues,
+        imageUrl: node.featuredImage?.url ?? null,
+        imageAlt: node.featuredImage?.altText ?? null,
+        category,
+        // honorary — forced to the pinned rail's category
+        subcategory,
+        brand: (node.vendor ?? "").trim() || null,
+        mood: cleanTagList(parseListMetafield(node.moodTagsRaw?.value)),
+        audience: cleanTagList(parseListMetafield(node.audienceTagsRaw?.value)),
+        matters: cleanTagList(parseListMetafield(node.mattersTagsRaw?.value)),
+        totalInventory: node.totalInventory ?? null,
+        productType,
+        productTypeDial: dial || null
+      });
+    }
+  }
+  return out;
+}
+async function getHonoraryProductsForPin(handle, category) {
+  const cleaned = handle.trim().toLowerCase();
+  if (!cleaned) return [];
+  const cacheKey3 = honoraryCacheKey(category, cleaned);
+  const cached2 = await kvGet(cacheKey3);
+  if (cached2 && Array.isArray(cached2)) return cached2;
+  const ids = await getProductIdsByCollectionHandle(cleaned);
+  if (ids.length === 0) {
+    await kvSet(cacheKey3, [], HONORARY_CACHE_TTL);
+    return [];
+  }
+  const products = await fetchHonoraryProducts(ids, category);
+  await kvSet(cacheKey3, products, HONORARY_CACHE_TTL);
+  return products;
+}
+async function buildCategoryMap() {
+  const sets = await Promise.all(
+    CATEGORY_PRIORITY.map(async (cat) => ({
+      cat,
+      ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat])
+    }))
+  );
+  const map = /* @__PURE__ */ new Map();
+  for (const { cat, ids } of sets) {
+    for (const id of ids) {
+      if (!map.has(id)) map.set(id, cat);
+    }
+  }
+  return map;
+}
+async function buildDiscoveryIndex() {
+  const categoryMap = await buildCategoryMap();
+  const out = [];
+  let cursor = null;
+  while (true) {
+    const data = await adminGraphQL(
+      PRODUCTS_PAGE_QUERY,
+      { cursor }
+    );
+    for (const node of data.products.nodes) {
+      const dp = nodeToDiscoveryProduct(node, categoryMap);
+      if (dp) out.push(dp);
+    }
+    if (!data.products.pageInfo.hasNextPage) break;
+    cursor = data.products.pageInfo.endCursor;
+    if (!cursor) break;
+  }
+  return out;
+}
+function triggerDiscoveryRebuild() {
+  const baseUrl2 = process.env["BASE_URL"];
+  const cronSecret = process.env["CRON_SECRET"];
+  if (!baseUrl2 || !cronSecret) return;
+  void fetch(`${baseUrl2}/cron/warm-discovery-index`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${cronSecret}` }
+  }).catch(() => {
+  });
+}
+function readL1Memo() {
+  const entry = _g4.__discoveryIndexMemo;
+  if (!entry) return null;
+  if (Date.now() - entry.ts > L1_TTL_MS) return null;
+  return entry;
+}
+function writeL1Memo(index2, vocab) {
+  _g4.__discoveryIndexMemo = { index: index2, vocab, ts: Date.now() };
+}
+async function readDiscoveryIndexDurable() {
+  try {
+    const [row] = await db.select().from(discoveryIndexPayload).where(eq8(discoveryIndexPayload.version, INDEX_VERSION)).limit(1);
+    if (!row) return null;
+    const index2 = row.indexJson;
+    const vocab = row.vocabJson;
+    if (!Array.isArray(index2) || index2.length === 0) return null;
+    void kvSet(INDEX_KEY, index2, INDEX_TTL_SECONDS).catch(() => {
+    });
+    void kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS).catch(() => {
+    });
+    return { index: index2, vocab };
+  } catch (err2) {
+    console.warn("[discovery] Neon durable read failed:", err2);
+    return null;
+  }
+}
+async function writeDiscoveryIndexDurable(index2, vocab) {
+  if (index2.length === 0) return;
+  await kvSet(INDEX_KEY, index2, INDEX_TTL_SECONDS);
+  await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS);
+  writeL1Memo(index2, vocab);
+  try {
+    await db.insert(discoveryIndexPayload).values({
+      version: INDEX_VERSION,
+      indexJson: index2,
+      vocabJson: vocab,
+      count: index2.length
+    }).onConflictDoUpdate({
+      target: [discoveryIndexPayload.version],
+      set: {
+        indexJson: index2,
+        vocabJson: vocab,
+        count: index2.length,
+        builtAt: /* @__PURE__ */ new Date()
+      }
+    });
+  } catch (err2) {
+    console.error("[discovery] Neon durable upsert failed (KV still written):", err2);
+  }
+}
+async function getDiscoveryIndex(opts = {}) {
+  if (!opts.force) {
+    const memo2 = readL1Memo();
+    if (memo2) return memo2.index;
+    const cached2 = await kvGet(INDEX_KEY);
+    if (cached2 && Array.isArray(cached2) && cached2.length > 0) {
+      const vocab = await kvGet(VOCAB_KEY) ?? computeVocab(cached2);
+      writeL1Memo(cached2, vocab);
+      return cached2;
+    }
+  }
+  if (!isKvConfigured()) {
+    const fresh = await buildDiscoveryIndex();
+    if (fresh.length > 0) {
+      await writeDiscoveryIndexDurable(fresh, computeVocab(fresh));
+    }
+    return fresh;
+  }
+  if (!opts.force) {
+    const durable = await readDiscoveryIndexDurable();
+    if (durable) {
+      writeL1Memo(durable.index, durable.vocab);
+      return durable.index;
+    }
+  }
+  triggerDiscoveryRebuild();
+  return [];
+}
+async function invalidateDiscoveryIndex() {
+  await kvSet(INDEX_KEY, null, 1);
+  await kvSet(VOCAB_KEY, null, 1);
+  _g4.__discoveryIndexMemo = null;
+}
+function computeVocab(index2) {
+  const tally = (key) => {
+    const counts = /* @__PURE__ */ new Map();
+    for (const p of index2) {
+      for (const v of p[key]) counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v);
+  };
+  return {
+    moods: tally("mood"),
+    audiences: tally("audience"),
+    matters: tally("matters")
+  };
+}
+async function getDiscoveryVocab() {
+  const cached2 = await kvGet(VOCAB_KEY);
+  if (cached2 && Array.isArray(cached2.moods) && cached2.moods.length > 0) return cached2;
+  const idx = await getDiscoveryIndex();
+  if (idx.length === 0) return { moods: [], audiences: [], matters: [] };
+  const vocab = computeVocab(idx);
+  if (vocab.moods.length > 0 || vocab.audiences.length > 0 || vocab.matters.length > 0) {
+    await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS);
+  }
+  return vocab;
+}
+async function getDiscoveryRails(state, opts = {}) {
+  const products = opts.index ?? await getDiscoveryIndex();
+  const perRail = opts.perRail ?? 4;
+  const [rules, inventoryMin] = await Promise.all([
+    getActiveDiscoveryRules(),
+    getInventoryMin()
+  ]);
+  const filtered = applyRules(products, rules, inventoryMin);
+  const collectionPinIds = await resolveCollectionPins(
+    rules,
+    getProductIdsByCollectionHandle
+  );
+  const rankOpts = { perRail };
+  if (opts.dropEmpty !== void 0) rankOpts.dropEmpty = opts.dropEmpty;
+  if (opts.seed !== void 0) rankOpts.seed = opts.seed;
+  const rails = rankRails(filtered, state, rankOpts);
+  const hasAnySelections = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
+  const indexedIds = new Set(filtered.map((p) => p.id));
+  const honoraryByCategory = {};
+  const collectionPinRules = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category).sort((a, b) => a.sortOrder - b.sortOrder);
+  await Promise.all(
+    collectionPinRules.map(async (pin) => {
+      const cat = pin.category;
+      const products2 = await getHonoraryProductsForPin(pin.ruleValue, cat);
+      const novel = products2.filter((p) => !indexedIds.has(p.id));
+      if (novel.length === 0) return;
+      const allowed = applyRules(novel, rules, inventoryMin);
+      if (allowed.length === 0) return;
+      const existing = honoraryByCategory[cat] ?? [];
+      const seen = new Set(existing.map((p) => p.id));
+      for (const p of allowed) {
+        if (!seen.has(p.id)) {
+          existing.push(p);
+          seen.add(p.id);
+        }
+      }
+      honoraryByCategory[cat] = existing;
+    })
+  );
+  const includedIds = new Set(
+    rails.flatMap((r) => r.items.map((sp) => sp.product.id))
+  );
+  for (const rail of rails) {
+    if (rail.items.length < perRail) {
+      const filled = fillFallbacks(
+        rail,
+        rules,
+        filtered,
+        perRail,
+        includedIds,
+        collectionPinIds,
+        honoraryByCategory
+      );
+      for (const sp of filled.items) {
+        if (!includedIds.has(sp.product.id)) includedIds.add(sp.product.id);
+      }
+      rail.items = filled.items;
+      rail.total = filled.total;
+    }
+  }
+  for (const rail of rails) {
+    if (rail.items.length === 0 && hasAnySelections) {
+      const loosened = autoLoosen(rail.category, state, filtered, perRail);
+      if (loosened) {
+        rail.items = loosened.items;
+        rail.total = loosened.items.length;
+        rail.relaxed = true;
+        rail.relaxedReason = loosened.reason;
+      }
+    }
+  }
+  const available = availableToArrays(computeAvailable(filtered, state));
+  return { rails, total: filtered.length, available };
+}
+async function getDiscoveryRailPage(state, category, offset, limit, opts = {}) {
+  const products = opts.index ?? await getDiscoveryIndex();
+  const [rules, inventoryMin] = await Promise.all([
+    getActiveDiscoveryRules(),
+    getInventoryMin()
+  ]);
+  const filtered = applyRules(products, rules, inventoryMin);
+  return rankSingleRail(filtered, state, category, offset, limit);
+}
+async function reportTagCoverage() {
+  const idx = await getDiscoveryIndex({ force: true });
+  const report = {
+    total: idx.length,
+    withMood: 0,
+    withAudience: 0,
+    withMatters: 0,
+    withAllThree: 0,
+    withCategoryMapping: idx.length,
+    // index already requires a category mapping
+    byCategory: { Pleasure: 0, Play: 0, Body: 0, Wear: 0 }
+  };
+  for (const p of idx) {
+    if (p.mood.length > 0) report.withMood += 1;
+    if (p.audience.length > 0) report.withAudience += 1;
+    if (p.matters.length > 0) report.withMatters += 1;
+    if (p.mood.length > 0 && p.audience.length > 0 && p.matters.length > 0) {
+      report.withAllThree += 1;
+    }
+    report.byCategory[p.category] += 1;
+  }
+  return report;
+}
+var INDEX_VERSION, INDEX_KEY, INDEX_TTL_SECONDS, VOCAB_KEY, VOCAB_TTL_SECONDS, CATEGORY_COLLECTION_IDS, CATEGORY_PRIORITY, PRODUCTS_PAGE_QUERY, COLLECTION_PRODUCTS_QUERY, COLLECTION_BY_HANDLE_QUERY, COLLECTION_HANDLE_CACHE_TTL, collectionHandleKey, NODES_BY_IDS_QUERY, HONORARY_CACHE_TTL, honoraryCacheKey, L1_TTL_MS, _g4;
+var init_discovery_server = __esm({
+  "app/lib/discovery.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_shopify_server();
+    init_kv_server();
+    init_discovery_emma();
+    init_discovery_tags();
+    init_discovery_rules_server();
+    INDEX_VERSION = "v8";
+    INDEX_KEY = `discovery:index:${INDEX_VERSION}`;
+    INDEX_TTL_SECONDS = 60 * 60 * 24;
+    VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`;
+    VOCAB_TTL_SECONDS = 60 * 60 * 24;
+    CATEGORY_COLLECTION_IDS = {
+      Pleasure: "gid://shopify/Collection/330228727979",
+      Play: "gid://shopify/Collection/330228695211",
+      Body: "gid://shopify/Collection/330227581099",
+      Wear: "gid://shopify/Collection/330229514411"
+    };
+    CATEGORY_PRIORITY = ["Pleasure", "Play", "Body", "Wear"];
+    PRODUCTS_PAGE_QUERY = /* GraphQL */
+    `
+  query DiscoveryIndexPage($cursor: String) {
+    products(first: 100, after: $cursor, query: "status:active") {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        handle
+        title
+        status
+        productType
+        vendor
+        featuredImage { url altText }
+        variants(first: 1) { nodes { id } }
+        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+        compareAtPriceRange { minVariantCompareAtPrice { amount } }
+        options(first: 3) { name optionValues { name } }
+        totalInventory
+        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
+        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
+        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
+        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
+      }
+    }
+  }
+`;
+    COLLECTION_PRODUCTS_QUERY = /* GraphQL */
+    `
+  query DiscoveryCollectionProducts($id: ID!, $cursor: String) {
+    collection(id: $id) {
+      products(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id }
+      }
+    }
+  }
+`;
+    COLLECTION_BY_HANDLE_QUERY = /* GraphQL */
+    `
+  query DiscoveryCollectionByHandle($handle: String!) {
+    collectionByHandle(handle: $handle) { id }
+  }
+`;
+    COLLECTION_HANDLE_CACHE_TTL = 30 * 60;
+    collectionHandleKey = (h) => `discovery:collection-pin:${INDEX_VERSION}:${h}`;
+    NODES_BY_IDS_QUERY = /* GraphQL */
+    `
+  query DiscoveryHonoraryNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        handle
+        title
+        status
+        productType
+        vendor
+        featuredImage { url altText }
+        variants(first: 1) { nodes { id } }
+        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+        compareAtPriceRange { minVariantCompareAtPrice { amount } }
+        options(first: 3) { name optionValues { name } }
+        totalInventory
+        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
+        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
+        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
+        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
+      }
+    }
+  }
+`;
+    HONORARY_CACHE_TTL = 30 * 60;
+    honoraryCacheKey = (cat, handle) => `discovery:honorary:${INDEX_VERSION}:${cat}:${handle}`;
+    L1_TTL_MS = 6e5;
+    _g4 = globalThis;
+    if (_g4.__discoveryIndexMemo === void 0) _g4.__discoveryIndexMemo = null;
+  }
+});
+
+// app/lib/homepage-payload.server.ts
+var homepage_payload_server_exports = {};
+__export(homepage_payload_server_exports, {
+  DEFAULT_ANCHOR_COLLECTION_HANDLE: () => DEFAULT_ANCHOR_COLLECTION_HANDLE,
+  HOMEPAGE_PAYLOAD_B_KV_KEY: () => HOMEPAGE_PAYLOAD_B_KV_KEY,
+  HOMEPAGE_PAYLOAD_B_VERSION: () => HOMEPAGE_PAYLOAD_B_VERSION,
+  HOMEPAGE_PAYLOAD_KV_KEY: () => HOMEPAGE_PAYLOAD_KV_KEY,
+  HOMEPAGE_PAYLOAD_KV_PREFIX: () => HOMEPAGE_PAYLOAD_KV_PREFIX,
+  HOMEPAGE_PAYLOAD_VERSION: () => HOMEPAGE_PAYLOAD_VERSION,
+  VARIANT_B_SECTION_TYPES: () => VARIANT_B_SECTION_TYPES,
+  assertJsonSafe: () => assertJsonSafe,
+  assertJsonSafeB: () => assertJsonSafeB,
+  buildHomeContentBlocks: () => buildHomeContentBlocks,
+  buildHomeContentBlocksLean: () => buildHomeContentBlocksLean,
+  buildHomepagePayloadA: () => buildHomepagePayloadA,
+  getAnchorCollectionProducts: () => getAnchorCollectionProducts,
+  invalidateHomepagePayloadA: () => invalidateHomepagePayloadA,
+  invalidateHomepagePayloadB: () => invalidateHomepagePayloadB,
+  readHomepagePayloadA: () => readHomepagePayloadA,
+  readHomepagePayloadB: () => readHomepagePayloadB,
+  reshuffleRailsWithSeed: () => reshuffleRailsWithSeed,
+  triggerHomepageWarm: () => triggerHomepageWarm,
+  triggerHomepageWarmB: () => triggerHomepageWarmB,
+  warmHomepagePayloadA: () => warmHomepagePayloadA,
+  writeHomepagePayloadA: () => writeHomepagePayloadA,
+  writeHomepagePayloadB: () => writeHomepagePayloadB
+});
+import { eq as eq9 } from "drizzle-orm";
+async function buildHomeContentBlocks() {
+  const cmsData = await withTimeout(
+    getHomepageSections(),
+    BUILD_TIMEOUT_MS,
+    null,
+    "getHomepageSections(payloadA)"
+  );
+  const sections = (cmsData?.sections ?? []).filter((s) => s._type !== "announcementBar");
+  const carouselBlocks = sections.filter(
+    (s) => s._type === "productCarousel"
+  );
+  const emmaRailBlocks = sections.filter(
+    (s) => s._type === "emmaCuratedRail"
+  );
+  const couplesBlocks = sections.filter(
+    (s) => s._type === "playTogetherBanner"
+  );
+  const [carouselResults, emmaRailResults, couplesResults] = await Promise.all([
+    carouselBlocks.length > 0 ? withTimeout(Promise.all(carouselBlocks.map((b) => {
+      const limit = b.productLimit ?? 8;
+      const source = b.source ?? "tag";
+      if (source === "collection" && b.collectionHandle) {
+        return getCollectionProducts(b.collectionHandle, limit);
+      }
+      if (source === "manual" && b.productHandles?.length) {
+        return getProductsByHandles(normalizeProductHandles(b.productHandles));
+      }
+      return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([]);
+    })), BUILD_TIMEOUT_MS, [], "carouselResults(payloadA)") : Promise.resolve([]),
+    emmaRailBlocks.length > 0 ? withTimeout(Promise.all(emmaRailBlocks.map(
+      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)) : Promise.resolve([])
+    )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([]),
+    // Couples strip. Uses the same hardened path as the rails above:
+    // `normalizeProductHandles` tolerates BOTH shapes this array exists in
+    // (productRef objects and bare strings), and each block additionally
+    // catches its own rejection. That last part matters: every homepage block
+    // resolves inside one Promise.all, so a single malformed entry used to
+    // reject the whole contentBlocks build and blank every team-published
+    // section on the page (the three-day outage PR #322 fixed). A bad couples
+    // block must cost only its own strip.
+    couplesBlocks.length > 0 ? withTimeout(Promise.all(couplesBlocks.map(
+      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)).catch((err2) => {
+        console.error("[homepage-payload] couples rail resolve failed:", err2);
+        return [];
+      }) : Promise.resolve([])
+    )), BUILD_TIMEOUT_MS, [], "couplesResults(payloadA)") : Promise.resolve([])
+  ]);
+  const carouselProductMap = {};
+  carouselBlocks.forEach((b, i) => {
+    carouselProductMap[b._key] = carouselResults[i] ?? [];
+  });
+  emmaRailBlocks.forEach((b, i) => {
+    carouselProductMap[b._key] = emmaRailResults[i] ?? [];
+  });
+  couplesBlocks.forEach((b, i) => {
+    carouselProductMap[b._key] = couplesResults[i] ?? [];
+  });
+  return { sections, carouselProductMap };
+}
+function toLeanCardProduct(p) {
+  const lean = {
+    id: p.id,
+    handle: p.handle,
+    title: p.title,
+    price: p.price,
+    images: p.images.length > 0 ? [p.images[0]] : []
+  };
+  if (p.compareAtPrice !== void 0) lean.compareAtPrice = p.compareAtPrice;
+  if (p.brand !== void 0) lean.brand = p.brand;
+  if (p.videos && p.videos.length > 0) lean.videos = [p.videos[0]];
+  return lean;
+}
+async function getAnchorCollectionProducts(handle, limit = 12) {
+  const h = (handle ?? "").trim() || DEFAULT_ANCHOR_COLLECTION_HANDLE;
+  try {
+    const products = await getCollectionProducts(h, limit);
+    return products.map(toLeanCardProduct);
+  } catch (err2) {
+    console.warn(
+      `[homepage-payload:b] anchor collection "${h}" fetch failed, falling back to discovery best-of:`,
+      err2
+    );
+    return [];
+  }
+}
+async function buildHomeContentBlocksLean() {
+  const { sections, carouselProductMap } = await buildHomeContentBlocks();
+  const leanSections = sections.filter(
+    (s) => VARIANT_B_SECTION_TYPES.includes(s._type)
+  );
+  const survivingRailKeys = new Set(
+    leanSections.filter((s) => s._type === "emmaCuratedRail" || s._type === "playTogetherBanner").map((s) => s._key)
+  );
+  const leanCarouselProductMap = {};
+  for (const key of survivingRailKeys) {
+    leanCarouselProductMap[key] = (carouselProductMap[key] ?? []).map(toLeanCardProduct);
+  }
+  return { sections: leanSections, carouselProductMap: leanCarouselProductMap };
+}
+async function buildHomepagePayloadA() {
+  const [railsResult, vocab, content] = await Promise.all([
+    withTimeout(
+      getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: 0 }),
+      BUILD_TIMEOUT_MS,
+      { rails: [], total: 0, available: { moods: [], audiences: [], matters: [] } },
+      "getDiscoveryRails(payloadA)"
+    ),
+    withTimeout(
+      getDiscoveryVocab(),
+      BUILD_TIMEOUT_MS,
+      { moods: [], audiences: [], matters: [] },
+      "getDiscoveryVocab(payloadA)"
+    ),
+    buildHomeContentBlocks()
+  ]);
+  const payload = {
+    version: HOMEPAGE_PAYLOAD_VERSION,
+    variant: "a",
+    rails: railsResult.rails,
+    total: railsResult.total,
+    welcomeBackEnabled: true,
+    moods: vocab.moods,
+    audiences: vocab.audiences,
+    matters: vocab.matters,
+    available: railsResult.available,
+    sections: content.sections,
+    carouselProductMap: content.carouselProductMap,
+    builtAt: Date.now(),
+    // Empty rails == the discovery index was cold during the build. Strictly
+    // worse than a populated blob; the write guard refuses to clobber a good
+    // blob with a degraded one unless forced.
+    degraded: railsResult.rails.length === 0
+  };
+  return payload;
+}
+function assertJsonSafe(payload) {
+  const round = JSON.parse(JSON.stringify(payload));
+  if (!Array.isArray(round.rails)) throw new Error("payload.rails not array after JSON round-trip");
+  if (typeof round.builtAt !== "number") throw new Error("payload.builtAt not number after JSON round-trip");
+  if (round.version !== HOMEPAGE_PAYLOAD_VERSION) throw new Error("payload.version mismatch after JSON round-trip");
+}
+async function readHomepagePayloadA() {
+  try {
+    const kv = await kvGet(HOMEPAGE_PAYLOAD_KV_KEY);
+    if (kv && kv.version === HOMEPAGE_PAYLOAD_VERSION) return kv;
+  } catch (err2) {
+    console.warn("[homepage-payload] KV read failed, trying Neon:", err2);
+  }
+  try {
+    const [row] = await db.select().from(homepagePayload).where(eq9(homepagePayload.variant, "a")).limit(1);
+    if (row && row.version === HOMEPAGE_PAYLOAD_VERSION && row.payload) {
+      const payload = row.payload;
+      void kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
+      });
+      return payload;
+    }
+  } catch (err2) {
+    console.warn("[homepage-payload] Neon read failed:", err2);
+  }
+  return null;
+}
+async function writeHomepagePayloadA(payload, opts = {}) {
+  assertJsonSafe(payload);
+  if (payload.degraded && !opts.force) {
+    const existing = await readHomepagePayloadA();
+    if (existing && !existing.degraded) {
+      console.warn("[homepage-payload] skipping degraded write over a good blob (use force to override)");
+      return;
+    }
+  }
+  await kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS);
+  try {
+    await db.insert(homepagePayload).values({
+      variant: "a",
+      version: HOMEPAGE_PAYLOAD_VERSION,
+      payload,
+      degraded: payload.degraded
+    }).onConflictDoUpdate({
+      target: [homepagePayload.variant, homepagePayload.version],
+      set: {
+        payload,
+        degraded: payload.degraded,
+        builtAt: /* @__PURE__ */ new Date()
+      }
+    });
+  } catch (err2) {
+    console.error("[homepage-payload] Neon upsert failed (KV still written):", err2);
+  }
+}
+async function warmHomepagePayloadA(opts = {}) {
+  const force = opts.force ?? true;
+  const payload = await buildHomepagePayloadA();
+  await writeHomepagePayloadA(payload, { force });
+  return payload;
+}
+async function invalidateHomepagePayloadA() {
+  await kvDel(HOMEPAGE_PAYLOAD_KV_KEY);
+}
+function triggerHomepageWarm() {
+  const baseUrl2 = process.env["BASE_URL"];
+  const cronSecret = process.env["CRON_SECRET"];
+  if (!baseUrl2 || !cronSecret) return;
+  void fetch(`${baseUrl2}/cron/warm-homepage`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${cronSecret}` }
+  }).catch(() => {
+  });
+}
+function mulberry322(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = t + 1831565813 >>> 0;
+    let r = t;
+    r = Math.imul(r ^ r >>> 15, r | 1);
+    r ^= r + Math.imul(r ^ r >>> 7, r | 61);
+    return ((r ^ r >>> 14) >>> 0) / 4294967296;
+  };
+}
+function reshuffleRailsWithSeed(rails, seed) {
+  return rails.map((rail, railIdx) => {
+    if (rail.items.length <= 1) return rail;
+    const items = [...rail.items];
+    const rand = mulberry322(seed + railIdx * 2654435761);
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      const tmp3 = items[i];
+      items[i] = items[j];
+      items[j] = tmp3;
+    }
+    return { ...rail, items };
+  });
+}
+function assertJsonSafeB(payload) {
+  const round = JSON.parse(JSON.stringify(payload));
+  if (!Array.isArray(round.rails)) throw new Error("payloadB.rails not array after JSON round-trip");
+  if (typeof round.builtAt !== "number") throw new Error("payloadB.builtAt not number after JSON round-trip");
+  if (round.version !== HOMEPAGE_PAYLOAD_B_VERSION) throw new Error("payloadB.version mismatch after JSON round-trip");
+}
+async function readHomepagePayloadB() {
+  try {
+    const kv = await kvGet(HOMEPAGE_PAYLOAD_B_KV_KEY);
+    if (kv && kv.version === HOMEPAGE_PAYLOAD_B_VERSION) return kv;
+  } catch (err2) {
+    console.warn("[homepage-payload:b] KV read failed, trying Neon:", err2);
+  }
+  try {
+    const [row] = await db.select().from(homepagePayload).where(eq9(homepagePayload.variant, "b")).limit(1);
+    if (row && row.version === HOMEPAGE_PAYLOAD_B_VERSION && row.payload) {
+      const payload = row.payload;
+      void kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
+      });
+      return payload;
+    }
+  } catch (err2) {
+    console.warn("[homepage-payload:b] Neon read failed:", err2);
+  }
+  return null;
+}
+async function writeHomepagePayloadB(payload, opts = {}) {
+  assertJsonSafeB(payload);
+  if (payload.degraded && !opts.force) {
+    const existing = await readHomepagePayloadB();
+    if (existing && !existing.degraded) {
+      console.warn("[homepage-payload:b] skipping degraded write over a good blob (use force to override)");
+      return;
+    }
+  }
+  await kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS);
+  try {
+    await db.insert(homepagePayload).values({
+      variant: "b",
+      version: HOMEPAGE_PAYLOAD_B_VERSION,
+      payload,
+      degraded: payload.degraded
+    }).onConflictDoUpdate({
+      target: [homepagePayload.variant, homepagePayload.version],
+      set: {
+        payload,
+        degraded: payload.degraded,
+        builtAt: /* @__PURE__ */ new Date()
+      }
+    });
+  } catch (err2) {
+    console.error("[homepage-payload:b] Neon upsert failed (KV still written):", err2);
+  }
+}
+async function invalidateHomepagePayloadB() {
+  await kvDel(HOMEPAGE_PAYLOAD_B_KV_KEY);
+}
+function triggerHomepageWarmB() {
+  const baseUrl2 = process.env["BASE_URL"];
+  const cronSecret = process.env["CRON_SECRET"];
+  if (!baseUrl2 || !cronSecret) return;
+  void fetch(`${baseUrl2}/cron/warm-homepage-b`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${cronSecret}` }
+  }).catch(() => {
+  });
+}
+var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS, VARIANT_B_SECTION_TYPES, DEFAULT_ANCHOR_COLLECTION_HANDLE, HOMEPAGE_PAYLOAD_B_VERSION, HOMEPAGE_PAYLOAD_B_KV_KEY;
+var init_homepage_payload_server = __esm({
+  "app/lib/homepage-payload.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_kv_server();
+    init_with_timeout_server();
+    init_discovery_server();
+    init_discovery();
+    init_sanity_server();
+    init_product_handles();
+    init_shopify_server();
+    HOMEPAGE_PAYLOAD_VERSION = "v1";
+    HOMEPAGE_PAYLOAD_KV_KEY = `homepage:payload:${HOMEPAGE_PAYLOAD_VERSION}`;
+    HOMEPAGE_PAYLOAD_KV_PREFIX = "homepage:payload";
+    KV_TTL_SECONDS = 6 * 60 * 60;
+    BUILD_TIMEOUT_MS = 8e3;
+    VARIANT_B_SECTION_TYPES = [
+      "emmaCuratedRail",
+      "editorialTiles",
+      "wayfinderMosaic",
+      "playTogetherBanner",
+      // The hero trust strip (Nº 02). A `trustBar` block + `trustItem` docs already
+      // existed and were already projected as `trustItems`, but this whitelist
+      // filtered them out, so the strip stayed a hardcoded four-string array no
+      // agent could touch. Published trust items now win; the shell array is the
+      // fallback.
+      "trustBar",
+      // The FAQ band (Nº 11), same story: hardcoded Q&A with no Sanity read. The
+      // published block feeds BOTH the visible accordion and the FAQPage JSON-LD.
+      "homepageFaq"
+    ];
+    DEFAULT_ANCHOR_COLLECTION_HANDLE = "best-sellers";
+    HOMEPAGE_PAYLOAD_B_VERSION = "b6";
+    HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
+  }
+});
+
+// app/lib/sensation-map.ts
+function labelForType(v) {
+  return TYPE_LABELS[v] ?? v.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function savings(p) {
+  return p.compareAtPrice && p.compareAtPrice > p.price ? p.compareAtPrice - p.price : 0;
+}
+function qualityCompare(a, b) {
+  const ai = a.imageUrl ? 0 : 1;
+  const bi = b.imageUrl ? 0 : 1;
+  if (ai !== bi) return ai - bi;
+  const s = savings(b) - savings(a);
+  if (s !== 0) return s;
+  if (a.price !== b.price) return a.price - b.price;
+  return a.handle.localeCompare(b.handle);
+}
+function deriveTypeNotches(index2, max2 = MAX_TYPE_NOTCHES) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const p of index2) {
+    const t = p.productTypeDial;
+    if (!t) continue;
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, Math.max(0, max2)).map(([value, count]) => ({ value, label: labelForType(value), count }));
+}
+function deriveFeelNotches(moods, max2 = MAX_FEEL_NOTCHES) {
+  return moods.slice(0, Math.max(0, max2));
+}
+function defaultSensationState(types, feels, seed = 0) {
+  if (types.length === 0) return null;
+  const idx = (seed % types.length + types.length) % types.length;
+  const type = types[idx].value;
+  return { type, feel: feels[0] ?? null };
+}
+function matchSensationMap(index2, state, count = SENSATION_RESULT_COUNT) {
+  const ofType = index2.filter((p) => p.productTypeDial === state.type);
+  if (state.feel) {
+    const scoreState = { ...EMPTY_STATE, mood: [state.feel] };
+    const scored = ofType.map((p) => ({ p, s: scoreProduct2(p, scoreState) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || qualityCompare(a.p, b.p));
+    if (scored.length >= MIN_RESULTS) {
+      return {
+        items: scored.slice(0, count).map((x) => x.p),
+        relaxed: false,
+        relaxedReason: null,
+        resolved: state
+      };
+    }
+  }
+  if (ofType.length >= MIN_RESULTS) {
+    return {
+      items: [...ofType].sort(qualityCompare).slice(0, count),
+      relaxed: !!state.feel,
+      // dropping "any feel" is not a relaxation
+      relaxedReason: state.feel ? "Closest fit" : null,
+      resolved: { type: state.type, feel: null }
+    };
+  }
+  const [topNotch] = deriveTypeNotches(index2, 1);
+  const fallbackType = topNotch?.value ?? state.type;
+  const pool = index2.filter((p) => p.productTypeDial === fallbackType);
+  const source = pool.length ? pool : [...index2];
+  return {
+    items: [...source].sort(qualityCompare).slice(0, count),
+    relaxed: true,
+    relaxedReason: "Closest fit",
+    resolved: { type: fallbackType, feel: null }
+  };
+}
+var TYPE_LABELS, MAX_TYPE_NOTCHES, MAX_FEEL_NOTCHES, SENSATION_RESULT_COUNT, MIN_RESULTS;
+var init_sensation_map = __esm({
+  "app/lib/sensation-map.ts"() {
+    "use strict";
+    init_discovery();
+    init_discovery_emma();
+    TYPE_LABELS = {
+      vibrator: "Vibrator",
+      dildo: "Dildo",
+      anal: "Anal",
+      bondage: "Bondage",
+      "cock-ring": "Cock ring",
+      stroker: "Stroker",
+      couples: "For two",
+      harness: "Harness",
+      extender: "Extender",
+      pump: "Pump",
+      lube: "Lube",
+      massage: "Massage",
+      enhancer: "Enhancer",
+      wear: "To wear",
+      condom: "Condom",
+      wellness: "Wellness",
+      novelty: "Novelty",
+      "book-media": "Books",
+      "sex-machine": "Sex machine"
+    };
+    MAX_TYPE_NOTCHES = 5;
+    MAX_FEEL_NOTCHES = 4;
+    SENSATION_RESULT_COUNT = 3;
+    MIN_RESULTS = 2;
+  }
+});
+
+// app/lib/sensation-map.server.ts
+async function getSensationMapData(now = () => /* @__PURE__ */ new Date()) {
+  const index2 = await getDiscoveryIndex();
+  if (index2.length === 0) {
+    return { types: [], feels: [], defaultState: null, defaultMatch: null };
+  }
+  const types = deriveTypeNotches(index2);
+  const feels = deriveFeelNotches(computeVocab(index2).moods);
+  const dayBucket = Math.floor(now().getTime() / 864e5);
+  const defaultState = defaultSensationState(types, feels, dayBucket);
+  const defaultMatch = defaultState ? matchSensationMap(index2, defaultState) : null;
+  return { types, feels, defaultState, defaultMatch };
+}
+var init_sensation_map_server = __esm({
+  "app/lib/sensation-map.server.ts"() {
+    "use strict";
+    init_discovery_server();
+    init_sensation_map();
+  }
+});
+
+// app/lib/panel-deck.server.ts
+function resolveHref(link2, liveHandles) {
+  if (!link2?.kind) return null;
+  switch (link2.kind) {
+    case "collection": {
+      const handle = link2.collectionHandle?.trim();
+      if (!handle) return null;
+      if (liveHandles && !liveHandles.has(handle)) return null;
+      return `/collections/${handle}`;
+    }
+    case "article": {
+      if (!link2.articleSlug || link2.articlePublished === false) return null;
+      return `/notebook/${link2.articleSlug}`;
+    }
+    case "route": {
+      const route = link2.route?.trim();
+      return route && route.startsWith("/") ? route : null;
+    }
+    default:
+      return null;
+  }
+}
+function baseTile(item, href) {
+  return {
+    key: item._key ?? `${item.label}-${href}`,
+    label: item.label?.trim() ?? "",
+    surface: SURFACES.includes(item.surface) ? item.surface : "stone",
+    mark: item.mark ?? null,
+    imageUrl: item.imageUrl ?? null,
+    imageAlt: item.imageAlt ?? null,
+    href
+  };
+}
+async function getPanelDeck(preview = false) {
+  const client5 = getClient(false, preview);
+  if (!client5) return null;
+  let raw = null;
+  try {
+    raw = await client5.fetch(PANEL_DECK_GROQ);
+  } catch (err2) {
+    console.error("[panel-deck] fetch failed:", err2);
+    return null;
+  }
+  if (!raw?.rows?.length) return null;
+  let liveHandles = null;
+  try {
+    const collections = await getCollectionList();
+    liveHandles = new Set(
+      collections.filter((c) => c.productsCount === null || c.productsCount > 0).map((c) => c.handle)
+    );
+  } catch (err2) {
+    console.warn("[panel-deck] collection list unavailable, skipping handle validation:", err2);
+  }
+  const rows = [];
+  for (const row of raw.rows) {
+    const rowKey = row._key ?? `row-${rows.length}`;
+    const resolveItems = (decorate) => (row.items ?? []).flatMap((item) => {
+      const href = resolveHref(item.link, liveHandles);
+      if (!href || !item.label?.trim()) {
+        console.warn(
+          `[panel-deck] dropping panel "${item.label ?? "(unlabelled)"}": ` + (item.label?.trim() ? "destination missing, dead, or empty" : "no label")
+        );
+        return [];
+      }
+      return [decorate(item, baseTile(item, href))];
+    });
+    switch (row._type) {
+      case "panelSquareRow": {
+        const items = resolveItems((_item, tile) => tile);
+        if (items.length > 0) rows.push({ kind: "square", key: rowKey, items });
+        break;
+      }
+      case "panelRowLarge": {
+        const items = resolveItems((item, tile) => ({
+          ...tile,
+          kicker: item.kicker?.trim() || null,
+          blurb: item.blurb?.trim() || null,
+          ctaLabel: item.ctaLabel?.trim() || null
+        }));
+        if (items.length > 0) rows.push({ kind: "large", key: rowKey, items });
+        break;
+      }
+      case "panelRowSmall": {
+        const items = resolveItems((item, tile) => ({
+          ...tile,
+          meta: item.meta?.trim() || null,
+          figure: item.figure?.trim() || null
+        }));
+        if (items.length > 0) rows.push({ kind: "small", key: rowKey, items });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  if (rows.length === 0) return null;
+  return {
+    eyebrow: raw.eyebrow?.trim() || null,
+    theme: THEMES.includes(raw.theme) ? raw.theme : "tint",
+    showOrdinals: raw.showOrdinals === true,
+    rows
+  };
+}
+var PANEL_DECK_GROQ, SURFACES, THEMES;
+var init_panel_deck_server = __esm({
+  "app/lib/panel-deck.server.ts"() {
+    "use strict";
+    init_sanity_server();
+    init_shopify_server();
+    PANEL_DECK_GROQ = `
+  *[_id == "singleton.panelDeck"][0]{
+    eyebrow, theme, showOrdinals,
+    rows[]{
+      _type, _key,
+      items[]{
+        _key, label, surface, mark, kicker, blurb, ctaLabel, meta, figure,
+        "imageUrl": image.asset->url,
+        "imageAlt": image.alt,
+        link{
+          kind, collectionHandle, route,
+          "articleSlug": article->slug.current,
+          "articlePublished": article->status == "published"
+        }
+      }
+    }
+  }
+`;
+    SURFACES = ["blush", "lilac", "stone", "paper", "plum", "coral", "ink"];
+    THEMES = ["tint", "photo", "ruled"];
+  }
+});
+
+// app/lib/storefront-home.server.ts
+var storefront_home_server_exports = {};
+__export(storefront_home_server_exports, {
+  RAIL_SEED_BUCKET_MS: () => RAIL_SEED_BUCKET_MS,
+  STOREFRONT_EDGE_CACHE_HEADERS: () => STOREFRONT_EDGE_CACHE_HEADERS,
+  assembleStorefrontHome: () => assembleStorefrontHome,
+  buildHomepagePayloadB: () => buildHomepagePayloadB,
+  hydrateStorefrontPayloadB: () => hydrateStorefrontPayloadB,
+  railSeedBucket: () => railSeedBucket,
+  warmHomepagePayloadB: () => warmHomepagePayloadB
+});
+function railSeedBucket(now = Date.now()) {
+  return Math.floor(now / RAIL_SEED_BUCKET_MS);
+}
+async function assembleStorefrontHome(opts = {}) {
+  if (opts.fresh) return hydrateStorefrontPayloadB(await buildHomepagePayloadB());
+  const payload = await readHomepagePayloadB();
+  if (payload) {
+    if (payload.degraded) triggerHomepageWarmB();
+    return hydrateStorefrontPayloadB(payload);
+  }
+  const fresh = await buildHomepagePayloadB();
+  void writeHomepagePayloadB(fresh).catch((err2) => {
+    console.warn("[storefront-home] payload write after cold build failed:", err2);
+  });
+  return hydrateStorefrontPayloadB(fresh);
+}
+function hydrateStorefrontPayloadB(payload) {
+  const rails = reshuffleRailsWithSeed(payload.rails, railSeedBucket());
+  let featured = rails.map((r) => r.items[0]?.product).filter((p) => !!p);
+  const pinned = payload.pinnedProduct;
+  if (pinned) {
+    featured = [pinned, ...featured.filter((p) => p.handle !== pinned.handle)];
+  }
+  return {
+    variant: "b",
+    rails,
+    // Curated collection order is merchandising, not a rotation set, so it is
+    // passed through verbatim (no per-bucket reshuffle like `rails`).
+    anchorProducts: payload.anchorProducts ?? [],
+    emmaHero: payload.emmaHero,
+    emmaPhotoUrl: payload.emmaPhotoUrl,
+    emmaPhotoAlt: payload.emmaPhotoAlt,
+    featured,
+    total: payload.total,
+    // Already resolved at build time. PR #322 established that this must be a
+    // RESOLVED value rather than a streamed promise (a deferred one never
+    // survives the edge cache, so team merchandising reached nobody); reading
+    // it off the precomputed blob satisfies that contract by construction and
+    // removes the Sanity round-trip from the request path entirely.
+    contentBlocks: payload.contentBlocks,
+    notebookPosts: payload.notebookPosts,
+    sensationMap: payload.sensationMap,
+    // Resolved at build time for the same reason contentBlocks is: the shell
+    // cannot decide what to render from a value that arrives after it flushes.
+    layout: payload.layout ?? null,
+    panelDeck: payload.panelDeck ?? null
+  };
+}
+async function buildHomepagePayloadB() {
+  const railSeed = 0;
+  const [railsResult, emmaHero, notebook, editor, contentBlocks, layout, panelDeck] = await Promise.all([
+    getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
+    withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, "getEmmaHeroSettings(storefront)"),
+    // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
+    // dwell and currently sells nothing, so the homepage gives it a real shelf
+    // plus a see-all link into /notebook (see HomeNotebookRail).
+    getBlogPosts({ perPage: 6 }).catch(() => ({ posts: [], total: 0 })),
+    // Meet Emma portrait (Nº 04). Own short timeout + degrade-to-null so a slow
+    // or cold Sanity leg can never sink the render; MeetEmma falls back to the
+    // bundled illustration when this is null. getEditor() is already cached 300s
+    // and swallows its own errors, so this is belt-and-suspenders with emmaHero.
+    withTimeout(getEditor(), EDITOR_TIMEOUT_MS, null, "getEditor(storefront)"),
+    // Team merchandising surface — resolved here rather than deferred, so it
+    // survives the edge cache and reaches crawlers (see the `contentBlocks`
+    // field doc). Resolving it at BUILD time rather than per-request also takes
+    // the Sanity round-trip off the request path completely. `withTimeout` only
+    // guards a slow upstream; the `.catch` is what replaces the old
+    // `<Await errorElement>`, so a rejected leg degrades to shell fallbacks
+    // instead of failing the build.
+    withTimeout(
+      buildHomeContentBlocksLean(),
+      CONTENT_BLOCKS_TIMEOUT_MS,
+      EMPTY_CONTENT_BLOCKS,
+      "buildHomeContentBlocksLean(storefront)"
+    ).catch((err2) => {
+      console.error("[storefront-home] contentBlocks failed, using shell fallbacks:", err2);
+      return EMPTY_CONTENT_BLOCKS;
+    }),
+    // Band order + chrome overrides. Same reasoning as contentBlocks above: the
+    // shell cannot decide what to render from a value that lands after it has
+    // flushed, so this is resolved at build time and stored. Degrading to null
+    // renders the shipped order, so a slow or failed leg costs nothing.
+    withTimeout(
+      getStorefrontHomeLayout(),
+      LAYOUT_TIMEOUT_MS,
+      null,
+      "getStorefrontHomeLayout(storefront)"
+    ).catch((err2) => {
+      console.error("[storefront-home] layout failed, using shipped band order:", err2);
+      return null;
+    }),
+    // The deck. Same contract: resolved at build time, degrades to null, and
+    // null renders nothing, so a failed leg costs the deck and only the deck.
+    withTimeout(
+      getPanelDeck(),
+      LAYOUT_TIMEOUT_MS,
+      null,
+      "getPanelDeck(storefront)"
+    ).catch((err2) => {
+      console.error("[storefront-home] panel deck failed, rendering without it:", err2);
+      return null;
+    })
+  ]);
+  const rails = railsResult.rails;
+  const pinnedHandle = emmaHero?.featuredProductHandle?.trim();
+  let pinnedProduct = null;
+  if (pinnedHandle) {
+    pinnedProduct = rails.flatMap((r) => r.items).find((i) => i.product.handle === pinnedHandle)?.product ?? // Not surfaced by today's rails: pull it from the discovery index. The
+    // rails call above already warmed the L1 memo, so this is an in-memory
+    // lookup, not a second KV round-trip.
+    (await getDiscoveryIndex()).find((p) => p.handle === pinnedHandle) ?? null;
+    if (!pinnedProduct) {
+      console.warn(
+        `[storefront-home] featuredProductHandle "${pinnedHandle}" not in discovery index, hero stays rotating`
+      );
+    }
+  }
+  const anchorProducts = await getAnchorCollectionProducts(emmaHero?.anchorCollectionHandle);
+  const sensationMap = await getSensationMapData();
+  return {
+    version: HOMEPAGE_PAYLOAD_B_VERSION,
+    variant: "b",
+    rails,
+    anchorProducts,
+    total: railsResult.total,
+    pinnedProduct,
+    emmaHero,
+    // Nº 04 prefers the additive homepage-only situational portrait
+    // (`editor.homepagePhoto`) and falls back to the canonical `photo`. Only
+    // this homepage surface reads homepagePhoto; /about and the video
+    // pipeline's identity anchor (getEditorPhotoUrl) stay on `photo`, so a
+    // homepage-portrait swap never re-portraits /about or the video frames.
+    emmaPhotoUrl: editor?.homepagePhotoUrl ?? editor?.photoUrl ?? null,
+    emmaPhotoAlt: editor?.homepagePhotoAlt ?? editor?.photoAlt ?? null,
+    contentBlocks,
+    // resolved above — team-managed Sanity surface, lean/slimmed for variant b
+    notebookPosts: notebook.posts,
+    sensationMap,
+    layout,
+    panelDeck,
+    builtAt: Date.now(),
+    // Empty rails == the discovery index was cold during the build. The write
+    // guard refuses to clobber a good blob with this unless forced.
+    degraded: rails.length === 0
+  };
+}
+async function warmHomepagePayloadB(opts = {}) {
+  const force = opts.force ?? true;
+  const payload = await buildHomepagePayloadB();
+  await writeHomepagePayloadB(payload, { force });
+  return payload;
+}
+var EMMA_HERO_TIMEOUT_MS, EDITOR_TIMEOUT_MS, LAYOUT_TIMEOUT_MS, CONTENT_BLOCKS_TIMEOUT_MS, EMPTY_CONTENT_BLOCKS, RAIL_SEED_BUCKET_MS, STOREFRONT_EDGE_CACHE_HEADERS;
+var init_storefront_home_server = __esm({
+  "app/lib/storefront-home.server.ts"() {
+    "use strict";
+    init_discovery_server();
+    init_homepage_payload_server();
+    init_sensation_map_server();
+    init_sanity_server();
+    init_panel_deck_server();
+    init_with_timeout_server();
+    init_discovery();
+    EMMA_HERO_TIMEOUT_MS = 4e3;
+    EDITOR_TIMEOUT_MS = 4e3;
+    LAYOUT_TIMEOUT_MS = 4e3;
+    CONTENT_BLOCKS_TIMEOUT_MS = 6e3;
+    EMPTY_CONTENT_BLOCKS = { sections: [], carouselProductMap: {} };
+    RAIL_SEED_BUCKET_MS = 9e5;
+    STOREFRONT_EDGE_CACHE_HEADERS = {
+      "Cache-Control": "public, max-age=0, s-maxage=900, stale-while-revalidate=3600",
+      "Vercel-CDN-Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600"
+    };
+  }
+});
+
+// app/lib/homepage-healthcheck.server.ts
+var homepage_healthcheck_server_exports = {};
+__export(homepage_healthcheck_server_exports, {
+  FALLBACK_MARKERS: () => FALLBACK_MARKERS,
+  RENDER_TRUTH_LATEST_KEY: () => RENDER_TRUTH_LATEST_KEY,
+  RENDER_TRUTH_PROPAGATION_MS: () => RENDER_TRUTH_PROPAGATION_MS,
+  assertSlateRendered: () => assertSlateRendered,
+  checkPageOnce: () => checkPageOnce,
+  compareFingerprints: () => compareFingerprints,
+  extractJsonLd: () => extractJsonLd,
+  extractPublishedSlate: () => extractPublishedSlate,
+  fingerprintSlate: () => fingerprintSlate,
+  normalizeMarker: () => normalizeMarker,
+  normalizeRenderedText: () => normalizeRenderedText,
+  renderTruth: () => renderTruth,
+  runHomepageHealthcheck: () => runHomepageHealthcheck,
+  sanityAssetId: () => sanityAssetId,
+  utcDay: () => utcDay2
+});
+async function activeServedVariant() {
+  try {
+    const cfg = await getHomeConfig();
+    if (cfg?.activeVariant === "a" || cfg?.activeVariant === "b") return cfg.activeVariant;
+  } catch {
+  }
+  const env = process.env["HOME_VARIANT"];
+  if (env === "a" || env === "b" || env === "legacy") return env;
+  return "legacy";
+}
+function siteOrigin() {
+  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
+  return base.replace(/\/$/, "") || "https://xdipx.com";
+}
+function extractJsonLd(html) {
+  let parsed = 0;
+  let scripts = 0;
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    scripts += 1;
+    try {
+      JSON.parse((m[1] ?? "").trim());
+      parsed += 1;
+    } catch {
+    }
+  }
+  return { parsed, scripts };
+}
+async function checkPageOnce(path, attempt, opts = {}) {
+  const bust = `__healthcheck=${Date.now()}-${attempt}`;
+  const url = `${siteOrigin()}${path}${path.includes("?") ? "&" : "?"}${bust}`;
+  const problems = [];
+  let status = 0;
+  let bodyOk = false;
+  let captured;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    const res = await fetch(url, {
+      headers: { "user-agent": "xdipx-homepage-healthcheck" },
+      signal: ctrl.signal
+    }).finally(() => clearTimeout(timer));
+    status = res.status;
+    const html = await res.text();
+    if (opts.captureHtml) captured = html;
+    if (status !== 200) problems.push(`HTTP ${status}`);
+    if (html.length < MIN_BODY_BYTES) problems.push(`body too small (${html.length} bytes)`);
+    if (!/<img[\s>]/i.test(html)) problems.push("no <img> (hero/LCP image likely missing)");
+    if (!/<\/html>/i.test(html)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
+    bodyOk = status === 200 && html.length >= MIN_BODY_BYTES;
+    const { parsed, scripts } = extractJsonLd(html);
+    if (parsed === 0) problems.push("no valid JSON-LD");
+    else if (parsed < scripts) problems.push(`malformed JSON-LD (${scripts - parsed} unparseable)`);
+  } catch (err2) {
+    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
+  }
+  const hardFail = status >= 500;
+  const check = { path, status, ok: problems.length === 0, problems, bodyOk, hardFail };
+  if (captured !== void 0) check.html = captured;
+  return check;
+}
+async function checkPage(path, opts = {}) {
+  let best = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const c = await checkPageOnce(path, attempt, opts);
+    if (c.ok) return c;
+    if (!best || c.problems.length < best.problems.length) best = c;
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
+    }
+  }
+  return best;
+}
+function decodeEntities(s) {
+  return s.replace(/&#x([0-9a-f]+);/gi, (_m, hex) => String.fromCodePoint(parseInt(hex, 16))).replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(parseInt(dec, 10))).replace(/&([a-z]+);/gi, (m, name) => ENTITIES[name.toLowerCase()] ?? m);
+}
+function normalizeRenderedText(html) {
+  return decodeEntities(
+    html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]*>/g, " ")
+  ).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').toLowerCase().replace(/\s+/g, "");
+}
+function normalizeMarker(marker) {
+  return decodeEntities(marker).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').toLowerCase().replace(/\s+/g, "");
+}
+function stripScripts(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ");
+}
+function sanityAssetId(url) {
+  if (!url) return null;
+  const m = /\/images\/[^/]+\/[^/]+\/([^/?#]+)/.exec(url);
+  if (!m?.[1]) return url;
+  return m[1].replace(/-\d+x\d+\.[a-z0-9]+$/i, "");
+}
+function extractPublishedSlate(payload) {
+  const sections = payload.contentBlocks?.sections ?? [];
+  const rails = sections.filter((s) => s._type === "emmaCuratedRail");
+  const wayfinder = sections.find((s) => s._type === "wayfinderMosaic");
+  const couples = sections.find((s) => s._type === "playTogetherBanner");
+  const tiles = wayfinder?.wayfinderTiles ?? [];
+  const couplesImage = couples?.image;
+  return {
+    heroHandle: payload.pinnedProduct?.handle ?? null,
+    heroHandleRequested: payload.emmaHero?.featuredProductHandle?.trim() || null,
+    railTitles: rails.slice(0, RENDERED_TEAM_RAILS).map((r) => (r.heading ?? "").trim()).filter((t) => t.length > 0),
+    wayfinderHeading: wayfinder?.heading?.trim() || null,
+    tileHeadlines: tiles.map((t) => (t.label ?? "").trim()).filter((t) => t.length > 0),
+    couplesHeading: couples?.heading?.trim() || null,
+    tileImageIds: tiles.map((t) => sanityAssetId(t.image?.url)).filter((id) => !!id),
+    couplesImageId: sanityAssetId(couplesImage?.url),
+    publishedBlockCount: sections.length
+  };
+}
+function assertSlateRendered(slate, html) {
+  const text2 = normalizeRenderedText(html);
+  const attrs = stripScripts(html).toLowerCase();
+  const out = [];
+  const has = (marker) => text2.includes(normalizeMarker(marker));
+  if (slate.heroHandleRequested && !slate.heroHandle) {
+    out.push({
+      section: "hero",
+      expected: slate.heroHandleRequested,
+      ok: false,
+      fallbackRendered: true,
+      detail: "pinned handle never resolved into the payload, so the hero is rotating, not pinned"
+    });
+  } else if (slate.heroHandle) {
+    const handle = slate.heroHandle.toLowerCase();
+    const ok = attrs.includes(`/products/${handle}"`) || attrs.includes(`/products/${handle}?`);
+    const a = {
+      section: "hero",
+      expected: `/products/${slate.heroHandle}`,
+      ok,
+      fallbackRendered: !ok
+    };
+    if (!ok) a.detail = "pinned hero product is not linked anywhere on the page";
+    out.push(a);
+  }
+  const railsFellBack = slate.railTitles.length > 0 && has(FALLBACK_MARKERS.rails);
+  for (const title of slate.railTitles) {
+    const ok = has(title);
+    const a = {
+      section: "rails",
+      expected: title,
+      ok,
+      fallbackRendered: !ok && railsFellBack
+    };
+    if (!ok) {
+      a.detail = railsFellBack ? `rail title missing and the shell "${FALLBACK_MARKERS.rails}" fallback rendered instead` : "published rail title is not in the rendered page text";
+    }
+    out.push(a);
+  }
+  const wayfinderPublished = !!slate.wayfinderHeading || slate.tileHeadlines.length > 0;
+  const wayfinderFellBack = wayfinderPublished && has(FALLBACK_MARKERS.wayfinder);
+  const wayfinderExpected = [
+    ...slate.wayfinderHeading ? [slate.wayfinderHeading] : [],
+    ...slate.tileHeadlines
+  ];
+  for (const expected of wayfinderExpected) {
+    const ok = has(expected);
+    const a = {
+      section: "wayfinder",
+      expected,
+      ok,
+      fallbackRendered: !ok && wayfinderFellBack
+    };
+    if (!ok) {
+      a.detail = wayfinderFellBack ? `missing and the shell "${FALLBACK_MARKERS.wayfinder}" fallback rendered instead` : "published wayfinder copy is not in the rendered page text";
+    }
+    out.push(a);
+  }
+  if (slate.couplesHeading) {
+    const ok = has(slate.couplesHeading);
+    const fellBack = !ok && has(FALLBACK_MARKERS.couples);
+    const a = {
+      section: "couples",
+      expected: slate.couplesHeading,
+      ok,
+      fallbackRendered: fellBack
+    };
+    if (!ok) {
+      a.detail = fellBack ? `missing and the shell "${FALLBACK_MARKERS.couples}" fallback rendered instead` : "published couples heading is not in the rendered page text";
+    }
+    out.push(a);
+  }
+  return out;
+}
+function fingerprintSlate(slate) {
+  return {
+    hero: slate.heroHandle ?? "",
+    rails: slate.railTitles.join("|"),
+    tiles: slate.tileImageIds.join("|"),
+    couples: slate.couplesImageId ?? ""
+  };
+}
+function compareFingerprints(today, yesterday) {
+  if (!yesterday) return [];
+  return Object.keys(today).filter(
+    (slot) => today[slot] !== "" && today[slot] === yesterday[slot]
+  );
+}
+function utcDay2(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 10);
+}
+function fingerprintKey(day) {
+  return `${FINGERPRINT_KEY_PREFIX}:${day}`;
+}
+async function fetchHomeHtml() {
+  let best = null;
+  for (let attempt = 1; attempt <= RENDER_TRUTH_MAX_ATTEMPTS; attempt++) {
+    const c = await checkPageOnce("/", attempt, { captureHtml: true });
+    if (c.html && c.bodyOk) return c.html;
+    if (c.html && !best) best = c.html;
+    if (attempt < RENDER_TRUTH_MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, RENDER_TRUTH_RETRY_BACKOFF_MS));
+    }
+  }
+  return best;
+}
+async function persistLatestRenderTruth(result) {
+  try {
+    await kvSet(RENDER_TRUTH_LATEST_KEY, { ...result, at: (/* @__PURE__ */ new Date()).toISOString() });
+  } catch (err2) {
+    console.warn("[render-truth] latest snapshot failed", err2);
+  }
+}
+async function renderTruth(opts = {}) {
+  const now = opts.now ?? Date.now();
+  const fileTickets = opts.fileTickets ?? true;
+  const base = {
+    ok: true,
+    skipped: null,
+    assertions: [],
+    missing: [],
+    fallbacks: [],
+    slate: null,
+    fingerprint: {},
+    sameSlots: [],
+    ticketIds: []
+  };
+  try {
+    const variant = await activeServedVariant();
+    if (variant !== "b") {
+      return { ...base, skipped: "variant-not-b", message: `homepage is serving variant ${variant}` };
+    }
+    const [payload, rawDoc] = await Promise.all([
+      readHomepagePayloadB().catch(() => null),
+      getHomepageDocRaw().catch(() => null)
+    ]);
+    if (!payload) {
+      return { ...base, skipped: "no-payload", message: "no precomputed payload B blob to assert against" };
+    }
+    const slate = extractPublishedSlate(payload);
+    const fingerprint2 = fingerprintSlate(slate);
+    const updatedAtRaw = rawDoc?.["_updatedAt"];
+    const updatedAt = typeof updatedAtRaw === "string" ? Date.parse(updatedAtRaw) : NaN;
+    const propagating = Number.isFinite(updatedAt) && now - updatedAt < RENDER_TRUTH_PROPAGATION_MS;
+    const rawSections = Array.isArray(rawDoc?.["sections"]) ? rawDoc["sections"] : [];
+    const assertions = [];
+    if (rawSections.length > 0 && slate.publishedBlockCount === 0) {
+      assertions.push({
+        section: "payload",
+        expected: `${rawSections.length} published Sanity section(s) resolved into the homepage payload`,
+        ok: false,
+        fallbackRendered: true,
+        detail: "the Sanity homepage doc has sections but payload B carries none, so every slot is rendering shell defaults. This is the 2026-07-24 signature: one malformed block kills the whole projection."
+      });
+    }
+    let html = opts.html;
+    if (slate.publishedBlockCount > 0 || slate.heroHandleRequested) {
+      if (!html) html = await fetchHomeHtml() ?? void 0;
+      if (!html) {
+        return {
+          ...base,
+          slate,
+          fingerprint: fingerprint2,
+          skipped: "no-html",
+          message: "could not fetch the live homepage to assert against"
+        };
+      }
+      assertions.push(...assertSlateRendered(slate, html));
+    } else if (assertions.length === 0) {
+      return {
+        ...base,
+        slate,
+        fingerprint: fingerprint2,
+        skipped: "nothing-published",
+        message: "no team content published, nothing to assert"
+      };
+    }
+    const today = utcDay2(now);
+    const yesterday = utcDay2(now - 864e5);
+    let sameSlots = [];
+    try {
+      const prior = await kvGet(fingerprintKey(yesterday));
+      sameSlots = compareFingerprints(fingerprint2, prior);
+      await kvSet(fingerprintKey(today), fingerprint2);
+    } catch (err2) {
+      console.warn("[render-truth] fingerprint snapshot failed", err2);
+    }
+    const failed = assertions.filter((a) => !a.ok);
+    const missing = failed.map((a) => a.expected);
+    const fallbacks = [...new Set(failed.filter((a) => a.fallbackRendered).map((a) => a.section))];
+    const result = {
+      ...base,
+      assertions,
+      missing,
+      fallbacks,
+      slate,
+      fingerprint: fingerprint2,
+      sameSlots,
+      ok: failed.length === 0,
+      skipped: propagating && failed.length > 0 ? "propagating" : null
+    };
+    if (propagating && failed.length > 0) {
+      result.ok = true;
+      result.message = `${failed.length} assertion(s) failing but the Sanity doc changed ${Math.round((now - updatedAt) / 6e4)} min ago, inside the propagation window, so not reporting`;
+      await persistLatestRenderTruth(result);
+      return result;
+    }
+    if (fileTickets) {
+      result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate);
+      const changed = Object.keys(fingerprint2).filter(
+        (slot) => fingerprint2[slot] !== "" && !sameSlots.includes(slot)
+      );
+      await closeStaleSamenessTickets(changed, today);
+    }
+    await persistLatestRenderTruth(result);
+    return result;
+  } catch (err2) {
+    console.error("[render-truth] check failed (ignored)", err2);
+    return { ...base, message: `render-truth error: ${err2 instanceof Error ? err2.message : String(err2)}` };
+  }
+}
+async function fileRenderTruthTickets(failed, sameSlots, day, slate) {
+  const ids = [];
+  const bySection = /* @__PURE__ */ new Map();
+  for (const a of failed) {
+    const list = bySection.get(a.section) ?? [];
+    list.push(a);
+    bySection.set(a.section, list);
+  }
+  for (const [section, items] of bySection) {
+    const lines = items.map((a) => `- expected: ${a.expected}${a.detail ? ` (${a.detail})` : ""}`);
+    ids.push(
+      await fileDetectionTicket({
+        detector: "render-truth",
+        // Dated: a render break on a specific day's slate is a distinct
+        // incident from the same section breaking a week later.
+        dedupeKey: makeDedupeKey("render", section, day),
+        priority: 1,
+        category: "agents",
+        suggestion: `Render-truth FAILED on the homepage "${section}" slot (${day}).
+
+The merchandising team published content that is not reaching the live page. Published content that did not render:
+${lines.join("\n")}
+
+Payload block count: ${slate.publishedBlockCount}. Fix the publish-to-render path, then re-run /cron/homepage-healthcheck to confirm the markers appear.`,
+        links: [{ kind: "url", ref: `${siteOrigin()}/`, state: "failed" }]
+      })
+    );
+  }
+  for (const slot of sameSlots) {
+    ids.push(
+      await fileDetectionTicket({
+        detector: "render-truth",
+        // Undated: one open conversation until the slot actually changes.
+        dedupeKey: makeDedupeKey("sameness", slot),
+        priority: 3,
+        category: "agents",
+        kind: "process",
+        suggestion: `Homepage freshness: the "${slot}" slot is byte-identical to yesterday (${day}).
+
+The merchandise routine's freshness rule designates this slot as must-change daily. Two consecutive identical days means the run either reused the slot or never touched it. Check the daily run's art-director step and the slot's reuse-first default.`
+      })
+    );
+  }
+  return ids;
+}
+async function closeStaleSamenessTickets(changedSlots, day) {
+  if (changedSlots.length === 0) return;
+  try {
+    const { listSuggestions: listSuggestions2, transitionSuggestion: transitionSuggestion2 } = await Promise.resolve().then(() => (init_team_server(), team_server_exports));
+    const { makeDedupeKey: makeDedupeKey2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+    const keys = changedSlots.map((s) => makeDedupeKey2("sameness", s));
+    const open = await listSuggestions2({
+      dedupeKeys: keys,
+      kinds: ["process"],
+      statuses: ["proposed", "approved"]
+    });
+    const note = `Resolved ${day}: the slot changed, so the freshness rule is satisfied. Closed automatically by /cron/homepage-healthcheck.`;
+    const closed = [];
+    for (const row of open) {
+      try {
+        await transitionSuggestion2(row.id, "applied", "system", { note });
+        closed.push(row.id);
+      } catch (err2) {
+        if (String(err2).includes("409")) continue;
+        console.warn(`[render-truth] could not close sameness ticket #${row.id} (ignored)`, err2);
+      }
+    }
+    if (closed.length > 0) {
+      console.log(`[render-truth] closed ${closed.length} resolved sameness ticket(s): ${closed.map((id) => `#${id}`).join(", ")}`);
+    }
+  } catch (err2) {
+    console.warn("[render-truth] sameness ticket close failed (ignored)", err2);
+  }
+}
+async function openHealthcheckIssue(title, body) {
+  const token = process.env["GITHUB_TOKEN"];
+  const owner = process.env["GITHUB_OWNER"];
+  const repo = process.env["GITHUB_REPO"];
+  if (!token || !owner || !repo) {
+    console.warn("[homepage-healthcheck] GITHUB_TOKEN/OWNER/REPO not set \u2014 skipping issue");
+    return { url: null, created: false };
+  }
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json"
+  };
+  try {
+    const q = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open in:title "${title}"`);
+    const search = await fetch(`https://api.github.com/search/issues?q=${q}`, { headers });
+    const existing = search.ok ? ((await search.json()).items ?? [])[0] : void 0;
+    if (existing) {
+      await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${existing.number}/comments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ body })
+      });
+      return { url: existing.html_url, created: false };
+    }
+    const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title, body, labels: ["healthcheck", "P0"] })
+    });
+    if (!create.ok) {
+      console.error(`[homepage-healthcheck] issue create ${create.status}`);
+      return { url: null, created: false };
+    }
+    return { url: (await create.json()).html_url, created: true };
+  } catch (err2) {
+    console.error("[homepage-healthcheck] issue error", err2);
+    return { url: null, created: false };
+  }
+}
+async function runHomepageHealthcheck() {
+  const checks = await Promise.all(
+    PATHS.map((p) => checkPage(p, p === "/" ? { captureHtml: true } : {}))
+  );
+  const healthy = checks.every((c) => c.ok);
+  const home = checks.find((c) => c.path === "/");
+  const homeHtml = home?.html;
+  for (const c of checks) delete c.html;
+  const rt = await renderTruth({ html: homeHtml });
+  if (!rt.ok) {
+    Sentry.captureException(
+      new Error(`Homepage render-truth failed. Missing: ${rt.missing.join(" | ")}`),
+      {
+        tags: { healthcheck: "render-truth", severity: "P1" },
+        extra: {
+          missing: rt.missing,
+          fallbacks: rt.fallbacks,
+          slate: rt.slate,
+          tickets: rt.ticketIds
+        }
+      }
+    );
+  }
+  if (home?.bodyOk) {
+    try {
+      const doc = await getHomepageDocRaw();
+      if (doc) await kvSet(LAST_GOOD_KEY, doc);
+    } catch (err2) {
+      console.warn("[homepage-healthcheck] last-good snapshot failed", err2);
+    }
+  }
+  if (healthy) {
+    return {
+      ok: rt.ok,
+      checks,
+      action: "snapshot",
+      rolledBack: false,
+      alerted: !rt.ok,
+      renderTruth: rt,
+      ...rt.ok ? {} : { message: `render-truth failed: ${rt.missing.join(" | ")}` }
+    };
+  }
+  const failed = checks.filter((c) => !c.ok);
+  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
+  const homeHardBroken = !!home?.hardFail;
+  const result = {
+    ok: false,
+    checks,
+    action: homeHardBroken ? "rollback" : "alert",
+    rolledBack: false,
+    alerted: false,
+    renderTruth: rt
+  };
+  if (homeHardBroken) {
+    try {
+      const lastGood = await kvGet(LAST_GOOD_KEY);
+      const valid = !!lastGood && lastGood["_type"] === "homepageSections" && Array.isArray(lastGood["sections"]);
+      if (valid) {
+        await Promise.all([
+          invalidateHomepagePayloadA().catch(() => {
+          }),
+          invalidateHomepagePayloadB().catch(() => {
+          })
+        ]);
+        invalidateCmsCache();
+        await restoreHomepageDoc(lastGood);
+        const servedVariant = await activeServedVariant();
+        if (servedVariant === "b") {
+          const { warmHomepagePayloadB: warmHomepagePayloadB2 } = await Promise.resolve().then(() => (init_storefront_home_server(), storefront_home_server_exports));
+          await warmHomepagePayloadB2({ force: true }).catch(
+            (e) => console.error("[homepage-healthcheck] storefront payload rewarm failed", e)
+          );
+        } else {
+          await warmHomepagePayloadA({ force: true }).catch(
+            (e) => console.error("[homepage-healthcheck] payload rewarm failed", e)
+          );
+        }
+        result.rolledBack = true;
+      } else {
+        result.message = lastGood ? "last-good snapshot is malformed \u2014 skipping rollback" : "no last-good snapshot available to roll back to";
+      }
+    } catch (err2) {
+      result.message = `rollback failed: ${err2 instanceof Error ? err2.message : String(err2)}`;
+    }
+  } else if (home && !home.ok) {
+    result.message = "homepage returned 200 but tripped render heuristics \u2014 not a Sanity-content failure; alerting without rollback";
+  } else {
+    result.message = "non-homepage page unhealthy; no homepage rollback applicable";
+  }
+  const isP0 = homeHardBroken || result.rolledBack;
+  Sentry.captureException(
+    new Error(`Homepage healthcheck ${isP0 ? "failed" : "soft-degraded"} \u2014 ${summary}`),
+    {
+      tags: { healthcheck: "homepage", severity: isP0 ? "P0" : "P2" },
+      extra: { checks, rolledBack: result.rolledBack, note: result.message }
+    }
+  );
+  result.alerted = true;
+  if (isP0) {
+    const issueBody = [
+      `Homepage healthcheck failed against ${siteOrigin()}.`,
+      "",
+      "**Problems**",
+      summary,
+      "",
+      `**Auto-recovery:** ${result.rolledBack ? "rolled the Sanity homepage doc back to last-good and re-warmed the payload for the live variant." : result.message ?? "none"}`,
+      "",
+      "_Filed automatically by `/cron/homepage-healthcheck`._"
+    ].join("\n");
+    const issue = await openHealthcheckIssue("[P0] Homepage healthcheck failing", issueBody);
+    if (issue.url) result.message = `${result.message ? result.message + " \xB7 " : ""}issue: ${issue.url}`;
+    if (issue.created) {
+      const { sendOwnerSms: sendOwnerSms2, sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+      await sendOwnerSms2(`xdipx P0: homepage healthcheck failing. ${summary}`);
+      await sendOwnerEmail2(
+        "[P0] xdipx homepage healthcheck failing",
+        `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml2(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ""}`
+      );
+    }
+  }
+  return result;
+}
+var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS, RETRY_BACKOFF_MS, RENDER_TRUTH_PROPAGATION_MS, RENDER_TRUTH_MAX_ATTEMPTS, RENDER_TRUTH_RETRY_BACKOFF_MS, RENDERED_TEAM_RAILS, FINGERPRINT_KEY_PREFIX, RENDER_TRUTH_LATEST_KEY, FALLBACK_MARKERS, ENTITIES;
+var init_homepage_healthcheck_server = __esm({
+  "app/lib/homepage-healthcheck.server.ts"() {
+    "use strict";
+    init_sentry_server();
+    init_kv_server();
+    init_sanity_server();
+    init_homepage_payload_server();
+    init_detection_tickets_server();
+    LAST_GOOD_KEY = "homepage:healthcheck:lastgood";
+    PATHS = ["/", "/discover"];
+    FETCH_TIMEOUT_MS = 12e3;
+    MIN_BODY_BYTES = 1e3;
+    MAX_ATTEMPTS = 3;
+    RETRY_BACKOFF_MS = 1500;
+    RENDER_TRUTH_PROPAGATION_MS = 30 * 6e4;
+    RENDER_TRUTH_MAX_ATTEMPTS = 3;
+    RENDER_TRUTH_RETRY_BACKOFF_MS = 2e3;
+    RENDERED_TEAM_RAILS = 4;
+    FINGERPRINT_KEY_PREFIX = "homepage:render-truth:fingerprint";
+    RENDER_TRUTH_LATEST_KEY = "homepage:render-truth:latest";
+    FALLBACK_MARKERS = {
+      wayfinder: "Find your way in.",
+      couples: "Better together.",
+      rails: "Emma's edit"
+    };
+    ENTITIES = {
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      nbsp: " ",
+      hellip: "\u2026",
+      mdash: "-",
+      ndash: "-"
+    };
+  }
+});
+
+// app/lib/category-healthcheck.server.ts
+var category_healthcheck_server_exports = {};
+__export(category_healthcheck_server_exports, {
+  CATEGORY_HEALTH_LATEST_KEY: () => CATEGORY_HEALTH_LATEST_KEY,
+  runCategoryHealthcheck: () => runCategoryHealthcheck
+});
+async function persistLatest(result) {
+  try {
+    await kvSet(CATEGORY_HEALTH_LATEST_KEY, { ...result, at: (/* @__PURE__ */ new Date()).toISOString() });
+  } catch (err2) {
+    console.warn("[category-healthcheck] latest snapshot failed", err2);
+  }
+}
+function siteOrigin2() {
+  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
+  return base.replace(/\/$/, "") || "https://xdipx.com";
+}
+function countJsonLdType(html, type) {
+  let count = 0;
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    try {
+      const json2 = JSON.parse((m[1] ?? "").trim());
+      const t = json2["@type"];
+      if (t === type || Array.isArray(t) && t.includes(type)) count += 1;
+    } catch {
+    }
+  }
+  return count;
+}
+async function checkPageOnce2(exp, attempt) {
+  const bust = `__healthcheck=${Date.now()}-${attempt}`;
+  const url = `${siteOrigin2()}${exp.path}${exp.path.includes("?") ? "&" : "?"}${bust}`;
+  const problems = [];
+  let status = 0;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS2);
+    const res = await fetch(url, {
+      headers: { "user-agent": "xdipx-category-healthcheck" },
+      signal: ctrl.signal
+    }).finally(() => clearTimeout(timer));
+    status = res.status;
+    const body = await res.text();
+    if (status !== 200) problems.push(`HTTP ${status}`);
+    if (body.length < MIN_BODY_BYTES2) problems.push(`body too small (${body.length} bytes)`);
+    if (!/<\/html>/i.test(body)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
+    for (const marker of exp.markers) {
+      if (!body.includes(marker)) {
+        problems.push(`missing ${marker} (merchandised layer not rendering \u2014 fallback served)`);
+      }
+    }
+    if (exp.surface !== "deck") {
+      const faqNodes = countJsonLdType(body, "FAQPage");
+      if (faqNodes > 1) problems.push(`${faqNodes} FAQPage JSON-LD nodes (must dedupe to one)`);
+    }
+  } catch (err2) {
+    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
+  }
+  return { path: exp.path, surface: exp.surface, status, ok: problems.length === 0, problems, hardFail: status >= 500 };
+}
+async function checkPage2(exp) {
+  let best = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS2; attempt++) {
+    const c = await checkPageOnce2(exp, attempt);
+    if (c.ok) return c;
+    if (!best || c.problems.length < best.problems.length) best = c;
+    if (attempt < MAX_ATTEMPTS2) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS2));
+    }
+  }
+  return best;
+}
+async function fetchLiveDocs() {
+  const client5 = getClient(false);
+  if (!client5) return { categories: [], drops: [] };
+  try {
+    const rows = await client5.fetch(
+      `{
+        "categories": *[_type == "categoryPage" && status == "live"].shopifyCollectionHandle,
+        "drops": *[_type == "dropPage" && status == "live"].routeKey,
+      }`
+    );
+    return {
+      categories: (rows?.categories ?? []).filter((h) => typeof h === "string" && h.length > 0),
+      drops: (rows?.drops ?? []).filter((r) => r === "new" || r === "on-sale")
+    };
+  } catch (err2) {
+    console.error("[category-healthcheck] live-doc query failed:", err2);
+    return { categories: [], drops: [] };
+  }
+}
+async function runCategoryHealthcheck() {
+  const { categories, drops } = await fetchLiveDocs();
+  const expectations = [
+    ...categories.map((handle) => ({
+      path: `/collections/${handle}`,
+      surface: "category",
+      markers: ['data-block="categoryMasthead"']
+    })),
+    ...drops.map((routeKey) => ({
+      path: routeKey === "new" ? "/new" : "/collections/on-sale",
+      surface: "drop",
+      markers: ['data-block="dropMasthead"']
+    }))
+  ];
+  try {
+    const payload = await readHomepagePayloadB();
+    const deckPlaced = (payload?.layout?.sections ?? []).some(
+      (s) => s._type === "panelDeckSection" && s.enabled !== false
+    );
+    if (payload?.panelDeck && deckPlaced) {
+      expectations.push({
+        // ?variant=b pins the storefront render so the assertion holds whatever
+        // the served default is mid-rollout.
+        path: "/?variant=b",
+        surface: "deck",
+        markers: ["data-panel="]
+      });
+    }
+  } catch (err2) {
+    console.warn("[category-healthcheck] payload read failed (deck check skipped):", err2);
+  }
+  const liveDocs = categories.length + drops.length;
+  if (expectations.length === 0) {
+    const empty = { ok: true, liveDocs, checks: [], alerted: false };
+    await persistLatest(empty);
+    return empty;
+  }
+  const checks = await Promise.all(expectations.map(checkPage2));
+  const healthy = checks.every((c) => c.ok);
+  if (healthy) {
+    const green = { ok: true, liveDocs, checks, alerted: false };
+    await persistLatest(green);
+    return green;
+  }
+  const failed = checks.filter((c) => !c.ok);
+  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
+  const hard = failed.some((c) => c.hardFail);
+  Sentry.captureException(
+    new Error(`Category healthcheck ${hard ? "failed" : "soft-degraded"} \u2014 ${summary}`),
+    {
+      tags: { healthcheck: "category-pages", severity: hard ? "P1" : "P3" },
+      extra: { checks }
+    }
+  );
+  const result = { ok: false, liveDocs, checks, alerted: true };
+  try {
+    const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2, priorityFromSeverity: priorityFromSeverity2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+    result.ticketsFiled = [];
+    for (const c of failed) {
+      result.ticketsFiled.push(
+        await fileDetectionTicket2({
+          detector: "category-healthcheck",
+          dedupeKey: makeDedupeKey2("category-page", c.path),
+          priority: priorityFromSeverity2(c.hardFail ? "P1" : "P3"),
+          category: "other",
+          kind: "code",
+          suggestion: `Merchandised-page healthcheck failing on ${c.path} (HTTP ${c.status}).
+
+Problems:
+${c.problems.map((p) => `- ${p}`).join("\n")}
+
+Detected inside /cron/homepage-healthcheck against ${siteOrigin2()}. If the masthead marker is missing, the live Sanity doc is not reaching the page: check the category resolver logs, then the doc itself. Unpublishing the doc (status back to draft) is the rollback. Re-run the cron to confirm.`,
+          links: [{ kind: "url", ref: `${siteOrigin2()}${c.path}`, state: "failed" }]
+        })
+      );
+    }
+  } catch (err2) {
+    console.error("[category-healthcheck] ticket filing failed (ignored):", err2);
+  }
+  await persistLatest(result);
+  return result;
+}
+var CATEGORY_HEALTH_LATEST_KEY, FETCH_TIMEOUT_MS2, MIN_BODY_BYTES2, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2;
+var init_category_healthcheck_server = __esm({
+  "app/lib/category-healthcheck.server.ts"() {
+    "use strict";
+    init_sentry_server();
+    init_sanity_server();
+    init_homepage_payload_server();
+    init_kv_server();
+    CATEGORY_HEALTH_LATEST_KEY = "category-pages:healthcheck:latest";
+    FETCH_TIMEOUT_MS2 = 12e3;
+    MIN_BODY_BYTES2 = 1e3;
+    MAX_ATTEMPTS2 = 3;
+    RETRY_BACKOFF_MS2 = 1500;
+  }
+});
+
+// app/lib/notebook-healthcheck.server.ts
+var notebook_healthcheck_server_exports = {};
+__export(notebook_healthcheck_server_exports, {
+  runNotebookHealthcheck: () => runNotebookHealthcheck
+});
+function siteOrigin3() {
+  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
+  return base.replace(/\/$/, "") || "https://xdipx.com";
+}
+function extractJsonLd2(html) {
+  let parsed = 0;
+  let scripts = 0;
+  const types = [];
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    scripts += 1;
+    try {
+      const json2 = JSON.parse((m[1] ?? "").trim());
+      parsed += 1;
+      const t = json2["@type"];
+      if (typeof t === "string") types.push(t);
+      else if (Array.isArray(t)) types.push(...t);
+    } catch {
+    }
+  }
+  return { parsed, scripts, types };
+}
+async function checkPageOnce3(exp, attempt) {
+  const bust = `__healthcheck=${Date.now()}-${attempt}`;
+  const url = `${siteOrigin3()}${exp.path}${exp.path.includes("?") ? "&" : "?"}${bust}`;
+  const problems = [];
+  let status = 0;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS3);
+    const res = await fetch(url, {
+      headers: { "user-agent": "xdipx-notebook-healthcheck" },
+      signal: ctrl.signal
+    }).finally(() => clearTimeout(timer));
+    status = res.status;
+    const body = await res.text();
+    if (status !== 200) problems.push(`HTTP ${status}`);
+    if (exp.markdown) {
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("text/markdown")) problems.push(`content-type "${ct}" is not text/markdown`);
+      if (body.length < 200) problems.push(`markdown body too small (${body.length} bytes)`);
+    } else {
+      if (body.length < MIN_BODY_BYTES3) problems.push(`body too small (${body.length} bytes)`);
+      if (!/<img[\s>]/i.test(body)) problems.push("no <img> (hero/card images likely missing)");
+      if (!/<\/html>/i.test(body)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
+      const { parsed, scripts, types } = extractJsonLd2(body);
+      if (parsed === 0) problems.push("no valid JSON-LD");
+      else if (parsed < scripts) problems.push(`malformed JSON-LD (${scripts - parsed} unparseable)`);
+      if (exp.expectType && !types.includes(exp.expectType)) {
+        problems.push(`JSON-LD missing @type ${exp.expectType}`);
+      }
+    }
+  } catch (err2) {
+    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
+  }
+  return { path: exp.path, status, ok: problems.length === 0, problems, hardFail: status >= 500 };
+}
+async function checkPage3(exp) {
+  let best = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS3; attempt++) {
+    const c = await checkPageOnce3(exp, attempt);
+    if (c.ok) return c;
+    if (!best || c.problems.length < best.problems.length) best = c;
+    if (attempt < MAX_ATTEMPTS3) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS3));
+    }
+  }
+  return best;
+}
+async function openHealthcheckIssue2(title, body) {
+  const token = process.env["GITHUB_TOKEN"];
+  const owner = process.env["GITHUB_OWNER"];
+  const repo = process.env["GITHUB_REPO"];
+  if (!token || !owner || !repo) {
+    console.warn("[notebook-healthcheck] GITHUB_TOKEN/OWNER/REPO not set \u2014 skipping issue");
+    return { url: null, created: false };
+  }
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json"
+  };
+  try {
+    const q = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open in:title "${title}"`);
+    const search = await fetch(`https://api.github.com/search/issues?q=${q}`, { headers });
+    const existing = search.ok ? ((await search.json()).items ?? [])[0] : void 0;
+    if (existing) {
+      await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${existing.number}/comments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ body })
+      });
+      return { url: existing.html_url, created: false };
+    }
+    const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title, body, labels: ["healthcheck", "P1"] })
+    });
+    if (!create.ok) {
+      console.error(`[notebook-healthcheck] issue create ${create.status}`);
+      return { url: null, created: false };
+    }
+    return { url: (await create.json()).html_url, created: true };
+  } catch (err2) {
+    console.error("[notebook-healthcheck] issue error", err2);
+    return { url: null, created: false };
+  }
+}
+async function runNotebookHealthcheck() {
+  const [posts, categories] = await Promise.all([
+    getBlogPostsForSitemap().catch(() => []),
+    getBlogCategories().catch(() => [])
+  ]);
+  const latestSlug = posts[0]?.slug;
+  const categorySlug = categories[0]?.slug;
+  const expectations = [
+    { path: "/notebook", expectType: "ItemList" },
+    ...latestSlug ? [
+      { path: `/notebook/${latestSlug}`, expectType: "BlogPosting" },
+      { path: `/notebook/${latestSlug}.md`, markdown: true }
+    ] : [],
+    ...categorySlug ? [{ path: `/notebook/category/${categorySlug}` }] : []
+  ];
+  const checks = await Promise.all(expectations.map(checkPage3));
+  const healthy = checks.every((c) => c.ok);
+  if (healthy) {
+    return { ok: true, checks, alerted: false };
+  }
+  const failed = checks.filter((c) => !c.ok);
+  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
+  const hard = failed.some((c) => c.hardFail);
+  Sentry.captureException(
+    new Error(`Notebook healthcheck ${hard ? "failed" : "soft-degraded"} \u2014 ${summary}`),
+    {
+      tags: { healthcheck: "notebook", severity: hard ? "P1" : "P3" },
+      extra: { checks }
+    }
+  );
+  const result = { ok: false, checks, alerted: true };
+  try {
+    const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2, priorityFromSeverity: priorityFromSeverity2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
+    result.ticketsFiled = [];
+    for (const c of failed) {
+      result.ticketsFiled.push(
+        await fileDetectionTicket2({
+          detector: "notebook-healthcheck",
+          dedupeKey: makeDedupeKey2("notebook", c.path),
+          priority: priorityFromSeverity2(c.hardFail ? "P1" : "P3"),
+          category: "other",
+          kind: "code",
+          suggestion: `Notebook healthcheck failing on ${c.path} (HTTP ${c.status}).
+
+Problems:
+${c.problems.map((p) => `- ${p}`).join("\n")}
+
+Detected by /cron/notebook-healthcheck against ${siteOrigin3()}. Fix the page, then re-run the cron to confirm it renders with images and valid JSON-LD.`,
+          links: [{ kind: "url", ref: `${siteOrigin3()}${c.path}`, state: "failed" }]
+        })
+      );
+    }
+  } catch (err2) {
+    console.error("[notebook-healthcheck] ticket filing failed (ignored):", err2);
+  }
+  if (hard) {
+    const issueBody = [
+      `Notebook healthcheck failed against ${siteOrigin3()}.`,
+      "",
+      "**Problems**",
+      summary,
+      "",
+      "_Report-only check (no auto-recovery). Filed automatically by `/cron/notebook-healthcheck`._"
+    ].join("\n");
+    const issue = await openHealthcheckIssue2("[P1] Notebook healthcheck failing", issueBody);
+    if (issue.url) result.message = `issue: ${issue.url}`;
+    if (issue.created) {
+      const { sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
+      await sendOwnerEmail2(
+        "[P1] xdipx notebook healthcheck failing",
+        `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml2(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ""}`
+      );
+    }
+  }
+  return result;
+}
+var FETCH_TIMEOUT_MS3, MIN_BODY_BYTES3, MAX_ATTEMPTS3, RETRY_BACKOFF_MS3;
+var init_notebook_healthcheck_server = __esm({
+  "app/lib/notebook-healthcheck.server.ts"() {
+    "use strict";
+    init_sentry_server();
+    init_sanity_server();
+    FETCH_TIMEOUT_MS3 = 12e3;
+    MIN_BODY_BYTES3 = 1e3;
+    MAX_ATTEMPTS3 = 3;
+    RETRY_BACKOFF_MS3 = 1500;
+  }
+});
+
+// app/lib/profit.server.ts
+var profit_server_exports = {};
+__export(profit_server_exports, {
+  accumulateOrders: () => accumulateOrders,
+  computeProfitForDate: () => computeProfitForDate,
+  costLineItem: () => costLineItem,
+  costsFromOrderMetafields: () => costsFromOrderMetafields,
+  deleteSeedProfitRows: () => deleteSeedProfitRows,
+  getDashboardStats: () => getDashboardStats,
+  getProfitReconciliation: () => getProfitReconciliation,
+  getProfitRows: () => getProfitRows,
+  nextUtcDate: () => nextUtcDate,
+  ordersSearchQuery: () => ordersSearchQuery,
+  writeProfitSummary: () => writeProfitSummary,
+  yesterdayUtc: () => yesterdayUtc
+});
+import { and as and3, eq as eq10, gte as gte2, like, lt as lt2, sql as sql4 } from "drizzle-orm";
+function yesterdayUtc(now = Date.now()) {
+  return new Date(now - 864e5).toISOString().slice(0, 10);
+}
+function nextUtcDate(date2) {
+  return new Date((/* @__PURE__ */ new Date(`${date2}T00:00:00Z`)).getTime() + 864e5).toISOString().slice(0, 10);
+}
+function ordersSearchQuery(date2) {
+  return `created_at:>='${date2}T00:00:00Z' created_at:<'${nextUtcDate(date2)}T00:00:00Z' financial_status:paid status:any`;
+}
+function costsFromOrderMetafields(metafields) {
+  const out = /* @__PURE__ */ new Map();
+  for (const mf of metafields) {
+    if (!mf.key.startsWith("profit_")) continue;
+    const sku = mf.key.slice("profit_".length);
+    if (!sku) continue;
+    try {
+      const parsed = JSON.parse(mf.value);
+      const cost = Number(parsed.wholesale_cost);
+      if (Number.isFinite(cost) && cost > 0) out.set(sku, cost);
+    } catch {
+    }
+  }
+  return out;
+}
+function costLineItem(line, orderCosts) {
+  const qty = Number.isFinite(line.quantity) && line.quantity > 0 ? line.quantity : 0;
+  if (qty === 0) return { cost: 0, source: "none" };
+  const fromOrder = line.sku ? orderCosts.get(line.sku) : void 0;
+  if (fromOrder !== void 0 && fromOrder > 0) {
+    return { cost: fromOrder * qty, source: "order-metafield" };
+  }
+  const unit = Number(line.variant?.inventoryItem?.unitCost?.amount);
+  if (Number.isFinite(unit) && unit > 0) {
+    return { cost: unit * qty, source: "inventory-item" };
+  }
+  return { cost: null, source: "none" };
+}
+function accumulateOrders(orders, into) {
+  const t = { ...into };
+  for (const order of orders) {
+    t.totalOrders += 1;
+    const revenue = Number(order.totalPriceSet?.shopMoney?.amount ?? "0");
+    if (Number.isFinite(revenue)) t.totalRevenue += revenue;
+    const orderCosts = costsFromOrderMetafields(order.metafields?.nodes ?? []);
+    for (const line of order.lineItems?.nodes ?? []) {
+      const { cost } = costLineItem(line, orderCosts);
+      if (cost === null) {
+        t.cogsMissingUnits += Math.max(0, line.quantity);
+      } else {
+        t.totalCogs += cost;
+      }
+    }
+  }
+  t.totalProfit = t.totalRevenue - t.totalCogs;
+  t.avgOrderValue = t.totalOrders > 0 ? t.totalRevenue / t.totalOrders : 0;
+  return t;
+}
+async function computeProfitForDate(date2) {
+  const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const search = ordersSearchQuery(date2);
+  let totals = { ...EMPTY_TOTALS };
+  let cursor = null;
+  do {
+    const page = await adminGraphQL2(ORDERS_QUERY2, {
+      query: search,
+      first: ORDERS_PAGE,
+      after: cursor
+    });
+    totals = accumulateOrders(page.orders.nodes ?? [], totals);
+    cursor = page.orders.pageInfo?.hasNextPage ? page.orders.pageInfo.endCursor ?? null : null;
+  } while (cursor !== null);
+  return totals;
+}
+async function writeProfitSummary(targetDate) {
+  const date2 = targetDate ?? yesterdayUtc();
+  const totals = await computeProfitForDate(date2);
+  await db.insert(dailyProfitSummary).values({
+    summaryDate: date2,
+    totalOrders: totals.totalOrders,
+    totalRevenue: totals.totalRevenue.toFixed(2),
+    totalCogs: totals.totalCogs.toFixed(2),
+    totalProfit: totals.totalProfit.toFixed(2),
+    avgOrderValue: totals.avgOrderValue.toFixed(2),
+    cogsMissingUnits: totals.cogsMissingUnits
+  }).onConflictDoUpdate({
+    target: dailyProfitSummary.summaryDate,
+    set: {
+      totalOrders: sql4`excluded.total_orders`,
+      totalRevenue: sql4`excluded.total_revenue`,
+      totalCogs: sql4`excluded.total_cogs`,
+      totalProfit: sql4`excluded.total_profit`,
+      avgOrderValue: sql4`excluded.avg_order_value`,
+      cogsMissingUnits: sql4`excluded.cogs_missing_units`
+    }
+  });
+  return totals;
+}
+async function getProfitReconciliation(date2) {
+  const day = date2 ?? yesterdayUtc();
+  const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
+  const counted = await adminGraphQL2(
+    `query ProfitReconcile($query: String!) { ordersCount(query: $query, limit: 10000) { count } }`,
+    { query: ordersSearchQuery(day) }
+  );
+  const [row] = await db.select({
+    totalOrders: dailyProfitSummary.totalOrders,
+    cogsMissingUnits: dailyProfitSummary.cogsMissingUnits
+  }).from(dailyProfitSummary).where(eq10(dailyProfitSummary.summaryDate, day)).limit(1);
+  const shopifyPaidOrders = counted.ordersCount?.count ?? 0;
+  const summaryOrders = row ? row.totalOrders ?? 0 : null;
+  return {
+    date: day,
+    shopifyPaidOrders,
+    summaryOrders,
+    summaryExists: !!row,
+    match: !!row && summaryOrders === shopifyPaidOrders,
+    cogsMissingUnits: row?.cogsMissingUnits ?? 0
+  };
+}
+async function deleteSeedProfitRows() {
+  const deleted = await db.delete(dailyProfitSummary).where(like(dailyProfitSummary.featuredSku, "SEED-%")).returning({ date: dailyProfitSummary.summaryDate });
+  return deleted.length;
+}
+async function getDashboardStats(days = 30) {
+  const rows = await db.select().from(dailyProfitSummary).orderBy(sql4`${dailyProfitSummary.summaryDate} DESC`).limit(days);
+  const total2 = rows.reduce((acc, r) => ({
+    revenue: acc.revenue + parseFloat(r.totalRevenue ?? "0"),
+    profit: acc.profit + parseFloat(r.totalProfit ?? "0"),
+    orders: acc.orders + (r.totalOrders ?? 0)
+  }), { revenue: 0, profit: 0, orders: 0 });
+  return { rows, total: total2 };
+}
+async function getProfitRows(fromDate, toDate) {
+  return db.select().from(dailyProfitSummary).where(and3(
+    gte2(dailyProfitSummary.summaryDate, fromDate),
+    lt2(dailyProfitSummary.summaryDate, nextUtcDate(toDate))
+  )).orderBy(dailyProfitSummary.summaryDate);
+}
+var ORDERS_PAGE, ORDERS_QUERY2, EMPTY_TOTALS;
+var init_profit_server = __esm({
+  "app/lib/profit.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    ORDERS_PAGE = 50;
+    ORDERS_QUERY2 = `
+  query ProfitOrders($query: String!, $first: Int!, $after: String) {
+    orders(first: $first, after: $after, query: $query) {
+      nodes {
+        id
+        name
+        createdAt
+        totalPriceSet { shopMoney { amount } }
+        metafields(first: 25, namespace: "xdipx") { nodes { key value } }
+        lineItems(first: 50) {
+          nodes {
+            sku
+            quantity
+            variant { id inventoryItem { unitCost { amount } } }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+    EMPTY_TOTALS = {
+      totalOrders: 0,
+      totalRevenue: 0,
+      totalCogs: 0,
+      totalProfit: 0,
+      avgOrderValue: 0,
+      cogsMissingUnits: 0
+    };
+  }
+});
+
+// app/lib/reviews.server.ts
+var reviews_server_exports = {};
+__export(reviews_server_exports, {
+  createInvite: () => createInvite,
+  createReview: () => createReview,
+  deleteReview: () => deleteReview,
+  getAdminReviewQueue: () => getAdminReviewQueue,
+  getDueScheduledInvites: () => getDueScheduledInvites,
+  getInviteByToken: () => getInviteByToken,
+  getInviteStats: () => getInviteStats,
+  getPaginatedInvites: () => getPaginatedInvites,
+  getPendingReminderInvites: () => getPendingReminderInvites,
+  getProductAggregate: () => getProductAggregate,
+  getProductReviews: () => getProductReviews,
+  getProductsWithReviews: () => getProductsWithReviews,
+  getReviewById: () => getReviewById,
+  getReviewSettings: () => getReviewSettings,
+  getReviewStats: () => getReviewStats,
+  getReviewsForExport: () => getReviewsForExport,
+  getReviewsPerDay: () => getReviewsPerDay,
+  markInviteClicked: () => markInviteClicked,
+  markInviteOpened: () => markInviteOpened,
+  markInviteSent: () => markInviteSent,
+  markReminderSent: () => markReminderSent,
+  updateReviewAI: () => updateReviewAI,
+  updateReviewFeatured: () => updateReviewFeatured,
+  updateReviewReply: () => updateReviewReply,
+  updateReviewSettings: () => updateReviewSettings,
+  updateReviewStatus: () => updateReviewStatus,
+  voteHelpful: () => voteHelpful
+});
+import { neon as neon2 } from "@neondatabase/serverless";
+function rowToReview(row) {
+  return {
+    id: row["id"],
+    shopifyProductId: row["shopify_product_id"],
+    shopifyOrderId: row["shopify_order_id"] ?? null,
+    shopifyCustomerId: row["shopify_customer_id"] ?? null,
+    reviewerName: row["reviewer_name"],
+    reviewerEmail: row["reviewer_email"],
+    rating: row["rating"],
+    title: row["title"] ?? null,
+    body: row["body"] ?? null,
+    status: row["status"],
+    isVerifiedPurchase: row["is_verified_purchase"],
+    isFeatured: row["is_featured"],
+    isIncentivized: row["is_incentivized"],
+    helpfulYes: row["helpful_yes"],
+    helpfulNo: row["helpful_no"],
+    aiSentiment: row["ai_sentiment"] ?? null,
+    aiSummary: row["ai_summary"] ?? null,
+    aiSpamScore: row["ai_spam_score"] != null ? parseFloat(row["ai_spam_score"]) : null,
+    moderationNote: row["moderation_note"] ?? null,
+    moderatedBy: row["moderated_by"] ?? null,
+    moderatedAt: row["moderated_at"] ? new Date(row["moderated_at"]).toISOString() : null,
+    replyBody: row["reply_body"] ?? null,
+    replyAt: row["reply_at"] ? new Date(row["reply_at"]).toISOString() : null,
+    source: row["source"],
+    inviteToken: row["invite_token"] ?? null,
+    inviteTokenUsedAt: row["invite_token_used_at"] ? new Date(row["invite_token_used_at"]).toISOString() : null,
+    ipAddress: row["ip_address"] ?? null,
+    userAgent: row["user_agent"] ?? null,
+    createdAt: new Date(row["created_at"]).toISOString(),
+    updatedAt: new Date(row["updated_at"]).toISOString()
+  };
+}
+function rowToMedia(row) {
+  return {
+    id: row["id"],
+    reviewId: row["review_id"],
+    mediaType: row["media_type"],
+    url: row["url"],
+    thumbnailUrl: row["thumbnail_url"] ?? null,
+    sortOrder: row["sort_order"],
+    createdAt: new Date(row["created_at"]).toISOString()
+  };
+}
+function rowToAttributeRating(row) {
+  return {
+    id: row["id"],
+    reviewId: row["review_id"],
+    attributeName: row["attribute_name"],
+    rating: row["rating"]
+  };
+}
+function rowToAggregate(row) {
+  return {
+    shopifyProductId: row["shopify_product_id"],
+    totalCount: row["total_count"],
+    approvedCount: row["approved_count"],
+    averageRating: parseFloat(row["average_rating"]),
+    rating1Count: row["rating_1_count"],
+    rating2Count: row["rating_2_count"],
+    rating3Count: row["rating_3_count"],
+    rating4Count: row["rating_4_count"],
+    rating5Count: row["rating_5_count"],
+    verifiedCount: row["verified_count"],
+    withPhotoCount: row["with_photo_count"],
+    lastUpdated: new Date(row["last_updated"]).toISOString()
+  };
+}
+function rowToInvite(row) {
+  return {
+    id: row["id"],
+    shopifyOrderId: row["shopify_order_id"],
+    shopifyCustomerId: row["shopify_customer_id"] ?? null,
+    shopifyProductId: row["shopify_product_id"],
+    reviewerEmail: row["reviewer_email"],
+    reviewerName: row["reviewer_name"],
+    inviteToken: row["invite_token"],
+    sentAt: new Date(row["sent_at"]).toISOString(),
+    openedAt: row["opened_at"] ? new Date(row["opened_at"]).toISOString() : null,
+    clickedAt: row["clicked_at"] ? new Date(row["clicked_at"]).toISOString() : null,
+    completedAt: row["completed_at"] ? new Date(row["completed_at"]).toISOString() : null,
+    reminderSentAt: row["reminder_sent_at"] ? new Date(row["reminder_sent_at"]).toISOString() : null,
+    sendAfter: row["send_after"] ? new Date(row["send_after"]).toISOString() : null,
+    status: row["status"]
+  };
+}
+async function getProductReviews(shopifyProductId, opts = {}) {
+  const {
+    status = "approved",
+    sort = "newest",
+    filter = "all",
+    page = 1,
+    perPage = 10
+  } = opts;
+  const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`;
+  if (status === "approved") {
+    const hit = await kvGetMemo(ck, 60);
+    if (hit) return hit;
+  }
+  const offset = (page - 1) * perPage;
+  let orderBy = "r.created_at DESC";
+  if (sort === "oldest") orderBy = "r.created_at ASC";
+  if (sort === "highest") orderBy = "r.rating DESC, r.created_at DESC";
+  if (sort === "lowest") orderBy = "r.rating ASC, r.created_at DESC";
+  if (sort === "helpful") orderBy = "r.helpful_yes DESC, r.created_at DESC";
+  let filterClause = "";
+  if (filter === "verified") filterClause = "AND r.is_verified_purchase = true";
+  if (filter === "with_photo") filterClause = "AND EXISTS (SELECT 1 FROM review_media rm2 WHERE rm2.review_id = r.id)";
+  if (filter === "5star") filterClause = "AND r.rating = 5";
+  if (filter === "4star") filterClause = "AND r.rating = 4";
+  if (filter === "3star") filterClause = "AND r.rating = 3";
+  if (filter === "2star") filterClause = "AND r.rating = 2";
+  if (filter === "1star") filterClause = "AND r.rating = 1";
+  const reviewQ = `SELECT r.* FROM reviews r WHERE r.shopify_product_id = $1 AND r.status = $2 ${filterClause} ORDER BY ${orderBy} LIMIT $3 OFFSET $4`;
+  const countQ = `SELECT COUNT(*) as total FROM reviews r WHERE r.shopify_product_id = $1 AND r.status = $2 ${filterClause}`;
+  const [rows, countRows] = await Promise.all([
+    sql5(reviewQ, [shopifyProductId, status, perPage, offset]),
+    sql5(countQ, [shopifyProductId, status])
+  ]);
+  if (rows.length === 0) {
+    const empty = { reviews: [], total: 0 };
+    if (status === "approved") primeKvMemo(ck, empty);
+    return empty;
+  }
+  const reviewIds = rows.map((r) => r["id"]);
+  const [mediaRows, attrRows] = await Promise.all([
+    sql5`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`,
+    sql5`SELECT * FROM review_attribute_ratings WHERE review_id = ANY(${reviewIds})`
+  ]);
+  const mediaByReview = /* @__PURE__ */ new Map();
+  for (const m of mediaRows) {
+    const rid2 = m["review_id"];
+    if (!mediaByReview.has(rid2)) mediaByReview.set(rid2, []);
+    mediaByReview.get(rid2).push(rowToMedia(m));
+  }
+  const attrByReview = /* @__PURE__ */ new Map();
+  for (const a of attrRows) {
+    const rid2 = a["review_id"];
+    if (!attrByReview.has(rid2)) attrByReview.set(rid2, []);
+    attrByReview.get(rid2).push(rowToAttributeRating(a));
+  }
+  const reviews = rows.map((r) => {
+    const review = rowToReview(r);
+    review.media = mediaByReview.get(review.id) ?? [];
+    review.attributeRatings = attrByReview.get(review.id) ?? [];
+    return review;
+  });
+  const total2 = parseInt(countRows[0]?.["total"] ?? "0", 10);
+  const result = { reviews, total: total2 };
+  if (status === "approved") {
+    kvSet(ck, result, 300).catch(() => {
+    });
+    primeKvMemo(ck, result);
+  }
+  return result;
+}
+async function getProductAggregate(shopifyProductId) {
+  const ck = `aggregate:v1:${shopifyProductId}`;
+  const hit = await kvGetMemo(ck, 60);
+  if (hit) return hit;
+  const rows = await sql5`
+    SELECT * FROM review_aggregates WHERE shopify_product_id = ${shopifyProductId}
+  `;
+  if (!rows[0]) return null;
+  const agg = rowToAggregate(rows[0]);
+  kvSet(ck, agg, 300).catch(() => {
+  });
+  primeKvMemo(ck, agg);
+  return agg;
+}
+async function getAdminReviewQueue(filters = {}) {
+  const {
+    status,
+    productId,
+    search,
+    sort = "newest",
+    page = 1,
+    perPage = 20
+  } = filters;
+  const offset = (page - 1) * perPage;
+  const conditions = [];
+  const params = [];
+  let pIdx = 1;
+  if (status && status !== "all") {
+    conditions.push(`r.status = $${pIdx++}`);
+    params.push(status);
+  }
+  if (productId) {
+    conditions.push(`r.shopify_product_id = $${pIdx++}`);
+    params.push(productId);
+  }
+  if (search) {
+    conditions.push(`(r.reviewer_name ILIKE $${pIdx} OR r.title ILIKE $${pIdx} OR r.body ILIKE $${pIdx})`);
+    params.push(`%${search}%`);
+    pIdx++;
+  }
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  let orderBy = "r.created_at DESC";
+  if (sort === "oldest") orderBy = "r.created_at ASC";
+  if (sort === "highest") orderBy = "r.rating DESC";
+  if (sort === "lowest") orderBy = "r.rating ASC";
+  if (sort === "spam_risk") orderBy = "r.ai_spam_score DESC NULLS LAST";
+  const baseQuery = `SELECT r.* FROM reviews r ${whereClause} ORDER BY ${orderBy} LIMIT $${pIdx} OFFSET $${pIdx + 1}`;
+  const countQuery = `SELECT COUNT(*) as total FROM reviews r ${whereClause}`;
+  const allParams = [...params, perPage, offset];
+  const [rows, countRows] = await Promise.all([
+    sql5(baseQuery, allParams),
+    sql5(countQuery, params)
+  ]);
+  if (rows.length === 0) return { reviews: [], total: 0 };
+  const typedRows = rows;
+  const reviewIds = typedRows.map((r) => r["id"]);
+  const mediaRows = await sql5`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`;
+  const mediaByReview = /* @__PURE__ */ new Map();
+  for (const m of mediaRows) {
+    const rid2 = m["review_id"];
+    if (!mediaByReview.has(rid2)) mediaByReview.set(rid2, []);
+    mediaByReview.get(rid2).push(rowToMedia(m));
+  }
+  const reviews = typedRows.map((r) => {
+    const review = rowToReview(r);
+    review.media = mediaByReview.get(review.id) ?? [];
+    return review;
+  });
+  const total2 = parseInt(countRows[0]?.["total"] ?? "0", 10);
+  return { reviews, total: total2 };
+}
+async function getReviewStats() {
+  const [countRows, avgRows, inviteRows, conversionRows] = await Promise.all([
+    sql5`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'pending')  as pending,
+        COUNT(*) FILTER (WHERE status = 'approved') as approved,
+        COUNT(*) FILTER (WHERE status = 'rejected') as rejected,
+        COUNT(*) FILTER (WHERE status = 'spam')     as spam
+      FROM reviews
+    `,
+    sql5`
+      SELECT COALESCE(AVG(rating) FILTER (WHERE status = 'approved'), 0) as avg_rating
+      FROM reviews
+    `,
+    sql5`SELECT COUNT(*) as sent FROM review_invites`,
+    sql5`SELECT COUNT(*) as completed FROM review_invites WHERE status = 'completed'`
+  ]);
+  const c = countRows[0];
+  const total2 = parseInt(c?.["total"] ?? "0", 10);
+  const pending = parseInt(c?.["pending"] ?? "0", 10);
+  const approved = parseInt(c?.["approved"] ?? "0", 10);
+  const rejected = parseInt(c?.["rejected"] ?? "0", 10);
+  const spam = parseInt(c?.["spam"] ?? "0", 10);
+  const avgRating = parseFloat(avgRows[0]?.["avg_rating"] ?? "0");
+  const sent = parseInt(inviteRows[0]?.["sent"] ?? "0", 10);
+  const completed = parseInt(conversionRows[0]?.["completed"] ?? "0", 10);
+  return {
+    totalReviews: total2,
+    pendingReviews: pending,
+    approvedReviews: approved,
+    rejectedReviews: rejected,
+    spamReviews: spam,
+    averageRating: avgRating,
+    totalInvitesSent: sent,
+    inviteConversionRate: sent > 0 ? completed / sent : 0
+  };
+}
+async function getReviewsPerDay() {
+  const rows = await sql5`
+    SELECT
+      date_trunc('day', created_at)::date::text as date,
+      COUNT(*) as count
+    FROM reviews
+    WHERE created_at > now() - interval '30 days'
+    GROUP BY date_trunc('day', created_at)
+    ORDER BY date_trunc('day', created_at)
+  `;
+  return rows.map((r) => ({
+    date: r["date"],
+    count: parseInt(r["count"], 10)
+  }));
+}
+async function getProductsWithReviews() {
+  const rows = await sql5`
+    SELECT
+      shopify_product_id,
+      total_count,
+      approved_count,
+      average_rating,
+      verified_count
+    FROM review_aggregates
+    ORDER BY approved_count DESC
+  `;
+  return rows.map((r) => ({
+    shopifyProductId: r["shopify_product_id"],
+    totalCount: r["total_count"],
+    approvedCount: r["approved_count"],
+    averageRating: parseFloat(r["average_rating"]),
+    verifiedCount: r["verified_count"]
+  }));
+}
+async function createReview(input) {
+  const rows = await sql5`
+    INSERT INTO reviews (
+      shopify_product_id, shopify_order_id, shopify_customer_id,
+      reviewer_name, reviewer_email, rating, title, body,
+      is_verified_purchase, is_incentivized, source, invite_token,
+      ip_address, user_agent, updated_at
+    ) VALUES (
+      ${input.shopifyProductId},
+      ${input.shopifyOrderId ?? null},
+      ${input.shopifyCustomerId ?? null},
+      ${input.reviewerName},
+      ${input.reviewerEmail},
+      ${input.rating},
+      ${input.title ?? null},
+      ${input.body ?? null},
+      ${input.isVerifiedPurchase ?? false},
+      ${input.isIncentivized ?? false},
+      ${input.source ?? "organic"},
+      ${input.inviteToken ?? null},
+      ${input.ipAddress ?? null},
+      ${input.userAgent ?? null},
+      now()
+    )
+    RETURNING *
+  `;
+  const review = rowToReview(rows[0]);
+  if (input.attributeRatings && Object.keys(input.attributeRatings).length > 0) {
+    for (const [name, rating] of Object.entries(input.attributeRatings)) {
+      await sql5`
+        INSERT INTO review_attribute_ratings (review_id, attribute_name, rating)
+        VALUES (${review.id}, ${name}, ${rating})
+      `;
+    }
+  }
+  if (input.mediaUrls && input.mediaUrls.length > 0) {
+    for (let i = 0; i < input.mediaUrls.length; i++) {
+      const m = input.mediaUrls[i];
+      await sql5`
+        INSERT INTO review_media (review_id, media_type, url, thumbnail_url, sort_order)
+        VALUES (${review.id}, ${m.mediaType}, ${m.url}, ${m.thumbnailUrl ?? null}, ${i})
+      `;
+    }
+  }
+  if (input.inviteToken) {
+    await sql5`
+      UPDATE review_invites
+      SET status = 'completed', completed_at = now()
+      WHERE invite_token = ${input.inviteToken}::uuid
+    `.catch(() => {
+    });
+  }
+  return review;
+}
+async function updateReviewStatus(id, status, opts = {}) {
+  const rows = await sql5`
+    UPDATE reviews
+    SET
+      status         = ${status},
+      moderation_note = ${opts.moderationNote ?? null},
+      moderated_by   = ${opts.moderatedBy ?? null},
+      moderated_at   = now(),
+      updated_at     = now()
+    WHERE id = ${id}::uuid
+    RETURNING *
+  `;
+  return rowToReview(rows[0]);
+}
+async function updateReviewAI(id, ai) {
+  await sql5`
+    UPDATE reviews
+    SET
+      ai_sentiment = ${ai.aiSentiment},
+      ai_summary   = ${ai.aiSummary},
+      ai_spam_score = ${ai.aiSpamScore},
+      updated_at   = now()
+    WHERE id = ${id}::uuid
+  `;
+}
+async function updateReviewReply(id, replyBody) {
+  const rows = await sql5`
+    UPDATE reviews
+    SET reply_body = ${replyBody}, reply_at = now(), updated_at = now()
+    WHERE id = ${id}::uuid
+    RETURNING *
+  `;
+  return rowToReview(rows[0]);
+}
+async function updateReviewFeatured(id, isFeatured) {
+  await sql5`
+    UPDATE reviews SET is_featured = ${isFeatured}, updated_at = now() WHERE id = ${id}::uuid
+  `;
+}
+async function deleteReview(id) {
+  await sql5`DELETE FROM reviews WHERE id = ${id}::uuid`;
+}
+async function voteHelpful(id, vote) {
+  const col = vote === "yes" ? "helpful_yes" : "helpful_no";
+  const rows = await sql5(
+    `UPDATE reviews SET ${col} = ${col} + 1, updated_at = now() WHERE id = $1::uuid RETURNING helpful_yes, helpful_no`,
+    [id]
+  );
+  const row = rows[0];
+  return {
+    helpfulYes: row["helpful_yes"],
+    helpfulNo: row["helpful_no"]
+  };
+}
+async function getReviewById(id) {
+  const rows = await sql5`SELECT * FROM reviews WHERE id = ${id}::uuid`;
+  if (!rows[0]) return null;
+  const review = rowToReview(rows[0]);
+  const [mediaRows, attrRows] = await Promise.all([
+    sql5`SELECT * FROM review_media WHERE review_id = ${id}::uuid ORDER BY sort_order`,
+    sql5`SELECT * FROM review_attribute_ratings WHERE review_id = ${id}::uuid`
+  ]);
+  review.media = mediaRows.map((m) => rowToMedia(m));
+  review.attributeRatings = attrRows.map((a) => rowToAttributeRating(a));
+  return review;
+}
+async function createInvite(input) {
+  const rows = input.sendAfter ? await sql5`
+        INSERT INTO review_invites (
+          shopify_order_id, shopify_customer_id, shopify_product_id,
+          reviewer_email, reviewer_name, status, send_after
+        ) VALUES (
+          ${input.shopifyOrderId},
+          ${input.shopifyCustomerId ?? null},
+          ${input.shopifyProductId},
+          ${input.reviewerEmail},
+          ${input.reviewerName},
+          'scheduled',
+          ${input.sendAfter.toISOString()}
+        )
+        RETURNING *
+      ` : await sql5`
+        INSERT INTO review_invites (
+          shopify_order_id, shopify_customer_id, shopify_product_id,
+          reviewer_email, reviewer_name
+        ) VALUES (
+          ${input.shopifyOrderId},
+          ${input.shopifyCustomerId ?? null},
+          ${input.shopifyProductId},
+          ${input.reviewerEmail},
+          ${input.reviewerName}
+        )
+        RETURNING *
+      `;
+  return rowToInvite(rows[0]);
+}
+async function getDueScheduledInvites(limit = 200) {
+  const rows = await sql5`
+    SELECT * FROM review_invites
+    WHERE status = 'scheduled' AND send_after <= now()
+    ORDER BY send_after ASC
+    LIMIT ${limit}
+  `;
+  return rows.map((r) => rowToInvite(r));
+}
+async function markInviteSent(id) {
+  await sql5`
+    UPDATE review_invites SET status = 'sent', sent_at = now() WHERE id = ${id}::uuid
+  `;
+}
+async function getInviteByToken(token) {
+  const rows = await sql5`
+    SELECT * FROM review_invites WHERE invite_token = ${token}::uuid
+  `;
+  if (!rows[0]) return null;
+  return rowToInvite(rows[0]);
+}
+async function markInviteClicked(token) {
+  await sql5`
+    UPDATE review_invites
+    SET clicked_at = COALESCE(clicked_at, now()), status = 'clicked'
+    WHERE invite_token = ${token}::uuid AND status NOT IN ('completed', 'expired')
+  `;
+}
+async function markInviteOpened(token) {
+  await sql5`
+    UPDATE review_invites
+    SET opened_at = COALESCE(opened_at, now()), status = CASE WHEN status = 'sent' THEN 'opened' ELSE status END
+    WHERE invite_token = ${token}::uuid
+  `;
+}
+async function getPendingReminderInvites() {
+  const rows = await sql5`
+    SELECT * FROM review_invites
+    WHERE sent_at < now() - interval '5 days'
+      AND reminder_sent_at IS NULL
+      AND status NOT IN ('scheduled', 'completed', 'expired')
+  `;
+  return rows.map((r) => rowToInvite(r));
+}
+async function markReminderSent(id) {
+  await sql5`
+    UPDATE review_invites SET reminder_sent_at = now() WHERE id = ${id}::uuid
+  `;
+}
+async function getInviteStats() {
+  const rows = await sql5`
+    SELECT
+      COUNT(*) as sent,
+      COUNT(*) FILTER (WHERE status IN ('opened','clicked','completed')) as opened,
+      COUNT(*) FILTER (WHERE status IN ('clicked','completed')) as clicked,
+      COUNT(*) FILTER (WHERE status = 'completed') as completed
+    FROM review_invites
+  `;
+  const r = rows[0];
+  return {
+    sent: parseInt(r?.["sent"] ?? "0", 10),
+    opened: parseInt(r?.["opened"] ?? "0", 10),
+    clicked: parseInt(r?.["clicked"] ?? "0", 10),
+    completed: parseInt(r?.["completed"] ?? "0", 10)
+  };
+}
+async function getPaginatedInvites(page = 1, perPage = 20) {
+  const offset = (page - 1) * perPage;
+  const [rows, countRows] = await Promise.all([
+    sql5`
+      SELECT * FROM review_invites
+      ORDER BY sent_at DESC
+      LIMIT ${perPage} OFFSET ${offset}
+    `,
+    sql5`SELECT COUNT(*) as total FROM review_invites`
+  ]);
+  return {
+    invites: rows.map((r) => rowToInvite(r)),
+    total: parseInt(countRows[0]?.["total"] ?? "0", 10)
+  };
+}
+async function getReviewSettings() {
+  const rows = await sql5`SELECT * FROM review_settings WHERE id = 1`;
+  const r = rows[0] ?? {};
+  return {
+    autoApprove: r["auto_approve"] ?? false,
+    spamThreshold: parseFloat(r["spam_threshold"] ?? "0.75"),
+    minBodyLength: r["min_body_length"] ?? 0,
+    requireTitle: r["require_title"] ?? false,
+    inviteDelayDays: r["invite_delay_days"] ?? 3,
+    reminderDelayDays: r["reminder_delay_days"] ?? 5,
+    remindersEnabled: r["reminders_enabled"] ?? true,
+    reviewsPerPage: r["reviews_per_page"] ?? 10,
+    defaultSort: r["default_sort"] ?? "newest",
+    showAiSummaries: r["show_ai_summaries"] ?? true,
+    showIncentivizedLabel: r["show_incentivized_label"] ?? true,
+    digestEmail: r["digest_email"] ?? null,
+    webhookUrl: r["webhook_url"] ?? null
+  };
+}
+async function updateReviewSettings(settings) {
+  await sql5`
+    UPDATE review_settings SET
+      auto_approve           = COALESCE(${settings.autoApprove ?? null}::boolean, auto_approve),
+      spam_threshold         = COALESCE(${settings.spamThreshold ?? null}::numeric, spam_threshold),
+      min_body_length        = COALESCE(${settings.minBodyLength ?? null}::int, min_body_length),
+      require_title          = COALESCE(${settings.requireTitle ?? null}::boolean, require_title),
+      invite_delay_days      = COALESCE(${settings.inviteDelayDays ?? null}::int, invite_delay_days),
+      reminder_delay_days    = COALESCE(${settings.reminderDelayDays ?? null}::int, reminder_delay_days),
+      reminders_enabled      = COALESCE(${settings.remindersEnabled ?? null}::boolean, reminders_enabled),
+      reviews_per_page       = COALESCE(${settings.reviewsPerPage ?? null}::int, reviews_per_page),
+      default_sort           = COALESCE(${settings.defaultSort ?? null}, default_sort),
+      show_ai_summaries      = COALESCE(${settings.showAiSummaries ?? null}::boolean, show_ai_summaries),
+      show_incentivized_label= COALESCE(${settings.showIncentivizedLabel ?? null}::boolean, show_incentivized_label),
+      digest_email           = ${settings.digestEmail ?? null},
+      webhook_url            = ${settings.webhookUrl ?? null},
+      updated_at             = now()
+    WHERE id = 1
+  `;
+}
+async function getReviewsForExport(filters = {}) {
+  const { status, productId } = filters;
+  const conditions = [];
+  const params = [];
+  let pIdx = 1;
+  if (status && status !== "all") {
+    conditions.push(`status = $${pIdx++}`);
+    params.push(status);
+  }
+  if (productId) {
+    conditions.push(`shopify_product_id = $${pIdx++}`);
+    params.push(productId);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const rows = await sql5(`SELECT * FROM reviews ${where} ORDER BY created_at DESC`, params);
+  return rows.map((r) => rowToReview(r));
+}
+var sql5;
+var init_reviews_server = __esm({
+  "app/lib/reviews.server.ts"() {
+    "use strict";
+    init_kv_server();
+    sql5 = neon2(process.env["DATABASE_URL"]);
   }
 });
 
@@ -11963,196 +15517,10 @@ var init_editorial_author_server = __esm({
 });
 
 // app/lib/emma-rail-tools.server.ts
-function toCandidate(p) {
-  const candidate = {
-    handle: p.handle,
-    title: p.title,
-    price: p.price,
-    tags: p.tags?.slice(0, 12)
-  };
-  if (p.brand) candidate.brand = p.brand;
-  if (p.category) candidate.category = p.category;
-  if (p.audienceTags) candidate.audienceTags = p.audienceTags;
-  if (p.moodTags) candidate.moodTags = p.moodTags;
-  if (p.mattersTags) candidate.mattersTags = p.mattersTags;
-  return candidate;
-}
-function createRailGenState(excludeHandles = []) {
-  return {
-    rails: [],
-    pairingWhy: [],
-    excludeHandles: new Set(excludeHandles)
-  };
-}
-async function buildCandidatePool(deal, partner) {
-  const audiences = [.../* @__PURE__ */ new Set([...deal.audienceTags ?? [], ...partner?.audienceTags ?? []])];
-  const moods = [.../* @__PURE__ */ new Set([...deal.moodTags ?? [], ...partner?.moodTags ?? []])];
-  const categories = [.../* @__PURE__ */ new Set([
-    ...deal.category ?? [],
-    ...partner?.category ?? []
-  ])];
-  const buckets = await Promise.all([
-    ...audiences.slice(0, 3).map((t) => getProductsByTag(`audience-${t}`, 10).catch(() => [])),
-    ...moods.slice(0, 3).map((t) => getProductsByTag(`mood-${t}`, 10).catch(() => [])),
-    ...categories.map((c) => getProductsByTag(c, 15).catch(() => []))
-  ]);
-  const seen = new Set([deal.handle, partner?.handle].filter(Boolean));
-  const pool = [];
-  for (const bucket of buckets) {
-    for (const p of bucket) {
-      if (seen.has(p.handle)) continue;
-      seen.add(p.handle);
-      pool.push(toCandidate(p));
-      if (pool.length >= 60) return pool;
-    }
-  }
-  if (pool.length < 8) {
-    const vault = await getProductsByTag("deal-status-archived", 40).catch(() => []);
-    for (const p of vault) {
-      if (seen.has(p.handle)) continue;
-      seen.add(p.handle);
-      pool.push(toCandidate(p));
-      if (pool.length >= 60) break;
-    }
-  }
-  return pool;
-}
-async function executeRailTool(name, input, state, pool) {
-  switch (name) {
-    case "list_candidate_pool":
-      return { count: pool.length, products: pool };
-    case "query_products_by_tag": {
-      const limit = Math.min(Math.max(Number(input?.limit ?? 10), 1), 20);
-      const products = await getProductsByTag(String(input?.tag ?? ""), limit);
-      return {
-        products: products.filter((p) => !state.excludeHandles.has(p.handle)).map(toCandidate)
-      };
-    }
-    case "query_products_by_collection": {
-      const limit = Math.min(Math.max(Number(input?.limit ?? 10), 1), 20);
-      const products = await getCollectionProducts(String(input?.handle ?? ""), limit);
-      return {
-        products: products.filter((p) => !state.excludeHandles.has(p.handle)).map(toCandidate)
-      };
-    }
-    case "inspect_products": {
-      const handles = (Array.isArray(input?.handles) ? input.handles : []).map(String).slice(0, 8);
-      const products = await getProductsByHandles(handles);
-      return { products: products.map(toCandidate) };
-    }
-    case "propose_rail": {
-      const target = input?.target === "pdp" ? "pdp" : "homepage";
-      const handles = (Array.isArray(input?.productHandles) ? input.productHandles : []).map(String).filter((h) => !state.excludeHandles.has(h));
-      if (handles.length < 2) {
-        return { ok: false, error: "A rail needs at least 2 product handles after self-exclusion." };
-      }
-      const proposal = {
-        target,
-        heading: String(input?.heading ?? "").trim(),
-        productHandles: handles.slice(0, 8),
-        rationale: String(input?.rationale ?? "").trim()
-      };
-      if (input?.eyebrow) proposal.eyebrow = String(input.eyebrow).trim();
-      if (input?.emmaAside) proposal.emmaAside = String(input.emmaAside).trim();
-      if (input?.ctaLabel) proposal.ctaLabel = String(input.ctaLabel).trim();
-      if (input?.ctaLink) proposal.ctaLink = String(input.ctaLink).trim();
-      state.rails.push(proposal);
-      return { ok: true, railIndex: state.rails.length - 1, target, handleCount: handles.length };
-    }
-    case "propose_pairing_why": {
-      const accessoryProductId = String(input?.accessoryProductId ?? "").trim();
-      const blurb = String(input?.blurb ?? "").trim();
-      if (!accessoryProductId || !blurb) {
-        return { ok: false, error: "accessoryProductId and blurb are both required." };
-      }
-      state.pairingWhy.push({ accessoryProductId, blurb });
-      return { ok: true, count: state.pairingWhy.length };
-    }
-    default:
-      return { ok: false, error: `Unknown tool: ${name}` };
-  }
-}
-var RAIL_TOOLS;
 var init_emma_rail_tools_server = __esm({
   "app/lib/emma-rail-tools.server.ts"() {
     "use strict";
     init_shopify_server();
-    RAIL_TOOLS = [
-      {
-        name: "list_candidate_pool",
-        description: "Returns the pre-filtered catalog candidate pool for this deal \u2014 products that overlap with the deal's audience and mood tags. Start here. Each candidate has handle, title, brand, category, price, and tag facets.",
-        input_schema: { type: "object", properties: {}, required: [] }
-      },
-      {
-        name: "query_products_by_tag",
-        description: "Fetch products by Shopify tag. Use this if the candidate pool doesn't have what you need. Examples: 'audience-couples', 'mood-slow-burn', 'best-sellers', 'for-her'.",
-        input_schema: {
-          type: "object",
-          properties: {
-            tag: { type: "string", description: "Shopify tag string (without the tag: prefix)" },
-            limit: { type: "number", description: "Max products to return (1\u201320)", default: 10 }
-          },
-          required: ["tag"]
-        }
-      },
-      {
-        name: "query_products_by_collection",
-        description: "Fetch products from a Shopify collection by handle. Useful for thematic groupings. Examples: 'lubes', 'wearables', 'best-sellers', 'editor-picks'.",
-        input_schema: {
-          type: "object",
-          properties: {
-            handle: { type: "string", description: "Shopify collection handle" },
-            limit: { type: "number", description: "Max products to return (1\u201320)", default: 10 }
-          },
-          required: ["handle"]
-        }
-      },
-      {
-        name: "inspect_products",
-        description: "Fetch full details for specific product handles to verify before adding to a rail. Returns the same trimmed shape as the candidate pool.",
-        input_schema: {
-          type: "object",
-          properties: {
-            handles: { type: "array", items: { type: "string" }, description: "1\u20138 product handles" }
-          },
-          required: ["handles"]
-        }
-      },
-      {
-        name: "propose_rail",
-        description: "Propose one rail. Call this 2\u20133 times total (typically 2 PDP rails + 1 homepage rail). Each rail must have 4\u20138 products, an Emma-voice aside, and a one-sentence rationale.",
-        input_schema: {
-          type: "object",
-          properties: {
-            target: { type: "string", enum: ["homepage", "pdp"], description: "Where this rail appears" },
-            heading: { type: "string", description: "Rail heading shown to shoppers" },
-            eyebrow: { type: "string", description: "Small caps label above the heading" },
-            emmaAside: { type: "string", description: "Emma's first-person aside above the heading" },
-            productHandles: {
-              type: "array",
-              items: { type: "string" },
-              description: "4\u20138 Shopify product handles in display order"
-            },
-            rationale: { type: "string", description: "One sentence explaining why these products belong together" },
-            ctaLabel: { type: "string", description: 'Optional CTA label (default "See all \u2192")' },
-            ctaLink: { type: "string", description: "Optional CTA link (e.g. /collections/...)" }
-          },
-          required: ["target", "heading", "productHandles", "rationale"]
-        }
-      },
-      {
-        name: "propose_pairing_why",
-        description: "Propose Emma-voice copy explaining why a specific accessory pairs with the primary deal. Call once per accessory in the deal's accessory_product_ids list.",
-        input_schema: {
-          type: "object",
-          properties: {
-            accessoryProductId: { type: "string", description: "The accessory product GID" },
-            blurb: { type: "string", description: "One short sentence in Emma voice (\u2264120 chars)" }
-          },
-          required: ["accessoryProductId", "blurb"]
-        }
-      }
-    ];
   }
 });
 
@@ -12397,10 +15765,10 @@ async function logVideoCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql20 } = await import("drizzle-orm");
+  const { sql: sql19 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql20`SELECT * FROM api_token_daily
+    sql19`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -12408,11 +15776,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql20 } = await import("drizzle-orm");
+  const { sql: sql19 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql20`
+    sql19`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -12453,48 +15821,6 @@ var init_token_log_server = __esm({
 });
 
 // app/lib/claude.server.ts
-var claude_server_exports = {};
-__export(claude_server_exports, {
-  BRAND_VOICE_SYSTEM_PROMPT: () => BRAND_VOICE_SYSTEM_PROMPT,
-  IVR_EXPERIENCE_LEVELS: () => IVR_EXPERIENCE_LEVELS,
-  IVR_FEATURES: () => IVR_FEATURES,
-  IVR_USE_CASES: () => IVR_USE_CASES,
-  PRODUCT_SUBTYPES_BY_TYPE: () => PRODUCT_SUBTYPES_BY_TYPE,
-  buildEmmaSystemBlocks: () => buildEmmaSystemBlocks,
-  drainToolTokens: () => drainToolTokens,
-  enhanceLtxPrompt: () => enhanceLtxPrompt,
-  enhanceVeoPrompt: () => enhanceVeoPrompt,
-  generateAskEmmaTags: () => generateAskEmmaTags,
-  generateAskEmmaTagsAll: () => generateAskEmmaTagsAll,
-  generateBlogArticle: () => generateBlogArticle,
-  generateBlogDraft: () => generateBlogDraft,
-  generateBlogOutline: () => generateBlogOutline,
-  generateBlogSEO: () => generateBlogSEO,
-  generateCareInstructions: () => generateCareInstructions,
-  generateCopy: () => generateCopy,
-  generateEmmaHero: () => generateEmmaHero,
-  generateEmmaTagline: () => generateEmmaTagline,
-  generateEmmaTake: () => generateEmmaTake,
-  generateIvrAll: () => generateIvrAll,
-  generateIvrExperience: () => generateIvrExperience,
-  generateIvrFeatures: () => generateIvrFeatures,
-  generateIvrUseCase: () => generateIvrUseCase,
-  generatePairingWhy: () => generatePairingWhy,
-  generateProductCopyBundle: () => generateProductCopyBundle,
-  generateProductFaqs: () => generateProductFaqs,
-  generateProductTitle: () => generateProductTitle,
-  generateRails: () => generateRails,
-  generateSEOTitle: () => generateSEOTitle,
-  generateSchedule: () => generateSchedule,
-  generateSensationDialV2: () => generateSensationDialV2,
-  generateTweetCopy: () => generateTweetCopy,
-  generateVideoContent: () => generateVideoContent,
-  generateWithSystem: () => generateWithSystem,
-  inferProductTaxonomy: () => inferProductTaxonomy,
-  inferProductTypeDial: () => inferProductTypeDial,
-  pickForContextGroup: () => pickForContextGroup,
-  selectAccessories: () => selectAccessories
-});
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash as createHash3 } from "node:crypto";
 async function callClaude(opts) {
@@ -13312,34 +16638,6 @@ ${ctxBlock}`;
     return fallback();
   }
 }
-async function generateSchedule(products, days = 30) {
-  const productList = products.map(
-    (p, i) => `${i + 1}. SKU: ${p.sku} | Brand: ${p.brand} | Title: ${p.title} | Score: ${p.score.toFixed(3)} | Categories: ${p.categories.join(", ")}`
-  ).join("\n");
-  const startDate = /* @__PURE__ */ new Date();
-  startDate.setDate(startDate.getDate() + 1);
-  const raw = await generate(
-    `Given these ${products.length} products and their scores, suggest a ${days}-day deal calendar starting ${startDate.toISOString().split("T")[0]}.
-
-Rules:
-- No same brand within 3 days
-- Alternate price tiers (budget/mid/premium)
-- Highest-value deals on Friday/Saturday
-- Lubricants as accessories not daily deals when possible
-- Use highest-scoring products first
-
-Products:
-${productList}
-
-Return a JSON array: [{"date": "YYYY-MM-DD", "sku": "...", "rationale": "..."}]
-Return only the JSON array, no markdown.`
-  );
-  try {
-    return JSON.parse(stripFences(raw));
-  } catch {
-    return [];
-  }
-}
 async function generateSEOTitle(rawTitle, brand) {
   const text2 = await generate(
     `Rewrite this product title for SEO. Max 60 chars. Format: {Brand} {Product Type} {Key Feature}. Remove filler words and explicit language. Replace explicit terms with tasteful equivalents.
@@ -13477,336 +16775,6 @@ Return ONLY raw JSON (no markdown):
   }
   return { accessoryProductIds, pairingWhy };
 }
-async function generateTweetCopy(deal, llmClient) {
-  const discountPct = deal.msrp > 0 ? Math.round(100 - deal.dealPrice / deal.msrp * 100) : 0;
-  const productUrl = `https://xdipx.com/products/${deal.handle}`;
-  const primaryPrompt = `Write a tweet featuring this product from xdipx.com, an editorially curated sexual wellness storefront.
-
-Product: ${deal.title}
-Brand: ${deal.brand}${deal.tagline ? `
-Tagline: ${deal.tagline}` : ""}
-Price: $${deal.dealPrice} (was $${deal.msrp}) \u2014 ${discountPct}% off
-Category: ${deal.category}
-Link: ${productUrl}
-
-Rules:
-- The main tweet MUST be under 240 characters (leave room for the link)
-- Include the product URL at the end: ${productUrl}
-- Include 1-2 relevant hashtags from: #SelfCare #PleasurePositive #IntimateWellness #TreatYourself
-- Brand voice: playful, cheeky, warm. Never clinical, never sleazy.
-- Keep it product-forward. No flash-sale or "today only" urgency framing.
-- Include the price if compelling
-- Use the \u2665 motif naturally
-- NEVER use explicit language or the word "sex" as an adjective
-
-Also write a thread reply (optional second tweet) with 1-2 extra detail sentences if the product warrants it. Max 240 chars. If no thread reply is needed, set threadReply to null.
-
-Return ONLY this JSON (no markdown):
-{"mainTweet": "...", "threadReply": "..." or null}`;
-  const retryPrompt = `Return ONLY raw JSON, no markdown. Write a product-forward tweet under 240 chars for this product (no flash-sale or "today only" framing). Include the URL ${productUrl} and one hashtag.
-{"mainTweet": "...", "threadReply": null}
-
-Product: ${deal.brand} ${deal.title} \u2014 $${deal.dealPrice} (was $${deal.msrp})`;
-  const tryParse = (raw) => {
-    try {
-      const parsed = JSON.parse(stripFences(raw));
-      if (parsed?.mainTweet) {
-        const result = { mainTweet: parsed.mainTweet };
-        if (parsed.threadReply) result.threadReply = parsed.threadReply;
-        return result;
-      }
-    } catch {
-    }
-    return null;
-  };
-  const first = await generate(primaryPrompt, 512, MODEL_FAST, llmClient);
-  const firstParsed = tryParse(first);
-  if (firstParsed) return firstParsed;
-  const retried = await generate(retryPrompt, 512, MODEL_FAST, llmClient);
-  const secondParsed = tryParse(retried);
-  if (secondParsed) return secondParsed;
-  return {
-    mainTweet: `${deal.brand} ${deal.title}, ${discountPct}% off. $${deal.dealPrice} (was $${deal.msrp}) \u2665
-
-${productUrl}
-
-#SelfCare #IntimateWellness`
-  };
-}
-function pickFormat(category) {
-  const lowerCat = category.toLowerCase();
-  if (lowerCat.includes("couples")) return "sitcom_sketch";
-  if (lowerCat.includes("him") || lowerCat.includes("strok")) return "breaking_news";
-  if (lowerCat.includes("her") || lowerCat.includes("vibrat")) return "fake_testimonial";
-  if (lowerCat.includes("lube") || lowerCat.includes("lubricant")) return "educational";
-  const formats = ["sitcom_sketch", "fake_testimonial", "educational", "breaking_news", "absurdist_narrator"];
-  return formats[Math.floor(Math.random() * formats.length)];
-}
-function stripHtml(value) {
-  return value.replace(/<[^>]+>/g, " ").replace(/\s{2,}/g, " ").trim();
-}
-async function generateVideoContent(product) {
-  const format = product.customFormatDescription ? "custom" : product.forceFormat ?? pickFormat(product.category);
-  const fullStory = product.fullStory ? stripHtml(product.fullStory).slice(0, 300) : "";
-  const worksForHim = product.worksForHim ? stripHtml(product.worksForHim).slice(0, 200) : "";
-  const worksForHer = product.worksForHer ? stripHtml(product.worksForHer).slice(0, 200) : "";
-  const specs = product.specifications ? stripHtml(product.specifications).slice(0, 200) : "";
-  const inTheBox = product.whatsInTheBox ? stripHtml(product.whatsInTheBox).slice(0, 150) : "";
-  const productContext = [
-    `Product: ${product.title}`,
-    `Brand: ${product.brand}`,
-    `Category: ${product.category}`,
-    product.tagline ? `Tagline: ${product.tagline}` : "",
-    product.dealPrice ? `Deal price: $${product.dealPrice} (was $${product.msrp})` : "",
-    fullStory ? `Full story: ${fullStory}` : "",
-    worksForHim ? `Works for him: ${worksForHim}` : "",
-    worksForHer ? `Works for her: ${worksForHer}` : "",
-    specs ? `Specifications: ${specs}` : "",
-    inTheBox ? `What's in the box: ${inTheBox}` : ""
-  ].filter(Boolean).join("\n");
-  const formatDescriptions = {
-    sitcom_sketch: "narrator is a well-meaning friend who keeps accidentally describing couples activities in extremely innocent terms",
-    fake_testimonial: "narrator is an EXTREMELY enthusiastic stranger who found this product and their life is now unrecognizable, in the best way",
-    educational: "narrator is a hilariously underqualified 'expert' delivering 'facts' that are not facts",
-    breaking_news: "narrator is reporting BREAKING NEWS with escalating urgency about a very personal problem that this product solves",
-    absurdist_narrator: "narrator keeps accidentally describing the product perfectly while appearing to talk about something else entirely"
-  };
-  const customInstruction = product.customPrompt ? `
-
-ADDITIONAL DIRECTION FROM CREATOR:
-${product.customPrompt}
-` : "";
-  const persona = product.customFormatDescription || formatDescriptions[format] || "narrator delivers a funny, engaging product pitch";
-  const prompt = `Write a funny 10-second product ad narration.
-
-Narrator persona: ${persona}${customInstruction}
-
-This is for xdipx.com, an editorially curated sexual wellness storefront.
-Brand voice: playful, cheeky, warm. PG-13 strictly \u2014 suggest, never show. Innuendo welcome, explicit never.
-
-Product:
-${productContext}
-
-Use the product details above to make the narrator script and reaction text feel specific to THIS product \u2014 not generic wellness copy. Mine the full story and specs for details that are funny, surprising, or unusually specific. A narrator referencing an actual feature ("7 settings" or "whisper quiet" or "USB rechargeable") is always funnier and more trustworthy than one speaking in generalities. Specificity = credibility = conversion.
-
-If works-for-him and works-for-her are both present, the narrator should feel warm and inclusive toward both without assuming who is watching. If only one is present, subtly orient the tone toward that audience without being exclusionary.
-
-Mine specifications and what's-in-the-box for unexpected details that land as humor (e.g. "comes with a satin pouch, because you deserve nice things").
-
-Write the narrator script: 2\u20133 sentences, max 35 words total. Punchy, warm, slightly conspiratorial. Written to be performed aloud, not read. This is the exact voiceover script for a female voice.
-
-Write exactly 2 reaction strings: max 8 words each. Style them like a phone notification or TikTok comment \u2014 a stranger reacting to what the narrator just said. Keep them dry, funny, relatable.
-Examples of good reactions: "sir this is a wellness site" / "...adding to cart" / "my therapist said treat yourself so" / "wait this is actually genius"
-
-Also write:
-- endTagline: a funny 4\u20138 word closing line for the end card (e.g. "Your body called. We answered." or "Treat yourself. You've earned it, probably.")
-
-Return ONLY this JSON (no markdown):
-{
-  "formatRationale": "one sentence why this format fits this product",
-  "narratorScript": "...",
-  "reactionText": ["...", "..."],
-  "endTagline": "..."
-}`;
-  const raw = await generate(prompt, 1024);
-  let parsed;
-  try {
-    parsed = JSON.parse(stripFences(raw));
-  } catch {
-    const match = raw.match(/\{[\s\S]*?"narratorScript"[\s\S]*?\}/);
-    if (match) {
-      parsed = JSON.parse(match[0]);
-    } else {
-      parsed = {
-        formatRationale: "Fallback content",
-        narratorScript: `${product.tagline ?? `${product.brand} ${product.title}. Today only at xdipx.`}`,
-        reactionText: ["...adding to cart", "my therapist said treat yourself so"],
-        endTagline: "One deal. One day. No regrets."
-      };
-    }
-  }
-  const titleSum = product.title.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const ctaWord = CTA_WORDS[titleSum % CTA_WORDS.length];
-  return {
-    format,
-    formatRationale: parsed.formatRationale,
-    narratorScript: parsed.narratorScript,
-    reactionText: parsed.reactionText ?? ["...adding to cart", "my therapist said treat yourself so"],
-    endTagline: parsed.endTagline,
-    ctaWord
-  };
-}
-async function enhanceVeoPrompt(opts) {
-  const msg = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    system: VEO_SYSTEM_PROMPT,
-    messages: [{
-      role: "user",
-      content: `Enhance this video idea into a detailed Google Veo prompt. IMPORTANT: The user's idea IS the creative direction \u2014 keep it as the core of your prompt and build around it with cinematic detail.
-
-THE VIDEO IDEA: "${opts.userIdea}"
-
-Product: ${opts.productTitle} by ${opts.productBrand}${opts.productCategory ? ` (${opts.productCategory})` : ""}
-${opts.hasStartingImage ? opts.imageMode === "reference" ? "Mode: TEXT-TO-VIDEO with REFERENCE IMAGE \u2014 a product photo is included as visual context (NOT the first frame). The video should feature the product as it appears in the reference image." : "Mode: IMAGE-TO-VIDEO \u2014 the starting frame is a product photo. Describe how the scene evolves FROM that image." : "Mode: TEXT-TO-VIDEO \u2014 describe the full scene from scratch."}
-Aspect: ${opts.aspectRatio} (${opts.aspectRatio === "16:9" ? "landscape" : "vertical"}) | Duration: ${opts.durationSeconds}s
-
-Take the user's idea above and enrich it with:
-- Camera work (angle, movement: pan, dolly, tracking, etc.)
-- Lighting (golden hour, soft diffusion, neon, etc.)
-- Depth of field / focus effects
-- Audio: dialogue in quotes, sound effects, ambient noise
-
-Stay true to what the user described. Don't replace their concept with something different. Add production detail, don't reimagine.
-
-Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown.`
-    }]
-  });
-  const block = msg.content[0];
-  if (block?.type !== "text") throw new Error("Unexpected Claude response type for Veo prompt");
-  const uVeo = msg.usage;
-  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
-    ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
-      feature: "video-prompt",
-      model: MODEL,
-      source: "sync",
-      caller: "enhanceVeoPrompt",
-      inputTokens: uVeo.input_tokens,
-      outputTokens: uVeo.output_tokens,
-      cacheCreationTokens: uVeo.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: uVeo.cache_read_input_tokens ?? 0
-    })
-  ).catch((err2) => console.error("[claude] enhanceVeoPrompt token-log failed (ignored):", err2));
-  return block.text.trim();
-}
-async function enhanceLtxPrompt(opts) {
-  const msg = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    system: LTX_SYSTEM_PROMPT,
-    messages: [{
-      role: "user",
-      content: `Enhance this video idea into a detailed LTX Video prompt using the three-layer structure. IMPORTANT: The user's idea IS the creative direction \u2014 keep it as the core and build cinematic detail around it.
-
-THE VIDEO IDEA: "${opts.userIdea}"
-
-Product: ${opts.productTitle} by ${opts.productBrand}${opts.productCategory ? ` (${opts.productCategory})` : ""}
-
-FIRST FRAME: The starting frame is a product photo \u2014 the model already sees it. DO NOT re-describe the product's appearance, color, shape, or packaging. Jump straight into what happens next.
-
-Duration: ${opts.durationSeconds}s \u2014 scale your detail proportionally. ${opts.durationSeconds <= 8 ? "Keep it tight: 3-5 sentences." : opts.durationSeconds <= 15 ? "Medium detail: 5-8 sentences with temporal progression." : "Full detail: 8-12 sentences with phases of motion, mid-video shifts, and an ending beat."}
-Resolution: ${opts.resolution}
-${opts.cameraMotion ? `Camera direction: "${opts.cameraMotion.replace(/_/g, " ")}" \u2014 use this as the Camera Movement layer. Integrate it specifically (e.g., if "dolly in", describe pace and target of the dolly).` : "No camera direction specified \u2014 choose an appropriate camera movement for the Subject Action."}
-
-Build the prompt with these three layers in order:
-1. SUBJECT ACTION \u2014 what moves, how, the hero moment
-2. CAMERA MOVEMENT \u2014 specific cinematographic terms
-3. ENVIRONMENT/ATMOSPHERE \u2014 what shifts in lighting, particles, reflections, color temperature
-
-Return ONLY the enhanced prompt as one flowing paragraph. No labels, no markdown, no layer headings.`
-    }]
-  });
-  const block = msg.content[0];
-  if (block?.type !== "text") throw new Error("Unexpected Claude response type for LTX prompt");
-  const uLtx = msg.usage;
-  void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
-    ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
-      feature: "video-prompt",
-      model: MODEL,
-      source: "sync",
-      caller: "enhanceLtxPrompt",
-      inputTokens: uLtx.input_tokens,
-      outputTokens: uLtx.output_tokens,
-      cacheCreationTokens: uLtx.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: uLtx.cache_read_input_tokens ?? 0
-    })
-  ).catch((err2) => console.error("[claude] enhanceLtxPrompt token-log failed (ignored):", err2));
-  return block.text.trim();
-}
-async function selectAccessories(mainProduct, candidates, count = 3) {
-  if (candidates.length === 0) return [];
-  const productList = candidates.slice(0, 20).map(
-    (p) => `SKU: ${p.sku} | Title: ${p.title} | Brand: ${p.brand} | Categories: ${p.categories.join(", ")}`
-  ).join("\n");
-  const raw = await generate(
-    `You are selecting complementary add-on products for a daily deal.
-
-Main product: "${mainProduct.title}" by ${mainProduct.brand}
-Categories: ${mainProduct.categories.join(", ")}
-
-From the candidates below, choose exactly ${count} products that would work as accessories or perfect pairings \u2014 things that complete the experience or enhance the main product.
-
-Good pairings: lubricants with toys, cleaners/maintenance items, charging accessories, enhancement items that serve a complementary function.
-Do NOT pick products in the same primary category as the main product \u2014 those are competitors, not accessories.
-Prefer variety \u2014 don't pick ${count} of the same type.
-
-Return a JSON array of exactly ${count} SKU strings. Example: ["SKU1", "SKU2", "SKU3"]
-Return only the JSON array, no markdown.
-
-Candidates:
-${productList}`
-  );
-  try {
-    const parsed = JSON.parse(stripFences(raw));
-    return Array.isArray(parsed) ? parsed.slice(0, count) : [];
-  } catch {
-    return [];
-  }
-}
-async function generateBlogOutline(topic, keywords = [], category) {
-  const raw = await generate(
-    `Create a detailed blog post outline for the xdipx.com blog.
-
-Topic: ${topic}
-${keywords.length ? `SEO keywords to target: ${keywords.join(", ")}` : ""}
-${category ? `Category: ${category}` : ""}
-
-The blog covers sexual wellness topics \u2014 guides, tips, product roundups, relationship advice.
-Voice: playful, cheeky, warm, judgment-free. Never clinical or sleazy.
-
-Return a JSON object with:
-- "title": an engaging, SEO-friendly headline (max 70 chars)
-- "sections": array of { "heading": "H2 section title", "bullets": ["key point 1", "key point 2", ...] }
-  Include 4-6 sections with 2-4 bullets each.
-- "suggestedTags": array of 3-5 tag strings for categorization
-
-Return only the JSON object, no markdown fences.`,
-    2048
-  );
-  try {
-    return JSON.parse(stripFences(raw));
-  } catch {
-    return {
-      title: topic,
-      sections: [{ heading: "Introduction", bullets: ["Overview of the topic"] }],
-      suggestedTags: []
-    };
-  }
-}
-async function generateBlogDraft(outline) {
-  const sectionsText = outline.sections.map((s) => `## ${s.heading}
-${s.bullets.map((b) => `- ${b}`).join("\n")}`).join("\n\n");
-  const raw = await generate(
-    `Write a full blog post draft for the xdipx.com blog based on this outline.
-
-Title: ${outline.title}
-
-Outline:
-${sectionsText}
-
-Write in xdipx brand voice: playful, cheeky, warm, curious, judgment-free.
-Return valid HTML using: <h2>, <h3>, <p>, <strong>, <em>, <ul>/<li>, <blockquote>.
-No <html>, <head>, <body>, or <h1> tags.
-Each section should be 2-3 paragraphs.
-Include a brief intro paragraph before the first section.
-End with a wrap-up that includes a subtle CTA to browse xdipx deals.
-Make it genuinely entertaining \u2014 innuendo and tasteful humor welcome.
-Target word count: 800-1200 words.`,
-    4096
-  );
-  if (raw.includes("<h2>") || raw.includes("<p>")) return raw.trim();
-  return `<p>${raw.trim()}</p>`;
-}
 function emmaHeroFallback(deal, variant, voiceHash) {
   const base = {
     variant,
@@ -13880,78 +16848,6 @@ Return ONLY this JSON (no markdown):
   } catch (err2) {
     console.error("[generateEmmaHero] falling back to hardcoded copy:", err2);
     return emmaHeroFallback(opts.deal, variant, voiceHash);
-  }
-}
-async function generateEmmaTagline() {
-  const system = `You are Emma, xdipx's AI guide. You write like a trusted, funny friend. Tasteful, warm, curious. Never clinical. Never sleazy. Never "sex" as an adjective.
-
-${EMMA_VOICE_CORE}`;
-  const user = `Write ONE short tagline for the Emma chat window's status line. It sits right under "Ask Emma \xB7 Online".
-
-Rules:
-- 5 to 9 words, lowercase (first word may be capitalized).
-- First-person Emma voice.
-- Ends with the \u2665 glyph (exactly one).
-- No quotes, no period, no emoji other than \u2665.
-- No "buy now", no countdown, no pricing, no "sex" as adjective.
-- Never claim lived experience (no "I've tried", "I've tested"). Speak from catalog knowledge.
-- Feel friendly and specific, the kind of thing a friend might say when you open the chat. Examples of the vibe (don't copy): "here to help you find what you're into \u2665", "pick my brain, I know the catalog cold \u2665".
-
-Return ONLY the tagline text, nothing else.`;
-  try {
-    const msg = await client.messages.create({
-      model: MODEL_FAST,
-      max_tokens: 80,
-      // Cache the static charter prefix this system carries (B3.3 fix):
-      // byte-identical model input, cache-read pricing on burst repeats.
-      system: cacheableSystem(system),
-      messages: [{ role: "user", content: user }]
-    });
-    const block = msg.content[0];
-    if (block?.type !== "text") throw new Error("non-text response");
-    const uTagline = msg.usage;
-    void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
-      ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
-        feature: "contextual-tagline",
-        model: MODEL_FAST,
-        source: "sync",
-        caller: "generateEmmaTagline",
-        inputTokens: uTagline.input_tokens,
-        outputTokens: uTagline.output_tokens,
-        cacheCreationTokens: uTagline.cache_creation_input_tokens ?? 0,
-        cacheReadTokens: uTagline.cache_read_input_tokens ?? 0
-      })
-    ).catch((err2) => console.error("[claude] generateEmmaTagline token-log failed (ignored):", err2));
-    const line = block.text.trim().replace(/^["'`]|["'`]$/g, "").replace(/\s+/g, " ").split("\n")[0]?.trim();
-    if (line && line.length > 4 && line.length <= 80 && line.includes("\u2665")) return line;
-    if (line && line.length > 4 && line.length <= 80) return `${line} \u2665`;
-  } catch (err2) {
-    console.error("[generateEmmaTagline] falling back:", err2);
-  }
-  return EMMA_TAGLINE_FALLBACKS[Math.floor(Math.random() * EMMA_TAGLINE_FALLBACKS.length)];
-}
-async function generateBlogSEO(title, excerpt) {
-  const raw = await generate(
-    `Generate SEO metadata for this blog post on xdipx.com (an editorially curated sexual wellness storefront).
-
-Title: ${title}
-Excerpt: ${excerpt}
-
-Return a JSON object with:
-- "seoTitle": optimized page title, max 70 chars. Include primary keyword near the start.
-- "seoDescription": meta description, exactly 140-160 chars. Include a benefit and CTA. Conversational tone.
-- "suggestedTags": array of 3-5 relevant tags for the post.
-
-Return only the JSON object, no markdown.`
-  );
-  try {
-    return JSON.parse(stripFences(raw));
-  } catch {
-    return {
-      seoTitle: title.slice(0, 70),
-      seoDescription: excerpt.slice(0, 160),
-      suggestedTags: []
-    };
   }
 }
 async function generateEmmaTake(opts) {
@@ -14309,47 +17205,6 @@ Spread requirements (CRITICAL \u2014 dials look identical across products when t
   }
   return { items };
 }
-function mapLegacyDialBucket(legacy) {
-  if (legacy === "air-pulsation" || legacy === "wand" || legacy === "vibrator") return "vibrator";
-  if (legacy === "lube") return "lube";
-  if (legacy === "wear") return "wear";
-  return null;
-}
-async function inferProductTypeDial(input) {
-  const user = `Classify the product into ONE of these buckets (return exactly one):
-- air-pulsation  (clitoral suction / air-pulse / pressure-wave devices)
-- vibrator       (internal/external vibrators, rabbits, bullets, couples vibes)
-- wand           (large-format wand massagers, corded or rechargeable)
-- lube           (lubricants, gels, oils, intimate moisturizers)
-- wear           (lingerie, harnesses, panties, apparel, restraints, accessories worn on the body)
-
-Product:
-- Title: ${input.title}
-- Brand: ${input.brand}
-- Categories: ${input.categories.join(", ") || "(none)"}
-- Description (truncated): ${input.description.slice(0, 500)}
-
-Return ONLY this JSON: { "type": "vibrator" }
-No markdown. No commentary.`;
-  try {
-    const { text: text2 } = await callClaude({
-      llmClient: input.llmClient,
-      model: MODEL_FAST,
-      maxTokens: 60,
-      systemBlocks: await buildEmmaSystemBlocks(),
-      userPrompt: user
-    });
-    const parsed = JSON.parse(stripFences(text2));
-    const t = typeof parsed.type === "string" ? parsed.type.trim().toLowerCase() : "";
-    if (LEGACY_DIAL_BUCKETS.includes(t)) {
-      const mapped = mapLegacyDialBucket(t);
-      if (mapped) return mapped;
-    }
-  } catch (err2) {
-    console.error("[inferProductTypeDial] failed, defaulting to vibrator:", err2);
-  }
-  return "vibrator";
-}
 async function inferProductTaxonomy(input) {
   const subtypeBlock = Object.entries(PRODUCT_SUBTYPES_BY_TYPE).map(([t, subs]) => subs.length === 0 ? `  ${t}: (no subtype \u2014 leave subtype null/empty)` : `  ${t}: ${subs.join(" | ")}`).join("\n");
   const user = `Classify this product into a hierarchical taxonomy. Two fields:
@@ -14431,45 +17286,6 @@ function validateAskEmmaTagBatch(raw, preferredLabels, allowProposed) {
 function toTitleCase(s) {
   return s.toLowerCase().split(/\s+/).map((word) => word.split("-").map((part) => part.length > 0 ? part[0].toUpperCase() + part.slice(1) : part).join("-")).join(" ").trim();
 }
-async function generateAskEmmaTags(opts) {
-  const { deal, axis, preferredLabels, allowProposed = false } = opts;
-  const labelList = preferredLabels.length > 0 ? preferredLabels.map((l) => `- ${l}`).join("\n") : "(no curated vocabulary yet)";
-  const user = `Pick the Ask Emma tags for the "${axis}" axis on this product. ${ASK_EMMA_AXIS_GUIDANCE[axis]}
-
-Product:
-- Title: ${deal.seoTitle}
-- Brand: ${deal.brand}
-- Category: ${deal.category.join(", ")}
-${deal.productTypeDial ? `- Type: ${deal.productTypeDial}` : ""}
-${deal.tagline ? `- Tagline: ${deal.tagline}` : ""}
-${deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 400)}` : ""}
-${deal.specifications?.length ? `- Specs (context): ${deal.specifications.join("; ").slice(0, 300)}` : ""}
-
-Curated vocabulary for "${axis}" (Title Case \u2014 ${allowProposed ? "PREFER these; only propose new when none fit" : "STRICT: pick ONLY from this list"}):
-${labelList}
-
-Rules:
-- Return labels in **Title Case** (e.g. "Soft Touch", "First-Time Friendly", "Slow Burn") \u2014 never lowercase, never kebab-case.
-${allowProposed ? "- Only invent a new label if NONE of the curated ones fit. Keep new labels <=24 chars, Title Case, generic enough to apply to other products. Do NOT invent synonyms of existing labels." : "- DO NOT invent new labels. If no curated label fits, leave that aspect untagged."}
-- Honest tagging \u2014 don't tag every option. If unsure, leave it out.
-
-Return ONLY this JSON (no markdown): { "tags": ["Soft Touch", "First-Time Friendly"] }`;
-  try {
-    const { text: text2 } = await callClaude({
-      llmClient: opts.llmClient,
-      model: MODEL_FAST,
-      maxTokens: 200,
-      systemBlocks: await buildEmmaSystemBlocks(),
-      userPrompt: user
-    });
-    const parsed = JSON.parse(stripFences(text2));
-    if (!Array.isArray(parsed.tags)) return [];
-    return validateAskEmmaTagBatch(parsed.tags, preferredLabels, allowProposed);
-  } catch (err2) {
-    console.error(`[generateAskEmmaTags:${axis}] failed:`, err2);
-    return [];
-  }
-}
 async function generateAskEmmaTagsAll(opts) {
   const { deal, vocabularies, allowProposed = false } = opts;
   const renderVocab = (axis) => {
@@ -14537,147 +17353,6 @@ function ivrProductBlock(deal) {
     deal.fullStory ? `- Story (context, strip HTML): ${deal.fullStory.replace(/<[^>]+>/g, " ").slice(0, 400)}` : "",
     deal.specifications?.length ? `- Specs (context): ${deal.specifications.join("; ").slice(0, 250)}` : ""
   ].filter(Boolean).join("\n");
-}
-async function generateIvrExperience(opts) {
-  const user = `Pick every experience level this product genuinely fits. Multi-select \u2014 return 1\u20134 levels. Choose from: ${IVR_EXPERIENCE_LEVELS.join(" | ")}.
-
-Use "first-time" for beginner-friendly products (gentle, simple controls, low intensity).
-Use "curious" for someone exploring beyond the basics \u2014 slightly more ambitious but still approachable.
-Use "experienced" for people comfortable with the category looking for variety or upgrades.
-Use "advanced" for high-intensity, niche, or technique-heavy products.
-
-A versatile product can hit multiple levels (e.g. a starter vibrator that also satisfies an experienced buyer). Be honest \u2014 only include a level the product genuinely serves.
-
-${ivrProductBlock(opts.deal)}
-
-Return ONLY this JSON (no markdown): { "levels": ["first-time", "curious"] }`;
-  try {
-    const { text: text2 } = await callClaude({
-      llmClient: opts.llmClient,
-      model: MODEL_FAST,
-      maxTokens: 100,
-      systemBlocks: await buildEmmaSystemBlocks(),
-      userPrompt: user
-    });
-    const parsed = JSON.parse(stripFences(text2));
-    if (Array.isArray(parsed.levels)) {
-      const valid = new Set(IVR_EXPERIENCE_LEVELS);
-      const out = [];
-      const seen = /* @__PURE__ */ new Set();
-      for (const item of parsed.levels) {
-        if (typeof item !== "string") continue;
-        const v = item.trim().toLowerCase();
-        if (!valid.has(v) || seen.has(v)) continue;
-        seen.add(v);
-        out.push(v);
-        if (out.length >= 4) break;
-      }
-      return out;
-    }
-  } catch (err2) {
-    console.error("[generateIvrExperience] failed:", err2);
-  }
-  return [];
-}
-async function generateIvrUseCase(opts) {
-  const user = `Pick 2\u20135 use cases this product fits, from this exact vocabulary:
-${IVR_USE_CASES.map((s) => `- ${s}`).join("\n")}
-
-HONEST TAGGING \u2014 STRICT.
-- For OBJECTIVE/inferable slugs (travel = product is portable; long-distance = product has remote/app control): tag based on product spec support.
-- For SUBJECTIVE slugs (spice-up, partner-surprise, kink-curious, role-play, newly-dating, long-term, experimentation, queer-affirming, trans-affirming, etc.): tag ONLY when the description strongly supports it. Default to OMISSION when ambiguous. Skip rather than stretch.
-
-MUTUAL-EXCLUSIVITY HINTS (soft guidance \u2014 usually pick at most one within each facet):
-- Occasion: anniversary, honeymoon, valentine, birthday, bachelorette, pride, holiday \u2014 usually one or none. \`holiday\` is the umbrella for non-specific holidays; pick a specific occasion when it fits.
-- Wellness/health: pelvic-floor, kegel-training, postpartum, menopause, libido-boost, prostate-health, erectile-support, menstrual-comfort \u2014 usually one, ONLY on wellness-category products.
-- Affirming/inclusive: queer-affirming, trans-affirming, women-focused, men-focused, inclusive \u2014 usually one or two.
-- Gift sub-category: gift, gift-set, party-favor, self-gift \u2014 pick the most specific that applies.
-
-PRODUCT-TYPE SELF-RESTRICTION:
-- Wellness slugs (kegel-training, postpartum, prostate-health, erectile-support, menstrual-comfort) only apply to wellness/specific product types. Don't tag a vibrator as \`kegel-training\` unless it's actually a kegel device.
-- Affirming slugs (queer-affirming, trans-affirming, women-focused, men-focused) based on actual product positioning, not assumption from category.
-${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" \u2014 keep tags consistent with what fits this category.` : ""}
-
-CROSS-FIELD NOTE: Some slugs (valentine, pride, holiday, gift, gift-set, long-distance, first-time) also appear in the IVR features vocabulary. There, they describe what the product IS (Pride-edition design, has rainbow colors). Here, they describe WHEN/WHY to use it (good for Pride parties, good for Valentine's gift). A product may legitimately tag the same slug in both fields \u2014 that's intentional.
-
-${ivrProductBlock(opts.deal)}
-
-Return ONLY this JSON (no markdown): { "useCases": ["slug-one", "slug-two"] }`;
-  try {
-    const { text: text2 } = await callClaude({
-      llmClient: opts.llmClient,
-      model: MODEL_FAST,
-      maxTokens: 200,
-      systemBlocks: await buildEmmaSystemBlocks(),
-      userPrompt: user
-    });
-    const parsed = JSON.parse(stripFences(text2));
-    if (!Array.isArray(parsed.useCases)) return [];
-    const allowed = new Set(IVR_USE_CASES);
-    const seen = /* @__PURE__ */ new Set();
-    const out = [];
-    for (const raw of parsed.useCases) {
-      if (typeof raw !== "string") continue;
-      const slug = raw.trim().toLowerCase();
-      if (!allowed.has(slug) || seen.has(slug)) continue;
-      seen.add(slug);
-      out.push(slug);
-      if (out.length >= 5) break;
-    }
-    return out;
-  } catch (err2) {
-    console.error("[generateIvrUseCase] failed:", err2);
-    return [];
-  }
-}
-async function generateIvrFeatures(opts) {
-  const user = `Pick 3\u20138 features that are TRUE for this product, from this exact vocabulary:
-${IVR_FEATURES.map((s) => `- ${s}`).join("\n")}
-
-HONEST TAGGING \u2014 STRICT.
-- For OBJECTIVE slugs (waterproof, rechargeable, usb-c, silicone, body-safe, phthalate-free, latex-free, hypoallergenic, vegan, app-controlled, bluetooth, magnetic-charging, etc.): tag ONLY when the product description supports it. Don't infer from category.
-- For SUBJECTIVE slugs (rumbly, buzzy, gentle, intense, powerful, luxury, premium, discreet, beginner-friendly): tag ONLY when the description strongly supports it. Default to OMISSION when ambiguous.
-- These get spoken aloud by Emma when filtering ("looking for something quiet and waterproof"). False claims break shopper trust immediately.
-
-MUTUAL-EXCLUSIVITY HINTS (soft guidance \u2014 usually pick at most one within each facet):
-- Size: mini, compact, small, medium, large, xl, xxl, oversized, plus-size, queen-size, curvy, slim, girthy
-- Material primary: silicone, glass, metal, wood, leather, vegan-leather, faux-leather
-- Lube base: water-based, silicone-based, hybrid, oil-based (none for non-lubes)
-- Identity/edition: pride, rainbow, pride-edition, holiday, valentine
-
-PRODUCT-TYPE SELF-RESTRICTION:
-- Only tag features that apply to the product type. Don't tag \`harness-compatible\` on a lube, \`condom-safe\` on a vibrator, \`flared-base\` on a non-anal toy, \`water-based\`/\`silicone-based\`/\`hybrid\`/\`oil-based\` on anything that isn't a lubricant, etc.
-${opts.deal.productTypeDial ? `- This product's type is "${opts.deal.productTypeDial}" \u2014 only pick features that genuinely fit this category.` : ""}
-
-${ivrProductBlock(opts.deal)}
-
-Return ONLY this JSON (no markdown): { "features": ["slug-one", "slug-two"] }`;
-  try {
-    const { text: text2 } = await callClaude({
-      llmClient: opts.llmClient,
-      model: MODEL_FAST,
-      maxTokens: 300,
-      systemBlocks: await buildEmmaSystemBlocks(),
-      userPrompt: user
-    });
-    const parsed = JSON.parse(stripFences(text2));
-    if (!Array.isArray(parsed.features)) return [];
-    const allowed = new Set(IVR_FEATURES);
-    const seen = /* @__PURE__ */ new Set();
-    const out = [];
-    for (const raw of parsed.features) {
-      if (typeof raw !== "string") continue;
-      const slug = raw.trim().toLowerCase();
-      if (!allowed.has(slug) || seen.has(slug)) continue;
-      seen.add(slug);
-      out.push(slug);
-      if (out.length >= 8) break;
-    }
-    return out;
-  } catch (err2) {
-    console.error("[generateIvrFeatures] failed:", err2);
-    return [];
-  }
 }
 async function generateIvrAll(opts) {
   const user = `Pick three independent things for this product in a single response: experience levels, use cases, and features. Each axis has its own rules \u2014 apply them honestly.
@@ -14902,115 +17577,7 @@ Return exactly ${input.maxPicks} picks, ordered best\u2192worst. Use only ids fr
     }
   };
 }
-async function generateRails(opts) {
-  const { deal, partner, accessories = [] } = opts;
-  const brandVoice = opts.brandVoice ?? await getPipelineSetting("brandVoice") ?? DEFAULT_BRAND_VOICE;
-  const pool = await buildCandidatePool(deal, partner);
-  const state = createRailGenState([deal.handle, partner?.handle].filter(Boolean));
-  const dealContext = [
-    `Title: ${deal.seoTitle}`,
-    `Brand: ${deal.brand}`,
-    `Category: ${deal.category.join(", ")}`,
-    deal.tagline ? `Tagline: ${deal.tagline}` : "",
-    deal.audienceTags?.length ? `Audience tags: ${deal.audienceTags.join(", ")}` : "",
-    deal.moodTags?.length ? `Mood tags: ${deal.moodTags.join(", ")}` : "",
-    deal.mattersTags?.length ? `Matters tags: ${deal.mattersTags.join(", ")}` : ""
-  ].filter(Boolean).join("\n");
-  const partnerContext = partner ? `
-
-Paired with:
-- Title: ${partner.seoTitle}
-- Brand: ${partner.brand}
-- Category: ${partner.category}` : "";
-  const accessoryContext = accessories.length ? `
-
-Accessories that need pairing_why blurbs (call propose_pairing_why once each):
-${accessories.map((a) => `- ${a.id} \u2014 ${a.title}${a.brand ? ` (${a.brand})` : ""}`).join("\n")}` : "";
-  const system = `${EMMA_SYSTEM_PROMPT}
-
-${brandVoice}
-
-You are curating cross-sell rails for an editorial storefront. Your goal: propose 2 rails for the product detail page (target: "pdp") and 1 rail for the homepage (target: "homepage"). Each rail must include 4\u20138 products, a short Emma-voice aside, and a one-sentence rationale.
-
-Rules:
-- Use list_candidate_pool first to see what's available. Only fall back to query_products_by_tag/collection if the pool is thin.
-- Never include the primary deal product or its pair partner in any rail.
-- Each rail should have a clear theme (a mood, an audience, a use case), not a random grab bag.
-- The "emmaAside" is first-person and short, from catalog knowledge, not lived experience ("the specs line up for this pairing", "reviewers group these two together often").
-- The rail "heading" is a confident editorial label, 3\u20137 words. Never "buy now" / "shop now".
-- After all rails and pairing_why blurbs are proposed, simply stop responding (end_turn). Do not summarize.`;
-  const userPrompt = `Deal context:
-${dealContext}${partnerContext}${accessoryContext}
-
-Start by inspecting list_candidate_pool, then propose 2 PDP rails + 1 homepage rail using propose_rail.${accessories.length ? " Then propose one pairing_why blurb per accessory." : ""}`;
-  const messages = [{ role: "user", content: userPrompt }];
-  const MAX_TURNS = 8;
-  let turn = 0;
-  console.log(`[generateRails] starting. pool=${pool.length} deal=${deal.handle}${partner ? ` partner=${partner.handle}` : ""}`);
-  while (turn < MAX_TURNS) {
-    turn++;
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4096,
-      system,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tools: RAIL_TOOLS,
-      messages
-    });
-    messages.push({ role: "assistant", content: response.content });
-    {
-      const uRail = response.usage;
-      void Promise.resolve().then(() => (init_token_log_server(), token_log_server_exports)).then(
-        ({ logApiTokens: logApiTokens2 }) => logApiTokens2({
-          feature: "rail-gen",
-          model: MODEL,
-          source: "sync",
-          caller: "generateRails",
-          inputTokens: uRail.input_tokens,
-          outputTokens: uRail.output_tokens,
-          cacheCreationTokens: uRail.cache_creation_input_tokens ?? 0,
-          cacheReadTokens: uRail.cache_read_input_tokens ?? 0
-        })
-      ).catch((err2) => console.error("[claude] generateRails token-log failed (ignored):", err2));
-    }
-    const textParts = response.content.filter((b) => b.type === "text");
-    const toolUses = response.content.filter((b) => b.type === "tool_use");
-    console.log(
-      `[generateRails] turn ${turn}: stop=${response.stop_reason} tools=[${toolUses.map((t) => t.name).join(", ") || "none"}]${textParts[0]?.text ? ` text="${textParts[0].text.slice(0, 120).replace(/\s+/g, " ")}"` : ""}`
-    );
-    if (response.stop_reason === "end_turn" || response.stop_reason === "max_tokens") break;
-    if (toolUses.length === 0) break;
-    const toolResults = await Promise.all(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      toolUses.map(async (tu) => {
-        try {
-          const result = await executeRailTool(tu.name, tu.input, state, pool);
-          return {
-            type: "tool_result",
-            tool_use_id: tu.id,
-            content: JSON.stringify(result)
-          };
-        } catch (err2) {
-          return {
-            type: "tool_result",
-            tool_use_id: tu.id,
-            is_error: true,
-            content: `Tool error: ${err2 instanceof Error ? err2.message : String(err2)}`
-          };
-        }
-      })
-    );
-    messages.push({ role: "user", content: toolResults });
-  }
-  console.log(`[generateRails] completed in ${turn} turns. ${state.rails.length} rails, ${state.pairingWhy.length} blurbs.`);
-  return {
-    rails: state.rails,
-    pairingWhy: state.pairingWhy,
-    candidatePoolSize: pool.length,
-    turns: turn
-  };
-}
-var client, _toolTokenAccumulator, MODEL, MODEL_FAST, SYSTEM_PROMPT, BRAND_VOICE_SYSTEM_PROMPT, PRODUCT_TYPE_DESCRIPTOR_FALLBACK, CTA_WORDS, VEO_SYSTEM_PROMPT, LTX_SYSTEM_PROMPT, DEFAULT_BRAND_VOICE, EMMA_SYSTEM_PROMPT, EMMA_TAGLINE_FALLBACKS, PRODUCT_FAQ_CATEGORIES, LEGACY_DIAL_BUCKETS, PRODUCT_SUBTYPES_BY_TYPE, TOP_LEVEL_DIAL_GUIDE, ASK_EMMA_AXIS_GUIDANCE, IVR_EXPERIENCE_LEVELS, IVR_USE_CASES, IVR_FEATURES;
+var client, _toolTokenAccumulator, MODEL, MODEL_FAST, SYSTEM_PROMPT, BRAND_VOICE_SYSTEM_PROMPT, PRODUCT_TYPE_DESCRIPTOR_FALLBACK, DEFAULT_BRAND_VOICE, EMMA_SYSTEM_PROMPT, PRODUCT_FAQ_CATEGORIES, PRODUCT_SUBTYPES_BY_TYPE, TOP_LEVEL_DIAL_GUIDE, ASK_EMMA_AXIS_GUIDANCE, IVR_EXPERIENCE_LEVELS, IVR_USE_CASES, IVR_FEATURES;
 var init_claude_server = __esm({
   "app/lib/claude.server.ts"() {
     "use strict";
@@ -15055,53 +17622,13 @@ SEO targeting:
       "book-media": "Book",
       "sex-machine": "Sex Machine"
     };
-    CTA_WORDS = ["Today.", "Yours.", "Obviously.", "Go on.", "Finally."];
-    VEO_SYSTEM_PROMPT = `You are a video prompt engineer for Google Veo. You enhance simple video ideas into detailed, production-ready Veo prompts. Your job is to FAITHFULLY EXPAND the user's idea \u2014 not replace it. The user's concept is the creative foundation. You add cinematic detail (camera, lighting, composition, audio) while keeping their vision intact.
-
-Brand context: xdipx.com is an editorially curated sexual wellness storefront.
-Visual style: premium, warm, tasteful. Suggestive never explicit.`;
-    LTX_SYSTEM_PROMPT = `You are a video prompt engineer for LTX Video, an image-to-video model. You enhance simple video ideas into detailed, production-ready prompts.
-
-CRITICAL RULE \u2014 NEVER RE-DESCRIBE THE FIRST FRAME.
-The model already sees the product image as its starting frame. Your prompt must describe what happens NEXT \u2014 motion, change, evolution. If you restate what is already visible, the model wastes capacity on redundancy.
-
-Structure every prompt using three temporal layers, in order:
-
-1. SUBJECT ACTION \u2014 What moves and how. This is the hero moment. Name the subject first ("The vibrator begins to glow\u2026"), then describe the physical change. No adjective labels like "epic" or "stunning" \u2014 describe what physically happens.
-
-2. CAMERA MOVEMENT \u2014 Use specific cinematographic terms: slow dolly in, gentle jib up, smooth tracking left, rack focus from foreground to background. Never use vague words like "dynamic" or "cinematic" without specifying the actual motion.
-
-3. ENVIRONMENT / ATMOSPHERE \u2014 What shifts in the background: lighting changes (warm golden light intensifies, soft shadow creeps across the surface), particles (dust motes drift through a shaft of light), reflections, color temperature shifts. Describe change, not static state.
-
-Think of the prompt as a mini screenplay beat:
-- Sense of place/time (implied by the atmosphere layer)
-- Blocking (choreography between subject motion and camera)
-- Atmospheric detail (what the viewer feels through visual cues)
-
-Prompt length rules:
-- 6-8 second videos: 3-5 rich sentences
-- 10-15 second videos: 5-8 sentences with more temporal progression
-- 16-20 second videos: 8-12 sentences \u2014 describe phases of motion, mid-video shifts, ending beat
-
-Template skeleton: [product action] + [camera instruction] + [lighting/atmosphere shift] + [optional ambient audio cue]
-
-Brand context: xdipx.com, an editorially curated sexual wellness storefront.
-Visual style: premium, warm, a little edgy \u2014 push boundaries while staying tasteful. Suggestive and playful, never outright explicit. Think high-end fragrance ad that makes you look twice.`;
     DEFAULT_BRAND_VOICE = `${EMMA_VOICE_MARKETING}
 
 If any keyword targets, vocabulary lists, or input fields in the prompt do not fit the actual product, silently ignore them \u2014 write from the product details only. Never narrate a mismatch, never preface output with explanation, never write meta-commentary about the prompt. Output only the requested copy.`;
     EMMA_SYSTEM_PROMPT = `You are Emma, xdipx's AI guide. You write in first person, warm and specific, like a note to a friend. You are a curator, not a customer: recommend from product knowledge and what a product is known or designed for.
 
 ${EMMA_VOICE_CORE}`;
-    EMMA_TAGLINE_FALLBACKS = [
-      "here to help you find what you\u2019re into \u2665",
-      "your no-judgment guide to pleasure \u2665",
-      "quietly obsessed with the good stuff \u2665",
-      "pick my brain, I know the catalog cold \u2665",
-      "tell me what you\u2019re curious about \u2665"
-    ];
     PRODUCT_FAQ_CATEGORIES = ["general", "care", "usage", "compatibility", "shipping"];
-    LEGACY_DIAL_BUCKETS = ["air-pulsation", "vibrator", "wand", "lube", "wear"];
     PRODUCT_SUBTYPES_BY_TYPE = {
       vibrator: ["bullet-egg", "rabbit", "g-spot", "finger-clit", "wand", "air-pulsation", "rotating-thrusting", "remote", "wearable"],
       dildo: ["realistic", "glass-metal", "silicone", "dual-density", "non-phallic", "vibrating", "packer", "large"],
@@ -15350,334 +17877,6 @@ var init_types = __esm({
   }
 });
 
-// app/lib/twitter.server.ts
-var twitter_server_exports = {};
-__export(twitter_server_exports, {
-  deleteAndLogTweet: () => deleteAndLogTweet,
-  deleteTweet: () => deleteTweet,
-  postApprovedDraft: () => postApprovedDraft,
-  postDealTweet: () => postDealTweet,
-  postManualTweet: () => postManualTweet,
-  postTweet: () => postTweet,
-  replyToTweet: () => replyToTweet,
-  retryFailedPost: () => retryFailedPost,
-  uploadMedia: () => uploadMedia,
-  uploadMediaFromUrl: () => uploadMediaFromUrl
-});
-import OAuth from "oauth-1.0a";
-import crypto2 from "node:crypto";
-import { eq as eq7 } from "drizzle-orm";
-function getOAuth() {
-  return new OAuth({
-    consumer: {
-      key: process.env["X_API_KEY"],
-      secret: process.env["X_API_SECRET"]
-    },
-    signature_method: "HMAC-SHA1",
-    hash_function(baseString, key) {
-      return crypto2.createHmac("sha1", key).update(baseString).digest("base64");
-    }
-  });
-}
-function getToken() {
-  return {
-    key: process.env["X_ACCESS_TOKEN"],
-    secret: process.env["X_ACCESS_TOKEN_SECRET"]
-  };
-}
-async function xFetch(url, method, body, contentType = "application/json") {
-  const oauth = getOAuth();
-  const token = getToken();
-  const authHeader2 = oauth.toHeader(
-    oauth.authorize({ url, method }, token)
-  );
-  const headers = {
-    ...authHeader2,
-    "Content-Type": contentType
-  };
-  const init2 = { method, headers };
-  if (body) {
-    init2.body = contentType === "application/json" ? JSON.stringify(body) : body;
-  }
-  const res = await fetch(url, init2);
-  if (!res.ok) {
-    const text2 = await res.text();
-    const err2 = new Error(`X API ${method} ${url} \u2192 ${res.status}: ${text2}`);
-    err2.status = res.status;
-    throw err2;
-  }
-  if (res.status === 204) return {};
-  return await res.json();
-}
-async function postTweet(text2, mediaIds) {
-  const body = { text: text2 };
-  if (mediaIds?.length) {
-    body.media = { media_ids: mediaIds };
-  }
-  const res = await xFetch(
-    "https://api.x.com/2/tweets",
-    "POST",
-    body
-  );
-  return res.data;
-}
-async function deleteTweet(tweetId) {
-  await xFetch(`https://api.x.com/2/tweets/${tweetId}`, "DELETE");
-}
-async function replyToTweet(tweetId, text2, mediaIds) {
-  const body = {
-    text: text2,
-    reply: { in_reply_to_tweet_id: tweetId }
-  };
-  if (mediaIds?.length) {
-    body.media = { media_ids: mediaIds };
-  }
-  const res = await xFetch(
-    "https://api.x.com/2/tweets",
-    "POST",
-    body
-  );
-  return res.data;
-}
-async function uploadMedia(imageBuffer, _mimeType) {
-  const oauth = getOAuth();
-  const token = getToken();
-  const url = "https://upload.x.com/1.1/media/upload.json";
-  const boundary = `----XBoundary${Date.now()}`;
-  const mediaData = imageBuffer.toString("base64");
-  const parts = [
-    `--${boundary}\r
-Content-Disposition: form-data; name="media_data"\r
-\r
-${mediaData}\r
-`,
-    `--${boundary}\r
-Content-Disposition: form-data; name="media_category"\r
-\r
-tweet_image\r
-`,
-    `--${boundary}--\r
-`
-  ];
-  const bodyStr = parts.join("");
-  const authHeader2 = oauth.toHeader(
-    oauth.authorize({ url, method: "POST" }, token)
-  );
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      ...authHeader2,
-      "Content-Type": `multipart/form-data; boundary=${boundary}`
-    },
-    body: bodyStr
-  });
-  if (!res.ok) {
-    const text2 = await res.text();
-    throw new Error(`X media upload failed ${res.status}: ${text2}`);
-  }
-  const data = await res.json();
-  return data.media_id_string;
-}
-async function uploadMediaFromUrl(imageUrl) {
-  try {
-    const res = await fetch(imageUrl);
-    if (!res.ok) return null;
-    const buffer = Buffer.from(await res.arrayBuffer());
-    const mimeType = res.headers.get("content-type") ?? "image/jpeg";
-    return await uploadMedia(buffer, mimeType);
-  } catch (err2) {
-    console.error("[twitter] Media upload from URL failed:", err2);
-    return null;
-  }
-}
-async function postDealTweet(deal) {
-  try {
-    let imageUrl = deal.imageUrl;
-    let brand = deal.brand;
-    let tagline = deal.tagline;
-    let category = deal.category;
-    if (deal.shopifyProductId && (!imageUrl || !brand)) {
-      const numericId = deal.shopifyProductId.replace("gid://shopify/Product/", "");
-      const fullDeal = await getDealByShopifyId(numericId);
-      if (fullDeal) {
-        imageUrl = imageUrl || fullDeal.images[0]?.url || "";
-        brand = brand || fullDeal.brand;
-        tagline = tagline || fullDeal.tagline;
-        category = category || categoryToLegacyString(fullDeal.category);
-      }
-    }
-    const copy = await generateTweetCopy({
-      title: deal.seoTitle,
-      brand,
-      tagline,
-      dealPrice: deal.dealPrice,
-      msrp: deal.msrp,
-      category,
-      handle: deal.handle
-    });
-    let mediaIds;
-    const uploadedMediaUrls = [];
-    if (imageUrl) {
-      const mediaId = await uploadMediaFromUrl(imageUrl);
-      if (mediaId) {
-        mediaIds = [mediaId];
-        uploadedMediaUrls.push(imageUrl);
-      }
-    }
-    const tweet = await postTweet(copy.mainTweet, mediaIds);
-    await db.insert(socialPosts).values({
-      platform: "x",
-      postType: "auto_deal",
-      externalPostId: tweet.id,
-      dealHistoryId: deal.dealHistoryId,
-      tweetText: copy.mainTweet,
-      mediaUrls: uploadedMediaUrls.length ? uploadedMediaUrls : null,
-      mediaIds: mediaIds ?? null,
-      status: "posted",
-      postedAt: /* @__PURE__ */ new Date(),
-      createdBy: "system"
-    });
-    if (copy.threadReply) {
-      try {
-        const reply = await replyToTweet(tweet.id, copy.threadReply);
-        await db.insert(socialPosts).values({
-          platform: "x",
-          postType: "thread_reply",
-          externalPostId: reply.id,
-          parentPostId: void 0,
-          // Will use externalPostId linkage
-          dealHistoryId: deal.dealHistoryId,
-          tweetText: copy.threadReply,
-          status: "posted",
-          postedAt: /* @__PURE__ */ new Date(),
-          createdBy: "system"
-        });
-      } catch (replyErr) {
-        console.error("[twitter] Thread reply failed (main tweet OK):", replyErr);
-      }
-    }
-    return { ok: true, tweetId: tweet.id, tweetText: copy.mainTweet };
-  } catch (err2) {
-    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
-    console.error("[twitter] postDealTweet failed:", errorMessage);
-    try {
-      await db.insert(socialPosts).values({
-        platform: "x",
-        postType: "auto_deal",
-        dealHistoryId: deal.dealHistoryId,
-        tweetText: `[Failed to generate] ${deal.seoTitle}`,
-        status: "failed",
-        errorMessage,
-        createdBy: "system"
-      });
-    } catch {
-    }
-    return { ok: false, error: errorMessage };
-  }
-}
-async function postManualTweet(text2, imageUrl, dealHistoryId) {
-  try {
-    let mediaIds;
-    const uploadedMediaUrls = [];
-    if (imageUrl) {
-      const mediaId = await uploadMediaFromUrl(imageUrl);
-      if (mediaId) {
-        mediaIds = [mediaId];
-        uploadedMediaUrls.push(imageUrl);
-      }
-    }
-    const tweet = await postTweet(text2, mediaIds);
-    await db.insert(socialPosts).values({
-      platform: "x",
-      postType: "manual",
-      externalPostId: tweet.id,
-      dealHistoryId: dealHistoryId ?? null,
-      tweetText: text2,
-      mediaUrls: uploadedMediaUrls.length ? uploadedMediaUrls : null,
-      mediaIds: mediaIds ?? null,
-      status: "posted",
-      postedAt: /* @__PURE__ */ new Date(),
-      createdBy: "admin"
-    });
-    return { ok: true, tweetId: tweet.id, tweetText: text2 };
-  } catch (err2) {
-    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
-    console.error("[twitter] postManualTweet failed:", errorMessage);
-    return { ok: false, error: errorMessage };
-  }
-}
-async function postApprovedDraft(postId) {
-  const [post] = await db.select().from(socialPosts).where(eq7(socialPosts.id, postId)).limit(1);
-  if (!post || post.status !== "draft" || post.reviewStatus !== "approved") {
-    return { ok: false, error: "Post not found or not an approved draft" };
-  }
-  if (post.platform !== "x") {
-    return { ok: false, error: "Only X has live posting plumbing; post this one manually" };
-  }
-  const text2 = post.editedText?.trim() || post.tweetText;
-  try {
-    let mediaIds;
-    const imageUrl = post.mediaUrls?.[0];
-    if (imageUrl) {
-      const mediaId = await uploadMediaFromUrl(imageUrl);
-      if (mediaId) mediaIds = [mediaId];
-    }
-    const tweet = await postTweet(text2, mediaIds);
-    await db.update(socialPosts).set({
-      externalPostId: tweet.id,
-      mediaIds: mediaIds ?? null,
-      status: "posted",
-      postedAt: /* @__PURE__ */ new Date(),
-      errorMessage: null
-    }).where(eq7(socialPosts.id, postId));
-    return { ok: true, tweetId: tweet.id, tweetText: text2 };
-  } catch (err2) {
-    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
-    await db.update(socialPosts).set({ errorMessage }).where(eq7(socialPosts.id, postId));
-    return { ok: false, error: errorMessage };
-  }
-}
-async function deleteAndLogTweet(postId, externalPostId) {
-  try {
-    await deleteTweet(externalPostId);
-    await db.update(socialPosts).set({ status: "deleted" }).where(eq7(socialPosts.id, postId));
-    return { ok: true };
-  } catch (err2) {
-    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
-    return { ok: false, error: errorMessage };
-  }
-}
-async function retryFailedPost(postId) {
-  const [post] = await db.select().from(socialPosts).where(eq7(socialPosts.id, postId)).limit(1);
-  if (!post || post.status !== "failed") {
-    return { ok: false, error: "Post not found or not in failed state" };
-  }
-  try {
-    const tweet = await postTweet(post.tweetText);
-    await db.update(socialPosts).set({
-      externalPostId: tweet.id,
-      status: "posted",
-      postedAt: /* @__PURE__ */ new Date(),
-      errorMessage: null
-    }).where(eq7(socialPosts.id, postId));
-    return { ok: true, tweetId: tweet.id, tweetText: post.tweetText };
-  } catch (err2) {
-    const errorMessage = err2 instanceof Error ? err2.message : String(err2);
-    await db.update(socialPosts).set({ errorMessage }).where(eq7(socialPosts.id, postId));
-    return { ok: false, error: errorMessage };
-  }
-}
-var init_twitter_server = __esm({
-  "app/lib/twitter.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    init_claude_server();
-    init_shopify_server();
-    init_types();
-  }
-});
-
 // app/lib/emma-rails.server.ts
 var emma_rails_server_exports = {};
 __export(emma_rails_server_exports, {
@@ -15709,7 +17908,7 @@ function computeBriefHash(rail) {
   });
   return createHash4("sha256").update(payload).digest("hex").slice(0, 32);
 }
-function mulberry32(seed) {
+function mulberry323(seed) {
   let t = seed >>> 0;
   return () => {
     t = t + 1831565813 >>> 0;
@@ -15723,8 +17922,8 @@ function seedFromString(s) {
   const hex = createHash4("sha256").update(s).digest("hex").slice(0, 8);
   return parseInt(hex, 16) >>> 0;
 }
-function seededShuffle(items, seed) {
-  const rand = mulberry32(seed);
+function seededShuffle2(items, seed) {
+  const rand = mulberry323(seed);
   const arr = items.slice();
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
@@ -15964,7 +18163,7 @@ async function getEmmaContextRows(opts) {
     }).filter((x) => x !== null);
     if (alive.length === 0) continue;
     const seed = seedFromString(`${sessionSeed}|${dealHandle}|${rail._id}`);
-    const shuffled = seededShuffle(alive, seed);
+    const shuffled = seededShuffle2(alive, seed);
     const selected = shuffled.slice(0, Math.max(1, rail.displayCount));
     rows.push({
       rail: {
@@ -15997,4084 +18196,6 @@ var init_emma_rails_server = __esm({
   current, lastError
 }`;
     RAILS_GROQ = `*[_type == "emmaContextRail" && active == true] | order(sortOrder asc, _createdAt asc) ${RAIL_FIELDS_GROQ}`;
-  }
-});
-
-// app/lib/search-ping.server.ts
-var search_ping_server_exports = {};
-__export(search_ping_server_exports, {
-  INDEXNOW_MAX_URLS_PER_REQUEST: () => INDEXNOW_MAX_URLS_PER_REQUEST,
-  SITE_ORIGIN: () => SITE_ORIGIN,
-  chunkUrls: () => chunkUrls,
-  isRetryableStatus: () => isRetryableStatus,
-  normalizeUrls: () => normalizeUrls,
-  pingSearchEngines: () => pingSearchEngines,
-  submitIndexNow: () => submitIndexNow,
-  submitIndexNowChunk: () => submitIndexNowChunk
-});
-function normalizeUrls(paths, origin = SITE_ORIGIN) {
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const raw of paths) {
-    if (!raw || typeof raw !== "string") continue;
-    const abs = raw.startsWith("http") ? raw : `${origin}${raw.startsWith("/") ? raw : `/${raw}`}`;
-    let parsed;
-    try {
-      parsed = new URL(abs);
-    } catch {
-      continue;
-    }
-    if (parsed.host !== new URL(origin).host) continue;
-    if (seen.has(parsed.toString())) continue;
-    seen.add(parsed.toString());
-    out.push(parsed.toString());
-  }
-  return out;
-}
-function chunkUrls(urls, size = INDEXNOW_MAX_URLS_PER_REQUEST) {
-  const capped = Math.max(1, size);
-  const chunks = [];
-  for (let i = 0; i < urls.length; i += capped) chunks.push(urls.slice(i, i + capped));
-  return chunks;
-}
-function isRetryableStatus(status) {
-  return status === 0 || status >= 500 && status < 600;
-}
-async function submitIndexNowChunk(urls, opts) {
-  const origin = opts.origin ?? SITE_ORIGIN;
-  const host = new URL(origin).host;
-  let last = { urls, status: 0, ok: false, error: "no attempt made" };
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(INDEXNOW_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({
-          host,
-          key: opts.key,
-          keyLocation: `${origin}/indexnow.txt`,
-          urlList: urls
-        }),
-        signal: ctrl.signal
-      });
-      last = { urls, status: res.status, ok: res.ok };
-      if (res.ok || !isRetryableStatus(res.status)) return last;
-    } catch (err2) {
-      last = { urls, status: 0, ok: false, error: err2 instanceof Error ? err2.message : String(err2) };
-    } finally {
-      clearTimeout(timer);
-    }
-    if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
-  }
-  return last;
-}
-async function submitIndexNow(paths, opts = {}) {
-  if (process.env["SEARCH_PING_ENABLED"] !== "true") {
-    return { skipped: "SEARCH_PING_ENABLED is not true", submitted: 0, chunks: [] };
-  }
-  const key = process.env["INDEXNOW_API_KEY"];
-  if (!key) {
-    console.warn("[search-ping] SEARCH_PING_ENABLED set but INDEXNOW_API_KEY missing \u2014 skipping");
-    return { skipped: "INDEXNOW_API_KEY missing", submitted: 0, chunks: [] };
-  }
-  const origin = opts.origin ?? SITE_ORIGIN;
-  const urlList = normalizeUrls(paths, origin);
-  if (urlList.length === 0) return { skipped: "no submittable URLs", submitted: 0, chunks: [] };
-  const chunks = [];
-  let submitted = 0;
-  for (const chunk of chunkUrls(urlList, opts.chunkSize)) {
-    const result = await submitIndexNowChunk(chunk, { key, origin });
-    chunks.push(result);
-    if (result.ok) submitted += chunk.length;
-    console.log(`[search-ping] IndexNow ${result.status} for ${chunk.length} url(s)`);
-    if (!result.ok && (result.status === 429 || isRetryableStatus(result.status))) break;
-  }
-  return { submitted, chunks };
-}
-async function pingSearchEngines(paths) {
-  try {
-    await submitIndexNow(paths);
-  } catch (err2) {
-    console.error("[search-ping] IndexNow ping failed (non-blocking):", err2);
-  }
-}
-var SITE_ORIGIN, INDEXNOW_MAX_URLS_PER_REQUEST, INDEXNOW_ENDPOINT, REQUEST_TIMEOUT_MS, MAX_ATTEMPTS, RETRY_BACKOFF_MS;
-var init_search_ping_server = __esm({
-  "app/lib/search-ping.server.ts"() {
-    "use strict";
-    SITE_ORIGIN = "https://xdipx.com";
-    INDEXNOW_MAX_URLS_PER_REQUEST = 1e4;
-    INDEXNOW_ENDPOINT = "https://api.indexnow.org/IndexNow";
-    REQUEST_TIMEOUT_MS = 2e4;
-    MAX_ATTEMPTS = 2;
-    RETRY_BACKOFF_MS = 1e3;
-  }
-});
-
-// app/lib/with-timeout.server.ts
-async function withTimeout(p, ms, fallback, label = "op") {
-  let timer;
-  const timeout = new Promise((resolve4) => {
-    timer = setTimeout(() => {
-      console.warn(`[with-timeout] ${label} timed out after ${ms}ms \u2014 using fallback`);
-      resolve4(fallback);
-    }, ms);
-  });
-  try {
-    return await Promise.race([p, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-var init_with_timeout_server = __esm({
-  "app/lib/with-timeout.server.ts"() {
-    "use strict";
-  }
-});
-
-// app/types/discovery.ts
-var MATTERS_V1, MATTERS_V2, MATTERS, CATEGORIES, DEFAULT_BUDGET, EMPTY_STATE;
-var init_discovery = __esm({
-  "app/types/discovery.ts"() {
-    "use strict";
-    MATTERS_V1 = [
-      "Beginner-Friendly",
-      "Body-Safe Silicone",
-      "Discreet Design",
-      "First-Time",
-      "Hands-Free",
-      "Rechargeable",
-      "Soft-Touch",
-      "Travel-Size",
-      "Waterproof",
-      "App-Controlled",
-      "Whisper-Quiet",
-      "Plus-Size-Friendly"
-    ];
-    MATTERS_V2 = [
-      "Beginner-friendly",
-      "Whisper-quiet",
-      "Waterproof",
-      "Travel-ready",
-      "Discreet",
-      "Hands-free",
-      "Remote-controlled",
-      "Plus-size friendly",
-      "Easy to clean",
-      "Rechargeable",
-      "Soft-touch",
-      "Latex-free"
-    ];
-    MATTERS = [...MATTERS_V1, ...MATTERS_V2];
-    CATEGORIES = ["Pleasure", "Play", "Body", "Wear"];
-    DEFAULT_BUDGET = 200;
-    EMPTY_STATE = {
-      mood: [],
-      audience: [],
-      matters: [],
-      budget: DEFAULT_BUDGET,
-      step: 0
-    };
-  }
-});
-
-// app/lib/discovery-emma.ts
-function scoreProduct2(p, s) {
-  let score2 = 0;
-  for (const m of s.mood) if (p.mood.includes(m)) score2 += SCORE_MOOD;
-  for (const a of s.audience) if (p.audience.includes(a)) score2 += SCORE_AUDIENCE;
-  for (const k of s.matters) if (p.matters.includes(k)) score2 += SCORE_MATTERS;
-  return score2;
-}
-function computeAvailable(index2, s) {
-  const moods = /* @__PURE__ */ new Set();
-  const audiences = /* @__PURE__ */ new Set();
-  const matters = /* @__PURE__ */ new Set();
-  const hasMood = s.mood.length > 0;
-  const hasAudience = s.audience.length > 0;
-  const hasMatters = s.matters.length > 0;
-  for (const p of index2) {
-    const okMood = !hasMood || s.mood.some((m) => p.mood.includes(m));
-    const okAudience = !hasAudience || s.audience.some((a) => p.audience.includes(a));
-    const okMatters = !hasMatters || s.matters.some((k) => p.matters.includes(k));
-    if (okAudience && okMatters) for (const m of p.mood) moods.add(m);
-    if (okMood && okMatters) for (const a of p.audience) audiences.add(a);
-    if (okMood && okAudience) for (const k of p.matters) matters.add(k);
-  }
-  return { moods, audiences, matters };
-}
-function availableToArrays(a) {
-  return {
-    moods: Array.from(a.moods),
-    audiences: Array.from(a.audiences),
-    matters: Array.from(a.matters)
-  };
-}
-function mulberry322(seed) {
-  let t = seed >>> 0;
-  return () => {
-    t = t + 1831565813 >>> 0;
-    let r = t;
-    r = Math.imul(r ^ r >>> 15, r | 1);
-    r ^= r + Math.imul(r ^ r >>> 7, r | 61);
-    return ((r ^ r >>> 14) >>> 0) / 4294967296;
-  };
-}
-function seededShuffle2(arr, seed) {
-  const rand = mulberry322(seed);
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    const tmp3 = arr[i];
-    arr[i] = arr[j];
-    arr[j] = tmp3;
-  }
-}
-function rankRails(products, state, opts = {}) {
-  const { perRail = 4, dropEmpty = false, seed } = opts;
-  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
-  const filtered = products.filter((p) => p.price <= state.budget);
-  const buckets = {
-    Pleasure: [],
-    Play: [],
-    Body: [],
-    Wear: []
-  };
-  const totals = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
-  const aggScore = { Pleasure: 0, Play: 0, Body: 0, Wear: 0 };
-  for (const p of filtered) {
-    const score2 = hasAny ? scoreProduct2(p, state) : 0;
-    buckets[p.category].push({ product: p, score: score2 });
-    totals[p.category] += 1;
-    aggScore[p.category] += score2;
-  }
-  for (let ci = 0; ci < CATEGORIES.length; ci++) {
-    const cat = CATEGORIES[ci];
-    if (!hasAny && seed !== void 0) {
-      seededShuffle2(buckets[cat], (seed ^ (ci + 1) * 2654435761) >>> 0);
-    } else {
-      buckets[cat].sort((a, b) => b.score - a.score);
-    }
-  }
-  const order = [...CATEGORIES];
-  if (hasAny) {
-    order.sort((a, b) => {
-      const diff = aggScore[b] - aggScore[a];
-      if (diff !== 0) return diff;
-      return CATEGORIES.indexOf(a) - CATEGORIES.indexOf(b);
-    });
-  }
-  const rails = order.map((cat) => ({
-    category: cat,
-    score: aggScore[cat],
-    total: totals[cat],
-    items: buckets[cat].slice(0, perRail)
-  }));
-  return dropEmpty ? rails.filter((r) => r.items.length > 0) : rails;
-}
-function rankSingleRail(products, state, category, offset, limit) {
-  const hasAny = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
-  const filtered = products.filter((p) => p.price <= state.budget && p.category === category);
-  const scored = filtered.map((p) => ({
-    product: p,
-    score: hasAny ? scoreProduct2(p, state) : 0
-  }));
-  scored.sort((a, b) => b.score - a.score);
-  return { items: scored.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(0, limit)), total: scored.length };
-}
-var SCORE_MOOD, SCORE_AUDIENCE, SCORE_MATTERS;
-var init_discovery_emma = __esm({
-  "app/lib/discovery-emma.ts"() {
-    "use strict";
-    init_discovery();
-    SCORE_MOOD = 3;
-    SCORE_AUDIENCE = 2;
-    SCORE_MATTERS = 2;
-  }
-});
-
-// app/lib/discovery-tags.ts
-function normalizeTag2(raw) {
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  return trimmed.toLowerCase().split(/(\s+|-)/).map((part) => {
-    if (/^\s+$/.test(part) || part === "-") return part;
-    if (part.length === 0) return part;
-    return part[0].toUpperCase() + part.slice(1);
-  }).join("");
-}
-var init_discovery_tags = __esm({
-  "app/lib/discovery-tags.ts"() {
-    "use strict";
-  }
-});
-
-// app/lib/discovery-rules.server.ts
-import { eq as eq8, and as and2, asc as asc2 } from "drizzle-orm";
-async function getActiveDiscoveryRules() {
-  const cached2 = await kvGet(RULES_CACHE_KEY);
-  if (cached2 && Array.isArray(cached2)) return cached2;
-  const rows = await db.select().from(discoveryRules).where(eq8(discoveryRules.active, true)).orderBy(asc2(discoveryRules.ruleType), asc2(discoveryRules.sortOrder), asc2(discoveryRules.id));
-  const rules = rows.map(rowToRule);
-  await kvSet(RULES_CACHE_KEY, rules, RULES_TTL_SECONDS);
-  return rules;
-}
-async function getInventoryMin() {
-  const cached2 = await kvGet(INVENTORY_MIN_CACHE_KEY);
-  if (typeof cached2 === "number") return cached2;
-  const row = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq8(pipelineSettings.key, "discovery_inventory_min")).limit(1);
-  const parsed = row.length && row[0] ? parseInt(row[0].value, 10) : 0;
-  const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-  await kvSet(INVENTORY_MIN_CACHE_KEY, value, INVENTORY_MIN_CACHE_TTL);
-  return value;
-}
-function rowToRule(row) {
-  return {
-    id: row.id,
-    ruleType: row.ruleType,
-    ruleValue: row.ruleValue,
-    category: row.category ?? null,
-    sortOrder: row.sortOrder,
-    notes: row.notes ?? null,
-    active: row.active,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt
-  };
-}
-function applyRules(products, rules, inventoryMin) {
-  if (rules.length === 0 && inventoryMin === 0) return products;
-  const excludeHandles = /* @__PURE__ */ new Set();
-  const excludeTypes = [];
-  const excludeKeywords = [];
-  const priceFloors = [];
-  const priceCeilings = [];
-  for (const rule of rules) {
-    switch (rule.ruleType) {
-      case "exclude_product":
-        excludeHandles.add(rule.ruleValue);
-        break;
-      case "exclude_product_type":
-        excludeTypes.push({ value: rule.ruleValue.trim().toLowerCase(), category: rule.category });
-        break;
-      case "exclude_keyword":
-        excludeKeywords.push(rule.ruleValue.toLowerCase());
-        break;
-      case "exclude_price_min": {
-        const n = parseFloat(rule.ruleValue);
-        if (Number.isFinite(n)) priceFloors.push(n);
-        break;
-      }
-      case "exclude_price_max": {
-        const n = parseFloat(rule.ruleValue);
-        if (Number.isFinite(n)) priceCeilings.push(n);
-        break;
-      }
-    }
-  }
-  return products.filter((p) => {
-    if (excludeHandles.has(p.handle)) return false;
-    if (p.productType) {
-      const productTypeLc = p.productType.trim().toLowerCase();
-      for (const et of excludeTypes) {
-        if (et.value === productTypeLc && (et.category === null || et.category === p.category)) {
-          return false;
-        }
-      }
-    }
-    const lowerTitle = p.title.toLowerCase();
-    for (const kw of excludeKeywords) {
-      if (lowerTitle.includes(kw)) return false;
-    }
-    for (const floor of priceFloors) {
-      if (p.price < floor) return false;
-    }
-    for (const ceiling of priceCeilings) {
-      if (p.price > ceiling) return false;
-    }
-    if (inventoryMin > 0 && p.totalInventory !== null && p.totalInventory < inventoryMin) {
-      return false;
-    }
-    return true;
-  });
-}
-function fillFallbacks(rail, rules, filteredIndex, perRail, alreadyIncludedIds = /* @__PURE__ */ new Set(), collectionPinIds = {}, honoraryProductsByCategory = {}) {
-  const slots = perRail - rail.items.length;
-  if (slots <= 0) return rail;
-  const byHandle = /* @__PURE__ */ new Map();
-  const byId = /* @__PURE__ */ new Map();
-  for (const p of filteredIndex) {
-    byHandle.set(p.handle, p);
-    byId.set(p.id, p);
-  }
-  for (const p of honoraryProductsByCategory[rail.category] ?? []) {
-    if (!byId.has(p.id)) byId.set(p.id, p);
-  }
-  const inRail = new Set(rail.items.map((sp) => sp.product.handle));
-  const inRailIds = new Set(rail.items.map((sp) => sp.product.id));
-  const pins = rules.filter((r) => r.ruleType === "pin_fallback" && r.category === rail.category).sort((a, b) => a.sortOrder - b.sortOrder);
-  const extras = [];
-  const usedIds = /* @__PURE__ */ new Set();
-  for (const pin of pins) {
-    if (extras.length >= slots) break;
-    const product = byHandle.get(pin.ruleValue);
-    if (!product) continue;
-    if (inRail.has(product.handle)) continue;
-    if (alreadyIncludedIds.has(product.id)) continue;
-    if (usedIds.has(product.id)) continue;
-    extras.push({ product, score: 0 });
-    usedIds.add(product.id);
-  }
-  const collectionIds = collectionPinIds[rail.category] ?? [];
-  for (const id of collectionIds) {
-    if (extras.length >= slots) break;
-    const product = byId.get(id);
-    if (!product) continue;
-    if (product.category !== rail.category) continue;
-    if (inRailIds.has(product.id)) continue;
-    if (alreadyIncludedIds.has(product.id)) continue;
-    if (usedIds.has(product.id)) continue;
-    extras.push({ product, score: 0 });
-    usedIds.add(product.id);
-  }
-  if (extras.length === 0) return rail;
-  return {
-    ...rail,
-    items: [...rail.items, ...extras],
-    total: rail.total + extras.length
-  };
-}
-function cleanCollectionHandle(input) {
-  if (!input) return "";
-  let s = input.trim().toLowerCase();
-  const protoMatch = s.match(/^https?:\/\/[^/]+(.*)$/);
-  if (protoMatch && protoMatch[1] !== void 0) s = protoMatch[1];
-  s = s.replace(/^\/+collections\/+/, "").replace(/^\/+/, "");
-  const stop = s.search(/[?#/]/);
-  if (stop !== -1) s = s.slice(0, stop);
-  return s;
-}
-async function resolveCollectionPins(rules, fetcher) {
-  const collectionPins = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category !== null).sort((a, b) => a.sortOrder - b.sortOrder);
-  if (collectionPins.length === 0) return {};
-  const handleCache = /* @__PURE__ */ new Map();
-  const result = {};
-  for (const pin of collectionPins) {
-    const handle = cleanCollectionHandle(pin.ruleValue);
-    if (!handle || !pin.category) continue;
-    let ids = handleCache.get(handle);
-    if (!ids) {
-      ids = await fetcher(handle);
-      handleCache.set(handle, ids);
-    }
-    const seen = new Set(result[pin.category] ?? []);
-    const merged = result[pin.category] ?? [];
-    for (const id of ids) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      merged.push(id);
-    }
-    result[pin.category] = merged;
-  }
-  return result;
-}
-function autoLoosen(category, state, filteredIndex, perRail) {
-  const withoutMatters = { ...state, matters: [] };
-  const r1 = rankSingleRail(filteredIndex, withoutMatters, category, 0, perRail);
-  if (r1.items.length > 0) {
-    return { items: r1.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
-  }
-  const withoutAudience = { ...withoutMatters, audience: [] };
-  const r2 = rankSingleRail(filteredIndex, withoutAudience, category, 0, perRail);
-  if (r2.items.length > 0) {
-    return { items: r2.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
-  }
-  const withoutMood = { ...withoutAudience, mood: [] };
-  const r3 = rankSingleRail(filteredIndex, withoutMood, category, 0, perRail);
-  if (r3.items.length > 0) {
-    return { items: r3.items, reason: `Loosened your brief \u2014 showing all of ${category}.` };
-  }
-  return null;
-}
-var RULES_CACHE_KEY, RULES_TTL_SECONDS, INVENTORY_MIN_CACHE_KEY, INVENTORY_MIN_CACHE_TTL;
-var init_discovery_rules_server = __esm({
-  "app/lib/discovery-rules.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    init_kv_server();
-    init_discovery_emma();
-    init_discovery_server();
-    RULES_CACHE_KEY = "discovery:rules:v1";
-    RULES_TTL_SECONDS = 5 * 60;
-    INVENTORY_MIN_CACHE_KEY = "discovery:inventory-min:v1";
-    INVENTORY_MIN_CACHE_TTL = 5 * 60;
-  }
-});
-
-// app/lib/discovery.server.ts
-var discovery_server_exports = {};
-__export(discovery_server_exports, {
-  INDEX_KEY: () => INDEX_KEY,
-  INDEX_TTL_SECONDS: () => INDEX_TTL_SECONDS,
-  VOCAB_KEY: () => VOCAB_KEY,
-  VOCAB_TTL_SECONDS: () => VOCAB_TTL_SECONDS,
-  buildDiscoveryIndex: () => buildDiscoveryIndex,
-  computeVocab: () => computeVocab,
-  fetchHonoraryProducts: () => fetchHonoraryProducts,
-  getDiscoveryIndex: () => getDiscoveryIndex,
-  getDiscoveryRailPage: () => getDiscoveryRailPage,
-  getDiscoveryRails: () => getDiscoveryRails,
-  getDiscoveryVocab: () => getDiscoveryVocab,
-  getHonoraryProductsForPin: () => getHonoraryProductsForPin,
-  getProductIdsByCollectionHandle: () => getProductIdsByCollectionHandle,
-  invalidateDiscoveryIndex: () => invalidateDiscoveryIndex,
-  reportTagCoverage: () => reportTagCoverage,
-  triggerDiscoveryRebuild: () => triggerDiscoveryRebuild,
-  writeDiscoveryIndexDurable: () => writeDiscoveryIndexDurable
-});
-import { eq as eq9 } from "drizzle-orm";
-function dialToSubcategory(dial) {
-  switch (dial) {
-    case "vibrator":
-      return "Vibrators";
-    case "dildo":
-      return "Dildos";
-    case "anal":
-      return "Anal";
-    case "cock-ring":
-    case "stroker":
-    case "extender":
-    case "pump":
-    case "sex-machine":
-      return "For Him";
-    case "bondage":
-      return "Bondage & Kink";
-    case "couples":
-      return "Couples";
-    case "lube":
-      return "Lubricants";
-    case "massage":
-      return "Massage";
-    case "enhancer":
-    case "wellness":
-      return "Wellness";
-    case "wear":
-      return "Lingerie";
-    case "harness":
-      return "Accessories";
-    default:
-      return null;
-  }
-}
-function cleanTagList(arr) {
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const raw of arr) {
-    const v = normalizeTag2(raw);
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    out.push(v);
-  }
-  return out;
-}
-function classifyOptionValues(options) {
-  let colorValues = [];
-  let sizeValues = [];
-  for (const o of options) {
-    const name = o.name.toLowerCase();
-    const values = o.optionValues.map((v) => v.name.trim()).filter(Boolean);
-    if (/colou?r/.test(name)) colorValues = values;
-    else if (/size|length/.test(name)) sizeValues = values;
-  }
-  return { colorValues, sizeValues };
-}
-function derivePricingAndOptions(n, price) {
-  const maxRaw = Number(n.priceRangeV2.maxVariantPrice?.amount);
-  const priceMax = Number.isFinite(maxRaw) && maxRaw > price ? maxRaw : null;
-  const originalRaw = Number(n.originalPriceRaw?.value);
-  const compareRaw = Number(n.compareAtPriceRange?.minVariantCompareAtPrice?.amount);
-  const msrp = Number.isFinite(originalRaw) && originalRaw > 0 ? originalRaw : Number.isFinite(compareRaw) ? compareRaw : NaN;
-  const compareAtPrice = Number.isFinite(msrp) && msrp > price ? msrp : null;
-  const { colorValues, sizeValues } = classifyOptionValues(n.options ?? []);
-  return { priceMax, compareAtPrice, colorValues, sizeValues };
-}
-function parseListMetafield(value) {
-  if (!value) return [];
-  if (value.trim().startsWith("[")) {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed.map(String) : [];
-    } catch {
-      return [];
-    }
-  }
-  return value.split(",").map((s) => s.trim()).filter(Boolean);
-}
-function nodeToDiscoveryProduct(n, categoryMap) {
-  const category = categoryMap.get(n.id);
-  if (!category) return null;
-  const price = Number(n.priceRangeV2.minVariantPrice.amount);
-  if (!Number.isFinite(price) || price <= 0) return null;
-  const dial = n.productTypeDial?.value ?? "";
-  const subcategory = dialToSubcategory(dial) ?? category;
-  const mood = cleanTagList(parseListMetafield(n.moodTagsRaw?.value));
-  const audience = cleanTagList(parseListMetafield(n.audienceTagsRaw?.value));
-  const matters = cleanTagList(parseListMetafield(n.mattersTagsRaw?.value));
-  const productType = (n.productType ?? "").trim() || null;
-  const productTypeDial = dial || null;
-  const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price);
-  return {
-    id: n.id,
-    handle: n.handle,
-    title: n.title,
-    defaultVariantId: n.variants?.nodes?.[0]?.id ?? null,
-    price,
-    priceMax,
-    compareAtPrice,
-    colorValues,
-    sizeValues,
-    imageUrl: n.featuredImage?.url ?? null,
-    imageAlt: n.featuredImage?.altText ?? null,
-    category,
-    subcategory,
-    brand: (n.vendor ?? "").trim() || null,
-    mood,
-    audience,
-    matters,
-    totalInventory: n.totalInventory ?? null,
-    productType,
-    productTypeDial
-  };
-}
-async function fetchCollectionProductIds(collectionGid) {
-  const ids = /* @__PURE__ */ new Set();
-  let cursor = null;
-  while (true) {
-    const data = await adminGraphQL(
-      COLLECTION_PRODUCTS_QUERY,
-      { id: collectionGid, cursor }
-    );
-    const page = data.collection?.products;
-    if (!page) break;
-    for (const n of page.nodes) ids.add(n.id);
-    if (!page.pageInfo.hasNextPage) break;
-    cursor = page.pageInfo.endCursor;
-    if (!cursor) break;
-  }
-  return ids;
-}
-async function getProductIdsByCollectionHandle(handle) {
-  const key = handle.trim().toLowerCase();
-  if (!key) return [];
-  const cacheKey3 = collectionHandleKey(key);
-  const cached2 = await kvGet(cacheKey3);
-  if (cached2 && Array.isArray(cached2)) return cached2;
-  let ids = [];
-  try {
-    const data = await adminGraphQL(
-      COLLECTION_BY_HANDLE_QUERY,
-      { handle: key }
-    );
-    const gid = data.collectionByHandle?.id;
-    if (gid) {
-      const set = await fetchCollectionProductIds(gid);
-      ids = Array.from(set);
-    }
-  } catch (err2) {
-    console.error("[discovery] getProductIdsByCollectionHandle error for", key, err2);
-    return [];
-  }
-  await kvSet(cacheKey3, ids, COLLECTION_HANDLE_CACHE_TTL);
-  return ids;
-}
-async function fetchHonoraryProducts(ids, category) {
-  if (ids.length === 0) return [];
-  const out = [];
-  for (let i = 0; i < ids.length; i += 100) {
-    const batch = ids.slice(i, i + 100);
-    let resp;
-    try {
-      resp = await adminGraphQL(NODES_BY_IDS_QUERY, { ids: batch });
-    } catch (err2) {
-      console.error("[discovery] fetchHonoraryProducts batch failed:", err2);
-      continue;
-    }
-    for (const node of resp.nodes) {
-      if (!node || node.status !== "ACTIVE") continue;
-      const price = Number(node.priceRangeV2.minVariantPrice.amount);
-      if (!Number.isFinite(price) || price <= 0) continue;
-      const dial = node.productTypeDial?.value ?? "";
-      const subcategory = dialToSubcategory(dial) ?? category;
-      const productType = (node.productType ?? "").trim() || null;
-      const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price);
-      out.push({
-        id: node.id,
-        handle: node.handle,
-        title: node.title,
-        defaultVariantId: node.variants?.nodes?.[0]?.id ?? null,
-        price,
-        priceMax,
-        compareAtPrice,
-        colorValues,
-        sizeValues,
-        imageUrl: node.featuredImage?.url ?? null,
-        imageAlt: node.featuredImage?.altText ?? null,
-        category,
-        // honorary — forced to the pinned rail's category
-        subcategory,
-        brand: (node.vendor ?? "").trim() || null,
-        mood: cleanTagList(parseListMetafield(node.moodTagsRaw?.value)),
-        audience: cleanTagList(parseListMetafield(node.audienceTagsRaw?.value)),
-        matters: cleanTagList(parseListMetafield(node.mattersTagsRaw?.value)),
-        totalInventory: node.totalInventory ?? null,
-        productType,
-        productTypeDial: dial || null
-      });
-    }
-  }
-  return out;
-}
-async function getHonoraryProductsForPin(handle, category) {
-  const cleaned = handle.trim().toLowerCase();
-  if (!cleaned) return [];
-  const cacheKey3 = honoraryCacheKey(category, cleaned);
-  const cached2 = await kvGet(cacheKey3);
-  if (cached2 && Array.isArray(cached2)) return cached2;
-  const ids = await getProductIdsByCollectionHandle(cleaned);
-  if (ids.length === 0) {
-    await kvSet(cacheKey3, [], HONORARY_CACHE_TTL);
-    return [];
-  }
-  const products = await fetchHonoraryProducts(ids, category);
-  await kvSet(cacheKey3, products, HONORARY_CACHE_TTL);
-  return products;
-}
-async function buildCategoryMap() {
-  const sets = await Promise.all(
-    CATEGORY_PRIORITY.map(async (cat) => ({
-      cat,
-      ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat])
-    }))
-  );
-  const map = /* @__PURE__ */ new Map();
-  for (const { cat, ids } of sets) {
-    for (const id of ids) {
-      if (!map.has(id)) map.set(id, cat);
-    }
-  }
-  return map;
-}
-async function buildDiscoveryIndex() {
-  const categoryMap = await buildCategoryMap();
-  const out = [];
-  let cursor = null;
-  while (true) {
-    const data = await adminGraphQL(
-      PRODUCTS_PAGE_QUERY,
-      { cursor }
-    );
-    for (const node of data.products.nodes) {
-      const dp = nodeToDiscoveryProduct(node, categoryMap);
-      if (dp) out.push(dp);
-    }
-    if (!data.products.pageInfo.hasNextPage) break;
-    cursor = data.products.pageInfo.endCursor;
-    if (!cursor) break;
-  }
-  return out;
-}
-function triggerDiscoveryRebuild() {
-  const baseUrl2 = process.env["BASE_URL"];
-  const cronSecret = process.env["CRON_SECRET"];
-  if (!baseUrl2 || !cronSecret) return;
-  void fetch(`${baseUrl2}/cron/warm-discovery-index`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${cronSecret}` }
-  }).catch(() => {
-  });
-}
-function readL1Memo() {
-  const entry = _g4.__discoveryIndexMemo;
-  if (!entry) return null;
-  if (Date.now() - entry.ts > L1_TTL_MS) return null;
-  return entry;
-}
-function writeL1Memo(index2, vocab) {
-  _g4.__discoveryIndexMemo = { index: index2, vocab, ts: Date.now() };
-}
-async function readDiscoveryIndexDurable() {
-  try {
-    const [row] = await db.select().from(discoveryIndexPayload).where(eq9(discoveryIndexPayload.version, INDEX_VERSION)).limit(1);
-    if (!row) return null;
-    const index2 = row.indexJson;
-    const vocab = row.vocabJson;
-    if (!Array.isArray(index2) || index2.length === 0) return null;
-    void kvSet(INDEX_KEY, index2, INDEX_TTL_SECONDS).catch(() => {
-    });
-    void kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS).catch(() => {
-    });
-    return { index: index2, vocab };
-  } catch (err2) {
-    console.warn("[discovery] Neon durable read failed:", err2);
-    return null;
-  }
-}
-async function writeDiscoveryIndexDurable(index2, vocab) {
-  if (index2.length === 0) return;
-  await kvSet(INDEX_KEY, index2, INDEX_TTL_SECONDS);
-  await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS);
-  writeL1Memo(index2, vocab);
-  try {
-    await db.insert(discoveryIndexPayload).values({
-      version: INDEX_VERSION,
-      indexJson: index2,
-      vocabJson: vocab,
-      count: index2.length
-    }).onConflictDoUpdate({
-      target: [discoveryIndexPayload.version],
-      set: {
-        indexJson: index2,
-        vocabJson: vocab,
-        count: index2.length,
-        builtAt: /* @__PURE__ */ new Date()
-      }
-    });
-  } catch (err2) {
-    console.error("[discovery] Neon durable upsert failed (KV still written):", err2);
-  }
-}
-async function getDiscoveryIndex(opts = {}) {
-  if (!opts.force) {
-    const memo2 = readL1Memo();
-    if (memo2) return memo2.index;
-    const cached2 = await kvGet(INDEX_KEY);
-    if (cached2 && Array.isArray(cached2) && cached2.length > 0) {
-      const vocab = await kvGet(VOCAB_KEY) ?? computeVocab(cached2);
-      writeL1Memo(cached2, vocab);
-      return cached2;
-    }
-  }
-  if (!isKvConfigured()) {
-    const fresh = await buildDiscoveryIndex();
-    if (fresh.length > 0) {
-      await writeDiscoveryIndexDurable(fresh, computeVocab(fresh));
-    }
-    return fresh;
-  }
-  if (!opts.force) {
-    const durable = await readDiscoveryIndexDurable();
-    if (durable) {
-      writeL1Memo(durable.index, durable.vocab);
-      return durable.index;
-    }
-  }
-  triggerDiscoveryRebuild();
-  return [];
-}
-async function invalidateDiscoveryIndex() {
-  await kvSet(INDEX_KEY, null, 1);
-  await kvSet(VOCAB_KEY, null, 1);
-  _g4.__discoveryIndexMemo = null;
-}
-function computeVocab(index2) {
-  const tally = (key) => {
-    const counts = /* @__PURE__ */ new Map();
-    for (const p of index2) {
-      for (const v of p[key]) counts.set(v, (counts.get(v) ?? 0) + 1);
-    }
-    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v);
-  };
-  return {
-    moods: tally("mood"),
-    audiences: tally("audience"),
-    matters: tally("matters")
-  };
-}
-async function getDiscoveryVocab() {
-  const cached2 = await kvGet(VOCAB_KEY);
-  if (cached2 && Array.isArray(cached2.moods) && cached2.moods.length > 0) return cached2;
-  const idx = await getDiscoveryIndex();
-  if (idx.length === 0) return { moods: [], audiences: [], matters: [] };
-  const vocab = computeVocab(idx);
-  if (vocab.moods.length > 0 || vocab.audiences.length > 0 || vocab.matters.length > 0) {
-    await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS);
-  }
-  return vocab;
-}
-async function getDiscoveryRails(state, opts = {}) {
-  const products = opts.index ?? await getDiscoveryIndex();
-  const perRail = opts.perRail ?? 4;
-  const [rules, inventoryMin] = await Promise.all([
-    getActiveDiscoveryRules(),
-    getInventoryMin()
-  ]);
-  const filtered = applyRules(products, rules, inventoryMin);
-  const collectionPinIds = await resolveCollectionPins(
-    rules,
-    getProductIdsByCollectionHandle
-  );
-  const rankOpts = { perRail };
-  if (opts.dropEmpty !== void 0) rankOpts.dropEmpty = opts.dropEmpty;
-  if (opts.seed !== void 0) rankOpts.seed = opts.seed;
-  const rails = rankRails(filtered, state, rankOpts);
-  const hasAnySelections = state.mood.length > 0 || state.audience.length > 0 || state.matters.length > 0;
-  const indexedIds = new Set(filtered.map((p) => p.id));
-  const honoraryByCategory = {};
-  const collectionPinRules = rules.filter((r) => r.ruleType === "pin_collection_fallback" && r.category).sort((a, b) => a.sortOrder - b.sortOrder);
-  await Promise.all(
-    collectionPinRules.map(async (pin) => {
-      const cat = pin.category;
-      const products2 = await getHonoraryProductsForPin(pin.ruleValue, cat);
-      const novel = products2.filter((p) => !indexedIds.has(p.id));
-      if (novel.length === 0) return;
-      const allowed = applyRules(novel, rules, inventoryMin);
-      if (allowed.length === 0) return;
-      const existing = honoraryByCategory[cat] ?? [];
-      const seen = new Set(existing.map((p) => p.id));
-      for (const p of allowed) {
-        if (!seen.has(p.id)) {
-          existing.push(p);
-          seen.add(p.id);
-        }
-      }
-      honoraryByCategory[cat] = existing;
-    })
-  );
-  const includedIds = new Set(
-    rails.flatMap((r) => r.items.map((sp) => sp.product.id))
-  );
-  for (const rail of rails) {
-    if (rail.items.length < perRail) {
-      const filled = fillFallbacks(
-        rail,
-        rules,
-        filtered,
-        perRail,
-        includedIds,
-        collectionPinIds,
-        honoraryByCategory
-      );
-      for (const sp of filled.items) {
-        if (!includedIds.has(sp.product.id)) includedIds.add(sp.product.id);
-      }
-      rail.items = filled.items;
-      rail.total = filled.total;
-    }
-  }
-  for (const rail of rails) {
-    if (rail.items.length === 0 && hasAnySelections) {
-      const loosened = autoLoosen(rail.category, state, filtered, perRail);
-      if (loosened) {
-        rail.items = loosened.items;
-        rail.total = loosened.items.length;
-        rail.relaxed = true;
-        rail.relaxedReason = loosened.reason;
-      }
-    }
-  }
-  const available = availableToArrays(computeAvailable(filtered, state));
-  return { rails, total: filtered.length, available };
-}
-async function getDiscoveryRailPage(state, category, offset, limit, opts = {}) {
-  const products = opts.index ?? await getDiscoveryIndex();
-  const [rules, inventoryMin] = await Promise.all([
-    getActiveDiscoveryRules(),
-    getInventoryMin()
-  ]);
-  const filtered = applyRules(products, rules, inventoryMin);
-  return rankSingleRail(filtered, state, category, offset, limit);
-}
-async function reportTagCoverage() {
-  const idx = await getDiscoveryIndex({ force: true });
-  const report = {
-    total: idx.length,
-    withMood: 0,
-    withAudience: 0,
-    withMatters: 0,
-    withAllThree: 0,
-    withCategoryMapping: idx.length,
-    // index already requires a category mapping
-    byCategory: { Pleasure: 0, Play: 0, Body: 0, Wear: 0 }
-  };
-  for (const p of idx) {
-    if (p.mood.length > 0) report.withMood += 1;
-    if (p.audience.length > 0) report.withAudience += 1;
-    if (p.matters.length > 0) report.withMatters += 1;
-    if (p.mood.length > 0 && p.audience.length > 0 && p.matters.length > 0) {
-      report.withAllThree += 1;
-    }
-    report.byCategory[p.category] += 1;
-  }
-  return report;
-}
-var INDEX_VERSION, INDEX_KEY, INDEX_TTL_SECONDS, VOCAB_KEY, VOCAB_TTL_SECONDS, CATEGORY_COLLECTION_IDS, CATEGORY_PRIORITY, PRODUCTS_PAGE_QUERY, COLLECTION_PRODUCTS_QUERY, COLLECTION_BY_HANDLE_QUERY, COLLECTION_HANDLE_CACHE_TTL, collectionHandleKey, NODES_BY_IDS_QUERY, HONORARY_CACHE_TTL, honoraryCacheKey, L1_TTL_MS, _g4;
-var init_discovery_server = __esm({
-  "app/lib/discovery.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    init_shopify_server();
-    init_kv_server();
-    init_discovery_emma();
-    init_discovery_tags();
-    init_discovery_rules_server();
-    INDEX_VERSION = "v8";
-    INDEX_KEY = `discovery:index:${INDEX_VERSION}`;
-    INDEX_TTL_SECONDS = 60 * 60 * 24;
-    VOCAB_KEY = `discovery:vocab:${INDEX_VERSION}`;
-    VOCAB_TTL_SECONDS = 60 * 60 * 24;
-    CATEGORY_COLLECTION_IDS = {
-      Pleasure: "gid://shopify/Collection/330228727979",
-      Play: "gid://shopify/Collection/330228695211",
-      Body: "gid://shopify/Collection/330227581099",
-      Wear: "gid://shopify/Collection/330229514411"
-    };
-    CATEGORY_PRIORITY = ["Pleasure", "Play", "Body", "Wear"];
-    PRODUCTS_PAGE_QUERY = /* GraphQL */
-    `
-  query DiscoveryIndexPage($cursor: String) {
-    products(first: 100, after: $cursor, query: "status:active") {
-      pageInfo { hasNextPage endCursor }
-      nodes {
-        id
-        handle
-        title
-        status
-        productType
-        vendor
-        featuredImage { url altText }
-        variants(first: 1) { nodes { id } }
-        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
-        compareAtPriceRange { minVariantCompareAtPrice { amount } }
-        options(first: 3) { name optionValues { name } }
-        totalInventory
-        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
-        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
-        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
-        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
-        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
-      }
-    }
-  }
-`;
-    COLLECTION_PRODUCTS_QUERY = /* GraphQL */
-    `
-  query DiscoveryCollectionProducts($id: ID!, $cursor: String) {
-    collection(id: $id) {
-      products(first: 250, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { id }
-      }
-    }
-  }
-`;
-    COLLECTION_BY_HANDLE_QUERY = /* GraphQL */
-    `
-  query DiscoveryCollectionByHandle($handle: String!) {
-    collectionByHandle(handle: $handle) { id }
-  }
-`;
-    COLLECTION_HANDLE_CACHE_TTL = 30 * 60;
-    collectionHandleKey = (h) => `discovery:collection-pin:${INDEX_VERSION}:${h}`;
-    NODES_BY_IDS_QUERY = /* GraphQL */
-    `
-  query DiscoveryHonoraryNodes($ids: [ID!]!) {
-    nodes(ids: $ids) {
-      ... on Product {
-        id
-        handle
-        title
-        status
-        productType
-        vendor
-        featuredImage { url altText }
-        variants(first: 1) { nodes { id } }
-        priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
-        compareAtPriceRange { minVariantCompareAtPrice { amount } }
-        options(first: 3) { name optionValues { name } }
-        totalInventory
-        originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
-        productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
-        moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
-        audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
-        mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
-      }
-    }
-  }
-`;
-    HONORARY_CACHE_TTL = 30 * 60;
-    honoraryCacheKey = (cat, handle) => `discovery:honorary:${INDEX_VERSION}:${cat}:${handle}`;
-    L1_TTL_MS = 6e5;
-    _g4 = globalThis;
-    if (_g4.__discoveryIndexMemo === void 0) _g4.__discoveryIndexMemo = null;
-  }
-});
-
-// app/lib/homepage-payload.server.ts
-var homepage_payload_server_exports = {};
-__export(homepage_payload_server_exports, {
-  DEFAULT_ANCHOR_COLLECTION_HANDLE: () => DEFAULT_ANCHOR_COLLECTION_HANDLE,
-  HOMEPAGE_PAYLOAD_B_KV_KEY: () => HOMEPAGE_PAYLOAD_B_KV_KEY,
-  HOMEPAGE_PAYLOAD_B_VERSION: () => HOMEPAGE_PAYLOAD_B_VERSION,
-  HOMEPAGE_PAYLOAD_KV_KEY: () => HOMEPAGE_PAYLOAD_KV_KEY,
-  HOMEPAGE_PAYLOAD_KV_PREFIX: () => HOMEPAGE_PAYLOAD_KV_PREFIX,
-  HOMEPAGE_PAYLOAD_VERSION: () => HOMEPAGE_PAYLOAD_VERSION,
-  VARIANT_B_SECTION_TYPES: () => VARIANT_B_SECTION_TYPES,
-  assertJsonSafe: () => assertJsonSafe,
-  assertJsonSafeB: () => assertJsonSafeB,
-  buildHomeContentBlocks: () => buildHomeContentBlocks,
-  buildHomeContentBlocksLean: () => buildHomeContentBlocksLean,
-  buildHomepagePayloadA: () => buildHomepagePayloadA,
-  getAnchorCollectionProducts: () => getAnchorCollectionProducts,
-  invalidateHomepagePayloadA: () => invalidateHomepagePayloadA,
-  invalidateHomepagePayloadB: () => invalidateHomepagePayloadB,
-  readHomepagePayloadA: () => readHomepagePayloadA,
-  readHomepagePayloadB: () => readHomepagePayloadB,
-  reshuffleRailsWithSeed: () => reshuffleRailsWithSeed,
-  triggerHomepageWarm: () => triggerHomepageWarm,
-  triggerHomepageWarmB: () => triggerHomepageWarmB,
-  warmHomepagePayloadA: () => warmHomepagePayloadA,
-  writeHomepagePayloadA: () => writeHomepagePayloadA,
-  writeHomepagePayloadB: () => writeHomepagePayloadB
-});
-import { eq as eq10 } from "drizzle-orm";
-async function buildHomeContentBlocks() {
-  const cmsData = await withTimeout(
-    getHomepageSections(),
-    BUILD_TIMEOUT_MS,
-    null,
-    "getHomepageSections(payloadA)"
-  );
-  const sections = (cmsData?.sections ?? []).filter((s) => s._type !== "announcementBar");
-  const carouselBlocks = sections.filter(
-    (s) => s._type === "productCarousel"
-  );
-  const emmaRailBlocks = sections.filter(
-    (s) => s._type === "emmaCuratedRail"
-  );
-  const couplesBlocks = sections.filter(
-    (s) => s._type === "playTogetherBanner"
-  );
-  const [carouselResults, emmaRailResults, couplesResults] = await Promise.all([
-    carouselBlocks.length > 0 ? withTimeout(Promise.all(carouselBlocks.map((b) => {
-      const limit = b.productLimit ?? 8;
-      const source = b.source ?? "tag";
-      if (source === "collection" && b.collectionHandle) {
-        return getCollectionProducts(b.collectionHandle, limit);
-      }
-      if (source === "manual" && b.productHandles?.length) {
-        return getProductsByHandles(normalizeProductHandles(b.productHandles));
-      }
-      return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([]);
-    })), BUILD_TIMEOUT_MS, [], "carouselResults(payloadA)") : Promise.resolve([]),
-    emmaRailBlocks.length > 0 ? withTimeout(Promise.all(emmaRailBlocks.map(
-      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)) : Promise.resolve([])
-    )), BUILD_TIMEOUT_MS, [], "emmaRailResults(payloadA)") : Promise.resolve([]),
-    // Couples strip. Uses the same hardened path as the rails above:
-    // `normalizeProductHandles` tolerates BOTH shapes this array exists in
-    // (productRef objects and bare strings), and each block additionally
-    // catches its own rejection. That last part matters: every homepage block
-    // resolves inside one Promise.all, so a single malformed entry used to
-    // reject the whole contentBlocks build and blank every team-published
-    // section on the page (the three-day outage PR #322 fixed). A bad couples
-    // block must cost only its own strip.
-    couplesBlocks.length > 0 ? withTimeout(Promise.all(couplesBlocks.map(
-      (b) => b.productHandles?.length ? getProductsByHandles(normalizeProductHandles(b.productHandles)).catch((err2) => {
-        console.error("[homepage-payload] couples rail resolve failed:", err2);
-        return [];
-      }) : Promise.resolve([])
-    )), BUILD_TIMEOUT_MS, [], "couplesResults(payloadA)") : Promise.resolve([])
-  ]);
-  const carouselProductMap = {};
-  carouselBlocks.forEach((b, i) => {
-    carouselProductMap[b._key] = carouselResults[i] ?? [];
-  });
-  emmaRailBlocks.forEach((b, i) => {
-    carouselProductMap[b._key] = emmaRailResults[i] ?? [];
-  });
-  couplesBlocks.forEach((b, i) => {
-    carouselProductMap[b._key] = couplesResults[i] ?? [];
-  });
-  return { sections, carouselProductMap };
-}
-function toLeanCardProduct(p) {
-  const lean = {
-    id: p.id,
-    handle: p.handle,
-    title: p.title,
-    price: p.price,
-    images: p.images.length > 0 ? [p.images[0]] : []
-  };
-  if (p.compareAtPrice !== void 0) lean.compareAtPrice = p.compareAtPrice;
-  if (p.brand !== void 0) lean.brand = p.brand;
-  if (p.videos && p.videos.length > 0) lean.videos = [p.videos[0]];
-  return lean;
-}
-async function getAnchorCollectionProducts(handle, limit = 12) {
-  const h = (handle ?? "").trim() || DEFAULT_ANCHOR_COLLECTION_HANDLE;
-  try {
-    const products = await getCollectionProducts(h, limit);
-    return products.map(toLeanCardProduct);
-  } catch (err2) {
-    console.warn(
-      `[homepage-payload:b] anchor collection "${h}" fetch failed, falling back to discovery best-of:`,
-      err2
-    );
-    return [];
-  }
-}
-async function buildHomeContentBlocksLean() {
-  const { sections, carouselProductMap } = await buildHomeContentBlocks();
-  const leanSections = sections.filter(
-    (s) => VARIANT_B_SECTION_TYPES.includes(s._type)
-  );
-  const survivingRailKeys = new Set(
-    leanSections.filter((s) => s._type === "emmaCuratedRail" || s._type === "playTogetherBanner").map((s) => s._key)
-  );
-  const leanCarouselProductMap = {};
-  for (const key of survivingRailKeys) {
-    leanCarouselProductMap[key] = (carouselProductMap[key] ?? []).map(toLeanCardProduct);
-  }
-  return { sections: leanSections, carouselProductMap: leanCarouselProductMap };
-}
-async function buildHomepagePayloadA() {
-  const [railsResult, vocab, content] = await Promise.all([
-    withTimeout(
-      getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: 0 }),
-      BUILD_TIMEOUT_MS,
-      { rails: [], total: 0, available: { moods: [], audiences: [], matters: [] } },
-      "getDiscoveryRails(payloadA)"
-    ),
-    withTimeout(
-      getDiscoveryVocab(),
-      BUILD_TIMEOUT_MS,
-      { moods: [], audiences: [], matters: [] },
-      "getDiscoveryVocab(payloadA)"
-    ),
-    buildHomeContentBlocks()
-  ]);
-  const payload = {
-    version: HOMEPAGE_PAYLOAD_VERSION,
-    variant: "a",
-    rails: railsResult.rails,
-    total: railsResult.total,
-    welcomeBackEnabled: true,
-    moods: vocab.moods,
-    audiences: vocab.audiences,
-    matters: vocab.matters,
-    available: railsResult.available,
-    sections: content.sections,
-    carouselProductMap: content.carouselProductMap,
-    builtAt: Date.now(),
-    // Empty rails == the discovery index was cold during the build. Strictly
-    // worse than a populated blob; the write guard refuses to clobber a good
-    // blob with a degraded one unless forced.
-    degraded: railsResult.rails.length === 0
-  };
-  return payload;
-}
-function assertJsonSafe(payload) {
-  const round = JSON.parse(JSON.stringify(payload));
-  if (!Array.isArray(round.rails)) throw new Error("payload.rails not array after JSON round-trip");
-  if (typeof round.builtAt !== "number") throw new Error("payload.builtAt not number after JSON round-trip");
-  if (round.version !== HOMEPAGE_PAYLOAD_VERSION) throw new Error("payload.version mismatch after JSON round-trip");
-}
-async function readHomepagePayloadA() {
-  try {
-    const kv = await kvGet(HOMEPAGE_PAYLOAD_KV_KEY);
-    if (kv && kv.version === HOMEPAGE_PAYLOAD_VERSION) return kv;
-  } catch (err2) {
-    console.warn("[homepage-payload] KV read failed, trying Neon:", err2);
-  }
-  try {
-    const [row] = await db.select().from(homepagePayload).where(eq10(homepagePayload.variant, "a")).limit(1);
-    if (row && row.version === HOMEPAGE_PAYLOAD_VERSION && row.payload) {
-      const payload = row.payload;
-      void kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
-      });
-      return payload;
-    }
-  } catch (err2) {
-    console.warn("[homepage-payload] Neon read failed:", err2);
-  }
-  return null;
-}
-async function writeHomepagePayloadA(payload, opts = {}) {
-  assertJsonSafe(payload);
-  if (payload.degraded && !opts.force) {
-    const existing = await readHomepagePayloadA();
-    if (existing && !existing.degraded) {
-      console.warn("[homepage-payload] skipping degraded write over a good blob (use force to override)");
-      return;
-    }
-  }
-  await kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS);
-  try {
-    await db.insert(homepagePayload).values({
-      variant: "a",
-      version: HOMEPAGE_PAYLOAD_VERSION,
-      payload,
-      degraded: payload.degraded
-    }).onConflictDoUpdate({
-      target: [homepagePayload.variant, homepagePayload.version],
-      set: {
-        payload,
-        degraded: payload.degraded,
-        builtAt: /* @__PURE__ */ new Date()
-      }
-    });
-  } catch (err2) {
-    console.error("[homepage-payload] Neon upsert failed (KV still written):", err2);
-  }
-}
-async function warmHomepagePayloadA(opts = {}) {
-  const force = opts.force ?? true;
-  const payload = await buildHomepagePayloadA();
-  await writeHomepagePayloadA(payload, { force });
-  return payload;
-}
-async function invalidateHomepagePayloadA() {
-  await kvDel(HOMEPAGE_PAYLOAD_KV_KEY);
-}
-function triggerHomepageWarm() {
-  const baseUrl2 = process.env["BASE_URL"];
-  const cronSecret = process.env["CRON_SECRET"];
-  if (!baseUrl2 || !cronSecret) return;
-  void fetch(`${baseUrl2}/cron/warm-homepage`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${cronSecret}` }
-  }).catch(() => {
-  });
-}
-function mulberry323(seed) {
-  let t = seed >>> 0;
-  return () => {
-    t = t + 1831565813 >>> 0;
-    let r = t;
-    r = Math.imul(r ^ r >>> 15, r | 1);
-    r ^= r + Math.imul(r ^ r >>> 7, r | 61);
-    return ((r ^ r >>> 14) >>> 0) / 4294967296;
-  };
-}
-function reshuffleRailsWithSeed(rails, seed) {
-  return rails.map((rail, railIdx) => {
-    if (rail.items.length <= 1) return rail;
-    const items = [...rail.items];
-    const rand = mulberry323(seed + railIdx * 2654435761);
-    for (let i = items.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1));
-      const tmp3 = items[i];
-      items[i] = items[j];
-      items[j] = tmp3;
-    }
-    return { ...rail, items };
-  });
-}
-function assertJsonSafeB(payload) {
-  const round = JSON.parse(JSON.stringify(payload));
-  if (!Array.isArray(round.rails)) throw new Error("payloadB.rails not array after JSON round-trip");
-  if (typeof round.builtAt !== "number") throw new Error("payloadB.builtAt not number after JSON round-trip");
-  if (round.version !== HOMEPAGE_PAYLOAD_B_VERSION) throw new Error("payloadB.version mismatch after JSON round-trip");
-}
-async function readHomepagePayloadB() {
-  try {
-    const kv = await kvGet(HOMEPAGE_PAYLOAD_B_KV_KEY);
-    if (kv && kv.version === HOMEPAGE_PAYLOAD_B_VERSION) return kv;
-  } catch (err2) {
-    console.warn("[homepage-payload:b] KV read failed, trying Neon:", err2);
-  }
-  try {
-    const [row] = await db.select().from(homepagePayload).where(eq10(homepagePayload.variant, "b")).limit(1);
-    if (row && row.version === HOMEPAGE_PAYLOAD_B_VERSION && row.payload) {
-      const payload = row.payload;
-      void kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS).catch(() => {
-      });
-      return payload;
-    }
-  } catch (err2) {
-    console.warn("[homepage-payload:b] Neon read failed:", err2);
-  }
-  return null;
-}
-async function writeHomepagePayloadB(payload, opts = {}) {
-  assertJsonSafeB(payload);
-  if (payload.degraded && !opts.force) {
-    const existing = await readHomepagePayloadB();
-    if (existing && !existing.degraded) {
-      console.warn("[homepage-payload:b] skipping degraded write over a good blob (use force to override)");
-      return;
-    }
-  }
-  await kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS);
-  try {
-    await db.insert(homepagePayload).values({
-      variant: "b",
-      version: HOMEPAGE_PAYLOAD_B_VERSION,
-      payload,
-      degraded: payload.degraded
-    }).onConflictDoUpdate({
-      target: [homepagePayload.variant, homepagePayload.version],
-      set: {
-        payload,
-        degraded: payload.degraded,
-        builtAt: /* @__PURE__ */ new Date()
-      }
-    });
-  } catch (err2) {
-    console.error("[homepage-payload:b] Neon upsert failed (KV still written):", err2);
-  }
-}
-async function invalidateHomepagePayloadB() {
-  await kvDel(HOMEPAGE_PAYLOAD_B_KV_KEY);
-}
-function triggerHomepageWarmB() {
-  const baseUrl2 = process.env["BASE_URL"];
-  const cronSecret = process.env["CRON_SECRET"];
-  if (!baseUrl2 || !cronSecret) return;
-  void fetch(`${baseUrl2}/cron/warm-homepage-b`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${cronSecret}` }
-  }).catch(() => {
-  });
-}
-var HOMEPAGE_PAYLOAD_VERSION, HOMEPAGE_PAYLOAD_KV_KEY, HOMEPAGE_PAYLOAD_KV_PREFIX, KV_TTL_SECONDS, BUILD_TIMEOUT_MS, VARIANT_B_SECTION_TYPES, DEFAULT_ANCHOR_COLLECTION_HANDLE, HOMEPAGE_PAYLOAD_B_VERSION, HOMEPAGE_PAYLOAD_B_KV_KEY;
-var init_homepage_payload_server = __esm({
-  "app/lib/homepage-payload.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    init_kv_server();
-    init_with_timeout_server();
-    init_discovery_server();
-    init_discovery();
-    init_sanity_server();
-    init_product_handles();
-    init_shopify_server();
-    HOMEPAGE_PAYLOAD_VERSION = "v1";
-    HOMEPAGE_PAYLOAD_KV_KEY = `homepage:payload:${HOMEPAGE_PAYLOAD_VERSION}`;
-    HOMEPAGE_PAYLOAD_KV_PREFIX = "homepage:payload";
-    KV_TTL_SECONDS = 6 * 60 * 60;
-    BUILD_TIMEOUT_MS = 8e3;
-    VARIANT_B_SECTION_TYPES = [
-      "emmaCuratedRail",
-      "editorialTiles",
-      "wayfinderMosaic",
-      "playTogetherBanner",
-      // The hero trust strip (Nº 02). A `trustBar` block + `trustItem` docs already
-      // existed and were already projected as `trustItems`, but this whitelist
-      // filtered them out, so the strip stayed a hardcoded four-string array no
-      // agent could touch. Published trust items now win; the shell array is the
-      // fallback.
-      "trustBar",
-      // The FAQ band (Nº 11), same story: hardcoded Q&A with no Sanity read. The
-      // published block feeds BOTH the visible accordion and the FAQPage JSON-LD.
-      "homepageFaq"
-    ];
-    DEFAULT_ANCHOR_COLLECTION_HANDLE = "best-sellers";
-    HOMEPAGE_PAYLOAD_B_VERSION = "b6";
-    HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`;
-  }
-});
-
-// app/lib/deal-rotator.server.ts
-var deal_rotator_server_exports = {};
-__export(deal_rotator_server_exports, {
-  activateDeal: () => activateDeal,
-  isLiveDealSoldOut: () => isLiveDealSoldOut,
-  rotateDeal: () => rotateDeal,
-  transitionToVaultPricing: () => transitionToVaultPricing
-});
-import { eq as eq11, ne as ne2, and as and3, isNull, asc as asc3, inArray as inArray3 } from "drizzle-orm";
-function estDate(offsetDays = 0) {
-  const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1e3);
-  return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-}
-function pastDealTag(dealDate) {
-  if (!dealDate) return null;
-  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(dealDate);
-  if (!m) return null;
-  const [, yyyy, mm] = m;
-  return `past-daily-deal-${mm}-${yyyy.slice(2)}`;
-}
-async function getVaultDiscountPct() {
-  const [row] = await db.select().from(pipelineSettings).where(eq11(pipelineSettings.key, "vaultDiscountPct")).limit(1);
-  const pct = parseFloat(row?.value ?? "25");
-  return isNaN(pct) ? 25 : Math.max(5, Math.min(60, pct));
-}
-async function getFirstVariantGid(shopifyProductId) {
-  const numericId = shopifyProductId.replace("gid://shopify/Product/", "");
-  let product;
-  try {
-    ;
-    ({ product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`));
-  } catch (err2) {
-    console.error(`[deal-rotator] product ${numericId} lookup failed \u2014 treating as missing:`, err2);
-    return null;
-  }
-  const v = product?.variants?.[0];
-  return v ? `gid://shopify/ProductVariant/${v.id}` : null;
-}
-async function transitionToVaultPricing(deal) {
-  if (!deal.shopifyProductId) return;
-  const msrp = parseFloat(deal.msrp ?? "0");
-  let vaultPrice = deal.vaultPrice ? parseFloat(deal.vaultPrice) : 0;
-  if (!vaultPrice && msrp > 0) {
-    const productPct = deal.pctOffMsrp ? parseFloat(deal.pctOffMsrp) : NaN;
-    const pct = isFinite(productPct) && productPct > 0 ? Math.max(0, Math.min(100, productPct)) : await getVaultDiscountPct();
-    vaultPrice = Math.round(msrp * (1 - pct / 100) * 100) / 100;
-  }
-  try {
-    if (vaultPrice > 0) {
-      const variantGid = await getFirstVariantGid(deal.shopifyProductId);
-      if (variantGid) {
-        await updateVariantPricing(
-          variantGid,
-          vaultPrice.toFixed(2),
-          msrp > 0 ? msrp.toFixed(2) : ""
-        );
-      }
-      await updateProductMetafield(
-        deal.shopifyProductId,
-        "vault_price",
-        vaultPrice.toFixed(2),
-        "number_decimal"
-      );
-    }
-    await setDealStatus(deal.shopifyProductId, "vault");
-    const tag = pastDealTag(deal.dealDate);
-    if (tag) await appendProductTag(deal.shopifyProductId, tag);
-  } catch (err2) {
-    console.error(
-      `[deal-rotator] Shopify-side vaulting failed for deal ${deal.id} (product ${deal.shopifyProductId}) \u2014 product may no longer exist; archiving in DB only:`,
-      err2
-    );
-  }
-  await db.update(dealHistory).set({
-    status: "archived",
-    completedAt: /* @__PURE__ */ new Date(),
-    vaultPrice: vaultPrice > 0 ? vaultPrice.toFixed(2) : null
-  }).where(and3(eq11(dealHistory.id, deal.id), eq11(dealHistory.status, "live")));
-  try {
-    const { archiveHomepageRailsForDeal: archiveHomepageRailsForDeal2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
-    const { archived } = await archiveHomepageRailsForDeal2(deal.shopifyProductId);
-    if (archived.length) {
-      console.log("[deal-rotator] Archived homepage rails:", archived.length);
-    }
-  } catch (err2) {
-    console.error("[deal-rotator] Rail archive failed (non-blocking):", err2);
-  }
-}
-async function activateDeal(deal) {
-  if (!deal.shopifyProductId) return;
-  const blockingJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and3(
-    eq11(batchJobs.gatesDealId, deal.id),
-    inArray3(batchJobs.status, ["queued", "submitted", "processing", "applying"])
-  ));
-  if (blockingJobs.length > 0) {
-    console.log(`[deal-rotator] enrichment in flight for deal ${deal.id} \u2014 deferring activation (${blockingJobs.length} blocking job(s))`);
-    return;
-  }
-  const failedJobs = await db.select({ id: batchJobs.id }).from(batchJobs).where(and3(eq11(batchJobs.gatesDealId, deal.id), eq11(batchJobs.status, "failed")));
-  if (failedJobs.length > 0) {
-    console.warn(`[deal-rotator] WARN gated enrichment failed for deal ${deal.id}; activating with stale/partial copy (degraded-enrichment path)`);
-  }
-  const claimed = await db.update(dealHistory).set({ status: "live" }).where(and3(eq11(dealHistory.id, deal.id), ne2(dealHistory.status, "live"))).returning({ id: dealHistory.id });
-  if (claimed.length === 0) {
-    console.log(`[deal-rotator] deal ${deal.id} already live \u2014 skipping duplicate activation`);
-    return;
-  }
-  const anyGatingJob = await db.select({ id: batchJobs.id, status: batchJobs.status }).from(batchJobs).where(eq11(batchJobs.gatesDealId, deal.id)).limit(1);
-  const skipInlineHero = anyGatingJob.length > 0;
-  const numericId = deal.shopifyProductId.replace("gid://shopify/Product/", "");
-  await activateShopifyProduct(numericId);
-  const dealPrice = parseFloat(deal.dealPrice ?? "0");
-  const msrp = parseFloat(deal.msrp ?? "0");
-  if (dealPrice > 0) {
-    const variantGid = await getFirstVariantGid(deal.shopifyProductId);
-    if (variantGid) {
-      await updateVariantPricing(
-        variantGid,
-        dealPrice.toFixed(2),
-        msrp > 0 ? msrp.toFixed(2) : "",
-        deal.wholesaleCost ?? void 0
-      );
-    }
-  }
-  await setDealStatus(deal.shopifyProductId, "live");
-  try {
-    const { unarchiveHomepageRailsForDeal: unarchiveHomepageRailsForDeal2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
-    const { unarchived } = await unarchiveHomepageRailsForDeal2(deal.shopifyProductId);
-    if (unarchived.length) {
-      console.log("[deal-rotator] Un-archived homepage rails:", unarchived.length);
-    }
-  } catch (err2) {
-    console.error("[deal-rotator] Rail un-archive failed (non-blocking):", err2);
-  }
-  if (!skipInlineHero) {
-    try {
-      const { getDailyDeal: getDailyDeal2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
-      const { generateEmmaHero: generateEmmaHero2 } = await Promise.resolve().then(() => (init_claude_server(), claude_server_exports));
-      const fullDeal = await getDailyDeal2().catch(() => null);
-      const seedDeal = fullDeal ?? {
-        seoTitle: deal.seoTitle ?? "",
-        tagline: "",
-        fullStory: "",
-        brand: "",
-        category: ["for-him", "for-her"],
-        dealPrice,
-        msrp,
-        mapRestricted: false
-      };
-      const variant = seedDeal.mapRestricted ? "quote" : "loving";
-      const copy = await generateEmmaHero2({ deal: seedDeal, variant });
-      await updateProductMetafield(
-        deal.shopifyProductId,
-        "emma_hero",
-        JSON.stringify(copy),
-        "json"
-      );
-      if (copy.aside) {
-        await updateProductMetafield(
-          deal.shopifyProductId,
-          "tagline",
-          copy.aside,
-          "single_line_text_field"
-        );
-      }
-      if (fullDeal?.handle) {
-        try {
-          const { upsertEmmaPick: upsertEmmaPick2 } = await Promise.resolve().then(() => (init_sanity_server(), sanity_server_exports));
-          await upsertEmmaPick2({
-            productId: deal.shopifyProductId,
-            productHandle: fullDeal.handle,
-            productTitle: fullDeal.seoTitle ?? deal.seoTitle ?? void 0,
-            brand: fullDeal.brand ?? void 0,
-            category: fullDeal.category && fullDeal.category.length > 0 ? fullDeal.category[0] : void 0,
-            dealDate: estDate(0),
-            variant: copy.variant,
-            eyebrow: copy.eyebrow,
-            headline: copy.headline,
-            body: copy.body,
-            aside: copy.aside,
-            pullQuote: copy.pullQuote,
-            voiceHash: copy.voiceHash,
-            generatedAt: copy.generatedAt
-          });
-        } catch (sanityErr) {
-          console.error("[deal-rotator] Emma pick Sanity index failed (non-blocking):", sanityErr);
-        }
-      }
-    } catch (err2) {
-      console.error("[deal-rotator] Emma hero generation failed (non-blocking):", err2);
-    }
-  } else {
-    console.log(`[deal-rotator] Skipping inline Emma hero for deal ${deal.id} \u2014 gated enrichment job already wrote copy`);
-  }
-  await db.update(dealHistory).set({
-    activatedAt: /* @__PURE__ */ new Date(),
-    dealDate: estDate(0)
-  }).where(eq11(dealHistory.id, deal.id));
-  await kvSet(KV_KEYS.dealOfDay, {
-    sku: deal.sku,
-    title: deal.seoTitle,
-    date: estDate(0)
-  }, 86400);
-  await triggerDailyDealEmail({
-    title: deal.seoTitle ?? "",
-    tagline: "",
-    dealPrice: parseFloat(deal.dealPrice ?? "0"),
-    msrp: parseFloat(deal.msrp ?? "0"),
-    handle: deal.sku,
-    imageUrl: "",
-    subjectLine: `New deal just dropped \u2014 ${deal.seoTitle ?? "check it out"} \u2665`
-  });
-  if (process.env["X_AUTO_POST_ENABLED"] === "true") {
-    try {
-      const { postDealTweet: postDealTweet2 } = await Promise.resolve().then(() => (init_twitter_server(), twitter_server_exports));
-      const result = await postDealTweet2({
-        dealHistoryId: deal.id,
-        seoTitle: deal.seoTitle ?? "",
-        tagline: "",
-        dealPrice: parseFloat(deal.dealPrice ?? "0"),
-        msrp: parseFloat(deal.msrp ?? "0"),
-        brand: "",
-        category: "both",
-        handle: deal.sku,
-        imageUrl: "",
-        shopifyProductId: deal.shopifyProductId ?? void 0
-      });
-      console.log("[deal-rotator] Auto-tweet:", result.ok ? result.tweetId : result.error);
-    } catch (err2) {
-      console.error("[deal-rotator] Auto-tweet failed (non-blocking):", err2);
-    }
-  }
-}
-async function rotateDeal() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq11(dealHistory.status, "live")).limit(1);
-  if (liveDeal) {
-    await transitionToVaultPricing(liveDeal);
-  }
-  const [nextDeal] = await db.select().from(dealHistory).where(
-    and3(
-      eq11(dealHistory.status, "queued"),
-      isNull(dealHistory.completedAt)
-    )
-  ).orderBy(asc3(dealHistory.sortOrder)).limit(1);
-  if (nextDeal) {
-    await activateDeal(nextDeal);
-    let liveHandle = null;
-    try {
-      const { getDailyDeal: getDailyDeal2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
-      const live = await getDailyDeal2().catch(() => null);
-      liveHandle = live?.handle ?? null;
-      if (liveHandle) {
-        const { regenerateActiveRails: regenerateActiveRails2 } = await Promise.resolve().then(() => (init_emma_rails_server(), emma_rails_server_exports));
-        const res = await regenerateActiveRails2(liveHandle, "midnight");
-        console.log("[deal-rotator] emma rails precomputed:", res);
-      }
-    } catch (err2) {
-      console.error("[deal-rotator] emma rails precompute failed (non-blocking):", err2);
-    }
-    try {
-      const { pingSearchEngines: pingSearchEngines2 } = await Promise.resolve().then(() => (init_search_ping_server(), search_ping_server_exports));
-      await pingSearchEngines2(["/", ...liveHandle ? [`/products/${liveHandle}`] : []]);
-    } catch (err2) {
-      console.error("[deal-rotator] search ping failed (non-blocking):", err2);
-    }
-    try {
-      const { warmHomepagePayloadA: warmHomepagePayloadA2 } = await Promise.resolve().then(() => (init_homepage_payload_server(), homepage_payload_server_exports));
-      const p = await warmHomepagePayloadA2({ force: true });
-      console.log(`[deal-rotator] homepage payload precomputed (rails=${p.rails.length}, sections=${p.sections.length}, degraded=${p.degraded})`);
-    } catch (err2) {
-      console.error("[deal-rotator] homepage precompute failed (non-blocking):", err2);
-    }
-  }
-  return {
-    vaulted: liveDeal?.sku ?? null,
-    activated: nextDeal?.sku ?? null
-  };
-}
-async function isLiveDealSoldOut() {
-  const [liveDeal] = await db.select().from(dealHistory).where(eq11(dealHistory.status, "live")).limit(1);
-  if (!liveDeal?.shopifyProductId) return { soldOut: false, dealId: null };
-  const numericId = liveDeal.shopifyProductId.replace("gid://shopify/Product/", "");
-  let product;
-  try {
-    ;
-    ({ product } = await shopifyAdmin(`/products/${numericId}.json?fields=variants`));
-  } catch (err2) {
-    console.error(
-      `[deal-rotator] live deal ${liveDeal.id} product ${numericId} lookup failed \u2014 treating as sold out:`,
-      err2
-    );
-    return { soldOut: true, dealId: liveDeal.id };
-  }
-  if (!product) return { soldOut: false, dealId: liveDeal.id };
-  const totalInventory = product.variants.reduce(
-    (sum, v) => sum + (v.inventory_quantity ?? 0),
-    0
-  );
-  return { soldOut: totalInventory <= 0, dealId: liveDeal.id };
-}
-var init_deal_rotator_server = __esm({
-  "app/lib/deal-rotator.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    init_shopify_server();
-    init_klaviyo_server();
-    init_kv_server();
-  }
-});
-
-// app/lib/sensation-map.ts
-function labelForType(v) {
-  return TYPE_LABELS[v] ?? v.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-function savings(p) {
-  return p.compareAtPrice && p.compareAtPrice > p.price ? p.compareAtPrice - p.price : 0;
-}
-function qualityCompare(a, b) {
-  const ai = a.imageUrl ? 0 : 1;
-  const bi = b.imageUrl ? 0 : 1;
-  if (ai !== bi) return ai - bi;
-  const s = savings(b) - savings(a);
-  if (s !== 0) return s;
-  if (a.price !== b.price) return a.price - b.price;
-  return a.handle.localeCompare(b.handle);
-}
-function deriveTypeNotches(index2, max2 = MAX_TYPE_NOTCHES) {
-  const counts = /* @__PURE__ */ new Map();
-  for (const p of index2) {
-    const t = p.productTypeDial;
-    if (!t) continue;
-    counts.set(t, (counts.get(t) ?? 0) + 1);
-  }
-  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, Math.max(0, max2)).map(([value, count]) => ({ value, label: labelForType(value), count }));
-}
-function deriveFeelNotches(moods, max2 = MAX_FEEL_NOTCHES) {
-  return moods.slice(0, Math.max(0, max2));
-}
-function defaultSensationState(types, feels, seed = 0) {
-  if (types.length === 0) return null;
-  const idx = (seed % types.length + types.length) % types.length;
-  const type = types[idx].value;
-  return { type, feel: feels[0] ?? null };
-}
-function matchSensationMap(index2, state, count = SENSATION_RESULT_COUNT) {
-  const ofType = index2.filter((p) => p.productTypeDial === state.type);
-  if (state.feel) {
-    const scoreState = { ...EMPTY_STATE, mood: [state.feel] };
-    const scored = ofType.map((p) => ({ p, s: scoreProduct2(p, scoreState) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || qualityCompare(a.p, b.p));
-    if (scored.length >= MIN_RESULTS) {
-      return {
-        items: scored.slice(0, count).map((x) => x.p),
-        relaxed: false,
-        relaxedReason: null,
-        resolved: state
-      };
-    }
-  }
-  if (ofType.length >= MIN_RESULTS) {
-    return {
-      items: [...ofType].sort(qualityCompare).slice(0, count),
-      relaxed: !!state.feel,
-      // dropping "any feel" is not a relaxation
-      relaxedReason: state.feel ? "Closest fit" : null,
-      resolved: { type: state.type, feel: null }
-    };
-  }
-  const [topNotch] = deriveTypeNotches(index2, 1);
-  const fallbackType = topNotch?.value ?? state.type;
-  const pool = index2.filter((p) => p.productTypeDial === fallbackType);
-  const source = pool.length ? pool : [...index2];
-  return {
-    items: [...source].sort(qualityCompare).slice(0, count),
-    relaxed: true,
-    relaxedReason: "Closest fit",
-    resolved: { type: fallbackType, feel: null }
-  };
-}
-var TYPE_LABELS, MAX_TYPE_NOTCHES, MAX_FEEL_NOTCHES, SENSATION_RESULT_COUNT, MIN_RESULTS;
-var init_sensation_map = __esm({
-  "app/lib/sensation-map.ts"() {
-    "use strict";
-    init_discovery();
-    init_discovery_emma();
-    TYPE_LABELS = {
-      vibrator: "Vibrator",
-      dildo: "Dildo",
-      anal: "Anal",
-      bondage: "Bondage",
-      "cock-ring": "Cock ring",
-      stroker: "Stroker",
-      couples: "For two",
-      harness: "Harness",
-      extender: "Extender",
-      pump: "Pump",
-      lube: "Lube",
-      massage: "Massage",
-      enhancer: "Enhancer",
-      wear: "To wear",
-      condom: "Condom",
-      wellness: "Wellness",
-      novelty: "Novelty",
-      "book-media": "Books",
-      "sex-machine": "Sex machine"
-    };
-    MAX_TYPE_NOTCHES = 5;
-    MAX_FEEL_NOTCHES = 4;
-    SENSATION_RESULT_COUNT = 3;
-    MIN_RESULTS = 2;
-  }
-});
-
-// app/lib/sensation-map.server.ts
-async function getSensationMapData(now = () => /* @__PURE__ */ new Date()) {
-  const index2 = await getDiscoveryIndex();
-  if (index2.length === 0) {
-    return { types: [], feels: [], defaultState: null, defaultMatch: null };
-  }
-  const types = deriveTypeNotches(index2);
-  const feels = deriveFeelNotches(computeVocab(index2).moods);
-  const dayBucket = Math.floor(now().getTime() / 864e5);
-  const defaultState = defaultSensationState(types, feels, dayBucket);
-  const defaultMatch = defaultState ? matchSensationMap(index2, defaultState) : null;
-  return { types, feels, defaultState, defaultMatch };
-}
-var init_sensation_map_server = __esm({
-  "app/lib/sensation-map.server.ts"() {
-    "use strict";
-    init_discovery_server();
-    init_sensation_map();
-  }
-});
-
-// app/lib/panel-deck.server.ts
-function resolveHref(link2, liveHandles) {
-  if (!link2?.kind) return null;
-  switch (link2.kind) {
-    case "collection": {
-      const handle = link2.collectionHandle?.trim();
-      if (!handle) return null;
-      if (liveHandles && !liveHandles.has(handle)) return null;
-      return `/collections/${handle}`;
-    }
-    case "article": {
-      if (!link2.articleSlug || link2.articlePublished === false) return null;
-      return `/notebook/${link2.articleSlug}`;
-    }
-    case "route": {
-      const route = link2.route?.trim();
-      return route && route.startsWith("/") ? route : null;
-    }
-    default:
-      return null;
-  }
-}
-function baseTile(item, href) {
-  return {
-    key: item._key ?? `${item.label}-${href}`,
-    label: item.label?.trim() ?? "",
-    surface: SURFACES.includes(item.surface) ? item.surface : "stone",
-    mark: item.mark ?? null,
-    imageUrl: item.imageUrl ?? null,
-    imageAlt: item.imageAlt ?? null,
-    href
-  };
-}
-async function getPanelDeck(preview = false) {
-  const client5 = getClient(false, preview);
-  if (!client5) return null;
-  let raw = null;
-  try {
-    raw = await client5.fetch(PANEL_DECK_GROQ);
-  } catch (err2) {
-    console.error("[panel-deck] fetch failed:", err2);
-    return null;
-  }
-  if (!raw?.rows?.length) return null;
-  let liveHandles = null;
-  try {
-    const collections = await getCollectionList();
-    liveHandles = new Set(
-      collections.filter((c) => c.productsCount === null || c.productsCount > 0).map((c) => c.handle)
-    );
-  } catch (err2) {
-    console.warn("[panel-deck] collection list unavailable, skipping handle validation:", err2);
-  }
-  const rows = [];
-  for (const row of raw.rows) {
-    const rowKey = row._key ?? `row-${rows.length}`;
-    const resolveItems = (decorate) => (row.items ?? []).flatMap((item) => {
-      const href = resolveHref(item.link, liveHandles);
-      if (!href || !item.label?.trim()) {
-        console.warn(
-          `[panel-deck] dropping panel "${item.label ?? "(unlabelled)"}": ` + (item.label?.trim() ? "destination missing, dead, or empty" : "no label")
-        );
-        return [];
-      }
-      return [decorate(item, baseTile(item, href))];
-    });
-    switch (row._type) {
-      case "panelSquareRow": {
-        const items = resolveItems((_item, tile) => tile);
-        if (items.length > 0) rows.push({ kind: "square", key: rowKey, items });
-        break;
-      }
-      case "panelRowLarge": {
-        const items = resolveItems((item, tile) => ({
-          ...tile,
-          kicker: item.kicker?.trim() || null,
-          blurb: item.blurb?.trim() || null,
-          ctaLabel: item.ctaLabel?.trim() || null
-        }));
-        if (items.length > 0) rows.push({ kind: "large", key: rowKey, items });
-        break;
-      }
-      case "panelRowSmall": {
-        const items = resolveItems((item, tile) => ({
-          ...tile,
-          meta: item.meta?.trim() || null,
-          figure: item.figure?.trim() || null
-        }));
-        if (items.length > 0) rows.push({ kind: "small", key: rowKey, items });
-        break;
-      }
-      default:
-        break;
-    }
-  }
-  if (rows.length === 0) return null;
-  return {
-    eyebrow: raw.eyebrow?.trim() || null,
-    theme: THEMES.includes(raw.theme) ? raw.theme : "tint",
-    showOrdinals: raw.showOrdinals === true,
-    rows
-  };
-}
-var PANEL_DECK_GROQ, SURFACES, THEMES;
-var init_panel_deck_server = __esm({
-  "app/lib/panel-deck.server.ts"() {
-    "use strict";
-    init_sanity_server();
-    init_shopify_server();
-    PANEL_DECK_GROQ = `
-  *[_id == "singleton.panelDeck"][0]{
-    eyebrow, theme, showOrdinals,
-    rows[]{
-      _type, _key,
-      items[]{
-        _key, label, surface, mark, kicker, blurb, ctaLabel, meta, figure,
-        "imageUrl": image.asset->url,
-        "imageAlt": image.alt,
-        link{
-          kind, collectionHandle, route,
-          "articleSlug": article->slug.current,
-          "articlePublished": article->status == "published"
-        }
-      }
-    }
-  }
-`;
-    SURFACES = ["blush", "lilac", "stone", "paper", "plum", "coral", "ink"];
-    THEMES = ["tint", "photo", "ruled"];
-  }
-});
-
-// app/lib/storefront-home.server.ts
-var storefront_home_server_exports = {};
-__export(storefront_home_server_exports, {
-  RAIL_SEED_BUCKET_MS: () => RAIL_SEED_BUCKET_MS,
-  STOREFRONT_EDGE_CACHE_HEADERS: () => STOREFRONT_EDGE_CACHE_HEADERS,
-  assembleStorefrontHome: () => assembleStorefrontHome,
-  buildHomepagePayloadB: () => buildHomepagePayloadB,
-  hydrateStorefrontPayloadB: () => hydrateStorefrontPayloadB,
-  railSeedBucket: () => railSeedBucket,
-  warmHomepagePayloadB: () => warmHomepagePayloadB
-});
-function railSeedBucket(now = Date.now()) {
-  return Math.floor(now / RAIL_SEED_BUCKET_MS);
-}
-async function assembleStorefrontHome(opts = {}) {
-  if (opts.fresh) return hydrateStorefrontPayloadB(await buildHomepagePayloadB());
-  const payload = await readHomepagePayloadB();
-  if (payload) {
-    if (payload.degraded) triggerHomepageWarmB();
-    return hydrateStorefrontPayloadB(payload);
-  }
-  const fresh = await buildHomepagePayloadB();
-  void writeHomepagePayloadB(fresh).catch((err2) => {
-    console.warn("[storefront-home] payload write after cold build failed:", err2);
-  });
-  return hydrateStorefrontPayloadB(fresh);
-}
-function hydrateStorefrontPayloadB(payload) {
-  const rails = reshuffleRailsWithSeed(payload.rails, railSeedBucket());
-  let featured = rails.map((r) => r.items[0]?.product).filter((p) => !!p);
-  const pinned = payload.pinnedProduct;
-  if (pinned) {
-    featured = [pinned, ...featured.filter((p) => p.handle !== pinned.handle)];
-  }
-  return {
-    variant: "b",
-    rails,
-    // Curated collection order is merchandising, not a rotation set, so it is
-    // passed through verbatim (no per-bucket reshuffle like `rails`).
-    anchorProducts: payload.anchorProducts ?? [],
-    emmaHero: payload.emmaHero,
-    emmaPhotoUrl: payload.emmaPhotoUrl,
-    emmaPhotoAlt: payload.emmaPhotoAlt,
-    featured,
-    total: payload.total,
-    // Already resolved at build time. PR #322 established that this must be a
-    // RESOLVED value rather than a streamed promise (a deferred one never
-    // survives the edge cache, so team merchandising reached nobody); reading
-    // it off the precomputed blob satisfies that contract by construction and
-    // removes the Sanity round-trip from the request path entirely.
-    contentBlocks: payload.contentBlocks,
-    notebookPosts: payload.notebookPosts,
-    sensationMap: payload.sensationMap,
-    // Resolved at build time for the same reason contentBlocks is: the shell
-    // cannot decide what to render from a value that arrives after it flushes.
-    layout: payload.layout ?? null,
-    panelDeck: payload.panelDeck ?? null
-  };
-}
-async function buildHomepagePayloadB() {
-  const railSeed = 0;
-  const [railsResult, emmaHero, notebook, editor, contentBlocks, layout, panelDeck] = await Promise.all([
-    getDiscoveryRails(EMPTY_STATE, { perRail: 12, seed: railSeed }),
-    withTimeout(getEmmaHeroSettings(), EMMA_HERO_TIMEOUT_MS, null, "getEmmaHeroSettings(storefront)"),
-    // 6, not 3. The Notebook is ~21% of all site sessions with ~20 minutes of
-    // dwell and currently sells nothing, so the homepage gives it a real shelf
-    // plus a see-all link into /notebook (see HomeNotebookRail).
-    getBlogPosts({ perPage: 6 }).catch(() => ({ posts: [], total: 0 })),
-    // Meet Emma portrait (Nº 04). Own short timeout + degrade-to-null so a slow
-    // or cold Sanity leg can never sink the render; MeetEmma falls back to the
-    // bundled illustration when this is null. getEditor() is already cached 300s
-    // and swallows its own errors, so this is belt-and-suspenders with emmaHero.
-    withTimeout(getEditor(), EDITOR_TIMEOUT_MS, null, "getEditor(storefront)"),
-    // Team merchandising surface — resolved here rather than deferred, so it
-    // survives the edge cache and reaches crawlers (see the `contentBlocks`
-    // field doc). Resolving it at BUILD time rather than per-request also takes
-    // the Sanity round-trip off the request path completely. `withTimeout` only
-    // guards a slow upstream; the `.catch` is what replaces the old
-    // `<Await errorElement>`, so a rejected leg degrades to shell fallbacks
-    // instead of failing the build.
-    withTimeout(
-      buildHomeContentBlocksLean(),
-      CONTENT_BLOCKS_TIMEOUT_MS,
-      EMPTY_CONTENT_BLOCKS,
-      "buildHomeContentBlocksLean(storefront)"
-    ).catch((err2) => {
-      console.error("[storefront-home] contentBlocks failed, using shell fallbacks:", err2);
-      return EMPTY_CONTENT_BLOCKS;
-    }),
-    // Band order + chrome overrides. Same reasoning as contentBlocks above: the
-    // shell cannot decide what to render from a value that lands after it has
-    // flushed, so this is resolved at build time and stored. Degrading to null
-    // renders the shipped order, so a slow or failed leg costs nothing.
-    withTimeout(
-      getStorefrontHomeLayout(),
-      LAYOUT_TIMEOUT_MS,
-      null,
-      "getStorefrontHomeLayout(storefront)"
-    ).catch((err2) => {
-      console.error("[storefront-home] layout failed, using shipped band order:", err2);
-      return null;
-    }),
-    // The deck. Same contract: resolved at build time, degrades to null, and
-    // null renders nothing, so a failed leg costs the deck and only the deck.
-    withTimeout(
-      getPanelDeck(),
-      LAYOUT_TIMEOUT_MS,
-      null,
-      "getPanelDeck(storefront)"
-    ).catch((err2) => {
-      console.error("[storefront-home] panel deck failed, rendering without it:", err2);
-      return null;
-    })
-  ]);
-  const rails = railsResult.rails;
-  const pinnedHandle = emmaHero?.featuredProductHandle?.trim();
-  let pinnedProduct = null;
-  if (pinnedHandle) {
-    pinnedProduct = rails.flatMap((r) => r.items).find((i) => i.product.handle === pinnedHandle)?.product ?? // Not surfaced by today's rails: pull it from the discovery index. The
-    // rails call above already warmed the L1 memo, so this is an in-memory
-    // lookup, not a second KV round-trip.
-    (await getDiscoveryIndex()).find((p) => p.handle === pinnedHandle) ?? null;
-    if (!pinnedProduct) {
-      console.warn(
-        `[storefront-home] featuredProductHandle "${pinnedHandle}" not in discovery index, hero stays rotating`
-      );
-    }
-  }
-  const anchorProducts = await getAnchorCollectionProducts(emmaHero?.anchorCollectionHandle);
-  const sensationMap = await getSensationMapData();
-  return {
-    version: HOMEPAGE_PAYLOAD_B_VERSION,
-    variant: "b",
-    rails,
-    anchorProducts,
-    total: railsResult.total,
-    pinnedProduct,
-    emmaHero,
-    // Nº 04 prefers the additive homepage-only situational portrait
-    // (`editor.homepagePhoto`) and falls back to the canonical `photo`. Only
-    // this homepage surface reads homepagePhoto; /about and the video
-    // pipeline's identity anchor (getEditorPhotoUrl) stay on `photo`, so a
-    // homepage-portrait swap never re-portraits /about or the video frames.
-    emmaPhotoUrl: editor?.homepagePhotoUrl ?? editor?.photoUrl ?? null,
-    emmaPhotoAlt: editor?.homepagePhotoAlt ?? editor?.photoAlt ?? null,
-    contentBlocks,
-    // resolved above — team-managed Sanity surface, lean/slimmed for variant b
-    notebookPosts: notebook.posts,
-    sensationMap,
-    layout,
-    panelDeck,
-    builtAt: Date.now(),
-    // Empty rails == the discovery index was cold during the build. The write
-    // guard refuses to clobber a good blob with this unless forced.
-    degraded: rails.length === 0
-  };
-}
-async function warmHomepagePayloadB(opts = {}) {
-  const force = opts.force ?? true;
-  const payload = await buildHomepagePayloadB();
-  await writeHomepagePayloadB(payload, { force });
-  return payload;
-}
-var EMMA_HERO_TIMEOUT_MS, EDITOR_TIMEOUT_MS, LAYOUT_TIMEOUT_MS, CONTENT_BLOCKS_TIMEOUT_MS, EMPTY_CONTENT_BLOCKS, RAIL_SEED_BUCKET_MS, STOREFRONT_EDGE_CACHE_HEADERS;
-var init_storefront_home_server = __esm({
-  "app/lib/storefront-home.server.ts"() {
-    "use strict";
-    init_discovery_server();
-    init_homepage_payload_server();
-    init_sensation_map_server();
-    init_sanity_server();
-    init_panel_deck_server();
-    init_with_timeout_server();
-    init_discovery();
-    EMMA_HERO_TIMEOUT_MS = 4e3;
-    EDITOR_TIMEOUT_MS = 4e3;
-    LAYOUT_TIMEOUT_MS = 4e3;
-    CONTENT_BLOCKS_TIMEOUT_MS = 6e3;
-    EMPTY_CONTENT_BLOCKS = { sections: [], carouselProductMap: {} };
-    RAIL_SEED_BUCKET_MS = 9e5;
-    STOREFRONT_EDGE_CACHE_HEADERS = {
-      "Cache-Control": "public, max-age=0, s-maxage=900, stale-while-revalidate=3600",
-      "Vercel-CDN-Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600"
-    };
-  }
-});
-
-// app/lib/homepage-healthcheck.server.ts
-var homepage_healthcheck_server_exports = {};
-__export(homepage_healthcheck_server_exports, {
-  FALLBACK_MARKERS: () => FALLBACK_MARKERS,
-  RENDER_TRUTH_LATEST_KEY: () => RENDER_TRUTH_LATEST_KEY,
-  RENDER_TRUTH_PROPAGATION_MS: () => RENDER_TRUTH_PROPAGATION_MS,
-  assertSlateRendered: () => assertSlateRendered,
-  checkPageOnce: () => checkPageOnce,
-  compareFingerprints: () => compareFingerprints,
-  extractJsonLd: () => extractJsonLd,
-  extractPublishedSlate: () => extractPublishedSlate,
-  fingerprintSlate: () => fingerprintSlate,
-  normalizeMarker: () => normalizeMarker,
-  normalizeRenderedText: () => normalizeRenderedText,
-  renderTruth: () => renderTruth,
-  runHomepageHealthcheck: () => runHomepageHealthcheck,
-  sanityAssetId: () => sanityAssetId,
-  utcDay: () => utcDay2
-});
-async function activeServedVariant() {
-  try {
-    const cfg = await getHomeConfig();
-    if (cfg?.activeVariant === "a" || cfg?.activeVariant === "b") return cfg.activeVariant;
-  } catch {
-  }
-  const env = process.env["HOME_VARIANT"];
-  if (env === "a" || env === "b" || env === "legacy") return env;
-  return "legacy";
-}
-function siteOrigin() {
-  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
-  return base.replace(/\/$/, "") || "https://xdipx.com";
-}
-function extractJsonLd(html) {
-  let parsed = 0;
-  let scripts = 0;
-  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    scripts += 1;
-    try {
-      JSON.parse((m[1] ?? "").trim());
-      parsed += 1;
-    } catch {
-    }
-  }
-  return { parsed, scripts };
-}
-async function checkPageOnce(path, attempt, opts = {}) {
-  const bust = `__healthcheck=${Date.now()}-${attempt}`;
-  const url = `${siteOrigin()}${path}${path.includes("?") ? "&" : "?"}${bust}`;
-  const problems = [];
-  let status = 0;
-  let bodyOk = false;
-  let captured;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-    const res = await fetch(url, {
-      headers: { "user-agent": "xdipx-homepage-healthcheck" },
-      signal: ctrl.signal
-    }).finally(() => clearTimeout(timer));
-    status = res.status;
-    const html = await res.text();
-    if (opts.captureHtml) captured = html;
-    if (status !== 200) problems.push(`HTTP ${status}`);
-    if (html.length < MIN_BODY_BYTES) problems.push(`body too small (${html.length} bytes)`);
-    if (!/<img[\s>]/i.test(html)) problems.push("no <img> (hero/LCP image likely missing)");
-    if (!/<\/html>/i.test(html)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
-    bodyOk = status === 200 && html.length >= MIN_BODY_BYTES;
-    const { parsed, scripts } = extractJsonLd(html);
-    if (parsed === 0) problems.push("no valid JSON-LD");
-    else if (parsed < scripts) problems.push(`malformed JSON-LD (${scripts - parsed} unparseable)`);
-  } catch (err2) {
-    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
-  }
-  const hardFail = status >= 500;
-  const check = { path, status, ok: problems.length === 0, problems, bodyOk, hardFail };
-  if (captured !== void 0) check.html = captured;
-  return check;
-}
-async function checkPage(path, opts = {}) {
-  let best = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS2; attempt++) {
-    const c = await checkPageOnce(path, attempt, opts);
-    if (c.ok) return c;
-    if (!best || c.problems.length < best.problems.length) best = c;
-    if (attempt < MAX_ATTEMPTS2) {
-      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS2));
-    }
-  }
-  return best;
-}
-function decodeEntities(s) {
-  return s.replace(/&#x([0-9a-f]+);/gi, (_m, hex) => String.fromCodePoint(parseInt(hex, 16))).replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(parseInt(dec, 10))).replace(/&([a-z]+);/gi, (m, name) => ENTITIES[name.toLowerCase()] ?? m);
-}
-function normalizeRenderedText(html) {
-  return decodeEntities(
-    html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]*>/g, " ")
-  ).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').toLowerCase().replace(/\s+/g, "");
-}
-function normalizeMarker(marker) {
-  return decodeEntities(marker).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').toLowerCase().replace(/\s+/g, "");
-}
-function stripScripts(html) {
-  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ");
-}
-function sanityAssetId(url) {
-  if (!url) return null;
-  const m = /\/images\/[^/]+\/[^/]+\/([^/?#]+)/.exec(url);
-  if (!m?.[1]) return url;
-  return m[1].replace(/-\d+x\d+\.[a-z0-9]+$/i, "");
-}
-function extractPublishedSlate(payload) {
-  const sections = payload.contentBlocks?.sections ?? [];
-  const rails = sections.filter((s) => s._type === "emmaCuratedRail");
-  const wayfinder = sections.find((s) => s._type === "wayfinderMosaic");
-  const couples = sections.find((s) => s._type === "playTogetherBanner");
-  const tiles = wayfinder?.wayfinderTiles ?? [];
-  const couplesImage = couples?.image;
-  return {
-    heroHandle: payload.pinnedProduct?.handle ?? null,
-    heroHandleRequested: payload.emmaHero?.featuredProductHandle?.trim() || null,
-    railTitles: rails.slice(0, RENDERED_TEAM_RAILS).map((r) => (r.heading ?? "").trim()).filter((t) => t.length > 0),
-    wayfinderHeading: wayfinder?.heading?.trim() || null,
-    tileHeadlines: tiles.map((t) => (t.label ?? "").trim()).filter((t) => t.length > 0),
-    couplesHeading: couples?.heading?.trim() || null,
-    tileImageIds: tiles.map((t) => sanityAssetId(t.image?.url)).filter((id) => !!id),
-    couplesImageId: sanityAssetId(couplesImage?.url),
-    publishedBlockCount: sections.length
-  };
-}
-function assertSlateRendered(slate, html) {
-  const text2 = normalizeRenderedText(html);
-  const attrs = stripScripts(html).toLowerCase();
-  const out = [];
-  const has = (marker) => text2.includes(normalizeMarker(marker));
-  if (slate.heroHandleRequested && !slate.heroHandle) {
-    out.push({
-      section: "hero",
-      expected: slate.heroHandleRequested,
-      ok: false,
-      fallbackRendered: true,
-      detail: "pinned handle never resolved into the payload, so the hero is rotating, not pinned"
-    });
-  } else if (slate.heroHandle) {
-    const handle = slate.heroHandle.toLowerCase();
-    const ok = attrs.includes(`/products/${handle}"`) || attrs.includes(`/products/${handle}?`);
-    const a = {
-      section: "hero",
-      expected: `/products/${slate.heroHandle}`,
-      ok,
-      fallbackRendered: !ok
-    };
-    if (!ok) a.detail = "pinned hero product is not linked anywhere on the page";
-    out.push(a);
-  }
-  const railsFellBack = slate.railTitles.length > 0 && has(FALLBACK_MARKERS.rails);
-  for (const title of slate.railTitles) {
-    const ok = has(title);
-    const a = {
-      section: "rails",
-      expected: title,
-      ok,
-      fallbackRendered: !ok && railsFellBack
-    };
-    if (!ok) {
-      a.detail = railsFellBack ? `rail title missing and the shell "${FALLBACK_MARKERS.rails}" fallback rendered instead` : "published rail title is not in the rendered page text";
-    }
-    out.push(a);
-  }
-  const wayfinderPublished = !!slate.wayfinderHeading || slate.tileHeadlines.length > 0;
-  const wayfinderFellBack = wayfinderPublished && has(FALLBACK_MARKERS.wayfinder);
-  const wayfinderExpected = [
-    ...slate.wayfinderHeading ? [slate.wayfinderHeading] : [],
-    ...slate.tileHeadlines
-  ];
-  for (const expected of wayfinderExpected) {
-    const ok = has(expected);
-    const a = {
-      section: "wayfinder",
-      expected,
-      ok,
-      fallbackRendered: !ok && wayfinderFellBack
-    };
-    if (!ok) {
-      a.detail = wayfinderFellBack ? `missing and the shell "${FALLBACK_MARKERS.wayfinder}" fallback rendered instead` : "published wayfinder copy is not in the rendered page text";
-    }
-    out.push(a);
-  }
-  if (slate.couplesHeading) {
-    const ok = has(slate.couplesHeading);
-    const fellBack = !ok && has(FALLBACK_MARKERS.couples);
-    const a = {
-      section: "couples",
-      expected: slate.couplesHeading,
-      ok,
-      fallbackRendered: fellBack
-    };
-    if (!ok) {
-      a.detail = fellBack ? `missing and the shell "${FALLBACK_MARKERS.couples}" fallback rendered instead` : "published couples heading is not in the rendered page text";
-    }
-    out.push(a);
-  }
-  return out;
-}
-function fingerprintSlate(slate) {
-  return {
-    hero: slate.heroHandle ?? "",
-    rails: slate.railTitles.join("|"),
-    tiles: slate.tileImageIds.join("|"),
-    couples: slate.couplesImageId ?? ""
-  };
-}
-function compareFingerprints(today, yesterday) {
-  if (!yesterday) return [];
-  return Object.keys(today).filter(
-    (slot) => today[slot] !== "" && today[slot] === yesterday[slot]
-  );
-}
-function utcDay2(now = Date.now()) {
-  return new Date(now).toISOString().slice(0, 10);
-}
-function fingerprintKey(day) {
-  return `${FINGERPRINT_KEY_PREFIX}:${day}`;
-}
-async function fetchHomeHtml() {
-  let best = null;
-  for (let attempt = 1; attempt <= RENDER_TRUTH_MAX_ATTEMPTS; attempt++) {
-    const c = await checkPageOnce("/", attempt, { captureHtml: true });
-    if (c.html && c.bodyOk) return c.html;
-    if (c.html && !best) best = c.html;
-    if (attempt < RENDER_TRUTH_MAX_ATTEMPTS) {
-      await new Promise((r) => setTimeout(r, RENDER_TRUTH_RETRY_BACKOFF_MS));
-    }
-  }
-  return best;
-}
-async function persistLatestRenderTruth(result) {
-  try {
-    await kvSet(RENDER_TRUTH_LATEST_KEY, { ...result, at: (/* @__PURE__ */ new Date()).toISOString() });
-  } catch (err2) {
-    console.warn("[render-truth] latest snapshot failed", err2);
-  }
-}
-async function renderTruth(opts = {}) {
-  const now = opts.now ?? Date.now();
-  const fileTickets = opts.fileTickets ?? true;
-  const base = {
-    ok: true,
-    skipped: null,
-    assertions: [],
-    missing: [],
-    fallbacks: [],
-    slate: null,
-    fingerprint: {},
-    sameSlots: [],
-    ticketIds: []
-  };
-  try {
-    const variant = await activeServedVariant();
-    if (variant !== "b") {
-      return { ...base, skipped: "variant-not-b", message: `homepage is serving variant ${variant}` };
-    }
-    const [payload, rawDoc] = await Promise.all([
-      readHomepagePayloadB().catch(() => null),
-      getHomepageDocRaw().catch(() => null)
-    ]);
-    if (!payload) {
-      return { ...base, skipped: "no-payload", message: "no precomputed payload B blob to assert against" };
-    }
-    const slate = extractPublishedSlate(payload);
-    const fingerprint2 = fingerprintSlate(slate);
-    const updatedAtRaw = rawDoc?.["_updatedAt"];
-    const updatedAt = typeof updatedAtRaw === "string" ? Date.parse(updatedAtRaw) : NaN;
-    const propagating = Number.isFinite(updatedAt) && now - updatedAt < RENDER_TRUTH_PROPAGATION_MS;
-    const rawSections = Array.isArray(rawDoc?.["sections"]) ? rawDoc["sections"] : [];
-    const assertions = [];
-    if (rawSections.length > 0 && slate.publishedBlockCount === 0) {
-      assertions.push({
-        section: "payload",
-        expected: `${rawSections.length} published Sanity section(s) resolved into the homepage payload`,
-        ok: false,
-        fallbackRendered: true,
-        detail: "the Sanity homepage doc has sections but payload B carries none, so every slot is rendering shell defaults. This is the 2026-07-24 signature: one malformed block kills the whole projection."
-      });
-    }
-    let html = opts.html;
-    if (slate.publishedBlockCount > 0 || slate.heroHandleRequested) {
-      if (!html) html = await fetchHomeHtml() ?? void 0;
-      if (!html) {
-        return {
-          ...base,
-          slate,
-          fingerprint: fingerprint2,
-          skipped: "no-html",
-          message: "could not fetch the live homepage to assert against"
-        };
-      }
-      assertions.push(...assertSlateRendered(slate, html));
-    } else if (assertions.length === 0) {
-      return {
-        ...base,
-        slate,
-        fingerprint: fingerprint2,
-        skipped: "nothing-published",
-        message: "no team content published, nothing to assert"
-      };
-    }
-    const today = utcDay2(now);
-    const yesterday = utcDay2(now - 864e5);
-    let sameSlots = [];
-    try {
-      const prior = await kvGet(fingerprintKey(yesterday));
-      sameSlots = compareFingerprints(fingerprint2, prior);
-      await kvSet(fingerprintKey(today), fingerprint2);
-    } catch (err2) {
-      console.warn("[render-truth] fingerprint snapshot failed", err2);
-    }
-    const failed = assertions.filter((a) => !a.ok);
-    const missing = failed.map((a) => a.expected);
-    const fallbacks = [...new Set(failed.filter((a) => a.fallbackRendered).map((a) => a.section))];
-    const result = {
-      ...base,
-      assertions,
-      missing,
-      fallbacks,
-      slate,
-      fingerprint: fingerprint2,
-      sameSlots,
-      ok: failed.length === 0,
-      skipped: propagating && failed.length > 0 ? "propagating" : null
-    };
-    if (propagating && failed.length > 0) {
-      result.ok = true;
-      result.message = `${failed.length} assertion(s) failing but the Sanity doc changed ${Math.round((now - updatedAt) / 6e4)} min ago, inside the propagation window, so not reporting`;
-      await persistLatestRenderTruth(result);
-      return result;
-    }
-    if (fileTickets) {
-      result.ticketIds = await fileRenderTruthTickets(failed, sameSlots, today, slate);
-      const changed = Object.keys(fingerprint2).filter(
-        (slot) => fingerprint2[slot] !== "" && !sameSlots.includes(slot)
-      );
-      await closeStaleSamenessTickets(changed, today);
-    }
-    await persistLatestRenderTruth(result);
-    return result;
-  } catch (err2) {
-    console.error("[render-truth] check failed (ignored)", err2);
-    return { ...base, message: `render-truth error: ${err2 instanceof Error ? err2.message : String(err2)}` };
-  }
-}
-async function fileRenderTruthTickets(failed, sameSlots, day, slate) {
-  const ids = [];
-  const bySection = /* @__PURE__ */ new Map();
-  for (const a of failed) {
-    const list = bySection.get(a.section) ?? [];
-    list.push(a);
-    bySection.set(a.section, list);
-  }
-  for (const [section, items] of bySection) {
-    const lines = items.map((a) => `- expected: ${a.expected}${a.detail ? ` (${a.detail})` : ""}`);
-    ids.push(
-      await fileDetectionTicket({
-        detector: "render-truth",
-        // Dated: a render break on a specific day's slate is a distinct
-        // incident from the same section breaking a week later.
-        dedupeKey: makeDedupeKey("render", section, day),
-        priority: 1,
-        category: "agents",
-        suggestion: `Render-truth FAILED on the homepage "${section}" slot (${day}).
-
-The merchandising team published content that is not reaching the live page. Published content that did not render:
-${lines.join("\n")}
-
-Payload block count: ${slate.publishedBlockCount}. Fix the publish-to-render path, then re-run /cron/homepage-healthcheck to confirm the markers appear.`,
-        links: [{ kind: "url", ref: `${siteOrigin()}/`, state: "failed" }]
-      })
-    );
-  }
-  for (const slot of sameSlots) {
-    ids.push(
-      await fileDetectionTicket({
-        detector: "render-truth",
-        // Undated: one open conversation until the slot actually changes.
-        dedupeKey: makeDedupeKey("sameness", slot),
-        priority: 3,
-        category: "agents",
-        kind: "process",
-        suggestion: `Homepage freshness: the "${slot}" slot is byte-identical to yesterday (${day}).
-
-The merchandise routine's freshness rule designates this slot as must-change daily. Two consecutive identical days means the run either reused the slot or never touched it. Check the daily run's art-director step and the slot's reuse-first default.`
-      })
-    );
-  }
-  return ids;
-}
-async function closeStaleSamenessTickets(changedSlots, day) {
-  if (changedSlots.length === 0) return;
-  try {
-    const { listSuggestions: listSuggestions2, transitionSuggestion: transitionSuggestion2 } = await Promise.resolve().then(() => (init_team_server(), team_server_exports));
-    const { makeDedupeKey: makeDedupeKey2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
-    const keys = changedSlots.map((s) => makeDedupeKey2("sameness", s));
-    const open = await listSuggestions2({
-      dedupeKeys: keys,
-      kinds: ["process"],
-      statuses: ["proposed", "approved"]
-    });
-    const note = `Resolved ${day}: the slot changed, so the freshness rule is satisfied. Closed automatically by /cron/homepage-healthcheck.`;
-    const closed = [];
-    for (const row of open) {
-      try {
-        await transitionSuggestion2(row.id, "applied", "system", { note });
-        closed.push(row.id);
-      } catch (err2) {
-        if (String(err2).includes("409")) continue;
-        console.warn(`[render-truth] could not close sameness ticket #${row.id} (ignored)`, err2);
-      }
-    }
-    if (closed.length > 0) {
-      console.log(`[render-truth] closed ${closed.length} resolved sameness ticket(s): ${closed.map((id) => `#${id}`).join(", ")}`);
-    }
-  } catch (err2) {
-    console.warn("[render-truth] sameness ticket close failed (ignored)", err2);
-  }
-}
-async function openHealthcheckIssue(title, body) {
-  const token = process.env["GITHUB_TOKEN"];
-  const owner = process.env["GITHUB_OWNER"];
-  const repo = process.env["GITHUB_REPO"];
-  if (!token || !owner || !repo) {
-    console.warn("[homepage-healthcheck] GITHUB_TOKEN/OWNER/REPO not set \u2014 skipping issue");
-    return { url: null, created: false };
-  }
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "Content-Type": "application/json"
-  };
-  try {
-    const q = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open in:title "${title}"`);
-    const search = await fetch(`https://api.github.com/search/issues?q=${q}`, { headers });
-    const existing = search.ok ? ((await search.json()).items ?? [])[0] : void 0;
-    if (existing) {
-      await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${existing.number}/comments`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ body })
-      });
-      return { url: existing.html_url, created: false };
-    }
-    const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ title, body, labels: ["healthcheck", "P0"] })
-    });
-    if (!create.ok) {
-      console.error(`[homepage-healthcheck] issue create ${create.status}`);
-      return { url: null, created: false };
-    }
-    return { url: (await create.json()).html_url, created: true };
-  } catch (err2) {
-    console.error("[homepage-healthcheck] issue error", err2);
-    return { url: null, created: false };
-  }
-}
-async function runHomepageHealthcheck() {
-  const checks = await Promise.all(
-    PATHS.map((p) => checkPage(p, p === "/" ? { captureHtml: true } : {}))
-  );
-  const healthy = checks.every((c) => c.ok);
-  const home = checks.find((c) => c.path === "/");
-  const homeHtml = home?.html;
-  for (const c of checks) delete c.html;
-  const rt = await renderTruth({ html: homeHtml });
-  if (!rt.ok) {
-    Sentry.captureException(
-      new Error(`Homepage render-truth failed. Missing: ${rt.missing.join(" | ")}`),
-      {
-        tags: { healthcheck: "render-truth", severity: "P1" },
-        extra: {
-          missing: rt.missing,
-          fallbacks: rt.fallbacks,
-          slate: rt.slate,
-          tickets: rt.ticketIds
-        }
-      }
-    );
-  }
-  if (home?.bodyOk) {
-    try {
-      const doc = await getHomepageDocRaw();
-      if (doc) await kvSet(LAST_GOOD_KEY, doc);
-    } catch (err2) {
-      console.warn("[homepage-healthcheck] last-good snapshot failed", err2);
-    }
-  }
-  if (healthy) {
-    return {
-      ok: rt.ok,
-      checks,
-      action: "snapshot",
-      rolledBack: false,
-      alerted: !rt.ok,
-      renderTruth: rt,
-      ...rt.ok ? {} : { message: `render-truth failed: ${rt.missing.join(" | ")}` }
-    };
-  }
-  const failed = checks.filter((c) => !c.ok);
-  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
-  const homeHardBroken = !!home?.hardFail;
-  const result = {
-    ok: false,
-    checks,
-    action: homeHardBroken ? "rollback" : "alert",
-    rolledBack: false,
-    alerted: false,
-    renderTruth: rt
-  };
-  if (homeHardBroken) {
-    try {
-      const lastGood = await kvGet(LAST_GOOD_KEY);
-      const valid = !!lastGood && lastGood["_type"] === "homepageSections" && Array.isArray(lastGood["sections"]);
-      if (valid) {
-        await Promise.all([
-          invalidateHomepagePayloadA().catch(() => {
-          }),
-          invalidateHomepagePayloadB().catch(() => {
-          })
-        ]);
-        invalidateCmsCache();
-        await restoreHomepageDoc(lastGood);
-        const servedVariant = await activeServedVariant();
-        if (servedVariant === "b") {
-          const { warmHomepagePayloadB: warmHomepagePayloadB2 } = await Promise.resolve().then(() => (init_storefront_home_server(), storefront_home_server_exports));
-          await warmHomepagePayloadB2({ force: true }).catch(
-            (e) => console.error("[homepage-healthcheck] storefront payload rewarm failed", e)
-          );
-        } else {
-          await warmHomepagePayloadA({ force: true }).catch(
-            (e) => console.error("[homepage-healthcheck] payload rewarm failed", e)
-          );
-        }
-        result.rolledBack = true;
-      } else {
-        result.message = lastGood ? "last-good snapshot is malformed \u2014 skipping rollback" : "no last-good snapshot available to roll back to";
-      }
-    } catch (err2) {
-      result.message = `rollback failed: ${err2 instanceof Error ? err2.message : String(err2)}`;
-    }
-  } else if (home && !home.ok) {
-    result.message = "homepage returned 200 but tripped render heuristics \u2014 not a Sanity-content failure; alerting without rollback";
-  } else {
-    result.message = "non-homepage page unhealthy; no homepage rollback applicable";
-  }
-  const isP0 = homeHardBroken || result.rolledBack;
-  Sentry.captureException(
-    new Error(`Homepage healthcheck ${isP0 ? "failed" : "soft-degraded"} \u2014 ${summary}`),
-    {
-      tags: { healthcheck: "homepage", severity: isP0 ? "P0" : "P2" },
-      extra: { checks, rolledBack: result.rolledBack, note: result.message }
-    }
-  );
-  result.alerted = true;
-  if (isP0) {
-    const issueBody = [
-      `Homepage healthcheck failed against ${siteOrigin()}.`,
-      "",
-      "**Problems**",
-      summary,
-      "",
-      `**Auto-recovery:** ${result.rolledBack ? "rolled the Sanity homepage doc back to last-good and re-warmed the payload for the live variant." : result.message ?? "none"}`,
-      "",
-      "_Filed automatically by `/cron/homepage-healthcheck`._"
-    ].join("\n");
-    const issue = await openHealthcheckIssue("[P0] Homepage healthcheck failing", issueBody);
-    if (issue.url) result.message = `${result.message ? result.message + " \xB7 " : ""}issue: ${issue.url}`;
-    if (issue.created) {
-      const { sendOwnerSms: sendOwnerSms2, sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
-      await sendOwnerSms2(`xdipx P0: homepage healthcheck failing. ${summary}`);
-      await sendOwnerEmail2(
-        "[P0] xdipx homepage healthcheck failing",
-        `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml2(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ""}`
-      );
-    }
-  }
-  return result;
-}
-var LAST_GOOD_KEY, PATHS, FETCH_TIMEOUT_MS, MIN_BODY_BYTES, MAX_ATTEMPTS2, RETRY_BACKOFF_MS2, RENDER_TRUTH_PROPAGATION_MS, RENDER_TRUTH_MAX_ATTEMPTS, RENDER_TRUTH_RETRY_BACKOFF_MS, RENDERED_TEAM_RAILS, FINGERPRINT_KEY_PREFIX, RENDER_TRUTH_LATEST_KEY, FALLBACK_MARKERS, ENTITIES;
-var init_homepage_healthcheck_server = __esm({
-  "app/lib/homepage-healthcheck.server.ts"() {
-    "use strict";
-    init_sentry_server();
-    init_kv_server();
-    init_sanity_server();
-    init_homepage_payload_server();
-    init_detection_tickets_server();
-    LAST_GOOD_KEY = "homepage:healthcheck:lastgood";
-    PATHS = ["/", "/discover"];
-    FETCH_TIMEOUT_MS = 12e3;
-    MIN_BODY_BYTES = 1e3;
-    MAX_ATTEMPTS2 = 3;
-    RETRY_BACKOFF_MS2 = 1500;
-    RENDER_TRUTH_PROPAGATION_MS = 30 * 6e4;
-    RENDER_TRUTH_MAX_ATTEMPTS = 3;
-    RENDER_TRUTH_RETRY_BACKOFF_MS = 2e3;
-    RENDERED_TEAM_RAILS = 4;
-    FINGERPRINT_KEY_PREFIX = "homepage:render-truth:fingerprint";
-    RENDER_TRUTH_LATEST_KEY = "homepage:render-truth:latest";
-    FALLBACK_MARKERS = {
-      wayfinder: "Find your way in.",
-      couples: "Better together.",
-      rails: "Emma's edit"
-    };
-    ENTITIES = {
-      amp: "&",
-      lt: "<",
-      gt: ">",
-      quot: '"',
-      apos: "'",
-      nbsp: " ",
-      hellip: "\u2026",
-      mdash: "-",
-      ndash: "-"
-    };
-  }
-});
-
-// app/lib/category-healthcheck.server.ts
-var category_healthcheck_server_exports = {};
-__export(category_healthcheck_server_exports, {
-  CATEGORY_HEALTH_LATEST_KEY: () => CATEGORY_HEALTH_LATEST_KEY,
-  runCategoryHealthcheck: () => runCategoryHealthcheck
-});
-async function persistLatest(result) {
-  try {
-    await kvSet(CATEGORY_HEALTH_LATEST_KEY, { ...result, at: (/* @__PURE__ */ new Date()).toISOString() });
-  } catch (err2) {
-    console.warn("[category-healthcheck] latest snapshot failed", err2);
-  }
-}
-function siteOrigin2() {
-  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
-  return base.replace(/\/$/, "") || "https://xdipx.com";
-}
-function countJsonLdType(html, type) {
-  let count = 0;
-  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    try {
-      const json2 = JSON.parse((m[1] ?? "").trim());
-      const t = json2["@type"];
-      if (t === type || Array.isArray(t) && t.includes(type)) count += 1;
-    } catch {
-    }
-  }
-  return count;
-}
-async function checkPageOnce2(exp, attempt) {
-  const bust = `__healthcheck=${Date.now()}-${attempt}`;
-  const url = `${siteOrigin2()}${exp.path}${exp.path.includes("?") ? "&" : "?"}${bust}`;
-  const problems = [];
-  let status = 0;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS2);
-    const res = await fetch(url, {
-      headers: { "user-agent": "xdipx-category-healthcheck" },
-      signal: ctrl.signal
-    }).finally(() => clearTimeout(timer));
-    status = res.status;
-    const body = await res.text();
-    if (status !== 200) problems.push(`HTTP ${status}`);
-    if (body.length < MIN_BODY_BYTES2) problems.push(`body too small (${body.length} bytes)`);
-    if (!/<\/html>/i.test(body)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
-    for (const marker of exp.markers) {
-      if (!body.includes(marker)) {
-        problems.push(`missing ${marker} (merchandised layer not rendering \u2014 fallback served)`);
-      }
-    }
-    if (exp.surface !== "deck") {
-      const faqNodes = countJsonLdType(body, "FAQPage");
-      if (faqNodes > 1) problems.push(`${faqNodes} FAQPage JSON-LD nodes (must dedupe to one)`);
-    }
-  } catch (err2) {
-    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
-  }
-  return { path: exp.path, surface: exp.surface, status, ok: problems.length === 0, problems, hardFail: status >= 500 };
-}
-async function checkPage2(exp) {
-  let best = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS3; attempt++) {
-    const c = await checkPageOnce2(exp, attempt);
-    if (c.ok) return c;
-    if (!best || c.problems.length < best.problems.length) best = c;
-    if (attempt < MAX_ATTEMPTS3) {
-      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS3));
-    }
-  }
-  return best;
-}
-async function fetchLiveDocs() {
-  const client5 = getClient(false);
-  if (!client5) return { categories: [], drops: [] };
-  try {
-    const rows = await client5.fetch(
-      `{
-        "categories": *[_type == "categoryPage" && status == "live"].shopifyCollectionHandle,
-        "drops": *[_type == "dropPage" && status == "live"].routeKey,
-      }`
-    );
-    return {
-      categories: (rows?.categories ?? []).filter((h) => typeof h === "string" && h.length > 0),
-      drops: (rows?.drops ?? []).filter((r) => r === "new" || r === "on-sale")
-    };
-  } catch (err2) {
-    console.error("[category-healthcheck] live-doc query failed:", err2);
-    return { categories: [], drops: [] };
-  }
-}
-async function runCategoryHealthcheck() {
-  const { categories, drops } = await fetchLiveDocs();
-  const expectations = [
-    ...categories.map((handle) => ({
-      path: `/collections/${handle}`,
-      surface: "category",
-      markers: ['data-block="categoryMasthead"']
-    })),
-    ...drops.map((routeKey) => ({
-      path: routeKey === "new" ? "/new" : "/collections/on-sale",
-      surface: "drop",
-      markers: ['data-block="dropMasthead"']
-    }))
-  ];
-  try {
-    const payload = await readHomepagePayloadB();
-    const deckPlaced = (payload?.layout?.sections ?? []).some(
-      (s) => s._type === "panelDeckSection" && s.enabled !== false
-    );
-    if (payload?.panelDeck && deckPlaced) {
-      expectations.push({
-        // ?variant=b pins the storefront render so the assertion holds whatever
-        // the served default is mid-rollout.
-        path: "/?variant=b",
-        surface: "deck",
-        markers: ["data-panel="]
-      });
-    }
-  } catch (err2) {
-    console.warn("[category-healthcheck] payload read failed (deck check skipped):", err2);
-  }
-  const liveDocs = categories.length + drops.length;
-  if (expectations.length === 0) {
-    const empty = { ok: true, liveDocs, checks: [], alerted: false };
-    await persistLatest(empty);
-    return empty;
-  }
-  const checks = await Promise.all(expectations.map(checkPage2));
-  const healthy = checks.every((c) => c.ok);
-  if (healthy) {
-    const green = { ok: true, liveDocs, checks, alerted: false };
-    await persistLatest(green);
-    return green;
-  }
-  const failed = checks.filter((c) => !c.ok);
-  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
-  const hard = failed.some((c) => c.hardFail);
-  Sentry.captureException(
-    new Error(`Category healthcheck ${hard ? "failed" : "soft-degraded"} \u2014 ${summary}`),
-    {
-      tags: { healthcheck: "category-pages", severity: hard ? "P1" : "P3" },
-      extra: { checks }
-    }
-  );
-  const result = { ok: false, liveDocs, checks, alerted: true };
-  try {
-    const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2, priorityFromSeverity: priorityFromSeverity2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
-    result.ticketsFiled = [];
-    for (const c of failed) {
-      result.ticketsFiled.push(
-        await fileDetectionTicket2({
-          detector: "category-healthcheck",
-          dedupeKey: makeDedupeKey2("category-page", c.path),
-          priority: priorityFromSeverity2(c.hardFail ? "P1" : "P3"),
-          category: "other",
-          kind: "code",
-          suggestion: `Merchandised-page healthcheck failing on ${c.path} (HTTP ${c.status}).
-
-Problems:
-${c.problems.map((p) => `- ${p}`).join("\n")}
-
-Detected inside /cron/homepage-healthcheck against ${siteOrigin2()}. If the masthead marker is missing, the live Sanity doc is not reaching the page: check the category resolver logs, then the doc itself. Unpublishing the doc (status back to draft) is the rollback. Re-run the cron to confirm.`,
-          links: [{ kind: "url", ref: `${siteOrigin2()}${c.path}`, state: "failed" }]
-        })
-      );
-    }
-  } catch (err2) {
-    console.error("[category-healthcheck] ticket filing failed (ignored):", err2);
-  }
-  await persistLatest(result);
-  return result;
-}
-var CATEGORY_HEALTH_LATEST_KEY, FETCH_TIMEOUT_MS2, MIN_BODY_BYTES2, MAX_ATTEMPTS3, RETRY_BACKOFF_MS3;
-var init_category_healthcheck_server = __esm({
-  "app/lib/category-healthcheck.server.ts"() {
-    "use strict";
-    init_sentry_server();
-    init_sanity_server();
-    init_homepage_payload_server();
-    init_kv_server();
-    CATEGORY_HEALTH_LATEST_KEY = "category-pages:healthcheck:latest";
-    FETCH_TIMEOUT_MS2 = 12e3;
-    MIN_BODY_BYTES2 = 1e3;
-    MAX_ATTEMPTS3 = 3;
-    RETRY_BACKOFF_MS3 = 1500;
-  }
-});
-
-// app/lib/notebook-healthcheck.server.ts
-var notebook_healthcheck_server_exports = {};
-__export(notebook_healthcheck_server_exports, {
-  runNotebookHealthcheck: () => runNotebookHealthcheck
-});
-function siteOrigin3() {
-  const base = process.env["BASE_URL"] || (process.env["VERCEL_URL"] ? `https://${process.env["VERCEL_URL"]}` : "");
-  return base.replace(/\/$/, "") || "https://xdipx.com";
-}
-function extractJsonLd2(html) {
-  let parsed = 0;
-  let scripts = 0;
-  const types = [];
-  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    scripts += 1;
-    try {
-      const json2 = JSON.parse((m[1] ?? "").trim());
-      parsed += 1;
-      const t = json2["@type"];
-      if (typeof t === "string") types.push(t);
-      else if (Array.isArray(t)) types.push(...t);
-    } catch {
-    }
-  }
-  return { parsed, scripts, types };
-}
-async function checkPageOnce3(exp, attempt) {
-  const bust = `__healthcheck=${Date.now()}-${attempt}`;
-  const url = `${siteOrigin3()}${exp.path}${exp.path.includes("?") ? "&" : "?"}${bust}`;
-  const problems = [];
-  let status = 0;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS3);
-    const res = await fetch(url, {
-      headers: { "user-agent": "xdipx-notebook-healthcheck" },
-      signal: ctrl.signal
-    }).finally(() => clearTimeout(timer));
-    status = res.status;
-    const body = await res.text();
-    if (status !== 200) problems.push(`HTTP ${status}`);
-    if (exp.markdown) {
-      const ct = res.headers.get("content-type") ?? "";
-      if (!ct.includes("text/markdown")) problems.push(`content-type "${ct}" is not text/markdown`);
-      if (body.length < 200) problems.push(`markdown body too small (${body.length} bytes)`);
-    } else {
-      if (body.length < MIN_BODY_BYTES3) problems.push(`body too small (${body.length} bytes)`);
-      if (!/<img[\s>]/i.test(body)) problems.push("no <img> (hero/card images likely missing)");
-      if (!/<\/html>/i.test(body)) problems.push("truncated HTML (no </html> \u2014 stream cut off)");
-      const { parsed, scripts, types } = extractJsonLd2(body);
-      if (parsed === 0) problems.push("no valid JSON-LD");
-      else if (parsed < scripts) problems.push(`malformed JSON-LD (${scripts - parsed} unparseable)`);
-      if (exp.expectType && !types.includes(exp.expectType)) {
-        problems.push(`JSON-LD missing @type ${exp.expectType}`);
-      }
-    }
-  } catch (err2) {
-    problems.push(`fetch error: ${err2 instanceof Error ? err2.message : String(err2)}`);
-  }
-  return { path: exp.path, status, ok: problems.length === 0, problems, hardFail: status >= 500 };
-}
-async function checkPage3(exp) {
-  let best = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS4; attempt++) {
-    const c = await checkPageOnce3(exp, attempt);
-    if (c.ok) return c;
-    if (!best || c.problems.length < best.problems.length) best = c;
-    if (attempt < MAX_ATTEMPTS4) {
-      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS4));
-    }
-  }
-  return best;
-}
-async function openHealthcheckIssue2(title, body) {
-  const token = process.env["GITHUB_TOKEN"];
-  const owner = process.env["GITHUB_OWNER"];
-  const repo = process.env["GITHUB_REPO"];
-  if (!token || !owner || !repo) {
-    console.warn("[notebook-healthcheck] GITHUB_TOKEN/OWNER/REPO not set \u2014 skipping issue");
-    return { url: null, created: false };
-  }
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "Content-Type": "application/json"
-  };
-  try {
-    const q = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open in:title "${title}"`);
-    const search = await fetch(`https://api.github.com/search/issues?q=${q}`, { headers });
-    const existing = search.ok ? ((await search.json()).items ?? [])[0] : void 0;
-    if (existing) {
-      await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${existing.number}/comments`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ body })
-      });
-      return { url: existing.html_url, created: false };
-    }
-    const create = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ title, body, labels: ["healthcheck", "P1"] })
-    });
-    if (!create.ok) {
-      console.error(`[notebook-healthcheck] issue create ${create.status}`);
-      return { url: null, created: false };
-    }
-    return { url: (await create.json()).html_url, created: true };
-  } catch (err2) {
-    console.error("[notebook-healthcheck] issue error", err2);
-    return { url: null, created: false };
-  }
-}
-async function runNotebookHealthcheck() {
-  const [posts, categories] = await Promise.all([
-    getBlogPostsForSitemap().catch(() => []),
-    getBlogCategories().catch(() => [])
-  ]);
-  const latestSlug = posts[0]?.slug;
-  const categorySlug = categories[0]?.slug;
-  const expectations = [
-    { path: "/notebook", expectType: "ItemList" },
-    ...latestSlug ? [
-      { path: `/notebook/${latestSlug}`, expectType: "BlogPosting" },
-      { path: `/notebook/${latestSlug}.md`, markdown: true }
-    ] : [],
-    ...categorySlug ? [{ path: `/notebook/category/${categorySlug}` }] : []
-  ];
-  const checks = await Promise.all(expectations.map(checkPage3));
-  const healthy = checks.every((c) => c.ok);
-  if (healthy) {
-    return { ok: true, checks, alerted: false };
-  }
-  const failed = checks.filter((c) => !c.ok);
-  const summary = failed.map((c) => `${c.path}: ${c.problems.join("; ")}`).join(" | ");
-  const hard = failed.some((c) => c.hardFail);
-  Sentry.captureException(
-    new Error(`Notebook healthcheck ${hard ? "failed" : "soft-degraded"} \u2014 ${summary}`),
-    {
-      tags: { healthcheck: "notebook", severity: hard ? "P1" : "P3" },
-      extra: { checks }
-    }
-  );
-  const result = { ok: false, checks, alerted: true };
-  try {
-    const { fileDetectionTicket: fileDetectionTicket2, makeDedupeKey: makeDedupeKey2, priorityFromSeverity: priorityFromSeverity2 } = await Promise.resolve().then(() => (init_detection_tickets_server(), detection_tickets_server_exports));
-    result.ticketsFiled = [];
-    for (const c of failed) {
-      result.ticketsFiled.push(
-        await fileDetectionTicket2({
-          detector: "notebook-healthcheck",
-          dedupeKey: makeDedupeKey2("notebook", c.path),
-          priority: priorityFromSeverity2(c.hardFail ? "P1" : "P3"),
-          category: "other",
-          kind: "code",
-          suggestion: `Notebook healthcheck failing on ${c.path} (HTTP ${c.status}).
-
-Problems:
-${c.problems.map((p) => `- ${p}`).join("\n")}
-
-Detected by /cron/notebook-healthcheck against ${siteOrigin3()}. Fix the page, then re-run the cron to confirm it renders with images and valid JSON-LD.`,
-          links: [{ kind: "url", ref: `${siteOrigin3()}${c.path}`, state: "failed" }]
-        })
-      );
-    }
-  } catch (err2) {
-    console.error("[notebook-healthcheck] ticket filing failed (ignored):", err2);
-  }
-  if (hard) {
-    const issueBody = [
-      `Notebook healthcheck failed against ${siteOrigin3()}.`,
-      "",
-      "**Problems**",
-      summary,
-      "",
-      "_Report-only check (no auto-recovery). Filed automatically by `/cron/notebook-healthcheck`._"
-    ].join("\n");
-    const issue = await openHealthcheckIssue2("[P1] Notebook healthcheck failing", issueBody);
-    if (issue.url) result.message = `issue: ${issue.url}`;
-    if (issue.created) {
-      const { sendOwnerEmail: sendOwnerEmail2, escapeHtml: escapeHtml2 } = await Promise.resolve().then(() => (init_owner_alerts_server(), owner_alerts_server_exports));
-      await sendOwnerEmail2(
-        "[P1] xdipx notebook healthcheck failing",
-        `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml2(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ""}`
-      );
-    }
-  }
-  return result;
-}
-var FETCH_TIMEOUT_MS3, MIN_BODY_BYTES3, MAX_ATTEMPTS4, RETRY_BACKOFF_MS4;
-var init_notebook_healthcheck_server = __esm({
-  "app/lib/notebook-healthcheck.server.ts"() {
-    "use strict";
-    init_sentry_server();
-    init_sanity_server();
-    FETCH_TIMEOUT_MS3 = 12e3;
-    MIN_BODY_BYTES3 = 1e3;
-    MAX_ATTEMPTS4 = 3;
-    RETRY_BACKOFF_MS4 = 1500;
-  }
-});
-
-// app/lib/profit.server.ts
-var profit_server_exports = {};
-__export(profit_server_exports, {
-  accumulateOrders: () => accumulateOrders,
-  computeProfitForDate: () => computeProfitForDate,
-  costLineItem: () => costLineItem,
-  costsFromOrderMetafields: () => costsFromOrderMetafields,
-  deleteSeedProfitRows: () => deleteSeedProfitRows,
-  getDashboardStats: () => getDashboardStats,
-  getProfitReconciliation: () => getProfitReconciliation,
-  getProfitRows: () => getProfitRows,
-  nextUtcDate: () => nextUtcDate,
-  ordersSearchQuery: () => ordersSearchQuery,
-  writeProfitSummary: () => writeProfitSummary,
-  yesterdayUtc: () => yesterdayUtc
-});
-import { and as and4, eq as eq12, gte as gte2, like, lt as lt2, sql as sql5 } from "drizzle-orm";
-function yesterdayUtc(now = Date.now()) {
-  return new Date(now - 864e5).toISOString().slice(0, 10);
-}
-function nextUtcDate(date2) {
-  return new Date((/* @__PURE__ */ new Date(`${date2}T00:00:00Z`)).getTime() + 864e5).toISOString().slice(0, 10);
-}
-function ordersSearchQuery(date2) {
-  return `created_at:>='${date2}T00:00:00Z' created_at:<'${nextUtcDate(date2)}T00:00:00Z' financial_status:paid status:any`;
-}
-function costsFromOrderMetafields(metafields) {
-  const out = /* @__PURE__ */ new Map();
-  for (const mf of metafields) {
-    if (!mf.key.startsWith("profit_")) continue;
-    const sku = mf.key.slice("profit_".length);
-    if (!sku) continue;
-    try {
-      const parsed = JSON.parse(mf.value);
-      const cost = Number(parsed.wholesale_cost);
-      if (Number.isFinite(cost) && cost > 0) out.set(sku, cost);
-    } catch {
-    }
-  }
-  return out;
-}
-function costLineItem(line, orderCosts) {
-  const qty = Number.isFinite(line.quantity) && line.quantity > 0 ? line.quantity : 0;
-  if (qty === 0) return { cost: 0, source: "none" };
-  const fromOrder = line.sku ? orderCosts.get(line.sku) : void 0;
-  if (fromOrder !== void 0 && fromOrder > 0) {
-    return { cost: fromOrder * qty, source: "order-metafield" };
-  }
-  const unit = Number(line.variant?.inventoryItem?.unitCost?.amount);
-  if (Number.isFinite(unit) && unit > 0) {
-    return { cost: unit * qty, source: "inventory-item" };
-  }
-  return { cost: null, source: "none" };
-}
-function accumulateOrders(orders, into) {
-  const t = { ...into };
-  for (const order of orders) {
-    t.totalOrders += 1;
-    const revenue = Number(order.totalPriceSet?.shopMoney?.amount ?? "0");
-    if (Number.isFinite(revenue)) t.totalRevenue += revenue;
-    const orderCosts = costsFromOrderMetafields(order.metafields?.nodes ?? []);
-    for (const line of order.lineItems?.nodes ?? []) {
-      const { cost } = costLineItem(line, orderCosts);
-      if (cost === null) {
-        t.cogsMissingUnits += Math.max(0, line.quantity);
-      } else {
-        t.totalCogs += cost;
-      }
-    }
-  }
-  t.totalProfit = t.totalRevenue - t.totalCogs;
-  t.avgOrderValue = t.totalOrders > 0 ? t.totalRevenue / t.totalOrders : 0;
-  return t;
-}
-async function computeProfitForDate(date2) {
-  const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
-  const search = ordersSearchQuery(date2);
-  let totals = { ...EMPTY_TOTALS };
-  let cursor = null;
-  do {
-    const page = await adminGraphQL2(ORDERS_QUERY2, {
-      query: search,
-      first: ORDERS_PAGE,
-      after: cursor
-    });
-    totals = accumulateOrders(page.orders.nodes ?? [], totals);
-    cursor = page.orders.pageInfo?.hasNextPage ? page.orders.pageInfo.endCursor ?? null : null;
-  } while (cursor !== null);
-  return totals;
-}
-async function writeProfitSummary(targetDate) {
-  const date2 = targetDate ?? yesterdayUtc();
-  const totals = await computeProfitForDate(date2);
-  await db.insert(dailyProfitSummary).values({
-    summaryDate: date2,
-    totalOrders: totals.totalOrders,
-    totalRevenue: totals.totalRevenue.toFixed(2),
-    totalCogs: totals.totalCogs.toFixed(2),
-    totalProfit: totals.totalProfit.toFixed(2),
-    avgOrderValue: totals.avgOrderValue.toFixed(2),
-    cogsMissingUnits: totals.cogsMissingUnits
-  }).onConflictDoUpdate({
-    target: dailyProfitSummary.summaryDate,
-    set: {
-      totalOrders: sql5`excluded.total_orders`,
-      totalRevenue: sql5`excluded.total_revenue`,
-      totalCogs: sql5`excluded.total_cogs`,
-      totalProfit: sql5`excluded.total_profit`,
-      avgOrderValue: sql5`excluded.avg_order_value`,
-      cogsMissingUnits: sql5`excluded.cogs_missing_units`
-    }
-  });
-  return totals;
-}
-async function getProfitReconciliation(date2) {
-  const day = date2 ?? yesterdayUtc();
-  const { adminGraphQL: adminGraphQL2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
-  const counted = await adminGraphQL2(
-    `query ProfitReconcile($query: String!) { ordersCount(query: $query, limit: 10000) { count } }`,
-    { query: ordersSearchQuery(day) }
-  );
-  const [row] = await db.select({
-    totalOrders: dailyProfitSummary.totalOrders,
-    cogsMissingUnits: dailyProfitSummary.cogsMissingUnits
-  }).from(dailyProfitSummary).where(eq12(dailyProfitSummary.summaryDate, day)).limit(1);
-  const shopifyPaidOrders = counted.ordersCount?.count ?? 0;
-  const summaryOrders = row ? row.totalOrders ?? 0 : null;
-  return {
-    date: day,
-    shopifyPaidOrders,
-    summaryOrders,
-    summaryExists: !!row,
-    match: !!row && summaryOrders === shopifyPaidOrders,
-    cogsMissingUnits: row?.cogsMissingUnits ?? 0
-  };
-}
-async function deleteSeedProfitRows() {
-  const deleted = await db.delete(dailyProfitSummary).where(like(dailyProfitSummary.featuredSku, "SEED-%")).returning({ date: dailyProfitSummary.summaryDate });
-  return deleted.length;
-}
-async function getDashboardStats(days = 30) {
-  const rows = await db.select().from(dailyProfitSummary).orderBy(sql5`${dailyProfitSummary.summaryDate} DESC`).limit(days);
-  const total2 = rows.reduce((acc, r) => ({
-    revenue: acc.revenue + parseFloat(r.totalRevenue ?? "0"),
-    profit: acc.profit + parseFloat(r.totalProfit ?? "0"),
-    orders: acc.orders + (r.totalOrders ?? 0)
-  }), { revenue: 0, profit: 0, orders: 0 });
-  return { rows, total: total2 };
-}
-async function getProfitRows(fromDate, toDate) {
-  return db.select().from(dailyProfitSummary).where(and4(
-    gte2(dailyProfitSummary.summaryDate, fromDate),
-    lt2(dailyProfitSummary.summaryDate, nextUtcDate(toDate))
-  )).orderBy(dailyProfitSummary.summaryDate);
-}
-var ORDERS_PAGE, ORDERS_QUERY2, EMPTY_TOTALS;
-var init_profit_server = __esm({
-  "app/lib/profit.server.ts"() {
-    "use strict";
-    init_db_server();
-    init_schema();
-    ORDERS_PAGE = 50;
-    ORDERS_QUERY2 = `
-  query ProfitOrders($query: String!, $first: Int!, $after: String) {
-    orders(first: $first, after: $after, query: $query) {
-      nodes {
-        id
-        name
-        createdAt
-        totalPriceSet { shopMoney { amount } }
-        metafields(first: 25, namespace: "xdipx") { nodes { key value } }
-        lineItems(first: 50) {
-          nodes {
-            sku
-            quantity
-            variant { id inventoryItem { unitCost { amount } } }
-          }
-        }
-      }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-`;
-    EMPTY_TOTALS = {
-      totalOrders: 0,
-      totalRevenue: 0,
-      totalCogs: 0,
-      totalProfit: 0,
-      avgOrderValue: 0,
-      cogsMissingUnits: 0
-    };
-  }
-});
-
-// app/lib/reviews.server.ts
-var reviews_server_exports = {};
-__export(reviews_server_exports, {
-  createInvite: () => createInvite,
-  createReview: () => createReview,
-  deleteReview: () => deleteReview,
-  getAdminReviewQueue: () => getAdminReviewQueue,
-  getDueScheduledInvites: () => getDueScheduledInvites,
-  getInviteByToken: () => getInviteByToken,
-  getInviteStats: () => getInviteStats,
-  getPaginatedInvites: () => getPaginatedInvites,
-  getPendingReminderInvites: () => getPendingReminderInvites,
-  getProductAggregate: () => getProductAggregate,
-  getProductReviews: () => getProductReviews,
-  getProductsWithReviews: () => getProductsWithReviews,
-  getReviewById: () => getReviewById,
-  getReviewSettings: () => getReviewSettings,
-  getReviewStats: () => getReviewStats,
-  getReviewsForExport: () => getReviewsForExport,
-  getReviewsPerDay: () => getReviewsPerDay,
-  markInviteClicked: () => markInviteClicked,
-  markInviteOpened: () => markInviteOpened,
-  markInviteSent: () => markInviteSent,
-  markReminderSent: () => markReminderSent,
-  updateReviewAI: () => updateReviewAI,
-  updateReviewFeatured: () => updateReviewFeatured,
-  updateReviewReply: () => updateReviewReply,
-  updateReviewSettings: () => updateReviewSettings,
-  updateReviewStatus: () => updateReviewStatus,
-  voteHelpful: () => voteHelpful
-});
-import { neon as neon2 } from "@neondatabase/serverless";
-function rowToReview(row) {
-  return {
-    id: row["id"],
-    shopifyProductId: row["shopify_product_id"],
-    shopifyOrderId: row["shopify_order_id"] ?? null,
-    shopifyCustomerId: row["shopify_customer_id"] ?? null,
-    reviewerName: row["reviewer_name"],
-    reviewerEmail: row["reviewer_email"],
-    rating: row["rating"],
-    title: row["title"] ?? null,
-    body: row["body"] ?? null,
-    status: row["status"],
-    isVerifiedPurchase: row["is_verified_purchase"],
-    isFeatured: row["is_featured"],
-    isIncentivized: row["is_incentivized"],
-    helpfulYes: row["helpful_yes"],
-    helpfulNo: row["helpful_no"],
-    aiSentiment: row["ai_sentiment"] ?? null,
-    aiSummary: row["ai_summary"] ?? null,
-    aiSpamScore: row["ai_spam_score"] != null ? parseFloat(row["ai_spam_score"]) : null,
-    moderationNote: row["moderation_note"] ?? null,
-    moderatedBy: row["moderated_by"] ?? null,
-    moderatedAt: row["moderated_at"] ? new Date(row["moderated_at"]).toISOString() : null,
-    replyBody: row["reply_body"] ?? null,
-    replyAt: row["reply_at"] ? new Date(row["reply_at"]).toISOString() : null,
-    source: row["source"],
-    inviteToken: row["invite_token"] ?? null,
-    inviteTokenUsedAt: row["invite_token_used_at"] ? new Date(row["invite_token_used_at"]).toISOString() : null,
-    ipAddress: row["ip_address"] ?? null,
-    userAgent: row["user_agent"] ?? null,
-    createdAt: new Date(row["created_at"]).toISOString(),
-    updatedAt: new Date(row["updated_at"]).toISOString()
-  };
-}
-function rowToMedia(row) {
-  return {
-    id: row["id"],
-    reviewId: row["review_id"],
-    mediaType: row["media_type"],
-    url: row["url"],
-    thumbnailUrl: row["thumbnail_url"] ?? null,
-    sortOrder: row["sort_order"],
-    createdAt: new Date(row["created_at"]).toISOString()
-  };
-}
-function rowToAttributeRating(row) {
-  return {
-    id: row["id"],
-    reviewId: row["review_id"],
-    attributeName: row["attribute_name"],
-    rating: row["rating"]
-  };
-}
-function rowToAggregate(row) {
-  return {
-    shopifyProductId: row["shopify_product_id"],
-    totalCount: row["total_count"],
-    approvedCount: row["approved_count"],
-    averageRating: parseFloat(row["average_rating"]),
-    rating1Count: row["rating_1_count"],
-    rating2Count: row["rating_2_count"],
-    rating3Count: row["rating_3_count"],
-    rating4Count: row["rating_4_count"],
-    rating5Count: row["rating_5_count"],
-    verifiedCount: row["verified_count"],
-    withPhotoCount: row["with_photo_count"],
-    lastUpdated: new Date(row["last_updated"]).toISOString()
-  };
-}
-function rowToInvite(row) {
-  return {
-    id: row["id"],
-    shopifyOrderId: row["shopify_order_id"],
-    shopifyCustomerId: row["shopify_customer_id"] ?? null,
-    shopifyProductId: row["shopify_product_id"],
-    reviewerEmail: row["reviewer_email"],
-    reviewerName: row["reviewer_name"],
-    inviteToken: row["invite_token"],
-    sentAt: new Date(row["sent_at"]).toISOString(),
-    openedAt: row["opened_at"] ? new Date(row["opened_at"]).toISOString() : null,
-    clickedAt: row["clicked_at"] ? new Date(row["clicked_at"]).toISOString() : null,
-    completedAt: row["completed_at"] ? new Date(row["completed_at"]).toISOString() : null,
-    reminderSentAt: row["reminder_sent_at"] ? new Date(row["reminder_sent_at"]).toISOString() : null,
-    sendAfter: row["send_after"] ? new Date(row["send_after"]).toISOString() : null,
-    status: row["status"]
-  };
-}
-async function getProductReviews(shopifyProductId, opts = {}) {
-  const {
-    status = "approved",
-    sort = "newest",
-    filter = "all",
-    page = 1,
-    perPage = 10
-  } = opts;
-  const ck = `reviews:v1:${shopifyProductId}:${status}:${sort}:${filter}:${page}:${perPage}`;
-  if (status === "approved") {
-    const hit = await kvGetMemo(ck, 60);
-    if (hit) return hit;
-  }
-  const offset = (page - 1) * perPage;
-  let orderBy = "r.created_at DESC";
-  if (sort === "oldest") orderBy = "r.created_at ASC";
-  if (sort === "highest") orderBy = "r.rating DESC, r.created_at DESC";
-  if (sort === "lowest") orderBy = "r.rating ASC, r.created_at DESC";
-  if (sort === "helpful") orderBy = "r.helpful_yes DESC, r.created_at DESC";
-  let filterClause = "";
-  if (filter === "verified") filterClause = "AND r.is_verified_purchase = true";
-  if (filter === "with_photo") filterClause = "AND EXISTS (SELECT 1 FROM review_media rm2 WHERE rm2.review_id = r.id)";
-  if (filter === "5star") filterClause = "AND r.rating = 5";
-  if (filter === "4star") filterClause = "AND r.rating = 4";
-  if (filter === "3star") filterClause = "AND r.rating = 3";
-  if (filter === "2star") filterClause = "AND r.rating = 2";
-  if (filter === "1star") filterClause = "AND r.rating = 1";
-  const reviewQ = `SELECT r.* FROM reviews r WHERE r.shopify_product_id = $1 AND r.status = $2 ${filterClause} ORDER BY ${orderBy} LIMIT $3 OFFSET $4`;
-  const countQ = `SELECT COUNT(*) as total FROM reviews r WHERE r.shopify_product_id = $1 AND r.status = $2 ${filterClause}`;
-  const [rows, countRows] = await Promise.all([
-    sql6(reviewQ, [shopifyProductId, status, perPage, offset]),
-    sql6(countQ, [shopifyProductId, status])
-  ]);
-  if (rows.length === 0) {
-    const empty = { reviews: [], total: 0 };
-    if (status === "approved") primeKvMemo(ck, empty);
-    return empty;
-  }
-  const reviewIds = rows.map((r) => r["id"]);
-  const [mediaRows, attrRows] = await Promise.all([
-    sql6`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`,
-    sql6`SELECT * FROM review_attribute_ratings WHERE review_id = ANY(${reviewIds})`
-  ]);
-  const mediaByReview = /* @__PURE__ */ new Map();
-  for (const m of mediaRows) {
-    const rid2 = m["review_id"];
-    if (!mediaByReview.has(rid2)) mediaByReview.set(rid2, []);
-    mediaByReview.get(rid2).push(rowToMedia(m));
-  }
-  const attrByReview = /* @__PURE__ */ new Map();
-  for (const a of attrRows) {
-    const rid2 = a["review_id"];
-    if (!attrByReview.has(rid2)) attrByReview.set(rid2, []);
-    attrByReview.get(rid2).push(rowToAttributeRating(a));
-  }
-  const reviews = rows.map((r) => {
-    const review = rowToReview(r);
-    review.media = mediaByReview.get(review.id) ?? [];
-    review.attributeRatings = attrByReview.get(review.id) ?? [];
-    return review;
-  });
-  const total2 = parseInt(countRows[0]?.["total"] ?? "0", 10);
-  const result = { reviews, total: total2 };
-  if (status === "approved") {
-    kvSet(ck, result, 300).catch(() => {
-    });
-    primeKvMemo(ck, result);
-  }
-  return result;
-}
-async function getProductAggregate(shopifyProductId) {
-  const ck = `aggregate:v1:${shopifyProductId}`;
-  const hit = await kvGetMemo(ck, 60);
-  if (hit) return hit;
-  const rows = await sql6`
-    SELECT * FROM review_aggregates WHERE shopify_product_id = ${shopifyProductId}
-  `;
-  if (!rows[0]) return null;
-  const agg = rowToAggregate(rows[0]);
-  kvSet(ck, agg, 300).catch(() => {
-  });
-  primeKvMemo(ck, agg);
-  return agg;
-}
-async function getAdminReviewQueue(filters = {}) {
-  const {
-    status,
-    productId,
-    search,
-    sort = "newest",
-    page = 1,
-    perPage = 20
-  } = filters;
-  const offset = (page - 1) * perPage;
-  const conditions = [];
-  const params = [];
-  let pIdx = 1;
-  if (status && status !== "all") {
-    conditions.push(`r.status = $${pIdx++}`);
-    params.push(status);
-  }
-  if (productId) {
-    conditions.push(`r.shopify_product_id = $${pIdx++}`);
-    params.push(productId);
-  }
-  if (search) {
-    conditions.push(`(r.reviewer_name ILIKE $${pIdx} OR r.title ILIKE $${pIdx} OR r.body ILIKE $${pIdx})`);
-    params.push(`%${search}%`);
-    pIdx++;
-  }
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  let orderBy = "r.created_at DESC";
-  if (sort === "oldest") orderBy = "r.created_at ASC";
-  if (sort === "highest") orderBy = "r.rating DESC";
-  if (sort === "lowest") orderBy = "r.rating ASC";
-  if (sort === "spam_risk") orderBy = "r.ai_spam_score DESC NULLS LAST";
-  const baseQuery = `SELECT r.* FROM reviews r ${whereClause} ORDER BY ${orderBy} LIMIT $${pIdx} OFFSET $${pIdx + 1}`;
-  const countQuery = `SELECT COUNT(*) as total FROM reviews r ${whereClause}`;
-  const allParams = [...params, perPage, offset];
-  const [rows, countRows] = await Promise.all([
-    sql6(baseQuery, allParams),
-    sql6(countQuery, params)
-  ]);
-  if (rows.length === 0) return { reviews: [], total: 0 };
-  const typedRows = rows;
-  const reviewIds = typedRows.map((r) => r["id"]);
-  const mediaRows = await sql6`SELECT * FROM review_media WHERE review_id = ANY(${reviewIds}) ORDER BY sort_order ASC`;
-  const mediaByReview = /* @__PURE__ */ new Map();
-  for (const m of mediaRows) {
-    const rid2 = m["review_id"];
-    if (!mediaByReview.has(rid2)) mediaByReview.set(rid2, []);
-    mediaByReview.get(rid2).push(rowToMedia(m));
-  }
-  const reviews = typedRows.map((r) => {
-    const review = rowToReview(r);
-    review.media = mediaByReview.get(review.id) ?? [];
-    return review;
-  });
-  const total2 = parseInt(countRows[0]?.["total"] ?? "0", 10);
-  return { reviews, total: total2 };
-}
-async function getReviewStats() {
-  const [countRows, avgRows, inviteRows, conversionRows] = await Promise.all([
-    sql6`
-      SELECT
-        COUNT(*) as total,
-        COUNT(*) FILTER (WHERE status = 'pending')  as pending,
-        COUNT(*) FILTER (WHERE status = 'approved') as approved,
-        COUNT(*) FILTER (WHERE status = 'rejected') as rejected,
-        COUNT(*) FILTER (WHERE status = 'spam')     as spam
-      FROM reviews
-    `,
-    sql6`
-      SELECT COALESCE(AVG(rating) FILTER (WHERE status = 'approved'), 0) as avg_rating
-      FROM reviews
-    `,
-    sql6`SELECT COUNT(*) as sent FROM review_invites`,
-    sql6`SELECT COUNT(*) as completed FROM review_invites WHERE status = 'completed'`
-  ]);
-  const c = countRows[0];
-  const total2 = parseInt(c?.["total"] ?? "0", 10);
-  const pending = parseInt(c?.["pending"] ?? "0", 10);
-  const approved = parseInt(c?.["approved"] ?? "0", 10);
-  const rejected = parseInt(c?.["rejected"] ?? "0", 10);
-  const spam = parseInt(c?.["spam"] ?? "0", 10);
-  const avgRating = parseFloat(avgRows[0]?.["avg_rating"] ?? "0");
-  const sent = parseInt(inviteRows[0]?.["sent"] ?? "0", 10);
-  const completed = parseInt(conversionRows[0]?.["completed"] ?? "0", 10);
-  return {
-    totalReviews: total2,
-    pendingReviews: pending,
-    approvedReviews: approved,
-    rejectedReviews: rejected,
-    spamReviews: spam,
-    averageRating: avgRating,
-    totalInvitesSent: sent,
-    inviteConversionRate: sent > 0 ? completed / sent : 0
-  };
-}
-async function getReviewsPerDay() {
-  const rows = await sql6`
-    SELECT
-      date_trunc('day', created_at)::date::text as date,
-      COUNT(*) as count
-    FROM reviews
-    WHERE created_at > now() - interval '30 days'
-    GROUP BY date_trunc('day', created_at)
-    ORDER BY date_trunc('day', created_at)
-  `;
-  return rows.map((r) => ({
-    date: r["date"],
-    count: parseInt(r["count"], 10)
-  }));
-}
-async function getProductsWithReviews() {
-  const rows = await sql6`
-    SELECT
-      shopify_product_id,
-      total_count,
-      approved_count,
-      average_rating,
-      verified_count
-    FROM review_aggregates
-    ORDER BY approved_count DESC
-  `;
-  return rows.map((r) => ({
-    shopifyProductId: r["shopify_product_id"],
-    totalCount: r["total_count"],
-    approvedCount: r["approved_count"],
-    averageRating: parseFloat(r["average_rating"]),
-    verifiedCount: r["verified_count"]
-  }));
-}
-async function createReview(input) {
-  const rows = await sql6`
-    INSERT INTO reviews (
-      shopify_product_id, shopify_order_id, shopify_customer_id,
-      reviewer_name, reviewer_email, rating, title, body,
-      is_verified_purchase, is_incentivized, source, invite_token,
-      ip_address, user_agent, updated_at
-    ) VALUES (
-      ${input.shopifyProductId},
-      ${input.shopifyOrderId ?? null},
-      ${input.shopifyCustomerId ?? null},
-      ${input.reviewerName},
-      ${input.reviewerEmail},
-      ${input.rating},
-      ${input.title ?? null},
-      ${input.body ?? null},
-      ${input.isVerifiedPurchase ?? false},
-      ${input.isIncentivized ?? false},
-      ${input.source ?? "organic"},
-      ${input.inviteToken ?? null},
-      ${input.ipAddress ?? null},
-      ${input.userAgent ?? null},
-      now()
-    )
-    RETURNING *
-  `;
-  const review = rowToReview(rows[0]);
-  if (input.attributeRatings && Object.keys(input.attributeRatings).length > 0) {
-    for (const [name, rating] of Object.entries(input.attributeRatings)) {
-      await sql6`
-        INSERT INTO review_attribute_ratings (review_id, attribute_name, rating)
-        VALUES (${review.id}, ${name}, ${rating})
-      `;
-    }
-  }
-  if (input.mediaUrls && input.mediaUrls.length > 0) {
-    for (let i = 0; i < input.mediaUrls.length; i++) {
-      const m = input.mediaUrls[i];
-      await sql6`
-        INSERT INTO review_media (review_id, media_type, url, thumbnail_url, sort_order)
-        VALUES (${review.id}, ${m.mediaType}, ${m.url}, ${m.thumbnailUrl ?? null}, ${i})
-      `;
-    }
-  }
-  if (input.inviteToken) {
-    await sql6`
-      UPDATE review_invites
-      SET status = 'completed', completed_at = now()
-      WHERE invite_token = ${input.inviteToken}::uuid
-    `.catch(() => {
-    });
-  }
-  return review;
-}
-async function updateReviewStatus(id, status, opts = {}) {
-  const rows = await sql6`
-    UPDATE reviews
-    SET
-      status         = ${status},
-      moderation_note = ${opts.moderationNote ?? null},
-      moderated_by   = ${opts.moderatedBy ?? null},
-      moderated_at   = now(),
-      updated_at     = now()
-    WHERE id = ${id}::uuid
-    RETURNING *
-  `;
-  return rowToReview(rows[0]);
-}
-async function updateReviewAI(id, ai) {
-  await sql6`
-    UPDATE reviews
-    SET
-      ai_sentiment = ${ai.aiSentiment},
-      ai_summary   = ${ai.aiSummary},
-      ai_spam_score = ${ai.aiSpamScore},
-      updated_at   = now()
-    WHERE id = ${id}::uuid
-  `;
-}
-async function updateReviewReply(id, replyBody) {
-  const rows = await sql6`
-    UPDATE reviews
-    SET reply_body = ${replyBody}, reply_at = now(), updated_at = now()
-    WHERE id = ${id}::uuid
-    RETURNING *
-  `;
-  return rowToReview(rows[0]);
-}
-async function updateReviewFeatured(id, isFeatured) {
-  await sql6`
-    UPDATE reviews SET is_featured = ${isFeatured}, updated_at = now() WHERE id = ${id}::uuid
-  `;
-}
-async function deleteReview(id) {
-  await sql6`DELETE FROM reviews WHERE id = ${id}::uuid`;
-}
-async function voteHelpful(id, vote) {
-  const col = vote === "yes" ? "helpful_yes" : "helpful_no";
-  const rows = await sql6(
-    `UPDATE reviews SET ${col} = ${col} + 1, updated_at = now() WHERE id = $1::uuid RETURNING helpful_yes, helpful_no`,
-    [id]
-  );
-  const row = rows[0];
-  return {
-    helpfulYes: row["helpful_yes"],
-    helpfulNo: row["helpful_no"]
-  };
-}
-async function getReviewById(id) {
-  const rows = await sql6`SELECT * FROM reviews WHERE id = ${id}::uuid`;
-  if (!rows[0]) return null;
-  const review = rowToReview(rows[0]);
-  const [mediaRows, attrRows] = await Promise.all([
-    sql6`SELECT * FROM review_media WHERE review_id = ${id}::uuid ORDER BY sort_order`,
-    sql6`SELECT * FROM review_attribute_ratings WHERE review_id = ${id}::uuid`
-  ]);
-  review.media = mediaRows.map((m) => rowToMedia(m));
-  review.attributeRatings = attrRows.map((a) => rowToAttributeRating(a));
-  return review;
-}
-async function createInvite(input) {
-  const rows = input.sendAfter ? await sql6`
-        INSERT INTO review_invites (
-          shopify_order_id, shopify_customer_id, shopify_product_id,
-          reviewer_email, reviewer_name, status, send_after
-        ) VALUES (
-          ${input.shopifyOrderId},
-          ${input.shopifyCustomerId ?? null},
-          ${input.shopifyProductId},
-          ${input.reviewerEmail},
-          ${input.reviewerName},
-          'scheduled',
-          ${input.sendAfter.toISOString()}
-        )
-        RETURNING *
-      ` : await sql6`
-        INSERT INTO review_invites (
-          shopify_order_id, shopify_customer_id, shopify_product_id,
-          reviewer_email, reviewer_name
-        ) VALUES (
-          ${input.shopifyOrderId},
-          ${input.shopifyCustomerId ?? null},
-          ${input.shopifyProductId},
-          ${input.reviewerEmail},
-          ${input.reviewerName}
-        )
-        RETURNING *
-      `;
-  return rowToInvite(rows[0]);
-}
-async function getDueScheduledInvites(limit = 200) {
-  const rows = await sql6`
-    SELECT * FROM review_invites
-    WHERE status = 'scheduled' AND send_after <= now()
-    ORDER BY send_after ASC
-    LIMIT ${limit}
-  `;
-  return rows.map((r) => rowToInvite(r));
-}
-async function markInviteSent(id) {
-  await sql6`
-    UPDATE review_invites SET status = 'sent', sent_at = now() WHERE id = ${id}::uuid
-  `;
-}
-async function getInviteByToken(token) {
-  const rows = await sql6`
-    SELECT * FROM review_invites WHERE invite_token = ${token}::uuid
-  `;
-  if (!rows[0]) return null;
-  return rowToInvite(rows[0]);
-}
-async function markInviteClicked(token) {
-  await sql6`
-    UPDATE review_invites
-    SET clicked_at = COALESCE(clicked_at, now()), status = 'clicked'
-    WHERE invite_token = ${token}::uuid AND status NOT IN ('completed', 'expired')
-  `;
-}
-async function markInviteOpened(token) {
-  await sql6`
-    UPDATE review_invites
-    SET opened_at = COALESCE(opened_at, now()), status = CASE WHEN status = 'sent' THEN 'opened' ELSE status END
-    WHERE invite_token = ${token}::uuid
-  `;
-}
-async function getPendingReminderInvites() {
-  const rows = await sql6`
-    SELECT * FROM review_invites
-    WHERE sent_at < now() - interval '5 days'
-      AND reminder_sent_at IS NULL
-      AND status NOT IN ('scheduled', 'completed', 'expired')
-  `;
-  return rows.map((r) => rowToInvite(r));
-}
-async function markReminderSent(id) {
-  await sql6`
-    UPDATE review_invites SET reminder_sent_at = now() WHERE id = ${id}::uuid
-  `;
-}
-async function getInviteStats() {
-  const rows = await sql6`
-    SELECT
-      COUNT(*) as sent,
-      COUNT(*) FILTER (WHERE status IN ('opened','clicked','completed')) as opened,
-      COUNT(*) FILTER (WHERE status IN ('clicked','completed')) as clicked,
-      COUNT(*) FILTER (WHERE status = 'completed') as completed
-    FROM review_invites
-  `;
-  const r = rows[0];
-  return {
-    sent: parseInt(r?.["sent"] ?? "0", 10),
-    opened: parseInt(r?.["opened"] ?? "0", 10),
-    clicked: parseInt(r?.["clicked"] ?? "0", 10),
-    completed: parseInt(r?.["completed"] ?? "0", 10)
-  };
-}
-async function getPaginatedInvites(page = 1, perPage = 20) {
-  const offset = (page - 1) * perPage;
-  const [rows, countRows] = await Promise.all([
-    sql6`
-      SELECT * FROM review_invites
-      ORDER BY sent_at DESC
-      LIMIT ${perPage} OFFSET ${offset}
-    `,
-    sql6`SELECT COUNT(*) as total FROM review_invites`
-  ]);
-  return {
-    invites: rows.map((r) => rowToInvite(r)),
-    total: parseInt(countRows[0]?.["total"] ?? "0", 10)
-  };
-}
-async function getReviewSettings() {
-  const rows = await sql6`SELECT * FROM review_settings WHERE id = 1`;
-  const r = rows[0] ?? {};
-  return {
-    autoApprove: r["auto_approve"] ?? false,
-    spamThreshold: parseFloat(r["spam_threshold"] ?? "0.75"),
-    minBodyLength: r["min_body_length"] ?? 0,
-    requireTitle: r["require_title"] ?? false,
-    inviteDelayDays: r["invite_delay_days"] ?? 3,
-    reminderDelayDays: r["reminder_delay_days"] ?? 5,
-    remindersEnabled: r["reminders_enabled"] ?? true,
-    reviewsPerPage: r["reviews_per_page"] ?? 10,
-    defaultSort: r["default_sort"] ?? "newest",
-    showAiSummaries: r["show_ai_summaries"] ?? true,
-    showIncentivizedLabel: r["show_incentivized_label"] ?? true,
-    digestEmail: r["digest_email"] ?? null,
-    webhookUrl: r["webhook_url"] ?? null
-  };
-}
-async function updateReviewSettings(settings) {
-  await sql6`
-    UPDATE review_settings SET
-      auto_approve           = COALESCE(${settings.autoApprove ?? null}::boolean, auto_approve),
-      spam_threshold         = COALESCE(${settings.spamThreshold ?? null}::numeric, spam_threshold),
-      min_body_length        = COALESCE(${settings.minBodyLength ?? null}::int, min_body_length),
-      require_title          = COALESCE(${settings.requireTitle ?? null}::boolean, require_title),
-      invite_delay_days      = COALESCE(${settings.inviteDelayDays ?? null}::int, invite_delay_days),
-      reminder_delay_days    = COALESCE(${settings.reminderDelayDays ?? null}::int, reminder_delay_days),
-      reminders_enabled      = COALESCE(${settings.remindersEnabled ?? null}::boolean, reminders_enabled),
-      reviews_per_page       = COALESCE(${settings.reviewsPerPage ?? null}::int, reviews_per_page),
-      default_sort           = COALESCE(${settings.defaultSort ?? null}, default_sort),
-      show_ai_summaries      = COALESCE(${settings.showAiSummaries ?? null}::boolean, show_ai_summaries),
-      show_incentivized_label= COALESCE(${settings.showIncentivizedLabel ?? null}::boolean, show_incentivized_label),
-      digest_email           = ${settings.digestEmail ?? null},
-      webhook_url            = ${settings.webhookUrl ?? null},
-      updated_at             = now()
-    WHERE id = 1
-  `;
-}
-async function getReviewsForExport(filters = {}) {
-  const { status, productId } = filters;
-  const conditions = [];
-  const params = [];
-  let pIdx = 1;
-  if (status && status !== "all") {
-    conditions.push(`status = $${pIdx++}`);
-    params.push(status);
-  }
-  if (productId) {
-    conditions.push(`shopify_product_id = $${pIdx++}`);
-    params.push(productId);
-  }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await sql6(`SELECT * FROM reviews ${where} ORDER BY created_at DESC`, params);
-  return rows.map((r) => rowToReview(r));
-}
-var sql6;
-var init_reviews_server = __esm({
-  "app/lib/reviews.server.ts"() {
-    "use strict";
-    init_kv_server();
-    sql6 = neon2(process.env["DATABASE_URL"]);
   }
 });
 
@@ -20246,8 +18367,8 @@ async function followWithCookies(startUrl, maxHops = 12) {
     const getSetCookie = res.headers.getSetCookie;
     for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
       const pair = sc.split(";")[0] ?? "";
-      const eq30 = pair.indexOf("=");
-      if (eq30 > 0) jar.set(pair.slice(0, eq30).trim(), pair.slice(eq30 + 1).trim());
+      const eq28 = pair.indexOf("=");
+      if (eq28 > 0) jar.set(pair.slice(0, eq28).trim(), pair.slice(eq28 + 1).trim());
     }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
@@ -20511,7 +18632,7 @@ async function runGscSnapshot() {
   }
   const topQueries = mapRows(queryRows, "query");
   const topPages = mapRows(pageRows, "page");
-  await sql7`
+  await sql6`
     INSERT INTO gsc_snapshots (period_start, period_end, totals, top_queries, top_pages, sitemaps)
     VALUES (
       ${periodStart}, ${periodEnd},
@@ -20533,11 +18654,11 @@ async function runGscSnapshot() {
     }
   };
 }
-var sql7, SCOPE, TOKEN_URL, DEFAULT_SITE;
+var sql6, SCOPE, TOKEN_URL, DEFAULT_SITE;
 var init_gsc_server = __esm({
   "app/lib/gsc.server.ts"() {
     "use strict";
-    sql7 = neon3(process.env["DATABASE_URL"]);
+    sql6 = neon3(process.env["DATABASE_URL"]);
     SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
     TOKEN_URL = "https://oauth2.googleapis.com/token";
     DEFAULT_SITE = "sc-domain:xdipx.com";
@@ -20640,15 +18761,15 @@ async function runGscIndexSweep(opts = {}) {
   if (entries.length === 0) throw new Error("sitemap parsed to zero URLs; refusing to flag everything absent");
   const urls = entries.map((e) => e.url);
   const lastmods = entries.map((e) => e.lastmod);
-  await sql8`
+  await sql7`
     INSERT INTO gsc_url_inspections (url, sitemap_lastmod)
     SELECT u, m FROM unnest(${urls}::text[], ${lastmods}::text[]) AS t(u, m)
     ON CONFLICT (url) DO UPDATE
       SET in_sitemap = TRUE, sitemap_lastmod = EXCLUDED.sitemap_lastmod`;
-  await sql8`
+  await sql7`
     UPDATE gsc_url_inspections SET in_sitemap = FALSE
     WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`;
-  const batch = await sql8`
+  const batch = await sql7`
     SELECT url, coverage_state, verdict FROM gsc_url_inspections
     WHERE in_sitemap OR coverage_state = ANY(${DEAD_VERDICT_STATES}::text[])
     ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
@@ -20680,7 +18801,7 @@ async function runGscIndexSweep(opts = {}) {
       const isIndexed = r.verdict === "PASS";
       if (row.verdict !== null && !wasIndexed && isIndexed) newlyIndexed++;
       if (wasIndexed && !isIndexed) newlyDropped++;
-      await sql8`
+      await sql7`
         UPDATE gsc_url_inspections SET
           verdict = ${r.verdict ?? null},
           coverage_state = ${newCoverage},
@@ -20700,7 +18821,7 @@ async function runGscIndexSweep(opts = {}) {
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batch.length) }, () => worker()));
   const quotaUsedToday = inspected > 0 ? await kvIncrBy(quotaKey, inspected) : used;
-  const aggRows = await sql8`
+  const aggRows = await sql7`
     SELECT
       count(*) FILTER (WHERE in_sitemap)::int AS sitemap_urls,
       count(*) FILTER (WHERE in_sitemap AND last_inspected_at IS NOT NULL)::int AS inspected_urls,
@@ -20714,7 +18835,7 @@ async function runGscIndexSweep(opts = {}) {
                        AND google_canonical <> user_canonical)::int AS canonical_mismatches
     FROM gsc_url_inspections`;
   const agg = aggRows[0];
-  await sql8`
+  await sql7`
     INSERT INTO gsc_index_daily (
       day, sitemap_urls, inspected_urls, indexed_count, crawled_not_indexed,
       discovered_not_indexed, other_not_indexed, canonical_mismatches,
@@ -20753,13 +18874,13 @@ async function runGscIndexSweep(opts = {}) {
     }
   };
 }
-var sql8, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
+var sql7, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
 var init_gsc_index_server = __esm({
   "app/lib/gsc-index.server.ts"() {
     "use strict";
     init_gsc_server();
     init_kv_server();
-    sql8 = neon4(process.env["DATABASE_URL"]);
+    sql7 = neon4(process.env["DATABASE_URL"]);
     DEAD_VERDICT_STATES = ["Not found (404)", "Soft 404", "Server error (5xx)"];
     INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
     DAILY_QUOTA_CEILING = 1900;
@@ -20778,7 +18899,7 @@ __export(seo_daily_server_exports, {
   isoWeek: () => isoWeek,
   runSeoDaily: () => runSeoDaily
 });
-import { sql as sql9 } from "drizzle-orm";
+import { sql as sql8 } from "drizzle-orm";
 function delta(a, b) {
   return typeof a === "number" && typeof b === "number" ? a - b : null;
 }
@@ -20810,7 +18931,7 @@ function auditPageHtml(url, html) {
   } else {
     const path = (u) => {
       try {
-        const p = new URL(u, SITE_ORIGIN2);
+        const p = new URL(u, SITE_ORIGIN);
         return p.pathname.replace(/\/+$/, "") || "/";
       } catch {
         return u;
@@ -20833,10 +18954,10 @@ async function probe(url) {
   return { url, ok: problems.length === 0, status: res.status, problems };
 }
 async function sampleUrls() {
-  const urls = [`${SITE_ORIGIN2}/`];
+  const urls = [`${SITE_ORIGIN}/`];
   try {
     const { fetchSitemapEntries: fetchSitemapEntries2 } = await Promise.resolve().then(() => (init_gsc_index_server(), gsc_index_server_exports));
-    const entries = await fetchSitemapEntries2(new URL("sitemap.xml", `${SITE_ORIGIN2}/`));
+    const entries = await fetchSitemapEntries2(new URL("sitemap.xml", `${SITE_ORIGIN}/`));
     const pick = (list, n) => {
       if (list.length <= n) return list;
       const stride = Math.floor(list.length / n);
@@ -20859,7 +18980,7 @@ async function coverageCounters() {
     enrichedDistinctProducts: null
   };
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql8`
       SELECT
         jsonb_array_length(index_json::jsonb)::int AS total,
         (SELECT count(*)::int FROM jsonb_array_elements(index_json::jsonb) e
@@ -20870,7 +18991,7 @@ async function coverageCounters() {
           WHERE e->>'imageUrl' IS NOT NULL AND e->>'imageUrl' <> '') AS has_image
       FROM discovery_index_payload WHERE version = 'v7' LIMIT 1`);
     const row = (res.rows ?? [])[0];
-    const enrichRes = await db.execute(sql9`
+    const enrichRes = await db.execute(sql8`
       SELECT count(DISTINCT product_id)::int AS n FROM product_enrichment_cache`);
     const enriched = (enrichRes.rows ?? [])[0];
     return {
@@ -20899,17 +19020,17 @@ async function runSeoDaily() {
     }
   };
   const today = await guard("gsc_index_daily latest", async () => {
-    const r = await db.execute(sql9`SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
+    const r = await db.execute(sql8`SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
     return (r.rows ?? [])[0] ?? null;
   }, null);
   const weekAgo = await guard("gsc_index_daily week-ago", async () => {
-    const r = await db.execute(sql9`
+    const r = await db.execute(sql8`
       SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily
       WHERE day <= now()::date - 7 ORDER BY day DESC LIMIT 1`);
     return (r.rows ?? [])[0] ?? null;
   }, null);
   const transitions = await guard("coverage transitions", async () => {
-    const r = await db.execute(sql9`
+    const r = await db.execute(sql8`
       SELECT
         count(*) FILTER (
           WHERE verdict = 'PASS'
@@ -20924,7 +19045,7 @@ async function runSeoDaily() {
     return { cleared: num2(row?.["cleared"]), regressed: num2(row?.["regressed"]), total: num2(row?.["total"]) };
   }, { cleared: 0, regressed: 0, total: 0 });
   const verdictCounts = await guard("verdict breakdown", async () => {
-    const r = await db.execute(sql9`
+    const r = await db.execute(sql8`
       SELECT COALESCE(coverage_state, 'unknown') AS state, count(*)::int AS n
       FROM gsc_url_inspections WHERE in_sitemap GROUP BY 1 ORDER BY 2 DESC`);
     const out = {};
@@ -20935,12 +19056,12 @@ async function runSeoDaily() {
   }, {});
   const serverErrors = verdictCounts["Server error (5xx)"] ?? 0;
   const indexnowPushed24h = await guard("indexnow ledger", async () => {
-    const r = await db.execute(sql9`
+    const r = await db.execute(sql8`
       SELECT count(*)::int AS n FROM indexnow_pings WHERE pinged_at >= now() - interval '24 hours'`);
     return num2((r.rows ?? [])[0]?.n);
   }, 0);
   const snapshot = await guard("gsc_snapshots", async () => {
-    const r = await db.execute(sql9`
+    const r = await db.execute(sql8`
       SELECT captured_at::text AS captured_at, period_start::text AS period_start,
              period_end::text AS period_end, totals
       FROM gsc_snapshots ORDER BY captured_at DESC LIMIT 1`);
@@ -21044,7 +19165,7 @@ async function runSeoDaily() {
     errors
   };
   await guard("persist seo_coverage_daily", async () => {
-    await db.execute(sql9`
+    await db.execute(sql8`
       INSERT INTO seo_coverage_daily (
         day, discovery_total, has_type_dial, has_mood, has_image,
         enriched_distinct_products, notes
@@ -21066,7 +19187,7 @@ async function runSeoDaily() {
 }
 async function getLatestSeoDaily() {
   try {
-    const r = await db.execute(sql9`
+    const r = await db.execute(sql8`
       SELECT day::text AS day, notes FROM seo_coverage_daily ORDER BY day DESC LIMIT 1`);
     const row = (r.rows ?? [])[0];
     if (!row) return null;
@@ -21076,7 +19197,7 @@ async function getLatestSeoDaily() {
     return null;
   }
 }
-var SITE_ORIGIN2, PDP_SAMPLE, PLP_SAMPLE, INDEXED_DROP_PCT, NEWLY_DROPPED_MAX, SERVER_ERROR_MAX, INDEX_DAILY_COLS;
+var SITE_ORIGIN, PDP_SAMPLE, PLP_SAMPLE, INDEXED_DROP_PCT, NEWLY_DROPPED_MAX, SERVER_ERROR_MAX, INDEX_DAILY_COLS;
 var init_seo_daily_server = __esm({
   "app/lib/seo-daily.server.ts"() {
     "use strict";
@@ -21085,13 +19206,13 @@ var init_seo_daily_server = __esm({
     init_checkout_probe_server();
     init_team_server();
     init_owner_alerts_server();
-    SITE_ORIGIN2 = (process.env["BASE_URL"] || "https://xdipx.com").replace(/\/+$/, "");
+    SITE_ORIGIN = (process.env["BASE_URL"] || "https://xdipx.com").replace(/\/+$/, "");
     PDP_SAMPLE = 5;
     PLP_SAMPLE = 2;
     INDEXED_DROP_PCT = 5;
     NEWLY_DROPPED_MAX = 20;
     SERVER_ERROR_MAX = 10;
-    INDEX_DAILY_COLS = sql9`
+    INDEX_DAILY_COLS = sql8`
   day::text AS day, sitemap_urls, inspected_urls, indexed_count,
   crawled_not_indexed, discovered_not_indexed, other_not_indexed,
   canonical_mismatches, newly_indexed, newly_dropped`;
@@ -21113,7 +19234,7 @@ __export(owner_digest_server_exports, {
   renderTicketsSection: () => renderTicketsSection,
   runOwnerDigest: () => runOwnerDigest
 });
-import { sql as sql10 } from "drizzle-orm";
+import { sql as sql9 } from "drizzle-orm";
 function esc(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -21201,7 +19322,7 @@ function renderOwnerQueueSection(f) {
   if (f.agedOut === null) {
     parts.push(`<p style="margin:0 0 6px;color:${MUTED};">Forced send: the stale-row ager did not run, so nothing was dismissed.</p>`);
   } else if (f.agedOut > 0) {
-    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} untargeted row${f.agedOut === 1 ? "" : "s"} aged out automatically (21 days, low priority, no team).</p>`);
+    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} stale row${f.agedOut === 1 ? "" : "s"} aged out automatically (21 days old, low priority).</p>`);
   }
   if (f.rows.length === 0) {
     parts.push(`<p style="margin:0;color:${GOOD};">Nothing waiting on a decision from you.</p>`);
@@ -21281,7 +19402,7 @@ function parseRenderTruth(raw) {
 async function gatherShipped() {
   const items = [];
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT l.suggestion_id AS ticket_id, l.ref, l.updated_at::text AS at,
              COALESCE(s.kind, 'code') AS kind, COALESCE(s.suggestion, '') AS suggestion
       FROM suggestion_links l
@@ -21303,7 +19424,7 @@ async function gatherShipped() {
     console.warn("[owner-digest] suggestion_links unavailable (migration 070?):", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT id, kind, suggestion, apply_ref, updated_at::text AS at
       FROM homepage_team_suggestions
       WHERE status = 'applied' AND updated_at >= now() - interval '24 hours'
@@ -21357,7 +19478,7 @@ async function gatherHomepageNow() {
   }
   let renderTickets = [];
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT id, status, suggestion
       FROM homepage_team_suggestions
       WHERE dedupe_key LIKE 'render:%' AND status NOT IN ('applied', 'dismissed')
@@ -21399,23 +19520,23 @@ async function gatherTicketMetrics(statusCounts) {
   };
   try {
     const [openedRes, closedRes, blockedRes, oldestRes, finalRes, blockedRowsRes] = await Promise.all([
-      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE created_at >= now() - interval '24 hours' GROUP BY kind`),
-      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE status IN ('applied', 'dismissed')
                         AND updated_at >= now() - interval '24 hours' GROUP BY kind`),
-      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE status = 'blocked' GROUP BY kind`),
-      db.execute(sql10`SELECT id, suggestion,
+      db.execute(sql9`SELECT id, suggestion,
                             EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
                        FROM homepage_team_suggestions
                       WHERE status = 'approved' ORDER BY created_at ASC LIMIT 1`),
-      db.execute(sql10`SELECT id, status, kind, attempt_count, last_error, suggestion
+      db.execute(sql9`SELECT id, status, kind, attempt_count, last_error, suggestion
                        FROM homepage_team_suggestions
                       WHERE attempt_count = ${MAX_TICKET_ATTEMPTS - 1}
                         AND status NOT IN ('applied', 'dismissed')
                       ORDER BY priority ASC, updated_at DESC LIMIT 10`),
-      db.execute(sql10`SELECT id, status, kind, attempt_count, last_error, suggestion
+      db.execute(sql9`SELECT id, status, kind, attempt_count, last_error, suggestion
                        FROM homepage_team_suggestions
                       WHERE status = 'blocked'
                       ORDER BY priority ASC, updated_at DESC LIMIT 8`)
@@ -21441,7 +19562,7 @@ async function gatherTicketMetrics(statusCounts) {
 }
 async function ageOutStaleSuggestions() {
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       UPDATE homepage_team_suggestions
          SET status = 'dismissed',
              decided_by = 'system',
@@ -21450,8 +19571,7 @@ async function ageOutStaleSuggestions() {
        WHERE status = 'approved'
          AND kind IN ('process', 'strategy')
          AND priority >= 3
-         AND target_team IS NULL
-         AND updated_at < now() - interval '21 days'
+         AND created_at < now() - interval '21 days'
        RETURNING id`);
     return (res.rows ?? []).length;
   } catch (err2) {
@@ -21462,16 +19582,16 @@ async function ageOutStaleSuggestions() {
 async function gatherOwnerQueue(agedOut) {
   const out = { rows: [], totalCount: 0, agedOut };
   try {
-    const kinds = sql10.join(OWNER_DECISION_KINDS.map((k) => sql10`${k}`), sql10`, `);
+    const kinds = sql9.join(OWNER_DECISION_KINDS.map((k) => sql9`${k}`), sql9`, `);
     const [listRes, countRes] = await Promise.all([
-      db.execute(sql10`
+      db.execute(sql9`
         SELECT id, kind, team, target_team, decided_by, suggestion,
                EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
           FROM homepage_team_suggestions
          WHERE status = 'approved' AND kind IN (${kinds})
          ORDER BY created_at ASC
          LIMIT 30`),
-      db.execute(sql10`
+      db.execute(sql9`
         SELECT COUNT(*)::int AS n
           FROM homepage_team_suggestions
          WHERE status = 'approved' AND kind IN (${kinds})`)
@@ -21503,7 +19623,7 @@ async function gatherOpsWatch() {
     agentRetired: []
   };
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT COUNT(*)::int AS n,
              EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 86400 AS oldest_days
         FROM social_posts
@@ -21519,7 +19639,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] social draft sweep failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT COUNT(*)::int AS n
         FROM pricing_audit_log
        WHERE trigger = 'batch'
@@ -21530,7 +19650,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] pricing batch check failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT EXTRACT(epoch FROM now() - MAX(created_at))::float8 / 3600 AS age_hours
         FROM product_enrichment_cache`);
     const raw = (res.rows ?? [])[0]?.["age_hours"];
@@ -21539,7 +19659,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] enrichment age check failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT COUNT(DISTINCT s.id)::int AS n
         FROM homepage_team_suggestions s
         JOIN suggestion_links l ON l.suggestion_id = s.id AND l.kind = 'pr'
@@ -21550,7 +19670,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] stranded-ticket count failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT id, kind, suggestion
         FROM homepage_team_suggestions
        WHERE status = 'dismissed'
@@ -21573,7 +19693,7 @@ async function gatherOpsWatch() {
 async function gatherEscalations() {
   const out = { protectedPrs: [], exhausted: [] };
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT l.suggestion_id AS ticket_id, l.ref, l.state,
              COALESCE(s.suggestion, '') AS suggestion
       FROM suggestion_links l
@@ -21594,7 +19714,7 @@ async function gatherEscalations() {
     console.warn("[owner-digest] protected-PR sweep failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql10`
+    const res = await db.execute(sql9`
       SELECT id, status, kind, attempt_count, last_error, suggestion
         FROM homepage_team_suggestions
        WHERE attempt_count >= ${MAX_TICKET_ATTEMPTS}
@@ -21612,7 +19732,7 @@ async function runOwnerDigest(opts = {}) {
     const first = await kvSetNX(`owner-digest:sent:${day}`, String(Date.now()), 26 * 3600);
     if (!first) return { sent: false, skipped: "already sent today (pass force=1 to re-send)" };
   }
-  const profitRes = await db.execute(sql10`
+  const profitRes = await db.execute(sql9`
     SELECT summary_date::text AS day,
            COALESCE(total_orders, 0)::int AS orders,
            COALESCE(total_revenue, 0)::float8 AS revenue,
@@ -21623,7 +19743,7 @@ async function runOwnerDigest(opts = {}) {
     LIMIT 8`);
   const profit = profitRes.rows ?? [];
   const yesterday = profit[0];
-  const runsRes = await db.execute(sql10`
+  const runsRes = await db.execute(sql9`
     SELECT team, run_type, status, started_at::text AS started_at, error, summary
     FROM homepage_team_runs
     WHERE started_at >= now() - interval '24 hours'
@@ -21631,7 +19751,7 @@ async function runOwnerDigest(opts = {}) {
     LIMIT 40`);
   const runs = runsRes.rows ?? [];
   const failures = runs.filter((r) => r.status === "failed");
-  const suggRes = await db.execute(sql10`
+  const suggRes = await db.execute(sql9`
     SELECT status, COUNT(*)::int AS n, MIN(created_at)::text AS oldest
     FROM homepage_team_suggestions
     GROUP BY status`);
@@ -21658,7 +19778,7 @@ async function runOwnerDigest(opts = {}) {
     console.warn("[owner-digest] seo-daily unavailable:", String(err2).slice(0, 200));
   }
   try {
-    const droppedRes = await db.execute(sql10`
+    const droppedRes = await db.execute(sql9`
       SELECT url, previous_coverage_state, coverage_state
       FROM gsc_url_inspections
       WHERE coverage_changed_at >= now() - interval '24 hours'
@@ -21670,7 +19790,7 @@ async function runOwnerDigest(opts = {}) {
     console.warn("[owner-digest] index-monitor tables unavailable (migration 064 not applied?):", String(err2).slice(0, 200));
   }
   try {
-    const ticketRes = await db.execute(sql10`
+    const ticketRes = await db.execute(sql9`
       SELECT id, priority, status, suggestion, dedupe_key
       FROM homepage_team_suggestions
       WHERE created_at >= now() - interval '24 hours' AND dedupe_key LIKE 'seo:%'
@@ -21803,6 +19923,78 @@ var init_owner_digest_server = __esm({
       "homepage:healthcheck:render-truth",
       "render-truth:latest"
     ];
+  }
+});
+
+// app/lib/search-ping.server.ts
+function normalizeUrls(paths, origin = SITE_ORIGIN2) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of paths) {
+    if (!raw || typeof raw !== "string") continue;
+    const abs = raw.startsWith("http") ? raw : `${origin}${raw.startsWith("/") ? raw : `/${raw}`}`;
+    let parsed;
+    try {
+      parsed = new URL(abs);
+    } catch {
+      continue;
+    }
+    if (parsed.host !== new URL(origin).host) continue;
+    if (seen.has(parsed.toString())) continue;
+    seen.add(parsed.toString());
+    out.push(parsed.toString());
+  }
+  return out;
+}
+function chunkUrls(urls, size = INDEXNOW_MAX_URLS_PER_REQUEST) {
+  const capped = Math.max(1, size);
+  const chunks = [];
+  for (let i = 0; i < urls.length; i += capped) chunks.push(urls.slice(i, i + capped));
+  return chunks;
+}
+function isRetryableStatus(status) {
+  return status === 0 || status >= 500 && status < 600;
+}
+async function submitIndexNowChunk(urls, opts) {
+  const origin = opts.origin ?? SITE_ORIGIN2;
+  const host = new URL(origin).host;
+  let last = { urls, status: 0, ok: false, error: "no attempt made" };
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS4; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(INDEXNOW_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          host,
+          key: opts.key,
+          keyLocation: `${origin}/indexnow.txt`,
+          urlList: urls
+        }),
+        signal: ctrl.signal
+      });
+      last = { urls, status: res.status, ok: res.ok };
+      if (res.ok || !isRetryableStatus(res.status)) return last;
+    } catch (err2) {
+      last = { urls, status: 0, ok: false, error: err2 instanceof Error ? err2.message : String(err2) };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (attempt < MAX_ATTEMPTS4) await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS4));
+  }
+  return last;
+}
+var SITE_ORIGIN2, INDEXNOW_MAX_URLS_PER_REQUEST, INDEXNOW_ENDPOINT, REQUEST_TIMEOUT_MS, MAX_ATTEMPTS4, RETRY_BACKOFF_MS4;
+var init_search_ping_server = __esm({
+  "app/lib/search-ping.server.ts"() {
+    "use strict";
+    SITE_ORIGIN2 = "https://xdipx.com";
+    INDEXNOW_MAX_URLS_PER_REQUEST = 1e4;
+    INDEXNOW_ENDPOINT = "https://api.indexnow.org/IndexNow";
+    REQUEST_TIMEOUT_MS = 2e4;
+    MAX_ATTEMPTS4 = 2;
+    RETRY_BACKOFF_MS4 = 1e3;
   }
 });
 
@@ -22091,10 +20283,10 @@ __export(sitemap_server_exports, {
   getUrlHealth: () => getUrlHealth
 });
 import { neon as neon5 } from "@neondatabase/serverless";
-import { eq as eq13 } from "drizzle-orm";
+import { eq as eq11 } from "drizzle-orm";
 async function getUrlHealth() {
   try {
-    const rows = await sql11`
+    const rows = await sql10`
       SELECT url, coverage_state, last_crawl_time FROM gsc_url_inspections
       WHERE coverage_state = ANY(${BAD_VERDICT_STATES}::text[])
     `;
@@ -22143,7 +20335,7 @@ async function assembleSegments() {
     guard(getProductHandlesForSitemap(), [], "getProductHandlesForSitemap"),
     guard(getProductImagesForSitemap(), /* @__PURE__ */ new Map(), "getProductImagesForSitemap"),
     guard(getCollectionsForSitemap(), [], "getCollectionsForSitemap"),
-    guard(db.select().from(dealHistory).where(eq13(dealHistory.status, "live")).limit(1), [], "liveDeal query"),
+    guard(db.select().from(dealHistory).where(eq11(dealHistory.status, "live")).limit(1), [], "liveDeal query"),
     guard(getMainMenu(), [], "getMainMenu"),
     getUrlHealth(),
     guard(getIndexableProductHandles(), null, "getIndexableProductHandles"),
@@ -22273,7 +20465,7 @@ async function assembleSegments() {
   segments.push(...chunkSegments("products", clean(productUrls), PRODUCTS_PER_SEGMENT));
   return segments;
 }
-var sql11, BAD_VERDICT_STATES, PRODUCTS_PER_SEGMENT, PAGE_SLUG_DENYLIST, COLLECTION_DENYLIST, memo, MEMO_TTL_MS;
+var sql10, BAD_VERDICT_STATES, PRODUCTS_PER_SEGMENT, PAGE_SLUG_DENYLIST, COLLECTION_DENYLIST, memo, MEMO_TTL_MS;
 var init_sitemap_server = __esm({
   "app/lib/sitemap.server.ts"() {
     "use strict";
@@ -22285,7 +20477,7 @@ var init_sitemap_server = __esm({
     init_collection_canonical_aliases();
     init_category_page_server();
     init_schema();
-    sql11 = neon5(process.env["DATABASE_URL"]);
+    sql10 = neon5(process.env["DATABASE_URL"]);
     BAD_VERDICT_STATES = [
       "Excluded by \u2018noindex\u2019 tag",
       "Duplicate without user-selected canonical",
@@ -22348,15 +20540,15 @@ async function staleUrls() {
 }
 async function allSitemapUrls() {
   const { fetchSitemapEntries: fetchSitemapEntries2 } = await Promise.resolve().then(() => (init_gsc_index_server(), gsc_index_server_exports));
-  const entries = await fetchSitemapEntries2(new URL("sitemap.xml", `${SITE_ORIGIN}/`));
+  const entries = await fetchSitemapEntries2(new URL("sitemap.xml", `${SITE_ORIGIN2}/`));
   return entries.map((e) => e.url);
 }
 async function recentlyPinged(urls) {
   if (urls.length === 0) return /* @__PURE__ */ new Set();
   try {
     const { neon: neon6 } = await import("@neondatabase/serverless");
-    const sql20 = neon6(process.env["DATABASE_URL"]);
-    const rows = await sql20`
+    const sql19 = neon6(process.env["DATABASE_URL"]);
+    const rows = await sql19`
       SELECT url FROM indexnow_pings
       WHERE url = ANY(${urls}::text[])
         AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')
@@ -22370,8 +20562,8 @@ async function recentlyPinged(urls) {
 async function recordPushed(urls, batchId, statusCode) {
   if (urls.length === 0) return;
   const { neon: neon6 } = await import("@neondatabase/serverless");
-  const sql20 = neon6(process.env["DATABASE_URL"]);
-  await sql20`
+  const sql19 = neon6(process.env["DATABASE_URL"]);
+  await sql19`
     INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
     SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
     FROM unnest(${urls}::text[]) AS t(u)
@@ -23249,7 +21441,7 @@ __export(purchase_watcher_server_exports, {
   evaluatePurchaseWatch: () => evaluatePurchaseWatch,
   runPurchaseWatcher: () => runPurchaseWatcher
 });
-import { and as and5, inArray as inArray4, isNull as isNull2, lt as lt3 } from "drizzle-orm";
+import { and as and4, inArray as inArray3, isNull, lt as lt3 } from "drizzle-orm";
 function fingerprint(ids) {
   return [...new Set(ids)].sort().join(",");
 }
@@ -23329,7 +21521,7 @@ async function fetchRecentPaidOrderIds(now) {
 }
 async function findGapOrderIds(orderIds) {
   if (orderIds.length === 0) return [];
-  const rows = await db.selectDistinct({ id: orderLineItems.shopifyOrderId }).from(orderLineItems).where(inArray4(orderLineItems.shopifyOrderId, orderIds));
+  const rows = await db.selectDistinct({ id: orderLineItems.shopifyOrderId }).from(orderLineItems).where(inArray3(orderLineItems.shopifyOrderId, orderIds));
   const processed = new Set(rows.map((r) => r.id));
   return orderIds.filter((id) => !processed.has(id));
 }
@@ -23348,11 +21540,11 @@ async function runPurchaseWatcher(now = Date.now()) {
   const [prior, recentIds, staleCapiRows, staleGa4Rows] = await Promise.all([
     loadState(),
     fetchRecentPaidOrderIds(now),
-    db.select({ id: metaCapiFailures.orderId }).from(metaCapiFailures).where(and5(isNull2(metaCapiFailures.resolvedAt), lt3(metaCapiFailures.createdAt, staleBefore))).catch((err2) => {
+    db.select({ id: metaCapiFailures.orderId }).from(metaCapiFailures).where(and4(isNull(metaCapiFailures.resolvedAt), lt3(metaCapiFailures.createdAt, staleBefore))).catch((err2) => {
       console.warn("[purchase-watcher] meta_capi_failures query failed:", String(err2).slice(0, 200));
       return [];
     }),
-    db.select({ id: ga4PurchaseFailures.orderId }).from(ga4PurchaseFailures).where(and5(isNull2(ga4PurchaseFailures.resolvedAt), lt3(ga4PurchaseFailures.createdAt, staleBefore))).catch((err2) => {
+    db.select({ id: ga4PurchaseFailures.orderId }).from(ga4PurchaseFailures).where(and4(isNull(ga4PurchaseFailures.resolvedAt), lt3(ga4PurchaseFailures.createdAt, staleBefore))).catch((err2) => {
       console.warn("[purchase-watcher] ga4_purchase_failures query failed:", String(err2).slice(0, 200));
       return [];
     })
@@ -23426,7 +21618,7 @@ __export(purchase_capi_server_exports, {
   reconcilePurchases: () => reconcilePurchases,
   sendPurchaseWithLedger: () => sendPurchaseWithLedger
 });
-import { eq as eq14, inArray as inArray5 } from "drizzle-orm";
+import { eq as eq12, inArray as inArray4 } from "drizzle-orm";
 function buildPurchaseEvent(order) {
   const user_data = {
     fbp: order.fbp,
@@ -23471,9 +21663,9 @@ async function sendPurchaseWithLedger(order) {
   const result = await sendCapiEvent(event, { consentGranted: false });
   try {
     if (result.ok) {
-      await db.update(metaCapiFailures).set({ resolvedAt: /* @__PURE__ */ new Date(), lastError: null }).where(eq14(metaCapiFailures.orderId, order.id));
+      await db.update(metaCapiFailures).set({ resolvedAt: /* @__PURE__ */ new Date(), lastError: null }).where(eq12(metaCapiFailures.orderId, order.id));
     } else {
-      await db.update(metaCapiFailures).set({ lastError: result.error ?? result.skipped ?? "unknown" }).where(eq14(metaCapiFailures.orderId, order.id));
+      await db.update(metaCapiFailures).set({ lastError: result.error ?? result.skipped ?? "unknown" }).where(eq12(metaCapiFailures.orderId, order.id));
     }
   } catch (err2) {
     console.error("[purchase-capi] ledger update failed", order.id, err2);
@@ -23530,7 +21722,7 @@ async function reconcilePurchases(opts = {}) {
   const ids = orders.map((o) => numericOrderId(o.id));
   let resolved = /* @__PURE__ */ new Set();
   try {
-    const rows = await db.select({ orderId: metaCapiFailures.orderId, resolvedAt: metaCapiFailures.resolvedAt }).from(metaCapiFailures).where(inArray5(metaCapiFailures.orderId, ids));
+    const rows = await db.select({ orderId: metaCapiFailures.orderId, resolvedAt: metaCapiFailures.resolvedAt }).from(metaCapiFailures).where(inArray4(metaCapiFailures.orderId, ids));
     resolved = new Set(rows.filter((r) => r.resolvedAt != null).map((r) => r.orderId));
   } catch (err2) {
     console.error("[purchase-capi] reconcile: ledger read failed, skipping run", err2);
@@ -23938,7 +22130,7 @@ var init_pricing_report_server = __esm({
 });
 
 // app/lib/pricing-agent.server.ts
-import { eq as eq15 } from "drizzle-orm";
+import { eq as eq13 } from "drizzle-orm";
 var init_pricing_agent_server = __esm({
   "app/lib/pricing-agent.server.ts"() {
     "use strict";
@@ -23961,7 +22153,7 @@ var init_pricing_apply_server = __esm({
 });
 
 // app/lib/pricing-webhook.server.ts
-import { eq as eq16, sql as sql12 } from "drizzle-orm";
+import { eq as eq14, sql as sql11 } from "drizzle-orm";
 async function setPipelineSetting(key, value) {
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -23982,7 +22174,7 @@ var init_pricing_webhook_server = __esm({
 });
 
 // app/lib/cost-sync.server.ts
-import { inArray as inArray6, sql as sql13 } from "drizzle-orm";
+import { inArray as inArray5, sql as sql12 } from "drizzle-orm";
 function round23(n) {
   return Math.round(n * 100) / 100;
 }
@@ -24012,7 +22204,7 @@ async function runNalpacCostSync(opts) {
     if (carriedInFeed.length === 0) return result;
     const dropPctRaw = await getPipelineSetting("import_monitor_watch_price_drop_pct");
     const dropPct = parseFloat(dropPctRaw ?? "0.10") || 0.1;
-    const priorRows = await db.select().from(nalpacPriceHistory).where(inArray6(nalpacPriceHistory.sku, carriedInFeed));
+    const priorRows = await db.select().from(nalpacPriceHistory).where(inArray5(nalpacPriceHistory.sku, carriedInFeed));
     const priorBySku = new Map(priorRows.map((r) => [r.sku, r]));
     const today = todayIso();
     const now = /* @__PURE__ */ new Date();
@@ -24066,17 +22258,17 @@ async function runNalpacCostSync(opts) {
         await db.insert(nalpacPriceHistory).values(chunk).onConflictDoUpdate({
           target: nalpacPriceHistory.sku,
           set: {
-            wholesale: sql13`excluded.wholesale`,
-            msrp: sql13`excluded.msrp`,
-            mapPrice: sql13`excluded.map_price`,
-            salePrice: sql13`excluded.sale_price`,
-            qty: sql13`excluded.qty`,
-            nalpacDiscountPct: sql13`excluded.nalpac_discount_pct`,
-            inTop100: sql13`excluded.in_top100`,
-            inNew: sql13`excluded.in_new`,
-            inSale: sql13`excluded.in_sale`,
-            observedAt: sql13`excluded.observed_at`,
-            syncedAt: sql13`excluded.synced_at`
+            wholesale: sql12`excluded.wholesale`,
+            msrp: sql12`excluded.msrp`,
+            mapPrice: sql12`excluded.map_price`,
+            salePrice: sql12`excluded.sale_price`,
+            qty: sql12`excluded.qty`,
+            nalpacDiscountPct: sql12`excluded.nalpac_discount_pct`,
+            inTop100: sql12`excluded.in_top100`,
+            inNew: sql12`excluded.in_new`,
+            inSale: sql12`excluded.in_sale`,
+            observedAt: sql12`excluded.observed_at`,
+            syncedAt: sql12`excluded.synced_at`
           }
         });
       } catch (err2) {
@@ -24694,7 +22886,7 @@ Be efficient. Each tool is a single call. Do NOT call the same tool twice.`;
 });
 
 // app/lib/enricher-brief.server.ts
-import { eq as eq17 } from "drizzle-orm";
+import { eq as eq15 } from "drizzle-orm";
 async function adminGraphQLWithRetry(query, variables, attempt = 0) {
   try {
     return await adminGraphQL(query, variables);
@@ -24802,7 +22994,7 @@ async function gatherProductBrief(numericProductId) {
     sku: dealHistory.sku,
     brand: dealHistory.brand,
     categories: dealHistory.categories
-  }).from(dealHistory).where(eq17(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  }).from(dealHistory).where(eq15(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const hist = histRows[0];
   const sku = hist?.sku;
   const brand = hist?.brand ?? snap.vendor ?? "";
@@ -25122,7 +23314,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and6, asc as asc4, eq as eq18, inArray as inArray7, isNull as isNull3, sql as sql14 } from "drizzle-orm";
+import { and as and5, asc as asc3, eq as eq16, inArray as inArray6, isNull as isNull2, sql as sql13 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -25158,7 +23350,7 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
   const snap = await fetchProductSnapshot(numericProductId);
   if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
   const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
-  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq18(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq16(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const editorialTags = (histRows[0]?.categories ?? []).filter(
     (c) => !!c && c !== "(uncategorized)"
   );
@@ -25277,12 +23469,12 @@ function isBatchClaimStuck(claimedAt, now, maxHours = STUCK_BATCH_MAX_HOURS) {
   return ageHours >= maxHours;
 }
 async function submitEnrichmentBatch(cap, opts = {}) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq18(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
-    eq18(importCandidates.status, "imported"),
-    isNull3(importCandidates.enrichedAt),
-    isNull3(importCandidates.enrichBatchId),
-    isNull3(importCandidates.enrichFailedAt)
-  )).orderBy(asc4(importCandidates.id)).limit(cap);
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
+    eq16(importCandidates.status, "imported"),
+    isNull2(importCandidates.enrichedAt),
+    isNull2(importCandidates.enrichBatchId),
+    isNull2(importCandidates.enrichFailedAt)
+  )).orderBy(asc3(importCandidates.id)).limit(cap);
   const valid = rows.filter((r) => Boolean(r.productId));
   if (valid.length === 0) return { submitted: 0, batchIds: [], reason: "no_unenriched" };
   const sharedContext = await loadSharedEnrichmentContext();
@@ -25308,7 +23500,7 @@ async function submitEnrichmentBatch(cap, opts = {}) {
     }
     if (inputs.length === 0) continue;
     const { batchId } = await submitFullEnrichmentBatch(inputs, sharedContext, { brandVoice: EMMA_VOICE_ENRICHMENT });
-    await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray7(importCandidates.id, candidateIds));
+    await db.update(importCandidates).set({ enrichBatchId: batchId, updatedAt: /* @__PURE__ */ new Date() }).where(inArray6(importCandidates.id, candidateIds));
     batchIds.push(batchId);
     submittedTotal += inputs.length;
     console.log(`[import-enrich] submitted full-enrichment batch ${batchId} for ${inputs.length} product(s)`);
@@ -25320,12 +23512,12 @@ async function detectImportEnrichStall(enabled) {
   try {
     const cutoff = new Date(Date.now() - STALL_AGE_HOURS * 3600 * 1e3);
     const rows = await db.select({
-      anchor: sql14`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
-    }).from(importCandidates).where(and6(
-      eq18(importCandidates.status, "imported"),
-      isNull3(importCandidates.enrichedAt),
-      isNull3(importCandidates.enrichBatchId),
-      isNull3(importCandidates.enrichFailedAt)
+      anchor: sql13`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
+    }).from(importCandidates).where(and5(
+      eq16(importCandidates.status, "imported"),
+      isNull2(importCandidates.enrichedAt),
+      isNull2(importCandidates.enrichBatchId),
+      isNull2(importCandidates.enrichFailedAt)
     ));
     const anchors = rows.map((r) => new Date(r.anchor)).filter((d) => !Number.isNaN(d.getTime()) && d < cutoff);
     const stuck = anchors.length;
@@ -25351,10 +23543,10 @@ async function detectImportEnrichStall(enabled) {
 async function applyEnrichFailure(candidate, reason) {
   const disp = decideEnrichFailure(candidate.enrichAttempts);
   if (disp.action === "retry") {
-    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
+    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
     console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- re-queued for retry`);
   } else {
-    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
+    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
     console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- parked, needs manual review`);
   }
 }
@@ -25365,12 +23557,12 @@ async function collectEnrichmentBatch() {
     productId: dealHistory.shopifyProductId,
     enrichAttempts: importCandidates.enrichAttempts,
     claimedAt: importCandidates.updatedAt
-  }).from(importCandidates).innerJoin(dealHistory, eq18(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
-    eq18(importCandidates.status, "imported"),
-    isNull3(importCandidates.enrichedAt),
-    isNull3(importCandidates.enrichFailedAt),
-    sql14`${importCandidates.enrichBatchId} IS NOT NULL`
-  )).orderBy(asc4(importCandidates.id));
+  }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
+    eq16(importCandidates.status, "imported"),
+    isNull2(importCandidates.enrichedAt),
+    isNull2(importCandidates.enrichFailedAt),
+    sql13`${importCandidates.enrichBatchId} IS NOT NULL`
+  )).orderBy(asc3(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
     return { enriched: 0, failed: 0, stillPending: 0, recovered: 0 };
@@ -25427,7 +23619,7 @@ async function collectEnrichmentBatch() {
         }
       }
       if (ok) {
-        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, candidate.id));
+        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
         enrichedTotal++;
         continue;
       }
@@ -25445,10 +23637,10 @@ async function publishEnrichedProducts() {
     sku: dealHistory.sku,
     title: dealHistory.seoTitle,
     categories: dealHistory.categories
-  }).from(importCandidates).innerJoin(dealHistory, eq18(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
-    eq18(importCandidates.status, "imported"),
-    sql14`${importCandidates.enrichedAt} IS NOT NULL`,
-    isNull3(importCandidates.publishedAt)
+  }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
+    eq16(importCandidates.status, "imported"),
+    sql13`${importCandidates.enrichedAt} IS NOT NULL`,
+    isNull2(importCandidates.publishedAt)
   ));
   let published = 0;
   let failed = 0;
@@ -25467,7 +23659,7 @@ async function publishEnrichedProducts() {
       } catch (tagErr) {
         console.warn(`[import-enrich] appendProductTag('new-arrival') failed for product ${r.productId} (candidate ${r.id}):`, tagErr instanceof Error ? tagErr.message : tagErr);
       }
-      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(importCandidates.id, r.id));
+      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, r.id));
       published++;
     } catch (err2) {
       console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err2);
@@ -25533,7 +23725,7 @@ __export(field_regen_runner_server_exports, {
   enqueueFieldRegenJob: () => enqueueFieldRegenJob
 });
 import Anthropic6 from "@anthropic-ai/sdk";
-import { eq as eq19 } from "drizzle-orm";
+import { eq as eq17 } from "drizzle-orm";
 function toDbRunnerState(rs) {
   return rs;
 }
@@ -25757,7 +23949,7 @@ async function advanceFieldRegenJob(job) {
           maxTokens: f.maxTokens
         };
       }
-      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
       const client5 = getClient2();
       const requests = [];
       const systemParam = systemBlocks.map((b) => ({
@@ -25785,7 +23977,7 @@ async function advanceFieldRegenJob(job) {
         runnerState: toDbRunnerState(newRunnerState),
         submittedAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq19(batchJobs.jobId, job.jobId));
+      }).where(eq17(batchJobs.jobId, job.jobId));
       outcome.submitted = true;
       console.log(`[field-regen] job ${job.jobId} submitted batch ${batch.id} (${requests.length} requests)`);
       break;
@@ -25799,7 +23991,7 @@ async function advanceFieldRegenJob(job) {
       const client5 = getClient2();
       const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -25850,7 +24042,7 @@ async function advanceFieldRegenJob(job) {
         currentBatchId: null,
         runnerState: toDbRunnerState(updatedRs),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq19(batchJobs.jobId, job.jobId));
+      }).where(eq17(batchJobs.jobId, job.jobId));
       break;
     }
     case "applying": {
@@ -25891,11 +24083,11 @@ async function advanceFieldRegenJob(job) {
           runnerState: toDbRunnerState(updatedRs),
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq19(batchJobs.jobId, job.jobId));
+        }).where(eq17(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       } else {
-        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
       }
       break;
     }
@@ -26023,7 +24215,7 @@ async function enqueueFieldRegenJob(context) {
   const fields = context.kind === "copy-fields" ? context.fields.map((f) => f) : context.kind === "emma-hero" ? ["emma-hero"] : ["emma-take"];
   const meta = { jobKind: "field-regen", context, systemBlocks, fields };
   const runnerState = { "__meta": meta };
-  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, result.jobId));
+  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, result.jobId));
   return result;
 }
 var MODEL4, MODEL_FAST3;
@@ -26052,7 +24244,7 @@ __export(batch_orchestrator_server_exports, {
 });
 import { createHash as createHash6, randomUUID as randomUUID2 } from "node:crypto";
 import Anthropic7 from "@anthropic-ai/sdk";
-import { eq as eq20, inArray as inArray8 } from "drizzle-orm";
+import { eq as eq18, inArray as inArray7 } from "drizzle-orm";
 function getClient3() {
   return new Anthropic7({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
@@ -26106,7 +24298,7 @@ async function enqueueBatchJob(args) {
 }
 async function advanceInflightJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 10;
-  const rows = await db.select().from(batchJobs).where(inArray8(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(batchJobs).where(inArray7(batchJobs.status, ["queued", "submitted", "processing", "applying"])).orderBy(batchJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, submitted: 0, applied: 0, done: 0, failed: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.enrichmentPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS);
@@ -26122,7 +24314,7 @@ async function advanceInflightJobs(opts = {}) {
       if (outcome.failed) result.failed++;
     } catch (err2) {
       console.error(`[batch-orchestrator] advanceJob ${job.jobId} threw:`, err2);
-      await db.update(batchJobs).set({ status: "failed", error: String(err2), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ status: "failed", error: String(err2), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       result.failed++;
     }
   }
@@ -26146,7 +24338,7 @@ async function advanceJob(job) {
       for (const p of job.products) {
         runnerState[p.productId] = freshRunnerState(p, job.jobId);
       }
-      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       const updatedJob = { ...job, runnerState };
       await submitTurnBatch(updatedJob);
       outcome.submitted = true;
@@ -26161,7 +24353,7 @@ async function advanceJob(job) {
       const client5 = getClient3();
       const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq20(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -26221,7 +24413,7 @@ async function advanceJob(job) {
               lastProcessedBatchId: job.currentBatchId
             };
           }
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
           continue;
         }
         const msg = entry.result.message;
@@ -26241,7 +24433,7 @@ async function advanceJob(job) {
             status: "done",
             lastProcessedBatchId: job.currentBatchId
           };
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
           continue;
         }
         const state = stateFor(ps, p, {
@@ -26314,7 +24506,7 @@ async function advanceJob(job) {
           messages: finalMessages,
           lastProcessedBatchId: job.currentBatchId
         };
-        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       }
       if (turnCount > 0) {
         void logApiTokens({
@@ -26347,7 +24539,7 @@ async function advanceJob(job) {
           turn: nowTurn,
           runnerState,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq20(batchJobs.jobId, job.jobId));
+        }).where(eq18(batchJobs.jobId, job.jobId));
       } else {
         const updatedJob = {
           ...job,
@@ -26384,7 +24576,7 @@ async function advanceJob(job) {
           if (idx >= 0) results[idx] = resultEntry;
           else results.push(resultEntry);
           runnerState[p.productId] = { ...ps, applyRetries: 0 };
-          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
         } catch (err2) {
           const applyRetries = (ps.applyRetries ?? 0) + 1;
           const errMsg = err2 instanceof Error ? err2.message : String(err2);
@@ -26407,7 +24599,7 @@ async function advanceJob(job) {
               error: `apply-permafail: ${errMsg}`
             };
           }
-          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq20(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
         }
       }
       outcome.applied = appliedThisTick;
@@ -26418,9 +24610,6 @@ async function advanceJob(job) {
         return !appliedSkus.includes(p.sku);
       });
       if (pending.length === 0) {
-        if (job.gatesDealId) {
-          await maybeActivateGatedDeal(job.jobId, job.gatesDealId);
-        }
         const anyHardError = Object.values(runnerState).some((ps) => ps.status === "error");
         const finalStatus = anyHardError ? "failed" : "done";
         await db.update(batchJobs).set({
@@ -26430,7 +24619,7 @@ async function advanceJob(job) {
           appliedSkus,
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq20(batchJobs.jobId, job.jobId));
+        }).where(eq18(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       }
@@ -26441,7 +24630,7 @@ async function advanceJob(job) {
       break;
   }
   try {
-    const fresh = await db.select().from(batchJobs).where(eq20(batchJobs.jobId, job.jobId)).limit(1);
+    const fresh = await db.select().from(batchJobs).where(eq18(batchJobs.jobId, job.jobId)).limit(1);
     const row = fresh[0];
     if (row) {
       const productStatuses = {};
@@ -26514,7 +24703,7 @@ async function submitTurnBatch(job) {
     runnerState,
     updatedAt: /* @__PURE__ */ new Date(),
     ...isFirstSubmit ? { submittedAt: /* @__PURE__ */ new Date() } : {}
-  }).where(eq20(batchJobs.jobId, job.jobId));
+  }).where(eq18(batchJobs.jobId, job.jobId));
   console.log(`[batch-orchestrator] job ${job.jobId} turn ${job.turn + 1}: submitted batch ${batch.id} (${requests.length} requests)`);
 }
 function buildCustomId2(jobId, productId) {
@@ -26562,36 +24751,8 @@ function stateFor(ps, p, taxonomy) {
     finished: ps.finished
   };
 }
-async function maybeActivateGatedDeal(jobId, gatesDealId) {
-  try {
-    const { dealHistory: dealHistory2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    const { eq: eq30 } = await import("drizzle-orm");
-    const rows = await db.select().from(dealHistory2).where(eq30(dealHistory2.id, gatesDealId)).limit(1);
-    const deal = rows[0];
-    if (!deal) {
-      console.warn(`[batch-orchestrator] maybeActivateGatedDeal: deal ${gatesDealId} not found`);
-      return;
-    }
-    if (deal.status === "live") {
-      return;
-    }
-    const { activateDeal: activateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
-    await activateDeal2({
-      id: deal.id,
-      shopifyProductId: deal.shopifyProductId,
-      sku: deal.sku,
-      seoTitle: deal.seoTitle,
-      dealPrice: deal.dealPrice ?? null,
-      msrp: deal.msrp ?? null,
-      wholesaleCost: deal.wholesaleCost ?? null
-    });
-    console.log(`[batch-orchestrator] job ${jobId} gated deal ${gatesDealId} activated`);
-  } catch (err2) {
-    console.error(`[batch-orchestrator] maybeActivateGatedDeal for job ${jobId} deal ${gatesDealId} failed:`, err2);
-  }
-}
 async function getBatchJobById(jobId) {
-  const rows = await db.select().from(batchJobs).where(eq20(batchJobs.jobId, jobId)).limit(1);
+  const rows = await db.select().from(batchJobs).where(eq18(batchJobs.jobId, jobId)).limit(1);
   return rows[0] ?? null;
 }
 async function listRecentBatchJobs(limit = 50) {
@@ -26627,7 +24788,7 @@ __export(bulk_import_server_exports, {
   parseBulkImportCSV: () => parseBulkImportCSV
 });
 import { parse as parse3 } from "csv-parse/sync";
-import { eq as eq21, max } from "drizzle-orm";
+import { eq as eq19, max } from "drizzle-orm";
 function inferCategory(categories) {
   const forHimCats = ["Vagina Strokers", "Body Molds", "Prostate Toys", "Masturbators", "Hands-Free Masturbators"];
   const forHerCats = ["Dual Action and Rabbits", "Finger and Clit", "Air Pulse and Suction", "Bullets and Eggs"];
@@ -26737,7 +24898,7 @@ function parseBulkImportCSV(csvText) {
   return { groups, parseErrors };
 }
 async function isSkuAlreadyImported(sku) {
-  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq21(dealHistory.sku, sku)).limit(1);
+  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq19(dealHistory.sku, sku)).limit(1);
   return rows.length > 0;
 }
 async function importProductGroup(group) {
@@ -26868,8 +25029,6 @@ async function importProductGroup(group) {
       tags: editorialTagsFrom(categories),
       category,
       sectionTags: [deriveSection({ productTypeDial: void 0, categories, title: masterRow["Product Title"] })],
-      dealStatus: "pending_approval",
-      dealDate: "2099-12-31",
       originalPrice: msrp,
       wholesaleCost: wholesale,
       mapPrice: map,
@@ -27011,8 +25170,6 @@ async function importProductGroupRaw(group) {
       tags: editorialTagsFrom(categories),
       category,
       sectionTags: [deriveSection({ categories, title: masterRow["Product Title"] })],
-      dealStatus: "pending_approval",
-      dealDate: "2099-12-31",
       originalPrice: msrp,
       wholesaleCost: wholesale,
       mapPrice: map,
@@ -27153,8 +25310,6 @@ async function importNewProduct(input) {
     seoTitle,
     tags: editorialTagsFrom(rawProduct.categories),
     category,
-    dealStatus: "pending_approval",
-    dealDate: "2099-12-31",
     originalPrice: rawProduct.msrp,
     wholesaleCost: rawProduct.wholesaleCost,
     mapPrice: rawProduct.mapPrice ?? 0,
@@ -27261,7 +25416,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and7, eq as eq22, inArray as inArray9, sql as sql15 } from "drizzle-orm";
+import { and as and6, eq as eq20, inArray as inArray8, sql as sql14 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -27428,7 +25583,7 @@ async function runImportMonitor(opts = {}) {
       status: importCandidates.status,
       watchScore: importCandidates.watchScore,
       watchPrice: importCandidates.watchPrice
-    }).from(importCandidates).where(inArray9(importCandidates.masterKey, cappedKeys)) : [];
+    }).from(importCandidates).where(inArray8(importCandidates.masterKey, cappedKeys)) : [];
     const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r]));
     let candidatesNew = 0;
     let candidatesResurfaced = 0;
@@ -27446,21 +25601,21 @@ async function runImportMonitor(opts = {}) {
         candidatesNew++;
         candidatesFound++;
       } else if (existing.status === "rejected" || existing.status === "imported") {
-        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq22(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(importCandidates.masterKey, masterKey));
       } else if (existing.status === "watching") {
         const priorScore = parseFloat(existing.watchScore ?? "0");
         const priorPrice = parseFloat(existing.watchPrice ?? "0");
         const scoreImproved = score2 >= priorScore + watchScoreDelta;
         const priceDropped = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct);
         if (scoreImproved || priceDropped) {
-          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq22(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq20(importCandidates.masterKey, masterKey));
           candidatesResurfaced++;
           candidatesFound++;
         } else {
-          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq22(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(importCandidates.masterKey, masterKey));
         }
       } else {
-        await db.update(importCandidates).set(upsertPayload).where(eq22(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set(upsertPayload).where(eq20(importCandidates.masterKey, masterKey));
         candidatesFound++;
       }
     }
@@ -27477,7 +25632,7 @@ async function runImportMonitor(opts = {}) {
       candidatesNew,
       candidatesResurfaced,
       autoImported
-    }).where(eq22(importMonitorRuns.id, runId));
+    }).where(eq20(importMonitorRuns.id, runId));
     await setPipelineSetting("import_monitor_last_run_at", (/* @__PURE__ */ new Date()).toISOString());
     console.info(
       `[import-monitor] done: feedsOk=${feedsOk} found=${candidatesFound} new=${candidatesNew} resurfaced=${candidatesResurfaced}`
@@ -27490,7 +25645,7 @@ async function runImportMonitor(opts = {}) {
       finishedAt: /* @__PURE__ */ new Date(),
       feedsOk: false,
       errorMessage
-    }).where(eq22(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
+    }).where(eq20(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
     return {
       feedsOk: false,
       candidatesFound: 0,
@@ -27533,7 +25688,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql15`count(*)::int` }).from(importCandidates).where(and7(eq22(importCandidates.status, "imported"), eq22(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql14`count(*)::int` }).from(importCandidates).where(and6(eq20(importCandidates.status, "imported"), eq20(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -27551,10 +25706,10 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
     msrp: importCandidates.msrp,
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
-  }).from(importCandidates).where(and7(
-    eq22(importCandidates.status, "pending"),
-    inArray9(importCandidates.masterKey, cappedKeys)
-  )).orderBy(importCandidates.tier, sql15`${importCandidates.dealScore} DESC NULLS LAST`);
+  }).from(importCandidates).where(and6(
+    eq20(importCandidates.status, "pending"),
+    inArray8(importCandidates.masterKey, cappedKeys)
+  )).orderBy(importCandidates.tier, sql14`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
     if (!tierOk || c.needsReview) return false;
@@ -27649,7 +25804,7 @@ async function stageMasterCandidatesBySkus(skus, opts) {
     }
   }
   const masterKeys = [...mastersToDo];
-  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray9(importCandidates.masterKey, masterKeys)) : [];
+  const existingRows = masterKeys.length > 0 ? await db.select({ masterKey: importCandidates.masterKey, status: importCandidates.status }).from(importCandidates).where(inArray8(importCandidates.masterKey, masterKeys)) : [];
   const existingByKey = new Map(existingRows.map((r) => [r.masterKey ?? "", r.status]));
   let staged = 0;
   let skippedCarried = 0;
@@ -27677,10 +25832,10 @@ async function stageMasterCandidatesBySkus(skus, opts) {
       }).onConflictDoNothing();
       staged++;
     } else if (existingStatus === "watching") {
-      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq22(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq20(importCandidates.masterKey, masterKey));
       staged++;
     } else {
-      await db.update(importCandidates).set(upsertPayload).where(eq22(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set(upsertPayload).where(eq20(importCandidates.masterKey, masterKey));
       staged++;
     }
   }
@@ -27688,22 +25843,22 @@ async function stageMasterCandidatesBySkus(skus, opts) {
 }
 async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
-  const query = db.select().from(importCandidates).where(inArray9(importCandidates.status, statuses)).orderBy(
+  const query = db.select().from(importCandidates).where(inArray8(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
-    sql15`${importCandidates.dealScore} DESC NULLS LAST`
+    sql14`${importCandidates.dealScore} DESC NULLS LAST`
   );
   if (limit != null) return query.limit(limit);
   return query;
 }
 async function getCatalogOpportunities() {
-  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql15`${dealHistory.brand} IS NOT NULL`);
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql14`${dealHistory.brand} IS NOT NULL`);
   const brandCount = /* @__PURE__ */ new Map();
   for (const r of brandRows) {
     if (!r.brand) continue;
     brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
   }
   const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
-  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql15`${dealHistory.categories} IS NOT NULL`);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql14`${dealHistory.categories} IS NOT NULL`);
   const catCount = /* @__PURE__ */ new Map();
   for (const r of catRows) {
     for (const cat of r.categories ?? []) {
@@ -27715,7 +25870,7 @@ async function getCatalogOpportunities() {
     brand: importCandidates.brand,
     tier: importCandidates.tier,
     dealScore: importCandidates.dealScore
-  }).from(importCandidates).where(inArray9(importCandidates.status, ["pending", "watching"]));
+  }).from(importCandidates).where(inArray8(importCandidates.status, ["pending", "watching"]));
   const oppMap = /* @__PURE__ */ new Map();
   for (const r of pendingRows) {
     if (!r.brand) continue;
@@ -27733,7 +25888,7 @@ async function getCatalogOpportunities() {
   return { brandCoverage, categoryCoverage, brandOpportunities };
 }
 async function getRecentImportRuns(limit) {
-  return db.select().from(importMonitorRuns).orderBy(sql15`${importMonitorRuns.startedAt} DESC`).limit(limit);
+  return db.select().from(importMonitorRuns).orderBy(sql14`${importMonitorRuns.startedAt} DESC`).limit(limit);
 }
 async function updateCandidateStatus(id, status, opts = {}) {
   const now = /* @__PURE__ */ new Date();
@@ -27745,24 +25900,24 @@ async function updateCandidateStatus(id, status, opts = {}) {
     updatedAt: now
   };
   if (status === "watching") {
-    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq22(importCandidates.id, id)).limit(1);
+    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq20(importCandidates.id, id)).limit(1);
     if (rows[0]) {
       base.watchScore = rows[0].dealScore;
       base.watchPrice = rows[0].proposedPrice;
     }
   }
-  await db.update(importCandidates).set(base).where(eq22(importCandidates.id, id));
+  await db.update(importCandidates).set(base).where(eq20(importCandidates.id, id));
 }
 async function approveAndImport(id, reviewedBy, opts = {}) {
   const reviewedStamp = reviewedBy ? { reviewedBy, reviewedAt: /* @__PURE__ */ new Date() } : {};
-  const rows = await db.select().from(importCandidates).where(eq22(importCandidates.id, id)).limit(1);
+  const rows = await db.select().from(importCandidates).where(eq20(importCandidates.id, id)).limit(1);
   const candidate = rows[0];
   if (!candidate) {
     return { ok: false, error: `candidate ${id} not found` };
   }
   const repSku = candidate.sku;
   if (await isSkuAlreadyImported(repSku)) {
-    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq22(importCandidates.id, id));
+    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq20(importCandidates.id, id));
     return { ok: true, skipped: true };
   }
   const masters = opts.preloadedMasters ?? collapseMasters((await fetchAllNalpacFeeds()).snapshots);
@@ -27831,14 +25986,14 @@ async function approveAndImport(id, reviewedBy, opts = {}) {
   if (!result.success && !result.skipped) {
     return { ok: false, error: result.error ?? "importProductGroupRaw failed" };
   }
-  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq22(dealHistory.sku, repSku)).limit(1);
+  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq20(dealHistory.sku, repSku)).limit(1);
   const dealHistoryId = dhRows[0]?.id;
   await db.update(importCandidates).set({
     status: "imported",
     dealHistoryId: dealHistoryId ?? null,
     updatedAt: /* @__PURE__ */ new Date(),
     ...reviewedStamp
-  }).where(eq22(importCandidates.id, id));
+  }).where(eq20(importCandidates.id, id));
   return {
     ok: true,
     ...result.shopifyProductId !== void 0 ? { shopifyProductId: result.shopifyProductId } : {},
@@ -28295,16 +26450,16 @@ __export(ticket_out_of_band_sweep_server_exports, {
   referencesTicketId: () => referencesTicketId,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and8, desc as desc2, eq as eq23, inArray as inArray10, lt as lt4, notExists, sql as sql16 } from "drizzle-orm";
+import { and as and7, desc as desc2, eq as eq21, inArray as inArray9, lt as lt4, notExists, sql as sql15 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
     ticketId: homepageTeamSuggestions.id,
     ref: suggestionLinks.ref,
     linkedAt: suggestionLinks.createdAt
-  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and8(
-    inArray10(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
-    eq23(suggestionLinks.kind, "pr"),
+  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq21(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
+    inArray9(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+    eq21(suggestionLinks.kind, "pr"),
     lt4(homepageTeamSuggestions.updatedAt, cutoff)
   )).orderBy(homepageTeamSuggestions.updatedAt, desc2(suggestionLinks.createdAt));
   const seen = /* @__PURE__ */ new Set();
@@ -28321,13 +26476,13 @@ async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
 }
 async function findStrandedLinklessTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const rows = await db.select({ ticketId: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and8(
-    inArray10(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+  const rows = await db.select({ ticketId: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and7(
+    inArray9(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
     lt4(homepageTeamSuggestions.updatedAt, cutoff),
     notExists(
-      db.select({ one: sql16`1` }).from(suggestionLinks).where(and8(
-        eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
-        eq23(suggestionLinks.kind, "pr")
+      db.select({ one: sql15`1` }).from(suggestionLinks).where(and7(
+        eq21(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
+        eq21(suggestionLinks.kind, "pr")
       ))
     )
   )).orderBy(homepageTeamSuggestions.updatedAt).limit(limit);
@@ -28369,10 +26524,10 @@ async function findMergedPrForTicket(ticketId, context = "out-of-band-sweep") {
   return classifyTicketPrMatches(prs, ticketId);
 }
 async function markPrLinkMerged(ticketId, prRef) {
-  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and8(
-    eq23(suggestionLinks.suggestionId, ticketId),
-    eq23(suggestionLinks.kind, "pr"),
-    eq23(suggestionLinks.ref, prRef)
+  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and7(
+    eq21(suggestionLinks.suggestionId, ticketId),
+    eq21(suggestionLinks.kind, "pr"),
+    eq21(suggestionLinks.ref, prRef)
   ));
 }
 async function applyCandidateIfMerged(c, result) {
@@ -28443,9 +26598,9 @@ async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
 }
 async function countStrandedVerifiedTickets() {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const [row] = await db.select({ n: sql16`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and8(
-    inArray10(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
-    eq23(suggestionLinks.kind, "pr"),
+  const [row] = await db.select({ n: sql15`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq21(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and7(
+    inArray9(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+    eq21(suggestionLinks.kind, "pr"),
     lt4(homepageTeamSuggestions.updatedAt, cutoff)
   ));
   return row?.n ?? 0;
@@ -28473,9 +26628,9 @@ __export(settings_server_exports, {
   recentSettingChanges: () => recentSettingChanges,
   setPipelineSettingAudited: () => setPipelineSettingAudited
 });
-import { desc as desc3, eq as eq24, gte as gte3 } from "drizzle-orm";
+import { desc as desc3, eq as eq22, gte as gte3 } from "drizzle-orm";
 async function setPipelineSettingAudited(key, value, actor, source) {
-  const [existing] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq24(pipelineSettings.key, key)).limit(1);
+  const [existing] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq22(pipelineSettings.key, key)).limit(1);
   const oldValue = existing?.value ?? null;
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -28554,7 +26709,7 @@ __export(release_engine_server_exports, {
   summarizeSmoke: () => summarizeSmoke,
   utcDay: () => utcDay3
 });
-import { and as and9, desc as desc4, eq as eq25, sql as sql17 } from "drizzle-orm";
+import { and as and8, desc as desc4, eq as eq23, sql as sql16 } from "drizzle-orm";
 function utcDay3(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -28906,17 +27061,17 @@ async function runSelfCheck(opts = {}) {
   return { ok: false, problems };
 }
 async function resolveTicketForPr(pr) {
-  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
-    eq25(suggestionLinks.kind, "pr"),
-    sql17`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
+  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and8(
+    eq23(suggestionLinks.kind, "pr"),
+    sql16`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
   const match = direct.find((l) => prNumberFromRef(l.ref) === pr.number);
   if (match) return loadTicketFacts(match.suggestionId);
   const titleId = parseTicketRefFromTitle(pr.title);
   if (titleId === null) return null;
-  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
-    eq25(suggestionLinks.kind, "pr"),
-    eq25(suggestionLinks.suggestionId, titleId)
+  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and8(
+    eq23(suggestionLinks.kind, "pr"),
+    eq23(suggestionLinks.suggestionId, titleId)
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
   const otherPr = claimed.find((l) => prNumberFromRef(l.ref) !== pr.number);
   if (otherPr) {
@@ -28933,7 +27088,7 @@ async function loadTicketFacts(id) {
     status: homepageTeamSuggestions.status,
     kind: homepageTeamSuggestions.kind,
     attemptCount: homepageTeamSuggestions.attemptCount
-  }).from(homepageTeamSuggestions).where(eq25(homepageTeamSuggestions.id, id)).limit(1);
+  }).from(homepageTeamSuggestions).where(eq23(homepageTeamSuggestions.id, id)).limit(1);
   if (!row) return null;
   return { id: row.id, status: row.status, kind: row.kind, attemptCount: row.attemptCount };
 }
@@ -29176,7 +27331,7 @@ async function maybeSweepExhaustedTickets(dryRun) {
   await kvSet(KEYS.exhaustedHour, hour);
   let rows = [];
   try {
-    const res = await db.execute(sql17`
+    const res = await db.execute(sql16`
       SELECT id, attempt_count, last_error
         FROM homepage_team_suggestions
        WHERE status = 'in_progress'
@@ -29535,10 +27690,10 @@ async function markPrLinksState(pending, state) {
   if (pending.ticketId === null) return;
   try {
     await db.update(suggestionLinks).set({ state: state.slice(0, 16), updatedAt: /* @__PURE__ */ new Date() }).where(
-      and9(
-        eq25(suggestionLinks.suggestionId, pending.ticketId),
-        eq25(suggestionLinks.kind, "pr"),
-        eq25(suggestionLinks.ref, pending.prUrl)
+      and8(
+        eq23(suggestionLinks.suggestionId, pending.ticketId),
+        eq23(suggestionLinks.kind, "pr"),
+        eq23(suggestionLinks.ref, pending.prUrl)
       )
     );
   } catch (err2) {
@@ -30389,10 +28544,10 @@ var init_avatar_script = __esm({
 });
 
 // app/lib/ivr-voice.server.ts
-import { eq as eq26 } from "drizzle-orm";
+import { eq as eq24 } from "drizzle-orm";
 async function getActiveIvrVoiceId() {
   try {
-    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq26(ivrVoices.active, true)).limit(1);
+    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq24(ivrVoices.active, true)).limit(1);
     if (rows[0]?.voiceId) return rows[0].voiceId;
   } catch (err2) {
     console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err2);
@@ -30424,7 +28579,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq27, and as and10, inArray as inArray11, desc as desc5, isNotNull, ne as ne3, sql as sql18 } from "drizzle-orm";
+import { eq as eq25, and as and9, inArray as inArray10, desc as desc5, isNotNull, ne as ne2, sql as sql17 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -30484,7 +28639,7 @@ async function enqueueVideoJob(args) {
 }
 async function advanceInflightVideoJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 5;
-  const rows = await db.select().from(videoJobs).where(inArray11(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(videoJobs).where(inArray10(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, done: 0, failed: 0, parked: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.videoPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS2);
@@ -30498,14 +28653,14 @@ async function advanceInflightVideoJobs(opts = {}) {
       if (outcome === "parked") result.parked++;
     } catch (err2) {
       console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err2);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.jobId, job.jobId));
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq25(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq25(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -30550,12 +28705,12 @@ async function frameReviewEnabled() {
   return v !== "false";
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
-  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and10(
-    sql18`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
-    eq27(videoJobs.presenter, presenter),
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and9(
+    sql17`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
+    eq25(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
-    inArray11(videoJobs.stage, FRAME_APPROVED_STAGES),
-    ...excludeJobRowId != null ? [ne3(videoJobs.id, excludeJobRowId)] : []
+    inArray10(videoJobs.stage, FRAME_APPROVED_STAGES),
+    ...excludeJobRowId != null ? [ne2(videoJobs.id, excludeJobRowId)] : []
   )).orderBy(desc5(videoJobs.createdAt)).limit(1);
   return row?.frameId ?? null;
 }
@@ -30569,14 +28724,14 @@ async function advanceSceneFrame(job) {
     if (!reusableJob) {
       throw new Error("reuseFrameAssetId applies only to avatar/talking-head jobs");
     }
-    const [asset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, reuseId)).limit(1);
+    const [asset] = await db.select().from(mediaAssets).where(eq25(mediaAssets.id, reuseId)).limit(1);
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
-    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and10(
-      eq27(videoJobs.sceneFrameAssetId, reuseId),
-      eq27(videoJobs.presenter, job.presenter),
-      inArray11(videoJobs.stage, FRAME_APPROVED_STAGES)
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and9(
+      eq25(videoJobs.sceneFrameAssetId, reuseId),
+      eq25(videoJobs.presenter, job.presenter),
+      inArray10(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
       throw new Error(`reuseFrameAssetId ${reuseId} has never been approved for presenter '${job.presenter}' (no matching job carried it past the frame gate)`);
@@ -30665,7 +28820,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq25(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -30750,7 +28905,7 @@ async function advanceClipAvatar(job, spec) {
     if ((Number(job.costUsd) + clipCost + ttsCost) * 100 > maxCents) {
       throw new Error(`Accrued + avatar render cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq25(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const frameBuf = await blobFetchToBuffer(frame.blobUrl);
     const imageUrl = await uploadToFalStorage(frameBuf, "image/jpeg", `frame-${job.jobId}.jpg`);
@@ -30844,7 +28999,7 @@ async function advanceLipsync(job) {
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq27(mediaAssets.videoJobId, jobRowId)).orderBy(desc5(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq25(mediaAssets.videoJobId, jobRowId)).orderBy(desc5(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
@@ -30892,7 +29047,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq25(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -30906,7 +29061,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq27(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq25(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -30918,29 +29073,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq25(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq25(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq25(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq25(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq25(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq25(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -30960,12 +29115,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq25(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq25(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq25(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -30992,17 +29147,17 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
 async function recordVideoMetrics(jobRowId, platform, metrics) {
   const submitted = Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== void 0));
   if (!Object.keys(submitted).length) return;
-  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq25(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const existing = (job.metricsJson ?? {})[platform] ?? {};
   const merged = { ...job.metricsJson ?? {}, [platform]: { ...existing, ...submitted } };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq25(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc5(videoJobs.createdAt)).limit(limit);
   if (!jobs.length) return [];
   const jobIds = jobs.map((j) => j.id);
-  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray11(mediaAssets.videoJobId, jobIds));
+  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray10(mediaAssets.videoJobId, jobIds));
   return jobs.map((job) => {
     const own = assets.filter((a) => a.videoJobId === job.id);
     const finalAsset = own.find((a) => a.id === job.finalAssetId) ?? null;
@@ -31172,7 +29327,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq28 } from "drizzle-orm";
+import { eq as eq26 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -31293,7 +29448,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq28(returns.id, row.id)).returning();
+    }).where(eq26(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err2) {
     console.error("[returns] db update threw", err2);
@@ -31301,7 +29456,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq28(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq26(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -31332,7 +29487,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq28(returns.id, row.id));
+  }).where(eq26(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -31341,13 +29496,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq28(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq26(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq28(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq26(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq28(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq26(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -31488,18 +29643,18 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and11, eq: eq30, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and10, eq: eq28, isNull: isNull3, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and10(isNull3(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq30(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq28(metaCapiFailures2.id, row.id));
         resolved++;
       } else if (result.skipped) {
-        await db2.update(metaCapiFailures2).set({ lastError: result.skipped }).where(eq30(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ lastError: result.skipped }).where(eq28(metaCapiFailures2.id, row.id));
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq30(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq28(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -31514,16 +29669,16 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and11, eq: eq30, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and10, eq: eq28, isNull: isNull3, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and10(isNull3(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
       if (result.ok) {
-        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq30(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq28(ga4PurchaseFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq30(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq28(ga4PurchaseFailures2.id, row.id));
       }
     }
     return resolved;
@@ -31547,23 +29702,13 @@ function createCronRoutes() {
     next();
   };
   const cronRoute = (path, handler) => router.route(path).get(guard, handler).post(guard, handler);
-  cronRoute("/daily-feed-processor", async (_req, res) => {
+  cronRoute("/discontinued-sweep", async (_req, res) => {
     try {
-      const { dailyFeedProcessor: dailyFeedProcessor2 } = await Promise.resolve().then(() => (init_feed_processor_server(), feed_processor_server_exports));
-      const result = await dailyFeedProcessor2();
-      res.json({ ok: true, topCandidates: result.topCandidates.length, needsImagen: result.needsImagen.length });
+      const { runDiscontinuedSweep: runDiscontinuedSweep2 } = await Promise.resolve().then(() => (init_feed_processor_server(), feed_processor_server_exports));
+      const result = await runDiscontinuedSweep2();
+      res.json({ ok: true, ...result.discontinuedSweep });
     } catch (err2) {
-      console.error("[cron:daily-feed-processor]", err2);
-      res.status(500).json({ error: String(err2) });
-    }
-  });
-  cronRoute("/deal-activator", async (_req, res) => {
-    try {
-      const { rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
-      const result = await rotateDeal2();
-      res.json({ ok: true, ...result });
-    } catch (err2) {
-      console.error("[cron:deal-activator]", err2);
+      console.error("[cron:discontinued-sweep]", err2);
       res.status(500).json({ error: String(err2) });
     }
   });
@@ -31995,22 +30140,6 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err2) });
     }
   });
-  cronRoute("/inventory-check", async (_req, res) => {
-    try {
-      const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
-      const { soldOut } = await isLiveDealSoldOut2();
-      if (soldOut) {
-        console.log("[cron:inventory-check] Live deal sold out \u2014 rotating");
-        const result = await rotateDeal2();
-        res.json({ ok: true, rotated: true, ...result });
-      } else {
-        res.json({ ok: true, rotated: false });
-      }
-    } catch (err2) {
-      console.error("[cron:inventory-check]", err2);
-      res.status(500).json({ error: String(err2) });
-    }
-  });
   router.post("/warm-discovery-index", guard, async (_req, res) => {
     try {
       const {
@@ -32146,8 +30275,8 @@ function createCronRoutes() {
 // server/webhooks.ts
 init_schema();
 import { Router as Router2 } from "express";
-import crypto3 from "node:crypto";
-import { eq as eq29, sql as sql19 } from "drizzle-orm";
+import crypto2 from "node:crypto";
+import { eq as eq27, sql as sql18 } from "drizzle-orm";
 var PURCHASE_SIGNAL_TIMEOUT_MS = 2500;
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
@@ -32155,11 +30284,11 @@ function verifyShopifyWebhook(req) {
   const hmac = req.headers["x-shopify-hmac-sha256"];
   if (typeof hmac !== "string" || hmac.length === 0) return false;
   const body = req.body;
-  const digest = crypto3.createHmac("sha256", secret).update(body).digest("base64");
+  const digest = crypto2.createHmac("sha256", secret).update(body).digest("base64");
   const a = Buffer.from(hmac);
   const b = Buffer.from(digest);
   if (a.length !== b.length) return false;
-  return crypto3.timingSafeEqual(a, b);
+  return crypto2.timingSafeEqual(a, b);
 }
 async function handlePurchaseSignals(order) {
   await Promise.allSettled([sendMetaPurchase(order), sendGa4Purchase_(order)]);
@@ -32265,7 +30394,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql19`${productCopurchase.count} + 1`,
+              count: sql18`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
@@ -32393,16 +30522,7 @@ async function handleInventoryUpdate(level) {
   const key = inventoryLevelKey(level.inventory_item_id);
   const prev = await kvGet2(key);
   await kvSet2(key, level.available);
-  if (level.available <= 0) {
-    const { isLiveDealSoldOut: isLiveDealSoldOut2, rotateDeal: rotateDeal2 } = await Promise.resolve().then(() => (init_deal_rotator_server(), deal_rotator_server_exports));
-    const { soldOut } = await isLiveDealSoldOut2();
-    if (soldOut) {
-      console.log("[webhook:inventory-update] Live deal sold out \u2014 rotating to next deal");
-      const result = await rotateDeal2();
-      console.log("[webhook:inventory-update] Rotation result:", result);
-    }
-    return;
-  }
+  if (level.available <= 0) return;
   if (!isRestockCrossing(prev, level.available)) return;
   const { getProductByInventoryItemId: getProductByInventoryItemId2 } = await Promise.resolve().then(() => (init_shopify_server(), shopify_server_exports));
   const product = await getProductByInventoryItemId2(String(level.inventory_item_id));
@@ -32436,7 +30556,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq29(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq27(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];

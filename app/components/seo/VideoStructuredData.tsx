@@ -15,8 +15,10 @@ function isoDuration(seconds: number): string {
   return r > 0 ? `PT${m}M${r}S` : `PT${m}M`
 }
 
-function uploadDateFor(deal: Deal): string {
-  return deal.dealDate || new Date().toISOString().slice(0, 10)
+// uploadDate used to come from the xdipx.deal_date metafield, which is retired.
+// Today's date is the honest fallback for a video with no recorded upload date.
+function uploadDateFor(_deal: Deal): string {
+  return new Date().toISOString().slice(0, 10)
 }
 
 function buildHeroVideoObject(hv: HeroVideo, deal: Deal): object | null {

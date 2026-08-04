@@ -125,8 +125,6 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "works_for_him" }
     { namespace: "xdipx", key: "works_for_her" }
     { namespace: "xdipx", key: "box_contents" }
-    { namespace: "xdipx", key: "deal_status" }
-    { namespace: "xdipx", key: "deal_date" }
     { namespace: "xdipx", key: "deal_score" }
     { namespace: "xdipx", key: "wholesale_cost" }
     { namespace: "xdipx", key: "map_price" }
@@ -232,10 +230,8 @@ const PRODUCT_CORE_FRAGMENT = `
 // versus PRODUCT_CORE_FRAGMENT.
 const CARD_METAFIELDS_FRAGMENT = `
   metafields(identifiers: [
-    { namespace: "xdipx", key: "deal_date" }
     { namespace: "xdipx", key: "original_price" }
     { namespace: "xdipx", key: "category" }
-    { namespace: "xdipx", key: "deal_status" }
     { namespace: "xdipx", key: "mood_tags" }
     { namespace: "xdipx", key: "audience_tags" }
     { namespace: "xdipx", key: "matters_tags" }
@@ -323,13 +319,11 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     id: node.id,
     handle: node.handle,
     seoTitle: node.title,
-    dealDate: parseMetafield(mf, 'deal_date'),
     dealPrice,
     msrp: parseFloat(parseMetafield(mf, 'original_price') || (variant?.compareAtPrice?.amount ?? '0')),
     images: parseImages(node.images.edges),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
-    dealStatus: 'archived' as const,
     qty: variant?.quantityAvailable ?? 0,
     defaultVariantId:    variant?.id ?? null,
     hasMultipleVariants: variantEdges.length > 1,
@@ -686,8 +680,6 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     mapPrice: parseFloat(parseMetafield(mf, 'map_price') || '0'),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
-    dealStatus: (parseMetafield(mf, 'deal_status') || 'live') as Deal['dealStatus'],
-    dealDate: parseMetafield(mf, 'deal_date'),
     qty: variant?.quantityAvailable ?? 0,
     tags: node.tags ?? [],
     accessoryProductIds: parseMetafieldJSON<string[]>(mf, 'accessory_product_ids', []),
@@ -751,23 +743,35 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
 
 // ─── Public API ───────────────────────────────────────────────────────────
 
+/**
+ * The product Emma is currently featuring, in full.
+ *
+ * Source of truth is the Sanity hero singleton the homepage team maintains
+ * (`singleton.emmaHeroStorefront.featuredProductHandle`). It used to be the
+ * `deal-status-live` Shopify tag, set by the midnight daily-deal rotator —
+ * that rotator is retired, so the tag is never written and would be a
+ * permanently-empty source.
+ *
+ * Sanity is imported dynamically to keep this module free of a static
+ * shopify -> sanity edge.
+ */
+export async function getFeaturedProductHandle(): Promise<string | null> {
+  try {
+    const { getEmmaHeroSettings } = await import('./sanity.server')
+    const hero = await getEmmaHeroSettings()
+    return hero?.featuredProductHandle ?? null
+  } catch (err) {
+    console.error('[shopify] getFeaturedProductHandle failed:', err)
+    return null
+  }
+}
+
 export async function getDailyDeal(): Promise<Deal | null> {
-  // Step 1: find the live deal handle via tag search (metafields not available on search nodes)
-  const search = await storefront<{
-    products: { edges: { node: { handle: string } }[] }
-  }>(`
-    query GetDailyDealHandle {
-      products(first: 1, query: "tag:deal-status-live") {
-        edges { node { handle } }
-      }
-    }
-  `)
-  const handle = search.products.edges[0]?.node.handle
+  const handle = await getFeaturedProductHandle()
   if (!handle) return null
 
-  // Step 2: fetch full product data by handle (metafields work on direct product queries)
   const data = await storefront<{ product: ShopifyProductNode | null }>(`
-    query GetDailyDeal($handle: String!) {
+    query GetFeaturedProduct($handle: String!) {
       product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
     }
   `, { handle })
@@ -775,40 +779,9 @@ export async function getDailyDeal(): Promise<Deal | null> {
   return nodeToDeal(data.product)
 }
 
-/** Lightweight: returns only the live deal's handle. Used by PLPs to flag tiles. */
+/** Lightweight: only the featured product's handle. Used by PLPs to flag tiles. */
 export async function getLiveDealHandle(): Promise<string | null> {
-  const search = await storefront<{
-    products: { edges: { node: { handle: string } }[] }
-  }>(`
-    query GetLiveDealHandle {
-      products(first: 1, query: "tag:deal-status-live") {
-        edges { node { handle } }
-      }
-    }
-  `).catch(() => null)
-  return search?.products.edges[0]?.node.handle ?? null
-}
-
-/** Like getDailyDeal but finds the deal-status-approved product so admin can promote it. */
-export async function getApprovedDeal(): Promise<Deal | null> {
-  const search = await storefront<{
-    products: { edges: { node: { handle: string } }[] }
-  }>(`
-    query GetApprovedDealHandle {
-      products(first: 1, query: "tag:deal-status-approved") {
-        edges { node { handle } }
-      }
-    }
-  `)
-  const handle = search.products.edges[0]?.node.handle
-  if (!handle) return null
-  const data = await storefront<{ product: ShopifyProductNode | null }>(`
-    query GetApprovedDeal($handle: String!) {
-      product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
-    }
-  `, { handle })
-  if (!data.product) return null
-  return nodeToDeal(data.product)
+  return getFeaturedProductHandle()
 }
 
 export async function getProductByHandle(handle: string): Promise<Product | null> {
@@ -967,8 +940,6 @@ async function getDealByShopifyIdUncached(id: string): Promise<Deal | null> {
     mapPrice: parseFloat(mfVal('map_price') || '0'),
     brand: product.vendor,
     category: parseCategory(mfVal('category')),
-    dealStatus: (mfVal('deal_status') || 'pending') as Deal['dealStatus'],
-    dealDate: mfVal('deal_date'),
     qty: variant?.inventory_quantity ?? 0,
     tags: product.tags ? product.tags.split(', ').filter(Boolean) : [],
     accessoryProductIds: mfJSON<string[]>('accessory_product_ids', []),
@@ -1078,6 +1049,28 @@ export async function getProductsByTag(tag: string, limit = 6): Promise<Product[
       query: `tag:${JSON.stringify(tag)}`,
       first: limit,
     })
+    return data.products.edges.map(e => nodeToProduct(e.node))
+  })
+}
+
+/**
+ * Newest-updated products, no tag filter. The broad evergreen fallback pool for
+ * callers that need "some real products" when a narrower query comes up short.
+ *
+ * Replaces the old `tag:deal-status-archived` (vault) fallback, which only ever
+ * matched products that had cycled through the retired daily-deal rotation.
+ */
+export async function getRecentProducts(limit = 40): Promise<Product[]> {
+  return cached(`shopify:recent:${limit}`, READ_TTL, async () => {
+    const data = await storefront<{
+      products: { edges: { node: ShopifyProductNode }[] }
+    }>(`
+      query GetRecentProducts($first: Int!) {
+        products(first: $first, sortKey: UPDATED_AT, reverse: true) {
+          edges { node { ${PRODUCT_CORE_FRAGMENT} } }
+        }
+      }
+    `, { first: limit })
     return data.products.edges.map(e => nodeToProduct(e.node))
   })
 }
@@ -1259,11 +1252,14 @@ const CATALOG_PAGE_CAP = 40
  *
  * The sitemap's product list comes from Sanity `productPage` docs, but the PDP
  * route resolves against Shopify: a handle the Storefront API does not return
- * 404s, and one whose `deal_status` metafield is `archived` 410s. Nothing
- * reconciled the two, so the sitemap shipped URLs that were dead on arrival:
- * 183 of them on 2026-07-29 (164 would 404, 19 would 410). That is crawl budget
- * spent to learn nothing on a property with very little of it, and every dead
- * entry costs the sitemap some of the trust that makes the rest worth crawling.
+ * 404s. Nothing reconciled the two, so the sitemap shipped URLs that were dead
+ * on arrival: 183 of them on 2026-07-29. That is crawl budget spent to learn
+ * nothing on a property with very little of it, and every dead entry costs the
+ * sitemap some of the trust that makes the rest worth crawling.
+ *
+ * The Storefront API is now the only gate. There used to be a second one —
+ * `deal_status === 'archived'` — which suppressed 17 active, sellable products
+ * from the sitemap because they had once been daily deals.
  *
  * Deliberately not routed through cached(): the result is a ~4,500-entry set,
  * and KV is the wrong home for a payload that size (the sitemap module keeps
@@ -1278,27 +1274,20 @@ export async function getIndexableProductHandles(): Promise<Set<string>> {
     const data: {
       products: {
         pageInfo: { hasNextPage: boolean; endCursor: string | null }
-        edges: Array<{
-          node: { handle: string; dealStatus: { value: string } | null }
-        }>
+        edges: Array<{ node: { handle: string } }>
       }
     } = await storefront(`
       query IndexableProductHandles($first: Int!, $after: String) {
         products(first: $first, after: $after) {
           pageInfo { hasNextPage endCursor }
           edges {
-            node {
-              handle
-              dealStatus: metafield(namespace: "xdipx", key: "deal_status") { value }
-            }
+            node { handle }
           }
         }
       }
     `, { first: 250, after: cursor })
 
     for (const edge of data.products.edges) {
-      // `archived` is the one deal_status the PDP route turns into a 410.
-      if (edge.node.dealStatus?.value === 'archived') continue
       handles.add(edge.node.handle)
     }
 
@@ -1521,44 +1510,6 @@ export async function getBonusDeal(): Promise<Product | null> {
   })
 }
 
-export async function getRecentVaultDeals(limit = 7): Promise<VaultDeal[]> {
-  const data = await storefront<{
-    products: { edges: { node: ShopifyProductCardNode }[] }
-  }>(`
-    query GetVaultDeals($first: Int!) {
-      products(first: $first, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
-        edges { node { ${PRODUCT_CARD_FRAGMENT} } }
-      }
-    }
-  `, { first: limit })
-
-  return data.products.edges.map(e => nodeToVaultDeal(e.node))
-}
-
-export async function getVaultDeals(page = 1, limit = 20): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
-  const data = await storefront<{
-    products: {
-      edges: { node: ShopifyProductCardNode; cursor: string }[]
-      pageInfo: { hasNextPage: boolean }
-    }
-  }>(`
-    query GetVaultPage($first: Int!, $after: String) {
-      products(first: $first, after: $after, query: "tag:deal-status-archived", sortKey: UPDATED_AT, reverse: true) {
-        pageInfo { hasNextPage }
-        edges {
-          cursor
-          node { ${PRODUCT_CARD_FRAGMENT} }
-        }
-      }
-    }
-  `, { first: limit, after: page > 1 ? btoa(`${(page - 1) * limit}`) : null })
-
-  return {
-    deals: data.products.edges.map(e => nodeToVaultDeal(e.node)),
-    hasNextPage: data.products.pageInfo.hasNextPage,
-  }
-}
-
 // ─── GMC Feed ─────────────────────────────────────────────────────────────
 //
 // Separate fragment + type + mapper so the feed can fetch extra metafields
@@ -1566,7 +1517,6 @@ export async function getVaultDeals(page = 1, limit = 20): Promise<{ deals: Vaul
 
 const GMC_FEED_METAFIELDS_FRAGMENT = `
   metafields(identifiers: [
-    { namespace: "xdipx", key: "deal_date" }
     { namespace: "xdipx", key: "original_price" }
     { namespace: "xdipx", key: "map_price" }
     { namespace: "xdipx", key: "map_restricted" }
@@ -1581,7 +1531,6 @@ const GMC_FEED_METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "specifications" }
     { namespace: "xdipx", key: "product_type_dial" }
     { namespace: "xdipx", key: "deal_score" }
-    { namespace: "xdipx", key: "is_daily_deal" }
     { namespace: "mm-google-shopping", key: "google_product_category" }
     { namespace: "mm-google-shopping", key: "age_group" }
     { namespace: "mm-google-shopping", key: "gender" }
@@ -1685,9 +1634,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
   const mapRestricted = parseMetafieldByNsKey(mf, 'xdipx', 'map_restricted') === 'true'
   const productTypeDial = parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial')
   const dealScoreRaw   = parseMetafieldByNsKey(mf, 'xdipx', 'deal_score')
-  const isDailyDealRaw = parseMetafieldByNsKey(mf, 'xdipx', 'is_daily_deal')
   const dealScoreNum   = dealScoreRaw ? parseFloat(dealScoreRaw) : null
-  const isDailyDeal    = isDailyDealRaw === 'true'
 
   // mm-google-shopping namespace
   const gmcCategory = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'google_product_category')
@@ -1707,13 +1654,11 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     id: node.id,
     handle: node.handle,
     seoTitle: node.title,
-    dealDate: parseMetafield(mf, 'deal_date'),
     dealPrice,
     msrp: parseFloat(originalPrice || (variant?.compareAtPrice?.amount ?? '0')),
     images: parseImages(node.images.edges),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
-    dealStatus: 'archived' as const,
     qty: variant?.quantityAvailable ?? 0,
     defaultVariantId:    variant?.id ?? null,
     hasMultipleVariants: variantEdges.length > 1,
@@ -1747,7 +1692,6 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     ...(gmcLabel3    != null ? { gmcLabel3 }    : {}),
     ...(gmcLabel4    != null ? { gmcLabel4 }    : {}),
     ...(dealScoreNum !== null && !isNaN(dealScoreNum) ? { dealScore: dealScoreNum } : {}),
-    isDailyDeal,
   }
 }
 
@@ -1759,7 +1703,7 @@ export async function getFeedDeals(after: string | null = null, limit = 50): Pro
     }
   }>(`
     query GetFeedPage($first: Int!, $after: String) {
-      products(first: $first, after: $after, query: "tag:deal-status-archived OR tag:deal-status-live", sortKey: UPDATED_AT, reverse: true) {
+      products(first: $first, after: $after, sortKey: UPDATED_AT, reverse: true) {
         pageInfo { hasNextPage endCursor }
         edges {
           node { ${GMC_FEED_CARD_FRAGMENT} }
@@ -1960,17 +1904,8 @@ export async function getCollectionDeals(
   `, { handle, first: limit, after, sortKey, reverse })
 
   if (!data.collection) return { deals: [], hasNextPage: false }
-  // A product whose `deal_status` metafield is `archived` returns 410 Gone at
-  // its PDP (see _layout.products.$slug.tsx). Smart collections match on
-  // Shopify-native rules (e.g. on-sale = compare_at_price > 0) and can't see
-  // the xdipx metafield, so an editorially-archived product keeps appearing on
-  // the shelf and links to a dead PDP. Drop those before they become cards —
-  // the same `archived` rule getIndexableProductHandles applies to the sitemap.
-  // hasNextPage still reflects the raw collection, so pagination is unaffected.
   return {
-    deals: data.collection.products.edges
-      .filter(e => parseMetafield(e.node.metafields, 'deal_status') !== 'archived')
-      .map(e => nodeToVaultDeal(e.node)),
+    deals: data.collection.products.edges.map(e => nodeToVaultDeal(e.node)),
     hasNextPage: data.collection.products.pageInfo.hasNextPage,
   }
 }
@@ -2711,24 +2646,12 @@ export async function updateVariantPricing(variantGid: string, price: string, co
   }
 }
 
-export async function setDealStatus(productId: string, status: string): Promise<void> {
-  const numericId = productId.replace('gid://shopify/Product/', '')
-  await updateProductMetafield(productId, 'deal_status', status)
-  // Mirror status in tags for Storefront API querying
-  const { product } = await shopifyAdmin<{ product: { tags: string } | null }>(`/products/${numericId}.json`)
-  if (!product) throw new Error(`Product ${numericId} not found when setting deal status`)
-  const currentTags = product.tags.split(', ').filter((t: string) => !t.startsWith('deal-status-'))
-  currentTags.push(`deal-status-${status}`)
-  await shopifyAdmin(`/products/${numericId}.json`, 'PUT', {
-    product: { id: numericId, tags: currentTags.join(', ') },
-  })
-}
-
 /**
  * Archive a Shopify product so it stops appearing in storefront/search.
  *
- *   - Sets the Shopify product `status` to ARCHIVED via Admin GraphQL.
- *   - Sets `xdipx.deal_status='archived'` metafield + mirrors `deal-status-archived` tag.
+ *   - Sets the Shopify product `status` to ARCHIVED via Admin GraphQL, which is
+ *     the only archive signal now. It also removes the product from the
+ *     Storefront API, so the PDP 404s on its own.
  *   - Returns the resolved handle so callers can mirror to Sanity.
  *
  * Idempotent — calling on an already-archived product is a no-op (the GraphQL
@@ -2759,9 +2682,6 @@ export async function archiveShopifyProduct(
   }
 
   const handle = updateResult.productUpdate.product?.handle ?? await getProductHandleById(numericId)
-
-  // 2. Mirror archive state in our metafield + tag — keeps Storefront queries consistent.
-  await setDealStatus(productId, 'archived')
 
   if (reason) {
     console.info(`[archiveShopifyProduct] ${numericId} archived: ${reason}`)
@@ -2836,7 +2756,7 @@ export interface ProductPageDoc {
   vendor?: string | undefined
   /** Editorial sub-category labels only (e.g. "Restraints"). Merged into the
    *  product's existing tags by pushProductToShopify, which preserves operational
-   *  tags (cat:*, brand:*, price:*, nalpac-sku-*, deal-status-*, for-*). Do NOT
+   *  tags (cat:*, brand:*, price:*, nalpac-sku-*, for-*). Do NOT
    *  pass operational tags here. */
   tags?: string[] | undefined
   description?: unknown        // string (legacy) or portable text blocks
@@ -2850,8 +2770,6 @@ export interface ProductPageDoc {
   moodImageUrl?: string | undefined
   /** Phase 2 — multi-select audience tags. Stored as JSON string[] on Shopify. */
   category?: Array<'for-him' | 'for-her' | 'couples'> | undefined
-  dealStatus?: string | undefined
-  dealDate?: string | undefined
   originalPrice?: number | undefined
   wholesaleCost?: number | undefined
   mapPrice?: number | undefined
@@ -2891,7 +2809,7 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
 
   // doc.tags carries EDITORIAL sub-category labels only. Shopify product tags
   // also carry operational tags (cat:*, brand:*, price:*, nalpac-sku-*,
-  // deal-status-*, for-him/for-her/for-couples) that drive search and the deal
+  // for-him/for-her/for-couples) that drive search and the
   // lifecycle. A naive replace would clobber them, so merge: keep the current
   // operational tags, replace the editorial set with the supplied labels, and
   // drop the "(uncategorized)" sentinel.
@@ -2983,8 +2901,6 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
       type: 'single_line_text_field',
     })
   }
-  add('deal_status',      doc.dealStatus,                      'single_line_text_field')
-  add('deal_date',        doc.dealDate,                        'date')
   add('nalpac_sku',       doc.nalpacSku,                       'single_line_text_field')
   add('original_price',   doc.originalPrice?.toString(),       'number_decimal')
   add('wholesale_cost',   doc.wholesaleCost?.toString(),       'number_decimal')
@@ -3228,8 +3144,8 @@ export async function activateShopifyProduct(numericId: string): Promise<void> {
 
   // 3. WS2c — clear the mirrored Sanity productPage's `hiddenUntilLive` import-stub
   //    flag, if one exists. This function is the universal chokepoint every
-  //    activation path funnels through (import publish, deal-rotator daily
-  //    activation, admin queue force-activate), so wiring the clear here — rather
+  //    activation path funnels through (import publish, admin force-activate),
+  //    so wiring the clear here — rather
   //    than in just one caller — guarantees a draft-stage import stub stops
   //    leaking into sitemap.xml / on-site search the moment it actually becomes
   //    purchasable, no matter which path activated it. Best-effort: a Sanity
@@ -3379,7 +3295,7 @@ export async function findProductBySKU(sku: string): Promise<string | null> {
 
 /**
  * Slugify a string into a Shopify product handle. Phase 1 rebuild — extracted
- * here so legacy callers (`bulk-import`, `deal-pipeline`) keep auto-slugify
+ * here so legacy callers (`bulk-import`) keep auto-slugify
  * behavior at the call site, while new callers (importNewProduct entry point)
  * accept handle as a required input from the product-management agent.
  *
@@ -3465,7 +3381,6 @@ export async function setShopifyProductType(numericProductId: string, productTyp
 /**
  * Create a Shopify product (DRAFT) with multiple variants for bulk import.
  * Each variant maps to one BulkVariantRow. Returns the numeric product ID.
- * Includes 'deal-status-pending' in initial tags to avoid a separate setDealStatus call.
  */
 /**
  * Phase 1 rebuild — `handle` is a REQUIRED input. See `slugifyHandle` and the
@@ -3492,7 +3407,6 @@ export async function createShopifyProductWithVariants(
   const tags: string[] = [
     `brand:${master.brand.toLowerCase().replace(/\s+/g, '-')}`,
     `nalpac-sku-${master.sku}`,
-    'deal-status-pending',
     ...(master.msrp < 25  ? ['price:under-25']  :
         master.msrp < 50  ? ['price:25-50']      :
         master.msrp < 100 ? ['price:50-100']     : ['price:100-plus']),
@@ -5463,7 +5377,6 @@ export interface FetchedDealProduct {
   title: string
   vendor: string
   category?: string
-  dealDate?: string
   wholesaleCost?: number
   dealPrice: number
   msrp?: number
@@ -5516,8 +5429,8 @@ export async function fetchAllDealProducts(): Promise<{ products: FetchedDealPro
       const mf = node.metafields.nodes
       const mfVal = (key: string) => mf.find((m: AdminMetafieldNode) => m.key === key)?.value ?? ''
 
-      // Only include products that have been set up as deals (have a deal_status metafield)
-      if (!mfVal('deal_status') && !mfVal('nalpac_sku')) continue
+      // Only imported products (they carry a nalpac_sku).
+      if (!mfVal('nalpac_sku')) continue
 
       const numericId = node.id.replace('gid://shopify/Product/', '')
       const variant = node.variants.nodes[0]
@@ -5533,7 +5446,6 @@ export async function fetchAllDealProducts(): Promise<{ products: FetchedDealPro
         title: node.title,
         vendor: node.vendor,
         ...(mfVal('category') ? { category: mfVal('category') } : {}),
-        ...(mfVal('deal_date') ? { dealDate: mfVal('deal_date') } : {}),
         ...(!isNaN(wholesaleCost) ? { wholesaleCost } : {}),
         dealPrice: parseFloat(variant?.price ?? '0'),
         ...(!isNaN(msrp) ? { msrp } : {}),
@@ -6397,9 +6309,6 @@ export async function sendDraftOrderInvoice(
  *   buildShopifyQuery({ productType: 'vibrator', priceMin: 20, priceMax: 80 })
  *   // → 'product_type:vibrator AND variants.price:>=20 AND variants.price:<=80'
  *
- *   buildShopifyQuery({ excludeArchivedDeals: true })
- *   // → '-tag:deal-status-archived'
- *
  *   buildShopifyQuery({})
  *   // → ''
  */
@@ -6409,7 +6318,6 @@ export function buildShopifyQuery(input: {
   productType?: string
   priceMin?: number
   priceMax?: number
-  excludeArchivedDeals?: boolean
 }): string {
   // Strip Shopify query special chars from any user-supplied string
   const sanitize = (s: string) => s.replace(/[:()*"]/g, '').trim().toLowerCase()
@@ -6439,10 +6347,6 @@ export function buildShopifyQuery(input: {
 
   if (typeof input.priceMax === 'number') {
     clauses.push(`variants.price:<=${input.priceMax}`)
-  }
-
-  if (input.excludeArchivedDeals) {
-    clauses.push('-tag:deal-status-archived')
   }
 
   return clauses.join(' AND ')

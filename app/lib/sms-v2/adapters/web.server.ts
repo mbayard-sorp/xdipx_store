@@ -196,6 +196,10 @@ async function stageResponseToChatReply(
     }
   }
 
+  if (resp.createdCartId) {
+    chatReply.newCartId = resp.createdCartId
+  }
+
   if (cartCreated) {
     chatReply.cartUpdated = true
   }

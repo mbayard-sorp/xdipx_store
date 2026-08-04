@@ -442,20 +442,11 @@ async function handleInventoryUpdate(level: ShopifyInventoryLevel): Promise<void
   // if the notification path below throws.
   await kvSet(key, level.available)
 
-  // Sold-out path (existing behaviour): rotate the daily deal off a sold-out
-  // live deal.
-  if (level.available <= 0) {
-    const { isLiveDealSoldOut, rotateDeal } = await import('../app/lib/deal-rotator.server.js')
-    const { soldOut } = await isLiveDealSoldOut()
-    if (soldOut) {
-      console.log('[webhook:inventory-update] Live deal sold out — rotating to next deal')
-      const result = await rotateDeal()
-      console.log('[webhook:inventory-update] Rotation result:', result)
-    }
-    return
-  }
+  // Sold-out path: nothing to do beyond recording the level above. This used to
+  // rotate the daily deal off a sold-out live deal; daily deals are retired.
+  if (level.available <= 0) return
 
-  // Restock path (new): only on a genuine sold-out -> in-stock crossing, notify
+  // Restock path: only on a genuine sold-out -> in-stock crossing, notify
   // everyone waiting on this product. Firing on every positive update would
   // spam; the crossing guard limits us to the transition that matters.
   if (!isRestockCrossing(prev, level.available)) return

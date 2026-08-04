@@ -91,13 +91,6 @@ export function gmcCustomLabel2(dealScore: number | null): 'high' | 'mid' | 'low
 }
 
 /**
- * custom_label_3: deal vs vault.
- */
-export function gmcCustomLabel3(isDailyDeal: boolean): 'deal' | 'vault' {
-  return isDailyDeal ? 'deal' : 'vault'
-}
-
-/**
  * custom_label_4: price tier bucket.
  * under-30 | 30-to-60 | 60-plus
  */
@@ -124,46 +117,6 @@ export function mapAllowsAdvertisedDiscount(
   if (mapRestricted) return false
   if (!mapPrice || mapPrice <= 0) return true
   return mapPrice < regularPrice - 0.005
-}
-
-// ─── Sale window ──────────────────────────────────────────────────────────
-
-/**
- * Formats a deal_date ISO string into a GMC sale_price_effective_date range,
- * but only when that window actually covers the present moment.
- *
- * deal_date is a scheduling slot, not a live-sale marker: the deal pipeline
- * assigns products the next open queue date (weeks or months out), and vault
- * items keep whatever slot they last held. Emitting that slot blindly
- * published far-future windows (e.g. 2027-02-02 while the sale price was
- * already what checkout charges), telling merchant surfaces to show the
- * regular price today. When the window does not cover now, return null:
- * g:sale_price without an effective-date range means the sale is active
- * immediately, which matches the storefront.
- *
- * The deal runs from midnight on deal_date through end-of-day the next day (PT).
- * Format: 2026-05-16T00:00-07:00/2026-05-17T23:59-07:00
- */
-export function salePriceEffectiveDate(dealDate: string, now: Date = new Date()): string | null {
-  if (!dealDate) return null
-  // Accept ISO date strings like "2026-05-16" or "2026-05-16T..."
-  const dateOnly = dealDate.slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null
-  const [year, month, day] = dateOnly.split('-').map(Number)
-  if (!year || !month || !day) return null
-
-  // next day
-  const next = new Date(Date.UTC(year, month - 1, day + 1))
-  const ny = next.getUTCFullYear()
-  const nm = String(next.getUTCMonth() + 1).padStart(2, '0')
-  const nd = String(next.getUTCDate()).padStart(2, '0')
-
-  const start = new Date(`${dateOnly}T00:00:00-07:00`)
-  const end   = new Date(`${ny}-${nm}-${nd}T23:59:59-07:00`)
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
-  if (now < start || now > end) return null
-
-  return `${dateOnly}T00:00-07:00/${ny}-${nm}-${nd}T23:59-07:00`
 }
 
 // ─── Spec parser ──────────────────────────────────────────────────────────

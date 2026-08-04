@@ -141,8 +141,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
+  // A product the Storefront API does not return is genuinely gone (unpublished
+  // or Shopify-archived) and 404s here. There is no second, metafield-driven
+  // gate: the old `deal_status === 'archived'` check was daily-deal bookkeeping,
+  // and it 410'd 17 active, sellable products whose only sin was having once
+  // been a deal.
   if (!deal) throw new Response('Product not found', { status: 404 })
-  if (deal.dealStatus === 'archived') throw new Response('This product is no longer available', { status: 410 })
 
   // Related-guides rail data. Posts that embed THIS product are the strongest
   // signal, so they win when they exist. Otherwise fall back to the latest

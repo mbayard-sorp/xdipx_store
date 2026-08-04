@@ -1,9 +1,8 @@
 /**
  * /products/:slug.md — Markdown twin for the product detail page.
  *
- * Mirrors the HTML PDP's 404/410 logic exactly:
+ * Mirrors the HTML PDP's 404 logic exactly:
  * - Missing product  → 404
- * - Archived product → 410
  * - map_restricted   → price shown without struck/compare-at context
  */
 
@@ -35,7 +34,6 @@ export async function loader({ params }: LoaderFunctionArgs) {
     ])
 
     if (!deal) return null
-    if (deal.dealStatus === 'archived') return 'archived'
 
     let md = productToMarkdown(deal)
 
@@ -56,9 +54,6 @@ export async function loader({ params }: LoaderFunctionArgs) {
 
   if (body === null) {
     return new Response('Product not found', { status: 404 })
-  }
-  if (body === 'archived') {
-    return new Response('This product is no longer available', { status: 410 })
   }
 
   return new Response(body, {
