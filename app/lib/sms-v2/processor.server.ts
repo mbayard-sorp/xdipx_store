@@ -29,18 +29,92 @@ import { buildEmmaContextWithCrossChannel } from './cross-channel.server'
 import { loadConversationHistory } from './conversation-history.server'
 import { generateConversationSummary } from './summary.server'
 import { db } from '~/lib/db.server'
+import { kvSetNX } from '~/lib/kv.server'
 import { smsAgeConsent } from '../../../db/schema'
 import { eq } from 'drizzle-orm'
+import type { ProcessSmsResult } from '~/lib/sms-processor.server'
 import type { Stage } from './types.server'
 
 // Re-export types so callers can switch by import only — no re-definition needed.
 export type { ProcessSmsInput, ProcessSmsResult, SmsSegment } from '~/lib/sms-processor.server'
 
 // ---------------------------------------------------------------------------
+// Reliability guards (conv-audit B1)
+// ---------------------------------------------------------------------------
+
+// Last-resort reply sent when a v2 turn throws. Silence on an SMS support
+// channel reads as being ignored; a brief honest recovery line closes the loop
+// and tells the customer exactly what to do next. Static, never AI-generated.
+// emma-empathy-reviewer PASS 2026-08-05.
+const V2_FAILURE_REPLY =
+  "Something hiccuped on my end. Text me that again in a minute and I'll take another look."
+
+// How long a processed Twilio MessageSid stays claimed for idempotency. Twilio
+// retries an inbound webhook only within a short window (minutes), so a day is
+// far more than enough; MessageSids are globally unique forever, so no fresh
+// message can ever collide with an expired marker.
+const SID_DEDUPE_TTL_SECONDS = 60 * 60 * 24
+
+const V2_FAILURE_RESULT: ProcessSmsResult = {
+  replies: [{ body: V2_FAILURE_REPLY }],
+  reply: V2_FAILURE_REPLY,
+  outcome: 'reply_fallback',
+}
+
+const NOOP_RESULT: ProcessSmsResult = { replies: [], reply: null, outcome: 'empty' }
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
+/**
+ * Public v2 entry point. Two reliability guards wrap the turn (conv-audit B1):
+ *
+ *   1. MessageSid idempotency. A Twilio webhook retry carries the same
+ *      MessageSid. We claim it atomically before any stage dispatch, so a retry
+ *      never re-enters the pipeline — no duplicate turn row, no duplicate
+ *      Anthropic spend, no double stage transition. The existing sentinel-row
+ *      dedup in withTurnLogging only fires after dispatchStage has already run
+ *      the LLM, which is too late for the v2 stage-handler path; this moves the
+ *      gate to the entry. Empty SID (simulator/web) is never deduped.
+ *
+ *   2. Never reply with silence. The turn body has several unguarded awaits
+ *      (stage dispatch, the Anthropic call in research.server.ts, state writes,
+ *      turn logging). Any throw would otherwise surface as empty TwiML at the
+ *      route, so the customer receives nothing. On failure we return a friendly,
+ *      voice-gated recovery reply instead.
+ */
 export async function processSmsMessageV2(
+  input: Parameters<typeof processSmsMessage>[0],
+): Promise<Awaited<ReturnType<typeof processSmsMessage>>> {
+  const twilioSid = (input.twilioSid ?? '').trim()
+
+  // Guard 1: idempotency. kvSetNX degrades to an in-memory store internally and
+  // does not throw, but treat any unexpected failure as "fresh" so a KV outage
+  // can never drop a real inbound message.
+  if (twilioSid) {
+    let fresh = true
+    try {
+      fresh = await kvSetNX(`sms:v2:sid:${twilioSid}`, '1', SID_DEDUPE_TTL_SECONDS)
+    } catch (err) {
+      console.warn('[processor-v2] idempotency check failed — processing as fresh', err)
+    }
+    if (!fresh) {
+      console.warn(`[processor-v2] duplicate MessageSid ${twilioSid} — no-op`)
+      return NOOP_RESULT
+    }
+  }
+
+  // Guard 2: never let a throw become silence.
+  try {
+    return await runV2Turn(input)
+  } catch (err) {
+    console.error('[processor-v2] turn failed — returning friendly reply instead of silence', err)
+    return V2_FAILURE_RESULT
+  }
+}
+
+async function runV2Turn(
   input: Parameters<typeof processSmsMessage>[0],
 ): Promise<Awaited<ReturnType<typeof processSmsMessage>>> {
   const phone = input.from.trim()
