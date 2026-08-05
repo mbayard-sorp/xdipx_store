@@ -21,7 +21,7 @@
  */
 
 import { timingSafeEqual } from 'node:crypto'
-import { and, asc, desc, eq, gte, inArray, lt, lte, ne, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
@@ -605,14 +605,45 @@ export async function createSuggestionDetailed(
   // The insert was absorbed by uq_team_sugg_dedupe_key: find the live ticket
   // that owns the key so the caller can point at the open conversation.
   const [live] = await db
-    .select({ id: homepageTeamSuggestions.id })
+    .select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status })
     .from(homepageTeamSuggestions)
     .where(and(
       eq(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
       sql`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`,
     ))
     .limit(1)
-  return { id: live?.id ?? 0, deduped: !!live }
+  if (!live) return { id: 0, deduped: false }
+  // A `blocked` row still owns its dedupe key, and `blocked` has no edge any
+  // agent can walk, so every later observation of the same condition was
+  // silently swallowed by a ticket nobody was working. That is how the browser
+  // checkout probe failed five days running against one three-day-old blocked
+  // row (#455), and it is the same hole the detector self-close edge already
+  // documents for `proposed`. Drive the blocked -> approved `system` edge the
+  // ALLOWED map already permits and attach the fresh evidence, so the SAME
+  // ticket comes back onto the board instead of the alarm going mute. No new
+  // row, no silence, and the reopen is bounded to the row the key already
+  // pointed at.
+  if (live.status === 'blocked') {
+    await reopenBlockedOnRepeatObservation(live.id, s.suggestion)
+  }
+  return { id: live.id, deduped: true }
+}
+
+/**
+ * Put a blocked ticket back on the queue because its condition was observed
+ * again. Best-effort by construction: a detector filing a routine observation
+ * must never fail because the reopen lost a race, so a rejected transition is
+ * swallowed and the caller still gets its `deduped` answer.
+ */
+async function reopenBlockedOnRepeatObservation(id: number, evidence: string): Promise<void> {
+  try {
+    await transitionSuggestion(id, 'approved', 'system', {
+      note: `Re-observed while blocked, reopened by the detector: ${evidence.slice(0, 600)}`,
+    })
+  } catch {
+    // Raced with another writer, or the row moved off `blocked` in between.
+    // Either way the ticket is no longer silently muted, which is the point.
+  }
 }
 
 /**
@@ -1292,6 +1323,15 @@ export async function transitionSuggestion(
  * attempt count is deliberately untouched — a dead sandbox is not a failed fix
  * attempt, and burning attempts on infrastructure noise would escalate healthy
  * tickets to the owner. Sibling of expireStaleRuns(), same 5-minute throttle.
+ *
+ * A NULL lease counts as already expired. SQL NULL never satisfies `<`, so a
+ * row that reached `in_progress` without a lease used to be skipped by every
+ * sweep, forever. That is reachable in normal operation: the QA bounce edge
+ * only renews the lease `if (row.assignee)`, so bouncing a row whose assignee a
+ * previous reap had already cleared lands it in `in_progress` with no lease and
+ * no holder — invisible to this sweep, and invisible to both executors, which
+ * claim from `approved` only. Tickets #120, #423 and #471 sat exactly that way
+ * for six days (#878).
  */
 export async function expireStaleClaims(): Promise<number> {
   const res = await db
@@ -1305,7 +1345,10 @@ export async function expireStaleClaims(): Promise<number> {
     })
     .where(and(
       eq(homepageTeamSuggestions.status, 'in_progress'),
-      lt(homepageTeamSuggestions.claimExpiresAt, new Date()),
+      or(
+        lt(homepageTeamSuggestions.claimExpiresAt, new Date()),
+        isNull(homepageTeamSuggestions.claimExpiresAt),
+      ),
     ))
     .returning({ id: homepageTeamSuggestions.id })
   return res.length

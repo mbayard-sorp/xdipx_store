@@ -20,8 +20,12 @@ const h = vi.hoisted(() => {
     updates: [] as unknown[][],
     /** Every patch passed to .set(), in order. */
     patches: [] as Record<string, unknown>[],
+    /** Every predicate passed to an update's .where(), in order. */
+    updateWheres: [] as unknown[],
     /** Every value array passed to .values(), in order. */
     inserts: [] as unknown[],
+    /** FIFO of results handed to successive db.insert() chains. */
+    insertResults: [] as unknown[][],
     execute: null as null | ((q: SQL) => Promise<{ rows: Record<string, unknown>[] }>),
   }
 
@@ -46,10 +50,13 @@ const h = vi.hoisted(() => {
     select: () => chain(() => state.selects.shift() ?? []),
     update: () => chain(
       () => state.updates.shift() ?? [],
-      (m, args) => { if (m === 'set') state.patches.push(args[0] as Record<string, unknown>) },
+      (m, args) => {
+        if (m === 'set') state.patches.push(args[0] as Record<string, unknown>)
+        if (m === 'where') state.updateWheres.push(args[0])
+      },
     ),
     insert: () => chain(
-      () => undefined,
+      () => state.insertResults.shift() ?? [],
       (m, args) => { if (m === 'values') state.inserts.push(args[0]) },
     ),
     execute: (q: SQL) => state.execute!(q),
@@ -75,6 +82,7 @@ import {
   TICKET_STATUSES,
   buildClaimQuery,
   claimSuggestion,
+  createSuggestionDetailed,
   expireStaleClaims,
   findTransitionRule,
   isTicketActor,
@@ -95,7 +103,9 @@ beforeEach(() => {
   h.state.selects = []
   h.state.updates = []
   h.state.patches = []
+  h.state.updateWheres = []
   h.state.inserts = []
+  h.state.insertResults = []
   h.state.execute = null
 })
 
@@ -535,6 +545,30 @@ describe('expireStaleClaims', () => {
     expect(h.state.patches[0]!['attemptCount']).toBeUndefined()
     expect(h.state.patches[0]!['lastError']).toBeUndefined()
   })
+
+  // #878. SQL NULL never satisfies `<`, so filtering on claim_expires_at alone
+  // skipped a NULL-lease row on every sweep, forever. That state is reachable:
+  // the QA bounce edge renews the lease only `if (row.assignee)`, so bouncing a
+  // row whose assignee an earlier reap had cleared lands it in `in_progress`
+  // with no lease and no holder. Tickets #120, #423 and #471 sat there six days,
+  // invisible to this sweep and to both executors, which claim from `approved`.
+  it('treats a NULL lease as already expired', async () => {
+    h.state.updates.push([{ id: 120 }])
+    await expireStaleClaims()
+    const { text } = render(h.state.updateWheres[0] as SQL)
+    expect(text).toContain('"claim_expires_at" is null')
+    expect(text).toContain('"claim_expires_at" <')
+    // Both lease conditions are alternatives, and the status fence still binds.
+    expect(text).toMatch(/or/i)
+    expect(text).toContain('"status" =')
+  })
+
+  it('only ever reaps in_progress rows', async () => {
+    h.state.updates.push([])
+    await expireStaleClaims()
+    const { params } = render(h.state.updateWheres[0] as SQL)
+    expect(params).toContain('in_progress')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -702,5 +736,86 @@ describe('detector self-close edge', () => {
 
   it('leaves applied terminal', () => {
     expect(ALLOWED['applied']).toEqual([])
+  })
+})
+
+/**
+ * #455. A `blocked` row still owns its dedupe_key — the partial-unique index
+ * excludes only `applied` and `dismissed` — and `blocked` has no edge any agent
+ * can walk. So a condition that recurs while its ticket is blocked was filed
+ * into silence: the browser checkout probe failed five days running and every
+ * one of those filings was swallowed by one three-day-old blocked row.
+ *
+ * The fix drives the blocked -> approved `system` edge the map already permits
+ * and attaches the fresh evidence, so the same ticket comes back on the board.
+ */
+describe('a repeat observation reopens a blocked ticket', () => {
+  /** Queue the reads createSuggestionDetailed makes before the dedupe branch. */
+  function primeDedupeHit(liveRow: { id: number; status: string }) {
+    // 1) getTeamConfigUncached reads pipeline_settings, 2) insert is swallowed
+    // by the unique index, 3) the dedupe lookup finds the live row.
+    h.state.selects.push([{ key: 'strategy_team_enabled', value: 'true' }])
+    h.state.insertResults.push([])
+    h.state.selects.push([liveRow])
+  }
+
+  it('walks blocked -> approved and records the new evidence', async () => {
+    primeDedupeHit({ id: 142, status: 'blocked' })
+    // transitionSuggestion re-reads the row, then writes it.
+    h.state.selects.push([{ id: 142, status: 'blocked', assignee: null, kind: 'code' }])
+    h.state.updates.push([{ id: 142, status: 'approved' }])
+
+    const res = await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code',
+      suggestion: 'browser tier FAIL again, failed_step probe-crash',
+      dedupeKey: 'probe:browser:probe-crash',
+    })
+
+    expect(res).toEqual({ id: 142, deduped: true })
+    expect(h.state.patches.at(-1)).toMatchObject({ status: 'approved' })
+  })
+
+  it('leaves a non-blocked live row exactly where it is', async () => {
+    primeDedupeHit({ id: 900, status: 'in_progress' })
+    const res = await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code',
+      suggestion: 'same condition, someone is already on it',
+      dedupeKey: 'probe:browser:probe-crash',
+    })
+    expect(res).toEqual({ id: 900, deduped: true })
+    // No reopen: nothing was written.
+    expect(h.state.patches).toEqual([])
+  })
+
+  it('never fails the caller when the reopen loses a race', async () => {
+    primeDedupeHit({ id: 142, status: 'blocked' })
+    // The row moved off `blocked` between the lookup and the transition, so
+    // transitionSuggestion 409s. A detector filing a routine observation must
+    // still get its answer.
+    h.state.selects.push([{ id: 142, status: 'applied', assignee: null, kind: 'code' }])
+
+    await expect(createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code',
+      suggestion: 'condition observed again',
+      dedupeKey: 'probe:browser:probe-crash',
+    })).resolves.toEqual({ id: 142, deduped: true })
+  })
+
+  it('reports a clean miss as not deduped', async () => {
+    h.state.selects.push([{ key: 'strategy_team_enabled', value: 'true' }])
+    h.state.insertResults.push([])
+    h.state.selects.push([])
+    const res = await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code',
+      suggestion: 'no live row owns this key',
+      dedupeKey: 'probe:browser:gone',
+    })
+    expect(res).toEqual({ id: 0, deduped: false })
+  })
+
+  it('blocked -> approved by system is what the map already allowed', () => {
+    expect(isTransitionAllowed('blocked', 'approved', 'system', { kind: 'code' })).toBe(true)
+    // And it is still not something an agent can walk on its own.
+    expect(isTransitionAllowed('blocked', 'approved', 'agent:rr7-engineer', { kind: 'code' })).toBe(false)
   })
 })

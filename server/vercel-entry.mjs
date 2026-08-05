@@ -9822,7 +9822,7 @@ __export(team_server_exports, {
   updateRun: () => updateRun
 });
 import { timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq as eq4, gte, inArray as inArray2, lt, lte, ne, sql as sql3 } from "drizzle-orm";
+import { and, asc, desc, eq as eq4, gte, inArray as inArray2, isNull, lt, lte, ne, or, sql as sql3 } from "drizzle-orm";
 function assertTeamAuth(request) {
   const expected = process.env["TEAM_TOKEN"] ?? process.env["HOMEPAGE_TEAM_TOKEN"] ?? process.env["CRON_SECRET"] ?? "";
   const auth = request.headers.get("authorization") ?? "";
@@ -10065,11 +10065,23 @@ async function createSuggestionDetailed(s) {
   }).onConflictDoNothing().returning({ id: homepageTeamSuggestions.id });
   if (row?.id) return { id: row.id, deduped: false };
   if (!s.dedupeKey) return { id: 0, deduped: false };
-  const [live] = await db.select({ id: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and(
+  const [live] = await db.select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status }).from(homepageTeamSuggestions).where(and(
     eq4(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
     sql3`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`
   )).limit(1);
-  return { id: live?.id ?? 0, deduped: !!live };
+  if (!live) return { id: 0, deduped: false };
+  if (live.status === "blocked") {
+    await reopenBlockedOnRepeatObservation(live.id, s.suggestion);
+  }
+  return { id: live.id, deduped: true };
+}
+async function reopenBlockedOnRepeatObservation(id, evidence) {
+  try {
+    await transitionSuggestion(id, "approved", "system", {
+      note: `Re-observed while blocked, reopened by the detector: ${evidence.slice(0, 600)}`
+    });
+  } catch {
+  }
 }
 async function fileTicketForOpenPr(input) {
   const [row] = await db.insert(homepageTeamSuggestions).values({
@@ -10279,7 +10291,10 @@ async function expireStaleClaims() {
     updatedAt: /* @__PURE__ */ new Date()
   }).where(and(
     eq4(homepageTeamSuggestions.status, "in_progress"),
-    lt(homepageTeamSuggestions.claimExpiresAt, /* @__PURE__ */ new Date())
+    or(
+      lt(homepageTeamSuggestions.claimExpiresAt, /* @__PURE__ */ new Date()),
+      isNull(homepageTeamSuggestions.claimExpiresAt)
+    )
   )).returning({ id: homepageTeamSuggestions.id });
   return res.length;
 }
@@ -21484,7 +21499,7 @@ __export(purchase_watcher_server_exports, {
   evaluatePurchaseWatch: () => evaluatePurchaseWatch,
   runPurchaseWatcher: () => runPurchaseWatcher
 });
-import { and as and4, inArray as inArray3, isNull, lt as lt3 } from "drizzle-orm";
+import { and as and4, inArray as inArray3, isNull as isNull2, lt as lt3 } from "drizzle-orm";
 function fingerprint(ids) {
   return [...new Set(ids)].sort().join(",");
 }
@@ -21583,11 +21598,11 @@ async function runPurchaseWatcher(now = Date.now()) {
   const [prior, recentIds, staleCapiRows, staleGa4Rows] = await Promise.all([
     loadState(),
     fetchRecentPaidOrderIds(now),
-    db.select({ id: metaCapiFailures.orderId }).from(metaCapiFailures).where(and4(isNull(metaCapiFailures.resolvedAt), lt3(metaCapiFailures.createdAt, staleBefore))).catch((err2) => {
+    db.select({ id: metaCapiFailures.orderId }).from(metaCapiFailures).where(and4(isNull2(metaCapiFailures.resolvedAt), lt3(metaCapiFailures.createdAt, staleBefore))).catch((err2) => {
       console.warn("[purchase-watcher] meta_capi_failures query failed:", String(err2).slice(0, 200));
       return [];
     }),
-    db.select({ id: ga4PurchaseFailures.orderId }).from(ga4PurchaseFailures).where(and4(isNull(ga4PurchaseFailures.resolvedAt), lt3(ga4PurchaseFailures.createdAt, staleBefore))).catch((err2) => {
+    db.select({ id: ga4PurchaseFailures.orderId }).from(ga4PurchaseFailures).where(and4(isNull2(ga4PurchaseFailures.resolvedAt), lt3(ga4PurchaseFailures.createdAt, staleBefore))).catch((err2) => {
       console.warn("[purchase-watcher] ga4_purchase_failures query failed:", String(err2).slice(0, 200));
       return [];
     })
@@ -23357,7 +23372,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and5, asc as asc3, eq as eq16, inArray as inArray6, isNull as isNull2, sql as sql13 } from "drizzle-orm";
+import { and as and5, asc as asc3, eq as eq16, inArray as inArray6, isNull as isNull3, sql as sql13 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -23514,9 +23529,9 @@ function isBatchClaimStuck(claimedAt, now, maxHours = STUCK_BATCH_MAX_HOURS) {
 async function submitEnrichmentBatch(cap, opts = {}) {
   const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
     eq16(importCandidates.status, "imported"),
-    isNull2(importCandidates.enrichedAt),
-    isNull2(importCandidates.enrichBatchId),
-    isNull2(importCandidates.enrichFailedAt)
+    isNull3(importCandidates.enrichedAt),
+    isNull3(importCandidates.enrichBatchId),
+    isNull3(importCandidates.enrichFailedAt)
   )).orderBy(asc3(importCandidates.id)).limit(cap);
   const valid = rows.filter((r) => Boolean(r.productId));
   if (valid.length === 0) return { submitted: 0, batchIds: [], reason: "no_unenriched" };
@@ -23558,9 +23573,9 @@ async function detectImportEnrichStall(enabled) {
       anchor: sql13`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
     }).from(importCandidates).where(and5(
       eq16(importCandidates.status, "imported"),
-      isNull2(importCandidates.enrichedAt),
-      isNull2(importCandidates.enrichBatchId),
-      isNull2(importCandidates.enrichFailedAt)
+      isNull3(importCandidates.enrichedAt),
+      isNull3(importCandidates.enrichBatchId),
+      isNull3(importCandidates.enrichFailedAt)
     ));
     const anchors = rows.map((r) => new Date(r.anchor)).filter((d) => !Number.isNaN(d.getTime()) && d < cutoff);
     const stuck = anchors.length;
@@ -23602,8 +23617,8 @@ async function collectEnrichmentBatch() {
     claimedAt: importCandidates.updatedAt
   }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
     eq16(importCandidates.status, "imported"),
-    isNull2(importCandidates.enrichedAt),
-    isNull2(importCandidates.enrichFailedAt),
+    isNull3(importCandidates.enrichedAt),
+    isNull3(importCandidates.enrichFailedAt),
     sql13`${importCandidates.enrichBatchId} IS NOT NULL`
   )).orderBy(asc3(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
@@ -23683,7 +23698,7 @@ async function publishEnrichedProducts() {
   }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
     eq16(importCandidates.status, "imported"),
     sql13`${importCandidates.enrichedAt} IS NOT NULL`,
-    isNull2(importCandidates.publishedAt)
+    isNull3(importCandidates.publishedAt)
   ));
   let published = 0;
   let failed = 0;
@@ -29802,8 +29817,8 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and11, eq: eq29, isNull: isNull3, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull3(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
@@ -29828,8 +29843,8 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and11, eq: eq29, isNull: isNull3, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull3(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
