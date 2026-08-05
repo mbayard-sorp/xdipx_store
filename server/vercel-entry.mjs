@@ -30742,6 +30742,15 @@ async function handleReturnsUpdate(payload) {
     }
   }
 }
+function parseWebhookBody(req, res, route) {
+  try {
+    return JSON.parse(req.body.toString());
+  } catch (err2) {
+    console.error(`[webhook:${route}] unparseable body`, err2);
+    res.status(400).json({ error: "Bad Request" });
+    return null;
+  }
+}
 function createWebhookRoutes() {
   const router = Router2();
   router.post("/order-created", async (req, res) => {
@@ -30749,14 +30758,8 @@ function createWebhookRoutes() {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    let order;
-    try {
-      order = JSON.parse(req.body.toString());
-    } catch (err2) {
-      console.error("[webhook:order-created] unparseable body", err2);
-      res.status(400).json({ error: "Bad Request" });
-      return;
-    }
+    const order = parseWebhookBody(req, res, "order-created");
+    if (!order) return;
     await Promise.race([
       handlePurchaseSignals(order).catch(
         (err2) => console.error("[webhook:order-created] purchase signals", err2)
@@ -30773,7 +30776,8 @@ function createWebhookRoutes() {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const order = JSON.parse(req.body.toString());
+    const order = parseWebhookBody(req, res, "order-fulfilled");
+    if (!order) return;
     res.json({ ok: true });
     handleOrderFulfilled(order).catch(
       (err2) => console.error("[webhook:order-fulfilled]", err2)
@@ -30784,7 +30788,8 @@ function createWebhookRoutes() {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const product = JSON.parse(req.body.toString());
+    const product = parseWebhookBody(req, res, "product-created");
+    if (!product) return;
     res.json({ ok: true });
     handleProductCreated(product).catch(
       (err2) => console.error("[webhook:product-created]", err2)
@@ -30813,7 +30818,8 @@ function createWebhookRoutes() {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const level = JSON.parse(req.body.toString());
+    const level = parseWebhookBody(req, res, "inventory-update");
+    if (!level) return;
     res.json({ ok: true });
     handleInventoryUpdate(level).catch(
       (err2) => console.error("[webhook:inventory-update]", err2)
@@ -30824,7 +30830,8 @@ function createWebhookRoutes() {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const payload = JSON.parse(req.body.toString());
+    const payload = parseWebhookBody(req, res, "returns-update");
+    if (!payload) return;
     res.json({ ok: true });
     handleReturnsUpdate(payload).catch(
       (err2) => console.error("[webhook:returns-update]", err2)
