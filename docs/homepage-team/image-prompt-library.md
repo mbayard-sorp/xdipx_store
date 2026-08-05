@@ -315,6 +315,27 @@ the shape to make room for one. Switched subject to the Tantus Bullet (simpler g
 unbranded in its second photo) rather than spend a third attempt on the same product — the brief
 explicitly allows choosing whichever embedded product gives the strongest frame.
 
+Lovense Lush 4 Bluetooth Egg Vibrator (`lush-4-bluetooth-remote-controlled-egg-vibrator`), guides
+category, **no generation attempt made** — short-circuited straight to the real Shopify/Nalpac
+photo per the label-heavy rule. This product's only available photo (and the same is true of its
+Lovense siblings Ferri and Diamo — checked all three before choosing) bundles the naked device with
+a large printed "LOVENSE / Closing the Distance / {product name}" pink retail box and, on Ferri/
+Diamo, a busy phone-app screenshot too; there is no clean unpackaged shot in the library the way the
+Tantus Bullet had one. Rather than spend a Kontext attempt that would almost certainly bake garbled
+box/app-UI text into the scene, isolated the naked device from the existing packshot with a plain
+pixel crop (no AI): the box's right edge sits at a consistent x≈622 on the 1000×1000 source, so
+`extract({left:625, top:510, width:375, height:440})` cleanly isolates the unboxed device on its
+existing white background with zero box or screenshot bleed, then centered on a fresh 1200×900 white
+canvas at 1.7x scale (`resize(639,750)`, composite at `left:280, top:75`) for generous negative
+space. Zero generation cost, passed the vision gate on inspection (bold hot-pink product large in
+frame, reads clearly at 375px, real photography so no uncanny-artifact risk, tiny embossed real
+"LOVENSE" wordmark on the tail is illegible at hero scale and is real texture, not invented text) →
+`image-2e644edc38e33c5331b0644a7458820b27c47521-1200x900-jpg` (post:
+`how-do-app-controlled-vibrators-work`, media-manager run for content-writer run 186). Precedent:
+apply this same box-edge-crop technique to any Lovense app-controlled product hero (Ferri, Diamo,
+and the wider Lovense line all ship the same box+device±phone packshot template) instead of
+spending a Kontext attempt on it.
+
 **Tooling gotcha (not a prompt reject, a call-site bug):** on the `naturals-h2o` run, calling
 `generateImage()` directly (not through `gen-notebook-art.ts`, which has no `hero` surface) with
 `imageSize: { width: 1200, height: 900 }` silently produced a 16:9-ish 1392×752 frame — the
