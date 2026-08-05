@@ -29,9 +29,13 @@ Status 2026-07-23 (automation-drift audit fixes): all 14 routines then existing 
 :05 minute chosen so it can never collide with routine 10's Sun 16:00 fire). Routine 1 (Weekly
 Strategy) had its prompt re-issued to add the program-manager sub-step and the routines 2-14
 coverage check that had been dropped. Note: the scheduler API attaches a default personal-connector
-set on trigger create and does not clear it via an empty array, so stripping the unrelated
-connectors from routines 10, 11, 13, and 14 (and attaching GA4 to 1/3/7/8, Meta Ads to 4) remains an
-owner action in the claude.ai scheduler UI.
+set on trigger create, so routines 10, 11, 13, and 14 each carried connectors they never use (and
+GA4 still wants attaching to 1/3/7/8, Meta Ads to 4). **Correction, 2026-08-05:** the claim that the
+API "does not clear it via an empty array" was wrong about the mechanism and made this look like an
+owner-only chore. An `update` *replaces* the whole `mcp_connections` array with whatever you send,
+so sending only the connections a routine actually needs drops the rest. Proven on routine 10, which
+went from 11 connectors to Sanity alone this day. Routines 11, 13, and 14 have not been re-checked
+since; the prune is now an agent action, not a UI one. See §Connector permissions.
 Status 2026-07-21: routines 1–10 and 12–14 existed as triggers; routine 11 remained uncreated.
 Triggers 10 and 14 were created 2026-07-21 during the automation-audit fix session, alongside the
 run-cap corrections described below.
@@ -182,3 +186,37 @@ Same as `docs/homepage-team/README.md`: scheduled Claude cloud session with repo
 callback secret (`TEAM_TOKEN` / `HOMEPAGE_TEAM_TOKEN`) in its secret store, GA4 MCP where the agent
 def lists it, and (ads only) the read/insights Meta Ads MCP tools named in
 `.claude/agents/ads-manager.md`. All routines no-op at the gate until migration 052 is applied.
+
+## Connector permissions
+
+A cloud routine approves MCP connector calls from the trigger record, not from this repo. Each entry
+in the trigger's `mcp_connections[]` carries a `permitted_tools` array of **bare** tool names
+(`query_documents`, not `mcp__Sanity__query_documents`). An empty array pre-approves nothing, so the
+routine stops on every single connector call with "This connector call requires your approval to
+proceed". A Sanity-writing content run raises about twenty of them.
+
+**`.claude/settings.json` does not help here, and looking at it will mislead you.** Its
+`permissions.allow` list names tools as `mcp__Sanity__*`, which matches the locally-configured MCP
+server. In a cloud routine the same connector is namespaced by its connector UUID (Sanity is
+`f6b85f83-b70c-4e86-8a72-4a7caa86b1f8`), so those entries never match and never suppress a prompt.
+The repo allowlist is still the right place to read the owner's *intent*: mirror its `allow` list
+into `permitted_tools`, and leave its `ask` list out so destructive Sanity ops (`unpublish_documents`,
+`discard_drafts`, `version_discard`, `create_release`) keep stopping for a human.
+
+Grant per routine from what its playbook actually does, not one blanket list:
+
+| # | Routine | Connectors | Sanity `permitted_tools` |
+|---|---|---|---|
+| 9 | Daily Content Writer | Sanity, Vercel (unused, empty) | 17: reads + `create_documents`, `create_version`, `patch_documents`, `publish_documents`, `generate_image`, `transform_image` |
+| 10 | Weekly SEO Curation | Sanity only (pruned from 11) | 15: same minus the two image tools, since this playbook places no imagery |
+| 12 | Weekly Podcast Review | Sanity only | 13: reads + `create_documents`, `patch_documents`. No publish or versioning: the playbook is research-only ("never a publish, no images") and its pending `podcastReviewBrief` is a plain published doc |
+
+"Reads" above is `query_documents`, `get_document`, `get_schema`, `list_workspace_schemas`,
+`semantic_search`, `list_sanity_rules`, `get_sanity_rules`, `search_docs`, `read_docs`, `whoami`,
+`list_datasets`.
+
+Two gotchas when editing these. An `update` replaces the entire `mcp_connections` array, so resend
+every connection the routine needs, not just the one you are changing, or you will silently detach
+the others. And an update applied while a run is in flight does not affect that run: routine 12's
+fix landed ninety seconds after its 21:05 fire on 2026-08-05, so that run still prompted and the
+change first took effect the following week.
