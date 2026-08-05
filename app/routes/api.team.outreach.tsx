@@ -5,6 +5,8 @@
  *
  *   { op: 'upsert-prospect', domain, name?, contactEmail?, contactChannel?,
  *     source?, status?, policyNote?, notes?, suggestionId? } -> { id, created }
+ *     (status applies on CREATE only; an update ignores it entirely, so the
+ *     lifecycle can only move through the 'queue' op and its guard below)
  *   { op: 'list', status? } -> { prospects: [...] }
  *   { op: 'queue', id | domain } -> { ok, id }
  *   { op: 'send', prospectId, subject, text } -> { sent, error?, messageId? }
@@ -41,12 +43,15 @@ export async function action({ request }: ActionFunctionArgs) {
       ? (b['contactChannel'] as ContactChannel)
       : undefined
     const status = isProspectStatus(b['status']) ? b['status'] : undefined
+    // Status is deliberately NOT in this patch. On an existing row it is a
+    // lifecycle decision (a rejected/replied/landed prospect must never be
+    // flipped back to queued by an upsert); the only way to move status is
+    // the 'queue' op with its eligibility guard, or the send/inbox pipeline.
     const patch = {
       name:         str(b['name'], 255),
       contactEmail: str(b['contactEmail'], 255),
       contactChannel: channel,
       source:       str(b['source'], 64),
-      status,
       policyNote:   str(b['policyNote'], 4000),
       notes:        str(b['notes'], 4000),
       suggestionId: typeof b['suggestionId'] === 'number' ? b['suggestionId'] : undefined,
@@ -70,7 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
         contactEmail:   patch.contactEmail ?? null,
         contactChannel: patch.contactChannel ?? 'email',
         source:         patch.source ?? 'api',
-        status:         patch.status ?? 'new',
+        status:         status ?? 'new',
         policyNote:     patch.policyNote ?? null,
         notes:          patch.notes ?? null,
         suggestionId:   patch.suggestionId ?? null,

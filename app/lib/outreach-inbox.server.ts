@@ -22,6 +22,7 @@ import { outreachMessages, outreachProspects } from '../../db/schema'
 import {
   buildClassifyPrompt,
   CLASSIFY_SYSTEM_PROMPT,
+  inboundDedupeKey,
   matchOutreachReply,
   parseClassification,
   statusForClassification,
@@ -96,6 +97,10 @@ export async function pollOutreachInbox(): Promise<OutreachPollResult> {
       // readOnly mailbox open: even an imapflow bug could not write flags.
       const lock = await client.getMailboxLock('INBOX', { readOnly: true })
       try {
+        // UIDVALIDITY of the opened mailbox, part of the fallback dedupe key
+        // for inbound messages that carry no Message-ID header.
+        const uidValidity =
+          typeof client.mailbox === 'object' && client.mailbox ? client.mailbox.uidValidity : undefined
         const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000)
         const uids = await client.search({ since }, { uid: true })
         const uidList = Array.isArray(uids) ? uids : []
@@ -118,7 +123,11 @@ export async function pollOutreachInbox(): Promise<OutreachPollResult> {
 
           const matchedId = matchOutreachReply({ inReplyTo, references }, knownIds)
           if (!matchedId) continue // not ours: leave it completely alone
-          if (messageId && seenInbound.has(messageId)) continue // already processed
+          // Dedupe on the Message-ID when present, otherwise on the stable
+          // IMAP coordinates, so a reply without a Message-ID is still
+          // processed exactly once instead of on every poll.
+          const dedupeKey = inboundDedupeKey({ messageId, uidValidity, uid })
+          if (seenInbound.has(dedupeKey)) continue // already processed
 
           const prospectId = prospectByMessageId.get(matchedId)
           if (!prospectId) continue
@@ -140,13 +149,13 @@ export async function pollOutreachInbox(): Promise<OutreachPollResult> {
             direction: 'in',
             subject,
             bodyText: bodyText.slice(0, 20000),
-            messageId: messageId ?? null,
+            messageId: dedupeKey,
             inReplyTo: inReplyTo ?? null,
             referencesHeader: references ?? null,
             classification,
             sentAt: parsed?.date ?? msg.envelope?.date ?? new Date(),
           })
-          if (messageId) seenInbound.add(messageId)
+          seenInbound.add(dedupeKey)
 
           const nextStatus = statusForClassification(classification)
           if (nextStatus) {

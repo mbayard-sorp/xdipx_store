@@ -12,6 +12,7 @@ import {
   CLASSIFY_SYSTEM_PROMPT,
   DEDUPE_WINDOW_DAYS,
   extractMessageIds,
+  inboundDedupeKey,
   matchOutreachReply,
   parseClassification,
   statusForClassification,
@@ -154,6 +155,30 @@ describe('matchOutreachReply', () => {
     )).toBeNull()
     expect(matchOutreachReply({}, known)).toBeNull()
     expect(matchOutreachReply({ inReplyTo: '<out-1@xdipx.com>' }, new Set())).toBeNull()
+  })
+})
+
+describe('inboundDedupeKey', () => {
+  it('prefers the Message-ID when the sender provided one', () => {
+    expect(inboundDedupeKey({ messageId: '<reply@partner.com>', uidValidity: 42n, uid: 7 }))
+      .toBe('<reply@partner.com>')
+  })
+
+  // The bug this guards against: a matched reply with no Message-ID was
+  // re-inserted, re-classified, and re-alerted on every poll. The fallback
+  // key must be stable across polls (same uidvalidity + uid = same key).
+  it('falls back to stable IMAP coordinates when the Message-ID is absent', () => {
+    const key = inboundDedupeKey({ messageId: null, uidValidity: 1234n, uid: 567 })
+    expect(key).toBe('imap:1234:567')
+    // Same message on the next poll produces the identical key.
+    expect(inboundDedupeKey({ messageId: null, uidValidity: 1234n, uid: 567 })).toBe(key)
+    // A different message never collides.
+    expect(inboundDedupeKey({ messageId: null, uidValidity: 1234n, uid: 568 })).not.toBe(key)
+  })
+
+  it('still yields a usable key when uidvalidity is unavailable', () => {
+    expect(inboundDedupeKey({ messageId: null, uidValidity: undefined, uid: 9 }))
+      .toBe('imap:unknown:9')
   })
 })
 

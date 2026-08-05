@@ -1497,7 +1497,7 @@ export const adCreatives = pgTable('ad_creatives', {
 }))
 
 /**
- * Outreach pipeline (077) — vetted guest-post / brand-partnership targets.
+ * Outreach pipeline (077): vetted guest-post / brand-partnership targets.
  * One row per domain. Seeded from docs/store-team/outreach-prospects.md by
  * scripts/seed-outreach-prospects.ts; the offsite-scout adds more through
  * POST /api/team/outreach. Sending is valve-gated (outreach_send_enabled,
@@ -1525,7 +1525,7 @@ export const outreachProspects = pgTable('outreach_prospects', {
 }))
 
 /**
- * Outreach pipeline (077) — every outreach email, both directions. Outbound
+ * Outreach pipeline (077): every outreach email, both directions. Outbound
  * rows carry the SMTP Message-ID so the IMAP poller can match replies by
  * In-Reply-To/References and leave everything else in hello@ untouched;
  * inbound rows carry the classification the poller assigned.
@@ -1537,7 +1537,7 @@ export const outreachMessages = pgTable('outreach_messages', {
   direction:        varchar('direction', { length: 3 }).notNull(),  // in|out
   subject:          text('subject'),
   bodyText:         text('body_text'),
-  messageId:        text('message_id'),                             // RFC 5322 Message-ID
+  messageId:        text('message_id'),  // RFC 5322 Message-ID; inbound rows missing one store the imap:<uidvalidity>:<uid> fallback dedupe key
   inReplyTo:        text('in_reply_to'),
   referencesHeader: text('references_header'),
   classification:   varchar('classification', { length: 12 }),      // positive|negative|neutral|auto_reply

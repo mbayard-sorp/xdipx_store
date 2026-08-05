@@ -115,6 +115,24 @@ export function matchOutreachReply(
   return null
 }
 
+/**
+ * Stable dedupe key for an inbound message. Prefers the RFC 5322 Message-ID;
+ * when the sender omitted one (rare but legal), falls back to the IMAP
+ * coordinates of the message, which are stable for the life of the mailbox:
+ * 'imap:<uidvalidity>:<uid>'. Without this fallback a matched reply lacking a
+ * Message-ID would be re-inserted, re-classified, and re-alerted on every
+ * poll for the whole lookback window. The key is stored in the message_id
+ * column, so the seen-inbound preload picks it up on later polls.
+ */
+export function inboundDedupeKey(input: {
+  messageId: string | null
+  uidValidity: bigint | number | string | null | undefined
+  uid: number | string
+}): string {
+  if (input.messageId) return input.messageId
+  return `imap:${input.uidValidity ?? 'unknown'}:${input.uid}`
+}
+
 export const REPLY_CLASSIFICATIONS = ['positive', 'negative', 'neutral', 'auto_reply'] as const
 export type ReplyClassification = (typeof REPLY_CLASSIFICATIONS)[number]
 
