@@ -474,9 +474,16 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
     const groqParams: Record<string, unknown> = {}
     const boostClauses: string[] = []
 
+    // Enrichment-dependent filters are soft: an un-enriched product (empty or
+    // missing tag array) stays IN the pool rather than being invisible —
+    // coverage is partial (57-82% depending on field), so hard AND filters hid
+    // large slices of the catalog. coalesce matters: count(missingField) is
+    // null in GROQ and null == 0 is false, so without it a doc missing the
+    // field entirely fails even the "no constraint" escape. Boost clauses are
+    // unchanged, so genuinely-matching enriched products still rank first.
     if (mood && mood.length > 0) {
       const moodOr = mood.map((_, i) => `$mood${i} in moodTags`).join(' || ')
-      conditions.push(`(${moodOr})`)
+      conditions.push(`(count(coalesce(moodTags, [])) == 0 || ${moodOr})`)
       mood.forEach((m, i) => {
         groqParams[`mood${i}`] = m
         boostClauses.push(`boost($mood${i} in moodTags, 3)`)
@@ -484,16 +491,14 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
     }
 
     if (experience) {
-      // Phase 2 — ivrExperience is now string[]. Empty array means "no
-      // level constraint" so it matches every filter automatically.
-      conditions.push('(count(ivrExperience) == 0 || $exp in ivrExperience)')
+      conditions.push('(count(coalesce(ivrExperience, [])) == 0 || $exp in ivrExperience)')
       groqParams.exp = experience
       boostClauses.push('boost($exp in ivrExperience, 4)')
     }
 
     if (useCase && useCase.length > 0) {
       const ucOr = useCase.map((_, i) => `$uc${i} in ivrUseCase`).join(' || ')
-      conditions.push(`(${ucOr})`)
+      conditions.push(`(count(coalesce(ivrUseCase, [])) == 0 || ${ucOr})`)
       useCase.forEach((u, i) => {
         groqParams[`uc${i}`] = u
         boostClauses.push(`boost($uc${i} in ivrUseCase, 3)`)
@@ -502,7 +507,7 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
 
     if (features && features.length > 0) {
       const featOr = features.map((_, i) => `$feat${i} in ivrFeatures`).join(' || ')
-      conditions.push(`(${featOr})`)
+      conditions.push(`(count(coalesce(ivrFeatures, [])) == 0 || ${featOr})`)
       features.forEach((f, i) => {
         groqParams[`feat${i}`] = f
         boostClauses.push(`boost($feat${i} in ivrFeatures, 2)`)
