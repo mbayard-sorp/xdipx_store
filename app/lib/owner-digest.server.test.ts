@@ -461,6 +461,7 @@ describe('renderTicketLoopSection', () => {
     },
     orphans: [],
     orphanScanSkipped: false,
+    conflictedPrs: [],
     backlog: { created7d: 10, terminal7d: 12, netPerDay: -0.3 },
     routineFlags: [],
   }
@@ -516,6 +517,30 @@ describe('renderTicketLoopSection', () => {
     expect(html).toContain('Orphan scan skipped')
     expect(html).not.toContain('No orphaned tickets')
   })
+
+  it('surfaces a merge-conflicted PR, on which CI can never run', () => {
+    // A conflicted PR gets ZERO pull_request workflow runs, and the engine
+    // parks it silently; this line is what stops the next incident being
+    // re-investigated as "Actions declined my triggers".
+    const html = renderTicketLoopSection({
+      ...healthyLoop,
+      conflictedPrs: [{
+        number: 494,
+        title: 'fix the rail',
+        branch: 'ticket/494',
+        explanation: 'CI cannot run on a merge-conflicted PR.',
+      }],
+    })
+    expect(html).toContain('1 merge-conflicted PR')
+    expect(html).toContain('CI cannot run on a conflicted PR at all')
+    expect(html).toContain('Merge origin/main into the branch and rebuild')
+    expect(html).toContain('PR #494')
+    expect(html).toContain('ticket/494')
+  })
+
+  it('stays silent on conflicts when there are none', () => {
+    expect(renderTicketLoopSection(healthyLoop)).not.toContain('merge-conflicted')
+  })
 })
 
 describe('runOwnerDigest', () => {
@@ -565,6 +590,7 @@ describe('renderNeedsMikeSection', () => {
     blockedRows: [],
     staleOwnerRows: [],
     orphans: [],
+    conflictedPrs: [],
     missedRoutines: [],
   }
 
@@ -578,6 +604,12 @@ describe('renderNeedsMikeSection', () => {
       blockedRows: [{ id: 2, status: 'blocked', kind: 'code', attemptCount: 1, lastError: null, suggestion: 'stuck row' }],
       staleOwnerRows: [{ id: 3, kind: 'campaign', ageDays: 5, suggestion: 'send the pitch batch' }],
       orphans: [{ ticketId: 4, status: 'approved', prRef: 'https://github.com/o/r/pull/429', prOutcome: 'merged' }],
+      conflictedPrs: [{
+        number: 494,
+        title: 'fix the rail',
+        branch: 'ticket/494',
+        explanation: 'CI cannot run on a merge-conflicted PR.',
+      }],
       missedRoutines: [{
         routine: 'Weekly trend scout', team: 'content', runType: 'trend-scout',
         schedule: 'Sat 19:00', lastRunAt: '2026-07-20T19:00:00Z', hoursSince: 380, maxGapHours: 194,
@@ -589,6 +621,8 @@ describe('renderNeedsMikeSection', () => {
     expect(html).toContain('#3 (campaign) approved 5d ago')
     expect(html).toContain('#4 is orphaned')
     expect(html).toContain('PR #429')
+    expect(html).toContain('PR #494 is merge-conflicted, CI cannot run on it at all, rebase it on main')
+    expect(html).toContain('ticket/494')
     expect(html).toContain('Weekly trend scout')
     expect(html).toContain('380h ago')
   })

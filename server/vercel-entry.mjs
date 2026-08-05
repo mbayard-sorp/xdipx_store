@@ -18859,6 +18859,15 @@ function classifyOrphans(candidates) {
   }
   return out;
 }
+function classifyConflictedPrs(candidates) {
+  const out = [];
+  for (const c of candidates) {
+    if (c.mergeableState === "dirty" || c.mergeable === false) {
+      out.push({ number: c.number, title: c.title, branch: c.branch, explanation: CONFLICTED_PR_EXPLANATION });
+    }
+  }
+  return out;
+}
 function checkRoutineLiveness(lastRuns, now = /* @__PURE__ */ new Date(), cadences = ROUTINE_CADENCES) {
   const newest = /* @__PURE__ */ new Map();
   for (const r of lastRuns) {
@@ -18891,6 +18900,17 @@ function computeNetPerDay(created, terminal, days = 7) {
   if (days <= 0) return 0;
   return Math.round((created - terminal) / days * 10) / 10;
 }
+function createPrReadCache(maxReads = MAX_GITHUB_READS) {
+  const byNumber = /* @__PURE__ */ new Map();
+  return async function read(num3) {
+    if (!byNumber.has(num3)) {
+      if (byNumber.size >= maxReads) return null;
+      const pr = await getPullRequest(num3, "ticket-janitor");
+      byNumber.set(num3, pr.ok ? pr.data : null);
+    }
+    return byNumber.get(num3) ?? null;
+  };
+}
 async function gatherSlaRows() {
   const res = await db.execute(sql6`
     SELECT s.id, s.status, s.kind, s.priority, s.suggestion, s.last_error,
@@ -18912,7 +18932,7 @@ async function gatherSlaRows() {
     updatedAt: new Date(String(r["updated_at"] ?? 0))
   }));
 }
-async function gatherOrphans() {
+async function gatherOrphans(readPr) {
   if (!isGithubConfigured()) return { orphans: [], skipped: true };
   const res = await db.execute(sql6`
     SELECT DISTINCT ON (s.id) s.id, s.status, l.ref
@@ -18925,19 +18945,35 @@ async function gatherOrphans() {
     status: String(r["status"] ?? ""),
     prRef: String(r["ref"] ?? "")
   }));
-  const byNumber = /* @__PURE__ */ new Map();
   const candidates = [];
   for (const row of rows) {
     const num3 = parsePrNumber(row.prRef);
     if (num3 === null) continue;
-    if (!byNumber.has(num3)) {
-      if (byNumber.size >= MAX_GITHUB_READS) continue;
-      const pr = await getPullRequest(num3, "ticket-janitor");
-      byNumber.set(num3, pr.ok ? { merged: pr.data.merged, state: pr.data.state } : null);
-    }
-    candidates.push({ ...row, pr: byNumber.get(num3) ?? null });
+    const pr = await readPr(num3);
+    candidates.push({ ...row, pr: pr ? { merged: pr.merged, state: pr.state } : null });
   }
   return { orphans: classifyOrphans(candidates), skipped: false };
+}
+async function gatherConflictedPrs(readPr) {
+  if (!isGithubConfigured()) return [];
+  const list = await listOpenPullRequests({
+    headPrefixes: [...ELIGIBLE_BRANCH_PREFIXES],
+    context: "ticket-janitor"
+  });
+  if (!list.ok) return [];
+  const candidates = [];
+  for (const pr of list.data) {
+    const full = await readPr(pr.number);
+    if (!full) continue;
+    candidates.push({
+      number: full.number,
+      title: full.title,
+      branch: full.headRef,
+      mergeable: full.mergeable,
+      mergeableState: full.mergeableState
+    });
+  }
+  return classifyConflictedPrs(candidates);
 }
 async function gatherBacklog() {
   const res = await db.execute(sql6`
@@ -18970,20 +19006,27 @@ async function computeTicketLoopHealth() {
     sla: EMPTY_SLA,
     orphans: [],
     orphanScanSkipped: true,
+    conflictedPrs: [],
     backlog: { created7d: 0, terminal7d: 0, netPerDay: 0 },
     routineFlags: []
   };
+  const readPr = createPrReadCache();
   try {
     health.sla = classifySlaBreaches(await gatherSlaRows());
   } catch (err2) {
     console.warn("[ticket-janitor] SLA sweep failed:", String(err2).slice(0, 200));
   }
   try {
-    const { orphans, skipped } = await gatherOrphans();
+    const { orphans, skipped } = await gatherOrphans(readPr);
     health.orphans = orphans;
     health.orphanScanSkipped = skipped;
   } catch (err2) {
     console.warn("[ticket-janitor] orphan scan failed:", String(err2).slice(0, 200));
+  }
+  try {
+    health.conflictedPrs = await gatherConflictedPrs(readPr);
+  } catch (err2) {
+    console.warn("[ticket-janitor] conflicted-PR scan failed:", String(err2).slice(0, 200));
   }
   try {
     health.backlog = await gatherBacklog();
@@ -19023,7 +19066,7 @@ async function reconcilePrLinkStates(opts = {}) {
   }
   return { checked: byNumber.size, updated, skipped: false };
 }
-var SLA, TERMINAL_STATUSES, TWICE_DAILY_GAP, RDEV_GAP, DAILY_GAP, WEEKLY_GAP, TWICE_WEEKLY_GAP, ROUTINE_CADENCES, EMPTY_SLA, MAX_GITHUB_READS;
+var SLA, TERMINAL_STATUSES, ELIGIBLE_BRANCH_PREFIXES, CONFLICTED_PR_EXPLANATION, TWICE_DAILY_GAP, RDEV_GAP, DAILY_GAP, WEEKLY_GAP, TWICE_WEEKLY_GAP, ROUTINE_CADENCES, EMPTY_SLA, MAX_GITHUB_READS;
 var init_ticket_janitor_server = __esm({
   "app/lib/ticket-janitor.server.ts"() {
     "use strict";
@@ -19037,6 +19080,17 @@ var init_ticket_janitor_server = __esm({
       proposedHours: 72
     };
     TERMINAL_STATUSES = ["applied", "dismissed"];
+    ELIGIBLE_BRANCH_PREFIXES = [
+      "agents/",
+      "ticket/",
+      "claude/",
+      "phase1/",
+      "tonight/",
+      "fix/",
+      "pm/",
+      "revert/pr-"
+    ];
+    CONFLICTED_PR_EXPLANATION = "CI cannot run on a merge-conflicted PR: GitHub creates zero pull_request workflow runs for it, and the release engine parks it as a conflict skip. The fix is merging origin/main into the branch and rebuilding.";
     TWICE_DAILY_GAP = 12 + 2;
     RDEV_GAP = 18 + 2;
     DAILY_GAP = 24 + 2;
@@ -20172,6 +20226,9 @@ function renderTicketLoopSection(h) {
     const empty = h.sla.blocked.filter((b) => b.emptyReason);
     parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.sla.blocked.length} blocked ticket${h.sla.blocked.length === 1 ? "" : "s"}${empty.length ? `, <strong>${empty.length} with no recorded reason</strong> (nobody can clear a block that does not say what it is)` : ""}:</p><ul style="margin:0;padding-left:18px;">${h.sla.blocked.slice(0, 8).map((b) => `<li>#${b.id} (${esc(b.kind)}, ${agePhrase(b.ageHours)})${b.emptyReason ? ` <span style="color:${BAD};">no reason</span>` : ""} ${esc(clip(b.suggestion, 90))}</li>`).join("")}</ul>`);
   }
+  if (h.conflictedPrs.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.conflictedPrs.length} merge-conflicted PR${h.conflictedPrs.length === 1 ? "" : "s"}: CI cannot run on a conflicted PR at all (GitHub creates zero workflow runs for it, so nothing anywhere goes red), and the release engine parks it. Merge origin/main into the branch and rebuild:</p><ul style="margin:0;padding-left:18px;">${h.conflictedPrs.slice(0, 6).map((p) => `<li>PR #${p.number} (${esc(p.branch)}) ${esc(clip(p.title, 90))}</li>`).join("")}</ul>`);
+  }
   if (h.orphanScanSkipped) {
     parts.push(`<p style="margin:6px 0 4px;color:${MUTED};">Orphan scan skipped (GitHub not readable this run).</p>`);
   } else if (h.orphans.length) {
@@ -20199,6 +20256,9 @@ function renderNeedsMikeSection(f) {
   }
   for (const o of f.orphans.slice(0, 5)) {
     items.push(`#${o.ticketId} is orphaned: its ${link(o.prRef, prLabel(o.prRef))} is ${esc(o.prOutcome)} but the ticket sits ${esc(o.status)}`);
+  }
+  for (const c of f.conflictedPrs.slice(0, 5)) {
+    items.push(`PR #${c.number} is merge-conflicted, CI cannot run on it at all, rebase it on main (branch ${esc(c.branch)})`);
   }
   for (const m of f.missedRoutines.slice(0, 5)) {
     items.push(`Routine ${esc(m.routine)} missed its window (${esc(m.schedule)} UTC): ${m.lastRunAt ? `last run ${m.hoursSince}h ago` : "no run row ever"}`);
@@ -20683,6 +20743,7 @@ async function runOwnerDigest(opts = {}) {
     blockedRows: ticketMetrics.blockedRows,
     staleOwnerRows,
     orphans: loopHealth?.orphans ?? [],
+    conflictedPrs: loopHealth?.conflictedPrs ?? [],
     missedRoutines: loopHealth?.routineFlags ?? []
   };
   const ordersY = yesterday?.orders ?? 0;

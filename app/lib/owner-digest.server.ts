@@ -27,6 +27,7 @@ import { getProfitReconciliation } from '~/lib/profit.server'
 import {
   computeTicketLoopHealth,
   reconcilePrLinkStates,
+  type ConflictedPr,
   type OrphanTicket,
   type RoutineLivenessFlag,
   type TicketLoopHealth,
@@ -466,6 +467,10 @@ export function renderTicketLoopSection(h: TicketLoopHealth | null): string {
     parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.sla.blocked.length} blocked ticket${h.sla.blocked.length === 1 ? '' : 's'}${empty.length ? `, <strong>${empty.length} with no recorded reason</strong> (nobody can clear a block that does not say what it is)` : ''}:</p><ul style="margin:0;padding-left:18px;">${h.sla.blocked.slice(0, 8).map(b => `<li>#${b.id} (${esc(b.kind)}, ${agePhrase(b.ageHours)})${b.emptyReason ? ` <span style="color:${BAD};">no reason</span>` : ''} ${esc(clip(b.suggestion, 90))}</li>`).join('')}</ul>`)
   }
 
+  if (h.conflictedPrs.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.conflictedPrs.length} merge-conflicted PR${h.conflictedPrs.length === 1 ? '' : 's'}: CI cannot run on a conflicted PR at all (GitHub creates zero workflow runs for it, so nothing anywhere goes red), and the release engine parks it. Merge origin/main into the branch and rebuild:</p><ul style="margin:0;padding-left:18px;">${h.conflictedPrs.slice(0, 6).map(p => `<li>PR #${p.number} (${esc(p.branch)}) ${esc(clip(p.title, 90))}</li>`).join('')}</ul>`)
+  }
+
   if (h.orphanScanSkipped) {
     parts.push(`<p style="margin:6px 0 4px;color:${MUTED};">Orphan scan skipped (GitHub not readable this run).</p>`)
   } else if (h.orphans.length) {
@@ -499,6 +504,8 @@ export interface NeedsMikeFacts {
   /** Approved promo/campaign/program rows older than 3 days: owner-executed kinds. */
   staleOwnerRows: StaleOwnerRow[]
   orphans: OrphanTicket[]
+  /** PRs GitHub reports merge-conflicted, on which CI structurally cannot run. */
+  conflictedPrs: ConflictedPr[]
   missedRoutines: RoutineLivenessFlag[]
 }
 
@@ -520,6 +527,9 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   }
   for (const o of f.orphans.slice(0, 5)) {
     items.push(`#${o.ticketId} is orphaned: its ${link(o.prRef, prLabel(o.prRef))} is ${esc(o.prOutcome)} but the ticket sits ${esc(o.status)}`)
+  }
+  for (const c of f.conflictedPrs.slice(0, 5)) {
+    items.push(`PR #${c.number} is merge-conflicted, CI cannot run on it at all, rebase it on main (branch ${esc(c.branch)})`)
   }
   for (const m of f.missedRoutines.slice(0, 5)) {
     items.push(`Routine ${esc(m.routine)} missed its window (${esc(m.schedule)} UTC): ${m.lastRunAt ? `last run ${m.hoursSince}h ago` : 'no run row ever'}`)
@@ -1116,6 +1126,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     blockedRows: ticketMetrics.blockedRows,
     staleOwnerRows,
     orphans: loopHealth?.orphans ?? [],
+    conflictedPrs: loopHealth?.conflictedPrs ?? [],
     missedRoutines: loopHealth?.routineFlags ?? [],
   }
 

@@ -25,7 +25,12 @@
 import { and, eq, isNull, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { suggestionLinks } from '../../db/schema'
-import { getPullRequest, isGithubConfigured } from '~/lib/github.server'
+import {
+  getPullRequest,
+  isGithubConfigured,
+  listOpenPullRequests,
+  type PullRequestSummary,
+} from '~/lib/github.server'
 
 /* ── SLA thresholds ────────────────────────────────────────────────────────── */
 
@@ -223,6 +228,67 @@ export function classifyOrphans(candidates: readonly OrphanCandidate[]): OrphanT
   return out
 }
 
+/* ── Conflicted PRs: CI structurally cannot run ────────────────────────────── */
+
+/**
+ * Head-branch prefixes the release engine evaluates. Mirrors
+ * `AGENT_BRANCH_PREFIXES` plus `REVERT_BRANCH_PREFIX` in
+ * `release-engine.server.ts`, which is a protected file with a heavy module
+ * graph (healthcheck, checkout probe, KV, email), so the janitor mirrors the
+ * list rather than importing it. If the engine's list changes, change this in
+ * the same PR.
+ */
+export const ELIGIBLE_BRANCH_PREFIXES: readonly string[] = [
+  'agents/', 'ticket/', 'claude/', 'phase1/', 'tonight/', 'fix/', 'pm/', 'revert/pr-',
+]
+
+/**
+ * The fixed explanation every conflicted-PR entry carries. Why it exists: a
+ * merge-conflicted PR gets ZERO pull_request workflow runs on GitHub
+ * (documented behavior, confirmed on PR #494), and the release engine already
+ * classifies these as skip 'conflict' but parks them silently, so without this
+ * line the next incident gets re-investigated as "Actions declined my
+ * triggers".
+ */
+export const CONFLICTED_PR_EXPLANATION =
+  'CI cannot run on a merge-conflicted PR: GitHub creates zero pull_request workflow runs for it, '
+  + 'and the release engine parks it as a conflict skip. '
+  + 'The fix is merging origin/main into the branch and rebuilding.'
+
+export interface ConflictedPr {
+  number: number
+  title: string
+  branch: string
+  explanation: string
+}
+
+/** What the conflict classifier consumes; the gatherer maps PR reads to it. */
+export interface ConflictCandidate {
+  number: number
+  title: string
+  branch: string
+  /** GitHub's computed mergeability; null while it is still computing. */
+  mergeable: boolean | null
+  /** 'dirty' is the conflict signal; the engine skips on exactly this. */
+  mergeableState: string
+}
+
+/**
+ * Pure conflict classification. A PR is conflicted when GitHub reports its
+ * mergeable state as `dirty` (what the engine skips on) or `mergeable` as
+ * explicitly false. A null/unknown mergeability never classifies: GitHub
+ * computes it lazily, and unknown must never read as broken.
+ */
+export function classifyConflictedPrs(candidates: readonly ConflictCandidate[]): ConflictedPr[] {
+  const out: ConflictedPr[] = []
+  for (const c of candidates) {
+    if (c.mergeableState === 'dirty' || c.mergeable === false) {
+      out.push({ number: c.number, title: c.title, branch: c.branch, explanation: CONFLICTED_PR_EXPLANATION })
+    }
+  }
+  return out
+}
+
 /* ── Routine liveness ──────────────────────────────────────────────────────── */
 
 export type CadenceKind = 'twice-daily' | 'daily' | 'twice-weekly' | 'weekly'
@@ -364,6 +430,9 @@ export interface TicketLoopHealth {
   orphans: OrphanTicket[]
   /** True when GitHub was unreachable/unconfigured, so orphans is a floor. */
   orphanScanSkipped: boolean
+  /** Open eligible-branch PRs GitHub reports merge-conflicted: CI cannot run
+   *  on them at all. Empty when GitHub is unconfigured, so also a floor. */
+  conflictedPrs: ConflictedPr[]
   backlog: BacklogTrajectory
   /** Routines whose last run row is older than cadence plus grace. */
   routineFlags: RoutineLivenessFlag[]
@@ -379,6 +448,26 @@ const EMPTY_SLA: SlaBreaches = {
 
 /** Most PRs the orphan scan and reconcile will read from GitHub per run. */
 const MAX_GITHUB_READS = 20
+
+/**
+ * One capped, memoised PR reader shared by the orphan and conflict scans, so a
+ * PR appearing in both costs one API call and the shared 20-read cap holds for
+ * the whole health computation. This runs inside the digest cron and must stay
+ * cheap even when the queue is a mess.
+ */
+function createPrReadCache(maxReads = MAX_GITHUB_READS) {
+  const byNumber = new Map<number, PullRequestSummary | null>()
+  return async function read(num: number): Promise<PullRequestSummary | null> {
+    if (!byNumber.has(num)) {
+      if (byNumber.size >= maxReads) return null
+      const pr = await getPullRequest(num, 'ticket-janitor')
+      byNumber.set(num, pr.ok ? pr.data : null)
+    }
+    return byNumber.get(num) ?? null
+  }
+}
+
+type PrReader = ReturnType<typeof createPrReadCache>
 
 async function gatherSlaRows(): Promise<JanitorTicketRow[]> {
   const res = await db.execute(sql`
@@ -402,7 +491,7 @@ async function gatherSlaRows(): Promise<JanitorTicketRow[]> {
   }))
 }
 
-async function gatherOrphans(): Promise<{ orphans: OrphanTicket[]; skipped: boolean }> {
+async function gatherOrphans(readPr: PrReader): Promise<{ orphans: OrphanTicket[]; skipped: boolean }> {
   if (!isGithubConfigured()) return { orphans: [], skipped: true }
 
   const res = await db.execute(sql`
@@ -417,21 +506,43 @@ async function gatherOrphans(): Promise<{ orphans: OrphanTicket[]; skipped: bool
     prRef: String(r['ref'] ?? ''),
   }))
 
-  // One GitHub read per distinct PR, hard-capped: this runs inside the digest
-  // cron and must stay cheap even if the queue is a mess.
-  const byNumber = new Map<number, { merged: boolean; state: string } | null>()
+  // One GitHub read per distinct PR through the shared capped cache: a PR the
+  // cap excluded reads as null, which classifies as unknown, never as dead.
   const candidates: OrphanCandidate[] = []
   for (const row of rows) {
     const num = parsePrNumber(row.prRef)
     if (num === null) continue
-    if (!byNumber.has(num)) {
-      if (byNumber.size >= MAX_GITHUB_READS) continue
-      const pr = await getPullRequest(num, 'ticket-janitor')
-      byNumber.set(num, pr.ok ? { merged: pr.data.merged, state: pr.data.state } : null)
-    }
-    candidates.push({ ...row, pr: byNumber.get(num) ?? null })
+    const pr = await readPr(num)
+    candidates.push({ ...row, pr: pr ? { merged: pr.merged, state: pr.state } : null })
   }
   return { orphans: classifyOrphans(candidates), skipped: false }
+}
+
+async function gatherConflictedPrs(readPr: PrReader): Promise<ConflictedPr[]> {
+  if (!isGithubConfigured()) return []
+
+  const list = await listOpenPullRequests({
+    headPrefixes: [...ELIGIBLE_BRANCH_PREFIXES],
+    context: 'ticket-janitor',
+  })
+  if (!list.ok) return []
+
+  // The list endpoint omits mergeable_state (GitHub computes it only on the
+  // individual PR read), so each open eligible PR costs one read through the
+  // same capped cache the orphan scan uses; overlapping PRs are free.
+  const candidates: ConflictCandidate[] = []
+  for (const pr of list.data) {
+    const full = await readPr(pr.number)
+    if (!full) continue
+    candidates.push({
+      number: full.number,
+      title: full.title,
+      branch: full.headRef,
+      mergeable: full.mergeable,
+      mergeableState: full.mergeableState,
+    })
+  }
+  return classifyConflictedPrs(candidates)
 }
 
 async function gatherBacklog(): Promise<BacklogTrajectory> {
@@ -472,9 +583,12 @@ export async function computeTicketLoopHealth(): Promise<TicketLoopHealth> {
     sla: EMPTY_SLA,
     orphans: [],
     orphanScanSkipped: true,
+    conflictedPrs: [],
     backlog: { created7d: 0, terminal7d: 0, netPerDay: 0 },
     routineFlags: [],
   }
+
+  const readPr = createPrReadCache()
 
   try {
     health.sla = classifySlaBreaches(await gatherSlaRows())
@@ -482,11 +596,16 @@ export async function computeTicketLoopHealth(): Promise<TicketLoopHealth> {
     console.warn('[ticket-janitor] SLA sweep failed:', String(err).slice(0, 200))
   }
   try {
-    const { orphans, skipped } = await gatherOrphans()
+    const { orphans, skipped } = await gatherOrphans(readPr)
     health.orphans = orphans
     health.orphanScanSkipped = skipped
   } catch (err) {
     console.warn('[ticket-janitor] orphan scan failed:', String(err).slice(0, 200))
+  }
+  try {
+    health.conflictedPrs = await gatherConflictedPrs(readPr)
+  } catch (err) {
+    console.warn('[ticket-janitor] conflicted-PR scan failed:', String(err).slice(0, 200))
   }
   try {
     health.backlog = await gatherBacklog()

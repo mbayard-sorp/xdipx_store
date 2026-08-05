@@ -1,19 +1,34 @@
 import { describe, expect, it, vi } from 'vitest'
 
 // The module imports the drizzle client, whose module-level neon() call needs a
-// DATABASE_URL. The IO entry points are not exercised here; the pure logic is.
+// DATABASE_URL. The pure logic is exercised directly; computeTicketLoopHealth
+// is exercised through the db and GitHub mocks below.
 const executeMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
 
+const githubConfiguredMock = vi.hoisted(() => vi.fn(() => false))
+const getPullRequestMock = vi.hoisted(() => vi.fn())
+const listOpenPullRequestsMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/github.server', () => ({
+  isGithubConfigured: githubConfiguredMock,
+  getPullRequest: getPullRequestMock,
+  listOpenPullRequests: listOpenPullRequestsMock,
+}))
+
 import {
+  CONFLICTED_PR_EXPLANATION,
+  ELIGIBLE_BRANCH_PREFIXES,
   ROUTINE_CADENCES,
   SLA,
   TERMINAL_STATUSES,
   checkRoutineLiveness,
+  classifyConflictedPrs,
   classifyOrphans,
   classifySlaBreaches,
   computeNetPerDay,
+  computeTicketLoopHealth,
   parsePrNumber,
+  type ConflictCandidate,
   type JanitorTicketRow,
   type OrphanCandidate,
 } from '~/lib/ticket-janitor.server'
@@ -134,6 +149,96 @@ describe('parsePrNumber', () => {
     expect(parsePrNumber('https://api.github.com/repos/o/r/pulls/12')).toBe(12)
     expect(parsePrNumber('https://github.com/o/r/issues/9')).toBeNull()
     expect(parsePrNumber('not a url')).toBeNull()
+  })
+})
+
+describe('classifyConflictedPrs', () => {
+  const candidate = (over: Partial<ConflictCandidate> = {}): ConflictCandidate => ({
+    number: 494,
+    title: 'fix the rail',
+    branch: 'ticket/494',
+    mergeable: false,
+    mergeableState: 'dirty',
+    ...over,
+  })
+
+  it('flags a dirty PR with the fixed explanation and passes clean ones', () => {
+    const out = classifyConflictedPrs([
+      candidate(),
+      candidate({ number: 500, branch: 'fix/nav', mergeable: true, mergeableState: 'clean' }),
+    ])
+    expect(out).toEqual([{
+      number: 494,
+      title: 'fix the rail',
+      branch: 'ticket/494',
+      explanation: CONFLICTED_PR_EXPLANATION,
+    }])
+    // The explanation is the point: zero workflow runs is documented GitHub
+    // behavior, and without the sentence the next incident gets re-investigated.
+    expect(CONFLICTED_PR_EXPLANATION).toContain('CI cannot run')
+    expect(CONFLICTED_PR_EXPLANATION).toContain('zero pull_request workflow runs')
+    expect(CONFLICTED_PR_EXPLANATION).toContain('origin/main')
+  })
+
+  it('never classifies an unknown mergeability as conflicted', () => {
+    // GitHub computes mergeability lazily; unknown must never read as broken.
+    const out = classifyConflictedPrs([candidate({ mergeable: null, mergeableState: 'unknown' })])
+    expect(out).toEqual([])
+  })
+
+  it('covers every engine-eligible branch prefix, revert lane included', () => {
+    expect(ELIGIBLE_BRANCH_PREFIXES).toEqual(
+      ['agents/', 'ticket/', 'claude/', 'phase1/', 'tonight/', 'fix/', 'pm/', 'revert/pr-'])
+  })
+})
+
+describe('computeTicketLoopHealth conflicted-PR scan', () => {
+  it('leaves conflictedPrs empty without throwing when GitHub is unconfigured', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    githubConfiguredMock.mockReturnValue(false)
+    getPullRequestMock.mockReset()
+    listOpenPullRequestsMock.mockReset()
+
+    const health = await computeTicketLoopHealth()
+
+    expect(health.conflictedPrs).toEqual([])
+    expect(health.orphanScanSkipped).toBe(true)
+    expect(listOpenPullRequestsMock).not.toHaveBeenCalled()
+    expect(getPullRequestMock).not.toHaveBeenCalled()
+  })
+
+  it('reads mergeable state per open eligible PR and reports the dirty ones', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    githubConfiguredMock.mockReturnValue(true)
+    getPullRequestMock.mockReset()
+    listOpenPullRequestsMock.mockReset()
+    listOpenPullRequestsMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [{ number: 494, title: 'fix the rail', headRef: 'ticket/494' }],
+    })
+    // The list endpoint omits mergeable_state, so the scan must do the
+    // individual read to see the conflict.
+    getPullRequestMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        number: 494, title: 'fix the rail', headRef: 'ticket/494', state: 'open',
+        merged: false, mergeable: false, mergeableState: 'dirty',
+      },
+    })
+
+    const health = await computeTicketLoopHealth()
+
+    expect(health.conflictedPrs).toEqual([{
+      number: 494,
+      title: 'fix the rail',
+      branch: 'ticket/494',
+      explanation: CONFLICTED_PR_EXPLANATION,
+    }])
+    expect(getPullRequestMock).toHaveBeenCalledTimes(1)
   })
 })
 
