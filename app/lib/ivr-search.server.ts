@@ -188,7 +188,7 @@ function toIvrCard(
 // text alone we return garbage (a massager whose description says "pair with
 // lube" gets surfaced for a "lube" search). Restrict these to strict fields
 // so the result is actually that kind of product.
-const STRICT_CATEGORY_TERMS = new Set([
+export const STRICT_CATEGORY_TERMS = new Set([
   'lube', 'lubes', 'lubricant', 'lubricants',
   'vibrator', 'vibrators', 'vibe', 'vibes',
   'dildo', 'dildos',
