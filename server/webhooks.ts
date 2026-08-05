@@ -534,6 +534,30 @@ async function handleReturnsUpdate(payload: ShopifyReturnWebhook): Promise<void>
 
 // ─── Router ───────────────────────────────────────────────────────────────
 
+/**
+ * Parse a verified webhook body, or answer the request and return null.
+ *
+ * `JSON.parse` throwing inside an async Express handler writes no response at
+ * all: the request hangs until Shopify's 5s budget expires, Shopify records a
+ * failed delivery, and it retry-storms an endpoint that will never succeed
+ * (the body is malformed; retrying cannot fix it). `/order-created` learned
+ * this the hard way and guarded itself; four sibling routes did not, and a
+ * signed-but-malformed probe against production confirmed all four hang.
+ *
+ * 400 rather than 200: a body that cannot be parsed is a client error, it will
+ * not parse on the next attempt either, and answering honestly is what stops
+ * the retry loop.
+ */
+export function parseWebhookBody<T>(req: Request, res: Response, route: string): T | null {
+  try {
+    return JSON.parse((req.body as Buffer).toString()) as T
+  } catch (err) {
+    console.error(`[webhook:${route}] unparseable body`, err)
+    res.status(400).json({ error: 'Bad Request' })
+    return null
+  }
+}
+
 export function createWebhookRoutes() {
   const router = Router()
 
@@ -543,16 +567,10 @@ export function createWebhookRoutes() {
       return
     }
 
-    let order: ShopifyOrder
-    try {
-      order = JSON.parse((req.body as Buffer).toString()) as ShopifyOrder
-    } catch (err) {
-      // An unparseable body used to throw inside an async Express handler,
-      // which writes no response at all and leaves Shopify to time out.
-      console.error('[webhook:order-created] unparseable body', err)
-      res.status(400).json({ error: 'Bad Request' })
-      return
-    }
+    // This route already had the guard; parseWebhookBody is that same guard,
+    // shared so the sibling routes cannot drift back out of it.
+    const order = parseWebhookBody<ShopifyOrder>(req, res, 'order-created')
+    if (!order) return
 
     // Send the conversion signals BEFORE responding. Shopify's budget is 5s and
     // this is two HTTP POSTs, so the ceiling is a guard against a pathological
@@ -579,7 +597,8 @@ export function createWebhookRoutes() {
       return
     }
 
-    const order = JSON.parse((req.body as Buffer).toString()) as ShopifyFulfilledOrder
+    const order = parseWebhookBody<ShopifyFulfilledOrder>(req, res, 'order-fulfilled')
+    if (!order) return
 
     res.json({ ok: true })
 
@@ -594,7 +613,8 @@ export function createWebhookRoutes() {
       return
     }
 
-    const product = JSON.parse((req.body as Buffer).toString()) as ShopifyProductWebhook
+    const product = parseWebhookBody<ShopifyProductWebhook>(req, res, 'product-created')
+    if (!product) return
 
     res.json({ ok: true })
 
@@ -633,7 +653,8 @@ export function createWebhookRoutes() {
       return
     }
 
-    const level = JSON.parse((req.body as Buffer).toString()) as ShopifyInventoryLevel
+    const level = parseWebhookBody<ShopifyInventoryLevel>(req, res, 'inventory-update')
+    if (!level) return
 
     res.json({ ok: true })
 
@@ -648,7 +669,8 @@ export function createWebhookRoutes() {
       return
     }
 
-    const payload = JSON.parse((req.body as Buffer).toString()) as ShopifyReturnWebhook
+    const payload = parseWebhookBody<ShopifyReturnWebhook>(req, res, 'returns-update')
+    if (!payload) return
 
     res.json({ ok: true })
 

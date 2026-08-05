@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isRestockCrossing } from './webhooks'
+import { isRestockCrossing, parseWebhookBody } from './webhooks'
 
 // Guards the inventory webhook's back-in-stock branch: a notification must fire
 // only on a genuine sold-out -> in-stock transition, never on routine positive
@@ -27,5 +27,57 @@ describe('isRestockCrossing', () => {
   it('does not fire on the first observation (unknown prior)', () => {
     expect(isRestockCrossing(null, 5)).toBe(false)
     expect(isRestockCrossing(null, 0)).toBe(false)
+  })
+})
+
+// Every webhook route must ANSWER a malformed body. `JSON.parse` throwing
+// inside an async Express handler writes no response at all, so the request
+// hangs until Shopify's 5s budget expires, and Shopify then retry-storms an
+// endpoint that can never succeed. A signed-but-malformed probe against
+// production found four routes doing exactly that: order-fulfilled,
+// product-created, inventory-update and returns-update.
+
+/** Minimal Express res double: records status and the body written. */
+function resDouble() {
+  const sent: { status: number; body: unknown }[] = []
+  const res = {
+    statusCode: 200,
+    status(code: number) { this.statusCode = code; return this },
+    json(body: unknown) { sent.push({ status: this.statusCode, body }); return this },
+  }
+  return { res, sent }
+}
+
+const reqWith = (raw: string) => ({ body: Buffer.from(raw) })
+
+describe('parseWebhookBody', () => {
+  it('returns the parsed payload and writes nothing on a good body', () => {
+    const { res, sent } = resDouble()
+    const out = parseWebhookBody<{ id: number }>(
+      reqWith('{"id":42}') as never, res as never, 'order-created',
+    )
+    expect(out).toEqual({ id: 42 })
+    expect(sent).toEqual([])
+  })
+
+  it('answers 400 instead of hanging on a malformed body', () => {
+    const { res, sent } = resDouble()
+    const out = parseWebhookBody(reqWith('not-json') as never, res as never, 'inventory-update')
+    expect(out).toBeNull()
+    // The response is what matters: returning null alone would still hang.
+    expect(sent).toEqual([{ status: 400, body: { error: 'Bad Request' } }])
+  })
+
+  it('answers on an empty body too', () => {
+    const { res, sent } = resDouble()
+    expect(parseWebhookBody(reqWith('') as never, res as never, 'returns-update')).toBeNull()
+    expect(sent[0]!.status).toBe(400)
+  })
+
+  it('never throws, whatever the body is', () => {
+    for (const raw of ['', 'not-json', '{', '[1,', 'undefined', ' ']) {
+      const { res } = resDouble()
+      expect(() => parseWebhookBody(reqWith(raw) as never, res as never, 'x')).not.toThrow()
+    }
   })
 })
