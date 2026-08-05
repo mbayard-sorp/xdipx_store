@@ -135,8 +135,12 @@ async function sendGa4Purchase_(order: ShopifyOrder): Promise<void> {
  * orders/create — Item 1 (Day-1 non-negotiable): write wholesale cost per order.
  * Also captures referral code.
  *
- * Best-effort enrichment. Runs after the response, so a failure here costs
- * profit attribution and co-purchase data, never a conversion event.
+ * Best-effort enrichment: a failure here costs profit attribution and
+ * co-purchase data, never a conversion event, because the conversion sends live
+ * in handlePurchaseSignals under their own ceiling.
+ *
+ * Runs BEFORE the response, under runWebhookWork's budget. It used to be fired
+ * fire-and-forget after res.json(), which on Vercel meant it never ran at all.
  */
 async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
   // A module that fails to load is a deployment problem, not an order problem.
@@ -558,6 +562,59 @@ export function parseWebhookBody<T>(req: Request, res: Response, route: string):
   }
 }
 
+/**
+ * Wall-clock ceiling for a webhook's work, sized under Shopify's 5s delivery
+ * budget with headroom for the ack itself. Exceeding Shopify's budget would
+ * make it record a failed delivery and retry, and these handlers are not all
+ * idempotent, so responding late is worse than responding with work unfinished.
+ */
+const WEBHOOK_WORK_BUDGET_MS = 4000
+
+/**
+ * Run a webhook's work to completion BEFORE the response, bounded.
+ *
+ * Every route used to write the response first and then call its handler
+ * fire-and-forget. On Vercel the instance is frozen the moment the response is
+ * written, so that work never ran at all — the ack was honest and the
+ * processing was silently discarded.
+ *
+ * Proven in production 2026-08-05: a signed, well-formed inventory payload got
+ * `200 {"ok":true}`, and the KV key handleInventoryUpdate writes as its first
+ * action was still absent nine seconds later, with no error logged either. Two
+ * real products/update deliveries the same hour returned 200 and emitted none
+ * of the handler's own log lines. Lost with it: profit metafields and
+ * order_line_items on every order, review invites, the markdown cache purge,
+ * back-in-stock notifications, and the returns auto-refund pipeline.
+ *
+ * A timeout is logged at error level rather than swallowed. Work left
+ * unfinished at the ceiling is still lost to the freeze, so this line is the
+ * only trace that anything was left undone — silence here would recreate
+ * exactly the failure mode this function exists to fix.
+ */
+export async function runWebhookWork(
+  route: string,
+  work: Promise<unknown>,
+  budgetMs: number = WEBHOOK_WORK_BUDGET_MS,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const done = work
+    .then(() => 'done' as const)
+    .catch(err => {
+      console.error(`[webhook:${route}] handler failed`, err)
+      return 'done' as const
+    })
+  const expired = new Promise<'timeout'>(resolve => {
+    timer = setTimeout(() => resolve('timeout'), budgetMs)
+  })
+  const outcome = await Promise.race([done, expired])
+  clearTimeout(timer)
+  if (outcome === 'timeout') {
+    console.error(
+      `[webhook:${route}] work exceeded its ${budgetMs}ms budget; acking anyway, the remainder is lost to the instance freeze`,
+    )
+  }
+}
+
 export function createWebhookRoutes() {
   const router = Router()
 
@@ -572,23 +629,20 @@ export function createWebhookRoutes() {
     const order = parseWebhookBody<ShopifyOrder>(req, res, 'order-created')
     if (!order) return
 
-    // Send the conversion signals BEFORE responding. Shopify's budget is 5s and
-    // this is two HTTP POSTs, so the ceiling is a guard against a pathological
-    // stall, not an expected path. If it does trip, the send keeps running and
-    // the reconciliation sweep catches the order within 15 minutes anyway.
-    await Promise.race([
-      handlePurchaseSignals(order).catch(err =>
-        console.error('[webhook:order-created] purchase signals', err),
-      ),
-      new Promise<void>(resolve => setTimeout(resolve, PURCHASE_SIGNAL_TIMEOUT_MS)),
+    // Both halves run BEFORE the response, concurrently, each with its own
+    // ceiling and its own log line. They are independent — signals are two HTTP
+    // POSTs (Meta CAPI, GA4), enrichment is metafield writes and DB inserts —
+    // so running them in parallel gives enrichment the full budget instead of
+    // whatever the signals left over. Signals keep the tighter ceiling because
+    // a stalled send is recoverable: the reconciliation sweep catches the order
+    // within 15 minutes. Enrichment has no such sweep, which is why it gets the
+    // wider one.
+    await Promise.all([
+      runWebhookWork('order-created:signals', handlePurchaseSignals(order), PURCHASE_SIGNAL_TIMEOUT_MS),
+      runWebhookWork('order-created:enrich', handleOrderCreated(order)),
     ])
 
     res.json({ ok: true })
-
-    // Enrichment is best-effort and explicitly allowed to be lost.
-    handleOrderCreated(order).catch(err =>
-      console.error('[webhook:order-created]', err),
-    )
   })
 
   router.post('/order-fulfilled', async (req: Request, res: Response) => {
@@ -600,11 +654,9 @@ export function createWebhookRoutes() {
     const order = parseWebhookBody<ShopifyFulfilledOrder>(req, res, 'order-fulfilled')
     if (!order) return
 
-    res.json({ ok: true })
+    await runWebhookWork('order-fulfilled', handleOrderFulfilled(order))
 
-    handleOrderFulfilled(order).catch(err =>
-      console.error('[webhook:order-fulfilled]', err),
-    )
+    res.json({ ok: true })
   })
 
   router.post('/product-created', async (req: Request, res: Response) => {
@@ -616,11 +668,9 @@ export function createWebhookRoutes() {
     const product = parseWebhookBody<ShopifyProductWebhook>(req, res, 'product-created')
     if (!product) return
 
-    res.json({ ok: true })
+    await runWebhookWork('product-created', handleProductCreated(product))
 
-    handleProductCreated(product).catch(err =>
-      console.error('[webhook:product-created]', err),
-    )
+    res.json({ ok: true })
   })
 
   router.post('/product-updated', async (req: Request, res: Response) => {
@@ -636,15 +686,14 @@ export function createWebhookRoutes() {
       console.error('[webhook:product-updated] malformed payload, skipping:', err)
     }
 
-    // Ack immediately regardless of parse outcome — a malformed payload should
-    // never cause Shopify to retry-storm this endpoint.
-    res.json({ ok: true })
-
+    // This route acks 200 even on a malformed payload, deliberately and unlike
+    // its siblings: Shopify retries any non-2xx, and retrying a body that can
+    // never parse is pure noise on the highest-volume topic we subscribe to.
     if (product) {
-      handleProductUpdated(product).catch(err =>
-        console.error('[webhook:product-updated]', err),
-      )
+      await runWebhookWork('product-updated', handleProductUpdated(product))
     }
+
+    res.json({ ok: true })
   })
 
   router.post('/inventory-update', async (req: Request, res: Response) => {
@@ -656,11 +705,9 @@ export function createWebhookRoutes() {
     const level = parseWebhookBody<ShopifyInventoryLevel>(req, res, 'inventory-update')
     if (!level) return
 
-    res.json({ ok: true })
+    await runWebhookWork('inventory-update', handleInventoryUpdate(level))
 
-    handleInventoryUpdate(level).catch(err =>
-      console.error('[webhook:inventory-update]', err),
-    )
+    res.json({ ok: true })
   })
 
   router.post('/returns-update', async (req: Request, res: Response) => {
@@ -672,11 +719,9 @@ export function createWebhookRoutes() {
     const payload = parseWebhookBody<ShopifyReturnWebhook>(req, res, 'returns-update')
     if (!payload) return
 
-    res.json({ ok: true })
+    await runWebhookWork('returns-update', handleReturnsUpdate(payload))
 
-    handleReturnsUpdate(payload).catch(err =>
-      console.error('[webhook:returns-update]', err),
-    )
+    res.json({ ok: true })
   })
 
   return router

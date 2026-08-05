@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { isRestockCrossing, parseWebhookBody } from './webhooks'
+import { describe, it, expect, vi } from 'vitest'
+import { isRestockCrossing, parseWebhookBody, runWebhookWork } from './webhooks'
 
 // Guards the inventory webhook's back-in-stock branch: a notification must fire
 // only on a genuine sold-out -> in-stock transition, never on routine positive
@@ -79,5 +79,58 @@ describe('parseWebhookBody', () => {
       const { res } = resDouble()
       expect(() => parseWebhookBody(reqWith(raw) as never, res as never, 'x')).not.toThrow()
     }
+  })
+})
+
+// Webhook work must COMPLETE before the response is written. Every route used
+// to call its handler after res.json() and drop the promise; Vercel freezes the
+// instance the moment the response goes out, so that work never ran. Proven in
+// production 2026-08-05: a signed inventory payload got 200 and the KV key the
+// handler writes first was still absent nine seconds later, with no error
+// logged either.
+
+describe('runWebhookWork', () => {
+  it('does not resolve until the work has finished', async () => {
+    let finished = false
+    const work = new Promise<void>(resolve => setTimeout(() => { finished = true; resolve() }, 30))
+    await runWebhookWork('inventory-update', work, 5000)
+    // If this were fire-and-forget, finished would still be false here — which
+    // is exactly the production bug.
+    expect(finished).toBe(true)
+  })
+
+  it('swallows a rejecting handler so the route still acks', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await expect(
+      runWebhookWork('returns-update', Promise.reject(new Error('boom')), 5000),
+    ).resolves.toBeUndefined()
+    expect(spy.mock.calls.some(c => String(c[0]).includes('returns-update'))).toBe(true)
+    spy.mockRestore()
+  })
+
+  it('gives up at the budget rather than blowing Shopify 5s delivery window', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const started = Date.now()
+    await runWebhookWork('order-created:enrich', new Promise(() => {}), 40)
+    const elapsed = Date.now() - started
+    expect(elapsed).toBeLessThan(1000)
+    // A timeout must be loud: the remainder is lost to the freeze, so this line
+    // is the only trace that anything was left undone.
+    expect(spy.mock.calls.some(c => String(c[0]).includes('exceeded its 40ms budget'))).toBe(true)
+    spy.mockRestore()
+  })
+
+  it('stays quiet when the work finishes inside the budget', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await runWebhookWork('product-updated', Promise.resolve(), 5000)
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('clears its timer so a fast handler leaves nothing pending', async () => {
+    const clear = vi.spyOn(globalThis, 'clearTimeout')
+    await runWebhookWork('product-created', Promise.resolve(), 5000)
+    expect(clear).toHaveBeenCalled()
+    clear.mockRestore()
   })
 })
