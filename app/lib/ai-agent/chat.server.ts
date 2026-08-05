@@ -22,6 +22,12 @@ import {
   pickVulnerability,
   type VulnerabilityTrigger,
 } from '~/lib/sms-v2/templates/vulnerability-bank'
+import {
+  evaluateGateStall,
+  readStallCount,
+  CIRCUIT_BREAKER_DIRECTIVE,
+  type GateStallResult,
+} from './discovery-circuit-breaker'
 import { db } from '~/lib/db.server'
 import { webConversations } from '../../../db/schema'
 
@@ -188,17 +194,34 @@ async function persistGateState(
   nextState: DiscoveryState,
   mergedSlots: Partial<DiscoverySlots>,
   softBeatThisTurn: boolean,
+  stallCount = 0,
 ): Promise<void> {
+  // Upsert, not a bare update: the web-chat v1 path has no other row creator, so
+  // an UPDATE would silently affect zero rows and gate state would never
+  // accumulate. The stall counter rides inside the discovery_state json blob so
+  // the circuit breaker survives across turns without a schema change; the read
+  // path pulls it back out with readStallCount().
+  const stateToPersist = {
+    ...(nextState as unknown as Record<string, unknown>),
+    stallCount,
+  }
   await db
-    .update(webConversations)
-    .set({
-      discoveryState: nextState as unknown as Record<string, unknown>,
+    .insert(webConversations)
+    .values({
+      sessionId,
+      discoveryState: stateToPersist,
       discoveredSlots: mergedSlots as Record<string, unknown>,
-      // softBeat lives on sms_turns, not web_conversations, so we log it here
-      // via console so the web-turn-logger can pick it up separately.
-      ...(softBeatThisTurn ? {} : {}), // no extra column — logged via web-turn-logger
     })
-    .where(eq(webConversations.sessionId, sessionId))
+    .onConflictDoUpdate({
+      target: webConversations.sessionId,
+      set: {
+        discoveryState: stateToPersist,
+        discoveredSlots: mergedSlots as Record<string, unknown>,
+        lastActiveAt: new Date(),
+        // softBeat lives on sms_turns, not web_conversations, so we log it via
+        // console below so the web-turn-logger can pick it up separately.
+      },
+    })
 
   if (softBeatThisTurn) {
     // Log soft-beat so ops can track vulnerability signals in the web channel.
@@ -231,6 +254,7 @@ export async function generateChatReply(
   let currentDiscoveryState: DiscoveryState | null = null
   let priorDiscoveredSlots: Partial<DiscoverySlots> = {}
   let gateSessionId: string | null = null
+  let priorStallCount = 0
 
   if (isChat && ctx.sessionId) {
     gateSessionId = ctx.sessionId
@@ -247,6 +271,7 @@ export async function generateChatReply(
       if (row) {
         currentDiscoveryState = (row.discoveryState as DiscoveryState) ?? null
         priorDiscoveredSlots = (row.discoveredSlots as Partial<DiscoverySlots>) ?? {}
+        priorStallCount = readStallCount(row.discoveryState)
       }
     } catch (err) {
       console.warn('[chat.server] failed to read gate state from web_conversations', err)
@@ -396,14 +421,36 @@ export async function generateChatReply(
   //     a real checkout URL, so anything else means fabrication.
   const forceMode = isSms ? forceToolMode(history) : null
 
+  // Circuit breaker: after GATE_STALL_LIMIT forcing-gate turns with no new
+  // discovery signal, stop forcing pills so the shopper is never trapped tapping
+  // buttons that never yield a product. When it trips we search now (with the
+  // known slots, or the shopper's own words if none) instead of asking again.
+  let gateStall: GateStallResult = { stallCount: 0, circuitBroken: false }
+  if (isChat && gateAdvancement) {
+    gateStall = evaluateGateStall({
+      priorStallCount,
+      priorSlots: priorDiscoveredSlots,
+      mergedSlots: mergedSlotsForGate,
+      gate: gateAdvancement.nextState.gate,
+      searchNow: gateAdvancement.searchNow,
+    })
+  }
+  const circuitBroken = isChat && gateStall.circuitBroken
+  const effectiveSearchNow = (gateAdvancement?.searchNow ?? false) || circuitBroken
+
   // Build gate context block for web chat — injected as second system block.
   // This block is turn-specific (includes extracted slots) so it must NOT be
-  // cached (it changes every turn).
+  // cached (it changes every turn). When the breaker has tripped we tell the
+  // model to search now and append the search-now directive.
   const gateContextBlock: Anthropic.TextBlockParam | null =
     isChat && gateAdvancement
       ? {
           type: 'text',
-          text: buildGateContextBlock(gateAdvancement.nextState, gateAdvancement),
+          text:
+            buildGateContextBlock(gateAdvancement.nextState, {
+              question: circuitBroken ? null : gateAdvancement.question,
+              searchNow: effectiveSearchNow,
+            }) + (circuitBroken ? `\n\n${CIRCUIT_BREAKER_DIRECTIVE}` : ''),
         }
       : null
 
@@ -417,10 +464,11 @@ export async function generateChatReply(
     // Gate-aware tool-choice: when gate is MOOD/WHO/MATTERS and searchNow is
     // false, restrict to text-only or askQuickChoice — prevents the model from
     // jumping to discoverProducts/searchProducts before discovery is complete.
+    // effectiveSearchNow folds in the circuit breaker: once it trips we stop
+    // forcing pills so the model is free to search.
     if (isChat && gateAdvancement && hop === 0 && !toolChoice) {
       const gate = gateAdvancement.nextState.gate
-      const searchNow = gateAdvancement.searchNow
-      if (!searchNow && (gate === 'MOOD' || gate === 'WHO' || gate === 'MATTERS')) {
+      if (!effectiveSearchNow && (gate === 'MOOD' || gate === 'WHO' || gate === 'MATTERS')) {
         // Restrict to askQuickChoice only — no product search tools allowed.
         toolChoice = { type: 'tool', name: 'askQuickChoice' }
       }
@@ -520,6 +568,7 @@ export async function generateChatReply(
         gateAdvancement.nextState,
         mergedSlotsForGate,
         softBeatThisTurn,
+        gateStall.stallCount,
       ).catch((err) => console.warn('[chat.server] gate state persist failed', err))
     }
 

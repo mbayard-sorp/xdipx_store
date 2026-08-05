@@ -225,6 +225,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const result = await generateChatReply(nextHistory, {
       channel: 'chat',
       cartId: existingCartId,
+      // Pass the stable session key so the discovery gate can read/write its
+      // state in web_conversations. Without it, priorDiscoveredSlots never
+      // accumulates and the gate can force pills forever without ever searching.
+      sessionId: emmaSessionCookieId,
       onCartCreated: (id: string) => {
         newCartId = id
       },
