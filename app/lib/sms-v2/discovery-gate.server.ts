@@ -79,14 +79,14 @@ export interface GateAdvancement {
 
 // ─── Quick-choice option constants ────────────────────────────────────────────
 
-const WHO_OPTS: string[] = ['For me', 'For a partner', 'For us', 'A gift']
+export const WHO_OPTS: string[] = ['For me', 'For a partner', 'For us', 'A gift']
 
 /**
  * Quick-choice pills shown at the MATTERS gate. SMS subset of MATTERS_V2 —
  * Co-Work final sign-off. Filter-test grounded; first-impression friendly.
  * See docs/what-matters-final-signoff.md.
  */
-const MATTERS_OPTS: string[] = [
+export const MATTERS_OPTS: string[] = [
   'Beginner-friendly',
   'Discreet',
   'Waterproof',
