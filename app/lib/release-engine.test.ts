@@ -37,7 +37,11 @@ vi.mock('~/lib/owner-alerts.server', () => ({
   sendOwnerEmail: vi.fn(async () => ({ sent: false })),
   escapeHtml: (s: string) => s,
 }))
-vi.mock('~/lib/team.server', () => ({ transitionSuggestion: vi.fn(), getTicket: vi.fn() }))
+vi.mock('~/lib/team.server', () => ({
+  transitionSuggestion: vi.fn(),
+  getTicket: vi.fn(),
+  runWithOutOfBandReconcile: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+}))
 // ADR-008 step 2. Mocked here because this file is about the engine's decision
 // logic; the autofile module's own behaviour is tested in
 // release-ticket-autofile.test.ts.

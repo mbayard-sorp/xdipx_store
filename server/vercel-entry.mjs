@@ -9757,6 +9757,7 @@ __export(team_server_exports, {
   CLAIM_LEASE_DEFAULT_SEC: () => CLAIM_LEASE_DEFAULT_SEC,
   CLAIM_LEASE_MAX_SEC: () => CLAIM_LEASE_MAX_SEC,
   DETECTOR_SELF_CLOSE_KINDS: () => DETECTOR_SELF_CLOSE_KINDS,
+  KNOWN_TICKET_KINDS: () => KNOWN_TICKET_KINDS,
   REKIND_ACTORS: () => REKIND_ACTORS,
   REKIND_FROM_KINDS: () => REKIND_FROM_KINDS,
   REKIND_TO_KINDS: () => REKIND_TO_KINDS,
@@ -9809,6 +9810,7 @@ __export(team_server_exports, {
   listSocialPosts: () => listSocialPosts,
   listSuggestions: () => listSuggestions,
   markSuggestion: () => markSuggestion,
+  normalizeTicketKind: () => normalizeTicketKind,
   proposeCalendarEvent: () => proposeCalendarEvent,
   publishBrief: () => publishBrief,
   recordEvent: () => recordEvent,
@@ -9816,11 +9818,13 @@ __export(team_server_exports, {
   rescheduleSocialPost: () => rescheduleSocialPost,
   retireSuggestion: () => retireSuggestion,
   reviewSocialPost: () => reviewSocialPost,
+  runWithOutOfBandReconcile: () => runWithOutOfBandReconcile,
   startRun: () => startRun,
   teamKeys: () => teamKeys,
   transitionSuggestion: () => transitionSuggestion,
   updateRun: () => updateRun
 });
+import { AsyncLocalStorage } from "node:async_hooks";
 import { timingSafeEqual } from "node:crypto";
 import { and, asc, desc, eq as eq4, gte, inArray as inArray2, isNull, lt, lte, ne, or, sql as sql3 } from "drizzle-orm";
 function assertTeamAuth(request) {
@@ -10040,6 +10044,11 @@ async function listRecentEvents(team, sinceDays = 7, limit = 500) {
     summary: homepageTeamEvents.summary
   }).from(homepageTeamEvents).innerJoin(homepageTeamRuns, eq4(homepageTeamEvents.runId, homepageTeamRuns.id)).where(and(...conditions)).orderBy(desc(homepageTeamEvents.ts)).limit(limit);
 }
+function normalizeTicketKind(kind) {
+  if (kind === void 0) return { kind: "process", original: null };
+  if (KNOWN_TICKET_KINDS.includes(kind)) return { kind, original: null };
+  return { kind: "process", original: kind };
+}
 async function createSuggestion(s) {
   const res = await createSuggestionDetailed(s);
   return res.deduped ? 0 : res.id;
@@ -10047,13 +10056,15 @@ async function createSuggestion(s) {
 async function createSuggestionDetailed(s) {
   const actingTeam = s.targetTeam ?? s.team;
   const autoApprove = await getTeamConfig(actingTeam).then((c) => c.autoApproveSuggestions).catch(() => false);
+  const nk = normalizeTicketKind(s.kind);
+  const suggestionText = nk.original === null ? s.suggestion : `[unknown kind '${nk.original.slice(0, 64)}' coerced to process] ${s.suggestion}`;
   const [row] = await db.insert(homepageTeamSuggestions).values({
     team: s.team,
     targetTeam: s.targetTeam ?? null,
     runId: s.runId ?? null,
     category: s.category,
-    kind: s.kind ?? "process",
-    suggestion: s.suggestion,
+    kind: nk.kind,
+    suggestion: suggestionText,
     estSavingsUsd: String(s.estSavingsUsd ?? 0),
     cxRisk: s.cxRisk ?? "low",
     status: autoApprove ? "approved" : "proposed",
@@ -10196,6 +10207,9 @@ function isTicketStatus(v) {
 function isTicketActor(v) {
   return typeof v === "string" && (v === "owner" || v === "auto" || v === "system" || AGENT_ACTOR_RE.test(v));
 }
+function runWithOutOfBandReconcile(fn) {
+  return outOfBandReconcileScope.run(true, fn);
+}
 function findTransitionRule(from, to, actor, ctx = {}) {
   for (const rule of ALLOWED[from] ?? []) {
     if (rule.to !== to) continue;
@@ -10204,6 +10218,7 @@ function findTransitionRule(from, to, actor, ctx = {}) {
     );
     if (!actorOk) continue;
     if (rule.kinds && !rule.kinds.includes(ctx.kind ?? "")) continue;
+    if (rule.outOfBandReconcileOnly && ctx.viaOutOfBandReconcile !== true) continue;
     return rule;
   }
   return null;
@@ -10232,7 +10247,12 @@ async function transitionSuggestion(id, to, actor, opts = {}) {
   const [row] = await db.select().from(homepageTeamSuggestions).where(eq4(homepageTeamSuggestions.id, id)).limit(1);
   if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 });
   const from = row.status;
-  const rule = findTransitionRule(from, to, actor, { assignee: row.assignee, kind: row.kind });
+  const viaOutOfBandReconcile = opts.viaOutOfBandReconcile === true || outOfBandReconcileScope.getStore() === true;
+  const rule = findTransitionRule(from, to, actor, {
+    assignee: row.assignee,
+    kind: row.kind,
+    viaOutOfBandReconcile
+  });
   if (!rule) {
     throw new Response(
       `Conflict: '${from}' -> '${to}' is not permitted for actor '${actor}' on suggestion ${id}`,
@@ -10245,6 +10265,9 @@ async function transitionSuggestion(id, to, actor, opts = {}) {
     patch["attemptCount"] = sql3`${homepageTeamSuggestions.attemptCount} + 1`;
   }
   if (opts.lastError !== void 0) patch["lastError"] = opts.lastError;
+  if (to === "blocked" && !opts.lastError?.trim() && !opts.note?.trim()) {
+    patch["lastError"] = `blocked without stated reason by ${actor}`;
+  }
   if (to === "approved") {
     patch["assignee"] = null;
     patch["claimedAt"] = null;
@@ -10469,7 +10492,7 @@ async function proposeCalendarEvent(input) {
   }).returning({ id: marketingCalendar.id });
   return row.id;
 }
-var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, DETECTOR_SELF_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, BOUNCE_LEASE_SEC, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
+var RUN_IDLE_TIMEOUT_MIN, lastActivityAt, SETTINGS_CACHE_TTL_SEC, SPEND_KV_TTL_SEC, SPEND_RESEED_MS, KNOWN_TICKET_KINDS, SUGGESTION_LIST_MAX, REKIND_FROM_KINDS, REKIND_TO_KINDS, REKIND_ACTORS, TICKET_STATUSES, TERMINAL_TICKET_STATUSES, AGENT_ACTOR_RE, AGENT_EDITOR_APPLY_KINDS, CLAIMANT_ACTORS, AGENT_RETIRE_KINDS, RUN_CLOSE_ACTORS, RUN_CLOSE_KINDS, DETECTOR_SELF_CLOSE_KINDS, OWNER_DISMISS, ALLOWED, outOfBandReconcileScope, BOUNCE_LEASE_SEC, CLAIM_LEASE_DEFAULT_SEC, CLAIM_LEASE_MAX_SEC, defaultExecutor;
 var init_team_server = __esm({
   "app/lib/team.server.ts"() {
     "use strict";
@@ -10492,6 +10515,17 @@ var init_team_server = __esm({
     SETTINGS_CACHE_TTL_SEC = 60;
     SPEND_KV_TTL_SEC = 26 * 3600;
     SPEND_RESEED_MS = 15 * 6e4;
+    KNOWN_TICKET_KINDS = [
+      "code",
+      "instructions",
+      "agent-def",
+      "config",
+      "campaign",
+      "promo",
+      "program",
+      "process",
+      "strategy"
+    ];
     SUGGESTION_LIST_MAX = 200;
     REKIND_FROM_KINDS = ["process"];
     REKIND_TO_KINDS = ["instructions", "code"];
@@ -10544,6 +10578,23 @@ var init_team_server = __esm({
         // RUN_CLOSE_ACTORS, which would also hand the release engine the ability to
         // close `strategy` rows it has no business touching.
         { to: "applied", actors: ["system"], kinds: DETECTOR_SELF_CLOSE_KINDS },
+        // Out-of-band merged-PR reconcile only, mirroring the `pr_open -> applied`
+        // system edge below. `applied` means "the fix is live on xdipx.com", and the
+        // sweep earns that claim the same way it does on the pr_open edge: it asks
+        // GitHub whether the PR this ticket links is already merged, and only a
+        // `merged: true` from GitHub itself lets it write this edge. Nothing here
+        // can mark unmerged work as shipped.
+        //
+        // Why `approved` can be stranded at all: a bounced ticket whose lease
+        // expires returns to `approved` with its PR link intact, and if the owner
+        // then merges that PR by hand the ticket sits on the unassigned queue
+        // forever while its fix is live in production. Tickets #120 and #423 sat
+        // exactly this way with PRs #436 and #429 merged. Unlike the detector
+        // self-close above this edge is deliberately not fenced by kind: a
+        // hand-merged PR strands a ticket of any kind, exactly as on `pr_open`.
+        // What fences it instead of a kind list is `outOfBandReconcileOnly`: a
+        // plain system transition cannot walk it, only the reconcile sweeps can.
+        { to: "applied", actors: ["system"], outOfBandReconcileOnly: true },
         // agent-editor's hygiene pass retiring a row with no executor. Kinds are
         // fenced so it can never dismiss the instruction rows aimed at itself.
         { to: "dismissed", actors: ["agent:agent-editor"], kinds: AGENT_RETIRE_KINDS },
@@ -10561,7 +10612,10 @@ var init_team_server = __esm({
         // The legacy agent-editor docs path, preserved verbatim.
         { to: "applied", actors: ["agent:agent-editor"], kinds: AGENT_EDITOR_APPLY_KINDS },
         // Out-of-band reconciliation. See the note on the `in_review` edge below.
-        { to: "applied", actors: ["system"] },
+        // Fenced: the merged-PR precondition used to live only in the sweep, so
+        // any plain system call could walk this edge. Now the map itself demands
+        // the reconcile declaration.
+        { to: "applied", actors: ["system"], outOfBandReconcileOnly: true },
         // Abandoned-PR cleanup for ADR-008 step 2 (`dismissTicketsForClosedUnmergedPrs`).
         // Without it an auto-filed ticket whose PR is closed unmerged sits at
         // `pr_open` forever, and the autofile backstop turns into a litter machine.
@@ -10596,7 +10650,8 @@ var init_team_server = __esm({
         // their PRs (#413, #414, #420) were live in production, and R-DEV then
         // spent later passes re-diagnosing incidents that had already shipped.
         // The sweep only ever moves a ticket in the direction reality already went.
-        { to: "applied", actors: ["system"] },
+        // Fenced like the `pr_open` edge above: reconcile callers only.
+        { to: "applied", actors: ["system"], outOfBandReconcileOnly: true },
         OWNER_DISMISS
       ],
       verified: [
@@ -10608,11 +10663,23 @@ var init_team_server = __esm({
       ],
       blocked: [
         { to: "approved", actors: ["owner", "system"] },
+        // Out-of-band merged-PR reconcile only, mirroring the `pr_open -> applied`
+        // system edge above. Only a `merged: true` from GitHub itself lets the
+        // sweep write this edge, so nothing here can mark unmerged work as shipped.
+        //
+        // A blocked ticket whose PR the owner then merges by hand is otherwise
+        // stranded forever: `blocked` used to have no exit but the owner, so the
+        // fix went live while the ticket kept holding its dedupe key and kept
+        // showing in the blocked count. Ticket #455 sat exactly this way with
+        // PR #508 merged. Fenced by `outOfBandReconcileOnly` like the `approved`
+        // edge above: a plain system transition is rejected at the map.
+        { to: "applied", actors: ["system"], outOfBandReconcileOnly: true },
         OWNER_DISMISS
       ],
       applied: [],
       dismissed: []
     };
+    outOfBandReconcileScope = new AsyncLocalStorage();
     BOUNCE_LEASE_SEC = 6 * 3600;
     CLAIM_LEASE_DEFAULT_SEC = 1200;
     CLAIM_LEASE_MAX_SEC = 6 * 3600;
@@ -26827,21 +26894,30 @@ __export(release_engine_server_exports, {
   AGENT_BRANCH_PREFIXES: () => AGENT_BRANCH_PREFIXES,
   AGENT_EDITOR_ALLOWLIST_RE: () => AGENT_EDITOR_ALLOWLIST_RE,
   ALLOWLIST_CHECK_NAMES: () => ALLOWLIST_CHECK_NAMES,
+  CONDITIONAL_UNDRAFT_MIN_AGE_MS: () => CONDITIONAL_UNDRAFT_MIN_AGE_MS,
+  CONDITIONAL_UNDRAFT_PREFIXES: () => CONDITIONAL_UNDRAFT_PREFIXES,
   DEFAULT_MAX_MERGES_PER_DAY: () => DEFAULT_MAX_MERGES_PER_DAY,
   DEPLOY_TIMEOUT_MS: () => DEPLOY_TIMEOUT_MS,
   MAX_TICKET_ATTEMPTS: () => MAX_TICKET_ATTEMPTS2,
   MAX_UNDRAFTS_PER_CYCLE: () => MAX_UNDRAFTS_PER_CYCLE,
   NEEDS_OWNER_LABEL: () => NEEDS_OWNER_LABEL,
+  ORPHAN_SWEEP_MAX_TICKETS: () => ORPHAN_SWEEP_MAX_TICKETS,
+  ORPHAN_SWEEP_STATUSES: () => ORPHAN_SWEEP_STATUSES,
   REQUIRED_CHECK: () => REQUIRED_CHECK,
   REVERT_BRANCH_PREFIX: () => REVERT_BRANCH_PREFIX,
   ROLLBACK_CIRCUIT_LIMIT: () => ROLLBACK_CIRCUIT_LIMIT,
+  ageMsFromTimestamp: () => ageMsFromTimestamp,
   autoReadyOnDraft: () => autoReadyOnDraft,
   checkState: () => checkState,
+  checkVercelCredentials: () => checkVercelCredentials,
+  conditionalUndraftEligible: () => conditionalUndraftEligible,
   dailyCapReached: () => dailyCapReached,
   evaluatePullRequest: () => evaluatePullRequest,
   findDeploymentBySha: () => findDeploymentBySha,
   findPreviousReadyDeployment: () => findPreviousReadyDeployment,
+  hasWipMarker: () => hasWipMarker,
   isAgentBranch: () => isAgentBranch,
+  isConditionalUndraftLane: () => isConditionalUndraftLane,
   isDocsOnly: () => isDocsOnly,
   isEligibleBranch: () => isEligibleBranch,
   isRevertBranch: () => isRevertBranch,
@@ -26858,9 +26934,10 @@ __export(release_engine_server_exports, {
   shouldBlockForAttempts: () => shouldBlockForAttempts,
   shouldTripCircuit: () => shouldTripCircuit,
   summarizeSmoke: () => summarizeSmoke,
+  sweepOrphanedMergedPrTickets: () => sweepOrphanedMergedPrTickets,
   utcDay: () => utcDay3
 });
-import { and as and9, desc as desc4, eq as eq24, sql as sql17 } from "drizzle-orm";
+import { and as and9, desc as desc4, eq as eq24, inArray as inArray10, lt as lt5, sql as sql17 } from "drizzle-orm";
 function utcDay3(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -26878,6 +26955,19 @@ function requiresAllowlistCheck(headRef) {
 }
 function autoReadyOnDraft(headRef) {
   return headRef.startsWith("agents/") || headRef.startsWith("ticket/");
+}
+function isConditionalUndraftLane(headRef) {
+  return CONDITIONAL_UNDRAFT_PREFIXES.some((p) => headRef.startsWith(p));
+}
+function hasWipMarker(title, labels) {
+  return /\bwip\b/i.test(title) || labels.some((l) => l.toLowerCase() === "wip");
+}
+function conditionalUndraftEligible(facts) {
+  return isConditionalUndraftLane(facts.headRef) && checkState(facts.checks, [REQUIRED_CHECK]) === "success" && facts.ticket !== null && facts.ageMs >= CONDITIONAL_UNDRAFT_MIN_AGE_MS && !hasWipMarker(facts.title, facts.labels);
+}
+function ageMsFromTimestamp(ts, now = Date.now()) {
+  const t = Date.parse(ts);
+  return Number.isFinite(t) ? Math.max(0, now - t) : 0;
 }
 function isDocsOnly(paths) {
   if (paths.length === 0) return false;
@@ -26940,6 +27030,14 @@ function evaluatePullRequest(facts) {
         action: "undraft",
         code: "draft-auto-ready",
         reason: `draft PR on the ${facts.headRef.split("/")[0]}/ lane, marking it ready for review`
+      };
+    }
+    if (conditionalUndraftEligible(facts)) {
+      return {
+        ...base,
+        action: "undraft",
+        code: "draft-auto-ready",
+        reason: `idle green draft on the ${facts.headRef.split("/")[0]}/ lane with a linked ticket and no WIP marker, marking it ready for review`
       };
     }
     return { ...base, action: "skip", code: "draft", reason: "draft PR" };
@@ -27176,9 +27274,8 @@ async function runSelfCheck(opts = {}) {
     problems.push("GITHUB_TOKEN / GITHUB_OWNER / GITHUB_REPO are not all set");
     return { ok: false, problems };
   }
-  if (!vercelConfig()) {
-    problems.push("VERCEL_TOKEN / VERCEL_PROJECT_ID are not set, so the deploy poll cannot run");
-  }
+  const vercelProblem = await checkVercelCredentials();
+  if (vercelProblem) problems.push(vercelProblem);
   const repo = await githubRequest(
     "/repos/{owner}/{repo}",
     { context: "release-engine" }
@@ -27210,6 +27307,19 @@ async function runSelfCheck(opts = {}) {
   console.error(`${LOG3} CONFIG ERROR, refusing to run:
   - ${problems.join("\n  - ")}`);
   return { ok: false, problems };
+}
+async function checkVercelCredentials() {
+  const cfg = vercelConfig();
+  if (!cfg) {
+    return "VERCEL_TOKEN / VERCEL_PROJECT_ID are not set, so the deploy poll cannot run";
+  }
+  const probe2 = await vercelFetch(
+    `/v6/deployments?projectId=${encodeURIComponent(cfg.projectId)}&target=production&limit=1${cfg.teamQs}`
+  );
+  if (!probe2.ok && (probe2.status === 401 || probe2.status === 403)) {
+    return `VERCEL_TOKEN is set but the Vercel API rejects it (HTTP ${probe2.status}), so the deploy poll would see no deployments and every merge would falsely roll back`;
+  }
+  return null;
 }
 async function resolveTicketForPr(pr) {
   const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
@@ -27321,9 +27431,7 @@ async function cycleBody(dryRun) {
   }
   const cap = parseDailyCap(await getPipelineSetting("release_engine_max_merges_per_day"));
   const mergesToday = Number(await kvGet(KEYS.merges(day)) ?? 0);
-  if (dailyCapReached(mergesToday, cap)) {
-    return { ...result, phase: "daily-cap", message: `daily cap reached (${mergesToday}/${cap})` };
-  }
+  const capped = dailyCapReached(mergesToday, cap);
   const open = await listOpenPullRequests({
     headPrefixes: [...AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX],
     context: "release-engine"
@@ -27375,6 +27483,12 @@ async function cycleBody(dryRun) {
       continue;
     }
     if (decision.action !== "merge") continue;
+    if (capped) {
+      console.log(
+        `${LOG3} daily cap reached (${mergesToday}/${cap}), PR #${summary.number} is merge-ready but waits for the next UTC day`
+      );
+      continue;
+    }
     if (dryRun) {
       return {
         ...result,
@@ -27386,14 +27500,16 @@ async function cycleBody(dryRun) {
     return mergeOne(summary, decision, decisions, day);
   }
   const undraftNote = undrafted > 0 ? `, ${undrafted} taken out of draft` : "";
+  const evaluatedNote = `${decisions.length} open PR(s) evaluated, nothing merged${undraftNote}`;
   return {
     ...result,
     // A failed undraft is reported rather than swallowed. Silence is what made
     // the original stall invisible, and a backstop that fails quietly is just a
     // slower version of the same bug.
     ...undraftErrors.length > 0 ? { ok: false, errors: undraftErrors } : {},
+    ...capped ? { phase: "daily-cap" } : {},
     decisions,
-    message: `${decisions.length} open PR(s) evaluated, nothing merged${undraftNote}`
+    message: capped ? `daily cap reached (${mergesToday}/${cap}); ${evaluatedNote}` : evaluatedNote
   };
 }
 async function undraftOne(pr, dryRun) {
@@ -27438,6 +27554,8 @@ async function gatherFacts(summary) {
   return {
     number: pr.number,
     headRef: pr.headRef,
+    title: pr.title,
+    ageMs: ageMsFromTimestamp(pr.updatedAt),
     draft: pr.draft,
     mergeable: pr.mergeable,
     mergeableState: pr.mergeableState,
@@ -27470,7 +27588,7 @@ async function maybeSweepOutOfBand() {
   await kvSet(KEYS.sweepHour, hour);
   try {
     const { sweepOutOfBandMerges: sweepOutOfBandMerges2 } = await Promise.resolve().then(() => (init_ticket_out_of_band_sweep_server(), ticket_out_of_band_sweep_server_exports));
-    const swept = await sweepOutOfBandMerges2();
+    const swept = await runWithOutOfBandReconcile(() => sweepOutOfBandMerges2());
     if (swept.applied.length > 0) {
       console.log(`${LOG3} out-of-band sweep applied tickets: ${swept.applied.join(", ")}`);
     }
@@ -27488,6 +27606,63 @@ async function maybeSweepOutOfBand() {
   } catch (err2) {
     console.error(`${LOG3} abandoned-PR sweep failed`, err2);
   }
+  try {
+    const orphans = await sweepOrphanedMergedPrTickets();
+    if (orphans.applied.length > 0) {
+      console.log(`${LOG3} orphan sweep applied tickets: ${orphans.applied.join(", ")}`);
+    }
+    for (const err2 of orphans.errors) console.warn(`${LOG3} orphan sweep: ${err2}`);
+  } catch (err2) {
+    console.error(`${LOG3} orphan sweep failed`, err2);
+  }
+}
+async function sweepOrphanedMergedPrTickets(limit = ORPHAN_SWEEP_MAX_TICKETS) {
+  const out = { checked: 0, applied: [], errors: [] };
+  const cutoff = new Date(Date.now() - ORPHAN_SWEEP_MIN_AGE_MS);
+  let rows = [];
+  try {
+    rows = await db.select({
+      ticketId: homepageTeamSuggestions.id,
+      status: homepageTeamSuggestions.status,
+      ref: suggestionLinks.ref
+    }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq24(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and9(
+      inArray10(homepageTeamSuggestions.status, [...ORPHAN_SWEEP_STATUSES]),
+      eq24(suggestionLinks.kind, "pr"),
+      lt5(homepageTeamSuggestions.updatedAt, cutoff)
+    )).orderBy(homepageTeamSuggestions.updatedAt, desc4(suggestionLinks.createdAt));
+  } catch (err2) {
+    out.errors.push(`orphan candidate query failed: ${String(err2)}`);
+    return out;
+  }
+  const seen = /* @__PURE__ */ new Set();
+  for (const row of rows) {
+    if (out.checked >= limit) break;
+    if (seen.has(row.ticketId)) continue;
+    seen.add(row.ticketId);
+    const prNumber = prNumberFromRef(row.ref);
+    if (prNumber === null) continue;
+    out.checked += 1;
+    try {
+      const pr = await getPullRequest(prNumber, "release-engine");
+      if (!pr.ok || !pr.data) {
+        out.errors.push(`ticket #${row.ticketId}: PR #${prNumber}: ${pr.ok ? "no data" : pr.error}`);
+        continue;
+      }
+      if (pr.data.merged !== true) continue;
+      await transitionSuggestion(row.ticketId, "applied", "system", {
+        note: `merged out-of-band while '${row.status}' (PR #${prNumber} was already merged when the engine reconciled it)`,
+        links: [{ kind: "pr", ref: pr.data.htmlUrl, state: "merged" }],
+        viaOutOfBandReconcile: true
+      });
+      out.applied.push(row.ticketId);
+      console.log(`${LOG3} orphan ticket #${row.ticketId} (${row.status}) applied: PR #${prNumber} merged out of band`);
+    } catch (err2) {
+      const msg = err2 instanceof Response ? `${err2.status}` : String(err2);
+      if (msg.includes("409")) continue;
+      out.errors.push(`ticket #${row.ticketId}: ${msg}`);
+    }
+  }
+  return out;
 }
 async function maybeSweepExhaustedTickets(dryRun) {
   if (dryRun) return;
@@ -27879,7 +28054,7 @@ async function setReleaseEngineEnabled(value) {
     console.error(`${LOG3} could not flip release_engine_enabled off`, err2);
   }
 }
-var LOG3, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, MAX_UNDRAFTS_PER_CYCLE, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS, MAX_MERGE_ATTEMPTS;
+var LOG3, AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX, REQUIRED_CHECK, ALLOWLIST_CHECK_NAMES, NEEDS_OWNER_LABEL, AGENT_EDITOR_ALLOWLIST_RE, FAILING_CONCLUSIONS2, MAX_TICKET_ATTEMPTS2, ROLLBACK_CIRCUIT_LIMIT, DEFAULT_MAX_MERGES_PER_DAY, MAX_UNDRAFTS_PER_CYCLE, DEPLOY_TIMEOUT_MS, POLL_BUDGET_MS, POLL_INTERVAL_MS, LOCK_TTL_SEC, KEYS, MAX_MERGE_ATTEMPTS, CONDITIONAL_UNDRAFT_PREFIXES, CONDITIONAL_UNDRAFT_MIN_AGE_MS, ORPHAN_SWEEP_STATUSES, ORPHAN_SWEEP_MAX_TICKETS, ORPHAN_SWEEP_MIN_AGE_MS;
 var init_release_engine_server = __esm({
   "app/lib/release-engine.server.ts"() {
     "use strict";
@@ -27941,6 +28116,17 @@ var init_release_engine_server = __esm({
       exhaustedHour: "release-engine:exhausted-sweep-hour"
     };
     MAX_MERGE_ATTEMPTS = 3;
+    CONDITIONAL_UNDRAFT_PREFIXES = [
+      "claude/",
+      "phase1/",
+      "tonight/",
+      "fix/",
+      "pm/"
+    ];
+    CONDITIONAL_UNDRAFT_MIN_AGE_MS = 30 * 6e4;
+    ORPHAN_SWEEP_STATUSES = ["approved", "blocked"];
+    ORPHAN_SWEEP_MAX_TICKETS = 5;
+    ORPHAN_SWEEP_MIN_AGE_MS = 60 * 6e4;
   }
 });
 
@@ -28753,7 +28939,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq26, and as and10, inArray as inArray10, desc as desc5, isNotNull, ne as ne2, sql as sql18 } from "drizzle-orm";
+import { eq as eq26, and as and10, inArray as inArray11, desc as desc5, isNotNull, ne as ne2, sql as sql18 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -28813,7 +28999,7 @@ async function enqueueVideoJob(args) {
 }
 async function advanceInflightVideoJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 5;
-  const rows = await db.select().from(videoJobs).where(inArray10(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(videoJobs).where(inArray11(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, done: 0, failed: 0, parked: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.videoPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS2);
@@ -28883,7 +29069,7 @@ async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
     sql18`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
     eq26(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
-    inArray10(videoJobs.stage, FRAME_APPROVED_STAGES),
+    inArray11(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne2(videoJobs.id, excludeJobRowId)] : []
   )).orderBy(desc5(videoJobs.createdAt)).limit(1);
   return row?.frameId ?? null;
@@ -28905,7 +29091,7 @@ async function advanceSceneFrame(job) {
     const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and10(
       eq26(videoJobs.sceneFrameAssetId, reuseId),
       eq26(videoJobs.presenter, job.presenter),
-      inArray10(videoJobs.stage, FRAME_APPROVED_STAGES)
+      inArray11(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
       throw new Error(`reuseFrameAssetId ${reuseId} has never been approved for presenter '${job.presenter}' (no matching job carried it past the frame gate)`);
@@ -29331,7 +29517,7 @@ async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc5(videoJobs.createdAt)).limit(limit);
   if (!jobs.length) return [];
   const jobIds = jobs.map((j) => j.id);
-  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray10(mediaAssets.videoJobId, jobIds));
+  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray11(mediaAssets.videoJobId, jobIds));
   return jobs.map((job) => {
     const own = assets.filter((a) => a.videoJobId === job.id);
     const finalAsset = own.find((a) => a.id === job.finalAssetId) ?? null;
@@ -29817,8 +30003,8 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and11, eq: eq29, isNull: isNull4, lt: lt6 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull4(metaCapiFailures2.resolvedAt), lt6(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
@@ -29843,8 +30029,8 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and11, eq: eq29, isNull: isNull4, lt: lt6 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull4(ga4PurchaseFailures2.resolvedAt), lt6(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);

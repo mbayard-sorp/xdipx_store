@@ -82,6 +82,9 @@ vi.mock('~/lib/owner-alerts.server', () => ({
 vi.mock('~/lib/team.server', () => ({
   transitionSuggestion: vi.fn(async () => ({ attemptCount: 1 })),
   getTicket: vi.fn(async () => null),
+  // Pass-through: the fence itself is exercised for real in team-tickets.test.ts;
+  // here the mock just lets the engine's sweep wrapping run.
+  runWithOutOfBandReconcile: vi.fn(async (fn: () => Promise<unknown>) => fn()),
 }))
 vi.mock('~/lib/release-ticket-autofile.server', () => ({
   autoFileTicketForPr: vi.fn(async () => null),
@@ -373,8 +376,14 @@ describe('sweepOrphanedMergedPrTickets', () => {
     expect(res.applied).toEqual([120, 455])
     expect(res.errors).toEqual([])
     expect(vi.mocked(transitionSuggestion)).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(transitionSuggestion)).toHaveBeenCalledWith(120, 'applied', 'system', expect.anything())
-    expect(vi.mocked(transitionSuggestion)).toHaveBeenCalledWith(455, 'applied', 'system', expect.anything())
+    // Every reconcile transition must carry the declaration that unlocks the
+    // fenced approved/blocked -> applied edges; without it the map 409s.
+    expect(vi.mocked(transitionSuggestion)).toHaveBeenCalledWith(
+      120, 'applied', 'system', expect.objectContaining({ viaOutOfBandReconcile: true }),
+    )
+    expect(vi.mocked(transitionSuggestion)).toHaveBeenCalledWith(
+      455, 'applied', 'system', expect.objectContaining({ viaOutOfBandReconcile: true }),
+    )
     // The unmerged PR's ticket was left exactly where it was.
     expect(vi.mocked(transitionSuggestion)).not.toHaveBeenCalledWith(900, 'applied', 'system', expect.anything())
   })

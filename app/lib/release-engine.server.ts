@@ -66,7 +66,7 @@ import { checkUrl, runCheckoutProbe } from '~/lib/checkout-probe.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { KV_KEYS, kvDel, kvGet, kvIncr, kvSet, kvSetNX } from '~/lib/kv.server'
 import { escapeHtml, sendOwnerEmail } from '~/lib/owner-alerts.server'
-import { getTicket, transitionSuggestion, type TicketStatus } from '~/lib/team.server'
+import { getTicket, runWithOutOfBandReconcile, transitionSuggestion, type TicketStatus } from '~/lib/team.server'
 // One-directional: the autofile module imports team.server and github.server,
 // never this file, so there is no cycle. Keeping the tunable half of ADR-008
 // step 2 out of this protected file is the point (see that module's header).
@@ -1410,7 +1410,13 @@ async function maybeSweepOutOfBand(): Promise<void> {
 
   try {
     const { sweepOutOfBandMerges } = await import('~/lib/ticket-out-of-band-sweep.server')
-    const swept = await sweepOutOfBandMerges()
+    // The wrapper is the sweep's key to the `outOfBandReconcileOnly` edges
+    // (pr_open/in_review -> applied; verified -> applied is unfenced). Its
+    // transition calls live in ticket-out-of-band-sweep.server.ts, outside
+    // this file, so the engine hands it the reconcile declaration ambiently
+    // here at the one place the sweep is invoked. Without the wrapper the map
+    // itself would 409 those transitions.
+    const swept = await runWithOutOfBandReconcile(() => sweepOutOfBandMerges())
     if (swept.applied.length > 0) {
       console.log(`${LOG} out-of-band sweep applied tickets: ${swept.applied.join(', ')}`)
     }
@@ -1480,6 +1486,12 @@ const ORPHAN_SWEEP_MIN_AGE_MS = 60 * 60_000
  * edges added for exactly this. Identical safety shape to the main sweep: only
  * `merged: true` from GitHub itself moves a ticket, a 409 means the row moved
  * first and is ignored, and nothing here can mark unmerged work as shipped.
+ *
+ * Both edges are `outOfBandReconcileOnly` in the transition map, so they open
+ * only to a call that passes `viaOutOfBandReconcile` (this sweep, after the
+ * merged check) or runs inside `runWithOutOfBandReconcile`. A plain
+ * `transitionSuggestion(id, 'applied', 'system')` from anywhere else, present
+ * or future, is a 409 at the map.
  */
 export async function sweepOrphanedMergedPrTickets(
   limit = ORPHAN_SWEEP_MAX_TICKETS,
@@ -1526,9 +1538,13 @@ export async function sweepOrphanedMergedPrTickets(
       }
       if (pr.data.merged !== true) continue
 
+      // `viaOutOfBandReconcile` is what unlocks the fenced approved/blocked
+      // `-> applied` edges, and this call has earned it: the `merged: true`
+      // check above is the precondition the flag declares.
       await transitionSuggestion(row.ticketId, 'applied', 'system', {
         note: `merged out-of-band while '${row.status}' (PR #${prNumber} was already merged when the engine reconciled it)`,
         links: [{ kind: 'pr', ref: pr.data.htmlUrl, state: 'merged' }],
+        viaOutOfBandReconcile: true,
       })
       out.applied.push(row.ticketId)
       console.log(`${LOG} orphan ticket #${row.ticketId} (${row.status}) applied: PR #${prNumber} merged out of band`)
