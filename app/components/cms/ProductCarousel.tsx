@@ -14,6 +14,16 @@ interface ProductCarouselProps {
   ctaLabel?: string
   bgStyle?: 'white' | 'mist' | 'cream' | 'charcoal' | 'purple'
   layout?: 'carousel' | 'grid' | 'grid-3'
+  /**
+   * Card chrome. `'legacy'` (default) keeps the pre-redesign v2 card treatment
+   * used by the deferred daily-deal home's ForHim/ForHer rails and legacy
+   * `productCarousel` blocks. `'storefront'` applies the v3 token set (locked
+   * 22px `--radius-lg`, hairline `border-line`, paper ground, no drop-shadow)
+   * so an `emmaCuratedRail` on the new storefront matches every other card on
+   * the page instead of rendering the stale v2 chrome (rounded-2xl 16px +
+   * shadow + near-invisible border-cream-2). See `EmmaCuratedRail`.
+   */
+  chrome?: 'legacy' | 'storefront'
   products: LeanCardProduct[]
 }
 
@@ -37,6 +47,7 @@ export function ProductCarousel({
   ctaLabel: ctaLabelProp,
   bgStyle: bgStyleProp,
   layout: layoutProp,
+  chrome = 'legacy',
   products,
 }: ProductCarouselProps) {
   const heading  = block?.heading  ?? headingProp  ?? 'Products'
@@ -52,6 +63,13 @@ export function ProductCarousel({
 
   const bgClass = BG_CLASSES[bgStyle] ?? 'bg-white'
   const dark = isDark(bgStyle)
+  // Light-mode scroll-arrow border: the legacy `border-cream-2` (#FAFAF9) is a
+  // near-invisible hairline on the paper ground; the storefront chrome uses the
+  // real `border-line` hairline the rest of the v3 surface uses.
+  const lightArrow =
+    chrome === 'storefront'
+      ? 'border-line bg-paper text-ink hover:border-sage hover:text-sage'
+      : 'border-cream-2 bg-white text-ink hover:border-sage hover:text-sage'
 
   function scroll(dir: 'left' | 'right') {
     const el = scrollRef.current
@@ -93,7 +111,7 @@ export function ProductCarousel({
                   className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-full border transition-colors shadow-sm ${
                     dark
                       ? 'border-white/20 bg-white/10 text-white hover:border-white/40 hover:text-white'
-                      : 'border-cream-2 bg-white text-ink hover:border-sage hover:text-sage'
+                      : lightArrow
                   }`}
                 >
                   ←
@@ -104,7 +122,7 @@ export function ProductCarousel({
                   className={`hidden sm:flex items-center justify-center w-9 h-9 rounded-full border transition-colors shadow-sm ${
                     dark
                       ? 'border-white/20 bg-white/10 text-white hover:border-white/40 hover:text-white'
-                      : 'border-cream-2 bg-white text-ink hover:border-sage hover:text-sage'
+                      : lightArrow
                   }`}
                 >
                   →
@@ -137,7 +155,7 @@ export function ProductCarousel({
               className="flex gap-4 overflow-x-auto scrollbar-hide snap-x snap-mandatory pb-2"
             >
               {products.map(product => (
-                <ProductCard key={product.id} product={product} className="shrink-0 w-52 sm:w-60 snap-start" />
+                <ProductCard key={product.id} product={product} chrome={chrome} className="shrink-0 w-52 sm:w-60 snap-start" />
               ))}
             </div>
           </Reveal>
@@ -151,7 +169,7 @@ export function ProductCarousel({
           >
             {products.map((product, i) => (
               <Reveal key={product.id} variant="up" index={i}>
-                <ProductCard product={product} />
+                <ProductCard product={product} chrome={chrome} />
               </Reveal>
             ))}
           </div>
@@ -161,7 +179,15 @@ export function ProductCarousel({
   )
 }
 
-function ProductCard({ product, className = '' }: { product: LeanCardProduct; className?: string }) {
+function ProductCard({
+  product,
+  className = '',
+  chrome = 'legacy',
+}: {
+  product: LeanCardProduct
+  className?: string
+  chrome?: 'legacy' | 'storefront'
+}) {
   const price   = product.price
   const compare = product.compareAtPrice
   const onSale  = compare != null && compare > price
@@ -172,13 +198,23 @@ function ProductCard({ product, className = '' }: { product: LeanCardProduct; cl
     ? { previewUrl: firstVideo.previewImageUrl, src: videoSrc }
     : null
 
+  // Storefront chrome uses the locked v3 tokens (22px `--radius-lg`, hairline
+  // `border-line`, paper ground) and drops the drop-shadow / `card-lift` hover
+  // shadow, so the card matches `StorefrontProductCard` and the no-shadow
+  // discipline. Legacy chrome is byte-identical to the pre-redesign card.
+  const articleClass =
+    chrome === 'storefront'
+      ? 'bg-paper-2 rounded-[var(--radius-lg)] overflow-hidden border border-line h-full'
+      : 'bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:shadow-sage/10 transition-all duration-300 card-lift h-full'
+  const imageBgClass = chrome === 'storefront' ? 'bg-paper-2' : 'bg-cream-2'
+
   return (
     <Link
       to={`/products/${product.handle}`}
       className={`group ${className}`}
     >
-      <article className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:shadow-sage/10 transition-all duration-300 card-lift h-full">
-        <div className="relative aspect-square bg-cream-2 overflow-hidden">
+      <article className={articleClass}>
+        <div className={`relative aspect-square ${imageBgClass} overflow-hidden`}>
           {firstImage ? (
             <ProductTileMedia
               imageUrl={firstImage.url}

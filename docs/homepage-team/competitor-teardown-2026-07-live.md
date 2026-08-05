@@ -271,3 +271,71 @@ shipping-disciplined per mission brief §9.
 no existing Sanity schema modified. The brand eyebrow is a card-caption change plus an
 additive index-projection field inside the locked Nº01–Nº11 shell; the ambition
 concept stays a proposal pending IA review before any build.
+
+---
+
+## Delta — 2026-08-05 (Routine B design cycle, run #183)
+
+**Sourcing honesty (mandatory).** One live capture this run: `https://xdipx.com/`
+(our own homepage, WebFetch 200 OK, real rendered content read). Every
+reference-bench and competitor fetch attempted this run returned **403 Forbidden
+at the origin**, not at our egress: Lovehoney, Aesop, Maude (`getmaude.com`),
+Glossier, and Dame (`dame.com`) all 403'd, the same site-level bot-block pattern
+the 2026-07-22 and 2026-07-29 deltas documented for Maude and Dame. The
+agent-proxy status endpoint reports egress `enabled: true` with an empty
+`recentRelayFailures` list, so the blocks are the origins' anti-bot layer, not an
+org egress denial. **No competitor or reference homepage was re-captured this
+run.** Anything below about the field is prior knowledge from the base teardown
+and earlier deltas, tagged as such; no competitor copy is quoted from memory and
+no new site was reviewed. Today is Wednesday, so the mission-brief §4 Monday
+five-site recon is not due; this is Routine B's own step 0.5 lightweight delta.
+
+**Live self-capture — what our own homepage shows today (verified this run):**
+- The homepage has rotated off the 2026-07-29 lube theme onto a **self-care /
+  "quiet" theme**: hero is the *Petite Rechargeable Vibrating Massager* (rose
+  gold) with the headline "The house has gone quiet. This part is yours." Hero is
+  product-forward, deep-links to the PDP, 200 OK. Healthy editorial cadence
+  against mission-brief §3 (visibly different week over week).
+- **The card system is not yet uniform across the page.** Two bands still render
+  as `emmaCuratedRail` through the pre-redesign `ProductCarousel` chrome:
+  `rounded-2xl` (Tailwind's 16px default, not the locked 22px `--radius-lg`), a
+  `shadow-sm` / `hover:shadow-lg` drop-shadow no other storefront card carries,
+  and near-invisible `border-cream-2` (#FAFAF9) scroll-arrow hairlines. Every
+  other tile on the page (hero, the Nº 03 anchor grid, the Nº 06 Emma's-edit
+  fallback rail, Sensation Map results, the Couples rail) uses
+  `StorefrontProductCard`'s v3 treatment (22px radius, `border-line` hairline, no
+  shadow). Vush's bench lesson is exactly this: "grid consistency as the money
+  signal, one render language for every SKU." We were running two render
+  languages on one page, on the team's single most-used content lever.
+
+**Decision this delta forces (recon that changes nothing is a wasted step):**
+1. **Bring `emmaCuratedRail` to v3 card chrome this cycle.** The
+   `VARIANT_B_SECTION_TYPES` allow-list already excludes the legacy
+   `productCarousel` block from the storefront "so stale v2 content can't surface
+   on the new homepage," but it missed the second path
+   (`emmaCuratedRail → EmmaCuratedRail → ProductCarousel`) that renders the
+   identical stale chrome. This cycle closes that gap with a surgical `chrome`
+   prop on `ProductCarousel` that `EmmaCuratedRail` sets to `'storefront'`, so
+   the rail matches `StorefrontProductCard`'s locked-token treatment. Legacy
+   call sites keep the default and stay byte-identical. This cycle's shell PR.
+
+**Adopted this cycle:** emmaCuratedRail v3 chrome convergence (a real,
+live, doctrine-token defect on the team's main lever, confirmed by two instances
+on the page right now).
+**Rejected/deferred this cycle (logged so ambition compounds):** imagery wave 1
+(#3) and hero art-directed frame (#4), both gated on `media-manager` fal.ai
+generation whose spend belongs in an asset-generation cycle, not bundled with a
+render-token fix, and unmeasurable while sessions < 300/wk; footer legitimacy
+pass (#7), still waiting on owner-supplied processor mark assets; and the fuller
+**structural** card convergence (caption rendered OUTSIDE the framed image the
+way `StorefrontProductCard` does, vs the current inside-a-bordered-card layout)
+is banked as a follow-up rather than bundled here, to keep this PR a certain,
+low-blast-radius token fix. The ambition-mandate concept carried this cycle is a
+**design doc + wire only**, `docs/homepage-team/concepts/the-next-step.md` (a new
+progression/adjacency self-discovery axis), shipping-disciplined per mission
+brief §9.
+
+**IA fence respected:** no new section type, no new route, no `/discover` link
+added, no existing Sanity schema modified. The chrome fix is a presentational
+card-token change inside the locked Nº01-Nº11 shell; the ambition concept stays a
+proposal pending IA review + additive schema before any build.

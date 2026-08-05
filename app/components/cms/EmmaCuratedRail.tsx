@@ -30,6 +30,7 @@ export function EmmaCuratedRail({ block, products }: EmmaCuratedRailProps) {
         </div>
       )}
       <ProductCarousel
+        chrome="storefront"
         heading={block.heading}
         {...(block.eyebrow  !== undefined ? { eyebrow:  block.eyebrow }  : {})}
         {...(block.ctaLink  !== undefined ? { ctaLink:  block.ctaLink }  : {})}
