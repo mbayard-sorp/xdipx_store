@@ -15,14 +15,18 @@ import {
   renderHomepageNowSection,
   renderOpsWatchSection,
   renderOwnerQueueSection,
+  renderNeedsMikeSection,
   renderShippedSection,
+  renderTicketLoopSection,
   renderTicketsSection,
   type EscalationFacts,
   type HomepageNowFacts,
+  type NeedsMikeFacts,
   type OpsWatchFacts,
   type OwnerQueueRow,
   type TicketMetrics,
 } from '~/lib/owner-digest.server'
+import type { TicketLoopHealth } from '~/lib/ticket-janitor.server'
 
 /**
  * The digest's KV guard is keyed on the UTC date, so triggering the cron to
@@ -405,5 +409,109 @@ describe('ageOutStaleSuggestions', () => {
     executeMock.mockReset()
     executeMock.mockRejectedValue(new Error('db down'))
     await expect(ageOutStaleSuggestions()).resolves.toBe(0)
+  })
+})
+
+describe('renderTicketLoopSection', () => {
+  const healthyLoop: TicketLoopHealth = {
+    generatedAt: '2026-08-05T13:00:00Z',
+    sla: {
+      prOpen: [],
+      inReview: [],
+      approvedCode: { count: 0, oldest: null, rows: [] },
+      proposed: [],
+      blocked: [],
+    },
+    orphans: [],
+    orphanScanSkipped: false,
+    backlog: { created7d: 10, terminal7d: 12, netPerDay: -0.3 },
+    routineFlags: [],
+  }
+
+  it('reports an absent health object as unknown, never as a pass', () => {
+    const html = renderTicketLoopSection(null)
+    expect(html).toContain('unknown')
+    expect(html).toContain('not a pass')
+  })
+
+  it('says plainly when the loop is healthy', () => {
+    const html = renderTicketLoopSection(healthyLoop)
+    expect(html).toContain('net -0.3/day')
+    expect(html).toContain('No orphaned tickets')
+    expect(html).toContain('Every expected routine has run inside its cadence window')
+  })
+
+  it('surfaces SLA breaches, empty-reason blocks, orphans, and dead routines', () => {
+    const html = renderTicketLoopSection({
+      ...healthyLoop,
+      sla: {
+        prOpen: [{ id: 9, status: 'pr_open', kind: 'code', priority: 2, ageHours: 30, suggestion: 'fix nav' }],
+        inReview: [{ id: 8, status: 'in_review', kind: 'code', priority: 2, ageHours: 15, suggestion: 'crashed' }],
+        approvedCode: {
+          count: 56,
+          oldest: { id: 3, status: 'approved', kind: 'code', priority: 3, ageHours: 21 * 24, suggestion: 'old' },
+          rows: [],
+        },
+        proposed: [{ id: 7, status: 'proposed', kind: 'code', priority: 3, ageHours: 80, suggestion: 'untriaged' }],
+        blocked: [{ id: 455, kind: 'code', ageHours: 100, suggestion: 'stuck', lastError: null, emptyReason: true }],
+      },
+      orphans: [{ ticketId: 120, status: 'approved', prRef: 'https://github.com/o/r/pull/436', prOutcome: 'merged' }],
+      backlog: { created7d: 60, terminal7d: 18, netPerDay: 6 },
+      routineFlags: [{
+        routine: 'Weekly business research', team: 'social', runType: 'research',
+        schedule: 'Thu 16:00', lastRunAt: null, hoursSince: null, maxGapHours: 194,
+      }],
+    })
+    expect(html).toContain('net +6/day')
+    expect(html).toContain('#9')
+    expect(html).toContain('56 approved code tickets')
+    expect(html).toContain('oldest #3 at 21d')
+    expect(html).toContain('#455')
+    expect(html).toContain('1 with no recorded reason')
+    expect(html).toContain('#120')
+    expect(html).toContain('PR #436')
+    expect(html).toContain('Weekly business research')
+    expect(html).toContain('no run row ever')
+  })
+
+  it('reports a skipped orphan scan as skipped, not as zero orphans', () => {
+    const html = renderTicketLoopSection({ ...healthyLoop, orphanScanSkipped: true })
+    expect(html).toContain('Orphan scan skipped')
+    expect(html).not.toContain('No orphaned tickets')
+  })
+})
+
+describe('renderNeedsMikeSection', () => {
+  const emptyFacts: NeedsMikeFacts = {
+    needsOwnerPrs: [],
+    blockedRows: [],
+    staleOwnerRows: [],
+    orphans: [],
+    missedRoutines: [],
+  }
+
+  it('says nothing needs the owner when the list is empty', () => {
+    expect(renderNeedsMikeSection(emptyFacts)).toContain('Nothing on this list today')
+  })
+
+  it('consolidates every owner-only fact into one list', () => {
+    const html = renderNeedsMikeSection({
+      needsOwnerPrs: [{ ticketId: 1, ref: 'https://github.com/o/r/pull/508', state: 'needs-owner', title: 'protected' }],
+      blockedRows: [{ id: 2, status: 'blocked', kind: 'code', attemptCount: 1, lastError: null, suggestion: 'stuck row' }],
+      staleOwnerRows: [{ id: 3, kind: 'campaign', ageDays: 5, suggestion: 'send the pitch batch' }],
+      orphans: [{ ticketId: 4, status: 'approved', prRef: 'https://github.com/o/r/pull/429', prOutcome: 'merged' }],
+      missedRoutines: [{
+        routine: 'Weekly trend scout', team: 'content', runType: 'trend-scout',
+        schedule: 'Sat 19:00', lastRunAt: '2026-07-20T19:00:00Z', hoursSince: 380, maxGapHours: 194,
+      }],
+    })
+    expect(html).toContain('PR #508')
+    expect(html).toContain('waits on your merge')
+    expect(html).toContain('#2 is blocked')
+    expect(html).toContain('#3 (campaign) approved 5d ago')
+    expect(html).toContain('#4 is orphaned')
+    expect(html).toContain('PR #429')
+    expect(html).toContain('Weekly trend scout')
+    expect(html).toContain('380h ago')
   })
 })

@@ -55,9 +55,10 @@ All times UTC. Vercel crons are verified against `vercel.json`; cloud routines a
 | every 10 min | `/cron/release-engine` | Vercel cron | Discovers agent PRs, classifies protected paths, checks gates, squash-merges, polls the deploy, smokes it, reverts on failure, escalates | LIVE (PR #351; `release_engine_enabled` turned ON by the owner 2026-07-28) |
 | 04:40 | `/cron/indexnow-push` | Vercel cron | Pushes changed and stale URLs to IndexNow | LIVE |
 | 12:30 | `/cron/seo-daily` | Vercel cron | Computes index deltas from `gsc_index_daily`, pushes recrawl batches, files tickets on anomalies, writes the digest blob | LIVE |
-| 13:00 | `/cron/owner-digest` | Vercel cron | The one owner email per day: shipped, homepage now, SEO deltas, tickets, escalations | LIVE (route + five sections, PR #352). Delivery was broken until 2026-07-28: see the note below |
-| 14:00 | R-DEV, dev pass 1 | Cloud routine, `rr7-engineer` | Claims up to 3 `kind:'code'` tickets, one branch and one PR each. Playbook: [`routine-dev-daily.md`](./routine-dev-daily.md) | LIVE (trigger `trig_01MEQYsg5sHPbM4v39FqssAD`, `0 14,20 * * *` UTC) |
-| 15:30 | R-QA | Cloud routine, `qa-reviewer` | Reviews every `pr_open` ticket, verifies or bounces. Playbook: [`routine-qa-daily.md`](./routine-qa-daily.md) | LIVE (trigger `trig_019GjVP9hGBU1gmXRBYtYURm`, `30 15 * * *` UTC) |
+| 03:30 | R-QA, pass 1 | Cloud routine, `qa-reviewer` | Reviews stranded `in_review` rows first, then every `pr_open` ticket; verifies or bounces. Added 2026-08-05 so the 20:00 dev pass's PRs stop waiting 19 hours | LIVE (trigger `trig_019GjVP9hGBU1gmXRBYtYURm`, `30 3,15 * * *` UTC, prompt `rqa-daily-0002`) |
+| 13:00 | `/cron/owner-digest` | Vercel cron | The one owner email per day: a Needs Mike list up top, then shipped, homepage now, SEO deltas, tickets, ticket-loop health, escalations | LIVE (route + five sections, PR #352; Needs Mike + Ticket loop sections added 2026-08-05, see §The ticket-loop janitor) |
+| 14:00 | R-DEV, dev pass 1 | Cloud routine, `rr7-engineer` | Claims up to 5 `kind:'code'` tickets (raised from 3 on 2026-08-05), one branch and one PR each. Playbook: [`routine-dev-daily.md`](./routine-dev-daily.md) | LIVE (trigger `trig_01MEQYsg5sHPbM4v39FqssAD`, `0 14,20 * * *` UTC, prompt `rdev-daily-0002`) |
+| 15:30 | R-QA, pass 2 | Cloud routine, `qa-reviewer` | Same as pass 1, 90 minutes after the 14:00 dev pass. Playbook: [`routine-qa-daily.md`](./routine-qa-daily.md) | LIVE (same trigger, `30 3,15 * * *` UTC) |
 | 17:00 (target) | Routine A, daily merchandise | Cloud routine, `homepage-orchestrator` | Picks the featured product, refreshes Emma copy and imagery, publishes content to Sanity within the budget and kill switch | LIVE, **but the trigger fires at 10:00, not 17:00** |
 | 20:00 | R-DEV, dev pass 2 | Cloud routine, `rr7-engineer` | Second attempt pass. Claims bounced tickets first | LIVE (same trigger as pass 1: `trig_01MEQYsg5sHPbM4v39FqssAD`, cron `0 14,20 * * *`) |
 | Mon 12:00 | Weekly strategy retro | Cloud routine, `store-strategist` | Cross-team retro, weekly brief, ticket metrics, routine coverage audit | LIVE |
@@ -164,10 +165,11 @@ Every one of these is a `pipeline_settings` row. Agents may never write `pipelin
 | `seo_curation_enabled`, `trend_scout_enabled` | Those weekly routines exit before starting a run | content tab |
 | `social_team_autopost` | Social drafts are never posted live. **Money valve, owner-gated** | social tab |
 | `video_frame_review` | Video frames require owner review. **Money valve, owner-gated** | `/admin/video-studio` |
-| `deal_status: approved` (Shopify metafield, not a valve) | No deal publishes without it. **Money valve, owner-gated** | `/admin/deals` |
+| `import_enrich_enabled` (also listed above) | Imported products never go draft to live. **Money valve, owner-gated**. This replaced the retired `deal_status: approved` metafield row that used to sit here: daily deals were retired and `deal_status` was removed catalog-wide on 2026-08-03 (see `CLAUDE.md`, Shopify Metafields), so product publishing is the gate now | `/admin/imports` |
 
-The three money valves at the bottom are unchanged by anything on this page. The release engine
-never writes them, and every file that could change them is a protected path.
+The three money valves at the bottom (import enrich, video frame review, social autopost) are
+unchanged by anything on this page. The release engine never writes them, and every file that could
+change them is a protected path.
 
 ---
 
@@ -180,8 +182,9 @@ Short list, deliberately. If it is not here, the system is supposed to handle it
 - **Every protected-path merge.** Checkout and payment, cart, migrations and schema, auth and
   session, valves and spend controls, CI and deploy config, the release engine itself. The engine
   will prepare, label, and email these, and will never merge one.
-- **The three money valves.** Deal approval, video frame review, social autopost. Nothing automates
-  these and nothing is proposing to.
+- **The three money valves.** Import enrich (draft to live), video frame review, social autopost.
+  Nothing automates these and nothing is proposing to. (Deal approval used to be the first of
+  these; daily deals and the `deal_status` metafield were retired 2026-08-03.)
 - **The five escalations in §5**, when they land. That is the intended inbox volume: rare.
 - **Turning the engine back on after a circuit break**, once you understand why it tripped.
 - **Strategic direction.** The weekly brief is written by agents from evidence, but what the store
@@ -331,14 +334,34 @@ been merged by the engine**, while two playbooks said the engine merged them. Bo
 now travels the ordinary ticket-and-QA path rather than a docs carve-out, which is the conservative
 of the two routes.
 
-### The QA cadence asymmetry
+### The QA cadence asymmetry (fixed 2026-08-05)
 
-R-DEV runs twice a day, 14:00 and 20:00 UTC. R-QA runs once, at 15:30 UTC. A `kind:'code'` ticket
-cannot reach `verified` without a QA pass, so **every PR from the 20:00 dev pass waits about 19 hours
-for review**, while the 14:00 pass gets reviewed within 90 minutes. Pass two structurally cannot land
-same-day. Verified instance: PR #477 opened 20:25 UTC on 2026-08-03, CI green on the required `check`
-job, and could not be looked at until 15:30 UTC the next day. This is a scheduling gap, not a gate
-doing its job.
+R-DEV runs twice a day, 14:00 and 20:00 UTC. R-QA used to run once, at 15:30 UTC. A `kind:'code'`
+ticket cannot reach `verified` without a QA pass, so **every PR from the 20:00 dev pass waited about
+19 hours for review**, while the 14:00 pass got reviewed within 90 minutes. Pass two structurally
+could not land same-day. Verified instance: PR #477 opened 20:25 UTC on 2026-08-03, CI green on the
+required `check` job, and could not be looked at until 15:30 UTC the next day. This was a scheduling
+gap, not a gate doing its job.
+
+Fixed 2026-08-05: R-QA now runs twice daily, `30 3,15 * * *` UTC on the same trigger, so a 20:00
+PR is reviewed at 03:30. The reissued prompt (`rqa-daily-0002`) also closed the other silent gap in
+this lane: it lists `in_review` alongside `pr_open` and resumes crashed reviews first, because
+until then nothing anywhere would ever touch a row a dead QA session left in `in_review`.
+
+### The ticket-loop janitor (2026-08-05)
+
+`app/lib/ticket-janitor.server.ts` computes a health object the 13:00 owner digest renders as a
+"Ticket loop" section, plus one consolidated "Needs Mike" list at the top of the email. It reports:
+SLA breaches (`pr_open` older than 24h, `in_review` older than 12h, approved `code` older than 7
+days with count and oldest, `proposed` older than 72h, and every blocked row with a flag when it
+carries no reason), orphaned tickets (still live while their PR is already merged or closed, read
+through `app/lib/github.server.ts`), the 7-day backlog trajectory (created vs terminal, net per
+day), and routine liveness against an expected-cadence table embedded as data (flagged past
+cadence plus grace: 2h for dailies, 26h for weeklies). A companion reconcile step refreshes stale
+`suggestion_links` pr-link states when GitHub disagrees; it writes only the link table and never
+transitions a ticket. Why it exists: `blocked` had never been exited by anything but the owner,
+`in_review` had no sweeper, orphans 120/423/455 sat invisible, and the 2026-08-02 SEO-curation fire
+died before writing a run row, which only a 7-day-later coverage check would have caught.
 
 ## A note on owner email, 2026-07-28
 
