@@ -33,8 +33,8 @@ import { buildEmmaContextWithCrossChannel } from '../cross-channel.server'
 import { sendSms } from '~/lib/twilio.server'
 import { normalizeForTTS } from '~/lib/tts-normalize'
 import { db } from '~/lib/db.server'
-import { like } from 'drizzle-orm'
-import { smsTurns } from '../../../../db/schema'
+import { eq, like } from 'drizzle-orm'
+import { smsConversations, smsTurns } from '../../../../db/schema'
 import type { Stage, StageResponse } from '../types.server'
 
 // ---------------------------------------------------------------------------
@@ -161,6 +161,44 @@ function isNegative(text: string): boolean {
 // window stays generous enough to preserve a real cross-channel handoff (text
 // Emma, then call her a few minutes later to keep going).
 const SESSION_FRESH_MS = Number(process.env['IVR_SESSION_FRESH_MS'] ?? 2 * 60 * 60 * 1000)
+
+/**
+ * Milliseconds since the conversation was last active, from a timestamp
+ * captured BEFORE getOrCreateConversation ran. Null (no prior row, or an
+ * unreadable one) means "infinitely stale" so a brand-new caller takes the
+ * clean-slate path rather than inheriting whatever happens to be in the row.
+ *
+ * Pure so the staleness rule is testable without a database.
+ */
+export function voiceSessionStaleMs(
+  priorLastActiveAt: Date | null,
+  now: number,
+): number {
+  if (!priorLastActiveAt) return Infinity
+  const then = new Date(priorLastActiveAt).getTime()
+  if (!Number.isFinite(then)) return Infinity
+  // Clamp negatives: clock skew between the DB and the runtime must never make
+  // a stale session look fresh.
+  return Math.max(0, now - then)
+}
+
+/**
+ * Reads lastActiveAt without mutating it. Must be called before
+ * getOrCreateConversation, which overwrites the column on every turn.
+ */
+async function readLastActiveAt(phone: string): Promise<Date | null> {
+  try {
+    const rows = await db
+      .select({ lastActiveAt: smsConversations.lastActiveAt })
+      .from(smsConversations)
+      .where(eq(smsConversations.phone, phone))
+      .limit(1)
+    return rows[0]?.lastActiveAt ?? null
+  } catch (err) {
+    console.warn('[voice-adapter] readLastActiveAt failed — treating session as stale', err)
+    return null
+  }
+}
 
 /**
  * True when this is the first turn we've logged for `callSid`. logVoiceTurn
@@ -520,6 +558,16 @@ export async function processVoiceMessageV2(
   const { callerPhone, customerText, callSid } = input
   const started = Date.now()
 
+  // --- Step 0: Capture prior activity BEFORE anything touches the row ---
+  // getOrCreateConversation unconditionally writes lastActiveAt = now and then
+  // re-reads, so the row it returns ALWAYS reports ~0ms since last activity.
+  // Reading staleness off that return value made the Step 1.5 gate below dead
+  // code: it shipped, deployed, and never once fired. Call
+  // CA419b2272eadb822ccd2785445c31b8ee opened 23h after the previous call and
+  // still entered at stage=PRESENTATION, answering "oh" with "Want me to send
+  // that link over?" — the previous call's pending link. Capture first, ask later.
+  const priorLastActiveAt = await readLastActiveAt(callerPhone)
+
   // --- Step 1: Get or create conversation (phone is the key) ---
   let conversation: Awaited<ReturnType<typeof getOrCreateConversation>>
   try {
@@ -536,8 +584,7 @@ export async function processVoiceMessageV2(
   // Identity (customerGid, name, zip) and conversationSummary are deliberately
   // left alone: those describe the person, not this shopping trip.
   try {
-    const lastActive = (conversation as { lastActiveAt?: Date | null }).lastActiveAt
-    const staleMs = lastActive ? Date.now() - new Date(lastActive).getTime() : Infinity
+    const staleMs = voiceSessionStaleMs(priorLastActiveAt, Date.now())
     if (staleMs > SESSION_FRESH_MS && (await isFirstTurnOfCall(callSid))) {
       await applyStateWrites(callerPhone, {
         stage: 'RECONNECT',
