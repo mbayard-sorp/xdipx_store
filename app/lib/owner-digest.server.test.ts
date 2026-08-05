@@ -7,6 +7,42 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 const executeMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
 
+// runOwnerDigest is exercised end-to-end below (the reconcile-before-health
+// ordering), so every collaborator with IO is mocked at the module boundary.
+const reconcileMock = vi.hoisted(() => vi.fn())
+const loopHealthMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/ticket-janitor.server', () => ({
+  computeTicketLoopHealth: loopHealthMock,
+  reconcilePrLinkStates: reconcileMock,
+}))
+vi.mock('~/lib/kv.server', () => ({
+  kvGet: vi.fn(async () => null),
+  kvSetNX: vi.fn(async () => true),
+  kvDel: vi.fn(async () => undefined),
+}))
+vi.mock('~/lib/team.server', () => ({
+  gate: vi.fn(),
+  getValve: vi.fn(async () => false),
+  TEAM_IDS: [],
+}))
+vi.mock('~/lib/team-keys', () => ({ VALVE_KEYS: {} }))
+vi.mock('~/lib/tracker.server', () => ({
+  getTrackers: () => [],
+  latestOwnerAsks: () => null,
+}))
+vi.mock('~/lib/owner-alerts.server', () => ({
+  sendOwnerEmail: vi.fn(async () => ({ sent: true })),
+}))
+vi.mock('~/lib/profit.server', () => ({
+  getProfitReconciliation: vi.fn(async () => null),
+}))
+vi.mock('~/lib/seo-daily.server', () => ({
+  getLatestSeoDaily: vi.fn(async () => null),
+}))
+vi.mock('~/lib/homepage-payload.server', () => ({
+  readHomepagePayloadB: vi.fn(async () => null),
+}))
+
 import {
   MAX_TICKET_ATTEMPTS,
   ageOutStaleSuggestions,
@@ -19,6 +55,7 @@ import {
   renderShippedSection,
   renderTicketLoopSection,
   renderTicketsSection,
+  runOwnerDigest,
   type EscalationFacts,
   type HomepageNowFacts,
   type NeedsMikeFacts,
@@ -478,6 +515,47 @@ describe('renderTicketLoopSection', () => {
     const html = renderTicketLoopSection({ ...healthyLoop, orphanScanSkipped: true })
     expect(html).toContain('Orphan scan skipped')
     expect(html).not.toContain('No orphaned tickets')
+  })
+})
+
+describe('runOwnerDigest', () => {
+  it('reconciles pr-link states immediately before computing ticket-loop health', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    reconcileMock.mockReset()
+    loopHealthMock.mockReset()
+    const order: string[] = []
+    reconcileMock.mockImplementation(async () => {
+      order.push('reconcile')
+      return { checked: 0, updated: [], skipped: true }
+    })
+    loopHealthMock.mockImplementation(async () => {
+      order.push('health')
+      return null
+    })
+
+    const res = await runOwnerDigest({ force: true })
+
+    expect(res.sent).toBe(true)
+    expect(reconcileMock).toHaveBeenCalledTimes(1)
+    expect(loopHealthMock).toHaveBeenCalledTimes(1)
+    // Fresh link states are the point: the reconcile completes before the
+    // health computation starts, not merely somewhere in the same run.
+    expect(order).toEqual(['reconcile', 'health'])
+  })
+
+  it('still sends and still computes health when the reconcile fails', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    reconcileMock.mockReset()
+    loopHealthMock.mockReset()
+    reconcileMock.mockRejectedValue(new Error('github down'))
+    loopHealthMock.mockResolvedValue(null)
+
+    const res = await runOwnerDigest({ force: true })
+
+    expect(res.sent).toBe(true)
+    expect(loopHealthMock).toHaveBeenCalledTimes(1)
   })
 })
 

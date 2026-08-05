@@ -26,6 +26,7 @@ import { sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { getProfitReconciliation } from '~/lib/profit.server'
 import {
   computeTicketLoopHealth,
+  reconcilePrLinkStates,
   type OrphanTicket,
   type RoutineLivenessFlag,
   type TicketLoopHealth,
@@ -1094,11 +1095,19 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
         console.warn('[owner-digest] profit reconciliation failed:', String(err).slice(0, 200))
         return null
       }),
-      // Best-effort for the same reason: the janitor reads GitHub.
-      computeTicketLoopHealth().catch((err): null => {
-        console.warn('[owner-digest] ticket-loop health failed:', String(err).slice(0, 200))
-        return null
-      }),
+      // Best-effort for the same reason: the janitor reads GitHub. The
+      // reconcile runs first so pr-link states are fresh when health is
+      // computed; its own failure costs nothing but freshness, never the
+      // digest and never the health computation behind it.
+      reconcilePrLinkStates()
+        .catch(err => {
+          console.warn('[owner-digest] pr-link reconcile failed:', String(err).slice(0, 200))
+        })
+        .then(() => computeTicketLoopHealth())
+        .catch((err): null => {
+          console.warn('[owner-digest] ticket-loop health failed:', String(err).slice(0, 200))
+          return null
+        }),
       gatherStaleOwnerRows(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length

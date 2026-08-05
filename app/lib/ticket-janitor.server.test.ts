@@ -153,9 +153,14 @@ describe('ROUTINE_CADENCES', () => {
     expect(ROUTINE_CADENCES.filter(c => c.kind === 'twice-daily').map(c => c.runType).sort()).toEqual(['dev', 'qa'])
   })
 
-  it('sizes grace at 2h for dailies and 26h for weeklies', () => {
+  it('sizes each gap against the lane\'s real cron, not its nominal kind', () => {
     const byType = new Map(ROUTINE_CADENCES.map(c => [`${c.team}|${c.runType}`, c]))
-    expect(byType.get('strategy|dev')?.maxGapHours).toBe(14)
+    // R-DEV fires 14:00 and 20:00 UTC, so its longest interval is the 18h
+    // overnight gap, not the 12h a symmetric twice-daily would have. The 13:00
+    // digest runs 17h after the 20:00 pass; a 14h gap would flag it daily.
+    expect(byType.get('strategy|dev')?.maxGapHours).toBe(20)
+    // R-QA's passes (03:30 and 15:30) are symmetric, so 12h plus 2h grace holds.
+    expect(byType.get('strategy|qa')?.maxGapHours).toBe(14)
     expect(byType.get('content|content')?.maxGapHours).toBe(26)
     expect(byType.get('strategy|strategy')?.maxGapHours).toBe(194)
     expect(byType.get('strategy|apply')?.maxGapHours).toBe(122)
@@ -165,11 +170,18 @@ describe('ROUTINE_CADENCES', () => {
 describe('checkRoutineLiveness', () => {
   it('flags a routine whose last run is past cadence plus grace, and not one inside it', () => {
     const flags = checkRoutineLiveness([
-      { team: 'strategy', runType: 'dev', startedAt: hoursAgo(15) },
+      { team: 'strategy', runType: 'dev', startedAt: hoursAgo(21) },
       { team: 'strategy', runType: 'qa', startedAt: hoursAgo(13) },
     ], NOW, ROUTINE_CADENCES.filter(c => c.kind === 'twice-daily'))
     expect(flags.map(f => f.runType)).toEqual(['dev'])
-    expect(flags[0]!.hoursSince).toBe(15)
+    expect(flags[0]!.hoursSince).toBe(21)
+  })
+
+  it('does not flag R-DEV across its 18h overnight gap (20:00 to the next 14:00)', () => {
+    const flags = checkRoutineLiveness([
+      { team: 'strategy', runType: 'dev', startedAt: hoursAgo(18) },
+    ], NOW, ROUTINE_CADENCES.filter(c => c.runType === 'dev'))
+    expect(flags).toEqual([])
   })
 
   it('flags a routine with no run row at all as never-run', () => {

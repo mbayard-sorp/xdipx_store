@@ -15823,10 +15823,10 @@ async function logVideoCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql20 } = await import("drizzle-orm");
+  const { sql: sql21 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql20`SELECT * FROM api_token_daily
+    sql21`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -15834,11 +15834,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql20 } = await import("drizzle-orm");
+  const { sql: sql21 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql20`
+    sql21`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -18362,6 +18362,714 @@ var init_tracker_server = __esm({
   }
 });
 
+// app/lib/github.server.ts
+function err(status, error, skipped = false) {
+  return { ok: false, status, data: null, error, skipped };
+}
+function getGithubConfig(context = "github") {
+  const token = process.env["GITHUB_TOKEN"];
+  const owner = process.env["GITHUB_OWNER"];
+  const repo = process.env["GITHUB_REPO"];
+  if (!token || !owner || !repo) {
+    console.warn(`[${context}] GITHUB_TOKEN/OWNER/REPO not set, skipping GitHub call`);
+    return null;
+  }
+  return { token, owner, repo };
+}
+function isGithubConfigured() {
+  return Boolean(process.env["GITHUB_TOKEN"] && process.env["GITHUB_OWNER"] && process.env["GITHUB_REPO"]);
+}
+function githubHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json",
+    "User-Agent": "xdipx-release-engine"
+  };
+}
+async function githubRequest(path, opts = {}) {
+  const cfg = getGithubConfig(opts.context ?? "github");
+  if (!cfg) return err(0, "GITHUB_TOKEN/OWNER/REPO not set", true);
+  const resolved = path.replace("{owner}", cfg.owner).replace("{repo}", cfg.repo);
+  const url = resolved.startsWith("http") ? resolved : `${API_BASE}${resolved.startsWith("/") ? "" : "/"}${resolved}`;
+  try {
+    const res = await fetch(url, {
+      method: opts.method ?? "GET",
+      headers: githubHeaders(cfg.token),
+      ...opts.body === void 0 ? {} : { body: JSON.stringify(opts.body) },
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    const text2 = await res.text();
+    if (!res.ok) {
+      return err(res.status, `GitHub ${opts.method ?? "GET"} ${resolved} -> ${res.status}: ${text2.slice(0, 400)}`);
+    }
+    const data = text2.length === 0 ? {} : JSON.parse(text2);
+    return { ok: true, status: res.status, data };
+  } catch (e) {
+    return err(0, `GitHub ${resolved} failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+function toSummary(p) {
+  return {
+    number: p.number,
+    title: p.title,
+    state: p.state,
+    nodeId: p.node_id ?? "",
+    draft: p.draft ?? false,
+    merged: p.merged ?? false,
+    mergeable: p.mergeable ?? null,
+    mergeableState: p.mergeable_state ?? "unknown",
+    headSha: p.head.sha,
+    headRef: p.head.ref,
+    baseRef: p.base.ref,
+    htmlUrl: p.html_url,
+    labels: (p.labels ?? []).map((l) => l.name),
+    body: p.body ?? "",
+    user: p.user?.login ?? "",
+    updatedAt: p.updated_at ?? ""
+  };
+}
+async function getPullRequest(number, context = "github") {
+  const res = await githubRequest(`/repos/{owner}/{repo}/pulls/${number}`, { context });
+  if (!res.ok) return res;
+  return { ok: true, status: res.status, data: toSummary(res.data) };
+}
+async function listOpenPullRequests(opts = {}) {
+  const res = await githubRequest(
+    "/repos/{owner}/{repo}/pulls?state=open&per_page=100&sort=created&direction=asc",
+    { context: opts.context ?? "github" }
+  );
+  if (!res.ok) return res;
+  const all = res.data.map(toSummary);
+  const prefixes = opts.headPrefixes;
+  const data = prefixes && prefixes.length > 0 ? all.filter((p) => prefixes.some((pre) => p.headRef.startsWith(pre))) : all;
+  return { ok: true, status: res.status, data };
+}
+async function listPullRequestFiles(number, context = "github") {
+  const out = [];
+  let status = 200;
+  for (let page = 1; page <= MAX_FILE_PAGES; page++) {
+    const res = await githubRequest(`/repos/{owner}/{repo}/pulls/${number}/files?per_page=100&page=${page}`, { context });
+    if (!res.ok) return res;
+    status = res.status;
+    for (const f of res.data) {
+      out.push({
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions ?? 0,
+        deletions: f.deletions ?? 0,
+        ...f.previous_filename ? { previousFilename: f.previous_filename } : {}
+      });
+    }
+    if (res.data.length < 100) break;
+  }
+  return { ok: true, status, data: out };
+}
+async function getChecksForRef(sha, context = "github") {
+  const runs = await githubRequest(`/repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`, { context });
+  if (!runs.ok) return runs;
+  const statuses = await githubRequest(`/repos/{owner}/{repo}/commits/${sha}/status?per_page=100`, { context });
+  if (!statuses.ok) return statuses;
+  const byName = /* @__PURE__ */ new Map();
+  const put = (at, check) => {
+    const prev = byName.get(check.name);
+    if (!prev || prev.at <= at) byName.set(check.name, { at, check });
+  };
+  for (const r of runs.data.check_runs ?? []) {
+    put(r.completed_at ?? r.started_at ?? "", {
+      name: r.name,
+      source: "check_run",
+      status: r.status,
+      conclusion: r.conclusion,
+      url: r.html_url ?? null
+    });
+  }
+  for (const s of statuses.data.statuses ?? []) {
+    const pending2 = s.state === "pending";
+    put(s.updated_at ?? "", {
+      name: s.context,
+      source: "status",
+      status: pending2 ? "in_progress" : "completed",
+      conclusion: pending2 ? null : s.state === "success" ? "success" : "failure",
+      url: s.target_url ?? null
+    });
+  }
+  const checks = [...byName.values()].map((v) => v.check).sort((a, b) => a.name.localeCompare(b.name));
+  const pending = checks.filter((c) => c.status !== "completed" || c.conclusion === null).map((c) => c.name);
+  const failing = checks.filter((c) => c.conclusion !== null && FAILING_CONCLUSIONS.has(c.conclusion)).map((c) => c.name);
+  const succeeded = checks.filter((c) => c.conclusion === "success").map((c) => c.name);
+  return {
+    ok: true,
+    status: 200,
+    data: {
+      ref: sha,
+      checks,
+      pending,
+      failing,
+      succeeded,
+      allGreen: checks.length > 0 && pending.length === 0 && failing.length === 0
+    }
+  };
+}
+async function githubGraphQL(query, variables = {}, context = "github") {
+  const res = await githubRequest(
+    "https://api.github.com/graphql",
+    { method: "POST", body: { query, variables }, context }
+  );
+  if (!res.ok) return res;
+  const { data, errors } = res.data;
+  if (errors && errors.length > 0) {
+    const msg = errors.map((e) => e.message ?? "unknown").join("; ");
+    return err(res.status, `GitHub GraphQL: ${msg}`);
+  }
+  if (data === void 0 || data === null) {
+    return err(res.status, "GitHub GraphQL returned no data");
+  }
+  return { ok: true, status: res.status, data };
+}
+async function markPullRequestReadyForReview(nodeId, context = "github") {
+  if (!nodeId) return err(0, "markPullRequestReadyForReview called without a node id");
+  const res = await githubGraphQL(MARK_READY_MUTATION, { id: nodeId }, context);
+  if (!res.ok) return res;
+  const pr = res.data.markPullRequestReadyForReview?.pullRequest;
+  if (!pr) return err(res.status, "GitHub GraphQL: mutation returned no pull request");
+  return { ok: true, status: res.status, data: pr };
+}
+async function squashMergePullRequest(number, opts = {}) {
+  return githubRequest(
+    `/repos/{owner}/{repo}/pulls/${number}/merge`,
+    {
+      method: "PUT",
+      context: opts.context ?? "github",
+      body: {
+        merge_method: "squash",
+        ...opts.title ? { commit_title: opts.title } : {},
+        ...opts.message ? { commit_message: opts.message } : {},
+        ...opts.expectedHeadSha ? { sha: opts.expectedHeadSha } : {}
+      }
+    }
+  );
+}
+async function addLabels(number, labels, context = "github") {
+  const res = await githubRequest(`/repos/{owner}/{repo}/issues/${number}/labels`, {
+    method: "POST",
+    body: { labels },
+    context
+  });
+  if (!res.ok) return res;
+  return { ok: true, status: res.status, data: res.data.map((l) => l.name) };
+}
+async function openPullRequest(input) {
+  const res = await githubRequest("/repos/{owner}/{repo}/pulls", {
+    method: "POST",
+    context: input.context ?? "github",
+    body: { title: input.title, head: input.head, base: input.base, body: input.body ?? "" }
+  });
+  if (!res.ok) return res;
+  return { ok: true, status: res.status, data: toSummary(res.data) };
+}
+async function getRef(ref, context = "github") {
+  const res = await githubRequest(
+    `/repos/{owner}/{repo}/git/ref/${ref.replace(/^refs\//, "")}`,
+    { context }
+  );
+  if (!res.ok) return res;
+  return { ok: true, status: res.status, data: { sha: res.data.object.sha, ref: res.data.ref } };
+}
+async function getCommit(sha, context = "github") {
+  const res = await githubRequest(`/repos/{owner}/{repo}/git/commits/${sha}`, { context });
+  if (!res.ok) return res;
+  return {
+    ok: true,
+    status: res.status,
+    data: {
+      sha: res.data.sha,
+      treeSha: res.data.tree.sha,
+      parents: (res.data.parents ?? []).map((p) => p.sha),
+      message: res.data.message
+    }
+  };
+}
+async function createCommit(input) {
+  return githubRequest("/repos/{owner}/{repo}/git/commits", {
+    method: "POST",
+    context: input.context ?? "github",
+    body: { message: input.message, tree: input.tree, parents: input.parents }
+  });
+}
+async function createRef(input) {
+  const ref = input.ref.startsWith("refs/") ? input.ref : `refs/heads/${input.ref}`;
+  return githubRequest("/repos/{owner}/{repo}/git/refs", {
+    method: "POST",
+    context: input.context ?? "github",
+    body: { ref, sha: input.sha }
+  });
+}
+async function createRevertBranch(input) {
+  const context = input.context ?? "github";
+  const base = input.base ?? "main";
+  const bad = await getCommit(input.badSha, context);
+  if (!bad.ok) return bad;
+  const parent = bad.data.parents[0];
+  if (!parent) return err(0, `commit ${input.badSha} has no parent, cannot revert`);
+  const parentCommit = await getCommit(parent, context);
+  if (!parentCommit.ok) return parentCommit;
+  const tip = await getRef(`heads/${base}`, context);
+  if (!tip.ok) return tip;
+  const commit = await createCommit({
+    message: input.message ?? `revert: restore tree of ${parent.slice(0, 7)} (bad commit ${input.badSha.slice(0, 7)})`,
+    tree: parentCommit.data.treeSha,
+    parents: [tip.data.sha],
+    context
+  });
+  if (!commit.ok) return commit;
+  const ref = await createRef({ ref: `refs/heads/${input.branch}`, sha: commit.data.sha, context });
+  if (!ref.ok) return ref;
+  return {
+    ok: true,
+    status: 201,
+    data: { branch: input.branch, sha: commit.data.sha, restoredTree: parentCommit.data.treeSha }
+  };
+}
+function escapeRe(s) {
+  return s.replace(RE_SPECIALS, "\\$&");
+}
+function globToRegExp(glob) {
+  const parts = glob.split("/");
+  let source = "^";
+  parts.forEach((part, i) => {
+    const last = i === parts.length - 1;
+    if (part === "**") {
+      source += last ? ".*" : "(?:[^/]*/)*";
+      return;
+    }
+    source += part.split("*").map(escapeRe).join("[^/]*");
+    if (!last) source += "/";
+  });
+  return new RegExp(`${source}$`, "i");
+}
+function normalizeChangedPath(raw) {
+  const out = [];
+  for (const seg of raw.trim().replace(/\\/g, "/").split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join("/");
+}
+function matchProtectedGlobs(path) {
+  const normalized = normalizeChangedPath(path);
+  if (normalized === "") return [];
+  return COMPILED.filter((c) => c.re.test(normalized)).map((c) => c.glob);
+}
+function classifyChangedFiles(files) {
+  const matches = [];
+  const seen = /* @__PURE__ */ new Set();
+  let fileCount = 0;
+  const consider = (path) => {
+    fileCount += 1;
+    const globs2 = matchProtectedGlobs(path);
+    if (globs2.length === 0) return;
+    const key = normalizeChangedPath(path);
+    if (seen.has(key)) return;
+    seen.add(key);
+    matches.push({ file: key, globs: globs2 });
+  };
+  for (const entry of files ?? []) {
+    if (typeof entry === "string") {
+      consider(entry);
+      continue;
+    }
+    const name = entry && typeof entry === "object" ? entry.filename : void 0;
+    if (typeof name === "string" && name.trim() !== "") {
+      consider(name);
+      const prevRaw = entry.previous_filename ?? entry.previousFilename;
+      if (typeof prevRaw === "string" && prevRaw.trim() !== "") consider(prevRaw);
+      continue;
+    }
+    fileCount += 1;
+    if (!seen.has(UNRESOLVED_PATH_GLOB)) {
+      seen.add(UNRESOLVED_PATH_GLOB);
+      matches.push({ file: UNRESOLVED_PATH_GLOB, globs: [UNRESOLVED_PATH_GLOB] });
+    }
+  }
+  matches.sort((a, b) => a.file.localeCompare(b.file));
+  const globs = [...new Set(matches.flatMap((m) => m.globs))].sort();
+  return {
+    protected: matches.length > 0,
+    fileCount,
+    files: matches.map((m) => m.file),
+    globs,
+    matches
+  };
+}
+var API_BASE, TIMEOUT_MS, MAX_FILE_PAGES, FAILING_CONCLUSIONS, MARK_READY_MUTATION, PROTECTED_GLOBS, RE_SPECIALS, COMPILED, UNRESOLVED_PATH_GLOB;
+var init_github_server = __esm({
+  "app/lib/github.server.ts"() {
+    "use strict";
+    API_BASE = "https://api.github.com";
+    TIMEOUT_MS = 2e4;
+    MAX_FILE_PAGES = 30;
+    FAILING_CONCLUSIONS = /* @__PURE__ */ new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"]);
+    MARK_READY_MUTATION = `
+mutation MarkReady($id: ID!) {
+  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+    pullRequest { number isDraft }
+  }
+}`;
+    PROTECTED_GLOBS = [
+      // --- policy list ---
+      "**/checkout*",
+      "app/lib/emma-cart.server.ts",
+      "app/components/store/CartDrawer.tsx",
+      "app/lib/checkout-probe*",
+      "db/migrations/**",
+      "db/schema.ts",
+      "app/lib/*auth*",
+      "app/lib/*session*",
+      "app/lib/team.server.ts",
+      "app/lib/team-keys.ts",
+      ".github/**",
+      "vercel.json",
+      ".env*",
+      "package.json",
+      "app/lib/release-engine.server.ts",
+      "app/lib/github.server.ts",
+      // --- widenings (same intent, this repo's real filenames) ---
+      // Any file whose name mentions checkout or cart, at any depth: catches
+      // app/routes/admin.checkout-upsells.tsx, app/routes/api.cart.tsx,
+      // app/lib/cart.server.ts, and future money-path files nobody remembers to add.
+      // (This comment used to cite app/routes/_layout.checkout-extras.tsx, which
+      // does not exist in the repo. The glob was always fine; the example was not.)
+      "**/*checkout*",
+      "**/*cart*",
+      // Valve and spend definitions beyond the two named files.
+      "app/lib/homepage-team.server.ts",
+      "app/lib/homepage-team-keys.ts",
+      // The audited write path for every pipeline_settings key, including the
+      // release engine's own enable flag. A change here can weaken or bypass the
+      // attribution trail on the store's entire safety boundary, so it needs the
+      // owner's eyes even though the file itself is small.
+      "app/lib/settings.server.ts",
+      // The cron auth block lives here; a change to it is a change to who can
+      // trigger every scheduled job.
+      //
+      // The glob covers the siblings too, because the entry was previously an exact
+      // filename while the handlers it authorises live in server/cron.<job>.ts. That
+      // meant server/cron.pricing-batch-recompute.ts and every other scheduled
+      // handler was unprotected, which contradicts the reason this line exists: the
+      // auth block only decides who may *call* a job, and the job itself is where
+      // the money and the writes are. A single `*` never crosses a directory
+      // boundary, so this stays scoped to server/.
+      "server/cron*.ts",
+      // Lockfile is the other half of package.json for supply chain.
+      "package-lock.json",
+      "**/package.json",
+      "**/package-lock.json",
+      // Nested env files, not just repo root.
+      "**/.env*"
+    ];
+    RE_SPECIALS = /[.+?^${}()|[\]\\]/g;
+    COMPILED = PROTECTED_GLOBS.map((glob) => ({ glob, re: globToRegExp(glob) }));
+    UNRESOLVED_PATH_GLOB = "<unresolved-path>";
+  }
+});
+
+// app/lib/ticket-janitor.server.ts
+import { and as and4, eq as eq11, isNull as isNull2, notInArray, or as or2, sql as sql6 } from "drizzle-orm";
+function hoursBetween(then, now) {
+  return Math.max(0, (now.getTime() - then.getTime()) / 36e5);
+}
+function toStale(r, since, now) {
+  return {
+    id: r.id,
+    status: r.status,
+    kind: r.kind,
+    priority: r.priority,
+    ageHours: Math.round(hoursBetween(since, now)),
+    suggestion: r.suggestion
+  };
+}
+function isBlank(s) {
+  return s == null || s.trim() === "";
+}
+function classifySlaBreaches(rows, now = /* @__PURE__ */ new Date()) {
+  const prOpen = [];
+  const inReview = [];
+  const approvedCode = [];
+  const proposed = [];
+  const blocked = [];
+  for (const r of rows) {
+    if (r.status === "pr_open" && hoursBetween(r.updatedAt, now) > SLA.prOpenHours) {
+      prOpen.push(toStale(r, r.updatedAt, now));
+    } else if (r.status === "in_review" && hoursBetween(r.updatedAt, now) > SLA.inReviewHours) {
+      inReview.push(toStale(r, r.updatedAt, now));
+    } else if (r.status === "approved" && r.kind === "code" && hoursBetween(r.createdAt, now) > SLA.approvedCodeDays * 24) {
+      approvedCode.push(toStale(r, r.createdAt, now));
+    } else if (r.status === "proposed" && hoursBetween(r.createdAt, now) > SLA.proposedHours) {
+      proposed.push(toStale(r, r.createdAt, now));
+    }
+    if (r.status === "blocked") {
+      blocked.push({
+        id: r.id,
+        kind: r.kind,
+        ageHours: Math.round(hoursBetween(r.updatedAt, now)),
+        suggestion: r.suggestion,
+        lastError: r.lastError,
+        emptyReason: isBlank(r.lastError) && isBlank(r.noteRef)
+      });
+    }
+  }
+  const sortOldest = (a, b) => b.ageHours - a.ageHours;
+  prOpen.sort(sortOldest);
+  inReview.sort(sortOldest);
+  approvedCode.sort(sortOldest);
+  proposed.sort(sortOldest);
+  blocked.sort((a, b) => b.ageHours - a.ageHours);
+  return {
+    prOpen,
+    inReview,
+    approvedCode: {
+      count: approvedCode.length,
+      oldest: approvedCode[0] ?? null,
+      rows: approvedCode
+    },
+    proposed,
+    blocked
+  };
+}
+function parsePrNumber(ref) {
+  const m = /\/pulls?\/(\d+)(?:$|[/?#])/.exec(ref);
+  return m?.[1] ? Number(m[1]) : null;
+}
+function classifyOrphans(candidates) {
+  const out = [];
+  for (const c of candidates) {
+    if (TERMINAL_STATUSES.includes(c.status)) continue;
+    if (!c.pr) continue;
+    if (c.pr.merged) {
+      out.push({ ticketId: c.ticketId, status: c.status, prRef: c.prRef, prOutcome: "merged" });
+    } else if (c.pr.state === "closed") {
+      out.push({ ticketId: c.ticketId, status: c.status, prRef: c.prRef, prOutcome: "closed" });
+    }
+  }
+  return out;
+}
+function checkRoutineLiveness(lastRuns, now = /* @__PURE__ */ new Date(), cadences = ROUTINE_CADENCES) {
+  const newest = /* @__PURE__ */ new Map();
+  for (const r of lastRuns) {
+    const at = r.startedAt instanceof Date ? r.startedAt : new Date(r.startedAt);
+    if (Number.isNaN(at.getTime())) continue;
+    for (const key of [`${r.team}|${r.runType}`, `|${r.runType}`]) {
+      const prev = newest.get(key);
+      if (!prev || prev < at) newest.set(key, at);
+    }
+  }
+  const flags = [];
+  for (const c of cadences) {
+    const key = c.team === null ? `|${c.runType}` : `${c.team}|${c.runType}`;
+    const last = newest.get(key) ?? null;
+    const hoursSince = last ? hoursBetween(last, now) : null;
+    if (hoursSince !== null && hoursSince <= c.maxGapHours) continue;
+    flags.push({
+      routine: c.routine,
+      team: c.team,
+      runType: c.runType,
+      schedule: c.schedule,
+      lastRunAt: last ? last.toISOString() : null,
+      hoursSince: hoursSince === null ? null : Math.round(hoursSince),
+      maxGapHours: c.maxGapHours
+    });
+  }
+  return flags;
+}
+function computeNetPerDay(created, terminal, days = 7) {
+  if (days <= 0) return 0;
+  return Math.round((created - terminal) / days * 10) / 10;
+}
+async function gatherSlaRows() {
+  const res = await db.execute(sql6`
+    SELECT s.id, s.status, s.kind, s.priority, s.suggestion, s.last_error,
+           s.created_at, s.updated_at,
+           (SELECT l.ref FROM suggestion_links l
+             WHERE l.suggestion_id = s.id AND l.kind = 'note'
+             ORDER BY l.created_at DESC LIMIT 1) AS note_ref
+      FROM homepage_team_suggestions s
+     WHERE s.status IN ('pr_open', 'in_review', 'approved', 'proposed', 'blocked')`);
+  return (res.rows ?? []).map((r) => ({
+    id: Number(r["id"] ?? 0),
+    status: String(r["status"] ?? ""),
+    kind: String(r["kind"] ?? ""),
+    priority: Number(r["priority"] ?? 3),
+    suggestion: String(r["suggestion"] ?? ""),
+    lastError: r["last_error"] == null ? null : String(r["last_error"]),
+    noteRef: r["note_ref"] == null ? null : String(r["note_ref"]),
+    createdAt: new Date(String(r["created_at"] ?? 0)),
+    updatedAt: new Date(String(r["updated_at"] ?? 0))
+  }));
+}
+async function gatherOrphans() {
+  if (!isGithubConfigured()) return { orphans: [], skipped: true };
+  const res = await db.execute(sql6`
+    SELECT DISTINCT ON (s.id) s.id, s.status, l.ref
+      FROM homepage_team_suggestions s
+      JOIN suggestion_links l ON l.suggestion_id = s.id AND l.kind = 'pr'
+     WHERE s.status NOT IN ('applied', 'dismissed')
+     ORDER BY s.id, l.created_at DESC`);
+  const rows = (res.rows ?? []).map((r) => ({
+    ticketId: Number(r["id"] ?? 0),
+    status: String(r["status"] ?? ""),
+    prRef: String(r["ref"] ?? "")
+  }));
+  const byNumber = /* @__PURE__ */ new Map();
+  const candidates = [];
+  for (const row of rows) {
+    const num3 = parsePrNumber(row.prRef);
+    if (num3 === null) continue;
+    if (!byNumber.has(num3)) {
+      if (byNumber.size >= MAX_GITHUB_READS) continue;
+      const pr = await getPullRequest(num3, "ticket-janitor");
+      byNumber.set(num3, pr.ok ? { merged: pr.data.merged, state: pr.data.state } : null);
+    }
+    candidates.push({ ...row, pr: byNumber.get(num3) ?? null });
+  }
+  return { orphans: classifyOrphans(candidates), skipped: false };
+}
+async function gatherBacklog() {
+  const res = await db.execute(sql6`
+    SELECT
+      (SELECT COUNT(*) FROM homepage_team_suggestions
+        WHERE created_at >= now() - interval '7 days')::int AS created,
+      (SELECT COUNT(*) FROM homepage_team_suggestions
+        WHERE status IN ('applied', 'dismissed')
+          AND updated_at >= now() - interval '7 days')::int AS terminal`);
+  const row = (res.rows ?? [])[0];
+  const created = Number(row?.["created"] ?? 0);
+  const terminal = Number(row?.["terminal"] ?? 0);
+  return { created7d: created, terminal7d: terminal, netPerDay: computeNetPerDay(created, terminal) };
+}
+async function gatherRoutineFlags() {
+  const res = await db.execute(sql6`
+    SELECT team, run_type, MAX(started_at) AS last_started
+      FROM homepage_team_runs
+     GROUP BY team, run_type`);
+  const lastRuns = (res.rows ?? []).map((r) => ({
+    team: String(r["team"] ?? ""),
+    runType: String(r["run_type"] ?? ""),
+    startedAt: String(r["last_started"] ?? "")
+  }));
+  return checkRoutineLiveness(lastRuns);
+}
+async function computeTicketLoopHealth() {
+  const health = {
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    sla: EMPTY_SLA,
+    orphans: [],
+    orphanScanSkipped: true,
+    backlog: { created7d: 0, terminal7d: 0, netPerDay: 0 },
+    routineFlags: []
+  };
+  try {
+    health.sla = classifySlaBreaches(await gatherSlaRows());
+  } catch (err2) {
+    console.warn("[ticket-janitor] SLA sweep failed:", String(err2).slice(0, 200));
+  }
+  try {
+    const { orphans, skipped } = await gatherOrphans();
+    health.orphans = orphans;
+    health.orphanScanSkipped = skipped;
+  } catch (err2) {
+    console.warn("[ticket-janitor] orphan scan failed:", String(err2).slice(0, 200));
+  }
+  try {
+    health.backlog = await gatherBacklog();
+  } catch (err2) {
+    console.warn("[ticket-janitor] backlog trajectory failed:", String(err2).slice(0, 200));
+  }
+  try {
+    health.routineFlags = await gatherRoutineFlags();
+  } catch (err2) {
+    console.warn("[ticket-janitor] routine liveness failed:", String(err2).slice(0, 200));
+  }
+  return health;
+}
+async function reconcilePrLinkStates(opts = {}) {
+  if (!isGithubConfigured()) return { checked: 0, updated: [], skipped: true };
+  const maxChecks = opts.maxChecks ?? MAX_GITHUB_READS;
+  const links = await db.select({ id: suggestionLinks.id, ref: suggestionLinks.ref, state: suggestionLinks.state }).from(suggestionLinks).where(and4(
+    eq11(suggestionLinks.kind, "pr"),
+    or2(isNull2(suggestionLinks.state), notInArray(suggestionLinks.state, ["merged", "closed"]))
+  )).limit(200);
+  const byNumber = /* @__PURE__ */ new Map();
+  const updated = [];
+  for (const link2 of links) {
+    const num3 = parsePrNumber(link2.ref);
+    if (num3 === null) continue;
+    if (!byNumber.has(num3)) {
+      if (byNumber.size >= maxChecks) continue;
+      const pr2 = await getPullRequest(num3, "ticket-janitor");
+      byNumber.set(num3, pr2.ok ? { merged: pr2.data.merged, state: pr2.data.state } : null);
+    }
+    const pr = byNumber.get(num3);
+    if (!pr) continue;
+    const next = pr.merged ? "merged" : pr.state === "closed" ? "closed" : null;
+    if (next === null || next === link2.state) continue;
+    await db.update(suggestionLinks).set({ state: next, updatedAt: /* @__PURE__ */ new Date() }).where(eq11(suggestionLinks.id, link2.id));
+    updated.push({ linkId: link2.id, ref: link2.ref, from: link2.state, to: next });
+  }
+  return { checked: byNumber.size, updated, skipped: false };
+}
+var SLA, TERMINAL_STATUSES, TWICE_DAILY_GAP, RDEV_GAP, DAILY_GAP, WEEKLY_GAP, TWICE_WEEKLY_GAP, ROUTINE_CADENCES, EMPTY_SLA, MAX_GITHUB_READS;
+var init_ticket_janitor_server = __esm({
+  "app/lib/ticket-janitor.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_github_server();
+    SLA = {
+      prOpenHours: 24,
+      inReviewHours: 12,
+      approvedCodeDays: 7,
+      proposedHours: 72
+    };
+    TERMINAL_STATUSES = ["applied", "dismissed"];
+    TWICE_DAILY_GAP = 12 + 2;
+    RDEV_GAP = 18 + 2;
+    DAILY_GAP = 24 + 2;
+    WEEKLY_GAP = 168 + 26;
+    TWICE_WEEKLY_GAP = 96 + 26;
+    ROUTINE_CADENCES = [
+      { routine: "R-DEV daily dev", team: "strategy", runType: "dev", kind: "twice-daily", schedule: "14:00 and 20:00 daily", maxGapHours: RDEV_GAP },
+      { routine: "R-QA daily QA gate", team: "strategy", runType: "qa", kind: "twice-daily", schedule: "03:30 and 15:30 daily", maxGapHours: TWICE_DAILY_GAP },
+      { routine: "Daily content writer", team: "content", runType: "content", kind: "daily", schedule: "15:00 daily", maxGapHours: DAILY_GAP },
+      { routine: "Daily merchandiser (Routine A)", team: "homepage", runType: "merchandise", kind: "daily", schedule: "10:00 daily", maxGapHours: DAILY_GAP },
+      { routine: "Daily social drafts", team: "social", runType: "social", kind: "daily", schedule: "14:00 daily", maxGapHours: DAILY_GAP },
+      { routine: "Daily product manager", team: "product", runType: "product", kind: "daily", schedule: "09:00 daily", maxGapHours: DAILY_GAP },
+      { routine: "Daily pricing sweep", team: null, runType: "pricing", kind: "daily", schedule: "14:37 daily (no team gate)", maxGapHours: DAILY_GAP },
+      { routine: "Weekly strategy", team: "strategy", runType: "strategy", kind: "weekly", schedule: "Mon 12:00", maxGapHours: WEEKLY_GAP },
+      { routine: "Apply pass (agent-editor)", team: "strategy", runType: "apply", kind: "twice-weekly", schedule: "Mon and Thu 22:00", maxGapHours: TWICE_WEEKLY_GAP },
+      { routine: "Cost review", team: "strategy", runType: "cost-review", kind: "weekly", schedule: "Mon 21:00", maxGapHours: WEEKLY_GAP },
+      { routine: "Weekly off-site scout", team: "strategy", runType: "offsite", kind: "weekly", schedule: "Tue 16:00", maxGapHours: WEEKLY_GAP },
+      { routine: "Weekly SEO curation", team: "content", runType: "seo-curation", kind: "weekly", schedule: "Sun 19:00", maxGapHours: WEEKLY_GAP },
+      { routine: "Weekly podcast review", team: "content", runType: "manual", kind: "weekly", schedule: "Wed 21:05", maxGapHours: WEEKLY_GAP },
+      { routine: "Weekly trend scout", team: "content", runType: "trend-scout", kind: "weekly", schedule: "Sat 19:00", maxGapHours: WEEKLY_GAP },
+      { routine: "Weekly business research", team: "social", runType: "research", kind: "weekly", schedule: "Thu 16:00", maxGapHours: WEEKLY_GAP }
+    ];
+    EMPTY_SLA = {
+      prOpen: [],
+      inReview: [],
+      approvedCode: { count: 0, oldest: null, rows: [] },
+      proposed: [],
+      blocked: []
+    };
+    MAX_GITHUB_READS = 20;
+  }
+});
+
 // app/lib/checkout-probe.server.ts
 var checkout_probe_server_exports = {};
 __export(checkout_probe_server_exports, {
@@ -18425,8 +19133,8 @@ async function followWithCookies(startUrl, maxHops = 12) {
     const getSetCookie = res.headers.getSetCookie;
     for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
       const pair = sc.split(";")[0] ?? "";
-      const eq29 = pair.indexOf("=");
-      if (eq29 > 0) jar.set(pair.slice(0, eq29).trim(), pair.slice(eq29 + 1).trim());
+      const eq30 = pair.indexOf("=");
+      if (eq30 > 0) jar.set(pair.slice(0, eq30).trim(), pair.slice(eq30 + 1).trim());
     }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
@@ -18690,7 +19398,7 @@ async function runGscSnapshot() {
   }
   const topQueries = mapRows(queryRows, "query");
   const topPages = mapRows(pageRows, "page");
-  await sql6`
+  await sql7`
     INSERT INTO gsc_snapshots (period_start, period_end, totals, top_queries, top_pages, sitemaps)
     VALUES (
       ${periodStart}, ${periodEnd},
@@ -18712,11 +19420,11 @@ async function runGscSnapshot() {
     }
   };
 }
-var sql6, SCOPE, TOKEN_URL, DEFAULT_SITE;
+var sql7, SCOPE, TOKEN_URL, DEFAULT_SITE;
 var init_gsc_server = __esm({
   "app/lib/gsc.server.ts"() {
     "use strict";
-    sql6 = neon3(process.env["DATABASE_URL"]);
+    sql7 = neon3(process.env["DATABASE_URL"]);
     SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
     TOKEN_URL = "https://oauth2.googleapis.com/token";
     DEFAULT_SITE = "sc-domain:xdipx.com";
@@ -18819,15 +19527,15 @@ async function runGscIndexSweep(opts = {}) {
   if (entries.length === 0) throw new Error("sitemap parsed to zero URLs; refusing to flag everything absent");
   const urls = entries.map((e) => e.url);
   const lastmods = entries.map((e) => e.lastmod);
-  await sql7`
+  await sql8`
     INSERT INTO gsc_url_inspections (url, sitemap_lastmod)
     SELECT u, m FROM unnest(${urls}::text[], ${lastmods}::text[]) AS t(u, m)
     ON CONFLICT (url) DO UPDATE
       SET in_sitemap = TRUE, sitemap_lastmod = EXCLUDED.sitemap_lastmod`;
-  await sql7`
+  await sql8`
     UPDATE gsc_url_inspections SET in_sitemap = FALSE
     WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`;
-  const batch = await sql7`
+  const batch = await sql8`
     SELECT url, coverage_state, verdict FROM gsc_url_inspections
     WHERE in_sitemap OR coverage_state = ANY(${DEAD_VERDICT_STATES}::text[])
     ORDER BY last_inspected_at ASC NULLS FIRST, first_seen_at ASC
@@ -18859,7 +19567,7 @@ async function runGscIndexSweep(opts = {}) {
       const isIndexed = r.verdict === "PASS";
       if (row.verdict !== null && !wasIndexed && isIndexed) newlyIndexed++;
       if (wasIndexed && !isIndexed) newlyDropped++;
-      await sql7`
+      await sql8`
         UPDATE gsc_url_inspections SET
           verdict = ${r.verdict ?? null},
           coverage_state = ${newCoverage},
@@ -18879,7 +19587,7 @@ async function runGscIndexSweep(opts = {}) {
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batch.length) }, () => worker()));
   const quotaUsedToday = inspected > 0 ? await kvIncrBy(quotaKey, inspected) : used;
-  const aggRows = await sql7`
+  const aggRows = await sql8`
     SELECT
       count(*) FILTER (WHERE in_sitemap)::int AS sitemap_urls,
       count(*) FILTER (WHERE in_sitemap AND last_inspected_at IS NOT NULL)::int AS inspected_urls,
@@ -18893,7 +19601,7 @@ async function runGscIndexSweep(opts = {}) {
                        AND google_canonical <> user_canonical)::int AS canonical_mismatches
     FROM gsc_url_inspections`;
   const agg = aggRows[0];
-  await sql7`
+  await sql8`
     INSERT INTO gsc_index_daily (
       day, sitemap_urls, inspected_urls, indexed_count, crawled_not_indexed,
       discovered_not_indexed, other_not_indexed, canonical_mismatches,
@@ -18932,13 +19640,13 @@ async function runGscIndexSweep(opts = {}) {
     }
   };
 }
-var sql7, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
+var sql8, DEAD_VERDICT_STATES, INSPECT_URL, DAILY_QUOTA_CEILING, DEFAULT_RUN_BUDGET, CONCURRENCY, QuotaExhaustedError;
 var init_gsc_index_server = __esm({
   "app/lib/gsc-index.server.ts"() {
     "use strict";
     init_gsc_server();
     init_kv_server();
-    sql7 = neon4(process.env["DATABASE_URL"]);
+    sql8 = neon4(process.env["DATABASE_URL"]);
     DEAD_VERDICT_STATES = ["Not found (404)", "Soft 404", "Server error (5xx)"];
     INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
     DAILY_QUOTA_CEILING = 1900;
@@ -18957,7 +19665,7 @@ __export(seo_daily_server_exports, {
   isoWeek: () => isoWeek,
   runSeoDaily: () => runSeoDaily
 });
-import { sql as sql8 } from "drizzle-orm";
+import { sql as sql9 } from "drizzle-orm";
 function delta(a, b) {
   return typeof a === "number" && typeof b === "number" ? a - b : null;
 }
@@ -19038,7 +19746,7 @@ async function coverageCounters() {
     enrichedDistinctProducts: null
   };
   try {
-    const res = await db.execute(sql8`
+    const res = await db.execute(sql9`
       SELECT
         jsonb_array_length(index_json::jsonb)::int AS total,
         (SELECT count(*)::int FROM jsonb_array_elements(index_json::jsonb) e
@@ -19049,7 +19757,7 @@ async function coverageCounters() {
           WHERE e->>'imageUrl' IS NOT NULL AND e->>'imageUrl' <> '') AS has_image
       FROM discovery_index_payload WHERE version = 'v7' LIMIT 1`);
     const row = (res.rows ?? [])[0];
-    const enrichRes = await db.execute(sql8`
+    const enrichRes = await db.execute(sql9`
       SELECT count(DISTINCT product_id)::int AS n FROM product_enrichment_cache`);
     const enriched = (enrichRes.rows ?? [])[0];
     return {
@@ -19078,17 +19786,17 @@ async function runSeoDaily() {
     }
   };
   const today = await guard("gsc_index_daily latest", async () => {
-    const r = await db.execute(sql8`SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
+    const r = await db.execute(sql9`SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily ORDER BY day DESC LIMIT 1`);
     return (r.rows ?? [])[0] ?? null;
   }, null);
   const weekAgo = await guard("gsc_index_daily week-ago", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT ${INDEX_DAILY_COLS} FROM gsc_index_daily
       WHERE day <= now()::date - 7 ORDER BY day DESC LIMIT 1`);
     return (r.rows ?? [])[0] ?? null;
   }, null);
   const transitions = await guard("coverage transitions", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT
         count(*) FILTER (
           WHERE verdict = 'PASS'
@@ -19103,7 +19811,7 @@ async function runSeoDaily() {
     return { cleared: num2(row?.["cleared"]), regressed: num2(row?.["regressed"]), total: num2(row?.["total"]) };
   }, { cleared: 0, regressed: 0, total: 0 });
   const verdictCounts = await guard("verdict breakdown", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT COALESCE(coverage_state, 'unknown') AS state, count(*)::int AS n
       FROM gsc_url_inspections WHERE in_sitemap GROUP BY 1 ORDER BY 2 DESC`);
     const out = {};
@@ -19114,12 +19822,12 @@ async function runSeoDaily() {
   }, {});
   const serverErrors = verdictCounts["Server error (5xx)"] ?? 0;
   const indexnowPushed24h = await guard("indexnow ledger", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT count(*)::int AS n FROM indexnow_pings WHERE pinged_at >= now() - interval '24 hours'`);
     return num2((r.rows ?? [])[0]?.n);
   }, 0);
   const snapshot = await guard("gsc_snapshots", async () => {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT captured_at::text AS captured_at, period_start::text AS period_start,
              period_end::text AS period_end, totals
       FROM gsc_snapshots ORDER BY captured_at DESC LIMIT 1`);
@@ -19223,7 +19931,7 @@ async function runSeoDaily() {
     errors
   };
   await guard("persist seo_coverage_daily", async () => {
-    await db.execute(sql8`
+    await db.execute(sql9`
       INSERT INTO seo_coverage_daily (
         day, discovery_total, has_type_dial, has_mood, has_image,
         enriched_distinct_products, notes
@@ -19245,7 +19953,7 @@ async function runSeoDaily() {
 }
 async function getLatestSeoDaily() {
   try {
-    const r = await db.execute(sql8`
+    const r = await db.execute(sql9`
       SELECT day::text AS day, notes FROM seo_coverage_daily ORDER BY day DESC LIMIT 1`);
     const row = (r.rows ?? [])[0];
     if (!row) return null;
@@ -19270,7 +19978,7 @@ var init_seo_daily_server = __esm({
     INDEXED_DROP_PCT = 5;
     NEWLY_DROPPED_MAX = 20;
     SERVER_ERROR_MAX = 10;
-    INDEX_DAILY_COLS = sql8`
+    INDEX_DAILY_COLS = sql9`
   day::text AS day, sitemap_urls, inspected_urls, indexed_count,
   crawled_not_indexed, discovered_not_indexed, other_not_indexed,
   canonical_mismatches, newly_indexed, newly_dropped`;
@@ -19286,13 +19994,15 @@ __export(owner_digest_server_exports, {
   parseRenderTruth: () => parseRenderTruth,
   renderEscalationsSection: () => renderEscalationsSection,
   renderHomepageNowSection: () => renderHomepageNowSection,
+  renderNeedsMikeSection: () => renderNeedsMikeSection,
   renderOpsWatchSection: () => renderOpsWatchSection,
   renderOwnerQueueSection: () => renderOwnerQueueSection,
   renderShippedSection: () => renderShippedSection,
+  renderTicketLoopSection: () => renderTicketLoopSection,
   renderTicketsSection: () => renderTicketsSection,
   runOwnerDigest: () => runOwnerDigest
 });
-import { sql as sql9 } from "drizzle-orm";
+import { sql as sql10 } from "drizzle-orm";
 function esc(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -19439,6 +20149,65 @@ function renderEscalationsSection(e) {
   }
   return parts.join("");
 }
+function agePhrase(hours) {
+  return hours >= 48 ? `${Math.round(hours / 24)}d` : `${hours}h`;
+}
+function renderTicketLoopSection(h) {
+  if (!h) {
+    return `<p style="margin:0;color:${WARN};">The ticket-loop janitor did not report this run, so SLA, orphan, and routine-liveness state is unknown. This is not a pass.</p>`;
+  }
+  const parts = [];
+  const net = h.backlog.netPerDay;
+  const netColor = net > 0 ? WARN : GOOD;
+  parts.push(`<p style="margin:0 0 4px;">Backlog, last 7 days: ${h.backlog.created7d} opened &middot; ${h.backlog.terminal7d} closed &middot; <span style="color:${netColor};">net ${net >= 0 ? "+" : ""}${net}/day</span></p>`);
+  const staleList = (label, rows, limit = 5) => rows.length ? `<p style="margin:6px 0 2px;color:${WARN};">${label} (${rows.length}):</p><ul style="margin:0;padding-left:18px;">${rows.slice(0, limit).map((r) => `<li>#${r.id} &middot; ${agePhrase(r.ageHours)} &middot; ${esc(clip(r.suggestion, 100))}</li>`).join("")}</ul>` : "";
+  parts.push(staleList(`pr_open older than ${SLA_LABELS.prOpen}`, h.sla.prOpen));
+  parts.push(staleList(`in_review older than ${SLA_LABELS.inReview} (a crashed QA pass leaves rows here)`, h.sla.inReview));
+  if (h.sla.approvedCode.count > 0) {
+    const oldest = h.sla.approvedCode.oldest;
+    parts.push(`<p style="margin:6px 0 2px;color:${WARN};">${h.sla.approvedCode.count} approved code ticket${h.sla.approvedCode.count === 1 ? "" : "s"} older than ${SLA_LABELS.approvedCode}${oldest ? `, oldest #${oldest.id} at ${agePhrase(oldest.ageHours)}` : ""}.</p>`);
+  }
+  parts.push(staleList(`proposed older than ${SLA_LABELS.proposed} (triage is not looking)`, h.sla.proposed));
+  if (h.sla.blocked.length) {
+    const empty = h.sla.blocked.filter((b) => b.emptyReason);
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.sla.blocked.length} blocked ticket${h.sla.blocked.length === 1 ? "" : "s"}${empty.length ? `, <strong>${empty.length} with no recorded reason</strong> (nobody can clear a block that does not say what it is)` : ""}:</p><ul style="margin:0;padding-left:18px;">${h.sla.blocked.slice(0, 8).map((b) => `<li>#${b.id} (${esc(b.kind)}, ${agePhrase(b.ageHours)})${b.emptyReason ? ` <span style="color:${BAD};">no reason</span>` : ""} ${esc(clip(b.suggestion, 90))}</li>`).join("")}</ul>`);
+  }
+  if (h.orphanScanSkipped) {
+    parts.push(`<p style="margin:6px 0 4px;color:${MUTED};">Orphan scan skipped (GitHub not readable this run).</p>`);
+  } else if (h.orphans.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.orphans.length} orphaned ticket${h.orphans.length === 1 ? "" : "s"} (still live, but the PR is already ${h.orphans.every((o) => o.prOutcome === "merged") ? "merged" : "merged or closed"}, so nothing will ever touch them):</p><ul style="margin:0;padding-left:18px;">${h.orphans.slice(0, 6).map((o) => `<li>#${o.ticketId} (${esc(o.status)}) &middot; ${link(o.prRef, prLabel(o.prRef))} ${esc(o.prOutcome)}</li>`).join("")}</ul>`);
+  } else {
+    parts.push(`<p style="margin:6px 0 4px;color:${GOOD};">No orphaned tickets.</p>`);
+  }
+  if (h.routineFlags.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.routineFlags.length} routine${h.routineFlags.length === 1 ? "" : "s"} past cadence plus grace:</p><ul style="margin:0;padding-left:18px;">${h.routineFlags.map((f) => `<li>${esc(f.routine)} (${esc(f.schedule)} UTC) &middot; ${f.lastRunAt ? `last run ${esc(f.lastRunAt.slice(0, 16).replace("T", " "))} UTC, ${f.hoursSince}h ago` : "<strong>no run row ever</strong>"}</li>`).join("")}</ul>`);
+  } else {
+    parts.push(`<p style="margin:6px 0 0;color:${GOOD};">Every expected routine has run inside its cadence window.</p>`);
+  }
+  return parts.filter(Boolean).join("");
+}
+function renderNeedsMikeSection(f) {
+  const items = [];
+  for (const p of f.needsOwnerPrs.slice(0, 5)) {
+    items.push(`${link(p.ref, prLabel(p.ref))} waits on your merge (protected path)${p.ticketId > 0 ? ` &middot; ticket #${p.ticketId}` : ""}`);
+  }
+  for (const b of f.blockedRows.slice(0, 5)) {
+    items.push(`#${b.id} is blocked (${esc(b.kind)}) ${esc(clip(b.suggestion, 80))}`);
+  }
+  for (const r of f.staleOwnerRows.slice(0, 5)) {
+    items.push(`#${r.id} (${esc(r.kind)}) approved ${r.ageDays}d ago and only you can execute it: ${esc(clip(r.suggestion, 80))}`);
+  }
+  for (const o of f.orphans.slice(0, 5)) {
+    items.push(`#${o.ticketId} is orphaned: its ${link(o.prRef, prLabel(o.prRef))} is ${esc(o.prOutcome)} but the ticket sits ${esc(o.status)}`);
+  }
+  for (const m of f.missedRoutines.slice(0, 5)) {
+    items.push(`Routine ${esc(m.routine)} missed its window (${esc(m.schedule)} UTC): ${m.lastRunAt ? `last run ${m.hoursSince}h ago` : "no run row ever"}`);
+  }
+  if (items.length === 0) {
+    return `<p style="margin:0;color:${GOOD};">Nothing on this list today.</p>`;
+  }
+  return `<ul style="margin:0;padding-left:18px;">${items.map((i) => `<li style="margin-bottom:3px;">${i}</li>`).join("")}</ul>`;
+}
 function parseRenderTruth(raw) {
   if (!raw || typeof raw !== "object") return null;
   const r = raw;
@@ -19460,7 +20229,7 @@ function parseRenderTruth(raw) {
 async function gatherShipped() {
   const items = [];
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT l.suggestion_id AS ticket_id, l.ref, l.updated_at::text AS at,
              COALESCE(s.kind, 'code') AS kind, COALESCE(s.suggestion, '') AS suggestion
       FROM suggestion_links l
@@ -19482,7 +20251,7 @@ async function gatherShipped() {
     console.warn("[owner-digest] suggestion_links unavailable (migration 070?):", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT id, kind, suggestion, apply_ref, updated_at::text AS at
       FROM homepage_team_suggestions
       WHERE status = 'applied' AND updated_at >= now() - interval '24 hours'
@@ -19536,7 +20305,7 @@ async function gatherHomepageNow() {
   }
   let renderTickets = [];
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT id, status, suggestion
       FROM homepage_team_suggestions
       WHERE dedupe_key LIKE 'render:%' AND status NOT IN ('applied', 'dismissed')
@@ -19578,23 +20347,23 @@ async function gatherTicketMetrics(statusCounts) {
   };
   try {
     const [openedRes, closedRes, blockedRes, oldestRes, finalRes, blockedRowsRes] = await Promise.all([
-      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE created_at >= now() - interval '24 hours' GROUP BY kind`),
-      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE status IN ('applied', 'dismissed')
                         AND updated_at >= now() - interval '24 hours' GROUP BY kind`),
-      db.execute(sql9`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
+      db.execute(sql10`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE status = 'blocked' GROUP BY kind`),
-      db.execute(sql9`SELECT id, suggestion,
+      db.execute(sql10`SELECT id, suggestion,
                             EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
                        FROM homepage_team_suggestions
                       WHERE status = 'approved' ORDER BY created_at ASC LIMIT 1`),
-      db.execute(sql9`SELECT id, status, kind, attempt_count, last_error, suggestion
+      db.execute(sql10`SELECT id, status, kind, attempt_count, last_error, suggestion
                        FROM homepage_team_suggestions
                       WHERE attempt_count = ${MAX_TICKET_ATTEMPTS - 1}
                         AND status NOT IN ('applied', 'dismissed')
                       ORDER BY priority ASC, updated_at DESC LIMIT 10`),
-      db.execute(sql9`SELECT id, status, kind, attempt_count, last_error, suggestion
+      db.execute(sql10`SELECT id, status, kind, attempt_count, last_error, suggestion
                        FROM homepage_team_suggestions
                       WHERE status = 'blocked'
                       ORDER BY priority ASC, updated_at DESC LIMIT 8`)
@@ -19620,7 +20389,7 @@ async function gatherTicketMetrics(statusCounts) {
 }
 async function ageOutStaleSuggestions() {
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       UPDATE homepage_team_suggestions
          SET status = 'dismissed',
              decided_by = 'system',
@@ -19640,16 +20409,16 @@ async function ageOutStaleSuggestions() {
 async function gatherOwnerQueue(agedOut) {
   const out = { rows: [], totalCount: 0, agedOut };
   try {
-    const kinds = sql9.join(OWNER_DECISION_KINDS.map((k) => sql9`${k}`), sql9`, `);
+    const kinds = sql10.join(OWNER_DECISION_KINDS.map((k) => sql10`${k}`), sql10`, `);
     const [listRes, countRes] = await Promise.all([
-      db.execute(sql9`
+      db.execute(sql10`
         SELECT id, kind, team, target_team, decided_by, suggestion,
                EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
           FROM homepage_team_suggestions
          WHERE status = 'approved' AND kind IN (${kinds})
          ORDER BY created_at ASC
          LIMIT 30`),
-      db.execute(sql9`
+      db.execute(sql10`
         SELECT COUNT(*)::int AS n
           FROM homepage_team_suggestions
          WHERE status = 'approved' AND kind IN (${kinds})`)
@@ -19681,7 +20450,7 @@ async function gatherOpsWatch() {
     agentRetired: []
   };
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT COUNT(*)::int AS n,
              EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 86400 AS oldest_days
         FROM social_posts
@@ -19697,7 +20466,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] social draft sweep failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT COUNT(*)::int AS n
         FROM pricing_audit_log
        WHERE trigger = 'batch'
@@ -19708,7 +20477,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] pricing batch check failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT EXTRACT(epoch FROM now() - MAX(created_at))::float8 / 3600 AS age_hours
         FROM product_enrichment_cache`);
     const raw = (res.rows ?? [])[0]?.["age_hours"];
@@ -19717,7 +20486,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] enrichment age check failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT COUNT(DISTINCT s.id)::int AS n
         FROM homepage_team_suggestions s
         JOIN suggestion_links l ON l.suggestion_id = s.id AND l.kind = 'pr'
@@ -19728,7 +20497,7 @@ async function gatherOpsWatch() {
     console.warn("[owner-digest] stranded-ticket count failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT id, kind, suggestion
         FROM homepage_team_suggestions
        WHERE status = 'dismissed'
@@ -19748,10 +20517,34 @@ async function gatherOpsWatch() {
   }
   return out;
 }
+async function gatherStaleOwnerRows() {
+  try {
+    const res = await db.execute(sql10`
+      SELECT id, kind, suggestion,
+             EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
+        FROM homepage_team_suggestions
+       WHERE status = 'approved'
+         AND kind IN ('promo', 'campaign', 'program')
+         AND created_at < now() - interval '3 days'
+       ORDER BY created_at ASC LIMIT 10`);
+    return (res.rows ?? []).map((r) => {
+      const row = r;
+      return {
+        id: Number(row["id"] ?? 0),
+        kind: String(row["kind"] ?? ""),
+        ageDays: Math.round(Number(row["age_days"] ?? 0)),
+        suggestion: String(row["suggestion"] ?? "")
+      };
+    });
+  } catch (err2) {
+    console.warn("[owner-digest] stale owner-row sweep failed:", String(err2).slice(0, 200));
+    return [];
+  }
+}
 async function gatherEscalations() {
   const out = { protectedPrs: [], exhausted: [] };
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT l.suggestion_id AS ticket_id, l.ref, l.state,
              COALESCE(s.suggestion, '') AS suggestion
       FROM suggestion_links l
@@ -19772,7 +20565,7 @@ async function gatherEscalations() {
     console.warn("[owner-digest] protected-PR sweep failed:", String(err2).slice(0, 200));
   }
   try {
-    const res = await db.execute(sql9`
+    const res = await db.execute(sql10`
       SELECT id, status, kind, attempt_count, last_error, suggestion
         FROM homepage_team_suggestions
        WHERE attempt_count >= ${MAX_TICKET_ATTEMPTS}
@@ -19790,7 +20583,7 @@ async function runOwnerDigest(opts = {}) {
     const first = await kvSetNX(`owner-digest:sent:${day}`, String(Date.now()), 26 * 3600);
     if (!first) return { sent: false, skipped: "already sent today (pass force=1 to re-send)" };
   }
-  const profitRes = await db.execute(sql9`
+  const profitRes = await db.execute(sql10`
     SELECT summary_date::text AS day,
            COALESCE(total_orders, 0)::int AS orders,
            COALESCE(total_revenue, 0)::float8 AS revenue,
@@ -19801,7 +20594,7 @@ async function runOwnerDigest(opts = {}) {
     LIMIT 8`);
   const profit = profitRes.rows ?? [];
   const yesterday = profit[0];
-  const runsRes = await db.execute(sql9`
+  const runsRes = await db.execute(sql10`
     SELECT team, run_type, status, started_at::text AS started_at, error, summary
     FROM homepage_team_runs
     WHERE started_at >= now() - interval '24 hours'
@@ -19809,7 +20602,7 @@ async function runOwnerDigest(opts = {}) {
     LIMIT 40`);
   const runs = runsRes.rows ?? [];
   const failures = runs.filter((r) => r.status === "failed");
-  const suggRes = await db.execute(sql9`
+  const suggRes = await db.execute(sql10`
     SELECT status, COUNT(*)::int AS n, MIN(created_at)::text AS oldest
     FROM homepage_team_suggestions
     GROUP BY status`);
@@ -19836,7 +20629,7 @@ async function runOwnerDigest(opts = {}) {
     console.warn("[owner-digest] seo-daily unavailable:", String(err2).slice(0, 200));
   }
   try {
-    const droppedRes = await db.execute(sql9`
+    const droppedRes = await db.execute(sql10`
       SELECT url, previous_coverage_state, coverage_state
       FROM gsc_url_inspections
       WHERE coverage_changed_at >= now() - interval '24 hours'
@@ -19848,7 +20641,7 @@ async function runOwnerDigest(opts = {}) {
     console.warn("[owner-digest] index-monitor tables unavailable (migration 064 not applied?):", String(err2).slice(0, 200));
   }
   try {
-    const ticketRes = await db.execute(sql9`
+    const ticketRes = await db.execute(sql10`
       SELECT id, priority, status, suggestion, dedupe_key
       FROM homepage_team_suggestions
       WHERE created_at >= now() - interval '24 hours' AND dedupe_key LIKE 'seo:%'
@@ -19859,7 +20652,7 @@ async function runOwnerDigest(opts = {}) {
   }
   const statusCountsLine = sugg.map((s) => `${esc(s.status)}: ${s.n}`).join(" &middot; ");
   const agedOut = opts.force ? null : await ageOutStaleSuggestions();
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation] = await Promise.all([
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows] = await Promise.all([
     gatherShipped(),
     gatherHomepageNow(),
     gatherTicketMetrics(statusCountsLine),
@@ -19871,9 +20664,27 @@ async function runOwnerDigest(opts = {}) {
     getProfitReconciliation().catch((err2) => {
       console.warn("[owner-digest] profit reconciliation failed:", String(err2).slice(0, 200));
       return null;
-    })
+    }),
+    // Best-effort for the same reason: the janitor reads GitHub. The
+    // reconcile runs first so pr-link states are fresh when health is
+    // computed; its own failure costs nothing but freshness, never the
+    // digest and never the health computation behind it.
+    reconcilePrLinkStates().catch((err2) => {
+      console.warn("[owner-digest] pr-link reconcile failed:", String(err2).slice(0, 200));
+    }).then(() => computeTicketLoopHealth()).catch((err2) => {
+      console.warn("[owner-digest] ticket-loop health failed:", String(err2).slice(0, 200));
+      return null;
+    }),
+    gatherStaleOwnerRows()
   ]);
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length;
+  const needsMike = {
+    needsOwnerPrs: escalations.protectedPrs,
+    blockedRows: ticketMetrics.blockedRows,
+    staleOwnerRows,
+    orphans: loopHealth?.orphans ?? [],
+    missedRoutines: loopHealth?.routineFlags ?? []
+  };
   const ordersY = yesterday?.orders ?? 0;
   const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? "" : "s"}, ${redTrackers} RED tracker${redTrackers === 1 ? "" : "s"}${needsOwner > 0 ? `, ${needsOwner} need${needsOwner === 1 ? "s" : ""} you` : ""}`;
   const profitRows = profit.map((p) => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? "")}</td></tr>`).join("");
@@ -19930,6 +20741,7 @@ async function runOwnerDigest(opts = {}) {
   const html = `<body style="margin:0;padding:16px;background:#faf7f2;">
     <div style="max-width:640px;">
       <h2 style="font-family:Inter,sans-serif;font-size:16px;margin:0 0 4px;">xdipx daily digest &middot; ${day}</h2>
+      ${section("Needs Mike", renderNeedsMikeSection(needsMike))}
       ${section(`Escalations${needsOwner > 0 ? ` (${needsOwner})` : ""}`, renderEscalationsSection(escalations))}
       ${section(`Shipped, last 24h (${shipped.length})`, renderShippedSection(shipped))}
       ${section("Homepage now", renderHomepageNowSection(homepageNow))}
@@ -19941,6 +20753,7 @@ async function runOwnerDigest(opts = {}) {
       ${section("Valves", `<table style="border-collapse:collapse;">${valveRows}</table>`)}
       ${section(`SEO and indexing${seoDay ? ` (diagnosis ${esc(seoDay)})` : ""}`, indexBody)}
       ${section(`Tickets (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ""})`, renderTicketsSection(ticketMetrics))}
+      ${section("Ticket loop", renderTicketLoopSection(loopHealth))}
       ${section("Program trackers", trackerBlocks || "no trackers found")}
       <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">
         Full detail: xdipx.com/admin/trackers and /admin/homepage-team. Sent by /cron/owner-digest.
@@ -19952,7 +20765,7 @@ async function runOwnerDigest(opts = {}) {
   if (!opts.force) await kvDel(`owner-digest:sent:${day}`);
   throw new Error(`owner digest send failed: ${res.error ?? "unknown error"}`);
 }
-var GOOD, WARN, BAD, MUTED, MAX_TICKET_ATTEMPTS, OWNER_DECISION_KINDS, STALE_QUEUE_DAYS, RENDER_TRUTH_KEYS;
+var GOOD, WARN, BAD, MUTED, MAX_TICKET_ATTEMPTS, OWNER_DECISION_KINDS, STALE_QUEUE_DAYS, SLA_LABELS, RENDER_TRUTH_KEYS;
 var init_owner_digest_server = __esm({
   "app/lib/owner-digest.server.ts"() {
     "use strict";
@@ -19962,6 +20775,7 @@ var init_owner_digest_server = __esm({
     init_tracker_server();
     init_owner_alerts_server();
     init_profit_server();
+    init_ticket_janitor_server();
     init_kv_server();
     GOOD = "#1c7c43";
     WARN = "#b57d0a";
@@ -19976,6 +20790,12 @@ var init_owner_digest_server = __esm({
       "promo"
     ];
     STALE_QUEUE_DAYS = 7;
+    SLA_LABELS = {
+      prOpen: "24h",
+      inReview: "12h",
+      approvedCode: "7 days",
+      proposed: "72h"
+    };
     RENDER_TRUTH_KEYS = [
       "homepage:render-truth:latest",
       "homepage:healthcheck:render-truth",
@@ -20341,10 +21161,10 @@ __export(sitemap_server_exports, {
   getUrlHealth: () => getUrlHealth
 });
 import { neon as neon5 } from "@neondatabase/serverless";
-import { eq as eq11 } from "drizzle-orm";
+import { eq as eq12 } from "drizzle-orm";
 async function getUrlHealth() {
   try {
-    const rows = await sql10`
+    const rows = await sql11`
       SELECT url, coverage_state, last_crawl_time FROM gsc_url_inspections
       WHERE coverage_state = ANY(${BAD_VERDICT_STATES}::text[])
     `;
@@ -20393,7 +21213,7 @@ async function assembleSegments() {
     guard(getProductHandlesForSitemap(), [], "getProductHandlesForSitemap"),
     guard(getProductImagesForSitemap(), /* @__PURE__ */ new Map(), "getProductImagesForSitemap"),
     guard(getCollectionsForSitemap(), [], "getCollectionsForSitemap"),
-    guard(db.select().from(dealHistory).where(eq11(dealHistory.status, "live")).limit(1), [], "liveDeal query"),
+    guard(db.select().from(dealHistory).where(eq12(dealHistory.status, "live")).limit(1), [], "liveDeal query"),
     guard(getMainMenu(), [], "getMainMenu"),
     getUrlHealth(),
     guard(getIndexableProductHandles(), null, "getIndexableProductHandles"),
@@ -20523,7 +21343,7 @@ async function assembleSegments() {
   segments.push(...chunkSegments("products", clean(productUrls), PRODUCTS_PER_SEGMENT));
   return segments;
 }
-var sql10, BAD_VERDICT_STATES, PRODUCTS_PER_SEGMENT, PAGE_SLUG_DENYLIST, COLLECTION_DENYLIST, memo, MEMO_TTL_MS;
+var sql11, BAD_VERDICT_STATES, PRODUCTS_PER_SEGMENT, PAGE_SLUG_DENYLIST, COLLECTION_DENYLIST, memo, MEMO_TTL_MS;
 var init_sitemap_server = __esm({
   "app/lib/sitemap.server.ts"() {
     "use strict";
@@ -20535,7 +21355,7 @@ var init_sitemap_server = __esm({
     init_collection_canonical_aliases();
     init_category_page_server();
     init_schema();
-    sql10 = neon5(process.env["DATABASE_URL"]);
+    sql11 = neon5(process.env["DATABASE_URL"]);
     BAD_VERDICT_STATES = [
       "Excluded by \u2018noindex\u2019 tag",
       "Duplicate without user-selected canonical",
@@ -20605,8 +21425,8 @@ async function recentlyPinged(urls) {
   if (urls.length === 0) return /* @__PURE__ */ new Set();
   try {
     const { neon: neon6 } = await import("@neondatabase/serverless");
-    const sql20 = neon6(process.env["DATABASE_URL"]);
-    const rows = await sql20`
+    const sql21 = neon6(process.env["DATABASE_URL"]);
+    const rows = await sql21`
       SELECT url FROM indexnow_pings
       WHERE url = ANY(${urls}::text[])
         AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')
@@ -20620,8 +21440,8 @@ async function recentlyPinged(urls) {
 async function recordPushed(urls, batchId, statusCode) {
   if (urls.length === 0) return;
   const { neon: neon6 } = await import("@neondatabase/serverless");
-  const sql20 = neon6(process.env["DATABASE_URL"]);
-  await sql20`
+  const sql21 = neon6(process.env["DATABASE_URL"]);
+  await sql21`
     INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
     SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
     FROM unnest(${urls}::text[]) AS t(u)
@@ -21499,7 +22319,7 @@ __export(purchase_watcher_server_exports, {
   evaluatePurchaseWatch: () => evaluatePurchaseWatch,
   runPurchaseWatcher: () => runPurchaseWatcher
 });
-import { and as and4, inArray as inArray3, isNull as isNull2, lt as lt3 } from "drizzle-orm";
+import { and as and5, inArray as inArray3, isNull as isNull3, lt as lt3 } from "drizzle-orm";
 function fingerprint(ids) {
   return [...new Set(ids)].sort().join(",");
 }
@@ -21598,11 +22418,11 @@ async function runPurchaseWatcher(now = Date.now()) {
   const [prior, recentIds, staleCapiRows, staleGa4Rows] = await Promise.all([
     loadState(),
     fetchRecentPaidOrderIds(now),
-    db.select({ id: metaCapiFailures.orderId }).from(metaCapiFailures).where(and4(isNull2(metaCapiFailures.resolvedAt), lt3(metaCapiFailures.createdAt, staleBefore))).catch((err2) => {
+    db.select({ id: metaCapiFailures.orderId }).from(metaCapiFailures).where(and5(isNull3(metaCapiFailures.resolvedAt), lt3(metaCapiFailures.createdAt, staleBefore))).catch((err2) => {
       console.warn("[purchase-watcher] meta_capi_failures query failed:", String(err2).slice(0, 200));
       return [];
     }),
-    db.select({ id: ga4PurchaseFailures.orderId }).from(ga4PurchaseFailures).where(and4(isNull2(ga4PurchaseFailures.resolvedAt), lt3(ga4PurchaseFailures.createdAt, staleBefore))).catch((err2) => {
+    db.select({ id: ga4PurchaseFailures.orderId }).from(ga4PurchaseFailures).where(and5(isNull3(ga4PurchaseFailures.resolvedAt), lt3(ga4PurchaseFailures.createdAt, staleBefore))).catch((err2) => {
       console.warn("[purchase-watcher] ga4_purchase_failures query failed:", String(err2).slice(0, 200));
       return [];
     })
@@ -21676,7 +22496,7 @@ __export(purchase_capi_server_exports, {
   reconcilePurchases: () => reconcilePurchases,
   sendPurchaseWithLedger: () => sendPurchaseWithLedger
 });
-import { eq as eq12, inArray as inArray4 } from "drizzle-orm";
+import { eq as eq13, inArray as inArray4 } from "drizzle-orm";
 function buildPurchaseEvent(order) {
   const user_data = {
     fbp: order.fbp,
@@ -21721,9 +22541,9 @@ async function sendPurchaseWithLedger(order) {
   const result = await sendCapiEvent(event, { consentGranted: false });
   try {
     if (result.ok) {
-      await db.update(metaCapiFailures).set({ resolvedAt: /* @__PURE__ */ new Date(), lastError: null }).where(eq12(metaCapiFailures.orderId, order.id));
+      await db.update(metaCapiFailures).set({ resolvedAt: /* @__PURE__ */ new Date(), lastError: null }).where(eq13(metaCapiFailures.orderId, order.id));
     } else {
-      await db.update(metaCapiFailures).set({ lastError: result.error ?? result.skipped ?? "unknown" }).where(eq12(metaCapiFailures.orderId, order.id));
+      await db.update(metaCapiFailures).set({ lastError: result.error ?? result.skipped ?? "unknown" }).where(eq13(metaCapiFailures.orderId, order.id));
     }
   } catch (err2) {
     console.error("[purchase-capi] ledger update failed", order.id, err2);
@@ -22188,7 +23008,7 @@ var init_pricing_report_server = __esm({
 });
 
 // app/lib/pricing-agent.server.ts
-import { eq as eq13 } from "drizzle-orm";
+import { eq as eq14 } from "drizzle-orm";
 var init_pricing_agent_server = __esm({
   "app/lib/pricing-agent.server.ts"() {
     "use strict";
@@ -22211,7 +23031,7 @@ var init_pricing_apply_server = __esm({
 });
 
 // app/lib/pricing-webhook.server.ts
-import { eq as eq14, sql as sql11 } from "drizzle-orm";
+import { eq as eq15, sql as sql12 } from "drizzle-orm";
 async function setPipelineSetting(key, value) {
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -22232,7 +23052,7 @@ var init_pricing_webhook_server = __esm({
 });
 
 // app/lib/cost-sync.server.ts
-import { inArray as inArray5, sql as sql12 } from "drizzle-orm";
+import { inArray as inArray5, sql as sql13 } from "drizzle-orm";
 function round23(n) {
   return Math.round(n * 100) / 100;
 }
@@ -22316,17 +23136,17 @@ async function runNalpacCostSync(opts) {
         await db.insert(nalpacPriceHistory).values(chunk).onConflictDoUpdate({
           target: nalpacPriceHistory.sku,
           set: {
-            wholesale: sql12`excluded.wholesale`,
-            msrp: sql12`excluded.msrp`,
-            mapPrice: sql12`excluded.map_price`,
-            salePrice: sql12`excluded.sale_price`,
-            qty: sql12`excluded.qty`,
-            nalpacDiscountPct: sql12`excluded.nalpac_discount_pct`,
-            inTop100: sql12`excluded.in_top100`,
-            inNew: sql12`excluded.in_new`,
-            inSale: sql12`excluded.in_sale`,
-            observedAt: sql12`excluded.observed_at`,
-            syncedAt: sql12`excluded.synced_at`
+            wholesale: sql13`excluded.wholesale`,
+            msrp: sql13`excluded.msrp`,
+            mapPrice: sql13`excluded.map_price`,
+            salePrice: sql13`excluded.sale_price`,
+            qty: sql13`excluded.qty`,
+            nalpacDiscountPct: sql13`excluded.nalpac_discount_pct`,
+            inTop100: sql13`excluded.in_top100`,
+            inNew: sql13`excluded.in_new`,
+            inSale: sql13`excluded.in_sale`,
+            observedAt: sql13`excluded.observed_at`,
+            syncedAt: sql13`excluded.synced_at`
           }
         });
       } catch (err2) {
@@ -22944,7 +23764,7 @@ Be efficient. Each tool is a single call. Do NOT call the same tool twice.`;
 });
 
 // app/lib/enricher-brief.server.ts
-import { eq as eq15 } from "drizzle-orm";
+import { eq as eq16 } from "drizzle-orm";
 async function adminGraphQLWithRetry(query, variables, attempt = 0) {
   try {
     return await adminGraphQL(query, variables);
@@ -23052,7 +23872,7 @@ async function gatherProductBrief(numericProductId) {
     sku: dealHistory.sku,
     brand: dealHistory.brand,
     categories: dealHistory.categories
-  }).from(dealHistory).where(eq15(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  }).from(dealHistory).where(eq16(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const hist = histRows[0];
   const sku = hist?.sku;
   const brand = hist?.brand ?? snap.vendor ?? "";
@@ -23372,7 +24192,7 @@ __export(import_enrich_server_exports, {
   runImportEnrichTick: () => runImportEnrichTick,
   submitEnrichmentBatch: () => submitEnrichmentBatch
 });
-import { and as and5, asc as asc3, eq as eq16, inArray as inArray6, isNull as isNull3, sql as sql13 } from "drizzle-orm";
+import { and as and6, asc as asc3, eq as eq17, inArray as inArray6, isNull as isNull4, sql as sql14 } from "drizzle-orm";
 function normalizeIvrExperience(raw) {
   const arr = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return arr.filter((v) => typeof v === "string" && VALID_IVR_EXPERIENCE.has(v));
@@ -23408,7 +24228,7 @@ async function applyFullEnrichmentWrites(numericProductId, writes) {
   const snap = await fetchProductSnapshot(numericProductId);
   if (!snap) throw new Error(`fetchProductSnapshot returned null for ${numericProductId}`);
   const category = inferCategoryFallback(snap.metafields["xdipx.category"]);
-  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq16(dealHistory.shopifyProductId, numericProductId)).limit(1);
+  const histRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(eq17(dealHistory.shopifyProductId, numericProductId)).limit(1);
   const editorialTags = (histRows[0]?.categories ?? []).filter(
     (c) => !!c && c !== "(uncategorized)"
   );
@@ -23527,11 +24347,11 @@ function isBatchClaimStuck(claimedAt, now, maxHours = STUCK_BATCH_MAX_HOURS) {
   return ageHours >= maxHours;
 }
 async function submitEnrichmentBatch(cap, opts = {}) {
-  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
-    eq16(importCandidates.status, "imported"),
-    isNull3(importCandidates.enrichedAt),
-    isNull3(importCandidates.enrichBatchId),
-    isNull3(importCandidates.enrichFailedAt)
+  const rows = await db.select({ id: importCandidates.id, productId: dealHistory.shopifyProductId }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
+    eq17(importCandidates.status, "imported"),
+    isNull4(importCandidates.enrichedAt),
+    isNull4(importCandidates.enrichBatchId),
+    isNull4(importCandidates.enrichFailedAt)
   )).orderBy(asc3(importCandidates.id)).limit(cap);
   const valid = rows.filter((r) => Boolean(r.productId));
   if (valid.length === 0) return { submitted: 0, batchIds: [], reason: "no_unenriched" };
@@ -23570,12 +24390,12 @@ async function detectImportEnrichStall(enabled) {
   try {
     const cutoff = new Date(Date.now() - STALL_AGE_HOURS * 3600 * 1e3);
     const rows = await db.select({
-      anchor: sql13`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
-    }).from(importCandidates).where(and5(
-      eq16(importCandidates.status, "imported"),
-      isNull3(importCandidates.enrichedAt),
-      isNull3(importCandidates.enrichBatchId),
-      isNull3(importCandidates.enrichFailedAt)
+      anchor: sql14`COALESCE(${importCandidates.reviewedAt}, ${importCandidates.updatedAt})`
+    }).from(importCandidates).where(and6(
+      eq17(importCandidates.status, "imported"),
+      isNull4(importCandidates.enrichedAt),
+      isNull4(importCandidates.enrichBatchId),
+      isNull4(importCandidates.enrichFailedAt)
     ));
     const anchors = rows.map((r) => new Date(r.anchor)).filter((d) => !Number.isNaN(d.getTime()) && d < cutoff);
     const stuck = anchors.length;
@@ -23601,10 +24421,10 @@ async function detectImportEnrichStall(enabled) {
 async function applyEnrichFailure(candidate, reason) {
   const disp = decideEnrichFailure(candidate.enrichAttempts);
   if (disp.action === "retry") {
-    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
+    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichBatchId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, candidate.id));
     console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- re-queued for retry`);
   } else {
-    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
+    await db.update(importCandidates).set({ enrichAttempts: disp.enrichAttempts, enrichFailedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, candidate.id));
     console.warn(`[import-enrich] candidate ${candidate.id} (product ${candidate.productId}) enrichment attempt ${disp.enrichAttempts} failed (${reason}) -- parked, needs manual review`);
   }
 }
@@ -23615,11 +24435,11 @@ async function collectEnrichmentBatch() {
     productId: dealHistory.shopifyProductId,
     enrichAttempts: importCandidates.enrichAttempts,
     claimedAt: importCandidates.updatedAt
-  }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
-    eq16(importCandidates.status, "imported"),
-    isNull3(importCandidates.enrichedAt),
-    isNull3(importCandidates.enrichFailedAt),
-    sql13`${importCandidates.enrichBatchId} IS NOT NULL`
+  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
+    eq17(importCandidates.status, "imported"),
+    isNull4(importCandidates.enrichedAt),
+    isNull4(importCandidates.enrichFailedAt),
+    sql14`${importCandidates.enrichBatchId} IS NOT NULL`
   )).orderBy(asc3(importCandidates.id));
   const pending = rows.filter((r) => Boolean(r.batchId) && Boolean(r.productId));
   if (pending.length === 0) {
@@ -23677,7 +24497,7 @@ async function collectEnrichmentBatch() {
         }
       }
       if (ok) {
-        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, candidate.id));
+        await db.update(importCandidates).set({ enrichedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, candidate.id));
         enrichedTotal++;
         continue;
       }
@@ -23695,10 +24515,10 @@ async function publishEnrichedProducts() {
     sku: dealHistory.sku,
     title: dealHistory.seoTitle,
     categories: dealHistory.categories
-  }).from(importCandidates).innerJoin(dealHistory, eq16(importCandidates.dealHistoryId, dealHistory.id)).where(and5(
-    eq16(importCandidates.status, "imported"),
-    sql13`${importCandidates.enrichedAt} IS NOT NULL`,
-    isNull3(importCandidates.publishedAt)
+  }).from(importCandidates).innerJoin(dealHistory, eq17(importCandidates.dealHistoryId, dealHistory.id)).where(and6(
+    eq17(importCandidates.status, "imported"),
+    sql14`${importCandidates.enrichedAt} IS NOT NULL`,
+    isNull4(importCandidates.publishedAt)
   ));
   let published = 0;
   let failed = 0;
@@ -23717,7 +24537,7 @@ async function publishEnrichedProducts() {
       } catch (tagErr) {
         console.warn(`[import-enrich] appendProductTag('new-arrival') failed for product ${r.productId} (candidate ${r.id}):`, tagErr instanceof Error ? tagErr.message : tagErr);
       }
-      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq16(importCandidates.id, r.id));
+      await db.update(importCandidates).set({ publishedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(importCandidates.id, r.id));
       published++;
     } catch (err2) {
       console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err2);
@@ -23783,7 +24603,7 @@ __export(field_regen_runner_server_exports, {
   enqueueFieldRegenJob: () => enqueueFieldRegenJob
 });
 import Anthropic6 from "@anthropic-ai/sdk";
-import { eq as eq17 } from "drizzle-orm";
+import { eq as eq18 } from "drizzle-orm";
 function toDbRunnerState(rs) {
   return rs;
 }
@@ -24007,7 +24827,7 @@ async function advanceFieldRegenJob(job) {
           maxTokens: f.maxTokens
         };
       }
-      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState: toDbRunnerState(newRunnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       const client5 = getClient2();
       const requests = [];
       const systemParam = systemBlocks.map((b) => ({
@@ -24035,7 +24855,7 @@ async function advanceFieldRegenJob(job) {
         runnerState: toDbRunnerState(newRunnerState),
         submittedAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq17(batchJobs.jobId, job.jobId));
+      }).where(eq18(batchJobs.jobId, job.jobId));
       outcome.submitted = true;
       console.log(`[field-regen] job ${job.jobId} submitted batch ${batch.id} (${requests.length} requests)`);
       break;
@@ -24049,7 +24869,7 @@ async function advanceFieldRegenJob(job) {
       const client5 = getClient2();
       const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -24100,7 +24920,7 @@ async function advanceFieldRegenJob(job) {
         currentBatchId: null,
         runnerState: toDbRunnerState(updatedRs),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq17(batchJobs.jobId, job.jobId));
+      }).where(eq18(batchJobs.jobId, job.jobId));
       break;
     }
     case "applying": {
@@ -24141,11 +24961,11 @@ async function advanceFieldRegenJob(job) {
           runnerState: toDbRunnerState(updatedRs),
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq17(batchJobs.jobId, job.jobId));
+        }).where(eq18(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       } else {
-        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState: toDbRunnerState(updatedRs), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
       }
       break;
     }
@@ -24273,7 +25093,7 @@ async function enqueueFieldRegenJob(context) {
   const fields = context.kind === "copy-fields" ? context.fields.map((f) => f) : context.kind === "emma-hero" ? ["emma-hero"] : ["emma-take"];
   const meta = { jobKind: "field-regen", context, systemBlocks, fields };
   const runnerState = { "__meta": meta };
-  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq17(batchJobs.jobId, result.jobId));
+  await db.update(batchJobs).set({ runnerState: toDbRunnerState(runnerState), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, result.jobId));
   return result;
 }
 var MODEL4, MODEL_FAST3;
@@ -24302,7 +25122,7 @@ __export(batch_orchestrator_server_exports, {
 });
 import { createHash as createHash6, randomUUID as randomUUID2 } from "node:crypto";
 import Anthropic7 from "@anthropic-ai/sdk";
-import { eq as eq18, inArray as inArray7 } from "drizzle-orm";
+import { eq as eq19, inArray as inArray7 } from "drizzle-orm";
 function getClient3() {
   return new Anthropic7({ apiKey: process.env["ANTHROPIC_API_KEY"]?.trim() });
 }
@@ -24372,7 +25192,7 @@ async function advanceInflightJobs(opts = {}) {
       if (outcome.failed) result.failed++;
     } catch (err2) {
       console.error(`[batch-orchestrator] advanceJob ${job.jobId} threw:`, err2);
-      await db.update(batchJobs).set({ status: "failed", error: String(err2), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ status: "failed", error: String(err2), failedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
       result.failed++;
     }
   }
@@ -24396,7 +25216,7 @@ async function advanceJob(job) {
       for (const p of job.products) {
         runnerState[p.productId] = freshRunnerState(p, job.jobId);
       }
-      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+      await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
       const updatedJob = { ...job, runnerState };
       await submitTurnBatch(updatedJob);
       outcome.submitted = true;
@@ -24411,7 +25231,7 @@ async function advanceJob(job) {
       const client5 = getClient3();
       const batch = await client5.messages.batches.retrieve(job.currentBatchId);
       if (batch.processing_status !== "ended") {
-        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ status: "processing", updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
         break;
       }
       const responses = /* @__PURE__ */ new Map();
@@ -24471,7 +25291,7 @@ async function advanceJob(job) {
               lastProcessedBatchId: job.currentBatchId
             };
           }
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
           continue;
         }
         const msg = entry.result.message;
@@ -24491,7 +25311,7 @@ async function advanceJob(job) {
             status: "done",
             lastProcessedBatchId: job.currentBatchId
           };
-          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
           continue;
         }
         const state = stateFor(ps, p, {
@@ -24564,7 +25384,7 @@ async function advanceJob(job) {
           messages: finalMessages,
           lastProcessedBatchId: job.currentBatchId
         };
-        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+        await db.update(batchJobs).set({ runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
       }
       if (turnCount > 0) {
         void logApiTokens({
@@ -24597,7 +25417,7 @@ async function advanceJob(job) {
           turn: nowTurn,
           runnerState,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq18(batchJobs.jobId, job.jobId));
+        }).where(eq19(batchJobs.jobId, job.jobId));
       } else {
         const updatedJob = {
           ...job,
@@ -24634,7 +25454,7 @@ async function advanceJob(job) {
           if (idx >= 0) results[idx] = resultEntry;
           else results.push(resultEntry);
           runnerState[p.productId] = { ...ps, applyRetries: 0 };
-          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ appliedSkus, results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
         } catch (err2) {
           const applyRetries = (ps.applyRetries ?? 0) + 1;
           const errMsg = err2 instanceof Error ? err2.message : String(err2);
@@ -24657,7 +25477,7 @@ async function advanceJob(job) {
               error: `apply-permafail: ${errMsg}`
             };
           }
-          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq18(batchJobs.jobId, job.jobId));
+          await db.update(batchJobs).set({ results, runnerState, updatedAt: /* @__PURE__ */ new Date() }).where(eq19(batchJobs.jobId, job.jobId));
         }
       }
       outcome.applied = appliedThisTick;
@@ -24677,7 +25497,7 @@ async function advanceJob(job) {
           appliedSkus,
           completedAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where(eq18(batchJobs.jobId, job.jobId));
+        }).where(eq19(batchJobs.jobId, job.jobId));
         if (finalStatus === "done") outcome.done = true;
         else outcome.failed = true;
       }
@@ -24688,7 +25508,7 @@ async function advanceJob(job) {
       break;
   }
   try {
-    const fresh = await db.select().from(batchJobs).where(eq18(batchJobs.jobId, job.jobId)).limit(1);
+    const fresh = await db.select().from(batchJobs).where(eq19(batchJobs.jobId, job.jobId)).limit(1);
     const row = fresh[0];
     if (row) {
       const productStatuses = {};
@@ -24761,7 +25581,7 @@ async function submitTurnBatch(job) {
     runnerState,
     updatedAt: /* @__PURE__ */ new Date(),
     ...isFirstSubmit ? { submittedAt: /* @__PURE__ */ new Date() } : {}
-  }).where(eq18(batchJobs.jobId, job.jobId));
+  }).where(eq19(batchJobs.jobId, job.jobId));
   console.log(`[batch-orchestrator] job ${job.jobId} turn ${job.turn + 1}: submitted batch ${batch.id} (${requests.length} requests)`);
 }
 function buildCustomId2(jobId, productId) {
@@ -24810,7 +25630,7 @@ function stateFor(ps, p, taxonomy) {
   };
 }
 async function getBatchJobById(jobId) {
-  const rows = await db.select().from(batchJobs).where(eq18(batchJobs.jobId, jobId)).limit(1);
+  const rows = await db.select().from(batchJobs).where(eq19(batchJobs.jobId, jobId)).limit(1);
   return rows[0] ?? null;
 }
 async function listRecentBatchJobs(limit = 50) {
@@ -24846,7 +25666,7 @@ __export(bulk_import_server_exports, {
   parseBulkImportCSV: () => parseBulkImportCSV
 });
 import { parse as parse3 } from "csv-parse/sync";
-import { eq as eq19, max } from "drizzle-orm";
+import { eq as eq20, max } from "drizzle-orm";
 function inferCategory(categories) {
   const forHimCats = ["Vagina Strokers", "Body Molds", "Prostate Toys", "Masturbators", "Hands-Free Masturbators"];
   const forHerCats = ["Dual Action and Rabbits", "Finger and Clit", "Air Pulse and Suction", "Bullets and Eggs"];
@@ -24956,7 +25776,7 @@ function parseBulkImportCSV(csvText) {
   return { groups, parseErrors };
 }
 async function isSkuAlreadyImported(sku) {
-  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq19(dealHistory.sku, sku)).limit(1);
+  const rows = await db.select({ sku: dealHistory.sku }).from(dealHistory).where(eq20(dealHistory.sku, sku)).limit(1);
   return rows.length > 0;
 }
 async function importProductGroup(group) {
@@ -25474,7 +26294,7 @@ __export(import_monitor_server_exports, {
   stageMasterCandidatesBySkus: () => stageMasterCandidatesBySkus,
   updateCandidateStatus: () => updateCandidateStatus
 });
-import { and as and6, eq as eq20, inArray as inArray8, sql as sql14 } from "drizzle-orm";
+import { and as and7, eq as eq21, inArray as inArray8, sql as sql15 } from "drizzle-orm";
 function buildMasterUpsertPayload(master, carriedBrands, todayStr, overrides) {
   const brand = master.brand.toLowerCase().trim();
   let tier = "D";
@@ -25659,21 +26479,21 @@ async function runImportMonitor(opts = {}) {
         candidatesNew++;
         candidatesFound++;
       } else if (existing.status === "rejected" || existing.status === "imported") {
-        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq21(importCandidates.masterKey, masterKey));
       } else if (existing.status === "watching") {
         const priorScore = parseFloat(existing.watchScore ?? "0");
         const priorPrice = parseFloat(existing.watchPrice ?? "0");
         const scoreImproved = score2 >= priorScore + watchScoreDelta;
         const priceDropped = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct);
         if (scoreImproved || priceDropped) {
-          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq20(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq21(importCandidates.masterKey, masterKey));
           candidatesResurfaced++;
           candidatesFound++;
         } else {
-          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq20(importCandidates.masterKey, masterKey));
+          await db.update(importCandidates).set({ lastSeenAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq21(importCandidates.masterKey, masterKey));
         }
       } else {
-        await db.update(importCandidates).set(upsertPayload).where(eq20(importCandidates.masterKey, masterKey));
+        await db.update(importCandidates).set(upsertPayload).where(eq21(importCandidates.masterKey, masterKey));
         candidatesFound++;
       }
     }
@@ -25690,7 +26510,7 @@ async function runImportMonitor(opts = {}) {
       candidatesNew,
       candidatesResurfaced,
       autoImported
-    }).where(eq20(importMonitorRuns.id, runId));
+    }).where(eq21(importMonitorRuns.id, runId));
     await setPipelineSetting("import_monitor_last_run_at", (/* @__PURE__ */ new Date()).toISOString());
     console.info(
       `[import-monitor] done: feedsOk=${feedsOk} found=${candidatesFound} new=${candidatesNew} resurfaced=${candidatesResurfaced}`
@@ -25703,7 +26523,7 @@ async function runImportMonitor(opts = {}) {
       finishedAt: /* @__PURE__ */ new Date(),
       feedsOk: false,
       errorMessage
-    }).where(eq20(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
+    }).where(eq21(importMonitorRuns.id, runId)).catch((e) => console.error("[import-monitor] could not write error to run row:", e));
     return {
       feedsOk: false,
       candidatesFound: 0,
@@ -25746,7 +26566,7 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
   const tierCMinGap = parseFloat(tierCMinGapStr ?? "4.5");
   const tierCMinMarkup = parseFloat(tierCMinMarkupStr ?? "0.15");
   const tierCMaxPerDay = Math.max(0, parseInt(tierCMaxPerDayStr ?? "3", 10) || 0);
-  const importedTodayRows = await db.select({ cnt: sql14`count(*)::int` }).from(importCandidates).where(and6(eq20(importCandidates.status, "imported"), eq20(importCandidates.runDate, todayStr)));
+  const importedTodayRows = await db.select({ cnt: sql15`count(*)::int` }).from(importCandidates).where(and7(eq21(importCandidates.status, "imported"), eq21(importCandidates.runDate, todayStr)));
   const importedToday = importedTodayRows[0]?.cnt ?? 0;
   const remaining = maxPerDay - importedToday;
   if (remaining <= 0) {
@@ -25764,10 +26584,10 @@ async function autoImportPhase2(cappedKeys, carriedBrands, todayStr, allMasters)
     msrp: importCandidates.msrp,
     proposedPrice: importCandidates.proposedPrice,
     needsReview: importCandidates.needsReview
-  }).from(importCandidates).where(and6(
-    eq20(importCandidates.status, "pending"),
+  }).from(importCandidates).where(and7(
+    eq21(importCandidates.status, "pending"),
     inArray8(importCandidates.masterKey, cappedKeys)
-  )).orderBy(importCandidates.tier, sql14`${importCandidates.dealScore} DESC NULLS LAST`);
+  )).orderBy(importCandidates.tier, sql15`${importCandidates.dealScore} DESC NULLS LAST`);
   const gated = pending.filter((c) => {
     const tierOk = c.tier === "A" || c.tier === "B";
     if (!tierOk || c.needsReview) return false;
@@ -25890,10 +26710,10 @@ async function stageMasterCandidatesBySkus(skus, opts) {
       }).onConflictDoNothing();
       staged++;
     } else if (existingStatus === "watching") {
-      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq20(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set({ ...upsertPayload, status: "pending" }).where(eq21(importCandidates.masterKey, masterKey));
       staged++;
     } else {
-      await db.update(importCandidates).set(upsertPayload).where(eq20(importCandidates.masterKey, masterKey));
+      await db.update(importCandidates).set(upsertPayload).where(eq21(importCandidates.masterKey, masterKey));
       staged++;
     }
   }
@@ -25903,20 +26723,20 @@ async function getImportCandidatesByStatus(statuses, limit) {
   if (statuses.length === 0) return [];
   const query = db.select().from(importCandidates).where(inArray8(importCandidates.status, statuses)).orderBy(
     importCandidates.tier,
-    sql14`${importCandidates.dealScore} DESC NULLS LAST`
+    sql15`${importCandidates.dealScore} DESC NULLS LAST`
   );
   if (limit != null) return query.limit(limit);
   return query;
 }
 async function getCatalogOpportunities() {
-  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql14`${dealHistory.brand} IS NOT NULL`);
+  const brandRows = await db.select({ brand: dealHistory.brand }).from(dealHistory).where(sql15`${dealHistory.brand} IS NOT NULL`);
   const brandCount = /* @__PURE__ */ new Map();
   for (const r of brandRows) {
     if (!r.brand) continue;
     brandCount.set(r.brand, (brandCount.get(r.brand) ?? 0) + 1);
   }
   const brandCoverage = [...brandCount.entries()].map(([brand, carried]) => ({ brand, carried })).sort((a, b) => b.carried - a.carried);
-  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql14`${dealHistory.categories} IS NOT NULL`);
+  const catRows = await db.select({ categories: dealHistory.categories }).from(dealHistory).where(sql15`${dealHistory.categories} IS NOT NULL`);
   const catCount = /* @__PURE__ */ new Map();
   for (const r of catRows) {
     for (const cat of r.categories ?? []) {
@@ -25946,7 +26766,7 @@ async function getCatalogOpportunities() {
   return { brandCoverage, categoryCoverage, brandOpportunities };
 }
 async function getRecentImportRuns(limit) {
-  return db.select().from(importMonitorRuns).orderBy(sql14`${importMonitorRuns.startedAt} DESC`).limit(limit);
+  return db.select().from(importMonitorRuns).orderBy(sql15`${importMonitorRuns.startedAt} DESC`).limit(limit);
 }
 async function updateCandidateStatus(id, status, opts = {}) {
   const now = /* @__PURE__ */ new Date();
@@ -25958,24 +26778,24 @@ async function updateCandidateStatus(id, status, opts = {}) {
     updatedAt: now
   };
   if (status === "watching") {
-    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq20(importCandidates.id, id)).limit(1);
+    const rows = await db.select({ dealScore: importCandidates.dealScore, proposedPrice: importCandidates.proposedPrice }).from(importCandidates).where(eq21(importCandidates.id, id)).limit(1);
     if (rows[0]) {
       base.watchScore = rows[0].dealScore;
       base.watchPrice = rows[0].proposedPrice;
     }
   }
-  await db.update(importCandidates).set(base).where(eq20(importCandidates.id, id));
+  await db.update(importCandidates).set(base).where(eq21(importCandidates.id, id));
 }
 async function approveAndImport(id, reviewedBy, opts = {}) {
   const reviewedStamp = reviewedBy ? { reviewedBy, reviewedAt: /* @__PURE__ */ new Date() } : {};
-  const rows = await db.select().from(importCandidates).where(eq20(importCandidates.id, id)).limit(1);
+  const rows = await db.select().from(importCandidates).where(eq21(importCandidates.id, id)).limit(1);
   const candidate = rows[0];
   if (!candidate) {
     return { ok: false, error: `candidate ${id} not found` };
   }
   const repSku = candidate.sku;
   if (await isSkuAlreadyImported(repSku)) {
-    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq20(importCandidates.id, id));
+    await db.update(importCandidates).set({ status: "imported", updatedAt: /* @__PURE__ */ new Date(), ...reviewedStamp }).where(eq21(importCandidates.id, id));
     return { ok: true, skipped: true };
   }
   const masters = opts.preloadedMasters ?? collapseMasters((await fetchAllNalpacFeeds()).snapshots);
@@ -26044,14 +26864,14 @@ async function approveAndImport(id, reviewedBy, opts = {}) {
   if (!result.success && !result.skipped) {
     return { ok: false, error: result.error ?? "importProductGroupRaw failed" };
   }
-  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq20(dealHistory.sku, repSku)).limit(1);
+  const dhRows = await db.select({ id: dealHistory.id }).from(dealHistory).where(eq21(dealHistory.sku, repSku)).limit(1);
   const dealHistoryId = dhRows[0]?.id;
   await db.update(importCandidates).set({
     status: "imported",
     dealHistoryId: dealHistoryId ?? null,
     updatedAt: /* @__PURE__ */ new Date(),
     ...reviewedStamp
-  }).where(eq20(importCandidates.id, id));
+  }).where(eq21(importCandidates.id, id));
   return {
     ok: true,
     ...result.shopifyProductId !== void 0 ? { shopifyProductId: result.shopifyProductId } : {},
@@ -26076,423 +26896,6 @@ var init_import_monitor_server = __esm({
   }
 });
 
-// app/lib/github.server.ts
-function err(status, error, skipped = false) {
-  return { ok: false, status, data: null, error, skipped };
-}
-function getGithubConfig(context = "github") {
-  const token = process.env["GITHUB_TOKEN"];
-  const owner = process.env["GITHUB_OWNER"];
-  const repo = process.env["GITHUB_REPO"];
-  if (!token || !owner || !repo) {
-    console.warn(`[${context}] GITHUB_TOKEN/OWNER/REPO not set, skipping GitHub call`);
-    return null;
-  }
-  return { token, owner, repo };
-}
-function isGithubConfigured() {
-  return Boolean(process.env["GITHUB_TOKEN"] && process.env["GITHUB_OWNER"] && process.env["GITHUB_REPO"]);
-}
-function githubHeaders(token) {
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "Content-Type": "application/json",
-    "User-Agent": "xdipx-release-engine"
-  };
-}
-async function githubRequest(path, opts = {}) {
-  const cfg = getGithubConfig(opts.context ?? "github");
-  if (!cfg) return err(0, "GITHUB_TOKEN/OWNER/REPO not set", true);
-  const resolved = path.replace("{owner}", cfg.owner).replace("{repo}", cfg.repo);
-  const url = resolved.startsWith("http") ? resolved : `${API_BASE}${resolved.startsWith("/") ? "" : "/"}${resolved}`;
-  try {
-    const res = await fetch(url, {
-      method: opts.method ?? "GET",
-      headers: githubHeaders(cfg.token),
-      ...opts.body === void 0 ? {} : { body: JSON.stringify(opts.body) },
-      signal: AbortSignal.timeout(TIMEOUT_MS)
-    });
-    const text2 = await res.text();
-    if (!res.ok) {
-      return err(res.status, `GitHub ${opts.method ?? "GET"} ${resolved} -> ${res.status}: ${text2.slice(0, 400)}`);
-    }
-    const data = text2.length === 0 ? {} : JSON.parse(text2);
-    return { ok: true, status: res.status, data };
-  } catch (e) {
-    return err(0, `GitHub ${resolved} failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-function toSummary(p) {
-  return {
-    number: p.number,
-    title: p.title,
-    state: p.state,
-    nodeId: p.node_id ?? "",
-    draft: p.draft ?? false,
-    merged: p.merged ?? false,
-    mergeable: p.mergeable ?? null,
-    mergeableState: p.mergeable_state ?? "unknown",
-    headSha: p.head.sha,
-    headRef: p.head.ref,
-    baseRef: p.base.ref,
-    htmlUrl: p.html_url,
-    labels: (p.labels ?? []).map((l) => l.name),
-    body: p.body ?? "",
-    user: p.user?.login ?? "",
-    updatedAt: p.updated_at ?? ""
-  };
-}
-async function getPullRequest(number, context = "github") {
-  const res = await githubRequest(`/repos/{owner}/{repo}/pulls/${number}`, { context });
-  if (!res.ok) return res;
-  return { ok: true, status: res.status, data: toSummary(res.data) };
-}
-async function listOpenPullRequests(opts = {}) {
-  const res = await githubRequest(
-    "/repos/{owner}/{repo}/pulls?state=open&per_page=100&sort=created&direction=asc",
-    { context: opts.context ?? "github" }
-  );
-  if (!res.ok) return res;
-  const all = res.data.map(toSummary);
-  const prefixes = opts.headPrefixes;
-  const data = prefixes && prefixes.length > 0 ? all.filter((p) => prefixes.some((pre) => p.headRef.startsWith(pre))) : all;
-  return { ok: true, status: res.status, data };
-}
-async function listPullRequestFiles(number, context = "github") {
-  const out = [];
-  let status = 200;
-  for (let page = 1; page <= MAX_FILE_PAGES; page++) {
-    const res = await githubRequest(`/repos/{owner}/{repo}/pulls/${number}/files?per_page=100&page=${page}`, { context });
-    if (!res.ok) return res;
-    status = res.status;
-    for (const f of res.data) {
-      out.push({
-        filename: f.filename,
-        status: f.status,
-        additions: f.additions ?? 0,
-        deletions: f.deletions ?? 0,
-        ...f.previous_filename ? { previousFilename: f.previous_filename } : {}
-      });
-    }
-    if (res.data.length < 100) break;
-  }
-  return { ok: true, status, data: out };
-}
-async function getChecksForRef(sha, context = "github") {
-  const runs = await githubRequest(`/repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`, { context });
-  if (!runs.ok) return runs;
-  const statuses = await githubRequest(`/repos/{owner}/{repo}/commits/${sha}/status?per_page=100`, { context });
-  if (!statuses.ok) return statuses;
-  const byName = /* @__PURE__ */ new Map();
-  const put = (at, check) => {
-    const prev = byName.get(check.name);
-    if (!prev || prev.at <= at) byName.set(check.name, { at, check });
-  };
-  for (const r of runs.data.check_runs ?? []) {
-    put(r.completed_at ?? r.started_at ?? "", {
-      name: r.name,
-      source: "check_run",
-      status: r.status,
-      conclusion: r.conclusion,
-      url: r.html_url ?? null
-    });
-  }
-  for (const s of statuses.data.statuses ?? []) {
-    const pending2 = s.state === "pending";
-    put(s.updated_at ?? "", {
-      name: s.context,
-      source: "status",
-      status: pending2 ? "in_progress" : "completed",
-      conclusion: pending2 ? null : s.state === "success" ? "success" : "failure",
-      url: s.target_url ?? null
-    });
-  }
-  const checks = [...byName.values()].map((v) => v.check).sort((a, b) => a.name.localeCompare(b.name));
-  const pending = checks.filter((c) => c.status !== "completed" || c.conclusion === null).map((c) => c.name);
-  const failing = checks.filter((c) => c.conclusion !== null && FAILING_CONCLUSIONS.has(c.conclusion)).map((c) => c.name);
-  const succeeded = checks.filter((c) => c.conclusion === "success").map((c) => c.name);
-  return {
-    ok: true,
-    status: 200,
-    data: {
-      ref: sha,
-      checks,
-      pending,
-      failing,
-      succeeded,
-      allGreen: checks.length > 0 && pending.length === 0 && failing.length === 0
-    }
-  };
-}
-async function githubGraphQL(query, variables = {}, context = "github") {
-  const res = await githubRequest(
-    "https://api.github.com/graphql",
-    { method: "POST", body: { query, variables }, context }
-  );
-  if (!res.ok) return res;
-  const { data, errors } = res.data;
-  if (errors && errors.length > 0) {
-    const msg = errors.map((e) => e.message ?? "unknown").join("; ");
-    return err(res.status, `GitHub GraphQL: ${msg}`);
-  }
-  if (data === void 0 || data === null) {
-    return err(res.status, "GitHub GraphQL returned no data");
-  }
-  return { ok: true, status: res.status, data };
-}
-async function markPullRequestReadyForReview(nodeId, context = "github") {
-  if (!nodeId) return err(0, "markPullRequestReadyForReview called without a node id");
-  const res = await githubGraphQL(MARK_READY_MUTATION, { id: nodeId }, context);
-  if (!res.ok) return res;
-  const pr = res.data.markPullRequestReadyForReview?.pullRequest;
-  if (!pr) return err(res.status, "GitHub GraphQL: mutation returned no pull request");
-  return { ok: true, status: res.status, data: pr };
-}
-async function squashMergePullRequest(number, opts = {}) {
-  return githubRequest(
-    `/repos/{owner}/{repo}/pulls/${number}/merge`,
-    {
-      method: "PUT",
-      context: opts.context ?? "github",
-      body: {
-        merge_method: "squash",
-        ...opts.title ? { commit_title: opts.title } : {},
-        ...opts.message ? { commit_message: opts.message } : {},
-        ...opts.expectedHeadSha ? { sha: opts.expectedHeadSha } : {}
-      }
-    }
-  );
-}
-async function addLabels(number, labels, context = "github") {
-  const res = await githubRequest(`/repos/{owner}/{repo}/issues/${number}/labels`, {
-    method: "POST",
-    body: { labels },
-    context
-  });
-  if (!res.ok) return res;
-  return { ok: true, status: res.status, data: res.data.map((l) => l.name) };
-}
-async function openPullRequest(input) {
-  const res = await githubRequest("/repos/{owner}/{repo}/pulls", {
-    method: "POST",
-    context: input.context ?? "github",
-    body: { title: input.title, head: input.head, base: input.base, body: input.body ?? "" }
-  });
-  if (!res.ok) return res;
-  return { ok: true, status: res.status, data: toSummary(res.data) };
-}
-async function getRef(ref, context = "github") {
-  const res = await githubRequest(
-    `/repos/{owner}/{repo}/git/ref/${ref.replace(/^refs\//, "")}`,
-    { context }
-  );
-  if (!res.ok) return res;
-  return { ok: true, status: res.status, data: { sha: res.data.object.sha, ref: res.data.ref } };
-}
-async function getCommit(sha, context = "github") {
-  const res = await githubRequest(`/repos/{owner}/{repo}/git/commits/${sha}`, { context });
-  if (!res.ok) return res;
-  return {
-    ok: true,
-    status: res.status,
-    data: {
-      sha: res.data.sha,
-      treeSha: res.data.tree.sha,
-      parents: (res.data.parents ?? []).map((p) => p.sha),
-      message: res.data.message
-    }
-  };
-}
-async function createCommit(input) {
-  return githubRequest("/repos/{owner}/{repo}/git/commits", {
-    method: "POST",
-    context: input.context ?? "github",
-    body: { message: input.message, tree: input.tree, parents: input.parents }
-  });
-}
-async function createRef(input) {
-  const ref = input.ref.startsWith("refs/") ? input.ref : `refs/heads/${input.ref}`;
-  return githubRequest("/repos/{owner}/{repo}/git/refs", {
-    method: "POST",
-    context: input.context ?? "github",
-    body: { ref, sha: input.sha }
-  });
-}
-async function createRevertBranch(input) {
-  const context = input.context ?? "github";
-  const base = input.base ?? "main";
-  const bad = await getCommit(input.badSha, context);
-  if (!bad.ok) return bad;
-  const parent = bad.data.parents[0];
-  if (!parent) return err(0, `commit ${input.badSha} has no parent, cannot revert`);
-  const parentCommit = await getCommit(parent, context);
-  if (!parentCommit.ok) return parentCommit;
-  const tip = await getRef(`heads/${base}`, context);
-  if (!tip.ok) return tip;
-  const commit = await createCommit({
-    message: input.message ?? `revert: restore tree of ${parent.slice(0, 7)} (bad commit ${input.badSha.slice(0, 7)})`,
-    tree: parentCommit.data.treeSha,
-    parents: [tip.data.sha],
-    context
-  });
-  if (!commit.ok) return commit;
-  const ref = await createRef({ ref: `refs/heads/${input.branch}`, sha: commit.data.sha, context });
-  if (!ref.ok) return ref;
-  return {
-    ok: true,
-    status: 201,
-    data: { branch: input.branch, sha: commit.data.sha, restoredTree: parentCommit.data.treeSha }
-  };
-}
-function escapeRe(s) {
-  return s.replace(RE_SPECIALS, "\\$&");
-}
-function globToRegExp(glob) {
-  const parts = glob.split("/");
-  let source = "^";
-  parts.forEach((part, i) => {
-    const last = i === parts.length - 1;
-    if (part === "**") {
-      source += last ? ".*" : "(?:[^/]*/)*";
-      return;
-    }
-    source += part.split("*").map(escapeRe).join("[^/]*");
-    if (!last) source += "/";
-  });
-  return new RegExp(`${source}$`, "i");
-}
-function normalizeChangedPath(raw) {
-  const out = [];
-  for (const seg of raw.trim().replace(/\\/g, "/").split("/")) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") {
-      out.pop();
-      continue;
-    }
-    out.push(seg);
-  }
-  return out.join("/");
-}
-function matchProtectedGlobs(path) {
-  const normalized = normalizeChangedPath(path);
-  if (normalized === "") return [];
-  return COMPILED.filter((c) => c.re.test(normalized)).map((c) => c.glob);
-}
-function classifyChangedFiles(files) {
-  const matches = [];
-  const seen = /* @__PURE__ */ new Set();
-  let fileCount = 0;
-  const consider = (path) => {
-    fileCount += 1;
-    const globs2 = matchProtectedGlobs(path);
-    if (globs2.length === 0) return;
-    const key = normalizeChangedPath(path);
-    if (seen.has(key)) return;
-    seen.add(key);
-    matches.push({ file: key, globs: globs2 });
-  };
-  for (const entry of files ?? []) {
-    if (typeof entry === "string") {
-      consider(entry);
-      continue;
-    }
-    const name = entry && typeof entry === "object" ? entry.filename : void 0;
-    if (typeof name === "string" && name.trim() !== "") {
-      consider(name);
-      const prevRaw = entry.previous_filename ?? entry.previousFilename;
-      if (typeof prevRaw === "string" && prevRaw.trim() !== "") consider(prevRaw);
-      continue;
-    }
-    fileCount += 1;
-    if (!seen.has(UNRESOLVED_PATH_GLOB)) {
-      seen.add(UNRESOLVED_PATH_GLOB);
-      matches.push({ file: UNRESOLVED_PATH_GLOB, globs: [UNRESOLVED_PATH_GLOB] });
-    }
-  }
-  matches.sort((a, b) => a.file.localeCompare(b.file));
-  const globs = [...new Set(matches.flatMap((m) => m.globs))].sort();
-  return {
-    protected: matches.length > 0,
-    fileCount,
-    files: matches.map((m) => m.file),
-    globs,
-    matches
-  };
-}
-var API_BASE, TIMEOUT_MS, MAX_FILE_PAGES, FAILING_CONCLUSIONS, MARK_READY_MUTATION, PROTECTED_GLOBS, RE_SPECIALS, COMPILED, UNRESOLVED_PATH_GLOB;
-var init_github_server = __esm({
-  "app/lib/github.server.ts"() {
-    "use strict";
-    API_BASE = "https://api.github.com";
-    TIMEOUT_MS = 2e4;
-    MAX_FILE_PAGES = 30;
-    FAILING_CONCLUSIONS = /* @__PURE__ */ new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"]);
-    MARK_READY_MUTATION = `
-mutation MarkReady($id: ID!) {
-  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
-    pullRequest { number isDraft }
-  }
-}`;
-    PROTECTED_GLOBS = [
-      // --- policy list ---
-      "**/checkout*",
-      "app/lib/emma-cart.server.ts",
-      "app/components/store/CartDrawer.tsx",
-      "app/lib/checkout-probe*",
-      "db/migrations/**",
-      "db/schema.ts",
-      "app/lib/*auth*",
-      "app/lib/*session*",
-      "app/lib/team.server.ts",
-      "app/lib/team-keys.ts",
-      ".github/**",
-      "vercel.json",
-      ".env*",
-      "package.json",
-      "app/lib/release-engine.server.ts",
-      "app/lib/github.server.ts",
-      // --- widenings (same intent, this repo's real filenames) ---
-      // Any file whose name mentions checkout or cart, at any depth: catches
-      // app/routes/admin.checkout-upsells.tsx, app/routes/api.cart.tsx,
-      // app/lib/cart.server.ts, and future money-path files nobody remembers to add.
-      // (This comment used to cite app/routes/_layout.checkout-extras.tsx, which
-      // does not exist in the repo. The glob was always fine; the example was not.)
-      "**/*checkout*",
-      "**/*cart*",
-      // Valve and spend definitions beyond the two named files.
-      "app/lib/homepage-team.server.ts",
-      "app/lib/homepage-team-keys.ts",
-      // The audited write path for every pipeline_settings key, including the
-      // release engine's own enable flag. A change here can weaken or bypass the
-      // attribution trail on the store's entire safety boundary, so it needs the
-      // owner's eyes even though the file itself is small.
-      "app/lib/settings.server.ts",
-      // The cron auth block lives here; a change to it is a change to who can
-      // trigger every scheduled job.
-      //
-      // The glob covers the siblings too, because the entry was previously an exact
-      // filename while the handlers it authorises live in server/cron.<job>.ts. That
-      // meant server/cron.pricing-batch-recompute.ts and every other scheduled
-      // handler was unprotected, which contradicts the reason this line exists: the
-      // auth block only decides who may *call* a job, and the job itself is where
-      // the money and the writes are. A single `*` never crosses a directory
-      // boundary, so this stays scoped to server/.
-      "server/cron*.ts",
-      // Lockfile is the other half of package.json for supply chain.
-      "package-lock.json",
-      "**/package.json",
-      "**/package-lock.json",
-      // Nested env files, not just repo root.
-      "**/.env*"
-    ];
-    RE_SPECIALS = /[.+?^${}()|[\]\\]/g;
-    COMPILED = PROTECTED_GLOBS.map((glob) => ({ glob, re: globToRegExp(glob) }));
-    UNRESOLVED_PATH_GLOB = "<unresolved-path>";
-  }
-});
-
 // app/lib/release-ticket-autofile.server.ts
 var release_ticket_autofile_server_exports = {};
 __export(release_ticket_autofile_server_exports, {
@@ -26502,7 +26905,7 @@ __export(release_ticket_autofile_server_exports, {
   dismissTicketsForClosedUnmergedPrs: () => dismissTicketsForClosedUnmergedPrs,
   prNumberFromAutofileKey: () => prNumberFromAutofileKey
 });
-import { and as and7, eq as eq21, like as like2, sql as sql15 } from "drizzle-orm";
+import { and as and8, eq as eq22, like as like2, sql as sql16 } from "drizzle-orm";
 async function autoFileTicketForPr(pr, dryRun = false) {
   if (dryRun) {
     console.log(`${LOG} [dry-run] would file a ticket for PR #${pr.number} (${pr.headRef})`);
@@ -26531,10 +26934,10 @@ async function dismissTicketsForClosedUnmergedPrs(dryRun = false) {
   const out = { checked: 0, dismissed: 0, errors: [] };
   let rows = [];
   try {
-    rows = await db.select({ id: homepageTeamSuggestions.id, dedupeKey: homepageTeamSuggestions.dedupeKey }).from(homepageTeamSuggestions).where(and7(
-      eq21(homepageTeamSuggestions.status, "pr_open"),
+    rows = await db.select({ id: homepageTeamSuggestions.id, dedupeKey: homepageTeamSuggestions.dedupeKey }).from(homepageTeamSuggestions).where(and8(
+      eq22(homepageTeamSuggestions.status, "pr_open"),
       like2(homepageTeamSuggestions.dedupeKey, `${AUTOFILE_DEDUPE_PREFIX}%`)
-    )).orderBy(sql15`${homepageTeamSuggestions.id} ASC`).limit(50);
+    )).orderBy(sql16`${homepageTeamSuggestions.id} ASC`).limit(50);
   } catch (err2) {
     out.errors.push(`cannot list auto-filed tickets: ${String(err2)}`);
     return out;
@@ -26601,16 +27004,16 @@ __export(ticket_out_of_band_sweep_server_exports, {
   referencesTicketId: () => referencesTicketId,
   sweepOutOfBandMerges: () => sweepOutOfBandMerges
 });
-import { and as and8, desc as desc2, eq as eq22, inArray as inArray9, lt as lt4, notExists, sql as sql16 } from "drizzle-orm";
+import { and as and9, desc as desc2, eq as eq23, inArray as inArray9, lt as lt4, notExists, sql as sql17 } from "drizzle-orm";
 async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
   const rows = await db.select({
     ticketId: homepageTeamSuggestions.id,
     ref: suggestionLinks.ref,
     linkedAt: suggestionLinks.createdAt
-  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and8(
+  }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and9(
     inArray9(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
-    eq22(suggestionLinks.kind, "pr"),
+    eq23(suggestionLinks.kind, "pr"),
     lt4(homepageTeamSuggestions.updatedAt, cutoff)
   )).orderBy(homepageTeamSuggestions.updatedAt, desc2(suggestionLinks.createdAt));
   const seen = /* @__PURE__ */ new Set();
@@ -26627,13 +27030,13 @@ async function findStrandedVerifiedTickets(limit = SWEEP_MAX_TICKETS) {
 }
 async function findStrandedLinklessTickets(limit = SWEEP_MAX_TICKETS) {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const rows = await db.select({ ticketId: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and8(
+  const rows = await db.select({ ticketId: homepageTeamSuggestions.id }).from(homepageTeamSuggestions).where(and9(
     inArray9(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
     lt4(homepageTeamSuggestions.updatedAt, cutoff),
     notExists(
-      db.select({ one: sql16`1` }).from(suggestionLinks).where(and8(
-        eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
-        eq22(suggestionLinks.kind, "pr")
+      db.select({ one: sql17`1` }).from(suggestionLinks).where(and9(
+        eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
+        eq23(suggestionLinks.kind, "pr")
       ))
     )
   )).orderBy(homepageTeamSuggestions.updatedAt).limit(limit);
@@ -26675,10 +27078,10 @@ async function findMergedPrForTicket(ticketId, context = "out-of-band-sweep") {
   return classifyTicketPrMatches(prs, ticketId);
 }
 async function markPrLinkMerged(ticketId, prRef) {
-  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and8(
-    eq22(suggestionLinks.suggestionId, ticketId),
-    eq22(suggestionLinks.kind, "pr"),
-    eq22(suggestionLinks.ref, prRef)
+  await db.update(suggestionLinks).set({ state: "merged", updatedAt: /* @__PURE__ */ new Date() }).where(and9(
+    eq23(suggestionLinks.suggestionId, ticketId),
+    eq23(suggestionLinks.kind, "pr"),
+    eq23(suggestionLinks.ref, prRef)
   ));
 }
 async function applyCandidateIfMerged(c, result) {
@@ -26749,9 +27152,9 @@ async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS) {
 }
 async function countStrandedVerifiedTickets() {
   const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 6e4);
-  const [row] = await db.select({ n: sql16`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq22(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and8(
+  const [row] = await db.select({ n: sql17`count(distinct ${homepageTeamSuggestions.id})::int` }).from(homepageTeamSuggestions).innerJoin(suggestionLinks, eq23(suggestionLinks.suggestionId, homepageTeamSuggestions.id)).where(and9(
     inArray9(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
-    eq22(suggestionLinks.kind, "pr"),
+    eq23(suggestionLinks.kind, "pr"),
     lt4(homepageTeamSuggestions.updatedAt, cutoff)
   ));
   return row?.n ?? 0;
@@ -26779,9 +27182,9 @@ __export(settings_server_exports, {
   recentSettingChanges: () => recentSettingChanges,
   setPipelineSettingAudited: () => setPipelineSettingAudited
 });
-import { desc as desc3, eq as eq23, gte as gte3 } from "drizzle-orm";
+import { desc as desc3, eq as eq24, gte as gte3 } from "drizzle-orm";
 async function setPipelineSettingAudited(key, value, actor, source) {
-  const [existing] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq23(pipelineSettings.key, key)).limit(1);
+  const [existing] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq24(pipelineSettings.key, key)).limit(1);
   const oldValue = existing?.value ?? null;
   await db.insert(pipelineSettings).values({ key, value }).onConflictDoUpdate({
     target: pipelineSettings.key,
@@ -26860,7 +27263,7 @@ __export(release_engine_server_exports, {
   summarizeSmoke: () => summarizeSmoke,
   utcDay: () => utcDay3
 });
-import { and as and9, desc as desc4, eq as eq24, sql as sql17 } from "drizzle-orm";
+import { and as and10, desc as desc4, eq as eq25, sql as sql18 } from "drizzle-orm";
 function utcDay3(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -27212,17 +27615,17 @@ async function runSelfCheck(opts = {}) {
   return { ok: false, problems };
 }
 async function resolveTicketForPr(pr) {
-  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
-    eq24(suggestionLinks.kind, "pr"),
-    sql17`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
+  const direct = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and10(
+    eq25(suggestionLinks.kind, "pr"),
+    sql18`${suggestionLinks.ref} LIKE ${"%/pull/" + pr.number} OR ${suggestionLinks.ref} = ${"#" + pr.number}`
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
   const match = direct.find((l) => prNumberFromRef(l.ref) === pr.number);
   if (match) return loadTicketFacts(match.suggestionId);
   const titleId = parseTicketRefFromTitle(pr.title);
   if (titleId === null) return null;
-  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and9(
-    eq24(suggestionLinks.kind, "pr"),
-    eq24(suggestionLinks.suggestionId, titleId)
+  const claimed = await db.select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref }).from(suggestionLinks).where(and10(
+    eq25(suggestionLinks.kind, "pr"),
+    eq25(suggestionLinks.suggestionId, titleId)
   )).orderBy(desc4(suggestionLinks.createdAt)).limit(20);
   const otherPr = claimed.find((l) => prNumberFromRef(l.ref) !== pr.number);
   if (otherPr) {
@@ -27239,7 +27642,7 @@ async function loadTicketFacts(id) {
     status: homepageTeamSuggestions.status,
     kind: homepageTeamSuggestions.kind,
     attemptCount: homepageTeamSuggestions.attemptCount
-  }).from(homepageTeamSuggestions).where(eq24(homepageTeamSuggestions.id, id)).limit(1);
+  }).from(homepageTeamSuggestions).where(eq25(homepageTeamSuggestions.id, id)).limit(1);
   if (!row) return null;
   return { id: row.id, status: row.status, kind: row.kind, attemptCount: row.attemptCount };
 }
@@ -27496,7 +27899,7 @@ async function maybeSweepExhaustedTickets(dryRun) {
   await kvSet(KEYS.exhaustedHour, hour);
   let rows = [];
   try {
-    const res = await db.execute(sql17`
+    const res = await db.execute(sql18`
       SELECT id, attempt_count, last_error
         FROM homepage_team_suggestions
        WHERE status = 'in_progress'
@@ -27855,10 +28258,10 @@ async function markPrLinksState(pending, state) {
   if (pending.ticketId === null) return;
   try {
     await db.update(suggestionLinks).set({ state: state.slice(0, 16), updatedAt: /* @__PURE__ */ new Date() }).where(
-      and9(
-        eq24(suggestionLinks.suggestionId, pending.ticketId),
-        eq24(suggestionLinks.kind, "pr"),
-        eq24(suggestionLinks.ref, pending.prUrl)
+      and10(
+        eq25(suggestionLinks.suggestionId, pending.ticketId),
+        eq25(suggestionLinks.kind, "pr"),
+        eq25(suggestionLinks.ref, pending.prUrl)
       )
     );
   } catch (err2) {
@@ -28718,10 +29121,10 @@ var init_avatar_script = __esm({
 });
 
 // app/lib/ivr-voice.server.ts
-import { eq as eq25 } from "drizzle-orm";
+import { eq as eq26 } from "drizzle-orm";
 async function getActiveIvrVoiceId() {
   try {
-    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq25(ivrVoices.active, true)).limit(1);
+    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq26(ivrVoices.active, true)).limit(1);
     if (rows[0]?.voiceId) return rows[0].voiceId;
   } catch (err2) {
     console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err2);
@@ -28753,7 +29156,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq26, and as and10, inArray as inArray10, desc as desc5, isNotNull, ne as ne2, sql as sql18 } from "drizzle-orm";
+import { eq as eq27, and as and11, inArray as inArray10, desc as desc5, isNotNull, ne as ne2, sql as sql19 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -28827,14 +29230,14 @@ async function advanceInflightVideoJobs(opts = {}) {
       if (outcome === "parked") result.parked++;
     } catch (err2) {
       console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err2);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.jobId, job.jobId));
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -28879,9 +29282,9 @@ async function frameReviewEnabled() {
   return v !== "false";
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
-  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and10(
-    sql18`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
-    eq26(videoJobs.presenter, presenter),
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and11(
+    sql19`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
+    eq27(videoJobs.presenter, presenter),
     isNotNull(videoJobs.sceneFrameAssetId),
     inArray10(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne2(videoJobs.id, excludeJobRowId)] : []
@@ -28898,13 +29301,13 @@ async function advanceSceneFrame(job) {
     if (!reusableJob) {
       throw new Error("reuseFrameAssetId applies only to avatar/talking-head jobs");
     }
-    const [asset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, reuseId)).limit(1);
+    const [asset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, reuseId)).limit(1);
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
-    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and10(
-      eq26(videoJobs.sceneFrameAssetId, reuseId),
-      eq26(videoJobs.presenter, job.presenter),
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and11(
+      eq27(videoJobs.sceneFrameAssetId, reuseId),
+      eq27(videoJobs.presenter, job.presenter),
       inArray10(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
@@ -28994,7 +29397,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -29079,7 +29482,7 @@ async function advanceClipAvatar(job, spec) {
     if ((Number(job.costUsd) + clipCost + ttsCost) * 100 > maxCents) {
       throw new Error(`Accrued + avatar render cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const frameBuf = await blobFetchToBuffer(frame.blobUrl);
     const imageUrl = await uploadToFalStorage(frameBuf, "image/jpeg", `frame-${job.jobId}.jpg`);
@@ -29173,7 +29576,7 @@ async function advanceLipsync(job) {
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq26(mediaAssets.videoJobId, jobRowId)).orderBy(desc5(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq27(mediaAssets.videoJobId, jobRowId)).orderBy(desc5(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
@@ -29221,7 +29624,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -29235,7 +29638,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq26(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq27(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -29247,29 +29650,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq27(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -29289,12 +29692,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq27(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -29321,11 +29724,11 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
 async function recordVideoMetrics(jobRowId, platform, metrics) {
   const submitted = Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== void 0));
   if (!Object.keys(submitted).length) return;
-  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq27(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const existing = (job.metricsJson ?? {})[platform] ?? {};
   const merged = { ...job.metricsJson ?? {}, [platform]: { ...existing, ...submitted } };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq27(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
   const jobs = await db.select().from(videoJobs).orderBy(desc5(videoJobs.createdAt)).limit(limit);
@@ -29501,7 +29904,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq27 } from "drizzle-orm";
+import { eq as eq28 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -29622,7 +30025,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq27(returns.id, row.id)).returning();
+    }).where(eq28(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err2) {
     console.error("[returns] db update threw", err2);
@@ -29630,7 +30033,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq27(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq28(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -29661,7 +30064,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq27(returns.id, row.id));
+  }).where(eq28(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -29670,13 +30073,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq27(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq28(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq27(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq28(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq27(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq28(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -29817,18 +30220,18 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and12, eq: eq30, isNull: isNull5, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and12(isNull5(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq29(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq30(metaCapiFailures2.id, row.id));
         resolved++;
       } else if (result.skipped) {
-        await db2.update(metaCapiFailures2).set({ lastError: result.skipped }).where(eq29(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ lastError: result.skipped }).where(eq30(metaCapiFailures2.id, row.id));
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq29(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq30(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -29843,16 +30246,16 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and12, eq: eq30, isNull: isNull5, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and12(isNull5(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
       if (result.ok) {
-        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq29(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq30(ga4PurchaseFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq29(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq30(ga4PurchaseFailures2.id, row.id));
       }
     }
     return resolved;
@@ -30450,7 +30853,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto2 from "node:crypto";
-import { eq as eq28, sql as sql19 } from "drizzle-orm";
+import { eq as eq29, sql as sql20 } from "drizzle-orm";
 var PURCHASE_SIGNAL_TIMEOUT_MS = 2500;
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
@@ -30568,7 +30971,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql19`${productCopurchase.count} + 1`,
+              count: sql20`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
@@ -30730,7 +31133,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq28(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq29(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];

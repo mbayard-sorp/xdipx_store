@@ -9,10 +9,11 @@ Runs on the **Max subscription**. Cadence: twice daily, `0 14 * * *` and `0 20 *
 14:00 pass is the fresh-work pass; the 20:00 pass exists to give a bounced ticket a same-day second
 attempt.
 
-Prompt history: the trigger (`trig_01MEQYsg5sHPbM4v39FqssAD`) was reissued 2026-08-05 as prompt
-uuid `rdev-daily-0002`. Three corrections, all recorded here so the playbook and the prompt agree:
-the per-pass claim cap rose from 3 to 5 (the approved `code` backlog stood 56 deep against 6
-claims/day, which never drains); `leaseSeconds` rose from the prompt's 1200 to 7200 (20-minute
+Prompt history: the trigger (`trig_01MEQYsg5sHPbM4v39FqssAD`) was reissued 2026-08-05, current
+prompt uuid `rdev-daily-0003`. Three corrections, all recorded here so the playbook and the prompt
+agree: the per-pass claim cap rose from 3 to 5 (the approved `code` backlog stood 56 deep against 6
+claims/day, which never drains); `leaseSeconds` rose from the scheduled prompt's old 1200 to the
+10800 this playbook documents, so the trigger now matches the three-hour lease below (20-minute
 leases expired mid-run, bouncing claimed tickets back to `approved` and orphaning tickets 120 and
 423 after their PRs merged); and the prompt's branch instruction was corrected from
 `agents/ticket-<id>` to `ticket/<id>`, which this playbook always said and the old prompt
@@ -35,7 +36,7 @@ RUN_ID=$(curl -s -X POST "$BASE_URL/api/team/run" \
 curl -s "$BASE_URL/api/team/gate?team=strategy&excludeRun=$RUN_ID" -H "x-team-secret: $TEAM_TOKEN"
 ```
 
-## Step 1 — Claim work (one at a time, max 5 per pass)
+## Step 1: Claim work (one at a time, max 5 per pass)
 
 Claim atomically. Never pick a ticket by reading the list and then marking it; two passes would
 collide. The claim op takes a lease, so a ticket you claim and abandon returns to `approved` on its
@@ -52,11 +53,11 @@ for good, and the next pass re-implements the same ticket on a second branch.
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"claim","assignee":"agent:rr7-engineer","leaseSeconds":7200,
+  -d '{"op":"claim","assignee":"agent:rr7-engineer","leaseSeconds":10800,
        "filter":{"kind":"code","status":"approved"}}'
 ```
 
-`leaseSeconds: 7200` is two hours, sized for one ticket including `typecheck`, `test`, and
+`leaseSeconds: 10800` is three hours, sized for one ticket including `typecheck`, `test`, and
 `build`. The endpoint caps a lease at six hours. Do not lower it to save time; nothing is waiting on
 the lease, and a lease that expires mid-ticket costs a whole PR. That is not hypothetical: the
 scheduled prompt carried `leaseSeconds: 1200` until 2026-08-05, and those 20-minute leases expired

@@ -243,6 +243,13 @@ export interface RoutineCadence {
 }
 
 const TWICE_DAILY_GAP = 12 + 2
+/**
+ * R-DEV's two passes are NOT evenly spaced: 14:00 and 20:00 UTC give a 6h
+ * afternoon interval and an 18h overnight one (20:00 to the next 14:00). The
+ * symmetric twice-daily gap of 14h would false-flag it in every 13:00 digest,
+ * which runs 17h after the previous 20:00 pass. 18h plus the 2h daily grace.
+ */
+const RDEV_GAP = 18 + 2
 const DAILY_GAP = 24 + 2
 const WEEKLY_GAP = 168 + 26
 /** Mon and Thu: the longest interval is Thu to Mon, 96h, plus weekly grace. */
@@ -260,7 +267,7 @@ const TWICE_WEEKLY_GAP = 96 + 26
  * is disabled pending the social run-cap raise.
  */
 export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
-  { routine: 'R-DEV daily dev', team: 'strategy', runType: 'dev', kind: 'twice-daily', schedule: '14:00 and 20:00 daily', maxGapHours: TWICE_DAILY_GAP },
+  { routine: 'R-DEV daily dev', team: 'strategy', runType: 'dev', kind: 'twice-daily', schedule: '14:00 and 20:00 daily', maxGapHours: RDEV_GAP },
   { routine: 'R-QA daily QA gate', team: 'strategy', runType: 'qa', kind: 'twice-daily', schedule: '03:30 and 15:30 daily', maxGapHours: TWICE_DAILY_GAP },
   { routine: 'Daily content writer', team: 'content', runType: 'content', kind: 'daily', schedule: '15:00 daily', maxGapHours: DAILY_GAP },
   { routine: 'Daily merchandiser (Routine A)', team: 'homepage', runType: 'merchandise', kind: 'daily', schedule: '10:00 daily', maxGapHours: DAILY_GAP },
