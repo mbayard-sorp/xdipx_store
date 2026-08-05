@@ -30751,6 +30751,24 @@ function parseWebhookBody(req, res, route) {
     return null;
   }
 }
+var WEBHOOK_WORK_BUDGET_MS = 4e3;
+async function runWebhookWork(route, work, budgetMs = WEBHOOK_WORK_BUDGET_MS) {
+  let timer;
+  const done = work.then(() => "done").catch((err2) => {
+    console.error(`[webhook:${route}] handler failed`, err2);
+    return "done";
+  });
+  const expired = new Promise((resolve4) => {
+    timer = setTimeout(() => resolve4("timeout"), budgetMs);
+  });
+  const outcome = await Promise.race([done, expired]);
+  clearTimeout(timer);
+  if (outcome === "timeout") {
+    console.error(
+      `[webhook:${route}] work exceeded its ${budgetMs}ms budget; acking anyway, the remainder is lost to the instance freeze`
+    );
+  }
+}
 function createWebhookRoutes() {
   const router = Router2();
   router.post("/order-created", async (req, res) => {
@@ -30760,16 +30778,11 @@ function createWebhookRoutes() {
     }
     const order = parseWebhookBody(req, res, "order-created");
     if (!order) return;
-    await Promise.race([
-      handlePurchaseSignals(order).catch(
-        (err2) => console.error("[webhook:order-created] purchase signals", err2)
-      ),
-      new Promise((resolve4) => setTimeout(resolve4, PURCHASE_SIGNAL_TIMEOUT_MS))
+    await Promise.all([
+      runWebhookWork("order-created:signals", handlePurchaseSignals(order), PURCHASE_SIGNAL_TIMEOUT_MS),
+      runWebhookWork("order-created:enrich", handleOrderCreated(order))
     ]);
     res.json({ ok: true });
-    handleOrderCreated(order).catch(
-      (err2) => console.error("[webhook:order-created]", err2)
-    );
   });
   router.post("/order-fulfilled", async (req, res) => {
     if (!verifyShopifyWebhook(req)) {
@@ -30778,10 +30791,8 @@ function createWebhookRoutes() {
     }
     const order = parseWebhookBody(req, res, "order-fulfilled");
     if (!order) return;
+    await runWebhookWork("order-fulfilled", handleOrderFulfilled(order));
     res.json({ ok: true });
-    handleOrderFulfilled(order).catch(
-      (err2) => console.error("[webhook:order-fulfilled]", err2)
-    );
   });
   router.post("/product-created", async (req, res) => {
     if (!verifyShopifyWebhook(req)) {
@@ -30790,10 +30801,8 @@ function createWebhookRoutes() {
     }
     const product = parseWebhookBody(req, res, "product-created");
     if (!product) return;
+    await runWebhookWork("product-created", handleProductCreated(product));
     res.json({ ok: true });
-    handleProductCreated(product).catch(
-      (err2) => console.error("[webhook:product-created]", err2)
-    );
   });
   router.post("/product-updated", async (req, res) => {
     if (!verifyShopifyWebhook(req)) {
@@ -30806,12 +30815,10 @@ function createWebhookRoutes() {
     } catch (err2) {
       console.error("[webhook:product-updated] malformed payload, skipping:", err2);
     }
-    res.json({ ok: true });
     if (product) {
-      handleProductUpdated(product).catch(
-        (err2) => console.error("[webhook:product-updated]", err2)
-      );
+      await runWebhookWork("product-updated", handleProductUpdated(product));
     }
+    res.json({ ok: true });
   });
   router.post("/inventory-update", async (req, res) => {
     if (!verifyShopifyWebhook(req)) {
@@ -30820,10 +30827,8 @@ function createWebhookRoutes() {
     }
     const level = parseWebhookBody(req, res, "inventory-update");
     if (!level) return;
+    await runWebhookWork("inventory-update", handleInventoryUpdate(level));
     res.json({ ok: true });
-    handleInventoryUpdate(level).catch(
-      (err2) => console.error("[webhook:inventory-update]", err2)
-    );
   });
   router.post("/returns-update", async (req, res) => {
     if (!verifyShopifyWebhook(req)) {
@@ -30832,10 +30837,8 @@ function createWebhookRoutes() {
     }
     const payload = parseWebhookBody(req, res, "returns-update");
     if (!payload) return;
+    await runWebhookWork("returns-update", handleReturnsUpdate(payload));
     res.json({ ok: true });
-    handleReturnsUpdate(payload).catch(
-      (err2) => console.error("[webhook:returns-update]", err2)
-    );
   });
   return router;
 }
