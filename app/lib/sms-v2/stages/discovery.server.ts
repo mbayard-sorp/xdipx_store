@@ -33,7 +33,7 @@ import { pickWho, WHO_BANK, type WhoTrigger } from '../templates/who-bank'
 import { pickMatters, type MattersTrigger } from '../templates/matters-bank'
 import { pickVulnerability, type VulnerabilityTrigger } from '../templates/vulnerability-bank'
 import { getExplainer, type ExplainerCategory } from '../templates/category-explainers'
-import { searchForIvrWithDiagnostics } from '~/lib/ivr-search.server'
+import { searchForIvrWithDiagnostics, STRICT_CATEGORY_TERMS } from '~/lib/ivr-search.server'
 import { resolveTransition } from '../transitions.server'
 import { executePresentationStage } from './presentation.server'
 import { generateDiscoveryWelcome } from '../discovery-welcome.server'
@@ -188,9 +188,73 @@ function buildMultiResultProse(
   )
 }
 
+// ─── Search query selection (conv-audit B2) ───────────────────────────────────
+
+// Browse-scaffolding tokens: articles, pronouns, framing verbs, audience words,
+// and price cues. Together with the category vocabulary (STRICT_CATEGORY_TERMS
+// from ivr-search) these are the words a bare category browse is built from.
+// Anything left after removing them is a specific signal — a brand, a model, a
+// descriptor — that must survive into the keyword query.
+const BROWSE_STOPWORDS = new Set([
+  'a', 'an', 'the', 'some', 'any', 'this', 'that', 'these', 'those',
+  'i', 'im', 'id', 'ive', 'you', 'we', 'me', 'my', 'us', 'our',
+  'want', 'wanna', 'need', 'looking', 'look', 'for', 'got', 'have', 'has', 'had',
+  'do', 'does', 'did', 'can', 'could', 'would', 'should', 'get', 'getting',
+  'show', 'find', 'see', 'check', 'out', 'something', 'anything', 'stuff',
+  'item', 'items', 'product', 'products', 'toy', 'toys',
+  'please', 'pls', 'plz', 'hey', 'hi', 'hello', 'thanks', 'thx', 'ok', 'okay',
+  'to', 'and', 'or', 'of', 'with', 'without', 'in', 'on', 'is', 'are', 'be',
+  'good', 'best', 'nice', 'great', 'cool', 'fun', 'cheap', 'affordable',
+  'buy', 'buying', 'shop', 'browse',
+  // audience framing
+  'her', 'him', 'she', 'he', 'girlfriend', 'boyfriend', 'wife', 'husband',
+  'partner', 'partners', 'couple', 'couples', 'gift', 'present', 'someone',
+  'myself', 'herself', 'himself', 'ourselves',
+  // price cues
+  'under', 'below', 'less', 'than', 'over', 'around', 'about', 'budget',
+  'max', 'maximum', 'up', 'dollars', 'bucks',
+])
+
+function normalizeQueryTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+/**
+ * Decide the keyword query for a discovery search (conv-audit B2).
+ *
+ * The old rule was `category ?? customerText`, which discarded any brand or
+ * model the customer named: "Do you have the Lelo Sona 2?" became the literal
+ * query "vibrator" (the extracted category), so the search never matched the
+ * product's title or vendor and returned random margin-weighted vibrators.
+ *
+ * Rule: when the customer text carries tokens beyond the category vocabulary —
+ * a brand, a model, a descriptor — search the full text so those tokens survive
+ * into the title/vendor keyword match, and keep the category as a filter (it is
+ * still passed separately as productTypeDial). When the text is a bare category
+ * browse ("a vibrator", "got any lube"), the canonical category term is the
+ * cleaner query and preserves ivr-search's strict-category precision path.
+ * Returning the category term here is byte-identical to the old behavior for
+ * that case, so bare browses are unchanged. With no extracted category, the
+ * customer text is all we have.
+ */
+export function pickSearchQuery(
+  customerText: string,
+  category: DiscoverySlots['category'] | undefined,
+): string {
+  if (!category) return customerText
+  const residual = normalizeQueryTokens(customerText).filter(
+    (t) => !BROWSE_STOPWORDS.has(t) && !STRICT_CATEGORY_TERMS.has(t) && !/^\d+$/.test(t),
+  )
+  return residual.length > 0 ? customerText : category
+}
+
 // ─── Branch 2: search and respond ─────────────────────────────────────────────
 
-async function runSearchBranch(
+export async function runSearchBranch(
   ctx: EmmaContext,
   intent: IntentResult,
   customerText: string,
@@ -198,7 +262,13 @@ async function runSearchBranch(
   currentDiscoveryState: DiscoveryState,
 ): Promise<StageResponse> {
   const searchCategory = audienceToSearchCategory(mergedSlots.audience)
-  const searchQuery = mergedSlots.category ?? customerText
+  const searchQuery = pickSearchQuery(customerText, mergedSlots.category)
+
+  // conv-audit B2: pass the customer's MATTERS answers through as mattersTags so
+  // the gate question actually shapes results. mattersTags is a soft OR filter;
+  // the filtered-to-zero retry variants below deliberately omit it, so a
+  // preference that starves the pool is loosened on retry rather than blocking.
+  const mattersTags = mergedSlots.matters
 
   let diag = await searchForIvrWithDiagnostics({
     query: searchQuery,
@@ -206,6 +276,7 @@ async function runSearchBranch(
     productSubtypeDial: mergedSlots.subtype,
     category: searchCategory,
     priceMax: mergedSlots.priceMax,
+    mattersTags,
     limit: 3,
   })
 
