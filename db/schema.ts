@@ -1496,3 +1496,55 @@ export const adCreatives = pgTable('ad_creatives', {
   campaignIdx: index('idx_ad_creatives_campaign').on(t.adCampaignId, t.status),
 }))
 
+/**
+ * Outreach pipeline (077) — vetted guest-post / brand-partnership targets.
+ * One row per domain. Seeded from docs/store-team/outreach-prospects.md by
+ * scripts/seed-outreach-prospects.ts; the offsite-scout adds more through
+ * POST /api/team/outreach. Sending is valve-gated (outreach_send_enabled,
+ * ships OFF) and capped (outreach_daily_send_cap); see
+ * docs/store-team/outreach-pipeline.md.
+ */
+export const outreachProspects = pgTable('outreach_prospects', {
+  id:             serial('id').primaryKey(),
+  domain:         varchar('domain', { length: 255 }).notNull(),
+  name:           varchar('name', { length: 255 }),
+  contactEmail:   varchar('contact_email', { length: 255 }),
+  contactChannel: varchar('contact_channel', { length: 8 }).notNull().default('email'), // email|form|dm
+  source:         varchar('source', { length: 64 }),      // prospects-doc | offsite-scout | ...
+  status:         varchar('status', { length: 20 }).notNull().default('new'),
+    // new|researching|queued|sent|replied_positive|replied_negative|bounced|on_hold|landed|rejected
+  policyNote:     text('policy_note'),                    // caveat carried from vetting
+  notes:          text('notes'),
+  suggestionId:   integer('suggestion_id')
+                    .references(() => homepageTeamSuggestions.id, { onDelete: 'set null' }),
+  createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  domainUq:  uniqueIndex('outreach_prospects_domain_key').on(t.domain),
+  statusIdx: index('idx_outreach_prospects_status').on(t.status, t.updatedAt),
+}))
+
+/**
+ * Outreach pipeline (077) — every outreach email, both directions. Outbound
+ * rows carry the SMTP Message-ID so the IMAP poller can match replies by
+ * In-Reply-To/References and leave everything else in hello@ untouched;
+ * inbound rows carry the classification the poller assigned.
+ */
+export const outreachMessages = pgTable('outreach_messages', {
+  id:               serial('id').primaryKey(),
+  prospectId:       integer('prospect_id').notNull()
+                      .references(() => outreachProspects.id, { onDelete: 'cascade' }),
+  direction:        varchar('direction', { length: 3 }).notNull(),  // in|out
+  subject:          text('subject'),
+  bodyText:         text('body_text'),
+  messageId:        text('message_id'),                             // RFC 5322 Message-ID
+  inReplyTo:        text('in_reply_to'),
+  referencesHeader: text('references_header'),
+  classification:   varchar('classification', { length: 12 }),      // positive|negative|neutral|auto_reply
+  sentAt:           timestamp('sent_at', { withTimezone: true }),
+  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  prospectIdx:  index('idx_outreach_messages_prospect').on(t.prospectId, t.direction, t.sentAt),
+  messageIdIdx: index('idx_outreach_messages_message_id').on(t.messageId),
+}))
+
