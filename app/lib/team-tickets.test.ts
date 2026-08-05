@@ -88,7 +88,9 @@ import {
   isTicketActor,
   isTransitionAllowed,
   markSuggestion,
+  normalizeTicketKind,
   transitionSuggestion,
+  KNOWN_TICKET_KINDS,
   AGENT_RETIRE_KINDS,
   DETECTOR_SELF_CLOSE_KINDS,
   REKIND_FROM_KINDS,
@@ -119,6 +121,12 @@ const ALLOWED_FOR_CODE_TICKET: Array<[TicketStatus, TicketStatus, TicketActor[]]
   ['proposed',    'approved',    ['owner', 'auto']],
   ['proposed',    'dismissed',   ['owner']],
   ['approved',    'in_progress', ['agent:rr7-engineer', 'agent:agent-editor']],
+  // Out-of-band merged-PR reconcile: a bounced ticket whose lease expired
+  // returns to `approved` with its PR link intact, and if the owner then
+  // merges that PR by hand the ticket is stranded (tickets #120/#423, PRs
+  // #436/#429). Only sweepOrphanedMergedPrTickets walks this, and only on a
+  // `merged: true` from GitHub itself.
+  ['approved',    'applied',     ['system']],
   ['approved',    'dismissed',   ['owner']],
   ['in_progress', 'pr_open',     ['agent:rr7-engineer']],          // assignee only
   ['in_progress', 'blocked',     ['agent:rr7-engineer', 'system']],
@@ -139,6 +147,9 @@ const ALLOWED_FOR_CODE_TICKET: Array<[TicketStatus, TicketStatus, TicketActor[]]
   ['verified',    'in_progress', ['system']],                       // smoke bounce
   ['verified',    'dismissed',   ['owner']],
   ['blocked',     'approved',    ['owner', 'system']],
+  // Same out-of-band reconcile edge: a blocked ticket whose PR the owner then
+  // merged by hand (ticket #455, PR #508) otherwise has no exit but the owner.
+  ['blocked',     'applied',     ['system']],
   ['blocked',     'dismissed',   ['owner']],
 ]
 
@@ -713,12 +724,18 @@ describe('detector self-close edge', () => {
     expect(isTransitionAllowed('approved', 'applied', 'system', { kind: 'process' })).toBe(true)
   })
 
-  it('fences the edge to process, so it cannot close work with a real executor', () => {
+  it('fences the edge to process at proposed, so it cannot close work with a real executor', () => {
     for (const kind of ['code', 'instructions', 'agent-def', 'config', 'strategy']) {
       expect(isTransitionAllowed('proposed', 'applied', 'system', { kind })).toBe(false)
-      expect(isTransitionAllowed('approved', 'applied', 'system', { kind })).toBe(false)
     }
     expect(DETECTOR_SELF_CLOSE_KINDS).toEqual(['process'])
+    // At `approved` the triple is now reachable for every kind, but through a
+    // DIFFERENT rule: the out-of-band merged-PR reconcile edge, which the
+    // sweep only ever walks on a `merged: true` from GitHub. The detector
+    // self-close rule itself stays fenced to `process`.
+    for (const kind of ['code', 'strategy']) {
+      expect(isTransitionAllowed('approved', 'applied', 'system', { kind })).toBe(true)
+    }
   })
 
   it('grants the edge to system only', () => {
@@ -728,10 +745,14 @@ describe('detector self-close edge', () => {
   })
 
   it('does not widen RUN_CLOSE_ACTORS as a side effect', () => {
-    // Adding 'system' there would have been the smaller diff, and would also
-    // have handed the release engine the ability to close `strategy` rows.
+    // Adding 'system' there would have been the smaller diff. The reconcile
+    // edge does now let `system` close a strategy row from `approved`, but
+    // only when its linked PR is merged (enforced by the sweep, not the map);
+    // the run-close lane itself stays fenced to the named entry agents.
     expect(RUN_CLOSE_ACTORS).not.toContain('system')
-    expect(isTransitionAllowed('approved', 'applied', 'system', { kind: 'strategy' })).toBe(false)
+    for (const actor of RUN_CLOSE_ACTORS) {
+      expect(isTransitionAllowed('approved', 'applied', actor, { kind: 'code' })).toBe(false)
+    }
   })
 
   it('leaves applied terminal', () => {
@@ -817,5 +838,173 @@ describe('a repeat observation reopens a blocked ticket', () => {
     expect(isTransitionAllowed('blocked', 'approved', 'system', { kind: 'code' })).toBe(true)
     // And it is still not something an agent can walk on its own.
     expect(isTransitionAllowed('blocked', 'approved', 'agent:rr7-engineer', { kind: 'code' })).toBe(false)
+  })
+})
+
+/**
+ * The two out-of-band merged-PR reconcile edges: `approved -> applied` and
+ * `blocked -> applied`, system only. They close the orphan class where a
+ * hand-merged PR leaves its ticket on the unassigned queue or in the blocked
+ * count forever (tickets #120/#423 in approved with PRs #436/#429 merged,
+ * ticket #455 blocked with PR #508 merged). The map grants the edge to
+ * `system`; the merged-PR precondition is enforced by the sweep that is the
+ * edge's only caller, exactly as on `pr_open -> applied`.
+ */
+describe('out-of-band reconcile edges (approved/blocked -> applied)', () => {
+  it('grants both edges to system for any kind, mirroring pr_open -> applied', () => {
+    for (const kind of ['code', 'process', 'instructions', 'strategy']) {
+      expect(isTransitionAllowed('approved', 'applied', 'system', { kind })).toBe(true)
+      expect(isTransitionAllowed('blocked', 'applied', 'system', { kind })).toBe(true)
+    }
+  })
+
+  it('rejects every non-system actor on both edges', () => {
+    for (const actor of ACTORS.filter(a => a !== 'system')) {
+      expect(isTransitionAllowed('approved', 'applied', actor, { kind: 'code' })).toBe(false)
+      expect(isTransitionAllowed('blocked', 'applied', actor, { kind: 'code' })).toBe(false)
+    }
+    // Including the assignee holding the claim: reconcile is never an agent move.
+    expect(isTransitionAllowed('blocked', 'applied', 'agent:rr7-engineer', {
+      kind: 'code', assignee: 'agent:rr7-engineer',
+    })).toBe(false)
+  })
+
+  it('walks blocked -> applied through transitionSuggestion and backfills apply_ref', async () => {
+    seedTicket({ status: 'blocked', applyRef: null })
+    await transitionSuggestion(42, 'applied', 'system', {
+      note: "merged out-of-band while 'blocked'",
+      links: [{ kind: 'pr', ref: 'https://github.com/o/r/pull/508', state: 'merged' }],
+    })
+    expect(h.state.patches[0]).toMatchObject({ status: 'applied' })
+    expect(h.state.patches[0]!['applyRef']).toBe('https://github.com/o/r/pull/508')
+  })
+
+  it('409s a non-system actor attempting the reconcile through the API', async () => {
+    h.state.selects.push([{ ...TICKET, status: 'approved' }])
+    expect(await status(transitionSuggestion(42, 'applied', 'agent:agent-editor'))).toBe(409)
+    h.state.selects.push([{ ...TICKET, status: 'blocked' }])
+    expect(await status(transitionSuggestion(42, 'applied', 'owner'))).toBe(409)
+    expect(h.state.patches).toEqual([])
+  })
+})
+
+/**
+ * Auto-stamped last_error on a reasonless block. Ten of the eleven blocked
+ * rows on 2026-08-05 carried an empty last_error, so the digest had nothing
+ * to flag and the owner nothing to act on.
+ */
+describe('blocked transitions auto-stamp a missing reason', () => {
+  it('stamps last_error when neither a note nor a lastError was given', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'blocked', 'system')
+    expect(h.state.patches[0]!['lastError']).toBe('blocked without stated reason by system')
+  })
+
+  it('names the actual actor in the stamp', async () => {
+    seedTicket({ status: 'in_progress', assignee: 'agent:rr7-engineer' })
+    await transitionSuggestion(42, 'blocked', 'agent:rr7-engineer')
+    expect(h.state.patches[0]!['lastError']).toBe('blocked without stated reason by agent:rr7-engineer')
+  })
+
+  it('treats an empty or whitespace-only reason as missing', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'blocked', 'system', { lastError: '   ', note: '' })
+    expect(h.state.patches[0]!['lastError']).toBe('blocked without stated reason by system')
+  })
+
+  it('never overwrites a real lastError', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'blocked', 'system', { lastError: 'smoke: / returned 500' })
+    expect(h.state.patches[0]!['lastError']).toBe('smoke: / returned 500')
+  })
+
+  it('counts a note as a stated reason and leaves lastError alone', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'blocked', 'system', { note: 'waiting on a Shopify scope change' })
+    expect(h.state.patches[0]!['lastError']).toBeUndefined()
+  })
+
+  it('never rejects the transition over the missing reason', async () => {
+    seedTicket({ status: 'in_progress' })
+    expect(await status(transitionSuggestion(42, 'blocked', 'system'))).toBe(200)
+  })
+
+  it('does not stamp any other destination', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'approved', 'system')
+    expect(h.state.patches[0]!['lastError']).toBeUndefined()
+  })
+})
+
+/**
+ * Kind validation at create. An invented kind ('bug', 'improvement') used to
+ * land verbatim in a bucket no executor reads, or fail the insert past 16
+ * characters. Now it coerces to `process` with the original preserved in the
+ * suggestion text.
+ */
+describe('unknown-kind coercion on create', () => {
+  it('pins the known-kind list the executor taxonomy covers', () => {
+    expect([...KNOWN_TICKET_KINDS].sort()).toEqual([
+      'agent-def', 'campaign', 'code', 'config', 'instructions',
+      'process', 'program', 'promo', 'strategy',
+    ])
+  })
+
+  it('passes every known kind through untouched', () => {
+    for (const kind of KNOWN_TICKET_KINDS) {
+      expect(normalizeTicketKind(kind)).toEqual({ kind, original: null })
+    }
+  })
+
+  it('defaults an absent kind to process with no original', () => {
+    expect(normalizeTicketKind(undefined)).toEqual({ kind: 'process', original: null })
+  })
+
+  it('coerces an unknown kind to process and keeps the original string', () => {
+    expect(normalizeTicketKind('bug')).toEqual({ kind: 'process', original: 'bug' })
+    expect(normalizeTicketKind('seo-fix')).toEqual({ kind: 'process', original: 'seo-fix' })
+    // Case and whitespace variants are unknown too: the column is compared
+    // verbatim by every executor query, so 'Code' would be a silent bucket.
+    expect(normalizeTicketKind('Code').kind).toBe('process')
+  })
+
+  it('writes the coerced kind and the preserved original on insert', async () => {
+    h.state.selects.push([])       // getTeamConfig reads pipeline_settings
+    h.state.insertResults.push([{ id: 77 }])
+    const res = await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'improvement',
+      suggestion: 'tighten the hero alt text',
+    })
+    expect(res).toEqual({ id: 77, deduped: false })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['kind']).toBe('process')
+    expect(values['suggestion']).toBe(
+      "[unknown kind 'improvement' coerced to process] tighten the hero alt text",
+    )
+  })
+
+  it('leaves a known kind and its suggestion text untouched on insert', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 78 }])
+    await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code',
+      suggestion: 'fix the rail anchor',
+    })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['kind']).toBe('code')
+    expect(values['suggestion']).toBe('fix the rail anchor')
+  })
+
+  it('cannot overflow the 16-char kind column however long the invented kind is', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 79 }])
+    await createSuggestionDetailed({
+      team: 'strategy', category: 'other',
+      kind: 'a-very-long-invented-kind-name-that-would-fail-the-varchar',
+      suggestion: 'x',
+    })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['kind']).toBe('process')
+    expect(String(values['kind']).length).toBeLessThanOrEqual(16)
   })
 })

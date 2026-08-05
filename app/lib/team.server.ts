@@ -525,6 +525,35 @@ export async function listRecentEvents(team?: TeamId, sinceDays = 7, limit = 500
 // additive and lives further down under "Ticket lifecycle (070)". Everything
 // in this section keeps its exact pre-070 behaviour.
 
+/**
+ * Every kind the executor taxonomy knows. `code` is claimed by the daily dev
+ * routine, `instructions`/`agent-def`/`config` by agent-editor, and the rest
+ * route to a daily run or to the owner. A kind outside this list has no
+ * executor at all, so a row filed under one would sit in the queue forever
+ * with nothing scheduled to ever read it.
+ */
+export const KNOWN_TICKET_KINDS: readonly string[] = [
+  'code', 'instructions', 'agent-def', 'config',
+  'campaign', 'promo', 'program', 'process', 'strategy',
+]
+
+/**
+ * Coerce an unknown kind to `process` while preserving what the caller said.
+ *
+ * Agents invent kinds ('bug', 'improvement', 'seo') and the column is
+ * write-once at insert, so before this a typo'd kind either landed in a
+ * no-executor bucket nobody sweeps or, past 16 characters, failed the insert
+ * outright. `process` is the safest landing: it is the kind the hygiene pass
+ * and the daily runs already read, and rekindSuggestion can move it to a real
+ * lane later. The original string is preserved by prefixing the suggestion
+ * text, so triage can see what was meant.
+ */
+export function normalizeTicketKind(kind: string | undefined): { kind: string; original: string | null } {
+  if (kind === undefined) return { kind: 'process', original: null }
+  if (KNOWN_TICKET_KINDS.includes(kind)) return { kind, original: null }
+  return { kind: 'process', original: kind }
+}
+
 export interface SuggestionInput {
   team: TeamId
   targetTeam?: TeamId | undefined
@@ -578,6 +607,13 @@ export async function createSuggestionDetailed(
   const autoApprove = await getTeamConfig(actingTeam)
     .then(c => c.autoApproveSuggestions)
     .catch(() => false)
+  // An unknown kind is coerced to `process` (see normalizeTicketKind), and the
+  // original string survives as a prefix on the suggestion text so triage and
+  // a later rekind can see what the filer meant.
+  const nk = normalizeTicketKind(s.kind)
+  const suggestionText = nk.original === null
+    ? s.suggestion
+    : `[unknown kind '${nk.original.slice(0, 64)}' coerced to process] ${s.suggestion}`
   const [row] = await db
     .insert(homepageTeamSuggestions)
     .values({
@@ -585,8 +621,8 @@ export async function createSuggestionDetailed(
       targetTeam:    s.targetTeam ?? null,
       runId:         s.runId ?? null,
       category:      s.category,
-      kind:          s.kind ?? 'process',
-      suggestion:    s.suggestion,
+      kind:          nk.kind,
+      suggestion:    suggestionText,
       estSavingsUsd: String(s.estSavingsUsd ?? 0),
       cxRisk:        s.cxRisk ?? 'low',
       status:        autoApprove ? 'approved' : 'proposed',
@@ -1072,6 +1108,21 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // RUN_CLOSE_ACTORS, which would also hand the release engine the ability to
     // close `strategy` rows it has no business touching.
     { to: 'applied', actors: ['system'], kinds: DETECTOR_SELF_CLOSE_KINDS },
+    // Out-of-band merged-PR reconcile only, mirroring the `pr_open -> applied`
+    // system edge below. `applied` means "the fix is live on xdipx.com", and the
+    // sweep earns that claim the same way it does on the pr_open edge: it asks
+    // GitHub whether the PR this ticket links is already merged, and only a
+    // `merged: true` from GitHub itself lets it write this edge. Nothing here
+    // can mark unmerged work as shipped.
+    //
+    // Why `approved` can be stranded at all: a bounced ticket whose lease
+    // expires returns to `approved` with its PR link intact, and if the owner
+    // then merges that PR by hand the ticket sits on the unassigned queue
+    // forever while its fix is live in production. Tickets #120 and #423 sat
+    // exactly this way with PRs #436 and #429 merged. Unlike the detector
+    // self-close above this edge is deliberately not fenced by kind: a
+    // hand-merged PR strands a ticket of any kind, exactly as on `pr_open`.
+    { to: 'applied', actors: ['system'] },
     // agent-editor's hygiene pass retiring a row with no executor. Kinds are
     // fenced so it can never dismiss the instruction rows aimed at itself.
     { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_RETIRE_KINDS },
@@ -1136,6 +1187,16 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
   ],
   blocked: [
     { to: 'approved', actors: ['owner', 'system'] },
+    // Out-of-band merged-PR reconcile only, mirroring the `pr_open -> applied`
+    // system edge above. Only a `merged: true` from GitHub itself lets the
+    // sweep write this edge, so nothing here can mark unmerged work as shipped.
+    //
+    // A blocked ticket whose PR the owner then merges by hand is otherwise
+    // stranded forever: `blocked` used to have no exit but the owner, so the
+    // fix went live while the ticket kept holding its dedupe key and kept
+    // showing in the blocked count. Ticket #455 sat exactly this way with
+    // PR #508 merged.
+    { to: 'applied', actors: ['system'] },
     OWNER_DISMISS,
   ],
   applied: [],
@@ -1257,6 +1318,14 @@ export async function transitionSuggestion(
     patch['attemptCount'] = sql`${homepageTeamSuggestions.attemptCount} + 1`
   }
   if (opts.lastError !== undefined) patch['lastError'] = opts.lastError
+  // A transition into `blocked` with no stated reason gets a stamped one. Ten
+  // of the eleven blocked rows on 2026-08-05 had an empty last_error, which
+  // left the owner digest nothing to flag and the owner nothing to act on. The
+  // transition itself is never rejected, since refusing it would strand the
+  // ticket in a worse state; the stamp just makes the silence attributable.
+  if (to === 'blocked' && !opts.lastError?.trim() && !opts.note?.trim()) {
+    patch['lastError'] = `blocked without stated reason by ${actor}`
+  }
   // Returning to `approved` puts the ticket back on the unassigned queue,
   // whether that came from a lease expiry or from an unblock.
   if (to === 'approved') {

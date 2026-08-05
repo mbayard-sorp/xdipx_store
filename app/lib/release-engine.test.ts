@@ -49,12 +49,17 @@ vi.mock('~/lib/release-ticket-autofile.server', () => ({
 import { classifyChangedFiles } from '~/lib/github.server'
 import {
   AGENT_EDITOR_ALLOWLIST_RE,
+  CONDITIONAL_UNDRAFT_MIN_AGE_MS,
+  CONDITIONAL_UNDRAFT_PREFIXES,
   DEFAULT_MAX_MERGES_PER_DAY,
   MAX_TICKET_ATTEMPTS,
   NEEDS_OWNER_LABEL,
   REQUIRED_CHECK,
   ROLLBACK_CIRCUIT_LIMIT,
+  ageMsFromTimestamp,
   autoReadyOnDraft,
+  hasWipMarker,
+  isConditionalUndraftLane,
   checkState,
   dailyCapReached,
   evaluatePullRequest,
@@ -93,6 +98,10 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
   return {
     number: 100,
     headRef: 'ticket/41',
+    title: 'fix the rail anchor',
+    // Fresh activity by default, so the conditional undraft (which requires 30
+    // idle minutes) never fires unless a test opts in with an explicit ageMs.
+    ageMs: 0,
     draft: false,
     mergeable: true,
     mergeableState: 'clean',
@@ -372,7 +381,11 @@ describe('evaluatePullRequest: gates', () => {
     expect(d.code).toBe('draft-auto-ready')
   })
 
-  it('still skips a draft on an owner-attended lane', () => {
+  // Green and ticketed, but with fresh activity (the fixture's ageMs is 0):
+  // the conditional undraft requires 30 idle minutes, so a draft someone is
+  // actively working on stays a draft. The stale-draft cases live in the
+  // 'conditional undraft' describe below.
+  it('still skips a fresh draft on an owner-attended lane', () => {
     for (const headRef of ['claude/some-session', 'phase1/thing', 'tonight/thing']) {
       const d = evaluatePullRequest(facts({ draft: true, headRef }))
       expect(d.action).toBe('skip')
@@ -653,5 +666,139 @@ describe('summarizeSmoke', () => {
 
   it('treats an empty check list as a pass only vacuously, and the caller never sends one', () => {
     expect(summarizeSmoke([]).ok).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Conditional undraft (owner-attended lanes)
+// ---------------------------------------------------------------------------
+
+describe('conditional undraft on owner-attended lanes', () => {
+  /** Every eligibility condition satisfied at once. */
+  const eligible = () =>
+    facts({
+      draft: true,
+      headRef: 'claude/stale-session',
+      ageMs: CONDITIONAL_UNDRAFT_MIN_AGE_MS,
+      checks: { [REQUIRED_CHECK]: 'success' },
+      ticket: verifiedTicket,
+      title: 'fix the rail anchor',
+      labels: [],
+    })
+
+  it('covers exactly the five owner-attended prefixes', () => {
+    expect(CONDITIONAL_UNDRAFT_PREFIXES).toEqual(['claude/', 'phase1/', 'tonight/', 'fix/', 'pm/'])
+    for (const p of CONDITIONAL_UNDRAFT_PREFIXES) {
+      expect(isConditionalUndraftLane(`${p}thing`)).toBe(true)
+      // No overlap with the unconditional machine-lane undraft.
+      expect(autoReadyOnDraft(`${p}thing`)).toBe(false)
+    }
+    for (const ref of ['agents/suggestion-1', 'ticket/43', 'revert/pr-9', 'main', 'claudette/x', 'fixture/x']) {
+      expect(isConditionalUndraftLane(ref)).toBe(false)
+    }
+  })
+
+  it('undrafts a stale, green, ticketed, unmarked draft on every covered lane', () => {
+    for (const p of CONDITIONAL_UNDRAFT_PREFIXES) {
+      const d = evaluatePullRequest({ ...eligible(), headRef: `${p}thing` })
+      expect(d.action).toBe('undraft')
+      expect(d.code).toBe('draft-auto-ready')
+    }
+  })
+
+  // The eligibility matrix: knocking out any single condition keeps the draft.
+  const ineligible: Array<[string, Partial<PullRequestFacts>]> = [
+    ['CI is red', { checks: { [REQUIRED_CHECK]: 'failure' } }],
+    ['CI is still pending', { checks: { [REQUIRED_CHECK]: null } }],
+    ['CI never reported', { checks: {} }],
+    ['no pr-linked ticket exists', { ticket: null }],
+    ['the PR is younger than 30 minutes', { ageMs: CONDITIONAL_UNDRAFT_MIN_AGE_MS - 1 }],
+    ['the timestamp was unparseable (ageMs 0)', { ageMs: 0 }],
+    ['the title says WIP', { title: 'WIP: fix the rail anchor' }],
+    ['the title says [wip]', { title: '[wip] rail anchor' }],
+    ['a wip label is set', { labels: ['wip'] }],
+    ['a WIP label is set in another case', { labels: ['WIP'] }],
+  ]
+  for (const [why, over] of ineligible) {
+    it(`keeps the draft when ${why}`, () => {
+      const d = evaluatePullRequest({ ...eligible(), ...over })
+      expect(d.action).toBe('skip')
+      expect(d.code).toBe('draft')
+    })
+  }
+
+  it('does not require the ticket to be verified, only to exist', () => {
+    const d = evaluatePullRequest({
+      ...eligible(),
+      ticket: { id: 9, status: 'pr_open', kind: 'code', attemptCount: 0 },
+    })
+    expect(d.action).toBe('undraft')
+  })
+
+  it('accepts a ticket in any status: undrafting is visibility, not approval', () => {
+    for (const status of ['proposed', 'approved', 'in_progress', 'in_review', 'blocked'] as const) {
+      const d = evaluatePullRequest({
+        ...eligible(),
+        ticket: { id: 9, status, kind: 'code', attemptCount: 0 },
+      })
+      expect(d.action).toBe('undraft')
+    }
+  })
+
+  it('never fires on the machine lanes, which have their own unconditional rule', () => {
+    // A ticket/ draft undrafts even when the conditional test would refuse it.
+    const d = evaluatePullRequest({ ...eligible(), headRef: 'ticket/41', ageMs: 0, checks: {} })
+    expect(d.action).toBe('undraft')
+  })
+
+  it('still lets protected classification and the needs-owner label win', () => {
+    const protectedDraft = evaluatePullRequest({
+      ...eligible(),
+      changedPaths: ['db/schema.ts'],
+      classification: classifyChangedFiles(['db/schema.ts']),
+    })
+    expect(protectedDraft.action).toBe('escalate-protected')
+
+    const claimed = evaluatePullRequest({ ...eligible(), labels: [NEEDS_OWNER_LABEL] })
+    expect(claimed.action).toBe('skip')
+    expect(claimed.code).toBe('needs-owner-label')
+  })
+
+  it('never merges in the decision that undrafts, same as the machine lanes', () => {
+    expect(evaluatePullRequest({ ...eligible(), draft: false }).action).toBe('merge')
+    expect(evaluatePullRequest(eligible()).action).toBe('undraft')
+  })
+})
+
+describe('hasWipMarker', () => {
+  it('matches the word wip in any case, in title or labels', () => {
+    expect(hasWipMarker('WIP: thing', [])).toBe(true)
+    expect(hasWipMarker('[wip] thing', [])).toBe(true)
+    expect(hasWipMarker('thing (WIP)', [])).toBe(true)
+    expect(hasWipMarker('thing', ['wip'])).toBe(true)
+    expect(hasWipMarker('thing', ['WIP'])).toBe(true)
+  })
+
+  it('does not match wip inside another word, or a label that merely contains it', () => {
+    expect(hasWipMarker('add swipe gesture', [])).toBe(false)
+    expect(hasWipMarker('fix wiper blade config', [])).toBe(false)
+    expect(hasWipMarker('thing', ['wip-adjacent'])).toBe(false)
+  })
+})
+
+describe('ageMsFromTimestamp', () => {
+  it('computes age from an ISO timestamp', () => {
+    const now = Date.parse('2026-08-05T12:00:00Z')
+    expect(ageMsFromTimestamp('2026-08-05T11:00:00Z', now)).toBe(3600_000)
+  })
+
+  it('clamps a future timestamp to 0 rather than going negative', () => {
+    const now = Date.parse('2026-08-05T12:00:00Z')
+    expect(ageMsFromTimestamp('2026-08-05T13:00:00Z', now)).toBe(0)
+  })
+
+  it('returns 0 (never eligible) for garbage, failing closed', () => {
+    expect(ageMsFromTimestamp('', Date.now())).toBe(0)
+    expect(ageMsFromTimestamp('not a date', Date.now())).toBe(0)
   })
 })
