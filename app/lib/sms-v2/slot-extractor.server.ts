@@ -24,7 +24,11 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import type { ProductTypeDial, ProductSubtypeDial } from '../../types/index'
-import { type DiscoverySlots, isHighStakesCategory } from './discovery-gate.server'
+import {
+  type DiscoverySlots,
+  isHighStakesCategory,
+  SKIP_SENTINEL,
+} from './discovery-gate.server'
 import { logApiTokens } from '../token-log.server'
 
 export type { ProductTypeDial, ProductSubtypeDial, DiscoverySlots }
@@ -90,9 +94,13 @@ function extractAudienceByRelationshipNoun(
     return 'couples'
   }
 
-  // Gift — catch before gendered nouns since gift phrasing can co-occur
+  // Gift — catch before gendered nouns since gift phrasing can co-occur.
+  // Bare `gift` is included so the WHO quick-choice pill "A gift" resolves; it
+  // also subsumes "as a gift" / "wedding gift". `\bgift\b` does not match
+  // "gifted", and the gendered override below still wins when a recipient noun
+  // is present ("a gift for my husband" → for-him).
   if (
-    /\b(?:as\s+a\s+(?:gift|present)|for\s+someone\s+special|wedding\s+gift|bachelorette)\b/.test(
+    /\b(?:gift|as\s+a\s+present|present\s+for|for\s+someone\s+special|bachelorette)\b/.test(
       norm,
     )
   ) {
@@ -371,6 +379,13 @@ function extractMatters(norm: string): string[] {
     results.push('app-controlled')
   if (/\b(?:discreet\s+(?:packaging|shipping|delivery))\b/.test(norm))
     results.push('discreet-packaging')
+  // Bare "discreet" — the literal MATTERS pill label. Excludes "discreet motor",
+  // which the quiet rule above already claims. Reads discretion as a
+  // packaging/delivery concern, the storefront's common interpretation.
+  if (/\bdiscreet\b(?!\s+motor)/.test(norm)) results.push('discreet-packaging')
+  // Hands-free — the literal MATTERS pill label. No product-tag mapping today,
+  // but producing the slot lets the gate advance instead of looping on the pill.
+  if (/\bhands[- ]?free\b/.test(norm)) results.push('hands-free')
   if (/\b(?:beginner[- ]?friendly|easy\s+to\s+use|simple)\b/.test(norm) ||
       // "beginner" alone (without "friendly" suffix) also qualifies
       /\bbeginner\b/.test(norm))
@@ -378,6 +393,44 @@ function extractMatters(norm: string): string[] {
   if (/\b(?:soft|gentle|romantic|slow)\b/.test(norm)) results.push('soft')
   if (/\b(?:powerful|strong|intense|deep\s+rumble|rumbly)\b/.test(norm)) results.push('powerful')
   if (/\b(?:warming|warm|warming\s+sensation)\b/.test(norm)) results.push('warming')
+
+  // De-dup while preserving insertion order
+  return [...new Set(results)]
+}
+
+// ── 4b. Mood ────────────────────────────────────────────────────────────────
+//
+// The MOOD gate was silently un-fillable: nothing ever assigned regexSlots.mood,
+// so hasMood stayed false forever and the documented SKIP_SENTINEL ("just show
+// me") was never produced. This closes both gaps.
+//
+// The mood vocabulary mirrors the searchProducts tool's mood enum
+// (playful | romantic | luxurious | adventurous | relaxing) so an extracted mood
+// slot maps straight onto a search filter. "Just show me" and close variants
+// return the skip-ahead sentinel, which advanceGate reads as searchNow=true.
+
+function extractMood(norm: string): string[] {
+  // Skip-ahead: the MATTERS pill "Just show me" and free-text equivalents.
+  // Returned alone — a shopper who wants to skip is not also picking a vibe.
+  if (
+    /\b(?:just\s+show\s+me|show\s+me\s+(?:what\s+you\s+(?:'?ve\s+)?got|something|anything|options|the\s+goods)|surprise\s+me|just\s+pick|pick\s+for\s+me|you\s+(?:choose|decide|pick)|whatever\s+you\s+(?:think|recommend|suggest)|no\s+preference)\b/.test(
+      norm,
+    )
+  ) {
+    return [SKIP_SENTINEL]
+  }
+
+  const results: string[] = []
+  if (/\b(?:playful|flirty|flirtatious|fun|teasing|tease|cheeky)\b/.test(norm))
+    results.push('playful')
+  if (/\b(?:romantic|intimate|sensual|loving|tender|passionate|connected)\b/.test(norm))
+    results.push('romantic')
+  if (/\b(?:luxurious|luxury|indulgent|fancy|premium|treat\s+myself|splurge)\b/.test(norm))
+    results.push('luxurious')
+  if (/\b(?:adventurous|adventure|kinky|wild|spicy|experimental|daring|naughty|frisky)\b/.test(norm))
+    results.push('adventurous')
+  if (/\b(?:relaxing|relaxed|unwind|chill|calm|cozy|mellow)\b/.test(norm))
+    results.push('relaxing')
 
   // De-dup while preserving insertion order
   return [...new Set(results)]
@@ -586,6 +639,7 @@ export async function extractSlots(input: ExtractInput): Promise<ExtractResult> 
   const audienceByRegex = extractAudienceByRelationshipNoun(norm)
   const experience = extractExperience(norm)
   const rawMatters = extractMatters(norm)
+  const rawMood = extractMood(norm)
 
   // "beginner" also implies first-time if experience not already set
   const resolvedExperience: DiscoverySlots['experience'] | undefined =
@@ -620,6 +674,7 @@ export async function extractSlots(input: ExtractInput): Promise<ExtractResult> 
   if (resolvedAudience !== undefined) regexSlots.audience = resolvedAudience
   if (resolvedExperience !== undefined) regexSlots.experience = resolvedExperience
   if (rawMatters.length > 0) regexSlots.matters = rawMatters
+  if (rawMood.length > 0) regexSlots.mood = rawMood
   if (priceMax !== undefined) regexSlots.priceMax = priceMax
   if (isAdviceRequest) regexSlots.isAdviceRequest = true
   if (vulnerabilitySignaled) regexSlots.vulnerabilitySignaled = true
