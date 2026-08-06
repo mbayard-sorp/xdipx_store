@@ -28,6 +28,8 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { searchForIvrWithDiagnostics, type IvrProductCard } from '~/lib/ivr-search.server'
 import { findCustomerByPhone, getProductByHandle } from '~/lib/shopify.server'
 import { getExplainer, type ExplainerCategory } from './templates/category-explainers'
+import { orderStatusLookup, OrderNotFoundError } from './tools/order-status.server'
+import { kbLookup, type KbTopic } from './tools/kb-lookup.server'
 
 // ─── Tool surface (model-facing definitions) ─────────────────────────────────
 
@@ -109,6 +111,47 @@ export const DISCOVERY_AGENT_TOOLS: Anthropic.Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'orderStatus',
+    description:
+      "Look up the status of the customer's order — shipped/delivered, tracking, and whether it can still be refunded or cancelled. Uses the caller's phone number automatically on SMS/voice: do not ask for a phone and do not pass one. Optionally pass an order name (like '#1042') if the customer states it; omit it to get their most recent order. Returns { orderName, status, trackingNumber?, trackingUrl?, carrier?, lastScan?, refundEligible, cancelEligible }. Use when the customer asks 'where's my order?', 'has it shipped?', 'tracking', or about a refund/cancel on an order they already placed. On web chat there is no phone, so this returns an error you should handle by directing them to email hello@xdipx.com with their order number.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        orderName: {
+          type: 'string',
+          description: "Optional order name exactly as the customer stated it, e.g. '#1042'. Omit to fetch their most recent order.",
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'lookupPolicy',
+    description:
+      "Answer a shipping, returns/refund, product-compatibility, troubleshooting, or general brand-FAQ question from xdipx's knowledge base. Returns { quickAnswer, sourceTitle, bodyExcerpt? } or an error when nothing matches. Use when the customer asks about shipping times or discretion, the return/refund policy, whether two products work together, how to charge/clean/fix a product, or a general brand or policy question. This is NOT for product discovery: use searchProducts to find products to buy.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          enum: ['shipping', 'returns', 'compatibility', 'troubleshooting', 'brand'],
+          description: "Which knowledge-base area the question falls under. 'returns' covers refunds. 'brand' is the catch-all for general policy/FAQ questions that aren't shipping, returns, compatibility, or troubleshooting.",
+        },
+        query: {
+          type: 'string',
+          description: "The customer's question in their own words. Used to rank within the topic. Optional but strongly recommended.",
+        },
+        productCategory: {
+          type: 'string',
+          description: "Optional product category to scope compatibility/troubleshooting answers (e.g. 'vibrator', 'lube').",
+        },
+      },
+      required: ['topic'],
+      additionalProperties: false,
+    },
+  },
 ]
 
 export type DiscoveryToolName =
@@ -116,6 +159,8 @@ export type DiscoveryToolName =
   | 'lookupReturningCustomer'
   | 'getCategoryExplainer'
   | 'getProductDetails'
+  | 'orderStatus'
+  | 'lookupPolicy'
 
 export interface DiscoveryAgentToolContext {
   /** Caller phone (E.164) for voice/sms, or `web:<sessionId>` for web chat. */
@@ -509,6 +554,74 @@ export async function runDiscoveryTool(
           in_stock: inStock,
           variant_options: variantOptions ?? [],
           price,
+        },
+      }
+    }
+
+    if (name === 'orderStatus') {
+      // Order lookup is keyed on the caller's phone. Web chat has no phone —
+      // short-circuit with a structured error the model can turn into an email
+      // hand-off, matching lookupReturningCustomer's web behaviour.
+      if (ctx.channel === 'web' || ctx.phone.startsWith('web:') || !ctx.phone) {
+        return {
+          ok: false,
+          error: 'no_caller_phone',
+          message: 'Order lookup is voice/sms-only (it needs the caller phone). Direct the customer to email hello@xdipx.com with their order number.',
+        }
+      }
+      const orderName = typeof input['orderName'] === 'string' && input['orderName'].trim()
+        ? input['orderName'].trim()
+        : undefined
+      try {
+        const status = await orderStatusLookup({
+          phone: ctx.phone,
+          ...(orderName ? { orderName } : {}),
+        })
+        return { ok: true, data: status }
+      } catch (err) {
+        if (err instanceof OrderNotFoundError) {
+          return {
+            ok: false,
+            error: 'order_not_found',
+            message: orderName
+              ? `No order ${orderName} found for this number. Ask them to double-check the order number, or to email hello@xdipx.com.`
+              : 'No orders found for this phone number. If they ordered under a different number, ask them to email hello@xdipx.com with their order number.',
+          }
+        }
+        throw err // real failure — handled by the outer catch as tool_failed
+      }
+    }
+
+    if (name === 'lookupPolicy') {
+      const topicRaw = String(input['topic'] ?? '').trim().toLowerCase()
+      const allowed: KbTopic[] = ['shipping', 'returns', 'compatibility', 'troubleshooting', 'brand']
+      if (!allowed.includes(topicRaw as KbTopic)) {
+        return { ok: false, error: 'invalid_topic', message: `topic must be one of: ${allowed.join(', ')}.` }
+      }
+      const query = typeof input['query'] === 'string' && input['query'].trim()
+        ? input['query'].trim()
+        : undefined
+      const productCategory = typeof input['productCategory'] === 'string' && input['productCategory'].trim()
+        ? input['productCategory'].trim()
+        : undefined
+      const kb = await kbLookup({
+        topic: topicRaw as KbTopic,
+        ...(query ? { query } : {}),
+        ...(productCategory ? { productCategory } : {}),
+      })
+      if (!kb) {
+        return {
+          ok: false,
+          error: 'not_found',
+          message: `No knowledge-base entry matched ${topicRaw}. Only answer from general knowledge if you are certain; otherwise offer to connect them with the team at hello@xdipx.com.`,
+        }
+      }
+      return {
+        ok: true,
+        data: {
+          quickAnswer: kb.quickAnswer,
+          sourceTitle: kb.sourceTitle,
+          ...(kb.bodyExcerpt ? { bodyExcerpt: kb.bodyExcerpt } : {}),
         },
       }
     }
