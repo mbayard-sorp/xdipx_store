@@ -8,8 +8,9 @@
  * Wire this URL into the Twilio phone number's "Primary Handler Fails" field.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
-import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
+import { twiml, verifyTwilioRequest, withTimeout, xmlEscape } from '~/lib/twilio.server'
 import { normalizeForTTS } from '~/lib/tts-normalize'
+import { persistPlaceholderVoicemail } from '~/lib/ivr-voicemail.server'
 
 function fallbackTwiml(): string {
   const appUrl = process.env['APP_URL'] ?? ''
@@ -24,9 +25,19 @@ function fallbackTwiml(): string {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { ok } = await verifyTwilioRequest(request)
+  const { ok, params } = await verifyTwilioRequest(request)
   if (!ok) return new Response('Forbidden', { status: 403 })
   console.info('[ivr] fallback triggered')
+  // Persist the voicemail row at Record time so the fallback message is visible
+  // in /admin/voicemails and its recording attaches via recording-status.
+  const callSid = params['CallSid'] ?? ''
+  const fromNumber = params['From'] ?? ''
+  await withTimeout(
+    persistPlaceholderVoicemail({ callSid, fromNumber, reason: 'fallback', callbackNumber: fromNumber || null }),
+    2500,
+    undefined,
+    'persistVoicemail.fallback',
+  )
   return twiml(fallbackTwiml())
 }
 

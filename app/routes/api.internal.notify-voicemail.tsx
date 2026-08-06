@@ -4,8 +4,8 @@
  * email. Shared-secret guarded.
  */
 import type { ActionFunctionArgs } from 'react-router'
-import { trackEvent } from '~/lib/klaviyo.server'
 import { verifyInternalSecret } from '~/lib/env.server'
+import { notifyVoicemailReceived } from '~/lib/ivr-voicemail.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
@@ -22,26 +22,15 @@ export async function action({ request }: ActionFunctionArgs) {
     contextOrderNumber: string | null
   }
 
-  const adminEmail = process.env['ADMIN_NOTIFICATION_EMAIL']
-  if (!adminEmail) {
-    // Voicemail is already stored; just log and 200.
-    console.warn('[notify-voicemail] ADMIN_NOTIFICATION_EMAIL not set — skipping Klaviyo event')
-    return Response.json({ ok: true, notified: false })
-  }
+  // Shared with the pre-agent <Record> gates so the Klaviyo event shape and the
+  // ADMIN_NOTIFICATION_EMAIL guard have a single source of truth. Never throws.
+  const notified = await notifyVoicemailReceived({
+    callSid: body.callSid,
+    fromNumber: body.fromNumber,
+    callbackNumber: body.callbackNumber,
+    summary: body.summary,
+    contextOrderNumber: body.contextOrderNumber,
+  })
 
-  try {
-    await trackEvent(adminEmail, 'IVR Voicemail Received', {
-      call_sid: body.callSid,
-      from_number: body.fromNumber,
-      callback_number: body.callbackNumber,
-      summary: body.summary,
-      context_order_number: body.contextOrderNumber,
-      admin_url: `https://xdipx.com/admin/voicemails`,
-    })
-  } catch (err) {
-    console.error('[notify-voicemail] klaviyo trackEvent failed', err)
-    return Response.json({ ok: true, notified: false }, { status: 200 })
-  }
-
-  return Response.json({ ok: true, notified: true })
+  return Response.json({ ok: true, notified })
 }
