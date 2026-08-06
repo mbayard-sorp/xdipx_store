@@ -434,24 +434,36 @@ interface CollectionProductsPage {
 }
 
 /**
- * Pacing for the full-catalog crawl, measured against production 2026-08-05.
+ * Pacing for the full-catalog crawl, derived rather than guessed.
  *
- * One PRODUCTS_PAGE_QUERY page costs 128 points and the catalog is 46 pages, so
- * a rebuild is 5,888 points against a 2,000-point bucket that refills at 100/s.
- * Only 15 pages fit before the crawl throttles itself, and fired back to back it
- * pinned the bucket near zero for ~60s: sampling every 15s across a cron
- * boundary read 1999 -> 1864 -> 138 -> 128 -> 575 -> 1999.
+ * Shopify's Admin GraphQL bucket is 2,000 points refilling at 100/s. One
+ * PRODUCTS_PAGE_QUERY page costs 128 points, so a page cycle that consumes
+ * without draining must take at least 128/100 = 1.28s. Anything faster spends
+ * the bucket down no matter how many pages there are; the delay is not a
+ * politeness knob, it is the break-even.
  *
- * Everything else sharing the bucket died in that window — the purchase
- * reconcile sweep every 15 minutes, warm-discovery-index 500ing on itself, and
- * getDiscoveryRails timing out so the homepage served a degraded payload.
+ * The first version of this used a flat 400ms, which felt reasonable and was
+ * arithmetically useless: measured in production, a page took ~332ms of network
+ * plus 400ms of delay = a 732ms cycle, so the crawl drew 175 points/s against a
+ * 100/s refill and bottomed the bucket at 54/2000 — worse than the 128 it was
+ * meant to fix. Slowing a drain is not the same as stopping it.
  *
- * Pacing does not make the crawl slower in any way that matters (it is already
- * bounded by the refill rate) — it spreads the same spend so co-scheduled
- * callers keep their headroom. Same fix, same reason, as
- * PRICING_FETCH_PAGE_DELAY_MS in shopify.server.ts.
+ * Sized off the real numbers with headroom: a ~1.83s cycle draws ~70 points/s,
+ * leaving ~30/s of refill for everyone else, and a full 46-page crawl takes
+ * ~84s. That cost is affordable precisely because the rebuild is now gated on
+ * an actual catalog change (see shouldRebuildDiscoveryIndex) instead of firing
+ * every 15 minutes.
  */
-const CRAWL_PAGE_DELAY_MS = 400
+const BUCKET_RESTORE_RATE_PER_SEC = 100
+const CRAWL_PAGE_COST_POINTS = 128
+/** Slowest observed page round-trip; subtracted so the delay tops up the cycle. */
+const CRAWL_PAGE_NETWORK_MS = 350
+/** Break-even cycle, below which the crawl drains the bucket no matter what. */
+export const CRAWL_BREAKEVEN_CYCLE_MS =
+  (CRAWL_PAGE_COST_POINTS / BUCKET_RESTORE_RATE_PER_SEC) * 1000
+/** 1.43x break-even: enough margin that a slow page cannot tip it negative. */
+const CRAWL_TARGET_CYCLE_MS = Math.round(CRAWL_BREAKEVEN_CYCLE_MS * 1.43)
+export const CRAWL_PAGE_DELAY_MS = Math.max(0, CRAWL_TARGET_CYCLE_MS - CRAWL_PAGE_NETWORK_MS)
 
 const pause = (ms: number) => new Promise(r => setTimeout(r, ms))
 
