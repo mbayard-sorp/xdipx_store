@@ -90,3 +90,30 @@ No new valve: the strategy team's existing kill switch and budget govern this ro
 propose-only by construction. To enable: create the cloud trigger (routine #11 in
 `docs/store-team/routine-schedule.md`) and confirm the strategy team is enabled. The owner
 executes approved pitches manually from hello@xdipx.com; nothing is ever sent by the routine.
+
+## Appendix: Execution step (valve-gated, OFF by default)
+
+This appendix activates ONLY when the `outreach_send_enabled` valve in pipeline_settings is
+true. While it is false (the shipped default), the routine's behavior is unchanged: propose-only,
+nothing sent, exactly as above. See `docs/store-team/outreach-pipeline.md` for the pipeline this
+drives and the policy constraints that bind every send.
+
+When the valve is on, after Step 3 the routine MAY execute approved pitches:
+
+1. List the sendable targets: `POST $BASE_URL/api/team/outreach {"op":"list","status":"queued"}`
+   plus the approved pitch rows from Step 1's suggestion listing. A pitch is executable only
+   when BOTH exist: an APPROVED suggestion row containing the full draft, and a `queued`
+   outreach prospect for the same domain with a contact_email. A prospect still in `new` that
+   has an approved pitch may first be queued with `{"op":"queue","domain":"<domain>"}`.
+2. For each executable pitch, at most **3 sends per run**:
+   `POST $BASE_URL/api/team/outreach {"op":"send","prospectId":<id>,"subject":"<subject>","text":"<the approved draft, plain text>"}`.
+   The server enforces the hard guards (valve, daily cap of `outreach_daily_send_cap`, queued
+   status, 7-day per-prospect dedupe); a `{sent:false,error}` response is a normal skip, not a
+   failure. Never send to the same prospect twice within 7 days, and never send a draft that
+   was not approved on the bus.
+3. Record results: one `step` event listing each send attempt and its outcome, and a `note` op
+   on each pitch's suggestion row with the outreach message outcome. Do not re-file sent
+   pitches as new suggestions.
+4. Replies are NOT this routine's job: the `/cron/outreach-inbox` poller classifies them and
+   loops the owner in at mike@xdipx.com on a positive reply. The routine only reads prospect
+   statuses on its next run to report movement.
