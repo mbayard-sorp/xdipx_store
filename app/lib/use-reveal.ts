@@ -57,6 +57,27 @@ export function useReveal(opts: UseRevealOptions = {}): UseRevealResult {
       setInView(true)
       return
     }
+
+    // Synchronous initial in-view seed. The IntersectionObserver callback is
+    // always async (fires on a later frame), so between mount (mounted=true)
+    // and that first callback, an above-the-fold element computes
+    // animateIn=true / inView=false and springs toward the hidden state
+    // (opacity 0, y 16px) before the observer springs it back. On a slow
+    // device that gap is more than one frame: a visible flash that shows up as
+    // Speed Index churn. Reading the element's box once here settles inView in
+    // the same batched re-render as setMounted, so anything already on screen
+    // paints its final state with no hidden frame. Off-screen elements stay
+    // false and reveal on scroll via the observer exactly as before.
+    const rect = el.getBoundingClientRect()
+    const vh = window.innerHeight || document.documentElement.clientHeight
+    // Mirror the default '-10% 0px' bottom rootMargin conservatively: only seed
+    // for elements clearly within the initial viewport. Borderline elements
+    // fall through to the observer, so this can never suppress a real reveal.
+    if (rect.top < vh * 0.9 && rect.bottom > 0) {
+      setInView(true)
+      if (once) return
+    }
+
     const io = new IntersectionObserver(
       ([entry]) => {
         if (!entry) return
