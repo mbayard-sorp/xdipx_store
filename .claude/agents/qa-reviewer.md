@@ -38,6 +38,17 @@ Type-checking and test suites verify code correctness, not feature correctness. 
    - Log lines for server behavior
 4. **Edge-case sweep**: golden path + at least 2 edge cases (empty state, error state, slow network).
 5. **Regression sweep**: did the change break adjacent features? Spot-check the nearest 1–2 routes.
+6. **Data-contract sweep** (from the 2026-08-04 product-lookup audit, where hard filters and casing
+   mismatches silently hid up to ~43% of the catalog). Bounce a PR that fails any of these:
+   - **Any PR adding or changing a search/query filter** must record a data-contract check in its
+     description: evidence (a GROQ/SQL count or a test) that the filtered field exists and that the
+     compared values match live data conventions (casing, vocabulary, presence). No check, no PASS.
+   - **Enrichment-dependent filters** (mood/matters/audience/`ivr*` tags, dials) carry the empty-array
+     escape (`count(coalesce(field, [])) == 0 || …`) unless the ticket explicitly says otherwise, since
+     coverage is partial (57–82%) and a hard `AND` makes un-enriched products invisible.
+   - **Customer-facing webhook handlers** (Twilio SMS/voice routes, `/api/ask-emma`) never return an
+     empty body on error: confirm the pipeline is wrapped in a `catch` that returns a voice-gated
+     friendly retry message.
 </workflow>
 
 <escalation>
