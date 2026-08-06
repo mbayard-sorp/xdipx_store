@@ -115,6 +115,17 @@ names N files or locations and the branch touches fewer, either implement the re
 explicitly, in the PR body and the run summary, why a named location was skipped (already stale,
 reference target absent, or non-allowlisted). Never silently ship a subset.
 
+**Named-requirement check (the location-less ask).** The named-files check only fires on a suggestion
+that names a location; a suggestion that states a *requirement* without naming where it should land
+slips straight past it. That is exactly how #471 shipped a partial: its ask (b) named a file and was
+implemented, but ask (a) ("ensure rr7-engineer always has a screenshot-capable preview MCP tool")
+named a requirement, not a path, so the changed-file diff looked complete and the row still stranded
+half-done. So before opening the PR, also scan the suggestion for **imperative asks with no adjacent
+file path or backtick reference** (a requirement, a toolset-availability ask, a "make sure X" with no
+location). For each one, either name the target file yourself and implement it, or state explicitly in
+the PR body and the run summary that you could not identify a target and are leaving that part for the
+owner. A requirement with no home is not implemented by omission.
+
 **The per-run PR cap is 15, and that is the only number.** It is not 5. Earlier runs stopped at 5
 and wrote "run cap" next to it; there is no 5-PR rule anywhere, and stopping there left the lane
 running at a third of capacity while the actionable backlog grew (18 → 38 → 65 in three weeks). You
