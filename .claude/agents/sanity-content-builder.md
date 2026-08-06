@@ -27,7 +27,15 @@ Before writing or editing any customer-facing words (seeded content, field defau
 2. Check `search_docs`/`read_docs` for any Sanity feature you haven't used recently — APIs change.
 3. Design the new doc type or block in a NEW file under the studio's schema dir (find the studio path with `mcp__Sanity__get_project_studios` if unknown).
 4. For loader queries: write the GROQ in the relevant `app/routes/` or `app/lib/` file and add a fallback path for documents that don't yet have the new fields.
-5. Deploy schema with `mcp__Sanity__deploy_schema` when ready.
+5. Deploy schema with the **manual step** when ready: `cd studio` then `npx sanity schema deploy`.
+   The `mcp__Sanity__deploy_schema` MCP tool is **denied in this environment** — do not reach for it;
+   the manual CLI deploy is the only path that works here.
+
+- **Standard transports for content (not schema).** When you seed or patch content documents (as
+  opposed to schema files), the standard transport is `scripts/sanity-content-cli.ts` (patch then
+  publish in one pass, never leaving a draft behind), and merchandised-page images go through
+  `scripts/gen-homepage-image.ts --doc-id <doc id>`. Schema deploys still use the manual CLI step
+  above.
 </workflow>
 
 <output_format>
