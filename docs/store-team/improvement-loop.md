@@ -293,3 +293,46 @@ carried `suggestions filed` as a required line in `<output_format>` and **nothin
 whether a filed row ever reached `applied`**. Filing was scored, closing was not, and the queue
 behaved exactly as that scoring predicts. If you add a metric to a retro step, make it a closure
 metric.
+
+## Disposal doctrine: verify before you keep
+
+Binding on every triage or queue-review pass. The intake doctrine above governs what enters the bus.
+This section governs what leaves it, which until now nothing did.
+
+An owner-directed review of all 156 open rows on 2026-08-06 checked every row against the repo, the
+live site, and production data rather than against its own description. **21 rows, one in seven,
+were already dead:** 9 shipped by other work and never closed, 5 moot because the thing they targeted
+had been retired, 4 outright duplicates, and 3 whose stated premise was false. The oldest had been
+dead for weeks. None of them were wrong when filed; they rotted because nothing re-reads a row after
+it is written.
+
+Three rules follow.
+
+1. **Re-verify before you keep, not before you file.** A row's description is evidence about the day
+   it was filed, never about today. Open the file it names, run the query it cites, curl the URL it
+   claims is broken. On 2026-08-06 that single step disposed of one row in seven, including a ticket
+   whose two "410" product handles both returned 200 because the `deal_status` retirement on
+   2026-08-03 had removed the gate that broke them.
+2. **A cleared blocker is not self-clearing.** `blocked` had 10 rows and 5 of them were waiting on a
+   dependency that had already merged, in one case with the ticket's own verification query passing
+   in production. `blocked -> approved` is reachable by `owner` and `system`, and nothing walks it on
+   its own. A pass that reads a blocked row must check whether its blocker still exists.
+3. **Check that the ask can reach its executor before unblocking it.** Ticket #1258 was blocked
+   because its last line asks to wire a check into the `npm test` script, and `package.json` is a
+   protected path. Unblocking it unchanged buys one more block. Rewrite the ask into the unprotected
+   shape first, or split the protected half into its own row.
+
+### The known structural gap: there is no agent-usable close
+
+Every closure in the 2026-08-06 review was written with `actor: 'owner'`, because that is the only
+actor that can reach `dismissed` from most statuses. `AGENT_RETIRE_KINDS` lets `agent-editor` retire
+`process`, `strategy`, and `program` rows only, so an agent that discovers an `instructions` or
+`code` row is already fixed **has nowhere to put that finding**. The row survives to be re-diagnosed
+on the next pass, and the next, which is most of how 21 dead rows accumulated.
+
+The fence is deliberate and must not be widened casually: an agent that can dismiss the instruction
+rows aimed at itself can edit its own instructions by deletion. But the narrow version is safe and is
+not built. Ticket #253 asks for it and is itself unbuildable by any agent, because the transition map
+lives in `app/lib/team.server.ts`, a protected path. It is one owner-authored change that pays for
+itself the first time it runs. Until it exists, dead-row disposal is a manual owner pass and the
+queue's floor is however long it has been since the last one.
