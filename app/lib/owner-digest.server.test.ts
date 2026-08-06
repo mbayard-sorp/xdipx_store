@@ -7,6 +7,42 @@ import { PgDialect } from 'drizzle-orm/pg-core'
 const executeMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
 
+// runOwnerDigest is exercised end-to-end below (the reconcile-before-health
+// ordering), so every collaborator with IO is mocked at the module boundary.
+const reconcileMock = vi.hoisted(() => vi.fn())
+const loopHealthMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/ticket-janitor.server', () => ({
+  computeTicketLoopHealth: loopHealthMock,
+  reconcilePrLinkStates: reconcileMock,
+}))
+vi.mock('~/lib/kv.server', () => ({
+  kvGet: vi.fn(async () => null),
+  kvSetNX: vi.fn(async () => true),
+  kvDel: vi.fn(async () => undefined),
+}))
+vi.mock('~/lib/team.server', () => ({
+  gate: vi.fn(),
+  getValve: vi.fn(async () => false),
+  TEAM_IDS: [],
+}))
+vi.mock('~/lib/team-keys', () => ({ VALVE_KEYS: {} }))
+vi.mock('~/lib/tracker.server', () => ({
+  getTrackers: () => [],
+  latestOwnerAsks: () => null,
+}))
+vi.mock('~/lib/owner-alerts.server', () => ({
+  sendOwnerEmail: vi.fn(async () => ({ sent: true })),
+}))
+vi.mock('~/lib/profit.server', () => ({
+  getProfitReconciliation: vi.fn(async () => null),
+}))
+vi.mock('~/lib/seo-daily.server', () => ({
+  getLatestSeoDaily: vi.fn(async () => null),
+}))
+vi.mock('~/lib/homepage-payload.server', () => ({
+  readHomepagePayloadB: vi.fn(async () => null),
+}))
+
 import {
   MAX_TICKET_ATTEMPTS,
   ageOutStaleSuggestions,
@@ -15,14 +51,19 @@ import {
   renderHomepageNowSection,
   renderOpsWatchSection,
   renderOwnerQueueSection,
+  renderNeedsMikeSection,
   renderShippedSection,
+  renderTicketLoopSection,
   renderTicketsSection,
+  runOwnerDigest,
   type EscalationFacts,
   type HomepageNowFacts,
+  type NeedsMikeFacts,
   type OpsWatchFacts,
   type OwnerQueueRow,
   type TicketMetrics,
 } from '~/lib/owner-digest.server'
+import type { TicketLoopHealth } from '~/lib/ticket-janitor.server'
 
 /**
  * The digest's KV guard is keyed on the UTC date, so triggering the cron to
@@ -405,5 +446,184 @@ describe('ageOutStaleSuggestions', () => {
     executeMock.mockReset()
     executeMock.mockRejectedValue(new Error('db down'))
     await expect(ageOutStaleSuggestions()).resolves.toBe(0)
+  })
+})
+
+describe('renderTicketLoopSection', () => {
+  const healthyLoop: TicketLoopHealth = {
+    generatedAt: '2026-08-05T13:00:00Z',
+    sla: {
+      prOpen: [],
+      inReview: [],
+      approvedCode: { count: 0, oldest: null, rows: [] },
+      proposed: [],
+      blocked: [],
+    },
+    orphans: [],
+    orphanScanSkipped: false,
+    conflictedPrs: [],
+    backlog: { created7d: 10, terminal7d: 12, netPerDay: -0.3 },
+    routineFlags: [],
+  }
+
+  it('reports an absent health object as unknown, never as a pass', () => {
+    const html = renderTicketLoopSection(null)
+    expect(html).toContain('unknown')
+    expect(html).toContain('not a pass')
+  })
+
+  it('says plainly when the loop is healthy', () => {
+    const html = renderTicketLoopSection(healthyLoop)
+    expect(html).toContain('net -0.3/day')
+    expect(html).toContain('No orphaned tickets')
+    expect(html).toContain('Every expected routine has run inside its cadence window')
+  })
+
+  it('surfaces SLA breaches, empty-reason blocks, orphans, and dead routines', () => {
+    const html = renderTicketLoopSection({
+      ...healthyLoop,
+      sla: {
+        prOpen: [{ id: 9, status: 'pr_open', kind: 'code', priority: 2, ageHours: 30, suggestion: 'fix nav' }],
+        inReview: [{ id: 8, status: 'in_review', kind: 'code', priority: 2, ageHours: 15, suggestion: 'crashed' }],
+        approvedCode: {
+          count: 56,
+          oldest: { id: 3, status: 'approved', kind: 'code', priority: 3, ageHours: 21 * 24, suggestion: 'old' },
+          rows: [],
+        },
+        proposed: [{ id: 7, status: 'proposed', kind: 'code', priority: 3, ageHours: 80, suggestion: 'untriaged' }],
+        blocked: [{ id: 455, kind: 'code', ageHours: 100, suggestion: 'stuck', lastError: null, emptyReason: true }],
+      },
+      orphans: [{ ticketId: 120, status: 'approved', prRef: 'https://github.com/o/r/pull/436', prOutcome: 'merged' }],
+      backlog: { created7d: 60, terminal7d: 18, netPerDay: 6 },
+      routineFlags: [{
+        routine: 'Weekly business research', team: 'social', runType: 'research',
+        schedule: 'Thu 16:00', lastRunAt: null, hoursSince: null, maxGapHours: 194,
+      }],
+    })
+    expect(html).toContain('net +6/day')
+    expect(html).toContain('#9')
+    expect(html).toContain('56 approved code tickets')
+    expect(html).toContain('oldest #3 at 21d')
+    expect(html).toContain('#455')
+    expect(html).toContain('1 with no recorded reason')
+    expect(html).toContain('#120')
+    expect(html).toContain('PR #436')
+    expect(html).toContain('Weekly business research')
+    expect(html).toContain('no run row ever')
+  })
+
+  it('reports a skipped orphan scan as skipped, not as zero orphans', () => {
+    const html = renderTicketLoopSection({ ...healthyLoop, orphanScanSkipped: true })
+    expect(html).toContain('Orphan scan skipped')
+    expect(html).not.toContain('No orphaned tickets')
+  })
+
+  it('surfaces a merge-conflicted PR, on which CI can never run', () => {
+    // A conflicted PR gets ZERO pull_request workflow runs, and the engine
+    // parks it silently; this line is what stops the next incident being
+    // re-investigated as "Actions declined my triggers".
+    const html = renderTicketLoopSection({
+      ...healthyLoop,
+      conflictedPrs: [{
+        number: 494,
+        title: 'fix the rail',
+        branch: 'ticket/494',
+        explanation: 'CI cannot run on a merge-conflicted PR.',
+      }],
+    })
+    expect(html).toContain('1 merge-conflicted PR')
+    expect(html).toContain('CI cannot run on a conflicted PR at all')
+    expect(html).toContain('Merge origin/main into the branch and rebuild')
+    expect(html).toContain('PR #494')
+    expect(html).toContain('ticket/494')
+  })
+
+  it('stays silent on conflicts when there are none', () => {
+    expect(renderTicketLoopSection(healthyLoop)).not.toContain('merge-conflicted')
+  })
+})
+
+describe('runOwnerDigest', () => {
+  it('reconciles pr-link states immediately before computing ticket-loop health', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    reconcileMock.mockReset()
+    loopHealthMock.mockReset()
+    const order: string[] = []
+    reconcileMock.mockImplementation(async () => {
+      order.push('reconcile')
+      return { checked: 0, updated: [], skipped: true }
+    })
+    loopHealthMock.mockImplementation(async () => {
+      order.push('health')
+      return null
+    })
+
+    const res = await runOwnerDigest({ force: true })
+
+    expect(res.sent).toBe(true)
+    expect(reconcileMock).toHaveBeenCalledTimes(1)
+    expect(loopHealthMock).toHaveBeenCalledTimes(1)
+    // Fresh link states are the point: the reconcile completes before the
+    // health computation starts, not merely somewhere in the same run.
+    expect(order).toEqual(['reconcile', 'health'])
+  })
+
+  it('still sends and still computes health when the reconcile fails', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    reconcileMock.mockReset()
+    loopHealthMock.mockReset()
+    reconcileMock.mockRejectedValue(new Error('github down'))
+    loopHealthMock.mockResolvedValue(null)
+
+    const res = await runOwnerDigest({ force: true })
+
+    expect(res.sent).toBe(true)
+    expect(loopHealthMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('renderNeedsMikeSection', () => {
+  const emptyFacts: NeedsMikeFacts = {
+    needsOwnerPrs: [],
+    blockedRows: [],
+    staleOwnerRows: [],
+    orphans: [],
+    conflictedPrs: [],
+    missedRoutines: [],
+  }
+
+  it('says nothing needs the owner when the list is empty', () => {
+    expect(renderNeedsMikeSection(emptyFacts)).toContain('Nothing on this list today')
+  })
+
+  it('consolidates every owner-only fact into one list', () => {
+    const html = renderNeedsMikeSection({
+      needsOwnerPrs: [{ ticketId: 1, ref: 'https://github.com/o/r/pull/508', state: 'needs-owner', title: 'protected' }],
+      blockedRows: [{ id: 2, status: 'blocked', kind: 'code', attemptCount: 1, lastError: null, suggestion: 'stuck row' }],
+      staleOwnerRows: [{ id: 3, kind: 'campaign', ageDays: 5, suggestion: 'send the pitch batch' }],
+      orphans: [{ ticketId: 4, status: 'approved', prRef: 'https://github.com/o/r/pull/429', prOutcome: 'merged' }],
+      conflictedPrs: [{
+        number: 494,
+        title: 'fix the rail',
+        branch: 'ticket/494',
+        explanation: 'CI cannot run on a merge-conflicted PR.',
+      }],
+      missedRoutines: [{
+        routine: 'Weekly trend scout', team: 'content', runType: 'trend-scout',
+        schedule: 'Sat 19:00', lastRunAt: '2026-07-20T19:00:00Z', hoursSince: 380, maxGapHours: 194,
+      }],
+    })
+    expect(html).toContain('PR #508')
+    expect(html).toContain('waits on your merge')
+    expect(html).toContain('#2 is blocked')
+    expect(html).toContain('#3 (campaign) approved 5d ago')
+    expect(html).toContain('#4 is orphaned')
+    expect(html).toContain('PR #429')
+    expect(html).toContain('PR #494 is merge-conflicted, CI cannot run on it at all, rebase it on main')
+    expect(html).toContain('ticket/494')
+    expect(html).toContain('Weekly trend scout')
+    expect(html).toContain('380h ago')
   })
 })

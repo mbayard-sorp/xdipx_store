@@ -24,6 +24,14 @@ import { VALVE_KEYS } from '~/lib/team-keys'
 import { getTrackers, latestOwnerAsks } from '~/lib/tracker.server'
 import { sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { getProfitReconciliation } from '~/lib/profit.server'
+import {
+  computeTicketLoopHealth,
+  reconcilePrLinkStates,
+  type ConflictedPr,
+  type OrphanTicket,
+  type RoutineLivenessFlag,
+  type TicketLoopHealth,
+} from '~/lib/ticket-janitor.server'
 import { kvDel, kvGet, kvSetNX } from '~/lib/kv.server'
 import type { SeoDailyResult } from '~/lib/seo-daily.server'
 import type { EditorialTilesBlock, EmmaCuratedRailBlock } from '~/types/cms'
@@ -410,6 +418,128 @@ export function renderEscalationsSection(e: EscalationFacts): string {
   return parts.join('')
 }
 
+/* ── Section: Ticket loop (janitor health) ─────────────────────────────────── */
+
+function agePhrase(hours: number): string {
+  return hours >= 48 ? `${Math.round(hours / 24)}d` : `${hours}h`
+}
+
+/** Threshold labels for the section copy, kept next to the renderer that uses
+ *  them; the numeric thresholds live in ticket-janitor.server.ts. */
+const SLA_LABELS = {
+  prOpen: '24h',
+  inReview: '12h',
+  approvedCode: '7 days',
+  proposed: '72h',
+} as const
+
+/**
+ * Renders `computeTicketLoopHealth()`: SLA breaches, orphans, the backlog
+ * trajectory, and routine liveness. A null health object (the janitor itself
+ * failed) is reported as absent rather than as clean, for the same reason
+ * render-truth is: silence must never read as a pass.
+ */
+export function renderTicketLoopSection(h: TicketLoopHealth | null): string {
+  if (!h) {
+    return `<p style="margin:0;color:${WARN};">The ticket-loop janitor did not report this run, so SLA, orphan, and routine-liveness state is unknown. This is not a pass.</p>`
+  }
+  const parts: string[] = []
+
+  const net = h.backlog.netPerDay
+  const netColor = net > 0 ? WARN : GOOD
+  parts.push(`<p style="margin:0 0 4px;">Backlog, last 7 days: ${h.backlog.created7d} opened &middot; ${h.backlog.terminal7d} closed &middot; <span style="color:${netColor};">net ${net >= 0 ? '+' : ''}${net}/day</span></p>`)
+
+  const staleList = (label: string, rows: readonly { id: number; ageHours: number; suggestion: string }[], limit = 5) =>
+    rows.length
+      ? `<p style="margin:6px 0 2px;color:${WARN};">${label} (${rows.length}):</p><ul style="margin:0;padding-left:18px;">${rows.slice(0, limit).map(r => `<li>#${r.id} &middot; ${agePhrase(r.ageHours)} &middot; ${esc(clip(r.suggestion, 100))}</li>`).join('')}</ul>`
+      : ''
+
+  parts.push(staleList(`pr_open older than ${SLA_LABELS.prOpen}`, h.sla.prOpen))
+  parts.push(staleList(`in_review older than ${SLA_LABELS.inReview} (a crashed QA pass leaves rows here)`, h.sla.inReview))
+  if (h.sla.approvedCode.count > 0) {
+    const oldest = h.sla.approvedCode.oldest
+    parts.push(`<p style="margin:6px 0 2px;color:${WARN};">${h.sla.approvedCode.count} approved code ticket${h.sla.approvedCode.count === 1 ? '' : 's'} older than ${SLA_LABELS.approvedCode}${oldest ? `, oldest #${oldest.id} at ${agePhrase(oldest.ageHours)}` : ''}.</p>`)
+  }
+  parts.push(staleList(`proposed older than ${SLA_LABELS.proposed} (triage is not looking)`, h.sla.proposed))
+
+  if (h.sla.blocked.length) {
+    const empty = h.sla.blocked.filter(b => b.emptyReason)
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.sla.blocked.length} blocked ticket${h.sla.blocked.length === 1 ? '' : 's'}${empty.length ? `, <strong>${empty.length} with no recorded reason</strong> (nobody can clear a block that does not say what it is)` : ''}:</p><ul style="margin:0;padding-left:18px;">${h.sla.blocked.slice(0, 8).map(b => `<li>#${b.id} (${esc(b.kind)}, ${agePhrase(b.ageHours)})${b.emptyReason ? ` <span style="color:${BAD};">no reason</span>` : ''} ${esc(clip(b.suggestion, 90))}</li>`).join('')}</ul>`)
+  }
+
+  if (h.conflictedPrs.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.conflictedPrs.length} merge-conflicted PR${h.conflictedPrs.length === 1 ? '' : 's'}: CI cannot run on a conflicted PR at all (GitHub creates zero workflow runs for it, so nothing anywhere goes red), and the release engine parks it. Merge origin/main into the branch and rebuild:</p><ul style="margin:0;padding-left:18px;">${h.conflictedPrs.slice(0, 6).map(p => `<li>PR #${p.number} (${esc(p.branch)}) ${esc(clip(p.title, 90))}</li>`).join('')}</ul>`)
+  }
+
+  if (h.orphanScanSkipped) {
+    parts.push(`<p style="margin:6px 0 4px;color:${MUTED};">Orphan scan skipped (GitHub not readable this run).</p>`)
+  } else if (h.orphans.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.orphans.length} orphaned ticket${h.orphans.length === 1 ? '' : 's'} (still live, but the PR is already ${h.orphans.every(o => o.prOutcome === 'merged') ? 'merged' : 'merged or closed'}, so nothing will ever touch them):</p><ul style="margin:0;padding-left:18px;">${h.orphans.slice(0, 6).map(o => `<li>#${o.ticketId} (${esc(o.status)}) &middot; ${link(o.prRef, prLabel(o.prRef))} ${esc(o.prOutcome)}</li>`).join('')}</ul>`)
+  } else {
+    parts.push(`<p style="margin:6px 0 4px;color:${GOOD};">No orphaned tickets.</p>`)
+  }
+
+  if (h.routineFlags.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${BAD};">${h.routineFlags.length} routine${h.routineFlags.length === 1 ? '' : 's'} past cadence plus grace:</p><ul style="margin:0;padding-left:18px;">${h.routineFlags.map(f => `<li>${esc(f.routine)} (${esc(f.schedule)} UTC) &middot; ${f.lastRunAt ? `last run ${esc(f.lastRunAt.slice(0, 16).replace('T', ' '))} UTC, ${f.hoursSince}h ago` : '<strong>no run row ever</strong>'}</li>`).join('')}</ul>`)
+  } else {
+    parts.push(`<p style="margin:6px 0 0;color:${GOOD};">Every expected routine has run inside its cadence window.</p>`)
+  }
+
+  return parts.filter(Boolean).join('')
+}
+
+/* ── Section: Needs Mike (the one consolidated owner list) ─────────────────── */
+
+export interface StaleOwnerRow {
+  id: number
+  kind: string
+  ageDays: number
+  suggestion: string
+}
+
+export interface NeedsMikeFacts {
+  /** Open needs-owner PRs, from suggestion_links state. */
+  needsOwnerPrs: EscalationFacts['protectedPrs']
+  blockedRows: TicketAttemptRow[]
+  /** Approved promo/campaign/program rows older than 3 days: owner-executed kinds. */
+  staleOwnerRows: StaleOwnerRow[]
+  orphans: OrphanTicket[]
+  /** PRs GitHub reports merge-conflicted, on which CI structurally cannot run. */
+  conflictedPrs: ConflictedPr[]
+  missedRoutines: RoutineLivenessFlag[]
+}
+
+/**
+ * One list at the top of the email of everything only the owner can move.
+ * The same facts also appear in their home sections with full detail; this is
+ * the summary that stops "it was in section nine" from being a failure mode.
+ */
+export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
+  const items: string[] = []
+  for (const p of f.needsOwnerPrs.slice(0, 5)) {
+    items.push(`${link(p.ref, prLabel(p.ref))} waits on your merge (protected path)${p.ticketId > 0 ? ` &middot; ticket #${p.ticketId}` : ''}`)
+  }
+  for (const b of f.blockedRows.slice(0, 5)) {
+    items.push(`#${b.id} is blocked (${esc(b.kind)}) ${esc(clip(b.suggestion, 80))}`)
+  }
+  for (const r of f.staleOwnerRows.slice(0, 5)) {
+    items.push(`#${r.id} (${esc(r.kind)}) approved ${r.ageDays}d ago and only you can execute it: ${esc(clip(r.suggestion, 80))}`)
+  }
+  for (const o of f.orphans.slice(0, 5)) {
+    items.push(`#${o.ticketId} is orphaned: its ${link(o.prRef, prLabel(o.prRef))} is ${esc(o.prOutcome)} but the ticket sits ${esc(o.status)}`)
+  }
+  for (const c of f.conflictedPrs.slice(0, 5)) {
+    items.push(`PR #${c.number} is merge-conflicted, CI cannot run on it at all, rebase it on main (branch ${esc(c.branch)})`)
+  }
+  for (const m of f.missedRoutines.slice(0, 5)) {
+    items.push(`Routine ${esc(m.routine)} missed its window (${esc(m.schedule)} UTC): ${m.lastRunAt ? `last run ${m.hoursSince}h ago` : 'no run row ever'}`)
+  }
+  if (items.length === 0) {
+    return `<p style="margin:0;color:${GOOD};">Nothing on this list today.</p>`
+  }
+  return `<ul style="margin:0;padding-left:18px;">${items.map(i => `<li style="margin-bottom:3px;">${i}</li>`).join('')}</ul>`
+}
+
 /* ── Gathering ─────────────────────────────────────────────────────────────── */
 
 /**
@@ -792,6 +922,37 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
   return out
 }
 
+/**
+ * Approved promo/campaign/program rows older than 3 days. These kinds have no
+ * automated executor: an approved row here is a task on the owner's desk, and
+ * three days is long enough that it belongs on the Needs Mike list rather
+ * than only in the decision-queue table further down.
+ */
+async function gatherStaleOwnerRows(): Promise<StaleOwnerRow[]> {
+  try {
+    const res = await db.execute(sql`
+      SELECT id, kind, suggestion,
+             EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
+        FROM homepage_team_suggestions
+       WHERE status = 'approved'
+         AND kind IN ('promo', 'campaign', 'program')
+         AND created_at < now() - interval '3 days'
+       ORDER BY created_at ASC LIMIT 10`)
+    return (res.rows ?? []).map(r => {
+      const row = r as Record<string, unknown>
+      return {
+        id: Number(row['id'] ?? 0),
+        kind: String(row['kind'] ?? ''),
+        ageDays: Math.round(Number(row['age_days'] ?? 0)),
+        suggestion: String(row['suggestion'] ?? ''),
+      }
+    })
+  } catch (err) {
+    console.warn('[owner-digest] stale owner-row sweep failed:', String(err).slice(0, 200))
+    return []
+  }
+}
+
 async function gatherEscalations(): Promise<EscalationFacts> {
   const out: EscalationFacts = { protectedPrs: [], exhausted: [] }
   try {
@@ -930,7 +1091,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // the kind of invisible mutation this digest was built to surface. The nightly
   // scheduled run is the only thing that ages anything out.
   const agedOut = opts.force ? null : await ageOutStaleSuggestions()
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation] =
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
@@ -944,8 +1105,30 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
         console.warn('[owner-digest] profit reconciliation failed:', String(err).slice(0, 200))
         return null
       }),
+      // Best-effort for the same reason: the janitor reads GitHub. The
+      // reconcile runs first so pr-link states are fresh when health is
+      // computed; its own failure costs nothing but freshness, never the
+      // digest and never the health computation behind it.
+      reconcilePrLinkStates()
+        .catch(err => {
+          console.warn('[owner-digest] pr-link reconcile failed:', String(err).slice(0, 200))
+        })
+        .then(() => computeTicketLoopHealth())
+        .catch((err): null => {
+          console.warn('[owner-digest] ticket-loop health failed:', String(err).slice(0, 200))
+          return null
+        }),
+      gatherStaleOwnerRows(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
+  const needsMike: NeedsMikeFacts = {
+    needsOwnerPrs: escalations.protectedPrs,
+    blockedRows: ticketMetrics.blockedRows,
+    staleOwnerRows,
+    orphans: loopHealth?.orphans ?? [],
+    conflictedPrs: loopHealth?.conflictedPrs ?? [],
+    missedRoutines: loopHealth?.routineFlags ?? [],
+  }
 
   // ── Compose ───────────────────────────────────────────────────────────────
   const ordersY = yesterday?.orders ?? 0
@@ -1051,6 +1234,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   const html = `<body style="margin:0;padding:16px;background:#faf7f2;">
     <div style="max-width:640px;">
       <h2 style="font-family:Inter,sans-serif;font-size:16px;margin:0 0 4px;">xdipx daily digest &middot; ${day}</h2>
+      ${section('Needs Mike', renderNeedsMikeSection(needsMike))}
       ${section(`Escalations${needsOwner > 0 ? ` (${needsOwner})` : ''}`, renderEscalationsSection(escalations))}
       ${section(`Shipped, last 24h (${shipped.length})`, renderShippedSection(shipped))}
       ${section('Homepage now', renderHomepageNowSection(homepageNow))}
@@ -1062,6 +1246,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section('Valves', `<table style="border-collapse:collapse;">${valveRows}</table>`)}
       ${section(`SEO and indexing${seoDay ? ` (diagnosis ${esc(seoDay)})` : ''}`, indexBody)}
       ${section(`Tickets (${proposed?.n ?? 0} awaiting triage${proposed ? `, oldest ${esc(proposed.oldest.slice(0, 10))}` : ''})`, renderTicketsSection(ticketMetrics))}
+      ${section('Ticket loop', renderTicketLoopSection(loopHealth))}
       ${section('Program trackers', trackerBlocks || 'no trackers found')}
       <p style="font-family:Inter,sans-serif;font-size:11px;color:#6f645c;margin-top:18px;">
         Full detail: xdipx.com/admin/trackers and /admin/homepage-team. Sent by /cron/owner-digest.

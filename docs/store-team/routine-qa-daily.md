@@ -1,13 +1,17 @@
 # Routine — Daily QA Gate (R-QA)
 
 The playbook for the daily verification pass. Entry agent: `qa-reviewer`. Reviews every ticket
-sitting in `pr_open` and returns a verdict: `verified` with evidence, or a bounce back to
-`in_progress` with a concrete reason. **QA never merges, and structurally cannot**: the transition
-map gives `qa-reviewer` no path to `applied`, so a verdict is a recommendation to the release
-engine, not a ship.
+sitting in `pr_open` or stranded in `in_review`, and returns a verdict: `verified` with evidence,
+or a bounce back to `in_progress` with a concrete reason. **QA never merges, and structurally
+cannot**: the transition map gives `qa-reviewer` no path to `applied`, so a verdict is a
+recommendation to the release engine, not a ship.
 
-Runs on the **Max subscription**. Cadence: `30 15 * * *` UTC, an hour and a half after the R-DEV
-pass so there is something to review.
+Runs on the **Max subscription**. Cadence: **two passes daily, `30 3,15 * * *` UTC** (03:30 and
+15:30), changed 2026-08-05 on trigger `trig_019GjVP9hGBU1gmXRBYtYURm` (prompt uuid
+`rqa-daily-0002`). The 15:30 pass reviews the 14:00 dev pass's PRs within 90 minutes; the 03:30
+pass exists because a single 15:30 pass left every PR from the 20:00 dev pass waiting about 19
+hours for review, so pass two structurally could not land same-day (verified on PR #477,
+2026-08-03).
 
 Mission brief: `docs/store-team/mission-brief.md`. The repo rules a diff must satisfy are in
 `CLAUDE.md`; visual work is additionally bound by `docs/design-doctrine.md` and copy by
@@ -24,8 +28,15 @@ Mission brief: `docs/store-team/mission-brief.md`. The repo rules a diff must sa
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"list","statuses":["pr_open"],"orderBy":"priority"}'
+  -d '{"op":"list","statuses":["in_review","pr_open"],"orderBy":"priority"}'
 ```
+
+**Resume crashed reviews first.** List `in_review` alongside `pr_open` and work any `in_review`
+rows before touching the fresh queue. A row sitting `in_review` means a previous QA pass opened the
+review and died before reaching a verdict; nothing else in the loop will ever move it, so until
+this rule existed those rows were stranded until a human noticed. Re-read the row with
+`{"op":"get","id":<id>}` and take it straight to a verdict (Steps 3 to 6); do not re-transition it
+to `in_review`, it is already there.
 
 Empty queue is a clean, short, successful run. Work in priority order (1 is P0), oldest first
 within a priority. Take each ticket to a verdict before starting the next one; a half-reviewed
