@@ -84,6 +84,26 @@ art, where the real photo is the point. The image caps and $/day caps are unchan
 still hard-stop every run; the floor never overrides a cap, a kill switch, or a vision gate. Full
 rules: `docs/homepage-team/mission-brief.md` section 2.
 
+**Images and video posters are requested at the size they render (engineering floor).** A standing
+performance rule for every code agent (`rr7-engineer`, `homepage-designer`, `sanity-content-builder`)
+that reads this brief at run start, because the same oversized-image defect shipped three times
+independently (a hardcoded `width=480` tile in a 208px box, deck panels inheriting a hero-scale
+`sizes`, an unsized 89KB video poster):
+
+- Never write a raw `<img>` against a `cdn.shopify.com` or `cdn.sanity.io` URL. Use `OptimizedImage`,
+  which handles srcset, sizes, and dimensions.
+- Every call site passes its own `sizes` describing the box it actually occupies. Never inherit the
+  default. A grid tile is not `100vw`.
+- Every call site passes a `widths` ladder bracketing its real device-pixel box. Hero ladders do not
+  belong on tiles.
+- A `<video>` poster is an image and takes the same CDN width parameter. `<video>` has no
+  `loading="lazy"`, so a decorative below-the-fold video must not mount until needed and uses
+  `preload="none"`.
+- Verify in a browser, not by reading the JSX: check `img.currentSrc` against `getBoundingClientRect()`
+  at 375px. If the selected rendition is more than ~1.3x the device-pixel box, the `sizes` attribute
+  is wrong. Worked example: PR #478 cut 12 tiles from 480w to 320w and a video poster from ~89KB to
+  ~10KB.
+
 ## 7. Definition of done (per run)
 
 Run row finished with an honest status and summary; events posted throughout (the dashboard is the
