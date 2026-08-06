@@ -116,6 +116,14 @@ Skip this step Tuesday through Sunday. On Mondays, run both of these in order be
    found nothing. Also close out past-dated rows still marked `active` so the calendar states what is
    true today.
 
+3. **Audit every generated promo/tile image against the NEW theme, and clear the leftovers.** On the
+   theme rotation, look at each generated promo/wayfinder-tile/rail image on the live page and check
+   it belongs to this week's theme. Clear or replace any leftover from the prior theme, especially
+   any image carrying baked-in category text (e.g. a "Air-pulse Stimulation" plate lingering into a
+   week that is not about air-pulse — run 40 shipped exactly this, and baked-in text also violates
+   the 2026-07-06 no-text rule). Confirming an image merely exists is not the check; an off-theme or
+   text-baked image is a leftover to replace, not a slot already done.
+
 ## Step 2 — Read context (data only)
 
 Emit an event, then gather inputs:
@@ -129,6 +137,17 @@ curl -s -X POST "$BASE_URL/api/homepage-team/event" \
 - **Marketing calendar** — today's theme / promo window / weekday-vs-weekend variant (`merch-calendar`
   rows in `marketing_calendar`). Per mission brief section 3, read today's theme from the calendar
   and merchandise inside it: the hero, rails, and tiles picked below all live within the week's theme.
+  - **Theme-alignment check (every run).** Confirm the LIVE hero + rails theme matches
+    `marketing_calendar`'s active theme. If the live surface has drifted off the calendar theme,
+    realign it on the **first run of the day** (do not carry the drift forward; runs #65/#73/#75
+    inherited exactly such a drift for days because it lived only in a run summary).
+  - **Any intentional theme change is written to `marketing_calendar` in the same run** (via
+    `merch-calendar`), never left only in a run summary. The calendar is the source of truth every
+    other routine reads; a change that never reaches it makes the calendar and the live surface
+    disagree.
+  - **Daily image spot-check.** Even off Monday, spot-check the live promo/tile/rail images for
+    off-theme content or baked-in category text, and flag or replace any leftover (the full leftover
+    audit runs Monday, Step 1c).
 - **GA4** — engagement/conversion via the `google-analytics` MCP. **Treat sparse early traffic as weak
   signal**; run heuristic/best-practice-led until volume is meaningful.
 - **Nalpac top-100** — `fetchAllNalpacFeeds()` → `inTop100Feed` (`app/lib/nalpac-feeds.server.ts`).
@@ -292,6 +311,22 @@ The orchestrator (with `homepage-cro` as the pick gate) then scores the candidat
 discount-styled surface. MAP=MSRP products cannot advertise a discount at all; MAP<MSRP uses MAP as
 the floor. Defer pricing claims to catalog data, never invent a discount.
 
+**Look at the primary image before pinning (mission brief §5, operationalised).** The four scores
+above never look at the photo, so a retail packaging shot passes by construction. Before pinning any
+product to the hero or a rail, download and look at its Shopify PRIMARY image and reject or reorder
+it if it is a packaging shot (product small on white with large empty bands, or baked-in packaging
+text). `imgs > 0` is not the check. If a cleaner sibling image exists on the product, promote it with
+`setMediaAsPrimary` before pinning. Roughly 29% of the catalog leads with a packaging shot, so expect
+this to fire.
+
+**Sensation-direction guard (theme-aware, cheap, prevents a visible register mismatch).** When the
+active `marketing_calendar` theme is cooling or cool-down oriented, hero and rail copy must not lead
+with warming / heat-up sensation language ("turns the heat up", "warms you", "the heat spreads"), and
+vice versa. Run #85 shipped a heat-forward hero during the Heat Wave/COOL DOWN week and it sat live
+~24h. Check the slate's copy sensation-direction against the day's theme at pick, and name the check
+for the voice gate (`emma-empathy-reviewer`) so a theme/sensation mismatch is caught the same way a
+charter breach is.
+
 Emit a `decision` event recording the proposed candidates, the scores, and the final slate with why.
 
 ## Step 3.5 — The day's visual scheme (`homepage-art-director`)
@@ -445,10 +480,23 @@ Every merchandise run touches all of these, not just the hero and rails:
    module's own products; `/collections/best-sellers` is not an acceptable fallback for any module,
    because best-seller order is a different ranking from the discovery index and is structurally
    guaranteed to mismatch. **Definition of done, every run:** after publishing, fetch the live
-   homepage and, for each See-all, fetch its destination and assert at least one of the module's own
-   handles appears on destination page 1. Report the check in the run summary; a failure blocks the
-   run's done state. When no destination genuinely contains the set, ship the module with **no**
+   homepage and, for each See-all, assert at least one of the module's own handles appears on
+   destination page 1. **Probe the destination via its collection loader / JSON payload (or the
+   products API), NOT a raw-HTML grep:** PLP product grids are client-hydrated, so the handles are
+   absent from the destination's initial SSR HTML and a grep returns false 0s (run 145 could not
+   confirm continuity for exactly this reason). Report the check in the run summary; a failure blocks
+   the run's done state. When no destination genuinely contains the set, ship the module with **no**
    See-all rather than point it somewhere plausible.
+   **Rail diversity (no product in more than one wired rail).** A product handle appears in at most
+   one wired `emmaCuratedRail` per page. Sharing one SKU across every rail (run #72 shipped
+   nixie-mystic-wave in all three) makes the rails read as one shelf; dedupe handles across the wired
+   rail set at Step 5 and swap the duplicate for a comparable pick.
+   **Featured brand rail (mission brief §3, #718).** When the week's calendar slot calls for it, one
+   wired rail is the rotating featured-brand rail — an `emmaCuratedRail` filtered to one carried
+   brand's in-stock SKUs (Shopify `vendor`) with an editorial intro tile, placed mid-page after the
+   first one to two rails and the trust bar, never replacing a top rail, rotated WEEKLY (not daily)
+   and aligned with the social featured-brand-of-the-week series; `merch-calendar` proposes the brand
+   queue. Its tiles link `/products/{slug}` like any rail, so the 70% PDP-link target holds.
 3. **Wayfinder mosaic tiles** — refresh `tiles[]` (art, labels, links) every run. **At least two of
    the tiles target collections rather than individual products**: the page needs image-led entry
    doors into categories, not three deep links to single PDPs.
@@ -532,6 +580,47 @@ shelf assignments across the page). Reorder so cleaner brand packshots lead; gym
 packaging-style shots, and dark supplier-lifestyle photos, sit deeper on the shelf or get swapped
 for a lighter brand alternate. When a calendar theme is active, that page's natural aisle expresses
 the theme in at least one visible element.
+
+### Category-page block shape (read the right field, or the refresh silently defers)
+
+The `categoryPage`/`dropPage` doc holds its blocks in the **`blocks[]`** array. It is NOT
+`pageBuilder` — a read of `pageBuilder` returns null and the deep-refresh recipe then composes no
+writes and silently defers (runs 152/166/172 left all five pages un-refreshed for 5+ days for exactly
+this reason). The block types you refresh:
+
+- **Masthead:** `_type == "categoryMasthead"`, fields `kicker`, `headline`, `italicWord`,
+  `standfirst`, `image`.
+- **Shelf:** `_type == "shelfSection"`, fields `title`, `collectionHandle`, `sortRationale`,
+  `seeAllLabel`, `intro`, `pinnedHandles[]`.
+
+Read the live keys first, then patch a single block by its `_key` (a minimal safe patch, never a
+whole-array replace):
+
+```bash
+# 1. read the block keys + types
+npx tsx scripts/sanity-content-cli.ts get --id categoryPage-pleasure \
+  --query '{blocks[]{_key, _type, headline, title, collectionHandle}}'
+# 2. patch one masthead field by its _key (leaves every other block untouched)
+npx tsx scripts/sanity-content-cli.ts patch --id categoryPage-pleasure \
+  --set 'blocks[_key=="<mastheadKey>"].standfirst=<voice-gated copy>'
+```
+
+### Register banding on merchandised pages (owner-approved, NOT a charter edit)
+
+Band the register by surface (this is homepage-team playbook guidance; charter edits happen only on
+the owner's explicit codify instruction):
+
+- **Masthead and standfirst** run at the site register (v5 desire-forward, intensity per the
+  charter's owned-channel rules).
+- **Shelf intros** run one notch quieter and stay product-functional.
+- **Spec-adjacent surfaces** (sensation legend, dial displays, materials copy) stay clinical at 1-2
+  out of 5 intensity; **comparison / chooser surfaces** at 3-4 max.
+- **`sortRationale` strings never leak internal scoring language** — say "Gentlest first", never
+  "highest deal score".
+- **`faqBlock` answers inherit the no-medical-claims rule**, and the `benefitEditorial` source
+  requirement stands: a claim without a source does not ship.
+- On a refresh run the voice gate reviews the **diff**, not the whole page, so unchanged copy is not
+  re-litigated every day.
 
 ### Start-of-run assertion: did yesterday's publish land?
 
@@ -720,6 +809,16 @@ document rejected the whole `contentBlocks` promise, so every Sanity-driven sect
 rendered its hardcoded fallback. The old gate ("HTTP 200 plus the hero renders") passed anyway,
 because the hero is not deferred. Three consecutive days of published merchandising were invisible to
 every visitor while the team reported success, and the owner found it before the team did.
+
+**Referenced docs (rails) warm differently from direct singleton fields — re-query, then warm.**
+When you patch a REFERENCED doc (an `emmaCuratedRail`) rather than a direct `singleton.homepage`
+field, the first `/cron/warm-homepage-b` fired seconds after the patch can rebuild the payload blob
+from a PRE-patch Sanity read (eventual consistency), so the rail change is absent at origin on warm
+#1 while a same-run direct-field change (an announcement, a hero pin) already appears. Run 152 saw
+exactly this. So after patching any referenced rail/doc: **re-query the published doc to confirm the
+new revision landed, THEN warm.** And if a referenced-doc change is still missing at origin after the
+first warm, **warm once more before declaring an invisible-publish failure** — do not roll back a
+rail on the strength of a single early warm.
 
 **Homepage SERP snippet specifically (only when Step 5c actually wrote):** the shortcut above does
 **not** work for this surface. `POST /cron/warm-homepage-b` rebuilds the storefront payload blob, and
