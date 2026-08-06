@@ -5,7 +5,7 @@
  * exercised here is the part that actually failed in production: whether a
  * conversion still goes out when the bookkeeping around it misbehaves.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const sendCapiEvent = vi.fn()
 const adminGraphQL = vi.fn()
@@ -183,5 +183,67 @@ describe('reconcilePurchases', () => {
     adminGraphQL.mockRejectedValue(new Error('Shopify 500'))
     const r = await reconcilePurchases()
     expect(r).toMatchObject({ scanned: 0, gaps: [], sent: [] })
+  })
+})
+
+/**
+ * The reconcile is the safety net for Purchase events the webhook missed, so it
+ * is the last thing that should be taken out by someone else's rate-limit
+ * burst. It was: the discovery index rebuild held Shopify's bucket near zero
+ * for ~60s at a time on the same 15-minute tick, and adminGraphQL's own retry
+ * (4 attempts, 5s cap) only covers ~20s, so the sweep was throttled on every
+ * single run through 2026-08-05.
+ */
+describe('reconcilePurchases throttle resilience', () => {
+  const okResponse = { orders: { nodes: [] } }
+
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+  const flush = async <T>(p: Promise<T>): Promise<T> => {
+    await vi.runAllTimersAsync()
+    return p
+  }
+
+  it('retries a THROTTLED query instead of giving up on the first one', async () => {
+    adminGraphQL
+      .mockRejectedValueOnce(new Error('Throttled'))
+      .mockResolvedValueOnce(okResponse)
+
+    const r = await flush(reconcilePurchases())
+
+    expect(adminGraphQL).toHaveBeenCalledTimes(2)
+    expect(r.scanned).toBe(0)
+  })
+
+  it('rides out a burst that outlasts adminGraphQL own retry budget', async () => {
+    adminGraphQL
+      .mockRejectedValueOnce(new Error('Throttled'))
+      .mockRejectedValueOnce(new Error('Throttled'))
+      .mockRejectedValueOnce(new Error('Throttled'))
+      .mockResolvedValueOnce(okResponse)
+
+    await flush(reconcilePurchases())
+
+    // 5s + 10s + 15s of extra rest: past the ~60s the rebuild used to hold the
+    // bucket down, which 4 x 5s alone never reached.
+    expect(adminGraphQL).toHaveBeenCalledTimes(4)
+  })
+
+  it('gives up after the retry budget rather than looping forever', async () => {
+    adminGraphQL.mockRejectedValue(new Error('Throttled'))
+
+    const r = await flush(reconcilePurchases())
+
+    expect(adminGraphQL).toHaveBeenCalledTimes(5) // 1 attempt + 4 retries
+    expect(r.scanned).toBe(0) // failure is swallowed, the sweep reports nothing
+  })
+
+  it('does not retry a non-throttle error', async () => {
+    // Retrying a bad query or an auth failure just delays the log line.
+    adminGraphQL.mockRejectedValue(new Error('Field \'orders\' doesn\'t exist'))
+
+    await flush(reconcilePurchases())
+
+    expect(adminGraphQL).toHaveBeenCalledTimes(1)
   })
 })

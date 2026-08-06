@@ -257,6 +257,41 @@ export interface ReconcileResult {
  * deterministic event id means a double send is a no-op on Meta's side, and the
  * ledger keeps the Shopify query result from turning into repeated traffic.
  */
+/**
+ * The reconcile's single Shopify query, with a throttle-aware retry.
+ *
+ * adminGraphQL already retries THROTTLED four times with a backoff capped at 5s
+ * per attempt, so it rides out about 20 seconds. That was not enough: the
+ * discovery index rebuild held the rate-limit bucket near zero for ~60s at a
+ * time, and because it ran on the same 15-minute cron tick as this sweep, the
+ * collision was not occasional — the reconcile was throttled on every single
+ * run (19:45, 20:15, 20:45, 21:15, 21:30, 21:45, 22:01 UTC on 2026-08-05).
+ *
+ * The rebuild's own oversizing is fixed separately and is the real cure; this
+ * is the seatbelt. The sweep is the safety net for Purchase events the webhook
+ * missed, so it is the last thing that should be taken out by someone else's
+ * burst. Escalating 5s/10s/15s/20s costs nothing on a 15-minute cadence.
+ *
+ * Same shape and reason as fetchPricingPageWithBackoff in shopify.server.ts.
+ */
+const RECONCILE_THROTTLE_RETRIES = 4
+const RECONCILE_THROTTLE_BACKOFF_MS = 5000
+
+async function fetchReconcileOrders(search: string): Promise<AdminOrdersResponse> {
+  const { adminGraphQL } = await import('./shopify.server')
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await adminGraphQL<AdminOrdersResponse>(RECONCILE_ORDERS_QUERY, { query: search })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      // A non-throttle error still fails fast and unchanged: retrying a bad
+      // query or an auth failure just delays the log line.
+      if (attempt > RECONCILE_THROTTLE_RETRIES || !/throttl/i.test(message)) throw err
+      await new Promise(r => setTimeout(r, attempt * RECONCILE_THROTTLE_BACKOFF_MS))
+    }
+  }
+}
+
 export async function reconcilePurchases(
   opts: { sinceHours?: number; dryRun?: boolean } = {},
 ): Promise<ReconcileResult> {
@@ -270,9 +305,7 @@ export async function reconcilePurchases(
   type AdminOrderNode = AdminOrdersResponse['orders']['nodes'][number]
   let orders: AdminOrderNode[]
   try {
-    const { adminGraphQL } = await import('./shopify.server')
-    const res = await adminGraphQL<AdminOrdersResponse>(RECONCILE_ORDERS_QUERY, { query: search })
-    orders = res?.orders?.nodes ?? []
+    orders = (await fetchReconcileOrders(search))?.orders?.nodes ?? []
   } catch (err) {
     console.error('[purchase-capi] reconcile: Shopify query failed', err)
     return out

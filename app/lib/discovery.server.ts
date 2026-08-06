@@ -13,7 +13,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { discoveryIndexPayload } from '../../db/schema'
 import { adminGraphQL } from '~/lib/shopify.server'
-import { kvGet, kvSet, isKvConfigured } from '~/lib/kv.server'
+import { kvDel, kvGet, kvSet, isKvConfigured } from '~/lib/kv.server'
 import type { ProductTypeDial } from '~/types'
 import type {
   Category,
@@ -58,6 +58,108 @@ import {
 const INDEX_VERSION = 'v8'
 export const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 export const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
+
+/**
+ * "The catalog changed since the last crawl."
+ *
+ * Set by the products/create and products/update webhooks, cleared by a
+ * successful rebuild. `/cron/warm` reads it to decide whether a full crawl is
+ * warranted, which turned 96 unconditional rebuilds a day into one per actual
+ * catalog change plus a floor.
+ *
+ * Not versioned with INDEX_VERSION on purpose: a deploy that bumps the version
+ * should not silently inherit "clean" from the previous shape, and an
+ * unversioned key that survives is harmless — the worst case is one extra
+ * rebuild.
+ */
+export const INDEX_DIRTY_KEY = 'discovery:index-dirty'
+/** Long enough that the flag outlives any plausible gap between cron ticks. */
+const INDEX_DIRTY_TTL_SECONDS = 60 * 60 * 24
+
+/**
+ * Mark the discovery index stale. Best-effort by design: a webhook must never
+ * fail because the flag write did, and a missed flag costs at most one stale
+ * cron window, which the staleness floor in `/cron/warm` then covers.
+ */
+export async function markDiscoveryIndexDirty(reason: string): Promise<void> {
+  try {
+    await kvSet(INDEX_DIRTY_KEY, { at: Date.now(), reason }, INDEX_DIRTY_TTL_SECONDS)
+  } catch (err) {
+    console.error('[discovery] could not mark index dirty:', err)
+  }
+}
+
+export async function isDiscoveryIndexDirty(): Promise<boolean> {
+  try {
+    return (await kvGet<{ at: number }>(INDEX_DIRTY_KEY)) != null
+  } catch (err) {
+    // Unknown means rebuild. A KV read failure must not freeze the index.
+    console.error('[discovery] dirty-flag read failed, assuming dirty:', err)
+    return true
+  }
+}
+
+async function clearDiscoveryIndexDirty(): Promise<void> {
+  try {
+    await kvDel(INDEX_DIRTY_KEY)
+  } catch (err) {
+    console.error('[discovery] could not clear index dirty flag:', err)
+  }
+}
+
+/**
+ * Rebuild anyway once the index is this old, however quiet the catalog has been.
+ *
+ * The dirty flag only covers changes that arrive as a products/* webhook. A
+ * collection edit, a missed delivery, or a KV eviction of the flag itself would
+ * otherwise leave a stale index indefinitely, so the floor is what makes "skip
+ * the rebuild" safe rather than a way to freeze the catalog. Six hours is four
+ * crawls a day instead of ninety-six, and well inside the index's own 24h TTL.
+ */
+export const INDEX_STALE_FLOOR_MS = 6 * 60 * 60 * 1000
+
+/**
+ * Should `/cron/warm` spend a full catalog crawl this tick?
+ *
+ * Pure so the decision is testable on its own: the cost of getting it wrong is
+ * either a starved rate-limit bucket (rebuild too often) or a frozen catalog
+ * (rebuild too rarely), and neither is something to discover in production.
+ *
+ * `ageMs === null` means no durable index row at all — never built, or the
+ * version was just bumped. That always rebuilds.
+ */
+export function shouldRebuildDiscoveryIndex(
+  input: { dirty: boolean; ageMs: number | null },
+): { rebuild: boolean; reason: string } {
+  if (input.ageMs == null) return { rebuild: true, reason: 'no durable index row' }
+  if (input.dirty)        return { rebuild: true, reason: 'catalog changed since last crawl' }
+  if (input.ageMs >= INDEX_STALE_FLOOR_MS) {
+    return { rebuild: true, reason: `index ${Math.round(input.ageMs / 3600_000)}h old, past the staleness floor` }
+  }
+  return { rebuild: false, reason: `index clean and ${Math.round(input.ageMs / 60_000)}min old` }
+}
+
+/**
+ * Age of the durable index row, or null when there is no row (never built, or
+ * the version was just bumped). Null reads as "stale" at every call site: a
+ * missing index is the one case that must always rebuild.
+ */
+export async function getDiscoveryIndexAgeMs(): Promise<number | null> {
+  try {
+    const [row] = await db
+      .select({ builtAt: discoveryIndexPayload.builtAt })
+      .from(discoveryIndexPayload)
+      .where(eq(discoveryIndexPayload.version, INDEX_VERSION))
+      .limit(1)
+    if (!row?.builtAt) return null
+    return Date.now() - new Date(row.builtAt).getTime()
+  } catch (err) {
+    // Unknown age reads as stale, same as a failed dirty read: the failure mode
+    // we refuse is a frozen index, not an extra crawl.
+    console.error('[discovery] index age read failed, treating as stale:', err)
+    return null
+  }
+}
 
 /**
  * Vocabulary cache: distinct mood/audience/matters tag values actually
@@ -331,10 +433,35 @@ interface CollectionProductsPage {
   } | null
 }
 
+/**
+ * Pacing for the full-catalog crawl, measured against production 2026-08-05.
+ *
+ * One PRODUCTS_PAGE_QUERY page costs 128 points and the catalog is 46 pages, so
+ * a rebuild is 5,888 points against a 2,000-point bucket that refills at 100/s.
+ * Only 15 pages fit before the crawl throttles itself, and fired back to back it
+ * pinned the bucket near zero for ~60s: sampling every 15s across a cron
+ * boundary read 1999 -> 1864 -> 138 -> 128 -> 575 -> 1999.
+ *
+ * Everything else sharing the bucket died in that window — the purchase
+ * reconcile sweep every 15 minutes, warm-discovery-index 500ing on itself, and
+ * getDiscoveryRails timing out so the homepage served a degraded payload.
+ *
+ * Pacing does not make the crawl slower in any way that matters (it is already
+ * bounded by the refill rate) — it spreads the same spend so co-scheduled
+ * callers keep their headroom. Same fix, same reason, as
+ * PRICING_FETCH_PAGE_DELAY_MS in shopify.server.ts.
+ */
+const CRAWL_PAGE_DELAY_MS = 400
+
+const pause = (ms: number) => new Promise(r => setTimeout(r, ms))
+
 async function fetchCollectionProductIds(collectionGid: string): Promise<Set<string>> {
   const ids = new Set<string>()
   let cursor: string | null = null
+  let first = true
   while (true) {
+    if (!first) await pause(CRAWL_PAGE_DELAY_MS)
+    first = false
     const data: CollectionProductsPage = await adminGraphQL<CollectionProductsPage>(
       COLLECTION_PRODUCTS_QUERY,
       { id: collectionGid, cursor },
@@ -534,12 +661,14 @@ export async function getHonoraryProductsForPin(
  * Multi-membership: tie-broken by CATEGORY_PRIORITY (Pleasure first).
  */
 async function buildCategoryMap(): Promise<Map<string, Category>> {
-  const sets = await Promise.all(
-    CATEGORY_PRIORITY.map(async cat => ({
-      cat,
-      ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat]),
-    })),
-  )
+  // Sequential, not Promise.all. Four concurrent paginated crawls defeat the
+  // per-page pacing: they interleave four requests where the delay allows one,
+  // which is the burst the pacing exists to prevent.
+  const sets: { cat: Category; ids: Set<string> }[] = []
+  for (const cat of CATEGORY_PRIORITY) {
+    if (sets.length > 0) await pause(CRAWL_PAGE_DELAY_MS)
+    sets.push({ cat, ids: await fetchCollectionProductIds(CATEGORY_COLLECTION_IDS[cat]) })
+  }
   const map = new Map<string, Category>()
   for (const { cat, ids } of sets) {
     for (const id of ids) {
@@ -559,8 +688,11 @@ export async function buildDiscoveryIndex(): Promise<DiscoveryProduct[]> {
   const categoryMap = await buildCategoryMap()
   const out: DiscoveryProduct[] = []
   let cursor: string | null = null
+  let first = true
 
   while (true) {
+    if (!first) await pause(CRAWL_PAGE_DELAY_MS)
+    first = false
     const data: AdminProductsPage = await adminGraphQL<AdminProductsPage>(
       PRODUCTS_PAGE_QUERY,
       { cursor },
@@ -679,6 +811,11 @@ export async function writeDiscoveryIndexDurable(
   await kvSet(INDEX_KEY, index, INDEX_TTL_SECONDS)
   await kvSet(VOCAB_KEY, vocab, VOCAB_TTL_SECONDS)
   writeL1Memo(index, vocab)
+  // The crawl that produced this index has just read the catalog, so whatever
+  // change marked it dirty is now reflected. Clear before the Neon write: a
+  // durable-write failure is explicitly non-fatal, and leaving the flag set
+  // would force a full re-crawl on the next tick for an index that is fine.
+  await clearDiscoveryIndexDirty()
 
   try {
     await db
