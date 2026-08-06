@@ -5,6 +5,8 @@
 > Runtime consumers import it via `app/lib/emma-voice.ts`. Voice reset approved by Mike on 2026-07-02 (see the ADR for rationale). Desire-forward register approved by Mike on 2026-07-20: intensity 9 (indulgent flavor with temptation closers) on owned channels, running as a 30-day trial through 2026-08-19 (tracker: `docs/store-team/trackers/voice-register-v5-trial.md`).
 >
 > Amended 2026-07-30 on Mike's explicit codify: the Emma section gains the no-omniscience rule, the no-self-narration rule, and the register ruling for copy that introduces her. The register system and the intensity dial are unchanged, so this stays v5.
+>
+> Amended 2026-08-06 on Mike's explicit instruction, applying approved suggestion #925: the blog addendum's aphorism-as-closer cap gains its explicit three-part test. The caps themselves are unchanged; what changes is that the definition of a hit is now written down instead of re-derived from a loose paraphrase on every review pass. This stays v5.
 
 <!-- core:start -->
 
@@ -199,10 +201,32 @@ rules below were owner-codified 2026-07-28.
   a joke load-bearing on a clinical or safety fact (joke about the awkwardness, never the pain).
   The license is owned-channels only; social recycling stays capped by the social addendum.
 - **Rhythm rules (the anti-AI-tells).** Vary sentence length; at least one short standalone
-  sentence per section. Cap the aphorism-as-closer construction (an abstract noun promoted to
-  subject of a defining clause, e.g. "bracing is what has been killing the moment") at one per
-  section and three per post, because it is a house tic under the fresh-language rule. Never two in one
-  paragraph.
+  sentence per section. Cap the aphorism-as-closer construction (e.g. "bracing is what has been
+  killing the moment") at one per section and three per post, because it is a house tic under the
+  fresh-language rule. Never two in one paragraph.
+
+  **What counts is a three-part test, and a sentence must meet ALL THREE.** This is the binding
+  definition; do not re-derive a wider one from the example above.
+
+  1. An **anaphoric demonstrative** as the grammatical subject ("that", "this", or a pronoun
+     standing in for the preceding sentence), and
+  2. a **copula** ("is", "are", "was", "were"), and
+  3. a **relative or defining clause that re-describes content the previous sentence already
+     delivered**.
+
+  The tic is a redundant recap-tag: it restates what the reader was just told, in a shape that
+  sounds like a conclusion. All three conditions are required, so the following do **not** count
+  and must not be flagged as hits:
+
+  - A plain noun plus copula plus predicate nominal that states an idea for the **first time**.
+    "The fix is usually a change in frequency rather than a jump in intensity" is a PASS.
+  - Forward-introducing topic sentences using "Here is ...".
+  - Any sentence whose subject is a concrete or indefinite noun phrase rather than an anaphoric
+    demonstrative, however epigrammatic it sounds.
+
+  Recorded 2026-08-06 from the voice reviewer's own ruling on run 157 (suggestion #925). The
+  earlier phrasing, "an abstract noun promoted to subject of a defining clause", was read wide
+  enough to flag ordinary expository prose, which is what this test exists to prevent.
 
 **Structure.**
 
