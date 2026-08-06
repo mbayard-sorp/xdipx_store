@@ -41,6 +41,12 @@
 # → Settings → Deployment Protection → Protection Bypass for Automation);
 # without it, protected previews serve Vercel's auth page and the run reports
 # that instead of failing confusingly.
+#
+# On a red run, the last step files the regression as a strategy-team ticket
+# on the improvement bus, so a failure here gets acted on instead of sitting
+# decoratively in the Checks tab. That needs the XDIPX_TEAM_TOKEN repo secret
+# (value: the team callback token accepted by /api/team/suggestion). Without
+# it, the step logs a notice and no-ops.
 name: lighthouse
 
 on:
@@ -67,11 +73,16 @@ jobs:
 
       - name: Wait for Vercel preview
         id: preview
-        # Non-fatal on purpose: the action errors on a 401 wall, and the gate
-        # below is where that becomes a verdict. Which verdict depends on
+        # v1.3.3 is the first release whose action.yml declares
+        # vercel_protection_bypass_header (verified against the tag; it sends
+        # the value as x-vercel-protection-bypass on every poll). v1.3.2
+        # silently dropped the input with an "Unexpected input(s)" warning and
+        # polled the protected preview unauthenticated until max_timeout on
+        # every run. Non-fatal on purpose: the gate below is where an
+        # unreachable preview becomes a verdict, and which verdict depends on
         # whether the bypass secret exists (see below).
         continue-on-error: true
-        uses: patrickedqvist/wait-for-vercel-preview@v1.3.2
+        uses: patrickedqvist/wait-for-vercel-preview@v1.3.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           max_timeout: 300
@@ -87,7 +98,7 @@ jobs:
       # Lighthouse stays NON-required for merge (repo branch protection): a perf
       # regression should file a ticket, not stall the release train on flaky
       # preview timing. Failing here makes the signal honest without making it
-      # a gate.
+      # a gate, and the final step is what actually files that ticket.
       - name: Check preview is reachable
         id: reachable
         env:
@@ -175,6 +186,7 @@ jobs:
           fi
 
       - name: Lighthouse (mobile, homepage + variant b)
+        id: lhci
         if: steps.reachable.outputs.ok == 'true'
         uses: treosh/lighthouse-ci-action@v12
         with:
@@ -183,3 +195,55 @@ jobs:
             ${{ steps.preview.outputs.url }}/?variant=b
           configPath: ./lighthouserc.runtime.json
           uploadArtifacts: true
+
+      # A red run must not die in the Checks tab. This job is deliberately
+      # non-required for merge (see the gate comment above), so the only way a
+      # regression gets acted on is if something files it; before this step,
+      # nothing did, and an 11-PR red streak (Jul 31 - Aug 3) was purely
+      # decorative until a human noticed. On any failure in this job, POST the
+      # regression to the improvement bus as a strategy-team ticket, deduped
+      # per branch via dedupeKey so a red streak on one branch files one
+      # ticket, not one per push. Without the XDIPX_TEAM_TOKEN secret it logs
+      # a notice and no-ops; it never fails the workflow itself.
+      - name: File regression ticket on failure
+        if: failure()
+        continue-on-error: true
+        env:
+          TEAM_TOKEN: ${{ secrets.XDIPX_TEAM_TOKEN }}
+          BRANCH: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Content of assertion-results.json, empty when LHCI never ran.
+          ASSERTIONS: ${{ steps.lhci.outputs.assertionResults }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${TEAM_TOKEN}" ]; then
+            echo "::notice::XDIPX_TEAM_TOKEN is not set, so this red run files no ticket. Add the repo secret (value: the team callback token) to have Lighthouse regressions land on the improvement bus."
+            exit 0
+          fi
+
+          # Compact failing-assertion summary: auditId, operator, ceiling,
+          # measured value, and the page path (full preview URLs are noise).
+          detail=$(printf '%s' "${ASSERTIONS:-}" | jq -r '
+            [.[] | select(.passed == false)
+              | "\(.auditId) \(.operator) \(.expected), measured \(.actual) on \(.url | sub("^https?://[^/]+"; ""))"
+            ] | .[0:8] | join("; ")' 2>/dev/null || true)
+          if [ -z "${detail}" ] || [ "${detail}" = "null" ]; then
+            detail="job failed before Lighthouse produced assertion results (preview unreachable or LHCI error); see the run log"
+          fi
+
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          suggestion="Lighthouse regression on ${BRANCH} (PR #${PR_NUMBER:-?}): ${detail}. Run: ${run_url}. DONE WHEN: the regression is diagnosed and the failing metric is back under its lighthouserc.json ceiling on main."
+
+          payload=$(jq -n \
+            --arg s "${suggestion}" \
+            --arg dk "lighthouse-regression-${BRANCH}" \
+            '{op: "create", kind: "code", team: "strategy", category: "other", priority: 2, suggestion: $s, dedupeKey: $dk}')
+
+          code=$(curl -s -o /tmp/suggestion-resp.txt -w '%{http_code}' --max-time 30 \
+            -H 'content-type: application/json' \
+            -H "x-team-secret: ${TEAM_TOKEN}" \
+            -d "${payload}" \
+            https://xdipx.com/api/team/suggestion || echo 000)
+          echo "ticket POST -> HTTP ${code}: $(head -c 300 /tmp/suggestion-resp.txt 2>/dev/null || true)"
+          exit 0
