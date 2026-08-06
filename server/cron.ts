@@ -709,6 +709,32 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/outreach-inbox
+   * Schedule: every 30 minutes. Poll hello@xdipx.com over IMAP for replies to
+   * outreach emails (read-only towards the mailbox: BODY.PEEK, matched threads
+   * only, never flags/moves/deletes; see outreach-inbox.server.ts).
+   *
+   * Free until armed: when the outreach_send_enabled valve is off AND no
+   * outreach_messages rows exist, the handler no-ops before touching IMAP,
+   * so shipping the cron costs nothing until the owner enables the pipeline.
+   */
+  cronRoute('/outreach-inbox', async (_req, res) => {
+    try {
+      const { isOutreachSendEnabled } = await import('../app/lib/outreach.server.js')
+      const { hasAnyOutreachMessages, pollOutreachInbox } = await import('../app/lib/outreach-inbox.server.js')
+      if (!(await isOutreachSendEnabled()) && !(await hasAnyOutreachMessages())) {
+        res.json({ ok: true, skipped: 'outreach not armed' })
+        return
+      }
+      const result = await pollOutreachInbox()
+      res.status(result.ok ? 200 : 503).json(result)
+    } catch (err) {
+      console.error('[cron:outreach-inbox]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/enrichment-batch-poller
    * Schedule: every 2 minutes. Advances every in-flight batch_job by one pass
    * (retrieve current turn's batch; if ended, distribute + run tools + submit
