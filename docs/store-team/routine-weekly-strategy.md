@@ -168,6 +168,18 @@ product-manager approve/reject/watch this week (and any `skippedDueToCap` days);
 price drops detected / repriced / routed. Per `mission-brief.md`: throughput is an activity metric,
 never a win — a high import count with zero new-product orders is a **stop-doing** signal.
 
+**Label the enrich/publish health line measured or UNMEASURED — never carry a stale "dead" verdict.**
+The strategy sandbox has no Shopify creds, so an enrich/publish claim inferred from Shopify-less
+signals is not a measurement. Read the ground truth from Neon: `import_candidates.enriched_at` /
+`published_at` max, plus the enrich-stuck (`imported AND enriched_at IS NULL`) and publish-stuck
+(`enriched_at set, published_at NULL`) counts. `DATABASE_URL` is available and the daily product
+routine already reads it this way (psql / neon-http over HTTPS, since port 5432 is firewalled); do
+the same here. If that read genuinely cannot run this pass, label the Catalog Pipeline health line
+**UNMEASURED** (or defer it to the product-daily run, which reads live DB) rather than repeating a
+prior "dead"/"chain is broken" verdict. A stale "dead" premise wrongly throttles the product-daily
+routine's Step-3 approval volume, and it has in fact been carried for three consecutive briefs while
+live DB showed enrich+publish keeping pace daily.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/brief" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \

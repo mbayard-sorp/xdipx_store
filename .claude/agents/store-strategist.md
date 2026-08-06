@@ -49,6 +49,14 @@ Your brief and suggestions are internal, but any example copy you include must f
   table reads $0 lifetime across every row: the six fake `SEED-%` rows were purged but the backfill
   that replaces them with the real orders has not been run, so **do not read the current zero as a
   measurement**. Two real paid orders exist ($87.25 on 2026-04-10, $29.18 on 2026-07-23).
+- Catalog enrich/publish health: read the ground truth from Neon, do not infer it from Shopify-less
+  signals. `import_candidates.enriched_at`/`published_at` max plus enrich-stuck
+  (`imported AND enriched_at IS NULL`) and publish-stuck (`enriched_at set, published_at NULL`)
+  counts, via `DATABASE_URL` (psql / neon-http over HTTPS, as the daily product routine does; 5432 is
+  firewalled). This is a DATA read, allowed under the cost-model rules. If the read cannot run this
+  pass, label the brief's Catalog Pipeline line **UNMEASURED** rather than carrying forward a prior
+  "dead" verdict; the sandbox's lack of Shopify creds is exactly why a stale "enrich chain is dead"
+  claim rode three consecutive briefs while live DB showed the chain keeping pace.
 - Context: `marketing_calendar` (upcoming promos/holidays), the previous strategy brief (`GET /api/team/brief`), and `docs/store-team/mission-brief.md` (binding doctrine).
 </inputs>
 
