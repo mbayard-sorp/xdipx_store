@@ -40,7 +40,7 @@
  * so release-engine.test.ts can hammer it without a network or a database.
  */
 
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm'
 
 import { db } from '~/lib/db.server'
 import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
@@ -66,7 +66,7 @@ import { checkUrl, runCheckoutProbe } from '~/lib/checkout-probe.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { KV_KEYS, kvDel, kvGet, kvIncr, kvSet, kvSetNX } from '~/lib/kv.server'
 import { escapeHtml, sendOwnerEmail } from '~/lib/owner-alerts.server'
-import { getTicket, transitionSuggestion, type TicketStatus } from '~/lib/team.server'
+import { getTicket, runWithOutOfBandReconcile, transitionSuggestion, type TicketStatus } from '~/lib/team.server'
 // One-directional: the autofile module imports team.server and github.server,
 // never this file, so there is no cycle. Keeping the tunable half of ADR-008
 // step 2 out of this protected file is the point (see that module's header).
@@ -219,6 +219,17 @@ export interface TicketFacts {
 export interface PullRequestFacts {
   number: number
   headRef: string
+  /** PR title, consulted ONLY for the WIP marker in the conditional undraft
+   *  rule. It is untrusted text, and it can only ever KEEP a PR drafted. */
+  title: string
+  /**
+   * Milliseconds since the PR's last recorded activity (`updated_at`), 0 when
+   * unparseable. `PullRequestSummary` carries no created_at, and updated_at is
+   * a strictly conservative stand-in: it is never earlier than creation, so
+   * "no activity for 30 minutes" implies "older than 30 minutes" and also
+   * refuses to undraft a PR someone is actively pushing to.
+   */
+  ageMs: number
   draft: boolean
   mergeable: boolean | null
   mergeableState: string
@@ -318,6 +329,70 @@ export function requiresAllowlistCheck(headRef: string): boolean {
  */
 export function autoReadyOnDraft(headRef: string): boolean {
   return headRef.startsWith('agents/') || headRef.startsWith('ticket/')
+}
+
+/**
+ * The owner-attended lanes where a draft MIGHT be deliberate WIP, so the engine
+ * undrafts only under the strict conditions in `conditionalUndraftEligible`.
+ *
+ * Why widen at all: 38 of the last 118 owner hand-merges (measured 2026-08-05)
+ * were green `claude/` drafts the engine refused to look at. A cloud session
+ * opens its PR as a draft by default, and a session that files its ticket and
+ * walks away leaves work that is fully gated, fully green, and structurally
+ * unmergeable. The conditions below separate that case from real WIP.
+ */
+export const CONDITIONAL_UNDRAFT_PREFIXES: readonly string[] = [
+  'claude/', 'phase1/', 'tonight/', 'fix/', 'pm/',
+]
+
+/** How long a draft on an owner-attended lane must sit with no activity before
+ *  the conditional undraft may touch it. */
+export const CONDITIONAL_UNDRAFT_MIN_AGE_MS = 30 * 60_000
+
+export function isConditionalUndraftLane(headRef: string): boolean {
+  return CONDITIONAL_UNDRAFT_PREFIXES.some((p) => headRef.startsWith(p))
+}
+
+/**
+ * A WIP marker means the author asked for the draft to stay a draft. The title
+ * match is on the word `wip` (case-insensitive, word-bounded so "swipe" does
+ * not count), and the label match is an exact `wip` label. Either alone keeps
+ * the PR drafted.
+ */
+export function hasWipMarker(title: string, labels: readonly string[]): boolean {
+  return /\bwip\b/i.test(title) || labels.some((l) => l.toLowerCase() === 'wip')
+}
+
+/**
+ * Whether a draft on an owner-attended lane may be taken out of draft. ALL of:
+ *
+ *   1. The required CI check has reported success. A red or pending build is
+ *      plausibly mid-work; a green one is a finished change sitting idle.
+ *   2. A pr-linked ticket exists for the PR, whatever its status. A session
+ *      that filed its ticket followed ADR-008 step 3 and meant to ship.
+ *   3. No activity for CONDITIONAL_UNDRAFT_MIN_AGE_MS. Someone still typing
+ *      gets left alone.
+ *   4. No WIP marker in the title or labels.
+ *
+ * Undrafting is still not an approval and merges nothing: the PR is re-read
+ * and fully gated on the next cycle, exactly like the machine-lane undraft.
+ */
+export function conditionalUndraftEligible(
+  facts: Pick<PullRequestFacts, 'headRef' | 'checks' | 'ticket' | 'ageMs' | 'title' | 'labels'>,
+): boolean {
+  return (
+    isConditionalUndraftLane(facts.headRef)
+    && checkState(facts.checks, [REQUIRED_CHECK]) === 'success'
+    && facts.ticket !== null
+    && facts.ageMs >= CONDITIONAL_UNDRAFT_MIN_AGE_MS
+    && !hasWipMarker(facts.title, facts.labels)
+  )
+}
+
+/** Age from a GitHub timestamp string; 0 (never eligible) when unparseable. */
+export function ageMsFromTimestamp(ts: string, now = Date.now()): number {
+  const t = Date.parse(ts)
+  return Number.isFinite(t) ? Math.max(0, now - t) : 0
 }
 
 /** Every changed path is on the agent-editor docs allowlist. Empty = false: an
@@ -420,6 +495,19 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
         action: 'undraft',
         code: 'draft-auto-ready',
         reason: `draft PR on the ${facts.headRef.split('/')[0]}/ lane, marking it ready for review`,
+      }
+    }
+    // Owner-attended lanes undraft only under the full eligibility test: green
+    // required check, a pr-linked ticket, half an hour of silence, and no WIP
+    // marker. Anything short of all four still means hands off.
+    if (conditionalUndraftEligible(facts)) {
+      return {
+        ...base,
+        action: 'undraft',
+        code: 'draft-auto-ready',
+        reason:
+          `idle green draft on the ${facts.headRef.split('/')[0]}/ lane with a linked ticket `
+          + 'and no WIP marker, marking it ready for review',
       }
     }
     return { ...base, action: 'skip', code: 'draft', reason: 'draft PR' }
@@ -793,9 +881,8 @@ export async function runSelfCheck(opts: { force?: boolean } = {}): Promise<Self
     problems.push('GITHUB_TOKEN / GITHUB_OWNER / GITHUB_REPO are not all set')
     return { ok: false, problems }
   }
-  if (!vercelConfig()) {
-    problems.push('VERCEL_TOKEN / VERCEL_PROJECT_ID are not set, so the deploy poll cannot run')
-  }
+  const vercelProblem = await checkVercelCredentials()
+  if (vercelProblem) problems.push(vercelProblem)
 
   const repo = await githubRequest<{ allow_squash_merge?: boolean; default_branch?: string; permissions?: { push?: boolean } }>(
     '/repos/{owner}/{repo}',
@@ -829,6 +916,40 @@ export async function runSelfCheck(opts: { force?: boolean } = {}): Promise<Self
   }
   console.error(`${LOG} CONFIG ERROR, refusing to run:\n  - ${problems.join('\n  - ')}`)
   return { ok: false, problems }
+}
+
+/**
+ * Prove the Vercel credentials WORK, not merely that they are set.
+ *
+ * An invalid VERCEL_TOKEN used to pass the self-check (which only tested
+ * presence) and then made listProductionDeployments return [] on every poll, so
+ * every merge "timed out waiting for a deploy", failed, and rolled back a
+ * perfectly good release. Two of those in a day trip the circuit breaker, which
+ * turns a stale token into a self-inflicted engine shutdown plus a rollback of
+ * healthy code. A definitive 401/403 from the API is therefore a config error
+ * that stops the cycle up front, on the same once-daily owner email path as a
+ * dead GitHub token.
+ *
+ * Any other failure (network blip, 429, 5xx) is transient and reports nothing:
+ * failing the self-check on a hiccup would stop releases for an hour at a time.
+ *
+ * Returns the problem string, or null when the credentials are usable.
+ */
+export async function checkVercelCredentials(): Promise<string | null> {
+  const cfg = vercelConfig()
+  if (!cfg) {
+    return 'VERCEL_TOKEN / VERCEL_PROJECT_ID are not set, so the deploy poll cannot run'
+  }
+  const probe = await vercelFetch<unknown>(
+    `/v6/deployments?projectId=${encodeURIComponent(cfg.projectId)}&target=production&limit=1${cfg.teamQs}`,
+  )
+  if (!probe.ok && (probe.status === 401 || probe.status === 403)) {
+    return (
+      `VERCEL_TOKEN is set but the Vercel API rejects it (HTTP ${probe.status}), `
+      + 'so the deploy poll would see no deployments and every merge would falsely roll back'
+    )
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -1070,9 +1191,13 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
 
   const cap = parseDailyCap(await getPipelineSetting('release_engine_max_merges_per_day'))
   const mergesToday = Number((await kvGet<number>(KEYS.merges(day))) ?? 0)
-  if (dailyCapReached(mergesToday, cap)) {
-    return { ...result, phase: 'daily-cap', message: `daily cap reached (${mergesToday}/${cap})` }
-  }
+  // The cap bounds MERGES, not vision. This used to return here, which meant a
+  // capped engine also stopped classifying, labelling, escalating, autofiling,
+  // and undrafting: on 2026-08-04 the cap was hit at 05:30 and a protected-path
+  // PR opened later that day got no needs-owner label and no owner email until
+  // the next UTC day. Now a capped cycle still lists and evaluates every PR and
+  // executes every side action; only the merge itself is withheld.
+  const capped = dailyCapReached(mergesToday, cap)
 
   const open = await listOpenPullRequests({
     headPrefixes: [...AGENT_BRANCH_PREFIXES, REVERT_BRANCH_PREFIX],
@@ -1141,6 +1266,15 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
     }
     if (decision.action !== 'merge') continue
 
+    // The daily cap withholds exactly this one action. Every side action above
+    // (label, escalate, bounce, autofile, undraft) already ran for this cycle.
+    if (capped) {
+      console.log(
+        `${LOG} daily cap reached (${mergesToday}/${cap}), PR #${summary.number} is merge-ready but waits for the next UTC day`,
+      )
+      continue
+    }
+
     // ONE merge per cycle, and in dry-run zero.
     if (dryRun) {
       return {
@@ -1154,14 +1288,18 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
   }
 
   const undraftNote = undrafted > 0 ? `, ${undrafted} taken out of draft` : ''
+  const evaluatedNote = `${decisions.length} open PR(s) evaluated, nothing merged${undraftNote}`
   return {
     ...result,
     // A failed undraft is reported rather than swallowed. Silence is what made
     // the original stall invisible, and a backstop that fails quietly is just a
     // slower version of the same bug.
     ...(undraftErrors.length > 0 ? { ok: false, errors: undraftErrors } : {}),
+    ...(capped ? { phase: 'daily-cap' as const } : {}),
     decisions,
-    message: `${decisions.length} open PR(s) evaluated, nothing merged${undraftNote}`,
+    message: capped
+      ? `daily cap reached (${mergesToday}/${cap}); ${evaluatedNote}`
+      : evaluatedNote,
   }
 }
 
@@ -1224,6 +1362,8 @@ async function gatherFacts(summary: PullRequestSummary): Promise<PullRequestFact
   return {
     number: pr.number,
     headRef: pr.headRef,
+    title: pr.title,
+    ageMs: ageMsFromTimestamp(pr.updatedAt),
     draft: pr.draft,
     mergeable: pr.mergeable,
     mergeableState: pr.mergeableState,
@@ -1270,7 +1410,13 @@ async function maybeSweepOutOfBand(): Promise<void> {
 
   try {
     const { sweepOutOfBandMerges } = await import('~/lib/ticket-out-of-band-sweep.server')
-    const swept = await sweepOutOfBandMerges()
+    // The wrapper is the sweep's key to the `outOfBandReconcileOnly` edges
+    // (pr_open/in_review -> applied; verified -> applied is unfenced). Its
+    // transition calls live in ticket-out-of-band-sweep.server.ts, outside
+    // this file, so the engine hands it the reconcile declaration ambiently
+    // here at the one place the sweep is invoked. Without the wrapper the map
+    // itself would 409 those transitions.
+    const swept = await runWithOutOfBandReconcile(() => sweepOutOfBandMerges())
     if (swept.applied.length > 0) {
       console.log(`${LOG} out-of-band sweep applied tickets: ${swept.applied.join(', ')}`)
     }
@@ -1294,6 +1440,122 @@ async function maybeSweepOutOfBand(): Promise<void> {
   } catch (err) {
     console.error(`${LOG} abandoned-PR sweep failed`, err)
   }
+
+  // Third pass, same cadence and same isolation: tickets stranded in `approved`
+  // or `blocked` whose linked PR already merged. See sweepOrphanedMergedPrTickets.
+  try {
+    const orphans = await sweepOrphanedMergedPrTickets()
+    if (orphans.applied.length > 0) {
+      console.log(`${LOG} orphan sweep applied tickets: ${orphans.applied.join(', ')}`)
+    }
+    for (const err of orphans.errors) console.warn(`${LOG} orphan sweep: ${err}`)
+  } catch (err) {
+    console.error(`${LOG} orphan sweep failed`, err)
+  }
+}
+
+/**
+ * Statuses the orphan sweep reconciles, complementing the out-of-band sweep's
+ * `verified`/`in_review`/`pr_open` (ticket-out-of-band-sweep.server.ts, which
+ * this file cannot widen without an owner merge; the two lists must stay
+ * disjoint so a ticket is never swept twice in one hour).
+ *
+ * How a ticket strands here with a merged PR:
+ *   - `approved`: a bounce plus a lease expiry returns the row to the
+ *     unassigned queue with its PR link intact, then the owner merges the PR
+ *     by hand. Tickets #120 and #423 (PRs #436/#429 merged) sat this way.
+ *   - `blocked`: the engine blocks a ticket after three attempts, then the
+ *     owner fixes and merges the PR himself but never revisits the ticket.
+ *     Ticket #455 (PR #508 merged) sat this way.
+ *
+ * `in_progress` stays excluded for the same reason it is excluded over there:
+ * an active lease means an agent is mid-edit and a link may be a superseded
+ * attempt.
+ */
+export const ORPHAN_SWEEP_STATUSES: readonly TicketStatus[] = ['approved', 'blocked']
+
+/** Tickets checked per sweep. Bounds the GitHub calls one cycle can make. */
+export const ORPHAN_SWEEP_MAX_TICKETS = 5
+
+/** Grace period so the sweep never races a transition that is mid-flight. */
+const ORPHAN_SWEEP_MIN_AGE_MS = 60 * 60_000
+
+/**
+ * Reconcile `approved`/`blocked` tickets whose most recent PR link points at a
+ * PR GitHub reports as merged, using the two out-of-band `-> applied` system
+ * edges added for exactly this. Identical safety shape to the main sweep: only
+ * `merged: true` from GitHub itself moves a ticket, a 409 means the row moved
+ * first and is ignored, and nothing here can mark unmerged work as shipped.
+ *
+ * Both edges are `outOfBandReconcileOnly` in the transition map, so they open
+ * only to a call that passes `viaOutOfBandReconcile` (this sweep, after the
+ * merged check) or runs inside `runWithOutOfBandReconcile`. A plain
+ * `transitionSuggestion(id, 'applied', 'system')` from anywhere else, present
+ * or future, is a 409 at the map.
+ */
+export async function sweepOrphanedMergedPrTickets(
+  limit = ORPHAN_SWEEP_MAX_TICKETS,
+): Promise<{ checked: number; applied: number[]; errors: string[] }> {
+  const out = { checked: 0, applied: [] as number[], errors: [] as string[] }
+  const cutoff = new Date(Date.now() - ORPHAN_SWEEP_MIN_AGE_MS)
+
+  let rows: Array<{ ticketId: number; status: string; ref: string }> = []
+  try {
+    rows = await db
+      .select({
+        ticketId: homepageTeamSuggestions.id,
+        status: homepageTeamSuggestions.status,
+        ref: suggestionLinks.ref,
+      })
+      .from(homepageTeamSuggestions)
+      .innerJoin(suggestionLinks, eq(suggestionLinks.suggestionId, homepageTeamSuggestions.id))
+      .where(and(
+        inArray(homepageTeamSuggestions.status, [...ORPHAN_SWEEP_STATUSES]),
+        eq(suggestionLinks.kind, 'pr'),
+        lt(homepageTeamSuggestions.updatedAt, cutoff),
+      ))
+      // Oldest ticket first; within a ticket the newest link is the live claim.
+      .orderBy(homepageTeamSuggestions.updatedAt, desc(suggestionLinks.createdAt))
+  } catch (err) {
+    out.errors.push(`orphan candidate query failed: ${String(err)}`)
+    return out
+  }
+
+  const seen = new Set<number>()
+  for (const row of rows) {
+    if (out.checked >= limit) break
+    if (seen.has(row.ticketId)) continue
+    seen.add(row.ticketId)
+    const prNumber = prNumberFromRef(row.ref)
+    if (prNumber === null) continue
+    out.checked += 1
+
+    try {
+      const pr = await getPullRequest(prNumber, 'release-engine')
+      if (!pr.ok || !pr.data) {
+        out.errors.push(`ticket #${row.ticketId}: PR #${prNumber}: ${pr.ok ? 'no data' : pr.error}`)
+        continue
+      }
+      if (pr.data.merged !== true) continue
+
+      // `viaOutOfBandReconcile` is what unlocks the fenced approved/blocked
+      // `-> applied` edges, and this call has earned it: the `merged: true`
+      // check above is the precondition the flag declares.
+      await transitionSuggestion(row.ticketId, 'applied', 'system', {
+        note: `merged out-of-band while '${row.status}' (PR #${prNumber} was already merged when the engine reconciled it)`,
+        links: [{ kind: 'pr', ref: pr.data.htmlUrl, state: 'merged' }],
+        viaOutOfBandReconcile: true,
+      })
+      out.applied.push(row.ticketId)
+      console.log(`${LOG} orphan ticket #${row.ticketId} (${row.status}) applied: PR #${prNumber} merged out of band`)
+    } catch (err) {
+      // A 409 is normal: the row moved between the query and the transition.
+      const msg = err instanceof Response ? `${err.status}` : String(err)
+      if (msg.includes('409')) continue
+      out.errors.push(`ticket #${row.ticketId}: ${msg}`)
+    }
+  }
+  return out
 }
 
 /**

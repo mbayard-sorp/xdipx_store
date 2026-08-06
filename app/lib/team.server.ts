@@ -20,6 +20,7 @@
  * Server-only.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { timingSafeEqual } from 'node:crypto'
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
@@ -525,6 +526,35 @@ export async function listRecentEvents(team?: TeamId, sinceDays = 7, limit = 500
 // additive and lives further down under "Ticket lifecycle (070)". Everything
 // in this section keeps its exact pre-070 behaviour.
 
+/**
+ * Every kind the executor taxonomy knows. `code` is claimed by the daily dev
+ * routine, `instructions`/`agent-def`/`config` by agent-editor, and the rest
+ * route to a daily run or to the owner. A kind outside this list has no
+ * executor at all, so a row filed under one would sit in the queue forever
+ * with nothing scheduled to ever read it.
+ */
+export const KNOWN_TICKET_KINDS: readonly string[] = [
+  'code', 'instructions', 'agent-def', 'config',
+  'campaign', 'promo', 'program', 'process', 'strategy',
+]
+
+/**
+ * Coerce an unknown kind to `process` while preserving what the caller said.
+ *
+ * Agents invent kinds ('bug', 'improvement', 'seo') and the column is
+ * write-once at insert, so before this a typo'd kind either landed in a
+ * no-executor bucket nobody sweeps or, past 16 characters, failed the insert
+ * outright. `process` is the safest landing: it is the kind the hygiene pass
+ * and the daily runs already read, and rekindSuggestion can move it to a real
+ * lane later. The original string is preserved by prefixing the suggestion
+ * text, so triage can see what was meant.
+ */
+export function normalizeTicketKind(kind: string | undefined): { kind: string; original: string | null } {
+  if (kind === undefined) return { kind: 'process', original: null }
+  if (KNOWN_TICKET_KINDS.includes(kind)) return { kind, original: null }
+  return { kind: 'process', original: kind }
+}
+
 export interface SuggestionInput {
   team: TeamId
   targetTeam?: TeamId | undefined
@@ -578,6 +608,13 @@ export async function createSuggestionDetailed(
   const autoApprove = await getTeamConfig(actingTeam)
     .then(c => c.autoApproveSuggestions)
     .catch(() => false)
+  // An unknown kind is coerced to `process` (see normalizeTicketKind), and the
+  // original string survives as a prefix on the suggestion text so triage and
+  // a later rekind can see what the filer meant.
+  const nk = normalizeTicketKind(s.kind)
+  const suggestionText = nk.original === null
+    ? s.suggestion
+    : `[unknown kind '${nk.original.slice(0, 64)}' coerced to process] ${s.suggestion}`
   const [row] = await db
     .insert(homepageTeamSuggestions)
     .values({
@@ -585,8 +622,8 @@ export async function createSuggestionDetailed(
       targetTeam:    s.targetTeam ?? null,
       runId:         s.runId ?? null,
       category:      s.category,
-      kind:          s.kind ?? 'process',
-      suggestion:    s.suggestion,
+      kind:          nk.kind,
+      suggestion:    suggestionText,
       estSavingsUsd: String(s.estSavingsUsd ?? 0),
       cxRisk:        s.cxRisk ?? 'low',
       status:        autoApprove ? 'approved' : 'proposed',
@@ -946,11 +983,16 @@ export async function markSuggestion(
 //     ─qa→ in_review ─qa→ verified ─system→ applied
 //
 // Every edge is declared once, in ALLOWED, with the actors permitted to walk
-// it. A pair that is not in the map is a 409. Two structural properties fall
+// it. A pair that is not in the map is a 409. Three structural properties fall
 // out of the map rather than out of prose:
 //   - QA cannot reach `applied`. It has no edge to it from anywhere.
 //   - Only the release engine (`system`) applies code tickets, and only from
 //     `verified`, which only QA can produce.
+//   - The out-of-band merged-PR reconcile edges (approved/blocked/pr_open/
+//     in_review -> applied) are `outOfBandReconcileOnly`: a plain `system`
+//     transition cannot walk them, only a caller that has declared itself the
+//     reconcile path can, and that declaration is an in-process signal the
+//     team HTTP API cannot express.
 
 export const TICKET_STATUSES = [
   'proposed', 'approved', 'in_progress', 'pr_open', 'in_review',
@@ -1045,6 +1087,20 @@ export interface TransitionRule {
   kinds?: readonly string[]
   /** Edges that always burn a fix attempt (QA bounce, smoke-failure bounce). */
   incrementAttempt?: boolean
+  /**
+   * The fence on the merged-PR reconcile edges. A rule carrying this flag is
+   * matched only when the transition arrives through the out-of-band reconcile
+   * path (see `viaOutOfBandReconcile` on TransitionOpts and
+   * `runWithOutOfBandReconcile`). Without the fence the actor check alone
+   * guarded these edges, so ANY present or future `system` call site could
+   * close an approved/blocked/pr_open/in_review ticket of any kind at the map
+   * level; the "only on a merged PR" precondition lived solely in the sweeps'
+   * own code. With it, the map itself rejects every caller that has not
+   * declared itself a reconciler, and the declaration is an in-process signal
+   * the team HTTP API cannot express, so no agent posting to
+   * /api/team/suggestion can reach these edges at all.
+   */
+  outOfBandReconcileOnly?: boolean
 }
 
 /** Every non-terminal status can be retired by the owner. */
@@ -1072,6 +1128,23 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // RUN_CLOSE_ACTORS, which would also hand the release engine the ability to
     // close `strategy` rows it has no business touching.
     { to: 'applied', actors: ['system'], kinds: DETECTOR_SELF_CLOSE_KINDS },
+    // Out-of-band merged-PR reconcile only, mirroring the `pr_open -> applied`
+    // system edge below. `applied` means "the fix is live on xdipx.com", and the
+    // sweep earns that claim the same way it does on the pr_open edge: it asks
+    // GitHub whether the PR this ticket links is already merged, and only a
+    // `merged: true` from GitHub itself lets it write this edge. Nothing here
+    // can mark unmerged work as shipped.
+    //
+    // Why `approved` can be stranded at all: a bounced ticket whose lease
+    // expires returns to `approved` with its PR link intact, and if the owner
+    // then merges that PR by hand the ticket sits on the unassigned queue
+    // forever while its fix is live in production. Tickets #120 and #423 sat
+    // exactly this way with PRs #436 and #429 merged. Unlike the detector
+    // self-close above this edge is deliberately not fenced by kind: a
+    // hand-merged PR strands a ticket of any kind, exactly as on `pr_open`.
+    // What fences it instead of a kind list is `outOfBandReconcileOnly`: a
+    // plain system transition cannot walk it, only the reconcile sweeps can.
+    { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
     // agent-editor's hygiene pass retiring a row with no executor. Kinds are
     // fenced so it can never dismiss the instruction rows aimed at itself.
     { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_RETIRE_KINDS },
@@ -1089,7 +1162,10 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // The legacy agent-editor docs path, preserved verbatim.
     { to: 'applied', actors: ['agent:agent-editor'], kinds: AGENT_EDITOR_APPLY_KINDS },
     // Out-of-band reconciliation. See the note on the `in_review` edge below.
-    { to: 'applied', actors: ['system'] },
+    // Fenced: the merged-PR precondition used to live only in the sweep, so
+    // any plain system call could walk this edge. Now the map itself demands
+    // the reconcile declaration.
+    { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
     // Abandoned-PR cleanup for ADR-008 step 2 (`dismissTicketsForClosedUnmergedPrs`).
     // Without it an auto-filed ticket whose PR is closed unmerged sits at
     // `pr_open` forever, and the autofile backstop turns into a litter machine.
@@ -1124,7 +1200,8 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // their PRs (#413, #414, #420) were live in production, and R-DEV then
     // spent later passes re-diagnosing incidents that had already shipped.
     // The sweep only ever moves a ticket in the direction reality already went.
-    { to: 'applied', actors: ['system'] },
+    // Fenced like the `pr_open` edge above: reconcile callers only.
+    { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
     OWNER_DISMISS,
   ],
   verified: [
@@ -1136,6 +1213,17 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
   ],
   blocked: [
     { to: 'approved', actors: ['owner', 'system'] },
+    // Out-of-band merged-PR reconcile only, mirroring the `pr_open -> applied`
+    // system edge above. Only a `merged: true` from GitHub itself lets the
+    // sweep write this edge, so nothing here can mark unmerged work as shipped.
+    //
+    // A blocked ticket whose PR the owner then merges by hand is otherwise
+    // stranded forever: `blocked` used to have no exit but the owner, so the
+    // fix went live while the ticket kept holding its dedupe key and kept
+    // showing in the blocked count. Ticket #455 sat exactly this way with
+    // PR #508 merged. Fenced by `outOfBandReconcileOnly` like the `approved`
+    // edge above: a plain system transition is rejected at the map.
+    { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
     OWNER_DISMISS,
   ],
   applied: [],
@@ -1145,6 +1233,28 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
 export interface TransitionContext {
   assignee?: string | null | undefined
   kind?: string | null | undefined
+  /** True only when the call arrives through the out-of-band reconcile path.
+   *  Rules flagged `outOfBandReconcileOnly` match on no other condition. */
+  viaOutOfBandReconcile?: boolean | undefined
+}
+
+/**
+ * Ambient reconcile scope for sweep code whose transition calls live outside
+ * this module and outside the release engine's file (today that is
+ * ticket-out-of-band-sweep.server.ts, kept out of the protected engine file on
+ * purpose so its cadence can be tuned through the normal PR lane). The engine
+ * wraps its invocation of that sweep in `runWithOutOfBandReconcile`, and every
+ * transitionSuggestion call inside the wrapped promise chain carries the
+ * reconcile declaration without the sweep having to thread an option through.
+ *
+ * This is an in-process signal only. Nothing arriving over HTTP can set it,
+ * and the /api/team/suggestion transition op does not forward any equivalent
+ * field, so the fenced edges are structurally unreachable from the team API.
+ */
+const outOfBandReconcileScope = new AsyncLocalStorage<boolean>()
+
+export function runWithOutOfBandReconcile<T>(fn: () => Promise<T>): Promise<T> {
+  return outOfBandReconcileScope.run(true, fn)
 }
 
 /**
@@ -1165,6 +1275,9 @@ export function findTransitionRule(
     )
     if (!actorOk) continue
     if (rule.kinds && !rule.kinds.includes(ctx.kind ?? '')) continue
+    // The reconcile fence: these rules are invisible to any caller that has
+    // not declared itself the out-of-band reconcile path.
+    if (rule.outOfBandReconcileOnly && ctx.viaOutOfBandReconcile !== true) continue
     return rule
   }
   return null
@@ -1192,6 +1305,16 @@ export interface TransitionOpts {
   lastError?: string | undefined
   /** Force an attempt increment on an edge that does not always spend one. */
   incrementAttempt?: boolean | undefined
+  /**
+   * Declares this call the out-of-band merged-PR reconcile, unlocking the
+   * `outOfBandReconcileOnly` edges. Passed only by the release engine's sweep
+   * call sites, which have already asked GitHub and received `merged: true`
+   * for the ticket's linked PR. Deliberately NOT forwarded by the
+   * /api/team/suggestion transition op, so the fence cannot be crossed from
+   * the HTTP surface. Sweep code that cannot pass options gets the same
+   * declaration ambiently via `runWithOutOfBandReconcile`.
+   */
+  viaOutOfBandReconcile?: boolean | undefined
 }
 
 export type TicketRow = typeof homepageTeamSuggestions.$inferSelect
@@ -1243,7 +1366,16 @@ export async function transitionSuggestion(
   if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 })
 
   const from = row.status as TicketStatus
-  const rule = findTransitionRule(from, to, actor, { assignee: row.assignee, kind: row.kind })
+  // The reconcile declaration travels either explicitly in opts (the engine's
+  // own orphan sweep) or ambiently through runWithOutOfBandReconcile (the
+  // out-of-band sweep module, whose transition calls live outside the engine).
+  const viaOutOfBandReconcile =
+    opts.viaOutOfBandReconcile === true || outOfBandReconcileScope.getStore() === true
+  const rule = findTransitionRule(from, to, actor, {
+    assignee: row.assignee,
+    kind: row.kind,
+    viaOutOfBandReconcile,
+  })
   if (!rule) {
     throw new Response(
       `Conflict: '${from}' -> '${to}' is not permitted for actor '${actor}' on suggestion ${id}`,
@@ -1257,6 +1389,14 @@ export async function transitionSuggestion(
     patch['attemptCount'] = sql`${homepageTeamSuggestions.attemptCount} + 1`
   }
   if (opts.lastError !== undefined) patch['lastError'] = opts.lastError
+  // A transition into `blocked` with no stated reason gets a stamped one. Ten
+  // of the eleven blocked rows on 2026-08-05 had an empty last_error, which
+  // left the owner digest nothing to flag and the owner nothing to act on. The
+  // transition itself is never rejected, since refusing it would strand the
+  // ticket in a worse state; the stamp just makes the silence attributable.
+  if (to === 'blocked' && !opts.lastError?.trim() && !opts.note?.trim()) {
+    patch['lastError'] = `blocked without stated reason by ${actor}`
+  }
   // Returning to `approved` puts the ticket back on the unassigned queue,
   // whether that came from a lease expiry or from an unblock.
   if (to === 'approved') {
