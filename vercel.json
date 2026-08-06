@@ -14,7 +14,9 @@
           "node_modules/@react-router/**",
           "node_modules/react-router/**",
           "node_modules/react-router-dom/**",
-          "node_modules/nodemailer/**"
+          "node_modules/nodemailer/**",
+          "node_modules/imapflow/**",
+          "node_modules/mailparser/**"
         ],
         "maxDuration": 300,
         "memory": 1024
@@ -111,6 +113,10 @@
     {
       "path": "/cron/release-engine",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/cron/outreach-inbox",
+      "schedule": "*/30 * * * *"
     }
   ]
 }
