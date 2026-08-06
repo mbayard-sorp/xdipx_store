@@ -79,6 +79,8 @@ __export(schema_exports, {
   metaCapiFailures: () => metaCapiFailures,
   nalpacPriceHistory: () => nalpacPriceHistory,
   orderLineItems: () => orderLineItems,
+  outreachMessages: () => outreachMessages,
+  outreachProspects: () => outreachProspects,
   pdpDialVotes: () => pdpDialVotes,
   pdpProductVotes: () => pdpProductVotes,
   pipelineSettings: () => pipelineSettings,
@@ -129,7 +131,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, settingsAuditLog, checkoutProbeRuns, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, ga4PurchaseFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, suggestionLinks, indexnowPings, seoCoverageDaily, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives;
+var dealHistory, consentLog, tosAcceptance, tosVersions, referrals, dailyProfitSummary, pipelineSettings, settingsAuditLog, checkoutProbeRuns, customerProfileExtras, customerAnniversaries, socialPosts, adminRoles, orderLineItems, wishlists, wishlistItems, pdpDialVotes, pdpProductVotes, callLog, voicemails, smsOptouts, smsMessages, smsAgeConsent, draftOrders, returns, emmaChatSessions, emmaChatTurns, emmaChatEvents, ivrVoices, colorSwatchCache, productCopurchase, productEnrichmentCache, smsConversations, smsTurns, webConversations, emmaChatThreads, emmaChatMessages, pricingGroups, pricingSubGroups, pricingProductTypeMap, pricingRules, pricingAuditLog, discoveryRules, pricingChanges, nalpacPriceHistory, importCandidates, importMonitorRuns, enrichmentBatches, batchJobs, apiTokenLog, metaCapiFailures, ga4PurchaseFailures, homepagePayload, discoveryIndexPayload, homepageTeamRuns, homepageTeamEvents, homepageTeamSuggestions, suggestionLinks, indexnowPings, seoCoverageDaily, strategyBriefs, adCampaigns, marketingCalendar, mediaAssets, videoJobs, adCreatives, outreachProspects, outreachMessages;
 var init_schema = __esm({
   "db/schema.ts"() {
     "use strict";
@@ -1252,6 +1254,46 @@ var init_schema = __esm({
       updatedAt: timestamp("updated_at").notNull().defaultNow()
     }, (t) => ({
       campaignIdx: index("idx_ad_creatives_campaign").on(t.adCampaignId, t.status)
+    }));
+    outreachProspects = pgTable("outreach_prospects", {
+      id: serial("id").primaryKey(),
+      domain: varchar("domain", { length: 255 }).notNull(),
+      name: varchar("name", { length: 255 }),
+      contactEmail: varchar("contact_email", { length: 255 }),
+      contactChannel: varchar("contact_channel", { length: 8 }).notNull().default("email"),
+      // email|form|dm
+      source: varchar("source", { length: 64 }),
+      // prospects-doc | offsite-scout | ...
+      status: varchar("status", { length: 20 }).notNull().default("new"),
+      // new|researching|queued|sent|replied_positive|replied_negative|bounced|on_hold|landed|rejected
+      policyNote: text("policy_note"),
+      // caveat carried from vetting
+      notes: text("notes"),
+      suggestionId: integer("suggestion_id").references(() => homepageTeamSuggestions.id, { onDelete: "set null" }),
+      createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+      updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+    }, (t) => ({
+      domainUq: uniqueIndex("outreach_prospects_domain_key").on(t.domain),
+      statusIdx: index("idx_outreach_prospects_status").on(t.status, t.updatedAt)
+    }));
+    outreachMessages = pgTable("outreach_messages", {
+      id: serial("id").primaryKey(),
+      prospectId: integer("prospect_id").notNull().references(() => outreachProspects.id, { onDelete: "cascade" }),
+      direction: varchar("direction", { length: 3 }).notNull(),
+      // in|out
+      subject: text("subject"),
+      bodyText: text("body_text"),
+      messageId: text("message_id"),
+      // RFC 5322 Message-ID; inbound rows missing one store the imap:<uidvalidity>:<uid> fallback dedupe key
+      inReplyTo: text("in_reply_to"),
+      referencesHeader: text("references_header"),
+      classification: varchar("classification", { length: 12 }),
+      // positive|negative|neutral|auto_reply
+      sentAt: timestamp("sent_at", { withTimezone: true }),
+      createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+    }, (t) => ({
+      prospectIdx: index("idx_outreach_messages_prospect").on(t.prospectId, t.direction, t.sentAt),
+      messageIdIdx: index("idx_outreach_messages_message_id").on(t.messageId)
     }));
   }
 });
@@ -11127,9 +11169,9 @@ function isDiscontinued(product) {
     if (/\bdiscontinued\b/i.test(f)) return true;
     if (/\b(DISC|DC)\b/.test(f)) return true;
   }
-  const desc6 = product["Product Description"] ?? "";
-  if (/\bdiscontinued by manufacturer\b/i.test(desc6)) return true;
-  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc6)) return true;
+  const desc7 = product["Product Description"] ?? "";
+  if (/\bdiscontinued by manufacturer\b/i.test(desc7)) return true;
+  if (/\bproduct (?:has been |is )?discontinued\b/i.test(desc7)) return true;
   return false;
 }
 function parseCategories(raw) {
@@ -15823,10 +15865,10 @@ async function logVideoCost(entry) {
 }
 async function getDailyTokenRollup(opts = {}) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql20 } = await import("drizzle-orm");
+  const { sql: sql22 } = await import("drizzle-orm");
   const days = opts.days ?? 30;
   const result = await db2.execute(
-    sql20`SELECT * FROM api_token_daily
+    sql22`SELECT * FROM api_token_daily
         WHERE day >= current_date - ${days}::int
         ORDER BY day DESC, est_cost_usd DESC`
   );
@@ -15834,11 +15876,11 @@ async function getDailyTokenRollup(opts = {}) {
 }
 async function getTokenCallDetail(opts) {
   const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
-  const { sql: sql20 } = await import("drizzle-orm");
+  const { sql: sql22 } = await import("drizzle-orm");
   const model = opts.model ?? null;
   const source = opts.source ?? null;
   const result = await db2.execute(
-    sql20`
+    sql22`
       WITH grouped AS (
         SELECT
           caller, sku, product_id, batch_id,
@@ -18425,8 +18467,8 @@ async function followWithCookies(startUrl, maxHops = 12) {
     const getSetCookie = res.headers.getSetCookie;
     for (const sc of getSetCookie ? getSetCookie.call(res.headers) : []) {
       const pair = sc.split(";")[0] ?? "";
-      const eq29 = pair.indexOf("=");
-      if (eq29 > 0) jar.set(pair.slice(0, eq29).trim(), pair.slice(eq29 + 1).trim());
+      const eq31 = pair.indexOf("=");
+      if (eq31 > 0) jar.set(pair.slice(0, eq31).trim(), pair.slice(eq31 + 1).trim());
     }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
@@ -20605,8 +20647,8 @@ async function recentlyPinged(urls) {
   if (urls.length === 0) return /* @__PURE__ */ new Set();
   try {
     const { neon: neon6 } = await import("@neondatabase/serverless");
-    const sql20 = neon6(process.env["DATABASE_URL"]);
-    const rows = await sql20`
+    const sql22 = neon6(process.env["DATABASE_URL"]);
+    const rows = await sql22`
       SELECT url FROM indexnow_pings
       WHERE url = ANY(${urls}::text[])
         AND pinged_at >= now() - (${PING_SUPPRESSION_DAYS} * interval '1 day')
@@ -20620,8 +20662,8 @@ async function recentlyPinged(urls) {
 async function recordPushed(urls, batchId, statusCode) {
   if (urls.length === 0) return;
   const { neon: neon6 } = await import("@neondatabase/serverless");
-  const sql20 = neon6(process.env["DATABASE_URL"]);
-  await sql20`
+  const sql22 = neon6(process.env["DATABASE_URL"]);
+  await sql22`
     INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
     SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
     FROM unnest(${urls}::text[]) AS t(u)
@@ -27944,6 +27986,348 @@ var init_release_engine_server = __esm({
   }
 });
 
+// app/lib/outreach-core.ts
+function checkSendGuards(input) {
+  if (!input.valveOn) {
+    return { ok: false, reason: "outreach_send_enabled is off" };
+  }
+  if (input.sentToday >= input.dailyCap) {
+    return { ok: false, reason: `daily send cap reached (${input.sentToday}/${input.dailyCap})` };
+  }
+  if (!input.prospect) {
+    return { ok: false, reason: "prospect not found" };
+  }
+  if (input.prospect.status !== "queued") {
+    return { ok: false, reason: `prospect status is '${input.prospect.status}', not 'queued'` };
+  }
+  if (!input.prospect.contactEmail) {
+    return { ok: false, reason: "prospect has no contact_email" };
+  }
+  if (input.lastOutboundAt) {
+    const ageMs = input.now.getTime() - input.lastOutboundAt.getTime();
+    if (ageMs < DEDUPE_WINDOW_DAYS * 24 * 60 * 60 * 1e3) {
+      return { ok: false, reason: `already emailed this prospect within ${DEDUPE_WINDOW_DAYS} days` };
+    }
+  }
+  return { ok: true };
+}
+function utcDayStart(now) {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+function buildFooter(postalAddress) {
+  const lines = ["", "--", "xdipx.com, editorially curated sexual wellness"];
+  if (postalAddress) lines.push(postalAddress);
+  return lines.join("\n");
+}
+function extractMessageIds(header) {
+  if (!header) return [];
+  return header.match(/<[^<>\s]+>/g) ?? [];
+}
+function matchOutreachReply(headers, knownMessageIds) {
+  if (knownMessageIds.size === 0) return null;
+  for (const id of extractMessageIds(headers.inReplyTo)) {
+    if (knownMessageIds.has(id)) return id;
+  }
+  for (const id of extractMessageIds(headers.references)) {
+    if (knownMessageIds.has(id)) return id;
+  }
+  return null;
+}
+function inboundDedupeKey(input) {
+  if (input.messageId) return input.messageId;
+  return `imap:${input.uidValidity ?? "unknown"}:${input.uid}`;
+}
+function buildClassifyPrompt(input) {
+  const body = input.bodyText.length > 4e3 ? `${input.bodyText.slice(0, 4e3)}...` : input.bodyText;
+  return `Subject: ${input.subject ?? "(none)"}
+
+${body}
+
+One word:`;
+}
+function parseClassification(raw) {
+  const word = raw.trim().toLowerCase().replace(/[^a-z_]/g, "");
+  return REPLY_CLASSIFICATIONS.includes(word) ? word : "neutral";
+}
+function statusForClassification(c) {
+  if (c === "positive") return "replied_positive";
+  if (c === "negative") return "replied_negative";
+  return null;
+}
+var DEDUPE_WINDOW_DAYS, REPLY_CLASSIFICATIONS, CLASSIFY_SYSTEM_PROMPT;
+var init_outreach_core = __esm({
+  "app/lib/outreach-core.ts"() {
+    "use strict";
+    DEDUPE_WINDOW_DAYS = 7;
+    REPLY_CLASSIFICATIONS = ["positive", "negative", "neutral", "auto_reply"];
+    CLASSIFY_SYSTEM_PROMPT = "You classify replies to a guest-post or brand-partnership outreach email. Answer with exactly one word: positive (they are interested, want to proceed, or ask for the draft), negative (they decline, ask us to stop, or reject the pitch), auto_reply (out-of-office, autoresponder, or delivery notification), or neutral (anything else, including questions that are neither a yes nor a no).";
+  }
+});
+
+// app/lib/outreach.server.ts
+var outreach_server_exports = {};
+__export(outreach_server_exports, {
+  OUTREACH_CAP_KEY: () => OUTREACH_CAP_KEY,
+  OUTREACH_VALVE_KEY: () => OUTREACH_VALVE_KEY,
+  countOutboundToday: () => countOutboundToday,
+  getOutreachDailyCap: () => getOutreachDailyCap,
+  isOutreachSendEnabled: () => isOutreachSendEnabled,
+  sendOutreachEmail: () => sendOutreachEmail
+});
+import { and as and10, desc as desc5, eq as eq25, gte as gte4, sql as sql18 } from "drizzle-orm";
+async function readSetting(key) {
+  const [row] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq25(pipelineSettings.key, key)).limit(1);
+  return row?.value ?? null;
+}
+async function isOutreachSendEnabled() {
+  return await readSetting(OUTREACH_VALVE_KEY) === "true";
+}
+async function getOutreachDailyCap() {
+  const raw = await readSetting(OUTREACH_CAP_KEY);
+  const n = raw == null ? NaN : parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DAILY_CAP;
+}
+async function countOutboundToday(now = /* @__PURE__ */ new Date()) {
+  const [row] = await db.select({ n: sql18`count(*)::int` }).from(outreachMessages).where(and10(
+    eq25(outreachMessages.direction, "out"),
+    gte4(outreachMessages.sentAt, utcDayStart(now))
+  ));
+  return row?.n ?? 0;
+}
+async function sendOutreachEmail(input) {
+  try {
+    const now = /* @__PURE__ */ new Date();
+    const [prospect] = await db.select().from(outreachProspects).where(eq25(outreachProspects.id, input.prospectId)).limit(1);
+    const [lastOut] = await db.select({ sentAt: outreachMessages.sentAt }).from(outreachMessages).where(and10(
+      eq25(outreachMessages.prospectId, input.prospectId),
+      eq25(outreachMessages.direction, "out")
+    )).orderBy(desc5(outreachMessages.sentAt)).limit(1);
+    const guard = checkSendGuards({
+      valveOn: await isOutreachSendEnabled(),
+      sentToday: await countOutboundToday(now),
+      dailyCap: await getOutreachDailyCap(),
+      prospect: prospect ? { status: prospect.status, contactEmail: prospect.contactEmail } : null,
+      lastOutboundAt: lastOut?.sentAt ?? null,
+      now
+    });
+    if (!guard.ok) return { sent: false, error: guard.reason };
+    const host = process.env["ZOHO_SMTP_HOST"] ?? "smtp.zoho.com";
+    const port2 = parseInt(process.env["ZOHO_SMTP_PORT"] ?? "465", 10);
+    const user = process.env["ZOHO_SMTP_USER"];
+    const pass = process.env["ZOHO_SMTP_PASS"];
+    const from = process.env["OUTREACH_FROM"] ?? process.env["EMAIL_FROM"] ?? "hello@xdipx.com";
+    const replyTo = process.env["OUTREACH_REPLY_TO"] ?? from;
+    if (!user || !pass) {
+      return { sent: false, error: "SMTP credentials not configured" };
+    }
+    let nm = null;
+    try {
+      nm = await import("nodemailer");
+      nm = nm?.default ?? nm;
+    } catch (err2) {
+      return { sent: false, error: `nodemailer could not be loaded: ${String(err2)}` };
+    }
+    const transporter = nm.createTransport({
+      host,
+      port: port2,
+      secure: port2 === 465,
+      auth: { user, pass }
+    });
+    const info = await transporter.sendMail({
+      from: `"xdipx" <${from}>`,
+      replyTo,
+      to: prospect.contactEmail,
+      subject: input.subject,
+      text: input.text + buildFooter(process.env["OUTREACH_POSTAL_ADDRESS"])
+    });
+    const messageId = typeof info?.messageId === "string" ? info.messageId : void 0;
+    await db.insert(outreachMessages).values({
+      prospectId: input.prospectId,
+      direction: "out",
+      subject: input.subject,
+      bodyText: input.text,
+      messageId: messageId ?? null,
+      sentAt: now
+    });
+    await db.update(outreachProspects).set({ status: "sent", updatedAt: now }).where(eq25(outreachProspects.id, input.prospectId));
+    const result = { sent: true };
+    if (messageId) result.messageId = messageId;
+    return result;
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
+    console.error("[outreach] send failed:", msg);
+    return { sent: false, error: msg };
+  }
+}
+var OUTREACH_VALVE_KEY, OUTREACH_CAP_KEY, DEFAULT_DAILY_CAP;
+var init_outreach_server = __esm({
+  "app/lib/outreach.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_outreach_core();
+    OUTREACH_VALVE_KEY = "outreach_send_enabled";
+    OUTREACH_CAP_KEY = "outreach_daily_send_cap";
+    DEFAULT_DAILY_CAP = 5;
+  }
+});
+
+// app/lib/outreach-inbox.server.ts
+var outreach_inbox_server_exports = {};
+__export(outreach_inbox_server_exports, {
+  hasAnyOutreachMessages: () => hasAnyOutreachMessages,
+  pollOutreachInbox: () => pollOutreachInbox
+});
+import { and as and11, eq as eq26, inArray as inArray10, isNotNull, sql as sql19 } from "drizzle-orm";
+async function pollOutreachInbox() {
+  const result = { ok: true, scanned: 0, matched: 0, classified: {} };
+  try {
+    const outRows = await db.select({ id: outreachMessages.id, prospectId: outreachMessages.prospectId, messageId: outreachMessages.messageId }).from(outreachMessages).where(and11(eq26(outreachMessages.direction, "out"), isNotNull(outreachMessages.messageId)));
+    if (outRows.length === 0) return result;
+    const knownIds = new Set(outRows.map((r) => r.messageId));
+    const prospectByMessageId = new Map(outRows.map((r) => [r.messageId, r.prospectId]));
+    const seenInbound = new Set(
+      (await db.select({ messageId: outreachMessages.messageId }).from(outreachMessages).where(and11(eq26(outreachMessages.direction, "in"), isNotNull(outreachMessages.messageId)))).map((r) => r.messageId)
+    );
+    const host = process.env["OUTREACH_IMAP_HOST"] ?? "imap.zoho.com";
+    const port2 = parseInt(process.env["OUTREACH_IMAP_PORT"] ?? "993", 10);
+    const user = process.env["OUTREACH_IMAP_USER"] ?? process.env["ZOHO_SMTP_USER"];
+    const pass = process.env["OUTREACH_IMAP_PASS"] ?? process.env["ZOHO_SMTP_PASS"];
+    if (!user || !pass) {
+      return { ...result, ok: false, error: "IMAP credentials not configured" };
+    }
+    const { ImapFlow } = await import("imapflow");
+    const { simpleParser } = await import("mailparser");
+    const client5 = new ImapFlow({
+      host,
+      port: port2,
+      secure: true,
+      auth: { user, pass },
+      logger: false
+    });
+    await client5.connect();
+    try {
+      const lock = await client5.getMailboxLock("INBOX", { readOnly: true });
+      try {
+        const uidValidity = typeof client5.mailbox === "object" && client5.mailbox ? client5.mailbox.uidValidity : void 0;
+        const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1e3);
+        const uids = await client5.search({ since }, { uid: true });
+        const uidList = Array.isArray(uids) ? uids : [];
+        for (const uid of uidList) {
+          result.scanned++;
+          const msg = await client5.fetchOne(
+            String(uid),
+            { headers: ["in-reply-to", "references", "message-id"], envelope: true },
+            { uid: true }
+          );
+          if (!msg || !msg.headers) continue;
+          const rawHeaders = msg.headers.toString();
+          const inReplyTo = headerValue(rawHeaders, "in-reply-to");
+          const references = headerValue(rawHeaders, "references");
+          const messageId = headerValue(rawHeaders, "message-id");
+          const matchedId = matchOutreachReply({ inReplyTo, references }, knownIds);
+          if (!matchedId) continue;
+          const dedupeKey = inboundDedupeKey({ messageId, uidValidity, uid });
+          if (seenInbound.has(dedupeKey)) continue;
+          const prospectId = prospectByMessageId.get(matchedId);
+          if (!prospectId) continue;
+          result.matched++;
+          const full = await client5.fetchOne(String(uid), { source: true }, { uid: true });
+          const source = full && full.source ? full.source : null;
+          const parsed = source ? await simpleParser(source) : null;
+          const subject = parsed?.subject ?? msg.envelope?.subject ?? null;
+          const bodyText = (parsed?.text ?? "").trim();
+          const classification = await classifyReply(subject, bodyText);
+          result.classified[classification] = (result.classified[classification] ?? 0) + 1;
+          await db.insert(outreachMessages).values({
+            prospectId,
+            direction: "in",
+            subject,
+            bodyText: bodyText.slice(0, 2e4),
+            messageId: dedupeKey,
+            inReplyTo: inReplyTo ?? null,
+            referencesHeader: references ?? null,
+            classification,
+            sentAt: parsed?.date ?? msg.envelope?.date ?? /* @__PURE__ */ new Date()
+          });
+          seenInbound.add(dedupeKey);
+          const nextStatus = statusForClassification(classification);
+          if (nextStatus) {
+            await db.update(outreachProspects).set({ status: nextStatus, updatedAt: /* @__PURE__ */ new Date() }).where(and11(
+              eq26(outreachProspects.id, prospectId),
+              // Never regress a hand-set terminal state.
+              inArray10(outreachProspects.status, ["queued", "sent", "replied_positive", "replied_negative"])
+            ));
+          }
+          if (classification === "positive") {
+            const [prospect] = await db.select({ domain: outreachProspects.domain, contactEmail: outreachProspects.contactEmail }).from(outreachProspects).where(eq26(outreachProspects.id, prospectId)).limit(1);
+            const domain = prospect?.domain ?? `prospect ${prospectId}`;
+            await sendOwnerEmail(
+              `Outreach reply: ${domain} is interested`,
+              [
+                `<p><strong>${escapeHtml(domain)}</strong> replied positively to our outreach email.</p>`,
+                `<p>From: ${escapeHtml(prospect?.contactEmail ?? "unknown")}<br>`,
+                `Subject: ${escapeHtml(subject ?? "(none)")}</p>`,
+                `<pre>${escapeHtml(bodyText.slice(0, 3e3))}</pre>`,
+                "<p>The thread is in hello@xdipx.com. Reply from there to take over.</p>"
+              ].join("\n"),
+              { fromName: "xdipx outreach" }
+            );
+          }
+        }
+      } finally {
+        lock.release();
+      }
+    } finally {
+      await client5.logout().catch(() => client5.close());
+    }
+    return result;
+  } catch (err2) {
+    const msg = err2 instanceof Error ? err2.message : String(err2);
+    console.error("[outreach-inbox] poll failed:", msg);
+    return { ...result, ok: false, error: msg };
+  }
+}
+function headerValue(raw, name) {
+  const unfolded = raw.replace(/\r?\n[ \t]+/g, " ");
+  const re = new RegExp(`^${name}:[ \\t]*(.+)$`, "im");
+  return unfolded.match(re)?.[1]?.trim() ?? null;
+}
+async function classifyReply(subject, bodyText) {
+  try {
+    const raw = await generateWithSystem({
+      system: CLASSIFY_SYSTEM_PROMPT,
+      user: buildClassifyPrompt({ subject, bodyText }),
+      model: SONNET,
+      maxTokens: 8,
+      timeoutMs: 2e4,
+      feature: "outreach",
+      caller: "outreach-inbox-classify"
+    });
+    return parseClassification(raw);
+  } catch (err2) {
+    console.error("[outreach-inbox] classification failed, treating as neutral:", err2);
+    return "neutral";
+  }
+}
+async function hasAnyOutreachMessages() {
+  const [row] = await db.select({ n: sql19`count(*)::int` }).from(outreachMessages);
+  return (row?.n ?? 0) > 0;
+}
+var LOOKBACK_DAYS;
+var init_outreach_inbox_server = __esm({
+  "app/lib/outreach-inbox.server.ts"() {
+    "use strict";
+    init_db_server();
+    init_schema();
+    init_outreach_core();
+    init_claude_server();
+    init_models_server();
+    init_owner_alerts_server();
+    LOOKBACK_DAYS = 14;
+  }
+});
+
 // app/lib/fal-video.server.ts
 function requireKey() {
   const key = process.env["FAL_KEY"];
@@ -28718,10 +29102,10 @@ var init_avatar_script = __esm({
 });
 
 // app/lib/ivr-voice.server.ts
-import { eq as eq25 } from "drizzle-orm";
+import { eq as eq27 } from "drizzle-orm";
 async function getActiveIvrVoiceId() {
   try {
-    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq25(ivrVoices.active, true)).limit(1);
+    const rows = await db.select({ voiceId: ivrVoices.voiceId }).from(ivrVoices).where(eq27(ivrVoices.active, true)).limit(1);
     if (rows[0]?.voiceId) return rows[0].voiceId;
   } catch (err2) {
     console.error("[ivr-voice] DB lookup failed \u2014 falling back to env", err2);
@@ -28753,7 +29137,7 @@ __export(video_pipeline_server_exports, {
   retrySceneFrames: () => retrySceneFrames
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { eq as eq26, and as and10, inArray as inArray10, desc as desc5, isNotNull, ne as ne2, sql as sql18 } from "drizzle-orm";
+import { eq as eq28, and as and12, inArray as inArray11, desc as desc6, isNotNull as isNotNull2, ne as ne2, sql as sql20 } from "drizzle-orm";
 async function getMaxCostCents() {
   const cfg = await getTeamConfig("video").catch(() => null);
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT;
@@ -28813,7 +29197,7 @@ async function enqueueVideoJob(args) {
 }
 async function advanceInflightVideoJobs(opts = {}) {
   const maxJobs = opts.maxJobs ?? 5;
-  const rows = await db.select().from(videoJobs).where(inArray10(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
+  const rows = await db.select().from(videoJobs).where(inArray11(videoJobs.status, ["queued", "running", "awaiting_provider", "applying"])).orderBy(videoJobs.updatedAt).limit(maxJobs);
   const result = { advanced: 0, done: 0, failed: 0, parked: 0 };
   if (rows.length === 0) {
     await kvSet(KV_KEYS.videoPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS2);
@@ -28827,14 +29211,14 @@ async function advanceInflightVideoJobs(opts = {}) {
       if (outcome === "parked") result.parked++;
     } catch (err2) {
       console.error(`[video-pipeline] advanceJob ${job.jobId} threw:`, err2);
-      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.jobId, job.jobId));
+      await db.update(videoJobs).set({ status: "failed", stage: "failed", error: String(err2), updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.jobId, job.jobId));
       result.failed++;
     }
   }
   return result;
 }
 async function touch(job, set) {
-  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, job.id));
+  await db.update(videoJobs).set({ ...set, updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, job.id));
 }
 async function advanceJob2(job) {
   switch (job.stage) {
@@ -28879,13 +29263,13 @@ async function frameReviewEnabled() {
   return v !== "false";
 }
 async function findReusableSceneFrame(sceneSlug, presenter, excludeJobRowId) {
-  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and10(
-    sql18`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
-    eq26(videoJobs.presenter, presenter),
-    isNotNull(videoJobs.sceneFrameAssetId),
-    inArray10(videoJobs.stage, FRAME_APPROVED_STAGES),
+  const [row] = await db.select({ frameId: videoJobs.sceneFrameAssetId }).from(videoJobs).where(and12(
+    sql20`${videoJobs.scriptJson}->>'sceneSlug' = ${sceneSlug}`,
+    eq28(videoJobs.presenter, presenter),
+    isNotNull2(videoJobs.sceneFrameAssetId),
+    inArray11(videoJobs.stage, FRAME_APPROVED_STAGES),
     ...excludeJobRowId != null ? [ne2(videoJobs.id, excludeJobRowId)] : []
-  )).orderBy(desc5(videoJobs.createdAt)).limit(1);
+  )).orderBy(desc6(videoJobs.createdAt)).limit(1);
   return row?.frameId ?? null;
 }
 async function advanceSceneFrame(job) {
@@ -28898,14 +29282,14 @@ async function advanceSceneFrame(job) {
     if (!reusableJob) {
       throw new Error("reuseFrameAssetId applies only to avatar/talking-head jobs");
     }
-    const [asset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, reuseId)).limit(1);
+    const [asset] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, reuseId)).limit(1);
     if (!asset || asset.purpose !== "scene_frame") {
       throw new Error(`reuseFrameAssetId ${reuseId} does not reference a scene-frame asset`);
     }
-    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and10(
-      eq26(videoJobs.sceneFrameAssetId, reuseId),
-      eq26(videoJobs.presenter, job.presenter),
-      inArray10(videoJobs.stage, FRAME_APPROVED_STAGES)
+    const [approvedBy] = await db.select({ id: videoJobs.id }).from(videoJobs).where(and12(
+      eq28(videoJobs.sceneFrameAssetId, reuseId),
+      eq28(videoJobs.presenter, job.presenter),
+      inArray11(videoJobs.stage, FRAME_APPROVED_STAGES)
     )).limit(1);
     if (!approvedBy) {
       throw new Error(`reuseFrameAssetId ${reuseId} has never been approved for presenter '${job.presenter}' (no matching job carried it past the frame gate)`);
@@ -28994,7 +29378,7 @@ async function advanceClip(job) {
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const handle = await submitVideoRequest(job.modelTier, {
       prompt: motionPrompt,
@@ -29079,7 +29463,7 @@ async function advanceClipAvatar(job, spec) {
     if ((Number(job.costUsd) + clipCost + ttsCost) * 100 > maxCents) {
       throw new Error(`Accrued + avatar render cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`);
     }
-    const [frame] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
+    const [frame] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.sceneFrameAssetId)).limit(1);
     if (!frame) throw new Error("Approved scene-frame asset not found");
     const frameBuf = await blobFetchToBuffer(frame.blobUrl);
     const imageUrl = await uploadToFalStorage(frameBuf, "image/jpeg", `frame-${job.jobId}.jpg`);
@@ -29173,7 +29557,7 @@ async function advanceLipsync(job) {
   return "progressed";
 }
 async function latestAssetByPurpose(jobRowId, purpose) {
-  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq26(mediaAssets.videoJobId, jobRowId)).orderBy(desc5(mediaAssets.createdAt));
+  const rows = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, createdAt: mediaAssets.createdAt }).from(mediaAssets).where(eq28(mediaAssets.videoJobId, jobRowId)).orderBy(desc6(mediaAssets.createdAt));
   const hit = rows.find((r) => r.purpose === purpose);
   return hit ? { id: hit.id, blobUrl: hit.blobUrl } : null;
 }
@@ -29221,7 +29605,7 @@ async function advanceAssembly(job) {
 }
 async function advancePoster(job) {
   if (!job.finalAssetId) throw new Error("No final asset for poster extraction");
-  const [finalAsset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.finalAssetId)).limit(1);
+  const [finalAsset] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.finalAssetId)).limit(1);
   if (!finalAsset) throw new Error("Final asset row missing");
   const video = await blobFetchToBuffer(finalAsset.blobUrl);
   const poster = await extractPoster(video, 1);
@@ -29235,7 +29619,7 @@ async function advancePoster(job) {
     videoJobId: job.id
   }).returning({ id: mediaAssets.id });
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq26(mediaAssets.id, finalAsset.id));
+    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq28(mediaAssets.id, finalAsset.id));
   }
   await touch(job, {
     stage: "done",
@@ -29247,29 +29631,29 @@ async function advancePoster(job) {
   return "done";
 }
 async function approveSceneFrame(jobRowId, frameAssetId) {
-  const [asset] = await db.select().from(mediaAssets).where(eq26(mediaAssets.id, frameAssetId)).limit(1);
+  const [asset] = await db.select().from(mediaAssets).where(eq28(mediaAssets.id, frameAssetId)).limit(1);
   if (!asset || asset.videoJobId !== jobRowId || asset.purpose !== "scene_frame") {
     throw new Error("Frame does not belong to this job");
   }
-  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ sceneFrameAssetId: frameAssetId, stage: "clip", status: "queued", updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function retrySceneFrames(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq28(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : [];
   script.frameFeedback = [...prior, feedback];
   const basePrompt = typeof script["framePrompt"] === "string" ? script["framePrompt"] : "";
   script["framePrompt"] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt;
-  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ scriptJson: script, stage: "scene_frame", status: "queued", sceneFrameAssetId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, jobRowId));
   await kvDel(KV_KEYS.videoPollerIdle);
 }
 async function rejectVideoJob(jobRowId, reason) {
-  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ status: "failed", stage: "failed", error: `Rejected by owner: ${reason || "no reason given"}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, jobRowId));
 }
 async function regenerateVideoJob(jobRowId, feedback) {
-  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq28(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const script = { ...job.scriptJson };
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : [];
@@ -29289,12 +29673,12 @@ async function regenerateVideoJob(jobRowId, feedback) {
   });
 }
 async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
-  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq28(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   if (job.stage !== "done") throw new Error("Job is not finished");
-  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
+  const finalAsset = job.finalAssetId ? (await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.finalAssetId)).limit(1))[0] : void 0;
   if (!finalAsset) throw new Error("No final video asset");
-  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq26(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
+  const posterAsset = job.posterAssetId ? (await db.select().from(mediaAssets).where(eq28(mediaAssets.id, job.posterAssetId)).limit(1))[0] : void 0;
   const captions = job.scriptJson.captions ?? {};
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(" ");
   const ids = [];
@@ -29321,17 +29705,17 @@ async function fanOutVideoToSocialDrafts(jobRowId, reviewedBy) {
 async function recordVideoMetrics(jobRowId, platform, metrics) {
   const submitted = Object.fromEntries(Object.entries(metrics).filter(([, v]) => v !== void 0));
   if (!Object.keys(submitted).length) return;
-  const [job] = await db.select().from(videoJobs).where(eq26(videoJobs.id, jobRowId)).limit(1);
+  const [job] = await db.select().from(videoJobs).where(eq28(videoJobs.id, jobRowId)).limit(1);
   if (!job) throw new Error("Job not found");
   const existing = (job.metricsJson ?? {})[platform] ?? {};
   const merged = { ...job.metricsJson ?? {}, [platform]: { ...existing, ...submitted } };
-  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq26(videoJobs.id, jobRowId));
+  await db.update(videoJobs).set({ metricsJson: merged, updatedAt: /* @__PURE__ */ new Date() }).where(eq28(videoJobs.id, jobRowId));
 }
 async function listVideoJobs(limit = 40) {
-  const jobs = await db.select().from(videoJobs).orderBy(desc5(videoJobs.createdAt)).limit(limit);
+  const jobs = await db.select().from(videoJobs).orderBy(desc6(videoJobs.createdAt)).limit(limit);
   if (!jobs.length) return [];
   const jobIds = jobs.map((j) => j.id);
-  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray10(mediaAssets.videoJobId, jobIds));
+  const assets = await db.select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId }).from(mediaAssets).where(inArray11(mediaAssets.videoJobId, jobIds));
   return jobs.map((job) => {
     const own = assets.filter((a) => a.videoJobId === job.id);
     const finalAsset = own.find((a) => a.id === job.finalAssetId) ?? null;
@@ -29501,7 +29885,7 @@ __export(returns_server_exports, {
   recordLabelTracking: () => recordLabelTracking,
   rmaNumber: () => rmaNumber
 });
-import { eq as eq27 } from "drizzle-orm";
+import { eq as eq29 } from "drizzle-orm";
 function rmaNumber(shopifyReturnId) {
   const m = shopifyReturnId.match(/\/(\d+)$/);
   return m ? `RMA-${m[1]}` : shopifyReturnId;
@@ -29622,7 +30006,7 @@ async function createCustomerReturn(input) {
       status: "label_sent",
       labelPurchasedAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq27(returns.id, row.id)).returning();
+    }).where(eq29(returns.id, row.id)).returning();
     console.log("[returns] db update ok", { rowId: updated?.id ?? row.id });
   } catch (err2) {
     console.error("[returns] db update threw", err2);
@@ -29630,7 +30014,7 @@ async function createCustomerReturn(input) {
   return { ok: true, returnRow: updated ?? row };
 }
 async function markReceivedAndRefund(shopifyReturnId, opts) {
-  const [row] = await db.select().from(returns).where(eq27(returns.shopifyReturnId, shopifyReturnId)).limit(1);
+  const [row] = await db.select().from(returns).where(eq29(returns.shopifyReturnId, shopifyReturnId)).limit(1);
   if (!row) return { ok: false, error: `Unknown return: ${shopifyReturnId}` };
   if (row.status === "refunded" || row.status === "closed") return { ok: true };
   if (!row.lineItems) return { ok: false, error: "Return row has no line items snapshot" };
@@ -29661,7 +30045,7 @@ async function markReceivedAndRefund(shopifyReturnId, opts) {
     refundedAt: /* @__PURE__ */ new Date(),
     closedAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq27(returns.id, row.id));
+  }).where(eq29(returns.id, row.id));
   return { ok: true };
 }
 async function recordLabelTracking(shopifyReturnId, update) {
@@ -29670,13 +30054,13 @@ async function recordLabelTracking(shopifyReturnId, update) {
     ...update.trackingNumber ? { trackingNumber: update.trackingNumber } : {},
     status: "in_transit",
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq27(returns.shopifyReturnId, shopifyReturnId));
+  }).where(eq29(returns.shopifyReturnId, shopifyReturnId));
 }
 async function listCustomerReturns(customerGid) {
-  return db.select().from(returns).where(eq27(returns.customerGid, customerGid)).orderBy(returns.createdAt);
+  return db.select().from(returns).where(eq29(returns.customerGid, customerGid)).orderBy(returns.createdAt);
 }
 async function getCustomerReturn(id, customerGid) {
-  const [row] = await db.select().from(returns).where(eq27(returns.id, id)).limit(1);
+  const [row] = await db.select().from(returns).where(eq29(returns.id, id)).limit(1);
   if (!row) {
     console.error("[returns] getCustomerReturn: no row for id", { id });
     return null;
@@ -29817,18 +30201,18 @@ async function drainMetaCapiFailures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { metaCapiFailures: metaCapiFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendCapiEvent: sendCapiEvent2 } = await Promise.resolve().then(() => (init_meta_capi_server(), meta_capi_server_exports));
-    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(metaCapiFailures2).where(and11(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and13, eq: eq31, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(metaCapiFailures2).where(and13(isNull4(metaCapiFailures2.resolvedAt), lt5(metaCapiFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendCapiEvent2(row.payload, { consentGranted: false });
       if (result.ok) {
-        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq29(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq31(metaCapiFailures2.id, row.id));
         resolved++;
       } else if (result.skipped) {
-        await db2.update(metaCapiFailures2).set({ lastError: result.skipped }).where(eq29(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ lastError: result.skipped }).where(eq31(metaCapiFailures2.id, row.id));
       } else {
-        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq29(metaCapiFailures2.id, row.id));
+        await db2.update(metaCapiFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? "unknown" }).where(eq31(metaCapiFailures2.id, row.id));
       }
     }
     return resolved;
@@ -29843,16 +30227,16 @@ async function drainGa4Failures() {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { ga4PurchaseFailures: ga4PurchaseFailures2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { sendGa4Purchase: sendGa4Purchase2 } = await Promise.resolve().then(() => (init_ga4_mp_server(), ga4_mp_server_exports));
-    const { and: and11, eq: eq29, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
-    const rows = await db2.select().from(ga4PurchaseFailures2).where(and11(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
+    const { and: and13, eq: eq31, isNull: isNull4, lt: lt5 } = await import("drizzle-orm");
+    const rows = await db2.select().from(ga4PurchaseFailures2).where(and13(isNull4(ga4PurchaseFailures2.resolvedAt), lt5(ga4PurchaseFailures2.attempts, MAX_ATTEMPTS5))).limit(100);
     let resolved = 0;
     for (const row of rows) {
       const result = await sendGa4Purchase2(row.payload);
       if (result.ok) {
-        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq29(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ resolvedAt: /* @__PURE__ */ new Date(), attempts: row.attempts + 1 }).where(eq31(ga4PurchaseFailures2.id, row.id));
         resolved++;
       } else {
-        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq29(ga4PurchaseFailures2.id, row.id));
+        await db2.update(ga4PurchaseFailures2).set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? "unknown" }).where(eq31(ga4PurchaseFailures2.id, row.id));
       }
     }
     return resolved;
@@ -30220,6 +30604,21 @@ function createCronRoutes() {
       res.status(500).json({ error: String(err2) });
     }
   });
+  cronRoute("/outreach-inbox", async (_req, res) => {
+    try {
+      const { isOutreachSendEnabled: isOutreachSendEnabled2 } = await Promise.resolve().then(() => (init_outreach_server(), outreach_server_exports));
+      const { hasAnyOutreachMessages: hasAnyOutreachMessages2, pollOutreachInbox: pollOutreachInbox2 } = await Promise.resolve().then(() => (init_outreach_inbox_server(), outreach_inbox_server_exports));
+      if (!await isOutreachSendEnabled2() && !await hasAnyOutreachMessages2()) {
+        res.json({ ok: true, skipped: "outreach not armed" });
+        return;
+      }
+      const result = await pollOutreachInbox2();
+      res.status(result.ok ? 200 : 503).json(result);
+    } catch (err2) {
+      console.error("[cron:outreach-inbox]", err2);
+      res.status(500).json({ error: String(err2) });
+    }
+  });
   cronRoute("/enrichment-batch-poller", async (_req, res) => {
     const { kvGet: kvGet2, kvSetNX: kvSetNX2, kvDel: kvDel2, KV_KEYS: KV_KEYS2 } = await Promise.resolve().then(() => (init_kv_server(), kv_server_exports));
     const idle = await kvGet2(KV_KEYS2.enrichmentPollerIdle);
@@ -30450,7 +30849,7 @@ function createCronRoutes() {
 init_schema();
 import { Router as Router2 } from "express";
 import crypto2 from "node:crypto";
-import { eq as eq28, sql as sql19 } from "drizzle-orm";
+import { eq as eq30, sql as sql21 } from "drizzle-orm";
 var PURCHASE_SIGNAL_TIMEOUT_MS = 2500;
 function verifyShopifyWebhook(req) {
   const secret = process.env["SHOPIFY_WEBHOOK_SECRET"];
@@ -30568,7 +30967,7 @@ async function handleOrderCreated(order) {
           await db2.insert(productCopurchase).values({ handleA: a, handleB: b, count: 1 }).onConflictDoUpdate({
             target: [productCopurchase.handleA, productCopurchase.handleB],
             set: {
-              count: sql19`${productCopurchase.count} + 1`,
+              count: sql21`${productCopurchase.count} + 1`,
               lastSeenAt: /* @__PURE__ */ new Date()
             }
           });
@@ -30730,7 +31129,7 @@ async function handleReturnsUpdate(payload) {
   if (status === "DECLINED" || status === "CANCELED") {
     const { db: db2 } = await Promise.resolve().then(() => (init_db_server(), db_server_exports));
     const { returns: returns2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq28(returns2.shopifyReturnId, returnGid));
+    await db2.update(returns2).set({ status: status === "DECLINED" ? "denied" : "canceled", updatedAt: /* @__PURE__ */ new Date() }).where(eq30(returns2.shopifyReturnId, returnGid));
     return;
   }
   const terminalSignals = ["CLOSED", "RECEIVED", "PROCESSED"];
