@@ -21,7 +21,12 @@ import {
   getStorefrontCollections,
   sendDraftOrderInvoice,
 } from '~/lib/shopify.server'
-import { searchForIvr, discoverForIvr, getIvrCardsByHandles } from '~/lib/ivr-search.server'
+import {
+  searchForIvrWithDiagnostics,
+  discoverForIvrWithDiagnostics,
+  getIvrCardsByHandles,
+  type SearchDiagnostics,
+} from '~/lib/ivr-search.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
 import { db } from '~/lib/db.server'
 import { draftOrders } from '~/../db/schema'
@@ -335,6 +340,28 @@ export interface ToolResult {
   message?: string
 }
 
+/**
+ * Per-reason framing hint attached to a search/discover tool result so the model
+ * can tell "loosen your filters" from "the catalog is down" and respond with
+ * agency or an honest outage apology instead of a bare "no results". These are
+ * guidance FOR Emma (patterns, not verbatim copy); the example phrasings passed
+ * the emma-empathy-reviewer voice gate (ticket #1268). Returns undefined when
+ * results matched, so a normal result carries no extra instruction.
+ */
+export function searchReasonGuidance(reason: SearchDiagnostics['reason']): string | undefined {
+  switch (reason) {
+    case 'matched':
+      return undefined
+    case 'filtered-to-zero':
+      return 'Nothing matched every filter at once. Do not dead-end: offer to relax one, with agency. Pattern: "Want me to loosen the price cap or drop one of the features and look again?"'
+    case 'no-base-results':
+      return 'The catalog itself has nothing for this search, not just the filters, so do not blame filters. Ask for a different angle and search again. Pattern: "I do not have anything close to that in the catalog right now. What feeling are you hoping for, or how were you planning to use it?"'
+    case 'sanity-unavailable':
+    case 'catalog-unavailable':
+      return 'Search is degraded right now, not empty. Be honest and warm and do not invent products. Pattern: "My catalog is being slow right now. Give me a few minutes and try again, sorry for the wait." Then offer to help another way.'
+  }
+}
+
 export async function runQaTool(
   name: string,
   input: Record<string, unknown>,
@@ -352,7 +379,7 @@ export async function runQaTool(
       const mattersTags = Array.isArray(input['mattersTags'])
         ? (input['mattersTags'] as unknown[]).filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
         : undefined
-      const cards = await searchForIvr({
+      const { cards, reason } = await searchForIvrWithDiagnostics({
         query,
         limit,
         category,
@@ -361,7 +388,8 @@ export async function runQaTool(
         ...(productTypeDial && productSubtypeDial ? { productSubtypeDial } : {}),
         ...(mattersTags && mattersTags.length > 0 ? { mattersTags } : {}),
       })
-      return { ok: true, data: { query, results: cards } }
+      const guidance = searchReasonGuidance(reason)
+      return { ok: true, data: { query, results: cards, reason, ...(guidance ? { guidance } : {}) } }
     }
 
     if (name === 'discoverProducts') {
@@ -372,8 +400,9 @@ export async function runQaTool(
       const category = input['category'] ? String(input['category']) : undefined
       const priceMax = input['priceMax'] != null ? Number(input['priceMax']) : undefined
       const limit = Math.max(1, Math.min(5, Number(input['limit'] ?? 3)))
-      const cards = await discoverForIvr({ mood, experience, useCase, features, category, priceMax, limit })
-      return { ok: true, data: { results: cards } }
+      const { cards, reason } = await discoverForIvrWithDiagnostics({ mood, experience, useCase, features, category, priceMax, limit })
+      const guidance = searchReasonGuidance(reason)
+      return { ok: true, data: { results: cards, reason, ...(guidance ? { guidance } : {}) } }
     }
 
     if (name === 'recommendSimilar') {
