@@ -960,20 +960,50 @@ export function createCronRoutes() {
       const baseUrl = process.env['BASE_URL'] ?? ''
       const cronSecret = process.env['CRON_SECRET'] ?? ''
 
-      // Step 1: trigger the discovery index rebuild (reuses the dedicated handler).
+      // Step 1: rebuild the discovery index — but only when it is actually
+      // stale. This used to fire unconditionally on every 15-minute tick.
+      //
+      // Measured 2026-08-05: one catalog page costs 128 rate-limit points and
+      // the catalog is 46 pages, so a rebuild is 5,888 points against a
+      // 2,000-point bucket refilling at 100/s. It is 2.9x the whole bucket, so
+      // it throttles itself after 15 pages and then pins the bucket near zero
+      // for ~60s. Sampled across a cron boundary: 1999 -> 1864 -> 138 -> 128 ->
+      // 575 -> 1999. Every other Admin API caller in that window died —
+      // the purchase reconcile sweep (also every 15 min, so it collided every time),
+      // warm-discovery-index 500ing on itself, and getDiscoveryRails timing out
+      // so the homepage served a degraded payload.
+      //
+      // The products/create and products/update webhooks went live 2026-08-05,
+      // so the catalog now tells us when it changes and the crawl can follow
+      // real events instead of a timer. The staleness floor is the safety net
+      // for anything that changes without a webhook (a collection edit, a
+      // missed delivery, a KV eviction of the flag).
       let discoveryCount = 0
+      let discoverySkipped: string | null = null
       if (baseUrl && cronSecret) {
-        try {
-          const r = await fetch(`${baseUrl}/cron/warm-discovery-index`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${cronSecret}` },
-          })
-          if (r.ok) {
-            const body = await r.json() as { count?: number }
-            discoveryCount = body.count ?? 0
+        const { isDiscoveryIndexDirty, getDiscoveryIndexAgeMs, shouldRebuildDiscoveryIndex } =
+          await import('../app/lib/discovery.server.js')
+        const decision = shouldRebuildDiscoveryIndex({
+          dirty: await isDiscoveryIndexDirty(),
+          ageMs: await getDiscoveryIndexAgeMs(),
+        })
+        if (!decision.rebuild) {
+          discoverySkipped = decision.reason
+          console.log(`[cron:warm] discovery rebuild skipped — ${decision.reason}`)
+        } else {
+          console.log(`[cron:warm] discovery rebuild — ${decision.reason}`)
+          try {
+            const r = await fetch(`${baseUrl}/cron/warm-discovery-index`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${cronSecret}` },
+            })
+            if (r.ok) {
+              const body = await r.json() as { count?: number }
+              discoveryCount = body.count ?? 0
+            }
+          } catch (err) {
+            console.warn('[cron:warm] discovery rebuild fetch failed:', err)
           }
-        } catch (err) {
-          console.warn('[cron:warm] discovery rebuild fetch failed:', err)
         }
       }
 
@@ -1046,6 +1076,7 @@ export function createCronRoutes() {
       res.json({
         ok: true,
         discoveryProducts: discoveryCount,
+        discoverySkipped,
         pagesWarmed,
         homepageBytes, homepageRails,
         storefrontBytes, storefrontRails,

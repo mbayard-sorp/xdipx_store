@@ -387,6 +387,11 @@ async function handleProductCreated(product: ShopifyProductWebhook): Promise<voi
     title: product.title,
     imageUrl: product.images?.[0]?.src,
   })
+  // A new product is exactly the case the discovery index must not miss: it is
+  // absent from the index until the next crawl, so it is unreachable from
+  // discovery, the rails, and the homepage payload built from them.
+  const { markDiscoveryIndexDirty } = await import('../app/lib/discovery.server.js')
+  await markDiscoveryIndexDirty(`products/create ${product.handle}`)
   console.log(`[webhook:product-created] ${product.handle} → ${result.created ? 'created in Sanity' : 'already exists'}`)
 }
 
@@ -409,6 +414,12 @@ async function handleProductUpdated(product: ShopifyProductWebhook): Promise<voi
   }
   const { purgeMarkdownCache } = await import('../app/lib/kv.server.js')
   await purgeMarkdownCache(product.handle)
+  // Tell /cron/warm the catalog moved. Without this signal the warm cron has no
+  // way to know, so it re-crawled the whole catalog every 15 minutes — 5,888
+  // rate-limit points against a 2,000-point bucket, which starved every other
+  // Admin API caller for ~60s per tick.
+  const { markDiscoveryIndexDirty } = await import('../app/lib/discovery.server.js')
+  await markDiscoveryIndexDirty(`products/update ${product.handle}`)
   console.log(`[webhook:product-updated] purged markdown + PDP cache for ${product.handle}`)
 }
 
