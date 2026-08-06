@@ -14,6 +14,7 @@ import { normalizeForTTS } from '~/lib/tts-normalize'
 import { callLog, pipelineSettings } from '../../db/schema'
 import { getActiveIvrVoiceId } from '~/lib/ivr-voice.server'
 import { getIvrConfig, type IvrConfig } from '~/lib/ivr-config.server'
+import { persistPlaceholderVoicemail } from '~/lib/ivr-voicemail.server'
 
 // Kept in sync with ivr/src/config.ts CallEndReason. The IVR service writes
 // the first five from the Fly runtime; this Vercel route owns the last three
@@ -217,12 +218,16 @@ function buildTwiml(
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  // Hoisted so the catch branch can still persist a voicemail row when the
+  // crash happens after params are parsed.
+  let callSid = ''
+  let fromNumber = ''
   try {
     const { ok, params } = await verifyTwilioRequest(request)
     if (!ok) return new Response('Forbidden', { status: 403 })
 
-    const fromNumber = params['From'] ?? ''
-    const callSid = params['CallSid'] ?? ''
+    fromNumber = params['From'] ?? ''
+    callSid = params['CallSid'] ?? ''
     const toNumber = params['To'] ?? null
 
     const config = await getIvrConfig()
@@ -236,6 +241,13 @@ export async function action({ request }: ActionFunctionArgs) {
         2000,
         undefined,
         'recordRejectedCall.anonymous',
+      )
+      // Blocked callers have no usable callback number.
+      await withTimeout(
+        persistPlaceholderVoicemail({ callSid, fromNumber, reason: 'anonymous', callbackNumber: null }),
+        2500,
+        undefined,
+        'persistVoicemail.anonymous',
       )
       return twiml(voicemailTwiml(config.voicemailMaxLengthSec, VOICEMAIL_INTROS.anonymous))
     }
@@ -259,6 +271,12 @@ export async function action({ request }: ActionFunctionArgs) {
         undefined,
         'recordRejectedCall.after_hours',
       )
+      await withTimeout(
+        persistPlaceholderVoicemail({ callSid, fromNumber, reason: 'after_hours', callbackNumber: fromNumber || null }),
+        2500,
+        undefined,
+        'persistVoicemail.after_hours',
+      )
       return twiml(voicemailTwiml(config.voicemailMaxLengthSec, VOICEMAIL_INTROS.afterHours))
     }
 
@@ -267,13 +285,29 @@ export async function action({ request }: ActionFunctionArgs) {
     const xml = buildTwiml(greeting, voiceId, config)
     // Missing env → no valid ConversationRelay TwiML; send caller to voicemail
     // rather than letting Twilio play a generic "application error" message.
-    if (!xml) return twiml(voicemailTwiml(config.voicemailMaxLengthSec, VOICEMAIL_INTROS.unavailable))
+    if (!xml) {
+      await withTimeout(
+        persistPlaceholderVoicemail({ callSid, fromNumber, reason: 'unavailable', callbackNumber: fromNumber || null }),
+        2500,
+        undefined,
+        'persistVoicemail.unavailable',
+      )
+      return twiml(voicemailTwiml(config.voicemailMaxLengthSec, VOICEMAIL_INTROS.unavailable))
+    }
     return twiml(xml)
   } catch (err) {
     // Never throw out of this action — Twilio would serve its generic error
     // message or (worse) Vercel returns FUNCTION_INVOCATION_FAILED. Always
     // return a valid TwiML voicemail response so the caller gets heard.
     console.error('[ivr] voice action crashed — falling back to voicemail', err)
+    // Best-effort: persist a row if we got far enough to know the callSid, so
+    // the crash-path voicemail is still visible and its recording attaches.
+    await withTimeout(
+      persistPlaceholderVoicemail({ callSid, fromNumber, reason: 'unavailable', callbackNumber: fromNumber || null }),
+      2500,
+      undefined,
+      'persistVoicemail.catch',
+    )
     return twiml(voicemailTwiml(120, VOICEMAIL_INTROS.unavailable))
   }
 }
