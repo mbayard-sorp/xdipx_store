@@ -484,6 +484,170 @@ export async function detectImportEnrichStall(enabled: boolean): Promise<{ stuck
 }
 
 /**
+ * Read-only snapshot of the import_candidates funnel across the enrich stages.
+ * A single grouped count query, used by the submit-blocker diagnostic so a tick
+ * that submits nothing can name precisely which stage is empty or jammed.
+ *
+ * Stages (mutually exclusive within status='imported'):
+ *   - pending:            status='pending', awaiting product-manager import
+ *                         (upstream of enrichment, gated separately)
+ *   - importedUnenriched: imported draft eligible to submit (no batch, not
+ *                         enriched, not parked) -- the submit step's input set
+ *   - inFlight:           claimed (enrich_batch_id set), awaiting collect
+ *   - parked:             enrich_failed_at set, retry cap hit, needs review
+ *   - enriched:           enriched_at set (may or may not be published yet)
+ */
+export interface EnrichFunnelSnapshot {
+  pending:            number
+  importedUnenriched: number
+  inFlight:           number
+  parked:             number
+  enriched:           number
+}
+
+export async function snapshotEnrichFunnel(): Promise<EnrichFunnelSnapshot> {
+  const rows = await db
+    .select({
+      pending: sql<number>`COUNT(*) FILTER (WHERE ${importCandidates.status} = 'pending')`,
+      importedUnenriched: sql<number>`COUNT(*) FILTER (WHERE ${importCandidates.status} = 'imported'
+        AND ${importCandidates.enrichedAt} IS NULL
+        AND ${importCandidates.enrichBatchId} IS NULL
+        AND ${importCandidates.enrichFailedAt} IS NULL)`,
+      inFlight: sql<number>`COUNT(*) FILTER (WHERE ${importCandidates.status} = 'imported'
+        AND ${importCandidates.enrichedAt} IS NULL
+        AND ${importCandidates.enrichFailedAt} IS NULL
+        AND ${importCandidates.enrichBatchId} IS NOT NULL)`,
+      parked: sql<number>`COUNT(*) FILTER (WHERE ${importCandidates.status} = 'imported'
+        AND ${importCandidates.enrichFailedAt} IS NOT NULL)`,
+      enriched: sql<number>`COUNT(*) FILTER (WHERE ${importCandidates.status} = 'imported'
+        AND ${importCandidates.enrichedAt} IS NOT NULL)`,
+    })
+    .from(importCandidates)
+
+  const r = rows[0]
+  return {
+    pending:            Number(r?.pending ?? 0),
+    importedUnenriched: Number(r?.importedUnenriched ?? 0),
+    inFlight:           Number(r?.inFlight ?? 0),
+    parked:             Number(r?.parked ?? 0),
+    enriched:           Number(r?.enriched ?? 0),
+  }
+}
+
+/**
+ * The precise reason a tick submitted no enrichment batch. `idle` and
+ * `batch_in_flight` are healthy no-ops (nothing to do, or a batch is
+ * legitimately still processing within its SLA); the other three are jams that
+ * will not self-clear without an upstream fix or owner action, and are the ones
+ * worth a loud owner alert.
+ */
+export type SubmitBlockerKind =
+  | 'idle'
+  | 'batch_in_flight'
+  | 'upstream_backlog'
+  | 'all_parked'
+  | 'no_briefs'
+
+export interface SubmitBlocker {
+  kind:      SubmitBlockerKind
+  /** True when this state warrants a loud, owner-visible daily alert. */
+  alertable: boolean
+  detail:    string
+}
+
+/**
+ * Pure classifier: given the funnel snapshot and the submit step's reason code,
+ * name the binding blocker for a tick that produced no batch. Extracted so the
+ * decision is unit-tested without a database. `submitReason` is one of
+ * submitEnrichmentBatch's reasons ('no_unenriched', 'no_briefs') or
+ * 'batch_in_flight' when the tick skipped submit because a batch was still in
+ * flight.
+ *
+ * This exists because detectImportEnrichStall only ever counts
+ * importedUnenriched rows: when the funnel is empty at that stage but jammed
+ * elsewhere (everything parked, or a real backlog stuck upstream at 'pending',
+ * or imported rows that cannot produce a brief), the pipeline was silent. That
+ * silence is exactly how enrichment produced nothing for 75 days with no alert.
+ */
+export function classifySubmitBlocker(
+  snap: EnrichFunnelSnapshot,
+  submitReason: string | undefined,
+): SubmitBlocker {
+  if (submitReason === 'no_briefs') {
+    return {
+      kind:      'no_briefs',
+      alertable: true,
+      detail:    `${snap.importedUnenriched} imported draft(s) awaiting enrichment could not produce a gatherable brief (missing dealHistory/snapshot); none could be submitted.`,
+    }
+  }
+  if (submitReason === 'batch_in_flight' || snap.inFlight > 0) {
+    return {
+      kind:      'batch_in_flight',
+      alertable: false,
+      detail:    `${snap.inFlight} candidate(s) are in an enrichment batch still being collected; submit correctly waits until it drains.`,
+    }
+  }
+  // submitReason === 'no_unenriched' (or defensively unknown): the submit input
+  // set is empty. Name where the funnel is actually stuck.
+  if (snap.pending > 0) {
+    return {
+      kind:      'upstream_backlog',
+      alertable: true,
+      detail:    `No imported drafts await enrichment, but ${snap.pending} candidate(s) sit at status='pending' upstream and are not being imported, so enrichment has nothing to claim.`,
+    }
+  }
+  if (snap.parked > 0) {
+    return {
+      kind:      'all_parked',
+      alertable: true,
+      detail:    `No imported drafts await enrichment; ${snap.parked} candidate(s) are parked (enrich_failed_at set) and need manual review before they can re-enter the pipeline.`,
+    }
+  }
+  return {
+    kind:      'idle',
+    alertable: false,
+    detail:    'The enrichment funnel is empty at every stage; nothing to submit.',
+  }
+}
+
+/**
+ * Loud, owner-visible daily diagnostic for a tick that produced no batch. Fires
+ * at most once per 24h (KV dedupe, same pattern as detectImportEnrichStall) and
+ * only for an alertable blocker, so a healthy idle pipeline or a batch mid-flight
+ * stays quiet. Never throws into the tick.
+ */
+export async function reportSubmitBlocker(
+  snap: EnrichFunnelSnapshot,
+  blocker: SubmitBlocker,
+): Promise<{ alerted: boolean }> {
+  if (!blocker.alertable) return { alerted: false }
+  try {
+    const { kvSetNX } = await import('~/lib/kv.server')
+    const fresh = await kvSetNX('alert:import-enrich-no-submit', String(Date.now()), 24 * 3600)
+    if (!fresh) {
+      console.warn(`[import-enrich] no submit this tick (${blocker.kind}): ${blocker.detail}`)
+      return { alerted: false }
+    }
+
+    const { sendOwnerEmail, escapeHtml } = await import('~/lib/owner-alerts.server')
+    await sendOwnerEmail(
+      `xdipx import-enrich: no enrichment submitted (${blocker.kind})`,
+      `<p>The import-enrich pipeline is <strong>enabled</strong> but submitted no enrichment batch this tick.</p>`
+        + `<p><strong>Blocker: ${escapeHtml(blocker.kind)}.</strong> ${escapeHtml(blocker.detail)}</p>`
+        + `<p>Funnel: pending ${snap.pending}, imported awaiting enrichment ${snap.importedUnenriched}, `
+        + `in flight ${snap.inFlight}, parked ${snap.parked}, enriched ${snap.enriched}.</p>`
+        + `<p>Check the /cron/import-enrich logs. If parked, the candidates hit the retry cap; if an upstream `
+        + `backlog, check product_manager_enabled and the import path; if no briefs, check dealHistory linkage.</p>`,
+    )
+    console.warn(`[import-enrich] NO-SUBMIT alert (${blocker.kind}): ${blocker.detail}; owner alerted`)
+    return { alerted: true }
+  } catch (err) {
+    console.error('[import-enrich] no-submit reporter error (non-fatal):', err)
+    return { alerted: false }
+  }
+}
+
+/**
  * Collect previously-submitted full-enrichment batches. Candidates sharing a
  * batchId (the common case -- one submit call batches up to the cap in a
  * single Anthropic Message Batch) are grouped so collectFullEnrichmentBatch is
@@ -723,6 +887,10 @@ export interface ImportEnrichTickResult {
   collect?: Awaited<ReturnType<typeof collectEnrichmentBatch>>
   publish?: Awaited<ReturnType<typeof publishEnrichedProducts>>
   submit?:  Awaited<ReturnType<typeof submitEnrichmentBatch>>
+  /** Present when the tick submitted no batch: the named funnel blocker and
+   *  whether the owner was alerted. Surfaces the reason in the cron response and
+   *  logs, so an idle-or-jammed pipeline is never silent again. */
+  noSubmit?: { blocker: SubmitBlocker; funnel: EnrichFunnelSnapshot; alerted: boolean }
 }
 
 /**
@@ -753,6 +921,22 @@ export async function runImportEnrichTick(opts: { source?: 'cron' | 'manual' } =
   const submit = collect.stillPending === 0
     ? await submitEnrichmentBatch(await getBatchCap(), { deadline })
     : { submitted: 0, batchIds: [], reason: 'batch_in_flight' }
+
+  // A tick that submits nothing is where the pipeline used to go silent: the
+  // stall detector only ever sees importedUnenriched rows, so an empty-input or
+  // parked-out or upstream-jammed funnel raised no alert at all. Snapshot the
+  // funnel, name the precise blocker, and raise a loud daily owner alert for the
+  // states that will not self-clear. Never blocks the tick.
+  if (submit.submitted === 0) {
+    try {
+      const funnel = await snapshotEnrichFunnel()
+      const blocker = classifySubmitBlocker(funnel, submit.reason)
+      const { alerted } = await reportSubmitBlocker(funnel, blocker)
+      return { ok: true, stall, collect, publish, submit, noSubmit: { blocker, funnel, alerted } }
+    } catch (err) {
+      console.error('[import-enrich] no-submit diagnostic error (non-fatal):', err)
+    }
+  }
 
   return { ok: true, stall, collect, publish, submit }
 }
