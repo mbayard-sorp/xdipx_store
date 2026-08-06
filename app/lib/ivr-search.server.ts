@@ -285,9 +285,12 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
       // OR across preference tags: a product matching any stated preference
       // stays in the pool. AND-ing here starves results — un-enriched products
       // have empty mattersTags and preferences are soft signals, not hard specs.
+      // Query the normalized field so both "Plus-size friendly" and
+      // "Plus-size-friendly" casings match: mattersTagsNormalized is written
+      // through the same canonical slugifier (tag-normalize) as the params here.
       const slugged = mattersTags.map((t) => normalizeTag(t)).filter(Boolean)
       if (slugged.length > 0) {
-        const orClauses = slugged.map((_, i) => `$mt${i} in mattersTags`)
+        const orClauses = slugged.map((_, i) => `$mt${i} in mattersTagsNormalized`)
         filterConditions.push(`(${orClauses.join(' || ')})`)
         slugged.forEach((t, i) => { groqParams[`mt${i}`] = t })
       }
