@@ -103,6 +103,15 @@ Otherwise pick, in order, logging the source as a `step` event:
 3. The next unwritten entry in the content-plan §3 backlog.
 4. The strategy brief's content section.
 
+**Stale-claim reclaim (before selecting a fresh brief).** A crashed run leaves its brief in
+`drafted` with no published post, and the weekly curator sweep can hold that topic hostage for days.
+Do not wait for the sweep: if the top brief in the queue is already `status:'drafted'` but has no
+corresponding published `blogPost` (`*[_type == "blogPost" && slug.current == $slug && status == "published"][0]`
+returns nothing) and no run is currently in flight for it, treat it as **reclaimable** and pick it
+up as today's topic, recording a `step` event that says you reclaimed a stale drafted brief and
+which run stranded it. A brief that is `drafted` **and** already has a published post is genuinely
+done; leave it.
+
 When a brief is chosen: patch it `status:'drafted'` immediately **and `publish_documents` on it**
 (idempotent claim; a crashed run leaves it drafted, and the curator re-queues stale drafted briefs
 weekly), and carry its `targetQuery`, keyword refs, `embedHints`, and `internalLinks` into Step 4.
@@ -155,6 +164,12 @@ Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
   for guides/comparisons/care/wellness-basics; essay-shaped (direct-answer capsule + scene-first
   + statement H2s allowed) for real-talk. Register: authority max, desire capped 7-8, zero
   hedging, humor licensed (never on clinical beats), rhythm rules per the blog addendum.
+- **IP ratings are SAFETY claims, not feature copy — map them before drafting.** Never infer a
+  water permission from a vendor adjective ("splashproof", "shower-ready"). Resolve the actual IP
+  code first: IPX4 = splashes only, keep out of the shower and never submerge; IPX7 = submersion to
+  1m/30min, so shower, bath, and rinse-clean are all fine. A wrong water instruction is a safety
+  defect the accuracy gate will BLOCK on (run 148: an IPX4 wand written as shower-safe). IP-rating
+  and other safety strings then fall under the frozen-safety-string rule in Step 5.3.
 - A `## Frequently asked questions` section in every post.
 - At least one honest `blogProductEmbed` where it genuinely helps (in-stock products only,
   verified first). CTAs from the charter whitelist.
@@ -207,7 +222,13 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
 
 1. **Voice gate first.** Run the full draft through `emma-empathy-reviewer` against the charter +
    blog addendum, **naming every section explicitly** so none is silently skipped: title, excerpt,
-   body, **the Frequently-Asked-Questions block**, SEO fields, and embed CTA labels. Any rule the
+   body, **the Frequently-Asked-Questions block**, SEO fields, and embed CTA labels. The request
+   must also **state the post's category and its charter-granted structural exemptions** so a
+   cycle-2 reviewer instance cannot re-litigate what the charter already settles: essay-shaped
+   real-talk and podcast-notes posts are allowed statement (non-question) H2s, with the
+   question-shaped material concentrated in the FAQ (blog addendum + content-plan §8B, owner-codified
+   2026-07-28). Restate in the request that a mandatory or charter-granted element is never a valid
+   gate objection. Any rule the
    gate enforces per-post or per-section (the aphorism-as-closer cap is the live example) must be
    **counted across the whole document on this first pass** — the FAQ block included. Because the
    routine allows exactly one shared rewrite (item 3), a defect first discovered in cycle 2 is
@@ -223,8 +244,13 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    then re-run both gates once, unless the selective re-run carve-out below applies. A second
    non-PASS from either is treated as BLOCK. **Change only the strings a gate actually flagged**
    — no cosmetic edits ride along, except the minimum surrounding sentences needed to satisfy a
-   paragraph-scoped or section-scoped cap (the aphorism-as-closer cap is the live example); a
-   qualifying rewrite must de-construct the banned pattern rather than swap words inside it. Any
+   paragraph-scoped, section-scoped, **or post-scoped** cap (the aphorism-as-closer cap is the live
+   example); a qualifying rewrite must de-construct the banned pattern rather than swap words inside
+   it. A post-scoped (whole-document) cap is the case a cap can otherwise be unfixable in one cycle:
+   when the count exceeds the cap but the offending sentences sit in sections the gate PASSed and
+   never flagged, this carve-out permits the minimum edits **anywhere in the document** needed to
+   bring the whole-document count under its cap, provided each such edit is **listed explicitly for
+   the re-gate** and de-constructs the banned pattern rather than swapping words inside it. Any
    string carrying a safety enumeration ("no motor, battery, or electronics inside"), a material
    limit, or a never/only instruction is **frozen exactly as today** unless the ACCURACY gate asked
    for that exact change: a battery-plus-switch DC-motor toy is arguably not "electronic", so a
