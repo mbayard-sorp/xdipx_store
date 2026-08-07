@@ -248,8 +248,18 @@ and are not yours to end. Note them instead.
 
 
 If you looked at a row and are deliberately not acting (out of scope, no longer true, needs code),
-post `{"op":"note", ...}` saying which and why, and leave the status alone. Never close a row you did
-not actually execute: a false `applied` is worse than an aging row, because it looks handled.
+post a note saying which and why, and leave the status alone:
+
+```bash
+-d '{"op":"note","id":52,"ref":"OOS SKU flagged in the Nº02 rail, but the swap needs a layout change, so it is the ticket lane, not this run"}'
+```
+
+The `note` op carries its text in **`ref`**, not `note`. The `transition` example above uses `note`
+for its text, so reusing that key here is the natural guess and it returns
+`400 Bad Request: ref required`.
+
+Never close a row you did not actually execute: a false `applied` is worse than an aging row,
+because it looks handled.
 
 ## Step 2e: Homepage SERP snippet review (read-only, every run)
 
