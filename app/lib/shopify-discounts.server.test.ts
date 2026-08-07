@@ -2,6 +2,9 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   promoExecuteEnabled,
   detectMapConflict,
+  detectMapClean,
+  extractPromoCode,
+  extractSkus,
   parsePromoBrief,
   decidePromo,
   buildDiscountVariables,
@@ -11,9 +14,10 @@ import {
 } from './shopify-discounts.server'
 
 // These helpers back the promo executor that mints a LIVE Shopify discount code
-// from an approved brief. It is fail-closed: MAP conflicts, missing windows, and
-// promos with no resolvable eligible product are refused, never minted. Gated by
-// promo_execute_enabled (default OFF). Verified without Shopify or a database.
+// from an approved brief. It is fail-closed: MAP conflicts, briefs that never
+// state MAP compliance, missing windows, and promos with no resolvable eligible
+// product are refused, never minted. Gated by promo_execute_enabled (default
+// OFF). Verified without Shopify or a database.
 
 const CLEAN_BRIEF = `Promo: Late Summer Wind-Down
 Code: SLOWEVENING15
@@ -31,6 +35,22 @@ const MAP_FLAGGED_BRIEF = CLEAN_BRIEF.replace(
   'MAP check result: MAP conflict on dolce, it sits below MAP',
 )
 
+// The real promo-manager format, reproduced from live suggestion #51. It states
+// the code inline after the "PROMO n" header, names eligible products by Nalpac
+// SKU number (not by /products/ link), verdicts MAP as "MAP CHECK PASS", and
+// separately explains a scoping guardrail with the phrase "would sell below MAP".
+// That last phrase is what the first implementation false-flagged as a conflict.
+const EM = String.fromCharCode(0x2014) // em-dash, kept out of the source literal
+const LIVE_BRIEF_51 =
+  `PROMO 2 (propose-only, owner mints in Shopify) ${EM} FIRSTLOOK10, a shallow ` +
+  `first-order welcome code scoped only to fully-discountable (map_price=0) starter SKUs. ` +
+  `DEPTH: 10% off (deliberately shallow, not the 45-50%-off daily-deal tier). ` +
+  `SKU SCOPE, MAP CHECK PASS (map_price=0 confirmed per-SKU): Screaming O Bullet ` +
+  `Vibrators (SKUs 84740/84743/84747/84748; wholesale $5.45, MSRP $13.80-15.05). ` +
+  `STANDING GUARDRAIL: mint the code restricted to a tagged welcome-eligible collection ` +
+  `containing ONLY map_price=0 SKUs, because any further code discount on those would ` +
+  `sell below MAP. WINDOW: 2026-07-27 through 2026-08-09 for this proposal.`
+
 describe('promoExecuteEnabled', () => {
   it('is off unless the setting is exactly "true"', () => {
     expect(promoExecuteEnabled(null)).toBe(false)
@@ -41,15 +61,56 @@ describe('promoExecuteEnabled', () => {
 })
 
 describe('detectMapConflict', () => {
-  it('flags explicit conflict phrasing', () => {
+  it('flags an explicit MAP-fail verdict', () => {
     expect(detectMapConflict('MAP conflict on dolce')).toBe(true)
-    expect(detectMapConflict('this sits below MAP')).toBe(true)
+    expect(detectMapConflict('MAP CHECK FAIL')).toBe(true)
     expect(detectMapConflict('not MAP-compliant')).toBe(true)
     expect(detectMapConflict('MAP violation flagged')).toBe(true)
+    expect(detectMapConflict('this promo violates MAP')).toBe(true)
   })
   it('does not flag a clean MAP note', () => {
     expect(detectMapConflict('MAP check result: clean, all SKUs MAP=0')).toBe(false)
     expect(detectMapConflict('MAP = 0, discountable')).toBe(false)
+    expect(detectMapConflict('MAP CHECK PASS')).toBe(false)
+  })
+  it('does not flag guardrail-rationale prose that merely says "below MAP"', () => {
+    // The regression: bare, conditional "would sell below MAP" explains a
+    // guardrail, it is not a verdict that this promo breaches MAP.
+    expect(detectMapConflict('any further discount on those would sell below MAP')).toBe(false)
+    expect(detectMapConflict(LIVE_BRIEF_51)).toBe(false)
+  })
+})
+
+describe('detectMapClean', () => {
+  it('requires an explicit clean verdict', () => {
+    expect(detectMapClean('MAP CHECK PASS')).toBe(true)
+    expect(detectMapClean('MAP check result: clean')).toBe(true)
+    expect(detectMapClean('map_price=0 confirmed')).toBe(true)
+    expect(detectMapClean(LIVE_BRIEF_51)).toBe(true)
+  })
+  it('is false when the brief never states MAP compliance', () => {
+    expect(detectMapClean('Code: X10\nDepth: 10%\nWindow: 2026-08-12 to 2026-08-19')).toBe(false)
+    expect(detectMapClean('this sits below MAP')).toBe(false)
+  })
+})
+
+describe('extractPromoCode', () => {
+  it('reads an explicit Code: line', () => {
+    expect(extractPromoCode(CLEAN_BRIEF)).toBe('SLOWEVENING15')
+  })
+  it('reads a code stated inline after the PROMO header', () => {
+    expect(extractPromoCode(LIVE_BRIEF_51)).toBe('FIRSTLOOK10')
+  })
+  it('never returns a section label as a code', () => {
+    expect(extractPromoCode('PROMO plan. DEPTH and WINDOW only, no code here.')).toBeNull()
+  })
+})
+
+describe('extractSkus', () => {
+  it('reads SKU numbers from a labelled list and ignores counts and prices', () => {
+    expect(extractSkus(LIVE_BRIEF_51)).toEqual(['84740', '84743', '84747', '84748'])
+    // "SKUs (1503 MAP-locked ...)" is a count, not a scope: the paren breaks the label.
+    expect(extractSkus('about 60% of SKUs (1503 MAP-locked) are floored')).toEqual([])
   })
 })
 
@@ -61,7 +122,17 @@ describe('parsePromoBrief', () => {
     expect(p.startsAt).toBe('2026-08-12T00:00:00Z')
     expect(p.endsAt).toBe('2026-08-19T23:59:59Z')
     expect(p.handles).toEqual(['ferri', 'dolce'])
+    expect(p.skus).toEqual([])
     expect(p.mapNote?.toLowerCase()).toContain('map')
+  })
+  it('parses the live inline format: inline code, SKU scope, prose window', () => {
+    const p = parsePromoBrief(LIVE_BRIEF_51)
+    expect(p.code).toBe('FIRSTLOOK10')
+    expect(p.percentage).toBe(10)
+    expect(p.startsAt).toBe('2026-07-27T00:00:00Z')
+    expect(p.endsAt).toBe('2026-08-09T23:59:59Z')
+    expect(p.handles).toEqual([])
+    expect(p.skus).toEqual(['84740', '84743', '84747', '84748'])
   })
   it('leaves the window null when there are fewer than two ISO dates', () => {
     const p = parsePromoBrief('Code: X10\nDepth: 10%\nStarts 2026-08-12, ends soon')
@@ -75,9 +146,17 @@ describe('decidePromo', () => {
     const p = parsePromoBrief(CLEAN_BRIEF)
     expect(decidePromo(p, CLEAN_BRIEF)).toEqual({ ok: true, reason: 'ok' })
   })
+  it('passes the live MAP-clean brief #51', () => {
+    const p = parsePromoBrief(LIVE_BRIEF_51)
+    expect(decidePromo(p, LIVE_BRIEF_51)).toEqual({ ok: true, reason: 'ok' })
+  })
   it('refuses a MAP-flagged brief first', () => {
     const p = parsePromoBrief(MAP_FLAGGED_BRIEF)
     expect(decidePromo(p, MAP_FLAGGED_BRIEF)).toEqual({ ok: false, reason: 'map-conflict-flagged' })
+  })
+  it('refuses a structurally complete brief that never confirms MAP', () => {
+    const text = 'Code: X10\nDepth: 10%\nWindow: 2026-08-12 to 2026-08-19\nProducts: https://xdipx.com/products/ferri'
+    expect(decidePromo(parsePromoBrief(text), text)).toEqual({ ok: false, reason: 'map-not-confirmed' })
   })
   it('refuses when the window is not explicit', () => {
     const text = 'Code: X10\nDepth: 10%\nWindow: starts 2026-08-12'
@@ -117,7 +196,9 @@ describe('buildDiscountVariables', () => {
 function makeDeps(overrides: Partial<PromoExecuteDeps> = {}): PromoExecuteDeps {
   return {
     getSetting: vi.fn(async () => 'true'),
-    resolveProductGids: vi.fn(async (h: string[]) => h.map((_, i) => `gid://shopify/Product/${i + 1}`)),
+    resolveProductGids: vi.fn(async (sel: { handles: string[]; skus: string[] }) =>
+      [...sel.handles, ...sel.skus].map((_, i) => `gid://shopify/Product/${i + 1}`),
+    ),
     createDiscount: vi.fn(async () => ({ id: 'gid://shopify/DiscountCodeNode/9', userErrors: [] })),
     sendOwnerEmail: vi.fn(async () => ({ sent: true })),
     addNote: vi.fn(async () => {}),
@@ -152,6 +233,18 @@ describe('executeApprovedPromo', () => {
     const [noteId, noteRef] = (deps.addNote as any).mock.calls[0]
     expect(noteId).toBe(50)
     expect(noteRef).toContain('SLOWEVENING15')
+  })
+
+  it('mints the live MAP-clean brief #51 end to end, resolving SKUs to products', async () => {
+    const deps = makeDeps()
+    const res = await executeApprovedPromo({ id: 51, suggestion: LIVE_BRIEF_51 }, deps)
+    expect(res.minted).toBe(true)
+    expect(res.code).toBe('FIRSTLOOK10')
+    // resolveProductGids is asked for the parsed SKUs, not /products/ handles.
+    const sel = (deps.resolveProductGids as any).mock.calls[0][0]
+    expect(sel.handles).toEqual([])
+    expect(sel.skus).toEqual(['84740', '84743', '84747', '84748'])
+    expect(deps.createDiscount).toHaveBeenCalledOnce()
   })
 
   it('refuses a MAP-flagged row loudly and never mints', async () => {
