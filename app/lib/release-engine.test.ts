@@ -53,6 +53,8 @@ vi.mock('~/lib/release-ticket-autofile.server', () => ({
 import { classifyChangedFiles } from '~/lib/github.server'
 import {
   AGENT_EDITOR_ALLOWLIST_RE,
+  CI_ABSENT_GRACE_MS,
+  MAX_CI_RETRIGGERS_PER_PR,
   CONDITIONAL_UNDRAFT_MIN_AGE_MS,
   CONDITIONAL_UNDRAFT_PREFIXES,
   DEFAULT_MAX_MERGES_PER_DAY,
@@ -114,6 +116,9 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
     changedPaths,
     checks: { [REQUIRED_CHECK]: 'success' },
     ticket: verifiedTicket,
+    // No re-triggers spent by default, so a test that wants the exhausted
+    // branch has to say so explicitly.
+    ciRetriggers: 0,
     ...over,
   }
 }
@@ -500,6 +505,90 @@ describe('evaluatePullRequest: gates', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// The dropped-trigger class
+//
+// GitHub declines to create `pull_request` workflow runs often enough that this
+// was the single largest cause of an agent PR sitting open: `check` is a
+// required context on main, so a PR whose run was never built can never merge,
+// and before these paths existed nothing detected it, retried it, or reported
+// it. The owner merged those by hand, every day.
+// ---------------------------------------------------------------------------
+
+describe('evaluatePullRequest: missing and no-verdict checks', () => {
+  const OLD = CI_ABSENT_GRACE_MS + 60_000
+
+  it('waits, not re-triggers, while a missing check is still inside the grace window', () => {
+    const d = evaluatePullRequest(facts({ checks: {}, ageMs: CI_ABSENT_GRACE_MS - 1 }))
+    expect(d.action).toBe('wait')
+    expect(d.code).toBe('ci-pending')
+  })
+
+  it('re-triggers once a required check has been absent past the grace window', () => {
+    const d = evaluatePullRequest(facts({ checks: {}, ageMs: OLD }))
+    expect(d.action).toBe('retrigger-ci')
+    expect(d.code).toBe('ci-absent')
+  })
+
+  it('escalates to the owner once the re-trigger budget is spent', () => {
+    const d = evaluatePullRequest(
+      facts({ checks: {}, ageMs: OLD, ciRetriggers: MAX_CI_RETRIGGERS_PER_PR }),
+    )
+    expect(d.action).toBe('escalate-ci')
+    expect(d.code).toBe('ci-stuck')
+  })
+
+  // A hosted runner that was never acquired reports `cancelled`, which is
+  // indistinguishable from a real failure in the checks API even though not one
+  // step executed. Re-running is how a verdict is obtained; it is not a way
+  // around one.
+  it('re-runs a check that concluded without executing rather than calling it red', () => {
+    for (const conclusion of ['cancelled', 'stale']) {
+      const d = evaluatePullRequest(facts({ checks: { [REQUIRED_CHECK]: conclusion } }))
+      expect(d.action).toBe('retrigger-ci')
+      expect(d.code).toBe('ci-no-verdict')
+    }
+  })
+
+  it('escalates a no-verdict check once the re-trigger budget is spent', () => {
+    const d = evaluatePullRequest(
+      facts({ checks: { [REQUIRED_CHECK]: 'cancelled' }, ciRetriggers: MAX_CI_RETRIGGERS_PER_PR }),
+    )
+    expect(d.action).toBe('escalate-ci')
+    expect(d.code).toBe('ci-stuck')
+  })
+
+  // The gate this whole path must not weaken. A build that ran and failed is
+  // red forever, no re-runs, no matter how old the PR is.
+  it('never re-triggers a check that genuinely ran and failed', () => {
+    for (const conclusion of ['failure', 'timed_out', 'action_required', 'startup_failure']) {
+      const d = evaluatePullRequest(
+        facts({ checks: { [REQUIRED_CHECK]: conclusion }, ageMs: OLD, ticket: null }),
+      )
+      expect(d.action).toBe('skip')
+      expect(d.code).toBe('ci-red')
+    }
+  })
+
+  it('re-triggers a missing allowlist run on the docs lane', () => {
+    const d = evaluatePullRequest(
+      facts({ headRef: DOCS_BRANCH, changedPaths: DOCS_FILES, ticket: null, checks: {}, ageMs: OLD }),
+    )
+    expect(d.action).toBe('retrigger-ci')
+    expect(d.code).toBe('ci-absent')
+  })
+
+  // Protected paths still win. A stuck check must never become a route around
+  // the one gate that has no override.
+  it('still escalates a protected path ahead of any re-trigger', () => {
+    const d = evaluatePullRequest(
+      facts({ changedPaths: ['db/schema.ts'], checks: {}, ageMs: OLD }),
+    )
+    expect(d.action).toBe('escalate-protected')
+    expect(d.code).toBe('protected')
+  })
+})
+
 describe('evaluatePullRequest: ticket linkage', () => {
   it('refuses to merge a code PR with no linked ticket', () => {
     const d = evaluatePullRequest(facts({ ticket: null }))
@@ -515,12 +604,31 @@ describe('evaluatePullRequest: ticket linkage', () => {
     }
   })
 
+  // The carve-out covers a SLOW `check` (a run exists and has not concluded),
+  // which is what it was written for. It deliberately does not cover an ABSENT
+  // one: `check` is a required context on main, so a merge attempted while no
+  // run exists is one GitHub refuses, and the engine would burn all three merge
+  // attempts on refusals before escalating a PR whose only problem was a
+  // missing trigger. That case is the re-trigger path instead.
   it('applies the docs-only carve-out: allowlist green is enough, no ticket needed', () => {
     const d = evaluatePullRequest(
-      facts({ headRef: DOCS_BRANCH, changedPaths: DOCS_FILES, ticket: null, checks: { allowlist: 'success' } }),
+      facts({
+        headRef: DOCS_BRANCH,
+        changedPaths: DOCS_FILES,
+        ticket: null,
+        checks: { allowlist: 'success', [REQUIRED_CHECK]: null },
+      }),
     )
     expect(d.action).toBe('merge')
     expect(d.docsOnly).toBe(true)
+  })
+
+  it('withholds the docs carve-out while no `check` run exists at all', () => {
+    const d = evaluatePullRequest(
+      facts({ headRef: DOCS_BRANCH, changedPaths: DOCS_FILES, ticket: null, checks: { allowlist: 'success' } }),
+    )
+    expect(d.action).toBe('wait')
+    expect(d.code).toBe('ci-pending')
   })
 
   // A docs-only diff on a code branch is still a code PR: the carve-out belongs

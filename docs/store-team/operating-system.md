@@ -311,6 +311,7 @@ broken.
 |---|---|
 | Protected path | `needs-owner` label, one email, a digest row. **Loud, correct.** |
 | No linked `verified` ticket | Auto-filed a ticket since 2026-08-04, so it moves to QA on its own. **Self-clearing.** |
+| **A required check GitHub never created** | Nothing at all before 2026-08-06. Now re-triggered, then `needs-owner` + one email. See below. |
 | **Ineligible branch prefix** | **Nothing at all.** |
 
 The third row is the one that matters. `listOpenPullRequests` filters by prefix before any
@@ -319,6 +320,49 @@ emailed, never logged by number, and never reaches the digest. It is invisible t
 surface at once, and it can sit for a month without anything saying so. **Silence from the engine
 means "not looked at", never "looked at and fine".** An open PR on a prefix outside
 `AGENT_BRANCH_PREFIXES` plus `revert/pr-` is owner-only work whether or not anyone noticed.
+
+### The dropped trigger: GitHub declining to build a required check
+
+Measured 2026-08-06, and the largest single cause of the owner's daily merge-button tax. **Six of
+twelve open PRs had zero GitHub Actions runs on their head commit.** Only the Vercel checks were
+present. `ci.yml` was on every one of those branches, the merge base was identical to the PRs that
+did get runs, and the commit author was the same. GitHub simply never created the run. Three more
+PRs had a job whose annotation read `The job was not acquired by Runner of type hosted even after
+multiple attempts`, which GitHub reports as `cancelled` even though no step ever executed.
+
+`check` is a required status context on `main`, so a PR whose run was never built cannot satisfy
+branch protection and can never merge. The engine's own gate returned `wait / ci-pending` on every
+ten-minute cycle forever: no counter, no clock, no re-trigger, no escalation, and no surface that
+reads a non-terminal decision code. The decision went only to a Vercel function log. **The only
+actor who could move those PRs was the owner, and nothing told him they needed moving.**
+
+Three things now handle it, in `app/lib/release-engine.server.ts`:
+
+| Decision code | When | What happens |
+|---|---|---|
+| `ci-absent` | No run for the required check, PR non-draft and idle past `CI_ABSENT_GRACE_MS` (20 min) | The PR is recycled: closed, then reopened. `reopened` is a default `on: pull_request` activity type and is the only mechanism that reliably makes GitHub dispatch a run it skipped |
+| `ci-no-verdict` | A check concluded `cancelled` or `stale` | Its failed jobs are re-run. No step executed, so calling it red is as wrong as calling it green |
+| `ci-stuck` | `MAX_CI_RETRIGGERS_PER_PR` (2) attempts spent | `needs-owner` label plus one email, through the same dedupe as a protected path |
+
+The counter is keyed on the **head SHA**, so a new commit earns a fresh budget, and it is
+incremented **before** the mutation, so a killed invocation still spends the attempt and converges
+on the escalation instead of recycling forever.
+
+What this deliberately does **not** do: a check that genuinely ran and concluded `failure`,
+`timed_out`, `action_required`, or `startup_failure` is red, permanently, and is never re-run.
+Protected-path classification still runs first and still has no override. A re-run produces the real
+conclusion; it never substitutes for one.
+
+Recycling is chosen over pushing an empty commit because it moves no SHA, so it invalidates no
+check that already reported and does not reset QA's review target.
+
+The docs carve-out was narrowed at the same time. It now applies only to a check that is *slow* (a
+run exists and has not concluded), not to one that is absent. Merging while the required context is
+absent is a merge GitHub refuses, and the carve-out used to spend all three `MAX_MERGE_ATTEMPTS` on
+refusals before escalating a PR whose only real problem was a missing trigger.
+
+**R-WATCH** (routine 22) is the belt-and-braces backstop for the same class, plus the two the engine
+still does not cover: a stranded draft on a machine lane, and an open PR with no ticket.
 
 ADR-008 step 4 added `fix/` and `pm/` to that list on 2026-08-04, which fixes the two known
 instances. It does not fix the class. The next prefix somebody invents will be silent in exactly the

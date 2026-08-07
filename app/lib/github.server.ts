@@ -512,6 +512,85 @@ export async function createIssueComment(number: number, body: string, context =
   })
 }
 
+/**
+ * Workflow runs GitHub created for one head SHA.
+ *
+ * The release engine needs this to tell two states apart that look identical
+ * from the checks API: a run that has not reported yet, and a run GitHub never
+ * created at all. `getChecksForRef` reports check RUNS, so a workflow that was
+ * never dispatched contributes nothing to it and is indistinguishable from one
+ * still queued.
+ */
+export async function listWorkflowRunsForSha(
+  sha: string,
+  context = 'github',
+): Promise<GithubResult<Array<{ id: number; name: string; status: string; conclusion: string | null }>>> {
+  if (!sha) return err(0, 'listWorkflowRunsForSha called without a sha')
+  const res = await githubRequest<{
+    workflow_runs: Array<{ id: number; name: string; status: string; conclusion: string | null }>
+  }>(`/repos/{owner}/{repo}/actions/runs?head_sha=${encodeURIComponent(sha)}&per_page=50`, { context })
+  if (!res.ok) return res
+  return {
+    ok: true,
+    status: res.status,
+    data: (res.data.workflow_runs ?? []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      conclusion: r.conclusion,
+    })),
+  }
+}
+
+/**
+ * Re-run only the failed jobs of a workflow run.
+ *
+ * Used for the runner-capacity class of failure. GitHub reports "The job was
+ * not acquired by Runner of type hosted even after multiple attempts" as a
+ * `cancelled` conclusion, which is indistinguishable from a real failure in the
+ * checks API even though no test, typecheck, or build step ever executed. A
+ * re-run is how you get an actual verdict; it is not a way around one.
+ */
+export async function rerunFailedJobs(runId: number, context = 'github'): Promise<GithubResult<unknown>> {
+  if (!Number.isInteger(runId) || runId <= 0) return err(0, 'rerunFailedJobs called without a run id')
+  return githubRequest<unknown>(`/repos/{owner}/{repo}/actions/runs/${runId}/rerun-failed-jobs`, {
+    method: 'POST',
+    context,
+  })
+}
+
+/**
+ * Close a pull request and immediately reopen it.
+ *
+ * This is the only reliable way to make GitHub create `pull_request` workflow
+ * runs it declined to create the first time. `reopened` is one of the default
+ * `on: pull_request` activity types, so every workflow in the repo re-evaluates
+ * the PR from scratch.
+ *
+ * Why this rather than an empty commit: a commit moves the head SHA, which
+ * invalidates every check already reported, resets QA's review target, and
+ * writes to the branch. Close/reopen changes no code and no SHA.
+ *
+ * The reopen is attempted even when the close reports a failure, because
+ * leaving a PR closed is far worse than a redundant reopen. A caller that gets
+ * `ok: false` should assume the PR may be in either state and re-read it.
+ */
+export async function recyclePullRequest(number: number, context = 'github'): Promise<GithubResult<PullRequestSummary>> {
+  const closed = await githubRequest<RawPull>(`/repos/{owner}/{repo}/pulls/${number}`, {
+    method: 'PATCH',
+    body: { state: 'closed' },
+    context,
+  })
+  const reopened = await githubRequest<RawPull>(`/repos/{owner}/{repo}/pulls/${number}`, {
+    method: 'PATCH',
+    body: { state: 'open' },
+    context,
+  })
+  if (!reopened.ok) return reopened
+  if (!closed.ok) return err(closed.status, `close failed (${closed.error}) but reopen succeeded`)
+  return { ok: true, status: reopened.status, data: toSummary(reopened.data) }
+}
+
 export async function openPullRequest(
   input: { title: string; head: string; base: string; body?: string; context?: string },
 ): Promise<GithubResult<PullRequestSummary>> {
