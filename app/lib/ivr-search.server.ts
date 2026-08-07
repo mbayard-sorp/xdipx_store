@@ -116,6 +116,14 @@ export interface SearchDiagnostics {
    *                         the set to zero. Caller should consider dropping a filter.
    * - 'no-base-results'   — the keyword/discovery query itself returned nothing.
    *                         No filters to blame.
+   * - 'relaxed-audience'  — the audience tag filter (for-her / for-him / couples)
+   *                         emptied the set, so it was dropped and the search
+   *                         retried. Cards ARE relevant to the query and category
+   *                         but may not be audience-tagged. Distinct from 'matched'
+   *                         so the gap stays visible in telemetry: audience tag
+   *                         coverage in the catalog is thin, and this reason firing
+   *                         often is the signal to backfill it rather than to keep
+   *                         leaning on the fallback.
    * - 'sanity-unavailable'— the Sanity query layer could not be reached (client env
    *                         vars missing, or the GROQ fetch threw). Shopify fallback
    *                         may have been used.
@@ -124,7 +132,13 @@ export interface SearchDiagnostics {
    *                         a Sanity one: kept distinct so it is neither mislabeled as
    *                         'sanity-unavailable' nor read by the model as "no results".
    */
-  reason: 'matched' | 'filtered-to-zero' | 'no-base-results' | 'sanity-unavailable' | 'catalog-unavailable'
+  reason:
+    | 'matched'
+    | 'filtered-to-zero'
+    | 'relaxed-audience'
+    | 'no-base-results'
+    | 'sanity-unavailable'
+    | 'catalog-unavailable'
 }
 
 /**
@@ -246,6 +260,97 @@ export const STRICT_CATEGORY_TERMS = new Set([
  * "no candidates in Sanity at all" in order to decide whether to retry
  * with a looser filter.
  */
+/**
+ * Audience values the discovery agent may pass through as `tags`. Only these
+ * are droppable on a filtered-to-zero retry — an unrecognised tag is left alone
+ * because we can't assume it's a soft preference.
+ */
+const AUDIENCE_TAGS = new Set(['for-her', 'for-him', 'couples'])
+
+type SanityCandidate = { handle: string; title: string; category: string | null; tagline: string | null }
+
+/**
+ * Given the filter conditions built for a search and the `tags` they came from,
+ * return the conditions with audience-tag clauses removed — or null when there
+ * is nothing to relax (no tags, no audience tags among them, or no matching
+ * clause found). Null means "don't retry", so a caller can't loop on an
+ * identical query.
+ *
+ * The `$tag{i} in tags` clause names are positional, matching the order tags
+ * were pushed in the main query builder. Kept in lockstep with that loop.
+ */
+export function dropAudienceTagConditions(
+  filterConditions: string[],
+  tags: string[] | undefined,
+): string[] | null {
+  if (!tags || tags.length === 0) return null
+  const audienceClauses = new Set(
+    tags
+      .map((t, i) => (AUDIENCE_TAGS.has(t) ? `$tag${i} in tags` : null))
+      .filter((c): c is string => c !== null),
+  )
+  if (audienceClauses.size === 0) return null
+  const kept = filterConditions.filter((c) => !audienceClauses.has(c))
+  return kept.length === filterConditions.length ? null : kept
+}
+
+/**
+ * Re-run the candidate query with audience tags removed from the filter set.
+ * Returns null when there was no audience tag to drop (nothing to relax) or the
+ * relaxed query is still empty — in both cases the caller reports the original
+ * filtered-to-zero rather than inventing results.
+ */
+async function retryWithoutAudienceTags(args: {
+  client: ReturnType<typeof getSanityClient>
+  baseConditions: string[]
+  filterConditions: string[]
+  groqParams: Record<string, unknown>
+  tags: string[] | undefined
+  boosts: string
+  candidatePool: number
+}): Promise<SanityCandidate[] | null> {
+  const { client, baseConditions, filterConditions, groqParams, tags, boosts, candidatePool } = args
+  if (!client) return null
+
+  const kept = dropAudienceTagConditions(filterConditions, tags)
+  if (kept === null) return null
+
+  const filter = [...baseConditions, ...kept].join(' && ')
+  const groq = `*[${filter}] | score(${boosts}) [0...${candidatePool}] {
+      "handle": shopifyHandle,
+      title,
+      category,
+      tagline
+    }`
+  const results = await cachedGroqFetch<SanityCandidate[]>(client, groq, groqParams)
+  return results && results.length > 0 ? results : null
+}
+
+/**
+ * Hydrate Sanity candidates against Shopify, apply the live-price budget filter,
+ * and rank. Shared by the normal path and the relaxed-audience retry so the two
+ * cannot drift apart.
+ */
+async function hydrateAndRank(
+  sanityResults: SanityCandidate[],
+  opts: { limit: number; priceMax: number | undefined; reason: SearchDiagnostics['reason'] },
+): Promise<SearchDiagnostics> {
+  const handles = sanityResults.map((r) => r.handle).filter(Boolean)
+  const shopifyProducts = await getProductsByHandles(handles)
+  const shopifyMap = new Map<string, Product>(shopifyProducts.map((p) => [p.handle, p]))
+
+  const cards: IvrProductCard[] = []
+  for (const sr of sanityResults) {
+    const product = shopifyMap.get(sr.handle)
+    if (!product) continue
+    cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
+  }
+
+  const priced = applyPriceMax(cards, opts.priceMax)
+  const ranked = marginWeightedSelect(priced, opts.limit)
+  return { cards: ranked, reason: ranked.length > 0 ? opts.reason : 'filtered-to-zero' }
+}
+
 export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<SearchDiagnostics> {
   const { query, limit = 3, category, priceMax, tags, mattersTags, productTypeDial, productSubtypeDial } = opts
   const client = getSanityClient()
@@ -372,8 +477,27 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
           const baseFilter = baseConditions.join(' && ')
           const baseGroq = `*[${baseFilter}] [0...1] { "handle": shopifyHandle }`
           const baseCheck = await cachedGroqFetch<{ handle: string }[]>(client, baseGroq, groqParams)
-          const reason = baseCheck.length > 0 ? 'filtered-to-zero' : 'no-base-results'
-          return { cards: [], reason }
+          if (baseCheck.length === 0) return { cards: [], reason: 'no-base-results' }
+
+          // filtered-to-zero: the keyword DID match the catalog and only the
+          // extra filters emptied it. Returning nothing here is how a caller
+          // saying the two most ordinary things in a row — "a vibrator", "with
+          // a partner" — got zero results out of 696 vibrators. Audience tag
+          // coverage is the reason: 2 of 696 vibrator-dial products carry
+          // `couples` and 0 carry `for-him`, so ANDing an audience tag against
+          // a category dial is very nearly a guaranteed empty set.
+          //
+          // Audience is a soft preference, not a hard spec — the same reasoning
+          // mattersTags already documents above. Drop it and retry once before
+          // giving up. Category, dial and price stay: those are the filters a
+          // caller would actually notice being ignored.
+          const relaxed = await retryWithoutAudienceTags({
+            client, baseConditions, filterConditions, groqParams,
+            tags, boosts, candidatePool,
+          })
+          if (relaxed === null) return { cards: [], reason: 'filtered-to-zero' }
+          sanityOk = true // past every Sanity query; a throw below is catalog-side
+          return await hydrateAndRank(relaxed, { limit, priceMax, reason: 'relaxed-audience' })
         }
         return { cards: [], reason: 'no-base-results' }
       }
@@ -390,27 +514,15 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
       return { cards, reason: cards.length > 0 ? 'matched' : 'no-base-results' }
     }
 
-    const handles = sanityResults.map((r) => r.handle).filter(Boolean)
     sanityOk = true // past every Sanity query; anything below is catalog-side
-    const shopifyProducts = await getProductsByHandles(handles)
-    const shopifyMap = new Map<string, Product>(shopifyProducts.map((p) => [p.handle, p]))
-
-    const cards: IvrProductCard[] = []
-    for (const sr of sanityResults) {
-      const product = shopifyMap.get(sr.handle)
-      if (!product) continue
-      cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
-    }
-
     // Live-price budget filter, then rank by margin × inventory with enough
     // randomness to keep variety. Sanity has already filtered for context
     // relevance (the candidate pool is "products that match this query");
     // within that pool, prefer items that make us money AND are sellable.
-    const priced = applyPriceMax(cards, priceMax)
-    const ranked = marginWeightedSelect(priced, limit)
+    //
     // A non-empty hydrated pool emptied by the price filter is honestly
-    // filtered-to-zero, which existing zero-card handling already reports.
-    return { cards: ranked, reason: ranked.length > 0 ? 'matched' : 'filtered-to-zero' }
+    // filtered-to-zero, which hydrateAndRank reports.
+    return await hydrateAndRank(sanityResults, { limit, priceMax, reason: 'matched' })
   } catch (err) {
     if (sanityOk) {
       // Sanity returned candidates; the throw is a Shopify hydration/pricing
