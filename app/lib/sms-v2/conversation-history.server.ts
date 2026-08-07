@@ -25,7 +25,21 @@ export interface HistoryTurn {
   text: string
 }
 
+/** Raw inbound/outbound text for one sms_turns row. */
+export interface RawTurnRow {
+  customerMsg: string | null
+  emmaMsg: string | null
+}
+
 const DEFAULT_LIMIT = 12
+
+/**
+ * Placeholder inbound text synthesized for a row that has an Emma reply but no
+ * customer text — a media-only MMS trims Body to '' (api.twilio.sms.tsx), and a
+ * voice-greeting row has no inbound text at all. It is never shown to a
+ * customer; it only keeps the model transcript well-formed.
+ */
+const EMPTY_INBOUND_PLACEHOLDER = '[no text]'
 
 /**
  * Strip SSML markup from a stored Emma reply so voice history reads as prose.
@@ -76,17 +90,40 @@ export async function loadConversationHistory(
     .limit(limit)
 
   // Reverse to chronological (oldest first), then expand each row into
-  // user + assistant messages. Empty bodies are dropped — they'd confuse the
-  // model and burn tokens for no signal.
-  const chronological = [...rows].reverse()
+  // alternating user/assistant messages.
+  return expandHistoryTurns([...rows].reverse())
+}
+
+/**
+ * Expand chronological `sms_turns` rows into alternating [user, assistant]
+ * messages for the Messages API. Exported for testing.
+ *
+ * conv-audit C6: a row with an Emma reply but no inbound text (media-only MMS,
+ * voice greeting) used to contribute an assistant turn with no preceding user
+ * turn, so the window could start with role 'assistant'. The Messages API
+ * rejects an assistant-leading window, conversation-agent catches the error and
+ * returns safeFallback, and because the bad row stays in the window it poisons
+ * EVERY subsequent turn. We now synthesize a placeholder user turn for such
+ * rows so each contributes a well-formed pair, and defensively strip any
+ * leading assistant turns as a final invariant guard. A fully-empty row (no
+ * inbound text, no reply) carries no signal and is dropped.
+ */
+export function expandHistoryTurns(chronological: RawTurnRow[]): HistoryTurn[] {
   const turns: HistoryTurn[] = []
 
   for (const row of chronological) {
     const userText = (row.customerMsg ?? '').trim()
     const assistantText = stripSsml(row.emmaMsg ?? '').trim()
-    if (userText) turns.push({ role: 'user', text: userText })
+    if (!userText && !assistantText) continue
+    turns.push({ role: 'user', text: userText || EMPTY_INBOUND_PLACEHOLDER })
     if (assistantText) turns.push({ role: 'assistant', text: assistantText })
   }
+
+  // Invariant: the Messages API requires the first turn to be 'user'. The
+  // placeholder above already guarantees this; this guard makes the invariant
+  // explicit so a future change to the expansion can't silently reintroduce a
+  // leading assistant turn.
+  while (turns.length > 0 && turns[0]!.role === 'assistant') turns.shift()
 
   return turns
 }
