@@ -7380,6 +7380,47 @@ export async function paginateAllProductsForSanity(
   return { created, skipped }
 }
 
+/**
+ * Sweep every Shopify product via the REST Admin API and bucket its handle by
+ * status. Reuses the same active/draft/archived pagination as
+ * `paginateAllProductsForSanity`, but keeps the status so callers can tell a
+ * still-sellable product from an archived one.
+ *
+ *   - `sellable` = status active OR draft (still surfaces / is orderable).
+ *   - `archived` = status archived (dropped from the Storefront API).
+ *
+ * A handle present in neither set is gone from Shopify entirely. Used by the
+ * Sanity↔Shopify reconcile to decide which productPage docs no longer have a
+ * sellable counterpart.
+ */
+export async function collectProductHandlesByStatus(): Promise<{
+  sellable: Set<string>
+  archived: Set<string>
+}> {
+  const sellable = new Set<string>()
+  const archived = new Set<string>()
+
+  for (const status of ['active', 'draft', 'archived'] as const) {
+    let sinceId = 0
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { products } = await shopifyAdmin<{ products: Array<{ id: number; handle: string }> }>(
+        `/products.json?limit=250&since_id=${sinceId}&status=${status}&fields=id,handle`,
+      )
+      if (!products?.length) break
+      for (const p of products) {
+        if (!p.handle) continue
+        if (status === 'archived') archived.add(p.handle)
+        else sellable.add(p.handle)
+      }
+      if (products.length < 250) break
+      sinceId = products[products.length - 1]!.id
+    }
+  }
+
+  return { sellable, archived }
+}
+
 // ---------------------------------------------------------------------------
 // Debug: fetch xdipx metafields for a product (admin route helper)
 // ---------------------------------------------------------------------------
