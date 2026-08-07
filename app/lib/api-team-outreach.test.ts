@@ -53,6 +53,8 @@ vi.mock('~/lib/db.server', () => {
 })
 vi.mock('~/lib/team.server', () => ({ assertTeamAuth: vi.fn() }))
 vi.mock('~/lib/outreach.server', () => ({ sendOutreachEmail: vi.fn() }))
+const probeMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/outreach-inbox.server', () => ({ probeOutreachImap: probeMock }))
 
 // Lives in app/lib rather than next to the route: anything in app/routes is
 // picked up by flatRoutes/typegen as a route module, tests included.
@@ -153,5 +155,35 @@ describe('queue op eligibility guard', () => {
     state.selectResults = [[]]
     const res = await post({ op: 'queue', id: 999 })
     expect(res.status).toBe(404)
+  })
+})
+
+describe('probe op', () => {
+  it('returns the probe result verbatim with status 200 on success', async () => {
+    probeMock.mockResolvedValueOnce({
+      ok: true,
+      host: 'imap.zoho.com',
+      port: 993,
+      user: 'he***@xdipx.com',
+      mailbox: 'INBOX',
+      messages: 7,
+    })
+    const res = await post({ op: 'probe' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      ok: true,
+      host: 'imap.zoho.com',
+      port: 993,
+      user: 'he***@xdipx.com',
+      mailbox: 'INBOX',
+      messages: 7,
+    })
+  })
+
+  it('still returns 200 on a probe failure; the ok field carries the verdict', async () => {
+    probeMock.mockResolvedValueOnce({ ok: false, stage: 'auth', error: 'LOGIN rejected' })
+    const res = await post({ op: 'probe' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: false, stage: 'auth', error: 'LOGIN rejected' })
   })
 })
