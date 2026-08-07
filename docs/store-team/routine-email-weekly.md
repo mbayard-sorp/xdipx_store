@@ -1,9 +1,10 @@
 # Routine — Email Campaign Briefs (email-marketing-manager)
 
 The playbook for the scheduled weekly email routine. Entry agent: `email-marketing-manager`.
-**PLAN-ONLY**: campaign briefs are filed as suggestions (kind `campaign`) for the owner to execute
-in Klaviyo's UI. The store's Klaviyo integration fires events and manages lists; it cannot create
-campaigns, and this routine sends nothing.
+**PLAN-ONLY for sending**: campaign briefs are filed as suggestions (kind `campaign`). Once the
+owner approves a brief, an optional valve-gated executor turns it into a Klaviyo **draft** (never a
+send). The store's Klaviyo integration fires events and manages lists, and, when
+`email_campaign_push_enabled` is on, creates draft campaigns; this routine still sends nothing.
 
 Runs on the **Max subscription**. Recommended cadence: weekly, after the strategy routine.
 
@@ -48,6 +49,24 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 ```
 
 One `event` per brief.
+
+## Step 5b — Execute approved briefs to Klaviyo drafts (valve-gated)
+
+This step turns briefs the owner has **already approved** into Klaviyo **draft** campaigns plus an
+owner review email. It never sends or schedules: creating a Klaviyo campaign leaves it in Draft, and
+`app/lib/klaviyo-campaigns.server.ts` makes no send-job call. Gated by `email_campaign_push_enabled`,
+which defaults **off**; with the valve off the script exits without touching Klaviyo or any ticket.
+
+```bash
+tsx scripts/push-approved-campaigns.ts
+```
+
+For each approved `kind:'campaign'` row on team `email`, the script creates a draft campaign
+(audience resolved from the brief, subject and preview set, sender from `EMAIL_FROM`), emails the
+owner a one-click review-and-send link, and records that link as a `note` on the ticket. It is
+idempotent: a row that already carries a Klaviyo draft link is skipped, so re-runs never duplicate.
+The full body copy travels in the owner email; finishing the template and hitting send stay manual
+in Klaviyo.
 
 ## Step 6 — Retro
 
