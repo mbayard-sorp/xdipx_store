@@ -16,9 +16,9 @@
  * regardless of when keys arrive.
  */
 
-import type { VideoPublisher, PublishInput, PublishResult } from './types'
+import type { SocialPublisher, PublishInput, PublishResult } from './types'
 
-export const tiktokPublisher: VideoPublisher = {
+export const tiktokPublisher: SocialPublisher = {
   platform: 'tiktok',
   configured(): boolean {
     return !!process.env['TIKTOK_CLIENT_KEY']?.trim()

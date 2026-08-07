@@ -14,9 +14,9 @@
  * Docs: https://developers.google.com/youtube/v3/docs/videos/insert
  */
 
-import type { VideoPublisher, PublishInput, PublishResult } from './types'
+import type { SocialPublisher, PublishInput, PublishResult } from './types'
 
-export const youtubePublisher: VideoPublisher = {
+export const youtubePublisher: SocialPublisher = {
   platform: 'youtube',
   configured(): boolean {
     return !!process.env['YOUTUBE_OAUTH_CLIENT_ID']?.trim()

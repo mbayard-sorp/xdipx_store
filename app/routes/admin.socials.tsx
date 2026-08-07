@@ -141,10 +141,11 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: result.ok, intent: 'post-approved-draft', tweetId: result.tweetId, error: result.error }
   }
 
-  // ── Video posting via platform publishers — double-gated (valve + env).
-  // Today every adapter is a stub, so this reports the manual path; when keys
-  // land, the same click goes live with zero UI change.
-  if (intent === 'post-video') {
+  // ── Media posting via platform publishers, double-gated (valve + env).
+  // Instagram is live; TikTok and YouTube are still stubs and report the
+  // manual path. The owner's click is always the trigger: nothing here runs
+  // on a schedule.
+  if (intent === 'post-media') {
     const postId = parseInt(form.get('postId') as string)
     if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
     const [post] = await db.select().from(socialPosts).where(eq(socialPosts.id, postId)).limit(1)
@@ -153,17 +154,19 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const valveOn = await getValve(VALVE_KEYS.videoAutopublish)
     if (!valveOn) {
-      return { ok: false, stub: true, error: 'Autopublish valve is OFF (Homepage Team > Video tab). Copy the caption and download the video to post manually.' }
+      return { ok: false, stub: true, error: 'Autopublish valve is OFF (Homepage Team > Video tab). Copy the caption and download the media to post manually.' }
     }
     const { getPublisher } = await import('~/lib/social-publish/registry.server')
     const publisher = getPublisher(post.platform)
     if (!publisher) return { ok: false, stub: true, error: `No publisher for ${post.platform}` }
-    const videoUrl = post.mediaUrls?.[0]
-    if (!videoUrl) return { ok: false, error: 'Draft has no video URL' }
+    const mediaUrl = post.mediaUrls?.[0]
+    if (!mediaUrl) return { ok: false, error: 'Draft has no media URL' }
+    const isVideo = post.videoJobId != null || !!mediaUrl.split('?')[0]?.endsWith('.mp4')
     const result = await publisher.publish({
       postId,
-      videoUrl,
-      ...(post.posterUrl ? { posterUrl: post.posterUrl } : {}),
+      media: isVideo
+        ? { kind: 'video', videoUrl: mediaUrl, ...(post.posterUrl ? { posterUrl: post.posterUrl } : {}) }
+        : { kind: 'image', imageUrl: mediaUrl },
       caption: post.editedText?.trim() || post.tweetText,
     })
     if (!result.ok) {
@@ -397,9 +400,9 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
           </fetcher.Form>
         ) : (
           <>
-            {video && (
+            {media && (
               <fetcher.Form method="post">
-                <input type="hidden" name="intent" value="post-video" />
+                <input type="hidden" name="intent" value="post-media" />
                 <input type="hidden" name="postId" value={post.id} />
                 <button
                   type="submit"
