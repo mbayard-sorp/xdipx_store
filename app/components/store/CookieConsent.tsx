@@ -50,7 +50,14 @@ export function CookieConsent() {
       // own category flyout dialog (56) so the banner and its buttons are
       // never occluded, however the user is interacting with the bottom
       // nav; see the z-index scale note in app.css.
-      className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] left-4 right-4 md:bottom-4 md:left-auto md:right-6 md:max-w-sm z-[57] bg-ink text-white rounded-2xl p-5 shadow-2xl fade-in"
+      //
+      // No entrance animation: this is a client-only overlay that can only
+      // appear after hydration, and a fade-in makes its ~1/3-viewport of
+      // pixels keep CHANGING for the animation's duration, which Speed Index
+      // integrates as churn. Rendering it in its final state in a single frame
+      // turns that into one settled change instead of an animated one. It is
+      // fixed-position, so it never shifts layout (CLS stays 0).
+      className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] left-4 right-4 md:bottom-4 md:left-auto md:right-6 md:max-w-sm z-[57] bg-ink text-white rounded-2xl p-5 shadow-2xl"
       role="dialog"
       aria-modal="true"
       aria-label="Cookie consent"
