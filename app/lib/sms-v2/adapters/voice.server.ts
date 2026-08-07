@@ -84,12 +84,24 @@ function ssmlEscape(text: string): string {
  * Example: "Take a peek: https://xdipx.com/products/x — it's $129"
  *   →     "Take a peek, it's $129"
  */
-function stripUrlsForVoice(prose: string): string {
+export function stripUrlsForVoice(prose: string): string {
   return prose
+    // conv-audit C7: drop whole Markdown links that point at a product page,
+    // label and target together. A spoken link is useless, and the multi-result
+    // list (stages/discovery.server.ts buildMultiResultProse) puts a
+    // "[Take a peek →](…/products/<handle>)" line under every item — without
+    // this the label repeats once per result on a call. Covers absolute
+    // https://xdipx.com/products/… and relative /products/… targets. Scoped to
+    // /products so a non-product link's label text still gets spoken.
+    .replace(/\[[^\]]*\]\((?:https?:\/\/[^)\s]*)?\/products\/[^)\s]*\)/gi, '')
     // Drop "<word>: <url>" patterns where the URL follows a colon.
     .replace(/[:\-—]\s*https?:\/\/\S+/gi, ',')
     // Drop bare URLs.
     .replace(/https?:\/\/\S+/gi, '')
+    // conv-audit C7: bare relative product paths (no scheme) that the http
+    // rules above miss, e.g. a stage emitting "/products/<handle>" as text.
+    // These were being read aloud character-by-character before.
+    .replace(/\/products\/[a-z0-9][a-z0-9-]*/gi, '')
     // Drop www-only links some templates produce.
     .replace(/\bwww\.\S+/gi, '')
     // Collapse runs of whitespace and clean up dangling punctuation.

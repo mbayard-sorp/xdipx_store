@@ -172,14 +172,21 @@ function audienceToSearchCategory(
  * Build a numbered-list prose string from search result cards.
  * Capped at 3. Stays in DISCOVERY so the customer's next reply is a fresh signal.
  */
-function buildMultiResultProse(
+export function buildMultiResultProse(
   cards: Awaited<ReturnType<typeof searchForIvrWithDiagnostics>>['cards'],
 ): string {
   const capped = cards.slice(0, 3)
-  // ADR-003 Sub-decision A: include PDP URLs so web widget renders tappable links.
-  // IvrProductCard.handle is a non-optional string (ivr-search.server.ts:32).
+  // conv-audit C7: emit ABSOLUTE https://xdipx.com/products/{handle} URLs (the
+  // convention every other v2 stage follows; the web adapter relativizes them,
+  // see adapters/web.server.ts) inside a Markdown link on its OWN line. On SMS,
+  // stripMarkdownForSms collapses [label](url) to the bare url, so the link
+  // lands alone on a line and splitProseAtUrl can pull the top result into its
+  // own bubble for an iMessage preview. A relative path was neither tappable nor
+  // preview-able on SMS and got read aloud on voice. Whitelisted CTA label; the
+  // em-dash before the price is gone (brand rule). IvrProductCard.handle is a
+  // non-optional string (ivr-search.server.ts:32).
   const lines = capped.map((c, i) =>
-    `${i + 1}. [${c.title}](/products/${c.handle}) — $${c.price.toFixed(2)}`
+    `${i + 1}. ${c.title}, $${c.price.toFixed(2)}\n[Take a peek →](https://xdipx.com/products/${c.handle})`
   )
   return (
     `A few options that fit what you described:\n\n` +
