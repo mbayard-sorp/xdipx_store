@@ -181,13 +181,21 @@ the other categories stay answer-shaped per the blog addendum):
 0. **Direct-answer capsule.** Two sentences at the very top that answer the target query
    directly — the quotable block for LLM/AEO citation. The essay below is what gets read; the
    capsule is what gets cited.
-1. **The problem, scene first.** Open with a real-sounding scene or moment of recognition in the
-   reader's world before any explanation. Statement H2s are allowed in this format. The title
-   still matches the target query closely, and the FAQ carries the question-form variants (with
-   FAQPage JSON-LD), so citability survives the essay shape. "What people tell us / what shows up
-   in questions", never first-person anecdote (Emma has no lived experience — the rule is extra
-   load-bearing in this format; her hero-image depictions are fictional expression and don't
-   change this).
+1. **The problem, scene first — illustrative, never sourced-frequency.** Open with a real-sounding
+   scene or moment of recognition in the reader's world before any explanation, framed
+   **illustratively** ("It is a familiar scene. Someone opens a site and freezes at the first
+   choice."). Prefer that scene phrasing over any "what people tell us / what shows up in questions"
+   or "more than any other question" framing: the writer has no access to support mail and cannot
+   verify a customer-frequency claim, so the charter (which outranks this plan) reads it as
+   unsourced customer-feedback and it has BLOCKed the voice gate on first submit. Steer to the
+   illustrative scene to lift the first-submit pass rate. Statement H2s are allowed in this format.
+   The title still matches the target query closely, and the FAQ carries the question-form variants
+   (with FAQPage JSON-LD), so citability survives the essay shape. Never first-person anecdote (Emma
+   has no lived experience — the rule is extra load-bearing in this format; her hero-image
+   depictions are fictional expression and don't change this).
+   - **Watch note (cadence):** avoid the "the one you keep reaching for" cadence, adjacent to the
+     retired "keeps coming back to" tic. It reads as an unsourced habit claim about the reader and
+     rotates out like any other repeating tic.
 2. **The root cause, plainly and with authority.** No diagnosis language, no medical overreach;
    include a "worth seeing a clinician if…" line whenever the topic borders on health. Variance
    in experience is stated boldly, never hedged.
