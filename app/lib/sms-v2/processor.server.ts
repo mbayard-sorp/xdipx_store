@@ -28,6 +28,7 @@ import { pickEffectiveStage, dispatchStage } from './stage-dispatch.server'
 import { buildEmmaContextWithCrossChannel } from './cross-channel.server'
 import { loadConversationHistory } from './conversation-history.server'
 import { generateConversationSummary } from './summary.server'
+import { runWithTurnDeadline, isTurnAborted } from './turn-deadline.server'
 import { db } from '~/lib/db.server'
 import { kvSetNX } from '~/lib/kv.server'
 import { smsAgeConsent } from '../../../db/schema'
@@ -105,9 +106,18 @@ export async function processSmsMessageV2(
     }
   }
 
-  // Guard 2: never let a throw become silence.
+  // Guard 2: never let a throw — or a blown Twilio webhook window — become
+  // silence. runWithTurnDeadline (conv-audit C4b) races the turn against a
+  // per-turn budget well under Twilio's ~15s timeout; on timeout it aborts the
+  // shared signal so in-flight LLM calls stop, and we send the same friendly,
+  // voice-gated best-effort reply we use for a throw.
   try {
-    return await runV2Turn(input)
+    const outcome = await runWithTurnDeadline(() => runV2Turn(input))
+    if (outcome.timedOut) {
+      console.error('[processor-v2] turn exceeded its deadline — returning best-effort reply')
+      return V2_FAILURE_RESULT
+    }
+    return outcome.result as Awaited<ReturnType<typeof runV2Turn>>
   } catch (err) {
     console.error('[processor-v2] turn failed — returning friendly reply instead of silence', err)
     return V2_FAILURE_RESULT
@@ -133,6 +143,9 @@ async function runV2Turn(
       })
     }
   } catch (err) {
+    // On a deadline abort, don't spawn an unsignalled v1 turn in the
+    // background — let the abort bubble to the abandoned promise instead.
+    if (isTurnAborted()) throw err
     // Fail open into v1, which re-runs its own compliance checks.
     console.error('[processor-v2] compliance short-circuit failed — falling back to v1', err)
     return processSmsMessage(input)
@@ -143,6 +156,7 @@ async function runV2Turn(
   try {
     conversation = await getOrCreateConversation(phone)
   } catch (err) {
+    if (isTurnAborted()) throw err
     console.error('[processor-v2] getOrCreateConversation failed — falling back to v1', err)
     return processSmsMessage(input)
   }

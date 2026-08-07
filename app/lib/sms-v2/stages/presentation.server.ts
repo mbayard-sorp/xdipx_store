@@ -15,6 +15,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
+import { getTurnSignal } from '../turn-deadline.server'
 import { searchForIvr } from '~/lib/ivr-search.server'
 import { executeConversationAgent } from '../conversation-agent.server'
 import { pickDiscoveryAgentVersion } from '../discovery-agent-flag.server'
@@ -187,7 +188,7 @@ async function executePresentationStageGate(
       tools:      [SEARCH_FOR_IVR_TOOL],
       tool_choice: { type: 'auto' },
       messages,
-    })
+    }, { signal: getTurnSignal() })
 
     const usage = response.usage as typeof response.usage & {
       cache_creation_input_tokens?: number
