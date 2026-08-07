@@ -54,9 +54,12 @@ import {
   isGithubConfigured,
   listOpenPullRequests,
   listPullRequestFiles,
+  listWorkflowRunsForSha,
   markPullRequestReadyForReview,
   normalizeChangedPath,
   openPullRequest,
+  recyclePullRequest,
+  rerunFailedJobs,
   squashMergePullRequest,
   type ProtectedClassification,
   type PullRequestSummary,
@@ -140,6 +143,42 @@ const FAILING_CONCLUSIONS = new Set([
   'failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure', 'stale',
 ])
 
+/**
+ * Failing conclusions that mean the job never actually executed.
+ *
+ * GitHub reports a hosted-runner capacity failure ("The job was not acquired by
+ * Runner of type hosted even after multiple attempts") as `cancelled`, and a
+ * superseded concurrency group the same way. In both cases no typecheck, test,
+ * or build step ran, so reading it as "the build is red" is as wrong as reading
+ * it as "the build is green". The honest state is "no verdict yet", and the way
+ * to get one is to re-run.
+ *
+ * This is bounded by MAX_CI_RETRIGGERS_PER_PR and it never merges anything: a
+ * re-run that comes back `failure` is red, permanently, exactly as before.
+ */
+const NO_VERDICT_CONCLUSIONS = new Set(['cancelled', 'stale'])
+
+/**
+ * How long a non-draft PR may sit with a required check that never reported
+ * before the engine concludes GitHub dropped the trigger.
+ *
+ * Measured against `updated_at`, and deliberately longer than one cron cycle
+ * (10 min) plus a normal queue wait, so a merely slow run is never recycled out
+ * from under itself.
+ */
+export const CI_ABSENT_GRACE_MS = 20 * 60_000
+
+/**
+ * Times the engine will try to make GitHub produce a missing check for one PR
+ * before it stops and asks the owner.
+ *
+ * Why a cap at all: if the trigger is being declined for a reason recycling
+ * cannot fix, an uncapped retry is an infinite close/reopen loop that spams the
+ * PR timeline and burns Actions minutes. Two attempts covers the observed
+ * transient case; the third signal to the owner is worth more than a third try.
+ */
+export const MAX_CI_RETRIGGERS_PER_PR = 2
+
 /** Attempts a ticket gets before it is blocked and escalated. */
 export const MAX_TICKET_ATTEMPTS = 3
 
@@ -186,6 +225,15 @@ const KEYS = {
   sweepHour: 'release-engine:sweep-hour',
   /** Marks the cycle that last swept tickets that burned every fix attempt. */
   exhaustedHour: 'release-engine:exhausted-sweep-hour',
+  /**
+   * Times the engine has tried to make GitHub produce a check for one head.
+   *
+   * Keyed on the SHA, not the PR: a new commit is a new chance at a run, and
+   * an author who pushes a fix should not inherit the previous head's exhausted
+   * budget. It also self-expires, since a merged branch's SHA is never read
+   * again.
+   */
+  ciRetrigger: (sha: string) => `release-engine:ci-retrigger:${sha}`,
 } as const
 
 /**
@@ -242,9 +290,17 @@ export interface PullRequestFacts {
    *  is absent from this map never reported at all. */
   checks: Readonly<Record<string, string | null>>
   ticket: TicketFacts | null
+  /**
+   * Times the engine has already tried to make GitHub produce a missing check
+   * for this PR. Read from KV by the caller so `evaluatePullRequest` stays a
+   * pure function of its facts.
+   */
+  ciRetriggers: number
 }
 
-export type ReleaseAction = 'merge' | 'wait' | 'skip' | 'bounce' | 'escalate-protected' | 'undraft'
+export type ReleaseAction =
+  | 'merge' | 'wait' | 'skip' | 'bounce' | 'escalate-protected' | 'undraft'
+  | 'retrigger-ci' | 'escalate-ci'
 
 export type ReleaseReasonCode =
   | 'protected'
@@ -254,6 +310,9 @@ export type ReleaseReasonCode =
   | 'conflict'
   | 'ci-red'
   | 'ci-pending'
+  | 'ci-absent'
+  | 'ci-no-verdict'
+  | 'ci-stuck'
   | 'allowlist-red'
   | 'allowlist-pending'
   | 'no-ticket'
@@ -422,6 +481,27 @@ export function checkState(checks: Readonly<Record<string, string | null>>, name
 }
 
 /**
+ * The raw conclusion string of the first of `names` that reported one.
+ *
+ * `checkState` deliberately collapses every failing conclusion to `'failing'`,
+ * which is the right shape for the merge gate but loses the distinction between
+ * a build that ran and failed and a job that was never scheduled. Only the
+ * re-run path needs the raw value, so it reads it here rather than widening
+ * `CheckState` for everyone.
+ */
+export function rawConclusion(
+  checks: Readonly<Record<string, string | null>>,
+  names: readonly string[],
+): string | null {
+  for (const name of names) {
+    if (!(name in checks)) continue
+    const conclusion = checks[name]
+    if (typeof conclusion === 'string' && conclusion) return conclusion
+  }
+  return null
+}
+
+/**
  * Extract a ticket id from a PR title (`agents: ticket #41: ...`).
  *
  * This is untrusted text. It is safe only because naming a ticket can never
@@ -519,6 +599,65 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
 
   // 3. CI. A red `check` blocks every PR without exception, revert PRs included.
   const ci = checkState(facts.checks, [REQUIRED_CHECK])
+
+  // 3a. A check that reported a no-verdict conclusion (a hosted runner that was
+  //     never acquired, or a concurrency-superseded run) never executed a single
+  //     step. Re-run it rather than reading it as a red build. Bounded, and it
+  //     merges nothing: the re-run's real conclusion is what the gate below sees
+  //     on the next cycle.
+  const rawCi = rawConclusion(facts.checks, [REQUIRED_CHECK])
+  if (ci === 'failing' && rawCi !== null && NO_VERDICT_CONCLUSIONS.has(rawCi)) {
+    if (facts.ciRetriggers < MAX_CI_RETRIGGERS_PER_PR) {
+      return {
+        ...base,
+        action: 'retrigger-ci',
+        code: 'ci-no-verdict',
+        reason:
+          `required check "${REQUIRED_CHECK}" concluded '${rawCi}' without running any step, `
+          + `re-running it (attempt ${facts.ciRetriggers + 1} of ${MAX_CI_RETRIGGERS_PER_PR})`,
+      }
+    }
+    return {
+      ...base,
+      action: 'escalate-ci',
+      code: 'ci-stuck',
+      reason:
+        `required check "${REQUIRED_CHECK}" concluded '${rawCi}' without running, and `
+        + `${MAX_CI_RETRIGGERS_PER_PR} re-runs did not produce a verdict`,
+    }
+  }
+
+  // 3b. A required check that never reported at all. GitHub silently declines to
+  //     create `pull_request` workflow runs often enough that this is the single
+  //     largest cause of a PR sitting open: the context branch protection
+  //     requires can never arrive, so the PR is unmergeable forever and nothing
+  //     in the loop notices. Recycling the PR (close then reopen) fires the
+  //     `reopened` activity type and makes GitHub build the run.
+  //
+  //     The grace window matters. Before it elapses this is an ordinary
+  //     `ci-pending` wait, because a queued run and a dropped run look identical.
+  if (ci === 'absent' && facts.ageMs >= CI_ABSENT_GRACE_MS) {
+    if (facts.ciRetriggers < MAX_CI_RETRIGGERS_PER_PR) {
+      return {
+        ...base,
+        action: 'retrigger-ci',
+        code: 'ci-absent',
+        reason:
+          `no "${REQUIRED_CHECK}" run exists for this head after `
+          + `${Math.round(facts.ageMs / 60_000)} min, recycling the PR to make GitHub create one `
+          + `(attempt ${facts.ciRetriggers + 1} of ${MAX_CI_RETRIGGERS_PER_PR})`,
+      }
+    }
+    return {
+      ...base,
+      action: 'escalate-ci',
+      code: 'ci-stuck',
+      reason:
+        `GitHub never created a "${REQUIRED_CHECK}" run for this head and `
+        + `${MAX_CI_RETRIGGERS_PER_PR} recycles did not change that`,
+    }
+  }
+
   if (ci === 'failing') {
     const lastError = `CI check "${REQUIRED_CHECK}" failed on PR #${facts.number} (${facts.headRef})`
     // A bounce is only legal from `verified`; from anywhere else the red build
@@ -539,6 +678,21 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
     return { ...base, action: 'skip', code: 'allowlist-red', reason: lastError }
   }
   if (allowlist === 'pending' || allowlist === 'absent') {
+    // Same dropped-trigger class as the required check above. The allowlist runs
+    // in the same workflow dispatch batch, so when GitHub declines one it has
+    // usually declined both, and recycling the PR rebuilds them together.
+    if (allowlist === 'absent' && facts.ageMs >= CI_ABSENT_GRACE_MS
+      && facts.ciRetriggers < MAX_CI_RETRIGGERS_PER_PR) {
+      return {
+        ...base,
+        action: 'retrigger-ci',
+        code: 'ci-absent',
+        reason:
+          `no agent-allowlist run exists for this head after `
+          + `${Math.round(facts.ageMs / 60_000)} min, recycling the PR to make GitHub create one `
+          + `(attempt ${facts.ciRetriggers + 1} of ${MAX_CI_RETRIGGERS_PER_PR})`,
+      }
+    }
     return {
       ...base,
       action: 'wait',
@@ -548,9 +702,16 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
   }
 
   // The docs carve-out: a docs-only agent PR merges on the allowlist alone, so
-  // a slow or absent `check` does not park a one-line playbook edit for a day.
-  // It still cannot merge over a RED `check`; that was handled above.
-  const docsCarveOut = docsOnly && allowlistRequired
+  // a slow `check` does not park a one-line playbook edit for a day. It still
+  // cannot merge over a RED `check`; that was handled above.
+  //
+  // `absent` is excluded on purpose. Branch protection lists `check` as a
+  // required context, so a merge attempted while no run exists is one GitHub
+  // refuses; the carve-out used to spend all three MAX_MERGE_ATTEMPTS on
+  // refusals and then escalate a PR whose only real problem was a missing
+  // trigger. Case 3b recycles it instead, and the carve-out applies once a run
+  // exists and is merely slow.
+  const docsCarveOut = docsOnly && allowlistRequired && ci !== 'absent'
   if (ci !== 'success' && !docsCarveOut) {
     return {
       ...base,
@@ -1028,7 +1189,7 @@ async function loadTicketFacts(id: number): Promise<TicketFacts | null> {
 // Escalation
 // ---------------------------------------------------------------------------
 
-type EscalationKind = 'protected' | 'attempts' | 'merge-attempts' | 'revert-ci' | 'circuit'
+type EscalationKind = 'protected' | 'attempts' | 'merge-attempts' | 'revert-ci' | 'circuit' | 'ci-stuck'
 
 /**
  * One email per PR per escalation kind, deduped in KV for a week. Without this
@@ -1246,6 +1407,19 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
       if (problem) undraftErrors.push(problem)
       continue
     }
+    // GitHub declined to build a required check, or built one that never ran a
+    // step. Neither is a verdict, and until this existed neither had an exit:
+    // the PR sat on `wait` every ten minutes until the owner merged it by hand.
+    // Recycling costs one cheap mutation, merges nothing, and every gate is
+    // re-evaluated from scratch on the next cycle against the real result.
+    if (decision.action === 'retrigger-ci') {
+      await retriggerChecks(summary, decision, dryRun)
+      continue
+    }
+    if (decision.action === 'escalate-ci') {
+      await escalateStuckCi(summary, decision, dryRun)
+      continue
+    }
     if (decision.code === 'ci-red' && decision.isRevert) {
       await escalateRevertCiFailure(summary, dryRun)
     }
@@ -1372,6 +1546,7 @@ async function gatherFacts(summary: PullRequestSummary): Promise<PullRequestFact
     changedPaths,
     checks,
     ticket,
+    ciRetriggers: Number((await kvGet<number>(KEYS.ciRetrigger(pr.headSha))) ?? 0),
   }
 }
 
@@ -1634,6 +1809,97 @@ async function handleProtected(pr: PullRequestSummary, decision: ReleaseDecision
       ],
       `<p>The engine will never merge this one. Review and merge it yourself if it is right: <a href="${escapeHtml(pr.htmlUrl)}">${escapeHtml(pr.htmlUrl)}</a></p>
 <p>The classification comes only from the GitHub changed-file list. Nothing in the PR title, body, or the linked ticket was consulted.</p>`,
+    ),
+    dryRun,
+  )
+}
+
+/**
+ * Make GitHub produce a check it did not produce.
+ *
+ * Two mechanisms, chosen by what is actually wrong:
+ *   - a run exists but concluded without executing (`ci-no-verdict`): re-run its
+ *     failed jobs, which keeps the same run and the same head;
+ *   - no run exists at all (`ci-absent`): close and reopen the PR, which is the
+ *     only thing that reliably makes GitHub dispatch `pull_request` workflows it
+ *     skipped the first time.
+ *
+ * The counter is incremented before the mutation, not after. If the mutation
+ * throws or the function is killed mid-flight, the attempt is still spent, so a
+ * pathological PR converges on the escalation instead of recycling forever.
+ */
+async function retriggerChecks(
+  pr: PullRequestSummary,
+  decision: ReleaseDecision,
+  dryRun: boolean,
+): Promise<void> {
+  if (dryRun) {
+    console.log(`${LOG} [dry-run] would re-trigger checks on PR #${pr.number}: ${decision.reason}`)
+    return
+  }
+  const attempts = await kvIncr(KEYS.ciRetrigger(pr.headSha))
+  console.log(`${LOG} re-triggering checks on PR #${pr.number} (attempt ${attempts}): ${decision.reason}`)
+
+  if (decision.code === 'ci-no-verdict') {
+    const runs = await listWorkflowRunsForSha(pr.headSha, 'release-engine')
+    if (!runs.ok) {
+      console.warn(`${LOG} cannot list workflow runs for PR #${pr.number}: ${runs.error}`)
+      return
+    }
+    const stalled = runs.data.filter((r) =>
+      r.status === 'completed' && r.conclusion !== null && NO_VERDICT_CONCLUSIONS.has(r.conclusion),
+    )
+    if (stalled.length === 0) {
+      console.warn(`${LOG} PR #${pr.number} reported a no-verdict check but no matching run was found`)
+      return
+    }
+    for (const run of stalled) {
+      const res = await rerunFailedJobs(run.id, 'release-engine')
+      if (!res.ok) console.warn(`${LOG} rerun of run ${run.id} failed: ${res.error}`)
+    }
+    return
+  }
+
+  const recycled = await recyclePullRequest(pr.number, 'release-engine')
+  if (!recycled.ok) {
+    console.warn(`${LOG} recycle of PR #${pr.number} failed: ${recycled.error}`)
+  }
+}
+
+/**
+ * The re-trigger budget is spent and GitHub still will not produce a verdict.
+ *
+ * This is the one case the engine genuinely cannot resolve, so it does what it
+ * does for a protected path: labels the PR and tells the owner once. The point
+ * is that a PR is never again stuck silently. Before this, `wait / ci-pending`
+ * was written only to a Vercel function log that nothing reads.
+ */
+async function escalateStuckCi(
+  pr: PullRequestSummary,
+  decision: ReleaseDecision,
+  dryRun: boolean,
+): Promise<void> {
+  if (!dryRun && !pr.labels.includes(NEEDS_OWNER_LABEL)) {
+    const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], 'release-engine')
+    if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
+  }
+  if (!dryRun && decision.ticketId !== null) {
+    await addTicketLink(decision.ticketId, { kind: 'pr', ref: pr.htmlUrl, state: 'needs-owner' })
+  }
+  await escalate(
+    'ci-stuck',
+    KEYS.escalated(pr.number),
+    `[xdipx] PR #${pr.number} needs you: CI will not report`,
+    emailShell(
+      'GitHub will not produce a required check, so the release engine stopped',
+      [
+        ['PR', `#${pr.number} ${pr.title}`],
+        ['Branch', pr.headRef],
+        ['Head', pr.headSha.slice(0, 8)],
+        ['Detail', decision.reason],
+      ],
+      `<p>The engine re-triggered the checks ${MAX_CI_RETRIGGERS_PER_PR} times and GitHub still reported no verdict. This is a GitHub Actions problem, not a problem with the diff.</p>
+<p>Re-run the checks from the PR page, or merge it yourself if you are satisfied it is right: <a href="${escapeHtml(pr.htmlUrl)}">${escapeHtml(pr.htmlUrl)}</a></p>`,
     ),
     dryRun,
   )
