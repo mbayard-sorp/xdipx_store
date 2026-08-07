@@ -718,17 +718,28 @@ export async function executeConversationAgent(
   let searchRepeatedPitch = false
 
   try {
-    for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
+    // conv-audit C5: MAX_TOOL_HOPS counts only tool-calling turns. Once they are
+    // spent we always run one final text turn (hop === MAX_TOOL_HOPS) with tool
+    // use forbidden, so the customer gets a reply written over whatever the
+    // searches already found instead of safeFallback discarding completed
+    // results. Previously the terminal text turn shared the budget, so three
+    // tool hops left no turn to speak and a successful search was thrown away.
+    for (let hop = 0; hop <= MAX_TOOL_HOPS; hop++) {
+      const isFinalTextTurn = hop === MAX_TOOL_HOPS
       const res = await _client.messages.create({
         model: SONNET_MODEL,
         max_tokens: tuning.maxTokens,
         system: systemParam,
+        // Keep the tool definitions present (the transcript already contains
+        // tool_use/tool_result blocks), but forbid new tool calls on the final
+        // turn so the model must answer in text over the collected results.
         tools: DISCOVERY_AGENT_TOOLS,
+        ...(isFinalTextTurn ? { tool_choice: { type: 'none' as const } } : {}),
         messages,
       })
       tally(res.usage)
 
-      if (res.stop_reason === 'tool_use') {
+      if (!isFinalTextTurn && res.stop_reason === 'tool_use') {
         messages.push({ role: 'assistant', content: res.content })
         const toolResultBlocks: Anthropic.ToolResultBlockParam[] = []
 
@@ -795,13 +806,14 @@ export async function executeConversationAgent(
           })
         }
 
-        // Task 0.9: detect budget exhaustion on the last hop.
-        // When hop === MAX_TOOL_HOPS - 1 and stop_reason is still 'tool_use',
-        // the loop will exit after this iteration without setting finalText.
+        // conv-audit C5: on the last tool turn, mark the budget exhausted and
+        // fall through to the final no-tools text turn (hop === MAX_TOOL_HOPS),
+        // which speaks over the collected results. Previously the loop simply
+        // ended here with no text turn, discarding completed searches.
         if (hop === MAX_TOOL_HOPS - 1) {
           toolBudgetExhausted = true
           console.warn(
-            `[conversation-agent] tool budget exhausted at hop=${hop + 1}; safeFallback will run`,
+            `[conversation-agent] tool budget exhausted at hop=${hop + 1}; running one final no-tools text turn over collected results`,
           )
         }
 
@@ -809,7 +821,8 @@ export async function executeConversationAgent(
         continue
       }
 
-      // Terminal stop_reason ('end_turn' / 'max_tokens' / etc.) — pull the text.
+      // Terminal stop_reason ('end_turn' / 'max_tokens' / etc.), or the forced
+      // final no-tools text turn — pull the text.
       const textBlock = res.content.find(
         (b): b is Anthropic.TextBlock => b.type === 'text',
       )
