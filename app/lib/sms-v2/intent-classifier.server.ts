@@ -14,6 +14,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
+import { getTurnSignal } from './turn-deadline.server'
 import type { Intent, IntentResult, Stage } from './types.server'
 import type { EmmaContext } from './types.server'
 import { logApiTokens } from '../token-log.server'
@@ -230,7 +231,7 @@ async function classifyWithHaiku(
           content: `Current conversation stage: ${stage}\nCustomer message: ${text}`,
         },
       ],
-    })
+    }, { signal: getTurnSignal() })
 
     const _u = res.usage as {
       input_tokens: number

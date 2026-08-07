@@ -24,6 +24,7 @@
  *     any error so a Haiku failure can't break the call.
  */
 import Anthropic from '@anthropic-ai/sdk'
+import { getTurnSignal } from './turn-deadline.server'
 import { getSmsConfig, fillReturningGreeting, SMS_DEFAULTS } from './sms-config.server'
 import { logApiTokens } from '../token-log.server'
 import { EMMA_VOICE_CONVERSATIONAL } from '../emma-voice.server'
@@ -109,7 +110,7 @@ export async function generateDiscoveryWelcome(
       max_tokens: 220,
       system: SYSTEM,
       messages: [{ role: 'user', content: userMsg }],
-    })
+    }, { signal: getTurnSignal() })
 
     const _u = resp.usage as {
       input_tokens: number
