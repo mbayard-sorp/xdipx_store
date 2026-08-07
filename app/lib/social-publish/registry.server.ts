@@ -4,17 +4,17 @@
  * text-first; these adapters are the video platforms.
  */
 
-import type { VideoPublisher } from './types'
+import type { SocialPublisher } from './types'
 import { instagramPublisher } from './instagram.server'
 import { tiktokPublisher } from './tiktok.server'
 import { youtubePublisher } from './youtube.server'
 
-const PUBLISHERS: Record<string, VideoPublisher> = {
+const PUBLISHERS: Record<string, SocialPublisher> = {
   instagram: instagramPublisher,
   tiktok: tiktokPublisher,
   youtube: youtubePublisher,
 }
 
-export function getPublisher(platform: string): VideoPublisher | null {
+export function getPublisher(platform: string): SocialPublisher | null {
   return PUBLISHERS[platform] ?? null
 }
