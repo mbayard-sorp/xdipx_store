@@ -1,7 +1,7 @@
 import { getPipelineSetting } from './feed-processor.server'
 import { sendOwnerEmail, escapeHtml } from './owner-alerts.server'
 import { addSuggestionNote } from './team.server'
-import { getProductsByHandles, adminGraphQL } from './shopify.server'
+import { getProductsByHandles, findProductBySKU, adminGraphQL } from './shopify.server'
 
 /**
  * Executor for `kind:'promo'` suggestion rows (the promo-manager brief format).
@@ -27,12 +27,26 @@ import { getProductsByHandles, adminGraphQL } from './shopify.server'
 export const PROMO_EXECUTE_VALVE = 'promo_execute_enabled'
 
 /**
- * Conservative MAP-conflict signals. Every brief mentions "MAP" (the guard is
- * part of the format), so we match only explicit conflict phrasing, never the
- * bare word, to avoid refusing a clean promo whose note says "MAP check: clean".
+ * MAP verdict detection, in two halves, both fail-closed.
+ *
+ * Every promo-manager brief carries an explicit MAP verdict ("MAP CHECK PASS",
+ * "MAP check result: clean", "MAP conflict on X"), and briefs *also* discuss MAP
+ * in general guardrail prose ("...any further discount on those would sell below
+ * MAP", explaining why a scoping guardrail exists). The earlier detector matched
+ * the bare phrase "below MAP" anywhere in the body, so it refused the clean,
+ * MAP-passing brief #51 on the strength of its own guardrail rationale.
+ *
+ * `MAP_FAIL_RE` now matches only an explicit conflict/failure verdict, never the
+ * bare "below MAP" that appears in explanatory prose. `MAP_PASS_RE` matches an
+ * explicit clean verdict. The executor refuses on a FAIL verdict AND refuses
+ * unless a PASS verdict is explicitly present, so a brief that merely mentions
+ * MAP in passing is refused, never minted.
  */
-const MAP_CONFLICT_RE =
-  /\bmap\b[^.\n]*\b(conflict|violation|violat\w*|risk|issue|flagged?|breach)\b|\b(below|under|beneath|breaks?|breaches?|fails?)\s+map\b|\bnot\s+map[\s-]*compliant\b/i
+const MAP_FAIL_RE =
+  /\bmap\b[^.\n]{0,40}?\b(?:conflict|violation|violates?|breach(?:es|ed)?|fail(?:s|ed|ure)?|flagged?)\b|\b(?:violates?|breaches?|breaking)\s+map\b|\bnot\s+map[\s-]*compliant\b|\bmap[\s-]*(?:check|status|result)[\s:_-]*fail/i
+
+const MAP_PASS_RE =
+  /\bmap\b[^.\n]{0,40}?\b(?:pass(?:ed|es)?|clean|clear|compliant|legal)\b|\bmap[\s_]*(?:price)?[\s_]*=?\s*0\b/i
 
 export interface ParsedPromo {
   code: string | null
@@ -43,6 +57,8 @@ export interface ParsedPromo {
   endsAt: string | null
   /** Product handles pulled from /products/<handle> links in the brief. */
   handles: string[]
+  /** Nalpac/variant SKU numbers pulled from labelled "SKU(s) N/N/..." lists. */
+  skus: string[]
   mapNote: string | null
   body: string
 }
@@ -50,8 +66,8 @@ export interface ParsedPromo {
 export interface PromoDecision {
   ok: boolean
   /**
-   * 'ok' | 'map-conflict-flagged' | 'no-code' | 'no-depth' |
-   * 'no-explicit-window' | 'invalid-window'
+   * 'ok' | 'map-conflict-flagged' | 'map-not-confirmed' | 'no-code' |
+   * 'no-depth' | 'no-explicit-window' | 'invalid-window'
    */
   reason: string
 }
@@ -71,15 +87,71 @@ export function promoExecuteEnabled(settingValue: string | null): boolean {
   return settingValue === 'true'
 }
 
-/** True when the brief text flags a MAP conflict. Conservative: explicit phrasing only. */
+/** True when the brief carries an explicit MAP-FAIL verdict about this promo. */
 export function detectMapConflict(text: string): boolean {
-  return MAP_CONFLICT_RE.test(text)
+  return MAP_FAIL_RE.test(text)
+}
+
+/**
+ * True when the brief carries an explicit MAP-clean verdict (a PASS/clean check,
+ * or an explicit map_price=0). Required before any mint: a brief that never
+ * states MAP compliance is refused rather than minted.
+ */
+export function detectMapClean(text: string): boolean {
+  return MAP_PASS_RE.test(text)
+}
+
+/** Section labels and units that look ALL-CAPS but are never a discount code. */
+const CODE_STOPWORDS = new Set([
+  'PROMO', 'DEPTH', 'ELIGIBILITY', 'SKU', 'SKUS', 'MSRP', 'MAP', 'AOV', 'PDP',
+  'CTA', 'STANDING', 'GUARDRAIL', 'WINDOW', 'CHANNEL', 'STACKING', 'PLAN',
+  'SCOPE', 'CHECK', 'PASS', 'FAIL', 'VOICE', 'NOTE', 'USD', 'ONLY', 'THIS',
+])
+
+/**
+ * Extract the discount code. The promo-manager writes it three ways, so we try
+ * three in order:
+ *   A. an explicit `Code: FOO` line (the synthetic/ideal format),
+ *   B. the token right after a `PROMO n \u2014` (em-dash or hyphen) header, which is
+ *      how the live briefs state it inline (row #51: "PROMO 2 (...) \u2014 FIRSTLOOK10"),
+ *   C. the first standalone ALL-CAPS token that contains a digit and is not a
+ *      known section label.
+ * A brief with none of these has no parseable code, and decidePromo refuses it.
+ */
+export function extractPromoCode(text: string): string | null {
+  const line = text.match(/^\s*code\s*[^:\n]*:\s*([A-Za-z0-9][A-Za-z0-9_-]{2,39})/im)
+  if (line?.[1]) return line[1].trim()
+
+  // \u2014 is the em-dash, matched by codepoint so this source stays em-dash-free.
+  const header = text.match(/\bpromo\b[^\u2014\n]*(?:\u2014|-)\s*([A-Z][A-Z0-9]{3,39})\b/i)
+  if (header?.[1] && !CODE_STOPWORDS.has(header[1].toUpperCase())) return header[1]
+
+  for (const m of text.matchAll(/\b([A-Z][A-Z0-9]{3,39})\b/g)) {
+    const tok = m[1] as string
+    if (!CODE_STOPWORDS.has(tok) && /\d/.test(tok)) return tok
+  }
+  return null
+}
+
+/**
+ * Extract eligible product SKUs from labelled lists. Only numbers that directly
+ * follow a "SKU"/"SKUs" label are taken, so counts written elsewhere as "SKUs
+ * (1503 MAP-locked ...)" and dollar/percent figures are never mistaken for a
+ * scope. Row #51 writes them as "SKUs 84740/84743/84747/84748; ...".
+ */
+export function extractSkus(text: string): string[] {
+  const skus = new Set<string>()
+  for (const m of text.matchAll(/\bskus?\b\s*:?\s*(\d[\d,/\s]*\d)/gi)) {
+    for (const n of (m[1] as string).split(/[^\d]+/)) {
+      if (n.length >= 3) skus.add(n)
+    }
+  }
+  return [...skus]
 }
 
 /** Best-effort structured extraction from a free-text promo brief. */
 export function parsePromoBrief(text: string): ParsedPromo {
-  const codeMatch = text.match(/^\s*code\s*[^:\n]*:\s*([A-Za-z0-9][A-Za-z0-9_-]{2,39})/im)
-  const code = codeMatch?.[1] ? codeMatch[1].trim() : null
+  const code = extractPromoCode(text)
 
   // Depth: prefer an explicit "Depth: 15%" line, then "15% off", then a bare percent.
   const depth =
@@ -108,6 +180,7 @@ export function parsePromoBrief(text: string): ParsedPromo {
     startsAt,
     endsAt,
     handles: uniqueHandles,
+    skus: extractSkus(text),
     mapNote,
     body: text,
   }
@@ -125,6 +198,9 @@ export function decidePromo(parsed: ParsedPromo, fullText: string): PromoDecisio
   if (new Date(parsed.endsAt).getTime() <= new Date(parsed.startsAt).getTime()) {
     return { ok: false, reason: 'invalid-window' }
   }
+  // Fail-closed: mint only when MAP compliance is explicitly stated, never on the
+  // mere absence of a conflict word.
+  if (!detectMapClean(fullText)) return { ok: false, reason: 'map-not-confirmed' }
   return { ok: true, reason: 'ok' }
 }
 
@@ -207,9 +283,14 @@ export interface ShopifyDiscountResult {
   userErrors: { field?: readonly string[] | null; message: string }[]
 }
 
+export interface ProductSelector {
+  handles: string[]
+  skus: string[]
+}
+
 export interface PromoExecuteDeps {
   getSetting: (key: string) => Promise<string | null>
-  resolveProductGids: (handles: string[]) => Promise<string[]>
+  resolveProductGids: (sel: ProductSelector) => Promise<string[]>
   createDiscount: (variables: Record<string, unknown>) => Promise<ShopifyDiscountResult>
   sendOwnerEmail: (
     subject: string,
@@ -219,10 +300,20 @@ export interface PromoExecuteDeps {
   addNote: (id: number, ref: string) => Promise<void>
 }
 
-async function resolveProductGidsLive(handles: string[]): Promise<string[]> {
-  if (handles.length === 0) return []
-  const products = await getProductsByHandles(handles)
-  return products.map(p => p.id).filter((id): id is string => !!id)
+async function resolveProductGidsLive(sel: ProductSelector): Promise<string[]> {
+  const gids = new Set<string>()
+  if (sel.handles.length > 0) {
+    const products = await getProductsByHandles(sel.handles)
+    for (const p of products) if (p.id) gids.add(p.id)
+  }
+  // The live briefs (row #51) name eligible products by Nalpac SKU, not by a
+  // /products/ link. Imported products carry that value as their variant SKU, so
+  // `sku:` search resolves each one to its product GID.
+  for (const sku of sel.skus) {
+    const gid = await findProductBySKU(sku)
+    if (gid) gids.add(gid)
+  }
+  return [...gids]
 }
 
 async function createDiscountLive(variables: Record<string, unknown>): Promise<ShopifyDiscountResult> {
@@ -293,7 +384,7 @@ export async function executeApprovedPromo(
     return refuse(row, parsed, decision.reason, 0, deps)
   }
 
-  const productGids = await deps.resolveProductGids(parsed.handles)
+  const productGids = await deps.resolveProductGids({ handles: parsed.handles, skus: parsed.skus })
   if (productGids.length === 0) {
     // Fail closed: never mint a catalog-wide code. A promo with no resolvable
     // eligible product is not actionable, per the promo-manager bound-the-reach rule.
