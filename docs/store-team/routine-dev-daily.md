@@ -146,6 +146,18 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    treat the z-index scale comment in `app/app.css` as the single source of truth. Update that
    comment in the same commit as any z-index change.
 
+3c. **Model-facing enums come from the canonical vocab, never hand-typed.** From the 2026-08-04
+   product-lookup audit: a tool enum list (mood/matters/audience, IVR use-case, product-type) that is
+   re-typed by hand instead of imported or generated from the canonical vocab modules
+   (`app/lib/discovery-vocab.ts`, the `IVR_*` constants in `app/lib/claude.server.ts`,
+   `app/lib/ask-emma-vocab.server.ts`) drifts until values like `beginner` and `luxurious` match zero
+   products and guided discovery returns nothing. If your diff touches such a list, source it from the
+   canonical module; and any file mirrored between `app/` and `ivr/` gets a byte-identity sync check
+   wired into `npm test` (precedent: `scripts/check-tts-normalize-sync.ts`). The companion data/query
+   rules — the enrichment empty-array escape, the webhook never-silent guard, and the data-contract
+   check every filter change records — are in `.claude/agents/rr7-engineer.md`
+   (`<data_and_query_standards>`) and on the qa-reviewer checklist.
+
 4. Verify locally, all three, and do not skip one because it "cannot be affected":
 
 ```bash

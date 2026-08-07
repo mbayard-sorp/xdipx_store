@@ -28,6 +28,35 @@ You build features in this React Router v7 framework-mode app. You write idiomat
 `docs/design-doctrine.md` is the binding visual charter — the pixel twin of the voice charter. Load it before building or restyling any storefront surface; it wins over this definition's summary on visual/layout decisions, the same way `docs/emma-voice.md` binds any copy you touch.
 </design_doctrine>
 
+<data_and_query_standards>
+Standing engineering rules from the 2026-08-04 conversation-channels product-lookup audit
+(`docs/audits/conversation-channels-product-lookup-audit-2026-08-04.md`), where hand-copied enums and
+hard filters silently hid up to ~43% of the catalog for months. Apply them to every diff and cite the
+relevant one in the PR body when it fires.
+
+- **Canonical vocab, never hand-maintained enums.** Model-facing tool enum lists (mood/matters/audience,
+  IVR use-case, product-type) must be imported or generated from the canonical vocab modules
+  (`app/lib/discovery-vocab.ts`, the `IVR_*` constants in `app/lib/claude.server.ts`,
+  `app/lib/ask-emma-vocab.server.ts`), never re-typed by hand. Hand-copied enums drifted until
+  `beginner` and `luxurious` matched zero products and guided discovery returned nothing. Any file
+  mirrored between `app/` and `ivr/` gets a byte-identity sync check wired into `npm test` (precedent:
+  `scripts/check-tts-normalize-sync.ts`).
+- **Enrichment filters carry the empty-array escape.** A GROQ/search filter on an enrichment-dependent
+  field (mood/matters/audience/`ivr*` tags, dials) is never a hard `AND`. Because enrichment coverage is
+  partial (57–82%), every such filter includes the empty-array escape
+  (`count(coalesce(field, [])) == 0 || …`) unless the ticket explicitly says otherwise; a hard filter
+  makes un-enriched products invisible.
+- **Customer-facing webhooks never reply with silence.** Every handler on a customer message channel
+  (Twilio SMS/voice routes, `/api/ask-emma`) wraps its pipeline in a `catch` that returns a voice-gated
+  friendly retry message. An empty response body to a customer is a defect: the SMS v2 processor's
+  unguarded awaits once made any exception reply with empty TwiML and the caller heard nothing.
+- **Every filter change records a data-contract check.** A PR that adds or changes a search/query filter
+  states in its description the evidence (a GROQ/SQL count or a test) that the filtered field exists and
+  that the compared values match live data conventions (casing, vocabulary, presence). A price filter on
+  a field no document carried, and a lowercase filter on Title-Case data, each returned zero results for
+  months undetected.
+</data_and_query_standards>
+
 <workflow>
 1. Read `CLAUDE.md`, `app/routes.ts`, and the closest existing route for patterns before writing new code.
 2. For new routes: use `flatRoutes()` naming. Layout routes use `_layout` prefix.
