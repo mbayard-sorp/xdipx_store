@@ -71,27 +71,40 @@ describe('resolveBandOrder — Sanity layout to render order', () => {
     expect(resolveBandOrder(mirrored)).toEqual(DEFAULT_BAND_ORDER)
   })
 
+  // The anchor guard (ticket #292) force-keeps `anchorGrid` right after the hero
+  // whenever a layout drops or disables it and no live rail replaced it
+  // (`anchorReplaced` defaults false). These reorder/disable/dedup cases omit
+  // anchorGrid from their input, so it appears at index 1 in every expected
+  // result below. The reorder/disable/dedup behaviour each test targets is
+  // unchanged and still demonstrated. The guard itself is covered in
+  // StorefrontHome.test.ts.
   it('honours a reordering', () => {
     const layout = { sections: [band('hero'), band('faq'), band('couples')] }
-    expect(resolveBandOrder(layout)).toEqual(['hero', 'faq', 'couples'])
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'anchorGrid', 'faq', 'couples'])
   })
 
   it('drops bands switched off', () => {
     const layout = { sections: [band('hero'), band('faq', false), band('couples')] }
-    expect(resolveBandOrder(layout)).toEqual(['hero', 'couples'])
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'anchorGrid', 'couples'])
   })
 
   it('keeps the hero first even when the layout moves or omits it', () => {
     // The hero owns the H1 and the LCP image. A content edit must not be able
     // to move the largest paint element.
-    expect(resolveBandOrder({ sections: [band('faq'), band('hero')] })).toEqual(['hero', 'faq'])
+    expect(resolveBandOrder({ sections: [band('faq'), band('hero')] })).toEqual([
+      'hero',
+      'anchorGrid',
+      'faq',
+    ])
     expect(resolveBandOrder({ sections: [band('faq'), band('couples')] })).toEqual([
       'hero',
+      'anchorGrid',
       'faq',
       'couples',
     ])
     expect(resolveBandOrder({ sections: [band('hero', false), band('faq')] })).toEqual([
       'hero',
+      'anchorGrid',
       'faq',
     ])
   })
@@ -107,7 +120,7 @@ describe('resolveBandOrder — Sanity layout to render order', () => {
         band('faq'),
       ],
     }
-    expect(resolveBandOrder(layout)).toEqual(['hero', 'faq'])
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'anchorGrid', 'faq'])
   })
 
   it('places the deck where the layout puts its marker', () => {
@@ -125,15 +138,16 @@ describe('resolveBandOrder — Sanity layout to render order', () => {
     const layout = {
       sections: [band('hero'), { _type: 'panelDeckSection', enabled: false }, band('faq')],
     }
-    expect(resolveBandOrder(layout)).toEqual(['hero', 'faq'])
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'anchorGrid', 'faq'])
   })
 
   it('never lets the deck sit above the hero', () => {
-    // Nothing outranks the largest paint element, the deck included.
+    // Nothing outranks the largest paint element, the deck included. The anchor
+    // guard inserts anchorGrid after the hero, still above the deck.
     const layout = {
       sections: [{ _type: 'panelDeckSection', enabled: true }, band('hero'), band('faq')],
     }
-    expect(resolveBandOrder(layout)).toEqual(['hero', 'panelDeck', 'faq'])
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'anchorGrid', 'panelDeck', 'faq'])
   })
 
   it('renders the deck at most once', () => {
@@ -145,12 +159,12 @@ describe('resolveBandOrder — Sanity layout to render order', () => {
         band('faq'),
       ],
     }
-    expect(resolveBandOrder(layout)).toEqual(['hero', 'panelDeck', 'faq'])
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'anchorGrid', 'panelDeck', 'faq'])
   })
 
   it('renders a band at most once', () => {
     const layout = { sections: [band('hero'), band('faq'), band('faq')] }
-    expect(resolveBandOrder(layout)).toEqual(['hero', 'faq'])
+    expect(resolveBandOrder(layout)).toEqual(['hero', 'anchorGrid', 'faq'])
   })
 
   it('falls back when a layout contains no usable band', () => {
