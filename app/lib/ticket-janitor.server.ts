@@ -323,14 +323,12 @@ const TWICE_WEEKLY_GAP = 96 + 26
 
 /**
  * What should be running, as data. Mirrors `docs/store-team/routine-schedule.md`
- * as of 2026-08-05 (R-QA at two passes, the trend-scout/research triggers
- * created). If the manifest and this table disagree, fix one of them in the
- * same PR that moved the other.
+ * as of 2026-08-07 (R-QA at two passes, the trend-scout/research triggers
+ * created, the social trend scout trigger now enabled). If the manifest and
+ * this table disagree, fix one of them in the same PR that moved the other.
  *
  * The podcast lane's playbook opens its run with runType 'manual', so its
- * liveness rides the manual bucket and is approximate by construction; the
- * social trend scout (routine 20) is deliberately absent because its trigger
- * is disabled pending the social run-cap raise.
+ * liveness rides the manual bucket and is approximate by construction.
  */
 export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   { routine: 'R-DEV daily dev', team: 'strategy', runType: 'dev', kind: 'twice-daily', schedule: '14:00 and 20:00 daily', maxGapHours: RDEV_GAP },
@@ -348,6 +346,7 @@ export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   { routine: 'Weekly podcast review', team: 'content', runType: 'manual', kind: 'weekly', schedule: 'Wed 21:05', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly trend scout', team: 'content', runType: 'trend-scout', kind: 'weekly', schedule: 'Sat 19:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly business research', team: 'social', runType: 'research', kind: 'weekly', schedule: 'Thu 16:00', maxGapHours: WEEKLY_GAP },
+  { routine: 'Weekly social trend scout', team: 'social', runType: 'social-trend-scout', kind: 'weekly', schedule: 'Mon 17:00', maxGapHours: WEEKLY_GAP },
 ]
 
 export interface RoutineLivenessFlag {

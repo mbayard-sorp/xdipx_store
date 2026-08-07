@@ -244,7 +244,7 @@ describe('computeTicketLoopHealth conflicted-PR scan', () => {
 
 describe('ROUTINE_CADENCES', () => {
   it('carries every expected lane with a complete shape', () => {
-    expect(ROUTINE_CADENCES.length).toBe(15)
+    expect(ROUTINE_CADENCES.length).toBe(16)
     for (const c of ROUTINE_CADENCES) {
       expect(c.routine.length).toBeGreaterThan(0)
       expect(c.runType.length).toBeGreaterThan(0)
@@ -256,6 +256,13 @@ describe('ROUTINE_CADENCES', () => {
     expect(ROUTINE_CADENCES.filter(c => c.team === null).map(c => c.runType)).toEqual(['pricing'])
     // The two twice-daily lanes are dev and qa.
     expect(ROUTINE_CADENCES.filter(c => c.kind === 'twice-daily').map(c => c.runType).sort()).toEqual(['dev', 'qa'])
+    // Routine 20 (Weekly social trend scout) has a liveness watch now that its
+    // trigger is enabled: team social, runType matching what its playbook writes.
+    const scout = ROUTINE_CADENCES.find(c => c.runType === 'social-trend-scout')
+    expect(scout).toBeDefined()
+    expect(scout?.team).toBe('social')
+    expect(scout?.kind).toBe('weekly')
+    expect(scout?.maxGapHours).toBe(194)
   })
 
   it('sizes each gap against the lane\'s real cron, not its nominal kind', () => {
@@ -294,6 +301,17 @@ describe('checkRoutineLiveness', () => {
     expect(flags).toHaveLength(1)
     expect(flags[0]!.lastRunAt).toBeNull()
     expect(flags[0]!.hoursSince).toBeNull()
+  })
+
+  it('flags the social trend scout when its last run is stale, and not when fresh', () => {
+    const scoutOnly = ROUTINE_CADENCES.filter(c => c.runType === 'social-trend-scout')
+    const stale = checkRoutineLiveness(
+      [{ team: 'social', runType: 'social-trend-scout', startedAt: hoursAgo(200) }], NOW, scoutOnly)
+    expect(stale).toHaveLength(1)
+    expect(stale[0]!.runType).toBe('social-trend-scout')
+    const fresh = checkRoutineLiveness(
+      [{ team: 'social', runType: 'social-trend-scout', startedAt: hoursAgo(24) }], NOW, scoutOnly)
+    expect(fresh).toEqual([])
   })
 
   it('matches the no-team pricing lane on runType alone', () => {
