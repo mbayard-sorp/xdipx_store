@@ -6,7 +6,9 @@ or a bounce back to `in_progress` with a concrete reason. **QA never merges, and
 cannot**: the transition map gives `qa-reviewer` no path to `applied`, so a verdict is a
 recommendation to the release engine, not a ship.
 
-Runs on the **Max subscription**. Cadence: **two passes daily, `30 3,15 * * *` UTC** (03:30 and
+Runs on the **Max subscription**. Cadence: **four passes daily, `30 3,9,15,21 * * *` UTC**, raised
+from two on 2026-08-07 so each pass sits 90 minutes behind an R-DEV pass and a PR is reviewed within
+about two hours of opening. Prompt `rqa-daily-0003`. The history below is why it was two: `30 3,15 * * *` (03:30 and
 15:30), changed 2026-08-05 on trigger `trig_019GjVP9hGBU1gmXRBYtYURm` (prompt uuid
 `rqa-daily-0002`). The 15:30 pass reviews the 14:00 dev pass's PRs within 90 minutes; the 03:30
 pass exists because a single 15:30 pass left every PR from the 20:00 dev pass waiting about 19

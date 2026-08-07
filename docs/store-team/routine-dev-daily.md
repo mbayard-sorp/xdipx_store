@@ -5,9 +5,15 @@ tickets off the improvement bus and turns each one into **one branch and one PR*
 never pushes to `main`, never touches a protected path. The release engine merges what passes the
 gates; see `docs/store-team/operating-system.md`.
 
-Runs on the **Max subscription**. Cadence: twice daily, `0 14 * * *` and `0 20 * * *` UTC. The
-14:00 pass is the fresh-work pass; the 20:00 pass exists to give a bounced ticket a same-day second
-attempt.
+Runs on the **Max subscription**. Cadence: **four passes daily, `0 2,8,14,20 * * *` UTC**, raised
+from two on 2026-08-07 on owner direction. At the 5-ticket claim cap that is 20 code tickets a day,
+sized against the 43 approved `code` rows in the backlog at the time. Note the dependency: the
+strategy team's run cap must be at least 12, or the Monday and Thursday Apply Pass is the run that
+skips.
+
+Every pass claims fresh work, and every pass after the first also gives a ticket bounced by the
+preceding QA pass a same-day second attempt. That rhythm was the point of going to four: at two
+passes a bounce landed at 20:00 and could not be re-attempted until 14:00 the next day.
 
 Prompt history: the trigger (`trig_01MEQYsg5sHPbM4v39FqssAD`) was reissued 2026-08-05, current
 prompt uuid `rdev-daily-0003`. Three corrections, all recorded here so the playbook and the prompt
