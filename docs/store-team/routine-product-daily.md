@@ -115,9 +115,19 @@ Only `process` and `strategy` rows can be closed this way (`RUN_CLOSE_KINDS`). A
 and are not yours to end. Note them instead.
 
 
-Looked but deliberately did not act (out of scope, no longer true, needs code)? Post
-`{"op":"note", ...}` with which and why and leave the status alone. Never close a row you did not
-execute: a false `applied` looks handled and is worse than an aging row.
+Looked but deliberately did not act (out of scope, no longer true, needs code)? Post a note with
+which and why, and leave the status alone:
+
+```bash
+-d '{"op":"note","id":<id>,"ref":"<which row, and why this run did not act>"}'
+```
+
+The `note` op carries its text in **`ref`**, not `note`. The `transition` example above uses `note`
+for its text, so reusing that key here is the natural guess and it returns
+`400 Bad Request: ref required`.
+
+Never close a row you did not execute: a false `applied` looks handled and is worse than an aging
+row.
 
 ## Step 5: Report + finish
 

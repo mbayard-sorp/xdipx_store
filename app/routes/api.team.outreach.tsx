@@ -10,6 +10,12 @@
  *   { op: 'list', status? } -> { prospects: [...] }
  *   { op: 'queue', id | domain } -> { ok, id }
  *   { op: 'send', prospectId, subject, text } -> { sent, error?, messageId? }
+ *   { op: 'probe' } -> { ok: true, host, port, user (masked), mailbox,
+ *     messages } | { ok: false, stage, error }
+ *     Server-side IMAP connection check (connect, LOGIN, open INBOX
+ *     read-only, count, log out) so the Zoho login is verified with the real
+ *     credentials before the first send, without anyone touching the
+ *     password. Always status 200; the JSON ok field carries the verdict.
  *
  * `send` enforces every hard guard in outreach.server.ts (valve, daily cap,
  * queued status, contact email, 7-day dedupe); a guard failure comes back as
@@ -118,6 +124,14 @@ export async function action({ request }: ActionFunctionArgs) {
       .set({ status: 'queued', updatedAt: new Date() })
       .where(eq(outreachProspects.id, row.id))
     return Response.json({ ok: true, id: row.id })
+  }
+
+  if (b['op'] === 'probe') {
+    // Dynamic import keeps the poller's dependency graph (Claude client,
+    // owner alerts, mail parsing) out of this route module until the one op
+    // that needs it actually runs.
+    const { probeOutreachImap } = await import('~/lib/outreach-inbox.server')
+    return Response.json(await probeOutreachImap())
   }
 
   if (b['op'] === 'send') {

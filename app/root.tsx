@@ -122,6 +122,11 @@ export const links: LinksFunction = () => [
   { rel: 'icon', type: 'image/png', href: '/favicon-32x32.png', sizes: '32x32' },
   { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
   { rel: 'manifest', href: '/site.webmanifest' },
+  // Sitemap discovery on every page. robots.txt already carries the canonical
+  // `Sitemap:` line that Google and Bing actually read; this link relation is
+  // belt-and-suspenders for crawlers and tools that fetch a page before they
+  // fetch robots.txt. Relative href so preview deploys point at themselves.
+  { rel: 'sitemap', type: 'application/xml', href: '/sitemap.xml' },
   // Preconnect for Shopify CDN — the LCP hero image and gallery come from
   // cdn.shopify.com on every product/homepage view. No crossOrigin: <img> and
   // image-preload fetches are no-cors, and a credentialless (anonymous) socket

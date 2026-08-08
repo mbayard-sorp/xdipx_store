@@ -1263,36 +1263,61 @@ export type HomeSlot = BandName | 'panelDeck'
  *
  * The deck only OCCUPIES a slot here; whether it has anything to show is the
  * payload's business (`panelDeck` null renders nothing in that slot).
+ *
+ * `opts.anchorReplaced` is true when a live team rail has explicitly claimed the
+ * anchor slot (`replacesAnchor`). Only then may a layout drop the `anchorGrid`
+ * band; otherwise the band is forced back in (see the anchor guard below).
  */
-export function resolveBandOrder(layout?: { sections: { _type: string; band?: string; enabled?: boolean }[] } | null): HomeSlot[] {
-  if (!layout?.sections?.length) return DEFAULT_BAND_ORDER
+export function resolveBandOrder(
+  layout?: { sections: { _type: string; band?: string; enabled?: boolean }[] } | null,
+  opts?: { anchorReplaced?: boolean },
+): HomeSlot[] {
+  const anchorReplaced = opts?.anchorReplaced === true
 
-  const seen = new Set<string>()
-  const ordered: HomeSlot[] = []
-  for (const section of layout.sections) {
-    if (section.enabled === false) continue
-    if (section._type === 'panelDeckSection') {
-      if (!seen.has('panelDeck')) {
-        seen.add('panelDeck')
-        ordered.push('panelDeck')
+  const order: HomeSlot[] = (() => {
+    if (!layout?.sections?.length) return DEFAULT_BAND_ORDER
+
+    const seen = new Set<string>()
+    const ordered: HomeSlot[] = []
+    for (const section of layout.sections) {
+      if (section.enabled === false) continue
+      if (section._type === 'panelDeckSection') {
+        if (!seen.has('panelDeck')) {
+          seen.add('panelDeck')
+          ordered.push('panelDeck')
+        }
+        continue
       }
-      continue
+      if (section._type !== 'homeBand') continue
+      const band = section.band
+      if (!band || !KNOWN_BAND.has(band) || seen.has(band)) continue
+      seen.add(band)
+      ordered.push(band as BandName)
     }
-    if (section._type !== 'homeBand') continue
-    const band = section.band
-    if (!band || !KNOWN_BAND.has(band) || seen.has(band)) continue
-    seen.add(band)
-    ordered.push(band as BandName)
+
+    // A layout with no usable band renders the shipped order — a deck marker
+    // alone is not a homepage.
+    if (!ordered.some(slot => slot !== 'panelDeck')) return DEFAULT_BAND_ORDER
+
+    // The hero is not reorderable. A layout that omits or demotes it would move
+    // the largest paint element, so it is put back at the front rather than
+    // honoured, and the page keeps its LCP guarantee whatever Sanity says.
+    return ordered[0] === 'hero' ? ordered : ['hero', ...ordered.filter(b => b !== 'hero')]
+  })()
+
+  // Anchor guard, mirroring the hero-first guard. `anchorGrid` is the page's
+  // bestseller wall. A bad layout publish (band disabled or dropped) or a rail
+  // retirement must not silently delete it: unless a live rail has explicitly
+  // taken the slot (`anchorReplaced`), the band is put back right after the
+  // hero — its shipped position — rather than honouring its removal. The
+  // DEFAULT order already carries it, so this only re-adds it when a layout
+  // stripped it. The band itself renders null when it has nothing to show, so
+  // forcing the slot back is safe even during a cold-KV outage.
+  if (!anchorReplaced && !order.includes('anchorGrid')) {
+    const at = order.indexOf('hero') + 1 // 0 when there is no hero (indexOf -1)
+    return [...order.slice(0, at), 'anchorGrid', ...order.slice(at)]
   }
-
-  // A layout with no usable band renders the shipped order — a deck marker
-  // alone is not a homepage.
-  if (!ordered.some(slot => slot !== 'panelDeck')) return DEFAULT_BAND_ORDER
-
-  // The hero is not reorderable. A layout that omits or demotes it would move
-  // the largest paint element, so it is put back at the front rather than
-  // honoured, and the page keeps its LCP guarantee whatever Sanity says.
-  return ordered[0] === 'hero' ? ordered : ['hero', ...ordered.filter(b => b !== 'hero')]
+  return order
 }
 
 export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout, panelDeck }: StorefrontData) {
@@ -1521,7 +1546,7 @@ export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks,
         />
       )}
 
-      {resolveBandOrder(layout).map(name => (
+      {resolveBandOrder(layout, { anchorReplaced: replacesAnchor }).map(name => (
         <Fragment key={name}>{slots[name]}</Fragment>
       ))}
     </>

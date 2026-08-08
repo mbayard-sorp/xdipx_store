@@ -90,6 +90,16 @@ curl -s -X POST "$BASE_URL/api/team/event" \
 1. `inventory-sentinel` — catalog stock/price sweep → targeted suggestions + scoreboard event.
 2. `promo-manager` — MAP-guarded promo designs for the coming window → kind `promo` suggestions +
    calendar proposals.
+2b. **Execute approved promos (valve-gated).** For promo rows the owner has already approved, mint
+   the Shopify discount code. Gated by `promo_execute_enabled`, default **off**; with the valve off
+   the script exits without touching Shopify. It is fail-closed: a row flagged with a MAP conflict,
+   missing an explicit window, or with no resolvable eligible product is refused (loud owner email +
+   ticket note), never minted. On a clean mint the owner is emailed the code and window and a note
+   link lands on the ticket. Idempotent: rows already carrying a minted note are skipped.
+
+   ```bash
+   tsx scripts/execute-approved-promos.ts
+   ```
 3. `loyalty-referral-manager` — retention/referral moves → kind `program` suggestions.
 4. `product-manager` (**review-only in the weekly run**) — do NOT call the import-candidate action
    endpoint here; the daily product routine (`routine-product-daily.md`) owns queue execution.

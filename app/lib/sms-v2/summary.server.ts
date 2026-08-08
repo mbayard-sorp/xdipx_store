@@ -26,6 +26,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
+import { getTurnSignal } from './turn-deadline.server'
 import type { HistoryTurn } from './conversation-history.server'
 import { logApiTokens } from '../token-log.server'
 
@@ -127,7 +128,7 @@ export async function generateConversationSummary(
       max_tokens: 120,
       system: SUMMARY_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
-    })
+    }, { signal: getTurnSignal() })
 
     // Usage may be absent on injected test clients; logging is best-effort
     // and must never unwind the call (see token-log.server.ts contract).

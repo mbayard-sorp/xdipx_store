@@ -145,6 +145,18 @@ The homepage must be visibly different week over week. Sameness is a defect.
   concept, mosaic arrangement) is visibly new each week.
 - No two consecutive weeks with the same hero product, the same rail lineup,
   or the same tile artwork. Check last week's run summaries before picking.
+- **Featured brand rail (owner direction #718, existing primitives only).** Run
+  a rotating FEATURED BRAND rail using existing content primitives — an
+  `emmaCuratedRail` (or `productCarousel`) filtered to one carried brand's
+  in-stock SKUs (Shopify `vendor` field) with an editorial intro tile for the
+  brand story. It rotates WEEKLY (not daily), aligned with the social team's
+  featured-brand-of-the-week series and the marketing calendar; `merch-calendar`
+  proposes the brand queue. Place it mid-page, after the first one to two
+  product-forward rails and the trust bar, and never replacing a top rail, so
+  every tile still links `/products/{slug}` and the 70% PDP-link target holds.
+  Copy passes the voice gate as usual. This adds no shell: a distinct
+  single-brand visual treatment later is a `homepage-designer` +
+  `sanity-content-builder` additive-schema PR, not something Routine A invents.
 - **The hero belongs to the theme (binding, owner direction 2026-07-27).**
   During an active `marketing_calendar` theme week, the hero product is either
   a product from the theme's own category, or a product plus theme combo where
@@ -193,6 +205,16 @@ and rail products (on top of the selection criteria in Routine A):
   product that pops. During a theme week this rule ranks candidates *within*
   the theme category (section 3's hero binding); it is never a reason to leave
   the theme. A photogenic off-theme product does not beat an on-theme one.
+- **Actually look at the primary image before pinning it (operationalises
+  "photogenic first").** Before pinning any product to the hero or a rail,
+  download and *look at* its Shopify PRIMARY image. Reject or reorder it if it is
+  a retail packaging shot — the product small and floating on white with large
+  empty bands, or with baked-in packaging text. Confirming `imgs > 0` is NOT the
+  check; roughly 29% of the active catalog leads with a packaging shot, so this
+  fires often. If a cleaner sibling image exists on the product, promote it with
+  `setMediaAsPrimary` before pinning (as run 89 did by hand for 77791B). The
+  Routine A pick step is where this check runs; a packaging-shot hero passes
+  every numeric score and still looks wrong on the page.
 - **Story-able.** You must be able to say in one sentence what it does for
   the reader and why it earns the slot this week. If the enrichment data
   (Emma's take, sensation dial, tags) is thin, either route it to
@@ -330,7 +352,11 @@ After publishing, fetch the live homepage and verify before closing the run:
 2. Count product/collection links versus /discover links; report the ratio
    and flag if under the 70 percent target.
 3. Every image on the page passed the section 2 review or is Shopify product
-   photography.
+   photography. **"Shopify product photography" is not a free pass for a retail
+   packaging shot:** a pinned hero/rail primary image that is a packaging shot
+   (product small on white with empty bands, or baked-in packaging text) fails
+   this check even though it is genuine Shopify photography. Look at it and
+   promote a cleaner sibling per section 5 before pinning.
 4. All new copy passed the Emma voice gate.
 5. Published `emmaPreset` count is 5 or fewer, the lineup matches the
    current theme, and every published preset lands on 3+ products.

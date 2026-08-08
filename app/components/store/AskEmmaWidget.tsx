@@ -77,57 +77,79 @@ export function AskEmmaWidget() {
   // before committing, so Emma never "teleports" her reply in.
   const isSending = fetcher.state !== 'idle' || pendingSubmitRef.current
 
-  // Hydrate state once on mount.
+  // Hydrate state once on mount — but deferred out of the LCP / Speed Index
+  // window. Emma's launcher is an affordance, not above-the-fold content: it
+  // can only appear post-hydration, so painting it (and firing its tagline
+  // fetch) during the critical window just adds pixel churn and a competing
+  // request while the main content is still painting on a slow device.
+  // requestIdleCallback pushes both past that window; the 3s timeout guarantees
+  // the widget still appears promptly even if the main thread stays busy.
   useEffect(() => {
-    setMounted(true)
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) {
-        // ADR-003 Sub-decision E: read back persisted sessionId for session bridge.
-        const saved = JSON.parse(raw) as { open?: boolean; turns?: Turn[]; sessionId?: string }
-        if (Array.isArray(saved.turns)) setTurns(saved.turns.slice(-20))
-        if (typeof saved.open === 'boolean') setOpen(saved.open)
-        if (typeof saved.sessionId === 'string' && saved.sessionId) {
-          setPersistedSessionId(saved.sessionId)
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    // Rotating Emma tagline — cached in sessionStorage with a short TTL so the
-    // headline visibly refreshes while someone is browsing, without hammering
-    // the Claude API on every route change.
-    let cached: string | null = null
-    try {
-      const raw = sessionStorage.getItem(TAGLINE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as { tagline?: unknown; fetchedAt?: unknown }
-        const line = typeof parsed.tagline === 'string' ? parsed.tagline : null
-        const fetchedAt = typeof parsed.fetchedAt === 'number' ? parsed.fetchedAt : 0
-        if (line && Date.now() - fetchedAt < TAGLINE_TTL_MS) cached = line
-      }
-    } catch { /* privacy mode or bad JSON — fall through to fetch */ }
-
-    if (cached) {
-      setTagline(cached)
-      return
-    }
-
     const controller = new AbortController()
-    fetch('/api/emma-tagline', { signal: controller.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { tagline?: string } | null) => {
-        const line = data?.tagline?.trim()
-        if (line) {
-          setTagline(line)
-          try {
-            sessionStorage.setItem(TAGLINE_KEY, JSON.stringify({ tagline: line, fetchedAt: Date.now() }))
-          } catch { /* ignore */ }
+
+    const hydrate = () => {
+      setMounted(true)
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY)
+        if (raw) {
+          // ADR-003 Sub-decision E: read back persisted sessionId for session bridge.
+          const saved = JSON.parse(raw) as { open?: boolean; turns?: Turn[]; sessionId?: string }
+          if (Array.isArray(saved.turns)) setTurns(saved.turns.slice(-20))
+          if (typeof saved.open === 'boolean') setOpen(saved.open)
+          if (typeof saved.sessionId === 'string' && saved.sessionId) {
+            setPersistedSessionId(saved.sessionId)
+          }
         }
-      })
-      .catch(() => { /* keep default */ })
-    return () => controller.abort()
+      } catch {
+        // ignore
+      }
+
+      // Rotating Emma tagline — cached in sessionStorage with a short TTL so the
+      // headline visibly refreshes while someone is browsing, without hammering
+      // the Claude API on every route change.
+      let cached: string | null = null
+      try {
+        const raw = sessionStorage.getItem(TAGLINE_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw) as { tagline?: unknown; fetchedAt?: unknown }
+          const line = typeof parsed.tagline === 'string' ? parsed.tagline : null
+          const fetchedAt = typeof parsed.fetchedAt === 'number' ? parsed.fetchedAt : 0
+          if (line && Date.now() - fetchedAt < TAGLINE_TTL_MS) cached = line
+        }
+      } catch { /* privacy mode or bad JSON — fall through to fetch */ }
+
+      if (cached) {
+        setTagline(cached)
+        return
+      }
+
+      fetch('/api/emma-tagline', { signal: controller.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: { tagline?: string } | null) => {
+          const line = data?.tagline?.trim()
+          if (line) {
+            setTagline(line)
+            try {
+              sessionStorage.setItem(TAGLINE_KEY, JSON.stringify({ tagline: line, fetchedAt: Date.now() }))
+            } catch { /* ignore */ }
+          }
+        })
+        .catch(() => { /* keep default */ })
+    }
+
+    let cancel: () => void
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(hydrate, { timeout: 3000 })
+      cancel = () => window.cancelIdleCallback(id)
+    } else {
+      const t = setTimeout(hydrate, 1200)
+      cancel = () => clearTimeout(t)
+    }
+
+    return () => {
+      cancel()
+      controller.abort()
+    }
   }, [])
 
   // Listen for cart drawer open/close so Emma can slide left while it's visible.

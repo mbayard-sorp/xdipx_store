@@ -22,6 +22,7 @@
 import {
   advanceGate,
   mergeSlots,
+  initDiscoveryState,
   suspendForExplain,
   SKIP_SENTINEL,
   type DiscoveryState,
@@ -172,14 +173,21 @@ function audienceToSearchCategory(
  * Build a numbered-list prose string from search result cards.
  * Capped at 3. Stays in DISCOVERY so the customer's next reply is a fresh signal.
  */
-function buildMultiResultProse(
+export function buildMultiResultProse(
   cards: Awaited<ReturnType<typeof searchForIvrWithDiagnostics>>['cards'],
 ): string {
   const capped = cards.slice(0, 3)
-  // ADR-003 Sub-decision A: include PDP URLs so web widget renders tappable links.
-  // IvrProductCard.handle is a non-optional string (ivr-search.server.ts:32).
+  // conv-audit C7: emit ABSOLUTE https://xdipx.com/products/{handle} URLs (the
+  // convention every other v2 stage follows; the web adapter relativizes them,
+  // see adapters/web.server.ts) inside a Markdown link on its OWN line. On SMS,
+  // stripMarkdownForSms collapses [label](url) to the bare url, so the link
+  // lands alone on a line and splitProseAtUrl can pull the top result into its
+  // own bubble for an iMessage preview. A relative path was neither tappable nor
+  // preview-able on SMS and got read aloud on voice. Whitelisted CTA label; the
+  // em-dash before the price is gone (brand rule). IvrProductCard.handle is a
+  // non-optional string (ivr-search.server.ts:32).
   const lines = capped.map((c, i) =>
-    `${i + 1}. [${c.title}](/products/${c.handle}) — $${c.price.toFixed(2)}`
+    `${i + 1}. ${c.title}, $${c.price.toFixed(2)}\n[Take a peek →](https://xdipx.com/products/${c.handle})`
   )
   return (
     `A few options that fit what you described:\n\n` +
@@ -311,6 +319,19 @@ export async function runSearchBranch(
     if (retryOpts) {
       diag = await searchForIvrWithDiagnostics(retryOpts)
     }
+
+    // Last resort: drop the productTypeDial itself. The retries above never
+    // remove the dial, so a single wrong dial classification (e.g. a wand
+    // request tagged 'lube') keeps every matching product permanently
+    // unreachable in SMS discovery. If we are still filtered to zero, retry
+    // once more on the free-text query alone — dial, subtype, audience, and
+    // priceMax all dropped — and log it so a misclassifying dial is visible.
+    if (diag.reason === 'filtered-to-zero') {
+      console.warn(
+        `[discovery] filtered-to-zero after filter-drop retry; dropping productTypeDial=${mergedSlots.category ?? 'none'} and retrying on query text alone`,
+      )
+      diag = await searchForIvrWithDiagnostics({ query: searchQuery, limit: 3 })
+    }
   }
 
   const baseWrites = {
@@ -416,6 +437,36 @@ export async function runSearchBranch(
       telemetry: { ...baseTelemetry, inputTokens: 0, outputTokens: 0 },
     }
   }
+}
+
+/**
+ * Product-question escape hatch for non-discovery stages (SUPPORT, RECONNECT).
+ *
+ * Those stages are deterministic and have no catalog access, so a "do you sell
+ * X?" that arrives mid-support used to get an order-status template or a generic
+ * greeting instead of an answer. This runs the same shared search the discovery
+ * stage uses (runSearchBranch → searchForIvrWithDiagnostics), so the reply is
+ * built only from real, MAP-priced catalog hits — never model memory — which is
+ * the discovery agent's fabrication guard by construction.
+ *
+ * Slots come from the customer's text (plus any prior discovered slots); the
+ * discovery state defaults to a fresh gate when the customer has never shopped.
+ * runSearchBranch writes stage: 'DISCOVERY', so the customer continues shopping
+ * from here — the same place the next-turn intent reclassification would have
+ * routed them anyway, one turn sooner.
+ */
+export async function runCatalogLookup(
+  ctx: EmmaContext,
+  intent: IntentResult,
+  customerText: string,
+): Promise<StageResponse> {
+  const priorSlots: Partial<DiscoverySlots> =
+    (ctx.conversation.discoveredSlots as Partial<DiscoverySlots>) ?? {}
+  const { slots: extracted } = await extractSlots({ text: customerText, priorSlots })
+  const mergedSlots = mergeSlots(priorSlots, extracted)
+  const discoveryState =
+    (ctx.conversation.discoveryState as DiscoveryState | null) ?? initDiscoveryState()
+  return runSearchBranch(ctx, intent, customerText, mergedSlots, discoveryState)
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────

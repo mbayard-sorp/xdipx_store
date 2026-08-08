@@ -23,6 +23,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
+import { getTurnSignal } from './turn-deadline.server'
 import type { ProductTypeDial, ProductSubtypeDial } from '../../types/index'
 import {
   type DiscoverySlots,
@@ -568,7 +569,7 @@ async function classifyAudienceWithHaiku(
       max_tokens: 100,
       system: HAIKU_AUDIENCE_SYSTEM,
       messages: [{ role: 'user', content: text }],
-    })
+    }, { signal: getTurnSignal() })
 
     // Usage may be absent on injected test clients; logging is best-effort
     // and must never unwind the call (see token-log.server.ts contract).

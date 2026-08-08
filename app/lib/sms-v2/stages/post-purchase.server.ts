@@ -18,6 +18,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
+import { getTurnSignal } from '../turn-deadline.server'
 import { resolveTransition } from '../transitions.server'
 import { orderStatusLookup, OrderNotFoundError, type OrderStatus } from '../tools/order-status.server'
 import { GENERIC_POST_PURCHASE_FALLBACK } from '../templates/post-purchase-templates'
@@ -93,7 +94,7 @@ async function generatePostPurchaseProse(opts: {
     max_tokens: MAX_TOKENS,
     system:     systemParam,
     messages:   [{ role: 'user', content: JSON.stringify(userPayload, null, 2) }],
-  })
+  }, { signal: getTurnSignal() })
 
   const usage = msg.usage as typeof msg.usage & {
     cache_creation_input_tokens?: number

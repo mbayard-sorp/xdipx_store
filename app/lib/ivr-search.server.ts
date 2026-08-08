@@ -116,10 +116,55 @@ export interface SearchDiagnostics {
    *                         the set to zero. Caller should consider dropping a filter.
    * - 'no-base-results'   — the keyword/discovery query itself returned nothing.
    *                         No filters to blame.
-   * - 'sanity-unavailable'— Sanity client could not be reached (env vars missing or
-   *                         network error). Shopify fallback may have been used.
+   * - 'relaxed-audience'  — the audience tag filter (for-her / for-him / couples)
+   *                         emptied the set, so it was dropped and the search
+   *                         retried. Cards ARE relevant to the query and category
+   *                         but may not be audience-tagged. Distinct from 'matched'
+   *                         so the gap stays visible in telemetry: audience tag
+   *                         coverage in the catalog is thin, and this reason firing
+   *                         often is the signal to backfill it rather than to keep
+   *                         leaning on the fallback.
+   * - 'sanity-unavailable'— the Sanity query layer could not be reached (client env
+   *                         vars missing, or the GROQ fetch threw). Shopify fallback
+   *                         may have been used.
+   * - 'catalog-unavailable'— Sanity returned candidates, but hydrating them against
+   *                         the live Shopify catalog failed. A downstream outage, NOT
+   *                         a Sanity one: kept distinct so it is neither mislabeled as
+   *                         'sanity-unavailable' nor read by the model as "no results".
    */
-  reason: 'matched' | 'filtered-to-zero' | 'no-base-results' | 'sanity-unavailable'
+  reason:
+    | 'matched'
+    | 'filtered-to-zero'
+    | 'relaxed-audience'
+    | 'no-base-results'
+    | 'sanity-unavailable'
+    | 'catalog-unavailable'
+}
+
+/**
+ * Emit an outage signal for a degraded search path. Sentry is a no-op without a
+ * DSN (dev/preview), so this is safe to call unconditionally; in production it
+ * feeds a rate alert on `search: '<fn>'` + `outage: '<reason>'` (the alert
+ * threshold itself is a Sentry-dashboard rule, an owner action, so the code's
+ * job is to emit the signal every time so the rate is measurable). Sentry is
+ * loaded dynamically (like the owner-alert path in import-enrich.server) so the
+ * heavy @sentry/node graph never enters a caller's module-load path. Never
+ * throws.
+ */
+async function captureSearchOutage(
+  fn: 'searchForIvr' | 'discoverForIvr',
+  reason: 'sanity-unavailable' | 'catalog-unavailable',
+  err?: unknown,
+): Promise<void> {
+  try {
+    const { Sentry } = await import('./sentry.server')
+    const error = err instanceof Error ? err : new Error(`${fn} ${reason}`)
+    Sentry.captureException(error, {
+      tags: { search: fn, outage: reason, severity: 'P1' },
+    })
+  } catch {
+    /* never let telemetry break a search */
+  }
 }
 
 // ─── priceMax (post-hydration) ───────────────────────────────────────────────
@@ -215,15 +260,113 @@ export const STRICT_CATEGORY_TERMS = new Set([
  * "no candidates in Sanity at all" in order to decide whether to retry
  * with a looser filter.
  */
+/**
+ * Audience values the discovery agent may pass through as `tags`. Only these
+ * are droppable on a filtered-to-zero retry — an unrecognised tag is left alone
+ * because we can't assume it's a soft preference.
+ */
+const AUDIENCE_TAGS = new Set(['for-her', 'for-him', 'couples'])
+
+type SanityCandidate = { handle: string; title: string; category: string | null; tagline: string | null }
+
+/**
+ * Given the filter conditions built for a search and the `tags` they came from,
+ * return the conditions with audience-tag clauses removed — or null when there
+ * is nothing to relax (no tags, no audience tags among them, or no matching
+ * clause found). Null means "don't retry", so a caller can't loop on an
+ * identical query.
+ *
+ * The `$tag{i} in tags` clause names are positional, matching the order tags
+ * were pushed in the main query builder. Kept in lockstep with that loop.
+ */
+export function dropAudienceTagConditions(
+  filterConditions: string[],
+  tags: string[] | undefined,
+): string[] | null {
+  if (!tags || tags.length === 0) return null
+  const audienceClauses = new Set(
+    tags
+      .map((t, i) => (AUDIENCE_TAGS.has(t) ? `$tag${i} in tags` : null))
+      .filter((c): c is string => c !== null),
+  )
+  if (audienceClauses.size === 0) return null
+  const kept = filterConditions.filter((c) => !audienceClauses.has(c))
+  return kept.length === filterConditions.length ? null : kept
+}
+
+/**
+ * Re-run the candidate query with audience tags removed from the filter set.
+ * Returns null when there was no audience tag to drop (nothing to relax) or the
+ * relaxed query is still empty — in both cases the caller reports the original
+ * filtered-to-zero rather than inventing results.
+ */
+async function retryWithoutAudienceTags(args: {
+  client: ReturnType<typeof getSanityClient>
+  baseConditions: string[]
+  filterConditions: string[]
+  groqParams: Record<string, unknown>
+  tags: string[] | undefined
+  boosts: string
+  candidatePool: number
+}): Promise<SanityCandidate[] | null> {
+  const { client, baseConditions, filterConditions, groqParams, tags, boosts, candidatePool } = args
+  if (!client) return null
+
+  const kept = dropAudienceTagConditions(filterConditions, tags)
+  if (kept === null) return null
+
+  const filter = [...baseConditions, ...kept].join(' && ')
+  const groq = `*[${filter}] | score(${boosts}) [0...${candidatePool}] {
+      "handle": shopifyHandle,
+      title,
+      category,
+      tagline
+    }`
+  const results = await cachedGroqFetch<SanityCandidate[]>(client, groq, groqParams)
+  return results && results.length > 0 ? results : null
+}
+
+/**
+ * Hydrate Sanity candidates against Shopify, apply the live-price budget filter,
+ * and rank. Shared by the normal path and the relaxed-audience retry so the two
+ * cannot drift apart.
+ */
+async function hydrateAndRank(
+  sanityResults: SanityCandidate[],
+  opts: { limit: number; priceMax: number | undefined; reason: SearchDiagnostics['reason'] },
+): Promise<SearchDiagnostics> {
+  const handles = sanityResults.map((r) => r.handle).filter(Boolean)
+  const shopifyProducts = await getProductsByHandles(handles)
+  const shopifyMap = new Map<string, Product>(shopifyProducts.map((p) => [p.handle, p]))
+
+  const cards: IvrProductCard[] = []
+  for (const sr of sanityResults) {
+    const product = shopifyMap.get(sr.handle)
+    if (!product) continue
+    cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
+  }
+
+  const priced = applyPriceMax(cards, opts.priceMax)
+  const ranked = marginWeightedSelect(priced, opts.limit)
+  return { cards: ranked, reason: ranked.length > 0 ? opts.reason : 'filtered-to-zero' }
+}
+
 export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<SearchDiagnostics> {
   const { query, limit = 3, category, priceMax, tags, mattersTags, productTypeDial, productSubtypeDial } = opts
   const client = getSanityClient()
 
   if (!client) {
+    await captureSearchOutage('searchForIvr', 'sanity-unavailable')
     const pool = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
     const cards = shuffle(pool).slice(0, limit)
     return { cards, reason: 'sanity-unavailable' }
   }
+
+  // Distinguishes a Sanity-layer failure (the GROQ query itself) from a
+  // downstream Shopify hydration failure. Flipped true only once every Sanity
+  // query has returned and we commit to hydrating against the live catalog, so
+  // the catch below never mislabels a Shopify outage as 'sanity-unavailable'.
+  let sanityOk = false
 
   // Fetch a wider candidate pool so we can shuffle within similar relevance
   // and avoid pitching the same product on every call. Top-N matches usually
@@ -334,8 +477,27 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
           const baseFilter = baseConditions.join(' && ')
           const baseGroq = `*[${baseFilter}] [0...1] { "handle": shopifyHandle }`
           const baseCheck = await cachedGroqFetch<{ handle: string }[]>(client, baseGroq, groqParams)
-          const reason = baseCheck.length > 0 ? 'filtered-to-zero' : 'no-base-results'
-          return { cards: [], reason }
+          if (baseCheck.length === 0) return { cards: [], reason: 'no-base-results' }
+
+          // filtered-to-zero: the keyword DID match the catalog and only the
+          // extra filters emptied it. Returning nothing here is how a caller
+          // saying the two most ordinary things in a row — "a vibrator", "with
+          // a partner" — got zero results out of 696 vibrators. Audience tag
+          // coverage is the reason: 2 of 696 vibrator-dial products carry
+          // `couples` and 0 carry `for-him`, so ANDing an audience tag against
+          // a category dial is very nearly a guaranteed empty set.
+          //
+          // Audience is a soft preference, not a hard spec — the same reasoning
+          // mattersTags already documents above. Drop it and retry once before
+          // giving up. Category, dial and price stay: those are the filters a
+          // caller would actually notice being ignored.
+          const relaxed = await retryWithoutAudienceTags({
+            client, baseConditions, filterConditions, groqParams,
+            tags, boosts, candidatePool,
+          })
+          if (relaxed === null) return { cards: [], reason: 'filtered-to-zero' }
+          sanityOk = true // past every Sanity query; a throw below is catalog-side
+          return await hydrateAndRank(relaxed, { limit, priceMax, reason: 'relaxed-audience' })
         }
         return { cards: [], reason: 'no-base-results' }
       }
@@ -352,28 +514,27 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
       return { cards, reason: cards.length > 0 ? 'matched' : 'no-base-results' }
     }
 
-    const handles = sanityResults.map((r) => r.handle).filter(Boolean)
-    const shopifyProducts = await getProductsByHandles(handles)
-    const shopifyMap = new Map<string, Product>(shopifyProducts.map((p) => [p.handle, p]))
-
-    const cards: IvrProductCard[] = []
-    for (const sr of sanityResults) {
-      const product = shopifyMap.get(sr.handle)
-      if (!product) continue
-      cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
-    }
-
+    sanityOk = true // past every Sanity query; anything below is catalog-side
     // Live-price budget filter, then rank by margin × inventory with enough
     // randomness to keep variety. Sanity has already filtered for context
     // relevance (the candidate pool is "products that match this query");
     // within that pool, prefer items that make us money AND are sellable.
-    const priced = applyPriceMax(cards, priceMax)
-    const ranked = marginWeightedSelect(priced, limit)
+    //
     // A non-empty hydrated pool emptied by the price filter is honestly
-    // filtered-to-zero, which existing zero-card handling already reports.
-    return { cards: ranked, reason: ranked.length > 0 ? 'matched' : 'filtered-to-zero' }
+    // filtered-to-zero, which hydrateAndRank reports.
+    return await hydrateAndRank(sanityResults, { limit, priceMax, reason: 'matched' })
   } catch (err) {
+    if (sanityOk) {
+      // Sanity returned candidates; the throw is a Shopify hydration/pricing
+      // failure. Do not mislabel it 'sanity-unavailable', and do not attempt the
+      // Shopify fallback that would fail the same way. Surface it as its own
+      // outage so the model apologizes instead of claiming there are no results.
+      console.error('[ivr-search] catalog hydration failed after Sanity returned:', err)
+      await captureSearchOutage('searchForIvr', 'catalog-unavailable', err)
+      return { cards: [], reason: 'catalog-unavailable' }
+    }
     console.error('[ivr-search] Sanity search failed, falling back to Shopify:', err)
+    await captureSearchOutage('searchForIvr', 'sanity-unavailable', err)
     const pool = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
     const cards = marginWeightedSelect(pool, limit)
     return { cards, reason: 'sanity-unavailable' }
@@ -461,12 +622,19 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
   const { mood, experience, useCase, features, category, priceMax, limit = 3, productTypeDial, productSubtypeDial } = opts
   const client = getSanityClient()
 
-  if (!client) return { cards: [], reason: 'sanity-unavailable' }
+  if (!client) {
+    await captureSearchOutage('discoverForIvr', 'sanity-unavailable')
+    return { cards: [], reason: 'sanity-unavailable' }
+  }
 
-  // Track whether any non-mood/experience/useCase/feature filters are active so
-  // we can distinguish "filtered-to-zero" from "no-base-results".
-  const hasPrimaryFilters = Boolean(mood?.length || experience || useCase?.length || features?.length)
+  // Only a NARROWING filter (category / priceMax / productTypeDial) can reduce
+  // an otherwise-matching pool to zero, so it is the sole signal for telling
+  // "filtered-to-zero" from "no-base-results" below.
   const hasNarrowingFilters = Boolean(category || priceMax != null || productTypeDial)
+
+  // Distinguishes a Sanity-layer failure from a downstream Shopify hydration
+  // failure; see the twin flag in searchForIvrWithDiagnostics.
+  let sanityOk = false
 
   try {
     const conditions: string[] = [
@@ -549,10 +717,17 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
     >(client, groq, groqParams)
 
     if (!sanityResults || sanityResults.length === 0) {
-      // Determine whether this is "filtered-to-zero" or truly "no base results".
-      // Only worth checking when we have both primary filters (mood/exp/useCase/features)
-      // AND narrowing filters (category/price/typeDial).
-      if (hasPrimaryFilters && hasNarrowingFilters) {
+      // 'filtered-to-zero' is only meaningful when a NARROWING filter
+      // (category / productTypeDial / subtypeDial) could be the reducer — those
+      // are the clauses in the GROQ that can empty an otherwise-matching pool.
+      // When one is present, re-run the base query with those clauses stripped:
+      // if the base would have matched, the narrowing filters emptied it
+      // (filtered-to-zero); if not, there is genuinely no base result. With no
+      // narrowing filter there is nothing to blame, so it is 'no-base-results'.
+      // (Previously this only ran when BOTH primary and narrowing filters were
+      // present, and the else-branch was a dead `x ? a : a` ternary that lost
+      // the distinction for narrowing-only queries — the bug this fixes.)
+      if (hasNarrowingFilters) {
         const baseConditions = conditions.filter(
           (c) =>
             !c.includes('$cat') &&
@@ -560,17 +735,19 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
             !c.includes('productTypeDial') &&
             !c.includes('productSubtypeDial'),
         )
+        // baseConditions always retains the _type/archived/hiddenUntilLive
+        // guards, so the query is well-formed even with no primary filters.
         const baseFilter = baseConditions.join(' && ')
         const baseGroq = `*[${baseFilter}] [0...1] { "handle": shopifyHandle }`
         const baseCheck = await cachedGroqFetch<{ handle: string }[]>(client, baseGroq, groqParams)
         const reason = baseCheck.length > 0 ? 'filtered-to-zero' : 'no-base-results'
         return { cards: [], reason }
       }
-      const reason = hasPrimaryFilters || hasNarrowingFilters ? 'no-base-results' : 'no-base-results'
-      return { cards: [], reason }
+      return { cards: [], reason: 'no-base-results' }
     }
 
     const handles = sanityResults.map((r) => r.handle).filter(Boolean)
+    sanityOk = true // past every Sanity query; anything below is catalog-side
     const shopifyProducts = await getProductsByHandles(handles)
     const shopifyMap = new Map<string, Product>(shopifyProducts.map((p) => [p.handle, p]))
 
@@ -585,7 +762,16 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
     // Cards existed but the live-price filter emptied them: filtered-to-zero.
     return { cards: priced, reason: priced.length > 0 ? 'matched' : 'filtered-to-zero' }
   } catch (err) {
+    if (sanityOk) {
+      // Sanity returned candidates; the throw is a Shopify hydration failure, not
+      // a Sanity outage. Keep it distinct so it is neither mislabeled nor read as
+      // "no results".
+      console.error('[ivr-search] catalog hydration failed after Sanity returned (discover):', err)
+      await captureSearchOutage('discoverForIvr', 'catalog-unavailable', err)
+      return { cards: [], reason: 'catalog-unavailable' }
+    }
     console.error('[ivr-search] Sanity discover failed:', err)
+    await captureSearchOutage('discoverForIvr', 'sanity-unavailable', err)
     return { cards: [], reason: 'sanity-unavailable' }
   }
 }

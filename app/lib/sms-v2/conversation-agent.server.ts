@@ -45,6 +45,7 @@ import {
   type DiscoveryAgentToolContext,
 } from './discovery-agent-tools.server'
 import { extractSlots, type DiscoverySlots } from './slot-extractor.server'
+import { getTurnSignal, getTurnRemainingMs, SONNET_HOP_MIN_MS } from './turn-deadline.server'
 import { mergeSlots } from './discovery-gate.server'
 import { resolveTransition } from './transitions.server'
 import { BRAND_VOICE } from '~/lib/ai-agent/prompt'
@@ -726,6 +727,19 @@ export async function executeConversationAgent(
     // tool hops left no turn to speak and a successful search was thrown away.
     for (let hop = 0; hop <= MAX_TOOL_HOPS; hop++) {
       const isFinalTextTurn = hop === MAX_TOOL_HOPS
+      // conv-audit C4b: a single Sonnet hop can take seconds. If the per-turn
+      // deadline budget is nearly spent, stop here and let safeFallback reply
+      // rather than start a call that could blow Twilio's webhook window. This
+      // guards the final text turn too: with no time left there is no room to
+      // write the reply either. No-op outside a deadline scope
+      // (getTurnRemainingMs is Infinity).
+      if (getTurnRemainingMs() < SONNET_HOP_MIN_MS) {
+        toolBudgetExhausted = true
+        console.warn(
+          `[conversation-agent] turn budget nearly spent at hop=${hop}; stopping loop for safeFallback`,
+        )
+        break
+      }
       const res = await _client.messages.create({
         model: SONNET_MODEL,
         max_tokens: tuning.maxTokens,
@@ -736,7 +750,7 @@ export async function executeConversationAgent(
         tools: DISCOVERY_AGENT_TOOLS,
         ...(isFinalTextTurn ? { tool_choice: { type: 'none' as const } } : {}),
         messages,
-      })
+      }, { signal: getTurnSignal() })
       tally(res.usage)
 
       if (!isFinalTextTurn && res.stop_reason === 'tool_use') {

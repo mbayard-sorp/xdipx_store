@@ -140,7 +140,28 @@ export function createCronRoutes() {
     try {
       const { runDiscontinuedSweep } = await import('../app/lib/feed-processor.server.js')
       const result = await runDiscontinuedSweep()
-      res.json({ ok: true, ...result.discontinuedSweep })
+
+      // Catch productPage docs whose Shopify counterpart was archived or removed
+      // by a path the SKU-scoped mirror above never sees, so search / IVR stop
+      // matching docs that can no longer hydrate a PDP. Best-effort: a reconcile
+      // hiccup must not fail the discontinued sweep. The reconcile's own safety
+      // guard refuses to mass-archive on a partial Shopify sweep.
+      let reconcile: unknown = null
+      try {
+        const { reconcileArchivedProductPages } = await import('../app/lib/sanity-shopify-reconcile.server.js')
+        const rec = await reconcileArchivedProductPages({ apply: true })
+        console.log(
+          `[cron:discontinued-sweep] reconcile: ${rec.flagged} flagged ` +
+          `(${rec.archivedInShopify} archived, ${rec.goneFromShopify} gone), ${rec.patched} patched` +
+          (rec.skippedForSafety ? ` — SKIPPED: ${rec.skippedForSafety.reason}` : ''),
+        )
+        reconcile = rec
+      } catch (err) {
+        console.error('[cron:discontinued-sweep] reconcile failed (ignored):', err)
+        reconcile = { error: String(err) }
+      }
+
+      res.json({ ok: true, ...result.discontinuedSweep, reconcile })
     } catch (err) {
       console.error('[cron:discontinued-sweep]', err)
       res.status(500).json({ error: String(err) })
