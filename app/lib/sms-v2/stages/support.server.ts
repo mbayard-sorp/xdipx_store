@@ -20,6 +20,7 @@ import {
   pickSupportTemplate,
   NOT_FOUND_REPLY,
 } from '../templates/support-templates'
+import { runCatalogLookup } from './discovery.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -27,8 +28,16 @@ import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 export async function executeSupportStage(
   ctx: EmmaContext,
   intent: IntentResult,
-  _customerText: string,
+  customerText: string,
 ): Promise<StageResponse> {
+  // A product question mid-support ("do you sell X?") should be answered from
+  // the real catalog, not the order-status template. NAME_ITEM is the intent
+  // classifier's product/category intent; hand off to the shared catalog search
+  // so the customer gets real, MAP-priced results and continues in DISCOVERY.
+  if (intent.intent === 'NAME_ITEM') {
+    return runCatalogLookup(ctx, intent, customerText)
+  }
+
   const toolCalls: StageResponse['telemetry']['toolCalls'] = []
   let prose: string
 
