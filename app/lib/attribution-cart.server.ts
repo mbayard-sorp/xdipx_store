@@ -13,7 +13,13 @@
  * flow both created carts without it, which made those orders invisible to
  * every downstream analytics consumer.
  */
-import { getFbCookies, getGaClientId, getStoredRefCode, getStoredUTM } from './attribution.server'
+import {
+  getFbCookies,
+  getGaClientId,
+  getStoredGoogleClickId,
+  getStoredRefCode,
+  getStoredUTM,
+} from './attribution.server'
 import { setCartAttributes } from './shopify.server'
 
 export interface CartAttr { key: string; value: string }
@@ -26,12 +32,19 @@ export interface CartAttr { key: string; value: string }
 export function attributionCartAttrs(request: Request): CartAttr[] {
   const { fbp, fbc } = getFbCookies(request)
   const gaCid = getGaClientId(request)
+  const gclid = getStoredGoogleClickId(request)
   const utm = getStoredUTM(request)
   const refCode = getStoredRefCode(request)
   const attrs: CartAttr[] = []
   if (fbp) attrs.push({ key: '_fbp', value: fbp })
   if (fbc) attrs.push({ key: '_fbc', value: fbc })
   if (gaCid) attrs.push({ key: '_ga_cid', value: gaCid })
+  // Google offline conversion import needs the id AND its type: gbraid/wbraid
+  // upload in their own column, not as a gclid. Both ride to the order webhook.
+  if (gclid) {
+    attrs.push({ key: '_gclid', value: gclid.id })
+    attrs.push({ key: '_gclid_type', value: gclid.type })
+  }
   if (utm?.source)   attrs.push({ key: '_utm_source',   value: utm.source })
   if (utm?.medium)   attrs.push({ key: '_utm_medium',   value: utm.medium })
   if (utm?.campaign) attrs.push({ key: '_utm_campaign', value: utm.campaign })
