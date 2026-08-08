@@ -7,6 +7,8 @@
 > Amended 2026-07-30 on Mike's explicit codify: the Emma section gains the no-omniscience rule, the no-self-narration rule, and the register ruling for copy that introduces her. The register system and the intensity dial are unchanged, so this stays v5.
 >
 > Amended 2026-08-06 on Mike's explicit instruction, applying approved suggestion #925: the blog addendum's aphorism-as-closer cap gains its explicit three-part test. The caps themselves are unchanged; what changes is that the definition of a hit is now written down instead of re-derived from a loose paraphrase on every review pass. This stays v5.
+>
+> Amended 2026-08-08 on Mike's explicit codify (option A): the social addendum gains the Instagram influencer register ("Emma off the clock"), the engagement close replaces any caption CTA (the existing no-CTA rule is confirmed, not weakened), trust-signal boilerplate is banned from social captions, presenter-in-frame imagery (Emma or clothed hands holding, unboxing, presenting) is licensed on top of the still-life default, verified brand-handle tagging becomes standard, and carousels become a first-class format. The 4-5 intensity cap and every core hard line (no lived experience above all) are unchanged, so this stays v5.
 
 <!-- core:start -->
 
@@ -285,9 +287,29 @@ Draft against both, and understand which one you are avoiding.
   per X's own rules. The desire-forward register, layer 2 in the core (sensation, arousal,
   release), does not run on any of these platforms. Empathy layer stays fully on: this is where
   the shame-free voice does its work.
+- **On Instagram the register is Emma off the clock (codified 2026-08-08).** The account reads
+  like a group chat with a friend who happens to work in the industry: first person, direct
+  address, reactions, questions back to the audience. Lowercase-casual is licensed here and only
+  here. Fun raises *playfulness*, never heat: the 4-5 cap is unmoved, and enthusiasm is curiosity
+  and expertise ("the engineering on this is showing off"), never testimony. Recurring formats
+  (unboxings, things-learned lists, site news, trend reacts, Ask Emma) are the default shape;
+  catalog-copy captions are the exception, not the rule.
+- **Captions are conversation, not copywriting.** Arc: hook → one real thing learned → aside →
+  engagement close. The engagement close is a question, a "save this", or a "send this to", never
+  a CTA: option A, codified 2026-08-08, confirms the no-CTA rule below. "Link in bio" may appear
+  at most once a day, as a plain factual pointer inside a sentence, never as a closing line.
+- **No trust-signal boilerplate.** Plain-box, discreet-shipping, billing-descriptor, and
+  body-safe-certification closers never appear in a social caption; trust lives on the site and
+  reads as corporate on a feed. A direct question in comments gets a plain, warm answer.
 - **Never sell in the post.** No prices, no discounts, no promo codes, no "shop", no site CTAs
   (the whitelist is for site and email; a CTA in a caption is the sale attempt that gets the post
   pulled). Commerce goes post → profile → link in bio → site. The caption never points at a PDP.
+- **Tag the maker.** When a featured brand's Instagram handle is verified in the registry
+  (`docs/store-team/brand-ig-handles.json`), tag it in the caption. Never guess a handle; a wrong
+  tag is worse than none.
+- **Carousels are a first-class format.** Multi-slide affirming or educational sexual-wellness
+  messages over inspiring images, built for saves and shares. On-slide text is moderated copy and
+  follows every vocabulary rule; slide one is a hook, the closing slide invites the save.
 - **Name the product, do not sell the sensation.** A product may be identified, shown, and
   explained. What it does to a body is off-platform: no act naming, no orgasm or arousal
   description, no "you'll feel". Say what a thing *is* and who it suits, not what it will do to
@@ -296,10 +318,14 @@ Draft against both, and understand which one you are avoiding.
   platforms: explicit act naming, orgasm/arousal language, crude slang, emoji-anatomy of any kind
   (peach, eggplant, droplets), and anything that reads as solicitation. "Sex toy", "sexual
   wellness", and plain anatomy in an educational sentence stay fine and are the point.
-- **Imagery is stricter than the core's register.** Product as object, on clean editorial ground.
-  Beyond the core's hard lines: never in a hand, never on or near a body, never on a bed with a
-  person in frame, no simulated use, no fluid or lube texture, no lips or tongue in frame. The
-  editorial still-life look is the compliance strategy, not a style preference.
+- **Imagery: still-life default plus a presenter license (amended 2026-08-08).** The baseline
+  stays product as object on clean editorial ground. On top of it, presenter-in-frame is licensed:
+  Emma (canonical likeness per the likeness policy, product stays the hero) or clothed hands may
+  hold, unbox, and present the product, catalog-demo style. Packshot-only stills are filler, at
+  most one a day. Still banned, unchanged: simulated or implied use, product on or against a body,
+  a person on a bed with product in frame, fluid or lube texture, lips or tongue in frame. The
+  presenter shows the thing; the still life and the presenter are both compliance strategies, not
+  style preferences.
 - **Alt text, hashtags, and on-image text are moderated copy too** and follow every rule above. No
   reclaimed or coded tag sets to route around a blocked term: evasion is its own violation and
   risks the account rather than the post.
