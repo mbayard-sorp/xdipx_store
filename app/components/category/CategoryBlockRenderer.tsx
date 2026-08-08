@@ -25,10 +25,44 @@ import { DropTimeline } from './DropTimeline'
 import { MakersNote } from './MakersNote'
 import { ComingSoon } from './ComingSoon'
 
+/**
+ * Section rhythm is color, not whitespace (doctrine §1): the page must never
+ * ship six pale grounds in a row. Aisle `categoryPage` docs commonly resolve to
+ * an all-pale stack (masthead, jump-to, several shelves, trust) with no tinted
+ * block in the mix, so we hand one mid-run shelf a plum-soft ground to give the
+ * eye a beat. Sale runs on the quiet paper mandate (`dropTone==='quiet'`), so no
+ * tint is injected there. Classifying an unknown block as pale is the safe
+ * direction: it can only add a tint, never leave a pale run uncounted.
+ */
+const INHERENTLY_TINTED = new Set(['justLanded', 'learnStrip', 'sensationLegend'])
+const MAX_PALE_RUN = 4
+
+export function tintedShelfKeys(blocks: ResolvedCategoryBlock[], dropTone?: DropTone): Set<string> {
+  const keys = new Set<string>()
+  if (dropTone === 'quiet') return keys
+  let run = 0
+  for (const block of blocks) {
+    // dropTone==='quiet' already returned above, so a dropMasthead here is the
+    // tinted (New) treatment and counts as a non-pale ground.
+    const inherentlyTinted =
+      INHERENTLY_TINTED.has(block._type) || block._type === 'dropMasthead'
+    if (inherentlyTinted) {
+      run = 0
+      continue
+    }
+    run += 1
+    if (run >= MAX_PALE_RUN && block._type === 'shelfSection') {
+      keys.add(block.key)
+      run = 0
+    }
+  }
+  return keys
+}
+
 /** Renders one resolved block. Exported for callers that already iterate
  *  their own list (kept internal-only for now; `CategoryBlockRenderer` below
  *  is the route-facing entry point). */
-function renderOne(block: ResolvedCategoryBlock, dropTone?: DropTone) {
+function renderOne(block: ResolvedCategoryBlock, dropTone?: DropTone, tinted = false) {
   switch (block._type) {
     case 'categoryMasthead':
       return <CategoryMasthead block={block} />
@@ -41,7 +75,7 @@ function renderOne(block: ResolvedCategoryBlock, dropTone?: DropTone) {
     case 'editorialFeature':
       return <EditorialFeature block={block} />
     case 'shelfSection':
-      return <ShelfSection block={block} />
+      return <ShelfSection block={block} tinted={tinted} />
     case 'learnStrip':
       return <LearnStrip block={block} />
     case 'benefitEditorial':
@@ -78,10 +112,11 @@ export function CategoryBlockRenderer({
   /** Sale renders its dropMasthead on the quiet paper ground; New stays tinted. */
   dropTone?: DropTone
 }) {
+  const tintedKeys = tintedShelfKeys(blocks, dropTone)
   return (
     <>
       {blocks.map(block => (
-        <Fragment key={block.key}>{renderOne(block, dropTone)}</Fragment>
+        <Fragment key={block.key}>{renderOne(block, dropTone, tintedKeys.has(block.key))}</Fragment>
       ))}
     </>
   )
