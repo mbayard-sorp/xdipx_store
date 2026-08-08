@@ -30,7 +30,7 @@ function toGA4Item(p: CategoryProduct, listId: string, index?: number): GA4Item 
   }
 }
 
-export function ShelfSection({ block }: { block: Block }) {
+export function ShelfSection({ block, tinted = false }: { block: Block; tinted?: boolean }) {
   const listId = `category:${block.collectionHandle}:${block.anchorId}`
 
   const firedView = useRef(false)
@@ -45,7 +45,11 @@ export function ShelfSection({ block }: { block: Block }) {
   if (block.products.length === 0) return null
 
   return (
-    <section id={block.anchorId} data-block={block._type} className="bg-paper py-12 md:py-16">
+    <section
+      id={block.anchorId}
+      data-block={block._type}
+      className={`${tinted ? 'bg-plum-soft' : 'bg-paper'} py-12 md:py-16`}
+    >
       <div className="mx-auto max-w-[1320px] px-6 md:px-16">
         <Reveal variant="up" className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>

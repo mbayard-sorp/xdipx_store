@@ -492,7 +492,12 @@ export default function CollectionPage() {
       )}
 
       <div className="flex flex-col md:flex-row gap-8">
-        <div className="flex flex-col gap-4 md:w-[260px] md:shrink-0">
+        {/* The Emma rails are short; in a stretched flex row they left the left
+            third empty for a full screen beside a tall product grid (design-critic
+            spot check, 2026-07-29). Pinning the column sticky and capping it to the
+            viewport keeps Emma present as the grid scrolls instead of a dead
+            column. Desktop-only: the mobile stack is untouched. */}
+        <div className="flex flex-col gap-4 md:w-[260px] md:shrink-0 md:self-start md:sticky md:top-4 md:max-h-[calc(100dvh-2rem)] md:overflow-y-auto">
           <EmmaDiscoveryRail
             surface="collection"
             collection={handle}
