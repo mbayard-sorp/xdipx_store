@@ -102,25 +102,100 @@ export interface PredictiveResult {
 
 // ─── Query helpers ──────────────────────────────────────────────────────────
 
-// Narrow synonym map for category words where prefix matching isn't enough
-// (e.g. "lube*" won't match "lubricant"). Keep this short — broad stemming
-// belongs in a real search index, not here.
+// Synonym / mishearing / alias dictionary for category words where prefix
+// matching isn't enough (e.g. "lube*" won't match "lubricant") and for the
+// spellings Deepgram returns from voice queries. Voice arrives as raw STT
+// transcripts, so "loob" must reach "lubricant" and "flashlight" must reach
+// "fleshlight". This stays a hand-maintained dictionary on purpose — broad
+// fuzzy stemming belongs in a real search index, not here.
+//
+// Keys are normalized to their compact form (lowercased, spaces and hyphens
+// removed) via `synonymKey`, so "strap on", "strap-on" and "strapon" all look
+// up the same entry. Values are the canonical catalog tokens/phrases to emit
+// as prefix patterns; a value may contain a space (GROQ `match` splits it into
+// per-word prefix terms), which is how "cock ring" (two words in a title) and
+// "cockring" (one word) both get covered.
 const QUERY_SYNONYMS: Record<string, string[]> = {
+  // ── lubricant ──
   lube: ['lubricant', 'lubricants'],
   lubes: ['lubricant', 'lubricants'],
   lubricant: ['lube'],
   lubricants: ['lube'],
+  loob: ['lubricant', 'lube'],
+  loobe: ['lubricant', 'lube'],
+  loub: ['lubricant', 'lube'],
+  // ── vibrator ──
   vibrator: ['vibe', 'vibes'],
   vibrators: ['vibe', 'vibes'],
   vibe: ['vibrator', 'vibrators'],
   vibes: ['vibrator', 'vibrators'],
+  vib: ['vibrator'],
+  // ── dildo (STT often clips the trailing vowel) ──
+  dildo: ['dildo'],
+  dildos: ['dildo'],
+  dild: ['dildo'],
+  dildoe: ['dildo'],
+  dildoh: ['dildo'],
+  // ── bullet vibe ──
+  bullet: ['bullet'],
+  bullets: ['bullet'],
+  bullit: ['bullet'],
+  bullitt: ['bullet'],
+  // ── stroker / masturbator (Fleshlight is the household name) ──
+  fleshlight: ['fleshlight', 'stroker', 'masturbator'],
+  fleshlights: ['fleshlight', 'stroker'],
+  fleshlite: ['fleshlight', 'stroker'],
+  flashlight: ['fleshlight', 'stroker', 'masturbator'],
+  flashlite: ['fleshlight', 'stroker'],
+  stroker: ['stroker', 'masturbator', 'fleshlight'],
+  masturbator: ['masturbator', 'stroker'],
+  // ── strap-on ──
+  strapon: ['strapon', 'strap-on', 'strap on', 'harness'],
+  // ── cock ring ──
+  cockring: ['cockring', 'cock ring', 'ring'],
+  cockrings: ['cockring', 'cock ring', 'ring'],
+  // ── butt plug ──
+  buttplug: ['buttplug', 'butt plug', 'plug'],
+  buttplugs: ['buttplug', 'butt plug', 'plug'],
+  plug: ['plug', 'butt plug'],
+  plugs: ['plug', 'butt plug'],
+  // ── wand massager ──
+  wand: ['wand', 'massager'],
+  wands: ['wand', 'massager'],
+  magicwand: ['magic wand', 'wand', 'massager'],
+  // ── anal ──
+  anal: ['anal'],
+  beads: ['beads', 'anal beads'],
+  analbeads: ['anal beads', 'beads'],
+  // ── rabbit ──
+  rabbit: ['rabbit'],
+  rabbits: ['rabbit'],
+  // ── brand aliases (spacing / common mishearings) ──
+  womanizer: ['womanizer'],
+  womaniser: ['womanizer'],
+  wevibe: ['we-vibe', 'we vibe'],
+  satisfyer: ['satisfyer'],
+  satisfier: ['satisfyer'],
+  lelo: ['lelo'],
+  doxy: ['doxy'],
+  njoy: ['njoy'],
+  funfactory: ['fun factory'],
+  tenga: ['tenga'],
+}
+
+// Compact lookup key: lowercase, whitespace and hyphens removed. Lets a heard
+// "strap on" / "strap-on" / "strapon" collapse to one dictionary entry.
+function synonymKey(s: string): string {
+  return s.replace(/[\s-]+/g, '')
 }
 
 // GROQ `match` does word-prefix matching, not stemming. Typing "dildos" won't
 // match products titled "Dildo". Build a small set of prefix patterns that
-// covers trailing -s / -es / -ies pluralization in either direction.
+// covers trailing -s / -es / -ies pluralization in either direction, the
+// hyphen/space spelling variants of a compound term, and the curated synonym /
+// mishearing / brand-alias dictionary above.
 export function buildQueryPatterns(query: string): string[] {
-  const lower = query.trim().toLowerCase()
+  const lower = query.trim().toLowerCase().replace(/\s+/g, ' ')
   if (!lower) return []
   const patterns = new Set<string>([`${lower}*`])
 
@@ -129,7 +204,16 @@ export function buildQueryPatterns(query: string): string[] {
   if (lower.length > 3 && lower.endsWith('es')) patterns.add(`${lower.slice(0, -2)}*`)
   if (lower.length > 3 && lower.endsWith('s'))  patterns.add(`${lower.slice(0, -1)}*`)
 
-  const synonyms = QUERY_SYNONYMS[lower]
+  // Hyphen/space spelling variants: "strap-on" → "strap on" and "strapon".
+  // Products may be titled either way, so emit a prefix pattern for each.
+  const spaced = lower.replace(/-/g, ' ')
+  const joined = lower.replace(/[\s-]+/g, '')
+  if (spaced !== lower) patterns.add(`${spaced}*`)
+  if (joined !== lower && joined.length > 0) patterns.add(`${joined}*`)
+
+  // Synonyms / mishearings / brand aliases, looked up on the compact key so
+  // spacing and hyphenation don't matter.
+  const synonyms = QUERY_SYNONYMS[synonymKey(lower)]
   if (synonyms) for (const s of synonyms) patterns.add(`${s}*`)
 
   return Array.from(patterns)
