@@ -25,16 +25,52 @@ remediation) is UI and appeal work the API does not express.
 
 ## 2. Owner checklist, in order
 
+Account status as of 2026-08-08: **exists, GA4 link completed 2026-08-07, never used to run a
+campaign.** A cold account is genuinely good news on policy (no inherited strikes, and in this
+category strikes are account-level and retroactive) and genuinely slower on billing.
+
 | # | Step | Latency | Blocks launch? |
 |---|---|---|---|
-| 1 | Create the Google Ads account on the identity that owns GA4 and Search Console | same day | yes |
-| 2 | Add billing. Expect manual review for this vertical | 2-5 business days | **yes, start first** |
-| 3 | Begin advertiser identity verification (legal entity + business name) | up to 4-5 weeks | no, serves while pending |
-| 4 | Link GA4 to Google Ads, import `purchase` as a conversion, mark it Primary | ~1 hour | no, but do it before spend |
-| 5 | Confirm auto-tagging is ON (it is the default) | minutes | yes, see §5 |
-| 6 | Build the campaign per §3 | ~2 hours | yes |
+| 1 | Google Ads account exists | done | - |
+| 2 | GA4 to Google Ads link | done 2026-08-07 | - |
+| 3 | **Add billing and clear first-charge verification** | 2-5 business days on a cold account | **yes, the long pole. Do it first.** |
+| 4 | Complete advertiser identity verification | days to weeks | not at first, but a new account can be paused on a deadline. Start it day one |
+| 5 | Confirm `GA4_API_SECRET` is set in prod (`/admin/settings`) | minutes | **yes.** Without it `sendGa4Purchase` silently skips and GA4 never sees a purchase, so there is nothing to import |
+| 6 | Mark `purchase` a key event in GA4, then import it as a conversion in Google Ads and confirm it appears under Goals | ~1 hour | yes. The link alone imports nothing |
+| 7 | Confirm auto-tagging is ON (it is the default) | minutes | **yes.** Without it no `gclid` reaches the site and the capture has nothing to capture |
+| 8 | Build the campaign per §3, leave it **paused** | ~2 hours | yes |
+| 9 | Unpause once billing clears and ads are approved | - | - |
 
 No certification or category application exists. Serving limits apply automatically.
+
+### Cold-account specifics
+
+- **Build paused, with the negative list applied before anything can serve.** A brand-new account
+  in the most restricted ad category, launching straight into live spend, is the profile that draws
+  scrutiny. The negatives are what stop the first day's budget evaporating on porn and DIY intent.
+- **Expect a slower first ad review.** New accounts queue behind established ones, and restricted
+  categories queue again. One to two business days is typical, longer here.
+- **"Eligible (limited)" is the normal steady state for this category, not an error.** Do not
+  "fix" it by loosening creative or keywords, which is how a compliant account becomes a
+  non-compliant one.
+- **Refuse Google's setup prompts.** The campaign creation flow will push Performance Max, Smart
+  campaigns, broad match, and a higher budget. All four are wrong here: the first two serve
+  prohibited networks (§Google network eligibility in `docs/ads-policy.md`), broad match burns a
+  cold budget on junk queries, and smart bidding has no conversion history to work from.
+- **Do not front-load spend to "learn faster."** On a cold account it buys noise and risk, not
+  signal.
+
+### Realistic timeline for a launch the week of 2026-08-10
+
+| Day | What happens |
+|---|---|
+| Mon 8/10 | Billing submitted, advertiser verification started, prod env checks done |
+| Mon-Tue | Campaign built paused, negatives applied, conversion imported and verified in Ads |
+| Wed-Thu | Billing clears, ads submitted for review |
+| **Thu 8/13 - Fri 8/14** | **Realistic first serve** |
+
+Next week is achievable, but it is the **back half** of next week, not Monday. The only way it slips
+past that is if billing review runs long, which is the one step nobody can accelerate.
 
 ## 3. Campaign: `gsearch-intent-aug26`
 
