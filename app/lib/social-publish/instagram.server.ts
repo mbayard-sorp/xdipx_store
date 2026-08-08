@@ -29,6 +29,9 @@ const CAPTION_MAX = 2200
 /** Container ingest polling. Images finish immediately; Reels take longer. */
 const POLL_INTERVAL_MS = 3_000
 const POLL_TIMEOUT_MS = 120_000
+/** Instagram carousels hold 2-10 slides. */
+const CAROUSEL_MIN_ITEMS = 2
+const CAROUSEL_MAX_ITEMS = 10
 
 function apiBase(): string {
   const version = process.env['IG_GRAPH_API_VERSION']?.trim() || DEFAULT_API_VERSION
@@ -85,6 +88,68 @@ function describe(error: MetaError): string {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+/** Create one media container; returns its id or an error detail. */
+async function createContainer(
+  igId: string,
+  params: Record<string, string>,
+  token: string,
+): Promise<{ ok: true; id: string } | { ok: false; detail: string }> {
+  const created = await igRequest(`/${igId}/media`, { method: 'POST', params, token })
+  if (!created.ok) return { ok: false, detail: describe(created.error) }
+  const id = String(created.data['id'] ?? '')
+  if (!id) return { ok: false, detail: 'Instagram returned no container id' }
+  return { ok: true, id }
+}
+
+/**
+ * Poll a container to FINISHED. ERROR/EXPIRED and the ingest timeout fail
+ * terminally — the container stays valid for 24h, so the id is in the message.
+ */
+async function pollUntilFinished(
+  containerId: string,
+  token: string,
+): Promise<{ ok: true } | { ok: false; detail: string }> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS
+  for (;;) {
+    const status = await igRequest(`/${containerId}`, {
+      method: 'GET',
+      params: { fields: 'status_code' },
+      token,
+    })
+    if (!status.ok) return { ok: false, detail: describe(status.error) }
+
+    const code = String(status.data['status_code'] ?? '')
+    if (code === 'FINISHED') return { ok: true }
+    if (code === 'ERROR' || code === 'EXPIRED') {
+      return { ok: false, detail: `Instagram rejected the media (status ${code}). Check the media URL is public and, for images, JPEG.` }
+    }
+    if (Date.now() >= deadline) {
+      return {
+        ok: false,
+        detail: `Instagram is still processing after ${POLL_TIMEOUT_MS / 1000}s (container ${containerId}, valid 24h). Retry the post shortly.`,
+      }
+    }
+    await sleep(POLL_INTERVAL_MS)
+  }
+}
+
+/** Publish a finished container; returns the media id (externalPostId). */
+async function publishContainer(
+  igId: string,
+  creationId: string,
+  token: string,
+): Promise<{ ok: true; id: string } | { ok: false; detail: string }> {
+  const published = await igRequest(`/${igId}/media_publish`, {
+    method: 'POST',
+    params: { creation_id: creationId },
+    token,
+  })
+  if (!published.ok) return { ok: false, detail: describe(published.error) }
+  const id = String(published.data['id'] ?? '')
+  if (!id) return { ok: false, detail: 'Instagram published but returned no media id' }
+  return { ok: true, id }
+}
+
 export const instagramPublisher: SocialPublisher = {
   platform: 'instagram',
 
@@ -98,6 +163,44 @@ export const instagramPublisher: SocialPublisher = {
     if (!token || !igId) return { ok: false, reason: 'not_configured' }
 
     const caption = input.caption.slice(0, CAPTION_MAX)
+
+    // Carousel: an item container per slide (image_url + is_carousel_item, no
+    // caption), each polled to FINISHED, then one parent CAROUSEL container
+    // (media_type=CAROUSEL, children=comma-joined ids, caption) published as a
+    // single post. Any item that ERRORs fails the whole post terminally.
+    if (input.media.kind === 'carousel') {
+      const urls = input.media.imageUrls.slice(0, CAROUSEL_MAX_ITEMS)
+      if (urls.length < CAROUSEL_MIN_ITEMS) {
+        return {
+          ok: false,
+          reason: 'error',
+          detail: `An Instagram carousel needs ${CAROUSEL_MIN_ITEMS}-${CAROUSEL_MAX_ITEMS} images; got ${input.media.imageUrls.length}.`,
+        }
+      }
+
+      const childIds: string[] = []
+      for (const url of urls) {
+        const item = await createContainer(igId, { image_url: url, is_carousel_item: 'true' }, token)
+        if (!item.ok) return { ok: false, reason: 'error', detail: item.detail }
+        const ingested = await pollUntilFinished(item.id, token)
+        if (!ingested.ok) return { ok: false, reason: 'error', detail: ingested.detail }
+        childIds.push(item.id)
+      }
+
+      const parent = await createContainer(
+        igId,
+        { media_type: 'CAROUSEL', children: childIds.join(','), caption },
+        token,
+      )
+      if (!parent.ok) return { ok: false, reason: 'error', detail: parent.detail }
+      const ingested = await pollUntilFinished(parent.id, token)
+      if (!ingested.ok) return { ok: false, reason: 'error', detail: ingested.detail }
+      const published = await publishContainer(igId, parent.id, token)
+      if (!published.ok) return { ok: false, reason: 'error', detail: published.detail }
+      return { ok: true, externalPostId: published.id }
+    }
+
+    // Single image or Reels: one container, one poll, one publish.
     const params: Record<string, string> =
       input.media.kind === 'image'
         ? { image_url: input.media.imageUrl, caption }
@@ -108,50 +211,13 @@ export const instagramPublisher: SocialPublisher = {
             ...(input.media.posterUrl ? { cover_url: input.media.posterUrl } : {}),
           }
 
-    // 1. Create the container.
-    const created = await igRequest(`/${igId}/media`, { method: 'POST', params, token })
-    if (!created.ok) return { ok: false, reason: 'error', detail: describe(created.error) }
-
-    const containerId = String(created.data['id'] ?? '')
-    if (!containerId) return { ok: false, reason: 'error', detail: 'Instagram returned no container id' }
-
-    // 2. Wait for ingest. The container stays valid for 24h, so a timeout is
-    //    recoverable by hand with the id in the message.
-    const deadline = Date.now() + POLL_TIMEOUT_MS
-    for (;;) {
-      const status = await igRequest(`/${containerId}`, {
-        method: 'GET',
-        params: { fields: 'status_code' },
-        token,
-      })
-      if (!status.ok) return { ok: false, reason: 'error', detail: describe(status.error) }
-
-      const code = String(status.data['status_code'] ?? '')
-      if (code === 'FINISHED') break
-      if (code === 'ERROR' || code === 'EXPIRED') {
-        return { ok: false, reason: 'error', detail: `Instagram rejected the media (status ${code}). Check the media URL is public and, for images, JPEG.` }
-      }
-      if (Date.now() >= deadline) {
-        return {
-          ok: false,
-          reason: 'error',
-          detail: `Instagram is still processing after ${POLL_TIMEOUT_MS / 1000}s (container ${containerId}, valid 24h). Retry the post shortly.`,
-        }
-      }
-      await sleep(POLL_INTERVAL_MS)
-    }
-
-    // 3. Publish.
-    const published = await igRequest(`/${igId}/media_publish`, {
-      method: 'POST',
-      params: { creation_id: containerId },
-      token,
-    })
-    if (!published.ok) return { ok: false, reason: 'error', detail: describe(published.error) }
-
-    const mediaId = String(published.data['id'] ?? '')
-    if (!mediaId) return { ok: false, reason: 'error', detail: 'Instagram published but returned no media id' }
-    return { ok: true, externalPostId: mediaId }
+    const created = await createContainer(igId, params, token)
+    if (!created.ok) return { ok: false, reason: 'error', detail: created.detail }
+    const ingested = await pollUntilFinished(created.id, token)
+    if (!ingested.ok) return { ok: false, reason: 'error', detail: ingested.detail }
+    const published = await publishContainer(igId, created.id, token)
+    if (!published.ok) return { ok: false, reason: 'error', detail: published.detail }
+    return { ok: true, externalPostId: published.id }
   },
 }
 

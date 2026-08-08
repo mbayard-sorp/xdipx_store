@@ -27,6 +27,7 @@ import { ReviewQueue } from '~/components/admin/social/ReviewQueue'
 import { FrequencyPanel } from '~/components/admin/social/FrequencyPanel'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
 import { isVideoPost, type SocialPostRow } from '~/components/admin/social/types'
+import type { PublishMedia } from '~/lib/social-publish/types'
 
 export const meta: MetaFunction = () => [{ title: 'Social Studio — xdipx Admin' }]
 
@@ -159,14 +160,20 @@ export async function action({ request }: ActionFunctionArgs) {
     const { getPublisher } = await import('~/lib/social-publish/registry.server')
     const publisher = getPublisher(post.platform)
     if (!publisher) return { ok: false, stub: true, error: `No publisher for ${post.platform}` }
-    const mediaUrl = post.mediaUrls?.[0]
+    const mediaUrls = post.mediaUrls ?? []
+    const mediaUrl = mediaUrls[0]
     if (!mediaUrl) return { ok: false, error: 'Draft has no media URL' }
     const isVideo = post.videoJobId != null || !!mediaUrl.split('?')[0]?.endsWith('.mp4')
+    // A still draft carrying more than one media URL publishes as a carousel;
+    // a single still or any video keeps the existing single-container path.
+    const media: PublishMedia = isVideo
+      ? { kind: 'video', videoUrl: mediaUrl, ...(post.posterUrl ? { posterUrl: post.posterUrl } : {}) }
+      : mediaUrls.length > 1
+        ? { kind: 'carousel', imageUrls: mediaUrls }
+        : { kind: 'image', imageUrl: mediaUrl }
     const result = await publisher.publish({
       postId,
-      media: isVideo
-        ? { kind: 'video', videoUrl: mediaUrl, ...(post.posterUrl ? { posterUrl: post.posterUrl } : {}) }
-        : { kind: 'image', imageUrl: mediaUrl },
+      media,
       caption: post.editedText?.trim() || post.tweetText,
     })
     if (!result.ok) {
