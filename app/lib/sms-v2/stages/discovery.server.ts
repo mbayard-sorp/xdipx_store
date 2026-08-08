@@ -22,6 +22,7 @@
 import {
   advanceGate,
   mergeSlots,
+  initDiscoveryState,
   suspendForExplain,
   SKIP_SENTINEL,
   type DiscoveryState,
@@ -423,6 +424,36 @@ export async function runSearchBranch(
       telemetry: { ...baseTelemetry, inputTokens: 0, outputTokens: 0 },
     }
   }
+}
+
+/**
+ * Product-question escape hatch for non-discovery stages (SUPPORT, RECONNECT).
+ *
+ * Those stages are deterministic and have no catalog access, so a "do you sell
+ * X?" that arrives mid-support used to get an order-status template or a generic
+ * greeting instead of an answer. This runs the same shared search the discovery
+ * stage uses (runSearchBranch → searchForIvrWithDiagnostics), so the reply is
+ * built only from real, MAP-priced catalog hits — never model memory — which is
+ * the discovery agent's fabrication guard by construction.
+ *
+ * Slots come from the customer's text (plus any prior discovered slots); the
+ * discovery state defaults to a fresh gate when the customer has never shopped.
+ * runSearchBranch writes stage: 'DISCOVERY', so the customer continues shopping
+ * from here — the same place the next-turn intent reclassification would have
+ * routed them anyway, one turn sooner.
+ */
+export async function runCatalogLookup(
+  ctx: EmmaContext,
+  intent: IntentResult,
+  customerText: string,
+): Promise<StageResponse> {
+  const priorSlots: Partial<DiscoverySlots> =
+    (ctx.conversation.discoveredSlots as Partial<DiscoverySlots>) ?? {}
+  const { slots: extracted } = await extractSlots({ text: customerText, priorSlots })
+  const mergedSlots = mergeSlots(priorSlots, extracted)
+  const discoveryState =
+    (ctx.conversation.discoveryState as DiscoveryState | null) ?? initDiscoveryState()
+  return runSearchBranch(ctx, intent, customerText, mergedSlots, discoveryState)
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────

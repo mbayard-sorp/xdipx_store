@@ -18,6 +18,7 @@ import {
 } from '../templates/reconnect-templates'
 import { getCrossChannelHint } from '../cross-channel.server'
 import { pickCrossChannelTemplate } from '../templates/cross-channel-templates'
+import { runCatalogLookup } from './discovery.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -25,8 +26,16 @@ import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 export async function executeReconnectStage(
   ctx: EmmaContext,
   intent: IntentResult,
-  _customerText: string,
+  customerText: string,
 ): Promise<StageResponse> {
+  // A returning customer whose first message back is itself a product question
+  // ("do you sell X?") gets real catalog results rather than a generic reconnect
+  // greeting. NAME_ITEM is the classifier's product/category intent; answer it
+  // from the shared catalog search before falling back to the greeting paths.
+  if (intent.intent === 'NAME_ITEM') {
+    return runCatalogLookup(ctx, intent, customerText)
+  }
+
   // Phase 10 — Cross-channel continuation: if the customer was active on
   // another channel recently and was looking at a specific product, surface
   // that immediately and route to DISCOVERY so the next turn can pick up.
