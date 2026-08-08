@@ -24,6 +24,7 @@ import { setPipelineSetting } from '~/lib/pricing-webhook.server'
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES, socialFreqKey } from '~/lib/team-keys'
 import { categoryToLegacyString } from '~/types'
 import { ReviewQueue } from '~/components/admin/social/ReviewQueue'
+import { parseBatchPostIds } from '~/components/admin/social/review-batch'
 import { FrequencyPanel } from '~/components/admin/social/FrequencyPanel'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
 import { isVideoPost, type SocialPostRow } from '~/components/admin/social/types'
@@ -108,6 +109,31 @@ export async function action({ request }: ActionFunctionArgs) {
       reviewedBy: user?.name || user?.email || 'admin',
     })
     return ok ? { ok: true } : { ok: false, error: 'Post not found or already posted' }
+  }
+
+  // ── Batch review (owner-only): approve/reject many selected drafts at once.
+  // Reuses the same reviewSocialPost writer per id, so the review_status
+  // transition + reviewed_by/reviewed_at contract is identical to the single
+  // 'review' intent. needs_changes is intentionally not batchable — it requires
+  // per-draft feedback, so it stays on the single-draft path.
+  if (intent === 'review-batch') {
+    const decision = form.get('decision') as string
+    if (decision !== 'approved' && decision !== 'rejected') {
+      return { ok: false, error: 'Batch review supports approve or reject only' }
+    }
+    const ids = parseBatchPostIds(form.get('postIds') as string | null)
+    if (ids.length === 0) return { ok: false, error: 'No drafts selected' }
+    const user = await getAdminUser(request)
+    const reviewedBy = user?.name || user?.email || 'admin'
+    let updated = 0
+    for (const id of ids) {
+      const ok = await reviewSocialPost(id, {
+        reviewStatus: decision as 'approved' | 'rejected',
+        reviewedBy,
+      })
+      if (ok) updated++
+    }
+    return { ok: true, intent: 'review-batch', updated, requested: ids.length }
   }
 
   if (intent === 'set-frequency') {
