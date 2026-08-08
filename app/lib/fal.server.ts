@@ -172,18 +172,24 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
 
   // Kontext dev takes image_url + resolution_mode; the text-to-image endpoints
   // take image_size. Same sync endpoint pattern otherwise.
+  // Pin JPEG on both branches. Instagram Graph API image containers require
+  // JPEG; leaving output_format to the provider default lets a silent PNG reach
+  // an image_url the IG container step then rejects (composeSceneFrame() in
+  // fal-video.server.ts already pins it for the same reason).
   const body = opts.refImageUrl
     ? {
         prompt:                opts.prompt,
         image_url:             opts.refImageUrl,
         num_images:            count,
         resolution_mode:       kontextResolutionMode(image_size),
+        output_format:         'jpeg',
         enable_safety_checker: false,
       }
     : {
         prompt:                opts.prompt,
         num_images:            count,
         image_size,
+        output_format:         'jpeg',
         enable_safety_checker: false,
       }
 

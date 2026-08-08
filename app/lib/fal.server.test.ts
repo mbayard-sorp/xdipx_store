@@ -2,8 +2,8 @@
 // has no image_size param, so a caller's imageSize must resolve to a string
 // aspect. A {width,height} object used to fall through to a hardcoded '16:9',
 // silently generating the wrong aspect (ticket #152). These lock in the mapping.
-import { describe, it, expect } from 'vitest'
-import { kontextResolutionMode } from './fal.server'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { kontextResolutionMode, falGenerate } from './fal.server'
 
 describe('kontextResolutionMode', () => {
   it('maps the string image_size enums to their aspect', () => {
@@ -38,5 +38,44 @@ describe('kontextResolutionMode', () => {
   it('throws on a degenerate object', () => {
     expect(() => kontextResolutionMode({ width: 0, height: 900 })).toThrow(/invalid image_size/)
     expect(() => kontextResolutionMode({ width: 1200, height: -1 })).toThrow(/invalid image_size/)
+  })
+})
+
+describe('falGenerate output_format', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  // Capture the request body the generator would POST to fal, without hitting
+  // the network. First fetch = the generation call (we assert its body); any
+  // follow-up fetch = the image download, which we stub to a tiny buffer.
+  function stubFal() {
+    vi.stubEnv('FAL_KEY', 'test-key')
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        calls.push({ url, body: JSON.parse(String(init.body)) })
+        return new Response(JSON.stringify({ images: [{ url: 'https://fal.test/out' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      // image download
+      return new Response(new ArrayBuffer(4), { status: 200 })
+    }))
+    return calls
+  }
+
+  it('pins jpeg on the text-to-image branch', async () => {
+    const calls = stubFal()
+    await falGenerate({ prompt: 'a lamp on a table' })
+    expect(calls[0]?.body).toMatchObject({ output_format: 'jpeg' })
+  })
+
+  it('pins jpeg on the ref-image (Kontext) branch', async () => {
+    const calls = stubFal()
+    await falGenerate({ prompt: 'the product in a scene', refImageUrl: 'https://img.test/p.jpg' })
+    expect(calls[0]?.body).toMatchObject({ output_format: 'jpeg' })
   })
 })
