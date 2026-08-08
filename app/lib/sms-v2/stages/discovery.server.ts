@@ -319,6 +319,19 @@ export async function runSearchBranch(
     if (retryOpts) {
       diag = await searchForIvrWithDiagnostics(retryOpts)
     }
+
+    // Last resort: drop the productTypeDial itself. The retries above never
+    // remove the dial, so a single wrong dial classification (e.g. a wand
+    // request tagged 'lube') keeps every matching product permanently
+    // unreachable in SMS discovery. If we are still filtered to zero, retry
+    // once more on the free-text query alone — dial, subtype, audience, and
+    // priceMax all dropped — and log it so a misclassifying dial is visible.
+    if (diag.reason === 'filtered-to-zero') {
+      console.warn(
+        `[discovery] filtered-to-zero after filter-drop retry; dropping productTypeDial=${mergedSlots.category ?? 'none'} and retrying on query text alone`,
+      )
+      diag = await searchForIvrWithDiagnostics({ query: searchQuery, limit: 3 })
+    }
   }
 
   const baseWrites = {
