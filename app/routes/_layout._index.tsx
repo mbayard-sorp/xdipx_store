@@ -220,8 +220,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     (s): s is import('~/types/cms').EmmaCuratedRailBlock => s._type === 'emmaCuratedRail',
   )
 
+  // withTimeout only converts a *timeout* to the fallback; a rejection still
+  // propagates. getDealByHandle rejects on any Storefront failure (so the PDP
+  // can answer 503 instead of a de-indexing 404), and a missing pair product is
+  // never worth 500ing the homepage over, so catch to the same null fallback.
   const pairBundleDealP = (homepageSettings.template === 'pair_bundle' || homepageSettings.template === 'pair_bundle_fullbleed') && homepageSettings.pairProductHandle
-    ? withTimeout(getDealByHandle(homepageSettings.pairProductHandle), LOADER_TIMEOUT_MS, null, 'getDealByHandle(pairBundle)')
+    ? withTimeout(getDealByHandle(homepageSettings.pairProductHandle).catch(() => null), LOADER_TIMEOUT_MS, null, 'getDealByHandle(pairBundle)')
     : Promise.resolve(null)
 
   // Swatches depend on pairBundleDeal — chain rather than serialize the whole
@@ -242,7 +246,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   )
 
   const pairDealP = emmaHero?.heroVariant === 'bundle' && emmaHero.pairProductHandle
-    ? withTimeout(getDealByHandle(emmaHero.pairProductHandle), LOADER_TIMEOUT_MS, null, 'getDealByHandle(pairDeal)')
+    ? withTimeout(getDealByHandle(emmaHero.pairProductHandle).catch(() => null), LOADER_TIMEOUT_MS, null, 'getDealByHandle(pairDeal)')
     : Promise.resolve(null)
 
   const bundleP = deal?.handle

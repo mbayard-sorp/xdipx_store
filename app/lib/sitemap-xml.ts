@@ -13,8 +13,42 @@ export const BASE = 'https://xdipx.com'
  * from May, so the sitemap kept telling Google nothing had changed since the
  * bad crawl and no recrawl was ever triggered. Flooring their lastmod here is
  * an honest signal: this is genuinely when the page's indexability changed.
+ *
+ * Also the cutoff for trusting a dead verdict — see isTrustworthyDeadVerdict.
  */
 export const RECRAWL_EPOCH = '2026-06-13'
+
+/**
+ * Date the errored-page canonical was fixed (#374, 079311c): before it, a page
+ * whose loader threw rendered the root error boundary with no canonical at all,
+ * because React Router does not run a route's `meta` export when that route
+ * errors. Identical canonical-less HTML across many URLs is exactly what
+ * Google's dedup clusters, and it elected the homepage as the representative.
+ *
+ * This matters separately from RECRAWL_EPOCH because the two bugs have two
+ * different fix dates. Flooring a "Duplicate without user-selected canonical"
+ * URL at 2026-06-13 advertises a lastmod *earlier* than the fix for its own
+ * defect, so the sitemap tells Google nothing has changed since the bad crawl
+ * — which is how 168 of them still carried a June or July lastmod on
+ * 2026-08-09, six weeks after Google last re-confirmed the duplicate verdict.
+ */
+export const CANONICAL_FIX_EPOCH = '2026-07-29'
+
+/**
+ * Per-coverage-state lastmod floor. A stale verdict is only worth re-signalling
+ * from the date the defect behind *that* verdict was actually fixed; claiming
+ * any later date would be the dishonest-lastmod problem we refuse to create.
+ * States absent from this map fall back to RECRAWL_EPOCH.
+ */
+export const STALE_VERDICT_EPOCHS: Record<string, string> = {
+  'Duplicate without user-selected canonical': CANONICAL_FIX_EPOCH,
+  'Duplicate, Google chose different canonical than user': CANONICAL_FIX_EPOCH,
+}
+
+/** Lastmod floor for a URL sitting on a given stale coverage state. */
+export function epochForCoverageState(coverageState: string): string {
+  return STALE_VERDICT_EPOCHS[coverageState] ?? RECRAWL_EPOCH
+}
 
 /**
  * Sitemap hierarchy.
@@ -58,8 +92,11 @@ export type SitemapSegment = {
 export type UrlHealth = {
   /** URLs to drop from the sitemap entirely. */
   dead:  Set<string>
-  /** URLs whose lastmod must be floored at RECRAWL_EPOCH. */
-  stale: Set<string>
+  /**
+   * URLs holding a stale verdict, mapped to the lastmod floor that verdict
+   * earns — the date its underlying defect was fixed, per STALE_VERDICT_EPOCHS.
+   */
+  stale: Map<string, string>
 }
 
 /** ISO dates sort lexically, so a string compare is the whole comparison. */
@@ -135,7 +172,8 @@ export function applyHealth(urls: SitemapUrl[], health: UrlHealth): SitemapUrl[]
   const out: SitemapUrl[] = []
   for (const u of urls) {
     if (health.dead.has(u.loc)) continue
-    out.push(health.stale.has(u.loc) ? { ...u, lastmod: floorLastmod(u.lastmod, RECRAWL_EPOCH) } : u)
+    const floor = health.stale.get(u.loc)
+    out.push(floor ? { ...u, lastmod: floorLastmod(u.lastmod, floor) } : u)
   }
   return out
 }
