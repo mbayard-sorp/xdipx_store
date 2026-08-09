@@ -3,6 +3,9 @@ import { parse as parseCookie, serialize as serializeCookie } from 'cookie'
 const UTM_COOKIE = '__xdipx_utm'
 const REF_COOKIE = '__xdipx_ref'
 const FBC_COOKIE = '_fbc'
+/** Google click id (gclid/gbraid/wbraid). Namespaced: unlike _fbc there is no
+ *  Google-owned cookie we need to stay format-compatible with. */
+const GCLID_COOKIE = '__xdipx_gclid'
 const THIRTY_DAYS = 60 * 60 * 24 * 30
 /** Meta's own _fbc lifetime. Matching it keeps our cookie and theirs in sync. */
 const NINETY_DAYS = 60 * 60 * 24 * 90
@@ -109,6 +112,82 @@ export function captureFbClickId(request: Request, nowMs: number = Date.now()): 
     ...(domain ? { domain } : {}),
     ...(process.env['NODE_ENV'] === 'production' ? { secure: true } : {}),
   })]
+}
+
+/**
+ * Google ad clicks arrive with `?gclid=` (or `?gbraid=`/`?wbraid=` on iOS and
+ * other privacy-restricted click paths). Capture whichever is present into the
+ * `__xdipx_gclid` cookie.
+ *
+ * This exists for the same reason captureFbClickId does, and the Google case is
+ * strictly worse. gtag.js is the only other writer of a Google click cookie, it
+ * is deferred behind first interaction/idle, AND consent-mode boots
+ * `ad_storage: 'denied'` (see root.tsx), and with ad_storage denied gtag does
+ * not write `_gcl_aw` at all. So for any shopper who ignores or declines the
+ * banner there is no Google click id persisted anywhere.
+ *
+ * Checkout is off-domain, so no client-side conversion tag can ever observe a
+ * purchase. The only durable path is offline click-conversion import keyed on
+ * this id, which means a click whose id was never captured here is permanently
+ * unattributable. There is no retroactive fix.
+ *
+ * gbraid/wbraid are recorded with their type because Google's conversion import
+ * requires uploading them in their own column, not as a gclid.
+ *
+ * Precedence follows Google's own: gclid, then wbraid, then gbraid. Last click
+ * wins. Writes nothing when no param is present, so ordinary requests stay
+ * Set-Cookie free and edge-cacheable (a URL bearing a click id is unique per
+ * click and was never a shared cache entry to begin with).
+ */
+export type GoogleClickIdType = 'gclid' | 'wbraid' | 'gbraid'
+
+export interface GoogleClickId {
+  id: string
+  type: GoogleClickIdType
+  capturedAt: string
+}
+
+/** Order matters: gclid is the most precise, gbraid the least. */
+const GOOGLE_CLICK_PARAMS: GoogleClickIdType[] = ['gclid', 'wbraid', 'gbraid']
+
+export function captureGoogleClickId(request: Request, nowMs: number = Date.now()): string[] {
+  let params: URLSearchParams
+  try { params = new URL(request.url).searchParams } catch { return [] }
+
+  let found: GoogleClickId | null = null
+  for (const type of GOOGLE_CLICK_PARAMS) {
+    const id = params.get(type)
+    if (id) {
+      found = { id, type, capturedAt: new Date(nowMs).toISOString() }
+      break
+    }
+  }
+  if (!found) return []
+
+  const domain = fbCookieDomain(request)
+  return [serializeCookie(GCLID_COOKIE, JSON.stringify(found), {
+    httpOnly: false, // readable client-side, matching the _fbc/__xdipx_utm posture
+    path: '/',
+    sameSite: 'lax', // an ad click is a top-level cross-site navigation
+    maxAge: NINETY_DAYS, // Google accepts offline conversions ~90 days from click
+    ...(domain ? { domain } : {}),
+    ...(process.env['NODE_ENV'] === 'production' ? { secure: true } : {}),
+  })]
+}
+
+/**
+ * Read the stored Google click id. Written as the `_gclid` / `_gclid_type` cart
+ * attributes by the cart action so it survives to the order webhook, which is
+ * what makes an offline conversion upload possible at all.
+ */
+export function getStoredGoogleClickId(request: Request): GoogleClickId | null {
+  const raw = parseCookie(request.headers.get('Cookie') ?? '')[GCLID_COOKIE]
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as GoogleClickId
+    if (!parsed?.id || !GOOGLE_CLICK_PARAMS.includes(parsed.type)) return null
+    return parsed
+  } catch { return null }
 }
 
 export function getStoredUTM(request: Request): UTMData | null {

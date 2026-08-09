@@ -23,7 +23,7 @@ import newsreaderLatinWoff2 from '@fontsource-variable/newsreader/files/newsread
 import dmSansLatinWoff2 from '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2?url'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { SITE_ORIGIN } from '~/lib/social-meta'
-import { captureUTM, captureFbClickId } from '~/lib/attribution.server'
+import { captureUTM, captureFbClickId, captureGoogleClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 
 const BOTID_PROTECTED_ROUTES = [
@@ -162,11 +162,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // property as the UTM capture: nothing is written unless the param is present.
   const fbcCookies = captureFbClickId(request)
 
+  // Google ad clicks arrive with ?gclid= (or ?gbraid=/?wbraid=). Capturing it
+  // server-side is the ONLY way the store ever sees it: gtag.js is deferred and
+  // consent-mode boots ad_storage denied, and with ad_storage denied gtag never
+  // writes _gcl_aw. Checkout is off-domain so no client tag can see a purchase,
+  // which makes offline conversion import keyed on this id the only path, and a
+  // click not captured here can never be attributed after the fact.
+  const gclidCookies = captureGoogleClickId(request)
+
   const ga4 = await resolveGa4()
 
   const headers = new Headers()
   for (const cookie of utmCookies) headers.append('Set-Cookie', cookie)
   for (const cookie of fbcCookies) headers.append('Set-Cookie', cookie)
+  for (const cookie of gclidCookies) headers.append('Set-Cookie', cookie)
 
   return data({
     utm,

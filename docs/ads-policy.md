@@ -9,9 +9,10 @@ is often account-level and retroactive.
 proposal must carry a `policyCheck` naming the platform category it fits and why it complies (the
 API rejects proposals without one). The creative rules in §Creative apply to **organic social too**.
 
-Policies drift. Last verified **2026-07** against the platform sources listed at the bottom. If a
-proposal hinges on a policy detail, re-verify against the live policy page that run and cite it in
-the `policyCheck`.
+Policies drift. Last verified **2026-07** against the platform sources listed at the bottom, except
+the Google sections (platform matrix row, §Google network eligibility, §Merchant Center), which were
+re-verified **2026-08-08**. If a proposal hinges on a policy detail, re-verify against the live
+policy page that run and cite it in the `policyCheck`.
 
 ---
 
@@ -22,14 +23,58 @@ the `policyCheck`.
 | **Meta** (FB/IG) | **Prohibited.** "Adult sexual arousal products or services" are banned outright — erotic products explicitly listed. | Narrow carve-out: sexual/reproductive **health & wellness** products (contraception, family planning) targeted 18+, focused on health and medical efficacy, **never on sexual pleasure**. For xdipx that covers at most lubricants/wellness-adjacent SKUs with strictly clinical framing — and the pleasure catalog can never ride along. Pixel/CAPI conversion tracking for organic/other traffic is fine and already wired. | **High.** Enforcement is aggressive; a rejected-ad pattern or a policy-violating landing page can ban the account. Never "wellness-wash" a pleasure product — reviewers follow the landing page. |
 | **TikTok** | **Prohibited.** Sexual products/services banned, including devices for sexual pleasure or performance. | Nothing paid. Do not propose TikTok, ever. | Ban risk plus brand-safety blowback. |
 | **X** | **Prohibited in ads.** Despite X's permissive *organic* adult-content policy, its advertising and shopping policies ban adult/sexual merchandise globally. | Organic posting (labeled appropriately per X's adult-content rules) — which is the social team's lane, not paid. | Ads get rejected; repeat attempts risk the ad account. |
-| **Google Ads** | **Restricted, not prohibited — the only mainstream paid channel.** Sex toys are explicitly in Google's "restricted sexual content" category: ads serve only in limited scenarios (user search intent, 18+, local law), never to minors, with muted formats. | Search ads on category intent ("where to buy X"), Shopping with a compliant feed (the store already has `gmc-metafields.server.ts` for Merchant Center), non-explicit creative and landing experience. Expect "Limited" serving status as the *normal* state, not an error. | **Medium.** Compliant-but-limited is sustainable; explicit creative or policy-evasion attempts escalate to account action. |
+| **Google Ads** | **Restricted, not prohibited. The only mainstream paid channel.** Sex toys are "moderately restricted" sexual merchandise: ads serve only in limited scenarios (user search intent, 18+, local law, SafeSearch), never to minors. **Eligible on the Search Network only. Prohibited on the Display Network and the Google Ad Manager Network.** No certification or allowlist application exists for this category; serving limits apply automatically. | Search text ads on category and brand intent ("where to buy X"). Shopping is a **separate** surface with its own policy and review queue, see §Merchant Center. Non-explicit creative and landing experience. Expect "Limited" serving status as the *normal* state, not an error. | **Medium.** Compliant-but-limited is sustainable; explicit creative or policy-evasion attempts escalate to account action. |
 | **Reddit** | Effectively prohibited for adult products in its ads program. | Organic community participation where subreddit rules allow (unpaid, social team's judgment). | Low spend exposure since there's no viable paid path. |
 | **Adult ad networks** (e.g. category-specialist networks) | **Allowed — it's their business.** | Display/native on adult and adjacent inventory. Vet each network's traffic quality and brand-safety before proposing; model conservative conversion rates. | Quality/fraud risk, not policy risk. Attribution via UTMs is mandatory. |
 | **Owned + earned channels** | No gatekeeper. | Email/SMS to consented lists (the email team), SEO/AEO (already invested), affiliates and creator/newsletter sponsorships (disclosure required, creator's platform rules apply), the referral program once built. | Lowest risk, best margins — the default recommendation when paid math is thin. |
 
-**Channel priority for proposals:** (1) owned/earned, (2) Google restricted-serving search/Shopping,
-(3) vetted adult networks and newsletter/creator sponsorships, (4) Meta only for genuinely
-health-framed SKUs that pass the carve-out honestly. Never TikTok; never X paid.
+**Channel priority for proposals:** (1) owned/earned, (2) Google restricted-serving Search,
+(3) vetted adult networks and newsletter/creator sponsorships, (4) Google Shopping via Merchant
+Center once §Merchant Center is satisfied, (5) Meta only for genuinely health-framed SKUs that pass
+the carve-out honestly. Never TikTok; never X paid.
+
+## Google network eligibility (the rule that kills campaign types)
+
+Verified 2026-08-08 against Google's sexual content policy. This is the most consequential detail in
+this document, because Google's own UI actively recommends the campaign types that are prohibited.
+
+**Eligible:** Search Network text ads.
+
+**Prohibited:** Display Network, Google Ad Manager Network.
+
+Therefore, by construction, **never propose Performance Max, Demand Gen, Discovery, YouTube, or any
+Smart campaign.** Those types serve Display, YouTube, Gmail, and Discover inventory with no network
+opt-out, so selecting one is selecting prohibited placements regardless of creative. A Standard
+Search campaign with "Include Google Display Network" left checked is the same violation by
+accident: **uncheck it explicitly, every time.**
+
+Geo: sexual content does not serve at all in roughly twenty countries (Algeria, Bahrain, Djibouti,
+Egypt, India, Iran, Iraq, Jordan, Kuwait, Lebanon, Libya, Morocco, Oman, Palestine, Qatar, Saudi
+Arabia, Syria, Tunisia, UAE, Yemen). Strongly restricted content additionally does not serve in
+China, Germany, Hong Kong, Indonesia, Malaysia, Peru, Philippines, Russia, Singapore, South Korea,
+Taiwan, Thailand, Ukraine, Vietnam. Set **Location options to "Presence"**, not the "Presence or
+interest" default, or ads reach users in excluded countries who merely searched about a target one.
+
+No certification, allowlist, or pre-approval process exists for this category. Serving restrictions
+apply automatically based on user age, local law, and SafeSearch.
+
+## Merchant Center and Shopping (separate policy surface)
+
+Shopping is **not** governed by the ad policies above. It has its own classification, its own
+attribute requirements, and its own review queue with its own latency. Verified 2026-08-08.
+
+- Merchandise intended to enhance sexual activity is **restricted, not prohibited**, for Shopping
+  ads and local inventory ads. Sexually explicit content is prohibited outright.
+- The `adult` attribute is **required** on these items. The store's feed already emits
+  `<g:adult>yes</g:adult>` unconditionally (`app/routes/[feed.xml].tsx`).
+- Country exclusions apply as above and are enforced at the Merchant Center account level.
+- **Shipping and price in the feed must match checkout exactly.** Mismatch is a misrepresentation
+  suspension, and it is the single most common way a compliant catalog loses its account.
+- Landing pages for adult items must not surface adult content on non-adult product pages.
+
+Shopping is a **phase two** lane, never a week-one launch dependency: it stacks three review queues
+(account, domain claim, adult-merchandise review) behind a feed that must already be exact. Search
+launches on the Ads account alone. Submit the feed in parallel; do not block on it.
 
 ## Organic social
 
@@ -66,10 +111,18 @@ keep the audience somewhere we own, and never make platform reach load-bearing f
   an asset here). Never porn-adjacent aesthetics.
 - Copy follows `docs/emma-voice.md` on top of platform rules: suggestive about what a product does,
   never crude, no "sex/sexy" as branding adjectives, no countdowns or urgency theater.
-- Age: all targeting 18+ minimum; treat 25+ as the floor where platforms age-gate the category
-  harder. Nothing that could read as appealing to minors.
-- Landing pages are part of the ad: reviewers follow them. The page must match the ad's framing,
-  carry the age gate, and never promise what the PDP doesn't deliver.
+- Age: all targeting 18+ minimum. Nothing that could read as appealing to minors. On **Meta**, treat
+  25+ as the working floor because the platform age-gates the category harder. On **Google Search**
+  this does not apply: Google enforces the 18+ floor itself for restricted sexual content, and the
+  "Unknown" age bucket is routinely 40-60% of Search impressions, so excluding it strangles delivery
+  for no policy benefit. Use a negative bid adjustment on 18-24 for high-ticket ad groups instead of
+  an exclusion. That is an economics decision, not a compliance one.
+- Landing pages are part of the ad: reviewers follow them. The page must match the ad's framing and
+  never promise what the PDP doesn't deliver. **Note the current state honestly:** the store has no
+  site-wide age gate. `AgeGatePanel` (`app/components/store/AgeGate.tsx`) is mounted only in the
+  cart drawer and `/social`, is `localStorage`-only, and is a UI convention rather than a compliance
+  control. Google does not require an age interstitial for this category, so this is not a rejection
+  risk, but no `policyCheck` may ever claim the landing page carries an age gate.
 - MAP rules apply to promoted prices: never advertise a discount on a MAP=MSRP product.
 
 ## The `policyCheck` protocol
@@ -97,7 +150,7 @@ killed. "It'll probably slip through review" is never a compliance case.
 - Meta: [Adult products or services ad standard](https://transparency.meta.com/policies/ad-standards/content-specific-restrictions/adult-products-or-services), [Health & wellness policy](https://www.facebook.com/business/help/2489235377779939)
 - TikTok: [Adult content ad policy](https://ads.tiktok.com/help/article/tiktok-ads-policy-adult-content)
 - X: [Adult or sexual products and services ads policy](https://business.twitter.com/en/help/ads-policies/ads-content-policies/adult-or-sexual-products-and-services), [Shopping policies](https://help.x.com/en/rules-and-policies/shopping-policies)
-- Google: [Sexual content ad policy](https://support.google.com/adspolicy/answer/6023699)
+- Google (re-verified 2026-08-08): [Sexual content ad policy](https://support.google.com/adspolicy/answer/6023699), [Merchant Center adult-oriented content](https://support.google.com/merchants/answer/6150138), [Advertiser verification](https://support.google.com/adspolicy/answer/9703665)
 
 Organic (community standards, not ad standards):
 
