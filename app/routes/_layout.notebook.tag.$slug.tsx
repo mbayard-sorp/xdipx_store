@@ -29,9 +29,9 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
-  if (!loaderData) return [{ title: 'Tag not found — xdipx' }]
+  if (!loaderData) return [{ title: 'Tag not found | xdipx' }]
   const { tag, canonical } = loaderData
-  const title = `${tag} — The Notebook | xdipx`
+  const title = `${tag} | The Notebook | xdipx`
   const description = `Notebook posts tagged "${tag}".`
 
   return [

@@ -29,8 +29,8 @@ export async function loader() {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
-  if (!data) return [{ title: 'Glossary — The Notebook | xdipx' }]
-  const title = 'The Glossary — The Notebook | xdipx'
+  if (!data) return [{ title: 'Glossary | The Notebook | xdipx' }]
+  const title = 'The Glossary | The Notebook | xdipx'
   const description =
     'Plain-language definitions for the words you meet while shopping for sexual wellness. What things do, how they differ, and what to look for.'
 

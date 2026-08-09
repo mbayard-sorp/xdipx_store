@@ -36,10 +36,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
-  if (!loaderData) return [{ title: 'Writer not found — xdipx' }]
+  if (!loaderData) return [{ title: 'Writer not found | xdipx' }]
   const { author, page, totalPages, canonical } = loaderData
-  const pageSuffix = page > 1 ? ` — Page ${page}` : ''
-  const title = `${author.name}${pageSuffix} — The Notebook | xdipx`
+  const pageSuffix = page > 1 ? ` | Page ${page}` : ''
+  const title = `${author.name}${pageSuffix} | The Notebook | xdipx`
   const description = author.bio ?? `Posts by ${author.name} in the xdipx Notebook.`
   const image = author.avatarUrl ?? null
 
