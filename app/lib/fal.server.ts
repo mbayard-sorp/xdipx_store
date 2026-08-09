@@ -68,6 +68,7 @@ const FAL_COST_KEY: Record<string, string> = {
   'fal-ai/flux-pro/kontext':   'fal/flux-kontext',
   'fal-ai/flux-kontext/dev':   'fal/flux-kontext-dev',
   'fal-ai/nano-banana':        'fal/nano-banana',
+  'fal-ai/nano-banana/edit':   'fal/nano-banana',
 }
 
 /**
@@ -78,6 +79,16 @@ const FAL_COST_KEY: Record<string, string> = {
  * enable_safety_checker:false like the other open FLUX endpoints.
  */
 const FAL_KONTEXT_MODEL = 'fal-ai/flux-kontext/dev'
+
+/**
+ * Multi-reference edit model, used whenever two or more reference images must
+ * appear faithfully in one scene (e.g. a vibrator plus its lube bottle in a
+ * single drawer shot, charter v5.3 License C). Kontext dev takes only one
+ * image_url, so it cannot composite multiple real products; nano-banana/edit
+ * takes an image_urls array. Same endpoint used by composeSceneFrame() in
+ * fal-video.server.ts, which pairs a presenter photo with the product photo.
+ */
+const FAL_NANO_BANANA_EDIT_MODEL = 'fal-ai/nano-banana/edit'
 
 /** fal image_size enum → Kontext resolution_mode/aspect (no image_size param). */
 const KONTEXT_ASPECT: Record<string, string> = {
@@ -145,6 +156,14 @@ export interface FalGenerateOpts {
    * in the generated scene instead of a model-invented lookalike.
    */
   refImageUrl?: string
+  /**
+   * Two or more publicly fetchable reference images to composite faithfully
+   * into one scene. When this holds more than one URL, generation routes to
+   * nano-banana/edit (image_urls) instead of single-ref Kontext. A single URL
+   * here (or `refImageUrl`) keeps the unchanged Kontext single-ref path; when
+   * both are set, `refImageUrls` wins if it is non-empty.
+   */
+  refImageUrls?: string[]
 }
 
 export interface FalGenerateResult {
@@ -164,28 +183,51 @@ export function falConfigured(): boolean {
  */
 export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateResult> {
   const key = requireKey()
-  const model = opts.refImageUrl
-    ? (opts.model?.trim() || FAL_KONTEXT_MODEL)
-    : (opts.model?.trim() || DEFAULT_FAL_IMAGE_MODEL)
   const count = Math.min(Math.max(1, opts.count ?? 1), 4)
   const image_size = opts.imageSize ?? 'landscape_16_9'
 
-  // Kontext dev takes image_url + resolution_mode; the text-to-image endpoints
-  // take image_size. Same sync endpoint pattern otherwise.
-  const body = opts.refImageUrl
+  // Normalise the reference images. `refImageUrls` wins when non-empty, else a
+  // single `refImageUrl` (kept for backward compatibility). More than one ref
+  // means a multi-product composite; exactly one keeps the unchanged Kontext
+  // single-ref path; none is plain text-to-image.
+  const refs = opts.refImageUrls?.length
+    ? opts.refImageUrls
+    : (opts.refImageUrl ? [opts.refImageUrl] : [])
+  const multiRef = refs.length > 1
+  const singleRef = refs.length === 1
+
+  const model = multiRef
+    ? (opts.model?.trim() || FAL_NANO_BANANA_EDIT_MODEL)
+    : singleRef
+      ? (opts.model?.trim() || FAL_KONTEXT_MODEL)
+      : (opts.model?.trim() || DEFAULT_FAL_IMAGE_MODEL)
+
+  // nano-banana/edit takes an image_urls array + aspect_ratio (jpeg pinned so
+  // the IG container step accepts it, same as composeSceneFrame). Kontext dev
+  // takes image_url + resolution_mode; the text-to-image endpoints take
+  // image_size. Same sync endpoint pattern otherwise.
+  const body = multiRef
     ? {
         prompt:                opts.prompt,
-        image_url:             opts.refImageUrl,
+        image_urls:            refs,
         num_images:            count,
-        resolution_mode:       kontextResolutionMode(image_size),
-        enable_safety_checker: false,
+        aspect_ratio:          kontextResolutionMode(image_size),
+        output_format:         'jpeg',
       }
-    : {
-        prompt:                opts.prompt,
-        num_images:            count,
-        image_size,
-        enable_safety_checker: false,
-      }
+    : singleRef
+      ? {
+          prompt:                opts.prompt,
+          image_url:             refs[0],
+          num_images:            count,
+          resolution_mode:       kontextResolutionMode(image_size),
+          enable_safety_checker: false,
+        }
+      : {
+          prompt:                opts.prompt,
+          num_images:            count,
+          image_size,
+          enable_safety_checker: false,
+        }
 
   const res = await fetch(`${FAL_SYNC_ENDPOINT}/${model}`, {
     method: 'POST',

@@ -37,6 +37,14 @@ export interface GenerateImageOpts {
    * the generated scene instead of a model-invented lookalike.
    */
   refImageUrl?: string
+  /**
+   * Two or more publicly fetchable reference image URLs to composite into one
+   * scene (e.g. product plus a second product in the same shot). On the fal
+   * path more than one URL routes to nano-banana/edit; a single URL behaves
+   * like `refImageUrl`. The Imagen fallback ignores these (it uses
+   * `referenceImageBuffers`).
+   */
+  refImageUrls?: string[]
   /** Force a provider (testing). Default tries fal then imagen. */
   only?: 'fal' | 'imagen'
   /**
@@ -84,6 +92,7 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
       const { buffers, costKey } = await falGenerate({
         prompt: opts.prompt,
         count,
+        ...(opts.refImageUrls?.length ? { refImageUrls: opts.refImageUrls } : {}),
         ...(opts.refImageUrl ? { refImageUrl: opts.refImageUrl } : {}),
         ...(opts.imageSize ? { imageSize: opts.imageSize } : {}),
       })
