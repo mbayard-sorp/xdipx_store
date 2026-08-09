@@ -27,6 +27,7 @@ import { getProfitReconciliation } from '~/lib/profit.server'
 import {
   computeTicketLoopHealth,
   reconcilePrLinkStates,
+  type BlockedTicket,
   type ConflictedPr,
   type OrphanTicket,
   type RoutineLivenessFlag,
@@ -234,9 +235,12 @@ export interface TicketMetrics {
   /**
    * The blocked tickets themselves, not just the count by kind. A count tells
    * the owner a number; only the rows tell him whether the block is his to
-   * clear (a protected path) or the agent's to retry.
+   * clear (a protected path) or the agent's to retry. Sourced from the
+   * ticket-janitor's note-aware `sla.blocked`, so the reason survives even when
+   * it lives only in a `suggestion_links` note (the common case for R-DEV
+   * blocks, which carry a note and no `last_error`).
    */
-  blockedRows: TicketAttemptRow[]
+  blockedRows: BlockedTicket[]
   /** Legacy status counts line, preserved verbatim from the original digest. */
   statusCounts: string
 }
@@ -249,6 +253,16 @@ function byKind(m: Record<string, number>): string {
 
 function total(m: Record<string, number>): number {
   return Object.values(m).reduce((a, b) => a + b, 0)
+}
+
+/**
+ * The reason a blocked row is blocked, wherever it lives. R-DEV blocks with a
+ * note and no `last_error`, so `last_error` alone renders a bare id for most
+ * blocked rows; fall back to the note text the janitor already resolved.
+ */
+function blockedReason(b: BlockedTicket): string | null {
+  const r = b.lastError ?? b.noteRef
+  return r && r.trim() !== '' ? r : null
 }
 
 export function renderTicketsSection(m: TicketMetrics): string {
@@ -264,7 +278,10 @@ export function renderTicketsSection(m: TicketMetrics): string {
     parts.push(`<p style="margin:6px 0 2px;color:${WARN};">On the last attempt (${MAX_TICKET_ATTEMPTS} of ${MAX_TICKET_ATTEMPTS}), one more failure escalates:</p><ul style="margin:0 0 4px;padding-left:18px;">${m.finalAttempt.map(t => `<li>#${t.id} (${esc(t.status)}) ${esc(clip(t.suggestion, 110))}${t.lastError ? `<br><span style="color:${MUTED};">${esc(clip(t.lastError, 140))}</span>` : ''}</li>`).join('')}</ul>`)
   }
   if (m.blockedRows.length) {
-    parts.push(`<p style="margin:6px 0 2px;color:${WARN};">Blocked, with the reason:</p><ul style="margin:0 0 4px;padding-left:18px;">${m.blockedRows.map(t => `<li>#${t.id} (${esc(t.kind)}) ${esc(clip(t.suggestion, 110))}${t.lastError ? `<br><span style="color:${MUTED};">${esc(clip(t.lastError, 160))}</span>` : ''}</li>`).join('')}</ul>`)
+    parts.push(`<p style="margin:6px 0 2px;color:${WARN};">Blocked, with the reason:</p><ul style="margin:0 0 4px;padding-left:18px;">${m.blockedRows.slice(0, 8).map(t => {
+      const reason = blockedReason(t)
+      return `<li>#${t.id} (${esc(t.kind)}) ${esc(clip(t.suggestion, 110))}${reason ? `<br><span style="color:${MUTED};">${esc(clip(reason, 160))}</span>` : ` <span style="color:${BAD};">no reason</span>`}</li>`
+    }).join('')}</ul>`)
   }
   parts.push(`<p style="margin:6px 0 0;color:${MUTED};">All statuses: ${m.statusCounts || 'none'}</p>`)
   return parts.join('')
@@ -500,7 +517,7 @@ export interface StaleOwnerRow {
 export interface NeedsMikeFacts {
   /** Open needs-owner PRs, from suggestion_links state. */
   needsOwnerPrs: EscalationFacts['protectedPrs']
-  blockedRows: TicketAttemptRow[]
+  blockedRows: BlockedTicket[]
   /** Approved promo/campaign/program rows older than 3 days: owner-executed kinds. */
   staleOwnerRows: StaleOwnerRow[]
   orphans: OrphanTicket[]
@@ -520,7 +537,8 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
     items.push(`${link(p.ref, prLabel(p.ref))} waits on your merge (protected path)${p.ticketId > 0 ? ` &middot; ticket #${p.ticketId}` : ''}`)
   }
   for (const b of f.blockedRows.slice(0, 5)) {
-    items.push(`#${b.id} is blocked (${esc(b.kind)}) ${esc(clip(b.suggestion, 80))}`)
+    const reason = blockedReason(b)
+    items.push(`#${b.id} is blocked (${esc(b.kind)}) ${esc(clip(b.suggestion, 80))}${reason ? `: ${esc(clip(reason, 120))}` : ` &middot; <span style="color:${BAD};">no reason recorded</span>`}`)
   }
   for (const r of f.staleOwnerRows.slice(0, 5)) {
     items.push(`#${r.id} (${esc(r.kind)}) approved ${r.ageDays}d ago and only you can execute it: ${esc(clip(r.suggestion, 80))}`)
@@ -706,7 +724,12 @@ async function gatherTicketMetrics(statusCounts: string): Promise<TicketMetrics>
     finalAttempt: [], blockedRows: [], statusCounts,
   }
   try {
-    const [openedRes, closedRes, blockedRes, oldestRes, finalRes, blockedRowsRes] = await Promise.all([
+    // blockedRows is intentionally NOT queried here. The raw query selected
+    // last_error with no join to suggestion_links, so it dropped the reason for
+    // every note-only block (which is most of them). The composer fills
+    // blockedRows from the ticket-janitor's note-aware sla.blocked instead, the
+    // single source that already resolves the note fallback.
+    const [openedRes, closedRes, blockedRes, oldestRes, finalRes] = await Promise.all([
       db.execute(sql`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
                       WHERE created_at >= now() - interval '24 hours' GROUP BY kind`),
       db.execute(sql`SELECT kind, COUNT(*)::int AS n FROM homepage_team_suggestions
@@ -723,10 +746,6 @@ async function gatherTicketMetrics(statusCounts: string): Promise<TicketMetrics>
                       WHERE attempt_count = ${MAX_TICKET_ATTEMPTS - 1}
                         AND status NOT IN ('applied', 'dismissed')
                       ORDER BY priority ASC, updated_at DESC LIMIT 10`),
-      db.execute(sql`SELECT id, status, kind, attempt_count, last_error, suggestion
-                       FROM homepage_team_suggestions
-                      WHERE status = 'blocked'
-                      ORDER BY priority ASC, updated_at DESC LIMIT 8`),
     ])
     const oldest = (oldestRes.rows ?? [])[0] as Record<string, unknown> | undefined
     return {
@@ -741,7 +760,7 @@ async function gatherTicketMetrics(statusCounts: string): Promise<TicketMetrics>
           }
         : null,
       finalAttempt: toAttemptRows((finalRes.rows ?? []) as Array<Record<string, unknown>>),
-      blockedRows: toAttemptRows((blockedRowsRes.rows ?? []) as Array<Record<string, unknown>>),
+      blockedRows: [],
       statusCounts,
     }
   } catch (err) {
@@ -1121,9 +1140,15 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       gatherStaleOwnerRows(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
+  // One note-aware source for blocked rows, shared by the Needs Mike list and
+  // the Tickets section. The janitor's sla.blocked resolves the reason from
+  // last_error OR the latest suggestion_links note; the raw ticket-metrics query
+  // did neither and rendered a bare id for every note-only block.
+  const blockedRows = loopHealth?.sla.blocked ?? []
+  ticketMetrics.blockedRows = blockedRows
   const needsMike: NeedsMikeFacts = {
     needsOwnerPrs: escalations.protectedPrs,
-    blockedRows: ticketMetrics.blockedRows,
+    blockedRows,
     staleOwnerRows,
     orphans: loopHealth?.orphans ?? [],
     conflictedPrs: loopHealth?.conflictedPrs ?? [],

@@ -71,6 +71,14 @@ export interface BlockedTicket {
   suggestion: string
   lastError: string | null
   /**
+   * The latest `note` link's text, when one exists. R-DEV blocks a ticket with
+   * a note and no `last_error` (transitionSuggestion leaves `last_error` null
+   * when a note is present), so for most blocked rows this is the only place the
+   * reason lives. Callers that render a reason should prefer `lastError`, then
+   * fall back to this.
+   */
+  noteRef: string | null
+  /**
    * True when the row carries no reason anywhere we can find one: empty
    * `last_error` AND no note link. A block with no reason cannot be cleared by
    * anyone but an archaeologist; 10 of 11 blocked rows looked like this on
@@ -158,6 +166,7 @@ export function classifySlaBreaches(rows: readonly JanitorTicketRow[], now: Date
         ageHours: Math.round(hoursBetween(r.updatedAt, now)),
         suggestion: r.suggestion,
         lastError: r.lastError,
+        noteRef: r.noteRef,
         emptyReason: isBlank(r.lastError) && isBlank(r.noteRef),
       })
     }

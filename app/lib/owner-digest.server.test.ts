@@ -63,7 +63,19 @@ import {
   type OwnerQueueRow,
   type TicketMetrics,
 } from '~/lib/owner-digest.server'
-import type { TicketLoopHealth } from '~/lib/ticket-janitor.server'
+import type { BlockedTicket, TicketLoopHealth } from '~/lib/ticket-janitor.server'
+
+/** BlockedTicket fixture with sane defaults; override just the field under test. */
+function blocked(over: Partial<BlockedTicket> = {}): BlockedTicket {
+  const lastError = over.lastError ?? null
+  const noteRef = over.noteRef ?? null
+  return {
+    id: 1, kind: 'code', ageHours: 6, suggestion: 'blocked row',
+    lastError, noteRef,
+    emptyReason: !lastError?.trim() && !noteRef?.trim(),
+    ...over,
+  }
+}
 
 /**
  * The digest's KV guard is keyed on the UTC date, so triggering the cron to
@@ -239,10 +251,34 @@ describe('renderTicketsSection', () => {
     const html = renderTicketsSection({
       ...base,
       blocked: { code: 1 },
-      blockedRows: [{ id: 91, status: 'blocked', kind: 'code', attemptCount: 0, lastError: 'touches app/lib/checkout-probe.server.ts', suggestion: 'Fix the browser checkout probe' }],
+      blockedRows: [blocked({ id: 91, lastError: 'touches app/lib/checkout-probe.server.ts', suggestion: 'Fix the browser checkout probe' })],
     })
     expect(html).toContain('#91')
     expect(html).toContain('touches app/lib/checkout-probe.server.ts')
+  })
+
+  it('renders the reason for a block whose reason lives only in a note', () => {
+    // R-DEV blocks with a note and no last_error, so the reason is on the
+    // suggestion_links note (surfaced by the janitor as noteRef). It must still
+    // render, not leave a bare id under a header that promises a reason.
+    const html = renderTicketsSection({
+      ...base,
+      blocked: { code: 1 },
+      blockedRows: [blocked({ id: 92, lastError: null, noteRef: 'Requires a change to db/schema.ts (protected path). Needs an owner-authored migration.', suggestion: 'Add the wishlist column' })],
+    })
+    expect(html).toContain('#92')
+    expect(html).toContain('Requires a change to db/schema.ts')
+    expect(html).not.toContain('no reason')
+  })
+
+  it('flags a block that carries no reason anywhere', () => {
+    const html = renderTicketsSection({
+      ...base,
+      blocked: { code: 1 },
+      blockedRows: [blocked({ id: 93, lastError: null, noteRef: null, emptyReason: true, suggestion: 'stuck row' })],
+    })
+    expect(html).toContain('#93')
+    expect(html).toContain('no reason')
   })
 })
 
@@ -491,7 +527,7 @@ describe('renderTicketLoopSection', () => {
           rows: [],
         },
         proposed: [{ id: 7, status: 'proposed', kind: 'code', priority: 3, ageHours: 80, suggestion: 'untriaged' }],
-        blocked: [{ id: 455, kind: 'code', ageHours: 100, suggestion: 'stuck', lastError: null, emptyReason: true }],
+        blocked: [{ id: 455, kind: 'code', ageHours: 100, suggestion: 'stuck', lastError: null, noteRef: null, emptyReason: true }],
       },
       orphans: [{ ticketId: 120, status: 'approved', prRef: 'https://github.com/o/r/pull/436', prOutcome: 'merged' }],
       backlog: { created7d: 60, terminal7d: 18, netPerDay: 6 },
@@ -601,7 +637,7 @@ describe('renderNeedsMikeSection', () => {
   it('consolidates every owner-only fact into one list', () => {
     const html = renderNeedsMikeSection({
       needsOwnerPrs: [{ ticketId: 1, ref: 'https://github.com/o/r/pull/508', state: 'needs-owner', title: 'protected' }],
-      blockedRows: [{ id: 2, status: 'blocked', kind: 'code', attemptCount: 1, lastError: null, suggestion: 'stuck row' }],
+      blockedRows: [blocked({ id: 2, lastError: null, noteRef: 'Protected path: this change edits the release engine itself.', suggestion: 'stuck row' })],
       staleOwnerRows: [{ id: 3, kind: 'campaign', ageDays: 5, suggestion: 'send the pitch batch' }],
       orphans: [{ ticketId: 4, status: 'approved', prRef: 'https://github.com/o/r/pull/429', prOutcome: 'merged' }],
       conflictedPrs: [{
@@ -618,6 +654,7 @@ describe('renderNeedsMikeSection', () => {
     expect(html).toContain('PR #508')
     expect(html).toContain('waits on your merge')
     expect(html).toContain('#2 is blocked')
+    expect(html).toContain('Protected path: this change edits the release engine itself.')
     expect(html).toContain('#3 (campaign) approved 5d ago')
     expect(html).toContain('#4 is orphaned')
     expect(html).toContain('PR #429')
@@ -625,5 +662,14 @@ describe('renderNeedsMikeSection', () => {
     expect(html).toContain('ticket/494')
     expect(html).toContain('Weekly trend scout')
     expect(html).toContain('380h ago')
+  })
+
+  it('flags a blocked row that records no reason at all', () => {
+    const html = renderNeedsMikeSection({
+      ...emptyFacts,
+      blockedRows: [blocked({ id: 7, lastError: null, noteRef: null, emptyReason: true, suggestion: 'reasonless block' })],
+    })
+    expect(html).toContain('#7 is blocked')
+    expect(html).toContain('no reason recorded')
   })
 })

@@ -105,6 +105,10 @@ describe('classifySlaBreaches', () => {
     expect(byId.get(51)).toBe(true)
     expect(byId.get(52)).toBe(false)
     expect(byId.get(53)).toBe(false)
+    // The note text must survive to the row so a renderer can show it; a
+    // note-only block (#53) is exactly the common R-DEV case.
+    expect(out.blocked.find(b => b.id === 53)?.noteRef).toBe('superseded by PR #429')
+    expect(out.blocked.find(b => b.id === 52)?.lastError).toBe('needs a schema change')
   })
 
   it('exports the thresholds the docs quote', () => {
