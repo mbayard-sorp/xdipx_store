@@ -15,7 +15,7 @@
 
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { Form, useLoaderData, useNavigation, useRevalidator } from 'react-router'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { requireAdmin } from '~/lib/session.server'
 import {
   listVideoJobs,
@@ -26,10 +26,14 @@ import {
   regenerateVideoJob,
   fanOutVideoToSocialDrafts,
   recordVideoMetrics,
+  enqueueVideoJob,
+  enqueueVideoJobSet,
   type VideoJobWithAssets,
   type VideoMetricsReport,
 } from '~/lib/video-pipeline.server'
-import { VIDEO_METRIC_FIELDS } from '~/lib/team-keys'
+import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
+import { getApprovedCastMembers } from '~/lib/sanity.server'
+import { VIDEO_METRIC_FIELDS, VIDEO_FORMULAS, VIDEO_TONES, SCENE_KIT, SOCIAL_PLATFORMS } from '~/lib/team-keys'
 import {
   getProductByHandle,
   createStagedVideoUpload,
@@ -50,7 +54,21 @@ export const meta: MetaFunction = () => [{ title: 'Video Studio — xdipx Admin'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
-  const rows = await listVideoJobs(40).catch(() => [] as VideoJobWithAssets[])
+  const [rows, cast] = await Promise.all([
+    listVideoJobs(40).catch(() => [] as VideoJobWithAssets[]),
+    getApprovedCastMembers().catch(() => []),
+  ])
+  // VIDEO_MODELS is server-only (fal-video.server.ts) — serialize what the
+  // Compose form needs across the loader boundary.
+  const models = Object.entries(VIDEO_MODELS).map(([id, spec]) => ({
+    id,
+    label: spec.label,
+    tier: spec.tier,
+    ratePerSecondUsd: spec.ratePerSecondUsd,
+    audioDriven: !!spec.audioDriven,
+    lipsync: !!spec.lipsync,
+    allowedDurations: spec.allowedDurations,
+  }))
   return {
     rows: rows.map(r => ({
       id: r.job.id,
@@ -68,12 +86,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       metricsJson: r.job.metricsJson,
       captions: (r.job.scriptJson?.captions ?? {}) as Record<string, string>,
       hook: typeof r.job.scriptJson?.hook === 'string' ? r.job.scriptJson.hook : null,
+      variantGroupId: r.job.variantGroupId,
+      variantAxes: r.job.variantAxes,
       createdAt: r.job.createdAt,
       frames: r.frames,
       finalUrl: r.finalUrl,
       posterUrl: r.posterUrl,
     })),
     active: hasActiveVideoJobs(rows),
+    models,
+    cast: cast.map(m => ({ slug: m.slug, name: m.name })),
   }
 }
 
@@ -82,6 +104,35 @@ export async function action({ request }: ActionFunctionArgs) {
   const user = await getAdminUser(request)
   const form = await request.formData()
   const intent = String(form.get('intent') ?? '')
+
+  // Job-less intents branch BEFORE the jobRowId guard.
+  if (intent === 'compose') {
+    try {
+      return await composeAction(form)
+    } catch (err) {
+      console.error('[video-studio] compose', err)
+      return Response.json({ error: err instanceof Error ? err.message : 'Compose failed' }, { status: 500 })
+    }
+  }
+  if (intent === 'approve-all-set') {
+    const variantGroupId = String(form.get('variantGroupId') ?? '')
+    if (!variantGroupId) return Response.json({ error: 'Missing variantGroupId' }, { status: 400 })
+    try {
+      const reviewer = user?.email ?? 'owner'
+      const rows = await listVideoJobs(100)
+      const done = rows.filter(r => r.job.variantGroupId === variantGroupId && r.job.stage === 'done' && r.job.status === 'done')
+      if (!done.length) return Response.json({ error: 'No finished jobs in this set' }, { status: 400 })
+      const postIds: number[] = []
+      for (const r of done) {
+        postIds.push(...await fanOutVideoToSocialDrafts(r.job.id, reviewer))
+      }
+      return Response.json({ ok: true, approved: done.length, postIds })
+    } catch (err) {
+      console.error('[video-studio] approve-all-set', err)
+      return Response.json({ error: err instanceof Error ? err.message : 'Set approval failed' }, { status: 500 })
+    }
+  }
+
   const jobRowId = Number(form.get('jobRowId'))
   if (!Number.isFinite(jobRowId) || jobRowId <= 0) {
     return Response.json({ error: 'Missing jobRowId' }, { status: 400 })
@@ -182,6 +233,85 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * Owner Compose (spec §5 Phase 4): the two-minute Arcads flow with every gate
+ * intact. Calls enqueueVideoJob / enqueueVideoJobSet directly under the admin
+ * session — deliberately NOT gate('video') (same as the regenerate intent: the
+ * gate governs agent runs; owner actions are deliberate). The per-video
+ * ceiling and the variants-per-set cap still apply inside enqueue.
+ */
+async function composeAction(form: FormData): Promise<Response> {
+  const productHandle = String(form.get('productHandle') ?? '').trim()
+  if (!productHandle) return Response.json({ error: 'Product handle required' }, { status: 400 })
+  const formula = String(form.get('formula') ?? '')
+  if (!(VIDEO_FORMULAS as readonly string[]).includes(formula)) {
+    return Response.json({ error: 'Unknown formula' }, { status: 400 })
+  }
+  const presenter = String(form.get('presenter') ?? 'none')
+  const modelTier = String(form.get('modelTier') ?? '')
+  if (!isVideoModelId(modelTier)) return Response.json({ error: 'Unknown model tier' }, { status: 400 })
+  const spec = VIDEO_MODELS[modelTier]
+
+  const hooks = String(form.get('hooks') ?? '')
+    .split('\n')
+    .map(h => h.trim())
+    .filter(Boolean)
+  if (!hooks.length) return Response.json({ error: 'At least one hook line required' }, { status: 400 })
+
+  const platforms = SOCIAL_PLATFORMS.filter(p => form.get(`platform-${p}`) === 'on')
+  if (!platforms.length) return Response.json({ error: 'Pick at least one platform' }, { status: 400 })
+
+  // Avatar tier derives duration from speech; its disabled select submits
+  // nothing, so normalize to 0 there and validate everywhere else.
+  const rawDuration = Number(form.get('durationSeconds'))
+  const durationSeconds = spec.audioDriven ? 0 : rawDuration
+  if (!spec.audioDriven && !spec.allowedDurations.includes(durationSeconds)) {
+    return Response.json({ error: `Duration must be one of ${spec.allowedDurations.join(', ')}s for this tier` }, { status: 400 })
+  }
+
+  const str = (name: string): string => String(form.get(name) ?? '').trim()
+  const talking = !!spec.audioDriven || !!spec.lipsync
+  const tone = str('tone')
+  const script: Record<string, unknown> = {
+    ...(str('presenterLine') ? { presenterLine: str('presenterLine') } : {}),
+    ...(str('voiceover') ? { voiceover: str('voiceover') } : {}),
+    ...(str('framePrompt') ? { framePrompt: str('framePrompt') } : {}),
+    ...(str('motionPrompt') ? { motionPrompt: str('motionPrompt') } : {}),
+    ...(str('sceneSlug') ? { sceneSlug: str('sceneSlug') } : {}),
+    ...(str('caption') ? { captions: { default: str('caption') } } : {}),
+    ...(tone && (VIDEO_TONES as readonly string[]).includes(tone) ? { presenterTone: tone } : {}),
+    ...(talking ? { talkingHead: true } : {}),
+  }
+
+  if (hooks.length === 1) {
+    const result = await enqueueVideoJob({
+      productHandle,
+      formula,
+      presenter,
+      scriptJson: {
+        ...script,
+        hook: hooks[0]!,
+        ...(durationSeconds > 0 ? { durationSeconds } : {}),
+      } as VideoJobWithAssets['job']['scriptJson'],
+      modelTier,
+      durationSeconds,
+      targetPlatforms: platforms,
+    })
+    return Response.json({ ok: true, ...result })
+  }
+  const result = await enqueueVideoJobSet({
+    productHandle,
+    formula,
+    presenter,
+    baseScriptJson: script as VideoJobWithAssets['job']['scriptJson'],
+    modelTier,
+    durationSeconds,
+    targetPlatforms: platforms,
+    hooks,
+  })
+  return Response.json({ ok: true, ...result })
+}
+
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 type Row = Awaited<ReturnType<typeof loader>>['rows'][number]
@@ -189,7 +319,7 @@ type Row = Awaited<ReturnType<typeof loader>>['rows'][number]
 const ACTIVE = new Set(['queued', 'running', 'awaiting_provider', 'applying'])
 
 export default function VideoStudioPage() {
-  const { rows, active } = useLoaderData<typeof loader>()
+  const { rows, active, models, cast } = useLoaderData<typeof loader>()
   const { revalidate } = useRevalidator()
   const navigation = useNavigation()
   const busy = navigation.state !== 'idle'
@@ -212,6 +342,19 @@ export default function VideoStudioPage() {
   const ready = rows.filter(r => r.status === 'done' && r.stage === 'done')
   const failed = rows.filter(r => r.status === 'failed')
 
+  // Variant sets among the ready jobs: group by variant_group_id when 2+
+  // finished siblings share one; everything else reviews individually.
+  const setGroups = new Map<string, Row[]>()
+  for (const r of ready) {
+    if (!r.variantGroupId) continue
+    const list = setGroups.get(r.variantGroupId) ?? []
+    list.push(r)
+    setGroups.set(r.variantGroupId, list)
+  }
+  const readySets = [...setGroups.entries()].filter(([, list]) => list.length > 1)
+  const inSet = new Set(readySets.flatMap(([, list]) => list.map(r => r.id)))
+  const readySingles = ready.filter(r => !inSet.has(r.id))
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -230,6 +373,9 @@ export default function VideoStudioPage() {
         <Stat label="Ready to review" value={ready.length} accent={ready.length > 0} />
         <Stat label="Failed" value={failed.length} accent={false} />
       </div>
+
+      {/* ── Compose ─────────────────────────────────────────────────────── */}
+      <ComposeSection models={models} cast={cast} busy={busy} />
 
       {/* ── Frame approvals ─────────────────────────────────────────────── */}
       {parked.length > 0 && (
@@ -297,74 +443,24 @@ export default function VideoStudioPage() {
       {ready.length > 0 && (
         <section className="space-y-4">
           <h2 className="font-display text-lg text-ink">Ready for review</h2>
-          {ready.map(job => (
-            <div key={job.id} className="rounded-[22px] border border-line bg-paper-2 p-4">
-              <JobHeader job={job} />
-              <div className="mt-3 flex flex-col gap-4 md:flex-row">
-                <div className="w-full md:w-56">
-                  {job.finalUrl && (
-                    <video
-                      src={job.finalUrl}
-                      poster={job.posterUrl ?? undefined}
-                      controls
-                      playsInline
-                      className="w-full rounded-lg border border-line bg-ink"
-                    />
-                  )}
-                  {job.finalUrl && (
-                    <a href={job.finalUrl} download className="mt-1 inline-block text-xs text-coral underline">
-                      Download mp4
-                    </a>
-                  )}
-                </div>
-                <div className="flex-1 space-y-3">
-                  {Object.entries(job.captions).length > 0 && (
-                    <div className="space-y-1">
-                      {Object.entries(job.captions).map(([platform, caption]) => (
-                        <p key={platform} className="text-sm text-ink-3">
-                          <span className="font-medium text-ink">{platform}:</span> {caption}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                  <Form method="post" className="space-y-2">
-                    <input type="hidden" name="intent" value="approve" />
-                    <input type="hidden" name="jobRowId" value={job.id} />
-                    <fieldset className="space-y-1 text-sm text-ink-3">
-                      <legend className="text-xs font-medium uppercase tracking-wide text-ink-4">Also send to Shopify?</legend>
-                      <label className="flex items-center gap-2">
-                        <input type="radio" name="graduation" value="none" defaultChecked /> Social drafts only
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <input type="radio" name="graduation" value="media" /> Attach to PDP media gallery
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <input type="radio" name="graduation" value="hero" /> Set as hero_video (card autoplay + PDP)
-                      </label>
-                    </fieldset>
-                    <button type="submit" disabled={busy} className="rounded-full bg-coral px-5 py-2 text-sm text-paper disabled:opacity-40">
-                      Approve · fan out to {job.targetPlatforms.join(', ')}
-                    </button>
-                  </Form>
-                  <div className="flex flex-col gap-2 md:flex-row">
-                    <Form method="post" className="flex flex-1 gap-2">
-                      <input type="hidden" name="intent" value="regenerate" />
-                      <input type="hidden" name="jobRowId" value={job.id} />
-                      <input
-                        name="feedback"
-                        placeholder="Feedback for the retake (new job, same script)"
-                        className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
-                      />
-                      <button type="submit" disabled={busy} className="rounded-full bg-ink px-4 py-2 text-sm text-paper disabled:opacity-40">
-                        Regenerate
-                      </button>
-                    </Form>
-                    <RejectForm jobRowId={job.id} busy={busy} />
-                  </div>
-                </div>
+          {readySets.map(([groupId, jobs]) => (
+            <div key={groupId} className="space-y-3 rounded-[22px] border border-plum/30 bg-plum-soft/40 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                <p className="text-sm font-medium text-ink">
+                  Variant set · {jobs.length} finished · {jobs[0]!.productHandle}
+                </p>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="approve-all-set" />
+                  <input type="hidden" name="variantGroupId" value={groupId} />
+                  <button type="submit" disabled={busy} className="rounded-full bg-coral px-4 py-1.5 text-sm text-paper disabled:opacity-40">
+                    Approve all in set
+                  </button>
+                </Form>
               </div>
+              {jobs.map(job => <ReadyCard key={job.id} job={job} busy={busy} />)}
             </div>
           ))}
+          {readySingles.map(job => <ReadyCard key={job.id} job={job} busy={busy} />)}
         </section>
       )}
 
@@ -437,8 +533,183 @@ function JobHeader({ job, compact }: { job: Row; compact?: boolean }) {
       <Chip>{job.presenter}</Chip>
       <Chip>{job.modelTier}</Chip>
       {job.aiDisclosure && <Chip>AI-labeled</Chip>}
+      {job.variantAxes?.sceneSlug && <Chip>{job.variantAxes.sceneSlug}</Chip>}
       {!compact && job.hook && <p className="w-full text-sm text-ink-3">"{job.hook}"</p>}
     </div>
+  )
+}
+
+function ReadyCard({ job, busy }: { job: Row; busy: boolean }) {
+  return (
+    <div className="rounded-[22px] border border-line bg-paper-2 p-4">
+      <JobHeader job={job} />
+      <div className="mt-3 flex flex-col gap-4 md:flex-row">
+        <div className="w-full md:w-56">
+          {job.finalUrl && (
+            <video
+              src={job.finalUrl}
+              poster={job.posterUrl ?? undefined}
+              controls
+              playsInline
+              className="w-full rounded-lg border border-line bg-ink"
+            />
+          )}
+          {job.finalUrl && (
+            <a href={job.finalUrl} download className="mt-1 inline-block text-xs text-coral underline">
+              Download mp4
+            </a>
+          )}
+        </div>
+        <div className="flex-1 space-y-3">
+          {Object.entries(job.captions).length > 0 && (
+            <div className="space-y-1">
+              {Object.entries(job.captions).map(([platform, caption]) => (
+                <p key={platform} className="text-sm text-ink-3">
+                  <span className="font-medium text-ink">{platform}:</span> {caption}
+                </p>
+              ))}
+            </div>
+          )}
+          <Form method="post" className="space-y-2">
+            <input type="hidden" name="intent" value="approve" />
+            <input type="hidden" name="jobRowId" value={job.id} />
+            <fieldset className="space-y-1 text-sm text-ink-3">
+              <legend className="text-xs font-medium uppercase tracking-wide text-ink-4">Also send to Shopify?</legend>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="graduation" value="none" defaultChecked /> Social drafts only
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="graduation" value="media" /> Attach to PDP media gallery
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="graduation" value="hero" /> Set as hero_video (card autoplay + PDP)
+              </label>
+            </fieldset>
+            <button type="submit" disabled={busy} className="rounded-full bg-coral px-5 py-2 text-sm text-paper disabled:opacity-40">
+              Approve · fan out to {job.targetPlatforms.join(', ')}
+            </button>
+          </Form>
+          <div className="flex flex-col gap-2 md:flex-row">
+            <Form method="post" className="flex flex-1 gap-2">
+              <input type="hidden" name="intent" value="regenerate" />
+              <input type="hidden" name="jobRowId" value={job.id} />
+              <input
+                name="feedback"
+                placeholder="Feedback for the retake (new job, same script)"
+                className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+              />
+              <button type="submit" disabled={busy} className="rounded-full bg-ink px-4 py-2 text-sm text-paper disabled:opacity-40">
+                Regenerate
+              </button>
+            </Form>
+            <RejectForm jobRowId={job.id} busy={busy} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type LoaderData = Awaited<ReturnType<typeof loader>>
+
+function ComposeSection({ models, cast, busy }: { models: LoaderData['models']; cast: LoaderData['cast']; busy: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [tierId, setTierId] = useState<string>('kling25-pro')
+  const tier = models.find(m => m.id === tierId)
+  const talking = !!tier?.audioDriven || !!tier?.lipsync
+  return (
+    <section className="rounded-[22px] border border-line bg-paper-2 p-4">
+      <button type="button" onClick={() => setOpen(o => !o)} className="flex w-full items-center justify-between text-left">
+        <span className="font-display text-lg text-ink">Compose a video</span>
+        <span className="text-xs text-ink-4">{open ? 'Hide' : 'One or more hooks · frame gate + ceilings still apply'}</span>
+      </button>
+      {open && (
+        <Form method="post" className="mt-4 space-y-3">
+          <input type="hidden" name="intent" value="compose" />
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <input
+              name="productHandle"
+              required
+              placeholder="Product handle (e.g. satin-wand)"
+              className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+            />
+            <select name="formula" className="rounded-lg border border-line bg-paper px-3 py-2 text-sm">
+              {VIDEO_FORMULAS.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+            <select name="presenter" defaultValue="emma" className="rounded-lg border border-line bg-paper px-3 py-2 text-sm">
+              <option value="none">no presenter</option>
+              <option value="emma">emma</option>
+              {cast.map(m => <option key={m.slug} value={`friend:${m.slug}`}>{m.name}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <select name="modelTier" value={tierId} onChange={e => setTierId(e.target.value)} className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm">
+              {models.map(m => <option key={m.id} value={m.id}>{m.label} (${m.ratePerSecondUsd.toFixed(2)}/s)</option>)}
+            </select>
+            <select name="durationSeconds" className="rounded-lg border border-line bg-paper px-3 py-2 text-sm" disabled={!!tier?.audioDriven}>
+              {(tier?.allowedDurations.length ? tier.allowedDurations : [8]).map(d => <option key={d} value={d}>{d}s</option>)}
+            </select>
+            <select name="sceneSlug" defaultValue="" className="rounded-lg border border-line bg-paper px-3 py-2 text-sm">
+              <option value="">no scene (fresh frame)</option>
+              {SCENE_KIT.map(s => <option key={s.slug} value={s.slug}>{s.label}</option>)}
+            </select>
+            <select name="tone" defaultValue="" className="rounded-lg border border-line bg-paper px-3 py-2 text-sm">
+              <option value="">neutral tone</option>
+              {VIDEO_TONES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <textarea
+            name="hooks"
+            required
+            rows={3}
+            placeholder={'Hook lines, one per line. Two or more lines become a variant set (shared approved frame, one review group).'}
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+          />
+          {talking ? (
+            <textarea
+              name="presenterLine"
+              rows={2}
+              placeholder="Spoken on-camera line. Use {{hook}} where each hook variant should be spoken."
+              className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+            />
+          ) : (
+            <textarea
+              name="voiceover"
+              rows={2}
+              placeholder="Voiceover narration (silent tiers only; optional). Use {{hook}} for per-variant substitution."
+              className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+            />
+          )}
+          <div className="flex flex-col gap-3 md:flex-row">
+            <input
+              name="framePrompt"
+              placeholder="Frame prompt (scene composition; blank reuses the approved scene frame)"
+              className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+            />
+            <input
+              name="motionPrompt"
+              placeholder="Motion prompt (required for non-avatar tiers)"
+              className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+            />
+          </div>
+          <input
+            name="caption"
+            placeholder="Default caption for the social drafts (optional; falls back to hook + CTA)"
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            {SOCIAL_PLATFORMS.map(p => (
+              <label key={p} className="flex items-center gap-1 text-sm text-ink-3">
+                <input type="checkbox" name={`platform-${p}`} defaultChecked={p === 'instagram'} /> {p}
+              </label>
+            ))}
+          </div>
+          <button type="submit" disabled={busy} className="rounded-full bg-coral px-5 py-2 text-sm text-paper disabled:opacity-40">
+            Queue it · frame gate reviews before any dollar spend
+          </button>
+        </Form>
+      )}
+    </section>
   )
 }
 

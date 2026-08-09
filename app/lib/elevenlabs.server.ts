@@ -15,6 +15,14 @@ export type AudioType = 'voiceover' | 'sfx' | 'music'
 export interface VoiceoverOptions {
   text: string
   voiceId?: string
+  /**
+   * Optional delivery tone (team-keys VIDEO_TONES). Routes this ONE request to
+   * eleven_v3 with a leading audio tag ("[warm] ..."); multilingual_v2 (the
+   * store voice's default model) does not support tags. On any error with tone
+   * set, the call retries once tone-less on the default model — a video ships
+   * without tone rather than failing.
+   */
+  tone?: string
 }
 
 export interface SoundEffectOptions {
@@ -57,25 +65,97 @@ async function parseElevenLabsError(res: Response): Promise<string> {
 
 // ─── Voiceover (Text-to-Speech) ─────────────────────────────────────────────
 
+const DEFAULT_TTS_MODEL = 'eleven_multilingual_v2'
+/** Audio-tag-capable model used only when a tone is requested. */
+const TONED_TTS_MODEL = 'eleven_v3'
+
+function ttsRequestBody(opts: VoiceoverOptions, withTone: boolean): { text: string; model_id: string } {
+  if (withTone && opts.tone) {
+    return { text: `[${opts.tone}] ${opts.text}`, model_id: TONED_TTS_MODEL }
+  }
+  return { text: opts.text, model_id: DEFAULT_TTS_MODEL }
+}
+
 export async function generateVoiceover(opts: VoiceoverOptions): Promise<Buffer> {
   const voiceId = opts.voiceId || getVoiceId()
 
-  const res = await fetch(`${API_BASE}/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
-    method: 'POST',
-    headers: {
-      'xi-api-key': getApiKey(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      text: opts.text,
-      model_id: 'eleven_multilingual_v2',
-    }),
-  })
+  const request = async (withTone: boolean): Promise<Buffer> => {
+    const res = await fetch(`${API_BASE}/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': getApiKey(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(ttsRequestBody(opts, withTone)),
+    })
+    if (!res.ok) throw new Error(await parseElevenLabsError(res))
+    const buf = await res.arrayBuffer()
+    if (buf.byteLength === 0) throw new Error('ElevenLabs TTS returned empty audio')
+    return Buffer.from(buf)
+  }
 
-  if (!res.ok) throw new Error(await parseElevenLabsError(res))
-  const buf = await res.arrayBuffer()
-  if (buf.byteLength === 0) throw new Error('ElevenLabs TTS returned empty audio')
-  return Buffer.from(buf)
+  if (opts.tone) {
+    try {
+      return await request(true)
+    } catch (err) {
+      console.warn('[elevenlabs] toned TTS failed, retrying tone-less:', err instanceof Error ? err.message.slice(0, 200) : err)
+    }
+  }
+  return request(false)
+}
+
+/** with-timestamps alignment shape (parallel per-character arrays). */
+export interface TtsCharAlignment {
+  characters: string[]
+  character_start_times_seconds: number[]
+  character_end_times_seconds: number[]
+}
+
+export interface VoiceoverWithTimestamps {
+  audio: Buffer
+  /** Null when the response carried no usable alignment — callers fall back to char-proportional timing. */
+  alignment: TtsCharAlignment | null
+}
+
+/**
+ * TTS via /with-timestamps: same audio as generateVoiceover plus the character
+ * alignment the caption burn converts to word timings (caption-timing.ts).
+ * Tone handling mirrors generateVoiceover (v3 + tag, tone-less retry).
+ */
+export async function generateVoiceoverWithTimestamps(opts: VoiceoverOptions): Promise<VoiceoverWithTimestamps> {
+  const voiceId = opts.voiceId || getVoiceId()
+
+  const request = async (withTone: boolean): Promise<VoiceoverWithTimestamps> => {
+    const res = await fetch(`${API_BASE}/text-to-speech/${voiceId}/with-timestamps?output_format=mp3_44100_128`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': getApiKey(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(ttsRequestBody(opts, withTone)),
+    })
+    if (!res.ok) throw new Error(await parseElevenLabsError(res))
+    const json = await res.json() as {
+      audio_base64?: string
+      alignment?: TtsCharAlignment | null
+      normalized_alignment?: TtsCharAlignment | null
+    }
+    if (!json.audio_base64) throw new Error('ElevenLabs with-timestamps returned no audio')
+    const audio = Buffer.from(json.audio_base64, 'base64')
+    if (!audio.length) throw new Error('ElevenLabs with-timestamps returned empty audio')
+    const a = json.normalized_alignment ?? json.alignment ?? null
+    const alignment = a && Array.isArray(a.characters) && a.characters.length ? a : null
+    return { audio, alignment }
+  }
+
+  if (opts.tone) {
+    try {
+      return await request(true)
+    } catch (err) {
+      console.warn('[elevenlabs] toned TTS (timestamps) failed, retrying tone-less:', err instanceof Error ? err.message.slice(0, 200) : err)
+    }
+  }
+  return request(false)
 }
 
 // ─── Sound Effects ──────────────────────────────────────────────────────────

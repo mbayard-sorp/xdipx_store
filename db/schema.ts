@@ -1414,15 +1414,28 @@ export const mediaAssets = pgTable('media_assets', {
   jobIdx: index('idx_media_assets_job').on(t.videoJobId),
 }))
 
+/** One spoken word with real start/end seconds from ElevenLabs with-timestamps. */
+export interface VideoWordTiming {
+  word: string
+  start: number
+  end: number
+}
+
 /** Per-scene script beat, plus per-platform captions, produced by video-producer. */
 export interface VideoScriptJson {
   hook?: string
-  beats?: { line: string; direction?: string }[]
+  beats?: { line: string; direction?: string; tone?: string }[]
   cta?: string
   /** Narration text for silent tiers (Kling): TTS'd in the active IVR voice and muxed at the lipsync stage. Ignored on native-audio tiers. */
   voiceover?: string
   /** Spoken on-camera line for the avatar tier (OmniHuman): TTS'd first, then performed. Distinct from voiceover, which stays the silent-tier narration field. */
   presenterLine?: string
+  /** Optional delivery tone from team-keys VIDEO_TONES; routes TTS to eleven_v3 with an audio tag and colors the avatar motion prompt. Absent = the store voice's neutral read. */
+  presenterTone?: string
+  /** Clip length for duration-validated tiers; enqueue-set writes it per variant and advanceClip reads it back. */
+  durationSeconds?: number
+  /** Real word timings captured at TTS time (with-timestamps), cumulative across split parts; assembly drives the caption burn from these when present. Overwritten wholesale on every clip-stage TTS pass. */
+  wordTimings?: VideoWordTiming[]
   /** Talking-head job: the scene frame is composed WITHOUT the product image (no product ever appears in a talking-head frame). */
   talkingHead?: boolean
   /** Scene-kit slug (team-keys SCENE_KIT). Avatar/talking-head jobs with a sceneSlug automatically reuse the latest approved frame from a prior same-presenter job for that scene; first use composes fresh. */
@@ -1461,6 +1474,8 @@ export const videoJobs = pgTable('video_jobs', {
   posterAssetId:     integer('poster_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
   costUsd:           decimal('cost_usd', { precision: 10, scale: 5 }).notNull().default('0'),
   metricsJson:       jsonb('metrics_json').$type<Record<string, Record<string, number>>>(), // platform -> {views, likes, ...} owner self-report
+  variantGroupId:    varchar('variant_group_id', { length: 36 }),                     // shared by every job expanded from one enqueue-set call
+  variantAxes:       jsonb('variant_axes').$type<{ hook: string; presenter?: string; sceneSlug?: string }>(), // which axis values this sibling got
   error:             text('error'),
   team:              varchar('team', { length: 24 }).notNull().default('video'),
   runId:             integer('run_id').references(() => homepageTeamRuns.id, { onDelete: 'set null' }),

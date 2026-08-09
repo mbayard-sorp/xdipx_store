@@ -32,13 +32,13 @@ export function falVideoConfigured(): boolean {
 // fal reprices. costKey must have a matching entry in model-pricing VIDEO_RATES.
 // ---------------------------------------------------------------------------
 
-export type VideoModelId = 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'omnihuman'
+export type VideoModelId = 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'omnihuman' | 'sync-lipsync'
 
 export interface VideoModelSpec {
   /** fal queue endpoint path. */
   falModel: string
   label: string
-  tier: 'premium' | 'premium-fast' | 'standard' | 'avatar'
+  tier: 'premium' | 'premium-fast' | 'standard' | 'avatar' | 'lipsync'
   /** Cost key understood by model-pricing VIDEO_RATES. */
   costKey: string
   ratePerSecondUsd: number
@@ -55,6 +55,12 @@ export interface VideoModelSpec {
    * does not apply (kept empty) and duration validation is skipped.
    */
   audioDriven?: boolean
+  /**
+   * Compound talking tier (spec §5 Phase 3): the clip stage renders the base
+   * model, then the lipsync stage submits THIS model with the finished clip +
+   * a TTS speech track. allowedDurations mirrors the base clip model's.
+   */
+  lipsync?: { baseClip: VideoModelId }
   /** Durations the model accepts, seconds. Empty for audio-driven models. */
   allowedDurations: number[]
 }
@@ -110,6 +116,22 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     audioDriven: true,
     allowedDurations: [],
   },
+  // Mid-price talking tier: Kling clip + TTS + sync lipsync (~$0.12/s all-in
+  // vs OmniHuman's $0.16/s). The clip stage renders kling25-pro from the
+  // approved frame; the lipsync stage performs the presenterLine onto it. The
+  // OmniHuman comment above predates this tier: talking heads that need full
+  // performance stay audio-first, but this tier is the sanctioned lipsync path
+  // for shorter spoken lines on a standard-tier budget.
+  'sync-lipsync': {
+    falModel: 'fal-ai/sync-lipsync',
+    label: 'Kling 2.5 Pro + Sync lipsync (talking standard tier)',
+    tier: 'lipsync',
+    costKey: 'fal/sync-lipsync',
+    ratePerSecondUsd: 0.05,
+    nativeAudio: false,
+    lipsync: { baseClip: 'kling25-pro' },
+    allowedDurations: [5, 10],
+  },
 }
 
 export function isVideoModelId(v: unknown): v is VideoModelId {
@@ -139,6 +161,8 @@ export interface VideoRequestInput {
   negativePrompt?: string
   /** Speech track URL for audio-driven models (fal storage or other fetchable URL). */
   audioUrl?: string
+  /** Source clip URL for lipsync models (fal storage or other fetchable URL). */
+  videoUrl?: string
 }
 
 /** Build the per-model input body. Each model family names params differently. */
@@ -178,13 +202,26 @@ function buildInput(model: VideoModelId, input: VideoRequestInput): Record<strin
         image_url: input.imageUrl,
         audio_url: input.audioUrl,
       }
+    case 'sync-lipsync':
+      // Video + audio in, lip-synced video out. cut_off ends the output at the
+      // shorter track, pairing with the speech-fits-duration enqueue guard.
+      return {
+        video_url: input.videoUrl,
+        audio_url: input.audioUrl,
+        sync_mode: 'cut_off',
+      }
   }
 }
 
 export async function submitVideoRequest(model: VideoModelId, input: VideoRequestInput): Promise<QueueHandle> {
   const key = requireKey()
   const spec = VIDEO_MODELS[model]
-  if (spec.audioDriven) {
+  if (spec.lipsync) {
+    // Output length = the shorter input track; duration validation happened
+    // when the base clip was submitted.
+    if (!input.videoUrl) throw new Error(`${model} requires videoUrl (the source clip)`)
+    if (!input.audioUrl) throw new Error(`${model} requires audioUrl (the speech track)`)
+  } else if (spec.audioDriven) {
     if (!input.audioUrl) throw new Error(`${model} is audio-driven and requires audioUrl`)
   } else if (!spec.allowedDurations.includes(input.durationSeconds)) {
     throw new Error(`${model} does not support duration ${input.durationSeconds}s (allowed: ${spec.allowedDurations.join(', ')})`)

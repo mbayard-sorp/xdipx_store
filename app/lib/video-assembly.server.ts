@@ -71,7 +71,8 @@ export async function probeDurationSeconds(video: Buffer): Promise<number> {
 let logoCache: { buffer: Buffer; ts: number } | null = null
 const LOGO_CACHE_TTL = 1000 * 60 * 60
 
-async function fetchLogoPng(): Promise<Buffer | null> {
+/** Exported for the end-card builder (video-postpass) — same 1h cache. */
+export async function fetchLogoPng(): Promise<Buffer | null> {
   if (logoCache && Date.now() - logoCache.ts < LOGO_CACHE_TTL) return logoCache.buffer
   const settings = await getSiteSettings()
   if (!settings?.logoUrl) return null
@@ -157,6 +158,45 @@ export async function muxAudio(video: Buffer, audio: Buffer): Promise<Buffer> {
     cleanup([videoIn, audioIn, output])
   }
 }
+
+// ── Multi-aspect masters ─────────────────────────────────────────────────────
+
+export type AspectMaster = '1:1' | '4:5'
+
+const ASPECT_DIMENSIONS: Record<AspectMaster, { width: number; height: number }> = {
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+}
+
+/**
+ * Derive a 1:1 or 4:5 master from the finished 1080x1920 9:16 final. The crop
+ * uses the same face-biased vertical anchor as the punch-in step (0.35 of the
+ * spare height instead of center), so a talking head stays framed. Deriving
+ * from the FINAL means captions, end card, and watermark carry over free.
+ * Audio is stream-copied.
+ */
+export async function renderAspectMaster(video: Buffer, aspect: AspectMaster): Promise<Buffer> {
+  const { width, height } = ASPECT_DIMENSIONS[aspect]
+  const input = tmp('aspect-in.mp4')
+  const output = tmp(`aspect-${aspect.replace(':', 'x')}.mp4`)
+  try {
+    writeFileSync(input, video)
+    execFileSync(ffmpegPath!, [
+      '-y',
+      '-i', input,
+      '-vf', `crop=${width}:${height}:(iw-${width})/2:(ih-${height})*0.35,setsar=1`,
+      '-c:v', 'libx264', '-preset', 'fast', '-crf', '19',
+      '-c:a', 'copy',
+      '-movflags', '+faststart',
+      output,
+    ], { timeout: 120_000 })
+    return readFileSync(output)
+  } finally {
+    cleanup([input, output])
+  }
+}
+
+export const ASPECT_MASTER_SIZES = ASPECT_DIMENSIONS
 
 /**
  * Concat clips into one 1080x1920 9:16 H.264/AAC video, re-encoding and

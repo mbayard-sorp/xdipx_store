@@ -4,21 +4,34 @@
  *   { op: 'enqueue', productHandle, shopifyProductGid?, formula, presenter,
  *     scriptJson, modelTier, durationSeconds, targetPlatforms, aiDisclosure?,
  *     runId? } -> { jobId, estCostUsd }
+ *   { op: 'enqueue-set', productHandle, shopifyProductGid?, formula, presenter,
+ *     baseScriptJson, hooks, presenters?, sceneSlugs?, modelTier,
+ *     durationSeconds, targetPlatforms, aiDisclosure?, runId? }
+ *       -> { variantGroupId, totalEstCostUsd, jobs: [{jobId, estCostUsd, axes}] }
  *   { op: 'list', limit? } -> { jobs: [...] }   (includes fan-out review outcomes
  *                                                — the agent's training channel)
- *   { op: 'config' } -> valves, model tiers/rates, formulas, approved cast,
- *                       platform frequencies
+ *   { op: 'config' } -> valves, model tiers/rates, formulas, tones, approved
+ *                       cast, platform frequencies
  *
- * Unlike social-post drafting (free), op:'enqueue' SPENDS REAL MONEY on fal,
- * so it checks the video team's kill switch AND budget gate before inserting.
- * Publishing stays owner-gated: a finished job only ever lands in
- * /admin/video-studio for review; nothing here posts anywhere.
+ * Unlike social-post drafting (free), op:'enqueue'/'enqueue-set' SPEND REAL
+ * MONEY on fal, so they check the video team's kill switch AND budget gate
+ * before inserting. Publishing stays owner-gated: a finished job only ever
+ * lands in /admin/video-studio for review; nothing here posts anywhere.
  */
 
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth, gate, getTeamConfig, getValve, VALVE_KEYS } from '~/lib/team.server'
-import { SOCIAL_PLATFORMS, VIDEO_FORMULAS, VIDEO_MAX_COST_CENTS_DEFAULT, SCENE_KIT } from '~/lib/team-keys'
-import { enqueueVideoJob, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame } from '~/lib/video-pipeline.server'
+import {
+  SOCIAL_PLATFORMS,
+  VIDEO_FORMULAS,
+  VIDEO_MAX_COST_CENTS_DEFAULT,
+  VIDEO_MAX_VARIANTS_PER_SET_DEFAULT,
+  VIDEO_TONES,
+  SCENE_KIT,
+  VIDEO_EXTRA_KEYS,
+} from '~/lib/team-keys'
+import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame } from '~/lib/video-pipeline.server'
+import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { db } from '~/lib/db.server'
@@ -29,6 +42,74 @@ import type { VideoScriptJson } from '../../db/schema'
 
 const PRESENTER_RE = /^(none|emma|friend:[a-z0-9-]+)$/
 
+interface ValidatedEnqueueCommon {
+  productHandle: string
+  formula: string
+  presenter: string
+  modelTier: keyof typeof VIDEO_MODELS
+  spec: (typeof VIDEO_MODELS)[keyof typeof VIDEO_MODELS]
+  script: VideoScriptJson
+  platforms: string[]
+}
+
+/**
+ * Shared field validation for enqueue and enqueue-set. Returns a Response on
+ * the first failure. `scriptField` names which body key carries the script
+ * (scriptJson vs baseScriptJson).
+ */
+function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string): ValidatedEnqueueCommon | Response {
+  if (typeof b['productHandle'] !== 'string' || !b['productHandle']) {
+    return new Response('Bad Request: productHandle required', { status: 400 })
+  }
+  if (typeof b['formula'] !== 'string' || !(VIDEO_FORMULAS as readonly string[]).includes(b['formula'])) {
+    return new Response(`Bad Request: formula must be one of ${VIDEO_FORMULAS.join('|')}`, { status: 400 })
+  }
+  const presenter = typeof b['presenter'] === 'string' ? b['presenter'] : 'none'
+  if (!PRESENTER_RE.test(presenter)) {
+    return new Response('Bad Request: presenter must be none | emma | friend:{slug}', { status: 400 })
+  }
+  if (!isVideoModelId(b['modelTier'])) {
+    return new Response(`Bad Request: modelTier must be one of ${Object.keys(VIDEO_MODELS).join('|')}`, { status: 400 })
+  }
+  const spec = VIDEO_MODELS[b['modelTier']]
+  const script = b[scriptField]
+  if (!script || typeof script !== 'object' || Array.isArray(script)) {
+    return new Response(`Bad Request: ${scriptField} object required (framePrompt, motionPrompt, captions)`, { status: 400 })
+  }
+  if (spec.audioDriven || spec.lipsync) {
+    // Talking tiers: the spoken line and an on-camera presenter are required.
+    // (enqueue-set may carry the line via the {{hook}} token — the pipeline
+    // re-validates each expanded variant.)
+    const line = (script as VideoScriptJson).presenterLine
+    if (typeof line !== 'string' || !line.trim()) {
+      return new Response(`Bad Request: ${spec.lipsync ? 'lipsync' : 'avatar'} tier requires ${scriptField}.presenterLine`, { status: 400 })
+    }
+    if (presenter === 'none') {
+      return new Response(`Bad Request: ${spec.lipsync ? 'lipsync' : 'avatar'} tier requires a presenter (emma or friend:{slug})`, { status: 400 })
+    }
+    if (spec.lipsync && typeof b['durationSeconds'] !== 'number') {
+      return new Response('Bad Request: durationSeconds required for the lipsync tier', { status: 400 })
+    }
+  } else if (typeof b['durationSeconds'] !== 'number') {
+    return new Response('Bad Request: durationSeconds required', { status: 400 })
+  }
+  const platforms = Array.isArray(b['targetPlatforms'])
+    ? (b['targetPlatforms'] as unknown[]).filter((p): p is string => typeof p === 'string' && (SOCIAL_PLATFORMS as readonly string[]).includes(p))
+    : []
+  if (!platforms.length) {
+    return new Response(`Bad Request: targetPlatforms must include at least one of ${SOCIAL_PLATFORMS.join('|')}`, { status: 400 })
+  }
+  return {
+    productHandle: b['productHandle'],
+    formula: b['formula'],
+    presenter,
+    modelTier: b['modelTier'],
+    spec,
+    script: script as VideoScriptJson,
+    platforms,
+  }
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
@@ -36,46 +117,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     if (b['op'] === 'enqueue') {
-      if (typeof b['productHandle'] !== 'string' || !b['productHandle']) {
-        return new Response('Bad Request: productHandle required', { status: 400 })
-      }
-      if (typeof b['formula'] !== 'string' || !(VIDEO_FORMULAS as readonly string[]).includes(b['formula'])) {
-        return new Response(`Bad Request: formula must be one of ${VIDEO_FORMULAS.join('|')}`, { status: 400 })
-      }
-      const presenter = typeof b['presenter'] === 'string' ? b['presenter'] : 'none'
-      if (!PRESENTER_RE.test(presenter)) {
-        return new Response('Bad Request: presenter must be none | emma | friend:{slug}', { status: 400 })
-      }
-      if (!isVideoModelId(b['modelTier'])) {
-        return new Response(`Bad Request: modelTier must be one of ${Object.keys(VIDEO_MODELS).join('|')}`, { status: 400 })
-      }
-      const spec = VIDEO_MODELS[b['modelTier']]
-      const script = b['scriptJson']
-      if (!script || typeof script !== 'object' || Array.isArray(script)) {
-        return new Response('Bad Request: scriptJson object required (framePrompt, motionPrompt, captions)', { status: 400 })
-      }
-      if (spec.audioDriven) {
-        // Avatar tier: duration derives from speech length, so durationSeconds
-        // is not required; the spoken line and an on-camera presenter are.
-        const line = (script as VideoScriptJson).presenterLine
-        if (typeof line !== 'string' || !line.trim()) {
-          return new Response('Bad Request: avatar tier requires scriptJson.presenterLine', { status: 400 })
-        }
-        if (presenter === 'none') {
-          return new Response('Bad Request: avatar tier requires a presenter (emma or friend:{slug})', { status: 400 })
-        }
-      } else if (typeof b['durationSeconds'] !== 'number') {
-        return new Response('Bad Request: durationSeconds required', { status: 400 })
-      }
-      const platforms = Array.isArray(b['targetPlatforms'])
-        ? (b['targetPlatforms'] as unknown[]).filter((p): p is string => typeof p === 'string' && (SOCIAL_PLATFORMS as readonly string[]).includes(p))
-        : []
-      if (!platforms.length) {
-        return new Response(`Bad Request: targetPlatforms must include at least one of ${SOCIAL_PLATFORMS.join('|')}`, { status: 400 })
-      }
+      const v = validateEnqueueCommon(b, 'scriptJson')
+      if (v instanceof Response) return v
 
-      // Money gate: kill switch + daily budget + run cap. Enqueue is the ONLY
-      // team op that spends, so it is the one that gates.
+      // Money gate: kill switch + daily budget + run cap. Enqueue ops are the
+      // ONLY team ops that spend, so they are the ones that gate.
       const excludeRun = typeof b['runId'] === 'number' ? b['runId'] : undefined
       const gateResult = await gate('video', excludeRun)
       if (!gateResult.ok) {
@@ -83,16 +129,63 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       const result = await enqueueVideoJob({
-        productHandle: b['productHandle'],
+        productHandle: v.productHandle,
         ...(typeof b['shopifyProductGid'] === 'string' ? { shopifyProductGid: b['shopifyProductGid'] } : {}),
-        formula: b['formula'],
-        presenter,
-        scriptJson: script as VideoScriptJson,
-        modelTier: b['modelTier'],
-        durationSeconds: spec.audioDriven ? 0 : b['durationSeconds'] as number,
-        targetPlatforms: platforms,
+        formula: v.formula,
+        presenter: v.presenter,
+        scriptJson: v.script,
+        modelTier: v.modelTier,
+        durationSeconds: v.spec.audioDriven ? 0 : b['durationSeconds'] as number,
+        targetPlatforms: v.platforms,
         ...(typeof b['aiDisclosure'] === 'boolean' ? { aiDisclosure: b['aiDisclosure'] } : {}),
         ...(typeof b['runId'] === 'number' ? { runId: b['runId'] } : {}),
+      })
+      return Response.json(result)
+    }
+
+    if (b['op'] === 'enqueue-set') {
+      const v = validateEnqueueCommon(b, 'baseScriptJson')
+      if (v instanceof Response) return v
+      const hooks = Array.isArray(b['hooks'])
+        ? (b['hooks'] as unknown[]).filter((h): h is string => typeof h === 'string' && !!h.trim())
+        : []
+      if (!hooks.length) {
+        return new Response('Bad Request: hooks must be a non-empty array of strings', { status: 400 })
+      }
+      const strList = (key: string): string[] | undefined => {
+        if (!Array.isArray(b[key])) return undefined
+        const out = (b[key] as unknown[]).filter((s): s is string => typeof s === 'string' && !!s.trim())
+        return out.length ? out : undefined
+      }
+      const presenters = strList('presenters')
+      if (presenters?.some(p => !PRESENTER_RE.test(p))) {
+        return new Response('Bad Request: presenters entries must be none | emma | friend:{slug}', { status: 400 })
+      }
+      const sceneSlugs = strList('sceneSlugs')
+      // Avatar tier derives duration from speech; every other tier (incl.
+      // lipsync) validated a numeric durationSeconds above.
+      const durationSeconds = v.spec.audioDriven ? 0 : b['durationSeconds'] as number
+
+      const excludeRun = typeof b['runId'] === 'number' ? b['runId'] : undefined
+      const gateResult = await gate('video', excludeRun)
+      if (!gateResult.ok) {
+        return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
+      }
+
+      const result = await enqueueVideoJobSet({
+        productHandle: v.productHandle,
+        ...(typeof b['shopifyProductGid'] === 'string' ? { shopifyProductGid: b['shopifyProductGid'] } : {}),
+        formula: v.formula,
+        presenter: v.presenter,
+        baseScriptJson: v.script,
+        modelTier: v.modelTier,
+        durationSeconds,
+        targetPlatforms: v.platforms,
+        ...(typeof b['aiDisclosure'] === 'boolean' ? { aiDisclosure: b['aiDisclosure'] } : {}),
+        ...(typeof b['runId'] === 'number' ? { runId: b['runId'] } : {}),
+        hooks,
+        ...(presenters ? { presenters } : {}),
+        ...(sceneSlugs ? { sceneSlugs } : {}),
       })
       return Response.json(result)
     }
@@ -127,6 +220,8 @@ export async function action({ request }: ActionFunctionArgs) {
         costUsd: r.job.costUsd,
         sceneFrameAssetId: r.job.sceneFrameAssetId,
         sceneSlug: typeof r.job.scriptJson?.sceneSlug === 'string' ? r.job.scriptJson.sceneSlug : null,
+        variantGroupId: r.job.variantGroupId,
+        variantAxes: r.job.variantAxes,
         error: r.job.error,
         targetPlatforms: r.job.targetPlatforms,
         metricsJson: r.job.metricsJson,
@@ -139,10 +234,11 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (b['op'] === 'config') {
-      const [config, autopublish, cast] = await Promise.all([
+      const [config, autopublish, cast, endcardSetting] = await Promise.all([
         getTeamConfig('video'),
         getValve(VALVE_KEYS.videoAutopublish),
         getApprovedCastMembers(),
+        getPipelineSetting(VIDEO_EXTRA_KEYS.endcardEnabled).catch(() => null),
       ])
       const models = Object.fromEntries(
         Object.entries(VIDEO_MODELS).map(([id, spec]) => {
@@ -154,6 +250,7 @@ export async function action({ request }: ActionFunctionArgs) {
             ratePerSecondUsd: spec.ratePerSecondUsd,
             nativeAudio: spec.nativeAudio,
             audioDriven: !!spec.audioDriven,
+            lipsync: !!spec.lipsync,
             allowedDurations: spec.allowedDurations,
             example8sCostUsd: estimateJobCostUsd(
               id as keyof typeof VIDEO_MODELS,
@@ -174,8 +271,11 @@ export async function action({ request }: ActionFunctionArgs) {
         enabled: config.enabled,
         dailyCents: config.dailyCents,
         maxCostCents: config.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT,
+        maxVariantsPerSet: config.maxVariantsPerSet ?? VIDEO_MAX_VARIANTS_PER_SET_DEFAULT,
+        endcardEnabled: endcardSetting === 'true',
         autopublish,
         formulas: VIDEO_FORMULAS,
+        tones: VIDEO_TONES,
         platforms: SOCIAL_PLATFORMS,
         models,
         sceneKit,

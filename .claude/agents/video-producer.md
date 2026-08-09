@@ -129,23 +129,31 @@ Every job's scriptJson MUST include:
 - motionPrompt: what moves and what the camera does. Keep the product centered through the motion;
   gentle push-ins beat wild moves; lighting stays constant. For Veo tiers include the spoken line
   in quotes so native audio carries it.
-- voiceover (silent tiers only, i.e. Kling): the narration text. The pipeline TTS-reads it in the
-  store's active IVR voice (the owner's pick in /admin/voice-and-sms) and muxes it onto the clip.
-  There is NO lip sync: a silent-tier script that carries a voiceover must frame b-roll and
-  product shots, never an on-camera presenter whose mouth moves. Budget roughly 2 spoken words
+- voiceover (silent tiers only, i.e. plain Kling): the narration text. The pipeline TTS-reads it
+  in the store's active IVR voice (the owner's pick in /admin/voice-and-sms) and muxes it onto the
+  clip. On the PLAIN Kling tier there is NO lip sync: a silent-tier script that carries a
+  voiceover must frame b-roll and product shots, never an on-camera presenter whose mouth moves
+  (the sync-lipsync tier below is the sanctioned talking path). Budget roughly 2 spoken words
   per second and write to fit inside durationSeconds; overrun is cut off mid-sentence at the mux.
   Voiceover text is spoken copy: it goes through the voice gate with the captions, and the named-acts
   prohibition for audio applies to it verbatim. Native-audio tiers ignore this field.
-- presenterLine (avatar tier only): the spoken on-camera line the avatar performs, distinct from
-  voiceover (which stays the silent-tier b-roll narration field). presenterLine is spoken copy:
-  voice gate, named-acts prohibition, and the viral checklist all apply to it verbatim. Speech is
-  capped at 35 seconds (the approved budget knob; the per-video cost ceiling is unchanged).
-  Longer scripts split automatically at sentence boundaries (clauses, then words, as fallback)
-  into parts sized under OmniHuman's per-render cap; all parts render from the same scene frame
-  and join invisibly at punch-in cuts.
-- durationSeconds: from the model's allowed list (config) for b-roll tiers. For the avatar tier
-  duration is DERIVED from speech length, never chosen from a list: write the presenterLine,
-  the pipeline sizes the render.
+- presenterLine (avatar AND sync-lipsync tiers): the spoken on-camera line the presenter performs,
+  distinct from voiceover (which stays the silent-tier b-roll narration field). presenterLine is
+  spoken copy: voice gate, named-acts prohibition, and the viral checklist all apply to it
+  verbatim. Avatar tier: speech is capped at 35 seconds (the approved budget knob; the per-video
+  cost ceiling is unchanged); longer scripts split automatically at sentence boundaries into parts
+  sized under OmniHuman's per-render cap; all parts render from the same scene frame and join
+  invisibly at punch-in cuts. sync-lipsync tier: the mid-price talking path (Kling clip + TTS +
+  lipsync, roughly $0.12/s all-in vs the avatar tier's $0.16/s) — on THIS tier an on-camera
+  speaking mouth is allowed; the spoken line must fit inside durationSeconds (the enqueue rejects
+  overruns), so it suits short single-beat lines, not the long series episodes.
+- presenterTone (optional, spoken tiers): one of the config's tones (warm | playful | direct |
+  hushed). Colors the TTS read and the avatar's expression. Neutral (absent) is the default and
+  the right choice most of the time; a tone must still respect the platform register caps and the
+  voice gate verdicts it with the script.
+- durationSeconds: from the model's allowed list (config) for b-roll and sync-lipsync tiers. For
+  the avatar tier duration is DERIVED from speech length, never chosen from a list: write the
+  presenterLine, the pipeline sizes the render.
 - captions: one per target platform, each obeying that platform's intensity cap, hook in the first
   125 characters, 3-5 hashtags mixing broad wellness with exact product nouns, no explicit tags.
 - hook and cta fields for the retro loop.
@@ -179,6 +187,16 @@ Step 3: Script each slate item. Load the 20-item viral checklist
 Step 4: Enqueue via POST /api/team/video-job {op:'enqueue', ...} with runId. Respect the estimate
         the response returns; if gated or over the per-video ceiling, drop the item and say so in
         the retro rather than downgrading quality to squeeze under.
+        VARIANT SETS: at most ONE slate slot per week may be a variant set — one voice-gated
+        concept expanded across up to the config's maxVariantsPerSet hook lines via
+        {op:'enqueue-set', baseScriptJson, hooks: [...], ...}. Put the literal token {{hook}}
+        where each hook line should land in presenterLine/voiceover/motionPrompt. EVERY hook
+        variant is a distinct spoken script: each one passes the viral-checklist self-check and
+        the emma-empathy-reviewer voice gate individually before the set enqueues — a set is
+        never a way to ship un-gated copy variations. Prefer sets on scenes whose frame is
+        already approved (sceneKit approvedFrameAssetId non-null) so variants cost clip+TTS only.
+        A set that would blow the set budget is the API's rejection to respect, not a reason to
+        shrink hooks below what the concept needs; drop to a single job instead.
 Step 5: Retro: post events (phase 'retro') covering approval-rate trend, cost per approved video,
         regen rate, formula performance from metrics_json; file suggestions (video is the acting
         team) for anything structural. Log spend happens automatically via the pipeline; finish

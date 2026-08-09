@@ -77,6 +77,7 @@ const VIDEO_RATES: Record<string, number> = {
   'fal/omnihuman-1.5': 0.16, // audio-driven avatar performance (image + audio -> talking video)
   'fal/sync-lipsync': 0.05, // lipsync billed ~$3/min of output video
   'elevenlabs/tts':   0.003, // voiceover, ~$0.20/min of speech at Creator-plan credit rates
+  'elevenlabs/music': 0.008, // music bed, ~$0.48/min — APPROXIMATE Creator-plan credit conversion
 }
 
 const DEFAULT_VIDEO_RATE = 0.40 // unknown model -> assume premium tier so estimates never lowball

@@ -38,6 +38,7 @@ import {
   CONTENT_MAX_IMAGES_DEFAULT,
   VIDEO_EXTRA_KEYS,
   VIDEO_MAX_COST_CENTS_DEFAULT,
+  VIDEO_MAX_VARIANTS_PER_SET_DEFAULT,
   SOCIAL_PLATFORMS,
   SOCIAL_FREQ_DEFAULTS,
   socialFreqKey,
@@ -129,6 +130,8 @@ export interface TeamConfig {
   maxImagesPerDay?: number
   /** Video-only extra (065): hard per-video cost ceiling in cents. */
   maxCostCents?: number
+  /** Video-only extra (078): hard cap on jobs one enqueue-set call may expand to. */
+  maxVariantsPerSet?: number
 }
 
 function num(v: string | undefined, fallback: number): number {
@@ -173,6 +176,7 @@ async function getTeamConfigUncached(team: TeamId): Promise<TeamConfig> {
     cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT)
   } else if (team === 'video') {
     cfg.maxCostCents = num(map.get(VIDEO_EXTRA_KEYS.maxCostCents), VIDEO_MAX_COST_CENTS_DEFAULT)
+    cfg.maxVariantsPerSet = num(map.get(VIDEO_EXTRA_KEYS.maxVariantsPerSet), VIDEO_MAX_VARIANTS_PER_SET_DEFAULT)
   }
   return cfg
 }
