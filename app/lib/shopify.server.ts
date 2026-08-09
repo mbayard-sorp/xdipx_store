@@ -607,6 +607,11 @@ function nodeToProduct(node: ShopifyProductNode): Product {
   const audienceTags = parseMetafieldJSON<string[]>(mf, 'audience_tags', [])
   const mattersTags  = parseMetafieldJSON<string[]>(mf, 'matters_tags',  [])
   const heroVideo    = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
+  // Same parse as nodeToDeal so the lean and full shapes never disagree on a
+  // product's dial: v2 metafield first, legacy sensation_dial projected as a
+  // fallback. undefined when neither exists (no fabricated reading).
+  const sensationDialV2 = normalizeSensationDialV2(parseMetafieldJSON<unknown>(mf, 'sensation_dial_v2', null))
+    ?? projectLegacyDial(parseMetafieldJSON<SensationDial>(mf, 'sensation_dial', {}) as SensationDial | undefined)
   return {
     id: node.id,
     handle: node.handle,
@@ -635,6 +640,7 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     ...(heroVideo?.src && typeof heroVideo.duration === 'number'
       ? { heroVideo: { src: heroVideo.src, duration: heroVideo.duration, ...(heroVideo.poster ? { poster: heroVideo.poster } : {}) } }
       : {}),
+    ...(sensationDialV2 ? { sensationDialV2 } : {}),
   }
 }
 

@@ -374,6 +374,10 @@ interface BackfillSummary {
   changed:    number
   skipped:    number
   errors:     Array<{ sku: string; message: string }>
+  /** Per-field coverage for this run: metafield/field name → count of products
+   *  that had it (re)written via the main enrichment path (enrichOne). Surfaces
+   *  dial coverage (`sensation_dial_v2`) alongside the other enriched fields. */
+  fieldCounts: Record<string, number>
   totalCost:  {
     inputTokens:         number
     outputTokens:        number
@@ -689,6 +693,10 @@ async function enrichOne(
     console.log(JSON.stringify({ handle: snap.handle, sku: row.sku, mode: args.scope, fieldsChanged: [], cost, cache: cacheStatus, promptVersion: PROMPT_VERSION, durationMs: 0 }))
     return
   }
+
+  // Run-level field coverage (dry-run and apply alike): how many products got
+  // each field this pass, so the run summary surfaces dial coverage.
+  for (const f of fieldsChanged) summary.fieldCounts[f] = (summary.fieldCounts[f] ?? 0) + 1
 
   if (!args.apply) {
     summary.changed++  // counted as "would change" in dry-run summary
@@ -1494,7 +1502,7 @@ function formatUsd(n: number): string {
 async function main() {
   const args = parseArgs(process.argv)
   const summary: BackfillSummary = {
-    processed: 0, changed: 0, skipped: 0, errors: [],
+    processed: 0, changed: 0, skipped: 0, errors: [], fieldCounts: {},
     totalCost: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
   }
 
@@ -1543,6 +1551,13 @@ async function main() {
   console.log(`  changed:   ${summary.changed}${args.apply ? '' : ' (would change)'}`)
   console.log(`  skipped:   ${summary.skipped}`)
   console.log(`  errors:    ${summary.errors.length}`)
+  const fieldEntries = Object.entries(summary.fieldCounts).sort((a, b) => b[1] - a[1])
+  if (fieldEntries.length > 0) {
+    console.log(`  coverage${args.apply ? '' : ' (would write)'}:`)
+    for (const [field, count] of fieldEntries) {
+      console.log(`    ${field}: ${count}`)
+    }
+  }
   if (summary.totalCost.inputTokens > 0 || summary.totalCost.outputTokens > 0) {
     console.log(`  tokens:    input=${summary.totalCost.inputTokens} output=${summary.totalCost.outputTokens}`)
     if (summary.totalCost.cacheCreationTokens > 0 || summary.totalCost.cacheReadTokens > 0) {
