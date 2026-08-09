@@ -21,6 +21,8 @@ export type PublishResult =
 export type PublishMedia =
   | { kind: 'image'; imageUrl: string }
   | { kind: 'video'; videoUrl: string; posterUrl?: string }
+  /** Multi-image Instagram carousel (2-10 slides). social_posts.media_urls. */
+  | { kind: 'carousel'; imageUrls: string[] }
 
 export interface PublishInput {
   postId: number
