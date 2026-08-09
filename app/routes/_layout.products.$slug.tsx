@@ -8,6 +8,7 @@ import {
   getDealByHandle, getProductsByTag,
   getCollectionProducts, getProductsByHandles,
   getProductsByIds, getMainMenu,
+  StorefrontUnavailableError,
 } from '~/lib/shopify.server'
 import { normalizeProductHandles } from '~/lib/product-handles'
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
@@ -98,7 +99,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // lookup rides along here as well (cached() so this stays a cheap KV hit) —
   // its result is branched on after the batch resolves, below.
   const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken, bundle, embedNotebookPosts] = await Promise.all([
-    getDealByHandle(slug),
+    // A Storefront outage must never reach the `!deal` 404 below. Google reads
+    // a 404 as "drop this URL"; a 503 with Retry-After reads as "come back",
+    // which is the truth when Shopify simply did not answer in time.
+    getDealByHandle(slug).catch((err: unknown) => {
+      if (err instanceof StorefrontUnavailableError) {
+        console.error(`[pdp] ${slug}: ${err.message}`)
+        throw new Response('Product temporarily unavailable', {
+          status: 503,
+          headers: { 'Retry-After': '120', 'Cache-Control': 'no-store' },
+        })
+      }
+      throw err
+    }),
     getProductPageBlocks(slug),
     getFrequentlyBoughtWith(slug, 4),
     getBundleCompanionFor(slug),
@@ -141,11 +154,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  // A product the Storefront API does not return is genuinely gone (unpublished
-  // or Shopify-archived) and 404s here. There is no second, metafield-driven
-  // gate: the old `deal_status === 'archived'` check was daily-deal bookkeeping,
-  // and it 410'd 17 active, sellable products whose only sin was having once
-  // been a deal.
+  // A product the Storefront API *answered about* and does not return is
+  // genuinely gone (unpublished or Shopify-archived) and 404s here. Reaching
+  // this line means Shopify responded — an outage was already turned into a
+  // 503 above, so a slow or failing Shopify can no longer de-index a live PDP.
+  // There is no second, metafield-driven gate: the old
+  // `deal_status === 'archived'` check was daily-deal bookkeeping, and it 410'd
+  // 17 active, sellable products whose only sin was having once been a deal.
   if (!deal) throw new Response('Product not found', { status: 404 })
 
   // Related-guides rail data. Posts that embed THIS product are the strongest

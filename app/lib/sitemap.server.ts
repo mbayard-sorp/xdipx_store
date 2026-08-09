@@ -18,7 +18,10 @@
  *     telling Google nothing had changed since the bad crawl and no recrawl
  *     was ever triggered. Any URL still sitting in one of those cached
  *     verdicts gets its lastmod floored at the fix date — an honest signal,
- *     since that is genuinely when the page's indexability changed.
+ *     since that is genuinely when the page's indexability changed. The floor
+ *     is per-verdict (STALE_VERDICT_EPOCHS): canonical-loss URLs were fixed by
+ *     #374 on 2026-07-29, six weeks after the noindex fix, so flooring them at
+ *     2026-06-13 would advertise a date earlier than their own repair.
  *
  *  2. Dead-URL suppression. URLs Google last saw as 404 / soft 404 / 5xx are
  *     dropped from the sitemap; submitting known-dead URLs costs crawl budget
@@ -37,7 +40,7 @@ import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, getI
 import { db } from '~/lib/db.server'
 import { DEAD_VERDICT_STATES } from '~/lib/gsc-index.server'
 import {
-  BASE, applyHealth, chunkSegments, isTrustworthyDeadVerdict, keepIndexable, newestLastmod,
+  BASE, applyHealth, chunkSegments, epochForCoverageState, isTrustworthyDeadVerdict, keepIndexable, newestLastmod,
   HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY,
   PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ,
   type SitemapImage, type SitemapSegment, type SitemapUrl, type UrlHealth,
@@ -76,15 +79,17 @@ export async function getUrlHealth(): Promise<UrlHealth> {
       WHERE coverage_state = ANY(${BAD_VERDICT_STATES}::text[])
     ` as unknown as Array<{ url: string; coverage_state: string; last_crawl_time: Date | string | null }>
     const dead  = new Set<string>()
-    const stale = new Set<string>()
+    const stale = new Map<string, string>()
     for (const row of rows) {
       if (isTrustworthyDeadVerdict(row.coverage_state, row.last_crawl_time)) dead.add(row.url)
-      else stale.add(row.url)
+      // The floor is per-verdict: a canonical-loss URL earns the canonical fix
+      // date, not the May-outage fix date that predates its own defect.
+      else stale.set(row.url, epochForCoverageState(row.coverage_state))
     }
     return { dead, stale }
   } catch (err) {
     console.error('[sitemap] getUrlHealth failed:', err)
-    return { dead: new Set(), stale: new Set() }
+    return { dead: new Set(), stale: new Map() }
   }
 }
 
