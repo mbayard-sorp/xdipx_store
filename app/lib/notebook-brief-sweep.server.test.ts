@@ -77,7 +77,7 @@ describe('sweepStrandedBriefs', () => {
       dedupeKey: string
       detector: string
     }
-    expect(first.kind).toBe('process') // not 'code' — no dev-loop claim
+    expect(first.kind).toBe('process') // not 'code', no dev-loop claim
     expect(first.priority).toBe(3)
     expect(first.dedupeKey).toBe('stranded-brief:a') // stable per slug
     expect(first.detector).toBe('notebook-brief-sweep')

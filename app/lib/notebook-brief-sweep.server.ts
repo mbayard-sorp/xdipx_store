@@ -18,7 +18,7 @@
  * published blogPost, filing one deduped ticket per stranded brief.
  *
  * The remediation is a Sanity data patch (mark the brief published), not a code
- * change, so the ticket is filed `kind:'process'` — filing it `code` would put
+ * change, so the ticket is filed `kind:'process'`. Filing it `code` would put
  * it in the daily dev claim loop with nothing to code, where it would only ever
  * bounce.
  *
@@ -62,7 +62,7 @@ const STRANDED_BRIEFS_QUERY = `*[_type == "seoContentBrief"
   } | order(_id asc)`
 
 /**
- * Query Sanity (published perspective) for stranded briefs. Never throws — a
+ * Query Sanity (published perspective) for stranded briefs. Never throws. A
  * client failure returns an empty list so the caller (the render healthcheck)
  * is never masked by a sweep problem.
  */
