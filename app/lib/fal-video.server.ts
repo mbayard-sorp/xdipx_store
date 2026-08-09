@@ -292,8 +292,12 @@ export interface ComposeSceneFrameOpts {
   presenterImageUrl: string
   /** Real Shopify product photo, publicly fetchable. Omitted for talking-head frames, which never include the product. */
   productImageUrl?: string
+  /** Additional publicly-fetchable reference images beyond presenter/product (e.g. a second product for a paired scene). */
+  extraImageUrls?: string[]
   /** Candidate count (default 3, capped 4). */
   count?: number
+  /** fal aspect_ratio string. Defaults to '9:16' (this function's original video-frame use). */
+  aspectRatio?: string
 }
 
 export interface SceneFrameResult {
@@ -313,9 +317,13 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
     },
     body: JSON.stringify({
       prompt: opts.prompt,
-      image_urls: [opts.presenterImageUrl, ...(opts.productImageUrl ? [opts.productImageUrl] : [])],
+      image_urls: [
+        opts.presenterImageUrl,
+        ...(opts.productImageUrl ? [opts.productImageUrl] : []),
+        ...(opts.extraImageUrls ?? []),
+      ],
       num_images: count,
-      aspect_ratio: '9:16',
+      aspect_ratio: opts.aspectRatio ?? '9:16',
       output_format: 'jpeg',
     }),
   })
