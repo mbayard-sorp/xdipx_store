@@ -4,12 +4,12 @@
 // URL and then fetches another (a silent LCP regression, not a win).
 // Isomorphic — meta() runs on both server and client.
 
-import { isShopifyCdn } from '~/lib/shopify-image'
+import { isShopifyCdn, shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 import { isSanityCdn, sanityImageUrl, sanityImageSrcSet } from '~/lib/sanity-image'
 
 // Same widths as OptimizedImage's DEFAULT_WIDTHS — KEEP THE TWO LISTS IDENTICAL.
-// The preload's imagesrcset must offer the exact candidate <picture> will pick
-// (see the DEFAULT_WIDTHS note there); 640 is the throttled-mobile right-size
+// The preload's imagesrcset must offer the exact candidate the <img> srcset will
+// pick (see the DEFAULT_WIDTHS note there); 640 is the throttled-mobile right-size
 // for the ~100vw storefront hero (ticket #603).
 const PRELOAD_WIDTHS = [480, 640, 768, 1024, 1600]
 const DEFAULT_SIZES = '(max-width: 768px) 100vw, 50vw'
@@ -32,17 +32,18 @@ export function heroPreloadTag(
   if (!imageUrl) return null
 
   if (isShopifyCdn(imageUrl)) {
-    const sep = imageUrl.includes('?') ? '&' : '?'
-    // AVIF-typed so the candidate matches what <OptimizedImage>'s <picture>
-    // selects (its AVIF source). Browsers without AVIF skip this preload and
-    // fall through to the picture's webp/jpg source — no wasted bytes.
+    // OptimizedImage renders a plain width-srcset <img> for Shopify and lets the
+    // CDN negotiate AVIF/WebP via the Accept header (a `&format=` param is inert
+    // on the Shopify CDN). So the preload is untyped and reuses the exact width
+    // URLs OptimizedImage renders, an exact cache hit whatever format the
+    // browser negotiates. Built from the same helpers to guarantee byte-identity.
+    const imagesrcset = shopifyImageSrcSet(imageUrl, widths)
     return {
       tagName: 'link',
       rel: 'preload',
       as: 'image',
-      type: 'image/avif',
-      href: `${imageUrl}${sep}width=${fallbackWidth}&format=avif`,
-      imagesrcset: widths.map((w) => `${imageUrl}${sep}width=${w}&format=avif ${w}w`).join(', '),
+      href: shopifyImageUrl(imageUrl, fallbackWidth),
+      ...(imagesrcset ? { imagesrcset } : {}),
       imagesizes: sizes,
       fetchpriority: 'high',
     }

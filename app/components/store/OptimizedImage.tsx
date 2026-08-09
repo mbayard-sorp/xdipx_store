@@ -2,14 +2,13 @@ import {
   isShopifyCdn,
   shopifyImageUrl,
   shopifyImageSrcSet,
-  shopifyImageSrcSetFmt,
 } from '~/lib/shopify-image'
 import { isSanityCdn, sanityImageUrl, sanityImageSrcSet } from '~/lib/sanity-image'
 
 // Matches the hero-preload srcset widths in the homepage + PDP meta() helpers
-// so a preloaded AVIF candidate is an exact cache hit for what <picture> picks.
+// so a preloaded candidate is an exact cache hit for what the <img> srcset picks.
 // KEEP IN SYNC with PRELOAD_WIDTHS in ~/lib/image-preload — a candidate the
-// <picture> can pick but the preload can't (or vice versa) turns the preloaded
+// <img> can pick but the preload can't (or vice versa) turns the preloaded
 // LCP hero into a second, uncredited fetch.
 // 640 sits between 480 and 768 for the throttled-mobile LCP case (ticket #603):
 // the storefront hero fills ~100vw, so a 412px-CSS mobile viewport at DPR ~1.5-1.75
@@ -49,13 +48,15 @@ interface OptimizedImageProps {
  * logic stays in ~/lib/shopify-image and ~/lib/sanity-image (the Oxygen
  * migration swaps those, not this component).
  *
- * Shopify URLs emit a <picture> with AVIF + WebP sources, a width-based
- * srcset, and a sized JPG/PNG fallback so mobile never pays for a 1200px+
- * hero asset. Sanity URLs emit a width srcset with `auto=format`, which makes
- * the Sanity CDN negotiate AVIF/WebP via the Accept header — one srcset covers
- * modern formats, no <source> pair needed. Other URLs (static /public assets)
- * render a plain <img> unchanged. SSR-safe — no .client suffix, no
- * browser-only APIs.
+ * Shopify URLs emit a single width-based srcset and let the Shopify CDN
+ * negotiate AVIF/WebP via the Accept header, so mobile never pays for a 1200px+
+ * hero asset and modern formats need no <source> pair (a `&format=` param is
+ * inert on the Shopify CDN. It negotiates purely from Accept, so the old
+ * <picture>/<source> split only tripled distinct CDN URLs and fragmented cache
+ * for zero benefit). Sanity URLs emit a width srcset with `auto=format`, the
+ * same Accept-header negotiation. Other URLs (static /public assets) render a
+ * plain <img> unchanged. SSR-safe, with no .client suffix and no browser-only
+ * APIs.
  */
 export function OptimizedImage({
   src,
@@ -97,13 +98,8 @@ export function OptimizedImage({
     />
   )
 
-  if (!shopify) return img
-
-  return (
-    <picture>
-      <source type="image/avif" srcSet={shopifyImageSrcSetFmt(src, 'avif', widths)} sizes={sizes} />
-      <source type="image/webp" srcSet={shopifyImageSrcSetFmt(src, 'webp', widths)} sizes={sizes} />
-      {img}
-    </picture>
-  )
+  // Shopify, Sanity, and static assets all render the same plain <img>: the
+  // width srcset plus Accept-header format negotiation is the whole story, so
+  // there is no <picture>/<source> split to add.
+  return img
 }
