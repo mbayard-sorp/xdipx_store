@@ -20,3 +20,28 @@ export const MIN_DISCOUNT_BADGE_PCT = 10
 export function showDiscountBadge(savePct: number): boolean {
   return savePct >= MIN_DISCOUNT_BADGE_PCT
 }
+
+/**
+ * Canonical savings-line wording, shared by every card that renders a
+ * "You save" line (ticket #842). One wording, no colon: the PLP VaultCard used
+ * to carry a colon ("You save: $X") while the discovery grid did not, so the
+ * same fact read three ways across the site. Amount is a dollar figure, pct is
+ * the already-rounded save percentage.
+ */
+export function formatSavings(amount: number, pct: number): string {
+  return `You save $${amount.toFixed(2)} (${pct}%)`
+}
+
+/** Range variant, for cards whose variants span more than one markdown. */
+export function formatSavingsRange(amount: number, pct: number): string {
+  return `Save up to $${amount.toFixed(2)} (${pct}%)`
+}
+
+/**
+ * The compact percentage pill on the home rails is a distinct badge treatment,
+ * not the savings line, but its string lives here too so all three surfaces
+ * draw their save-copy from one module and cannot drift apart.
+ */
+export function formatDiscountBadge(pct: number): string {
+  return `${pct}% off`
+}
