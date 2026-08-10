@@ -336,6 +336,38 @@ apply this same box-edge-crop technique to any Lovense app-controlled product he
 and the wider Lovense line all ship the same box+device±phone packshot template) instead of
 spending a Kontext attempt on it.
 
+We-Vibe Chorus Pro Satin Black couples vibrator (`we-vibe-chorus-pro-satin-black`), guides
+category, **Kontext generation failed twice, fell back to a real-photo crop-compose** (post:
+`best-app-controlled-vibrators-for-couples`, content-team run 252, media-manager). This product's
+only Shopify photo is a box+device composite (same template as We-Vibe Sync O/Sync 2 — the whole
+line ships this way), so the device+remote group was first isolated from the box with a plain
+pixel crop (clean cut at x≈645 on the 1000×1000 source keeps the printed box copy out of frame)
+and that crop uploaded to Sanity as a `--ref-image` for Kontext. Round 1 (2 candidates): one
+rendered the ring warped/twisted away from the reference geometry plus a stray invented white
+icon-mark on the remote; the other baked a hallucinated rabbit-shaped emblem with garbled sub-text
+onto the device body — the exact "fills the expected logo/text real We-Vibe products carry with an
+invented mark" failure the Sync Go entry below documents. Round 2, prompt hardened further
+("PERFECTLY PLAIN UNMARKED SILICONE... no logo, no wordmark, no emblem, no icon, no animal shape,
+no engraving... do not distort, twist, fold, or warp the ring shape", second object/remote dropped
+from the ask entirely): fixed the invented-mark problem on both candidates but lost the product's
+identifying C-shape in both, rendering a generic closed ring/tire shape instead — same tradeoff
+pattern as Sync Go round 2. Two failures → stopped generating per doctrine and used the real photo
+instead: isolated the device+remote group (clean box-free crop verified at `(645,492)-(995,825)`
+on the 1000×1000 source), background-keyed to a tight alpha mask, scaled ~2.3x with
+`ImageFilter.UnsharpMask(radius=2, percent=130)` to counter upscale softness, composited onto a
+fresh 1200×900 white canvas with a soft synthetic floor shadow (blurred offset mask, ~15% opacity)
+and generous margin on all sides. Zero generation cost. Passed the vision gate on inspection
+(unmistakably the real product, reads clearly at 375px, no invented marks since it's real
+photography, small embossed "we-vibe" wordmark visible on the device is real product texture at
+illegible scale, not invented text) →
+`image-10e8b855e3463dcbaa0e59dd518042534f6452f6-1200x900-jpg`. **Precedent:** the whole We-Vibe
+Sync line (Chorus Pro, Sync O, Sync 2 confirmed, likely Sync/Nova too) ships only the box+device
+composite photo and triggers this same invented-logo/lost-shape Kontext failure — apply the
+box-free-crop-then-real-photo-compose fallback directly for any of them rather than spending two
+more generation attempts re-discovering the same result. Checked the Shopify CDN URL directly
+(not just the Sanity cache) to confirm no higher-resolution source exists for this product — both
+resolve to the identical 1000×1000, 90538-byte file.
+
 **Tooling gotcha (not a prompt reject, a call-site bug):** on the `naturals-h2o` run, calling
 `generateImage()` directly (not through `gen-notebook-art.ts`, which has no `hero` surface) with
 `imageSize: { width: 1200, height: 900 }` silently produced a 16:9-ish 1392×752 frame — the
