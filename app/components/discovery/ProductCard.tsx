@@ -8,7 +8,7 @@ import { Link } from 'react-router'
 import { trackSelectItem } from '~/lib/analytics.client'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { abbreviate, buildPieGradient } from '~/components/store/CircleOptionSelector'
-import { showDiscountBadge } from '~/lib/discount-badge'
+import { showDiscountBadge, formatSavings } from '~/lib/discount-badge'
 import type { DiscoveryProduct } from '~/types/discovery'
 
 interface ProductCardProps {
@@ -112,7 +112,7 @@ export function ProductCard({ product, index, listId, listName }: ProductCardPro
                 <div className="flex items-center gap-2 mt-1">
                   {showSaveLine && (
                     <span className="text-ink/70 text-[11px] whitespace-nowrap">
-                      You save ${save.toFixed(2)} ({pct}%)
+                      {formatSavings(save, pct)}
                     </span>
                   )}
                   {(colors || sizeLabel) && (
