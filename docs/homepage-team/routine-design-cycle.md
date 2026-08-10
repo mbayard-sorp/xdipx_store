@@ -243,6 +243,13 @@ strategy brief (`GET /api/team/brief`). Real lessons go on the improvement bus v
 `POST /api/team/suggestion {op:'create', team:'homepage', kind:'instructions'|'process', ...}` —
 see `docs/store-team/improvement-loop.md`.
 
+**Append the design changelog.** When a design/shell PR ships this cycle (or is opened for the
+release engine), append one dated entry to `docs/homepage-team/design-changelog.md` in that file's
+entry format (Routine B, what changed, why, and the evidence probe touched — the PR number and the
+signal or directive that drove the change). Newest entry above the append marker. It may ride the
+same shell PR or, when the cycle produced only content-label work, a small docs append; either way the
+changelog is on the agent-editor allowlist and gates nothing.
+
 ## Hard rules for this routine
 
 - **Never merge your own work.** Always a PR; the release engine merges it after CI, QA verification,
