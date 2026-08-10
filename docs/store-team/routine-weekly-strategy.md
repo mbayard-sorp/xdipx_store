@@ -85,6 +85,54 @@ curl -s -X POST "$BASE_URL/api/team/event" \
   -d '{"op":"record","runId":'$RUN_ID',"eventType":"decision","agentRole":"store-strategist","phase":"retro","summary":"<directive>: <verdict + numbers>"}'
 ```
 
+## Step 3b — Drain the `strategy` kind (close or carry every approved row)
+
+The strategist already holds the terminal edge on `strategy` rows: `RUN_CLOSE_ACTORS` in
+`app/lib/team.server.ts` includes `agent:store-strategist` and `RUN_CLOSE_KINDS` includes `strategy`,
+so `ALLOWED.approved` grants `approved → applied` on any `strategy` row today, no code change and no
+valve. The lane is not missing, the instruction was. At run start list them:
+
+```bash
+-d '{"op":"list","status":"approved","kind":"strategy","orderBy":"age","limit":200}'
+```
+
+For each row, exactly one of two outcomes — no third option:
+
+- **(a) Fold it into this week's brief and close it:**
+  ```bash
+  -d '{"op":"transition","id":N,"to":"applied","actor":"agent:store-strategist","note":"folded into brief week=YYYY-MM-DD as <directive>"}'
+  ```
+- **(b) Carry it:** name it explicitly in the brief as carried, with the reason it is not yet folded.
+
+A row that is neither folded nor named is a bug in the run. This is what Step 7's "rows CLOSED since
+last run" line always asked for and no step implemented; 0 of the standing `strategy` rows had ever
+reached `applied` before this step existed.
+
+**Outreach fence (exempt from 3b).** Any row whose text begins "OFFSITE PITCH" or is a brand-partner
+pitch is the outreach send-arm's live input per `docs/store-team/outreach-pipeline.md` and stays
+`approved` until the pitch is sent or the prospect is closed. Never fold one into a brief to close it,
+and never retire it: retiring frees the undated per-domain `dedupeKey` and `offsite-scout` re-files
+the identical pitch next Tuesday. Say plainly in the brief that these rows are an **owner-send queue**,
+not backlog.
+
+## Step 3c — Triage the blocked pile
+
+Nothing else in the system reviews blocked rows: the only automated exit
+(`reopenBlockedOnRepeatObservation`) needs a `dedupeKey` plus a repeat detection of the identical
+condition, which a governance ticket never gets, and every other exit is owner-only. So each week read
+every blocked row and its latest `suggestion_links` note (that note is where R-DEV writes the reason;
+`last_error` is null by design on this path) and sort each into one bucket, then act:
+
+- **RESOLVED / superseded** (e.g. a block note that already reads "RESOLVED ... superseded on main") →
+  say so in the brief and list it for owner dismissal.
+- **WRONG LANE** (belongs to content, shopify-ops, or is not application code at all) → state the
+  correct owner and the re-file needed.
+- **GENUINELY PROTECTED PATH or awaiting a dependency** (e.g. dependents waiting on an unmerged PR) →
+  leave blocked and name it in the brief with what would unblock it.
+
+Report the three counts (resolved / wrong-lane / genuinely-blocked) in the run summary so a growing
+blocked pile is visible.
+
 ## Step 4 — Sub-specialists (sequence, same $RUN_ID)
 
 1. `inventory-sentinel` — catalog stock/price sweep → targeted suggestions + scoreboard event.
