@@ -7,7 +7,88 @@
  *
  * Per-call rows land in api_token_log. The daily rollup view api_token_daily
  * (created in migration 043) is read by getDailyTokenRollup() for /admin/usage.
+ *
+ * The insert is transient-fault tolerant: the row write fails roughly daily
+ * with `NeonDbError: fetch failed`, a blip that clears on an immediate
+ * reattempt, and those failures were swallowed silently, so spend tracking
+ * quietly undercounts. `insertTokenRow` retries the write once after a short
+ * delay, and a failure that survives the retry bumps a per-day KV counter
+ * (recordTokenWriteFailure) the owner digest surfaces when nonzero, so the
+ * gaps stop being invisible.
  */
+
+import type { InferInsertModel } from 'drizzle-orm'
+
+type ApiTokenLogInsert = InferInsertModel<typeof import('../../db/schema').apiTokenLog>
+
+/** One short pause before the single reattempt of a failed row write. */
+const WRITE_RETRY_DELAY_MS = 250
+
+/** KV key for the per-UTC-day count of writes that failed even after retry. */
+function tokenWriteFailureKey(utcDate: string): string {
+  return `token-log:write-failures:${utcDate}`
+}
+
+/**
+ * Insert one api_token_log row with a single bounded retry. The daily
+ * `NeonDbError: fetch failed` is transient and clears on an immediate second
+ * attempt, so one retry after a short delay recovers the common case without
+ * turning this best-effort logger into a blocking call. Throws if both
+ * attempts fail, so the caller's catch records the miss.
+ */
+async function insertTokenRow(values: ApiTokenLogInsert): Promise<void> {
+  const { db } = await import('./db.server')
+  const { apiTokenLog } = await import('../../db/schema')
+  try {
+    await db.insert(apiTokenLog).values(values)
+  } catch {
+    await new Promise(resolve => setTimeout(resolve, WRITE_RETRY_DELAY_MS))
+    await db.insert(apiTokenLog).values(values)
+  }
+}
+
+/**
+ * Count one api_token_log write that failed even after its retry. Kept in KV
+ * (independent of the Neon write that just failed) under a per-UTC-day key, so
+ * the owner digest can report the day's silent spend-tracking gap. BEST-EFFORT:
+ * kvIncrBy degrades to the in-memory fallback and never throws, and the whole
+ * body is guarded so recording a miss cannot itself unwind the caller.
+ */
+async function recordTokenWriteFailure(): Promise<void> {
+  try {
+    const { kvIncrBy } = await import('./kv.server')
+    const day = new Date().toISOString().slice(0, 10)
+    // One small integer per UTC day. kvIncrBy is atomic but sets no expiry, so
+    // the key persists; the digest reads today's and yesterday's buckets, and
+    // older buckets are stale but harmless. A count that survives the retry is
+    // rare, so this stays a tiny, low-cardinality set of keys.
+    await kvIncrBy(tokenWriteFailureKey(day), 1)
+  } catch (err) {
+    console.error('[token-log] failed to record write-failure counter (ignored):', err)
+  }
+}
+
+/**
+ * Count of api_token_log writes that failed even after retry over the trailing
+ * ~24-48h (current and previous UTC-day buckets summed), read from KV by the
+ * owner digest. Zero when healthy or when KV is cold. BEST-EFFORT: never throws.
+ */
+export async function getTokenWriteFailureCount(): Promise<number> {
+  try {
+    const { kvGet } = await import('./kv.server')
+    const now = new Date()
+    const today = now.toISOString().slice(0, 10)
+    const prev = new Date(now.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10)
+    const [a, b] = await Promise.all([
+      kvGet<number>(tokenWriteFailureKey(today)),
+      kvGet<number>(tokenWriteFailureKey(prev)),
+    ])
+    return (Number(a) || 0) + (Number(b) || 0)
+  } catch (err) {
+    console.error('[token-log] failed to read write-failure counter (ignored):', err)
+    return 0
+  }
+}
 
 export interface TokenLogEntry {
   feature:              string   // 'enrichment' | 'emma-chat' | 'sms' | 'ivr' | 'copy-gen' | 'reviews' | 'seo-research' | 'log-monitor' | 'video-prompt' | 'rail-gen' | 'discovery-rank' | 'contextual-tagline' | ...
@@ -56,8 +137,6 @@ async function bumpTeamSpendCounters(feature: string, costUsd: number, imageCoun
 
 export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
   try {
-    const { db } = await import('./db.server')
-    const { apiTokenLog } = await import('../../db/schema')
     const { estimateCostUsd } = await import('./model-pricing.server')
     const cacheCreation = entry.cacheCreationTokens ?? 0
     const cacheRead     = entry.cacheReadTokens     ?? 0
@@ -69,7 +148,7 @@ export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
       cacheCreationTokens: cacheCreation,
       cacheReadTokens:     cacheRead,
     })
-    await db.insert(apiTokenLog).values({
+    await insertTokenRow({
       feature:             entry.feature,
       model:               entry.model,
       source:              entry.source,
@@ -87,6 +166,7 @@ export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
     await bumpTeamSpendCounters(entry.feature, cost)
   } catch (err) {
     console.error('[token-log] best-effort write failed (ignored):', err)
+    await recordTokenWriteFailure()
   }
 }
 
@@ -117,11 +197,9 @@ export interface ImageCostEntry {
 export async function logImageCost(entry: ImageCostEntry): Promise<void> {
   try {
     if (!entry.count || entry.count <= 0) return
-    const { db } = await import('./db.server')
-    const { apiTokenLog } = await import('../../db/schema')
     const { estimateImageCostUsd } = await import('./model-pricing.server')
     const cost = estimateImageCostUsd(entry.model, entry.count)
-    await db.insert(apiTokenLog).values({
+    await insertTokenRow({
       feature:             entry.feature,
       model:               entry.model,
       source:              'sync',
@@ -140,6 +218,7 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
     await bumpTeamSpendCounters(entry.feature, cost, entry.count)
   } catch (err) {
     console.error('[token-log] best-effort image-cost write failed (ignored):', err)
+    await recordTokenWriteFailure()
   }
 }
 
@@ -169,11 +248,9 @@ export interface VideoCostEntry {
 export async function logVideoCost(entry: VideoCostEntry): Promise<void> {
   try {
     if (!entry.seconds || entry.seconds <= 0) return
-    const { db } = await import('./db.server')
-    const { apiTokenLog } = await import('../../db/schema')
     const { estimateVideoCostUsd } = await import('./model-pricing.server')
     const cost = estimateVideoCostUsd(entry.model, entry.seconds)
-    await db.insert(apiTokenLog).values({
+    await insertTokenRow({
       feature:             entry.feature,
       model:               entry.model,
       source:              'sync',
@@ -192,6 +269,7 @@ export async function logVideoCost(entry: VideoCostEntry): Promise<void> {
     await bumpTeamSpendCounters(entry.feature, cost)
   } catch (err) {
     console.error('[token-log] best-effort video-cost write failed (ignored):', err)
+    await recordTokenWriteFailure()
   }
 }
 
