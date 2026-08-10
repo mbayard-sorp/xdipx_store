@@ -223,6 +223,114 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Generation-block telemetry
+// ---------------------------------------------------------------------------
+
+/** Feature label every block row carries. `media` is not a TeamId, so
+ *  teamFromFeature() returns null and no budget counter is ever bumped. */
+export const MEDIA_BLOCK_FEATURE = 'media-blocks'
+
+export interface GenerationBlockEntry {
+  /** Provider/model that refused, e.g. 'fal-ai/nano-banana/edit', 'imagen'. */
+  model:      string
+  /** Why it failed, and which input it objected to. */
+  reason:     string
+  surface?:   string | null
+  /** Images that were asked for and not produced. Surfaces as `calls`. */
+  count?:     number
+  /** Originating function or route. */
+  caller?:    string
+  /** The feature the blocked call belonged to, e.g. 'video-frames'. */
+  ofFeature?: string
+  productId?: string
+  sku?:       string
+}
+
+/**
+ * Record a generation that a provider refused or failed to serve.
+ *
+ * Written as a ZERO-COST row in api_token_log under feature 'media-blocks'.
+ * That is deliberate and it is a compromise: a dedicated blocks table would be
+ * the clean design, but it needs a migration and db/schema.ts plus
+ * db/migrations are protected paths. Reusing the spend log means the existing
+ * api_token_daily view and /admin/usage pick these up with no new plumbing,
+ * and est_cost_usd = 0 keeps them out of every spend total.
+ *
+ * The reason/surface pair rides in ref_id (see encodeBlockRef).
+ *
+ * BEST-EFFORT: never throws into the caller. Also emits a structured
+ * console.warn so log-monitor can see blocks without a DB round trip.
+ */
+export async function logGenerationBlock(entry: GenerationBlockEntry): Promise<void> {
+  const count = Math.max(1, entry.count ?? 1)
+  console.warn(
+    `[media-block] model=${entry.model} reason=${entry.reason} surface=${entry.surface ?? '-'} ` +
+    `count=${count} caller=${entry.caller ?? '-'} feature=${entry.ofFeature ?? '-'} sku=${entry.sku ?? '-'}`,
+  )
+  try {
+    const { db } = await import('./db.server')
+    const { apiTokenLog } = await import('../../db/schema')
+    const { encodeBlockRef } = await import('./media-block')
+    await db.insert(apiTokenLog).values({
+      feature:             MEDIA_BLOCK_FEATURE,
+      // Model ids are longer than the 64-char column for some endpoints.
+      model:               entry.model.slice(0, 64),
+      source:              'sync',
+      batchId:             null,
+      productId:           entry.productId ?? null,
+      sku:                 entry.sku       ?? null,
+      caller:              (entry.ofFeature ? `${entry.ofFeature}:${entry.caller ?? '-'}` : entry.caller ?? null)?.slice(0, 96) ?? null,
+      refId:               encodeBlockRef({
+        reason:  entry.reason as never,
+        surface: (entry.surface ?? null) as never,
+      }).slice(0, 64),
+      inputTokens:         0,
+      outputTokens:        0,
+      cacheCreationTokens: 0,
+      cacheReadTokens:     0,
+      requestCount:        count,
+      estCostUsd:          '0',
+    })
+  } catch (err) {
+    console.error('[token-log] best-effort block write failed (ignored):', err)
+  }
+}
+
+export interface MediaBlockRow {
+  day:     string
+  model:   string
+  reason:  string
+  surface: string | null
+  caller:  string | null
+  blocked: string
+}
+
+/**
+ * Blocked generations by day, model, and reason. Answers the question the
+ * bake-off could only answer by hand: which models are refusing this catalog,
+ * how often, and on the prompt or the image.
+ */
+export async function getMediaBlockRollup(opts: { days?: number } = {}): Promise<MediaBlockRow[]> {
+  const { db } = await import('./db.server')
+  const { sql } = await import('drizzle-orm')
+  const days = opts.days ?? 30
+  const result = await db.execute(
+    sql`SELECT date_trunc('day', ts)::date::text AS day,
+               model,
+               split_part(ref_id, '/', 1) AS reason,
+               NULLIF(split_part(ref_id, '/', 2), '-') AS surface,
+               caller,
+               SUM(request_count) AS blocked
+        FROM api_token_log
+        WHERE feature = ${MEDIA_BLOCK_FEATURE}
+          AND ts >= current_date - ${days}::int
+        GROUP BY 1, 2, 3, 4, 5
+        ORDER BY day DESC, blocked DESC`
+  )
+  return result.rows as unknown as MediaBlockRow[]
+}
+
+// ---------------------------------------------------------------------------
 // Video-generation spend logger
 // ---------------------------------------------------------------------------
 

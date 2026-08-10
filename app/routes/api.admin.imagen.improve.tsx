@@ -5,7 +5,7 @@
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
-import { generateMoodImage } from '~/lib/imagen.server'
+import { generateImage } from '~/lib/generate-image.server'
 import { apiError } from '~/lib/api-error.server'
 
 /** Fetch a CDN URL server-side and return its bytes as a Buffer. */
@@ -54,12 +54,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
   let buffers: Buffer[]
   try {
-    buffers = await generateMoodImage({
-      categories:         [],
-      prompt:             fullPrompt,
-      count:              2,
-      originalImageBuffer,
-    })
+    ;({ buffers } = await generateImage({
+      prompt:  fullPrompt,
+      count:   2,
+      feature: 'admin-images',
+      caller:  'api.admin.imagen.improve',
+      ...(originalImageBuffer ? { originalImageBuffer } : {}),
+    }))
   } catch (err) {
     return apiError('imagen.improve', err, 'Image improvement failed', 502)
   }
