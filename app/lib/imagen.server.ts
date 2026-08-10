@@ -32,6 +32,21 @@ function getMoodDescription(categories: string[]): string {
   return 'warm abstract lifestyle, soft lighting, premium wellness aesthetic'
 }
 
+/**
+ * The default category-derived mood prompt. Exported so the provider-neutral
+ * `generateImage()` wrapper can send the same brief to fal when a caller
+ * supplies only categories, instead of falling straight through to Imagen
+ * because it has no prompt string to give fal.
+ */
+export function defaultMoodPrompt(categories: string[]): string {
+  return `Abstract lifestyle photography for a premium wellness product.
+Mood: warm, curious, inviting. Soft golden-hour lighting.
+Colors: coral red, warm orange, purple accents, cream background.
+No faces. No people. No product shown directly.
+Suggest the feeling of: ${getMoodDescription(categories)}.
+Style: editorial, tasteful, evocative but not explicit.`
+}
+
 function buildClient(): GoogleGenAI {
   const project  = process.env['GOOGLE_CLOUD_PROJECT_ID'] ?? ''
   const location = process.env['GOOGLE_CLOUD_LOCATION'] ?? 'us-central1'
@@ -120,15 +135,9 @@ export async function generateMoodImage(opts: {
   if (!project) throw new Error('GOOGLE_CLOUD_PROJECT_ID not set')
 
   const ai    = buildClient()
-  const mood  = getMoodDescription(opts.categories)
   const count = Math.min(Math.max(1, opts.count ?? 2), 4)
 
-  const basePrompt = opts.prompt ?? `Abstract lifestyle photography for a premium wellness product.
-Mood: warm, curious, inviting. Soft golden-hour lighting.
-Colors: coral red, warm orange, purple accents, cream background.
-No faces. No people. No product shown directly.
-Suggest the feeling of: ${mood}.
-Style: editorial, tasteful, evocative but not explicit.`
+  const basePrompt = opts.prompt ?? defaultMoodPrompt(opts.categories)
 
   // ── Build parts array ────────────────────────────────────────────────────
 

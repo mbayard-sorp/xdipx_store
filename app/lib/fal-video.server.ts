@@ -276,14 +276,49 @@ export async function uploadToFalStorage(buf: Buffer, contentType: string, fileN
 
 // ---------------------------------------------------------------------------
 // Scene-frame composition — the drift guard. Composes the presenter (Emma or a
-// cast member reference photo) together with the REAL product photo into one
-// 9:16 still via nano-banana multi-image edit. The chosen frame becomes the
-// image-to-video first frame, so the expensive video generation starts from an
-// already-correct scene instead of inventing one.
+// cast member reference photo) together with the REAL product into one 9:16
+// still. The chosen frame becomes the image-to-video first frame, so the
+// expensive video generation starts from an already-correct scene instead of
+// inventing one.
+//
+// TWO STAGES, for two measured reasons (bake-off 2026-08-10, see
+// docs/media-model-routing.md):
+//
+//  1. Stage 1 renders a clean PRODUCT PLATE. Shopify packshots routinely include
+//     the retail carton, and a one-shot composite puts the BOX in the
+//     presenter's hand with the manufacturer's brand name legible on it, which
+//     breaks the no-text-in-pixels rule and ships a competitor's logo. Isolating
+//     the bare product first removed that failure class outright.
+//  2. Stage 2 composites on FLUX.2 [dev] edit. The previous model here,
+//     `fal-ai/nano-banana/edit`, is Gemini Flash Image behind a fal wrapper and
+//     carries Google's non-configurable IMAGE_SAFETY output filter: it returned
+//     422 content_policy for an ordinary catalog vibrator at EVERY
+//     `safety_tolerance` from 6 down to 3, on both the raw packshot and a clean
+//     plate. It could not render a large part of the catalog at all. FLUX.2 also
+//     held the presenter's identity from a single reference photo, which the
+//     alternatives did not.
+//
+// Talking-head frames pass no product and therefore skip stage 1 entirely.
 // ---------------------------------------------------------------------------
 
-const SCENE_FRAME_MODEL = 'fal-ai/nano-banana/edit'
-export const SCENE_FRAME_COST_KEY = 'fal/nano-banana'
+/** Stage 1: isolate the real product onto a clean, packaging-free plate. */
+const SCENE_PLATE_MODEL = 'fal-ai/qwen-image-edit-2511'
+export const SCENE_PLATE_COST_KEY = 'fal/qwen-image-edit'
+
+/** Stage 2: composite presenter + plate into the 9:16 candidate frames. */
+const SCENE_FRAME_MODEL = 'fal-ai/flux-2/lora/edit'
+export const SCENE_FRAME_COST_KEY = 'fal/flux-2-edit'
+
+const PLATE_PROMPT =
+  'Show only the bare product itself from the reference image, centered on a plain seamless ' +
+  'neutral backdrop with bright high-key studio light and a crisp single shadow. Reproduce the ' +
+  'product exactly: same shape, proportions, color, and finish. Remove all packaging, boxes, ' +
+  'cartons, sleeves and inserts entirely. No text, no words, no letters, no watermark, no logo, ' +
+  'no brand name.'
+
+const PLATE_NEGATIVE =
+  'packaging, retail box, carton, sleeve, insert, text, words, letters, watermark, logo, ' +
+  'brand name, caption, second product, duplicate product'
 
 export interface ComposeSceneFrameOpts {
   /** Scene direction. Product prominence and grounds come from the caller's prompt scaffold. */
@@ -299,12 +334,59 @@ export interface ComposeSceneFrameOpts {
 export interface SceneFrameResult {
   /** fal-hosted candidate URLs (~24h TTL). Persist via downloadFalAsset + Blob promptly. */
   urls: string[]
+  /** Stage-2 compositor model, billed once per returned candidate. */
   costKey: string
+  /**
+   * Stage-1 plate spend, when a plate was built. Separate from `costKey` because
+   * it is a single image on a different model, and the caller owns cost logging.
+   */
+  plate?: { costKey: string; count: number }
+}
+
+/**
+ * Stage 1. Returns a fal-hosted URL for the packaging-free product plate.
+ * Throws on failure so the caller surfaces a composition error rather than
+ * silently falling back to the packshot, which is what put boxes in frame.
+ */
+async function composeProductPlate(productImageUrl: string): Promise<string> {
+  const key = requireKey()
+  const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_PLATE_MODEL}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Key ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      prompt: PLATE_PROMPT,
+      negative_prompt: PLATE_NEGATIVE,
+      image_urls: [productImageUrl],
+      num_images: 1,
+      image_size: 'square_hd',
+      enable_safety_checker: false,
+      output_format: 'jpeg',
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`fal.ai ${SCENE_PLATE_MODEL} error: ${res.status} ${text.slice(0, 400)}`)
+  }
+  const json = await res.json() as { images?: { url?: string }[] }
+  const url = json.images?.[0]?.url
+  if (!url) throw new Error(`fal.ai ${SCENE_PLATE_MODEL} returned no product plate`)
+  return url
 }
 
 export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<SceneFrameResult> {
   const key = requireKey()
   const count = Math.min(Math.max(1, opts.count ?? 3), 4)
+
+  // Stage 1. Skipped for talking-head frames (no product) and for the
+  // no-presenter caller, which passes the product photo as its own base — there
+  // is nothing to composite it against, so a plate would just be wasted spend.
+  const needsPlate = !!opts.productImageUrl && opts.productImageUrl !== opts.presenterImageUrl
+  const productRef = needsPlate ? await composeProductPlate(opts.productImageUrl!) : opts.productImageUrl
+
+  // Stage 2.
   const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_FRAME_MODEL}`, {
     method: 'POST',
     headers: {
@@ -313,9 +395,10 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
     },
     body: JSON.stringify({
       prompt: opts.prompt,
-      image_urls: [opts.presenterImageUrl, ...(opts.productImageUrl ? [opts.productImageUrl] : [])],
+      image_urls: [opts.presenterImageUrl, ...(productRef ? [productRef] : [])],
       num_images: count,
-      aspect_ratio: '9:16',
+      image_size: { width: 1080, height: 1920 },
+      enable_safety_checker: false,
       output_format: 'jpeg',
     }),
   })
@@ -326,5 +409,9 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
   const json = await res.json() as { images?: { url?: string }[] }
   const urls = (json.images ?? []).map(i => i.url).filter((u): u is string => !!u)
   if (!urls.length) throw new Error(`fal.ai ${SCENE_FRAME_MODEL} returned no images`)
-  return { urls, costKey: SCENE_FRAME_COST_KEY }
+  return {
+    urls,
+    costKey: SCENE_FRAME_COST_KEY,
+    ...(needsPlate ? { plate: { costKey: SCENE_PLATE_COST_KEY, count: 1 } } : {}),
+  }
 }

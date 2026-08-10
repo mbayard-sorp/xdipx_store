@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from 'react-router'
-import { generateMoodImage } from '~/lib/imagen.server'
+import { generateImage } from '~/lib/generate-image.server'
 import { requireAdmin } from '~/lib/session.server'
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -14,10 +14,14 @@ export async function action({ request }: ActionFunctionArgs) {
     categories = categoriesRaw ? categoriesRaw.split(',').map(c => c.trim()) : []
   }
 
-  const images = await generateMoodImage({ categories })
+  const { buffers } = await generateImage({
+    categories,
+    feature: 'admin-images',
+    caller: 'api.generate-image',
+  })
 
   // Return base64 encoded images
   return Response.json({
-    images: images.map(buf => `data:image/png;base64,${buf.toString('base64')}`),
+    images: buffers.map(buf => `data:image/png;base64,${buf.toString('base64')}`),
   })
 }
