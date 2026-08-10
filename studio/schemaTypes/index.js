@@ -68,6 +68,10 @@ import collectionsHub     from '../schemas/collectionsHub.js'
 // Phase 6d — Manufacturer specs data layer (additive; does not touch existing schemas).
 import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
 
+// Comparison ("X vs Y") pages — BOFU answer surface at /compare/{slug} with
+// ItemList + FAQ schema and a .md twin (additive; existing schemas untouched).
+import comparison         from '../schemas/comparison.js'
+
 // Discovery home page rebuild — variant toggle + Emma copy overrides (additive).
 import homeConfig          from '../schemas/homeConfig.js'
 
@@ -204,6 +208,8 @@ export const schemaTypes = [
   collectionsHub,
   // Phase 6d — Manufacturer specs per product (additive; does not touch existing schemas).
   mfgProductSpecs,
+  // Comparison ("X vs Y") pages — /compare/{slug} answer surface (additive).
+  comparison,
   // Block object types
   announcementBar,
   promoBanner,

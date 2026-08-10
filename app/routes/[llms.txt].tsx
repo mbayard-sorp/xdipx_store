@@ -10,7 +10,7 @@
  * Cache-Control: 1h (deal handle changes at midnight; other lists are stable).
  */
 
-import { getBlogCategories, getBlogPostsForSitemap, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
+import { getBlogCategories, getBlogPostsForSitemap, getPageList, getProductHandlesForSitemap, getComparisonList } from '~/lib/sanity.server'
 import { getCollectionsForSitemap, getLiveDealHandle } from '~/lib/shopify.server'
 
 const BASE_URL = 'https://xdipx.com'
@@ -59,13 +59,14 @@ export async function loader() {
       return fallback
     })
 
-  const [products, collections, blogPosts, blogCategories, pages, liveDealHandle] = await Promise.all([
+  const [products, collections, blogPosts, blogCategories, pages, liveDealHandle, comparisons] = await Promise.all([
     guard(getProductHandlesForSitemap(), [], 'getProductHandlesForSitemap'),
     guard(getCollectionsForSitemap(), [], 'getCollectionsForSitemap'),
     guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
     guard(getBlogCategories(), [], 'getBlogCategories'),
     guard(getPageList(), [], 'getPageList'),
     guard(getLiveDealHandle(), null, 'getLiveDealHandle'),
+    guard(getComparisonList(), [], 'getComparisonList'),
   ])
 
   const lines: string[] = []
@@ -185,6 +186,26 @@ export async function loader() {
         lines.push(`- [${name}](${url}): ${desc}`)
       } else {
         lines.push(`- [${name}](${url})`)
+      }
+    }
+    lines.push('')
+  }
+
+  // ── Comparisons ─────────────────────────────────────────────────────────────
+  // BOFU "X vs Y" answer pages. Enumerated as markdown twins like Products and
+  // Notebook posts, so LLMs cite the compare surface for versus/alternative
+  // queries. Omitted entirely until at least one comparison is published.
+  if (comparisons.length > 0) {
+    lines.push('## Comparisons')
+    lines.push('')
+    lines.push(`- [Compare index](${BASE_URL}/compare.md): all side-by-side comparisons`)
+    for (const c of comparisons) {
+      const name = c.title.replace(/[[\]]/g, '')
+      const desc = c.excerpt ? truncate(c.excerpt, 140) : undefined
+      if (desc) {
+        lines.push(`- [${name}](${BASE_URL}/compare/${c.slug}.md): ${desc}`)
+      } else {
+        lines.push(`- [${name}](${BASE_URL}/compare/${c.slug}.md)`)
       }
     }
     lines.push('')

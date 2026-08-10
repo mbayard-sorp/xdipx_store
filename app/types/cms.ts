@@ -627,6 +627,49 @@ export interface BlogPostLink {
   category?: { name: string; slug: string; color?: string }
 }
 
+// Comparison ("X vs Y") pages — the /compare/{slug} answer surface. Additive
+// doc type; see studio/schemas/comparison.js.
+export interface ComparisonItem {
+  name: string
+  /** Shopify handle, when the item is a catalog product (links to the PDP). */
+  productHandle?: string
+  blurb: string
+  bestFor?: string
+}
+
+export interface ComparisonAttribute {
+  label: string
+  /** One value per item, aligned to the `items` order. */
+  values: string[]
+}
+
+export interface ComparisonFaq {
+  question: string
+  answer: string
+}
+
+export interface ComparisonCard {
+  _id: string
+  title: string
+  slug: string
+  excerpt: string
+  publishedAt: string
+  featured: boolean
+  itemNames: string[]
+}
+
+export interface Comparison extends ComparisonCard {
+  _updatedAt?: string
+  items: ComparisonItem[]
+  attributes?: ComparisonAttribute[]
+  verdict?: string
+  body?: unknown[]
+  faqs?: ComparisonFaq[]
+  seoTitle?: string
+  seoDescription?: string
+  noIndex?: boolean
+}
+
 // Notebook redesign — optional per-post extras from the additive
 // blogPostExtras doc type (deck, sources, series membership).
 export interface BlogPostExtras {
