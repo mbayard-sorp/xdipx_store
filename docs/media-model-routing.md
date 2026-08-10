@@ -54,10 +54,12 @@ into scenes briefed as "elevated loungewear". Wardrobe register is fixed by re-s
   optimisation rather than the fix they looked like before the run. A house-style LoRA is still
   worth testing. Training was not attempted: `rest.alpha.fal.ai` (fal storage, where the
   trainer wants its dataset zip) is outside the cloud-routine egress allowlist.
-- **Block telemetry.** Every 422 above was invisible to our logs.
-  `generate-image.server.ts` swallows a provider failure into a `console.warn` and falls
-  through, so the rejection rate is unmeasured. Until that lands, changes here are judged by
-  hand-run bake-offs rather than by trend.
+- ~~**Block telemetry.**~~ **Landed.** Refused generations are now classified (refusal vs
+  outage, and prompt-side vs image-side) and recorded, surfacing under **Refused generations**
+  on `/admin/usage`. A model refusing repeatedly is a routing decision and belongs in the table
+  above; an outage is a retry. See `app/lib/media-block.ts`. Note the rows live in
+  `api_token_log` at zero cost under feature `media-blocks`, because a dedicated table needs a
+  migration and `db/schema.ts` is a protected path.
 - **ADR-010.** The atlascloud spike was premised on needing an uncensored provider. Open-weight
   FLUX and Qwen on fal already generate this vertical unfiltered, and the rejections traced to
   two specific hosted models. That weakens the case for a second provider; the ADR should be

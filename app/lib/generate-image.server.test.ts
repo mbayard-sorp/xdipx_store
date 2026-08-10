@@ -20,7 +20,11 @@ vi.mock('~/lib/imagen.server', () => ({
   defaultMoodPrompt: (cats: string[]) => `MOOD_BRIEF(${cats.join(',')})`,
 }))
 
-vi.mock('~/lib/token-log.server', () => ({ logImageCost: vi.fn() }))
+const logGenerationBlock = vi.fn()
+vi.mock('~/lib/token-log.server', () => ({
+  logImageCost: vi.fn(),
+  logGenerationBlock: (...args: unknown[]) => logGenerationBlock(...args),
+}))
 
 const OK = { buffers: [Buffer.from('img')], costKey: 'fal/flux-dev' }
 
@@ -28,6 +32,7 @@ describe('generateImage', () => {
   beforeEach(() => {
     falGenerate.mockReset().mockResolvedValue(OK)
     generateMoodImage.mockReset().mockResolvedValue([Buffer.from('imagen')])
+    logGenerationBlock.mockReset()
   })
   afterEach(() => vi.resetModules())
 
@@ -95,6 +100,31 @@ describe('generateImage', () => {
     await expect(generateImage({ prompt: 'p' })).resolves.toEqual({
       buffers: [], provider: 'none', model: 'none',
     })
+  })
+
+  it('records an Imagen refusal as a content block, classified and attributed', async () => {
+    // fal reports its own blocks inside falGenerate. Imagen throws prose, so if
+    // this call site did not classify it the fallback provider's refusals, which
+    // is most of what an operator hits, would stay invisible.
+    falGenerate.mockRejectedValue(new Error('fal down'))
+    generateMoodImage.mockRejectedValue(new Error('Image blocked by safety filters'))
+    const { generateImage } = await import('./generate-image.server')
+
+    await generateImage({ prompt: 'p', count: 3, feature: 'studio-images', caller: 'test-caller' })
+
+    expect(logGenerationBlock).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'imagen',
+      reason: 'content_policy',
+      count: 3,
+      ofFeature: 'studio-images',
+      caller: 'test-caller',
+    }))
+  })
+
+  it('does not record a block when a provider succeeds', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({ prompt: 'p' })
+    expect(logGenerationBlock).not.toHaveBeenCalled()
   })
 })
 

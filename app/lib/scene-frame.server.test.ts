@@ -13,9 +13,18 @@ const PLATE = 'https://fal.media/plate.jpg'
 
 type Call = { url: string; body: Record<string, unknown> }
 
-/** Records every fal call and replies with `count` fake image urls. */
+/**
+ * Records every fal call and replies with `count` fake image urls.
+ *
+ * Only fal.run traffic is recorded. Block telemetry writes through the Neon
+ * driver, which is itself fetch-based, so an unfiltered recorder counts a
+ * swallowed DB insert as a generation call.
+ */
 function mockFal(calls: Call[], opts: { failPlate?: boolean } = {}) {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (!String(url).startsWith('https://fal.run/')) {
+      return new Response('', { status: 500 })
+    }
     const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
     calls.push({ url: String(url), body })
 

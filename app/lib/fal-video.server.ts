@@ -14,6 +14,8 @@
  * fal-hosted output URLs live ~24h; download promptly and re-home to Blob.
  */
 
+import { recordFalBlock } from '~/lib/fal.server'
+
 const FAL_QUEUE_ENDPOINT = 'https://queue.fal.run'
 const FAL_SYNC_ENDPOINT = 'https://fal.run'
 
@@ -368,6 +370,9 @@ async function composeProductPlate(productImageUrl: string): Promise<string> {
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    await recordFalBlock(SCENE_PLATE_MODEL, res.status, text, 1, {
+      feature: 'video-frames', caller: 'composeProductPlate',
+    })
     throw new Error(`fal.ai ${SCENE_PLATE_MODEL} error: ${res.status} ${text.slice(0, 400)}`)
   }
   const json = await res.json() as { images?: { url?: string }[] }
@@ -404,6 +409,9 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    await recordFalBlock(SCENE_FRAME_MODEL, res.status, text, count, {
+      feature: 'video-frames', caller: 'composeSceneFrame',
+    })
     throw new Error(`fal.ai ${SCENE_FRAME_MODEL} error: ${res.status} ${text.slice(0, 400)}`)
   }
   const json = await res.json() as { images?: { url?: string }[] }

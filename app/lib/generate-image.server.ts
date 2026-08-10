@@ -149,6 +149,13 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
         count,
         ...(refImageUrl ? { refImageUrl } : {}),
         ...(imageSize ? { imageSize } : {}),
+        // falGenerate records its own blocks; this only attributes them.
+        telemetry: {
+          feature,
+          ...(opts.caller ? { caller: opts.caller } : {}),
+          ...(opts.sku ? { sku: opts.sku } : {}),
+          ...(opts.productId ? { productId: opts.productId } : {}),
+        },
       })
       if (buffers.length) {
         if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length })
@@ -175,6 +182,22 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
       }
     } catch (err) {
       console.warn('[generate-image] Imagen failed/blocked:', err)
+      // fal self-reports its blocks inside falGenerate; Imagen throws prose, so
+      // it is classified and recorded here. Without this the fallback provider's
+      // refusals stayed invisible, which is most of what an operator hits.
+      const { classifyMediaFailure } = await import('~/lib/media-block')
+      const { logGenerationBlock } = await import('~/lib/token-log.server')
+      const { reason, surface } = classifyMediaFailure(err)
+      void logGenerationBlock({
+        model: 'imagen',
+        reason,
+        surface,
+        count,
+        ofFeature: feature,
+        ...(opts.caller ? { caller: opts.caller } : {}),
+        ...(opts.sku ? { sku: opts.sku } : {}),
+        ...(opts.productId ? { productId: opts.productId } : {}),
+      })
     }
   }
 

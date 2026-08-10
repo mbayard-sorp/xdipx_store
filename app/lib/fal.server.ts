@@ -145,6 +145,11 @@ export interface FalGenerateOpts {
    * in the generated scene instead of a model-invented lookalike.
    */
   refImageUrl?: string
+  /**
+   * Attribution for block telemetry. Optional: a missing label still records
+   * the block, just without an origin.
+   */
+  telemetry?: { feature?: string; caller?: string; sku?: string; productId?: string }
 }
 
 export interface FalGenerateResult {
@@ -155,6 +160,37 @@ export interface FalGenerateResult {
 
 export function falConfigured(): boolean {
   return !!process.env['FAL_KEY']?.trim()
+}
+
+/**
+ * Classify and record a non-OK fal response. BEST-EFFORT and fully swallowed:
+ * telemetry must never replace the caller's real error, so a logging failure
+ * here is invisible and the original throw still happens.
+ */
+export async function recordFalBlock(
+  model: string,
+  status: number,
+  body: string,
+  count: number,
+  telemetry?: { feature?: string; caller?: string; sku?: string; productId?: string },
+): Promise<void> {
+  try {
+    const { classifyProviderResponse } = await import('~/lib/media-block')
+    const { logGenerationBlock } = await import('~/lib/token-log.server')
+    const { reason, surface } = classifyProviderResponse(status, body)
+    await logGenerationBlock({
+      model,
+      reason,
+      surface,
+      count,
+      ...(telemetry?.caller ? { caller: telemetry.caller } : {}),
+      ...(telemetry?.feature ? { ofFeature: telemetry.feature } : {}),
+      ...(telemetry?.sku ? { sku: telemetry.sku } : {}),
+      ...(telemetry?.productId ? { productId: telemetry.productId } : {}),
+    })
+  } catch {
+    // Never mask the caller's error with a telemetry failure.
+  }
 }
 
 /**
@@ -198,6 +234,10 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    // Recorded here rather than in each caller so every path through fal
+    // (homepage stills, ad creative, scripts) is counted by one hook, and at
+    // the only point where the status code and raw body are both available.
+    await recordFalBlock(model, res.status, text, count, opts.telemetry)
     throw new Error(`fal.ai ${model} error: ${res.status} ${text.slice(0, 400)}`)
   }
 
