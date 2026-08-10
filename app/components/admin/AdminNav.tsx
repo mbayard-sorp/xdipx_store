@@ -192,6 +192,7 @@ const NAV_ITEMS = [
   { to: '/admin/seo-regen',      label: 'SEO Regen',     Icon: LabsIcon      },
   { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
   { to: '/admin/chat/emma',      label: 'Agent Chat',   Icon: ChatBubbleIcon },
+  { to: '/admin/conversations',  label: 'Conversations', Icon: ChatBubbleIcon },
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
 
