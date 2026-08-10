@@ -229,6 +229,7 @@ export async function loader() {
   // ── Optional ────────────────────────────────────────────────────────────────
   lines.push('## Optional')
   lines.push('')
+  lines.push(`- [Full content](${BASE_URL}/llms-full.txt): the same index with the FAQ, About, and Notebook posts inlined in full`)
   lines.push(`- [Sitemap](${BASE_URL}/sitemap.xml)`)
   lines.push(`- [RSS feed](${BASE_URL}/feed.xml)`)
   lines.push('')
