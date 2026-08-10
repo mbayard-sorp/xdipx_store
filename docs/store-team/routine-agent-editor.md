@@ -26,12 +26,27 @@ session (e.g. Monday afternoon).
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"list","status":"approved"}'
+  -d '{"op":"list","status":"approved","orderBy":"age","limit":200}'
 ```
+
+**Pass `orderBy:"age"` and `limit:200` — this is not cosmetic.** `listSuggestions`
+(`app/lib/team.server.ts`) defaults `limit` to 100 and orders `desc(created_at)`, so a bare
+`{"op":"list","status":"approved"}` returns only the **newest 100** approved rows. Once the approved
+backlog passes 100, the oldest rows fall off the bottom and become permanently invisible: a truncated
+row can be neither executed nor retired, because every disposal op in Step 1.5 operates on rows this
+run can see. `orderBy:"age"` is `asc(created_at)` (oldest first) and `200` is `SUGGESTION_LIST_MAX`.
+Apply the same `orderBy:"age"` and `limit:200` to the three per-kind list calls in Step 1.5.
 
 Yours: kind `instructions` | `agent-def` | `config` (doc-level only). Everything else is skipped
 silently (kind `code` waits for a human + rr7-engineer; `campaign`/`promo`/`program` are the
 owner's to execute).
+
+**Config rows that change a valve or pipeline_settings VALUE are a dead end, not yours.** "config
+(doc-level only)" means you may edit a config *document* on the allowlist; it does **not** mean you
+may change a `pipeline_settings` value. A config row asking to flip a valve or set a settings value
+is not doc-level, is not implementable by you, and is not retirable by you (`config` is absent from
+both `AGENT_RETIRE_KINDS` and `REKIND_FROM_KINDS`, so `retire` and `rekind` both 409). Post a
+`decision` event naming the exact valve/key and leave the row for the owner.
 
 ## Step 1.5 — Hygiene pass (before implementing anything)
 
@@ -54,8 +69,11 @@ on evidence.
 1. List the approved rows in the three kinds you may dispose of — `process`, `strategy`, `program`
    (`AGENT_RETIRE_KINDS` in `app/lib/team.server.ts`). One call per kind:
    ```bash
-   -d '{"op":"list","status":"approved","kind":"process"}'
+   -d '{"op":"list","status":"approved","kind":"process","orderBy":"age","limit":200}'
    ```
+   Carry `orderBy:"age"` and `limit:200` on all three per-kind calls for the same reason as Step 1:
+   a bare list returns only the newest 100 and silently hides the oldest rows, which are exactly the
+   stale ones this hygiene pass exists to drain.
    Only `process` can be **rekinded** (`REKIND_FROM_KINDS`). A `strategy` or `program` row can be
    retired but not re-filed, so for those the choice is retire or leave.
 2. **Re-file the misfiled.** A row asking for a playbook or agent-definition edit is `instructions`;
@@ -76,6 +94,12 @@ on evidence.
    cheap, a wrongly-closed one is invisible.
 4. **Never retire** a row that names a live customer-facing defect (out-of-stock product in a live
    slot, a broken page, a money-path bug) even if it is old. Rekind those to `code` instead.
+5. **Never retire an OFFSITE PITCH row.** A `strategy` row whose text begins "OFFSITE PITCH" (or is a
+   brand-partner pitch) is the outreach send-arm's live input, not a stale note: per
+   `docs/store-team/outreach-pipeline.md` a pitch is executable only while an APPROVED row holding the
+   draft exists. Retiring it also frees the undated per-domain `dedupeKey`, so `offsite-scout` re-files
+   the identical pitch on its next Tuesday run. These rows are an owner-send queue and stay `approved`
+   until the pitch is sent or the prospect is closed.
 
 ## Step 2 — Implement (batched by target file, max 15 PRs per run)
 
@@ -203,3 +227,8 @@ PR URL (or skipped + why), conflicts flagged.
 below capacity visible in the summary itself instead of buried in a parenthetical. If PRs-opened is
 well under both the backlog and the cap, say why in the same line (queue drained, remaining rows
 non-actionable, conflicts, or run cut short).
+
+Add a second required line for the hygiene pass: **rekinds-made**, **retires-attempted**, and
+**retires-made broken out per kind** (`process` / `strategy` / `program`). "Leave it" is a silent
+default, so a run that disposes of nothing looks identical to a run that had nothing to dispose of
+unless the counts are stated. Report zeros explicitly.
