@@ -354,6 +354,7 @@ describe('renderOpsWatchSection', () => {
     enrichmentAgeHours: 6,
     strandedVerified: 0,
     agentRetired: [],
+    tokenWriteFailures: 0,
   }
 
   it('warns that a social backlog stops the team drafting', () => {
@@ -382,6 +383,12 @@ describe('renderOpsWatchSection', () => {
   it('surfaces unreconciled verified tickets', () => {
     expect(renderOpsWatchSection({ ...base, strandedVerified: 2 }))
       .toContain('2 verified tickets not yet reconciled')
+  })
+
+  it('reports token-log write failures only when nonzero', () => {
+    expect(renderOpsWatchSection({ ...base, tokenWriteFailures: 3 }))
+      .toContain('3 api_token_log writes failed even after retry')
+    expect(renderOpsWatchSection(base)).not.toContain('api_token_log')
   })
 
   it('lists what an agent retired, so the new power stays reviewable', () => {
