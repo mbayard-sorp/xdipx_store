@@ -63,6 +63,22 @@ git fetch origin ticket/<id> && git checkout ticket/<id>
 git diff origin/main...HEAD
 ```
 
+**Use an isolated worktree, not a shared `git checkout`, whenever more than one ticket is reviewed in
+the same pass** — whether by a delegated subagent or sequentially by the main session. A bare
+`git checkout ticket/<id>` mutates the one shared working directory, so a second review running in the
+same directory (a subagent, or your own next ticket) can flip the tree out from under an in-flight
+`typecheck`/`test`/`build` and produce a false PASS or FAIL against the wrong branch. This was
+observed live on 2026-08-10: a delegated subagent saw the shared tree jump to `ticket/1526` then
+`ticket/633` mid-review and had to build its own worktree to recover. Give each PR its own worktree
+under your own scratch path so concurrent or interleaved reviews cannot race:
+
+```bash
+git fetch origin ticket/<id>
+git worktree add "$QA_WORKTREE_DIR/ticket-<id>" ticket/<id>   # per-PR, per-scratch-path
+git -C "$QA_WORKTREE_DIR/ticket-<id>" diff origin/main...HEAD
+# ... run static checks inside that worktree; git worktree remove it when done
+```
+
 What you are looking for, in rough order of how often it matters:
 
 1. **Does it do what the ticket asked, and only that?** Scope creep is a bounce.
@@ -136,6 +152,15 @@ order landed in the last 24h, it has a resolved ledger row; (3) `POST /cron/purc
 `dryRun: true` reports zero gaps for orders inside the Meta 7-day window. Zero Purchase events is
 not a failure on a day with zero orders; this check is orders-versus-reported, never an absolute
 count.
+
+Sub-check (1) is **not reachable from a cloud session today**: there is no `/api/team/*` route that
+exposes `meta_capi_failures` / `ga4_purchase_failures`, and a direct `psql` to `DATABASE_URL` from a
+cloud routine hangs and times out because egress is restricted to xdipx.com. When you cannot reach the
+tables, **record sub-check (1) as `unverified` and say why — never guess PASS/FAIL on it.** The fix is
+a code ticket (a small authenticated `GET /api/team/conversion-status` returning the unresolved-count
+and oldest-age for both tables); until it ships, an honest "unverified: no cloud-reachable route" is
+the correct verdict on this sub-check. Sub-checks (2) and (3) run over xdipx.com endpoints and stay
+verifiable.
 
 **PASS needs evidence.** A verdict of `verified` without the specific things you checked is worse
 than no verdict, because the engine merges on it.
