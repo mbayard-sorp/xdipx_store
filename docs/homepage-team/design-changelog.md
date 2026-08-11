@@ -26,4 +26,9 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 
 ## Entries
 
+### 2026-08-11 — Routine A — Weekend-In-Not-Out theme refresh (completed #248's deferred slate)
+- **What:** Regenerated the "Discover You" promo image (fresh archetype-C product-forward scene: We-Vibe couples kit on a plum-soft ground with linen throw, warm daylight); rethemed promo copy off the August-Reset "give yourself the month" line to a Weekend-In staycation frame; refreshed both wired rail eyebrows + asides (couples rail "A weekend, the two of you"; on-ramp rail "Easy to start, under $30") in fresh dial-9 voice; refreshed the couples wayfinder tile aside. Hero held (We-Vibe kit, rotated yesterday). Flipped the "Weekend In, Not Out" calendar row planned→active.
+- **Why:** Monday changeover run #248 shipped only the hero + announcement and explicitly deferred the theme's art floor, rail re-copy, wayfinder/promo, and calendar flip to the next non-changeover run (today). Theme = "Weekend In, Not Out" (couples wellness + wearables, staycation).
+- **Evidence:** run 264. Sameness-diff surfaces vs #248: promo imagery (new asset), promo copy, both rail eyebrows/asides, couples tile aside (≥2 surfaces, one imagery). Step 5b health sweep GREEN (8/8 surfaces 200, one H1). Promo image gen attempt 1 (no-ref human-context) blackened by fal NSFW filter → retried with product ref (Kontext), passed.
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
