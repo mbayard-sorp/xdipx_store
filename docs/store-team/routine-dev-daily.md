@@ -69,6 +69,23 @@ backlog was 56 deep against 6 claims/day, so the queue only ever grew), once per
 `{"empty":true}` or a 409 means there is nothing claimable; that is a clean, successful, short run,
 not a failure. Claims come back in priority order (1 is P0), oldest first within a priority.
 
+**Check file overlap across the tickets you claim in one pass.** Two independently-authored `code`
+tickets that touch the same function in the same file can merge with **zero conflict markers and
+still silently drop one ticket's change** — verified on #1272/#1273 (both rewrote the same tool-hop
+loop in `app/lib/sms-v2/conversation-agent.server.ts`; the likely PR-ascending merge order dropped
+#1272's safety guard with no error and no test failure). A ticket self-flagging the overlap in its own
+prose is not enough; nothing else checks it. So before you start a second (or later) ticket in the
+same pass, diff its target files against the ones you have already touched this pass:
+
+```bash
+git diff --stat origin/main...ticket/<already-done-id> -- <files>   # compare target-file sets
+```
+
+If they overlap, either **serialize** (branch the later ticket off the earlier ticket's tip rather
+than off `main`, and hand-reconcile both behaviors) or **flag the overlap loudly** in both tickets'
+notes so QA checks the merged result before verifying either independently. Do not let two
+overlapping tickets proceed to `pr_open` as if they were independent.
+
 **On the 20:00 pass, work bounced tickets first.** A bounced ticket is one sitting in
 `in_progress` with a `last_error` and an `attempt_count` above zero, assigned to you. It is already
 yours — QA's bounce renews the lease for six hours, so you do **not** claim it again; you read it,
@@ -157,6 +174,17 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    rules — the enrichment empty-array escape, the webhook never-silent guard, and the data-contract
    check every filter change records — are in `.claude/agents/rr7-engineer.md`
    (`<data_and_query_standards>`) and on the qa-reviewer checklist.
+
+3d. **A parser over free-text suggestion rows is tested against a real row, not only a synthetic
+   fixture.** When a ticket builds a parser over `kind=promo`/`campaign` (or any similar free-text
+   brief format) suggestion rows, pull at least one **real historical row** via
+   `POST /api/team/suggestion {"op":"get","id":<real id>}` (or `{"op":"list",...}`) and assert the
+   parser handles it, in addition to any idealized fixtures. This is cheap — the data is already on the
+   bus — and it catches exactly what synthetic fixtures miss: on #1535 (PR #552) a discount-brief
+   parser passed a clean `Code:`/`Depth:`/`Window:` fixture with green CI, then produced three wrong
+   results against the real approved promo row #51 it was built for (false MAP-conflict match on
+   guardrail prose, `code=null` because the real brief stated the code inline, `handles=[]` because it
+   listed Nalpac SKUs not `/products/` links).
 
 4. Verify locally, all three, and do not skip one because it "cannot be affected":
 
