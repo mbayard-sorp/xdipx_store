@@ -199,6 +199,24 @@ external vibe; a snow globe containing a tiny bedside scene.
 **Rejects:** anything a viewer would read as crude rather than clever, literal anatomy, dim or
 moody grading, concept salad (two jokes in one frame).
 
+**Keepers:** §0-H, "How Loud Are Vibrators, and How Do You Keep Things Quiet?" (real-talk,
+content run 269). Feeling: divided attention, listening for a shared wall while trying to be
+present. One Black woman in her mid-30s, fuller curvy build, natural afro hair, sitting cross-
+legged on the edge of a made bed in bright warm daylight, head turned toward an open bedroom door
+as if listening down the hallway, self-conscious/tired expression (not ashamed), fully clothed in
+casual pink loungewear, deep warm-coral wall catching dramatic daylight streaks, no product in
+frame (left out per the brief's own "if it risks reading as a product hero, leave it out" call —
+raw/self-conscious topic, single-figure composition was strong enough alone). Diversity note: the
+four most recent real-talk heroes before this ran a South Asian man 40s, a mixed-gender couple
+40s, a woman early 40s, and a couple with a baby monitor — this run intentionally varied skin
+tone, body type, and styling rather than repeating the light/young pattern the brief flagged.
+2 candidates from one round, no regenerate needed: candidate 1 (head turned to the door, listening
+posture) picked over candidate 2 (facing camera, ambiguous small object on the nightstand — too
+close to the banned-object class to risk) →
+`image-76dff57c00109b99d73db3cadd172923370a09c5-1200x896-jpg` (post slug not yet created in
+Sanity at generation time; asset handed off to content-writer to set on `blogPost.heroImage`
+directly).
+
 **Keepers:** JO H2O Original Water-Based Lubricant (`jo-h2o-original-water-based-lubricant-4-oz`),
 sage-leaf + water-droplet care accent, warm dappled daylight on cream/white paper →
 `image-e75e55758b2fc4594fd24ec197a561744163c299-1184x880-jpg` (post: `how-do-you-care-for-silicone-toys`).
