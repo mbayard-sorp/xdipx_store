@@ -4,7 +4,7 @@ The playbook for the weekly keyword-bank and editorial-queue routine. Entry agen
 Four jobs per run: triage the gray-zone pending keywords (cap 250), keep the cluster catalog
 consolidated (merge maps are PROPOSED as suggestions, never executed here), review the Saturday
 trend-scout's pending `trendTopicBrief` proposals (adopt/skip/expire), and plan the coming
-week's `seoContentBrief` queue (up to 7) that the daily content-writer consumes.
+week's `seoContentBrief` queue (up to 4, the answer-shaped days) that the daily content-writer consumes.
 
 Runs on the **Max subscription**. Cadence: weekly, **Sunday 19:00 UTC** (`0 19 * * 0`), before Monday's
 strategy run reads the results. Moved off 16:00 on 2026-07-29 because the content team's
@@ -91,7 +91,7 @@ Judge the rest on one question: can the catalog honestly serve this topic?
 - **Adopt, cluster path (preferred):** the trend maps to an eligible cluster → boost that
   cluster's priority for Step 5, let the trend shape the brief's working title and `targetQuery`,
   and patch the trend `{status:'adopted', adoptedBrief: <ref to the seoContentBrief>}`.
-- **Adopt, clusterless path (max 1-2 per week, INSIDE the 7-brief cap):** no cluster fits but the
+- **Adopt, clusterless path (max 1-2 per week, INSIDE the 4-brief cap):** no cluster fits but the
   topic is strong and evidence-backed → mint a trend-sourced `seoContentBrief` without
   cluster/primaryKeyword refs (the schema allows it), category from `suggestedCategory`, and note
   the trend in `createdBy`. Patch the trend `adopted` + `adoptedBrief` as above.
@@ -101,7 +101,15 @@ Trend `suggestedTerms` missing from the keyword bank go into the Step 6 report (
 `keyword_research_enabled` conversation), never directly into `seoKeyword` docs. One `step` event
 (`phase:'trend-review'`) with adopted/skipped/expired counts and per-id outcomes.
 
-## Step 5: Plan the week's briefs (cap 7)
+## Step 5: Plan the week's briefs (cap 4 — the answer-shaped days only)
+
+**Real-talk (Tue/Fri) and podcast-notes (Thu) are backlog-and-brief-sourced by design; the curator
+plans briefs for the four answer-shaped days only, not seven.** The `seoContentBrief` queue covers the
+answer-shaped categories, so ~3 of 7 published posts a week intentionally draw from the content-plan
+backlog and the podcast/intimacy briefs rather than from a keyword-bank `seoContentBrief`. That is not
+a coverage gap to close by minting real-talk/podcast briefs here — an essay-shaped post is not
+answer-shaped and does not take a guides/comparisons/care/wellness-basics brief. Do not read the
+7-day posting rhythm as a 7-brief target.
 
 Slots, from `docs/store-team/content-plan.md`: Mon guide (theme-synced to the active
 `marketing_calendar` theme when one applies), Wed guide, Sat wellness-basics, Sun comparison.
