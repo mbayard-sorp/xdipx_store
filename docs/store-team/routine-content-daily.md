@@ -225,6 +225,26 @@ abstract-noun-plus-copula sentence stating an idea for the first time is never a
 unchanged: 3 per post, 1 per section, never 2 in a paragraph. Trim by de-constructing the flagged
 shape, not by swapping synonyms inside it.
 
+**Unsourced-frequency pre-flight (mandatory, before Step 5):** run the deterministic checker on the
+draft JSON and drive it to exit 0 before submitting to the voice gate:
+
+```bash
+npx tsx scripts/check-unsourced-frequency.ts <draft.json>
+```
+
+The checker flags a frequency or population quantifier (`usually`, `most`, `almost every`, `people
+keep`, `tends to`) bound to a subject the writer has no data on: customers, readers, or other
+publishers (`most people assume`, `almost every article`, `people keep buying`, `someone writes in`).
+It is subject-aware by design, so it does NOT flag the same quantifier on a product category (`as a
+category, small bullets run quietest`; `usually costs you the sensation`) or on an attributed research
+finding (`sex educators describe`, `reviewers draw the distinction`), and it never flags second-person
+address (`that fear will keep you buying`). The limit is zero: any candidate trips it. Resolve each by
+sourcing the claim, attributing it, or removing it. Do NOT soften it with a hedge (`can`, `often`,
+`it's easy to`): those are charter-banned in this register, so hedging trades a claim defect for a
+voice defect. Like the aphorism checker, it flags candidates and leaves the final judgment to the voice
+gate. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
+place (suggestions #1674, #2618).
+
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
 opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
