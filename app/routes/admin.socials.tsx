@@ -19,7 +19,11 @@ import { generateTweetCopy } from '~/lib/claude.server'
 import { getDealByShopifyId } from '~/lib/shopify.server'
 import { postManualTweet, deleteAndLogTweet, retryFailedPost, postApprovedDraft } from '~/lib/twitter.server'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
-import { getSocialFrequencies, reviewSocialPost, rescheduleSocialPost, recordLivePostFeedback, isLivePostVerdict, parseLiveFeedback, getValve, VALVE_KEYS } from '~/lib/team.server'
+import { getSocialFrequencies, reviewSocialPost, rescheduleSocialPost, recordLivePostFeedback, getValve, VALVE_KEYS } from '~/lib/team.server'
+// Pure encoding, imported from the non-server module: the component below
+// renders a stored verdict, and a component that reaches into a .server module
+// pulls the whole thing into the client build.
+import { isLivePostVerdict, parseLiveFeedback } from '~/lib/live-post-feedback'
 import { setPipelineSetting } from '~/lib/pricing-webhook.server'
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES, socialFreqKey } from '~/lib/team-keys'
 import { categoryToLegacyString } from '~/types'

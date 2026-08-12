@@ -25,6 +25,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
+import { formatLiveFeedback, type LivePostVerdict } from '~/lib/live-post-feedback'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import { cached, invalidateCache, kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
 import {
@@ -1825,42 +1826,18 @@ export async function reviewSocialPost(id: number, input: ReviewSocialPostInput)
 /**
  * Retrospective verdicts on a post that is already live (ticket #2738).
  *
- * Deliberately NOT the `review_status` vocabulary. `reviewSocialPost` above
- * refuses posted rows on the principle that review is an editorial gate on
- * drafts and not a way to relabel history, and that principle is right: a
- * posted row's `review_status` is the record of the decision that let it ship.
- * These are a different question asked at a different time ("now that it is
- * live, was it any good"), so they live in their own vocabulary and leave the
- * pre-publish verdict untouched.
+ * The encoding lives in `./live-post-feedback` (no `.server` suffix) because
+ * the Social Studio renders a stored verdict in component code, and a component
+ * that imports a `.server` module drags the whole module into the client build.
+ * Re-exported here so callers that already have this module keep working.
  */
-export const LIVE_POST_VERDICTS = ['worked', 'off', 'pull'] as const
-export type LivePostVerdict = (typeof LIVE_POST_VERDICTS)[number]
-
-export function isLivePostVerdict(v: unknown): v is LivePostVerdict {
-  return typeof v === 'string' && (LIVE_POST_VERDICTS as readonly string[]).includes(v)
-}
-
-/** `[live:worked] note` — greppable, parseable, and readable as plain text. */
-const LIVE_FEEDBACK_RE = /^\[live:(worked|off|pull)\]\s*([\s\S]*)$/
-
-export function formatLiveFeedback(verdict: LivePostVerdict, note: string): string {
-  const body = note.trim()
-  return body ? `[live:${verdict}] ${body}` : `[live:${verdict}]`
-}
-
-/**
- * Parse a stored feedback string back into a verdict. Returns null for
- * pre-publish feedback, which has no tag, so the social retro can tell the two
- * kinds apart when it reads a row.
- */
-export function parseLiveFeedback(
-  feedback: string | null | undefined,
-): { verdict: LivePostVerdict; note: string } | null {
-  if (!feedback) return null
-  const m = LIVE_FEEDBACK_RE.exec(feedback.trim())
-  if (!m) return null
-  return { verdict: m[1] as LivePostVerdict, note: (m[2] ?? '').trim() }
-}
+export {
+  LIVE_POST_VERDICTS,
+  isLivePostVerdict,
+  formatLiveFeedback,
+  parseLiveFeedback,
+  type LivePostVerdict,
+} from './live-post-feedback'
 
 export interface LivePostFeedbackInput {
   verdict: LivePostVerdict
