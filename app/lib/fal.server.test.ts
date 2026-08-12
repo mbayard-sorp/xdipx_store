@@ -67,23 +67,40 @@ describe('falGenerate reference-image routing and output_format', () => {
     return calls
   }
 
-  it('routes two-or-more refs to nano-banana/edit with an image_urls array', async () => {
+  it('routes two-or-more refs to FLUX.2 edit with an image_urls array', async () => {
     const calls = stubFal()
     const result = await falGenerate({
       prompt: 'a vibrator and its lube bottle in one drawer scene',
       refImageUrls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
       imageSize: 'portrait_16_9',
     })
-    expect(calls[0]?.url).toContain('fal-ai/nano-banana/edit')
+    expect(calls[0]?.url).toContain('fal-ai/flux-2/lora/edit')
     expect(calls[0]?.body).toMatchObject({
       image_urls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
-      aspect_ratio: '9:16',
+      image_size: 'portrait_16_9',
       output_format: 'jpeg',
+      // The whole reason this path is not nano-banana/edit: that endpoint's
+      // safety filter is not configurable and 422s on ordinary catalog product
+      // photos. FLUX.2 takes the flag like the other open FLUX endpoints.
+      enable_safety_checker: false,
     })
     // Multi-ref must not fall through to the Kontext single-ref shape.
     expect(calls[0]?.body).not.toHaveProperty('image_url')
-    // Cost logs against nano-banana, not the flux-dev default.
-    expect(result.costKey).toBe('fal/nano-banana')
+    expect(calls[0]?.body).not.toHaveProperty('resolution_mode')
+    // Cost logs against the FLUX.2 edit rate, not the flux-dev default.
+    expect(result.costKey).toBe('fal/flux-2-edit')
+  })
+
+  it('passes a {width,height} image_size straight through on the multi-ref path', async () => {
+    // Unlike Kontext, FLUX.2 edit has a real image_size param, so an explicit
+    // pixel size must not be flattened to a nearest-aspect string.
+    const calls = stubFal()
+    await falGenerate({
+      prompt: 'two products in one scene',
+      refImageUrls: ['https://img.test/a.jpg', 'https://img.test/b.jpg'],
+      imageSize: { width: 1080, height: 1350 },
+    })
+    expect(calls[0]?.body).toMatchObject({ image_size: { width: 1080, height: 1350 } })
   })
 
   it('keeps a single refImageUrl on the unchanged Kontext single-ref path', async () => {

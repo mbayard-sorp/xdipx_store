@@ -7,7 +7,7 @@
 // image-conditioned endpoint rather than being dropped on the floor.
 //
 // The multi-reference cases (ticket #2222) also live here: two or more URLs must
-// reach falGenerate as refImageUrls (which routes to nano-banana/edit inside
+// reach falGenerate as refImageUrls (which routes to FLUX.2 edit inside
 // fal.server) and log spend through the standard logImageCost path, while
 // single-ref callers stay on the unchanged Kontext path.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -134,8 +134,8 @@ describe('generateImage', () => {
     expect(logGenerationBlock).not.toHaveBeenCalled()
   })
 
-  it('passes two-or-more refs through as refImageUrls and logs the nano-banana cost', async () => {
-    falGenerate.mockResolvedValue({ buffers: [Buffer.from('x')], costKey: 'fal/nano-banana' })
+  it('passes two-or-more refs through as refImageUrls and logs the FLUX.2 edit cost', async () => {
+    falGenerate.mockResolvedValue({ buffers: [Buffer.from('x')], costKey: 'fal/flux-2-edit' })
     const { generateImage } = await import('./generate-image.server')
 
     const result = await generateImage({
@@ -148,11 +148,11 @@ describe('generateImage', () => {
     expect(falGenerate.mock.calls[0]![0]).toMatchObject({
       refImageUrls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
     })
-    expect(result).toMatchObject({ provider: 'fal', model: 'fal/nano-banana' })
+    expect(result).toMatchObject({ provider: 'fal', model: 'fal/flux-2-edit' })
     // Cost logged through the standard path, keyed to the model fal reported.
     expect(logImageCost).toHaveBeenCalledTimes(1)
     expect(logImageCost.mock.calls[0]![0]).toMatchObject({
-      model: 'fal/nano-banana',
+      model: 'fal/flux-2-edit',
       feature: 'social-images',
       count: 1,
     })

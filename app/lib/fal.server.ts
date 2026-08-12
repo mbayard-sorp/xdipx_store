@@ -68,7 +68,7 @@ const FAL_COST_KEY: Record<string, string> = {
   'fal-ai/flux-pro/kontext':   'fal/flux-kontext',
   'fal-ai/flux-kontext/dev':   'fal/flux-kontext-dev',
   'fal-ai/nano-banana':        'fal/nano-banana',
-  'fal-ai/nano-banana/edit':   'fal/nano-banana',
+  'fal-ai/flux-2/lora/edit':   'fal/flux-2-edit',
 }
 
 /**
@@ -84,11 +84,18 @@ const FAL_KONTEXT_MODEL = 'fal-ai/flux-kontext/dev'
  * Multi-reference edit model, used whenever two or more reference images must
  * appear faithfully in one scene (e.g. a vibrator plus its lube bottle in a
  * single drawer shot, charter v5.3 License C). Kontext dev takes only one
- * image_url, so it cannot composite multiple real products; nano-banana/edit
- * takes an image_urls array. Same endpoint used by composeSceneFrame() in
- * fal-video.server.ts, which pairs a presenter photo with the product photo.
+ * image_url, so it cannot composite multiple real products; this endpoint takes
+ * an image_urls array.
+ *
+ * NOT `fal-ai/nano-banana/edit`, the other multi-ref option: it is Gemini Flash
+ * Image behind a fal wrapper and carries Google's non-configurable IMAGE_SAFETY
+ * output filter, which returned 422 content_policy for an ordinary catalog
+ * vibrator at every safety_tolerance tested, on both raw packshots and clean
+ * plates (bake-off 2026-08-10, docs/media-model-routing.md). It cannot render a
+ * large part of the catalog. composeSceneFrame() in fal-video.server.ts moved
+ * off it to this same endpoint for that reason; keep the two in step.
  */
-const FAL_NANO_BANANA_EDIT_MODEL = 'fal-ai/nano-banana/edit'
+const FAL_MULTI_REF_MODEL = 'fal-ai/flux-2/lora/edit'
 
 /** fal image_size enum → Kontext resolution_mode/aspect (no image_size param). */
 const KONTEXT_ASPECT: Record<string, string> = {
@@ -159,7 +166,7 @@ export interface FalGenerateOpts {
   /**
    * Two or more publicly fetchable reference images to composite faithfully
    * into one scene. When this holds more than one URL, generation routes to
-   * nano-banana/edit (image_urls) instead of single-ref Kontext. A single URL
+   * FLUX.2 edit (image_urls) instead of single-ref Kontext. A single URL
    * here (or `refImageUrl`) keeps the unchanged Kontext single-ref path; when
    * both are set, `refImageUrls` wins if it is non-empty.
    */
@@ -233,13 +240,14 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
   const singleRef = refs.length === 1
 
   const model = multiRef
-    ? (opts.model?.trim() || FAL_NANO_BANANA_EDIT_MODEL)
+    ? (opts.model?.trim() || FAL_MULTI_REF_MODEL)
     : singleRef
       ? (opts.model?.trim() || FAL_KONTEXT_MODEL)
       : (opts.model?.trim() || DEFAULT_FAL_IMAGE_MODEL)
 
-  // nano-banana/edit takes an image_urls array + aspect_ratio. Kontext dev takes
-  // image_url + resolution_mode; the text-to-image endpoints take image_size.
+  // FLUX.2 edit takes an image_urls array + image_size, same shape as the
+  // text-to-image endpoints and the same call composeSceneFrame() makes. Kontext
+  // dev is the odd one out: image_url + resolution_mode, no image_size param.
   // Same sync endpoint pattern otherwise.
   // Pin JPEG on all three branches. Instagram Graph API image containers require
   // JPEG; leaving output_format to the provider default lets a silent PNG reach
@@ -250,8 +258,9 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
         prompt:                opts.prompt,
         image_urls:            refs,
         num_images:            count,
-        aspect_ratio:          kontextResolutionMode(image_size),
+        image_size,
         output_format:         'jpeg',
+        enable_safety_checker: false,
       }
     : singleRef
       ? {

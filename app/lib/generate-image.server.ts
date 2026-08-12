@@ -88,7 +88,7 @@ export interface GenerateImageOpts {
   /**
    * Two or more publicly fetchable reference image URLs to composite into one
    * scene (e.g. product plus a second product in the same shot). On the fal
-   * path more than one URL routes to nano-banana/edit; a single URL behaves
+   * path more than one URL routes to FLUX.2 edit; a single URL behaves
    * like `refImageUrl`. The Imagen fallback ignores these (it uses
    * `referenceImageBuffers`).
    */
