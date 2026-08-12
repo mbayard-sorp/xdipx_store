@@ -55,7 +55,7 @@ start and drafts against them.
 | Unboxing with Emma | What is actually in the box, in order, one surprise. |
 | Things I Learned Reading the Manual | A short list of specifics nobody reads the manual for. |
 | Ask Emma | A reader question restated plainly, then answered. |
-| Brand Crush | One maker, why their engineering is interesting. Tag the verified handle only (§6). |
+| Brand Crush | One maker, why their engineering is interesting. Tag the verified handle only (§8). |
 | This Week at xdipx | Site news: a new aisle, a drop, a Notebook piece worth reading. |
 | Trend React | A reaction to an adopted trend brief. Never chases a trend we have no view on. |
 | Inspo Carousel | Multi-slide affirming or educational message over a metaphor hook. Built for saves. |
