@@ -18,6 +18,12 @@
  *   npx tsx scripts/gen-notebook-art.ts --surface category --slug care \
  *     --upload .notebook-art/category-care-1.png --alt "..."
  *
+ *   # Hero cast-plus-product composite (--cast <castSlug> on --surface hero):
+ *   # routes through composeSceneFrame() (packaging-strip + identity-hold), NOT
+ *   # generateImage, so a supplier's branded carton never lands in frame.
+ *   npx tsx scripts/gen-notebook-art.ts --surface hero --slug <post-slug> \
+ *     --cast priya --count 2 --prompt "..."
+ *
  * Surfaces → Sanity targets:
  *   masthead → singleton.notebookSettings.mastheadImage (+ mastheadImageAlt)
  *   category → blogCategoryExtras.<slug>.headerImage    (+ headerImageAlt)
@@ -35,6 +41,7 @@ import './_load-env'
 
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { resolve, basename } from 'node:path'
+import { HERO_TARGET, resizeToExactCover } from '~/lib/hero-image-resize'
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`)
@@ -130,6 +137,137 @@ const SURFACES: Record<Surface, SurfaceSpec> = {
     defaultPrompt: () =>
       `${SHARED_PREFIX}editorial hero photograph for a Notebook article, a clear single focal subject in soft directional daylight, calm negative space around the subject with room for a headline, unembarrassed and inviting.`,
   },
+}
+
+// ─── Hero cast-plus-product compositing (ticket #2752) ───────────────────────
+//
+// The daily hero can be a cast-plus-product composite instead of a plain
+// text-to-image scene. It routes through composeSceneFrame() (the two-stage
+// packaging-strip → identity-hold path), NOT generateImage({refImageUrls}),
+// because the Shopify photos are box-plus-device composites and the multi-ref
+// path has no carton-stripping stage — it would put a supplier's branded box in
+// the cast member's hand. Triggered by --cast <slug> on --surface hero.
+
+/** The post's hero product: the first blogProductEmbed with a defined handle
+ *  (the same "first embedded product" the card projection uses). Prefers the
+ *  published post over its draft. Null when the post embeds no product. */
+async function resolveHeroProductHandle(slug: string): Promise<string | null> {
+  const { getClient } = await import('~/lib/sanity.server')
+  const client = getClient(true, true) // withToken + preview so an unpublished draft is visible
+  if (!client) return null
+  return client.fetch<string | null>(
+    `*[_type == "blogPost" && slug.current == $slug]
+       | order((_id in path("drafts.**")) asc)[0]
+       .body[_type == "blogProductEmbed" && defined(productHandle)][0].productHandle`,
+    { slug },
+  )
+}
+
+async function resolveCastPhotoUrl(castSlug: string): Promise<string> {
+  const { getApprovedCastMembers } = await import('~/lib/sanity.server')
+  const cast = await getApprovedCastMembers()
+  const member = cast.find(m => m.slug === castSlug)
+  // Fail fast — never silently substitute another presenter for an unapproved
+  // or misspelled cast slug (mirrors the video pipeline's presenter contract).
+  if (!member) {
+    throw new Error(`Cast member '${castSlug}' not found or not approved for use (castMember.active && approvedForUse)`)
+  }
+  return member.photoUrl
+}
+
+async function resolveProductPhotoUrl(handle: string): Promise<string> {
+  const { getProductByHandle } = await import('~/lib/shopify.server')
+  const product = await getProductByHandle(handle)
+  const url = product?.images?.[0]?.url
+  if (!url) throw new Error(`Product '${handle}' has no Shopify image to composite against`)
+  return url
+}
+
+interface HeroRungResult {
+  rung: string
+  buffers: Buffer[]
+  provider: string
+  model: string
+}
+
+/**
+ * Cast-plus-product composite hero with a fallback ladder (ticket #2752 DONE
+ * WHEN 5): composite → one corrected retry → product at secondary scale →
+ * simpler single-figure. If every rung yields nothing the caller holds the post
+ * as a Sanity draft; a hero is never published heroless. Each composeSceneFrame
+ * rung logs its own spend for BOTH the composite and (when built) the plate cost
+ * key — composeSceneFrame does not log spend, so without this the notebook hero
+ * would silently escape content_team_daily_cents. The single-figure rung logs
+ * its own spend through generateImage()'s standard path.
+ */
+async function generateHeroComposite(slug: string, castSlug: string, opts: {
+  prompt: string
+  count: number
+  saveDir: string
+}): Promise<HeroRungResult | null> {
+  const { composeSceneFrame, downloadFalAsset } = await import('~/lib/fal-video.server')
+  const { logImageCost } = await import('~/lib/token-log.server')
+
+  const presenterImageUrl = await resolveCastPhotoUrl(castSlug)
+  const productHandle = await resolveHeroProductHandle(slug)
+  const productImageUrl = productHandle ? await resolveProductPhotoUrl(productHandle) : null
+
+  async function runComposite(prompt: string, count: number, rung: string): Promise<HeroRungResult> {
+    const res = await composeSceneFrame({
+      prompt,
+      presenterImageUrl,
+      ...(productImageUrl ? { productImageUrl } : {}),
+      aspectRatio: '4:3',
+      count,
+    })
+    // composeSceneFrame logs no spend of its own — bill both keys here.
+    void logImageCost({ feature: 'notebook-images', model: res.costKey, count: res.urls.length, caller: `notebook-hero-composite/${rung}`, sku: productHandle ?? undefined })
+    if (res.plate) {
+      void logImageCost({ feature: 'notebook-images', model: res.plate.costKey, count: res.plate.count, caller: 'notebook-hero-composite/plate', sku: productHandle ?? undefined })
+    }
+    const buffers: Buffer[] = []
+    for (const url of res.urls) {
+      const raw = await downloadFalAsset(url)
+      buffers.push(await resizeToExactCover(raw))
+    }
+    if (!buffers.length) throw new Error('composite produced no candidates')
+    return { rung, buffers, provider: 'fal', model: res.costKey }
+  }
+
+  // Rung 4 — simpler single-figure, no product composite. Falls back to the
+  // existing text-to-image hero generator so a hero still gets produced.
+  async function runSingleFigure(): Promise<HeroRungResult> {
+    const { generateImage } = await import('~/lib/generate-image.server')
+    const res = await generateImage({
+      prompt: `${SHARED_PREFIX}editorial hero portrait, a single relatable person in soft directional daylight, calm negative space for a headline, unembarrassed and inviting.`,
+      count: opts.count,
+      feature: 'notebook-images',
+      caller: 'notebook-hero-composite/single-figure',
+      imageSize: SURFACES.hero.size,
+    })
+    if (res.provider === 'none' || !res.buffers.length) throw new Error('single-figure generation produced no candidates')
+    const buffers = await Promise.all(res.buffers.map(b => resizeToExactCover(b)))
+    return { rung: 'single-figure', buffers, provider: res.provider, model: res.model }
+  }
+
+  const SECONDARY_SCALE_HINT =
+    ' Stage the cast member as the primary subject and render the product at a smaller, secondary scale within the scene rather than oversized in hand.'
+
+  const ladder: Array<() => Promise<HeroRungResult>> = [
+    () => runComposite(opts.prompt, opts.count, 'composite'),
+    () => runComposite(opts.prompt, 1, 'composite-retry'),
+    () => runComposite(opts.prompt + SECONDARY_SCALE_HINT, 1, 'secondary-scale'),
+    () => runSingleFigure(),
+  ]
+
+  for (const rung of ladder) {
+    try {
+      return await rung()
+    } catch (err) {
+      console.error(`[hero-composite] rung failed, trying next:`, err instanceof Error ? err.message : err)
+    }
+  }
+  return null // every rung exhausted — caller holds the post as a Sanity draft
 }
 
 async function generate(surface: Surface, slug: string | undefined, opts: {
@@ -283,10 +421,15 @@ async function main() {
   const uploadFile = arg('upload')
   const only = arg('only') as 'fal' | 'imagen' | undefined
   const refImage = arg('ref-image')
+  const cast = arg('cast')
   const dryRun = hasFlag('dry-run')
 
   if (!surface || !(surface in SURFACES)) {
-    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--dry-run]')
+    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--dry-run]')
+    process.exit(1)
+  }
+  if (cast && surface !== 'hero') {
+    console.error('--cast is only valid with --surface hero (cast-plus-product compositing)')
     process.exit(1)
   }
   if ((surface === 'category' || surface === 'series' || surface === 'hero') && !slug) {
@@ -306,6 +449,21 @@ async function main() {
   }
 
   if (dryRun) {
+    if (surface === 'hero' && cast) {
+      console.log(JSON.stringify({
+        dryRun: true,
+        plan: {
+          surface, slug, cast, prompt,
+          route: 'composeSceneFrame',
+          aspectRatio: '4:3',
+          size: HERO_TARGET,
+          count,
+          saveDir,
+          fallbackLadder: ['composite', 'composite-retry', 'secondary-scale', 'single-figure', 'hold-as-draft'],
+        },
+      }))
+      process.exit(0)
+    }
     console.log(JSON.stringify({
       dryRun: true,
       plan: {
@@ -320,6 +478,39 @@ async function main() {
       },
     }))
     process.exit(0)
+  }
+
+  // Cast-plus-product composite hero (ticket #2752). The chosen cast member is
+  // passed by the caller; without --cast the hero stays the plain text-to-image
+  // path below, unchanged.
+  if (surface === 'hero' && cast) {
+    const result = await generateHeroComposite(slug!, cast, { prompt, count, saveDir })
+    if (!result) {
+      console.log(JSON.stringify({
+        generated: 0,
+        provider: 'none',
+        rung: 'hold-as-draft',
+        heroless: true,
+        next: 'Every fallback rung failed. Hold the post as a Sanity draft; never publish it heroless.',
+      }))
+      process.exit(0)
+    }
+    mkdirSync(resolve(saveDir), { recursive: true })
+    const files = result.buffers.map((buf, i) => {
+      const path = resolve(saveDir, `hero-${slug}-${i + 1}.png`)
+      writeFileSync(path, buf)
+      return path
+    })
+    console.log(JSON.stringify({
+      generated: files.length,
+      provider: result.provider,
+      model: result.model,
+      rung: result.rung,
+      cast,
+      files,
+      next: 'Review against the image-brief vision checklist, then re-run with --upload <file> to publish the keeper.',
+    }))
+    return
   }
 
   await generate(surface, slug, {

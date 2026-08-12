@@ -332,6 +332,9 @@ const PLATE_NEGATIVE =
 const SCENE_FRAME_SIZES = {
   '9:16': { width: 1080, height: 1920 },
   '4:5': { width: 1080, height: 1350 },
+  // Landscape Notebook hero (image-brief §0). The stage-2 model drifts ~1% off
+  // requested pixels, so callers must resize to the exact target themselves.
+  '4:3': { width: 1200, height: 900 },
 } as const
 
 export interface ComposeSceneFrameOpts {
