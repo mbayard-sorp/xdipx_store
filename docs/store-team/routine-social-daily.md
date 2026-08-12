@@ -53,15 +53,23 @@ unconditionally rather than on one weekday: "August Reset, Emma's Way" was propo
 and sat at `planned` forever because the only thing that reconciled calendar status was the homepage
 Monday changeover.
 
-1. **Activate.** No `type:'campaign'` row `active` today and a `planned` row whose `event_date` is on
-   or before today → promote it.
-2. **Close and hand over.** The active campaign's `ends` date (from the schedule) has passed → mark it
+Instagram campaign rows are named with an `IG: ` prefix (`IG: Wand Week` versus the homepage's
+`Wand Week`). The table has no channel column, so the prefix is how you tell the two tracks apart
+without reading into any JSON. Only reconcile rows you own; never touch a homepage row.
+
+1. **Retire the stale.** A `planned` `IG: ` row whose whole window (`starts` through `ends`) is
+   already in the past was never run and must not be revived. Mark it `skipped` and say so in the
+   summary. Activating it would put a campaign on the feed weeks after its moment, which is exactly
+   the failure "August Reset, Emma's Way" would have caused if anything had picked it up.
+2. **Activate.** No `IG: ` row is `active` today and a `planned` one's window contains today →
+   promote it.
+3. **Close and hand over.** The active campaign's `ends` date (from the schedule) has passed → mark it
    `done` and activate its successor **in the same pass**.
-3. **Kickoff.** A campaign activating today has no key-art pool → run the kickoff pass
+4. **Kickoff.** A campaign activating today has no key-art pool → run the kickoff pass
    (`instagram-campaigns.md` §3.4) before drafting: lock ground set, light signature, rhyme prop, and
    cast reference, and generate the reusable typography plates. The visual scheme is decided once,
    before post 1, and never re-decided mid-campaign.
-4. **Runway.** The schedule must always hold at least four weeks of future campaigns. Less → file a
+5. **Runway.** The schedule must always hold at least four weeks of future campaigns. Less → file a
    suggestion to `store-strategist` (kind `strategy`, `targetTeam:'strategy'`) asking for the next
    block. **Never invent campaign N+1 yourself:** the social team owns execution inside a campaign,
    `store-strategist` owns which story the store is telling this month. If a runway suggestion is

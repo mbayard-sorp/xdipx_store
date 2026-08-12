@@ -250,7 +250,13 @@ becomes a catalog, and a feed that is only advice has nothing to sell when someo
 `POST /api/team/calendar {op:'propose', eventDate:<starts>, name:<name>, type:'campaign', theme:<subject>}`,
 landing at `planned`. The `propose` op does not currently accept `assetsJson`, so **this file is the
 authority for `ends`, pillars, formats, and product scope**; the calendar row carries the name, the
-start date, and the status. Instagram rows are recognisable by matching their name against this table.
+start date, and the status.
+
+**Instagram rows are named with an `IG: ` prefix.** The table has no channel column and the homepage
+track shares it, so the prefix is how the two are told apart at a glance and in a query. `IG: Wand
+Week` is the Instagram campaign; `Wand Week` is the homepage theme week. The social routine reconciles
+only prefixed rows and never touches a homepage row. All seven campaigns above are live as `planned`
+rows (calendar ids 22 through 28), so the runway is unbroken through 2026-11-09.
 
 **Status reconciliation is a daily duty, not a Monday one.** "August Reset, Emma's Way" was proposed
 for 2026-08-01, a Saturday, and sat at `planned` forever because the only thing that reconciles
