@@ -41,7 +41,7 @@ describe('kontextResolutionMode', () => {
   })
 })
 
-describe('falGenerate reference-image routing', () => {
+describe('falGenerate reference-image routing and output_format', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
@@ -115,5 +115,17 @@ describe('falGenerate reference-image routing', () => {
     expect(calls[0]?.body).toMatchObject({ image_size: 'landscape_16_9' })
     expect(calls[0]?.body).not.toHaveProperty('image_url')
     expect(calls[0]?.body).not.toHaveProperty('image_urls')
+  })
+
+  it('pins jpeg on the text-to-image branch', async () => {
+    const calls = stubFal()
+    await falGenerate({ prompt: 'a lamp on a table' })
+    expect(calls[0]?.body).toMatchObject({ output_format: 'jpeg' })
+  })
+
+  it('pins jpeg on the ref-image (Kontext) branch', async () => {
+    const calls = stubFal()
+    await falGenerate({ prompt: 'the product in a scene', refImageUrl: 'https://img.test/p.jpg' })
+    expect(calls[0]?.body).toMatchObject({ output_format: 'jpeg' })
   })
 })

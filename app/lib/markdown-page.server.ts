@@ -12,6 +12,7 @@
 
 import type { Deal } from '~/types'
 import type { FaqSection } from '~/lib/faq-content'
+import type { Comparison } from '~/types/cms'
 
 // ─── Shared utilities ────────────────────────────────────────────────────────
 
@@ -868,6 +869,132 @@ export function collectionsHubToMarkdown(hub: CollectionsHubData): string {
     lines.push('## Frequently asked questions')
     lines.push('')
     for (const f of hub.faqs) {
+      lines.push(`### ${f.question}`)
+      lines.push('')
+      lines.push(f.answer)
+      lines.push('')
+    }
+  }
+
+  lines.push(mdFooter(path))
+
+  return lines.join('\n')
+}
+
+// ─── comparisonHubToMarkdown ─────────────────────────────────────────────────
+
+export interface ComparisonHubEntry {
+  slug: string
+  title: string
+  excerpt?: string | null | undefined
+}
+
+export function comparisonHubToMarkdown(entries: ComparisonHubEntry[]): string {
+  const path = '/compare'
+  const lines: string[] = []
+
+  lines.push('# Compare')
+  lines.push('')
+  lines.push(
+    '> Side-by-side comparisons to help you choose. Emma weighs the options, ' +
+    'names who each one suits, and points you to the right fit.',
+  )
+  lines.push('')
+
+  if (entries.length > 0) {
+    lines.push('## Comparisons')
+    lines.push('')
+    for (const c of entries) {
+      const desc = c.excerpt?.trim() ? `: ${c.excerpt.trim()}` : ''
+      lines.push(`- [${c.title}](${BASE_URL}/compare/${c.slug})${desc}`)
+    }
+    lines.push('')
+    lines.push('Each comparison also has a markdown version at the same URL with ".md" appended.')
+    lines.push('')
+  } else {
+    lines.push('New comparisons are on the way. Find your fit with Emma at ' + `${BASE_URL}/discover.`)
+    lines.push('')
+  }
+
+  lines.push(mdFooter(path))
+
+  return lines.join('\n')
+}
+
+// ─── comparisonToMarkdown ────────────────────────────────────────────────────
+
+export function comparisonToMarkdown(comparison: Comparison): string {
+  const path = `/compare/${comparison.slug}`
+  const lines: string[] = []
+
+  lines.push(`# ${comparison.seoTitle ?? comparison.title}`)
+  lines.push('')
+
+  if (comparison.excerpt) {
+    lines.push(comparison.excerpt)
+    lines.push('')
+  }
+
+  const items = comparison.items ?? []
+
+  // Each option, in the order the page presents them. Product-backed options
+  // link to their canonical PDP; non-catalog options carry no link (prices and
+  // stock live on the PDP, so nothing stale leaks onto the .md surface).
+  if (items.length > 0) {
+    lines.push('## The options')
+    lines.push('')
+    for (const item of items) {
+      const heading = item.productHandle
+        ? `[${item.name}](${BASE_URL}/products/${item.productHandle})`
+        : item.name
+      lines.push(`### ${heading}`)
+      lines.push('')
+      if (item.blurb) {
+        lines.push(item.blurb)
+        lines.push('')
+      }
+      if (item.bestFor) {
+        lines.push(`Best for: ${item.bestFor}`)
+        lines.push('')
+      }
+    }
+  }
+
+  // At-a-glance table. GitHub-flavored markdown table so LLMs and humans both
+  // read the row/column mapping. Values align to the items order.
+  const attributes = comparison.attributes ?? []
+  if (attributes.length > 0 && items.length > 0) {
+    lines.push('## At a glance')
+    lines.push('')
+    lines.push(`| Attribute | ${items.map(i => i.name).join(' | ')} |`)
+    lines.push(`| --- | ${items.map(() => '---').join(' | ')} |`)
+    for (const row of attributes) {
+      const cells = items.map((_, i) => row.values?.[i] ?? '')
+      lines.push(`| ${row.label} | ${cells.join(' | ')} |`)
+    }
+    lines.push('')
+  }
+
+  if (comparison.verdict) {
+    lines.push('## The verdict')
+    lines.push('')
+    lines.push(comparison.verdict)
+    lines.push('')
+  }
+
+  if (comparison.body) {
+    const bodyMd = portableTextToMarkdown(comparison.body)
+    if (bodyMd) {
+      lines.push(bodyMd)
+      lines.push('')
+    }
+  }
+
+  const faqs = comparison.faqs ?? []
+  if (faqs.length > 0) {
+    lines.push('## Frequently asked questions')
+    lines.push('')
+    for (const f of faqs) {
       lines.push(`### ${f.question}`)
       lines.push('')
       lines.push(f.answer)

@@ -1,37 +1,142 @@
-// Unit tests for generateImage() reference-image plumbing. The fal and token-log
-// layers are mocked so these run without the network: we assert that multiple
-// reference URLs reach falGenerate as refImageUrls (which routes to
-// nano-banana/edit inside fal.server) and that the resulting spend is logged
-// through the standard logImageCost path, and that single-ref callers are
-// unchanged. Ticket #2222.
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+// Unit tests for the provider-neutral image entry point.
+//
+// The admin and Sanity Studio image paths used to call Imagen directly, so an
+// operator typing a prompt got Google's filter with no fal attempt at all. These
+// lock in the routing those callers now depend on: fal first, a real prompt even
+// when the caller supplies only categories, and reference bytes reaching fal's
+// image-conditioned endpoint rather than being dropped on the floor.
+//
+// The multi-reference cases (ticket #2222) also live here: two or more URLs must
+// reach falGenerate as refImageUrls (which routes to nano-banana/edit inside
+// fal.server) and log spend through the standard logImageCost path, while
+// single-ref callers stay on the unchanged Kontext path.
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const falGenerate = vi.fn((..._args: unknown[]) => undefined as unknown)
-const falConfigured = vi.fn((..._args: unknown[]) => true)
-const logImageCost = vi.fn((..._args: unknown[]) => undefined as unknown)
-const generateMoodImage = vi.fn((..._args: unknown[]) => undefined as unknown)
+const falGenerate = vi.fn()
+const generateMoodImage = vi.fn()
 
 vi.mock('~/lib/fal.server', () => ({
-  falConfigured: (...args: unknown[]) => falConfigured(...args),
+  falConfigured: () => true,
   falGenerate: (...args: unknown[]) => falGenerate(...args),
 }))
-vi.mock('~/lib/token-log.server', () => ({
-  logImageCost: (...args: unknown[]) => logImageCost(...args),
-}))
+
 vi.mock('~/lib/imagen.server', () => ({
   generateMoodImage: (...args: unknown[]) => generateMoodImage(...args),
+  defaultMoodPrompt: (cats: string[]) => `MOOD_BRIEF(${cats.join(',')})`,
 }))
 
-import { generateImage } from './generate-image.server'
+const logGenerationBlock = vi.fn()
+const logImageCost = vi.fn()
+vi.mock('~/lib/token-log.server', () => ({
+  logImageCost: (...args: unknown[]) => logImageCost(...args),
+  logGenerationBlock: (...args: unknown[]) => logGenerationBlock(...args),
+}))
 
-describe('generateImage reference-image plumbing', () => {
+const OK = { buffers: [Buffer.from('img')], costKey: 'fal/flux-dev' }
+
+describe('generateImage', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    falConfigured.mockReturnValue(true)
+    falGenerate.mockReset().mockResolvedValue(OK)
+    generateMoodImage.mockReset().mockResolvedValue([Buffer.from('imagen')])
+    logGenerationBlock.mockReset()
+    logImageCost.mockReset()
+  })
+  afterEach(() => vi.resetModules())
+
+  it('sends a category-derived prompt to fal instead of skipping straight to Imagen', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    const res = await generateImage({ categories: ['Wands'] })
+
+    expect(falGenerate).toHaveBeenCalledTimes(1)
+    expect(falGenerate.mock.calls[0]![0]).toMatchObject({ prompt: 'MOOD_BRIEF(Wands)' })
+    expect(generateMoodImage).not.toHaveBeenCalled()
+    expect(res.provider).toBe('fal')
+  })
+
+  it('inlines an improvement-mode original as a data URI so fal can edit it', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({ prompt: 'brighter room', originalImageBuffer: Buffer.from('orig') })
+
+    const arg = falGenerate.mock.calls[0]![0] as { refImageUrl?: string }
+    expect(arg.refImageUrl).toBe(`data:image/jpeg;base64,${Buffer.from('orig').toString('base64')}`)
+  })
+
+  it('inlines the first product reference buffer when no explicit URL is given', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({ prompt: 'p', referenceImageBuffers: [Buffer.from('ref1'), Buffer.from('ref2')] })
+
+    const arg = falGenerate.mock.calls[0]![0] as { refImageUrl?: string }
+    expect(arg.refImageUrl).toBe(`data:image/jpeg;base64,${Buffer.from('ref1').toString('base64')}`)
+  })
+
+  it('prefers an explicit refImageUrl over inlined buffers', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({
+      prompt: 'p',
+      refImageUrl: 'https://cdn.shopify.com/real.jpg',
+      originalImageBuffer: Buffer.from('orig'),
+    })
+
+    const arg = falGenerate.mock.calls[0]![0] as { refImageUrl?: string }
+    expect(arg.refImageUrl).toBe('https://cdn.shopify.com/real.jpg')
+  })
+
+  it('resolves an aspect ratio to a fal image_size', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({ prompt: 'p', aspectRatio: '9:16' })
+
+    expect(falGenerate.mock.calls[0]![0]).toMatchObject({ imageSize: 'portrait_16_9' })
+  })
+
+  it('passes the improvement original through to Imagen when fal fails', async () => {
+    falGenerate.mockRejectedValue(new Error('fal down'))
+    const { generateImage } = await import('./generate-image.server')
+    const original = Buffer.from('orig')
+    const res = await generateImage({ prompt: 'p', originalImageBuffer: original })
+
+    expect(generateMoodImage).toHaveBeenCalledTimes(1)
+    expect(generateMoodImage.mock.calls[0]![0]).toMatchObject({ originalImageBuffer: original })
+    expect(res.provider).toBe('imagen')
+  })
+
+  it('returns an empty result rather than throwing when both providers fail', async () => {
+    falGenerate.mockRejectedValue(new Error('fal down'))
+    generateMoodImage.mockRejectedValue(new Error('blocked by safety filters'))
+    const { generateImage } = await import('./generate-image.server')
+
+    await expect(generateImage({ prompt: 'p' })).resolves.toEqual({
+      buffers: [], provider: 'none', model: 'none',
+    })
+  })
+
+  it('records an Imagen refusal as a content block, classified and attributed', async () => {
+    // fal reports its own blocks inside falGenerate. Imagen throws prose, so if
+    // this call site did not classify it the fallback provider's refusals, which
+    // is most of what an operator hits, would stay invisible.
+    falGenerate.mockRejectedValue(new Error('fal down'))
+    generateMoodImage.mockRejectedValue(new Error('Image blocked by safety filters'))
+    const { generateImage } = await import('./generate-image.server')
+
+    await generateImage({ prompt: 'p', count: 3, feature: 'studio-images', caller: 'test-caller' })
+
+    expect(logGenerationBlock).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'imagen',
+      reason: 'content_policy',
+      count: 3,
+      ofFeature: 'studio-images',
+      caller: 'test-caller',
+    }))
+  })
+
+  it('does not record a block when a provider succeeds', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({ prompt: 'p' })
+    expect(logGenerationBlock).not.toHaveBeenCalled()
   })
 
   it('passes two-or-more refs through as refImageUrls and logs the nano-banana cost', async () => {
     falGenerate.mockResolvedValue({ buffers: [Buffer.from('x')], costKey: 'fal/nano-banana' })
+    const { generateImage } = await import('./generate-image.server')
 
     const result = await generateImage({
       prompt: 'a vibrator and its lube bottle in one drawer scene',
@@ -40,13 +145,13 @@ describe('generateImage reference-image plumbing', () => {
     })
 
     expect(falGenerate).toHaveBeenCalledTimes(1)
-    expect(falGenerate.mock.calls[0]?.[0]).toMatchObject({
+    expect(falGenerate.mock.calls[0]![0]).toMatchObject({
       refImageUrls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
     })
     expect(result).toMatchObject({ provider: 'fal', model: 'fal/nano-banana' })
     // Cost logged through the standard path, keyed to the model fal reported.
     expect(logImageCost).toHaveBeenCalledTimes(1)
-    expect(logImageCost.mock.calls[0]?.[0]).toMatchObject({
+    expect(logImageCost.mock.calls[0]![0]).toMatchObject({
       model: 'fal/nano-banana',
       feature: 'social-images',
       count: 1,
@@ -56,25 +161,32 @@ describe('generateImage reference-image plumbing', () => {
   })
 
   it('leaves single-ref callers unchanged (refImageUrl only, no refImageUrls)', async () => {
-    falGenerate.mockResolvedValue({ buffers: [Buffer.from('x')], costKey: 'fal/flux-kontext-dev' })
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({ prompt: 'the product in a scene', refImageUrl: 'https://img.test/p.jpg' })
 
-    await generateImage({
-      prompt: 'the product in a scene',
-      refImageUrl: 'https://img.test/p.jpg',
-    })
-
-    const opts = falGenerate.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(opts).toMatchObject({ refImageUrl: 'https://img.test/p.jpg' })
-    expect(opts).not.toHaveProperty('refImageUrls')
+    const arg = falGenerate.mock.calls[0]![0] as Record<string, unknown>
+    expect(arg).toMatchObject({ refImageUrl: 'https://img.test/p.jpg' })
+    expect(arg).not.toHaveProperty('refImageUrls')
   })
 
   it('does not set refImageUrls when the caller passes an empty array', async () => {
-    falGenerate.mockResolvedValue({ buffers: [Buffer.from('x')], costKey: 'fal/flux-dev' })
-
+    const { generateImage } = await import('./generate-image.server')
     await generateImage({ prompt: 'a lamp on a table', refImageUrls: [] })
 
-    const opts = falGenerate.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(opts).not.toHaveProperty('refImageUrls')
-    expect(opts).not.toHaveProperty('refImageUrl')
+    const arg = falGenerate.mock.calls[0]![0] as Record<string, unknown>
+    expect(arg).not.toHaveProperty('refImageUrls')
+    expect(arg).not.toHaveProperty('refImageUrl')
+  })
+})
+
+describe('falImageSizeForAspect', () => {
+  it('maps every aspect the admin and Studio callers can send', async () => {
+    const { falImageSizeForAspect } = await import('./generate-image.server')
+    expect(falImageSizeForAspect('1:1')).toBe('square_hd')
+    expect(falImageSizeForAspect('4:3')).toBe('landscape_4_3')
+    expect(falImageSizeForAspect('3:4')).toBe('portrait_4_3')
+    expect(falImageSizeForAspect('16:9')).toBe('landscape_16_9')
+    expect(falImageSizeForAspect('9:16')).toBe('portrait_16_9')
+    expect(falImageSizeForAspect('21:9')).toBeUndefined()
   })
 })

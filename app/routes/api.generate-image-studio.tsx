@@ -8,7 +8,7 @@
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { timingSafeEqual } from 'node:crypto'
-import { generateMoodImage } from '~/lib/imagen.server'
+import { generateImage } from '~/lib/generate-image.server'
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a)
@@ -62,7 +62,13 @@ export async function action({ request }: ActionFunctionArgs) {
   // Generate
   let buffers: Buffer[]
   try {
-    buffers = await generateMoodImage({ categories: [], prompt, aspectRatio, personGeneration: 'allow_adult' })
+    ;({ buffers } = await generateImage({
+      prompt,
+      aspectRatio,
+      count,
+      feature: 'studio-images',
+      caller:  'api.generate-image-studio',
+    }))
   } catch (err: unknown) {
     console.error('[generate-image-studio] error:', err)
     const rawMsg = err instanceof Error ? err.message : String(err)

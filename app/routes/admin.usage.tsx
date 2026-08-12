@@ -12,7 +12,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { Link, useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
-import { getDailyTokenRollup } from '~/lib/token-log.server'
+import { getDailyTokenRollup, getMediaBlockRollup, MEDIA_BLOCK_FEATURE } from '~/lib/token-log.server'
 
 export const meta: MetaFunction = () => [{ title: 'API Usage — xdipx Admin' }]
 
@@ -30,10 +30,19 @@ function fmtUsd(n: number): string {
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
 
-  const rows = await getDailyTokenRollup({ days: 30 })
+  const [rows, blockRows] = await Promise.all([
+    getDailyTokenRollup({ days: 30 }),
+    getMediaBlockRollup({ days: 30 }),
+  ])
 
   // Parse numeric strings from the view's DECIMAL / SUM columns.
-  const parsed = rows.map(r => ({
+  const parsed = rows
+    // Refused generations share this table (a blocks table would need a
+    // migration, and db/schema.ts is protected) but they are not spend and not
+    // successful calls. Excluded here so they cannot inflate the KPI row, and
+    // shown in their own panel below.
+    .filter(r => r.feature !== MEDIA_BLOCK_FEATURE)
+    .map(r => ({
     day:                  typeof r.day === 'string' ? r.day : new Date(r.day as unknown as string).toISOString().slice(0, 10),
     feature:              r.feature,
     model:                r.model,
@@ -69,7 +78,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const featureSavings = Object.values(byFeature).sort((a, b) => b.actual - a.actual)
 
-  return { rows: parsed, mtdCost, mtdCalls, mtdInput, mtdOutput, mtdBatch, mtdSync, batchPct, featureSavings }
+  const blocks = blockRows.map(b => ({
+    day:     b.day,
+    model:   b.model,
+    reason:  b.reason,
+    surface: b.surface,
+    caller:  b.caller,
+    blocked: Number(b.blocked),
+  }))
+  const blockedTotal = blocks.reduce((s, b) => s + b.blocked, 0)
+  const refusedTotal = blocks.filter(b => b.reason === 'content_policy').reduce((s, b) => s + b.blocked, 0)
+
+  return {
+    rows: parsed, mtdCost, mtdCalls, mtdInput, mtdOutput, mtdBatch, mtdSync, batchPct, featureSavings,
+    blocks, blockedTotal, refusedTotal,
+  }
 }
 
 type LoaderData = Awaited<ReturnType<typeof loader>>
@@ -85,8 +108,8 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 }
 
 export default function UsagePage() {
-  const { rows, mtdCost, mtdCalls, mtdInput, mtdOutput, mtdBatch, mtdSync, batchPct, featureSavings } =
-    useLoaderData<LoaderData>()
+  const { rows, mtdCost, mtdCalls, mtdInput, mtdOutput, mtdBatch, mtdSync, batchPct, featureSavings,
+          blocks, blockedTotal, refusedTotal } = useLoaderData<LoaderData>()
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -142,6 +165,49 @@ export default function UsagePage() {
                 <p className="font-mono text-sm font-semibold text-ink">{fmtUsd(f.actual)}</p>
               </div>
             ))}
+          </div>
+        </section>
+      )}
+
+      {/* Refused / failed generations. Not spend: these are images we asked for
+          and did not get, which is how a model that cannot render the catalog
+          gets noticed instead of quietly falling back. */}
+      {blocks.length > 0 && (
+        <section>
+          <h2 className="kicker mb-3">Refused generations</h2>
+          <p className="text-xs text-ink-4 mb-3">
+            {fmtNum(refusedTotal)} of {fmtNum(blockedTotal)} failed images were content refusals
+            rather than outages. A model refusing repeatedly is a routing decision, not a retry.
+            See docs/media-model-routing.md.
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-line">
+            <table className="w-full min-w-[520px] text-xs text-left">
+              <thead className="bg-paper-2 text-ink-4">
+                <tr>
+                  {['Day', 'Model', 'Reason', 'On', 'Origin', 'Images'].map((h, hi) => (
+                    <th key={hi} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {blocks.map((b, i) => (
+                  <tr key={i} className="hover:bg-paper-2 transition-colors">
+                    <td className="px-3 py-2 font-mono text-ink-4 whitespace-nowrap">{b.day}</td>
+                    <td className="px-3 py-2 text-ink-4 font-mono text-[10px] whitespace-nowrap">{b.model}</td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${
+                        b.reason === 'content_policy' ? 'bg-coral-soft text-coral' : 'bg-paper-3 text-ink-4'
+                      }`}>
+                        {b.reason}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-ink-4 font-mono text-[10px]">{b.surface ?? '-'}</td>
+                    <td className="px-3 py-2 text-ink-4 font-mono text-[10px]">{b.caller ?? '-'}</td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold text-ink">{fmtNum(b.blocked)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       )}

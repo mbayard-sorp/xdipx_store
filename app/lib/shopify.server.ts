@@ -6517,6 +6517,41 @@ export async function searchCatalogForEmma(input: {
   })
 }
 
+/**
+ * Hydrate an ordered list of handles into display-correct EmmaProductCards,
+ * preserving the input order and dropping handles the Storefront no longer
+ * returns (archived / unpublished). Uses the same PRODUCT_CORE_FRAGMENT +
+ * productNodeToEmmaCard path as getProductDetailForEmma, so the taxonomy
+ * metafields (tagline, product_type_dial, mood/audience/matters tags,
+ * map_restricted) are populated — unlike searchNodeToEmmaCard, which leaves
+ * them empty because SearchProduct carries no metafields.
+ *
+ * The web-chat search path uses this to render cards for handles that were
+ * already ranked and filtered by the shared voice/SMS search core
+ * (searchForIvrWithDiagnostics), so the two channels surface the same catalog
+ * without inheriting the voice card's TTS-normalized title/tagline.
+ */
+export async function getEmmaCardsByHandles(handles: string[]): Promise<EmmaProductCard[]> {
+  if (handles.length === 0) return []
+  const nodes = await Promise.all(
+    handles.map(async (handle) => {
+      const data = await storefront<{ product: ShopifyProductNode | null }>(`
+        query GetEmmaCard($handle: String!) {
+          product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+        }
+      `, { handle })
+      return data.product
+    }),
+  )
+  const byHandle = new Map<string, EmmaProductCard>()
+  for (const node of nodes) {
+    if (node) byHandle.set(node.handle, productNodeToEmmaCard(node))
+  }
+  return handles
+    .map((h) => byHandle.get(h))
+    .filter((c): c is EmmaProductCard => c !== undefined)
+}
+
 export interface EmmaProductDetail extends EmmaProductCard {
   fullStory: string | null
   featureBullets: string[] | null

@@ -94,6 +94,7 @@ export async function generateAdBatch(args: GenerateAdBatchArgs): Promise<{ camp
       count: 1,
       imageSize: FORMAT_TO_IMAGE_SIZE[format],
       refImageUrl,
+      telemetry: { feature: 'ads-creative', caller: 'ad-creative', sku: args.productHandle },
     })
     costKeyUsed = costKey
     const buf = buffers[0]

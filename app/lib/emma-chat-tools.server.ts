@@ -1,21 +1,25 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import {
-  searchCatalogForEmma,
+  getEmmaCardsByHandles,
   getProductDetailForEmma,
-  type EmmaProductCard,
   type EmmaProductDetail,
 } from './shopify.server'
+import { searchForIvrWithDiagnostics } from './ivr-search.server'
+import { categoryToDial, audienceToCategory } from './sms-v2/discovery-agent-tools.server'
 
 export const EMMA_CHAT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'search_products',
     description:
       'Search the live xdipx.com catalog. Use this BEFORE naming any xdipx product so you ' +
-      'never invent SKUs. Returns up to 20 compact product cards with handle, title, ' +
-      'price, available, map_restricted. Detailed taxonomy (audience_tags, mood_tags, ' +
-      'matters_tags, product_type_dial, sensation_dial) lives on get_product_details — ' +
-      'this endpoint is light. PRIMARY LEVER is `keyword` (matches the product title); ' +
-      '`tags` and price filters are refinements.',
+      'never invent SKUs. Runs the same Sanity-backed search core as the voice and SMS ' +
+      'channels (dial + preference-tag filtering, MAP pricing, margin-weighted ranking), so ' +
+      'the same query surfaces the same products a customer gets on the phone. Returns up ' +
+      'to 20 cards with handle, title, priceUsd, available, mapRestricted, tagline, ' +
+      'productTypeDial, and audience/mood/matters tags. Deeper enrichment (full story, ' +
+      'sensation_dial, per-variant specs) still lives on get_product_details. PRIMARY LEVER ' +
+      'is `keyword` (matches the product title); `category`, `audience`, `matters`, and ' +
+      'price bounds are refinements.',
     input_schema: {
       type: 'object',
       properties: {
@@ -25,13 +29,28 @@ export const EMMA_CHAT_TOOLS: Anthropic.Tool[] = [
             'Title keyword (substring match). Best lever for "find me X" queries. ' +
             'Examples: "wand", "bullet", "vibrator", "kegel", "couples ring", "lube".',
         },
-        tags: {
+        category: {
+          type: 'string',
+          description:
+            "Optional product-type filter — one of 'vibrator', 'lube', 'plug', 'wand', " +
+            "'dildo', 'wear', 'anal'. Mapped to the catalog's productTypeDial (+ subtype " +
+            'where needed, e.g. wand, plug). Only set it when you are sure of the type — ' +
+            'the wrong one filters everything out.',
+        },
+        audience: {
+          type: 'string',
+          enum: ['for-her', 'for-him', 'couples', 'gift'],
+          description:
+            "Optional audience filter. 'for-her' / 'for-him' / 'couples' restrict to " +
+            "products tagged for that audience; 'gift' applies no audience filter.",
+        },
+        matters: {
           type: 'array',
           items: { type: 'string' },
           description:
-            'Shopify tags to AND-filter on. Common: for-him, for-her, couples, beginner, ' +
-            'advanced, waterproof, app-controlled, body-safe-silicone. Use sparingly — ' +
-            'tag coverage is uneven across the catalog.',
+            "Optional preference tags such as 'quiet', 'beginner-friendly', 'waterproof', " +
+            "'travel-ready'. Matched against each product's enriched mattersTags. Pass " +
+            "through what was actually asked for — don't invent tags.",
         },
         price_min: { type: 'number', description: 'USD lower bound (inclusive). Skip if no minimum.' },
         price_max: { type: 'number', description: 'USD upper bound (inclusive). Skip if no maximum.' },
@@ -93,13 +112,42 @@ export async function executeEmmaChatTool(
   const start = Date.now()
   try {
     if (name === 'search_products') {
-      const params: Parameters<typeof searchCatalogForEmma>[0] = { limit: 12 }
-      if (typeof input['keyword']   === 'string') params.keyword  = input['keyword']
-      if (Array.isArray(input['tags']))            params.tags     = input['tags'] as string[]
-      if (typeof input['price_min'] === 'number') params.priceMin = input['price_min']
-      if (typeof input['price_max'] === 'number') params.priceMax = input['price_max']
-      if (typeof input['limit']     === 'number') params.limit    = input['limit']
-      const cards: EmmaProductCard[] = await searchCatalogForEmma(params)
+      const keyword = typeof input['keyword'] === 'string' ? input['keyword'].trim() : ''
+      // The shared search core requires a text query; preserve the prior
+      // browse default so an argument-less search still returns something
+      // rather than erroring on an empty query.
+      const query = keyword || 'wellness'
+      const limit = Math.min(Math.max(typeof input['limit'] === 'number' ? input['limit'] : 12, 1), 20)
+      const priceMax = typeof input['price_max'] === 'number' ? input['price_max'] : undefined
+      const priceMin = typeof input['price_min'] === 'number' ? input['price_min'] : undefined
+      const category = typeof input['category'] === 'string' ? input['category'] : undefined
+      const audience = typeof input['audience'] === 'string' ? input['audience'] : undefined
+      const matters = Array.isArray(input['matters'])
+        ? (input['matters'] as unknown[]).filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        : undefined
+
+      // Route through the same core the voice/SMS channels use so web chat and
+      // SMS surface the same catalog. categoryToDial / audienceToCategory are
+      // the canonical model-facing → productTypeDial/category mappers (they own
+      // the dial vocabulary), so this list never drifts out of sync.
+      const dial = categoryToDial(category)
+      const audienceCategory = audienceToCategory(audience)
+      const opts: Parameters<typeof searchForIvrWithDiagnostics>[0] = {
+        query,
+        limit,
+        ...(audienceCategory !== undefined ? { category: audienceCategory } : {}),
+        ...(dial ?? {}),
+        ...(matters && matters.length > 0 ? { mattersTags: matters } : {}),
+        ...(priceMax !== undefined ? { priceMax } : {}),
+      }
+
+      const { cards: ivrCards } = await searchForIvrWithDiagnostics(opts)
+      // Re-hydrate the ranked handles into display-correct EmmaProductCards so
+      // the chat keeps its card shape and avoids the voice card's
+      // TTS-normalized title/tagline. The shared core has no price floor, so
+      // apply price_min here after hydration.
+      const hydrated = await getEmmaCardsByHandles(ivrCards.map((c) => c.handle))
+      const cards = priceMin !== undefined ? hydrated.filter((c) => c.priceUsd >= priceMin) : hydrated
       return {
         content: JSON.stringify({ count: cards.length, results: cards }),
         diagnostics: { durationMs: Date.now() - start, resultCount: cards.length },

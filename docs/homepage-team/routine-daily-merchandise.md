@@ -901,6 +901,13 @@ fold the results into the summary:
 - The summary states: today's theme, the hero product and why, what changed versus yesterday, and
   what will change next run. On Mondays, include the recon memo.
 
+**Append the design changelog.** On any run that changed what the page shows (hero, rails, wayfinder
+tiles, imagery, copy, or section order), append one dated entry to
+`docs/homepage-team/design-changelog.md` in that file's entry format (Routine A, what changed, why,
+and the evidence probe touched — the run id and the sameness-diff surfaces from Step 2c). Newest entry
+above the append marker. A run that shipped a visible change without a changelog entry is incomplete.
+This is a docs append on the agent-editor allowlist; it carries no code.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/homepage-team/run" \
   -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \

@@ -281,7 +281,7 @@ export function isAnalContextAuthorized(
  * 'gift' has no inherent audience — return undefined so the search is
  * unrestricted on the audience axis.
  */
-function audienceToCategory(audience: string | undefined): string | undefined {
+export function audienceToCategory(audience: string | undefined): string | undefined {
   if (!audience) return undefined
   if (audience === 'gift') return undefined
   if (audience === 'for-her' || audience === 'for-him' || audience === 'couples') return audience

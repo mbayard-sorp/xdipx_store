@@ -1,7 +1,8 @@
 /**
  * POST /api/fal-video/compose — scene-frame composition for the Labs fal-video
  * spike. Composes the presenter (Emma canonical photo, or none) with the real
- * product photo into 9:16 candidate first frames via nano-banana edit.
+ * product photo into 9:16 candidate first frames. Two-stage: a packaging-free
+ * product plate, then the composite (see composeSceneFrame).
  * Admin-gated; spend logged under feature 'video-spike'.
  */
 
@@ -61,6 +62,17 @@ export async function action({ request }: ActionFunctionArgs) {
       caller: 'api.fal-video.compose',
       ...(body.productHandle ? { sku: body.productHandle } : {}),
     })
+    // Stage-1 product plate, when one was built. Logged separately so spend
+    // lands against the right model on /admin/usage.
+    if (result.plate) {
+      void logImageCost({
+        feature: 'video-spike',
+        model: result.plate.costKey,
+        count: result.plate.count,
+        caller: 'api.fal-video.compose/plate',
+        ...(body.productHandle ? { sku: body.productHandle } : {}),
+      })
+    }
 
     return Response.json({ urls: result.urls })
   } catch (err) {
