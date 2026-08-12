@@ -84,6 +84,36 @@ describe('composeSceneFrame (two-stage)', () => {
     expect(res.plate).toEqual({ costKey: 'fal/qwen-image-edit', count: 1 })
   })
 
+  it('appends a real-world scale cue to the composite prompt when a product is present (ticket #2761)', async () => {
+    const calls: Call[] = []
+    globalThis.fetch = mockFal(calls) as unknown as typeof fetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+
+    await composeSceneFrame({
+      prompt: 'sunlit bedroom corner',
+      presenterImageUrl: PRESENTER,
+      productImageUrl: PRODUCT,
+    })
+
+    // Stage 2 is the composite call; its prompt keeps the caller's scaffold and
+    // adds the scale cue so the product no longer renders oversized in-hand.
+    const stage2 = calls.find(c => c.url.includes('flux-2/lora/edit'))!
+    const prompt = String(stage2.body['prompt'])
+    expect(prompt).toContain('sunlit bedroom corner')
+    expect(prompt).toContain('true real-world size')
+    expect(prompt).toContain('not oversized')
+  })
+
+  it('does not add the scale cue to a talking-head frame that carries no product', async () => {
+    const calls: Call[] = []
+    globalThis.fetch = mockFal(calls) as unknown as typeof fetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+
+    await composeSceneFrame({ prompt: 'sunlit bedroom corner', presenterImageUrl: PRESENTER })
+
+    expect(String(calls[0]!.body['prompt'])).toBe('sunlit bedroom corner')
+  })
+
   it('never routes the scene frame through the Google-filtered nano-banana endpoint', async () => {
     const calls: Call[] = []
     globalThis.fetch = mockFal(calls) as unknown as typeof fetch
