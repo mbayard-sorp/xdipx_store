@@ -177,7 +177,7 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   }))
 }
 
-async function upload(surface: Surface, slug: string | undefined, filePath: string, alt: string) {
+async function upload(surface: Surface, slug: string | undefined, filePath: string, alt: string, prompt: string) {
   if (surface === 'spot') {
     console.error('--upload is not supported for --surface spot (spot art is placed per-post via Studio)')
     process.exit(1)
@@ -252,8 +252,14 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
       console.error(`No blogPost with slug "${slug}" exists — create the post first.`)
       process.exit(1)
     }
-    await client.patch(postId).set({ heroImage: imageRef, heroImageAlt: alt }).commit()
-    console.log(JSON.stringify({ placed: true, target: `${postId}.heroImage`, assetId, url }))
+    // Persist the composed prompt alongside the image, not just heroImage/alt.
+    // The prompt existed in memory at generation time and used to be discarded on
+    // upload, leaving blogPost.imagePrompt NULL on every published post — so a bad
+    // hero could never be retro'd and the hero/embed audit only ever saw half its
+    // inputs (ticket #2750). postId prefers the published doc when one exists, so
+    // this writes to the same perspective heroImage already does.
+    await client.patch(postId).set({ heroImage: imageRef, heroImageAlt: alt, imagePrompt: prompt }).commit()
+    console.log(JSON.stringify({ placed: true, target: `${postId}.heroImage`, assetId, url, imagePrompt: prompt }))
     return
   }
 
@@ -295,7 +301,7 @@ async function main() {
       console.error('--alt is required with --upload (Emma-voice alt text, descriptive and non-explicit)')
       process.exit(1)
     }
-    await upload(surface, slug, uploadFile, alt)
+    await upload(surface, slug, uploadFile, alt, prompt)
     return
   }
 

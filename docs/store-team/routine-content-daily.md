@@ -252,6 +252,21 @@ is a first-submit voice-gate failure the writer otherwise discovers only at the 
 allowed rewrite cycle. Shape each seam with a concrete subject and avoid the "This is / That is
 [defining clause]" shape, so a seam does not itself create an aphorism-as-closer.
 
+**Hero pre-flight (mandatory, before Step 5):** the hero image and its alt are reviewed by no gate,
+and two hero guardrails shipped wired to nothing until #2750. After the hero is attached (Step 4) and
+`gen-notebook-art.ts` has written `imagePrompt`, run the slug-scoped checker and drive it to exit 0:
+
+```bash
+npx tsx scripts/check-hero-embed-match.ts --slug <slug>
+```
+
+Unlike the prose checkers above it reads Sanity live, because it needs the post's structured hero
+fields and the live catalog. It flags three things: an empty `imagePrompt` (the composed prompt was
+not captured on upload, so a bad hero can never be retro'd), a hero that names a catalog product the
+post does not embed, and the inverse the older audit is blind to, a post that carries embeds while its
+hero names no catalog product at all. Resolve each by regenerating or re-uploading the hero with an
+explicit `--prompt` that depicts a product the article is actually about, not by loosening the check.
+
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
 ## Step 5: Dual gate (voice + accuracy; mandatory, no publish path without both)
