@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { MIN_DISCOUNT_BADGE_PCT, showDiscountBadge } from './discount-badge'
+import {
+  MIN_DISCOUNT_BADGE_PCT,
+  showDiscountBadge,
+  formatSavings,
+  formatSavingsRange,
+  formatDiscountBadge,
+} from './discount-badge'
 
 /**
  * Discount-badge floor (ticket #467). A "1% off" badge next to genuine 10-37%
@@ -49,4 +55,41 @@ describe('every save-percentage surface routes through the shared floor', () => 
       expect(src).toContain("from '~/lib/discount-badge'")
     })
   }
+})
+
+describe('formatSavings — one wording, no colon (ticket #842)', () => {
+  it('renders the canonical savings line without a colon', () => {
+    expect(formatSavings(12.5, 25)).toBe('You save $12.50 (25%)')
+  })
+
+  it('renders the range variant', () => {
+    expect(formatSavingsRange(30, 40)).toBe('Save up to $30.00 (40%)')
+  })
+
+  it('renders the compact home-rail pill', () => {
+    expect(formatDiscountBadge(37)).toBe('37% off')
+  })
+})
+
+describe('every save-copy surface routes through the shared formatter (ticket #842)', () => {
+  const read = (rel: string) =>
+    readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8')
+
+  it('VaultCard uses the shared formatters and no longer hard-codes "You save"', () => {
+    const src = read('../components/store/VaultCard.tsx')
+    expect(src).toContain('formatSavings(')
+    expect(src).toContain('formatSavingsRange(')
+    // The colon variant this ticket removed must not come back.
+    expect(src).not.toContain('You save:')
+  })
+
+  it('discovery/ProductCard uses the shared formatter', () => {
+    const src = read('../components/discovery/ProductCard.tsx')
+    expect(src).toContain('formatSavings(')
+  })
+
+  it('StorefrontProductCard sources its pill string from the shared module', () => {
+    const src = read('../components/store/StorefrontProductCard.tsx')
+    expect(src).toContain('formatDiscountBadge(')
+  })
 })

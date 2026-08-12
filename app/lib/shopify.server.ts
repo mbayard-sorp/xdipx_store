@@ -27,6 +27,32 @@ const ADMIN_GQL_ENDPOINT    = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/ad
 
 // ─── Clients ──────────────────────────────────────────────────────────────
 
+/**
+ * The Storefront API did not answer — timeout, transport error, non-2xx, or a
+ * GraphQL error. Deliberately distinct from a `null` product, which means
+ * Shopify *did* answer and the product genuinely does not exist.
+ *
+ * Collapsing the two is what put live PDPs into Search Console as
+ * "Not found (404)": getDealByHandle raced the fetch against a 5s timeout that
+ * resolved to `null`, the PDP loader read `null` as "gone" and threw a 404,
+ * and `cached()` pinned that verdict for the full read TTL — so one slow
+ * Storefront call served a hard 404 for a live product to every visitor,
+ * Googlebot included, for up to two minutes. A 404 tells Google to drop the
+ * URL; a Shopify blip is not grounds for that.
+ *
+ * Any caller that serves a page MUST map this to a retryable status (503),
+ * never to 404/410.
+ */
+export class StorefrontUnavailableError extends Error {
+  readonly handle: string | undefined
+  constructor(message: string, handle?: string, cause?: unknown) {
+    super(`Shopify Storefront unavailable${handle ? ` for "${handle}"` : ''}: ${message}`)
+    this.name = 'StorefrontUnavailableError'
+    this.handle = handle
+    if (cause !== undefined) this.cause = cause
+  }
+}
+
 async function storefront<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   const res = await fetch(STOREFRONT_ENDPOINT, {
     method: 'POST',
@@ -997,19 +1023,39 @@ async function getDealByShopifyIdUncached(id: string): Promise<Deal | null> {
   }
 }
 
+/** Wall-clock budget for the single-product Storefront lookup. */
+const DEAL_FETCH_TIMEOUT_MS = 5000
+
 export async function getDealByHandle(handle: string): Promise<Deal | null> {
   return cached(`shopify:deal:byhandle:${handle}`, READ_TTL, async () => {
-    const timeout = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), 5000),
-    )
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new StorefrontUnavailableError(
+          `product lookup timed out after ${DEAL_FETCH_TIMEOUT_MS}ms`, handle,
+        )),
+        DEAL_FETCH_TIMEOUT_MS,
+      )
+    })
     const fetch = storefront<{ product: ShopifyProductNode | null }>(`
       query GetDealByHandle($handle: String!) {
         product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
       }
-    `, { handle })
-    const result = await Promise.race([fetch, timeout])
-    if (!result || !result.product) return null
-    return nodeToDeal(result.product)
+    `, { handle }).catch((err: unknown) => {
+      throw new StorefrontUnavailableError(
+        err instanceof Error ? err.message : String(err), handle, err,
+      )
+    })
+    try {
+      const result = await Promise.race([fetch, timeout])
+      // Shopify answered and has no such product: a real, cacheable 404.
+      if (!result.product) return null
+      return nodeToDeal(result.product)
+    } finally {
+      // The old code left this timer pending for the full 5s on every hit,
+      // which keeps a serverless invocation alive past its own response.
+      if (timer) clearTimeout(timer)
+    }
   })
 }
 
@@ -6469,6 +6515,41 @@ export async function searchCatalogForEmma(input: {
     const result = await searchProducts({ query, first: limit, productFilters })
     return result.products.map(searchNodeToEmmaCard)
   })
+}
+
+/**
+ * Hydrate an ordered list of handles into display-correct EmmaProductCards,
+ * preserving the input order and dropping handles the Storefront no longer
+ * returns (archived / unpublished). Uses the same PRODUCT_CORE_FRAGMENT +
+ * productNodeToEmmaCard path as getProductDetailForEmma, so the taxonomy
+ * metafields (tagline, product_type_dial, mood/audience/matters tags,
+ * map_restricted) are populated — unlike searchNodeToEmmaCard, which leaves
+ * them empty because SearchProduct carries no metafields.
+ *
+ * The web-chat search path uses this to render cards for handles that were
+ * already ranked and filtered by the shared voice/SMS search core
+ * (searchForIvrWithDiagnostics), so the two channels surface the same catalog
+ * without inheriting the voice card's TTS-normalized title/tagline.
+ */
+export async function getEmmaCardsByHandles(handles: string[]): Promise<EmmaProductCard[]> {
+  if (handles.length === 0) return []
+  const nodes = await Promise.all(
+    handles.map(async (handle) => {
+      const data = await storefront<{ product: ShopifyProductNode | null }>(`
+        query GetEmmaCard($handle: String!) {
+          product(handle: $handle) { ${PRODUCT_CORE_FRAGMENT} }
+        }
+      `, { handle })
+      return data.product
+    }),
+  )
+  const byHandle = new Map<string, EmmaProductCard>()
+  for (const node of nodes) {
+    if (node) byHandle.set(node.handle, productNodeToEmmaCard(node))
+  }
+  return handles
+    .map((h) => byHandle.get(h))
+    .filter((c): c is EmmaProductCard => c !== undefined)
 }
 
 export interface EmmaProductDetail extends EmmaProductCard {

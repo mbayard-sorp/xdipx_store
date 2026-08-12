@@ -98,7 +98,7 @@ export function batchIdForDay(d: Date = new Date()): string {
 async function staleUrls(): Promise<string[]> {
   const { getUrlHealth } = await import('~/lib/sitemap.server')
   const health = await getUrlHealth()
-  return Array.from(health.stale)
+  return Array.from(health.stale.keys())
 }
 
 /** Every URL currently in the sitemap, via the existing index-aware fetcher. */

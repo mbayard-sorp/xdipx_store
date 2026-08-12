@@ -4,7 +4,7 @@ import type { VaultDeal } from '~/types'
 import { HeartButton } from './HeartButton'
 import { CardMediaCarousel } from './CardMediaCarousel'
 import { abbreviate, buildPieGradient } from './CircleOptionSelector'
-import { showDiscountBadge } from '~/lib/discount-badge'
+import { showDiscountBadge, formatSavings, formatSavingsRange } from '~/lib/discount-badge'
 
 interface VaultCardProps {
   deal: VaultDeal
@@ -168,12 +168,12 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
               <div className="flex items-center gap-2 mt-1">
                 {showFlatSavings && (
                   <span className="text-ink/70 text-xs whitespace-nowrap">
-                    You save: ${(deal.msrp - deal.dealPrice).toFixed(2)} ({discount}%)
+                    {formatSavings(deal.msrp - deal.dealPrice, discount)}
                   </span>
                 )}
                 {showRangeSavings && (
                   <span className="text-ink/70 text-xs whitespace-nowrap">
-                    Save up to ${deal.maxSavingsAmount!.toFixed(2)} ({deal.maxSavingsPercent}%)
+                    {formatSavingsRange(deal.maxSavingsAmount!, deal.maxSavingsPercent!)}
                   </span>
                 )}
                 {(sizes || colors) && (

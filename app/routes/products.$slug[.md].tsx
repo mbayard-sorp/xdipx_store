@@ -7,7 +7,7 @@
  */
 
 import type { LoaderFunctionArgs } from 'react-router'
-import { getDealByHandle } from '~/lib/shopify.server'
+import { getDealByHandle, StorefrontUnavailableError } from '~/lib/shopify.server'
 import { getProductFaqs } from '~/lib/sanity.server'
 import { productToMarkdown } from '~/lib/markdown-page.server'
 import { cached } from '~/lib/kv.server'
@@ -27,30 +27,46 @@ export async function loader({ params }: LoaderFunctionArgs) {
   const cacheKey = `md:product:${slug}`
   const TTL = 900 // 15 minutes
 
-  const body = await cached(cacheKey, TTL, async () => {
-    const [deal, faqs] = await Promise.all([
-      guard(getDealByHandle(slug), null, 'getDealByHandle'),
-      guard(getProductFaqs(slug), [], 'getProductFaqs'),
-    ])
+  // A Storefront outage is deliberately NOT guarded: swallowing it to `null`
+  // would cache "product not found" for the full 15-minute TTL and serve a
+  // de-indexing 404 for a live product. Letting it throw skips the cache write
+  // entirely and answers 503 below.
+  let body: string | null
+  try {
+    body = await cached(cacheKey, TTL, async () => {
+      const [deal, faqs] = await Promise.all([
+        getDealByHandle(slug),
+        guard(getProductFaqs(slug), [], 'getProductFaqs'),
+      ])
 
-    if (!deal) return null
+      if (!deal) return null
 
-    let md = productToMarkdown(deal)
+      let md = productToMarkdown(deal)
 
-    // Append FAQs if present
-    if (faqs && faqs.length > 0) {
-      const faqLines: string[] = ['', '## Frequently asked questions', '']
-      for (const faq of faqs) {
-        faqLines.push(`## ${faq.question}`)
-        faqLines.push('')
-        faqLines.push(faq.answer)
-        faqLines.push('')
+      // Append FAQs if present
+      if (faqs && faqs.length > 0) {
+        const faqLines: string[] = ['', '## Frequently asked questions', '']
+        for (const faq of faqs) {
+          faqLines.push(`## ${faq.question}`)
+          faqLines.push('')
+          faqLines.push(faq.answer)
+          faqLines.push('')
+        }
+        md = md + faqLines.join('\n')
       }
-      md = md + faqLines.join('\n')
-    }
 
-    return md
-  })
+      return md
+    })
+  } catch (err) {
+    if (err instanceof StorefrontUnavailableError) {
+      console.error(`[md:products/${slug}] ${err.message}`)
+      return new Response('Product temporarily unavailable', {
+        status: 503,
+        headers: { 'Retry-After': '120', 'Cache-Control': 'no-store' },
+      })
+    }
+    throw err
+  }
 
   if (body === null) {
     return new Response('Product not found', { status: 404 })

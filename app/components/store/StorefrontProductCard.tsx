@@ -9,7 +9,7 @@
 
 import { Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
-import { showDiscountBadge } from '~/lib/discount-badge'
+import { showDiscountBadge, formatDiscountBadge } from '~/lib/discount-badge'
 import type { DiscoveryProduct } from '~/types/discovery'
 
 function fmt(n: number): string {
@@ -64,7 +64,7 @@ export function StorefrontProductCard({ product, priority = false, onSelect, flu
             className="absolute left-3 top-3 rounded-full bg-ink px-2.5 py-1 text-[11px] font-semibold text-paper"
             style={{ fontFamily: 'var(--font-body)' }}
           >
-            {savePct}% off
+            {formatDiscountBadge(savePct)}
           </span>
         )}
       </div>

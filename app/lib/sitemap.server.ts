@@ -18,7 +18,10 @@
  *     telling Google nothing had changed since the bad crawl and no recrawl
  *     was ever triggered. Any URL still sitting in one of those cached
  *     verdicts gets its lastmod floored at the fix date — an honest signal,
- *     since that is genuinely when the page's indexability changed.
+ *     since that is genuinely when the page's indexability changed. The floor
+ *     is per-verdict (STALE_VERDICT_EPOCHS): canonical-loss URLs were fixed by
+ *     #374 on 2026-07-29, six weeks after the noindex fix, so flooring them at
+ *     2026-06-13 would advertise a date earlier than their own repair.
  *
  *  2. Dead-URL suppression. URLs Google last saw as 404 / soft 404 / 5xx are
  *     dropped from the sitemap; submitting known-dead URLs costs crawl budget
@@ -32,12 +35,12 @@
  * a crawler nothing and was demonstrably false for 4,400 PDPs.
  */
 import { neon } from '@neondatabase/serverless'
-import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap } from '~/lib/sanity.server'
+import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap, getComparisonsForSitemap } from '~/lib/sanity.server'
 import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, getIndexableProductHandles, type SitemapProductImages, type SitemapCollection } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
 import { DEAD_VERDICT_STATES } from '~/lib/gsc-index.server'
 import {
-  BASE, applyHealth, chunkSegments, isTrustworthyDeadVerdict, keepIndexable, newestLastmod,
+  BASE, applyHealth, chunkSegments, epochForCoverageState, isTrustworthyDeadVerdict, keepIndexable, newestLastmod,
   HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY,
   PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ,
   type SitemapImage, type SitemapSegment, type SitemapUrl, type UrlHealth,
@@ -76,15 +79,17 @@ export async function getUrlHealth(): Promise<UrlHealth> {
       WHERE coverage_state = ANY(${BAD_VERDICT_STATES}::text[])
     ` as unknown as Array<{ url: string; coverage_state: string; last_crawl_time: Date | string | null }>
     const dead  = new Set<string>()
-    const stale = new Set<string>()
+    const stale = new Map<string, string>()
     for (const row of rows) {
       if (isTrustworthyDeadVerdict(row.coverage_state, row.last_crawl_time)) dead.add(row.url)
-      else stale.add(row.url)
+      // The floor is per-verdict: a canonical-loss URL earns the canonical fix
+      // date, not the May-outage fix date that predates its own defect.
+      else stale.set(row.url, epochForCoverageState(row.coverage_state))
     }
     return { dead, stale }
   } catch (err) {
     console.error('[sitemap] getUrlHealth failed:', err)
-    return { dead: new Set(), stale: new Set() }
+    return { dead: new Set(), stale: new Map() }
   }
 }
 
@@ -160,7 +165,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
       return fallback
     })
 
-  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles, newDropLastmod] = await Promise.all([
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles, newDropLastmod, comparisons] = await Promise.all([
     guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
     guard(getBlogCategories(), [], 'getBlogCategories'),
     guard(getAllBlogSeries(), [], 'getAllBlogSeries'),
@@ -173,6 +178,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     getUrlHealth(),
     guard(getIndexableProductHandles(), null, 'getIndexableProductHandles'),
     guard(getDropPageUpdatedAt('new'), undefined, 'getDropPageUpdatedAt(new)'),
+    guard(getComparisonsForSitemap(), [], 'getComparisonsForSitemap'),
   ])
 
   const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0]!.dealDate) : null
@@ -236,6 +242,11 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     { loc: `${BASE}/collections`, lastmod: collectionsHubLastmod ?? today, changefreq: 'weekly', priority: '0.7' },
     { loc: `${BASE}/notebook`,    lastmod: today, changefreq: 'weekly', priority: '0.5' },
     { loc: `${BASE}/notebook/glossary`, lastmod: today, changefreq: 'weekly', priority: '0.5' },
+    // /compare hub — listed only when at least one comparison is published, so
+    // the sitemap never advertises a thin, empty hub.
+    ...(comparisons.length > 0
+      ? [{ loc: `${BASE}/compare`, lastmod: today, changefreq: 'weekly', priority: '0.6' }]
+      : []),
     { loc: `${BASE}/faq`,         lastmod: today, changefreq: 'monthly', priority: '0.5' },
     { loc: `${BASE}/about`,       lastmod: today, changefreq: 'monthly', priority: '0.5' },
     { loc: `${BASE}/contributors/emma`, lastmod: today, changefreq: 'monthly', priority: '0.4' },
@@ -279,6 +290,17 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
       priority: '0.5',
     })),
   ]
+
+  // ── compare: /compare/$slug (BOFU answer pages) ──────────────────────────
+  // High-intent "X vs Y" surfaces, priority just below product pages. The .md
+  // twins are intentionally not listed (advertised via rel="alternate" only),
+  // matching the notebook/collection precedent.
+  const compareUrls: SitemapUrl[] = comparisons.map(c => ({
+    loc: `${BASE}/compare/${c.slug}`,
+    lastmod: (c._updatedAt ?? c.publishedAt)?.split('T')[0],
+    changefreq: 'weekly',
+    priority: '0.7',
+  }))
 
   // ── collections: /collections/$handle ────────────────────────────────────
   // Helps xdipx rank for category queries (e.g. "wand vibrators"). Skip the
@@ -356,6 +378,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
   push('pages', pageUrls)
   push('collections', collectionUrls)
   push('notebook', notebookUrls)
+  push('compare', compareUrls)
 
   segments.push(...chunkSegments('products', clean(productUrls), PRODUCTS_PER_SEGMENT))
 

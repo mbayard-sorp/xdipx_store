@@ -209,10 +209,48 @@ access and cannot see cross-post reuse, so this check runs here, not at the gate
 2. Diff the draft sentence-level against those posts' `body` text.
 3. Rewrite any recycled sentence or phrase BEFORE submitting the draft to the voice gate in Step 5.
 
-**Aphorism-as-closer pre-flight (mandatory, before Step 5):** scan every sentence in the draft for
-the shape [demonstrative or abstract noun phrase] + [is/are] + [the/what] + [defining clause].
-List the hits with their section, then cut back to the caps (3 per post, 1 per section, never 2 in
-a paragraph) before submitting to the voice gate.
+**Aphorism-as-closer pre-flight (mandatory, before Step 5):** run the merged deterministic checker on
+the draft JSON and trim until it exits 0, before submitting to the voice gate:
+
+```bash
+npx tsx scripts/check-aphorism-closers.ts <draft.json>
+```
+
+The checker implements the charter's binding three-part test: a hit needs an **anaphoric demonstrative
+subject** (`this` / `that`) AND a copula AND a defining clause that re-describes what the previous
+sentence already delivered — all three. (The earlier wording here, "[demonstrative **or abstract noun
+phrase**]", was the pre-#925 wide reading the charter has since narrowed to
+anaphoric-demonstrative-subject only; the charter wins and the script follows the charter, so a plain
+abstract-noun-plus-copula sentence stating an idea for the first time is never a hit.) The caps are
+unchanged: 3 per post, 1 per section, never 2 in a paragraph. Trim by de-constructing the flagged
+shape, not by swapping synonyms inside it.
+
+**Unsourced-frequency pre-flight (mandatory, before Step 5):** run the deterministic checker on the
+draft JSON and drive it to exit 0 before submitting to the voice gate:
+
+```bash
+npx tsx scripts/check-unsourced-frequency.ts <draft.json>
+```
+
+The checker flags a frequency or population quantifier (`usually`, `most`, `almost every`, `people
+keep`, `tends to`) bound to a subject the writer has no data on: customers, readers, or other
+publishers (`most people assume`, `almost every article`, `people keep buying`, `someone writes in`).
+It is subject-aware by design, so it does NOT flag the same quantifier on a product category (`as a
+category, small bullets run quietest`; `usually costs you the sensation`) or on an attributed research
+finding (`sex educators describe`, `reviewers draw the distinction`), and it never flags second-person
+address (`that fear will keep you buying`). The limit is zero: any candidate trips it. Resolve each by
+sourcing the claim, attributing it, or removing it. Do NOT soften it with a hedge (`can`, `often`,
+`it's easy to`): those are charter-banned in this register, so hedging trades a claim defect for a
+voice defect. Like the aphorism checker, it flags candidates and leaves the final judgment to the voice
+gate. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
+place (suggestions #1674, #2618).
+
+**Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
+`we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
+opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
+is a first-submit voice-gate failure the writer otherwise discovers only at the gate, spending the one
+allowed rewrite cycle. Shape each seam with a concrete subject and avoid the "This is / That is
+[defining clause]" shape, so a seam does not itself create an aphorism-as-closer.
 
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
@@ -271,12 +309,37 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    - First-person solidarity-voice seams must use a concrete subject ("I start everyone from...",
      "I would rather you owned...") and must avoid the "This is / That is [defining clause]"
      shape, which itself creates an aphorism-as-closer.
+   - **De-construct the pattern — standing rule for every flagged string, not only the post-scoped
+     cap.** When a gate flags a string for its SHAPE (an aphorism-as-closer, a fabricated-anecdote
+     opener, a recap-tag), resolving the flag means changing the shape, not swapping words inside it —
+     for *every* flag, not just the whole-document-cap carve-out. Pre-resubmit self-check: for each
+     rewritten string, state which shape the gate objected to and how the replacement differs
+     **structurally**, not just lexically. (Run 225 bounced because a fabricated-anecdote opener was
+     reworded into a first-person-endorsement opener of the same class the same rewrite had just
+     stripped elsewhere; the shape survived the synonyms.)
+   - **Checker-passed sections are settled.** A section the merged aphorism checker
+     (`scripts/check-aphorism-closers.ts`) passes is settled for the aphorism-as-closer **count** for
+     the remainder of the post lifecycle and is not re-litigated in later cycles. The checker is the
+     single source of truth for the count; this is what makes the rewrite cycles converge instead of
+     the reviewer recounting by judgement and self-contradicting across passes.
+   - **The voice gate never supplies replacement wording for a claim-carrying string.** For any string
+     carrying a factual, comparative, frequency, or causal claim, the voice reviewer names the defect
+     and the constraints but does **not** hand over literal replacement prose: it does not web-verify
+     and cannot judge claim strength, so gate-supplied wording can inject an overclaim that carries a
+     gate verdict's authority (twice in one day, runs 201/204 — a supply-side claim drifted to a
+     population claim, and a thesis drifted to majority causation). The writer drafts the replacement
+     and the accuracy gate rules on it. Any claim-carrying string rewritten for a **style** reason
+     **always** re-runs the accuracy gate, regardless of the selective re-run carve-out below.
    - **Selective re-run carve-out:** if one gate PASSed clean and the shared rewrite provably
      touches no string that gate verified, re-run only the gate that returned REVISE and carry the
      clean gate's verdict and citations forward unchanged. The mandatory dual re-run above still
      applies whenever the rewrite touches any accuracy-verified or frozen safety string.
 4. **BLOCK** (from either gate, either cycle) → the post stays `status:'draft'`, and you file a
-   suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons.
+   suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons. The blocked draft
+   still occupies its slug: the next run that picks this brief must **resume that draft**, not treat
+   the slug as taken and skip to another topic, or the finished work is silently orphaned. (The Step 3
+   slug pre-check currently matches the draft under the raw perspective; teaching it to read the
+   published perspective is a separate code fix.)
 5. **Sources insertion (mechanical, after the final PASS).** The accuracy gate returns 0-2
    citations it actually resolved. Append them as a `## Sources` section (source name + link,
    no new prose claims). This insertion is exempt from re-gating. If the gate reported

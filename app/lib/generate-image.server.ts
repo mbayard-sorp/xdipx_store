@@ -13,13 +13,45 @@
  */
 
 import { falConfigured, falGenerate } from '~/lib/fal.server'
-import { generateMoodImage } from '~/lib/imagen.server'
+import { defaultMoodPrompt, generateMoodImage } from '~/lib/imagen.server'
 import { logImageCost } from '~/lib/token-log.server'
 
+/**
+ * Aspect-ratio string (as the admin/Studio callers speak it) → fal `image_size`
+ * enum. Callers that only know '1:1' or '9:16' would otherwise silently get
+ * fal's landscape-16:9 default.
+ */
+const FAL_IMAGE_SIZE_BY_ASPECT: Record<string, string> = {
+  '1:1':  'square_hd',
+  '4:3':  'landscape_4_3',
+  '3:4':  'portrait_4_3',
+  '16:9': 'landscape_16_9',
+  '9:16': 'portrait_16_9',
+}
+
+export function falImageSizeForAspect(aspect: string): string | undefined {
+  return FAL_IMAGE_SIZE_BY_ASPECT[aspect]
+}
+
+/**
+ * fal's image inputs accept data URIs, so a caller holding raw bytes (the admin
+ * routes fetch reference photos server-side rather than handing fal a CDN URL)
+ * can still reach the image-conditioned FLUX Kontext path instead of dropping
+ * to the Imagen fallback.
+ */
+function bufferToDataUri(buf: Buffer | undefined, mimeType = 'image/jpeg'): string | undefined {
+  if (!buf?.length) return undefined
+  return `data:${mimeType};base64,${buf.toString('base64')}`
+}
+
 export interface GenerateImageOpts {
-  /** The scene/art prompt (tasteful, editorial — see Emma voice rules). */
-  prompt: string
-  /** Imagen mood mapping hint (only used on the Imagen fallback path). */
+  /**
+   * The scene/art prompt (tasteful, editorial — see Emma voice rules). Optional
+   * only when `categories` is supplied: the category mood brief is then used for
+   * both providers so fal is still tried first.
+   */
+  prompt?: string
+  /** Imagen mood mapping hint; also the prompt source when `prompt` is omitted. */
   categories?: string[]
   /** How many images (default 1, capped 4). */
   count?: number
@@ -29,8 +61,24 @@ export interface GenerateImageOpts {
   caller?: string
   productId?: string
   sku?: string
-  /** Reference product images (Imagen path reproduces the exact product). */
+  /**
+   * Reference product images. Imagen reproduces the exact product from these;
+   * on the fal path the first buffer is inlined as a data URI and routes to
+   * FLUX Kontext.
+   */
   referenceImageBuffers?: Buffer[]
+  /**
+   * Improvement mode: the original image to edit, where the prompt describes
+   * only what should change. Routes to FLUX Kontext on the fal path (its native
+   * edit behavior) and to Imagen's keep-the-product-identical mode on fallback.
+   */
+  originalImageBuffer?: Buffer
+  /**
+   * Aspect ratio as '1:1' | '4:3' | '3:4' | '16:9' | '9:16'. Resolved to a fal
+   * `image_size` when `imageSize` is not given explicitly. Ignored by Imagen,
+   * which no longer honours an aspect parameter.
+   */
+  aspectRatio?: string
   /**
    * Publicly fetchable reference image URL (real Shopify product photo). On
    * the fal path this routes to FLUX Kontext so the actual product appears in
@@ -78,14 +126,36 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
     ...(opts.sku ? { sku: opts.sku } : {}),
   }
 
+  // A caller may supply categories only (the legacy Imagen signature). Build the
+  // same mood brief for fal so those callers stop skipping the primary provider.
+  const prompt = opts.prompt?.trim() || defaultMoodPrompt(opts.categories ?? [])
+
+  // Prefer an explicit URL, then improvement mode's original, then the first
+  // product reference — any of them routes fal to the Kontext edit endpoint.
+  const refImageUrl =
+    opts.refImageUrl
+    ?? bufferToDataUri(opts.originalImageBuffer)
+    ?? bufferToDataUri(opts.referenceImageBuffers?.[0])
+
+  const imageSize =
+    opts.imageSize
+    ?? (opts.aspectRatio ? falImageSizeForAspect(opts.aspectRatio) : undefined)
+
   // 1. fal.ai — primary (skip if only:'imagen' or unconfigured).
   if (opts.only !== 'imagen' && falConfigured()) {
     try {
       const { buffers, costKey } = await falGenerate({
-        prompt: opts.prompt,
+        prompt,
         count,
-        ...(opts.refImageUrl ? { refImageUrl: opts.refImageUrl } : {}),
-        ...(opts.imageSize ? { imageSize: opts.imageSize } : {}),
+        ...(refImageUrl ? { refImageUrl } : {}),
+        ...(imageSize ? { imageSize } : {}),
+        // falGenerate records its own blocks; this only attributes them.
+        telemetry: {
+          feature,
+          ...(opts.caller ? { caller: opts.caller } : {}),
+          ...(opts.sku ? { sku: opts.sku } : {}),
+          ...(opts.productId ? { productId: opts.productId } : {}),
+        },
       })
       if (buffers.length) {
         if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length })
@@ -101,9 +171,10 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
     try {
       const buffers = await generateMoodImage({
         categories: opts.categories ?? [],
-        prompt: opts.prompt,
+        prompt,
         count,
         ...(opts.referenceImageBuffers ? { referenceImageBuffers: opts.referenceImageBuffers } : {}),
+        ...(opts.originalImageBuffer ? { originalImageBuffer: opts.originalImageBuffer } : {}),
       })
       if (buffers.length) {
         if (logCost) void logImageCost({ ...logBase, model: 'imagen', count: buffers.length })
@@ -111,6 +182,22 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
       }
     } catch (err) {
       console.warn('[generate-image] Imagen failed/blocked:', err)
+      // fal self-reports its blocks inside falGenerate; Imagen throws prose, so
+      // it is classified and recorded here. Without this the fallback provider's
+      // refusals stayed invisible, which is most of what an operator hits.
+      const { classifyMediaFailure } = await import('~/lib/media-block')
+      const { logGenerationBlock } = await import('~/lib/token-log.server')
+      const { reason, surface } = classifyMediaFailure(err)
+      void logGenerationBlock({
+        model: 'imagen',
+        reason,
+        surface,
+        count,
+        ofFeature: feature,
+        ...(opts.caller ? { caller: opts.caller } : {}),
+        ...(opts.sku ? { sku: opts.sku } : {}),
+        ...(opts.productId ? { productId: opts.productId } : {}),
+      })
     }
   }
 

@@ -21,11 +21,19 @@ import { useAgeVerified } from '~/lib/use-age-verified'
 import { Reveal } from '~/components/motion/Reveal'
 import { getSocialLandingSettings, getEmmaHeroSettings } from '~/lib/sanity.server'
 import { getDiscoveryIndex } from '~/lib/discovery.server'
+import { getRecentSocialProductHandles } from '~/lib/social-landing.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { buildSocialMeta } from '~/lib/social-meta'
 import type { DiscoveryProduct } from '~/types/discovery'
 
 const CANONICAL = 'https://xdipx.com/social'
+
+// Swappable product grid fed from recent product-featuring social posts.
+const RECENT_GRID_SIZE = 6
+const RECENT_TIMEOUT_MS = 3000
+// PDP links carry the source of the arrival: this bio-link is what the
+// Instagram profile points at.
+const RECENT_UTM = 'utm_source=instagram&utm_medium=social'
 const TITLE = 'Start here | xdipx'
 const DESCRIPTION =
   'You found us from a video. This is the quiet corner: chat with Emma, see what she is pointing people at, and stay close. Discreet shipping, billed as XDIPX.'
@@ -51,15 +59,29 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   }),
 ]
 
+// In-stock idiom shared with the discovery inventory floor: untracked
+// inventory (null) always passes; a tracked count must be above zero. See
+// app/lib/discovery-rules.server.ts.
+function inStock(p: DiscoveryProduct): boolean {
+  return p.totalInventory === null || p.totalInventory > 0
+}
+
 export async function loader() {
   // Swappable product module: singleton.socialLanding.featuredProductHandle
   // wins, falling back to the storefront hero pin
   // (singleton.emmaHeroStorefront.featuredProductHandle), then to no module.
   // Both Sanity legs are bounded and degrade to null so a slow leg can never
-  // sink the landing.
-  const [settings, emmaHero] = await Promise.all([
+  // sink the landing. In parallel we pull the handles of products featured in
+  // the last week of social posts to fill the grid below the pin.
+  const [settings, emmaHero, recentHandles] = await Promise.all([
     withTimeout(getSocialLandingSettings(), SANITY_TIMEOUT_MS, null, 'getSocialLandingSettings(social)'),
     withTimeout(getEmmaHeroSettings(), SANITY_TIMEOUT_MS, null, 'getEmmaHeroSettings(social)'),
+    withTimeout(
+      getRecentSocialProductHandles(RECENT_GRID_SIZE),
+      RECENT_TIMEOUT_MS,
+      [] as string[],
+      'getRecentSocialProductHandles(social)',
+    ),
   ])
 
   const candidates = [
@@ -67,9 +89,12 @@ export async function loader() {
     emmaHero?.featuredProductHandle?.trim(),
   ].filter((h): h is string => !!h)
 
+  // One index fetch resolves both the pinned module and the recent grid.
+  const needIndex = candidates.length > 0 || recentHandles.length > 0
+  const index = needIndex ? await getDiscoveryIndex().catch(() => [] as DiscoveryProduct[]) : []
+
   let product: DiscoveryProduct | null = null
   if (candidates.length > 0) {
-    const index = await getDiscoveryIndex().catch(() => [] as DiscoveryProduct[])
     for (const handle of candidates) {
       const match = index.find(p => p.handle === handle)
       if (match) {
@@ -82,10 +107,20 @@ export async function loader() {
     }
   }
 
+  // Resolve recent handles against the index, keep in-stock only, and drop the
+  // pinned product so it never appears twice. Order follows most-recent-posted.
+  const recentProducts: DiscoveryProduct[] = []
+  for (const handle of recentHandles) {
+    if (handle === product?.handle) continue
+    const match = index.find(p => p.handle === handle)
+    if (match && inStock(match)) recentProducts.push(match)
+  }
+
   return {
     heading: settings?.heading ?? null,
     emmaBlurb: settings?.emmaBlurb ?? null,
     product,
+    recentProducts,
   }
 }
 
@@ -101,8 +136,14 @@ function formatPrice(product: DiscoveryProduct): string {
   return min
 }
 
+// PDP link that carries the social arrival source so the visit attributes back
+// to the bio link this page sits behind.
+function pdpHref(handle: string): string {
+  return `/products/${handle}?${RECENT_UTM}`
+}
+
 export default function SocialLanding() {
-  const { heading, emmaBlurb, product } = useLoaderData<typeof loader>()
+  const { heading, emmaBlurb, product, recentProducts } = useLoaderData<typeof loader>()
   const { verified } = useAgeVerified()
   const rootData = useRouteLoaderData<{ ENV?: { AGE_GATE_LEVEL?: string } }>('root')
   const ageGateLevel = (rootData?.ENV?.AGE_GATE_LEVEL ?? 'click_through') as VerificationLevel
@@ -180,6 +221,42 @@ export default function SocialLanding() {
                     </span>
                   </div>
                 </Link>
+              </Reveal>
+            )}
+
+            {/* Swappable grid: products from the last week of social posts.
+                Fed straight from social_posts, so it stays current without a
+                manual sync; hidden entirely when nothing recent is in stock. */}
+            {recentProducts.length > 0 && (
+              <Reveal variant="up" as="section">
+                <h2 className="kicker mb-4 text-center">lately on my feed</h2>
+                <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {recentProducts.map(p => (
+                    <li key={p.handle}>
+                      <Link
+                        to={pdpHref(p.handle)}
+                        className="group block overflow-hidden rounded-[18px] border border-line bg-paper-2 transition-shadow hover:shadow-md"
+                      >
+                        {p.imageUrl ? (
+                          <img
+                            src={p.imageUrl}
+                            alt={p.imageAlt ?? p.title}
+                            className="aspect-square w-full bg-paper-3 object-cover"
+                            loading="lazy"
+                            width={240}
+                            height={240}
+                          />
+                        ) : (
+                          <div className="aspect-square w-full bg-paper-3" />
+                        )}
+                        <div className="p-3">
+                          <h3 className="line-clamp-2 text-sm leading-snug text-ink">{p.title}</h3>
+                          <p className="mt-1 text-xs font-medium text-ink-3">{formatPrice(p)}</p>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
               </Reveal>
             )}
 

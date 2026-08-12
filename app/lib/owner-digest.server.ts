@@ -372,6 +372,12 @@ export interface OpsWatchFacts {
   strandedVerified: number
   /** Suggestions an agent retired in the last 7 days. */
   agentRetired: Array<{ id: number; kind: string; suggestion: string }>
+  /**
+   * api_token_log writes that failed even after their one retry, over the
+   * trailing ~24-48h. Nonzero means spend tracking undercounts by that many
+   * rows and nothing else would have said so.
+   */
+  tokenWriteFailures: number
 }
 
 /**
@@ -406,6 +412,12 @@ export function renderOpsWatchSection(f: OpsWatchFacts): string {
 
   if (f.agentRetired.length > 0) {
     parts.push(`<p style="margin:6px 0 2px;color:${MUTED};">Retired by agent-editor in the last 7 days (undo by re-approving in /admin):</p><ul style="margin:0;padding-left:18px;color:${MUTED};">${f.agentRetired.map(r => `<li>#${r.id} (${esc(r.kind)}) ${esc(clip(r.suggestion, 100))}</li>`).join('')}</ul>`)
+  }
+
+  // Only shown when nonzero: a silent spend-tracking gap the retry could not
+  // recover, so the owner knows usage/spend figures undercount by this much.
+  if (f.tokenWriteFailures > 0) {
+    parts.push(`<p style="margin:0 0 4px;color:${WARN};">${f.tokenWriteFailures} api_token_log write${f.tokenWriteFailures === 1 ? '' : 's'} failed even after retry in the last 24h &mdash; spend tracking undercounts by that many rows.</p>`)
   }
 
   return parts.join('')
@@ -856,6 +868,7 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
     enrichmentAgeHours: null,
     strandedVerified: 0,
     agentRetired: [],
+    tokenWriteFailures: 0,
   }
 
   // Social review backlog. The social team stops drafting entirely once this
@@ -936,6 +949,15 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
     })
   } catch (err) {
     console.warn('[owner-digest] agent-retired sweep failed:', String(err).slice(0, 200))
+  }
+
+  // Silent spend-tracking gaps: api_token_log writes that failed even after
+  // their retry. Read from KV (independent of the Neon table that was failing).
+  try {
+    const { getTokenWriteFailureCount } = await import('~/lib/token-log.server')
+    out.tokenWriteFailures = await getTokenWriteFailureCount()
+  } catch (err) {
+    console.warn('[owner-digest] token-log write-failure count failed:', String(err).slice(0, 200))
   }
 
   return out

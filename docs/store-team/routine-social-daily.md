@@ -65,6 +65,20 @@ redraft, and write it with `"reworkedFrom": <original id>`. Reworks count toward
 the platform's daily quota. Feedback you can't act on (e.g. it asks for a capability you don't
 have) → say so honestly in the run summary, never silently drop it.
 
+## Step 2.6 — Stock gate (never feature an out-of-stock product)
+
+Owner direction 2026-08-09, after a live post featuring an out-of-stock product had to be deleted.
+**Never feature a product that is not currently in stock and ACTIVE**, in any format — single posts,
+carousels, and Brand Crush alike.
+
+- **Draft-time:** before selecting any product for a post, verify `availableForSale` via the
+  Storefront API. An out-of-stock, DRAFT, or ARCHIVED product is ineligible; pick the next candidate.
+- **Queue-hygiene sweep (run start):** sweep the still-unposted `approved`/`pending_review` drafts and,
+  for any whose featured product has since gone out of stock, mark it `needs_changes` with feedback
+  naming the stock issue, so the owner never approves a post that can no longer be bought.
+- `inventory-sentinel` adds `social_posts` featured products to its watch scope, so a stock drop on a
+  queued post surfaces as a flag rather than a deleted live post.
+
 ## Step 3 — Draft (≤6 per run, reworks included)
 
 Draft counts come from the Step 2 config — up to `social_freq_<platform>` new posts per platform,
@@ -145,6 +159,21 @@ and a blocked draft is rewritten or dropped, never softened until it squeaks pas
 
 A draft that only survives by disguising what it is fails this gate by definition. When a call is
 genuinely close, drop it and say so in the run summary: one post is never worth the account.
+
+## Step 4c — Product link policy (per platform)
+
+Owner question 2026-08-09 ("should posts include a product link when there is one?"). The answer is
+per-platform, and on Instagram it is a hard line the Step 4b sale gate already enforces:
+
+| Platform | PDP link in caption | Shoppable path |
+|---|---|---|
+| Instagram | **Never.** Caption URLs are not clickable on IG, and a PDP link is the clearest "attempting to sell" signal under Meta Restricted Goods. | post → profile → link in bio → site. The bio-link landing page at `xdipx.com/social`, plus comment replies (an answered "where do I get this?" is not a sale attempt; the support-drafted reply carries the direct PDP link). |
+| X | Allowed and encouraged, per the existing X lane. | direct PDP link with channel UTMs. |
+| LinkedIn | Site links fine, PDP links avoided, per the LinkedIn addendum. | site/editorial links only. |
+
+**`/social` sync is a daily-routine duty.** The bio-link landing page's product modules must be kept
+in sync with the last ~7 days of Instagram product posts, so the one clickable path from IG always
+resolves to what the feed is actually featuring. Do this as part of the run and note it in the summary.
 
 ## Step 5 — Imagery (every visual platform draft ships with a real asset)
 

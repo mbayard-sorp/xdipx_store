@@ -33,6 +33,7 @@ import {
   downloadFalAsset,
   uploadToFalStorage,
   SCENE_FRAME_COST_KEY,
+  SCENE_PLATE_COST_KEY,
   type VideoModelId,
   type VideoModelSpec,
   type QueueHandle,
@@ -97,7 +98,13 @@ export function estimateJobCostUsd(
   opts: { speechSeconds?: number; reuseFrame?: boolean } = {},
 ): number {
   const spec = VIDEO_MODELS[modelTier]
-  const frames = opts.reuseFrame ? 0 : estimateImageCostUsd(SCENE_FRAME_COST_KEY, SCENE_FRAME_CANDIDATES)
+  // Frame cost is the stage-1 product plate plus the stage-2 candidates.
+  // Talking-head jobs skip the plate, so this over-estimates them slightly; that
+  // is the safe direction for a pre-flight ceiling check.
+  const frames = opts.reuseFrame
+    ? 0
+    : estimateImageCostUsd(SCENE_PLATE_COST_KEY, 1)
+      + estimateImageCostUsd(SCENE_FRAME_COST_KEY, SCENE_FRAME_CANDIDATES)
   if (spec.audioDriven) {
     const seconds = opts.speechSeconds ?? durationSeconds
     const clip = estimateVideoCostUsd(spec.costKey, seconds)
@@ -339,7 +346,7 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
   const baseImageUrl = presenterUrl ?? productUrl
   if (!baseImageUrl) throw new Error('No reference image available for scene-frame composition')
 
-  const { urls, costKey } = await composeSceneFrame({
+  const { urls, costKey, plate } = await composeSceneFrame({
     prompt: framePrompt,
     presenterImageUrl: baseImageUrl,
     ...(productUrl ? { productImageUrl: productUrl } : {}),
@@ -372,7 +379,21 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
     sku: job.productHandle,
     refId: job.jobId,
   })
+  // The stage-1 product plate is a separate model and must not be folded into
+  // the compositor's count, or /admin/usage attributes its spend to the wrong
+  // model and the job's running cost under-reports.
+  if (plate) {
+    void logImageCost({
+      feature: 'video-frames',
+      model: plate.costKey,
+      count: plate.count,
+      caller: 'video-pipeline/plate',
+      sku: job.productHandle,
+      refId: job.jobId,
+    })
+  }
   const frameCost = estimateImageCostUsd(costKey, assetIds.length)
+    + (plate ? estimateImageCostUsd(plate.costKey, plate.count) : 0)
   const newCost = Number(job.costUsd) + frameCost
 
   // Default auto-choice is the first candidate. The owner's frame-review gate

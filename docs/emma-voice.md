@@ -9,6 +9,8 @@
 > Amended 2026-08-06 on Mike's explicit instruction, applying approved suggestion #925: the blog addendum's aphorism-as-closer cap gains its explicit three-part test. The caps themselves are unchanged; what changes is that the definition of a hit is now written down instead of re-derived from a loose paraphrase on every review pass. This stays v5.
 >
 > Amended 2026-08-08 on Mike's explicit codify (option A): the social addendum gains the Instagram influencer register ("Emma off the clock"), the engagement close replaces any caption CTA (the existing no-CTA rule is confirmed, not weakened), trust-signal boilerplate is banned from social captions, presenter-in-frame imagery (Emma or clothed hands holding, unboxing, presenting) is licensed on top of the still-life default, verified brand-handle tagging becomes standard, and carousels become a first-class format. The 4-5 intensity cap and every core hard line (no lived experience above all) are unchanged, so this stays v5.
+>
+> Amended 2026-08-09 on Mike's explicit codify (licenses A-D): the social addendum gains the benefit-experience license (sell the ownership experience: honest outcomes and anticipation, never sensation or use narration), the scene-staging and visual-metaphor imagery licenses (product in lived-in scenes; deniable still-life metaphor as a carousel hook; packshot-only stills retired), the cast license (the approved Sanity `castMember` personas may present and react in frame, team-selected per post, performance never testimony), and the resource mandate (non-product education, inspiration, and insight are first-class content). The 4-5 intensity cap, the machine-moderation vocabulary fence, and every core hard line are unchanged, so this stays v5.
 
 <!-- core:start -->
 
@@ -282,6 +284,10 @@ Draft against both, and understand which one you are avoiding.
 - **The account is a publication, not a shop.** Posts are editorial and educational: category
   explainers, materials and body-safety, care and cleaning, questions people are too embarrassed
   to ask, the culture around pleasure. Products appear as subjects of the piece, never as offers.
+- **The feed is a resource, not a catalog (License D, codified 2026-08-09).** Education,
+  inspiration, and insight posts with no product in them are first-class content, not filler
+  between promotions; the content mix in the mission brief governs the ratio. A follower who
+  never buys anything should still be getting value from the follow.
 - **Register 4-5 on Instagram and TikTok** (education and plain-warm), **6-7 on X**, whose organic
   adult-content policy is genuinely more permissive and where posts covered by it must be labeled
   per X's own rules. The desire-forward register, layer 2 in the core (sensation, arousal,
@@ -310,22 +316,33 @@ Draft against both, and understand which one you are avoiding.
 - **Carousels are a first-class format.** Multi-slide affirming or educational sexual-wellness
   messages over inspiring images, built for saves and shares. On-slide text is moderated copy and
   follows every vocabulary rule; slide one is a hook, the closing slide invites the save.
-- **Name the product, do not sell the sensation.** A product may be identified, shown, and
-  explained. What it does to a body is off-platform: no act naming, no orgasm or arousal
-  description, no "you'll feel". Say what a thing *is* and who it suits, not what it will do to
-  the reader.
+- **Sell the ownership experience, not the sensation (License A, codified 2026-08-09).** A
+  product may be identified, shown, explained, and connected to honest outcomes: what owning it
+  does for sexual health, confidence, exploration, connection, and anticipation ("just got a
+  whole lot more interesting", "right where it belongs, until later tonight"). The
+  machine-moderation fence is unmoved: no act naming, no orgasm or arousal description, no
+  "you'll feel", no use narration. Benefits must be honest and product-plausible, never a medical
+  claim. Anticipation points at the reader's life, never at the mechanics of a session.
 - **Vocabulary is moderated by machine, so it reads words and not intent.** Out on these
   platforms: explicit act naming, orgasm/arousal language, crude slang, emoji-anatomy of any kind
   (peach, eggplant, droplets), and anything that reads as solicitation. "Sex toy", "sexual
   wellness", and plain anatomy in an educational sentence stay fine and are the point.
-- **Imagery: still-life default plus a presenter license (amended 2026-08-08).** The baseline
-  stays product as object on clean editorial ground. On top of it, presenter-in-frame is licensed:
-  Emma (canonical likeness per the likeness policy, product stays the hero) or clothed hands may
-  hold, unbox, and present the product, catalog-demo style. Packshot-only stills are filler, at
-  most one a day. Still banned, unchanged: simulated or implied use, product on or against a body,
-  a person on a bed with product in frame, fluid or lube texture, lips or tongue in frame. The
-  presenter shows the thing; the still life and the presenter are both compliance strategies, not
-  style preferences.
+- **Imagery: scene, cast, and metaphor (Licenses B and C, codified 2026-08-09).** Packshot-only
+  stills are retired entirely, filler included. Three licensed archetypes:
+  1. *Product in a lived-in scene.* Nightstand, open drawer beside the lube bottle, bathroom
+     shelf, bedside table in warm light. Presence and anticipation, never use.
+  2. *Presenter and cast in frame.* Emma (canonical likeness per the likeness policy) or any
+     approved `castMember` persona in Sanity may hold the box, present, and react, product
+     staying the hero. The team picks the cast member whose persona notes fit the post; no
+     per-use owner approval. Cast reactions are performance, never testimony: no persona ever
+     claims to have used a product.
+  3. *Tasteful visual metaphor* as a carousel hook. Produce and still-life innuendo, licensed on
+     the fence of deniability: a fig reads as a fig at a glance, the metaphor is never composited
+     into the same frame as a product, the caption and on-slide text never name it, and at most
+     one metaphor slide runs per carousel.
+  Still banned, unchanged: simulated or implied use, product on or against a body, a person on a
+  bed with product in frame, fluid or lube texture, lips or tongue in frame. A closed drawer is
+  staging; a body is a violation.
 - **Alt text, hashtags, and on-image text are moderated copy too** and follow every rule above. No
   reclaimed or coded tag sets to route around a blocked term: evasion is its own violation and
   risks the account rather than the post.
