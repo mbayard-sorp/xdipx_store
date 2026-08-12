@@ -79,6 +79,7 @@ async function main() {
   const platform    = arg('platform') ?? 'instagram'
   const refImage    = arg('ref-image')
   const presenter   = arg('presenter-image')
+  const scale       = arg('scale')
   const noRef       = hasFlag('no-ref')
   const noRefReason = arg('no-ref-reason')
   const slide       = arg('slide') ? Number(arg('slide')) : undefined
@@ -124,6 +125,13 @@ async function main() {
   }
   if (presenter && archetype !== 'cast') {
     console.error('--presenter-image requires --archetype cast')
+    process.exit(1)
+  }
+  // Required, not defaulted. A silent default would be wrong for most of the
+  // catalog and wrong invisibly, which is exactly how a palm-sized toy shipped
+  // vase-sized (#2761).
+  if (presenter && !scale) {
+    console.error('--presenter-image requires --scale palm|handheld|forearm|bottle (or a free-text clause relative to the hand). Omitting it renders the product the wrong size.')
     process.exit(1)
   }
 
@@ -172,7 +180,7 @@ async function main() {
         ...(slide ? { slide } : {}),
         filename: buildSocialAssetFilename({ handle, archetype: archetype as never, mood, date, ...(slide ? { slide } : {}) }),
         only: presenter ? 'composeSceneFrame (qwen plate -> flux-2 lora edit)' : (only ?? 'fal-then-imagen'),
-        ...(presenter ? { presenter, mode: 'cast-composite' } : {}),
+        ...(presenter ? { presenter, mode: 'cast-composite', scale } : {}),
         caller, cap, capSource,
         ...(refImage ? { refImage } : { noRefReason }),
       },
@@ -194,6 +202,7 @@ async function main() {
       date,
       presenterImageUrl: presenter,
       productImageUrl: refImage!,
+      scale: scale!,
       count: Number(arg('candidates') ?? '2'),
       caller,
     })
@@ -217,6 +226,7 @@ async function main() {
       })),
       provider: 'fal',
       stages: result.costs,
+      scale,
       spendPosted, cap, capSource,
     }))
     process.exit(0)

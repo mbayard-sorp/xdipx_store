@@ -126,6 +126,49 @@ export function allMediaAreGeneratedSocialAssets(urls: readonly string[] | null 
  * composites presenter and plate together, holding cast identity from the
  * reference photo. Both references are supplied, so both survive.
  */
+/**
+ * Scale cues for a cast composite (ticket #2761).
+ *
+ * The first live two-stage run produced a correct Rosales in every respect
+ * except size: a palm-sized toy rendered vase-sized in Maya's hand. Stage 1
+ * renders the plate centered and large on a neutral field with no scale
+ * context, and stage 2 composites it at roughly the plate's apparent size.
+ * Nothing in either reference tells the model how big the object is in the
+ * world.
+ *
+ * The cue is expressed **relative to the presenter's own hand**, never in
+ * units, because the model has no unit sense but does understand a hand it is
+ * already drawing. Templating these from the Nalpac dimension specs is the
+ * better long-term answer and stays on #2761; these presets cover the catalog's
+ * real shape classes today.
+ */
+export const PRODUCT_SCALES = {
+  palm:     'The product is small and palm-sized: it sits entirely within her hand, no taller than her palm is wide, and her fingers wrap comfortably around it.',
+  handheld: 'The product is handheld and slender: roughly as long as her hand from wrist to fingertip, and narrow enough that her fingers close around it easily.',
+  forearm:  'The product is long-handled: roughly the length of her forearm from wrist to elbow, held near one end.',
+  bottle:   'The product is a small bottle, about the height of her hand from wrist to fingertip and easily gripped in one hand.',
+} as const
+
+export type ProductScale = keyof typeof PRODUCT_SCALES
+
+export function isProductScale(v: unknown): v is ProductScale {
+  return typeof v === 'string' && Object.prototype.hasOwnProperty.call(PRODUCT_SCALES, v)
+}
+
+/**
+ * Append the scale clause to a composite prompt.
+ *
+ * Appended rather than prepended: the trailing negative-prompt block is what
+ * callers tend to end on, and a scale cue buried before a long negative list
+ * gets less weight than one stated right after the scene. Kept as its own
+ * exported function so the rule is testable without spending a generation.
+ */
+export function withProductScale(prompt: string, scale: ProductScale | string): string {
+  const clause = isProductScale(scale) ? PRODUCT_SCALES[scale] : scale.trim()
+  if (!clause) return prompt
+  return `${prompt.trim()} ${clause}`
+}
+
 export interface GenerateCastCompositeOpts {
   prompt: string
   /** Product handle, for the filename. */
@@ -139,6 +182,12 @@ export interface GenerateCastCompositeOpts {
   presenterImageUrl: string
   /** Real Shopify product photo. Stage 1 turns it into an unlabeled plate. */
   productImageUrl: string
+  /**
+   * How big the product is, relative to the presenter's hand. Required, because
+   * omitting it is what produced a vase-sized palm toy: a silent default would
+   * be wrong for most of the catalog and wrong invisibly.
+   */
+  scale: ProductScale | string
   /** Candidate count (1-4). More candidates is the cheap way to survive hand anatomy. */
   count?: number
   caller?: string
@@ -158,7 +207,7 @@ export async function generateCastComposite(
   const { composeSceneFrame } = await import('./fal-video.server')
 
   const frame = await composeSceneFrame({
-    prompt: opts.prompt,
+    prompt: withProductScale(opts.prompt, opts.scale),
     presenterImageUrl: opts.presenterImageUrl,
     productImageUrl: opts.productImageUrl,
     // 4:5 is the feed/grid still. The default is 9:16, which is a video frame

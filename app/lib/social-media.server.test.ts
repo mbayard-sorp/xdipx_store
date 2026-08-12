@@ -10,6 +10,9 @@ import {
   buildSocialAssetFilename,
   isGeneratedSocialAsset,
   allMediaAreGeneratedSocialAssets,
+  PRODUCT_SCALES,
+  isProductScale,
+  withProductScale,
 } from './social-media.server'
 
 const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
@@ -108,5 +111,40 @@ describe('buildSocialAssetFilename', () => {
     })
     expect(name).toBe('social-untitled-plate-editorial-20260812.jpg')
     expect(isGeneratedSocialAsset(`${CDN}/${name}`)).toBe(true)
+  })
+})
+
+describe('product scale cues (ticket #2761)', () => {
+  it('expresses scale relative to the hand, never in units', () => {
+    // The model has no unit sense but does understand a hand it is drawing.
+    for (const clause of Object.values(PRODUCT_SCALES)) {
+      expect(clause).toMatch(/\bhand\b|\bpalm\b|\bfingers\b|\bwrist\b/)
+      expect(clause).not.toMatch(/\b\d+\s?(cm|mm|in|inch|inches)\b/)
+    }
+  })
+
+  it('appends a known preset to the prompt', () => {
+    const out = withProductScale('A bright scene.', 'palm')
+    expect(out.startsWith('A bright scene.')).toBe(true)
+    expect(out).toContain(PRODUCT_SCALES.palm)
+  })
+
+  it('passes free text through for a product no preset fits', () => {
+    const out = withProductScale('A bright scene.', 'about as wide as her two hands together')
+    expect(out).toBe('A bright scene. about as wide as her two hands together')
+  })
+
+  it('leaves the prompt alone when the cue is empty', () => {
+    expect(withProductScale('A bright scene.', '   ')).toBe('A bright scene.')
+  })
+
+  it('validates presets', () => {
+    expect(isProductScale('palm')).toBe(true)
+    expect(isProductScale('forearm')).toBe(true)
+    expect(isProductScale('enormous')).toBe(false)
+    expect(isProductScale(undefined)).toBe(false)
+    // Must not be fooled by inherited Object properties.
+    expect(isProductScale('toString')).toBe(false)
+    expect(isProductScale('constructor')).toBe(false)
   })
 })
