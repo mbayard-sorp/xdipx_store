@@ -339,3 +339,67 @@ brief §9.
 added, no existing Sanity schema modified. The chrome fix is a presentational
 card-token change inside the locked Nº01-Nº11 shell; the ambition concept stays a
 proposal pending IA review + additive schema before any build.
+
+---
+
+## Delta — 2026-08-12 (Routine B, run #282)
+
+**Sourcing honesty first.** External competitor egress is BLOCKED by this run's
+network policy: a `WebFetch` of `maude.co` returned `EGRESS_BLOCKED`, and only
+`github.com` and `xdipx.com` are reachable. **No live competitor captures were
+taken this run, and nothing is reported from memory** (the sourcing-honesty rule:
+never quote or characterize a competitor's live page from prior knowledge). The
+standing 16-capture baseline above is unchanged; this delta adds no competitor
+findings. When egress is restored, the next cycle should re-run the four-site
+sweep (Lovehoney, Spectrum, In The Groove, Too Timid) plus one new site and
+append real deltas.
+
+**Recon focus this run: our own new front door.** Since Instagram went live
+(strategy brief #5, 2026-08-10), `/social` is the priority IG→landing→PDP
+surface, and the homepage directive is explicit: "make sure whatever a curious
+IG viewer lands on is a clean, in-stock, conversion-shaped surface." So recon
+turned inward, to the one surface that now has real audience. Self-capture is
+fetchable: `xdipx.com/social` returns **200** and age-gates correctly (SSR
+serves the gate panel; post-gate content is code-verified in
+`app/routes/_layout.social.tsx`).
+
+**Code-level audit of `/social` found three real defects, all cheap-and-certain:**
+1. **Attribution gap on the primary click.** The pinned featured product (the
+   "one from the video," the highest-intent click on the page) linked to a bare
+   `/products/{handle}` with **no UTM**, while the secondary "lately on my feed"
+   grid already carried `utm_source=instagram&utm_medium=social` via `pdpHref`.
+   The most prominent IG→PDP click was the one hop we could not measure, on the
+   exact instrument the brief calls "the single most important missing" one.
+2. **No in-stock guard on the pinned feature.** The featured pin was selected by
+   first index match with no stock check, so a pinned-but-out-of-stock product
+   would send IG traffic to an unavailable PDP. This is the same class of failure
+   that already pulled one live IG post (out-of-stock feature) on 08-09.
+3. **Retired tic in the hero copy.** "I will point you at something worth
+   wanting" uses the retired "point you to/at" tic (charter fresh-language rule;
+   mission brief §8 retires it explicitly).
+
+**Decision this delta forces (recon that changes nothing is a wasted step):**
+Ship a surgical hardening of `/social` this cycle — in-stock featured pin,
+`pdpHref` on the primary PDP link, fresh hero copy — one route file, no protected
+path, gates green (typecheck/build/1788 tests), voice gate PASS. This cycle's
+shell PR.
+
+**Adopted this cycle:** `/social` IG-arrival hardening (three live, code-level
+defects on the week's single priority conversion surface).
+**Rejected/deferred this cycle (logged so ambition compounds):** the four-site
+external competitor sweep, **deferred by force** (egress blocked, not a
+judgment); adding an in-stock guard to the Sanity *pin-selection* layer
+(merchandising tickets #2388/#2212 own the upstream stock cross-check; this PR
+only hardens the render surface so a stale pin can never render a dead buy-path);
+and any generated imagery for `/social`, still gated on asset-generation spend
+and unmeasurable while sessions < 300/wk. The ambition-mandate concept carried
+this cycle is a **design doc + wire only**,
+`docs/homepage-team/concepts/first-tap.md` (a one-tap intent fork on the IG
+arrival surface, the first banked concept built for `/social` itself),
+shipping-disciplined per mission brief §9.
+
+**IA fence respected:** no new section type, no new route, no `/discover` link
+added, no existing Sanity schema modified. The shipped fix is presentational +
+instrumentation on one existing route inside the locked Nº01-Nº11 shell; the
+First Tap concept stays a proposal pending IA review + additive schema before any
+build.

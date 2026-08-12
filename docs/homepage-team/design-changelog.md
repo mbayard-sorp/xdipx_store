@@ -26,4 +26,9 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 
 ## Entries
 
+### 2026-08-12 — Routine B — Harden the /social IG-arrival surface (in-stock pin, attributed primary link, fresh hero copy)
+- **What:** `app/routes/_layout.social.tsx` — (1) the pinned featured product now requires an in-stock match (falls through / hides rather than sending IG traffic to a dead PDP); (2) the primary featured PDP link now carries the social UTM via `pdpHref`, matching the recent grid, so IG→PDP is measured on the highest-intent click; (3) hero copy retired-tic fix ("point you at" → "find you"). No shell/section/schema change. Ambition-mandate concept wire `docs/homepage-team/concepts/first-tap.md` banked (design-only, not built).
+- **Why:** Strategy brief #5 names /social the priority IG→landing→PDP surface and "measure each hop honestly" as the month's job; the primary click was the one hop we could not attribute, and the pin had no stock guard (same failure class that pulled a live IG post on 08-09). "point you to/at" is retired by mission brief §8.
+- **Evidence:** run #282; brief #5 (IG live, GA4-blind); WebFetch egress blocked for competitors this run (self-capture only); voice gate PASS; typecheck/build/1788 tests green; PR link on the run row.
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
