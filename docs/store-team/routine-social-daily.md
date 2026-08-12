@@ -3,8 +3,9 @@
 The playbook for the scheduled social routine. Entry agent: `social-media-manager`. **DRAFT-ONLY**:
 every post lands in `social_posts` as `status:'draft'`, `review_status:'pending_review'` for the
 owner to review in `/admin/socials` (the Social Studio). There is no live-posting step in this
-playbook, and none may be added outside the graduation process (`social_team_autopost` +
-`X_AUTO_POST_ENABLED`, owner-flipped, X only).
+playbook, and none may be added except through §Posting posture below, which records the owner's
+2026-08-11 decision to stop being the bottleneck and the four things that must exist before the
+posture actually changes. Until they do, this routine is draft-only exactly as before.
 
 This is the **internal review period**: the owner's decisions and written feedback on each draft
 are the team's training signal. Read them verbatim, rework what they ask for, and let the patterns
@@ -44,6 +45,39 @@ curl -s -X POST "$BASE_URL/api/team/run" \
    `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
    adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).
 
+## Posting posture (read before Step 2b, Step 2.5, and Step 7)
+
+Owner direction 2026-08-11: **"I don't want to be the bottle neck for posts to go out. I'll review
+them once they are live and give feedback to the team."**
+
+That is a decision to remove the pre-publish human gate on Instagram, and it is the owner's to make.
+It is not a valve flip, because of one fact that is easy to miss: **nothing sets
+`review_status:'approved'` except the owner's own click in the Social Studio.** Remove the click and
+nothing ever becomes approved, so a publish job would find nothing to publish. Something has to fill
+that slot, and what fills it is an independent pre-publish gate, not an absence.
+
+**Today the posture is unchanged: draft-only.** Instagram drafts still land `pending_review` and the
+owner still publishes from `/admin/socials`. Do not behave as though autopublish is live. The posture
+changes only when all of the following are true, and the routine checks rather than assumes:
+
+1. A social image-generation path exists, so posts stop carrying retired bare-SKU packshots. This is
+   a hard prerequisite: publishing non-compliant imagery unreviewed is strictly worse than publishing
+   nothing, and today it is a certainty rather than a risk.
+2. An **independent pre-publish gate** runs and is the thing that writes `approved`. It is not the
+   drafting agent grading its own homework, and it is not the voice gate, which reviews strings and
+   is structurally blind to imagery, live stock state, and repetition across posts.
+3. A publish job exists with a publish-time stock re-check, an image-provenance check, a daily
+   publish cap independent of the drafting quota, and its own kill switch.
+4. The owner can leave feedback on a **posted** row, so his stated loop can actually close.
+
+Until then, drafting continues exactly as before and the run summary says plainly that posts are
+waiting on the owner. See `docs/store-team/instagram-campaigns.md` §7 for what is built and what is
+not.
+
+**What never changes with the posture.** The voice gate, the platform-policy gate, the stock gate,
+and the campaign rules all still bind. Removing the owner's approval click removes a human check; it
+does not remove a single machine one, and no gate may be relaxed to make autopublish easier to ship.
+
 ## Step 2a: Campaign reconciliation (every run, no exceptions)
 
 Instagram runs a continuous chain of themed campaigns from
@@ -75,18 +109,37 @@ without reading into any JSON. Only reconcile rows you own; never touch a homepa
    `store-strategist` owns which story the store is telling this month. If a runway suggestion is
    already open, say so in the summary instead of filing a duplicate.
 
-## Step 2b — Backlog self-throttle
+## Step 2b — Self-throttle
 
-Using the Step 2 item 7 review-outcomes list, count `pending_review` rows and check whether any
-row was reviewed (`approved`/`needs_changes`/`rejected`) in roughly the last 3 days. If unreviewed
-`pending_review` drafts exceed **three days of the current per-platform quota** (the sum of
-`social_freq_*` across the platforms you draft for, times 3) with **zero** owner reviews in that
-window, throttle this run: draft **at most 1 new post** this run (or skip new drafting entirely),
-prioritize the active campaign's next slot over anything evergreen if you do draft, and record an honest
-`event` surfacing the backlog size and age to the owner. Reworks (Step 2.5) and Step 7b suggestion
-handling still run as normal. This only sizes down *new* drafting; it never touches draft-only
-status, the voice gate, or `social_team_autopost`. The threshold was hardcoded at 9 and silently
-stopped scaling the moment Instagram's frequency moved; it is now derived from the live quota.
+**Which throttle applies depends on the posting posture** (§Posting posture, above).
+
+**While Instagram posting is owner-reviewed (today):** the throttle is queue depth. Using the Step 2
+item 7 review-outcomes list, count `pending_review` rows and check whether any row was reviewed
+(`approved`/`needs_changes`/`rejected`) in roughly the last 3 days. If unreviewed `pending_review`
+drafts exceed **three days of the current per-platform quota** (the sum of `social_freq_*` across the
+platforms you draft for, times 3) with **zero** owner reviews in that window, throttle this run:
+draft **at most 1 new post** (or skip new drafting entirely), prioritize the active campaign's next
+slot over anything evergreen, and record an honest `event` surfacing the backlog size and age. The
+threshold was hardcoded at 9 and silently stopped scaling the moment Instagram's frequency moved; it
+is now derived from the live quota.
+
+**Once Instagram autopublishes, queue depth stops meaning anything.** Nothing queues, so a
+backlog-based throttle can never fire and the run would accelerate into a wall instead of slowing
+down. The trigger moves from "the queue is getting long" to "something already live looks wrong",
+which is the only failure mode left once nothing can be caught before the fact. Read the last 3 days
+of `status:'posted'` Instagram rows and check three things:
+
+1. **A post was removed or the platform flagged it.** Stop drafting new Instagram posts entirely,
+   step volume down one tier per the `docs/ads-policy.md` escalation ladder, end the active campaign,
+   and file the incident. One post is never worth the account.
+2. **Owner feedback on a live post reads as a stop or a correction.** Throttle to one draft and
+   address that specific complaint before anything else ships.
+3. **Neither fired, but a required gate cannot be satisfied cleanly this run** (no voice PASS, no
+   compliant image asset, campaign reconciliation failed). Throttle to one. Never force volume to
+   fill a quota that is now unsupervised on the way out.
+
+Reworks (Step 2.5) and Step 7b suggestion handling run as normal under both postures. This only
+sizes down *new* drafting; it never touches a gate.
 
 ## Step 2.5 — Rework pass (before any new drafting)
 
@@ -307,9 +360,26 @@ Three reads on the latest reviewed drafts:
    rewording you is feedback too; name the pattern (shorter? warmer? less hashtag-y?).
 3. **Approved unedited** — your quality signal; note what those drafts have in common.
 
+**Under autopublish, two of those three reads disappear.** There is no pending queue to diff, and
+`editedText` vanishes entirely as a signal because the owner is no longer rewriting captions before
+they ship. Losing the owner's pre-publish review removes the only training signal this loop has ever
+had, so the replacement is not optional. Read instead:
+
+1. **Owner feedback on live posts.** Quote it verbatim, exactly as rejection feedback was quoted.
+   This is the highest-value signal and the only one guaranteed to carry judgment.
+2. **Removals and platform flags.** The hard safety floor. Binary and rare, and it teaches nothing
+   about quality above the floor, but it is the one signal that must never be missed.
+3. **Engagement**, once it is captured: which *angle* landed with real people, independent of
+   whether the owner liked it.
+4. **A retroactive self-audit**, because none of the above is guaranteed to arrive on any given day.
+   Pull the last N posted Instagram rows and re-judge them against today's charter and today's
+   campaign rules, logging any that would not pass the gate as written now. On a run where the owner
+   said nothing and nothing was removed, this is the only way the loop still learns anything. Never
+   report a silent week as a good week.
+
 One `decision` event (`phase:'retro'`). When **two or more** pieces of feedback share a theme,
 file a suggestion (`team:'social'`, kind `instructions`) proposing the concrete change to your own
-playbook — that is how the owner's review period trains you. Organic winners worth paid
+playbook — that is how the owner's review trains you. Organic winners worth paid
 amplification → suggestion with `targetTeam:'ads'`.
 
 ## Step 7b — Inbound suggestions (read your own mail)
