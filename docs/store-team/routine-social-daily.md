@@ -30,26 +30,55 @@ curl -s -X POST "$BASE_URL/api/team/run" \
    addendum for that lane. Missing → STOP and report.
 2. `docs/ads-policy.md` §Organic social + §Creative (mandatory). These bind organic drafts, not
    just paid, and the platform's live rules outrank both when they are stricter.
-3. `docs/store-team/mission-brief.md`; the strategy brief (`GET /api/team/brief`).
-4. Calendar (`GET /api/team/calendar`), current featured products/deals.
-5. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
+3. `docs/store-team/mission-brief.md`; the strategy brief (`GET /api/team/brief`), including its
+   **Social Plan** section when present, which sizes the day's volume.
+4. `docs/store-team/instagram-campaigns.md` (mandatory before any Instagram drafting): the standing
+   campaign schedule, the pillar and format library, the rotation rule, and the continuity rule.
+   Missing → STOP and report.
+5. Calendar (`GET /api/team/calendar`), current featured products/deals.
+6. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
    (`social_freq_*`; 0 = skip that platform entirely).
-6. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
+7. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
    `editedText` per row are the owner's verdicts on your last drafts.
-7. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
+8. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
    `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
    adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).
 
+## Step 2a: Campaign reconciliation (every run, no exceptions)
+
+Instagram runs a continuous chain of themed campaigns from
+`docs/store-team/instagram-campaigns.md` §5. There is never a day without an active campaign. This
+pass is pure date arithmetic with no editorial judgment in it, which is exactly why it runs
+unconditionally rather than on one weekday: "August Reset, Emma's Way" was proposed for a Saturday
+and sat at `planned` forever because the only thing that reconciled calendar status was the homepage
+Monday changeover.
+
+1. **Activate.** No `type:'campaign'` row `active` today and a `planned` row whose `event_date` is on
+   or before today → promote it.
+2. **Close and hand over.** The active campaign's `ends` date (from the schedule) has passed → mark it
+   `done` and activate its successor **in the same pass**.
+3. **Kickoff.** A campaign activating today has no key-art pool → run the kickoff pass
+   (`instagram-campaigns.md` §3.4) before drafting: lock ground set, light signature, rhyme prop, and
+   cast reference, and generate the reusable typography plates. The visual scheme is decided once,
+   before post 1, and never re-decided mid-campaign.
+4. **Runway.** The schedule must always hold at least four weeks of future campaigns. Less → file a
+   suggestion to `store-strategist` (kind `strategy`, `targetTeam:'strategy'`) asking for the next
+   block. **Never invent campaign N+1 yourself:** the social team owns execution inside a campaign,
+   `store-strategist` owns which story the store is telling this month. If a runway suggestion is
+   already open, say so in the summary instead of filing a duplicate.
+
 ## Step 2b — Backlog self-throttle
 
-Using the Step 2 item 6 review-outcomes list, count `pending_review` rows and check whether any
+Using the Step 2 item 7 review-outcomes list, count `pending_review` rows and check whether any
 row was reviewed (`approved`/`needs_changes`/`rejected`) in roughly the last 3 days. If unreviewed
-`pending_review` drafts exceed **9** (about 3 days of quota) with **zero** owner reviews in that
+`pending_review` drafts exceed **three days of the current per-platform quota** (the sum of
+`social_freq_*` across the platforms you draft for, times 3) with **zero** owner reviews in that
 window, throttle this run: draft **at most 1 new post** this run (or skip new drafting entirely),
-prioritize the current theme's pick over anything evergreen if you do draft, and record an honest
+prioritize the active campaign's next slot over anything evergreen if you do draft, and record an honest
 `event` surfacing the backlog size and age to the owner. Reworks (Step 2.5) and Step 7b suggestion
 handling still run as normal. This only sizes down *new* drafting; it never touches draft-only
-status, the voice gate, or `social_team_autopost`.
+status, the voice gate, or `social_team_autopost`. The threshold was hardcoded at 9 and silently
+stopped scaling the moment Instagram's frequency moved; it is now derived from the live quota.
 
 ## Step 2.5 — Rework pass (before any new drafting)
 
@@ -88,6 +117,29 @@ Restricted Goods standard regardless of how clean the image is), fresh language 
 by the owner once approved. At most one promo-angle post per run, and only referencing
 owner-approved promo codes. Propose a `scheduledFor` date for every draft (default: tomorrow) so
 the Studio's calendar strip populates.
+
+**Instagram drafts against the active campaign.** Read its pillars, formats, rotation, and visual
+scheme from `docs/store-team/instagram-campaigns.md`, then:
+
+- **Rotate.** Never two consecutive Instagram posts from the same pillar, and never two consecutive
+  posts in the same format. The ground follows the 4-beat cycle and the archetype follows the 7-beat
+  spine (§3.1). Read the last few posted rows to find your position in both.
+- **Cadence is context-driven, not a fixed ramp.** Baseline is **at least one Instagram post every
+  day, no zero days**. Scale to 2-4/day on weeks with something real happening (an aisle or drop
+  going live, a featured-brand week, a calendar promo, an adopted trend brief); 10/day is a hard
+  ceiling for an exceptional moment, never a target. The strategy brief's Social Plan section sizes
+  this when present.
+- **Content mix** comes from `docs/store-team/mission-brief.md` §6b (roughly 40% product-in-scene or
+  carousel, 30% pure education with no product in frame, 20% inspiring, 10% site news and trend
+  reacts; at most half of a multi-post day is product-forward). The charter points at the brief for
+  this ratio, so the brief is where it is maintained.
+- **Set `postType:'campaign'`** on Instagram campaign posts (the enum already carries it and no row
+  has ever used it) and name the campaign slug in the draft's event summary, so posts can be traced
+  to their campaign until the schema carries a real link.
+- **A campaign licenses nothing.** Step 4a, 4b, 2.6, and 2b all apply unchanged inside a campaign.
+  "Wand Week" is not permission to sell wands.
+- **Any post removal ends the campaign** and steps volume down one level immediately, per
+  `docs/ads-policy.md` escalation. Volume is earned back by a clean stretch, not by waiting.
 
 **Plain nouns first.** Name the product category and anatomy with the charter's plain nouns
 (`docs/emma-voice.md`, "Say the word, drop the wink") — vibrator, clitoral, prostate, penetration —
@@ -151,7 +203,12 @@ and a blocked draft is rewritten or dropped, never softened until it squeaks pas
    PDP. (This is the one that removed our first Instagram post's category of content.)
 2. Does it describe what the product does to a body? Act naming, arousal, orgasm, "you'll feel".
 3. Does the image show product in a hand, on or near a body, in use, on a bed with a person, or
-   with fluid/lube texture?
+   with fluid/lube texture? **One narrow carve-out, pending the owner's ruling** (tracked in
+   `docs/store-team/instagram-campaigns.md` §3.6): the charter's License C licenses cast to hold and
+   present *the box*. An **unlabeled carton** in hand is allowed; **bare product in a hand stays a
+   BLOCK**, unchanged. The carton must be unlabeled because a real one carries a manufacturer logo,
+   which is text in pixels. If the two docs are ever read as conflicting, take the stricter one and
+   say so in the run summary.
 4. Does the caption, alt text, on-image text, or any hashtag carry explicit vocabulary, crude
    slang, or emoji-anatomy?
 5. Is anything in it coded to slip past a filter? Algospeak, character substitution, reclaimed
@@ -179,13 +236,31 @@ resolves to what the feed is actually featuring. Do this as part of the run and 
 
 An Instagram or TikTok draft **must carry at least one `mediaUrls` entry** — the owner reviews
 image and caption together; a caption alone is an incomplete draft. Ask `media-manager` first for
-an existing Shopify Files / Sanity asset (reuse-first); when nothing genuinely fits, request one
-generation (1:1 for Instagram feed, 9:16 for TikTok), re-checking the gate before each generation.
-Every asset on an Instagram or TikTok draft is **product-as-object on clean editorial ground** and
-must clear Step 4b question 3 before it ships: the core charter's imagery register is the floor
-here, and the social addendum's extra hard lines are the ceiling.
+an existing Shopify Files / Sanity asset (reuse-first); when nothing genuinely fits, request a
+generation, re-checking the gate before each one.
+
+**Instagram key art comes from the campaign pool, not from one-off daily requests.** Generating one
+image on the day of each draft structurally cannot produce fourteen posts that read as one campaign.
+The kickoff pass in Step 2a locks the ground set, light signature, rhyme prop, and cast reference and
+generates the reusable typography plates before the first caption is written; daily runs draw from
+that pool and generate only what it is missing.
+
+- **Aspect:** generate **4:5** for Instagram (9:16 for TikTok). The profile grid crops tiles to 3:4,
+  so the subject must survive both a 3:4 and a 1:1 centre crop.
+- **Archetypes:** the licensed set is the charter's — product in a lived-in scene, presenter and cast
+  in frame, and tasteful visual metaphor as a carousel hook. **Packshot-only stills are retired
+  entirely, filler included.** The line about "product-as-object on clean editorial ground" that
+  stood here was the packshot-era rule and is superseded.
+- **Cast composites always go through the two-stage path** (unlabeled product plate, then composite).
+  Compositing straight from a Shopify packshot puts a legible manufacturer carton in the presenter's
+  hand. Never skip the plate.
+- **No baked-in text in any generated image.** On-slide typography is rendered per the design
+  doctrine.
+- Every asset must clear Step 4b question 3 before it ships.
+
 If the gate has no image budget left, ship the draft with the best reusable asset available and
-note the ideal asset in the run summary. Video is produced by the video team (video-producer +
+note the ideal asset in the run summary — and say plainly in the summary that the campaign's visual
+identity is degraded, rather than letting a reuse-only run look like a normal one. Video is produced by the video team (video-producer +
 the video_jobs pipeline), never improvised here: approved videos arrive in your world as
 pre-approved `social_posts` rows (postType `video_reel`/`video_short`, `video_job_id` set) fanned
 out from `/admin/video-studio`. Do not draft over them, count them against your text/image

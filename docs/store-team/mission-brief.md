@@ -104,6 +104,27 @@ independently (a hardcoded `width=480` tile in a 208px box, deck panels inheriti
   is wrong. Worked example: PR #478 cut 12 tiles from 480w to 320w and a video poster from ~89KB to
   ~10KB.
 
+## 6b. Instagram content mix (the ratio the voice charter points at)
+
+The social addendum in `docs/emma-voice.md` says "the content mix in the mission brief governs the
+ratio." This is that ratio. Owner direction 2026-08-09: packshots are boring, make the product
+interesting, the account becomes a resource.
+
+| Share | Content |
+|---|---|
+| ~40% | Product in a lived-in scene, or a carousel |
+| ~30% | Pure education, **no product in the frame at all** |
+| ~20% | Inspiring or affirming |
+| ~10% | Site news and trend reacts |
+
+When posting more than once in a day, **at most half the set is product-forward**. A follower who
+never buys anything should still be getting value from the follow; that is what makes the account a
+publication rather than a catalog, and a catalog is what Meta's Restricted Goods standard removes.
+
+Instagram runs a continuous chain of themed campaigns. The schedule, the pillar and format library,
+the visual-scheme spec, and the continuity rule live in `docs/store-team/instagram-campaigns.md`,
+which the social routine loads at run start.
+
 ## 7. Definition of done (per run)
 
 Run row finished with an honest status and summary; events posted throughout (the dashboard is the
