@@ -109,6 +109,91 @@ export function allMediaAreGeneratedSocialAssets(urls: readonly string[] | null 
   return urls.every(isGeneratedSocialAsset)
 }
 
+/**
+ * Generate a cast-in-hand composite: an approved cast member holding and
+ * showing the REAL product (owner ruling 2026-08-12).
+ *
+ * Why this is a separate function from the single-image path below, and not a
+ * flag on it: a single reference image can hold exactly one thing. The
+ * single-ref Kontext path preserves whichever reference it is given, so passing
+ * the presenter preserves the presenter and *invents* the product. That is not
+ * a tuning problem, it is the shape of the model call, and it produced a frame
+ * where the cast member held a plausible pink cylinder that was no SKU at all.
+ *
+ * `composeSceneFrame` is the path built for this and already supports a 4:5
+ * feed still. Stage 1 renders a packaging-free plate from the real Shopify
+ * photo, so a manufacturer carton never reaches the presenter's hand; stage 2
+ * composites presenter and plate together, holding cast identity from the
+ * reference photo. Both references are supplied, so both survive.
+ */
+export interface GenerateCastCompositeOpts {
+  prompt: string
+  /** Product handle, for the filename. */
+  handle: string
+  /** Short mood token for the filename. */
+  mood: string
+  /** YYYY-MM-DD. */
+  date: string
+  slide?: number
+  /** Approved castMember reference photo. Identity comes from this, never from the prompt. */
+  presenterImageUrl: string
+  /** Real Shopify product photo. Stage 1 turns it into an unlabeled plate. */
+  productImageUrl: string
+  /** Candidate count (1-4). More candidates is the cheap way to survive hand anatomy. */
+  count?: number
+  caller?: string
+}
+
+export interface GenerateCastCompositeResult {
+  /** Permanent Shopify Files CDN URLs, one per surviving candidate. */
+  urls: string[]
+  filenames: string[]
+  /** Cost keys billed, so the caller can log spend for both stages. */
+  costs: { costKey: string; count: number }[]
+}
+
+export async function generateCastComposite(
+  opts: GenerateCastCompositeOpts,
+): Promise<GenerateCastCompositeResult> {
+  const { composeSceneFrame } = await import('./fal-video.server')
+
+  const frame = await composeSceneFrame({
+    prompt: opts.prompt,
+    presenterImageUrl: opts.presenterImageUrl,
+    productImageUrl: opts.productImageUrl,
+    // 4:5 is the feed/grid still. The default is 9:16, which is a video frame
+    // and would be cropped to nothing in a profile grid.
+    aspectRatio: '4:5',
+    count: opts.count ?? 2,
+  })
+
+  const costs: { costKey: string; count: number }[] = [
+    { costKey: frame.costKey, count: frame.urls.length },
+    ...(frame.plate ? [frame.plate] : []),
+  ]
+
+  // Rehost every candidate: fal URLs expire in ~24h and Instagram fetches the
+  // image server-side at publish time.
+  const urls: string[] = []
+  const filenames: string[] = []
+  for (const [i, falUrl] of frame.urls.entries()) {
+    const filename = buildSocialAssetFilename({
+      handle: opts.handle,
+      archetype: 'cast',
+      mood: opts.mood,
+      date: opts.date,
+      slide: opts.slide ?? i + 1,
+    })
+    const res = await fetch(falUrl)
+    if (!res.ok) continue
+    const buffer = Buffer.from(await res.arrayBuffer())
+    urls.push(await uploadMoodImageToShopifyFiles(buffer, filename))
+    filenames.push(filename)
+  }
+
+  return { urls, filenames, costs }
+}
+
 export interface GenerateSocialImageOpts {
   prompt: string
   /** Product handle (or campaign slug for a product-free post) for the filename. */
