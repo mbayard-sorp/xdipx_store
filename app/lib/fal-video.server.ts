@@ -322,6 +322,18 @@ const PLATE_NEGATIVE =
   'packaging, retail box, carton, sleeve, insert, text, words, letters, watermark, logo, ' +
   'brand name, caption, second product, duplicate product'
 
+/**
+ * Stage-2 output dimensions per caller-requested ratio. FLUX.2 edit takes explicit
+ * pixel dimensions rather than fal's `aspect_ratio` string, so the ratio resolves
+ * here. Pinning exact pixels also avoids the under-ratio drift the old
+ * nano-banana path had ('4:5' came back 896x1152, which Instagram rejects as
+ * taller than 4:5).
+ */
+const SCENE_FRAME_SIZES = {
+  '9:16': { width: 1080, height: 1920 },
+  '4:5': { width: 1080, height: 1350 },
+} as const
+
 export interface ComposeSceneFrameOpts {
   /** Scene direction. Product prominence and grounds come from the caller's prompt scaffold. */
   prompt: string
@@ -329,8 +341,12 @@ export interface ComposeSceneFrameOpts {
   presenterImageUrl: string
   /** Real Shopify product photo, publicly fetchable. Omitted for talking-head frames, which never include the product. */
   productImageUrl?: string
+  /** Additional publicly-fetchable reference images beyond presenter/product (e.g. a second product for a paired scene). */
+  extraImageUrls?: string[]
   /** Candidate count (default 3, capped 4). */
   count?: number
+  /** Frame ratio. Defaults to '9:16' (this function's original video-frame use); '4:5' for a feed/carousel still. */
+  aspectRatio?: keyof typeof SCENE_FRAME_SIZES
 }
 
 export interface SceneFrameResult {
@@ -400,9 +416,13 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
     },
     body: JSON.stringify({
       prompt: opts.prompt,
-      image_urls: [opts.presenterImageUrl, ...(productRef ? [productRef] : [])],
+      image_urls: [
+        opts.presenterImageUrl,
+        ...(productRef ? [productRef] : []),
+        ...(opts.extraImageUrls ?? []),
+      ],
       num_images: count,
-      image_size: { width: 1080, height: 1920 },
+      image_size: SCENE_FRAME_SIZES[opts.aspectRatio ?? '9:16'],
       enable_safety_checker: false,
       output_format: 'jpeg',
     }),
