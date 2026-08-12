@@ -1822,6 +1822,80 @@ export async function reviewSocialPost(id: number, input: ReviewSocialPostInput)
   return result.length > 0
 }
 
+/**
+ * Retrospective verdicts on a post that is already live (ticket #2738).
+ *
+ * Deliberately NOT the `review_status` vocabulary. `reviewSocialPost` above
+ * refuses posted rows on the principle that review is an editorial gate on
+ * drafts and not a way to relabel history, and that principle is right: a
+ * posted row's `review_status` is the record of the decision that let it ship.
+ * These are a different question asked at a different time ("now that it is
+ * live, was it any good"), so they live in their own vocabulary and leave the
+ * pre-publish verdict untouched.
+ */
+export const LIVE_POST_VERDICTS = ['worked', 'off', 'pull'] as const
+export type LivePostVerdict = (typeof LIVE_POST_VERDICTS)[number]
+
+export function isLivePostVerdict(v: unknown): v is LivePostVerdict {
+  return typeof v === 'string' && (LIVE_POST_VERDICTS as readonly string[]).includes(v)
+}
+
+/** `[live:worked] note` — greppable, parseable, and readable as plain text. */
+const LIVE_FEEDBACK_RE = /^\[live:(worked|off|pull)\]\s*([\s\S]*)$/
+
+export function formatLiveFeedback(verdict: LivePostVerdict, note: string): string {
+  const body = note.trim()
+  return body ? `[live:${verdict}] ${body}` : `[live:${verdict}]`
+}
+
+/**
+ * Parse a stored feedback string back into a verdict. Returns null for
+ * pre-publish feedback, which has no tag, so the social retro can tell the two
+ * kinds apart when it reads a row.
+ */
+export function parseLiveFeedback(
+  feedback: string | null | undefined,
+): { verdict: LivePostVerdict; note: string } | null {
+  if (!feedback) return null
+  const m = LIVE_FEEDBACK_RE.exec(feedback.trim())
+  if (!m) return null
+  return { verdict: m[1] as LivePostVerdict, note: (m[2] ?? '').trim() }
+}
+
+export interface LivePostFeedbackInput {
+  verdict: LivePostVerdict
+  note?: string | undefined
+  reviewedBy: string
+}
+
+/**
+ * Record the owner's feedback on an already-published post.
+ *
+ * This exists because the owner said on 2026-08-11 that he would stop approving
+ * posts before they ship and would instead review them once live and feed that
+ * back to the team. Every write path to the review fields refused a posted row,
+ * so that loop had nowhere to land and was not buildable. This is the writer
+ * that closes it.
+ *
+ * Only touches posted rows, and only writes `feedback` plus the reviewer stamp.
+ * `review_status` is left exactly as it was.
+ */
+export async function recordLivePostFeedback(
+  id: number,
+  input: LivePostFeedbackInput,
+): Promise<boolean> {
+  const result = await db
+    .update(socialPosts)
+    .set({
+      feedback:   formatLiveFeedback(input.verdict, input.note ?? ''),
+      reviewedBy: input.reviewedBy,
+      reviewedAt: new Date(),
+    })
+    .where(and(eq(socialPosts.id, id), eq(socialPosts.status, 'posted')))
+    .returning({ id: socialPosts.id })
+  return result.length > 0
+}
+
 /** Move a draft's proposed calendar slot. */
 export async function rescheduleSocialPost(id: number, scheduledFor: string | null): Promise<void> {
   await db
