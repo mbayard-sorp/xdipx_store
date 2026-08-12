@@ -147,3 +147,21 @@ export function findHeroEmbedMismatches(
 
   return results
 }
+
+/**
+ * True when the hero copy (alt + prompt) names AT LEAST ONE catalog product,
+ * using the same whole-word distinctive-token test as the mismatch finder.
+ *
+ * The complement is the failure mode findHeroEmbedMismatches is blind to by
+ * construction: it only fires when a hero names a product the post does NOT
+ * embed, so a hero that names NO product at all (a generic editorial scene on a
+ * post that does carry embeds) slips through. A per-post pre-flight checks
+ * `post.embedHandles.length > 0 && !heroNamesAnyProduct(post, catalog)` to catch
+ * exactly that (ticket #2750).
+ */
+export function heroNamesAnyProduct(post: AuditBlogPost, catalog: CatalogProduct[]): boolean {
+  const copy = normalize([post.heroImageAlt ?? '', post.imagePrompt ?? ''].join(' '))
+  if (!copy) return false
+  const copyTokens = new Set(copy.split(' ').filter(Boolean))
+  return catalog.some((p) => isNamedIn(distinctiveTokens(productName(p)), copyTokens))
+}
