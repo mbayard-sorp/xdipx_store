@@ -47,14 +47,46 @@ document did not happen.
 
 ## Read before you route
 
-Do not skip this. Routing without it produces confident nonsense.
+Routing without grounding produces confident nonsense. But do not front-load 160KB of charter
+either; read what the items in front of you actually touch.
 
-- `docs/store-team/operating-system.md` — what runs when, which gates exist, what is LIVE vs PLANNED
-- `docs/store-team/mission-brief.md` and `docs/homepage-team/mission-brief.md` — the binding briefs
-- `docs/emma-voice.md` — the voice charter, binding on every customer-facing word
-- `docs/design-doctrine.md` — binding on every pixel
-- `CLAUDE.md` — repo rules, merge policy, the carve-outs
-- `.claude/agents/` — the roster, so you route to a real owner and not an imagined one
+**Always:** `docs/store-team/operating-system.md` (what runs when, which gates exist, what is
+LIVE vs PLANNED). CLAUDE.md is already in context; trust it for merge policy and the carve-outs.
+
+**Only when an item touches that surface:**
+
+- Customer-facing words: `docs/emma-voice.md`, the binding voice charter
+- Pixels, imagery, layout: `docs/design-doctrine.md`, the binding visual charter
+- Homepage merchandising: `docs/homepage-team/mission-brief.md`. Store-wide strategy:
+  `docs/store-team/mission-brief.md`
+- Before routing to an agent: its file in `.claude/agents/`, so you route to a real owner and not
+  an imagined one
+
+### Routing card
+
+Verified against the code 2026-08-12. If reality disagrees with this card, trust the code and fix
+the card.
+
+- **Teams:** homepage, social, ads, email, strategy, content, product, video, support. `team` is
+  required on create; the API 400s without it.
+- **Auto-approve** (`{team}_team_auto_approve_suggestions`) is ON only for homepage, content,
+  product, social, strategy. A row filed under ads, email, video, or support sticks at `proposed`
+  and no scheduled session will ever triage it. If you must file there, say so in "Needs you".
+- **Kinds and who executes them:**
+  - `code`: R-DEV claims approved rows at 14:00 and 20:00 UTC, opens a PR, QA verifies, the
+    release engine merges
+  - `instructions` / `agent-def`: agent-editor, weekly, via PR, allowlist-bound (below)
+  - `config`: agent-editor, docs only. It can never change a valve, cap, or pipeline_settings value
+  - `process`, `program`, `campaign`, `promo`: the owner acts by hand; no automated executor
+  - `strategy`: store-strategist folds it into the weekly brief
+  - An unknown kind is silently coerced to `process`, which means owner homework. Spell kinds exactly.
+- **agent-editor's real allowlist is the CI regex:** `.claude/agents/*.md` plus depth-1 `.md`
+  files in `docs/store-team/` and `docs/homepage-team/`. Nothing else merges on an agent branch,
+  whatever an agent definition claims. `docs/emma-voice.md`, `docs/design-doctrine.md`,
+  `docs/ads-policy.md`, and `CLAUDE.md` are all outside it.
+- **Lifecycle:** proposed, approved, in_progress, pr_open, verified, applied; `blocked` and
+  `dismissed` are the offramps. In practice `blocked` is a parking lot nothing surfaces. Do not
+  park things there and call them handled.
 
 ## Step 1 — Split it up
 
@@ -69,13 +101,20 @@ Do not stall the whole batch waiting on one clarification.
 
 | If the item is | It becomes | Owner |
 |---|---|---|
-| A standing rule, preference, or "stop doing X" | An edit to a mission brief, playbook, charter, or agent definition | `agent-editor` via the bus, kind `instructions` or `agent-def` |
+| A standing rule landing in a mission brief, playbook, or agent definition | An edit to that document | `agent-editor` via the bus, kind `instructions` or `agent-def` |
+| A standing rule landing in a charter or root doc (`docs/emma-voice.md`, `docs/design-doctrine.md`, `docs/ads-policy.md`, `CLAUDE.md`) | An owner-merged PR you draft and open this session | you draft, owner merges. agent-editor's allowlist cannot touch these paths |
 | A defect in the product or the loop | A bus ticket, kind `code` | `rr7-engineer` via R-DEV |
 | Something to publish, merchandise, or write now | Direct work this session | the relevant specialist |
-| A setting, valve, cap, or schedule | Config change, stated explicitly for approval | owner, or `config` ticket |
+| A setting, valve, cap, or schedule | A stated proposal in the report: exact key, current value, proposed value, blast radius | owner only. Never a `config` ticket; that kind is docs-only and its executor must refuse a valve change |
 | A judgment only he can make (pricing, brand, legal, spend) | A question in the report, not a ticket | owner |
 
-Two rules that matter more than the table:
+Three rules that matter more than the table:
+
+**A ticket that cannot execute is not a landing.** If the work touches a protected path (checkout,
+payment, cart, migrations, auth, session, valves, spend controls, CI, the release engine), a
+`code` ticket for it will park in `blocked` where nothing surfaces it, even when he said to ship
+it. Land it instead as a question with a proposed plan in "Needs you", or open the PR yourself
+this session for him to merge.
 
 **Prefer the durable form.** If something can be a standing instruction rather than a one-off task,
 make it a standing instruction. That is the entire point of this command.
@@ -85,8 +124,11 @@ if the outcome is "not doing this, here is why."
 
 ## Step 3 — Convene the people who actually know
 
-For anything non-trivial, spawn the relevant specialists **in parallel** and ask for a real read,
-not a rubber stamp. Route by what the item touches:
+Most items have one obvious owner; route those directly without a convening. Spawn specialists,
+**in parallel**, only when an item is contested, spans surfaces, or a specialist's read would
+change where it lands. Each subagent costs real tokens, and a rubber stamp costs the same as a
+real read while being worth nothing. When you do convene, ask for a real read. Route by what the
+item touches:
 
 - Homepage look, layout, or merchandising → `homepage-cro`, `homepage-ia`, `homepage-designer`, `design-critic`
 - Copy, voice, or anything a customer reads → `emma-copywriter`, gated by `emma-empathy-reviewer`
@@ -103,14 +145,27 @@ in the report rather than flattening it. If two specialists conflict, say so and
 
 ## Step 4 — Land it
 
-- Instruction changes: file on the bus with a clear `dedupeKey` so repeat direction updates the
-  existing row instead of stacking duplicates. With auto-approve on for that team they go straight
-  to `approved`, and `agent-editor` turns them into a reviewed PR the release engine merges.
+Before filing anything, `POST /api/team/suggestion {"op":"list"}` and look for a live row that
+already covers it. Update or supersede the existing row; never stack a sibling.
+
+- Instruction changes: file on the bus, always with a `dedupeKey`. Dedupe is opt-in, and your key
+  is the only thing standing between repeat direction and duplicate rows. A repeat create with the
+  same key returns the existing live row (it does not update its content); a repeat against a
+  `blocked` row reopens it to `approved`, which is the sanctioned way to revive a stalled ticket.
+  When new direction replaces an old row, set `supersedesId` and name the old row in the text;
+  prose-only supersession leaves the old row sitting `approved` forever. With auto-approve on for
+  that team the row goes straight to `approved`, and `agent-editor` turns it into a reviewed PR
+  the release engine merges, subject to its allowlist and weekly cadence.
+- Charter or root-doc changes: draft the edit and open the PR yourself this session, file the
+  companion ticket per CLAUDE.md, and list the PR under "Needs you". Do not file these as
+  `instructions` rows; agent-editor cannot merge those paths.
 - Code defects: file kind `code` with an honest `priority` (1 is P0) and enough detail that R-DEV
-  can act without this conversation. Include how to reproduce and how to know it is fixed.
+  can act without this conversation. Include how to reproduce and how to know it is fixed. If it
+  touches a protected path it does not belong in the code lane at all; see the rule in Step 2.
 - Immediate work: do it now, verify it live, and show the evidence.
-- Config: state the exact key, current value, proposed value, and blast radius. Do not change a
-  valve, cap, or kill switch on your own initiative.
+- Config: state the exact key, current value, proposed value, and blast radius, in the report, for
+  the owner to act on. Do not change a valve, cap, or kill switch on your own initiative, and do
+  not file it as a `config` ticket.
 
 Use the team API (`POST /api/team/suggestion`) with the shared token, and the ticket lifecycle in
 `docs/store-team/operating-system.md`.
