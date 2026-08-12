@@ -415,6 +415,43 @@ for its text, so reusing that key here is the natural guess and it returns
 Never close a row you did not execute: a false `applied` looks handled and is worse than an aging
 row.
 
+## Step 6c: Post-publish embed-stock sweep (mandatory, every run)
+
+Step 4 stock-verifies an embed exactly once, before it is embedded. Nothing revisits it after
+publish, so a post sits live pointing readers at whatever the product later became: out of stock,
+de-listed, or 404'd. inventory-sentinel watches hero/rail/featured slots and never looks at blog
+embeds. This is that missing re-check, and it runs here so it cannot rot (ticket #2753).
+
+Run the deterministic sweep over every published post's embeds:
+
+```bash
+npx tsx scripts/audit-blog-embed-stock.ts --json
+```
+
+It resolves each distinct embed handle's buyability from Shopify Admin (`status`, `totalInventory`)
+and a storefront PDP probe, then prints the posts whose embeds are dead, worst first. Use the real
+signals it uses and never Admin `publishedAt` — on this headless catalog `publishedAt` is null for
+essentially the whole catalog and would flag every handle. A handle is dead when it is `gone` (no
+Admin product, status `ARCHIVED`, or PDP 404), `inactive` (Admin status set and not `ACTIVE`), or
+`out-of-stock` (`totalInventory <= 0`).
+
+For each post the sweep reports, file **one deduped suggestion** at the content team so the
+remediation is tracked and the row refreshes every run instead of aging:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"create","team":"content","targetTeam":"content","category":"bug","kind":"process",
+       "priority":<2 if hasNoBuyablePath else 3>,"dedupeKey":"dead-embed:<slug>",
+       "suggestion":"Published post /notebook/<slug> has dead embeds: <handle> (<reason>) ... Swap each for an in-stock, buyable product (charter-voice pairing copy) or remove it. <slug> has NO buyable path and is remediated first.","cxRisk":"low"}'
+```
+
+Then remediate the highest-priority post this run can reach through Step 6b's execute-what-you-can
+rule: a `kind:process` row is closeable by this routine, so swap the dead embed for an in-stock
+product with fresh charter-voice pairing copy (or remove the embed when no honest substitute fits),
+re-run the Step 6c sweep on that post to confirm it is clean, and close the row `applied`. Posts with
+no buyable path come first. Do not close a row you did not actually remediate.
+
 ## Step 7: Retro + finish
 
 Compare against the plan and last run's post (published? still draft? which gate verdict?). One
