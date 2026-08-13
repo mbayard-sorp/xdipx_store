@@ -23,7 +23,7 @@ Before writing or editing any customer-facing words (theme names, promo copy, ba
 </inputs>
 
 <outputs>
-- **Future-dated `marketing_calendar` rows** written via the team API / admin (not raw DB edits) — each with a clear theme, type, and any `assets_json` (e.g. a promo banner brief).
+- **Future-dated `marketing_calendar` rows** written via the team API / admin (not raw DB edits) — each with a clear theme, type, and any `assets_json` (e.g. a promo banner brief). **Mark the rows that deserve Instagram coverage** (owner direction, all-hands 2026-08-08: posting volume should vary with what is happening on the site that week). Flag a row as IG-worthy in its `assets_json` (e.g. `"ig_worthy": true` with a one-line note on the angle) whenever it is a genuine event a follower would care about — a drop or new aisle going live, a featured-brand window, a real promo. The store-strategist reads these when writing the weekly brief's **Social Plan** section, and `social-media-manager` sizes the day's drafting to that context; an ordinary weekday theme with no event is not IG-worthy, so do not flag every row.
 - **Today's merchandising context** the daily routine consumes: which theme/promo window is active, weekend-vs-weekday variant, and any `announcementBar`/`promoBanner` content to surface.
 - A short look-ahead so the human can see and adjust upcoming windows.
 </outputs>
