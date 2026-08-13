@@ -125,19 +125,38 @@ Pin these once per campaign: `castSlug`, the **exact versioned `referencePhotoUr
 register written to *match* that reference, the crop ladder (mid-shot default, one shoulders-up close
 per campaign, no full-length unless the reference is), and one light direction.
 
-**Wardrobe has a floor, and it is stricter than the doctrine's.** The design doctrine's hard limit
-is "nothing a premium lingerie campaign could not run", which is the right line for owned surfaces.
-Instagram is not an owned surface. On a post that also shows a pleasure product, lingerie reads to a
-platform classifier as a different kind of post than a linen shirt does, and the account is the thing
-at risk. So on Instagram: **everyday or elevated loungewear, a shirt, a knit, a slip dress worn as
-outerwear. No lingerie, no bralette as the visible garment, no underwear, no towel, nothing sheer
-over skin.** State the garment in the prompt every time, because the model inherits the reference
-photo's neckline when you leave it unsaid, and at least one approved cast reference has a deep V.
+**Wardrobe: loungewear and lingerie-as-outerwear are both licensed (owner ruling 2026-08-13).**
 
-This exists because nothing else said it. On 2026-08-13 a composite came back in a sheer lace
-bralette holding a vibrator, and the pre-publish gate did not flag the wardrobe at all: not because
-the gate is weak, but because no binding document contained a wardrobe standard for it to check
-against. A rule a reviewer cannot cite is a rule that does not exist.
+This section previously carried a stricter floor that I wrote on 2026-08-13 and that banned lingerie
+and bralettes outright. The owner reviewed a frame in a lace bralette the same day and ruled it
+"really good", selecting it as the campaign's reference look. His call, his account, and the ban is
+withdrawn rather than left on the books for a rule his own reference image breaks.
+
+What is licensed: everyday and elevated loungewear, a shirt, a knit, a slip dress, and lingerie or a
+bralette worn as the visible garment, in the relaxed at-home register the cast references already
+establish.
+
+**What does not move, and is not what this ruling was about:**
+
+- No nudity. No exposed nipples or genitalia, nothing sheer that renders either visible. The design
+  doctrine's hard limit still binds: nothing a premium lingerie campaign could not run.
+- The product is never on or against a body, and never in use or implied use. A hand holding it is
+  the licensed shape (§3.6). Wardrobe latitude does not buy body latitude, and the two together are
+  what a platform reviewer reads as a different kind of post.
+- No bed with a person in it, no fluid or lubricant texture.
+- Cast reactions stay performance, never testimony.
+
+**State the garment in every prompt regardless.** Not a restriction, a fidelity rule: the model
+inherits the reference photo's neckline when you leave it unsaid, so an unstated wardrobe is an
+accidental one rather than a chosen one. At least one approved cast reference has a deep V, and the
+2026-08-13 bralette was not asked for by the brief that produced it.
+
+**Honest note on what this costs.** Lingerie plus a pleasure product in one frame is a stronger
+signal to Meta's classifier than either alone. That is a real increase in account exposure, taken
+deliberately by the owner rather than drifted into. It makes the removal watcher (ticket #2741) and
+the step-down ladder in `docs/ads-policy.md` more load-bearing, not less: the first removal on a
+lingerie frame is the signal that this latitude was priced wrong, and it should step volume down and
+reach the owner rather than be absorbed quietly.
 
 What breaks identity, in order of how often it happens: swapping the reference mid-campaign; adding
 appearance words to the prompt on top of the reference, which competes with the image and drifts the
