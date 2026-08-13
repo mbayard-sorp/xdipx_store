@@ -125,6 +125,20 @@ Pin these once per campaign: `castSlug`, the **exact versioned `referencePhotoUr
 register written to *match* that reference, the crop ladder (mid-shot default, one shoulders-up close
 per campaign, no full-length unless the reference is), and one light direction.
 
+**Wardrobe has a floor, and it is stricter than the doctrine's.** The design doctrine's hard limit
+is "nothing a premium lingerie campaign could not run", which is the right line for owned surfaces.
+Instagram is not an owned surface. On a post that also shows a pleasure product, lingerie reads to a
+platform classifier as a different kind of post than a linen shirt does, and the account is the thing
+at risk. So on Instagram: **everyday or elevated loungewear, a shirt, a knit, a slip dress worn as
+outerwear. No lingerie, no bralette as the visible garment, no underwear, no towel, nothing sheer
+over skin.** State the garment in the prompt every time, because the model inherits the reference
+photo's neckline when you leave it unsaid, and at least one approved cast reference has a deep V.
+
+This exists because nothing else said it. On 2026-08-13 a composite came back in a sheer lace
+bralette holding a vibrator, and the pre-publish gate did not flag the wardrobe at all: not because
+the gate is weak, but because no binding document contained a wardrobe standard for it to check
+against. A rule a reviewer cannot cite is a rule that does not exist.
+
 What breaks identity, in order of how often it happens: swapping the reference mid-campaign; adding
 appearance words to the prompt on top of the reference, which competes with the image and drifts the
 face; aspect-ratio mismatch between reference and output; and **compositing straight from a Shopify
@@ -271,14 +285,38 @@ Do not re-propose these; each one has been tried or ruled out:
   subject is the idea; products are examples inside it.
 - **Pretty filler.** Non-product content is first-class, and first-class means it teaches something.
 
-### 3.6 Open ruling: what may be in a hand
+### 3.6 Owner ruling: what may be in a hand
 
-`docs/ads-policy.md` §Organic social lists "no product in hand or on a body" as an Instagram hard
-limit. The charter's License C licenses cast to "hold the box, present, and react." The reconcilable
-reading, and the one this file operates under until the owner rules otherwise, is: **an unlabeled
-carton in hand, yes; bare product in hand, no.** The carton must be unlabeled because a real carton
-carries a manufacturer logo, which is text in pixels. Slide 5 above is written to that reading, and it
-is load-bearing for 4 of every 14 posts.
+**RULED 2026-08-12. The cast holds the product itself.** Owner direction, verbatim: *"Put the
+products in a cast members hand. Have them show the product."*
+
+That supersedes the interim reading this section previously carried ("an unlabeled carton in hand,
+yes; bare product in hand, no"), which was written explicitly to hold until the owner ruled. He
+ruled. A cast member may hold and present the bare product.
+
+Recorded here because the delay already cost something. The ruling was given on 2026-08-12 and not
+written down, and on 2026-08-13 the pre-publish gate blocked two compliant cast composites by
+correctly applying the superseded reading. The gate was right; the document was stale. Owner
+direction that does not reach the binding document has not landed.
+
+**What is unchanged, and is not what this ruling was about:**
+
+- No simulated or implied use. Presenting a product is not using it.
+- The product is not on or against a body. In a hand, held out or held up, is the licensed shape.
+- No fluid or lubricant texture, no bed with a person in it, nothing explicit.
+- Cast reactions stay performance, never testimony. No persona claims to have used anything.
+- Stage 1 of the composite still strips packaging, so a manufacturer carton never reaches a
+  presenter's hand. That was never about the hand rule; it is the no-text-in-pixels rule, and it
+  still binds.
+
+**One conflict remains open and is not resolved by this section.** `docs/ads-policy.md` §Organic
+social still lists "no product in hand or on a body" as an Instagram hard limit. That line is this
+store's own conservative fence rather than a quotation of Meta policy, which removes for *commerce*
+and for explicit content; brands in this category routinely show product in hand. But `ads-policy.md`
+sits outside this file's authority and outside the `agent-editor` allowlist, so it needs its own
+change. Until it is amended, a gate reading both documents will find them in conflict. **This
+section is the operative one for Instagram cast imagery**, and a gate that blocks on the ads-policy
+line alone should say so and escalate rather than silently kill the frame.
 
 ## 4. Cadence and continuity
 
