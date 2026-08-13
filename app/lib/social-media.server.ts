@@ -183,6 +183,17 @@ export interface GenerateCastCompositeOpts {
   /** Real Shopify product photo. Stage 1 turns it into an unlabeled plate. */
   productImageUrl: string
   /**
+   * Extra references handed to stage 2 alongside the plate.
+   *
+   * Exists because of a measured failure (#3045): one run produced two
+   * candidates that disagreed about the product's silhouette. Both came from a
+   * single composeSceneFrame call and therefore shared ONE stage-1 plate, so a
+   * bad plate cannot explain it. The drift is stage 2 re-interpreting the plate
+   * per candidate rather than compositing it. Passing the real packshot here
+   * gives stage 2 a second, unambiguous look at the true shape.
+   */
+  extraImageUrls?: string[]
+  /**
    * How big the product is, relative to the presenter's hand. Required, because
    * omitting it is what produced a vase-sized palm toy: a silent default would
    * be wrong for most of the catalog and wrong invisibly.
@@ -210,6 +221,7 @@ export async function generateCastComposite(
     prompt: withProductScale(opts.prompt, opts.scale),
     presenterImageUrl: opts.presenterImageUrl,
     productImageUrl: opts.productImageUrl,
+    ...(opts.extraImageUrls?.length ? { extraImageUrls: opts.extraImageUrls } : {}),
     // 4:5 is the feed/grid still. The default is 9:16, which is a video frame
     // and would be cropped to nothing in a profile grid.
     aspectRatio: '4:5',
