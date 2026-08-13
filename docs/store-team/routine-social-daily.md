@@ -295,10 +295,57 @@ resolves to what the feed is actually featuring. Do this as part of the run and 
 
 ## Step 5 — Imagery (every visual platform draft ships with a real asset)
 
-An Instagram or TikTok draft **must carry at least one `mediaUrls` entry** — the owner reviews
-image and caption together; a caption alone is an incomplete draft. Ask `media-manager` first for
-an existing Shopify Files / Sanity asset (reuse-first); when nothing genuinely fits, request a
-generation, re-checking the gate before each one.
+An Instagram or TikTok draft **must carry at least one `mediaUrls` entry**. This is not a quality
+preference, it is a publish requirement: the pre-publish gate blocks a post with no media and blocks
+a post carrying a bare SKU packshot, so a draft with either is drafting into a wall. On 2026-08-13
+all four pending Instagram drafts were blocked, three for packshots and one for no image at all,
+while a working generator sat unused because this step never named it.
+
+Ask `media-manager` first for an existing Shopify Files / Sanity asset (reuse-first). When nothing
+fits, **generate one with `scripts/gen-social-image.ts`**, re-checking the gate before each run. It
+handles generation, rehosting to Shopify Files (fal URLs expire in 24h and Instagram fetches the
+image server-side at publish time), and the spend row.
+
+**Product post, cast composite.** The presenter holds and shows the product (§3.6):
+
+```bash
+npx tsx scripts/gen-social-image.ts \
+  --prompt "<scene, wardrobe with its coverage, light, product silhouette, negatives>" \
+  --handle <product-handle> --archetype cast --mood <short-token> \
+  --presenter-image "<castMember referencePhoto URL, the exact versioned one>" \
+  --ref-image "<real Shopify product photo>" \
+  --extra-ref "<the same product photo again>" \
+  --scale "<cue from the product's real dimensions, see below>" \
+  --candidates 2 --caller social-media-manager
+```
+
+`--extra-ref` is not redundant. Stage 1 renders an unlabeled plate from the packshot; stage 2
+composites it and, without a second look at the true shape, re-interprets it per candidate. That is
+how a frame once shipped with an object that was not the SKU at all.
+
+**Product-free post** (education, inspiration, a campaign kickoff naming several categories): drop
+`--presenter-image` and pass the cast reference as `--ref-image`. With no product to preserve, a
+single reference holding just the presenter is the right tool. For art with no person either, use
+`--no-ref` with a reason.
+
+**Scale is a lookup, not a judgment.** Read the length from the product's `xdipx.specifications`
+metafield ("Length: 4.7 inches") and build the cue with `scaleCueFromLengthInches()`. Do not guess a
+preset: briefing a 4.7-inch bullet as `palm` ("no taller than her palm is wide", about 3.5 inches)
+handed the model a cue contradicting its own reference photo, and it rendered the product too big or
+too small on three consecutive attempts.
+
+**Check every candidate against the real packshot before offering it.** Shape is stable now; size
+still drifts per candidate, so two frames from one run can disagree. Discard the ones that miss
+rather than shipping the near-miss. A follower who buys what they saw should receive that object.
+
+**Say the coverage, not just the garment.** "Lace bralette" spans a wide range and the model picks
+from it; three generations drifted more revealing than the owner's own reference while nominally
+obeying the brief. State the neckline and how much it covers, every time, because an unstated
+wardrobe is inherited from the reference photo rather than chosen.
+
+**Name the interest-floor properties you are buying, by number** (§3.4b), before generating. The
+reviewer checks the count against the frame, so an over-claimed tally is worse than none: a claimed
+"shadow from off-frame" that turns out to be the presenter's own arm fails the property and the post.
 
 **Instagram key art comes from the campaign pool, not from one-off daily requests.** Generating one
 image on the day of each draft structurally cannot produce fourteen posts that read as one campaign.
