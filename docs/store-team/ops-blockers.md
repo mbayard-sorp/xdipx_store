@@ -1,5 +1,16 @@
 # Ops blockers (owner / console actions)
 
+> **Superseded 2026-08-13 by the owner blocker list.** This file is now history, not the
+> working list. Live owner blockers are rows in `owner_blockers`, visible at `/admin/blockers`
+> and emailed daily by `/cron/blocker-list`; they are filed by `blocker-scout` and by any agent
+> or session that hits a wall, and they close themselves when their probe passes.
+>
+> The still-open items below were seeded into rows by `scripts/seed-owner-blockers.ts`.
+> **Do not add new blockers here.** File them: `POST /api/team/blocker {op:'file', ...}`, or add
+> them on `/admin/blockers`. A blocker recorded as prose in a doc is exactly the failure this
+> replaced, since nothing can tell whether a paragraph is still true. See
+> `docs/store-team/routine-blocker-scout.md`.
+
 Consolidated from improvement-bus `process`-kind rows that were reports of environment/infrastructure problems, not repo changes. The bus rows were retired after logging here; the full original text remains on the dismissed rows in `homepage_team_suggestions` if needed. **None of these are fixed by editing the codebase** — they are owner actions in the storefront, Klaviyo, GCP, or the Claude cloud-agent / sandbox settings. Ordered by impact.
 
 ## P0 — Revenue / storefront (#15)

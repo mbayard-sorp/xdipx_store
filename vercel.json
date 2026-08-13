@@ -111,6 +111,10 @@
       "schedule": "0 13 * * *"
     },
     {
+      "path": "/cron/blocker-list",
+      "schedule": "30 13 * * *"
+    },
+    {
       "path": "/cron/release-engine",
       "schedule": "*/10 * * * *"
     },
