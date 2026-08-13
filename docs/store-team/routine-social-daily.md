@@ -319,6 +319,26 @@ that pool and generate only what it is missing.
   doctrine.
 - Every asset must clear Step 4b question 3 before it ships.
 
+**How to generate an Instagram asset: `scripts/gen-social-image.ts`.** This is the generation path
+`media-manager` runs; name it explicitly so the imagery step is wired, because the deterministic
+pre-publish gate (`runDeterministicPublishChecks`) blocks **both** a draft with no media and a draft
+carrying a bare Nalpac/Shopify SKU packshot — shipping either is drafting into a wall.
+
+- **Product post (cast composite):** `--archetype cast --presenter-image <approved castMember
+  reference> --ref-image <the real Shopify product photo> --scale palm|handheld|forearm|bottle`. The
+  two references are mandatory (a composite with no product ref invents the product) and `--scale`
+  is mandatory (omitting it renders the product the wrong size).
+- **Product-free art (metaphor hook, typography plate):** the single-image form,
+  `--archetype scene|metaphor|macro|plate ... --ref-image <url>`, or `--no-ref --no-ref-reason
+  "<why>"` for genuinely product-free art.
+- **Dependency, stated plainly:** the cast-composite path and the `--scale` cue ride the unmerged
+  publish-job PR, so **the single-image form works today and the cast-composite form lands with that
+  merge.** Until then, generate single product-in-scene images for product posts (never a bare
+  packshot), and note the degraded cast path in the run summary.
+- **Generate the campaign key-art set at kickoff, not one image per draft-day** (Step 2a): the
+  campaign pool comes from `docs/store-team/instagram-campaigns.md` §3.4b, so a campaign produces its
+  reusable set once rather than a fresh one-off per caption.
+
 If the gate has no image budget left, ship the draft with the best reusable asset available and
 note the ideal asset in the run summary — and say plainly in the summary that the campaign's visual
 identity is degraded, rather than letting a reuse-only run look like a normal one. Video is produced by the video team (video-producer +
