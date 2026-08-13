@@ -31,4 +31,9 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Why:** Strategy brief #5 names /social the priority IG→landing→PDP surface and "measure each hop honestly" as the month's job; the primary click was the one hop we could not attribute, and the pin had no stock guard (same failure class that pulled a live IG post on 08-09). "point you to/at" is retired by mission brief §8.
 - **Evidence:** run #282; brief #5 (IG live, GA4-blind); WebFetch egress blocked for competitors this run (self-capture only); voice gate PASS; typecheck/build/1788 tests green; PR link on the run row.
 
+### 2026-08-12 — Routine A — Hero + couples-rail copy refresh (Weekend In); #1785 declined
+- **What:** `singleton.emmaHero` copy fully refreshed (eyebrow/headline/body/pullQuote) for the held We-Vibe "Moving as One" couples-kit hero; couples rail (`emmaRail-augreset-couples-20260801`) eyebrow/heading refreshed and a pairing aside added. No product-selection or imagery change this run (named supply hold).
+- **Why:** Active theme "Weekend In, Not Out" (marketing_calendar #6). Per-run freshness cadence (Step 2c) plus a voice cleanup (removed the borderline-dare "make them beg" from the hero body). Suggestion #1785's fresh candidates declined — Moxie+ has a packaging-only primary with no clean sibling, Biird glass plug is off-theme for the couples/wearable week, Gush 2 is 404.
+- **Evidence:** run 280; sameness-diff surfaces Hero (copy) + Rails (copy); Sanity revisions Aq77mZkFsuxXAoKZNDfL22 (hero), Aq77mZkFsuxXAoKZNDfNHU (rail); health sweep GREEN on all 8 live pages.
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
