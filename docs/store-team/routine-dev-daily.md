@@ -81,10 +81,14 @@ same pass, diff its target files against the ones you have already touched this 
 git diff --stat origin/main...ticket/<already-done-id> -- <files>   # compare target-file sets
 ```
 
-If they overlap, either **serialize** (branch the later ticket off the earlier ticket's tip rather
-than off `main`, and hand-reconcile both behaviors) or **flag the overlap loudly** in both tickets'
-notes so QA checks the merged result before verifying either independently. Do not let two
-overlapping tickets proceed to `pr_open` as if they were independent.
+If they overlap, take one of three routes: **defer** the later ticket to the next pass — release its
+claim (`{"op":"claim"}`'s lease lapses on its own, or transition it back to `approved`) so it is not
+implemented on top of an in-flight sibling; or **serialize** (branch the later ticket off the earlier
+ticket's tip rather than off `main`, and hand-reconcile both behaviors); or **flag the overlap
+loudly** in both tickets' notes so QA checks the merged result before verifying either independently.
+Prefer **defer** when the overlap is heavy or the earlier ticket's PR is still open, so a pass never
+builds a second edit on a region that has not landed. Do not let two overlapping tickets proceed to
+`pr_open` as if they were independent.
 
 **On the 20:00 pass, work bounced tickets first.** A bounced ticket is one sitting in
 `in_progress` with a `last_error` and an `attempt_count` above zero, assigned to you. It is already
