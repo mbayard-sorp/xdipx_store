@@ -378,6 +378,27 @@ export function createCronRoutes() {
     }
   })
 
+  /**
+   * GET|POST /cron/blocker-list
+   * Schedule: daily 13:30 UTC (approx 6:30a Pacific) — the owner blocker list,
+   * sent as its own short email half an hour after the digest. Deliberately
+   * NOT a digest section: a task list welded to a fourteen-section ops report
+   * reads as reference material, which is how blockers went unnoticed for
+   * days. Verifies every probe before composing, so a blocker cleared
+   * yesterday never appears. Sends even when empty. Pass ?force=1 to re-send.
+   */
+  cronRoute('/blocker-list', async (req, res) => {
+    try {
+      const { runBlockerEmail } = await import('../app/lib/owner-blockers.server.js')
+      const force = req.query['force'] === '1' || req.body?.force === true
+      const result = await runBlockerEmail({ force })
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:blocker-list]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   cronRoute('/gsc-snapshot', async (_req, res) => {
     try {
       const { runGscSnapshot } = await import('../app/lib/gsc.server.js')
