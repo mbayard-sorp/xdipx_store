@@ -46,6 +46,12 @@ CITATIONS:
 ```
 
 Rules: only sources you actually resolved this review (fetched or confirmed via search results you saw); reputable tier only (peer-reviewed, major health orgs, recognized sex educators); never a competitor storefront; zero citations is a valid outcome and always better than padding. The writer appends these mechanically; you never draft the Sources prose.
+
+**Prefer a verifiable host, and return the canonical domain.** The writer's Sources step only ships a URL that passes `/api/team/url-liveness`, and that endpoint checks against a fixed host allowlist (`CITATION_HOST_ALLOWLIST` in `app/lib/citation-liveness.server.ts`). A reputable-tier source on a host outside it is dropped even when the claim is real, which has cost avoidable citations across several runs. So:
+
+- When a source you resolved is carried by an allowlisted host, cite that host. The allowlist is: `medicalnewstoday.com`, `plannedparenthood.org`, `clevelandclinic.org`, `who.int`, `ncbi.nlm.nih.gov`, `nih.gov`, `cdc.gov`, `mayoclinic.org`, `healthline.com`, `medlineplus.gov`, `kinseyinstitute.org`, `ashasexualhealth.org`, `issm.info`, `nhs.uk`.
+- Return the **canonical** domain, never a legacy one — e.g. the Kinsey Institute is `kinseyinstitute.org`, not the legacy `kinsey.indiana.edu`.
+- This never lowers the reputable-tier bar and never pads: if the only source you resolved sits on a non-allowlisted host and no allowlisted host carries the same finding, return zero citations rather than an unverifiable URL. Fewer avoidable drops, never manufactured ones.
 </citations>
 
 <workflow>
