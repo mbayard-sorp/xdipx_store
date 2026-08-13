@@ -356,6 +356,7 @@ export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   { routine: 'Weekly trend scout', team: 'content', runType: 'trend-scout', kind: 'weekly', schedule: 'Sat 19:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly business research', team: 'social', runType: 'research', kind: 'weekly', schedule: 'Thu 16:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly social trend scout', team: 'social', runType: 'social-trend-scout', kind: 'weekly', schedule: 'Mon 17:00', maxGapHours: WEEKLY_GAP },
+  { routine: 'Daily blocker scout', team: 'strategy', runType: 'blocker-scout', kind: 'daily', schedule: '12:00 daily', maxGapHours: DAILY_GAP },
 ]
 
 export interface RoutineLivenessFlag {

@@ -248,7 +248,7 @@ describe('computeTicketLoopHealth conflicted-PR scan', () => {
 
 describe('ROUTINE_CADENCES', () => {
   it('carries every expected lane with a complete shape', () => {
-    expect(ROUTINE_CADENCES.length).toBe(16)
+    expect(ROUTINE_CADENCES.length).toBe(17)
     for (const c of ROUTINE_CADENCES) {
       expect(c.routine.length).toBeGreaterThan(0)
       expect(c.runType.length).toBeGreaterThan(0)
@@ -267,6 +267,14 @@ describe('ROUTINE_CADENCES', () => {
     expect(scout?.team).toBe('social')
     expect(scout?.kind).toBe('weekly')
     expect(scout?.maxGapHours).toBe(194)
+
+    // R-BLOCK: the daily blocker scout. Added with the owner blocker list so
+    // the routine that watches for blockers is itself watched, which the
+    // coverage audit would otherwise flag as a lane with no liveness entry.
+    const blocker = ROUTINE_CADENCES.find(c => c.runType === 'blocker-scout')
+    expect(blocker).toBeDefined()
+    expect(blocker?.team).toBe('strategy')
+    expect(blocker?.kind).toBe('daily')
   })
 
   it('sizes each gap against the lane\'s real cron, not its nominal kind', () => {

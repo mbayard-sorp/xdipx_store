@@ -172,10 +172,14 @@ blocked pile is visible.
 
    - Read every routine row in `docs/store-team/routine-schedule.md`. For each, decide whether it is
      **expected to run**: a trigger id is recorded, or its gating valve is on.
-   - Expected-to-run with no `homepage_team_runs` row in the last 7 days → file a `process`
+   - Expected-to-run with no `homepage_team_runs` row in the last 7 days → file a `code`
      suggestion. A stalled drain backs its queue up quietly (the daily product routine is the
-     easiest to miss).
-   - **Gating valve ON but no trigger id recorded** → also a mandatory `process` suggestion. This is
+     easiest to miss). **Not `process`**: that kind has no executor, so a coverage finding filed
+     there is read by nobody and terminates nowhere, which is the exact leak this step exists to
+     catch happening to the step itself.
+   - **Gating valve ON but no trigger id recorded** → also a mandatory finding, and it belongs on
+     the owner blocker list rather than the bus, since only the owner can create a scheduler
+     trigger: `POST /api/team/blocker {op:'file', dedupeKey:'coverage:trigger:<slug>', ...}`. This is
      the half-enabled state: on 2026-07-28 the trend-scout and social-trend-scout valves were turned
      on and their triggers were never created, so two lanes were live-but-dead and three downstream
      consumers starved with nothing reporting it.
@@ -185,6 +189,31 @@ blocked pile is visible.
    twice (it read "2-14" while the manifest listed 19 routines, so everything added after 2026-07-23
    was outside the watchdog's scope by construction), and a coverage check that cannot see a new
    lane is worse than none, because it reports "zero misses" either way.
+
+6. `coverage-auditor` (run after program-manager) — the **structural** half of coverage. Where
+   program-manager asks "did this routine run last week", this asks "would anyone find out if it
+   stopped". It is a deterministic script, not a judgment call, so it runs the same way every week
+   and its findings are testable:
+
+   ```bash
+   DATABASE_URL=<prod> npx tsx scripts/coverage-audit.ts --file
+   ```
+
+   Checks: every manifest routine against `ROUTINE_CADENCES` (a routine missing there is invisible
+   to the liveness check forever), manifest rows with no trigger, `server/cron.ts` routes against
+   `vercel.json` schedules in both directions, playbook paths that do not resolve, active run
+   lanes with no cadence entry, enabled teams with no run-cap row, and how much of the blocker
+   list can close itself.
+
+   `--file` routes each finding by the same line the blocker list uses: agent-doable work becomes
+   a `code` ticket, owner-only work (a scheduler trigger, a production settings row) becomes a
+   blocker. Every finding carries a stable `dedupeKey`, so a week where nothing changed files
+   nothing. Include the report's summary line in the brief.
+
+   Read the report before filing if anything looks wrong: the parsers depend on the shape of the
+   manifest tables and of `ROUTINE_CADENCES`, and they fail loudly rather than reporting a healthy
+   fleet as entirely uncovered. If the script throws a parser error, fix the parser in the same
+   pass, do not skip the step.
 
 Each posts its own events under `$RUN_ID` with its `agentRole`.
 

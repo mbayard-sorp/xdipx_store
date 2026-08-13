@@ -101,8 +101,17 @@ these things.
    secret header
 4. Create the daily scout trigger (desktop task preferred, see above)
 
-## Not yet built
+## The other half: the coverage audit
 
-The weekly **coverage audit**: for every automation lane, does a watcher exist, would its silent
-failure be detected, and is its cadence entry real. That is the half of the self-improvement
-loop that stops the *next* leak class rather than the current one. Filed as a follow-up.
+This routine finds blockers someone has already noticed. The **coverage audit** finds the gaps
+where a failure would produce no signal at all, because whatever was supposed to notice was
+never wired up. It runs weekly as a sub-step of the strategy routine (`coverage-auditor`, Step 4
+sub-step 6 of `routine-weekly-strategy.md`) and files into the same two places this routine does:
+agent-doable gaps to the bus, owner-only gaps to this list.
+
+```bash
+npx tsx scripts/coverage-audit.ts
+```
+
+Between the two, a problem has to survive both "nobody noticed it" and "nothing was watching" to
+stay hidden.
