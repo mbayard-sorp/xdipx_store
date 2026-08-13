@@ -84,6 +84,34 @@ on evidence.
    Rekind is one-way (`process` → `instructions`|`code`) by design. You cannot rekind *into* a
    retirable kind, because that plus a retire would let you dismiss the instruction rows aimed at
    you.
+
+   **Guard: rekind to `code` only when a real repo code artifact would change.** A `process` → `code`
+   rekind sends the row to R-DEV's claim queue, and a row with no implementable code diff is a wasted
+   claim that R-DEV can only block, then the undated dedupe key reopens it and it loops (R-DEV run 259
+   claimed four such misroutes and blocked all four, three of them from one rekind batch). So rekind
+   to `code` **only** when you can name a concrete repo file or symbol, under a **non-protected**
+   path, that a code diff would actually touch. Do **not** rekind to `code` when the row's DONE WHEN is:
+   - a deploy/publish/generate action (Sanity Studio deploy, image or content generation, content
+     publish) — that is an ops/owner or content-lane action, not a code PR;
+   - a cloud-routine env, trigger, schedule, or `maxTurns` change — infra/owner, not a persisted repo
+     config;
+   - a routine-playbook or agent-definition edit — that is **your** lane, so keep it `instructions`.
+
+   Cheap proxy before any `process` → `code` rekind: `git grep` the row's named target for a writer or
+   definition under `app/`, `scripts/`, or `server/`. If the only artifact lives under a Sanity/Studio
+   deploy, `.claude/agents/`, `docs/**`, or trigger/pipeline config, it is not a code ticket — keep it
+   `instructions` (routine/agent-def wiring) or, for a deploy/env/valve action, leave it for the owner
+   with a `decision` event naming the action. (Approved #2490.)
+
+   **Never rekind homepage `sameness:*` freshness rows to `code`.** Rows with `dedupeKey`
+   `sameness:rails` / `sameness:tiles` / `sameness:couples` / `sameness:hero` have no deterministic
+   code artifact: the hero/rail/tiles/couples slates are authored exclusively by `homepage-orchestrator`
+   via Sanity per `docs/homepage-team/routine-daily-merchandise.md`, so there is no function for R-DEV
+   to patch (the only code levers are forbidden — weakening the freshness detector — or out of lane).
+   `#2080` was blocked three times this way and siblings `#1888`/`#1702` were dismissed by the owner.
+   Leave a `sameness:*` row as `process` for the homepage merchandising-adherence lane, or dispose of
+   it via `retire` with a reason (it is not a customer-facing defect); never route it to the code lane.
+   (Approved #2540, #2592.)
 3. **Retire what is genuinely finished or moot** — a run-observation that was only ever a note to
    nobody, a duplicate, or something superseded by shipped work:
    ```bash
