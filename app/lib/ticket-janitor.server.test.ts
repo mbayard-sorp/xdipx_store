@@ -248,7 +248,7 @@ describe('computeTicketLoopHealth conflicted-PR scan', () => {
 
 describe('ROUTINE_CADENCES', () => {
   it('carries every expected lane with a complete shape', () => {
-    expect(ROUTINE_CADENCES.length).toBe(16)
+    expect(ROUTINE_CADENCES.length).toBe(17)
     for (const c of ROUTINE_CADENCES) {
       expect(c.routine.length).toBeGreaterThan(0)
       expect(c.runType.length).toBeGreaterThan(0)
@@ -267,6 +267,13 @@ describe('ROUTINE_CADENCES', () => {
     expect(scout?.team).toBe('social')
     expect(scout?.kind).toBe('weekly')
     expect(scout?.maxGapHours).toBe(194)
+    // Ads Proposals (manifest row 4, Tue 13:00) has a liveness watch; team and
+    // runType match the POST /api/team/run call in routine-ads-weekly.md.
+    const ads = ROUTINE_CADENCES.find(c => c.runType === 'ads')
+    expect(ads).toBeDefined()
+    expect(ads?.team).toBe('ads')
+    expect(ads?.kind).toBe('weekly')
+    expect(ads?.maxGapHours).toBe(194)
   })
 
   it('sizes each gap against the lane\'s real cron, not its nominal kind', () => {
