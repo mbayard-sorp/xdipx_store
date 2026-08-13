@@ -25,6 +25,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
+import { formatLiveFeedback, type LivePostVerdict } from '~/lib/live-post-feedback'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import { cached, invalidateCache, kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
 import {
@@ -1818,6 +1819,56 @@ export async function reviewSocialPost(id: number, input: ReviewSocialPostInput)
       reviewedAt:   new Date(),
     })
     .where(and(eq(socialPosts.id, id), ne(socialPosts.status, 'posted')))
+    .returning({ id: socialPosts.id })
+  return result.length > 0
+}
+
+/**
+ * Retrospective verdicts on a post that is already live (ticket #2738).
+ *
+ * The encoding lives in `./live-post-feedback` (no `.server` suffix) because
+ * the Social Studio renders a stored verdict in component code, and a component
+ * that imports a `.server` module drags the whole module into the client build.
+ * Re-exported here so callers that already have this module keep working.
+ */
+export {
+  LIVE_POST_VERDICTS,
+  isLivePostVerdict,
+  formatLiveFeedback,
+  parseLiveFeedback,
+  type LivePostVerdict,
+} from './live-post-feedback'
+
+export interface LivePostFeedbackInput {
+  verdict: LivePostVerdict
+  note?: string | undefined
+  reviewedBy: string
+}
+
+/**
+ * Record the owner's feedback on an already-published post.
+ *
+ * This exists because the owner said on 2026-08-11 that he would stop approving
+ * posts before they ship and would instead review them once live and feed that
+ * back to the team. Every write path to the review fields refused a posted row,
+ * so that loop had nowhere to land and was not buildable. This is the writer
+ * that closes it.
+ *
+ * Only touches posted rows, and only writes `feedback` plus the reviewer stamp.
+ * `review_status` is left exactly as it was.
+ */
+export async function recordLivePostFeedback(
+  id: number,
+  input: LivePostFeedbackInput,
+): Promise<boolean> {
+  const result = await db
+    .update(socialPosts)
+    .set({
+      feedback:   formatLiveFeedback(input.verdict, input.note ?? ''),
+      reviewedBy: input.reviewedBy,
+      reviewedAt: new Date(),
+    })
+    .where(and(eq(socialPosts.id, id), eq(socialPosts.status, 'posted')))
     .returning({ id: socialPosts.id })
   return result.length > 0
 }

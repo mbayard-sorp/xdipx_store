@@ -78,6 +78,8 @@ async function main() {
   const mood        = arg('mood')
   const platform    = arg('platform') ?? 'instagram'
   const refImage    = arg('ref-image')
+  const presenter   = arg('presenter-image')
+  const scale       = arg('scale')
   const noRef       = hasFlag('no-ref')
   const noRefReason = arg('no-ref-reason')
   const slide       = arg('slide') ? Number(arg('slide')) : undefined
@@ -112,6 +114,24 @@ async function main() {
   }
   if (noRef && !noRefReason) {
     console.error('--no-ref requires --no-ref-reason "<why>" (echoed in the manifest)')
+    process.exit(1)
+  }
+  // A cast composite needs BOTH references. With only the presenter, the model
+  // preserves the presenter and invents the product, which is exactly the
+  // failure this mode exists to fix.
+  if (presenter && !refImage) {
+    console.error('--presenter-image requires --ref-image <real shopify product photo>: a cast composite needs both references, or the product is invented.')
+    process.exit(1)
+  }
+  if (presenter && archetype !== 'cast') {
+    console.error('--presenter-image requires --archetype cast')
+    process.exit(1)
+  }
+  // Required, not defaulted. A silent default would be wrong for most of the
+  // catalog and wrong invisibly, which is exactly how a palm-sized toy shipped
+  // vase-sized (#2761).
+  if (presenter && !scale) {
+    console.error('--presenter-image requires --scale palm|handheld|forearm|bottle (or a free-text clause relative to the hand). Omitting it renders the product the wrong size.')
     process.exit(1)
   }
 
@@ -159,10 +179,55 @@ async function main() {
         prompt, handle, archetype, mood, platform, imageSize, date,
         ...(slide ? { slide } : {}),
         filename: buildSocialAssetFilename({ handle, archetype: archetype as never, mood, date, ...(slide ? { slide } : {}) }),
-        only: only ?? 'fal-then-imagen',
+        only: presenter ? 'composeSceneFrame (qwen plate -> flux-2 lora edit)' : (only ?? 'fal-then-imagen'),
+        ...(presenter ? { presenter, mode: 'cast-composite', scale } : {}),
         caller, cap, capSource,
         ...(refImage ? { refImage } : { noRefReason }),
       },
+    }))
+    process.exit(0)
+  }
+
+  // ── 4a. Cast composite (two-stage) ────────────────────────────────────────
+  // A single reference image holds exactly one thing, so the single-ref path
+  // below cannot hold a cast identity AND a real product at once: it preserves
+  // the presenter and invents the product. Anything with a presenter goes
+  // through composeSceneFrame instead, which takes both references.
+  if (presenter) {
+    const { generateCastComposite } = await import('~/lib/social-media.server')
+    const result = await generateCastComposite({
+      prompt,
+      handle,
+      mood,
+      date,
+      presenterImageUrl: presenter,
+      productImageUrl: refImage!,
+      scale: scale!,
+      count: Number(arg('candidates') ?? '2'),
+      caller,
+    })
+
+    let spendPosted = true
+    for (const cost of result.costs) {
+      const res = await fetch(`${BASE_URL}/api/homepage-team/spend`, {
+        method: 'POST',
+        headers: teamHeaders,
+        body: JSON.stringify({
+          kind: 'image', model: cost.costKey, count: cost.count,
+          feature: 'social-images', caller,
+        }),
+      })
+      if (!res.ok) spendPosted = false
+    }
+
+    console.log(JSON.stringify({
+      assets: result.urls.map((url, i) => ({
+        url, filename: result.filenames[i], kind: 'image', archetype: 'cast', platform,
+      })),
+      provider: 'fal',
+      stages: result.costs,
+      scale,
+      spendPosted, cap, capSource,
     }))
     process.exit(0)
   }
