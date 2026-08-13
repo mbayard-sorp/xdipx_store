@@ -13,6 +13,8 @@ import {
   PRODUCT_SCALES,
   isProductScale,
   withProductScale,
+  scaleCueFromLengthInches,
+  lengthInchesFromSpecifications,
 } from './social-media.server'
 
 const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
@@ -146,5 +148,40 @@ describe('product scale cues (ticket #2761)', () => {
     // Must not be fooled by inherited Object properties.
     expect(isProductScale('toString')).toBe(false)
     expect(isProductScale('constructor')).toBe(false)
+  })
+})
+
+describe('scale from real dimensions (ticket #2761)', () => {
+  it('parses the length out of the specifications metafield', () => {
+    expect(lengthInchesFromSpecifications([
+      'Length: 4.7 inches', 'Width: 0.91 inches', 'Material: Body-safe silicone',
+    ])).toBe(4.7)
+  })
+
+  it('returns null rather than inventing a number when there is no length', () => {
+    expect(lengthInchesFromSpecifications(['Material: Silicone'])).toBeNull()
+    expect(lengthInchesFromSpecifications([])).toBeNull()
+    expect(lengthInchesFromSpecifications(null)).toBeNull()
+    expect(lengthInchesFromSpecifications(['Length: not stated'])).toBeNull()
+  })
+
+  it('does not mistake a width line for a length', () => {
+    expect(lengthInchesFromSpecifications(['Width: 0.91 inches'])).toBeNull()
+  })
+
+  it('describes a 4.7in bullet as shorter than a hand, which the palm preset got wrong', () => {
+    const cue = scaleCueFromLengthInches(4.7)
+    expect(cue).toContain('4.7 inches')
+    expect(cue).toContain('two thirds')
+    // The defect: `palm` claimed it was no taller than a palm is wide (~3.5in).
+    expect(cue).not.toContain('within her hand')
+  })
+
+  it('states both a measurement and a hand-relative anchor at every size', () => {
+    for (const L of [1.5, 3.5, 4.7, 7.5, 12]) {
+      const cue = scaleCueFromLengthInches(L)
+      expect(cue).toContain(`${L} inches`)
+      expect(cue).toMatch(/hand|palm|wrist|finger|elbow/)
+    }
   })
 })
