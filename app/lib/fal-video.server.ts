@@ -323,6 +323,23 @@ const PLATE_NEGATIVE =
   'brand name, caption, second product, duplicate product'
 
 /**
+ * Stage-2 scale correction (ticket #2761). Stage 1 renders the plate centered
+ * and large on a neutral field with no scale context, so stage 2 composites it
+ * at roughly the plate's apparent size and the product reads oversized in the
+ * presenter's hand (observed: a palm-sized sucking vibrator rendering
+ * vase/watermelon-sized). The cue anchors the product to real-world proportion
+ * relative to the person and their hand. It deliberately does NOT hard-code a
+ * size ("palm-sized") — that would shrink a genuinely large product like a wand
+ * — so the same cue reads correctly across products of different real sizes.
+ * Appended only when a product is actually composited.
+ */
+const PRODUCT_SCALE_CUE =
+  'Render the product at its true real-world size within the scene, scaled ' +
+  'naturally relative to the person and their hand as a real object of its kind ' +
+  'would be, neither enlarged nor shrunk to fill the frame. A handheld product ' +
+  'sits in proportion within the hand and is not oversized.'
+
+/**
  * Stage-2 output dimensions per caller-requested ratio. FLUX.2 edit takes explicit
  * pixel dimensions rather than fal's `aspect_ratio` string, so the ratio resolves
  * here. Pinning exact pixels also avoids the under-ratio drift the old
@@ -410,6 +427,11 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
   const needsPlate = !!opts.productImageUrl && opts.productImageUrl !== opts.presenterImageUrl
   const productRef = needsPlate ? await composeProductPlate(opts.productImageUrl!) : opts.productImageUrl
 
+  // Anchor the composited product to real-world scale (ticket #2761). Applied
+  // only to a genuine presenter+product composite (needsPlate): a talking-head
+  // frame has no product, and the no-presenter base has no hand to scale against.
+  const framePrompt = needsPlate ? `${opts.prompt} ${PRODUCT_SCALE_CUE}` : opts.prompt
+
   // Stage 2.
   const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_FRAME_MODEL}`, {
     method: 'POST',
@@ -418,7 +440,7 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      prompt: opts.prompt,
+      prompt: framePrompt,
       image_urls: [
         opts.presenterImageUrl,
         ...(productRef ? [productRef] : []),
