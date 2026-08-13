@@ -149,6 +149,59 @@ export const PRODUCT_SCALES = {
   bottle:   'The product is a small bottle, about the height of her hand from wrist to fingertip and easily gripped in one hand.',
 } as const
 
+/**
+ * Build a scale cue from the product's REAL dimensions (ticket #2761).
+ *
+ * The presets above are shape-class guesses, and a guess is what produced the
+ * defect: a 4.7-inch bullet was briefed as `palm` ("no taller than her palm is
+ * wide"), which is about 3.5 inches. The cue contradicted the reference photo,
+ * so the model oscillated between too small and too big across candidates.
+ *
+ * The real numbers were in Shopify the whole time, in the `xdipx.specifications`
+ * metafield ("Length: 4.7 inches"). Prefer them over a preset whenever they
+ * exist.
+ *
+ * The cue states BOTH the measurement and a hand-relative anchor. Units alone
+ * are weak because the model has no scale sense; the anchor alone is what the
+ * presets already were. Together, one corrects the other.
+ *
+ * Anchors assume an adult hand of roughly 7.5in wrist to fingertip and a palm
+ * of roughly 4in from wrist crease to finger base.
+ */
+export function scaleCueFromLengthInches(lengthIn: number): string {
+  const L = `about ${lengthIn} inches long`
+  if (lengthIn <= 2.5) {
+    return `The product is small, ${L}: it disappears almost entirely inside her closed hand.`
+  }
+  if (lengthIn <= 4) {
+    return `The product is ${L}: roughly the length of her palm from wrist crease to the base of her fingers, and it sits comfortably within her hand.`
+  }
+  if (lengthIn <= 6) {
+    return `The product is ${L}: noticeably shorter than her whole hand, roughly two thirds of the distance from her wrist to her fingertips, so it reads as compact but not tiny when she holds it up.`
+  }
+  if (lengthIn <= 9) {
+    return `The product is ${L}: roughly the length of her whole hand from wrist to fingertip.`
+  }
+  return `The product is ${L}: longer than her hand, roughly reaching from her wrist toward her elbow.`
+}
+
+/**
+ * Pull a length in inches out of the `xdipx.specifications` metafield, whose
+ * entries look like "Length: 4.7 inches". Returns null when there is no usable
+ * length, so the caller falls back to a preset rather than inventing a number.
+ */
+export function lengthInchesFromSpecifications(specs: readonly string[] | null | undefined): number | null {
+  if (!specs) return null
+  for (const line of specs) {
+    const m = /length\s*:\s*([\d.]+)\s*(?:in|inch|inches)\b/i.exec(line)
+    if (m) {
+      const n = Number.parseFloat(m[1]!)
+      if (Number.isFinite(n) && n > 0) return n
+    }
+  }
+  return null
+}
+
 export type ProductScale = keyof typeof PRODUCT_SCALES
 
 export function isProductScale(v: unknown): v is ProductScale {
@@ -183,6 +236,17 @@ export interface GenerateCastCompositeOpts {
   /** Real Shopify product photo. Stage 1 turns it into an unlabeled plate. */
   productImageUrl: string
   /**
+   * Extra references handed to stage 2 alongside the plate.
+   *
+   * Exists because of a measured failure (#3045): one run produced two
+   * candidates that disagreed about the product's silhouette. Both came from a
+   * single composeSceneFrame call and therefore shared ONE stage-1 plate, so a
+   * bad plate cannot explain it. The drift is stage 2 re-interpreting the plate
+   * per candidate rather than compositing it. Passing the real packshot here
+   * gives stage 2 a second, unambiguous look at the true shape.
+   */
+  extraImageUrls?: string[]
+  /**
    * How big the product is, relative to the presenter's hand. Required, because
    * omitting it is what produced a vase-sized palm toy: a silent default would
    * be wrong for most of the catalog and wrong invisibly.
@@ -210,6 +274,7 @@ export async function generateCastComposite(
     prompt: withProductScale(opts.prompt, opts.scale),
     presenterImageUrl: opts.presenterImageUrl,
     productImageUrl: opts.productImageUrl,
+    ...(opts.extraImageUrls?.length ? { extraImageUrls: opts.extraImageUrls } : {}),
     // 4:5 is the feed/grid still. The default is 9:16, which is a video frame
     // and would be cropped to nothing in a profile grid.
     aspectRatio: '4:5',

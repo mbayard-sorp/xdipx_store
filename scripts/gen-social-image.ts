@@ -80,6 +80,7 @@ async function main() {
   const refImage    = arg('ref-image')
   const presenter   = arg('presenter-image')
   const scale       = arg('scale')
+  const extraRef    = arg('extra-ref')
   const noRef       = hasFlag('no-ref')
   const noRefReason = arg('no-ref-reason')
   const slide       = arg('slide') ? Number(arg('slide')) : undefined
@@ -203,6 +204,7 @@ async function main() {
       presenterImageUrl: presenter,
       productImageUrl: refImage!,
       scale: scale!,
+      ...(extraRef ? { extraImageUrls: [extraRef] } : {}),
       count: Number(arg('candidates') ?? '2'),
       caller,
     })
