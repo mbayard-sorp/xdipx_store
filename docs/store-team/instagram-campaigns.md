@@ -373,6 +373,36 @@ Working titles. Every caption still goes through the voice gate; a name here is 
 Category and live-better campaigns alternate deliberately: a feed that is only product education
 becomes a catalog, and a feed that is only advice has nothing to sell when someone is ready to buy.
 
+### The Vibrator Field Guide, locked scheme (owner-approved 2026-08-13)
+
+Locked per §3: decided once, before the run, and never re-decided mid-campaign. The owner selected
+the look on 2026-08-13 and confirmed its proportion. Reference frame:
+`social-femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink-cast-priya-true-scale-20260813-1.jpg`.
+
+| Field | Locked value |
+|---|---|
+| `groundSet` | Primary coral-soft blush plaster. Secondary plum-soft. Punctuation paper. |
+| `lightSignature` | Late-morning sun from a window **out of frame, upper right**, throwing one hard-edged diagonal band down the wall. Open, detailed shadows; never black. The caster stays off-frame, which is what makes it P9 rather than a body shadow. |
+| `rhymeProp` | A thin dark elastic hair tie on the wrist. |
+| `rhymeColor` | The product's saturated magenta against the coral ground. |
+| `surfaceMaterial` | Textured plaster wall. |
+| `castSlate` | `priya`, reference `https://cdn.sanity.io/images/0nlwk8cf/production/46d6016c81db7a1725425af6f72231786845cb32-576x1024.jpg`. Pin this exact URL; a re-upload changes the person. |
+| `wardrobeRegister` | Soft pink lace bralette with fine straps plus matching pyjama shorts, relaxed at-home loungewear. Licensed by the 2026-08-13 ruling in §3.2. **State it in every prompt**, and state the coverage, not just the garment name: "lace bralette" alone spans a wide range and the model will pick from it. |
+| `cropSignature` | Three-quarter to camera, waist-up, subject left of centre with the light and the open wall to her right. |
+| `productScale` | Derived from `xdipx.specifications`, never from a preset. See below. |
+| `retiredForCampaign` | Styled tabletops, packshots, centred symmetrical framing, anything the model invents in place of the real SKU. |
+
+**Scale is a lookup, not a judgment.** Read the length from the product's `xdipx.specifications`
+metafield and let `scaleCueFromLengthInches()` build the cue. Guessing a preset is what produced the
+defect: a 4.7-inch bullet briefed as `palm` ("no taller than her palm is wide", about 3.5 inches)
+gave the model a cue contradicting its own reference photo, and it resolved that contradiction
+differently on every candidate.
+
+**Known drift, so a run is not reported as clean when it is not.** Two candidates from one stage-2
+call can still disagree on size even with a correct cue: on 2026-08-13 one was right and one was
+oversized. Shape is stable once the packshot is passed as a second reference; size is not yet.
+Check every candidate against the real packshot before offering it, and expect to discard some.
+
 **Calendar rows.** Each campaign's start date gets a `marketing_calendar` row via
 `POST /api/team/calendar {op:'propose', eventDate:<starts>, name:<name>, type:'campaign', theme:<subject>}`,
 landing at `planned`. The `propose` op does not currently accept `assetsJson`, so **this file is the
