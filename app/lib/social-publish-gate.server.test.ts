@@ -1,0 +1,225 @@
+// Deterministic pre-publish checks (ticket #2739).
+//
+// These run in place of the owner's approval click, so the cases below are the
+// ones that actually happened or that the charter names, not invented ones: the
+// packshots on the current pending drafts, the out-of-stock product that had to
+// be deleted from the feed on 2026-08-09, and the sale-attempt forms Meta's
+// Restricted Goods standard removes.
+import { describe, it, expect } from 'vitest'
+import {
+  runDeterministicPublishChecks,
+  findRepeatedRun,
+  shingles,
+  REPETITION_SHINGLE,
+  isProductSellable,
+} from './social-publish-gate.server'
+
+const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
+const GOOD_MEDIA = [`${CDN}/social-rosales-cast-maya-20260812-1.jpg`]
+const inStock = async () => true
+const outOfStock = async () => false
+
+/** A caption with nothing wrong with it. */
+const CLEAN = 'ok, a detail about silicone nobody mentions: not all of it is the same grade.'
+
+function checks(r: { findings: { check: string }[] }): string[] {
+  return r.findings.map(f => f.check).sort()
+}
+
+describe('a clean post', () => {
+  it('passes with no findings', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'rosales' },
+      { getAvailability: inStock },
+    )
+    expect(r.findings).toEqual([])
+    expect(r.blocked).toBe(false)
+    expect(r.held).toBe(false)
+  })
+})
+
+describe('imagery provenance', () => {
+  it('blocks a bare Nalpac packshot, which is what the pending drafts carry', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: [`${CDN}/77292A.jpg?v=1775408527`] },
+    )
+    expect(checks(r)).toContain('image-provenance')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('blocks a carousel where only one slide is a packshot', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: CLEAN,
+      mediaUrls: [...GOOD_MEDIA, `${CDN}/96177A.jpg`],
+    })
+    expect(r.blocked).toBe(true)
+  })
+
+  it('blocks a post with no media rather than treating it as nothing to check', async () => {
+    const r = await runDeterministicPublishChecks({ caption: CLEAN, mediaUrls: [] })
+    expect(checks(r)).toContain('image-provenance')
+    expect(r.blocked).toBe(true)
+  })
+})
+
+describe('stock, re-checked at publish time', () => {
+  it('blocks an out-of-stock product (the 2026-08-09 deleted post)', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'gone' },
+      { getAvailability: outOfStock },
+    )
+    expect(checks(r)).toContain('stock-out')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('fails closed when stock cannot be resolved', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'unknown' },
+      { getAvailability: async () => null },
+    )
+    expect(checks(r)).toContain('stock-unverifiable')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('fails closed when the stock lookup throws, rather than publishing anyway', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'boom' },
+      { getAvailability: async () => { throw new Error('shopify down') } },
+    )
+    expect(checks(r)).toContain('stock-unverifiable')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('does not invent a stock finding for a product-free education post', async () => {
+    // License D posts legitimately feature no product.
+    const r = await runDeterministicPublishChecks({ caption: CLEAN, mediaUrls: GOOD_MEDIA })
+    expect(r.findings).toEqual([])
+  })
+})
+
+describe('attempts to sell, the thing Meta actually removes', () => {
+  const cases: [string, string][] = [
+    ['sale-price', 'this one is $48.99 and worth every cent'],
+    ['sale-discount', 'take 20% off this week only'],
+    ['sale-promo-code', 'use code BLOOM15 at checkout'],
+    ['sale-cta', 'shop now before it goes'],
+    ['sale-pdp-link', 'grab it at xdipx.com/products/rosales'],
+  ]
+  for (const [check, caption] of cases) {
+    it(`blocks ${check}`, async () => {
+      const r = await runDeterministicPublishChecks({ caption, mediaUrls: GOOD_MEDIA })
+      expect(checks(r)).toContain(check)
+      expect(r.blocked).toBe(true)
+    })
+  }
+
+  it('does not fire on ordinary editorial copy', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'the shape does the finding, so nobody has to go looking. link in bio if you want the full guide.',
+      mediaUrls: GOOD_MEDIA,
+    })
+    expect(r.findings).toEqual([])
+  })
+})
+
+describe('banned vocabulary', () => {
+  it('blocks emoji anatomy, which is read as anatomy regardless of intent', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'a little something 🍑 for later',
+      mediaUrls: GOOD_MEDIA,
+    })
+    expect(checks(r)).toContain('emoji-anatomy')
+  })
+
+  it('blocks a lived-experience claim, which Emma can never make', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'I tried this one last week and honestly',
+      mediaUrls: GOOD_MEDIA,
+    })
+    expect(checks(r)).toContain('lived-experience')
+  })
+
+  it('leaves second-person copy alone', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'you will feel the difference in the grip, is the thing',
+      mediaUrls: GOOD_MEDIA,
+    })
+    expect(checks(r)).not.toContain('lived-experience')
+  })
+})
+
+describe('repetition across the live feed', () => {
+  it('blocks an eight-word run recycled from an earlier post', async () => {
+    const prior = 'the nightstand drawer says a lot about a person, honestly'
+    const r = await runDeterministicPublishChecks({
+      caption: 'ok so the nightstand drawer says a lot about a person here',
+      mediaUrls: GOOD_MEDIA,
+      recentCaptions: [prior],
+    })
+    expect(checks(r)).toContain('repetition')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('tolerates short overlaps, which one brand voice cannot avoid', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'the thing most people miss about silicone grades',
+      mediaUrls: GOOD_MEDIA,
+      recentCaptions: ['the thing most people forget is how to store it'],
+    })
+    expect(checks(r)).not.toContain('repetition')
+  })
+
+  it('ignores punctuation and case when comparing', () => {
+    const a = 'Not all of it is the same silicone, it turns out.'
+    const b = 'not all of it is the same silicone it turns out!!'
+    expect(findRepeatedRun(a, [b])).not.toBeNull()
+  })
+
+  it('returns no shingles for a caption shorter than the window', () => {
+    expect(shingles('too short', REPETITION_SHINGLE).size).toBe(0)
+    expect(findRepeatedRun('too short', ['too short'])).toBeNull()
+  })
+})
+
+describe('result shape', () => {
+  it('reports every independent failure at once rather than stopping at the first', async () => {
+    const r = await runDeterministicPublishChecks(
+      {
+        caption: 'I tried this, $48.99, shop now 🍑',
+        mediaUrls: [`${CDN}/77292A.jpg`],
+        productHandle: 'gone',
+      },
+      { getAvailability: outOfStock },
+    )
+    // One pass should tell the drafter everything that is wrong, not make it
+    // rediscover the next problem on each retry.
+    expect(checks(r)).toEqual([
+      'emoji-anatomy', 'image-provenance', 'lived-experience',
+      'sale-cta', 'sale-price', 'stock-out',
+    ])
+    expect(r.blocked).toBe(true)
+    expect(r.held).toBe(false)
+  })
+})
+
+describe('isProductSellable', () => {
+  it('is sellable when any variant is, matching what the buy button asks', () => {
+    expect(isProductSellable({ variants: [{ availableForSale: false }, { availableForSale: true }] })).toBe(true)
+  })
+
+  it('is not sellable when every variant is out', () => {
+    expect(isProductSellable({ variants: [{ availableForSale: false }] })).toBe(false)
+  })
+
+  it('treats a product with no variants as not sellable rather than vacuously true', () => {
+    expect(isProductSellable({ variants: [] })).toBe(false)
+  })
+
+  it('distinguishes gone-from-the-storefront from out-of-stock', () => {
+    // An ARCHIVED or DRAFT product is dropped by the Storefront API entirely.
+    // That is a different finding from "every variant is out", so it returns
+    // null rather than false.
+    expect(isProductSellable(null)).toBeNull()
+    expect(isProductSellable(undefined)).toBeNull()
+  })
+})
