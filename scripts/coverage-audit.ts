@@ -212,6 +212,9 @@ async function file(findings: readonly CoverageFinding[]) {
           op: 'create',
           kind: 'code',
           team: 'strategy',
+          // Required by the endpoint. Everything this audit finds is about the
+          // agent plane's wiring, so 'agents' is the honest bucket.
+          category: 'agents',
           priority: f.severity === 'high' ? 2 : 3,
           dedupeKey: f.key,
           suggestion: `${f.title}. ${f.detail} DONE WHEN: ${f.remedy}`,
