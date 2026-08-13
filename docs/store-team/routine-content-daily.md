@@ -225,12 +225,47 @@ abstract-noun-plus-copula sentence stating an idea for the first time is never a
 unchanged: 3 per post, 1 per section, never 2 in a paragraph. Trim by de-constructing the flagged
 shape, not by swapping synonyms inside it.
 
+**Unsourced-frequency pre-flight (mandatory, before Step 5):** run the deterministic checker on the
+draft JSON and drive it to exit 0 before submitting to the voice gate:
+
+```bash
+npx tsx scripts/check-unsourced-frequency.ts <draft.json>
+```
+
+The checker flags a frequency or population quantifier (`usually`, `most`, `almost every`, `people
+keep`, `tends to`) bound to a subject the writer has no data on: customers, readers, or other
+publishers (`most people assume`, `almost every article`, `people keep buying`, `someone writes in`).
+It is subject-aware by design, so it does NOT flag the same quantifier on a product category (`as a
+category, small bullets run quietest`; `usually costs you the sensation`) or on an attributed research
+finding (`sex educators describe`, `reviewers draw the distinction`), and it never flags second-person
+address (`that fear will keep you buying`). The limit is zero: any candidate trips it. Resolve each by
+sourcing the claim, attributing it, or removing it. Do NOT soften it with a hedge (`can`, `often`,
+`it's easy to`): those are charter-banned in this register, so hedging trades a claim defect for a
+voice defect. Like the aphorism checker, it flags candidates and leaves the final judgment to the voice
+gate. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
+place (suggestions #1674, #2618).
+
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
 opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
 is a first-submit voice-gate failure the writer otherwise discovers only at the gate, spending the one
 allowed rewrite cycle. Shape each seam with a concrete subject and avoid the "This is / That is
 [defining clause]" shape, so a seam does not itself create an aphorism-as-closer.
+
+**Hero pre-flight (mandatory, before Step 5):** the hero image and its alt are reviewed by no gate,
+and two hero guardrails shipped wired to nothing until #2750. After the hero is attached (Step 4) and
+`gen-notebook-art.ts` has written `imagePrompt`, run the slug-scoped checker and drive it to exit 0:
+
+```bash
+npx tsx scripts/check-hero-embed-match.ts --slug <slug>
+```
+
+Unlike the prose checkers above it reads Sanity live, because it needs the post's structured hero
+fields and the live catalog. It flags three things: an empty `imagePrompt` (the composed prompt was
+not captured on upload, so a bad hero can never be retro'd), a hero that names a catalog product the
+post does not embed, and the inverse the older audit is blind to, a post that carries embeds while its
+hero names no catalog product at all. Resolve each by regenerating or re-uploading the hero with an
+explicit `--prompt` that depicts a product the article is actually about, not by loosening the check.
 
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
@@ -394,6 +429,43 @@ for its text, so reusing that key here is the natural guess and it returns
 
 Never close a row you did not execute: a false `applied` looks handled and is worse than an aging
 row.
+
+## Step 6c: Post-publish embed-stock sweep (mandatory, every run)
+
+Step 4 stock-verifies an embed exactly once, before it is embedded. Nothing revisits it after
+publish, so a post sits live pointing readers at whatever the product later became: out of stock,
+de-listed, or 404'd. inventory-sentinel watches hero/rail/featured slots and never looks at blog
+embeds. This is that missing re-check, and it runs here so it cannot rot (ticket #2753).
+
+Run the deterministic sweep over every published post's embeds:
+
+```bash
+npx tsx scripts/audit-blog-embed-stock.ts --json
+```
+
+It resolves each distinct embed handle's buyability from Shopify Admin (`status`, `totalInventory`)
+and a storefront PDP probe, then prints the posts whose embeds are dead, worst first. Use the real
+signals it uses and never Admin `publishedAt` — on this headless catalog `publishedAt` is null for
+essentially the whole catalog and would flag every handle. A handle is dead when it is `gone` (no
+Admin product, status `ARCHIVED`, or PDP 404), `inactive` (Admin status set and not `ACTIVE`), or
+`out-of-stock` (`totalInventory <= 0`).
+
+For each post the sweep reports, file **one deduped suggestion** at the content team so the
+remediation is tracked and the row refreshes every run instead of aging:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"create","team":"content","targetTeam":"content","category":"bug","kind":"process",
+       "priority":<2 if hasNoBuyablePath else 3>,"dedupeKey":"dead-embed:<slug>",
+       "suggestion":"Published post /notebook/<slug> has dead embeds: <handle> (<reason>) ... Swap each for an in-stock, buyable product (charter-voice pairing copy) or remove it. <slug> has NO buyable path and is remediated first.","cxRisk":"low"}'
+```
+
+Then remediate the highest-priority post this run can reach through Step 6b's execute-what-you-can
+rule: a `kind:process` row is closeable by this routine, so swap the dead embed for an in-stock
+product with fresh charter-voice pairing copy (or remove the embed when no honest substitute fits),
+re-run the Step 6c sweep on that post to confirm it is clean, and close the row `applied`. Posts with
+no buyable path come first. Do not close a row you did not actually remediate.
 
 ## Step 7: Retro + finish
 

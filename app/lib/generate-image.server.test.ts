@@ -5,6 +5,11 @@
 // lock in the routing those callers now depend on: fal first, a real prompt even
 // when the caller supplies only categories, and reference bytes reaching fal's
 // image-conditioned endpoint rather than being dropped on the floor.
+//
+// The multi-reference cases (ticket #2222) also live here: two or more URLs must
+// reach falGenerate as refImageUrls (which routes to FLUX.2 edit inside
+// fal.server) and log spend through the standard logImageCost path, while
+// single-ref callers stay on the unchanged Kontext path.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const falGenerate = vi.fn()
@@ -21,8 +26,9 @@ vi.mock('~/lib/imagen.server', () => ({
 }))
 
 const logGenerationBlock = vi.fn()
+const logImageCost = vi.fn()
 vi.mock('~/lib/token-log.server', () => ({
-  logImageCost: vi.fn(),
+  logImageCost: (...args: unknown[]) => logImageCost(...args),
   logGenerationBlock: (...args: unknown[]) => logGenerationBlock(...args),
 }))
 
@@ -33,6 +39,7 @@ describe('generateImage', () => {
     falGenerate.mockReset().mockResolvedValue(OK)
     generateMoodImage.mockReset().mockResolvedValue([Buffer.from('imagen')])
     logGenerationBlock.mockReset()
+    logImageCost.mockReset()
   })
   afterEach(() => vi.resetModules())
 
@@ -125,6 +132,50 @@ describe('generateImage', () => {
     const { generateImage } = await import('./generate-image.server')
     await generateImage({ prompt: 'p' })
     expect(logGenerationBlock).not.toHaveBeenCalled()
+  })
+
+  it('passes two-or-more refs through as refImageUrls and logs the FLUX.2 edit cost', async () => {
+    falGenerate.mockResolvedValue({ buffers: [Buffer.from('x')], costKey: 'fal/flux-2-edit' })
+    const { generateImage } = await import('./generate-image.server')
+
+    const result = await generateImage({
+      prompt: 'a vibrator and its lube bottle in one drawer scene',
+      refImageUrls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
+      feature: 'social-images',
+    })
+
+    expect(falGenerate).toHaveBeenCalledTimes(1)
+    expect(falGenerate.mock.calls[0]![0]).toMatchObject({
+      refImageUrls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
+    })
+    expect(result).toMatchObject({ provider: 'fal', model: 'fal/flux-2-edit' })
+    // Cost logged through the standard path, keyed to the model fal reported.
+    expect(logImageCost).toHaveBeenCalledTimes(1)
+    expect(logImageCost.mock.calls[0]![0]).toMatchObject({
+      model: 'fal/flux-2-edit',
+      feature: 'social-images',
+      count: 1,
+    })
+    // Multi-ref never touches the Imagen fallback.
+    expect(generateMoodImage).not.toHaveBeenCalled()
+  })
+
+  it('leaves single-ref callers unchanged (refImageUrl only, no refImageUrls)', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({ prompt: 'the product in a scene', refImageUrl: 'https://img.test/p.jpg' })
+
+    const arg = falGenerate.mock.calls[0]![0] as Record<string, unknown>
+    expect(arg).toMatchObject({ refImageUrl: 'https://img.test/p.jpg' })
+    expect(arg).not.toHaveProperty('refImageUrls')
+  })
+
+  it('does not set refImageUrls when the caller passes an empty array', async () => {
+    const { generateImage } = await import('./generate-image.server')
+    await generateImage({ prompt: 'a lamp on a table', refImageUrls: [] })
+
+    const arg = falGenerate.mock.calls[0]![0] as Record<string, unknown>
+    expect(arg).not.toHaveProperty('refImageUrls')
+    expect(arg).not.toHaveProperty('refImageUrl')
   })
 })
 

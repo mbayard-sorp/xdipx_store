@@ -322,6 +322,38 @@ const PLATE_NEGATIVE =
   'packaging, retail box, carton, sleeve, insert, text, words, letters, watermark, logo, ' +
   'brand name, caption, second product, duplicate product'
 
+/**
+ * Stage-2 scale correction (ticket #2761). Stage 1 renders the plate centered
+ * and large on a neutral field with no scale context, so stage 2 composites it
+ * at roughly the plate's apparent size and the product reads oversized in the
+ * presenter's hand (observed: a palm-sized sucking vibrator rendering
+ * vase/watermelon-sized). The cue anchors the product to real-world proportion
+ * relative to the person and their hand. It deliberately does NOT hard-code a
+ * size ("palm-sized") — that would shrink a genuinely large product like a wand
+ * — so the same cue reads correctly across products of different real sizes.
+ * Appended only when a product is actually composited.
+ */
+const PRODUCT_SCALE_CUE =
+  'Render the product at its true real-world size within the scene, scaled ' +
+  'naturally relative to the person and their hand as a real object of its kind ' +
+  'would be, neither enlarged nor shrunk to fill the frame. A handheld product ' +
+  'sits in proportion within the hand and is not oversized.'
+
+/**
+ * Stage-2 output dimensions per caller-requested ratio. FLUX.2 edit takes explicit
+ * pixel dimensions rather than fal's `aspect_ratio` string, so the ratio resolves
+ * here. Pinning exact pixels also avoids the under-ratio drift the old
+ * nano-banana path had ('4:5' came back 896x1152, which Instagram rejects as
+ * taller than 4:5).
+ */
+const SCENE_FRAME_SIZES = {
+  '9:16': { width: 1080, height: 1920 },
+  '4:5': { width: 1080, height: 1350 },
+  // Landscape Notebook hero (image-brief §0). The stage-2 model drifts ~1% off
+  // requested pixels, so callers must resize to the exact target themselves.
+  '4:3': { width: 1200, height: 900 },
+} as const
+
 export interface ComposeSceneFrameOpts {
   /** Scene direction. Product prominence and grounds come from the caller's prompt scaffold. */
   prompt: string
@@ -329,8 +361,12 @@ export interface ComposeSceneFrameOpts {
   presenterImageUrl: string
   /** Real Shopify product photo, publicly fetchable. Omitted for talking-head frames, which never include the product. */
   productImageUrl?: string
+  /** Additional publicly-fetchable reference images beyond presenter/product (e.g. a second product for a paired scene). */
+  extraImageUrls?: string[]
   /** Candidate count (default 3, capped 4). */
   count?: number
+  /** Frame ratio. Defaults to '9:16' (this function's original video-frame use); '4:5' for a feed/carousel still. */
+  aspectRatio?: keyof typeof SCENE_FRAME_SIZES
 }
 
 export interface SceneFrameResult {
@@ -391,6 +427,11 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
   const needsPlate = !!opts.productImageUrl && opts.productImageUrl !== opts.presenterImageUrl
   const productRef = needsPlate ? await composeProductPlate(opts.productImageUrl!) : opts.productImageUrl
 
+  // Anchor the composited product to real-world scale (ticket #2761). Applied
+  // only to a genuine presenter+product composite (needsPlate): a talking-head
+  // frame has no product, and the no-presenter base has no hand to scale against.
+  const framePrompt = needsPlate ? `${opts.prompt} ${PRODUCT_SCALE_CUE}` : opts.prompt
+
   // Stage 2.
   const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_FRAME_MODEL}`, {
     method: 'POST',
@@ -399,10 +440,14 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      prompt: opts.prompt,
-      image_urls: [opts.presenterImageUrl, ...(productRef ? [productRef] : [])],
+      prompt: framePrompt,
+      image_urls: [
+        opts.presenterImageUrl,
+        ...(productRef ? [productRef] : []),
+        ...(opts.extraImageUrls ?? []),
+      ],
       num_images: count,
-      image_size: { width: 1080, height: 1920 },
+      image_size: SCENE_FRAME_SIZES[opts.aspectRatio ?? '9:16'],
       enable_safety_checker: false,
       output_format: 'jpeg',
     }),

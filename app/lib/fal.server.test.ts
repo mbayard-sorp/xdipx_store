@@ -41,21 +41,21 @@ describe('kontextResolutionMode', () => {
   })
 })
 
-describe('falGenerate output_format', () => {
+describe('falGenerate reference-image routing and output_format', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
   })
 
-  // Capture the request body the generator would POST to fal, without hitting
-  // the network. First fetch = the generation call (we assert its body); any
-  // follow-up fetch = the image download, which we stub to a tiny buffer.
+  // Capture the request the generator POSTs to fal, without hitting the network.
+  // First fetch = the generation call (we assert its URL + body); any follow-up
+  // fetch = the image download, which we stub to a tiny buffer.
   function stubFal() {
     vi.stubEnv('FAL_KEY', 'test-key')
-    const calls: Array<{ url: string; body: unknown }> = []
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') {
-        calls.push({ url, body: JSON.parse(String(init.body)) })
+        calls.push({ url: String(url), body: JSON.parse(String(init.body)) })
         return new Response(JSON.stringify({ images: [{ url: 'https://fal.test/out' }] }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -66,6 +66,73 @@ describe('falGenerate output_format', () => {
     }))
     return calls
   }
+
+  it('routes two-or-more refs to FLUX.2 edit with an image_urls array', async () => {
+    const calls = stubFal()
+    const result = await falGenerate({
+      prompt: 'a vibrator and its lube bottle in one drawer scene',
+      refImageUrls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
+      imageSize: 'portrait_16_9',
+    })
+    expect(calls[0]?.url).toContain('fal-ai/flux-2/lora/edit')
+    expect(calls[0]?.body).toMatchObject({
+      image_urls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
+      image_size: 'portrait_16_9',
+      output_format: 'jpeg',
+      // The whole reason this path is not nano-banana/edit: that endpoint's
+      // safety filter is not configurable and 422s on ordinary catalog product
+      // photos. FLUX.2 takes the flag like the other open FLUX endpoints.
+      enable_safety_checker: false,
+    })
+    // Multi-ref must not fall through to the Kontext single-ref shape.
+    expect(calls[0]?.body).not.toHaveProperty('image_url')
+    expect(calls[0]?.body).not.toHaveProperty('resolution_mode')
+    // Cost logs against the FLUX.2 edit rate, not the flux-dev default.
+    expect(result.costKey).toBe('fal/flux-2-edit')
+  })
+
+  it('passes a {width,height} image_size straight through on the multi-ref path', async () => {
+    // Unlike Kontext, FLUX.2 edit has a real image_size param, so an explicit
+    // pixel size must not be flattened to a nearest-aspect string.
+    const calls = stubFal()
+    await falGenerate({
+      prompt: 'two products in one scene',
+      refImageUrls: ['https://img.test/a.jpg', 'https://img.test/b.jpg'],
+      imageSize: { width: 1080, height: 1350 },
+    })
+    expect(calls[0]?.body).toMatchObject({ image_size: { width: 1080, height: 1350 } })
+  })
+
+  it('keeps a single refImageUrl on the unchanged Kontext single-ref path', async () => {
+    const calls = stubFal()
+    const result = await falGenerate({
+      prompt: 'the product in a scene',
+      refImageUrl: 'https://img.test/p.jpg',
+    })
+    expect(calls[0]?.url).toContain('flux-kontext/dev')
+    expect(calls[0]?.body).toMatchObject({ image_url: 'https://img.test/p.jpg' })
+    expect(calls[0]?.body).not.toHaveProperty('image_urls')
+    expect(result.costKey).toBe('fal/flux-kontext-dev')
+  })
+
+  it('treats a single-element refImageUrls like the single-ref Kontext path', async () => {
+    const calls = stubFal()
+    await falGenerate({
+      prompt: 'the product in a scene',
+      refImageUrls: ['https://img.test/only.jpg'],
+    })
+    expect(calls[0]?.url).toContain('flux-kontext/dev')
+    expect(calls[0]?.body).toMatchObject({ image_url: 'https://img.test/only.jpg' })
+    expect(calls[0]?.body).not.toHaveProperty('image_urls')
+  })
+
+  it('routes no refs to the text-to-image endpoint unchanged', async () => {
+    const calls = stubFal()
+    await falGenerate({ prompt: 'a lamp on a table' })
+    expect(calls[0]?.body).toMatchObject({ image_size: 'landscape_16_9' })
+    expect(calls[0]?.body).not.toHaveProperty('image_url')
+    expect(calls[0]?.body).not.toHaveProperty('image_urls')
+  })
 
   it('pins jpeg on the text-to-image branch', async () => {
     const calls = stubFal()

@@ -199,6 +199,24 @@ external vibe; a snow globe containing a tiny bedside scene.
 **Rejects:** anything a viewer would read as crude rather than clever, literal anatomy, dim or
 moody grading, concept salad (two jokes in one frame).
 
+**Keepers:** §0-H, "How Loud Are Vibrators, and How Do You Keep Things Quiet?" (real-talk,
+content run 269). Feeling: divided attention, listening for a shared wall while trying to be
+present. One Black woman in her mid-30s, fuller curvy build, natural afro hair, sitting cross-
+legged on the edge of a made bed in bright warm daylight, head turned toward an open bedroom door
+as if listening down the hallway, self-conscious/tired expression (not ashamed), fully clothed in
+casual pink loungewear, deep warm-coral wall catching dramatic daylight streaks, no product in
+frame (left out per the brief's own "if it risks reading as a product hero, leave it out" call —
+raw/self-conscious topic, single-figure composition was strong enough alone). Diversity note: the
+four most recent real-talk heroes before this ran a South Asian man 40s, a mixed-gender couple
+40s, a woman early 40s, and a couple with a baby monitor — this run intentionally varied skin
+tone, body type, and styling rather than repeating the light/young pattern the brief flagged.
+2 candidates from one round, no regenerate needed: candidate 1 (head turned to the door, listening
+posture) picked over candidate 2 (facing camera, ambiguous small object on the nightstand — too
+close to the banned-object class to risk) →
+`image-76dff57c00109b99d73db3cadd172923370a09c5-1200x896-jpg` (post slug not yet created in
+Sanity at generation time; asset handed off to content-writer to set on `blogPost.heroImage`
+directly).
+
 **Keepers:** JO H2O Original Water-Based Lubricant (`jo-h2o-original-water-based-lubricant-4-oz`),
 sage-leaf + water-droplet care accent, warm dappled daylight on cream/white paper →
 `image-e75e55758b2fc4594fd24ec197a561744163c299-1184x880-jpg` (post: `how-do-you-care-for-silicone-toys`).
@@ -622,6 +640,63 @@ even with an explicit blank-surface negative prompt. Same failure class as
 We-Vibe Sync Go: Kontext cannot hold product shape and a blank product surface
 at the same time on branded bodies. Any branded-wordmark product should default
 to the real-photo fallback path rather than attempt Kontext.
+
+---
+
+## Instagram carousel — cast + product compositing (`fal-ai/nano-banana/edit`, License B/C)
+
+Not a homepage surface, but the same multi-reference compositing pattern belongs here so it
+isn't re-discovered from scratch. Route: `composeSceneFrame()` in `app/lib/fal-video.server.ts`
+(now takes an optional `aspectRatio` param, default `'9:16'` for its original video-frame
+use, plus `extraImageUrls` for references beyond presenter/product — pass `'4:5'` for a
+feed/carousel still). `image_urls` order does not matter to the model.
+
+**Model note (2026-08-10):** the run below was on `fal-ai/nano-banana/edit`. That path has
+since been replaced by the two-stage plate + `fal-ai/flux-2/lora/edit` composite (see the
+bake-off notes at the top of `fal-video.server.ts`), which was adopted precisely because
+nano-banana's non-configurable safety filter blocked much of the catalog. Read the fence below
+as a record of why the swap happened, not as a live constraint on the current route.
+
+**Hard content-policy fence (verified 2026-08-09, 4 independent prompt variations, all failed
+identically):** `fal-ai/nano-banana/edit` 422s with `content_policy_violation` on the *pairing*
+of a human reference photo (any `castMember`) with an insertable-toy product reference (tested:
+b-Vibe Essential Vibing P-Spot Plug, both the retail box and the bare product shot), regardless
+of prompt wording — a maximally generic prompt ("a smiling man holding a small teal item") still
+failed. The same product image alone (no human reference) composites fine. This reads as an
+image-content classifier on the reference pairing, not a text filter, so no prompt rewrite
+routes around it. **Do not spend more than one retry on a cast+insertable-toy composite** — stop
+at the fence and fall back to a cast-solo frame (no product in shot) or a product-only scene
+frame, per the two-failure gate. Flag the concept change to the caller rather than silently
+downgrading the brief.
+
+**fal's `aspect_ratio: '4:5'` on nano-banana/edit returns 896x1152 (0.778), not 1080x1350
+(0.8)** — same under-ratio drift as the flux_dev black-JPEG note above, and it will get an
+Instagram carousel image rejected as taller-than-4:5. `composeSceneFrame()` now sends explicit
+pixel dimensions (1080x1350 for `'4:5'`) rather than a ratio string, which removes the drift on
+that route. Any other caller that still passes a ratio string should center-crop-then-resize
+every candidate to exactly 1080x1350 before the vision gate and before upload; don't trust the
+returned dimensions.
+
+**Keepers (2026-08-09, owner-requested "p-spot arc" carousel, product handle
+`essential-vibing-p-spot-plug`):**
+- Frame 1 (metaphor, archetype D, flux/dev text-to-image, no ref): "Overhead macro editorial
+  photograph of a single fresh ripe purple fig sitting whole on a warm neutral linen surface,
+  soft natural directional daylight from one side, gentle shadow, shallow depth of field,
+  elegant food-editorial still life composition, warm bright color grade, high-key light... one
+  piece of fruit only, no other objects, no product, no hands, no people." Passed gate clean,
+  reads as a deniable food still life at a glance.
+- Frame 2 (cast solo, archetype C, nano-banana/edit, presenter ref only): castMember reference +
+  "waist-up... playfully confused, eyebrows raised, both hands raised palms-up..., mouth
+  slightly open like mid-laugh-question... plum-soft lavender-pink studio backdrop." Passed
+  clean; hands anatomically correct at first attempt.
+- Frame 4 (scene, archetype C, nano-banana/edit, two product refs, no presenter): plug product
+  photo + lube bottle photo + "open wooden nightstand drawer, darker walnut wood, three-quarter
+  high angle looking down, small folded cloth, unlit candle on the nightstand top, warm daylight
+  through a window off-frame." Label on the lube bottle reproduced legibly and undistorted; this
+  is the one archetype-C scene where a labeled bottle survives compositing, because it's the
+  product-only path (no human reference) rather than Kontext single-ref on a label-heavy hero.
+
+**Reject:** Frame 3 (cast + product together) — see the hard fence above.
 
 ---
 

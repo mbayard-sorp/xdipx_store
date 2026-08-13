@@ -93,17 +93,24 @@ export async function loader() {
   const needIndex = candidates.length > 0 || recentHandles.length > 0
   const index = needIndex ? await getDiscoveryIndex().catch(() => [] as DiscoveryProduct[]) : []
 
+  // The pinned feature is the highest-intent click a curious arrival makes, so
+  // it must never point at an unavailable PDP. Require an in-stock match (same
+  // idiom as the recent grid below); an out-of-stock pin falls through to the
+  // next candidate, then hides the module rather than sending IG traffic to a
+  // product they cannot buy.
   let product: DiscoveryProduct | null = null
   if (candidates.length > 0) {
     for (const handle of candidates) {
       const match = index.find(p => p.handle === handle)
-      if (match) {
+      if (match && inStock(match)) {
         product = match
         break
       }
     }
     if (!product) {
-      console.warn(`[social] no discovery match for handles ${candidates.join(', ')}, hiding product module`)
+      console.warn(
+        `[social] no in-stock discovery match for handles ${candidates.join(', ')}, hiding product module`,
+      )
     }
   }
 
@@ -137,7 +144,9 @@ function formatPrice(product: DiscoveryProduct): string {
 }
 
 // PDP link that carries the social arrival source so the visit attributes back
-// to the bio link this page sits behind.
+// to the bio link this page sits behind. Used by every PDP link on the page,
+// the pinned feature and the recent grid alike, so IG->PDP is measured on the
+// primary click, not only the secondary tiles.
 function pdpHref(handle: string): string {
   return `/products/${handle}?${RECENT_UTM}`
 }
@@ -171,8 +180,8 @@ export default function SocialLanding() {
               </h1>
               <p className="mx-auto mt-4 max-w-sm text-base leading-relaxed text-ink-3">
                 I am Emma. When I say my DMs are open, this is what I mean. Ask me
-                the thing you would not type into a search bar and I will point you
-                at something worth wanting.
+                the thing you would not type into a search bar and I will find you
+                something worth wanting.
               </p>
               <button
                 type="button"
@@ -192,7 +201,7 @@ export default function SocialLanding() {
                   {heading ?? 'the one from the video'}
                 </h2>
                 <Link
-                  to={`/products/${product.handle}`}
+                  to={pdpHref(product.handle)}
                   className="block overflow-hidden rounded-[22px] border border-line bg-paper-2 transition-shadow hover:shadow-md"
                 >
                   {product.imageUrl && (

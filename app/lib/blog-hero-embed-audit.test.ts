@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   distinctiveTokens,
   findHeroEmbedMismatches,
+  heroNamesAnyProduct,
   type AuditBlogPost,
   type CatalogProduct,
 } from '~/lib/blog-hero-embed-audit'
@@ -117,5 +118,44 @@ describe('findHeroEmbedMismatches — precision guardrails', () => {
       { slug: 'p', heroImageAlt: null, imagePrompt: null, embedHandles: ['magic-wand-mini'] },
     ]
     expect(findHeroEmbedMismatches(posts, CATALOG)).toEqual([])
+  })
+})
+
+// ticket #2750: the inverse case the mismatch finder is blind to — a hero that
+// names no catalog product at all on a post that does carry embeds.
+describe('heroNamesAnyProduct', () => {
+  it('is true when the hero copy names a catalog product', () => {
+    const post: AuditBlogPost = {
+      slug: 'p',
+      heroImageAlt: 'the Wanda Lust wand resting on white',
+      imagePrompt: null,
+      embedHandles: [],
+    }
+    expect(heroNamesAnyProduct(post, CATALOG)).toBe(true)
+  })
+
+  it('reads the imagePrompt too, not just the alt', () => {
+    const post: AuditBlogPost = {
+      slug: 'p',
+      heroImageAlt: 'a soft daylight scene',
+      imagePrompt: 'editorial still of a Satisfyer air-pulse toy on plum-soft ground',
+      embedHandles: [],
+    }
+    expect(heroNamesAnyProduct(post, CATALOG)).toBe(true)
+  })
+
+  it('is false for a generic editorial hero that names no product', () => {
+    const post: AuditBlogPost = {
+      slug: 'p',
+      heroImageAlt: 'soft morning light across an unmade linen bed',
+      imagePrompt: 'warm daylight, plum-soft ground, no product, no people',
+      embedHandles: ['magic-wand-mini'],
+    }
+    expect(heroNamesAnyProduct(post, CATALOG)).toBe(false)
+  })
+
+  it('is false when the hero copy is empty', () => {
+    const post: AuditBlogPost = { slug: 'p', heroImageAlt: null, imagePrompt: null, embedHandles: [] }
+    expect(heroNamesAnyProduct(post, CATALOG)).toBe(false)
   })
 })
