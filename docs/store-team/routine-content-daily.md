@@ -356,10 +356,18 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    slug pre-check currently matches the draft under the raw perspective; teaching it to read the
    published perspective is a separate code fix.)
 5. **Sources insertion (mechanical, after the final PASS).** The accuracy gate returns 0-2
-   citations it actually resolved. Append them as a `## Sources` section (source name + link,
-   no new prose claims). This insertion is exempt from re-gating. If the gate reported
-   `[web: degraded]`, follow its strip/soften instructions and ship without a Sources section;
-   zero citations is a valid outcome.
+   citations it actually resolved. **Verify every returned URL through `/api/team/url-liveness`
+   before appending it** — the endpoint enforces a fixed host allowlist (`CITATION_HOST_ALLOWLIST`
+   in `app/lib/citation-liveness.server.ts`: `medicalnewstoday.com`, `plannedparenthood.org`,
+   `clevelandclinic.org`, `who.int`, `ncbi.nlm.nih.gov`, `nih.gov`, `cdc.gov`, `mayoclinic.org`,
+   `healthline.com`, `medlineplus.gov`, `kinseyinstitute.org`, `ashasexualhealth.org`, `issm.info`,
+   `nhs.uk`), so a URL on any other host, or a legacy domain (e.g. `kinsey.indiana.edu` instead of
+   the canonical `kinseyinstitute.org`), fails the check. `sex-wellness-reviewer` is told this
+   allowlist up front and prefers an allowlisted, canonical host when one carries the same source;
+   drop any returned URL that still does not pass liveness rather than shipping it. Append the
+   verified ones as a `## Sources` section (source name + link, no new prose claims). This insertion
+   is exempt from re-gating. If the gate reported `[web: degraded]`, follow its strip/soften
+   instructions and ship without a Sources section; zero citations is a valid outcome, never padded.
 
 Two `step` events: `phase:'voice-gate'` and `phase:'accuracy-gate'`, each with the verdict and
 cycle count (the accuracy event also records citation count and `web: ok|degraded`).
