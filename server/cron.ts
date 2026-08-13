@@ -591,6 +591,66 @@ export function createCronRoutes() {
    * tier + score + price-preview candidates, upsert import_candidates.
    * Gated by import_monitor_enabled kill-switch and import_monitor_run_days CSV.
    */
+  /**
+   * GET|POST /cron/social-publish
+   * Schedule: hourly. Publishes approved, due Instagram drafts (ticket #2740).
+   *
+   * SHIPS INERT: instagram_autopublish_enabled defaults off and is read fresh
+   * every tick, so this does nothing until the owner flips it. That flip is his
+   * move; nothing in the agent fleet may make it.
+   *
+   * The substance lives in app/lib/social-publish-job.server.ts, which is not a
+   * protected path and carries the tests. This handler is registration only.
+   *
+   * AWAITED before responding, deliberately. Work that continues after the
+   * response is discarded on Vercel, which is how six Shopify webhook handlers
+   * silently did nothing for months.
+   */
+  cronRoute('/social-publish', async (_req, res) => {
+    try {
+      const { runSocialPublishTick, DEFAULT_MAX_PER_DAY } =
+        await import('../app/lib/social-publish-job.server.js')
+      const { getValve, VALVE_KEYS } = await import('../app/lib/team.server.js')
+      const { getPipelineSetting } = await import('../app/lib/feed-processor.server.js')
+      const { getPublisher } = await import('../app/lib/social-publish/registry.server.js')
+
+      const result = await runSocialPublishTick({
+        isEnabled: () => getValve(VALVE_KEYS.instagramAutopublish),
+        maxPerDay: async () => {
+          const raw = await getPipelineSetting('instagram_publish_max_per_day')
+          const n = raw == null ? NaN : parseInt(raw, 10)
+          return Number.isFinite(n) && n >= 0 ? n : DEFAULT_MAX_PER_DAY
+        },
+        publish: async (post) => {
+          const publisher = getPublisher(post.platform)
+          if (!publisher) return { ok: false, detail: `No publisher for ${post.platform}` }
+          const urls = post.mediaUrls ?? []
+          const first = urls[0]
+          if (!first) return { ok: false, detail: 'Draft has no media URL' }
+          const isVideo = post.videoJobId != null || !!first.split('?')[0]?.endsWith('.mp4')
+          const media = isVideo
+            ? { kind: 'video' as const, videoUrl: first, ...(post.posterUrl ? { posterUrl: post.posterUrl } : {}) }
+            : urls.length > 1
+              ? { kind: 'carousel' as const, imageUrls: urls }
+              : { kind: 'image' as const, imageUrl: first }
+          const out = await publisher.publish({
+            postId: post.id,
+            media,
+            caption: post.editedText?.trim() || post.tweetText,
+          })
+          return out.ok
+            ? { ok: true, externalPostId: out.externalPostId }
+            : { ok: false, detail: out.detail ?? out.reason ?? 'Publish failed' }
+        },
+      })
+
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron/social-publish] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
   cronRoute('/import-monitor', async (_req, res) => {
     try {
       const { getPipelineSetting } = await import('../app/lib/feed-processor.server.js')

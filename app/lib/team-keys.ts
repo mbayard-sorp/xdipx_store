@@ -247,6 +247,12 @@ export const VALVE_KEYS = {
   // chat_enabled gates the Ask Emma web widget's /api/ask-emma replies;
   // sms_agent_enabled gates conversational SMS replies (carrier-required
   // STOP/HELP/START compliance keeps working even when it is off).
+  // Instagram autopublish. Deliberately its own valve rather than reusing
+  // social_team_autopost, which is documented as X-only, gates nothing in code,
+  // and is already TRUE: keying an unattended Instagram publish off an armed
+  // valve would arm it silently. Different platform, different risk profile.
+  // Meta enforcement is account-level and retroactive. Default OFF.
+  instagramAutopublish: 'instagram_autopublish_enabled',
   chatEnabled:        'chat_enabled',
   smsAgentEnabled:    'sms_agent_enabled',
 } as const
