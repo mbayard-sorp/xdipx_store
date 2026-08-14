@@ -378,6 +378,18 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    is exempt from re-gating. If the gate reported `[web: degraded]`, follow its strip/soften
    instructions and ship without a Sources section; zero citations is a valid outcome, never padded.
 
+   **`live:false` is not always "drop it" — read the `reason`.** The endpoint distinguishes a host
+   that *refused* us from a page that is *gone* (ticket #3196). `reason:'blocked'` means an
+   allowlisted host returned 401/403/429, i.e. bot/WAF protection rejecting the checker's fixed
+   user-agent, not a bad path — `mayoclinic.org` does this even at its bare origin. In that case the
+   page is very likely live; **keep the citation only when `sex-wellness-reviewer` has independently
+   confirmed that page's content supports the claim**, and drop it otherwise. Any other `live:false`
+   (`reason:'dead'` for a genuine 404/410, `host-not-allowlisted`, `redirect-off-allowlist`,
+   `too-many-redirects`, `timeout`, `fetch-failed`) is a real miss: drop the URL, never ship it. Do
+   not blanket-keep a `blocked` URL — a dead or paywalled page shipping as a citation is worse than
+   losing one. Same-host canonicalizing redirects (e.g. `https://www.cdc.gov/`) are now followed
+   automatically and come back `live:true`, so they no longer need a hand-picked canonical URL.
+
 Two `step` events: `phase:'voice-gate'` and `phase:'accuracy-gate'`, each with the verdict and
 cycle count (the accuracy event also records citation count and `web: ok|degraded`).
 
