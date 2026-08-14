@@ -20,7 +20,11 @@ type Call = { url: string; body: Record<string, unknown> }
  * driver, which is itself fetch-based, so an unfiltered recorder counts a
  * swallowed DB insert as a generation call.
  */
-function mockFal(calls: Call[], opts: { failPlate?: boolean } = {}) {
+function mockFal(
+  calls: Call[],
+  opts: { failPlate?: boolean; failFrameCalls?: number } = {},
+) {
+  let frameCall = 0
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (!String(url).startsWith('https://fal.run/')) {
       return new Response('', { status: 500 })
@@ -32,10 +36,19 @@ function mockFal(calls: Call[], opts: { failPlate?: boolean } = {}) {
     if (isPlate && opts.failPlate) {
       return new Response('blocked', { status: 422 })
     }
+    // Fail the first N stage-2 candidate calls, to exercise partial-failure
+    // tolerance (ticket #3045).
+    if (!isPlate && opts.failFrameCalls && frameCall < opts.failFrameCalls) {
+      frameCall++
+      return new Response('frame blocked', { status: 422 })
+    }
+    // Each candidate is its own single-image stage-2 call now (ticket #3045), so
+    // give every frame call a distinct url the way fal would return distinct
+    // composites.
     const n = isPlate ? 1 : Number(body['num_images'] ?? 1)
     const images = isPlate
       ? [{ url: PLATE }]
-      : Array.from({ length: n }, (_, i) => ({ url: `https://fal.media/frame-${i}.jpg` }))
+      : Array.from({ length: n }, () => ({ url: `https://fal.media/frame-${frameCall++}.jpg` }))
     return new Response(JSON.stringify({ images }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -66,22 +79,80 @@ describe('composeSceneFrame (two-stage)', () => {
       count: 3,
     })
 
-    expect(calls).toHaveLength(2)
+    // One plate call, then one single-image stage-2 call per candidate.
+    expect(calls).toHaveLength(4)
 
     // Stage 1: the raw packshot goes to the plate model, alone.
-    expect(calls[0]!.url).toContain('qwen-image-edit-2511')
-    expect(calls[0]!.body['image_urls']).toEqual([PRODUCT])
-    expect(calls[0]!.body['num_images']).toBe(1)
+    const plate = calls.filter(c => c.url.includes('qwen-image-edit-2511'))
+    expect(plate).toHaveLength(1)
+    expect(plate[0]!.body['image_urls']).toEqual([PRODUCT])
+    expect(plate[0]!.body['num_images']).toBe(1)
 
-    // Stage 2: the presenter composites against the PLATE, never the packshot.
-    expect(calls[1]!.url).toContain('flux-2/lora/edit')
-    expect(calls[1]!.body['image_urls']).toEqual([PRESENTER, PLATE])
-    expect(calls[1]!.body['image_urls']).not.toContain(PRODUCT)
-    expect(calls[1]!.body['num_images']).toBe(3)
+    // Stage 2: three separate single-image composites, each against the PLATE,
+    // never the packshot (ticket #3045).
+    const frames = calls.filter(c => c.url.includes('flux-2/lora/edit'))
+    expect(frames).toHaveLength(3)
+    for (const f of frames) {
+      expect(f.body['image_urls']).toEqual([PRESENTER, PLATE])
+      expect(f.body['image_urls']).not.toContain(PRODUCT)
+      expect(f.body['num_images']).toBe(1)
+    }
 
+    // Distinct candidates come back, one per request.
     expect(res.urls).toHaveLength(3)
+    expect(new Set(res.urls).size).toBe(3)
     expect(res.costKey).toBe('fal/flux-2-edit')
     expect(res.plate).toEqual({ costKey: 'fal/qwen-image-edit', count: 1 })
+  })
+
+  it('generates each candidate as its own single-image call, not one num_images:N batch (ticket #3045)', async () => {
+    const calls: Call[] = []
+    globalThis.fetch = mockFal(calls) as unknown as typeof fetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+
+    const res = await composeSceneFrame({
+      prompt: 'sunlit bedroom corner',
+      presenterImageUrl: PRESENTER,
+      productImageUrl: PRODUCT,
+      count: 4,
+    })
+
+    // A batched num_images:N call re-interprets the shared plate independently
+    // per image and the candidates drifted apart; one request per candidate
+    // re-anchors each. Four candidates => four stage-2 calls, each num_images 1.
+    const frames = calls.filter(c => c.url.includes('flux-2/lora/edit'))
+    expect(frames).toHaveLength(4)
+    expect(frames.every(f => f.body['num_images'] === 1)).toBe(true)
+    expect(res.urls).toHaveLength(4)
+  })
+
+  it('returns the successful candidates when some stage-2 calls fail, and throws only when all fail (ticket #3045)', async () => {
+    // Two of three candidates fail: a partial set is still useful for review.
+    const partialCalls: Call[] = []
+    globalThis.fetch = mockFal(partialCalls, { failFrameCalls: 2 }) as unknown as typeof fetch
+    const mod = await import('./fal-video.server')
+
+    const res = await mod.composeSceneFrame({
+      prompt: 'p',
+      presenterImageUrl: PRESENTER,
+      productImageUrl: PRODUCT,
+      count: 3,
+    })
+    expect(res.urls).toHaveLength(1)
+
+    // Every candidate fails: surface the error rather than a heroless run.
+    vi.resetModules()
+    const allFailCalls: Call[] = []
+    globalThis.fetch = mockFal(allFailCalls, { failFrameCalls: 3 }) as unknown as typeof fetch
+    const mod2 = await import('./fal-video.server')
+    await expect(
+      mod2.composeSceneFrame({
+        prompt: 'p',
+        presenterImageUrl: PRESENTER,
+        productImageUrl: PRODUCT,
+        count: 3,
+      }),
+    ).rejects.toThrow(/flux-2\/lora\/edit error: 422/)
   })
 
   it('appends a real-world scale cue to the composite prompt when a product is present (ticket #2761)', async () => {
@@ -131,9 +202,11 @@ describe('composeSceneFrame (two-stage)', () => {
     globalThis.fetch = mockFal(calls) as unknown as typeof fetch
     const { composeSceneFrame } = await import('./fal-video.server')
 
-    const res = await composeSceneFrame({ prompt: 'p', presenterImageUrl: PRESENTER })
+    const res = await composeSceneFrame({ prompt: 'p', presenterImageUrl: PRESENTER, count: 1 })
 
+    // No plate call; the single stage-2 candidate composites the presenter alone.
     expect(calls).toHaveLength(1)
+    expect(calls.some(c => c.url.includes('qwen-image-edit'))).toBe(false)
     expect(calls[0]!.url).toContain('flux-2/lora/edit')
     expect(calls[0]!.body['image_urls']).toEqual([PRESENTER])
     expect(res.plate).toBeUndefined()
@@ -148,9 +221,11 @@ describe('composeSceneFrame (two-stage)', () => {
       prompt: 'p',
       presenterImageUrl: PRODUCT,
       productImageUrl: PRODUCT,
+      count: 1,
     })
 
     expect(calls).toHaveLength(1)
+    expect(calls.some(c => c.url.includes('qwen-image-edit'))).toBe(false)
     expect(res.plate).toBeUndefined()
   })
 
