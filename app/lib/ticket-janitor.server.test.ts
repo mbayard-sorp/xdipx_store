@@ -248,7 +248,33 @@ describe('computeTicketLoopHealth conflicted-PR scan', () => {
 
 describe('ROUTINE_CADENCES', () => {
   it('carries every expected lane with a complete shape', () => {
-    expect(ROUTINE_CADENCES.length).toBe(17)
+    // Identify each lane by team|runType and assert the expected SET, not a
+    // hand-maintained `.length` integer (ticket #3033). Adding a routine then
+    // appends one line to this list instead of bumping a shared count literal,
+    // so sibling per-routine additions from the coverage-audit generator no
+    // longer collide on this one line and can be authored as independent PRs.
+    const keys = ROUTINE_CADENCES.map(c => `${c.team}|${c.runType}`)
+    // No two lanes share an identity (guards the silent-drop-one merge hazard).
+    expect(new Set(keys).size).toBe(keys.length)
+    expect([...keys].sort()).toEqual([
+      'ads|ads',
+      'content|content',
+      'content|manual',
+      'content|seo-curation',
+      'content|trend-scout',
+      'homepage|merchandise',
+      'null|pricing',
+      'product|product',
+      'social|research',
+      'social|social',
+      'social|social-trend-scout',
+      'strategy|apply',
+      'strategy|cost-review',
+      'strategy|dev',
+      'strategy|offsite',
+      'strategy|qa',
+      'strategy|strategy',
+    ].sort())
     for (const c of ROUTINE_CADENCES) {
       expect(c.routine.length).toBeGreaterThan(0)
       expect(c.runType.length).toBeGreaterThan(0)
