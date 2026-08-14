@@ -14,6 +14,12 @@
  * by the LIKE in the UPDATE's WHERE clause, so it can never mutate a homepage
  * (or any non-IG) calendar row. Broader status changes stay on the
  * admin-session route admin.marketing-calendar.tsx.
+ *
+ * setStatus also enforces the calendar state machine (CALENDAR_TRANSITIONS,
+ * ticket #3030). An edge not in the map is refused with 409, mirroring how the
+ * suggestion bus rejects an illegal transition, so a routine cannot walk a row
+ * backwards (done -> planned) or skip a state (planned -> done). Terminal
+ * states ('done', 'skipped') have no outbound edges.
  */
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
@@ -25,6 +31,17 @@ import { marketingCalendar } from '../../db/schema'
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const CALENDAR_STATUSES = ['planned', 'active', 'done', 'skipped'] as const
 type CalendarStatus = (typeof CALENDAR_STATUSES)[number]
+// The calendar state machine (ticket #3030). A campaign is proposed 'planned',
+// activated, then either closed ('done') or, if it never ran, 'skipped'. Only
+// these edges are legal; an edge not in the map is a 409, so a routine can
+// neither reopen a finished campaign nor skip a state. Terminal states have no
+// outbound edges. This is the single source of transition authority.
+const CALENDAR_TRANSITIONS: Readonly<Record<CalendarStatus, readonly CalendarStatus[]>> = {
+  planned: ['active', 'skipped'],
+  active:  ['done'],
+  done:    [],
+  skipped: [],
+}
 // Social Step 2a may only touch its own campaign rows. Every 'IG: ' row is
 // named "IG: <campaign>"; nothing else on the calendar carries this prefix.
 const IG_PREFIX = 'IG: '
@@ -77,7 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const [row] = await db
-      .select({ id: marketingCalendar.id, name: marketingCalendar.name })
+      .select({ id: marketingCalendar.id, name: marketingCalendar.name, status: marketingCalendar.status })
       .from(marketingCalendar)
       .where(eq(marketingCalendar.id, id))
       .limit(1)
@@ -89,6 +106,18 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response(
         `Forbidden: setStatus may only change 'IG: '-prefixed rows`,
         { status: 403 },
+      )
+    }
+
+    // The state machine (ticket #3030). Refuse any edge not in the map with a
+    // 409, the way the suggestion bus refuses an illegal transition, so a
+    // routine cannot reopen a finished campaign or skip a state. A same-status
+    // call is not a declared edge and is refused too.
+    const from = row.status as CalendarStatus
+    if (!CALENDAR_TRANSITIONS[from]?.includes(status as CalendarStatus)) {
+      return new Response(
+        `Conflict: calendar row ${id} cannot move from '${from}' to '${status}'`,
+        { status: 409 },
       )
     }
 
