@@ -417,6 +417,51 @@ async function composeProductPlate(productImageUrl: string): Promise<string> {
   return url
 }
 
+/**
+ * Stage 2, one candidate. Returns a single fal-hosted composite URL, or throws.
+ *
+ * Each candidate is its own single-image request rather than one `num_images:N`
+ * call (ticket #3045). A batched call re-interprets the shared stage-1 plate
+ * independently per image, so two candidates from ONE run disagreed about the
+ * product's silhouette and size — one faithful to the packshot, one a different
+ * object. Re-anchoring each candidate in its own request holds the product
+ * steadier across the set. Cost is unchanged: the compositor is billed per
+ * returned candidate either way.
+ */
+async function composeOneSceneFrame(
+  key: string,
+  imageUrls: string[],
+  prompt: string,
+  imageSize: { readonly width: number; readonly height: number },
+): Promise<string> {
+  const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_FRAME_MODEL}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Key ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      prompt,
+      image_urls: imageUrls,
+      num_images: 1,
+      image_size: imageSize,
+      enable_safety_checker: false,
+      output_format: 'jpeg',
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    await recordFalBlock(SCENE_FRAME_MODEL, res.status, text, 1, {
+      feature: 'video-frames', caller: 'composeSceneFrame',
+    })
+    throw new Error(`fal.ai ${SCENE_FRAME_MODEL} error: ${res.status} ${text.slice(0, 400)}`)
+  }
+  const json = await res.json() as { images?: { url?: string }[] }
+  const url = json.images?.[0]?.url
+  if (!url) throw new Error(`fal.ai ${SCENE_FRAME_MODEL} returned no images`)
+  return url
+}
+
 export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<SceneFrameResult> {
   const key = requireKey()
   const count = Math.min(Math.max(1, opts.count ?? 3), 4)
@@ -432,36 +477,30 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
   // frame has no product, and the no-presenter base has no hand to scale against.
   const framePrompt = needsPlate ? `${opts.prompt} ${PRODUCT_SCALE_CUE}` : opts.prompt
 
-  // Stage 2.
-  const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_FRAME_MODEL}`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Key ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      prompt: framePrompt,
-      image_urls: [
-        opts.presenterImageUrl,
-        ...(productRef ? [productRef] : []),
-        ...(opts.extraImageUrls ?? []),
-      ],
-      num_images: count,
-      image_size: SCENE_FRAME_SIZES[opts.aspectRatio ?? '9:16'],
-      enable_safety_checker: false,
-      output_format: 'jpeg',
-    }),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    await recordFalBlock(SCENE_FRAME_MODEL, res.status, text, count, {
-      feature: 'video-frames', caller: 'composeSceneFrame',
-    })
-    throw new Error(`fal.ai ${SCENE_FRAME_MODEL} error: ${res.status} ${text.slice(0, 400)}`)
+  const imageUrls = [
+    opts.presenterImageUrl,
+    ...(productRef ? [productRef] : []),
+    ...(opts.extraImageUrls ?? []),
+  ]
+  const imageSize = SCENE_FRAME_SIZES[opts.aspectRatio ?? '9:16']
+
+  // Stage 2. One single-image request per candidate (ticket #3045), run in
+  // parallel. A partial set is still useful for review, so tolerate individual
+  // candidate failures and only throw when EVERY candidate failed.
+  const settled = await Promise.allSettled(
+    Array.from({ length: count }, () => composeOneSceneFrame(key, imageUrls, framePrompt, imageSize)),
+  )
+  const urls = settled
+    .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+    .map(r => r.value)
+  if (!urls.length) {
+    const firstRejected = settled.find(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    )
+    throw firstRejected?.reason instanceof Error
+      ? firstRejected.reason
+      : new Error(`fal.ai ${SCENE_FRAME_MODEL} returned no images`)
   }
-  const json = await res.json() as { images?: { url?: string }[] }
-  const urls = (json.images ?? []).map(i => i.url).filter((u): u is string => !!u)
-  if (!urls.length) throw new Error(`fal.ai ${SCENE_FRAME_MODEL} returned no images`)
   return {
     urls,
     costKey: SCENE_FRAME_COST_KEY,
