@@ -3,7 +3,7 @@
 // aspect. A {width,height} object used to fall through to a hardcoded '16:9',
 // silently generating the wrong aspect (ticket #152). These lock in the mapping.
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { kontextResolutionMode, falGenerate } from './fal.server'
+import { kontextResolutionMode, falGenerate, readFalRequestId } from './fal.server'
 
 describe('kontextResolutionMode', () => {
   it('maps the string image_size enums to their aspect', () => {
@@ -144,5 +144,46 @@ describe('falGenerate reference-image routing and output_format', () => {
     const calls = stubFal()
     await falGenerate({ prompt: 'the product in a scene', refImageUrl: 'https://img.test/p.jpg' })
     expect(calls[0]?.body).toMatchObject({ output_format: 'jpeg' })
+  })
+
+  it('returns the x-fal-request-id header on the result, undefined when absent (ticket #3046)', async () => {
+    // Present: the generation response carries the header fal sets on the sync
+    // endpoint, and falGenerate surfaces it for spend-row tracing.
+    vi.stubEnv('FAL_KEY', 'test-key')
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({ images: [{ url: 'https://fal.test/out' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-fal-request-id': '019ffca0-7f27-7603-be20-650ddf635c92' },
+        })
+      }
+      return new Response(new ArrayBuffer(4), { status: 200 })
+    }))
+    const withId = await falGenerate({ prompt: 'a lamp on a table' })
+    expect(withId.requestId).toBe('019ffca0-7f27-7603-be20-650ddf635c92')
+  })
+
+  it('omits requestId when fal returns no x-fal-request-id header (ticket #3046)', async () => {
+    const calls = stubFal() // stubFal's POST response carries no request-id header
+    const result = await falGenerate({ prompt: 'a lamp on a table' })
+    expect(calls).toHaveLength(1)
+    expect(result.requestId).toBeUndefined()
+  })
+})
+
+describe('readFalRequestId', () => {
+  it('reads the x-fal-request-id header from a Response', () => {
+    const res = new Response('', { headers: { 'x-fal-request-id': 'abc-123' } })
+    expect(readFalRequestId(res)).toBe('abc-123')
+  })
+
+  it('returns undefined when the header is absent', () => {
+    expect(readFalRequestId(new Response(''))).toBeUndefined()
+  })
+
+  it('returns undefined for a Response-like object without a real headers.get', () => {
+    // Best-effort telemetry must never throw on a test mock or odd shape.
+    expect(readFalRequestId({} as never)).toBeUndefined()
+    expect(readFalRequestId({ headers: {} } as never)).toBeUndefined()
   })
 })

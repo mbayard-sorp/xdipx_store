@@ -152,7 +152,7 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
   // 1. fal.ai — primary (skip if only:'imagen' or unconfigured).
   if (opts.only !== 'imagen' && falConfigured()) {
     try {
-      const { buffers, costKey } = await falGenerate({
+      const { buffers, costKey, requestId } = await falGenerate({
         prompt,
         count,
         ...(opts.refImageUrls?.length ? { refImageUrls: opts.refImageUrls } : {}),
@@ -167,7 +167,9 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
         },
       })
       if (buffers.length) {
-        if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length })
+        // With count > 1 this single fal request returns N images under one
+        // request_id, so the id identifies this batch of images, not one of them.
+        if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length, ...(requestId ? { requestId } : {}) })
         return { buffers, provider: 'fal', model: costKey }
       }
     } catch (err) {

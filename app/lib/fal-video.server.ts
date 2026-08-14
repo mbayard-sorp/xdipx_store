@@ -14,7 +14,7 @@
  * fal-hosted output URLs live ~24h; download promptly and re-home to Blob.
  */
 
-import { recordFalBlock } from '~/lib/fal.server'
+import { recordFalBlock, readFalRequestId } from '~/lib/fal.server'
 
 const FAL_QUEUE_ENDPOINT = 'https://queue.fal.run'
 const FAL_SYNC_ENDPOINT = 'https://fal.run'
@@ -372,6 +372,14 @@ export interface ComposeSceneFrameOpts {
 export interface SceneFrameResult {
   /** fal-hosted candidate URLs (~24h TTL). Persist via downloadFalAsset + Blob promptly. */
   urls: string[]
+  /**
+   * fal request id per candidate, index-aligned with `urls`. Each candidate is
+   * its own single-image fal request (ticket #3045), so the id identifies one
+   * frame, not a batch. undefined at a position when the header was absent.
+   * Thread into logImageCost({ requestId }) so an owner can trace a frame back
+   * to its generation without decoding a UUIDv7 timestamp.
+   */
+  requestIds: (string | undefined)[]
   /** Stage-2 compositor model, billed once per returned candidate. */
   costKey: string
   /**
@@ -379,6 +387,8 @@ export interface SceneFrameResult {
    * it is a single image on a different model, and the caller owns cost logging.
    */
   plate?: { costKey: string; count: number }
+  /** fal request id of the stage-1 plate call, when a plate was built. */
+  plateRequestId?: string
 }
 
 /**
@@ -386,7 +396,7 @@ export interface SceneFrameResult {
  * Throws on failure so the caller surfaces a composition error rather than
  * silently falling back to the packshot, which is what put boxes in frame.
  */
-async function composeProductPlate(productImageUrl: string): Promise<string> {
+async function composeProductPlate(productImageUrl: string): Promise<{ url: string; requestId?: string }> {
   const key = requireKey()
   const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_PLATE_MODEL}`, {
     method: 'POST',
@@ -411,10 +421,11 @@ async function composeProductPlate(productImageUrl: string): Promise<string> {
     })
     throw new Error(`fal.ai ${SCENE_PLATE_MODEL} error: ${res.status} ${text.slice(0, 400)}`)
   }
+  const requestId = readFalRequestId(res)
   const json = await res.json() as { images?: { url?: string }[] }
   const url = json.images?.[0]?.url
   if (!url) throw new Error(`fal.ai ${SCENE_PLATE_MODEL} returned no product plate`)
-  return url
+  return { url, ...(requestId ? { requestId } : {}) }
 }
 
 /**
@@ -433,7 +444,7 @@ async function composeOneSceneFrame(
   imageUrls: string[],
   prompt: string,
   imageSize: { readonly width: number; readonly height: number },
-): Promise<string> {
+): Promise<{ url: string; requestId?: string }> {
   const res = await fetch(`${FAL_SYNC_ENDPOINT}/${SCENE_FRAME_MODEL}`, {
     method: 'POST',
     headers: {
@@ -456,10 +467,11 @@ async function composeOneSceneFrame(
     })
     throw new Error(`fal.ai ${SCENE_FRAME_MODEL} error: ${res.status} ${text.slice(0, 400)}`)
   }
+  const requestId = readFalRequestId(res)
   const json = await res.json() as { images?: { url?: string }[] }
   const url = json.images?.[0]?.url
   if (!url) throw new Error(`fal.ai ${SCENE_FRAME_MODEL} returned no images`)
-  return url
+  return { url, ...(requestId ? { requestId } : {}) }
 }
 
 export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<SceneFrameResult> {
@@ -470,7 +482,8 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
   // no-presenter caller, which passes the product photo as its own base — there
   // is nothing to composite it against, so a plate would just be wasted spend.
   const needsPlate = !!opts.productImageUrl && opts.productImageUrl !== opts.presenterImageUrl
-  const productRef = needsPlate ? await composeProductPlate(opts.productImageUrl!) : opts.productImageUrl
+  const plate = needsPlate ? await composeProductPlate(opts.productImageUrl!) : undefined
+  const productRef = plate ? plate.url : opts.productImageUrl
 
   // Anchor the composited product to real-world scale (ticket #2761). Applied
   // only to a genuine presenter+product composite (needsPlate): a talking-head
@@ -490,10 +503,10 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
   const settled = await Promise.allSettled(
     Array.from({ length: count }, () => composeOneSceneFrame(key, imageUrls, framePrompt, imageSize)),
   )
-  const urls = settled
-    .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+  const fulfilled = settled
+    .filter((r): r is PromiseFulfilledResult<{ url: string; requestId?: string }> => r.status === 'fulfilled')
     .map(r => r.value)
-  if (!urls.length) {
+  if (!fulfilled.length) {
     const firstRejected = settled.find(
       (r): r is PromiseRejectedResult => r.status === 'rejected',
     )
@@ -502,8 +515,10 @@ export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<Sc
       : new Error(`fal.ai ${SCENE_FRAME_MODEL} returned no images`)
   }
   return {
-    urls,
+    urls: fulfilled.map(f => f.url),
+    requestIds: fulfilled.map(f => f.requestId),
     costKey: SCENE_FRAME_COST_KEY,
-    ...(needsPlate ? { plate: { costKey: SCENE_PLATE_COST_KEY, count: 1 } } : {}),
+    ...(plate ? { plate: { costKey: SCENE_PLATE_COST_KEY, count: 1 } } : {}),
+    ...(plate?.requestId ? { plateRequestId: plate.requestId } : {}),
   }
 }

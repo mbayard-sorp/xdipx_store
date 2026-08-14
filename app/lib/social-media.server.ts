@@ -263,6 +263,16 @@ export interface GenerateCastCompositeResult {
   filenames: string[]
   /** Cost keys billed, so the caller can log spend for both stages. */
   costs: { costKey: string; count: number }[]
+  /**
+   * fal request id per surviving candidate, index-aligned with `urls` and
+   * `filenames`. Each candidate is its own fal request (ticket #3045), so the
+   * id names the one image at that filename. Pass into the spend row's
+   * requestId (with the filename as refId) to make a fal request id resolvable
+   * to its file. undefined at a position when fal omitted the header.
+   */
+  requestIds: (string | undefined)[]
+  /** fal request id of the stage-1 plate call, when a plate was built. */
+  plateRequestId?: string
 }
 
 export async function generateCastComposite(
@@ -290,6 +300,7 @@ export async function generateCastComposite(
   // image server-side at publish time.
   const urls: string[] = []
   const filenames: string[] = []
+  const requestIds: (string | undefined)[] = []
   for (const [i, falUrl] of frame.urls.entries()) {
     const filename = buildSocialAssetFilename({
       handle: opts.handle,
@@ -303,9 +314,18 @@ export async function generateCastComposite(
     const buffer = Buffer.from(await res.arrayBuffer())
     urls.push(await uploadMoodImageToShopifyFiles(buffer, filename))
     filenames.push(filename)
+    // Keep aligned with the surviving urls/filenames (a fetch failure above
+    // skips both this filename and its request id).
+    requestIds.push(frame.requestIds[i])
   }
 
-  return { urls, filenames, costs }
+  return {
+    urls,
+    filenames,
+    costs,
+    requestIds,
+    ...(frame.plateRequestId ? { plateRequestId: frame.plateRequestId } : {}),
+  }
 }
 
 export interface GenerateSocialImageOpts {

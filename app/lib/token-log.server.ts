@@ -186,6 +186,16 @@ export interface ImageCostEntry {
   sku?:       string
   /** Correlation id (video_jobs.job_id, ad batch id) -> api_token_log.ref_id. */
   refId?:     string
+  /**
+   * Provider request id for the generation that produced this image (fal's
+   * `x-fal-request-id`), written to the existing api_token_log.request_id
+   * column so an owner can resolve a fal request id to its spend row directly
+   * instead of decoding a UUIDv7 timestamp. Globally unique per fal call, so it
+   * never collides with the IVR idempotency keys that also live in this column.
+   * Pair it with a file-identifying `refId` (per candidate) so the id resolves
+   * to one image, not a batch.
+   */
+  requestId?: string
 }
 
 /**
@@ -208,6 +218,7 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
       sku:                 entry.sku       ?? null,
       caller:              entry.caller    ?? null,
       refId:               entry.refId     ?? null,
+      requestId:           entry.requestId ?? null,
       inputTokens:         0,
       outputTokens:        0,
       cacheCreationTokens: 0,

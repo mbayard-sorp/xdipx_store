@@ -210,21 +210,41 @@ async function main() {
     })
 
     let spendPosted = true
-    for (const cost of result.costs) {
+    const postSpend = async (payload: Record<string, unknown>) => {
       const res = await fetch(`${BASE_URL}/api/homepage-team/spend`, {
         method: 'POST',
         headers: teamHeaders,
-        body: JSON.stringify({
-          kind: 'image', model: cost.costKey, count: cost.count,
-          feature: 'social-images', caller,
-        }),
+        body: JSON.stringify({ kind: 'image', feature: 'social-images', caller, ...payload }),
       })
       if (!res.ok) spendPosted = false
+    }
+    // Stage 2 (compositor) is the first cost entry; anything after it is the
+    // stage-1 plate. Post ONE image row per surviving candidate carrying that
+    // candidate's fal request id and its filename (as ref_id), so an owner can
+    // resolve a fal request id to the exact social asset it produced. Any
+    // billed candidate that failed to rehost has no file, so its spend is
+    // posted once as a remainder row to keep the social-images total exact.
+    const frameCostKey = result.costs[0]?.costKey ?? 'fal/flux-2-edit'
+    const framesBilled = result.costs[0]?.count ?? result.urls.length
+    for (let i = 0; i < result.urls.length; i++) {
+      await postSpend({
+        model: frameCostKey, count: 1, refId: result.filenames[i],
+        ...(result.requestIds[i] ? { requestId: result.requestIds[i] } : {}),
+      })
+    }
+    const remainder = framesBilled - result.urls.length
+    if (remainder > 0) await postSpend({ model: frameCostKey, count: remainder })
+    for (const plate of result.costs.slice(1)) {
+      await postSpend({
+        model: plate.costKey, count: plate.count,
+        ...(result.plateRequestId ? { requestId: result.plateRequestId } : {}),
+      })
     }
 
     console.log(JSON.stringify({
       assets: result.urls.map((url, i) => ({
-        url, filename: result.filenames[i], kind: 'image', archetype: 'cast', platform,
+        url, filename: result.filenames[i], requestId: result.requestIds[i] ?? null,
+        kind: 'image', archetype: 'cast', platform,
       })),
       provider: 'fal',
       stages: result.costs,
