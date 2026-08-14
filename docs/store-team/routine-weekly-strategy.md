@@ -215,6 +215,25 @@ the retro read `video_jobs` outcomes (approval rate, cost per approved video, re
 metrics_json once posts go out). Approval rate under ~40% sustained is a stop-doing signal: pause
 the slate and fix the formula via an instructions suggestion before spending more.
 
+Include a **Social Plan** section (mandatory whenever the social team is enabled), because posting
+volume should track what is actually happening on the site and in the industry that week rather than
+running at a flat cadence (owner direction, all-hands 2026-08-08). It lists this week's
+social-worthy events, each with a suggested post count and format so `social-media-manager` can size
+the day's drafting to real context (the social routine reads this section at run start, Step 2, and
+`docs/store-team/routine-social-daily.md` already treats it as the volume driver):
+
+- new aisles/drops going live and any featured brand of the week (tag the verified brand handle);
+- `marketing_calendar` promos and campaign themes landing in the window (coordinate with
+  `merch-calendar`, which marks the rows that deserve Instagram coverage);
+- adopted trend briefs from **both** trend scouts (`trend-scout` community discourse and
+  `social-trend-scout` format trends);
+
+with the baseline stated plainly: **at least 1 post/day, no zero days**, scaling to 2-4/day only on
+weeks that actually have site events or hot trends, per the context-driven cadence in
+`docs/store-team/instagram-campaigns.md`. When nothing social-worthy is happening, say so and hold
+the baseline rather than manufacturing volume. Omit the section honestly only when the social team is
+disabled.
+
 Include a **Catalog Pipeline** section (and mirror its numbers into `metricsJson`), **profit-first**:
 lead with orders/margin attributable to newly-imported SKUs and to price-dropped SKUs (order line
 items; GA4 item-list/PDP only when the week has ≥300 sessions, else flag the number heuristic) —
