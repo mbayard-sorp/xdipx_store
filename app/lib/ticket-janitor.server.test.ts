@@ -259,6 +259,7 @@ describe('ROUTINE_CADENCES', () => {
     expect([...keys].sort()).toEqual([
       'ads|ads',
       'email|email',
+      'homepage|design',
       'content|content',
       'content|manual',
       'content|seo-curation',
@@ -308,6 +309,14 @@ describe('ROUTINE_CADENCES', () => {
     expect(email?.team).toBe('email')
     expect(email?.kind).toBe('weekly')
     expect(email?.maxGapHours).toBe(194)
+    // Design Cycle / Routine B (manifest row 8, Wed 14:00) has a liveness
+    // watch; team and runType match the POST /api/homepage-team/run call in
+    // routine-design-cycle.md.
+    const design = ROUTINE_CADENCES.find(c => c.runType === 'design')
+    expect(design).toBeDefined()
+    expect(design?.team).toBe('homepage')
+    expect(design?.kind).toBe('weekly')
+    expect(design?.maxGapHours).toBe(194)
   })
 
   it('sizes each gap against the lane\'s real cron, not its nominal kind', () => {

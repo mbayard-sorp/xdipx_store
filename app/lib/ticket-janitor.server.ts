@@ -353,6 +353,7 @@ export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   { routine: 'Weekly off-site scout', team: 'strategy', runType: 'offsite', kind: 'weekly', schedule: 'Tue 16:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Ads Proposals', team: 'ads', runType: 'ads', kind: 'weekly', schedule: 'Tue 13:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Email Briefs', team: 'email', runType: 'email', kind: 'weekly', schedule: 'Tue 15:00', maxGapHours: WEEKLY_GAP },
+  { routine: 'Design Cycle (Routine B)', team: 'homepage', runType: 'design', kind: 'weekly', schedule: 'Wed 14:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly SEO curation', team: 'content', runType: 'seo-curation', kind: 'weekly', schedule: 'Sun 19:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly podcast review', team: 'content', runType: 'manual', kind: 'weekly', schedule: 'Wed 21:05', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly trend scout', team: 'content', runType: 'trend-scout', kind: 'weekly', schedule: 'Sat 19:00', maxGapHours: WEEKLY_GAP },
