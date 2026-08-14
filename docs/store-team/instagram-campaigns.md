@@ -469,14 +469,12 @@ because a named campaign is exactly the thing that tempts a routine to make an e
 
 Recorded so no run pretends otherwise, and so the gap is visible rather than quietly absorbed.
 
-- **There is no social image-generation path.** `scripts/gen-homepage-image.ts` and
-  `scripts/gen-notebook-art.ts` exist; there is no social equivalent, and nothing in the codebase
-  emits a `social-` image spend feature. The consequence is already live: the two posts that shipped
-  2026-08-09 carried real generated art, and every Instagram draft written since carries a bare
-  Nalpac SKU packshot (`77808A.jpg`, `77292A.jpg`, `96177A.jpg`), precisely the packshot-only still
-  the charter retired that same day. **The team is shipping non-compliant imagery because packshots
-  are the only image path it has.** Until a generation path exists, the visual scheme in §3 is
-  aspirational and every run that falls back to a packshot says so in its summary.
+- **The social image path now exists and the routine uses it.** `scripts/gen-social-image.ts`
+  generates, rehosts to Shopify Files, and logs spend, with a cast-composite form and a
+  single-reference form. This section previously said no such path existed, which was true when it
+  was written and stale within two days. Verified live 2026-08-14: a routine run generated a
+  compliant product-free frame on the locked scheme, discarded a first candidate that drifted from
+  the light signature, and passed the pre-publish gate with zero findings.
 - **`social_team_max_images` is inert.** `getTeamConfigUncached` assigns `maxImagesPerDay` only for
   the homepage and content teams, the cap is enforced only for homepage, and the day's image count is
   read against a hardcoded `homepage-images` feature. Setting the key changes nothing without a code

@@ -263,13 +263,14 @@ and a blocked draft is rewritten or dropped, never softened until it squeaks pas
 1. Does the post attempt a sale? Price, discount, promo code, shop CTA, or a caption pointing at a
    PDP. (This is the one that removed our first Instagram post's category of content.)
 2. Does it describe what the product does to a body? Act naming, arousal, orgasm, "you'll feel".
-3. Does the image show product in a hand, on or near a body, in use, on a bed with a person, or
-   with fluid/lube texture? **One narrow carve-out, pending the owner's ruling** (tracked in
-   `docs/store-team/instagram-campaigns.md` §3.6): the charter's License C licenses cast to hold and
-   present *the box*. An **unlabeled carton** in hand is allowed; **bare product in a hand stays a
-   BLOCK**, unchanged. The carton must be unlabeled because a real one carries a manufacturer logo,
-   which is text in pixels. If the two docs are ever read as conflicting, take the stricter one and
-   say so in the run summary.
+3. Does the image show product on or against a body, in use or implied use, on a bed with a person,
+   or with fluid/lube texture? **A cast member holding and presenting the bare product is licensed**
+   (owner ruling 2026-08-12, recorded in `docs/store-team/instagram-campaigns.md` §3.6, which is the
+   operative rule for Instagram cast imagery). This item previously read "product in a hand" as a
+   BLOCK and carried an interim carton-only carve-out; both are superseded. What still blocks is the
+   body, the act, and the bed. `docs/ads-policy.md` has not caught up yet and still lists "in hand";
+   §3.6 says to treat itself as operative and escalate that conflict rather than silently killing a
+   frame.
 4. Does the caption, alt text, on-image text, or any hashtag carry explicit vocabulary, crude
    slang, or emoji-anatomy?
 5. Is anything in it coded to slip past a filter? Algospeak, character substitution, reclaimed
