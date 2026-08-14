@@ -40,6 +40,9 @@ import { executePostCheckoutStage } from './stages/post-checkout.server'
  *   UPSELL       + UPSELL_ACCEPT → CHECKOUT
  *   UPSELL       + UPSELL_DECLINE → CHECKOUT
  *   UPSELL       + COMMIT_PICK   → CHECKOUT
+ *   UPSELL       + NAME_ITEM     → DISCOVERY   (topic change, #3214)
+ *   UPSELL       + RESEARCH      → DISCOVERY   (question mid-upsell, #3214)
+ *   UPSELL       + OBJECTION     → OBJECTION   (pushback mid-upsell, #3214)
  *   OBJECTION    + COMMIT_PICK   → CHECKOUT
  *   DISCOVERY    + NAME_ITEM     → DISCOVERY (handler itself decides)
  *
@@ -68,6 +71,20 @@ export function pickEffectiveStage(currentStage: Stage, intent: IntentResult): S
 
     case 'UPSELL':
       if (i === 'UPSELL_ACCEPT' || i === 'UPSELL_DECLINE' || i === 'COMMIT_PICK') return 'CHECKOUT'
+      // Ticket #3214. Everything that is NOT accept/decline/commit used to fall
+      // through here and re-enter executeUpsellStage, which ignores what the
+      // customer said and re-runs the same hardcoded lube search off
+      // currentPitchHandle. On 2026-08-14 a caller asked for a cock ring four
+      // times across two calls; the classifier tagged NAME_ITEM at 0.95 every
+      // time and the handler searched "anal lube" every time. He hung up twice.
+      //
+      // A customer who names a different product, pushes back, or asks a
+      // question has left the accept/decline script. Route them to a stage that
+      // reads their words instead of one that discards them. These three all
+      // have handlers on the conversation-agent path, so the caller gets a real
+      // search rather than a template.
+      if (i === 'NAME_ITEM' || i === 'RESEARCH') return 'DISCOVERY'
+      if (i === 'OBJECTION') return 'OBJECTION'
       break
 
     case 'OBJECTION':
