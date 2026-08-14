@@ -196,18 +196,27 @@ rejected/flagged terms are the avoid list:
 Use `embedHints` only after verifying the handles are in stock; use `internalLinks` where natural.
 
 **Fresh-language pre-check (mandatory, before Step 5):** `emma-empathy-reviewer` has no Sanity
-access and cannot see cross-post reuse, so this check runs here, not at the gate.
+access and cannot see cross-post reuse, so this check runs here, not at the gate. Run the
+deterministic checker and drive it to exit 0 before submitting to the voice gate:
 
-1. GROQ prior posts in the same topic cluster (same `category`, or the brief's keyword cluster
-   when the topic came from a brief):
+```bash
+npx tsx scripts/check-fresh-language.ts --category <categoryId> --draft <draft.json>
+```
+
+Like `check-hero-embed-match.ts`, and unlike the two prose checkers below, it reads Sanity live: it
+GROQs the last 10 published posts in the same cluster (the query below) and reports any word-6-gram
+the draft shares with them, weighting headings. Six words is the right grain for this corpus:
+headings were the surface a tic hardened on ("Where does this need a caveat?" shipped verbatim across
+two published podcast-notes posts), a whole-post similarity score misses that because the body prose
+did not overlap, and the 6-gram threshold ignores the short structural headings ("Sources", "Real
+talk") that repeat by format on purpose. Added after that pair of live posts (ticket #3009); the
+manual diff it replaces had let the tic through. The limit is zero shared 6-grams; rewrite each
+recycled phrase, do not loosen the check.
 
 ```groq
 *[_type == "blogPost" && category._ref == $categoryId && slug.current != $slug]
   | order(publishedAt desc)[0...10]{title, "slug": slug.current, body}
 ```
-
-2. Diff the draft sentence-level against those posts' `body` text.
-3. Rewrite any recycled sentence or phrase BEFORE submitting the draft to the voice gate in Step 5.
 
 **Aphorism-as-closer pre-flight (mandatory, before Step 5):** run the merged deterministic checker on
 the draft JSON and trim until it exits 0, before submitting to the voice gate:
