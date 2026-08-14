@@ -219,7 +219,13 @@ function Hero({
               className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink md:text-[4.4rem]"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
             >
-              {emmaHero.headline}
+              {/* Route the Sanity hero headline through the shared emphasis
+                  helper so it carries exactly one italic-plum emphasis word
+                  (last-word fallback), matching doctrine §2 and the editorial
+                  headline treatment used elsewhere on the page. Previously the
+                  Sanity headline rendered plain, so a team-authored hero never
+                  got its plum anchor (design-critic run 314, ticket #3197). */}
+              <EmphasizedHeading text={emmaHero.headline} />
             </h1>
           ) : (
             <h1
@@ -1077,7 +1083,11 @@ function StillDecidingBand() {
             style={DISPLAY}
           >
             Tell me what you're into, or what you're{' '}
-            <em className="not-italic" style={{ fontStyle: 'italic', color: 'var(--color-coral-2)' }}>
+            {/* Emphasis is plum, coral is action (doctrine §3): an emphasis
+                word in coral reads as a false affordance. plum-soft (not the
+                darker .em plum) keeps it in the emphasis family and legible on
+                this bg-ink band (design-critic run 314, ticket #3197). */}
+            <em className="not-italic" style={{ fontStyle: 'italic', color: 'var(--color-plum-soft)' }}>
               curious
             </em>{' '}
             about. Same thing.
