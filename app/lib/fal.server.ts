@@ -20,6 +20,18 @@ function requireKey(): string {
 }
 
 /**
+ * fal returns the request id for a sync call in the `x-fal-request-id` response
+ * header (the body carries only the model output). Read defensively: a
+ * best-effort telemetry read must never throw into a real generation, and test
+ * mocks may hand back a Response-like object without a real Headers instance.
+ */
+export function readFalRequestId(res: { headers?: { get?: (name: string) => string | null } }): string | undefined {
+  const get = res.headers?.get
+  if (typeof get !== 'function') return undefined
+  return get.call(res.headers, 'x-fal-request-id') ?? undefined
+}
+
+/**
  * Run BiRefNet v2 against a publicly-fetchable image URL. Returns the URL of the
  * transparent PNG hosted by fal.ai (valid for ~24h; download promptly).
  */
@@ -182,6 +194,14 @@ export interface FalGenerateResult {
   buffers: Buffer[]
   /** Cost key for model-pricing (e.g. 'fal/flux-dev'). */
   costKey: string
+  /**
+   * fal's request id for this generation (the `x-fal-request-id` response
+   * header on the sync endpoint), for tracing a generated image back to its
+   * spend row. undefined if the header was absent. NOTE: a `num_images > 1`
+   * call returns N images under this ONE request id, so it identifies the
+   * batch, not an individual image.
+   */
+  requestId?: string
 }
 
 export function falConfigured(): boolean {
@@ -297,6 +317,7 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
     throw new Error(`fal.ai ${model} error: ${res.status} ${text.slice(0, 400)}`)
   }
 
+  const requestId = readFalRequestId(res)
   const json = await res.json() as { images?: { url?: string }[] }
   const urls = (json.images ?? []).map(i => i.url).filter((u): u is string => !!u)
   if (!urls.length) throw new Error(`fal.ai ${model} returned no images`)
@@ -309,5 +330,5 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
     }),
   )
 
-  return { buffers, costKey: FAL_COST_KEY[model] ?? 'fal/flux-dev' }
+  return { buffers, costKey: FAL_COST_KEY[model] ?? 'fal/flux-dev', ...(requestId ? { requestId } : {}) }
 }

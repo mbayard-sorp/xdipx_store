@@ -346,14 +346,21 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
   const baseImageUrl = presenterUrl ?? productUrl
   if (!baseImageUrl) throw new Error('No reference image available for scene-frame composition')
 
-  const { urls, costKey, plate } = await composeSceneFrame({
+  const { urls, requestIds, costKey, plate, plateRequestId } = await composeSceneFrame({
     prompt: framePrompt,
     presenterImageUrl: baseImageUrl,
     ...(productUrl ? { productImageUrl: productUrl } : {}),
     count: SCENE_FRAME_CANDIDATES,
   })
 
-  // Persist candidates to Blob promptly (fal URLs are ~24h ephemeral).
+  // Persist candidates to Blob promptly (fal URLs are ~24h ephemeral). Log each
+  // candidate's spend as its own row (count 1) rather than one aggregate row:
+  // each candidate is its own fal request (ticket #3045), so a per-candidate
+  // row carries that request_id and a file-identifying ref_id
+  // (`<jobId>#frame-<i>`, mirroring the blob key video/<jobId>/frame-<i>.jpg).
+  // An owner can then resolve a fal request id straight to the frame it made.
+  // Totals are unchanged: /admin/usage groups by (caller, sku, product_id,
+  // batch_id) and sums request_count, so N rows of 1 equal one row of N.
   const assetIds: number[] = []
   for (let i = 0; i < urls.length; i++) {
     const buf = await downloadFalAsset(urls[i]!)
@@ -367,18 +374,22 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
       costUsd: String(estimateImageCostUsd(costKey, 1)),
       videoJobId: job.id,
     }).returning({ id: mediaAssets.id })
-    if (row) assetIds.push(row.id)
+    if (row) {
+      assetIds.push(row.id)
+      const rid = requestIds[i]
+      void logImageCost({
+        feature: 'video-frames',
+        model: costKey,
+        count: 1,
+        caller: 'video-pipeline',
+        sku: job.productHandle,
+        refId: `${job.jobId}#frame-${i}`,
+        ...(rid ? { requestId: rid } : {}),
+      })
+    }
   }
   if (!assetIds.length) throw new Error('Scene-frame composition produced no candidates')
 
-  void logImageCost({
-    feature: 'video-frames',
-    model: costKey,
-    count: assetIds.length,
-    caller: 'video-pipeline',
-    sku: job.productHandle,
-    refId: job.jobId,
-  })
   // The stage-1 product plate is a separate model and must not be folded into
   // the compositor's count, or /admin/usage attributes its spend to the wrong
   // model and the job's running cost under-reports.
@@ -390,6 +401,7 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
       caller: 'video-pipeline/plate',
       sku: job.productHandle,
       refId: job.jobId,
+      ...(plateRequestId ? { requestId: plateRequestId } : {}),
     })
   }
   const frameCost = estimateImageCostUsd(costKey, assetIds.length)

@@ -5,7 +5,7 @@
  * api_token_log (the same table /admin/usage reads), so team spend shows up
  * alongside everything else.
  *
- *   { kind: 'image', model, count, feature?, caller?, productId?, sku? }
+ *   { kind: 'image', model, count, feature?, caller?, productId?, sku?, refId?, requestId? }
  *   { kind: 'tokens', model, source, inputTokens, outputTokens, cacheCreationTokens?,
  *     cacheReadTokens?, feature?, caller?, requestCount? }
  */
@@ -29,6 +29,8 @@ export async function action({ request }: ActionFunctionArgs) {
       ...(s('caller') ? { caller: s('caller')! } : {}),
       ...(s('productId') ? { productId: s('productId')! } : {}),
       ...(s('sku') ? { sku: s('sku')! } : {}),
+      ...(s('refId') ? { refId: s('refId')! } : {}),
+      ...(s('requestId') ? { requestId: s('requestId')! } : {}),
     })
   } else {
     await logApiTokens({

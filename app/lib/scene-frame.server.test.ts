@@ -49,9 +49,15 @@ function mockFal(
     const images = isPlate
       ? [{ url: PLATE }]
       : Array.from({ length: n }, () => ({ url: `https://fal.media/frame-${frameCall++}.jpg` }))
+    // fal returns the request id in the x-fal-request-id response header on the
+    // sync endpoint (ticket #3046). Give each candidate a distinct, url-derived
+    // id so a test can assert the id threads through aligned to its frame.
+    const reqId = isPlate
+      ? 'rid-plate'
+      : `rid-${(images[0]!.url).split('/').pop()!.replace('.jpg', '')}`
     return new Response(JSON.stringify({ images }), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-fal-request-id': reqId },
     })
   })
 }
@@ -153,6 +159,52 @@ describe('composeSceneFrame (two-stage)', () => {
         count: 3,
       }),
     ).rejects.toThrow(/flux-2\/lora\/edit error: 422/)
+  })
+
+  it('threads the fal request id per candidate and for the plate (ticket #3046)', async () => {
+    const calls: Call[] = []
+    globalThis.fetch = mockFal(calls) as unknown as typeof fetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+
+    const res = await composeSceneFrame({
+      prompt: 'sunlit bedroom corner',
+      presenterImageUrl: PRESENTER,
+      productImageUrl: PRODUCT,
+      count: 3,
+    })
+
+    // One request id per candidate, index-aligned with urls, each distinct.
+    expect(res.requestIds).toHaveLength(res.urls.length)
+    expect(res.requestIds.every(id => typeof id === 'string')).toBe(true)
+    expect(new Set(res.requestIds).size).toBe(3)
+    // Each candidate's id is the one fal returned for that frame's own call.
+    res.urls.forEach((url, i) => {
+      const frameKey = url.split('/').pop()!.replace('.jpg', '')
+      expect(res.requestIds[i]).toBe(`rid-${frameKey}`)
+    })
+    // The stage-1 plate call's id is captured too.
+    expect(res.plateRequestId).toBe('rid-plate')
+  })
+
+  it('leaves candidate request ids undefined when fal omits the header', async () => {
+    // A Response without x-fal-request-id must not throw; the id is best-effort.
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (!String(url).startsWith('https://fal.run/')) return new Response('', { status: 500 })
+      const isPlate = String(url).includes('qwen-image-edit')
+      const images = isPlate ? [{ url: PLATE }] : [{ url: 'https://fal.media/frame-x.jpg' }]
+      return new Response(JSON.stringify({ images }), { status: 200 })
+    }) as unknown as typeof fetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+
+    const res = await composeSceneFrame({
+      prompt: 'p',
+      presenterImageUrl: PRESENTER,
+      productImageUrl: PRODUCT,
+      count: 1,
+    })
+    expect(res.urls).toHaveLength(1)
+    expect(res.requestIds).toEqual([undefined])
+    expect(res.plateRequestId).toBeUndefined()
   })
 
   it('appends a real-world scale cue to the composite prompt when a product is present (ticket #2761)', async () => {
