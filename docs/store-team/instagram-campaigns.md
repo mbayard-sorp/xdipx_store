@@ -457,13 +457,11 @@ because a named campaign is exactly the thing that tempts a routine to make an e
   the throttle is active, the campaign continues at reduced volume and the run summary says so.
 - **Fresh language every time.** A campaign repeats a *subject*, never a sentence. Any phrase that
   appeared in a previous post of the same campaign is spent.
-- **"The next campaign begins" means drafted, not published, until autopublish ships.** Publishing an
-  Instagram post is an owner action in the Social Studio today. A campaign can be fully drafted and
-  still invisible if nothing is published. The run summary reports both numbers and never conflates
-  them. The owner directed on 2026-08-11 that he will not be the bottleneck; the posture that
-  replaces his click, and the four things that must exist first, are in
-  `routine-social-daily.md` §Posting posture. **Autopublish changes who approves a post. It changes
-  no gate, and no gate may be relaxed to make it easier to ship.**
+- **Drafted and published stay two different numbers.** A campaign can be fully drafted and still
+  invisible, which is exactly what happens whenever `instagram_autopublish_enabled` is off or the
+  daily publish cap is spent. The run summary reports both and never conflates them. The posture that
+  replaced the owner's click is in `routine-social-daily.md` §Posting posture. **Autopublish changed
+  who approves a post. It changed no gate, and no gate may be relaxed to make it easier to ship.**
 
 ## 7. What this needs that does not exist yet
 
@@ -482,16 +480,18 @@ Recorded so no run pretends otherwise, and so the gap is visible rather than qui
 - **Cost is not the constraint.** At measured rates the owner's ask runs about $4.40/month at one post
   a day and about $13.40/month at four, against a hard ceiling near $31/month at the 10/day ceiling.
   The $5/day cap is not sized for a campaign kickoff burst, but the number was never the problem.
-- **Publishing is a manual click, and the owner has directed that it stop being one.** Four things do
-  not exist yet and all four gate the change: (a) the social image path above; (b) an **independent
-  pre-publish gate** that writes `approved`, since nothing but the owner's click writes it today and
-  a publish job would otherwise find nothing to publish; (c) a publish job with a publish-time stock
-  re-check, an image-provenance check, a daily publish cap independent of the drafting quota, and its
-  own kill switch; (d) a way for the owner to leave feedback on a **posted** row.
-- **The owner cannot give feedback on a live post.** `reviewSocialPost` carries
-  `ne(socialPosts.status, 'posted')`, so the admin review action refuses any posted row. The loop the
-  owner described on 2026-08-11, review live and feed it back to the team, is not buildable in the
-  current UI. This is the single blocking gap on his stated plan.
+- **Publishing no longer requires the owner's click.** All four things this section listed as
+  missing now exist: the social image path above; the **independent pre-publish gate**, which is the
+  only writer of `approved` and runs at Step 6.5 of the social routine; the publish job
+  (`/cron/social-publish`, hourly) with its publish-time stock re-check, image-provenance check,
+  daily cap, and its own kill switch; and the owner's feedback path on a **posted** row. What decides
+  whether posts actually go out is now one valve, `instagram_autopublish_enabled`, on the Social tab
+  of `/admin/homepage-team`. Read it, never assume it: a run that reports posts as published when the
+  valve is off is worse than one that reports nothing.
+- **`approved` alone is not a licence to publish.** The publish job refuses any row without a gate
+  PASS stamp in its `feedback`, including one the owner approved by hand. A row reported as
+  `no_gate_verdict` is a row nothing adversarial has read; it goes back through the gate, never
+  around it.
 - **No engagement is captured.** `social_posts` has no metrics column and nothing reads Instagram
   insights, so "which posts worked" is unanswerable. `video_jobs.metrics_json` plus its owner
   self-report merge is the existing precedent to mirror. Adding the column is a migration, so it is a

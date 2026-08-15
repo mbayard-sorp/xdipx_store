@@ -6,6 +6,8 @@
  *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id }
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
  *   { op: 'config' } -> { frequencies, autopostValve }
+ *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
+ *     productHandle? } } -> { ok, reviewStatus } | 422 { findings }
  *
  * The social-media-manager stub's only write path. Rows land in social_posts
  * with status='draft' AND review_status='pending_review' for human review in
@@ -22,11 +24,20 @@
  * exactly the required behaviour: a draft never enters the review queue without a
  * real voice-gate PASS asserted for it.
  *
- * Review state (approve / needs_changes / reject + feedback) is owner-only via
- * the /admin/socials action — there is no op here to write it. The agent READS
- * review outcomes through op:'list' (feedback and editedText come back
- * verbatim: that is the training channel) and its per-platform quota through
- * op:'config' (social_freq_* keys, posts/day, 0 = platform off).
+ * Review state is still not a field the drafting agent can set. The owner writes
+ * it from /admin/socials, and `op:'gate'` is the ONE other writer: the
+ * independent pre-publish gate (`social-publish-gate`), which exists precisely
+ * so the drafter is not grading its own homework. Their separation is the whole
+ * design, so keep it: the drafting routine calls `draft`, the gate routine
+ * calls `gate`, and neither calls the other's op.
+ *
+ * `op:'gate'` verifies rather than trusts. A PASS re-runs the deterministic
+ * publish checks server-side and is refused if they block, so the verdict
+ * cannot be asserted past them. See social-publish-approve.server.ts.
+ *
+ * The agent READS review outcomes through op:'list' (feedback and editedText
+ * come back verbatim: that is the training channel) and its per-platform quota
+ * through op:'config' (social_freq_* keys, posts/day, 0 = platform off).
  */
 
 import type { ActionFunctionArgs } from 'react-router'
@@ -40,6 +51,7 @@ import {
 } from '~/lib/team.server'
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
 import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
+import { applyPublishGateVerdict, parsePublishGateVerdict } from '~/lib/social-publish-approve.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -91,6 +103,29 @@ export async function action({ request }: ActionFunctionArgs) {
       reviewStatus,
     )
     return Response.json({ posts })
+  }
+
+  // The pre-publish gate's verdict. The only writer of review state other than
+  // the owner's own click, and the only path to `approved` once he stops
+  // clicking. A PASS is re-verified server-side before it is believed.
+  if (b['op'] === 'gate') {
+    if (typeof b['id'] !== 'number' || !Number.isFinite(b['id'])) {
+      return new Response('Bad Request: id required', { status: 400 })
+    }
+    const parsed = parsePublishGateVerdict(b['gate'])
+    if (!parsed.ok) return new Response(parsed.error, { status: parsed.status })
+
+    const result = await applyPublishGateVerdict(b['id'], parsed.verdict)
+    if (!result.ok) {
+      return Response.json(
+        {
+          error: result.error,
+          ...(result.status === 422 ? { findings: result.findings } : {}),
+        },
+        { status: result.status },
+      )
+    }
+    return Response.json({ ok: true, reviewStatus: result.reviewStatus })
   }
 
   if (b['op'] === 'config') {

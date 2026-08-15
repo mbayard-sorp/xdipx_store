@@ -14,6 +14,13 @@ import {
 
 const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
 
+/**
+ * A gate stamp on a product-free post. The default, because every publishable
+ * row now carries one: `approved` alone no longer means anything reviewed it.
+ */
+const PASS_STAMP =
+  '[publish-gate PASS by social-publish-gate on 2026-08-12, product: none]\nLooked at the frame and the last two weeks of the feed.'
+
 function post(over: Partial<PostRow> = {}): PostRow {
   return {
     id: 1, platform: 'instagram', postType: 'campaign', externalPostId: null,
@@ -22,7 +29,7 @@ function post(over: Partial<PostRow> = {}): PostRow {
     mediaUrls: [`${CDN}/social-rosales-cast-maya-20260812-1.jpg`],
     mediaIds: null, status: 'draft', errorMessage: null, postedAt: null,
     createdAt: new Date('2026-08-01'), createdBy: 'agent',
-    reviewStatus: 'approved', feedback: null, editedText: null,
+    reviewStatus: 'approved', feedback: PASS_STAMP, editedText: null,
     reviewedBy: null, reviewedAt: null, scheduledFor: '2026-08-12',
     reworkedFrom: null, videoJobId: null, posterUrl: null,
     ...over,
@@ -129,6 +136,44 @@ describe('the gate runs at publish time', () => {
       productHandleFor: async () => 'gone-oos',
       gateDeps: { getAvailability: async () => false },
     })
+    expect(publish).not.toHaveBeenCalled()
+    expect(calls.needsChanges[0]?.feedback).toContain('stock-out')
+  })
+
+  it('refuses a row approved without a publish-gate PASS', async () => {
+    // `approved` has two possible authors and only one of them is adversarial.
+    // A row with no stamp is a row nothing independent has read, which under
+    // autopublish is precisely the thing that must not go out.
+    const { repo, calls } = fakeRepo([post({ feedback: null })])
+    const publish = vi.fn()
+    const r = await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    expect(publish).not.toHaveBeenCalled()
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'no_gate_verdict' }])
+    expect(calls.needsChanges[0]?.feedback).toContain('social-publish-gate')
+  })
+
+  it('refuses a row whose gate stamp is not a PASS', async () => {
+    const held = '[publish-gate HOLD by social-publish-gate on 2026-08-12, product: none]\nNovel situation.'
+    const { repo, calls } = fakeRepo([post({ feedback: held })])
+    const publish = vi.fn()
+    await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    expect(publish).not.toHaveBeenCalled()
+    expect(calls.needsChanges).toHaveLength(1)
+  })
+
+  it('takes the product handle from the gate stamp, so the stock check actually runs', async () => {
+    // The gap this closes: nothing in production ever supplied productHandleFor,
+    // so the publish-time stock re-check silently no-opped on every row.
+    const stamped =
+      '[publish-gate PASS by social-publish-gate on 2026-08-12, product: femmefunn-ultra-bullet]\nChecked stock and the frame.'
+    const { repo, calls } = fakeRepo([post({ feedback: stamped })])
+    const publish = vi.fn()
+    const seen: string[] = []
+    await runSocialPublishTick({
+      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      gateDeps: { getAvailability: async (h) => { seen.push(h); return false } },
+    })
+    expect(seen).toEqual(['femmefunn-ultra-bullet'])
     expect(publish).not.toHaveBeenCalled()
     expect(calls.needsChanges[0]?.feedback).toContain('stock-out')
   })

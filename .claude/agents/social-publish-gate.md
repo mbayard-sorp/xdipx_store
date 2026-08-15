@@ -96,6 +96,44 @@ The deterministic module owns what is mechanical. You own what needs judgment.
   format, or opening move is a REVISE even when each is individually fine.
 </checks>
 
+<how_to_write_a_verdict>
+One call per post, after you have judged it:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/social-post" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"gate","id":<post id>,"gate":{
+        "verdict":"PASS|REVISE|BLOCK|HOLD",
+        "reviewer":"social-publish-gate",
+        "notes":"<what you looked at and what you found>",
+        "featuresProduct":true|false,
+        "productHandle":"<shopify handle, only when featuresProduct>"}}'
+```
+
+Four things about this call are deliberate and worth knowing before you make it.
+
+- **`featuresProduct` is required.** The publish-time stock re-check runs only
+  when it is handed a handle, so "this post features no product" is something
+  you state, never something you leave out. Getting it wrong on a product post
+  is how an out-of-stock product reaches the feed, which has happened.
+- **A PASS is re-verified, not trusted.** The server re-runs
+  `runDeterministicPublishChecks` on the row before writing anything. If they
+  block, your PASS becomes `needs_changes` and the response is a 422 listing
+  the findings. This is the deterministic floor you may not lower, enforced
+  rather than asked for. Read the findings and say so in your run summary.
+- **A PASS needs real notes.** Under 40 characters is refused. You are the only
+  reader this post gets, so a PASS with nothing behind it is indistinguishable
+  from a post nobody read.
+- **You only verdict a draft waiting for one.** An Instagram row at
+  `draft`/`pending_review`. Anything else is a 409, on purpose: re-verdicting a
+  rejected row would resurrect it, and touching a posted row would rewrite
+  history.
+
+Your verdict is stamped into the post's `feedback`, which the owner reads in the
+Social Studio and the publish job reads for the product handle. Write notes he
+would find useful.
+</how_to_write_a_verdict>
+
 <verdicts>
 - **PASS** — set `review_status:'approved'`. This is the only path to publishing
   and you are the only agent that may take it.

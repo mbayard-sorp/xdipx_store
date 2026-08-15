@@ -29,6 +29,7 @@ import { and, desc, eq, isNull, lte, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
+import { parseGateStamp } from './social-publish-approve.server'
 
 /**
  * Per-tick ceiling. A code constant, not a valve: there is no reason for the
@@ -52,6 +53,7 @@ export const MAX_TICK_DURATION_MS = MAX_PER_TICK * 120_000
 export type PublishOutcome =
   | 'published'
   | 'blocked_by_gate'
+  | 'no_gate_verdict'
   | 'failed'
   | 'claim_lost'
 
@@ -99,7 +101,16 @@ export interface PublishTickDeps {
   publish: (post: typeof socialPosts.$inferSelect) => Promise<
     { ok: true; externalPostId: string } | { ok: false; detail: string }
   >
-  /** Resolves the featured product handle for a post, when it has one. */
+  /**
+   * Resolves the featured product handle for a post, when it has one.
+   *
+   * Defaults to reading the gate stamp the pre-publish gate wrote into
+   * `feedback`. That default matters more than it looks: the handle is what
+   * turns the deterministic stock check on, `social_posts` has no column for
+   * one, and while this was merely optional nothing supplied it in production
+   * — so the publish-time stock re-check, the entire reason the gate runs here
+   * rather than only at draft time, silently did nothing on every row.
+   */
   productHandleFor?: (post: PostRow) => Promise<string | null>
   now?: () => Date
   /** Defaults to the live database. */
@@ -268,9 +279,33 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
 
     const caption = post.editedText?.trim() || post.tweetText
 
-    // The gate runs HERE, not only at draft time. Time passes between approval
-    // and the scheduled slot, and stock is the thing that moves in it.
-    const productHandle = deps.productHandleFor ? await deps.productHandleFor(post) : null
+    // Refuse anything the pre-publish gate never looked at.
+    //
+    // `review_status='approved'` has two possible authors: the gate, which
+    // stamps its verdict into `feedback`, and the owner's click in the Social
+    // Studio, which does not. Under autopublish he is not clicking, so an
+    // approved row with no stamp is either a leftover from before this shipped
+    // or something that reached the column another way. Either is a row nothing
+    // adversarial has read, and publishing it unattended is the one thing this
+    // whole chain exists to prevent. It goes back to the queue instead.
+    const stamp = parseGateStamp(post.feedback)
+    if (!stamp || stamp.verdict !== 'PASS') {
+      await repo.markNeedsChanges(
+        post.id,
+        'Approved without a publish-gate PASS, so nothing independent has reviewed it. ' +
+        'Run social-publish-gate over this draft (POST /api/team/social-post {op:"gate"}); ' +
+        'it re-verdicts and, on a PASS, re-approves.',
+      )
+      attempts.push({ postId: post.id, outcome: 'no_gate_verdict' })
+      continue
+    }
+
+    // The deterministic gate runs HERE, not only at gate time. Time passes
+    // between approval and the scheduled slot, and stock is the thing that
+    // moves in it. The handle comes from the stamp unless a caller overrides.
+    const productHandle = deps.productHandleFor
+      ? await deps.productHandleFor(post)
+      : stamp.productHandle
     const gate = await runDeterministicPublishChecks({
       caption,
       mediaUrls: post.mediaUrls ?? [],
