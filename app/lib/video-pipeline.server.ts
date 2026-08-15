@@ -44,10 +44,17 @@ import { logVideoCost, logImageCost } from '~/lib/token-log.server'
 import { getEditorPhotoUrl, getApprovedCastMembers } from '~/lib/sanity.server'
 import { getProductByHandle } from '~/lib/shopify.server'
 import { getTeamConfig } from '~/lib/team.server'
-import { VIDEO_EXTRA_KEYS, VIDEO_MAX_COST_CENTS_DEFAULT } from '~/lib/team-keys'
+import {
+  VIDEO_EXTRA_KEYS,
+  VIDEO_MAX_COST_CENTS_DEFAULT,
+  VIDEO_MAX_VARIANTS_PER_SET_DEFAULT,
+  ENDCARD_CTA_WHITELIST,
+  TONE_EXPRESSION,
+  isVideoTone,
+} from '~/lib/team-keys'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
-import { extractPoster, applyWatermark, probeDurationSeconds, muxAudio } from '~/lib/video-assembly.server'
-import { concatWithAudio, runPostPass } from '~/lib/video-postpass.server'
+import { extractPoster, applyWatermark, probeDurationSeconds, muxAudio, renderAspectMaster, type AspectMaster } from '~/lib/video-assembly.server'
+import { concatWithAudio, runPostPass, buildEndCard } from '~/lib/video-postpass.server'
 import {
   TTS_CHARS_PER_SECOND,
   OMNIHUMAN_MAX_RENDER_SECONDS,
@@ -56,7 +63,9 @@ import {
   splitPresenterLine,
   captionPhrases,
 } from '~/lib/avatar-script'
-import { generateVoiceover } from '~/lib/elevenlabs.server'
+import { generateVoiceover, generateVoiceoverWithTimestamps } from '~/lib/elevenlabs.server'
+import { charAlignmentToWordTimings, type WordTiming } from '~/lib/caption-timing'
+import { expandVariantSet, type VariantAxes } from '~/lib/video-variants'
 import { getActiveIvrVoiceId } from '~/lib/ivr-voice.server'
 
 const SCENE_FRAME_CANDIDATES = 3
@@ -80,6 +89,10 @@ export interface EnqueueVideoJobArgs {
   targetPlatforms: string[]
   aiDisclosure?: boolean
   runId?: number
+  /** Set by enqueueVideoJobSet — shared by every sibling expanded from one call. */
+  variantGroupId?: string
+  /** Which axis values this sibling got (labels Video Studio's set view). */
+  variantAxes?: VariantAxes
 }
 
 async function getMaxCostCents(): Promise<number> {
@@ -90,7 +103,8 @@ async function getMaxCostCents(): Promise<number> {
 /**
  * Estimated all-in USD for a job before it runs. Non-avatar: frames + clip.
  * Avatar (audio-driven): clip priced from derived speech seconds + TTS, and
- * frames are free when an approved scene frame is being reused.
+ * frames are free when an approved scene frame is being reused. Lipsync
+ * (compound tier): base clip + TTS + lipsync, all at durationSeconds.
  */
 export function estimateJobCostUsd(
   modelTier: VideoModelId,
@@ -105,6 +119,13 @@ export function estimateJobCostUsd(
     ? 0
     : estimateImageCostUsd(SCENE_PLATE_COST_KEY, 1)
       + estimateImageCostUsd(SCENE_FRAME_COST_KEY, SCENE_FRAME_CANDIDATES)
+  if (spec.lipsync) {
+    const base = VIDEO_MODELS[spec.lipsync.baseClip]
+    const clip = estimateVideoCostUsd(base.costKey, durationSeconds)
+    const tts = estimateVideoCostUsd(TTS_COST_KEY, durationSeconds)
+    const lipsync = estimateVideoCostUsd(spec.costKey, durationSeconds)
+    return Math.round((frames + clip + tts + lipsync) * 1e5) / 1e5
+  }
   if (spec.audioDriven) {
     const seconds = opts.speechSeconds ?? durationSeconds
     const clip = estimateVideoCostUsd(spec.costKey, seconds)
@@ -133,6 +154,20 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
     if (speechSeconds > AVATAR_MAX_SPEECH_SECONDS) {
       throw new Error(`presenterLine estimates ${speechSeconds}s of speech, over the ${AVATAR_MAX_SPEECH_SECONDS}s avatar cap. Trim the script.`)
     }
+  } else if (spec.lipsync) {
+    // Compound talking tier: the base clip is duration-validated, and the
+    // spoken line must fit inside it (sync_mode cut_off truncates the longer
+    // track, so an over-long read would lose its ending).
+    const line = typeof script.presenterLine === 'string' ? script.presenterLine.trim() : ''
+    if (!line) throw new Error('scriptJson.presenterLine is required for the lipsync tier')
+    if (args.presenter === 'none') throw new Error('lipsync tier requires a presenter (emma or friend:{slug})')
+    if (!spec.allowedDurations.includes(args.durationSeconds)) {
+      throw new Error(`${args.modelTier} does not support ${args.durationSeconds}s (allowed: ${spec.allowedDurations.join(', ')})`)
+    }
+    const speech = estimateAvatarSpeechSeconds(line)
+    if (speech > args.durationSeconds) {
+      throw new Error(`presenterLine estimates ${speech}s of speech but the clip is ${args.durationSeconds}s. Trim the line or lengthen the clip.`)
+    }
   } else if (!spec.allowedDurations.includes(args.durationSeconds)) {
     throw new Error(`${args.modelTier} does not support ${args.durationSeconds}s (allowed: ${spec.allowedDurations.join(', ')})`)
   }
@@ -160,11 +195,113 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
     modelTier: args.modelTier,
     targetPlatforms: args.targetPlatforms,
     runId: args.runId ?? null,
+    variantGroupId: args.variantGroupId ?? null,
+    variantAxes: args.variantAxes ?? null,
   })
 
   await kvDel(KV_KEYS.videoPollerIdle)
   console.log(`[video-pipeline] enqueued job ${jobId} product=${args.productHandle} formula=${args.formula} tier=${args.modelTier}`)
   return { jobId, estCostUsd }
+}
+
+// ─── Enqueue a variant set (batch engine, spec §5 Phase 1) ───────────────────
+
+export interface EnqueueVideoJobSetArgs {
+  productHandle: string
+  shopifyProductGid?: string
+  formula: string
+  /** Base presenter; the presenters axis overrides per variant. */
+  presenter: string
+  baseScriptJson: VideoScriptJson
+  modelTier: VideoModelId
+  durationSeconds: number
+  targetPlatforms: string[]
+  aiDisclosure?: boolean
+  runId?: number
+  hooks: string[]
+  presenters?: string[]
+  sceneSlugs?: string[]
+}
+
+export interface EnqueueVideoJobSetResult {
+  variantGroupId: string
+  totalEstCostUsd: number
+  jobs: { jobId: string; estCostUsd: number; axes: VariantAxes }[]
+}
+
+/**
+ * Expand one concept into N variant jobs sharing a variant_group_id. All
+ * validation and the set-level budget check run BEFORE the first insert.
+ * Variants whose scene already has an approved frame (sceneSlug reuse, or an
+ * explicit reuseFrameAssetId on the base script) cost no new frame spend —
+ * that is what makes a 4-hook set ~1.4x one video, not 4x. Per-job ceilings
+ * still apply inside each enqueueVideoJob call.
+ */
+export async function enqueueVideoJobSet(args: EnqueueVideoJobSetArgs): Promise<EnqueueVideoJobSetResult> {
+  if (!isVideoModelId(args.modelTier)) throw new Error(`Unknown model tier: ${args.modelTier}`)
+  const spec = VIDEO_MODELS[args.modelTier]
+
+  const variants = expandVariantSet({
+    baseScriptJson: args.baseScriptJson,
+    hooks: args.hooks,
+    ...(args.presenters?.length ? { presenters: args.presenters } : {}),
+    ...(args.sceneSlugs?.length ? { sceneSlugs: args.sceneSlugs } : {}),
+    durationSeconds: args.durationSeconds,
+  })
+
+  const cfg = await getTeamConfig('video').catch(() => null)
+  const maxVariants = cfg?.maxVariantsPerSet ?? VIDEO_MAX_VARIANTS_PER_SET_DEFAULT
+  if (variants.length > maxVariants) {
+    throw new Error(`Set expands to ${variants.length} variants, over the ${maxVariants}-variant cap (video_team_max_variants_per_set)`)
+  }
+  const maxCents = cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT
+
+  // Per-variant estimates with real frame-reuse detection, then the set-level
+  // budget check: total <= per-video ceiling x the variant cap.
+  let totalEstCostUsd = 0
+  const estimates: number[] = []
+  for (const v of variants) {
+    const presenter = v.presenter ?? args.presenter
+    let reuseFrame = typeof v.scriptJson.reuseFrameAssetId === 'number'
+    if (!reuseFrame && typeof v.scriptJson.sceneSlug === 'string' && (spec.audioDriven || spec.lipsync || v.scriptJson.talkingHead === true)) {
+      reuseFrame = (await findReusableSceneFrame(v.scriptJson.sceneSlug, presenter).catch(() => null)) != null
+    }
+    const speechSource = typeof v.scriptJson.presenterLine === 'string' ? v.scriptJson.presenterLine : ''
+    const est = estimateJobCostUsd(args.modelTier, args.durationSeconds, {
+      ...(spec.audioDriven ? { speechSeconds: estimateAvatarSpeechSeconds(speechSource) } : {}),
+      reuseFrame,
+    })
+    estimates.push(est)
+    totalEstCostUsd += est
+  }
+  if (totalEstCostUsd * 100 > maxCents * maxVariants) {
+    throw new Error(
+      `Set estimate $${totalEstCostUsd.toFixed(2)} exceeds the set budget of $${((maxCents * maxVariants) / 100).toFixed(2)} ` +
+      `(per-video ceiling x max variants per set)`,
+    )
+  }
+
+  const variantGroupId = randomUUID()
+  const jobs: EnqueueVideoJobSetResult['jobs'] = []
+  for (const v of variants) {
+    const { jobId, estCostUsd } = await enqueueVideoJob({
+      productHandle: args.productHandle,
+      ...(args.shopifyProductGid ? { shopifyProductGid: args.shopifyProductGid } : {}),
+      formula: args.formula,
+      presenter: v.presenter ?? args.presenter,
+      scriptJson: v.scriptJson,
+      modelTier: args.modelTier,
+      durationSeconds: args.durationSeconds,
+      targetPlatforms: args.targetPlatforms,
+      ...(typeof args.aiDisclosure === 'boolean' ? { aiDisclosure: args.aiDisclosure } : {}),
+      ...(typeof args.runId === 'number' ? { runId: args.runId } : {}),
+      variantGroupId,
+      variantAxes: v.axes,
+    })
+    jobs.push({ jobId, estCostUsd, axes: v.axes })
+  }
+  console.log(`[video-pipeline] enqueued variant set ${variantGroupId}: ${jobs.length} jobs, est $${totalEstCostUsd.toFixed(2)}`)
+  return { variantGroupId, totalEstCostUsd: Math.round(totalEstCostUsd * 1e5) / 1e5, jobs }
 }
 
 // ─── Advance loop (called by /cron/video-job-poller) ─────────────────────────
@@ -290,8 +427,9 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
   const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
   const talkingHead = script['talkingHead'] === true
   // Frame reuse is an avatar/talking-head mechanic only: b-roll frames are
-  // product-composed per job and never carry an identity to preserve.
-  const reusableJob = talkingHead || !!spec?.audioDriven
+  // product-composed per job and never carry an identity to preserve. The
+  // lipsync tier is a talking path too — its frame carries the presenter.
+  const reusableJob = talkingHead || !!spec?.audioDriven || !!spec?.lipsync
   const reuseId = typeof script['reuseFrameAssetId'] === 'number' ? script['reuseFrameAssetId'] as number : null
 
   // Scene-frame REUSE (talking-head rule): an already-approved frame is used
@@ -443,13 +581,17 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
 
   if (!existing) {
     // Submit. Ceiling re-check first: frame retries may have accrued cost.
+    // Compound lipsync tier: the CLIP renders on the base model (Kling); the
+    // lipsync model itself runs at the next stage.
+    const clipModelId = spec.lipsync ? spec.lipsync.baseClip : job.modelTier as VideoModelId
+    const clipSpec = VIDEO_MODELS[clipModelId]
     const script = job.scriptJson
     const motionPrompt = typeof script['motionPrompt'] === 'string' ? script['motionPrompt'] as string : null
     const durationSeconds = typeof script['durationSeconds'] === 'number' ? script['durationSeconds'] as number : spec.allowedDurations[0]!
     if (!motionPrompt) throw new Error('scriptJson.motionPrompt is required for the clip stage')
     if (!job.sceneFrameAssetId) throw new Error('No approved scene frame to animate')
 
-    const clipCost = estimateVideoCostUsd(spec.costKey, durationSeconds)
+    const clipCost = estimateVideoCostUsd(clipSpec.costKey, durationSeconds)
     const maxCents = await getMaxCostCents()
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`)
@@ -458,7 +600,7 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
     const [frame] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.sceneFrameAssetId)).limit(1)
     if (!frame) throw new Error('Approved scene-frame asset not found')
 
-    const handle = await submitVideoRequest(job.modelTier as VideoModelId, {
+    const handle = await submitVideoRequest(clipModelId, {
       prompt: motionPrompt,
       imageUrl: frame.blobUrl,
       durationSeconds,
@@ -467,7 +609,7 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
 
     void logVideoCost({
       feature: 'video-clip',
-      model: spec.costKey,
+      model: clipSpec.costKey,
       seconds: durationSeconds,
       caller: 'video-pipeline',
       sku: job.productHandle,
@@ -493,12 +635,13 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
   const result = await getVideoRequestResult(existing as QueueHandle)
   const buf = await downloadFalAsset(result.videoUrl)
   const { url } = await blobPut(`video/${job.jobId}/clip.mp4`, buf, { contentType: 'video/mp4' })
+  const clipSourceSpec = spec.lipsync ? VIDEO_MODELS[spec.lipsync.baseClip] : spec
   await db.insert(mediaAssets).values({
     kind: 'video',
     purpose: 'clip',
     blobUrl: url,
     contentType: 'video/mp4',
-    sourceModel: VIDEO_MODELS[job.modelTier as VideoModelId]?.costKey ?? job.modelTier,
+    sourceModel: clipSourceSpec?.costKey ?? job.modelTier,
     videoJobId: job.id,
   })
   await touch(job, { stage: 'lipsync', status: 'queued' })
@@ -538,15 +681,32 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
     const parts = splitPresenterLine(line)
     if (!parts.length) throw new Error('presenterLine produced no speakable parts')
 
+    const tone = isVideoTone(job.scriptJson['presenterTone']) ? job.scriptJson['presenterTone'] : undefined
     const voiceId = await getActiveIvrVoiceId()
     const audios: Buffer[] = []
+    const wordTimings: WordTiming[] = []
+    let timingsComplete = true
     let totalSpeechSeconds = 0
     for (const part of parts) {
-      const audio = await generateVoiceover({ text: part, ...(voiceId ? { voiceId } : {}) })
+      // with-timestamps: same audio, plus the char alignment that drives the
+      // word-timed caption burn. A missing alignment falls back to the
+      // char-proportional recipe at assembly, never fails the render.
+      const { audio, alignment } = await generateVoiceoverWithTimestamps({
+        text: part,
+        ...(voiceId ? { voiceId } : {}),
+        ...(tone ? { tone } : {}),
+      })
       const seconds = await probeDurationSeconds(audio)
       if (seconds <= 0) throw new Error('Could not probe TTS audio duration')
       if (seconds > OMNIHUMAN_MAX_RENDER_SECONDS - 0.5) {
         throw new Error(`TTS part runs ${seconds.toFixed(1)}s, over OmniHuman's ${OMNIHUMAN_MAX_RENDER_SECONDS}s per-render cap. Shorten presenterLine (or break long sentences up so the splitter can work) and re-enqueue.`)
+      }
+      if (alignment) {
+        // Offset by the REAL accumulated seconds of prior parts — the parts
+        // concat in assembly, so cumulative timing survives the join.
+        wordTimings.push(...charAlignmentToWordTimings(alignment, totalSpeechSeconds))
+      } else {
+        timingsComplete = false
       }
       audios.push(audio)
       totalSpeechSeconds += seconds
@@ -581,7 +741,8 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
     for (let i = 0; i < audios.length; i++) {
       const audioUrl = await uploadToFalStorage(audios[i]!, 'audio/mpeg', `speech-${job.jobId}-${i}.mp3`)
       newHandles[avatarPartKey(i)] = await submitVideoRequest('omnihuman', {
-        prompt: '',
+        // Tone colors the performance, not just the read (spec §5 Phase 3).
+        prompt: tone ? TONE_EXPRESSION[tone] : '',
         imageUrl,
         audioUrl,
         durationSeconds: 0,
@@ -598,9 +759,18 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
       refId: job.jobId,
     })
 
+    // Persist word timings alongside the handles: assembly runs on a later
+    // cron tick and reads them back off the row. Partial coverage (some part
+    // returned no alignment) is dropped wholesale — mistimed cues are worse
+    // than the char-proportional fallback.
+    const scriptWithTimings: VideoScriptJson = { ...job.scriptJson }
+    if (timingsComplete && wordTimings.length) scriptWithTimings.wordTimings = wordTimings
+    else delete scriptWithTimings.wordTimings
+
     await touch(job, {
       status: 'awaiting_provider',
       providerRequestIds: { ...handles, ...newHandles },
+      scriptJson: scriptWithTimings,
       costUsd: String(Number(job.costUsd) + clipCost + ttsCost),
     })
     return 'progressed'
@@ -647,9 +817,12 @@ async function advanceLipsync(job: VideoJobRow): Promise<AdvanceOutcome> {
   // would stomp it. Silent tiers (Kling) get an ElevenLabs voiceover in the
   // active IVR voice (the owner's pick in /admin/voice-and-sms) muxed here.
   // Scripts must frame these as b-roll/product shots: there is no lip sync,
-  // so an on-camera speaking presenter would read as dubbed. sync-lipsync is
-  // the designed fast-follow and slots in as a submit/poll pair like advanceClip.
+  // so an on-camera speaking presenter would read as dubbed. The sync-lipsync
+  // compound tier IS the sanctioned talking path on a standard-tier budget:
+  // it performs the presenterLine onto the finished base clip below.
   const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
+  if (spec?.lipsync) return advanceLipsyncPerform(job, spec)
+
   const voiceover = typeof job.scriptJson['voiceover'] === 'string' ? (job.scriptJson['voiceover'] as string).trim() : ''
   if (spec?.nativeAudio || !voiceover) {
     await touch(job, { stage: 'assembly', status: 'queued' })
@@ -693,6 +866,112 @@ async function advanceLipsync(job: VideoJobRow): Promise<AdvanceOutcome> {
   return 'progressed'
 }
 
+/**
+ * sync-lipsync perform pass (compound tier): TTS the presenterLine, submit the
+ * finished base clip + speech track to fal-ai/sync-lipsync, poll, and land the
+ * performed clip as the newest 'clip' asset for assembly. Same submit-or-poll
+ * discipline as advanceClip.
+ */
+async function advanceLipsyncPerform(job: VideoJobRow, spec: VideoModelSpec): Promise<AdvanceOutcome> {
+  const handles = job.providerRequestIds
+  const existing = handles['lipsync']
+
+  if (!existing) {
+    const line = typeof job.scriptJson['presenterLine'] === 'string' ? (job.scriptJson['presenterLine'] as string).trim() : ''
+    if (!line) throw new Error('scriptJson.presenterLine is required for the lipsync tier')
+    const clip = await latestAssetByPurpose(job.id, 'clip')
+    if (!clip) throw new Error('No clip asset to lip-sync')
+
+    const tone = isVideoTone(job.scriptJson['presenterTone']) ? job.scriptJson['presenterTone'] : undefined
+    const voiceId = await getActiveIvrVoiceId()
+    const { audio, alignment } = await generateVoiceoverWithTimestamps({
+      text: line,
+      ...(voiceId ? { voiceId } : {}),
+      ...(tone ? { tone } : {}),
+    })
+    const speechSeconds = await probeDurationSeconds(audio)
+    if (speechSeconds <= 0) throw new Error('Could not probe TTS audio duration')
+    const billedSeconds = Math.ceil(speechSeconds)
+
+    // TTS spend happened above — book it before anything can throw.
+    void logVideoCost({
+      feature: 'video-tts',
+      model: TTS_COST_KEY,
+      seconds: billedSeconds,
+      caller: 'video-pipeline',
+      sku: job.productHandle,
+      refId: job.jobId,
+    })
+
+    const ttsCost = estimateVideoCostUsd(TTS_COST_KEY, billedSeconds)
+    const lipsyncCost = estimateVideoCostUsd(spec.costKey, billedSeconds)
+    const maxCents = await getMaxCostCents()
+    if ((Number(job.costUsd) + ttsCost + lipsyncCost) * 100 > maxCents) {
+      throw new Error(`Accrued + lipsync cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`)
+    }
+
+    // Round-trip both inputs through fal storage: Blob URLs are usually
+    // fetchable, but fal storage keeps inputs in-house (same as the avatar path).
+    const clipBuf = await blobFetchToBuffer(clip.blobUrl)
+    const videoUrl = await uploadToFalStorage(clipBuf, 'video/mp4', `clip-${job.jobId}.mp4`)
+    const audioUrl = await uploadToFalStorage(audio, 'audio/mpeg', `speech-${job.jobId}.mp3`)
+
+    const handle = await submitVideoRequest('sync-lipsync', {
+      prompt: '',
+      imageUrl: '',
+      videoUrl,
+      audioUrl,
+      durationSeconds: 0,
+      aspect: '9:16',
+    })
+
+    void logVideoCost({
+      feature: 'video-lipsync',
+      model: spec.costKey,
+      seconds: billedSeconds,
+      caller: 'video-pipeline',
+      sku: job.productHandle,
+      refId: job.jobId,
+    })
+
+    const scriptWithTimings: VideoScriptJson = { ...job.scriptJson }
+    const timings = alignment ? charAlignmentToWordTimings(alignment, 0) : []
+    if (timings.length) scriptWithTimings.wordTimings = timings
+    else delete scriptWithTimings.wordTimings
+
+    await touch(job, {
+      status: 'awaiting_provider',
+      providerRequestIds: { ...handles, lipsync: handle },
+      scriptJson: scriptWithTimings,
+      costUsd: String(Number(job.costUsd) + ttsCost + lipsyncCost),
+    })
+    return 'progressed'
+  }
+
+  // Poll.
+  const { status } = await getVideoRequestStatus(existing as QueueHandle)
+  if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
+    await touch(job, {}) // heartbeat so ordering stays fair
+    return 'waiting'
+  }
+  if (status === 'FAILED') throw new Error('fal lipsync failed')
+
+  const result = await getVideoRequestResult(existing as QueueHandle)
+  const buf = await downloadFalAsset(result.videoUrl)
+  const { url } = await blobPut(`video/${job.jobId}/clip-ls.mp4`, buf, { contentType: 'video/mp4' })
+  // Same purpose as the base clip: assembly picks the newest 'clip' asset.
+  await db.insert(mediaAssets).values({
+    kind: 'video',
+    purpose: 'clip',
+    blobUrl: url,
+    contentType: 'video/mp4',
+    sourceModel: spec.costKey,
+    videoJobId: job.id,
+  })
+  await touch(job, { stage: 'assembly', status: 'queued' })
+  return 'progressed'
+}
+
 // ─── Stage: assembly ─────────────────────────────────────────────────────────
 
 async function latestAssetByPurpose(jobRowId: number, purpose: string): Promise<{ id: number; blobUrl: string } | null> {
@@ -708,13 +987,20 @@ async function latestAssetByPurpose(jobRowId: number, purpose: string): Promise<
 /** Full post passes allowed per job before assembly degrades (bounds music spend). */
 const ASSEMBLY_MAX_FULL_ATTEMPTS = 2
 
+async function endcardEnabled(): Promise<boolean> {
+  const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.endcardEnabled).catch(() => null)
+  return v === 'true' // defaults OFF
+}
+
 async function advanceAssembly(job: VideoJobRow): Promise<AdvanceOutcome> {
   const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
   const clip = await latestAssetByPurpose(job.id, 'clip')
   if (!clip) throw new Error('No clip asset to assemble')
   let raw = await blobFetchToBuffer(clip.blobUrl)
 
-  if (spec?.audioDriven) {
+  // Talking tiers (audio-first avatar AND the lipsync compound) get the full
+  // post pass; silent/native-audio b-roll ships as generated.
+  if (spec?.audioDriven || spec?.lipsync) {
     // Persist the attempt counter BEFORE the heavy work: if assembly keeps
     // crashing, retries must not re-spend music generation and re-encoding
     // forever. Attempts 1-2 run the full post pass; 3+ degrade to concat +
@@ -739,14 +1025,34 @@ async function advanceAssembly(job: VideoJobRow): Promise<AdvanceOutcome> {
     }
 
     if (attempts <= ASSEMBLY_MAX_FULL_ATTEMPTS) {
-      // Mandatory post pass: punch-ins ~3.5s, burned captions timed from the
-      // presenterLine, music bed, -14 LUFS loudnorm.
+      // Mandatory post pass: punch-ins ~3.5s, burned captions (word-timed when
+      // TTS captured timings, char-proportional otherwise), music bed,
+      // -14 LUFS loudnorm.
       const line = typeof job.scriptJson['presenterLine'] === 'string' ? (job.scriptJson['presenterLine'] as string).trim() : ''
-      raw = await runPostPass(raw, { phrases: line ? captionPhrases(line) : [] })
+      const wordTimings = Array.isArray(job.scriptJson.wordTimings) ? job.scriptJson.wordTimings as WordTiming[] : []
+      raw = await runPostPass(raw, {
+        phrases: line ? captionPhrases(line) : [],
+        ...(wordTimings.length ? { wordTimings } : {}),
+        costRef: { sku: job.productHandle, refId: job.jobId },
+      })
     } else {
       const warn = `assembly degraded on attempt ${attempts}: concat + watermark only, post pass skipped`
       console.warn(`[video-pipeline] job ${job.jobId} ${warn}`)
       await touch(job, { error: warn })
+    }
+  }
+
+  // Valve-gated 1.5s logo + CTA outro (spec §5 Phase 2). Failure never bricks
+  // the job — the video ships without its end card.
+  if (await endcardEnabled()) {
+    try {
+      const cta = typeof job.scriptJson.cta === 'string' && (ENDCARD_CTA_WHITELIST as readonly string[]).includes(job.scriptJson.cta)
+        ? job.scriptJson.cta
+        : ENDCARD_CTA_WHITELIST[0]
+      const card = await buildEndCard({ ctaLine: cta })
+      raw = await concatWithAudio([raw, card])
+    } catch (err) {
+      console.warn(`[video-pipeline] job ${job.jobId} end card failed, shipping without:`, err instanceof Error ? err.message.slice(0, 200) : err)
     }
   }
 
@@ -765,6 +1071,12 @@ async function advanceAssembly(job: VideoJobRow): Promise<AdvanceOutcome> {
 
 // ─── Stage: poster ───────────────────────────────────────────────────────────
 
+/** Extra masters derived from the 9:16 final in the poster tick (spec §5 Phase 2). */
+const ASPECT_MASTERS: { aspect: AspectMaster; purpose: string; suffix: string; width: number; height: number }[] = [
+  { aspect: '1:1', purpose: 'final_1x1', suffix: 'final-1x1', width: 1080, height: 1080 },
+  { aspect: '4:5', purpose: 'final_4x5', suffix: 'final-4x5', width: 1080, height: 1350 },
+]
+
 async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
   if (!job.finalAssetId) throw new Error('No final asset for poster extraction')
   const [finalAsset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.finalAssetId)).limit(1)
@@ -782,8 +1094,33 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
     videoJobId: job.id,
   }).returning({ id: mediaAssets.id })
 
+  // Multi-aspect masters, derived from the FINAL so captions/end card/watermark
+  // carry over free. Runs here (a light tick) rather than assembly to protect
+  // that stage's 300s budget. Each crop degrades independently — a failed crop
+  // never blocks completion. Idempotent across retries: skip purposes that
+  // already exist for this job.
+  for (const m of ASPECT_MASTERS) {
+    try {
+      if (await latestAssetByPurpose(job.id, m.purpose)) continue
+      const cropped = await renderAspectMaster(video, m.aspect)
+      const put = await blobPut(`video/${job.jobId}/${m.suffix}.mp4`, cropped, { contentType: 'video/mp4' })
+      await db.insert(mediaAssets).values({
+        kind: 'video',
+        purpose: m.purpose,
+        blobUrl: put.url,
+        contentType: 'video/mp4',
+        width: m.width,
+        height: m.height,
+        ...(duration > 0 ? { durationSeconds: String(duration) } : {}),
+        videoJobId: job.id,
+      })
+    } catch (err) {
+      console.warn(`[video-pipeline] job ${job.jobId} ${m.aspect} master failed, skipping:`, err instanceof Error ? err.message.slice(0, 200) : err)
+    }
+  }
+
   if (duration > 0) {
-    await db.update(mediaAssets).set({ durationSeconds: String(duration) }).where(eq(mediaAssets.id, finalAsset.id))
+    await db.update(mediaAssets).set({ durationSeconds: String(duration), width: 1080, height: 1920 }).where(eq(mediaAssets.id, finalAsset.id))
   }
   await touch(job, {
     stage: 'done',
@@ -838,6 +1175,9 @@ export async function regenerateVideoJob(jobRowId: number, feedback: string): Pr
   const script: VideoScriptJson = { ...job.scriptJson }
   const prior = Array.isArray(script.regenFeedback) ? script.regenFeedback : []
   if (feedback) script.regenFeedback = [...prior, feedback]
+  // Stale render artifacts never travel: timings are re-captured at TTS time,
+  // and a retake is a NEW single job — it does not inherit variant_group_id.
+  delete script.wordTimings
   const durationSeconds = typeof script['durationSeconds'] === 'number'
     ? script['durationSeconds'] as number
     : VIDEO_MODELS[job.modelTier as VideoModelId]?.allowedDurations[0] ?? 5

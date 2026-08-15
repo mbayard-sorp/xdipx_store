@@ -111,10 +111,49 @@ export const CONTENT_MAX_IMAGES_DEFAULT = 0
 export const VIDEO_EXTRA_KEYS = {
   maxCostCents: 'video_team_max_cost_cents',
   frameReview:  'video_frame_review',
+  // Hard cap on how many jobs one enqueue-set call may expand to (078). Read
+  // via getTeamConfig('video').maxVariantsPerSet — the key rides the existing
+  // 'video_team_%' LIKE query, no extra round trip.
+  maxVariantsPerSet: 'video_team_max_variants_per_set',
+  // 1.5s logo + CTA outro appended in assembly. Read via getPipelineSetting
+  // (=== 'true', defaults OFF) like frame_review — a render toggle, not budget.
+  endcardEnabled: 'video_endcard_enabled',
 } as const
 
 /** Default per-video ceiling when the key is unset (cents; migration seeds 600). */
 export const VIDEO_MAX_COST_CENTS_DEFAULT = 600
+
+/** Default enqueue-set expansion cap when the key is unset (migration seeds 4). */
+export const VIDEO_MAX_VARIANTS_PER_SET_DEFAULT = 4
+
+/**
+ * Delivery-tone vocabulary for video speech (spec §5 Phase 3). Optional and
+ * opt-in per job: scriptJson.presenterTone routes that job's TTS to eleven_v3
+ * with the matching audio tag (the store voice on eleven_multilingual_v2 stays
+ * the default) and appends the expression phrase to the avatar motion prompt.
+ * The voice gate checks tone choices against the platform register caps.
+ */
+export const VIDEO_TONES = ['warm', 'playful', 'direct', 'hushed'] as const
+export type VideoTone = (typeof VIDEO_TONES)[number]
+
+export function isVideoTone(v: unknown): v is VideoTone {
+  return typeof v === 'string' && (VIDEO_TONES as readonly string[]).includes(v)
+}
+
+/** Expression phrase appended to the avatar render prompt per tone. */
+export const TONE_EXPRESSION: Record<VideoTone, string> = {
+  warm:    'warm gentle smile, relaxed friendly delivery',
+  playful: 'playful bright energy, light teasing smile',
+  direct:  'steady eye contact, confident matter-of-fact delivery',
+  hushed:  'leaning in, soft conspiratorial delivery',
+}
+
+/**
+ * CTA lines allowed on the end card (subset of the charter CTA whitelist that
+ * reads well as a closing card; scriptJson.cta outside this list falls back to
+ * the first entry).
+ */
+export const ENDCARD_CTA_WHITELIST = ['Take a peek', 'Show me', 'Find your fit'] as const
 
 /**
  * The video formula library (client-safe). Ranked by platform-safety and

@@ -119,6 +119,7 @@ interface LoaderData {
   trendScout: boolean
   videoAutopublish: boolean
   videoFrameReview: boolean
+  videoEndcard: boolean
   releaseEngine: boolean
   releaseEngineMaxMerges: number
 }
@@ -133,7 +134,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, releaseEngineRow] = await Promise.all([
+  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, releaseEngineRow] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
@@ -146,6 +147,10 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.frameReview)).limit(1)
       .then(rows => rows[0]?.value !== 'false')
       .catch(() => true),
+    // End card defaults OFF; read directly for the same not-a-VALVE_KEYS reason.
+    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.endcardEnabled)).limit(1)
+      .then(rows => rows[0]?.value === 'true')
+      .catch(() => false),
     // Release-engine settings: read directly, same reason as frame review.
     db.select().from(pipelineSettings)
       .where(inArray(pipelineSettings.key, [RELEASE_ENGINE_KEYS.enabled, RELEASE_ENGINE_KEYS.maxMergesPerDay]))
@@ -249,7 +254,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     team, config, migrated, gateResult, runs, selectedRun, suggestions, ticketLinks, filter,
     kindOptions, assigneeOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
-    videoFrameReview, releaseEngine, releaseEngineMaxMerges,
+    videoFrameReview, videoEndcard, releaseEngine, releaseEngineMaxMerges,
   }
 }
 
@@ -382,7 +387,7 @@ export default function AgentTeamsPage() {
     team, config, migrated, gateResult, runs, selectedRun,
     suggestions, ticketLinks, filter, kindOptions, assigneeOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
-    seoCuration, trendScout, videoAutopublish, videoFrameReview,
+    seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard,
     releaseEngine, releaseEngineMaxMerges,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
@@ -470,7 +475,10 @@ export default function AgentTeamsPage() {
             <SettingField label="Max images / day" settingKey={CONTENT_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? 0} />
           )}
           {team === 'video' && (
-            <SettingField label="Max cost / video (cents)" settingKey={VIDEO_EXTRA_KEYS.maxCostCents} value={config.maxCostCents ?? 600} asDollars />
+            <>
+              <SettingField label="Max cost / video (cents)" settingKey={VIDEO_EXTRA_KEYS.maxCostCents} value={config.maxCostCents ?? 600} asDollars />
+              <SettingField label="Max variants / set" settingKey={VIDEO_EXTRA_KEYS.maxVariantsPerSet} value={config.maxVariantsPerSet ?? 4} />
+            </>
           )}
         </div>
 
@@ -532,6 +540,12 @@ export default function AgentTeamsPage() {
               detail="Even when ON, platform posting also requires per-platform publisher keys (all unset today; publishers are stubs). Keep OFF while videos are review-first."
               settingKey={VALVE_KEYS.videoAutopublish}
               on={videoAutopublish}
+            />
+            <ValveRow
+              label={`End card is ${videoEndcard ? 'ON' : 'OFF'}`}
+              detail="When ON, assembly appends a 1.5s closing card (logo + whitelist CTA) to every finished video. Ships OFF until you approve the card design on a test render."
+              settingKey={VIDEO_EXTRA_KEYS.endcardEnabled}
+              on={videoEndcard}
             />
           </>
         )}
