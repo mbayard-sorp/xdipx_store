@@ -113,6 +113,10 @@ export const dbRemovalWatchRepo: RemovalWatchRepo = {
         eq(socialPosts.platform, 'instagram'),
         eq(socialPosts.status, 'posted'),
         isNotNull(socialPosts.externalPostId),
+        // Postgres sorts NULLs FIRST under DESC, so a row that somehow reached
+        // `posted` without a timestamp would take a slot at the top of the
+        // sample and push a real post out of it.
+        isNotNull(socialPosts.postedAt),
       ))
       .orderBy(desc(socialPosts.postedAt))
       .limit(limit)
@@ -130,6 +134,18 @@ export const dbRemovalWatchRepo: RemovalWatchRepo = {
       .set({ status: 'deleted', errorMessage: detail })
       .where(eq(socialPosts.id, id))
   },
+  /**
+   * Removals in the window, counted by `posted_at` because there is no
+   * `removed_at` and adding one is a migration.
+   *
+   * The approximation this makes: a post published long ago and removed today
+   * falls outside the window and is not counted toward the pattern. It is a
+   * near-non-issue in practice rather than a hidden one, because the sweep only
+   * ever looks at the WATCH_SAMPLE most recent posts, which at this cadence is
+   * roughly the same span as the window itself. If Instagram ever starts
+   * removing months-old posts, this under-counts and the valve-off threshold is
+   * reached later than it should be.
+   */
   countRemovedSince: async (since) => {
     const rows = await db
       .select({ n: sql<number>`count(*)::int` })
