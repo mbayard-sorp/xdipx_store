@@ -45,6 +45,25 @@ const RELEASE_ENGINE_KEYS = {
 } as const
 
 /**
+ * Instagram publish cap. Same reasoning as the release-engine keys above: it
+ * belongs beside the autopublish valve in the UI, but adding it to team-keys.ts
+ * would make every future tweak an owner-merged protected-path PR. Read here
+ * directly and allowlisted explicitly in the action.
+ *
+ * The valve itself IS in VALVE_KEYS (`instagram_autopublish_enabled`), so it
+ * needs no entry here — only a control, which is what it has been missing.
+ * Until this shipped the key existed in code and in the cron and nowhere the
+ * owner could reach it, so the only way to turn Instagram autopublish on was a
+ * hand-written row in pipeline_settings.
+ */
+const SOCIAL_EXTRA_KEYS = {
+  instagramPublishMaxPerDay: 'instagram_publish_max_per_day',
+} as const
+
+/** Mirrors DEFAULT_MAX_PER_DAY in social-publish-job.server.ts (unset = 3/day). */
+const INSTAGRAM_PUBLISH_MAX_PER_DAY_DEFAULT = 3
+
+/**
  * Everything still in flight. The pre-070 board only knew proposed/approved/
  * pr_open; the ticket lifecycle added the middle of the road, and a ticket that
  * is not on this list is invisible to the owner.
@@ -120,6 +139,8 @@ interface LoaderData {
   videoAutopublish: boolean
   videoFrameReview: boolean
   videoEndcard: boolean
+  instagramAutopublish: boolean
+  instagramPublishMaxPerDay: number
   releaseEngine: boolean
   releaseEngineMaxMerges: number
 }
@@ -134,7 +155,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, releaseEngineRow] = await Promise.all([
+  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, releaseEngineRow] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
@@ -151,11 +172,24 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.endcardEnabled)).limit(1)
       .then(rows => rows[0]?.value === 'true')
       .catch(() => false),
+    // Instagram autopublish IS a VALVE_KEYS member and ships OFF, so the normal
+    // valve read applies.
+    getValve(VALVE_KEYS.instagramAutopublish).catch(() => false),
+    // Its daily cap is not a valve; read directly, same reason as frame review.
+    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, SOCIAL_EXTRA_KEYS.instagramPublishMaxPerDay)).limit(1)
+      .then(rows => rows[0]?.value)
+      .catch(() => undefined),
     // Release-engine settings: read directly, same reason as frame review.
     db.select().from(pipelineSettings)
       .where(inArray(pipelineSettings.key, [RELEASE_ENGINE_KEYS.enabled, RELEASE_ENGINE_KEYS.maxMergesPerDay]))
       .catch(() => [] as Array<{ key: string; value: string }>),
   ])
+  // Parsed exactly as the cron parses it, zero included: `|| DEFAULT` would turn
+  // a deliberate 0 (pause publishing without touching the valve) back into 3.
+  const instagramPublishParsed = instagramPublishRow == null ? NaN : parseInt(instagramPublishRow, 10)
+  const instagramPublishMaxPerDay = Number.isFinite(instagramPublishParsed) && instagramPublishParsed >= 0
+    ? instagramPublishParsed
+    : INSTAGRAM_PUBLISH_MAX_PER_DAY_DEFAULT
   const releaseEngine = releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.enabled)?.value === 'true'
   const releaseEngineMaxMerges =
     Number(releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.maxMergesPerDay)?.value ?? 6) || 6
@@ -254,7 +288,8 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     team, config, migrated, gateResult, runs, selectedRun, suggestions, ticketLinks, filter,
     kindOptions, assigneeOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
-    videoFrameReview, videoEndcard, releaseEngine, releaseEngineMaxMerges,
+    videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
+    releaseEngine, releaseEngineMaxMerges,
   }
 }
 
@@ -272,6 +307,7 @@ export async function action({ request }: ActionFunctionArgs) {
     ...Object.values(CONTENT_EXTRA_KEYS),
     ...Object.values(VIDEO_EXTRA_KEYS),
     ...Object.values(VALVE_KEYS),
+    ...Object.values(SOCIAL_EXTRA_KEYS),
     ...Object.values(RELEASE_ENGINE_KEYS),
   ])
 
@@ -388,6 +424,7 @@ export default function AgentTeamsPage() {
     suggestions, ticketLinks, filter, kindOptions, assigneeOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
     seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard,
+    instagramAutopublish, instagramPublishMaxPerDay,
     releaseEngine, releaseEngineMaxMerges,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
@@ -498,11 +535,30 @@ export default function AgentTeamsPage() {
               on={autopost}
             />
             <ValveRow
+              label={`Instagram autopublish is ${instagramAutopublish ? 'ON' : 'OFF'}`}
+              detail="When ON, the hourly /cron/social-publish job posts approved, due Instagram drafts to @hello_xdipx with no click from you. Only the social-publish-gate agent can mark a draft approved, and every post is re-checked at publish time for stock, imagery provenance, sale language, and repetition. OFF means drafts wait in the Social Studio exactly as before. Turning it off takes effect on the next tick, not the next deploy."
+              settingKey={VALVE_KEYS.instagramAutopublish}
+              on={instagramAutopublish}
+            />
+            <ValveRow
               label={`Social trend scout is ${socialTrendScout ? 'ON' : 'OFF'}`}
               detail="Weekly social-trend-scout research run (propose-only)."
               settingKey={VALVE_KEYS.socialTrendScout}
               on={socialTrendScout}
             />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <SettingField
+                label="Instagram posts / day (publish cap)"
+                settingKey={SOCIAL_EXTRA_KEYS.instagramPublishMaxPerDay}
+                value={instagramPublishMaxPerDay}
+              />
+            </div>
+            <p className="text-[11px] text-ink-4">
+              The publish cap is independent of the drafting quota above: drafting can run ahead
+              without the queue draining onto the account all at once. A tick posts at most 2, so a
+              backlog trickles out rather than flooding. Set it to 0 to pause publishing while
+              leaving the valve on.
+            </p>
           </>
         )}
         {team === 'content' && (
