@@ -80,6 +80,20 @@ function formatPrice(price: number): string {
   return `$${price.toFixed(2)}`
 }
 
+// ─── Pitched-handles log ──────────────────────────────────────────────────────
+
+/**
+ * Append a handle to the rolling pitched-handles log, most-recent last, capped
+ * at 10 — the same shape and cap the conversation agent writes for PRESENTATION
+ * pitches (migration 032). The UPSELL stage is a deterministic template path
+ * that never ran the agent, so it never recorded its pitch here (#3217); this is
+ * that record.
+ */
+export function appendPitchedHandle(log: readonly string[], handle: string): string[] {
+  const next = [...log, handle]
+  return next.length > 10 ? next.slice(next.length - 10) : next
+}
+
 // ─── Stage handler ────────────────────────────────────────────────────────────
 
 export async function executeUpsellStage(
@@ -144,8 +158,22 @@ export async function executeUpsellStage(
     },
   ]
 
-  // Step 3: no accessory found — short-circuit to CHECKOUT
-  if (!searchResults || searchResults.length === 0) {
+  // Repeat-pitch dedup (#3217). The UPSELL stage bypasses the conversation
+  // agent's tool-wrapper dedup, so it must filter its own results against the
+  // pitched-handles log and record what it pitches. Without this the repeat-pitch
+  // guard is blind to every upsell: on 2026-08-14 Jelle Plus was pitched in turn
+  // 1560 and re-pitched verbatim in turn 1562, with search_repeated_pitch FALSE
+  // the whole time because nothing ever wrote the upsell pitch to the log.
+  const pitchedLog = ctx.conversation.pitchedHandlesLog ?? []
+  const pitchedSet = new Set(pitchedLog.map((h) => h.toLowerCase()))
+  const freshResults = searchResults.filter((c) => !pitchedSet.has(c.handle.toLowerCase()))
+  // searchForIvr returned candidates but every one was already pitched. Do not
+  // re-offer; record the signal the dedup filter was missing on this turn.
+  const allRepeats = searchResults.length > 0 && freshResults.length === 0
+
+  // Step 3: no fresh accessory (none found, or all already pitched) — short-circuit
+  // to CHECKOUT rather than re-pitching something the caller already heard.
+  if (freshResults.length === 0) {
     return {
       stageOut: resolveTransition('UPSELL', 'CHECKOUT'),
       goalAchieved: false,
@@ -159,12 +187,13 @@ export async function executeUpsellStage(
         intent: intent.intent,
         intentConfidence: intent.confidence,
         toolCalls,
+        ...(allRepeats && { searchRepeatedPitch: true }),
       },
     }
   }
 
-  // Step 4: take the first (margin-weighted) result and build the ProductRef
-  const accessory = searchResults[0]!
+  // Step 4: take the first (margin-weighted) fresh result and build the ProductRef
+  const accessory = freshResults[0]!
   const pdpUrl = `https://xdipx.com/products/${accessory.handle}`
 
   // Fetch image URL from Shopify (IvrProductCard doesn't carry image)
@@ -217,6 +246,9 @@ export async function executeUpsellStage(
     segments: [segment],
     stateWrites: {
       currentUpsellHandle: accessory.handle,
+      // #3217: record the upsell pitch so the repeat-pitch guard can see it on
+      // the next turn and this call. Filtered above, so it is never a duplicate.
+      pitchedHandlesLog: appendPitchedHandle(pitchedLog, accessory.handle),
     },
     telemetry: {
       intent: intent.intent,
