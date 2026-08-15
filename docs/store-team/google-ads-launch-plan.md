@@ -6,8 +6,9 @@
 >
 > This is a deliberate decision made *with* the numbers in §4, not a deferral for lack of a plan.
 > The plan below is complete and correct. It is held because the store cannot yet convert traffic
-> profitably, and buying traffic into a funnel that converts at 0.32% on a $26.47 AOV converts a
-> small problem into an expensive one.
+> profitably. There has never been a real customer order, and at the ~$33 basket the catalog
+> currently produces, break-even on paid needs a ~12% conversion rate. Buying traffic into that
+> turns a small problem into an expensive one.
 >
 > **Do not propose, launch, or re-litigate a Google Ads campaign while this hold stands.**
 > `ads-manager` reads this file: treat the hold as binding, and do not write `ad_campaigns`
@@ -20,7 +21,8 @@
 >
 > 1. **AOV at or above $45**, over at least 10 real orders. At $45 and a 37.3% contribution margin,
 >    break-even CPA is ~$16.80, which needs a ~5.9% CVR at a $1.00 CPC. That is reachable on
->    model-name search intent. At today's $26.47 it needs 10.6%, which is not reachable by anyone.
+>    model-name search intent. At the ~$33 basket the catalog produces today it needs ~12%, which is
+>    not reachable by anyone. AOV itself is n=0; $45 is the target, not a measured delta.
 >    **This is the binding constraint and the real reason for the hold.**
 > 2. **The measurement chain is trustworthy**, specifically: ticket #3441 (GA4 `page_location`
 >    corruption) shipped, ticket #3422 (the gclid last hop) shipped, and a Shopify checkout web pixel
@@ -46,7 +48,7 @@
 > measurement can be trusted, not about hitting a rate nobody can measure.
 >
 > **What this does NOT change: the hold still stands.** It rests on the AOV arithmetic, which is
-> unaffected by the denominator problem. Even a healthy 2-3% CVR does not clear a 10.6% break-even
+> unaffected by the denominator problem. Even a healthy 2-3% CVR does not clear a ~12% break-even
 > requirement. The hold was right; one of its two stated reasons was not.
 >
 > **What it DOES change:** the CVR fixes are worth shipping because they are cheap and obviously
@@ -91,7 +93,7 @@ Corrections landed in this revision, each verified against live data rather than
 
 | # | Correction | Where |
 |---|---|---|
-| 1 | **AOV was assumed at $80. The only real order is $26.47.** Break-even CPA is ~$9.87, not $18.40 | §4 |
+| 1 | **AOV was assumed at $80. It is n=0: no real customer order has ever been placed.** The catalog's median basket is ~$33 | §4 |
 | 2 | **Ad group D (lubricant) fails this document's own stock gate**: 3 in-stock items ≥ $60, not 6 | §3 |
 | 3 | **Ad group A bid on two LELO products the store does not stock** | §3 |
 | 4 | Three collection handles in circulation are 404s | §2 |
@@ -105,9 +107,10 @@ Corrections landed in this revision, each verified against live data rather than
 | 12 | Four receiving-end defects sit on the paid path | §8 |
 | 13 | `ad_campaigns` row #1 conflicts with this plan and should be rejected | §9 |
 
-**The tension this revision exposes, which only the owner can resolve:** the minimum budget that can
-produce a statistically readable answer is about **$25/day for 4 weeks ($700)**, while the first-order
-economics at a $26 AOV cannot justify that spend. Both are true. See §4.
+**The tension this revision exposed:** the minimum budget that can produce a statistically readable
+answer is about **$25/day for 4 weeks ($700)**, while the first-order economics at the basket this
+catalog produces cannot justify that spend. Both were true, which is why the owner held the ads on
+2026-08-15 rather than splitting the difference. See the hold at the top and §4.
 
 ---
 
@@ -273,7 +276,7 @@ Verify each collection has at least six in-stock items above $60 before it gets 
 | `/collections/lubricants` | 243 | **3** | **FAILS** |
 
 **Ad group D does not launch.** Lubricant fails this document's own gate, and it fails it
-structurally rather than temporarily: lube is a sub-$20 category, so it will never carry a $9.87
+structurally rather than temporarily: lube is a sub-$20 category, so it will never carry a ~$12
 break-even CPA as an acquisition term. Lube is an **attachment** product, not an acquisition
 product. Move it to `FrequentlyBoughtWith` and to email, and give its budget to ad group B.
 
@@ -407,36 +410,61 @@ the month at 30.4x daily and eats the overage, so $25/day cannot cost more than 
 
 ### The AOV correction (2026-08-15, measured)
 
-**The $80 AOV this section originally assumed has never been observed.** Measured against live data:
+**The $80 AOV this section originally assumed has never been observed. Neither has any other AOV.**
+
+> **Second correction, same day: there has never been a real customer order. AOV is n=0.**
+>
+> An earlier revision of this section reported "1 real order, $26.47". That order is the owner's own
+> test purchase at a 75% discount. Order `#1002` breaks down as **$70.97 of line items, minus $53.22
+> from discount code `HKK1P6EV0AEJ`** (summary: "75% off one-time purchase products, For Michael
+> Bayard"), plus $9.99 shipping. `daily_profit_summary` corroborates: 63 rows, every one with
+> `total_orders: 0`.
+>
+> **So `$26.47` is not an AOV. It is the owner buying his own product at 75% off.** Write n=0, and
+> never quote $26.47 as a baseline again. (That code was still ACTIVE, unlimited, and unexpiring when
+> this was found; see ticket #3445.)
+>
+> The only observed *basket shapes* are the two owner orders, at **$70.97 and $87.25 of line items
+> before discount**, both a toy plus multiple lubricants. n=2 and both are the owner, so this proves
+> nothing about demand. It is worth one line only because it is an attach shape.
+
+Measured catalog figures, which are real:
 
 | Figure | Value | Source |
 |---|---|---|
-| Real (non-test) orders, all time | **1** | Shopify Admin API, 2026-08-15 |
-| That order's total | **$26.47** (3 items) | order `#1002`, 2026-07-23 |
-| Catalog median price, in-stock | **$26.99** | 3,000 in-stock products |
-| Catalog median margin, in-stock | **43.8%** (p25 35.0%, p75 44.7%) | 1,396 products carrying `wholesale_cost` |
+| Real customer orders, all time | **0** | Shopify Admin API, 2026-08-15 |
+| Catalog median price, in-stock | **$32.99** (mean $51.07, p25 $14.99, p75 $68.99) | 4,395 in-stock SKUs carrying `wholesale_cost` |
+| Catalog median margin, in-stock | **44.1%** (p25 35.3%, p75 44.8%) | same |
 
-Contribution margin at the median, after ~6.5% high-risk processing: **37.3%**.
+Contribution margin at the median, after ~6.5% processing: **37.6%**.
+
+An earlier revision quoted a $26.99 median over n=1,396. That query hit a channel-published subset.
+**Use $32.99 over n=4,395.**
 
 > **Break-even ROAS ≈ 2.7x** (better than the 4.3x previously stated, because realized margins run
-> above the engine's floor).
-> **But break-even CPA at a $26.47 AOV ≈ $9.87**, not $18.40. At a $1.05 CPC that needs a
-> **10.6% conversion rate.**
-> Confidence: margin high (n=1,396). AOV low (n=1). Both point the same direction.
+> above the engine's floor). Confidence high, n=4,395.
+> **Break-even CPA depends entirely on an AOV nobody has measured.** At the catalog median basket of
+> ~$33 it is ~$12.40, needing a **~12% conversion rate** at a $1.05 CPC. At a modelled $45 basket it
+> is ~$16.90 and needs ~6.4%. At $60 it is ~$22.60 and needs ~4.8%.
 
-**10.6% is not achievable.** Best-in-class ecommerce paid-search CVR is 2-4%. The measured
-site-wide CVR today is **0.32%** (1 purchase / 311 sessions, GA4, 90 days).
+**Anything at or below a ~$35 basket is unreachable.** Best-in-class ecommerce paid-search CVR is
+2-4%. So the conclusion does not depend on knowing the true AOV: **at the basket the catalog
+currently produces, Google Ads cannot break even on first-order revenue.** It becomes arguable
+somewhere north of a $50 basket and comfortable north of $60.
 
-**So state the conclusion plainly: Google Ads will not break even on first-order revenue at this
-AOV.** That is not a reason to skip it. It is a reason to price the experiment correctly:
+That is not a reason to skip paid forever. It is the reason the hold is keyed to AOV:
 
-- The **deliverable of the first month is a list and a search-terms report**, not a P&L line. Judge
-  it on cost per email captured and cost per add-to-cart, not ROAS.
-- **The binding constraint is AOV and CVR, not traffic.** Note that free shipping starts at $99
-  (`app/lib/shipping.ts`) against a $26.47 observed AOV, so a paid visitor pays $9.99 shipping on a
-  ~$27 order, a 38% surcharge at the exact moment they decide. Raising AOV toward the threshold, or
-  lowering the threshold, is worth more than any bid adjustment in this document.
-- Revisit these numbers after 10 real orders. One order is an anecdote, not an AOV.
+- **The binding constraint is basket size, not traffic.** Free shipping starts at $99
+  (`app/lib/shipping.ts`) against a ~$33 median item, so it is unreachable on a one-item cart and the
+  cart drawer's progress bar renders as a taunt. Meanwhile the visitor pays $9.99, a ~30% surcharge,
+  revealed at checkout.
+- **The store's own merchandising is working against its basket.** The homepage's first rail leads
+  with four lubricants and a toy cleaner, and `/collections/under-50` (3,210 products) is the largest
+  collection in the store and sits in the footer nav. The anchor item's price essentially *is* the
+  AOV, so leading with consumables sets it. This is the largest single AOV lever available and it
+  needs no code.
+- Revisit every number here after **20 real orders.** Until then AOV is n=0 and should be written
+  that way.
 
 **Against the $2,000/month profit goal:** paid search at break-even contributes $0, and below
 break-even it contributes negative. Its value here is first-order acquisition that feeds email and

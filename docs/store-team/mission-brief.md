@@ -25,8 +25,10 @@ and every touchpoint must be comfortable to receive, open, and share.
 - **PAID ACQUISITION IS HELD (owner direction, 2026-08-15): "fix the AOV and CVR first, hold the
   ads."** No team proposes, plans, or launches paid spend on any platform while this stands. This is
   not a policy hold and not a lack of a plan; `docs/store-team/google-ads-launch-plan.md` is complete
-  and carries the full reasoning and the unhold criteria. It is an **economics** hold: at a **$26.47**
-  AOV, break-even on paid needs a **10.6%** conversion rate, which nobody achieves at any budget.
+  and carries the full reasoning and the unhold criteria. It is an **economics** hold: **AOV is n=0**
+  (no real customer order has ever been placed; the one non-test order is the owner's own purchase at
+  75% off), and at the ~$33 basket the catalog currently produces, break-even on paid needs a ~12%
+  conversion rate, which nobody achieves at any budget.
   **The hold lifts when AOV >= $45 over 10+ real orders AND the measurement chain is trustworthy**
   (tickets #3441 and #3422 shipped, plus a checkout step pixel). Until then, acquisition effort goes
   to owned and earned channels (SEO, AEO, email, outreach, organic social), which is where it was
