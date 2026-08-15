@@ -15,16 +15,45 @@
 >
 > ## What lifts the hold
 >
-> The hold lifts when **both** are true, measured rather than estimated:
+> **Revised the same day, after a `homepage-cro` funnel audit corrected the CVR number. Read the
+> correction below before using either criterion.**
 >
 > 1. **AOV at or above $45**, over at least 10 real orders. At $45 and a 37.3% contribution margin,
 >    break-even CPA is ~$16.80, which needs a ~5.9% CVR at a $1.00 CPC. That is reachable on
 >    model-name search intent. At today's $26.47 it needs 10.6%, which is not reachable by anyone.
-> 2. **Site-wide CVR at or above 1.5%**, sustained over 4 weeks. Today it is 0.32%.
+>    **This is the binding constraint and the real reason for the hold.**
+> 2. **The measurement chain is trustworthy**, specifically: ticket #3441 (GA4 `page_location`
+>    corruption) shipped, ticket #3422 (the gclid last hop) shipped, and a Shopify checkout web pixel
+>    emitting step events. Without all three a campaign cannot be judged at any budget.
 >
-> A third condition is a build, not a metric, and it gates the *first click* rather than the hold:
-> ticket #3422 (the gclid last hop) must ship before any paid spend, or the campaign cannot be
-> measured no matter how good the funnel is by then.
+> ### Correction: the 0.32% CVR was measured against a polluted denominator
+>
+> An earlier draft of this hold set a second criterion of "site-wide CVR at or above 1.5%, today
+> 0.32%". **That number does not mean what it appears to.** Of 311 sessions in 90 days, roughly 91
+> are one crawler on `search.google.com` (114 sessions, **1 user**, 13 pageviews per session), ~14
+> are `vercel.com` deploy previews (the team), and a further chunk of Direct is the owner. Genuinely
+> cold humans: **roughly 30 to 40.**
+>
+> At user level the funnel reads 75 users, 20 reached a PDP, 5 added to cart, 5 began checkout, 1
+> purchased. **PDP to add-to-cart is 25%, not 6.6%, and add-to-cart to begin-checkout is 100%, so
+> there is no cart leak at all.** One order from ~35 cold humans is roughly **2 to 3%**, which is
+> unremarkable for an unfamiliar store.
+>
+> **So the store has not demonstrated a conversion problem. It has a traffic problem that makes
+> conversion unknowable.** A CVR threshold is therefore the wrong gate: at ~6 sessions a day,
+> detecting even a doubling of checkout completion would need on the order of 200+ checkout starts,
+> which at the current rate is roughly fifteen years. Criterion 2 is now about whether the
+> measurement can be trusted, not about hitting a rate nobody can measure.
+>
+> **What this does NOT change: the hold still stands.** It rests on the AOV arithmetic, which is
+> unaffected by the denominator problem. Even a healthy 2-3% CVR does not clear a 10.6% break-even
+> requirement. The hold was right; one of its two stated reasons was not.
+>
+> **What it DOES change:** the CVR fixes are worth shipping because they are cheap and obviously
+> correct, not because a metric will validate them. **Holding the ads is not a measurement strategy.**
+> No amount of waiting at this traffic level will reveal whether any fix worked. Ship the cheap fixes
+> on judgment, raise AOV, and restart on the AOV gate rather than waiting for a CVR signal that
+> cannot arrive.
 >
 > **What is NOT a reason to lift the hold:** an approved proposal sitting in `ad_campaigns`, a
 > competitor being seen advertising, a slow traffic week, or the plan looking ready. The two numbers
