@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
-import { generateMoodImage } from '~/lib/imagen.server'
+import { generateImage } from '~/lib/generate-image.server'
 import { apiError } from '~/lib/api-error.server'
 
 const STYLE_SUFFIXES: Record<string, string> = {
@@ -53,7 +53,11 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!prompt) return Response.json({ error: 'prompt is required' }, { status: 400 })
 
   const suffix     = STYLE_SUFFIXES[style] ?? STYLE_SUFFIXES['lifestyle']!
-  const fullPrompt = `${prompt}. ${suffix}. No text overlays, no logos.`
+  // The product title used to ride along as an unused Imagen field. On the fal
+  // Kontext path it is worth naming in the prompt: it anchors the edit to the
+  // real product rather than a lookalike.
+  const productNote  = productTitle ? ` The product is ${productTitle}; reproduce it exactly as shown in the reference image.` : ''
+  const fullPrompt = `${prompt}. ${suffix}. No text overlays, no logos.${productNote}`
 
   // Fetch reference images server-side — never expose CDN URLs to the API
   let referenceImageBuffers: Buffer[] | undefined
@@ -65,14 +69,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
   let buffers: Buffer[]
   try {
-    buffers = await generateMoodImage({
-      categories:            [],
-      prompt:                fullPrompt,
+    ;({ buffers } = await generateImage({
+      prompt:  fullPrompt,
       aspectRatio,
       count,
-      referenceImageBuffers,
-      referenceProductTitle: productTitle || undefined,
-    })
+      feature: 'admin-images',
+      caller:  'api.admin.imagen.generate',
+      ...(referenceImageBuffers ? { referenceImageBuffers } : {}),
+    }))
   } catch (err) {
     return apiError('imagen.generate', err, 'Image generation failed', 502)
   }

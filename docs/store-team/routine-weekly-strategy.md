@@ -85,6 +85,54 @@ curl -s -X POST "$BASE_URL/api/team/event" \
   -d '{"op":"record","runId":'$RUN_ID',"eventType":"decision","agentRole":"store-strategist","phase":"retro","summary":"<directive>: <verdict + numbers>"}'
 ```
 
+## Step 3b — Drain the `strategy` kind (close or carry every approved row)
+
+The strategist already holds the terminal edge on `strategy` rows: `RUN_CLOSE_ACTORS` in
+`app/lib/team.server.ts` includes `agent:store-strategist` and `RUN_CLOSE_KINDS` includes `strategy`,
+so `ALLOWED.approved` grants `approved → applied` on any `strategy` row today, no code change and no
+valve. The lane is not missing, the instruction was. At run start list them:
+
+```bash
+-d '{"op":"list","status":"approved","kind":"strategy","orderBy":"age","limit":200}'
+```
+
+For each row, exactly one of two outcomes — no third option:
+
+- **(a) Fold it into this week's brief and close it:**
+  ```bash
+  -d '{"op":"transition","id":N,"to":"applied","actor":"agent:store-strategist","note":"folded into brief week=YYYY-MM-DD as <directive>"}'
+  ```
+- **(b) Carry it:** name it explicitly in the brief as carried, with the reason it is not yet folded.
+
+A row that is neither folded nor named is a bug in the run. This is what Step 7's "rows CLOSED since
+last run" line always asked for and no step implemented; 0 of the standing `strategy` rows had ever
+reached `applied` before this step existed.
+
+**Outreach fence (exempt from 3b).** Any row whose text begins "OFFSITE PITCH" or is a brand-partner
+pitch is the outreach send-arm's live input per `docs/store-team/outreach-pipeline.md` and stays
+`approved` until the pitch is sent or the prospect is closed. Never fold one into a brief to close it,
+and never retire it: retiring frees the undated per-domain `dedupeKey` and `offsite-scout` re-files
+the identical pitch next Tuesday. Say plainly in the brief that these rows are an **owner-send queue**,
+not backlog.
+
+## Step 3c — Triage the blocked pile
+
+Nothing else in the system reviews blocked rows: the only automated exit
+(`reopenBlockedOnRepeatObservation`) needs a `dedupeKey` plus a repeat detection of the identical
+condition, which a governance ticket never gets, and every other exit is owner-only. So each week read
+every blocked row and its latest `suggestion_links` note (that note is where R-DEV writes the reason;
+`last_error` is null by design on this path) and sort each into one bucket, then act:
+
+- **RESOLVED / superseded** (e.g. a block note that already reads "RESOLVED ... superseded on main") →
+  say so in the brief and list it for owner dismissal.
+- **WRONG LANE** (belongs to content, shopify-ops, or is not application code at all) → state the
+  correct owner and the re-file needed.
+- **GENUINELY PROTECTED PATH or awaiting a dependency** (e.g. dependents waiting on an unmerged PR) →
+  leave blocked and name it in the brief with what would unblock it.
+
+Report the three counts (resolved / wrong-lane / genuinely-blocked) in the run summary so a growing
+blocked pile is visible.
+
 ## Step 4 — Sub-specialists (sequence, same $RUN_ID)
 
 1. `inventory-sentinel` — catalog stock/price sweep → targeted suggestions + scoreboard event.
@@ -166,6 +214,25 @@ never premium), promo/calendar window fit 5. Mirror the slate into `metricsJson.
 the retro read `video_jobs` outcomes (approval rate, cost per approved video, regen rate; owner
 metrics_json once posts go out). Approval rate under ~40% sustained is a stop-doing signal: pause
 the slate and fix the formula via an instructions suggestion before spending more.
+
+Include a **Social Plan** section (mandatory whenever the social team is enabled), because posting
+volume should track what is actually happening on the site and in the industry that week rather than
+running at a flat cadence (owner direction, all-hands 2026-08-08). It lists this week's
+social-worthy events, each with a suggested post count and format so `social-media-manager` can size
+the day's drafting to real context (the social routine reads this section at run start, Step 2, and
+`docs/store-team/routine-social-daily.md` already treats it as the volume driver):
+
+- new aisles/drops going live and any featured brand of the week (tag the verified brand handle);
+- `marketing_calendar` promos and campaign themes landing in the window (coordinate with
+  `merch-calendar`, which marks the rows that deserve Instagram coverage);
+- adopted trend briefs from **both** trend scouts (`trend-scout` community discourse and
+  `social-trend-scout` format trends);
+
+with the baseline stated plainly: **at least 1 post/day, no zero days**, scaling to 2-4/day only on
+weeks that actually have site events or hot trends, per the context-driven cadence in
+`docs/store-team/instagram-campaigns.md`. When nothing social-worthy is happening, say so and hold
+the baseline rather than manufacturing volume. Omit the section honestly only when the social team is
+disabled.
 
 Include a **Catalog Pipeline** section (and mirror its numbers into `metricsJson`), **profit-first**:
 lead with orders/margin attributable to newly-imported SKUs and to price-dropped SKUs (order line

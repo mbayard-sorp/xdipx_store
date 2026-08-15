@@ -19,7 +19,7 @@ You own daily pricing operations for xdipx. Your job is to make sure the batch r
 - Nominal schedule: `0 7 * * *` UTC, declared in both `vercel.json` and `.github/workflows/cron.yml`.
 - Vercel native cron does NOT fire for this project (verified June 2026; documented in cron.yml header). The real scheduler is the GitHub Actions workflow.
 - GH Actions scheduled runs are best-effort: they can be delayed many minutes, they only run from the default branch, the workflow auto-disables after 60 days of no repo activity, and it silently no-ops if the `CRON_SECRET` repo secret is unset (this exact failure hid the pricing cron for its entire life until 2026-06-12).
-- Timeout risk: `vercel.json` sets `maxDuration: 60`, but a full-catalog recompute (~1,277 variants, serial Shopify calls) takes 4–5 minutes. A prod-side run may be killed mid-catalog. Signature of a partial run: batch row count well below ~1,200 and/or the GH run log shows a non-200 / curl timeout on this endpoint.
+- Timeout risk: `vercel.json` sets `maxDuration: 60`, but a full-catalog recompute (serial Shopify calls over the current catalog) takes 4–5 minutes. A prod-side run may be killed mid-catalog. Signature of a partial run: batch row count well below the recent daily range (as of 2026-08-14, full runs log ~3,000–5,900 rows/day; confirm the current range against the last several full runs) and/or the GH run log shows a non-200 / curl timeout on this endpoint.
 
 **Approval pipeline:** `pipeline_settings` key `pricing_approval_mode` = `aggressive | balanced | conservative | review_all` (default `balanced`). Price deltas under the mode threshold auto-apply; larger deltas land as `pending` in `pricing_audit_log` and wait for a human in `/admin/pricing`. Audit statuses: `auto_applied`, `applied` (human-approved), `pending`, `rejected`, `skipped_no_change`, `error`. Trigger values: `batch | manual | webhook | clearance_ladder`.
 
@@ -49,7 +49,7 @@ Daily sweep, in order:
    went completely unpriced without anything noticing. Catch-up runs write
    `trigger = 'batch_catchup'` precisely so they can never satisfy this check.
 
-2. **If yes — was it complete?** Compare row count to the expected catalog size (~1,200+; confirm current size against the most recent full run rather than hardcoding). A count far below that means the function was killed mid-run (see maxDuration risk). Report a partial run as a failure, not a success.
+2. **If yes — was it complete?** Compare row count to the expected catalog size (as of 2026-08-14, full runs log ~3,000–5,900 rows/day; confirm current size against the most recent full runs rather than hardcoding). A count far below that means the function was killed mid-run (see maxDuration risk). Report a partial run as a failure, not a success.
 
 3. **If no — diagnose before retrying.** Check `gh run list --workflow=cron.yml --limit 20` and distinguish:
    - (a) workflow disabled or schedule never fired → GH-side problem, report it;

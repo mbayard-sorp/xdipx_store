@@ -89,11 +89,12 @@ export async function generateAdBatch(args: GenerateAdBatchArgs): Promise<{ camp
   let costKeyUsed = 'fal/flux-kontext-dev'
   for (const format of AD_FORMATS) {
     const angle = AD_ANGLES[creatives.length % AD_ANGLES.length]!
-    const { buffers, costKey } = await falGenerate({
+    const { buffers, costKey, requestId } = await falGenerate({
       prompt: buildAdPrompt(angle),
       count: 1,
       imageSize: FORMAT_TO_IMAGE_SIZE[format],
       refImageUrl,
+      telemetry: { feature: 'ads-creative', caller: 'ad-creative', sku: args.productHandle },
     })
     costKeyUsed = costKey
     const buf = buffers[0]
@@ -116,18 +117,24 @@ export async function generateAdBatch(args: GenerateAdBatchArgs): Promise<{ camp
       policyCheck: args.policyCheck,
     }).returning({ id: adCreatives.id })
     if (creative) creatives.push({ id: creative.id, format, blobUrl: url })
+    // One spend row per image, each carrying its own fal request_id (one
+    // falGenerate call per format), so an owner can resolve a fal request id to
+    // the exact ad creative it produced. ref_id `<batchId>#<format>` names the
+    // file; batch-level attribution is unaffected (/admin/usage groups by
+    // batch_id, and the batch total is the sum of these per-image rows).
+    void logImageCost({
+      feature: 'ads-creative',
+      model: costKey,
+      count: 1,
+      caller: 'ad-creative.server',
+      sku: args.productHandle,
+      refId: `${batchId}#${format}`,
+      ...(requestId ? { requestId } : {}),
+    })
     images++
   }
 
   const costUsd = estimateImageCostUsd(costKeyUsed, images)
-  void logImageCost({
-    feature: 'ads-creative',
-    model: costKeyUsed,
-    count: images,
-    caller: 'ad-creative.server',
-    sku: args.productHandle,
-    refId: batchId,
-  })
   return { campaignId, creatives, costUsd }
 }
 

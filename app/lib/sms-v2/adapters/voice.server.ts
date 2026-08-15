@@ -33,7 +33,7 @@ import { buildEmmaContextWithCrossChannel } from '../cross-channel.server'
 import { sendSms } from '~/lib/twilio.server'
 import { normalizeForTTS } from '~/lib/tts-normalize'
 import { db } from '~/lib/db.server'
-import { eq, like } from 'drizzle-orm'
+import { and, desc, eq, like, not } from 'drizzle-orm'
 import { smsConversations, smsTurns } from '../../../../db/schema'
 import type { Stage, StageResponse } from '../types.server'
 
@@ -225,6 +225,57 @@ async function isFirstTurnOfCall(callSid: string): Promise<boolean> {
     .where(like(smsTurns.twilioMessageSid, `call:${callSid}:%`))
     .limit(1)
   return rows.length === 0
+}
+
+/**
+ * Channel of this phone's most recent turn that did NOT belong to `callSid`.
+ * Null when there is no prior turn at all.
+ *
+ * Ticket #3221. SESSION_FRESH_MS exists to protect a real cross-channel
+ * handoff: text Emma, then call a few minutes later and keep going. It does
+ * that by keeping state for anything inside the window. The cost is that it
+ * also keeps state across two *voice* calls, and a hangup-then-redial is
+ * always inside the window.
+ *
+ * On 2026-08-14 a caller hung up mid-upsell and called back 12 seconds later.
+ * The second call opened at stage UPSELL with the dead call's pitch handles
+ * intact and re-pitched the identical lube. He hung up again after 37s.
+ *
+ * A phone call is a discrete session that ends when the caller hangs up; an
+ * SMS thread is one long conversation. So the reset decision keys off what the
+ * prior activity actually WAS, not how long ago it was.
+ */
+export function shouldResetVoiceSession(input: {
+  isNewCall: boolean
+  priorChannel: string | null
+  staleMs: number
+  freshMs: number
+}): boolean {
+  if (!input.isNewCall) return false
+  // A prior VOICE turn means the last session was a call, and calls end when
+  // the caller hangs up. Reset regardless of how recent it was.
+  if (input.priorChannel === 'voice') return true
+  // Anything else (SMS, web, or no history) keeps the elapsed-time window so a
+  // text-then-call handoff still carries context.
+  return input.staleMs > input.freshMs
+}
+
+async function priorActivityChannel(phone: string, callSid: string): Promise<string | null> {
+  if (!phone) return null
+  const rows = await db
+    .select({ channel: smsTurns.channel })
+    .from(smsTurns)
+    .where(
+      callSid
+        ? and(
+            eq(smsTurns.phone, phone),
+            not(like(smsTurns.twilioMessageSid, `call:${callSid}:%`)),
+          )
+        : eq(smsTurns.phone, phone),
+    )
+    .orderBy(desc(smsTurns.createdAt))
+    .limit(1)
+  return rows[0]?.channel ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +648,20 @@ export async function processVoiceMessageV2(
   // left alone: those describe the person, not this shopping trip.
   try {
     const staleMs = voiceSessionStaleMs(priorLastActiveAt, Date.now())
-    if (staleMs > SESSION_FRESH_MS && (await isFirstTurnOfCall(callSid))) {
+    // Ticket #3221: a NEW call always starts a fresh shopping slate when the
+    // last thing this number did was another call, however recently. The
+    // elapsed-time window still governs a genuine SMS-then-call handoff.
+    const isNewCall = await isFirstTurnOfCall(callSid)
+    const priorChannel = isNewCall ? await priorActivityChannel(callerPhone, callSid) : null
+    const priorWasVoice = priorChannel === 'voice'
+    if (
+      shouldResetVoiceSession({
+        isNewCall,
+        priorChannel,
+        staleMs,
+        freshMs: SESSION_FRESH_MS,
+      })
+    ) {
       await applyStateWrites(callerPhone, {
         stage: 'RECONNECT',
         discoveredSlots: {},
@@ -609,7 +673,7 @@ export async function processVoiceMessageV2(
       })
       conversation = await getOrCreateConversation(callerPhone)
       console.info(
-        `[voice-adapter] new call → session state cleared callSid=${callSid} staleMs=${staleMs}`,
+        `[voice-adapter] new call → session state cleared callSid=${callSid} staleMs=${staleMs} priorWasVoice=${priorWasVoice}`,
       )
     }
   } catch (err) {

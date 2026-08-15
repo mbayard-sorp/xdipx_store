@@ -26,12 +26,27 @@ session (e.g. Monday afternoon).
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"list","status":"approved"}'
+  -d '{"op":"list","status":"approved","orderBy":"age","limit":200}'
 ```
+
+**Pass `orderBy:"age"` and `limit:200` — this is not cosmetic.** `listSuggestions`
+(`app/lib/team.server.ts`) defaults `limit` to 100 and orders `desc(created_at)`, so a bare
+`{"op":"list","status":"approved"}` returns only the **newest 100** approved rows. Once the approved
+backlog passes 100, the oldest rows fall off the bottom and become permanently invisible: a truncated
+row can be neither executed nor retired, because every disposal op in Step 1.5 operates on rows this
+run can see. `orderBy:"age"` is `asc(created_at)` (oldest first) and `200` is `SUGGESTION_LIST_MAX`.
+Apply the same `orderBy:"age"` and `limit:200` to the three per-kind list calls in Step 1.5.
 
 Yours: kind `instructions` | `agent-def` | `config` (doc-level only). Everything else is skipped
 silently (kind `code` waits for a human + rr7-engineer; `campaign`/`promo`/`program` are the
 owner's to execute).
+
+**Config rows that change a valve or pipeline_settings VALUE are a dead end, not yours.** "config
+(doc-level only)" means you may edit a config *document* on the allowlist; it does **not** mean you
+may change a `pipeline_settings` value. A config row asking to flip a valve or set a settings value
+is not doc-level, is not implementable by you, and is not retirable by you (`config` is absent from
+both `AGENT_RETIRE_KINDS` and `REKIND_FROM_KINDS`, so `retire` and `rekind` both 409). Post a
+`decision` event naming the exact valve/key and leave the row for the owner.
 
 ## Step 1.5 — Hygiene pass (before implementing anything)
 
@@ -54,8 +69,11 @@ on evidence.
 1. List the approved rows in the three kinds you may dispose of — `process`, `strategy`, `program`
    (`AGENT_RETIRE_KINDS` in `app/lib/team.server.ts`). One call per kind:
    ```bash
-   -d '{"op":"list","status":"approved","kind":"process"}'
+   -d '{"op":"list","status":"approved","kind":"process","orderBy":"age","limit":200}'
    ```
+   Carry `orderBy:"age"` and `limit:200` on all three per-kind calls for the same reason as Step 1:
+   a bare list returns only the newest 100 and silently hides the oldest rows, which are exactly the
+   stale ones this hygiene pass exists to drain.
    Only `process` can be **rekinded** (`REKIND_FROM_KINDS`). A `strategy` or `program` row can be
    retired but not re-filed, so for those the choice is retire or leave.
 2. **Re-file the misfiled.** A row asking for a playbook or agent-definition edit is `instructions`;
@@ -66,6 +84,34 @@ on evidence.
    Rekind is one-way (`process` → `instructions`|`code`) by design. You cannot rekind *into* a
    retirable kind, because that plus a retire would let you dismiss the instruction rows aimed at
    you.
+
+   **Guard: rekind to `code` only when a real repo code artifact would change.** A `process` → `code`
+   rekind sends the row to R-DEV's claim queue, and a row with no implementable code diff is a wasted
+   claim that R-DEV can only block, then the undated dedupe key reopens it and it loops (R-DEV run 259
+   claimed four such misroutes and blocked all four, three of them from one rekind batch). So rekind
+   to `code` **only** when you can name a concrete repo file or symbol, under a **non-protected**
+   path, that a code diff would actually touch. Do **not** rekind to `code` when the row's DONE WHEN is:
+   - a deploy/publish/generate action (Sanity Studio deploy, image or content generation, content
+     publish) — that is an ops/owner or content-lane action, not a code PR;
+   - a cloud-routine env, trigger, schedule, or `maxTurns` change — infra/owner, not a persisted repo
+     config;
+   - a routine-playbook or agent-definition edit — that is **your** lane, so keep it `instructions`.
+
+   Cheap proxy before any `process` → `code` rekind: `git grep` the row's named target for a writer or
+   definition under `app/`, `scripts/`, or `server/`. If the only artifact lives under a Sanity/Studio
+   deploy, `.claude/agents/`, `docs/**`, or trigger/pipeline config, it is not a code ticket — keep it
+   `instructions` (routine/agent-def wiring) or, for a deploy/env/valve action, leave it for the owner
+   with a `decision` event naming the action. (Approved #2490.)
+
+   **Never rekind homepage `sameness:*` freshness rows to `code`.** Rows with `dedupeKey`
+   `sameness:rails` / `sameness:tiles` / `sameness:couples` / `sameness:hero` have no deterministic
+   code artifact: the hero/rail/tiles/couples slates are authored exclusively by `homepage-orchestrator`
+   via Sanity per `docs/homepage-team/routine-daily-merchandise.md`, so there is no function for R-DEV
+   to patch (the only code levers are forbidden — weakening the freshness detector — or out of lane).
+   `#2080` was blocked three times this way and siblings `#1888`/`#1702` were dismissed by the owner.
+   Leave a `sameness:*` row as `process` for the homepage merchandising-adherence lane, or dispose of
+   it via `retire` with a reason (it is not a customer-facing defect); never route it to the code lane.
+   (Approved #2540, #2592.)
 3. **Retire what is genuinely finished or moot** — a run-observation that was only ever a note to
    nobody, a duplicate, or something superseded by shipped work:
    ```bash
@@ -76,6 +122,12 @@ on evidence.
    cheap, a wrongly-closed one is invisible.
 4. **Never retire** a row that names a live customer-facing defect (out-of-stock product in a live
    slot, a broken page, a money-path bug) even if it is old. Rekind those to `code` instead.
+5. **Never retire an OFFSITE PITCH row.** A `strategy` row whose text begins "OFFSITE PITCH" (or is a
+   brand-partner pitch) is the outreach send-arm's live input, not a stale note: per
+   `docs/store-team/outreach-pipeline.md` a pitch is executable only while an APPROVED row holding the
+   draft exists. Retiring it also frees the undated per-domain `dedupeKey`, so `offsite-scout` re-files
+   the identical pitch on its next Tuesday run. These rows are an owner-send queue and stay `approved`
+   until the pitch is sent or the prospect is closed.
 
 ## Step 2 — Implement (batched by target file, max 15 PRs per run)
 
@@ -203,3 +255,8 @@ PR URL (or skipped + why), conflicts flagged.
 below capacity visible in the summary itself instead of buried in a parenthetical. If PRs-opened is
 well under both the backlog and the cap, say why in the same line (queue drained, remaining rows
 non-actionable, conflicts, or run cut short).
+
+Add a second required line for the hygiene pass: **rekinds-made**, **retires-attempted**, and
+**retires-made broken out per kind** (`process` / `strategy` / `program`). "Leave it" is a silent
+default, so a run that disposes of nothing looks identical to a run that had nothing to dispose of
+unless the counts are stated. Report zeros explicitly.

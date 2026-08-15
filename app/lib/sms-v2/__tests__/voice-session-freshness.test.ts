@@ -15,7 +15,7 @@
  * any write, so it can be tested without a database.
  */
 import { describe, it, expect } from 'vitest'
-import { voiceSessionStaleMs } from '../adapters/voice.server'
+import { voiceSessionStaleMs, shouldResetVoiceSession } from '../adapters/voice.server'
 
 const NOW = new Date('2026-08-05T00:23:00Z').getTime()
 const TWO_HOURS = 2 * 60 * 60 * 1000
@@ -65,5 +65,85 @@ describe('voiceSessionStaleMs', () => {
   it('trips the window just past the freshness boundary', () => {
     const justOver = new Date(NOW - (TWO_HOURS + 1000))
     expect(voiceSessionStaleMs(justOver, NOW)).toBeGreaterThan(TWO_HOURS)
+  })
+})
+
+/**
+ * Ticket #3221.
+ *
+ * The elapsed-time window above protects a real cross-channel handoff: text
+ * Emma, then call a few minutes later and keep going. It does that by keeping
+ * state for anything inside the window, which also keeps state across two
+ * VOICE calls — and a hangup-then-redial is always inside the window.
+ *
+ * On 2026-08-14 call CA1a5c76c597e495c454daad50d470b5ad began 12 seconds after
+ * CA27c5008a90bd94db88bebaf429b727aa hung up. It opened at stage UPSELL with
+ * the dead call's currentPitchHandle and currentUpsellHandle intact, and
+ * re-pitched the identical lube already pitched on the previous call. Both
+ * calls even shared one conversation_id. The caller hung up again after 37s.
+ *
+ * A phone call is a discrete session that ends at hangup; an SMS thread is one
+ * long conversation. So the decision keys off what the prior activity WAS.
+ */
+describe('shouldResetVoiceSession (#3221)', () => {
+  const FRESH = TWO_HOURS
+
+  it('resets a call-back-immediately after a previous call', () => {
+    // The 12-second redial that produced the bug.
+    expect(
+      shouldResetVoiceSession({
+        isNewCall: true,
+        priorChannel: 'voice',
+        staleMs: 12_000,
+        freshMs: FRESH,
+      }),
+    ).toBe(true)
+  })
+
+  it('preserves an SMS-then-call handoff inside the window', () => {
+    // The behaviour SESSION_FRESH_MS exists to protect — must not regress.
+    expect(
+      shouldResetVoiceSession({
+        isNewCall: true,
+        priorChannel: 'sms',
+        staleMs: 5 * 60 * 1000,
+        freshMs: FRESH,
+      }),
+    ).toBe(false)
+  })
+
+  it('still resets a stale SMS handoff outside the window', () => {
+    expect(
+      shouldResetVoiceSession({
+        isNewCall: true,
+        priorChannel: 'sms',
+        staleMs: 23 * 60 * 60 * 1000,
+        freshMs: FRESH,
+      }),
+    ).toBe(true)
+  })
+
+  it('never resets mid-call', () => {
+    // Turn 2+ of a live call must keep the slate it is building, even though
+    // the prior turn was voice.
+    expect(
+      shouldResetVoiceSession({
+        isNewCall: false,
+        priorChannel: 'voice',
+        staleMs: 8_000,
+        freshMs: FRESH,
+      }),
+    ).toBe(false)
+  })
+
+  it('gives a brand-new caller a clean slate', () => {
+    expect(
+      shouldResetVoiceSession({
+        isNewCall: true,
+        priorChannel: null,
+        staleMs: Infinity,
+        freshMs: FRESH,
+      }),
+    ).toBe(true)
   })
 })

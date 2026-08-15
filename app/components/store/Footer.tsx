@@ -120,7 +120,7 @@ export function Footer({ socialLinks = [], footerColumns = [], brandLinks, categ
                     href={link.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label={`Follow us on ${link.platform} — @${link.handle}`}
+                    aria-label={`Follow us on ${link.platform}, @${link.handle}`}
                     className="text-white/40 hover:text-white transition-colors"
                   >
                     <SocialIcon platform={link.platform} />

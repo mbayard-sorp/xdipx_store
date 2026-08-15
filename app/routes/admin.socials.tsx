@@ -19,7 +19,11 @@ import { generateTweetCopy } from '~/lib/claude.server'
 import { getDealByShopifyId } from '~/lib/shopify.server'
 import { postManualTweet, deleteAndLogTweet, retryFailedPost, postApprovedDraft } from '~/lib/twitter.server'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
-import { getSocialFrequencies, reviewSocialPost, rescheduleSocialPost, getValve, VALVE_KEYS } from '~/lib/team.server'
+import { getSocialFrequencies, reviewSocialPost, rescheduleSocialPost, recordLivePostFeedback, getValve, VALVE_KEYS } from '~/lib/team.server'
+// Pure encoding, imported from the non-server module: the component below
+// renders a stored verdict, and a component that reaches into a .server module
+// pulls the whole thing into the client build.
+import { isLivePostVerdict, parseLiveFeedback } from '~/lib/live-post-feedback'
 import { setPipelineSetting } from '~/lib/pricing-webhook.server'
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES, socialFreqKey } from '~/lib/team-keys'
 import { categoryToLegacyString } from '~/types'
@@ -110,6 +114,35 @@ export async function action({ request }: ActionFunctionArgs) {
       reviewedBy: user?.name || user?.email || 'admin',
     })
     return ok ? { ok: true } : { ok: false, error: 'Post not found or already posted' }
+  }
+
+  // ── Live-post feedback (owner-only). The 'review' intent above deliberately
+  // refuses posted rows, because review is an editorial gate on drafts and not
+  // a way to relabel history. This is the other question, asked after the fact
+  // ("now that it is live, was it any good"), and it is what the owner's
+  // 2026-08-11 direction needs: he stops approving before posts ship and
+  // reviews them live instead. It writes feedback and the reviewer stamp only,
+  // leaving review_status as the record of the decision that let it ship.
+  if (intent === 'review-live') {
+    const postId = parseInt(form.get('postId') as string)
+    const verdict = form.get('verdict')
+    const note = ((form.get('note') as string | null) ?? '').trim()
+
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    if (!isLivePostVerdict(verdict)) return { ok: false, error: 'Bad verdict' }
+    // "Worked" is self-explanatory; the other two are only useful to the team
+    // if they say what was wrong, which is the whole point of the loop.
+    if (verdict !== 'worked' && !note) {
+      return { ok: false, error: 'Tell the team what was off, otherwise there is nothing to learn from' }
+    }
+
+    const user = await getAdminUser(request)
+    const ok = await recordLivePostFeedback(postId, {
+      verdict,
+      note: note || undefined,
+      reviewedBy: user?.name || user?.email || 'admin',
+    })
+    return ok ? { ok: true } : { ok: false, error: 'Post not found or not published yet' }
   }
 
   // ── Batch review (owner-only): approve/reject many selected drafts at once.
@@ -625,6 +658,88 @@ function ComposeTab({ data }: { data: ReturnType<typeof useLoaderData<typeof loa
   )
 }
 
+/**
+ * Feedback on a post that is already live (ticket #2738).
+ *
+ * The owner said on 2026-08-11 that he would stop approving posts before they
+ * ship and review them live instead. Until this existed there was nowhere for
+ * that to land: every write path to the review fields refused a posted row, so
+ * his stated loop was not buildable. Collapsed to a single "worked" click plus
+ * an expandable note, because a loop that costs him a form every time is the
+ * bottleneck he just asked to stop being.
+ */
+function LiveFeedbackForm({ postId, hasFeedback }: { postId: number; hasFeedback: boolean }) {
+  const fetcher = useFetcher<typeof action>()
+  const [open, setOpen] = useState(false)
+  const busy = fetcher.state !== 'idle'
+
+  if (hasFeedback && !open) {
+    return (
+      <button onClick={() => setOpen(true)} className="text-xs text-ink-4 hover:underline mt-1">
+        Change feedback
+      </button>
+    )
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* "Worked" needs no note, so it stays one click. */}
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="review-live" />
+          <input type="hidden" name="postId" value={postId} />
+          <input type="hidden" name="verdict" value="worked" />
+          <button
+            type="submit"
+            disabled={busy}
+            className="text-xs text-sage hover:underline disabled:opacity-50"
+          >
+            This worked
+          </button>
+        </fetcher.Form>
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="text-xs text-ink-4 hover:underline"
+        >
+          {open ? 'Cancel' : 'Something was off'}
+        </button>
+      </div>
+
+      {open && (
+        <fetcher.Form method="post" className="flex flex-col gap-1 md:flex-row md:items-center">
+          <input type="hidden" name="intent" value="review-live" />
+          <input type="hidden" name="postId" value={postId} />
+          <input
+            type="text"
+            name="note"
+            required
+            placeholder="What was off? The team reads this verbatim."
+            className="text-xs border border-line rounded-lg px-2 py-1 flex-1 min-w-0"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="submit" name="verdict" value="off" disabled={busy}
+              className="text-xs text-ink-3 hover:underline disabled:opacity-50"
+            >
+              Note it
+            </button>
+            <button
+              type="submit" name="verdict" value="pull" disabled={busy}
+              className="text-xs text-red-500 hover:underline disabled:opacity-50"
+            >
+              Pull this
+            </button>
+          </div>
+        </fetcher.Form>
+      )}
+
+      {fetcher.data && !fetcher.data.ok && (
+        <p className="text-xs text-red-500">{fetcher.data.error}</p>
+      )}
+    </div>
+  )
+}
+
 // ── History tab ──────────────────────────────────────────────────────────────
 
 function HistoryTab({ posts }: { posts: SocialPostRow[] }) {
@@ -672,10 +787,20 @@ function HistoryTab({ posts }: { posts: SocialPostRow[] }) {
                 <span className="capitalize">{post.createdBy}</span>
                 {post.reviewedBy && <span>reviewed by {post.reviewedBy}</span>}
               </div>
-              {post.feedback && (
-                <p className="text-xs text-ink-3 mt-1 italic" title={post.feedback}>
-                  Feedback: {post.feedback.length > 120 ? `${post.feedback.slice(0, 120)}…` : post.feedback}
-                </p>
+              {post.feedback && (() => {
+                // Live feedback carries a [live:<verdict>] tag; pre-publish
+                // feedback does not. Show the verdict rather than the raw tag.
+                const live = parseLiveFeedback(post.feedback)
+                const label = live ? `Live (${live.verdict})` : 'Feedback'
+                const body = live ? live.note : post.feedback
+                return (
+                  <p className="text-xs text-ink-3 mt-1 italic" title={post.feedback}>
+                    {label}{body ? `: ${body.length > 120 ? `${body.slice(0, 120)}…` : body}` : ''}
+                  </p>
+                )
+              })()}
+              {post.status === 'posted' && (
+                <LiveFeedbackForm postId={post.id} hasFeedback={!!parseLiveFeedback(post.feedback)} />
               )}
               {post.status === 'failed' && post.errorMessage && (
                 <p className="text-xs text-red-500 mt-1 truncate">{post.errorMessage}</p>

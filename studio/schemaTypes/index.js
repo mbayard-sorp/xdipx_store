@@ -58,6 +58,9 @@ import seoContentBrief    from '../schemas/seo/seoContentBrief.js'
 // content-writer turns the pending brief into the podcast-notes Notebook post.
 // Additive.
 import podcastReviewBrief from '../schemas/podcastReviewBrief.js'
+// Weekly research handoff: adult-business-researcher writes briefs,
+// social-media-manager turns a pending brief into a LinkedIn draft. Additive.
+import researchBrief      from '../schemas/researchBrief.js'
 // Weekly trend handoff: trend-scout proposes topics on Saturday, seo-curator
 // adopts/skips/expires them in Sunday planning. Additive.
 import trendTopicBrief    from '../schemas/trendTopicBrief.js'
@@ -67,6 +70,10 @@ import collectionPage     from '../schemas/collectionPage.js'
 import collectionsHub     from '../schemas/collectionsHub.js'
 // Phase 6d — Manufacturer specs data layer (additive; does not touch existing schemas).
 import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
+
+// Comparison ("X vs Y") pages — BOFU answer surface at /compare/{slug} with
+// ItemList + FAQ schema and a .md twin (additive; existing schemas untouched).
+import comparison         from '../schemas/comparison.js'
 
 // Discovery home page rebuild — variant toggle + Emma copy overrides (additive).
 import homeConfig          from '../schemas/homeConfig.js'
@@ -191,6 +198,8 @@ export const schemaTypes = [
   seoContentBrief,
   // Weekly podcast review brief (podcast-reviewer → content-writer handoff).
   podcastReviewBrief,
+  // Weekly research brief (adult-business-researcher → social-media-manager handoff).
+  researchBrief,
   // Weekly trend topic brief (trend-scout → seo-curator handoff).
   trendTopicBrief,
   // Editorial authors — voice profiles for Emma + future AI authors.
@@ -204,6 +213,8 @@ export const schemaTypes = [
   collectionsHub,
   // Phase 6d — Manufacturer specs per product (additive; does not touch existing schemas).
   mfgProductSpecs,
+  // Comparison ("X vs Y") pages — /compare/{slug} answer surface (additive).
+  comparison,
   // Block object types
   announcementBar,
   promoBanner,

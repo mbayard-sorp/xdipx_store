@@ -85,9 +85,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'The Notebook | xdipx' }]
   const base = data.selectedCategory
-    ? `${data.selectedCategory.charAt(0).toUpperCase() + data.selectedCategory.slice(1)} — The Notebook`
+    ? `${data.selectedCategory.charAt(0).toUpperCase() + data.selectedCategory.slice(1)} | The Notebook`
     : 'The Notebook'
-  const pageSuffix = data.page > 1 ? ` — Page ${data.page}` : ''
+  const pageSuffix = data.page > 1 ? ` | Page ${data.page}` : ''
   const title = `${base}${pageSuffix} | xdipx`
   const description = data.blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma dug up so you don't have to."
 

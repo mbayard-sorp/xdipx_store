@@ -35,9 +35,9 @@ export async function loader({ params }: LoaderFunctionArgs) {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
-  if (!loaderData) return [{ title: 'Series not found — xdipx' }]
+  if (!loaderData) return [{ title: 'Series not found | xdipx' }]
   const { series, canonical } = loaderData
-  const title = `${series.title} — The Notebook | xdipx`
+  const title = `${series.title} | The Notebook | xdipx`
   const description = series.description ?? `${series.title}, a Notebook series from xdipx.`
 
   return [

@@ -248,7 +248,34 @@ describe('computeTicketLoopHealth conflicted-PR scan', () => {
 
 describe('ROUTINE_CADENCES', () => {
   it('carries every expected lane with a complete shape', () => {
-    expect(ROUTINE_CADENCES.length).toBe(16)
+    // Identify each lane by team|runType and assert the expected SET, not a
+    // hand-maintained `.length` integer (ticket #3033). Adding a routine then
+    // appends one line to this list instead of bumping a shared count literal,
+    // so sibling per-routine additions from the coverage-audit generator no
+    // longer collide on this one line and can be authored as independent PRs.
+    const keys = ROUTINE_CADENCES.map(c => `${c.team}|${c.runType}`)
+    // No two lanes share an identity (guards the silent-drop-one merge hazard).
+    expect(new Set(keys).size).toBe(keys.length)
+    expect([...keys].sort()).toEqual([
+      'ads|ads',
+      'email|email',
+      'content|content',
+      'content|manual',
+      'content|seo-curation',
+      'content|trend-scout',
+      'homepage|merchandise',
+      'null|pricing',
+      'product|product',
+      'social|research',
+      'social|social',
+      'social|social-trend-scout',
+      'strategy|apply',
+      'strategy|cost-review',
+      'strategy|dev',
+      'strategy|offsite',
+      'strategy|qa',
+      'strategy|strategy',
+    ].sort())
     for (const c of ROUTINE_CADENCES) {
       expect(c.routine.length).toBeGreaterThan(0)
       expect(c.runType.length).toBeGreaterThan(0)
@@ -267,6 +294,20 @@ describe('ROUTINE_CADENCES', () => {
     expect(scout?.team).toBe('social')
     expect(scout?.kind).toBe('weekly')
     expect(scout?.maxGapHours).toBe(194)
+    // Ads Proposals (manifest row 4, Tue 13:00) has a liveness watch; team and
+    // runType match the POST /api/team/run call in routine-ads-weekly.md.
+    const ads = ROUTINE_CADENCES.find(c => c.runType === 'ads')
+    expect(ads).toBeDefined()
+    expect(ads?.team).toBe('ads')
+    expect(ads?.kind).toBe('weekly')
+    expect(ads?.maxGapHours).toBe(194)
+    // Email Briefs (manifest row 5, Tue 15:00) has a liveness watch; team and
+    // runType match the POST /api/team/run call in routine-email-weekly.md.
+    const email = ROUTINE_CADENCES.find(c => c.runType === 'email')
+    expect(email).toBeDefined()
+    expect(email?.team).toBe('email')
+    expect(email?.kind).toBe('weekly')
+    expect(email?.maxGapHours).toBe(194)
   })
 
   it('sizes each gap against the lane\'s real cron, not its nominal kind', () => {

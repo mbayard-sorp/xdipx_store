@@ -196,23 +196,85 @@ rejected/flagged terms are the avoid list:
 Use `embedHints` only after verifying the handles are in stock; use `internalLinks` where natural.
 
 **Fresh-language pre-check (mandatory, before Step 5):** `emma-empathy-reviewer` has no Sanity
-access and cannot see cross-post reuse, so this check runs here, not at the gate.
+access and cannot see cross-post reuse, so this check runs here, not at the gate. Run the
+deterministic checker and drive it to exit 0 before submitting to the voice gate:
 
-1. GROQ prior posts in the same topic cluster (same `category`, or the brief's keyword cluster
-   when the topic came from a brief):
+```bash
+npx tsx scripts/check-fresh-language.ts --category <categoryId> --draft <draft.json>
+```
+
+Like `check-hero-embed-match.ts`, and unlike the two prose checkers below, it reads Sanity live: it
+GROQs the last 10 published posts in the same cluster (the query below) and reports any word-6-gram
+the draft shares with them, weighting headings. Six words is the right grain for this corpus:
+headings were the surface a tic hardened on ("Where does this need a caveat?" shipped verbatim across
+two published podcast-notes posts), a whole-post similarity score misses that because the body prose
+did not overlap, and the 6-gram threshold ignores the short structural headings ("Sources", "Real
+talk") that repeat by format on purpose. Added after that pair of live posts (ticket #3009); the
+manual diff it replaces had let the tic through. The limit is zero shared 6-grams; rewrite each
+recycled phrase, do not loosen the check.
 
 ```groq
 *[_type == "blogPost" && category._ref == $categoryId && slug.current != $slug]
   | order(publishedAt desc)[0...10]{title, "slug": slug.current, body}
 ```
 
-2. Diff the draft sentence-level against those posts' `body` text.
-3. Rewrite any recycled sentence or phrase BEFORE submitting the draft to the voice gate in Step 5.
+**Aphorism-as-closer pre-flight (mandatory, before Step 5):** run the merged deterministic checker on
+the draft JSON and trim until it exits 0, before submitting to the voice gate:
 
-**Aphorism-as-closer pre-flight (mandatory, before Step 5):** scan every sentence in the draft for
-the shape [demonstrative or abstract noun phrase] + [is/are] + [the/what] + [defining clause].
-List the hits with their section, then cut back to the caps (3 per post, 1 per section, never 2 in
-a paragraph) before submitting to the voice gate.
+```bash
+npx tsx scripts/check-aphorism-closers.ts <draft.json>
+```
+
+The checker implements the charter's binding three-part test: a hit needs an **anaphoric demonstrative
+subject** (`this` / `that`) AND a copula AND a defining clause that re-describes what the previous
+sentence already delivered — all three. (The earlier wording here, "[demonstrative **or abstract noun
+phrase**]", was the pre-#925 wide reading the charter has since narrowed to
+anaphoric-demonstrative-subject only; the charter wins and the script follows the charter, so a plain
+abstract-noun-plus-copula sentence stating an idea for the first time is never a hit.) The caps are
+unchanged: 3 per post, 1 per section, never 2 in a paragraph. Trim by de-constructing the flagged
+shape, not by swapping synonyms inside it.
+
+**Unsourced-frequency pre-flight (mandatory, before Step 5):** run the deterministic checker on the
+draft JSON and drive it to exit 0 before submitting to the voice gate:
+
+```bash
+npx tsx scripts/check-unsourced-frequency.ts <draft.json>
+```
+
+The checker flags a frequency or population quantifier (`usually`, `most`, `almost every`, `people
+keep`, `tends to`) bound to a subject the writer has no data on: customers, readers, or other
+publishers (`most people assume`, `almost every article`, `people keep buying`, `someone writes in`).
+It is subject-aware by design, so it does NOT flag the same quantifier on a product category (`as a
+category, small bullets run quietest`; `usually costs you the sensation`) or on an attributed research
+finding (`sex educators describe`, `reviewers draw the distinction`), and it never flags second-person
+address (`that fear will keep you buying`). The limit is zero: any candidate trips it. Resolve each by
+sourcing the claim, attributing it, or removing it. Do NOT soften it with a hedge (`can`, `often`,
+`it's easy to`): those are charter-banned in this register, so hedging trades a claim defect for a
+voice defect. Like the aphorism checker, it flags candidates and leaves the final judgment to the voice
+gate. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
+place (suggestions #1674, #2618).
+
+**Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
+`we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
+opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
+is a first-submit voice-gate failure the writer otherwise discovers only at the gate, spending the one
+allowed rewrite cycle. Shape each seam with a concrete subject and avoid the "This is / That is
+[defining clause]" shape, so a seam does not itself create an aphorism-as-closer.
+
+**Hero pre-flight (mandatory, before Step 5):** the hero image and its alt are reviewed by no gate,
+and two hero guardrails shipped wired to nothing until #2750. After the hero is attached (Step 4) and
+`gen-notebook-art.ts` has written `imagePrompt`, run the slug-scoped checker and drive it to exit 0:
+
+```bash
+npx tsx scripts/check-hero-embed-match.ts --slug <slug>
+```
+
+Unlike the prose checkers above it reads Sanity live, because it needs the post's structured hero
+fields and the live catalog. It flags three things: an empty `imagePrompt` (the composed prompt was
+not captured on upload, so a bad hero can never be retro'd), a hero that names a catalog product the
+post does not embed, and the inverse the older audit is blind to, a post that carries embeds while its
+hero names no catalog product at all. Resolve each by regenerating or re-uploading the hero with an
+explicit `--prompt` that depicts a product the article is actually about, not by loosening the check.
 
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
@@ -271,17 +333,62 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    - First-person solidarity-voice seams must use a concrete subject ("I start everyone from...",
      "I would rather you owned...") and must avoid the "This is / That is [defining clause]"
      shape, which itself creates an aphorism-as-closer.
+   - **De-construct the pattern — standing rule for every flagged string, not only the post-scoped
+     cap.** When a gate flags a string for its SHAPE (an aphorism-as-closer, a fabricated-anecdote
+     opener, a recap-tag), resolving the flag means changing the shape, not swapping words inside it —
+     for *every* flag, not just the whole-document-cap carve-out. Pre-resubmit self-check: for each
+     rewritten string, state which shape the gate objected to and how the replacement differs
+     **structurally**, not just lexically. (Run 225 bounced because a fabricated-anecdote opener was
+     reworded into a first-person-endorsement opener of the same class the same rewrite had just
+     stripped elsewhere; the shape survived the synonyms.)
+   - **Checker-passed sections are settled.** A section the merged aphorism checker
+     (`scripts/check-aphorism-closers.ts`) passes is settled for the aphorism-as-closer **count** for
+     the remainder of the post lifecycle and is not re-litigated in later cycles. The checker is the
+     single source of truth for the count; this is what makes the rewrite cycles converge instead of
+     the reviewer recounting by judgement and self-contradicting across passes.
+   - **The voice gate never supplies replacement wording for a claim-carrying string.** For any string
+     carrying a factual, comparative, frequency, or causal claim, the voice reviewer names the defect
+     and the constraints but does **not** hand over literal replacement prose: it does not web-verify
+     and cannot judge claim strength, so gate-supplied wording can inject an overclaim that carries a
+     gate verdict's authority (twice in one day, runs 201/204 — a supply-side claim drifted to a
+     population claim, and a thesis drifted to majority causation). The writer drafts the replacement
+     and the accuracy gate rules on it. Any claim-carrying string rewritten for a **style** reason
+     **always** re-runs the accuracy gate, regardless of the selective re-run carve-out below.
    - **Selective re-run carve-out:** if one gate PASSed clean and the shared rewrite provably
      touches no string that gate verified, re-run only the gate that returned REVISE and carry the
      clean gate's verdict and citations forward unchanged. The mandatory dual re-run above still
      applies whenever the rewrite touches any accuracy-verified or frozen safety string.
 4. **BLOCK** (from either gate, either cycle) → the post stays `status:'draft'`, and you file a
-   suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons.
+   suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons. The blocked draft
+   still occupies its slug: the next run that picks this brief must **resume that draft**, not treat
+   the slug as taken and skip to another topic, or the finished work is silently orphaned. (The Step 3
+   slug pre-check currently matches the draft under the raw perspective; teaching it to read the
+   published perspective is a separate code fix.)
 5. **Sources insertion (mechanical, after the final PASS).** The accuracy gate returns 0-2
-   citations it actually resolved. Append them as a `## Sources` section (source name + link,
-   no new prose claims). This insertion is exempt from re-gating. If the gate reported
-   `[web: degraded]`, follow its strip/soften instructions and ship without a Sources section;
-   zero citations is a valid outcome.
+   citations it actually resolved. **Verify every returned URL through `/api/team/url-liveness`
+   before appending it** — the endpoint enforces a fixed host allowlist (`CITATION_HOST_ALLOWLIST`
+   in `app/lib/citation-liveness.server.ts`: `medicalnewstoday.com`, `plannedparenthood.org`,
+   `clevelandclinic.org`, `who.int`, `ncbi.nlm.nih.gov`, `nih.gov`, `cdc.gov`, `mayoclinic.org`,
+   `healthline.com`, `medlineplus.gov`, `kinseyinstitute.org`, `ashasexualhealth.org`, `issm.info`,
+   `nhs.uk`), so a URL on any other host, or a legacy domain (e.g. `kinsey.indiana.edu` instead of
+   the canonical `kinseyinstitute.org`), fails the check. `sex-wellness-reviewer` is told this
+   allowlist up front and prefers an allowlisted, canonical host when one carries the same source;
+   drop any returned URL that still does not pass liveness rather than shipping it. Append the
+   verified ones as a `## Sources` section (source name + link, no new prose claims). This insertion
+   is exempt from re-gating. If the gate reported `[web: degraded]`, follow its strip/soften
+   instructions and ship without a Sources section; zero citations is a valid outcome, never padded.
+
+   **`live:false` is not always "drop it" — read the `reason`.** The endpoint distinguishes a host
+   that *refused* us from a page that is *gone* (ticket #3196). `reason:'blocked'` means an
+   allowlisted host returned 401/403/429, i.e. bot/WAF protection rejecting the checker's fixed
+   user-agent, not a bad path — `mayoclinic.org` does this even at its bare origin. In that case the
+   page is very likely live; **keep the citation only when `sex-wellness-reviewer` has independently
+   confirmed that page's content supports the claim**, and drop it otherwise. Any other `live:false`
+   (`reason:'dead'` for a genuine 404/410, `host-not-allowlisted`, `redirect-off-allowlist`,
+   `too-many-redirects`, `timeout`, `fetch-failed`) is a real miss: drop the URL, never ship it. Do
+   not blanket-keep a `blocked` URL — a dead or paywalled page shipping as a citation is worse than
+   losing one. Same-host canonicalizing redirects (e.g. `https://www.cdc.gov/`) are now followed
+   automatically and come back `live:true`, so they no longer need a hand-picked canonical URL.
 
 Two `step` events: `phase:'voice-gate'` and `phase:'accuracy-gate'`, each with the verdict and
 cycle count (the accuracy event also records citation count and `web: ok|degraded`).
@@ -351,6 +458,43 @@ for its text, so reusing that key here is the natural guess and it returns
 
 Never close a row you did not execute: a false `applied` looks handled and is worse than an aging
 row.
+
+## Step 6c: Post-publish embed-stock sweep (mandatory, every run)
+
+Step 4 stock-verifies an embed exactly once, before it is embedded. Nothing revisits it after
+publish, so a post sits live pointing readers at whatever the product later became: out of stock,
+de-listed, or 404'd. inventory-sentinel watches hero/rail/featured slots and never looks at blog
+embeds. This is that missing re-check, and it runs here so it cannot rot (ticket #2753).
+
+Run the deterministic sweep over every published post's embeds:
+
+```bash
+npx tsx scripts/audit-blog-embed-stock.ts --json
+```
+
+It resolves each distinct embed handle's buyability from Shopify Admin (`status`, `totalInventory`)
+and a storefront PDP probe, then prints the posts whose embeds are dead, worst first. Use the real
+signals it uses and never Admin `publishedAt` — on this headless catalog `publishedAt` is null for
+essentially the whole catalog and would flag every handle. A handle is dead when it is `gone` (no
+Admin product, status `ARCHIVED`, or PDP 404), `inactive` (Admin status set and not `ACTIVE`), or
+`out-of-stock` (`totalInventory <= 0`).
+
+For each post the sweep reports, file **one deduped suggestion** at the content team so the
+remediation is tracked and the row refreshes every run instead of aging:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"create","team":"content","targetTeam":"content","category":"bug","kind":"process",
+       "priority":<2 if hasNoBuyablePath else 3>,"dedupeKey":"dead-embed:<slug>",
+       "suggestion":"Published post /notebook/<slug> has dead embeds: <handle> (<reason>) ... Swap each for an in-stock, buyable product (charter-voice pairing copy) or remove it. <slug> has NO buyable path and is remediated first.","cxRisk":"low"}'
+```
+
+Then remediate the highest-priority post this run can reach through Step 6b's execute-what-you-can
+rule: a `kind:process` row is closeable by this routine, so swap the dead embed for an in-stock
+product with fresh charter-voice pairing copy (or remove the embed when no honest substitute fits),
+re-run the Step 6c sweep on that post to confirm it is clean, and close the row `applied`. Posts with
+no buyable path come first. Do not close a row you did not actually remediate.
 
 ## Step 7: Retro + finish
 

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   HOMEPAGE_PRIORITY, NAV_PRIORITY, NEW_ARRIVALS_PRIORITY,
   PRODUCT_CHANGEFREQ, PRODUCT_PRIORITY,
-  RECRAWL_EPOCH, SITEMAP_CACHE_CONTROL, applyHealth, chunkSegments, floorLastmod,
+  CANONICAL_FIX_EPOCH,
+  RECRAWL_EPOCH, SITEMAP_CACHE_CONTROL, applyHealth, chunkSegments, epochForCoverageState,
+  floorLastmod,
   isTrustworthyDeadVerdict, keepIndexable, newestLastmod, renderSitemapIndex, renderUrlset,
   type SitemapUrl, type UrlHealth,
 } from '~/lib/sitemap-xml'
@@ -11,8 +13,14 @@ const url = (loc: string, lastmod?: string): SitemapUrl => ({
   loc, lastmod, changefreq: 'daily', priority: '0.9',
 })
 
-const health = (dead: string[] = [], stale: string[] = []): UrlHealth => ({
-  dead: new Set(dead), stale: new Set(stale),
+/** `stale` entries are either a bare URL (floored at RECRAWL_EPOCH) or a
+ *  [url, epoch] pair, mirroring what getUrlHealth builds per coverage state. */
+const health = (
+  dead: string[] = [],
+  stale: Array<string | [string, string]> = [],
+): UrlHealth => ({
+  dead: new Set(dead),
+  stale: new Map(stale.map(s => (typeof s === 'string' ? [s, RECRAWL_EPOCH] : s))),
 })
 
 describe('floorLastmod', () => {
@@ -125,6 +133,45 @@ describe('applyHealth', () => {
   it('leaves healthy URLs untouched', () => {
     const input = [url('https://xdipx.com/products/fine', '2026-05-16')]
     expect(applyHealth(input, health())).toEqual(input)
+  })
+
+  // The canonical-loss bug was fixed six weeks after the noindex bug. Flooring
+  // its URLs at the older epoch advertises a lastmod earlier than their own
+  // repair, which is why 168 of them still carried a June/July date on
+  // 2026-08-09 with no recrawl signal to show for it.
+  it('floors a canonical-loss URL at its own fix date, not the noindex one', () => {
+    const out = applyHealth(
+      [url('https://xdipx.com/products/dup', '2026-06-13')],
+      health([], [['https://xdipx.com/products/dup', CANONICAL_FIX_EPOCH]]),
+    )
+    expect(out[0]!.lastmod).toBe(CANONICAL_FIX_EPOCH)
+  })
+
+  it('applies a different floor per URL in one pass', () => {
+    const out = applyHealth(
+      [url('https://xdipx.com/a', '2026-05-16'), url('https://xdipx.com/b', '2026-05-16')],
+      health([], ['https://xdipx.com/a', ['https://xdipx.com/b', CANONICAL_FIX_EPOCH]]),
+    )
+    expect(out.map(u => u.lastmod)).toEqual([RECRAWL_EPOCH, CANONICAL_FIX_EPOCH])
+  })
+})
+
+describe('epochForCoverageState', () => {
+  it('gives canonical-loss verdicts the canonical fix date', () => {
+    expect(epochForCoverageState('Duplicate without user-selected canonical')).toBe(CANONICAL_FIX_EPOCH)
+    expect(epochForCoverageState('Duplicate, Google chose different canonical than user')).toBe(CANONICAL_FIX_EPOCH)
+  })
+
+  it('gives the noindex verdict the May-outage fix date', () => {
+    expect(epochForCoverageState('Excluded by ‘noindex’ tag')).toBe(RECRAWL_EPOCH)
+  })
+
+  it('falls back to the recrawl epoch for anything unmapped', () => {
+    expect(epochForCoverageState('Soft 404')).toBe(RECRAWL_EPOCH)
+  })
+
+  it('never floors a URL at a date before its defect was fixed', () => {
+    expect(CANONICAL_FIX_EPOCH > RECRAWL_EPOCH).toBe(true)
   })
 })
 

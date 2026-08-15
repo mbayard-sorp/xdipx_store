@@ -20,6 +20,18 @@ function requireKey(): string {
 }
 
 /**
+ * fal returns the request id for a sync call in the `x-fal-request-id` response
+ * header (the body carries only the model output). Read defensively: a
+ * best-effort telemetry read must never throw into a real generation, and test
+ * mocks may hand back a Response-like object without a real Headers instance.
+ */
+export function readFalRequestId(res: { headers?: { get?: (name: string) => string | null } }): string | undefined {
+  const get = res.headers?.get
+  if (typeof get !== 'function') return undefined
+  return get.call(res.headers, 'x-fal-request-id') ?? undefined
+}
+
+/**
  * Run BiRefNet v2 against a publicly-fetchable image URL. Returns the URL of the
  * transparent PNG hosted by fal.ai (valid for ~24h; download promptly).
  */
@@ -68,6 +80,7 @@ const FAL_COST_KEY: Record<string, string> = {
   'fal-ai/flux-pro/kontext':   'fal/flux-kontext',
   'fal-ai/flux-kontext/dev':   'fal/flux-kontext-dev',
   'fal-ai/nano-banana':        'fal/nano-banana',
+  'fal-ai/flux-2/lora/edit':   'fal/flux-2-edit',
 }
 
 /**
@@ -78,6 +91,23 @@ const FAL_COST_KEY: Record<string, string> = {
  * enable_safety_checker:false like the other open FLUX endpoints.
  */
 const FAL_KONTEXT_MODEL = 'fal-ai/flux-kontext/dev'
+
+/**
+ * Multi-reference edit model, used whenever two or more reference images must
+ * appear faithfully in one scene (e.g. a vibrator plus its lube bottle in a
+ * single drawer shot, charter v5.3 License C). Kontext dev takes only one
+ * image_url, so it cannot composite multiple real products; this endpoint takes
+ * an image_urls array.
+ *
+ * NOT `fal-ai/nano-banana/edit`, the other multi-ref option: it is Gemini Flash
+ * Image behind a fal wrapper and carries Google's non-configurable IMAGE_SAFETY
+ * output filter, which returned 422 content_policy for an ordinary catalog
+ * vibrator at every safety_tolerance tested, on both raw packshots and clean
+ * plates (bake-off 2026-08-10, docs/media-model-routing.md). It cannot render a
+ * large part of the catalog. composeSceneFrame() in fal-video.server.ts moved
+ * off it to this same endpoint for that reason; keep the two in step.
+ */
+const FAL_MULTI_REF_MODEL = 'fal-ai/flux-2/lora/edit'
 
 /** fal image_size enum → Kontext resolution_mode/aspect (no image_size param). */
 const KONTEXT_ASPECT: Record<string, string> = {
@@ -145,16 +175,68 @@ export interface FalGenerateOpts {
    * in the generated scene instead of a model-invented lookalike.
    */
   refImageUrl?: string
+  /**
+   * Two or more publicly fetchable reference images to composite faithfully
+   * into one scene. When this holds more than one URL, generation routes to
+   * FLUX.2 edit (image_urls) instead of single-ref Kontext. A single URL
+   * here (or `refImageUrl`) keeps the unchanged Kontext single-ref path; when
+   * both are set, `refImageUrls` wins if it is non-empty.
+   */
+  refImageUrls?: string[]
+  /**
+   * Attribution for block telemetry. Optional: a missing label still records
+   * the block, just without an origin.
+   */
+  telemetry?: { feature?: string; caller?: string; sku?: string; productId?: string }
 }
 
 export interface FalGenerateResult {
   buffers: Buffer[]
   /** Cost key for model-pricing (e.g. 'fal/flux-dev'). */
   costKey: string
+  /**
+   * fal's request id for this generation (the `x-fal-request-id` response
+   * header on the sync endpoint), for tracing a generated image back to its
+   * spend row. undefined if the header was absent. NOTE: a `num_images > 1`
+   * call returns N images under this ONE request id, so it identifies the
+   * batch, not an individual image.
+   */
+  requestId?: string
 }
 
 export function falConfigured(): boolean {
   return !!process.env['FAL_KEY']?.trim()
+}
+
+/**
+ * Classify and record a non-OK fal response. BEST-EFFORT and fully swallowed:
+ * telemetry must never replace the caller's real error, so a logging failure
+ * here is invisible and the original throw still happens.
+ */
+export async function recordFalBlock(
+  model: string,
+  status: number,
+  body: string,
+  count: number,
+  telemetry?: { feature?: string; caller?: string; sku?: string; productId?: string },
+): Promise<void> {
+  try {
+    const { classifyProviderResponse } = await import('~/lib/media-block')
+    const { logGenerationBlock } = await import('~/lib/token-log.server')
+    const { reason, surface } = classifyProviderResponse(status, body)
+    await logGenerationBlock({
+      model,
+      reason,
+      surface,
+      count,
+      ...(telemetry?.caller ? { caller: telemetry.caller } : {}),
+      ...(telemetry?.feature ? { ofFeature: telemetry.feature } : {}),
+      ...(telemetry?.sku ? { sku: telemetry.sku } : {}),
+      ...(telemetry?.productId ? { productId: telemetry.productId } : {}),
+    })
+  } catch {
+    // Never mask the caller's error with a telemetry failure.
+  }
 }
 
 /**
@@ -164,28 +246,58 @@ export function falConfigured(): boolean {
  */
 export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateResult> {
   const key = requireKey()
-  const model = opts.refImageUrl
-    ? (opts.model?.trim() || FAL_KONTEXT_MODEL)
-    : (opts.model?.trim() || DEFAULT_FAL_IMAGE_MODEL)
   const count = Math.min(Math.max(1, opts.count ?? 1), 4)
   const image_size = opts.imageSize ?? 'landscape_16_9'
 
-  // Kontext dev takes image_url + resolution_mode; the text-to-image endpoints
-  // take image_size. Same sync endpoint pattern otherwise.
-  const body = opts.refImageUrl
+  // Normalise the reference images. `refImageUrls` wins when non-empty, else a
+  // single `refImageUrl` (kept for backward compatibility). More than one ref
+  // means a multi-product composite; exactly one keeps the unchanged Kontext
+  // single-ref path; none is plain text-to-image.
+  const refs = opts.refImageUrls?.length
+    ? opts.refImageUrls
+    : (opts.refImageUrl ? [opts.refImageUrl] : [])
+  const multiRef = refs.length > 1
+  const singleRef = refs.length === 1
+
+  const model = multiRef
+    ? (opts.model?.trim() || FAL_MULTI_REF_MODEL)
+    : singleRef
+      ? (opts.model?.trim() || FAL_KONTEXT_MODEL)
+      : (opts.model?.trim() || DEFAULT_FAL_IMAGE_MODEL)
+
+  // FLUX.2 edit takes an image_urls array + image_size, same shape as the
+  // text-to-image endpoints and the same call composeSceneFrame() makes. Kontext
+  // dev is the odd one out: image_url + resolution_mode, no image_size param.
+  // Same sync endpoint pattern otherwise.
+  // Pin JPEG on all three branches. Instagram Graph API image containers require
+  // JPEG; leaving output_format to the provider default lets a silent PNG reach
+  // an image_url the IG container step then rejects (composeSceneFrame() in
+  // fal-video.server.ts already pins it for the same reason).
+  const body = multiRef
     ? {
         prompt:                opts.prompt,
-        image_url:             opts.refImageUrl,
-        num_images:            count,
-        resolution_mode:       kontextResolutionMode(image_size),
-        enable_safety_checker: false,
-      }
-    : {
-        prompt:                opts.prompt,
+        image_urls:            refs,
         num_images:            count,
         image_size,
+        output_format:         'jpeg',
         enable_safety_checker: false,
       }
+    : singleRef
+      ? {
+          prompt:                opts.prompt,
+          image_url:             refs[0],
+          num_images:            count,
+          resolution_mode:       kontextResolutionMode(image_size),
+          output_format:         'jpeg',
+          enable_safety_checker: false,
+        }
+      : {
+          prompt:                opts.prompt,
+          num_images:            count,
+          image_size,
+          output_format:         'jpeg',
+          enable_safety_checker: false,
+        }
 
   const res = await fetch(`${FAL_SYNC_ENDPOINT}/${model}`, {
     method: 'POST',
@@ -198,9 +310,14 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    // Recorded here rather than in each caller so every path through fal
+    // (homepage stills, ad creative, scripts) is counted by one hook, and at
+    // the only point where the status code and raw body are both available.
+    await recordFalBlock(model, res.status, text, count, opts.telemetry)
     throw new Error(`fal.ai ${model} error: ${res.status} ${text.slice(0, 400)}`)
   }
 
+  const requestId = readFalRequestId(res)
   const json = await res.json() as { images?: { url?: string }[] }
   const urls = (json.images ?? []).map(i => i.url).filter((u): u is string => !!u)
   if (!urls.length) throw new Error(`fal.ai ${model} returned no images`)
@@ -213,5 +330,5 @@ export async function falGenerate(opts: FalGenerateOpts): Promise<FalGenerateRes
     }),
   )
 
-  return { buffers, costKey: FAL_COST_KEY[model] ?? 'fal/flux-dev' }
+  return { buffers, costKey: FAL_COST_KEY[model] ?? 'fal/flux-dev', ...(requestId ? { requestId } : {}) }
 }

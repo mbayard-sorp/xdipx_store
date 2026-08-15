@@ -98,6 +98,14 @@ const HISTORY_LIMIT = 12
 const MAX_TOKENS_SMS_VOICE = 480
 const MAX_TOKENS_WEB = 700
 
+/**
+ * The one recovery line used whenever a turn cannot be trusted to speak: the
+ * Sonnet loop failing (safeFallback) or the ungrounded-price guard catching a
+ * fabricated pitch (#3216). Kept as a single already-shipped literal so there is
+ * one recovery voice and no new customer-facing copy is introduced.
+ */
+const SESSION_RECOVERY_PROSE = "I lost the thread for a sec. What were you hoping to find?"
+
 // ─── Core conversational rules ───────────────────────────────────────────────
 
 /**
@@ -507,6 +515,37 @@ function applyFabricationGuard(text: string, realHandles: Set<string>): Fabricat
   return { text: out, caught }
 }
 
+// ─── Ungrounded-price guard (ticket #3216) ───────────────────────────────────
+
+/** A spoken dollar amount, e.g. "$137.99", "$198", "$1,299.50". */
+const SPOKEN_PRICE_RE = /\$\s?\d[\d,]*(?:\.\d{1,2})?/
+
+/**
+ * A voice/SMS turn may only quote a product price that came from a tool result
+ * THIS turn. The only legitimate source of a price is a searchProducts /
+ * getProductDetails card; the Sonnet loop stashes every such card in
+ * `cardsByToolUseId`. When the loop surfaced no cards at all, any `$`-price in
+ * the reply was produced from the model's own context, not a logged tool
+ * result — a fabrication, and the product name attached to it is fabricated by
+ * the same token.
+ *
+ * Verified on ticket #3216: turn 1551 (a RECONNECT→DISCOVERY turn with
+ * tool_calls NULL) spoke three named products with exact prices. Cross-checked
+ * against Shopify, one price was accidentally right ("Revo Extreme" $198.99) and
+ * two were invented ("Prowler Prostate … $137.99", "Prowler Plus … $134.99") —
+ * the model mixed real-from-memory and made-up numbers, and the caller had no
+ * way to tell. The existing fabrication guard only strips URLs, so a spoken
+ * price on a voice call sailed straight through.
+ *
+ * This is deliberately narrow: it fires ONLY when the turn produced zero tool
+ * cards, which is exactly "no logged tool result to ground a price". A turn that
+ * ran a search and quotes a price from its results is not touched.
+ */
+export function isUngroundedPricePitch(prose: string, toolCardCount: number): boolean {
+  if (toolCardCount > 0) return false
+  return SPOKEN_PRICE_RE.test(prose ?? '')
+}
+
 // ─── productCard detection ───────────────────────────────────────────────────
 
 /**
@@ -856,14 +895,30 @@ export async function executeConversationAgent(
 
   // ── Fabrication guard ─────────────────────────────────────────────────────
   const guarded = applyFabricationGuard(finalText, realHandles)
-  const finalProse = guarded.text || finalText // never ship empty
+  let finalProse = guarded.text || finalText // never ship empty
+  let fabricationCaught = guarded.caught
 
   // ── Detect pitched product (Task 0.7: tool-result truth first) ──────────
   const allCards: IvrProductCard[] = []
   for (const list of cardsByToolUseId.values()) {
     allCards.push(...list)
   }
-  const pitched = detectPitchedCard(finalProse, allCards, toolResultPitchedHandle)
+  let pitched = detectPitchedCard(finalProse, allCards, toolResultPitchedHandle)
+
+  // ── Ungrounded-price guard (#3216) ─────────────────────────────────────────
+  // A price only legitimately enters the conversation via a tool result. If the
+  // loop surfaced no cards this turn yet the reply quotes a price, the whole
+  // pitch (product name and number alike) came from the model's context, not a
+  // logged search — fail closed to the recovery line so nothing invented reaches
+  // the caller, and drop any prose-detected pitch.
+  if (isUngroundedPricePitch(finalProse, allCards.length)) {
+    console.warn(
+      `[conversation-agent] ungrounded price pitch caught — no tool cards this turn stage=${stage} channel=${channel}`,
+    )
+    finalProse = SESSION_RECOVERY_PROSE
+    fabricationCaught = fabricationCaught ? `${fabricationCaught}|price` : 'price'
+    pitched = undefined
+  }
 
   // ── Resolve parallel slot extraction ──────────────────────────────────────
   // Use mergeSlots rather than a plain spread: the spread kept category-scoped
@@ -941,7 +996,7 @@ export async function executeConversationAgent(
     inputTokens: totalInputTokens,
     outputTokens: totalOutputTokens,
     ...(toolCalls.length > 0 && { toolCalls }),
-    ...(guarded.caught && { fabricationCaught: guarded.caught }),
+    ...(fabricationCaught && { fabricationCaught }),
     // Task 0.9: only set when budget was truly exhausted (false would be noise
     // in the telemetry column — omit it for normal turns).
     ...(toolBudgetExhausted && { toolBudgetExhausted: true }),
@@ -994,8 +1049,7 @@ function safeFallback(
     goalAchieved: false,
     segments: [
       {
-        prose:
-          "I lost the thread for a sec. What were you hoping to find?",
+        prose: SESSION_RECOVERY_PROSE,
       },
     ],
     stateWrites: {

@@ -27,7 +27,7 @@ import {
 } from '~/lib/shopify.server'
 import { getDialTaxonomy } from '~/lib/dial-registry.server'
 import { normalizeProductHandles, type ProductHandleEntry } from '~/lib/product-handles'
-import type { Product, ProductTypeDial } from '~/types'
+import type { Product, ProductTypeDial, SensationDialV2 } from '~/types'
 import type {
   CategoryCardProduct,
   ResolvedCategoryBlock,
@@ -104,13 +104,25 @@ interface RawBlock {
   posts?: { slug?: string; title?: string; heroImageUrl?: string; excerpt?: string; status?: string }[]
 }
 
+/**
+ * Project a product's sensation dial onto the card's up-to-three readings.
+ * Honest by construction (design doctrine §6): a product with no dial data
+ * yields an empty array and the card renders no dial rather than a fabricated
+ * one. Values are clamped to 0-5 and zero readings are dropped, matching how
+ * `SensationDial` renders. Exported for unit tests.
+ */
+export function projectCardDial(dial: SensationDialV2 | undefined): CategoryCardProduct['dial'] {
+  return (dial?.items ?? [])
+    .map(it => ({ label: it.label, value: Math.max(0, Math.min(5, Math.round(it.value))) }))
+    .filter(it => it.value > 0)
+    .slice(0, 3)
+}
+
 function toCardProduct(p: Product): CategoryCardProduct {
-  // Per-dimension dial values live on the full Deal shape (PDP metafield
-  // fetch), not on the lean Product these fetchers return, and nothing here
-  // fabricates a reading. Cards ship dial-less until the dial-coverage
-  // backfill gives the lean pipeline real values; the field stays in the type
-  // so components already render it when that lands.
-  const dial: CategoryCardProduct['dial'] = []
+  // Dial values now ride the lean Product (nodeToProduct parses the same
+  // xdipx.sensation_dial_v2 metafield the Deal shape uses). Products without
+  // the metafield carry no dial, so the card stays honest and renders none.
+  const dial = projectCardDial(p.sensationDialV2)
   return {
     id: p.id,
     handle: p.handle,

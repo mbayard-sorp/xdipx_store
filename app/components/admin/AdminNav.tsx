@@ -166,6 +166,7 @@ interface AdminUserInfo {
 
 const NAV_ITEMS = [
   { to: '/admin',                label: 'Dashboard',    Icon: DashboardIcon },
+  { to: '/admin/blockers',           label: 'Blockers',         Icon: SlidersIcon    },
   { to: '/admin/deals',              label: 'Deals',            Icon: StarIcon       },
   { to: '/admin/homepage-team',      label: 'Homepage Team',    Icon: SlidersIcon    },
   { to: '/admin/trackers',           label: 'Trackers',         Icon: SlidersIcon    },
@@ -192,6 +193,7 @@ const NAV_ITEMS = [
   { to: '/admin/seo-regen',      label: 'SEO Regen',     Icon: LabsIcon      },
   { to: '/admin/labs',           label: 'Labs',          Icon: LabsIcon      },
   { to: '/admin/chat/emma',      label: 'Agent Chat',   Icon: ChatBubbleIcon },
+  { to: '/admin/conversations',  label: 'Conversations', Icon: ChatBubbleIcon },
   { to: '/admin/settings',       label: 'Settings',     Icon: SettingsIcon  },
 ]
 

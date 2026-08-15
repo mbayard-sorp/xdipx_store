@@ -2,7 +2,7 @@ import { createClient } from '@sanity/client'
 import type { SanityImageAssetDocument } from '@sanity/client'
 import { createHash } from 'node:crypto'
 import { toHTML } from '@portabletext/to-html'
-import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, GlossaryTerm, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig, HomeSeo, StorefrontHomeLayout, StorefrontHomeSection } from '~/types/cms'
+import type { HomepageSections, ContentBlock, AnnouncementMessage, SiteSettings, SanityPage, BlogPostCard, BlogPost, BlogCategory, BlogHomepage, BlogAuthor, BlogSeries, BlogCategoryExtras, NotebookSettings, GlossaryTerm, EmmaHeroSettings, EmmaPersona, EmmaPreset, Editor, ProductFaq, TrustBarBlock, HomeConfig, HomeSeo, StorefrontHomeLayout, StorefrontHomeSection, Comparison, ComparisonCard } from '~/types/cms'
 import type { ProductTypeDial } from '~/types'
 import { cached, invalidateCache, kvDel } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
@@ -193,6 +193,7 @@ const EMMA_HERO_GROQ = `
     heroVariant, eyebrow, headline, body, aside, pullQuote, pairProductHandle
   },
   "cta": *[_id == "singleton.emmaHeroStorefront"][0]{
+    emphasisWord,
     primaryCtaLabel, primaryCtaLink,
     secondaryCtaLabel, secondaryCtaLink,
     featuredProductHandle, anchorCollectionHandle
@@ -209,7 +210,7 @@ export async function getEmmaHeroSettings(preview = false): Promise<EmmaHeroSett
       if (!client) return null
       const raw = await client.fetch<{
         settings: EmmaHeroSettings | null
-        cta: Pick<EmmaHeroSettings, 'primaryCtaLabel' | 'primaryCtaLink' | 'featuredProductHandle' | 'anchorCollectionHandle'> | null
+        cta: Pick<EmmaHeroSettings, 'emphasisWord' | 'primaryCtaLabel' | 'primaryCtaLink' | 'featuredProductHandle' | 'anchorCollectionHandle'> | null
       } | null>(EMMA_HERO_GROQ)
       if (!raw?.settings && !raw?.cta) return null
       return { ...raw.settings, ...raw.cta }
@@ -1853,6 +1854,89 @@ export async function getBlogPostsForSitemap(): Promise<{ slug: string; publishe
     )
   } catch (err) {
     console.error('[sanity] getBlogPostsForSitemap error:', err)
+    return []
+  }
+}
+
+// ─── Comparisons ("X vs Y") ──────────────────────────────────────────────────
+// BOFU answer surface at /compare/{slug}. New additive doc type; every getter
+// degrades to null/[] when Sanity is unconfigured or the fetch fails, so the
+// route 404s cleanly rather than 500-ing, matching the blog getters above.
+
+const COMPARISON_PROJECTION = `
+  _id, title, "slug": slug.current, excerpt, publishedAt, featured,
+  "itemNames": items[].name
+`
+
+/** One published comparison by slug, with its full body for the page + .md twin. */
+export async function getComparison(slug: string, preview = false): Promise<Comparison | null> {
+  if (!projectId) return null
+
+  const fetcher = async (): Promise<Comparison | null> => {
+    try {
+      const client = getClient(false, preview)
+      if (!client) return null
+
+      const filter = preview
+        ? `_type == "comparison" && slug.current == $slug`
+        : `_type == "comparison" && slug.current == $slug && status == "published"`
+
+      const raw = await client.fetch<Comparison | null>(
+        `*[${filter}][0]{
+          ${COMPARISON_PROJECTION},
+          _updatedAt,
+          items[]{ name, productHandle, blurb, bestFor },
+          attributes[]{ label, values },
+          verdict,
+          body,
+          faqs[]{ question, answer },
+          seoTitle, seoDescription, noIndex
+        }`,
+        { slug },
+      )
+      return raw ?? null
+    } catch (err) {
+      console.error('[sanity] getComparison error:', err)
+      return null
+    }
+  }
+
+  if (preview) return fetcher()
+  return cached(`comparison:${slug}`, 300, fetcher)
+}
+
+/** Published comparisons for the /compare index, featured first then newest. */
+export async function getComparisonList(): Promise<ComparisonCard[]> {
+  if (!projectId) return []
+
+  return cached('comparison:list', 300, async () => {
+    try {
+      const client = getClient()
+      if (!client) return []
+      return await client.fetch<ComparisonCard[]>(
+        `*[_type == "comparison" && status == "published"]
+          | order(featured desc, publishedAt desc){ ${COMPARISON_PROJECTION} }`,
+      )
+    } catch (err) {
+      console.error('[sanity] getComparisonList error:', err)
+      return []
+    }
+  })
+}
+
+/** Slug + lastmod feed for the sitemap. Excludes noIndex, matching the meta robots directive. */
+export async function getComparisonsForSitemap(): Promise<{ slug: string; publishedAt: string; _updatedAt: string }[]> {
+  if (!projectId) return []
+  try {
+    const client = getClient()
+    if (!client) return []
+    return await client.fetch(
+      `*[_type == "comparison" && status == "published" && noIndex != true] | order(publishedAt desc) {
+        "slug": slug.current, publishedAt, _updatedAt
+      }`,
+    )
+  } catch (err) {
+    console.error('[sanity] getComparisonsForSitemap error:', err)
     return []
   }
 }

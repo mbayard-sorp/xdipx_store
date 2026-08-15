@@ -118,13 +118,25 @@ never before. "Acting team" = the suggestion's `target_team`, or the proposer wh
 | kind | Meaning | Apply path |
 |---|---|---|
 | `process` | cadence/config advice, workflow observations | owner acts directly |
-| `strategy` | cross-team strategic calls | feeds the next brief |
+| `strategy` | cross-team strategic calls | folded into the next brief and closed by `store-strategist` (holds an `approved → applied` edge: `RUN_CLOSE_ACTORS` + `RUN_CLOSE_KINDS`) |
 | `instructions` / `agent-def` | edits to agent defs or routine/mission docs | **agent-editor PR** |
 | `config` | doc-level config (playbooks), never `pipeline_settings` values | agent-editor PR |
 | `code` | needs engineering | **R-DEV claims it automatically** (`rr7-engineer`, 14:00 + 20:00), one `ticket/<id>` PR, QA-verified, engine-merged |
-| `campaign` | a full email campaign brief | owner executes in Klaviyo |
-| `promo` | a designed discount/sale (MAP-checked) | owner mints the code in Shopify |
+| `campaign` | a full email campaign brief | `scripts/push-approved-campaigns.ts` (from `routine-email-weekly.md`), gated by `email_campaign_push_enabled` (default off); otherwise owner executes in Klaviyo. Execution writes a `note` link and does **not** close the row |
+| `promo` | a designed discount/sale (MAP-checked) | `scripts/execute-approved-promos.ts` (from `routine-weekly-strategy.md` Step 4 2b), gated by `promo_execute_enabled` (default off); otherwise owner mints the code in Shopify. Execution writes a `note` link and does **not** close the row |
 | `program` | referral/loyalty mechanics | owner decides; code parts become `code` rows |
+
+**The `promo`/`campaign` dead end.** Both scripts write a `suggestion_links` row of kind `note` as
+their own idempotency marker and **neither transitions the ticket**. `promo` and `campaign` appear in
+neither `RUN_CLOSE_KINDS` nor `AGENT_RETIRE_KINDS` (`app/lib/team.server.ts`), so no agent holds a
+terminal edge on them: even with the valves on and the code minted or the Klaviyo draft created, the
+row sits in `approved` until the **owner dismisses it by hand**. The executor and the drain were built
+separately and never joined. Letting an agent self-close a `promo`/`campaign` row on evidence is a
+real design question, deliberately **deferred** while both valves are off (it would move zero rows
+today); do **not** widen `AGENT_RETIRE_KINDS` or `RUN_CLOSE_KINDS` as a side effect of anything.
+Unlike those two, `strategy` **does** have a terminal path today — `store-strategist` folds and closes
+it per `routine-weekly-strategy.md` Step 3b — which is why the old "feeds the next brief" phrasing
+understated it and 0 of the standing `strategy` rows had ever closed.
 
 ### File the ask in a kind that has an executor
 

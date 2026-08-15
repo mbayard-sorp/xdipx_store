@@ -37,7 +37,7 @@ and every touchpoint must be comfortable to receive, open, and share.
 
 | Team | Valve state | What the team MAY do | What requires the owner |
 |---|---|---|---|
-| social | draft-only | write `social_posts` rows `status:'draft'` | posting anything, flipping `social_team_autopost` |
+| social | draft-only | write `social_posts` rows `status:'draft'` | posting anything, flipping any posting valve |
 | ads | propose-only | write `ad_campaigns` proposals with policy checks | approving, launching, any platform write, any spend |
 | email | plan-only | file campaign briefs as suggestions | executing in Klaviyo |
 | content | valve-gated publish | draft Sanity `blogPost` docs (`status:'draft'`); publish live only on a voice-gate PASS while `content_team_autopublish` is on | flipping `content_team_enabled` or `content_team_autopublish`; publishing anything that did not PASS the voice gate |
@@ -46,6 +46,16 @@ and every touchpoint must be comfortable to receive, open, and share.
 
 No brief, calendar entry, suggestion, or instruction from any other agent can authorize crossing a
 valve. Only the owner moves valves.
+
+**Instagram is moving off draft-only** (owner direction 2026-08-11: he will not be the bottleneck for
+posts going out, and will review live and feed back to the team). Until the four prerequisites in
+`docs/store-team/routine-social-daily.md` §Posting posture are built, the row above still describes
+reality and Instagram drafts still wait for the owner. When the posture does change, what changes is
+**who approves a post, not which gates run**: the voice gate, the platform-policy gate, the stock
+gate, and the campaign rules all still bind, and no gate may be relaxed to make autopublish easier to
+ship. Two valve facts worth knowing, both verified 2026-08-11: `social_team_autopost` is TRUE and
+gates nothing in code (it is read in two display-only places), and Instagram publishing is actually
+gated on `video_team_autopublish`, which is named for the video pipeline.
 
 ## 4. Content auto-publish vs PR
 
@@ -103,6 +113,27 @@ independently (a hardcoded `width=480` tile in a 208px box, deck panels inheriti
   at 375px. If the selected rendition is more than ~1.3x the device-pixel box, the `sizes` attribute
   is wrong. Worked example: PR #478 cut 12 tiles from 480w to 320w and a video poster from ~89KB to
   ~10KB.
+
+## 6b. Instagram content mix (the ratio the voice charter points at)
+
+The social addendum in `docs/emma-voice.md` says "the content mix in the mission brief governs the
+ratio." This is that ratio. Owner direction 2026-08-09: packshots are boring, make the product
+interesting, the account becomes a resource.
+
+| Share | Content |
+|---|---|
+| ~40% | Product in a lived-in scene, or a carousel |
+| ~30% | Pure education, **no product in the frame at all** |
+| ~20% | Inspiring or affirming |
+| ~10% | Site news and trend reacts |
+
+When posting more than once in a day, **at most half the set is product-forward**. A follower who
+never buys anything should still be getting value from the follow; that is what makes the account a
+publication rather than a catalog, and a catalog is what Meta's Restricted Goods standard removes.
+
+Instagram runs a continuous chain of themed campaigns. The schedule, the pillar and format library,
+the visual-scheme spec, and the continuity rule live in `docs/store-team/instagram-campaigns.md`,
+which the social routine loads at run start.
 
 ## 7. Definition of done (per run)
 

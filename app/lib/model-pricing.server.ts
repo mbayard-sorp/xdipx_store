@@ -47,6 +47,12 @@ const IMAGE_RATES: Record<string, number> = {
   'fal/flux-kontext':     0.04,  // FLUX.1 Kontext [pro] image-to-image
   'fal/flux-kontext-dev': 0.025, // FLUX.1 Kontext [dev] image-to-image (product refs; safety checker off)
   'fal/nano-banana':    0.039, // fal's Gemini-flash-image endpoint
+  'fal/qwen-image-edit': 0.035, // Qwen-Image-Edit 2511 — stage-1 product plate
+  'fal/flux-2-edit':     0.07,  // FLUX.2 [dev] edit — stage-2 scene composite.
+                                // Billed per megapixel of input + output rather
+                                // than per image; 0.07 covers a 9:16 1080x1920
+                                // frame built from two references, rounded up so
+                                // the per-video ceiling never lowballs.
   'imagen':             0.04,  // Google Vertex gemini-2.5-flash-image
   'imagen-3':           0.04,
 }

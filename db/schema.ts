@@ -1563,3 +1563,44 @@ export const outreachMessages = pgTable('outreach_messages', {
   messageIdIdx: index('idx_outreach_messages_message_id').on(t.messageId),
 }))
 
+
+/**
+ * The owner blocker list (078): one row per thing only the owner can clear.
+ *
+ * Distinct from a ticket. A ticket is work an agent can do; a blocker is work
+ * that structurally cannot be done by an agent (a console setting, a billing
+ * account, a credential, a protected-path merge, a migration against prod).
+ * Filed by blocker-scout, by any agent that hits a wall, and by interactive
+ * sessions that discover one mid-conversation. Cleared automatically by the
+ * named probe in owner-blockers.server.ts wherever a machine check exists.
+ */
+export const ownerBlockers = pgTable('owner_blockers', {
+  id:             serial('id').primaryKey(),
+  dedupeKey:      varchar('dedupe_key', { length: 80 }).notNull(),
+  title:          varchar('title', { length: 200 }).notNull(),
+  detail:         text('detail'),
+  unblocks:       text('unblocks'),
+  whereToGo:      text('where_to_go'),
+  category:       varchar('category', { length: 24 }).notNull().default('other'),
+    // migration|valve|console|credential|approval|merge|execute|other
+  priority:       smallint('priority').notNull().default(3),
+  status:         varchar('status', { length: 16 }).notNull().default('open'), // open|cleared|dismissed
+  source:         varchar('source', { length: 32 }).notNull().default('agent'),
+  sourceRef:      text('source_ref'),
+  evidence:       text('evidence'),
+  verifyProbe:    varchar('verify_probe', { length: 32 }),
+  verifyArg:      text('verify_arg'),
+  lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+  lastVerifyOk:   boolean('last_verify_ok'),
+  firstSeenAt:    timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt:     timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  clearedAt:      timestamp('cleared_at', { withTimezone: true }),
+  clearedBy:      varchar('cleared_by', { length: 24 }),
+  clearNote:      text('clear_note'),
+  createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  dedupeUq: uniqueIndex('owner_blockers_dedupe_key_key').on(t.dedupeKey),
+  openIdx:  index('idx_owner_blockers_open').on(t.status, t.priority, t.firstSeenAt),
+  verifyIdx: index('idx_owner_blockers_verify').on(t.status, t.lastVerifiedAt),
+}))

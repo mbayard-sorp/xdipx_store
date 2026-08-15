@@ -278,9 +278,29 @@ export async function runGscIndexSweep(opts: { budget?: number } = {}): Promise<
       count(*) FILTER (WHERE in_sitemap AND verdict <> 'PASS' AND coverage_state LIKE 'Discovered%')::int AS discovered_not_indexed,
       count(*) FILTER (WHERE in_sitemap AND last_inspected_at IS NOT NULL AND verdict <> 'PASS'
                        AND coverage_state NOT LIKE 'Crawled%' AND coverage_state NOT LIKE 'Discovered%')::int AS other_not_indexed,
-      count(*) FILTER (WHERE in_sitemap AND verdict = 'PASS'
-                       AND google_canonical IS NOT NULL AND user_canonical IS NOT NULL
-                       AND google_canonical <> user_canonical)::int AS canonical_mismatches
+      -- URLs where Google elected a canonical the page did not declare.
+      -- COALESCE(user_canonical, url) is load-bearing: when Google finds no
+      -- canonical link it reports user_canonical as NULL, and "no declared
+      -- canonical, Google picked something else" is the worst canonical
+      -- outcome there is, not an absent one.
+      --
+      -- This filter used to require verdict = 'PASS' AND user_canonical IS NOT
+      -- NULL, which excluded every URL it existed to count: canonical-broken
+      -- URLs are by definition not indexed (verdict 'NEUTRAL'), and 353 of the
+      -- 377 broken on 2026-08-09 had no user canonical at all. The metric read
+      -- 0 every single day of the incident while the owner digest and weekly
+      -- brief reported the canonical signal clean.
+      --
+      -- Scoped to Duplicate* states and indexed pages on purpose. The ~1,200
+      -- URLs on a cached noindex verdict also report a foreign google_canonical
+      -- (the May outage served them an error page with none of their own), but
+      -- their defect is the noindex verdict, which other_not_indexed already
+      -- counts. Folding them in here would swamp the signal and leave the
+      -- number flat when canonicalization is actually fixed.
+      count(*) FILTER (WHERE in_sitemap AND last_inspected_at IS NOT NULL
+                       AND google_canonical IS NOT NULL
+                       AND google_canonical <> COALESCE(user_canonical, url)
+                       AND (coverage_state LIKE 'Duplicate%' OR verdict = 'PASS'))::int AS canonical_mismatches
     FROM gsc_url_inspections`
   const agg = aggRows[0] as {
     sitemap_urls: number; inspected_urls: number; indexed_count: number

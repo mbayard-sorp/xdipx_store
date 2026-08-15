@@ -2,8 +2,8 @@
 // has no image_size param, so a caller's imageSize must resolve to a string
 // aspect. A {width,height} object used to fall through to a hardcoded '16:9',
 // silently generating the wrong aspect (ticket #152). These lock in the mapping.
-import { describe, it, expect } from 'vitest'
-import { kontextResolutionMode } from './fal.server'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { kontextResolutionMode, falGenerate, readFalRequestId } from './fal.server'
 
 describe('kontextResolutionMode', () => {
   it('maps the string image_size enums to their aspect', () => {
@@ -38,5 +38,152 @@ describe('kontextResolutionMode', () => {
   it('throws on a degenerate object', () => {
     expect(() => kontextResolutionMode({ width: 0, height: 900 })).toThrow(/invalid image_size/)
     expect(() => kontextResolutionMode({ width: 1200, height: -1 })).toThrow(/invalid image_size/)
+  })
+})
+
+describe('falGenerate reference-image routing and output_format', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  // Capture the request the generator POSTs to fal, without hitting the network.
+  // First fetch = the generation call (we assert its URL + body); any follow-up
+  // fetch = the image download, which we stub to a tiny buffer.
+  function stubFal() {
+    vi.stubEnv('FAL_KEY', 'test-key')
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        calls.push({ url: String(url), body: JSON.parse(String(init.body)) })
+        return new Response(JSON.stringify({ images: [{ url: 'https://fal.test/out' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      // image download
+      return new Response(new ArrayBuffer(4), { status: 200 })
+    }))
+    return calls
+  }
+
+  it('routes two-or-more refs to FLUX.2 edit with an image_urls array', async () => {
+    const calls = stubFal()
+    const result = await falGenerate({
+      prompt: 'a vibrator and its lube bottle in one drawer scene',
+      refImageUrls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
+      imageSize: 'portrait_16_9',
+    })
+    expect(calls[0]?.url).toContain('fal-ai/flux-2/lora/edit')
+    expect(calls[0]?.body).toMatchObject({
+      image_urls: ['https://img.test/toy.jpg', 'https://img.test/lube.jpg'],
+      image_size: 'portrait_16_9',
+      output_format: 'jpeg',
+      // The whole reason this path is not nano-banana/edit: that endpoint's
+      // safety filter is not configurable and 422s on ordinary catalog product
+      // photos. FLUX.2 takes the flag like the other open FLUX endpoints.
+      enable_safety_checker: false,
+    })
+    // Multi-ref must not fall through to the Kontext single-ref shape.
+    expect(calls[0]?.body).not.toHaveProperty('image_url')
+    expect(calls[0]?.body).not.toHaveProperty('resolution_mode')
+    // Cost logs against the FLUX.2 edit rate, not the flux-dev default.
+    expect(result.costKey).toBe('fal/flux-2-edit')
+  })
+
+  it('passes a {width,height} image_size straight through on the multi-ref path', async () => {
+    // Unlike Kontext, FLUX.2 edit has a real image_size param, so an explicit
+    // pixel size must not be flattened to a nearest-aspect string.
+    const calls = stubFal()
+    await falGenerate({
+      prompt: 'two products in one scene',
+      refImageUrls: ['https://img.test/a.jpg', 'https://img.test/b.jpg'],
+      imageSize: { width: 1080, height: 1350 },
+    })
+    expect(calls[0]?.body).toMatchObject({ image_size: { width: 1080, height: 1350 } })
+  })
+
+  it('keeps a single refImageUrl on the unchanged Kontext single-ref path', async () => {
+    const calls = stubFal()
+    const result = await falGenerate({
+      prompt: 'the product in a scene',
+      refImageUrl: 'https://img.test/p.jpg',
+    })
+    expect(calls[0]?.url).toContain('flux-kontext/dev')
+    expect(calls[0]?.body).toMatchObject({ image_url: 'https://img.test/p.jpg' })
+    expect(calls[0]?.body).not.toHaveProperty('image_urls')
+    expect(result.costKey).toBe('fal/flux-kontext-dev')
+  })
+
+  it('treats a single-element refImageUrls like the single-ref Kontext path', async () => {
+    const calls = stubFal()
+    await falGenerate({
+      prompt: 'the product in a scene',
+      refImageUrls: ['https://img.test/only.jpg'],
+    })
+    expect(calls[0]?.url).toContain('flux-kontext/dev')
+    expect(calls[0]?.body).toMatchObject({ image_url: 'https://img.test/only.jpg' })
+    expect(calls[0]?.body).not.toHaveProperty('image_urls')
+  })
+
+  it('routes no refs to the text-to-image endpoint unchanged', async () => {
+    const calls = stubFal()
+    await falGenerate({ prompt: 'a lamp on a table' })
+    expect(calls[0]?.body).toMatchObject({ image_size: 'landscape_16_9' })
+    expect(calls[0]?.body).not.toHaveProperty('image_url')
+    expect(calls[0]?.body).not.toHaveProperty('image_urls')
+  })
+
+  it('pins jpeg on the text-to-image branch', async () => {
+    const calls = stubFal()
+    await falGenerate({ prompt: 'a lamp on a table' })
+    expect(calls[0]?.body).toMatchObject({ output_format: 'jpeg' })
+  })
+
+  it('pins jpeg on the ref-image (Kontext) branch', async () => {
+    const calls = stubFal()
+    await falGenerate({ prompt: 'the product in a scene', refImageUrl: 'https://img.test/p.jpg' })
+    expect(calls[0]?.body).toMatchObject({ output_format: 'jpeg' })
+  })
+
+  it('returns the x-fal-request-id header on the result, undefined when absent (ticket #3046)', async () => {
+    // Present: the generation response carries the header fal sets on the sync
+    // endpoint, and falGenerate surfaces it for spend-row tracing.
+    vi.stubEnv('FAL_KEY', 'test-key')
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({ images: [{ url: 'https://fal.test/out' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-fal-request-id': '019ffca0-7f27-7603-be20-650ddf635c92' },
+        })
+      }
+      return new Response(new ArrayBuffer(4), { status: 200 })
+    }))
+    const withId = await falGenerate({ prompt: 'a lamp on a table' })
+    expect(withId.requestId).toBe('019ffca0-7f27-7603-be20-650ddf635c92')
+  })
+
+  it('omits requestId when fal returns no x-fal-request-id header (ticket #3046)', async () => {
+    const calls = stubFal() // stubFal's POST response carries no request-id header
+    const result = await falGenerate({ prompt: 'a lamp on a table' })
+    expect(calls).toHaveLength(1)
+    expect(result.requestId).toBeUndefined()
+  })
+})
+
+describe('readFalRequestId', () => {
+  it('reads the x-fal-request-id header from a Response', () => {
+    const res = new Response('', { headers: { 'x-fal-request-id': 'abc-123' } })
+    expect(readFalRequestId(res)).toBe('abc-123')
+  })
+
+  it('returns undefined when the header is absent', () => {
+    expect(readFalRequestId(new Response(''))).toBeUndefined()
+  })
+
+  it('returns undefined for a Response-like object without a real headers.get', () => {
+    // Best-effort telemetry must never throw on a test mock or odd shape.
+    expect(readFalRequestId({} as never)).toBeUndefined()
+    expect(readFalRequestId({ headers: {} } as never)).toBeUndefined()
   })
 })

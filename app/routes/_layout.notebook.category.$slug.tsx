@@ -44,10 +44,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
-  if (!loaderData) return [{ title: 'Category not found — xdipx' }]
+  if (!loaderData) return [{ title: 'Category not found | xdipx' }]
   const { category, page, totalPages, canonical } = loaderData
-  const baseTitle = category.seoTitle ?? `${category.name} — The Notebook`
-  const pageSuffix = page > 1 ? ` — Page ${page}` : ''
+  const baseTitle = category.seoTitle ?? `${category.name} | The Notebook`
+  const pageSuffix = page > 1 ? ` | Page ${page}` : ''
   const title = `${baseTitle}${pageSuffix} | xdipx`
   const description = category.seoDescription ?? category.description ?? `Read ${category.name.toLowerCase()} posts in the xdipx Notebook.`
 

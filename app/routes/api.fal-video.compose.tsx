@@ -1,7 +1,8 @@
 /**
  * POST /api/fal-video/compose — scene-frame composition for the Labs fal-video
  * spike. Composes the presenter (Emma canonical photo, or none) with the real
- * product photo into 9:16 candidate first frames via nano-banana edit.
+ * product photo into 9:16 candidate first frames. Two-stage: a packaging-free
+ * product plate, then the composite (see composeSceneFrame).
  * Admin-gated; spend logged under feature 'video-spike'.
  */
 
@@ -54,13 +55,32 @@ export async function action({ request }: ActionFunctionArgs) {
           count,
         })
 
-    void logImageCost({
-      feature: 'video-spike',
-      model: result.costKey,
-      count: result.urls.length,
-      caller: 'api.fal-video.compose',
-      ...(body.productHandle ? { sku: body.productHandle } : {}),
+    // One spend row per candidate (each is its own fal request, ticket #3045),
+    // carrying that request_id so a returned frame traces back to its
+    // generation. Totals are unchanged: /admin/usage sums request_count.
+    result.urls.forEach((_url, i) => {
+      const rid = result.requestIds[i]
+      void logImageCost({
+        feature: 'video-spike',
+        model: result.costKey,
+        count: 1,
+        caller: 'api.fal-video.compose',
+        ...(body.productHandle ? { sku: body.productHandle } : {}),
+        ...(rid ? { requestId: rid } : {}),
+      })
     })
+    // Stage-1 product plate, when one was built. Logged separately so spend
+    // lands against the right model on /admin/usage.
+    if (result.plate) {
+      void logImageCost({
+        feature: 'video-spike',
+        model: result.plate.costKey,
+        count: result.plate.count,
+        caller: 'api.fal-video.compose/plate',
+        ...(body.productHandle ? { sku: body.productHandle } : {}),
+        ...(result.plateRequestId ? { requestId: result.plateRequestId } : {}),
+      })
+    }
 
     return Response.json({ urls: result.urls })
   } catch (err) {

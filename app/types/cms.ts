@@ -502,6 +502,11 @@ export interface EmmaHeroSettings {
   heroVariant?: EmmaHeroVariant
   eyebrow?: string
   headline?: string
+  // One word within `headline` to italicize in the plum emphasis style (doctrine
+  // §2, one-emphasis-word treatment). Merged in from the additive
+  // singleton.emmaHeroStorefront doc by getEmmaHeroSettings(). Unset, or a word
+  // not present in the headline, falls back to italicizing the last word.
+  emphasisWord?: string
   body?: string
   aside?: string
   pullQuote?: string
@@ -625,6 +630,49 @@ export interface BlogPostLink {
   heroImageUrl?: string
   heroLqip?: string
   category?: { name: string; slug: string; color?: string }
+}
+
+// Comparison ("X vs Y") pages — the /compare/{slug} answer surface. Additive
+// doc type; see studio/schemas/comparison.js.
+export interface ComparisonItem {
+  name: string
+  /** Shopify handle, when the item is a catalog product (links to the PDP). */
+  productHandle?: string
+  blurb: string
+  bestFor?: string
+}
+
+export interface ComparisonAttribute {
+  label: string
+  /** One value per item, aligned to the `items` order. */
+  values: string[]
+}
+
+export interface ComparisonFaq {
+  question: string
+  answer: string
+}
+
+export interface ComparisonCard {
+  _id: string
+  title: string
+  slug: string
+  excerpt: string
+  publishedAt: string
+  featured: boolean
+  itemNames: string[]
+}
+
+export interface Comparison extends ComparisonCard {
+  _updatedAt?: string
+  items: ComparisonItem[]
+  attributes?: ComparisonAttribute[]
+  verdict?: string
+  body?: unknown[]
+  faqs?: ComparisonFaq[]
+  seoTitle?: string
+  seoDescription?: string
+  noIndex?: boolean
 }
 
 // Notebook redesign — optional per-post extras from the additive

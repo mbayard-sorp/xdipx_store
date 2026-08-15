@@ -24,6 +24,7 @@ vi.mock('~/lib/team.server', () => ({
   autofileDedupeKey: (n: number) => `autofile:pr-${n}`,
 }))
 
+import { db } from '~/lib/db.server'
 import { getPullRequest } from '~/lib/github.server'
 import { fileTicketForOpenPr, transitionSuggestion } from '~/lib/team.server'
 import {
@@ -31,9 +32,19 @@ import {
   autoFileTicketForPr,
   autofileDedupeKey,
   prNumberFromAutofileKey,
+  prNumberFromLinkRef,
 } from '~/lib/release-ticket-autofile.server'
 
 const PR = { number: 494, title: 'docs: something', htmlUrl: 'https://github.com/o/r/pull/494', headRef: 'claude/foo' }
+
+/** Stub the prAlreadyTracked query (select → from → innerJoin → where → limit)
+ *  to return one link row per ref. []' means the PR is not tracked. */
+function stubTrackingLinks(refs: string[]) {
+  const rows = refs.map((ref) => ({ ref }))
+  ;(db as unknown as Record<string, unknown>).select = () => ({
+    from: () => ({ innerJoin: () => ({ where: () => ({ limit: async () => rows }) }) }),
+  })
+}
 
 beforeEach(() => {
   vi.mocked(fileTicketForOpenPr).mockReset()
@@ -66,6 +77,15 @@ describe('autofile dedupe key', () => {
 })
 
 describe('autoFileTicketForPr', () => {
+  // Default state for the two ticket #3302 guards: nothing tracks the PR yet,
+  // and the PR is open. Individual tests override as needed.
+  beforeEach(() => {
+    stubTrackingLinks([]) // (b) not tracked
+    vi.mocked(getPullRequest).mockResolvedValue({
+      ok: true, status: 200, data: { state: 'open', merged: false },
+    } as never) // (a) not merged
+  })
+
   it('writes nothing on a dry run', async () => {
     expect(await autoFileTicketForPr(PR, true)).toBeNull()
     expect(fileTicketForOpenPr).not.toHaveBeenCalled()
@@ -89,6 +109,57 @@ describe('autoFileTicketForPr', () => {
   it('swallows a write failure instead of breaking the cycle', async () => {
     vi.mocked(fileTicketForOpenPr).mockRejectedValue(new Error('db down'))
     await expect(autoFileTicketForPr(PR)).resolves.toBeNull()
+  })
+
+  // Ticket #3302 (b): a live/applied ticket already tracks this PR, so filing a
+  // second row is redundant and only makes R-DEV claim+block it. No write.
+  it('does not file when a tracked ticket already links the PR', async () => {
+    stubTrackingLinks(['https://github.com/o/r/pull/494'])
+    expect(await autoFileTicketForPr(PR)).toBeNull()
+    expect(fileTicketForOpenPr).not.toHaveBeenCalled()
+  })
+
+  // Exact-match guard: a link for a different PR whose number shares a prefix
+  // (/pull/4940) must not count as tracking PR 494.
+  it('still files when the only link is a different PR sharing a number prefix', async () => {
+    stubTrackingLinks(['https://github.com/o/r/pull/4940'])
+    vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
+    expect(await autoFileTicketForPr(PR)).toEqual({ prNumber: 494, ticketId: 1234, created: true })
+  })
+
+  // Ticket #3302 (a): the PR already merged, so a pr_open ticket for it is noise
+  // (sweepOutOfBandMerges and its applied ticket own it). No write.
+  it('does not file when the PR is already merged', async () => {
+    vi.mocked(getPullRequest).mockResolvedValue({
+      ok: true, status: 200, data: { state: 'closed', merged: true },
+    } as never)
+    expect(await autoFileTicketForPr(PR)).toBeNull()
+    expect(fileTicketForOpenPr).not.toHaveBeenCalled()
+  })
+
+  // Fail toward filing: neither guard may strand the PR when it cannot decide.
+  it('files anyway when the tracked-ticket lookup throws', async () => {
+    ;(db as unknown as Record<string, unknown>).select = () => {
+      throw new Error('db down')
+    }
+    vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
+    expect(await autoFileTicketForPr(PR)).toEqual({ prNumber: 494, ticketId: 1234, created: true })
+  })
+
+  it('files anyway when the merged-state check cannot read GitHub', async () => {
+    vi.mocked(getPullRequest).mockResolvedValue({ ok: false, status: 500, error: 'boom' } as never)
+    vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
+    expect(await autoFileTicketForPr(PR)).toEqual({ prNumber: 494, ticketId: 1234, created: true })
+  })
+})
+
+describe('prNumberFromLinkRef', () => {
+  it('parses /pull/N and #N, and rejects everything else', () => {
+    expect(prNumberFromLinkRef('https://github.com/o/r/pull/494')).toBe(494)
+    expect(prNumberFromLinkRef('#655')).toBe(655)
+    expect(prNumberFromLinkRef('https://github.com/o/r/pull/4940')).toBe(4940)
+    expect(prNumberFromLinkRef('https://github.com/o/r/issues/12')).toBeNull()
+    expect(prNumberFromLinkRef('nonsense')).toBeNull()
   })
 })
 

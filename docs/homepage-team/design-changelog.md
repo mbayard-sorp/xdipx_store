@@ -1,0 +1,59 @@
+# Homepage Design Changelog
+
+An append-only, dated log of every content or design change the homepage team ships, so the visual
+history of the storefront is auditable in one place instead of reconstructed from run events. Both
+homepage routines append here as their last content/design step:
+
+- **Routine A — Daily Merchandiser** (`routine-daily-merchandise.md`) appends an entry on every run
+  that changes what the page shows (hero, rails, wayfinder tiles, imagery, copy, section order).
+- **Routine B — Design Cycle** (`routine-design-cycle.md`) appends an entry when a design/shell PR
+  ships (or is opened for the release engine).
+
+## Entry format
+
+One dated entry per change, newest first. Each entry names **what changed**, **why**, and the
+**evidence probe touched** (the run/PR/event or GA4/GSC signal that motivated or verifies it):
+
+```
+### YYYY-MM-DD — [Routine A|Routine B] — <one-line what changed>
+- **What:** <the concrete surfaces that changed — hero/rail/tile/section/PR>
+- **Why:** <theme, signal, or directive that drove it>
+- **Evidence:** <run id / PR # / event / GA4 or GSC probe touched>
+```
+
+Keep entries terse and factual. This file is content/documentation on the agent-editor allowlist
+(`docs/homepage-team/*.md`); it carries no code and gates nothing.
+
+## Entries
+
+### 2026-08-14 — Routine A — Hero rotated to b-Vibe Snug Ring (owner-directed) + full fresh-art floor
+- **What:** Rotated the hero from the We-Vibe "Moving as One" kit to the **b-Vibe Snug Ring 45mm black** (`b-vibe-snug-ring-45mm-snug-fit-silicone-c-ring-black`) — pinned `emmaHeroStorefront.featuredProductHandle` + `primaryCtaLink` and refreshed the full hero copy (dial-9, act-anchored to the worn c-ring). Promoted the clean device sibling `98863B` to primary via `setMediaAsPrimary` first, because the product's primary `98863A` is a blister-pack composite (baked text). Met the fresh-art floor: 3 new images §2-passed and placed — Discover You promo (coral-soft), couples band (plum-soft + satin ribbon), couples wayfinder tile `wf65c` (paper); grounds rotated across the ground lock. Refreshed couples-band copy to the wearable.
+- **Why:** Owner direction (Mike, 2026-08-14, ticket #3184) — kick off the hero rotation now in a fresh run, clearing the 4-run hero hold (freshness #3047) with an on-theme wearable for "Weekend In, Not Out." A hero product change triggers the ≥3-image fresh-art floor (mission brief §2 / Step 4).
+- **Evidence:** run 314; Sanity revs J5AMcOqaNUY9YyUo4PDAz9 (hero copy), USWXCwIENgmO1X122cS3FM (pin), USWXCwIENgmO1X122cS9Fh (couples copy); image assets 485a2530 (promo), 404932a4 (couples band), d7247419 (tile wf65c); Shopify `featuredMedia` confirmed `98863B`; origin render confirmed the hero handle + new headline; hero image + couples heading propagation pending (300s storefront product cache), background re-warm + re-verify scheduled.
+
+### 2026-08-14 — Routine A — Fresh couples-band art + hero/couples copy refresh (Weekend In; hero product held)
+- **What:** Regenerated the couples band (`playTogether-starter`) image — clean archetype-C device still-life (matte-black U-shaped couples wearable on a plum-soft two-tone ground, bright daylight, ivory linen + green fig shape-rhyme, no text) replacing the byte-identical prior asset. Refreshed the couples-band heading + body and the full hero copy (eyebrow/headline/body/pullQuote, dial-9, We-Vibe "Moving as One" kit held on-theme) with fresh, non-repeating language. Step 5b health sweep GREEN on all 7 live merchandised pages (200 + one H1). Category deep-refresh pair deferred (turn budget).
+- **Why:** Active theme "Weekend In, Not Out" (couples + wearables), marketing_calendar #6. Per-run freshness cadence (Step 2c) — clears couples sameness #3056. Hero PRODUCT rotation + its mandated 3-image fresh-art floor deferred to next run: the cold-start cloud checkout (dependency install + CLI-syntax discovery) consumed the read-phase turn budget, and a changed-hero run cannot ship <3 fresh images honestly. First couples-band gen (kit Kontext ref) rejected on §2 (reproduced the retail box + baked text, repro of run 294 kit-ref failure); regenerated clean, no ref.
+- **Evidence:** run 308; sameness-diff surfaces vs run 294 = couples-band imagery (asset c5e29ca) + couples-band copy + hero copy (≥2 surfaces, one imagery); Sanity revs h8DOoF7DyhmSiqO7D57qiz (homepage/couples) + h8DOoF7DyhmSiqO7D57r7Z (hero); homepage warmed (warm-homepage-b ok, 4 rails, not degraded), origin propagation pending (blob warm + 900s edge + SWR); health sweep 7/7 pages 200 + one H1.
+
+### 2026-08-13 — Routine A — Weekend-In refresh: new couples-band product-still + full copy pass (hero held)
+- **What:** Regenerated the couples band (`playTogetherBanner`) image — clean archetype-C product still (Ferri wearable on ivory silk, plum-soft ground, warm daylight) replacing the month-era plate, and rethemed its copy off the August-Reset "start the month slow" line. Refreshed hero copy (eyebrow/headline/body/pullQuote, dial-9, We-Vibe kit held on-theme), both wired rail eyebrow/heading/asides (couples + under-$30 on-ramp), and all 3 wayfinder tile asides. Step 5b: health sweep GREEN on 8 live merchandised surfaces; category deep-refresh pair deferred (turn budget) and staleness filed (#2977).
+- **Why:** Active theme "Weekend In, Not Out" (couples wellness + wearables), marketing_calendar #6. Per-run freshness cadence (Step 2c) — closes freshness tickets #2461 (tiles), #2462 (couples), #2469 (hero). First band-image gen (kit-ref) rejected on §2 (reproduced the retail box + baked text); regenerated clean with a Ferri product ref. #1785 (We-Vibe Moxie+) declined for placement: packaging-only primary, no clean sibling.
+- **Evidence:** run 294; sameness-diff surfaces vs #280 = couples-band imagery (asset d74c60f8) + hero/rail/tile copy (≥2 surfaces, one imagery); origin render verified (hero handle, both rail headings, band heading + new asset present, no daily-deal framing); health sweep 7/7 category/drop pages 200 + one H1 + FAQ + trust.
+
+### 2026-08-12 — Routine B — Harden the /social IG-arrival surface (in-stock pin, attributed primary link, fresh hero copy)
+- **What:** `app/routes/_layout.social.tsx` — (1) the pinned featured product now requires an in-stock match (falls through / hides rather than sending IG traffic to a dead PDP); (2) the primary featured PDP link now carries the social UTM via `pdpHref`, matching the recent grid, so IG→PDP is measured on the highest-intent click; (3) hero copy retired-tic fix ("point you at" → "find you"). No shell/section/schema change. Ambition-mandate concept wire `docs/homepage-team/concepts/first-tap.md` banked (design-only, not built).
+- **Why:** Strategy brief #5 names /social the priority IG→landing→PDP surface and "measure each hop honestly" as the month's job; the primary click was the one hop we could not attribute, and the pin had no stock guard (same failure class that pulled a live IG post on 08-09). "point you to/at" is retired by mission brief §8.
+- **Evidence:** run #282; brief #5 (IG live, GA4-blind); WebFetch egress blocked for competitors this run (self-capture only); voice gate PASS; typecheck/build/1788 tests green; PR link on the run row.
+
+### 2026-08-12 — Routine A — Hero + couples-rail copy refresh (Weekend In); #1785 declined
+- **What:** `singleton.emmaHero` copy fully refreshed (eyebrow/headline/body/pullQuote) for the held We-Vibe "Moving as One" couples-kit hero; couples rail (`emmaRail-augreset-couples-20260801`) eyebrow/heading refreshed and a pairing aside added. No product-selection or imagery change this run (named supply hold).
+- **Why:** Active theme "Weekend In, Not Out" (marketing_calendar #6). Per-run freshness cadence (Step 2c) plus a voice cleanup (removed the borderline-dare "make them beg" from the hero body). Suggestion #1785's fresh candidates declined — Moxie+ has a packaging-only primary with no clean sibling, Biird glass plug is off-theme for the couples/wearable week, Gush 2 is 404.
+- **Evidence:** run 280; sameness-diff surfaces Hero (copy) + Rails (copy); Sanity revisions Aq77mZkFsuxXAoKZNDfL22 (hero), Aq77mZkFsuxXAoKZNDfNHU (rail); health sweep GREEN on all 8 live pages.
+
+### 2026-08-11 — Routine A — Weekend-In-Not-Out theme refresh (completed #248's deferred slate)
+- **What:** Regenerated the "Discover You" promo image (fresh archetype-C product-forward scene: We-Vibe couples kit on a plum-soft ground with linen throw, warm daylight); rethemed promo copy off the August-Reset "give yourself the month" line to a Weekend-In staycation frame; refreshed both wired rail eyebrows + asides (couples rail "A weekend, the two of you"; on-ramp rail "Easy to start, under $30") in fresh dial-9 voice; refreshed the couples wayfinder tile aside. Hero held (We-Vibe kit, rotated yesterday). Flipped the "Weekend In, Not Out" calendar row planned→active.
+- **Why:** Monday changeover run #248 shipped only the hero + announcement and explicitly deferred the theme's art floor, rail re-copy, wayfinder/promo, and calendar flip to the next non-changeover run (today). Theme = "Weekend In, Not Out" (couples wellness + wearables, staycation).
+- **Evidence:** run 264. Sameness-diff surfaces vs #248: promo imagery (new asset), promo copy, both rail eyebrows/asides, couples tile aside (≥2 surfaces, one imagery). Step 5b health sweep GREEN (8/8 surfaces 200, one H1). Promo image gen attempt 1 (no-ref human-context) blackened by fal NSFW filter → retried with product ref (Kontext), passed.
+
+<!-- Newest entries appended above this line by each routine's changelog step. -->

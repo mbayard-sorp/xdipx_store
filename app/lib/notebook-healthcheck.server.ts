@@ -15,6 +15,7 @@
  */
 import { Sentry } from '~/lib/sentry.server'
 import { getBlogPostsForSitemap, getBlogCategories } from '~/lib/sanity.server'
+import { sweepStrandedBriefs, type StrandedBrief } from '~/lib/notebook-brief-sweep.server'
 
 const FETCH_TIMEOUT_MS = 12_000
 const MIN_BODY_BYTES = 1000
@@ -38,6 +39,10 @@ export interface NotebookHealthResult {
   message?: string
   /** Improvement-bus ticket ids filed for failing pages (0 = deduped/failed). */
   ticketsFiled?: number[]
+  /** seoContentBrief rows found stranded (queued/drafted with a live post). */
+  strandedBriefs?: StrandedBrief[]
+  /** Ticket ids filed for stranded briefs (0 = deduped/failed). */
+  strandedTicketsFiled?: number[]
 }
 
 function siteOrigin(): string {
@@ -202,9 +207,22 @@ export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
   ]
 
   const checks = await Promise.all(expectations.map(checkPage))
+
+  // Stranded-brief sweep: independent of page render health. It files its own
+  // P3 process-kind tickets and never flips the render verdict below (a
+  // stranded brief is queue hygiene, not a render outage), so it must not feed
+  // `healthy`/`hard` or the P1 issue/email path.
+  const sweep = await sweepStrandedBriefs()
+
   const healthy = checks.every((c) => c.ok)
   if (healthy) {
-    return { ok: true, checks, alerted: false }
+    return {
+      ok: true,
+      checks,
+      alerted: false,
+      strandedBriefs: sweep.stranded,
+      strandedTicketsFiled: sweep.ticketsFiled,
+    }
   }
 
   const failed = checks.filter((c) => !c.ok)
@@ -219,7 +237,13 @@ export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
     },
   )
 
-  const result: NotebookHealthResult = { ok: false, checks, alerted: true }
+  const result: NotebookHealthResult = {
+    ok: false,
+    checks,
+    alerted: true,
+    strandedBriefs: sweep.stranded,
+    strandedTicketsFiled: sweep.ticketsFiled,
+  }
 
   // Ticket each failing page onto the improvement bus. Same pattern as the
   // homepage and log detectors, at a lower priority: the Notebook is

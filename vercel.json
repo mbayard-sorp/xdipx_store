@@ -111,12 +111,20 @@
       "schedule": "0 13 * * *"
     },
     {
+      "path": "/cron/blocker-list",
+      "schedule": "30 13 * * *"
+    },
+    {
       "path": "/cron/release-engine",
       "schedule": "*/10 * * * *"
     },
     {
       "path": "/cron/outreach-inbox",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/cron/social-publish",
+      "schedule": "0 * * * *"
     }
   ]
 }

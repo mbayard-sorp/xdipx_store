@@ -318,6 +318,11 @@ export interface Product {
   mattersTags?:  string[]
   // v2 redesign — 9:16 card hero video
   heroVideo?:    HeroVideo
+  // Per-dimension sensation-dial readings (xdipx.sensation_dial_v2, legacy
+  // sensation_dial projected). Present only when the product carries the
+  // metafield; lets lean-pipeline surfaces (category cards) render a real
+  // dial instead of fabricating one.
+  sensationDialV2?: SensationDialV2
 }
 
 /**

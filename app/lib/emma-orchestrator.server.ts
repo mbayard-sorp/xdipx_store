@@ -30,7 +30,7 @@ import {
 } from '~/lib/claude.server'
 import { getDialRegistry, getDialTaxonomy, appendDialLabel, type DialRegistry, type DialTaxonomy } from '~/lib/dial-registry.server'
 import { getAskEmmaVocabulary, type AskEmmaVocabulary } from '~/lib/ask-emma-vocab.server'
-import { generateMoodImage } from '~/lib/imagen.server'
+import { generateImage } from '~/lib/generate-image.server'
 import { uploadMoodImageToShopifyFiles, type PairingCandidate } from '~/lib/shopify.server'
 import { getDefaultClient, loadAgentSdk, type LLMClient } from '~/lib/llm-client.server'
 import { SONNET } from './models.server'
@@ -492,9 +492,11 @@ export async function executeTool(
         return { ok: true, summary: 'moodImage skipped (EMMA_SKIP_IMAGE=1)' }
       }
       try {
-        const buffers = await generateMoodImage({
+        const { buffers } = await generateImage({
           categories: product.categories,
           count:      1,
+          feature:    'import-mood-images',
+          caller:     'emma-orchestrator',
         })
         const buf = buffers[0]
         if (!buf) return { ok: false, summary: 'no image buffer returned' }

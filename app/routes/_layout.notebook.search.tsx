@@ -23,8 +23,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const title = data?.q
-    ? `"${data.q}" — Search The Notebook | xdipx`
-    : 'Search — The Notebook | xdipx'
+    ? `"${data.q}" | Search The Notebook | xdipx`
+    : 'Search | The Notebook | xdipx'
 
   return [
     { title },
