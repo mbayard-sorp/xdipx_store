@@ -47,10 +47,10 @@
  * stops being work-in-progress.
  */
 
-import { and, eq, like, sql } from 'drizzle-orm'
+import { and, eq, inArray, like, sql } from 'drizzle-orm'
 
 import { db } from '~/lib/db.server'
-import { homepageTeamSuggestions } from '../../db/schema'
+import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
 import { getPullRequest } from '~/lib/github.server'
 import { autofileDedupeKey, fileTicketForOpenPr, transitionSuggestion } from '~/lib/team.server'
 
@@ -83,6 +83,45 @@ export async function autoFileTicketForPr(
     console.log(`${LOG} [dry-run] would file a ticket for PR #${pr.number} (${pr.headRef})`)
     return null
   }
+
+  // Ticket #3302. Two redundant-autofile guards. Both fail toward filing: this
+  // module is the safety net that keeps a ticket-less PR from stranding on the
+  // owner, so a guard that cannot decide must never suppress the ticket. A
+  // missed skip costs one redundant row R-DEV blocks; a missed file re-strands
+  // the PR on the owner's merge button, which is the failure this file exists
+  // to prevent.
+
+  // (b) A live or applied ticket already tracks this PR number, so QA already
+  // has it (or it already shipped). A second pr_open row just makes R-DEV claim
+  // and block it, burning a claim against its 5-per-pass cap. Observed on
+  // 2026-08-15 run 321 for PRs #654/#655, whose real tickets were already
+  // applied / pr_open.
+  try {
+    if (await prAlreadyTracked(pr.number)) {
+      console.log(
+        `${LOG} not filing PR #${pr.number}: already tracked by a pr_open/in_review/verified/applied ticket`,
+      )
+      return null
+    }
+  } catch (err) {
+    console.warn(`${LOG} tracked-ticket check failed for PR #${pr.number}; proceeding to file`, err)
+  }
+
+  // (a) The PR already merged. A pr_open ticket asking QA to gate an already
+  // landed PR is pure noise; a merged PR belongs to sweepOutOfBandMerges and its
+  // real applied ticket, not to this fallback. Protected-path PRs never reach
+  // here (the engine escalates them before the ticket check), so this does not
+  // change their escalation.
+  try {
+    const res = await getPullRequest(pr.number, 'release-engine')
+    if (res.ok && res.data.merged) {
+      console.log(`${LOG} not filing PR #${pr.number}: already merged, no pr_open ticket needed`)
+      return null
+    }
+  } catch (err) {
+    console.warn(`${LOG} merged-state check failed for PR #${pr.number}; proceeding to file`, err)
+  }
+
   try {
     const ticketId = await fileTicketForOpenPr({
       prNumber: pr.number,
@@ -181,6 +220,50 @@ export function prNumberFromAutofileKey(key: string | null | undefined): number 
   if (!/^\d+$/.test(raw)) return null
   const n = Number(raw)
   return Number.isSafeInteger(n) && n > 0 ? n : null
+}
+
+/**
+ * Ticket statuses that mean "QA already has this PR, or it already shipped".
+ * An autofile for a PR one of these already links is redundant work, so it is
+ * skipped (ticket #3302). `blocked` and `dismissed` are deliberately absent: a
+ * PR whose only tracker was killed may still need a fresh path to QA.
+ */
+const TRACKED_SKIP_STATUSES: string[] = ['pr_open', 'in_review', 'verified', 'applied']
+
+/**
+ * True when a suggestion in a tracked status already links `prNumber` through a
+ * pr-kind suggestion link. Mirrors `resolveTicketForPr`'s direct-link match,
+ * kept local rather than imported to avoid an import cycle with the protected
+ * release-engine module, which imports this file.
+ */
+async function prAlreadyTracked(prNumber: number): Promise<boolean> {
+  const rows = await db
+    .select({ ref: suggestionLinks.ref })
+    .from(suggestionLinks)
+    .innerJoin(homepageTeamSuggestions, eq(suggestionLinks.suggestionId, homepageTeamSuggestions.id))
+    .where(
+      and(
+        eq(suggestionLinks.kind, 'pr'),
+        inArray(homepageTeamSuggestions.status, TRACKED_SKIP_STATUSES),
+        sql`${suggestionLinks.ref} LIKE ${'%/pull/' + prNumber} OR ${suggestionLinks.ref} = ${'#' + prNumber}`,
+      ),
+    )
+    .limit(20)
+  // The LIKE is end-anchored, but re-parse to be certain a ref for /pull/4940
+  // is never counted as a match for PR 494.
+  return rows.some((r) => prNumberFromLinkRef(r.ref) === prNumber)
+}
+
+/**
+ * PR number out of a suggestion-link ref (`<url>/pull/N` or `#N`). A local pure
+ * copy of the release-engine parser; see prAlreadyTracked for why it is not
+ * imported.
+ */
+export function prNumberFromLinkRef(ref: string): number | null {
+  const m = /(?:\/pull\/|#)(\d{1,9})\b/.exec(ref)
+  if (!m || !m[1]) return null
+  const n = Number(m[1])
+  return Number.isInteger(n) && n > 0 ? n : null
 }
 
 /** Re-exported so callers building a key do not need to reach into
