@@ -11,6 +11,12 @@ import { sendDealLinkSMS } from './sms.ts'
 import { recordVoicemail } from './voicemail.ts'
 import { callQaTool } from './catalog.ts'
 import { generateEmmaOrderNote } from '../emma-note.ts'
+import {
+  DISCOVER_MOOD,
+  DISCOVER_EXPERIENCE,
+  DISCOVER_USE_CASE,
+  DISCOVER_FEATURES,
+} from '../discovery-vocab.ts'
 
 const MAX_ORDER_LOOKUPS_PER_CALL = 15
 
@@ -99,10 +105,10 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       properties: {
-        mood: { type: 'array', items: { type: 'string', enum: ['playful', 'romantic', 'luxurious', 'adventurous', 'relaxing'] }, description: 'Mood/vibe tags matching what the caller described.' },
-        experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Experience level if the caller mentioned it.' },
-        useCase: { type: 'array', items: { type: 'string', enum: ['solo', 'couples', 'date-night', 'gift', 'travel'] }, description: 'Use-case tags.' },
-        features: { type: 'array', items: { type: 'string', enum: ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] }, description: 'Feature tags the caller asked about.' },
+        mood: { type: 'array', items: { type: 'string', enum: [...DISCOVER_MOOD] }, description: 'Mood/vibe tags matching what the caller described.' },
+        experience: { type: 'string', enum: [...DISCOVER_EXPERIENCE], description: 'Experience level if the caller mentioned it.' },
+        useCase: { type: 'array', items: { type: 'string', enum: [...DISCOVER_USE_CASE] }, description: 'Use-case tags.' },
+        features: { type: 'array', items: { type: 'string', enum: [...DISCOVER_FEATURES] }, description: 'Feature tags the caller asked about.' },
         category: { type: 'string', enum: ['for-him', 'for-her', 'couples'], description: 'Audience filter, only when the caller said who it is for.' },
         priceMax: { type: 'number', description: 'Max price in dollars.' },
         limit: { type: 'number', description: '1–5, default 3. Keep low on phone.' },
