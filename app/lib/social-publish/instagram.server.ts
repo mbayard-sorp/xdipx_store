@@ -222,6 +222,38 @@ export const instagramPublisher: SocialPublisher = {
 }
 
 /**
+ * Is a media object we published still on the account?
+ *
+ * Three answers, not two, and the third is the important one. A post can vanish
+ * because Meta removed it (the signal the removal watcher exists to catch) or
+ * because the token expired, the app is rate limited, or the network failed. On
+ * an expired token EVERY lookup fails at once, and a watcher that read that as
+ * "the whole feed was removed" would step volume down to nothing over an env
+ * var. So an error that is not specifically "this object does not exist" comes
+ * back as `unknown` and the caller decides.
+ *
+ * Code 100 with subcode 33 is Meta's "object does not exist, or you lack
+ * permission to see it" and is what a deleted media returns. Permission loss
+ * would produce it too, which is precisely why the caller must confirm the
+ * token still works against another post before believing it.
+ */
+export async function getInstagramMediaState(
+  mediaId: string,
+): Promise<{ state: 'live' | 'gone' | 'unknown'; detail?: string }> {
+  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+  if (!token) return { state: 'unknown', detail: 'Instagram keys are not configured' }
+
+  const res = await igRequest(`/${mediaId}`, { method: 'GET', params: { fields: 'id' }, token })
+  if (res.ok) return { state: 'live' }
+
+  const { code, error_subcode: subcode } = res.error
+  if (code === 100 && (subcode === 33 || subcode === undefined)) {
+    return { state: 'gone', detail: describe(res.error) }
+  }
+  return { state: 'unknown', detail: describe(res.error) }
+}
+
+/**
  * Remaining API-published posts in the rolling 24h window (cap is 100).
  * Doubles as a cheap token liveness probe for the Social Studio.
  */

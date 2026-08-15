@@ -30,6 +30,7 @@ import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
 import { parseGateStamp } from './social-publish-approve.server'
+import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
 
 /**
  * Per-tick ceiling. A code constant, not a valve: there is no reason for the
@@ -69,6 +70,8 @@ export interface PublishTickResult {
   swept: number
   attempts: PublishAttempt[]
   publishedToday: number
+  /** What the removal watch saw this tick, when it ran. */
+  watch?: RemovalWatchResult | null
 }
 
 /**
@@ -121,6 +124,13 @@ export interface PublishTickDeps {
    * gate does the real lookup.
    */
   gateDeps?: { getAvailability?: (handle: string) => Promise<boolean | null> }
+  /**
+   * Looks at what is already live before this tick adds to it (ticket #2741).
+   *
+   * Defaults to the real watch. Tests pass a no-op, because a tick that reaches
+   * Instagram to check eight posts is not the unit under test here.
+   */
+  removalWatch?: () => Promise<RemovalWatchResult | null>
 }
 
 /** The live implementation. */
@@ -258,6 +268,22 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
 
   const swept = await repo.sweepAbandoned()
 
+  // Look at what is already live before adding to it (ticket #2741).
+  //
+  // Order matters and is the whole point of putting this here: a removal found
+  // at 14:00 stops the 14:00 publish, not the 15:00 one. Under autopublish
+  // "something already live looks wrong" is the only failure signal left, since
+  // nothing queues for a human to notice.
+  //
+  // A removal steps the drafting quota down and, on a second removal in the
+  // window, turns this valve off. Both writes land before `listEligible`, so a
+  // sweep that just turned the valve off does not then publish two more posts
+  // in the same tick.
+  const watch = await (deps.removalWatch ?? (() => runRemovalWatch()))()
+  if (watch?.valveTurnedOff) {
+    return { skipped: 'removal_pattern', swept, attempts: [], publishedToday: 0, watch }
+  }
+
   const publishedToday = await repo.countPublishedToday()
   const maxPerDay = await deps.maxPerDay()
   if (publishedToday >= maxPerDay) {
@@ -340,5 +366,5 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     })
   }
 
-  return { swept, attempts, publishedToday }
+  return { swept, attempts, publishedToday, watch }
 }
