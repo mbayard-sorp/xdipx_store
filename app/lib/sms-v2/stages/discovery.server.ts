@@ -175,8 +175,29 @@ function audienceToSearchCategory(
  */
 export function buildMultiResultProse(
   cards: Awaited<ReturnType<typeof searchForIvrWithDiagnostics>>['cards'],
+  channel: 'sms' | 'voice' | 'web' = 'sms',
 ): string {
   const capped = cards.slice(0, 3)
+  // #3218: voice reads a numbered "1. … 2. … 3. …" list aloud as chat formatting
+  // spoken on a call (the addendum wants short spoken turns, not enumerations —
+  // turn 1551 read "1. Prowler 2. Prowler Plus 3. Revo Extreme"). On voice, speak
+  // the options as one natural sentence with no numbers and no per-item link line.
+  // SMS/web keep the tappable numbered list with PDP links.
+  if (channel === 'voice') {
+    // Match formatPrice (upsell.server.ts): whole dollars read cleaner aloud as
+    // "$42" than "$42.00", and this keeps the voice price format consistent with
+    // the VOICE_TEMPLATES bank rather than emitting raw two-decimal literals.
+    const spokenPrice = (p: number) => (p === Math.floor(p) ? `$${p}` : `$${p.toFixed(2)}`)
+    const spoken = capped.map((c) => `${c.title} at ${spokenPrice(c.price)}`)
+    const joined =
+      spoken.length <= 1
+        ? (spoken[0] ?? '')
+        : `${spoken.slice(0, -1).join(', ')}, or ${spoken[spoken.length - 1]}`
+    return (
+      `A few options that fit what you described. ${joined}. ` +
+      `Which one sounds good, or tell me what would land better?`
+    )
+  }
   // conv-audit C7: emit ABSOLUTE https://xdipx.com/products/{handle} URLs (the
   // convention every other v2 stage follows; the web adapter relativizes them,
   // see adapters/web.server.ts) inside a Markdown link on its OWN line. On SMS,
@@ -389,12 +410,13 @@ export async function runSearchBranch(
     }
   }
 
-  // Multiple results: surface as numbered list, stay in DISCOVERY
+  // Multiple results: surface as a list, stay in DISCOVERY. Voice gets a natural
+  // spoken sentence; SMS/web get the tappable numbered list (#3218).
   if (diag.cards.length > 1) {
     return {
       stageOut: resolveTransition('DISCOVERY', 'DISCOVERY'),
       goalAchieved: false,
-      segments: [{ prose: buildMultiResultProse(diag.cards) }],
+      segments: [{ prose: buildMultiResultProse(diag.cards, ctx.channel ?? 'sms') }],
       stateWrites: baseWrites,
       telemetry: { ...baseTelemetry, inputTokens: 0, outputTokens: 0 },
     }
