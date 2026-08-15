@@ -1081,8 +1081,11 @@ function StillDecidingBand() {
           >
             Tell me what you're into, or what you're{' '}
             {/* Emphasis word is plum, not coral: doctrine §3 reserves coral for
-                action, so a coral emphasis word reads as a false affordance. */}
-            <em className="em">curious</em>{' '}
+                action, so a coral emphasis word reads as a false affordance.
+                .em-on-dark lifts the plum to ~6.75:1 against this bg-ink
+                section; the base .em plum only clears ~2.48:1, under the
+                doctrine large-display 3:1 contrast floor. */}
+            <em className="em em-on-dark">curious</em>{' '}
             about. Same thing.
           </h2>
           {/* "Show me", not "Find your fit →": the Meet Emma band above now
