@@ -190,6 +190,10 @@ describe('applyPublishGateVerdict', () => {
     }
     expect(writes[0]?.reviewStatus).toBe('needs_changes')
     expect(writes[0]?.feedback).toContain('stock-out')
+    // The stamp has to agree with the status beside it. Stamping BLOCK ("drop
+    // it") on a row that says needs_changes ("fix it") tells the drafter two
+    // different things about the same post.
+    expect(parseGateStamp(writes[0]?.feedback)?.verdict).toBe('REVISE')
   })
 
   it('carries the product handle into the stamp so publish time can re-check it', async () => {

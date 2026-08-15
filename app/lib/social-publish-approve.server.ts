@@ -365,7 +365,12 @@ export async function applyPublishGateVerdict(
       'needs_changes',
       formatGateStamp(
         {
-          verdict: 'BLOCK',
+          // REVISE, not BLOCK, and the two must agree with the status written
+          // beside them. Every deterministic block has a redraft that fixes it
+          // (swap the product, regenerate the asset, rewrite the line), which is
+          // what `needs_changes` means. Stamping BLOCK here would tell the
+          // drafter to drop a post the row is simultaneously asking it to fix.
+          verdict: 'REVISE',
           reviewer: input.reviewer,
           notes:
             `Gate returned PASS, deterministic checks refused it. ${summary}\n\n` +
