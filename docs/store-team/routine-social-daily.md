@@ -1,11 +1,15 @@
 # Routine — Social Drafts (social-media-manager)
 
-The playbook for the scheduled social routine. Entry agent: `social-media-manager`. **DRAFT-ONLY**:
-every post lands in `social_posts` as `status:'draft'`, `review_status:'pending_review'` for the
-owner to review in `/admin/socials` (the Social Studio). There is no live-posting step in this
-playbook, and none may be added except through §Posting posture below, which records the owner's
-2026-08-11 decision to stop being the bottleneck and the four things that must exist before the
-posture actually changes. Until they do, this routine is draft-only exactly as before.
+The playbook for the scheduled social routine. Entry agent: `social-media-manager`. **You draft; you
+never publish.** Every post you write lands in `social_posts` as `status:'draft'`,
+`review_status:'pending_review'`. What happens next is not yours: on Instagram the independent
+`social-publish-gate` decides (Step 6.5) and, when `instagram_autopublish_enabled` is on, the hourly
+publish job ships what it approved. On every other platform the owner still acts in `/admin/socials`.
+
+That separation is the design, not a formality. The drafter deciding what ships is the failure mode
+the gate was built to remove, so there is no live-posting step in this playbook and none may be
+added. §Posting posture below records the owner's 2026-08-11 decision to stop being the bottleneck
+and what replaced his click.
 
 This is the **internal review period**: the owner's decisions and written feedback on each draft
 are the team's training signal. Read them verbatim, rework what they ask for, and let the patterns
@@ -56,23 +60,35 @@ It is not a valve flip, because of one fact that is easy to miss: **nothing sets
 nothing ever becomes approved, so a publish job would find nothing to publish. Something has to fill
 that slot, and what fills it is an independent pre-publish gate, not an absence.
 
-**Today the posture is unchanged: draft-only.** Instagram drafts still land `pending_review` and the
-owner still publishes from `/admin/socials`. Do not behave as though autopublish is live. The posture
-changes only when all of the following are true, and the routine checks rather than assumes:
+**All four prerequisites now exist. The posture is decided by one valve.** They were:
 
-1. A social image-generation path exists, so posts stop carrying retired bare-SKU packshots. This is
-   a hard prerequisite: publishing non-compliant imagery unreviewed is strictly worse than publishing
-   nothing, and today it is a certainty rather than a risk.
-2. An **independent pre-publish gate** runs and is the thing that writes `approved`. It is not the
-   drafting agent grading its own homework, and it is not the voice gate, which reviews strings and
-   is structurally blind to imagery, live stock state, and repetition across posts.
-3. A publish job exists with a publish-time stock re-check, an image-provenance check, a daily
-   publish cap independent of the drafting quota, and its own kill switch.
-4. The owner can leave feedback on a **posted** row, so his stated loop can actually close.
+1. A social image-generation path, so posts stop carrying retired bare-SKU packshots.
+   **Built** — `scripts/gen-social-image.ts` (Step 5).
+2. An **independent pre-publish gate** that is the thing that writes `approved`. Not the drafting
+   agent grading its own homework, and not the voice gate, which reviews strings and is structurally
+   blind to imagery, live stock state, and repetition across posts.
+   **Built** — the `social-publish-gate` agent plus its deterministic half, run at Step 6.5 below.
+3. A publish job with a publish-time stock re-check, an image-provenance check, a daily publish cap
+   independent of the drafting quota, and its own kill switch.
+   **Built** — `/cron/social-publish`, hourly, behind `instagram_autopublish_enabled`.
+4. The owner can leave feedback on a **posted** row, so his stated loop can close.
+   **Built** — the live-post verdict in the Social Studio.
 
-Until then, drafting continues exactly as before and the run summary says plainly that posts are
-waiting on the owner. See `docs/store-team/instagram-campaigns.md` §7 for what is built and what is
-not.
+So the live question is no longer "what is missing" but "is the valve on", and the routine **reads
+it rather than assuming either answer**: `POST /api/team/social-post {"op":"config"}` at Step 2, and
+the Social tab of `/admin/homepage-team` is where the owner flips it.
+
+- **Valve OFF:** drafts land `pending_review`, the gate still runs at Step 6.5, and approved posts
+  wait for the owner's click in `/admin/socials`. Say plainly in the run summary that posts are
+  waiting on him, and how many.
+- **Valve ON:** the same drafts, the same gate, and the publish job takes them from there. Nothing
+  about drafting changes. Report drafted and published as two separate numbers, always.
+
+One consequence to hold onto, because it is the thing that makes an unattended feed survivable: the
+publish job refuses any row that does not carry a gate PASS stamp, including one the owner approved
+by hand. `approved` on its own is no longer a licence to publish. If you see a run reporting
+`no_gate_verdict`, that is a row nothing adversarial read, and the fix is to gate it, never to
+approve it again.
 
 **What never changes with the posture.** The voice gate, the platform-policy gate, the stock gate,
 and the campaign rules all still bind. Removing the owner's approval click removes a human check; it
@@ -430,6 +446,44 @@ curl -s -X POST "$BASE_URL/api/team/event" \
 ```
 
 Note the field is `summary`, not `message` — this is `POST /api/team/event`, not an op on `/api/team/run`.
+
+## Step 6.5 — Publish gate (every Instagram draft, no exceptions)
+
+Step 4a asked whether the words are right. This asks whether the **finished post** should reach a
+public, rented, loseable account. They are different questions and a draft can sail through one
+while failing the other: a flawless register-4 Emma line is exactly the caption that gets a post
+pulled for the image beside it.
+
+**Spawn `social-publish-gate` as a fresh subagent, one per draft you wrote this run.** Fresh is
+load-bearing. The gate is adversarial by design and explicitly must not read your reasoning about
+why the post is compliant, because that reasoning is the thing under test. Handing it your context
+turns an independent check into a second opinion from yourself.
+
+Give it only the post id. It gathers its own inputs (the caption as it will publish, every media URL
+opened and actually looked at, the charter as it reads today, the ads policy, the campaign's visual
+scheme, and the last 10 to 14 live posts) and posts its own verdict with
+`POST /api/team/social-post {"op":"gate", ...}`. Its definition carries the call shape; do not make
+it for it, and never post a verdict on its behalf.
+
+What you do with the outcome:
+
+- **PASS** — the row is `approved` and, when the valve is on, the publish job takes it from there.
+- **REVISE** — `needs_changes` with the specific fix. It is next run's rework (Step 2.5), not
+  something to re-argue this run.
+- **BLOCK** — `rejected`. Drop it. Do not soften it and resubmit; that is the failure mode the gate
+  exists to catch.
+- **HOLD** — stays `pending_review` for the owner. Name it in the run summary, because a HOLD spends
+  his attention and he asked not to be spent.
+- **422 with findings** — the gate PASSed something the deterministic checks refused, and the row
+  went back for a redraft. Report the findings verbatim. Two of these in a week is a suggestion about
+  the gate, not a fluke.
+
+**If the gate cannot be invoked this run, you have drafts that cannot publish, and that is the
+correct outcome.** Do not self-certify, do not approve anything, and do not treat a voice-gate PASS
+as a substitute: it never opens the images, has no live stock read, and sees one draft at a time. Say
+in the run summary that the gate was unreachable and how many drafts are waiting on it. This is the
+same fail-closed rule as Step 4a, and it matters more here, because the thing on the other side of
+this gate is unattended.
 
 ## Step 7 — Retro (the training loop)
 
