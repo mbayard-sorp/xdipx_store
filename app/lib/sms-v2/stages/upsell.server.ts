@@ -221,6 +221,9 @@ export async function executeUpsellStage(
   // garbage. The voice adapter's permission gate picks up productCard.pdpUrl
   // separately and handles the link-text permission flow on the NEXT turn.
   const channel = ctx.channel ?? 'sms'
+  // #3218: key the closer to this session's pitch ordinal (how many products
+  // already pitched) so two different accessories in one conversation never get
+  // the identical closer sentence.
   const prose = pickUpsellTemplate(
     {
       name: accessory.title,
@@ -228,6 +231,7 @@ export async function executeUpsellStage(
       pdpUrl,
     },
     channel,
+    pitchedLog.length,
   )
 
   // Step 6: return with stageOut: 'UPSELL' — wait for accept/decline next turn
