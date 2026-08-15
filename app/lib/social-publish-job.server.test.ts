@@ -58,6 +58,16 @@ function fakeRepo(rows: PostRow[], over: Partial<PublishRepo> = {}) {
   return { repo, calls }
 }
 
+/**
+ * The tick with the removal watch stubbed out.
+ *
+ * The watch reaches Instagram to check what is already live (ticket #2741) and
+ * has its own tests; a publish case that also made eight Graph calls would be
+ * testing two things and hanging on one of them.
+ */
+const tick = (opts: Parameters<typeof runSocialPublishTick>[0]) =>
+  runSocialPublishTick({ removalWatch: async () => null, ...opts })
+
 const enabled = async () => true
 const cap = (n: number) => async () => n
 const publishOk = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_1' }))
@@ -66,7 +76,7 @@ describe('the valve', () => {
   it('does nothing at all when off, which is how it ships', async () => {
     const { repo, calls } = fakeRepo([post()])
     const publish = vi.fn()
-    const r = await runSocialPublishTick({
+    const r = await tick({
       isEnabled: async () => false, maxPerDay: cap(3), publish, repo,
     })
     expect(r.skipped).toBe('valve_off')
@@ -80,7 +90,7 @@ describe('caps', () => {
   it('stops at the daily cap', async () => {
     const { repo } = fakeRepo([post()], { countPublishedToday: async () => 3 })
     const publish = vi.fn()
-    const r = await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
     expect(r.skipped).toBe('daily_cap')
     expect(publish).not.toHaveBeenCalled()
   })
@@ -92,7 +102,7 @@ describe('caps', () => {
       countPublishedToday: async () => 2,
       listEligible: async (limit) => { seen.push(limit); return [] },
     })
-    await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
     expect(seen).toEqual([1])
   })
 
@@ -101,7 +111,7 @@ describe('caps', () => {
     const { repo } = fakeRepo([], {
       listEligible: async (limit) => { seen.push(limit); return [] },
     })
-    await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(50), publish: publishOk, repo })
+    await tick({ isEnabled: enabled, maxPerDay: cap(50), publish: publishOk, repo })
     expect(seen).toEqual([MAX_PER_TICK])
   })
 })
@@ -110,7 +120,7 @@ describe('claiming', () => {
   it('skips a row another tick already took, instead of publishing it twice', async () => {
     const { repo } = fakeRepo([post()], { claim: async () => null })
     const publish = vi.fn()
-    const r = await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'claim_lost' }])
     expect(publish).not.toHaveBeenCalled()
   })
@@ -120,7 +130,7 @@ describe('the gate runs at publish time', () => {
   it('does not publish a post carrying a retired packshot', async () => {
     const { repo, calls } = fakeRepo([post({ mediaUrls: [`${CDN}/77292A.jpg`] })])
     const publish = vi.fn()
-    const r = await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
     expect(publish).not.toHaveBeenCalled()
     expect(r.attempts[0]?.outcome).toBe('blocked_by_gate')
     // Returned to the queue with a reason, not silently dropped.
@@ -131,7 +141,7 @@ describe('the gate runs at publish time', () => {
     // The 2026-08-09 incident: approved when in stock, published when not.
     const { repo, calls } = fakeRepo([post()])
     const publish = vi.fn()
-    await runSocialPublishTick({
+    await tick({
       isEnabled: enabled, maxPerDay: cap(3), publish, repo,
       productHandleFor: async () => 'gone-oos',
       gateDeps: { getAvailability: async () => false },
@@ -146,7 +156,7 @@ describe('the gate runs at publish time', () => {
     // autopublish is precisely the thing that must not go out.
     const { repo, calls } = fakeRepo([post({ feedback: null })])
     const publish = vi.fn()
-    const r = await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
     expect(publish).not.toHaveBeenCalled()
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'no_gate_verdict' }])
     expect(calls.needsChanges[0]?.feedback).toContain('social-publish-gate')
@@ -156,7 +166,7 @@ describe('the gate runs at publish time', () => {
     const held = '[publish-gate HOLD by social-publish-gate on 2026-08-12, product: none]\nNovel situation.'
     const { repo, calls } = fakeRepo([post({ feedback: held })])
     const publish = vi.fn()
-    await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
     expect(publish).not.toHaveBeenCalled()
     expect(calls.needsChanges).toHaveLength(1)
   })
@@ -169,7 +179,7 @@ describe('the gate runs at publish time', () => {
     const { repo, calls } = fakeRepo([post({ feedback: stamped })])
     const publish = vi.fn()
     const seen: string[] = []
-    await runSocialPublishTick({
+    await tick({
       isEnabled: enabled, maxPerDay: cap(3), publish, repo,
       gateDeps: { getAvailability: async (h) => { seen.push(h); return false } },
     })
@@ -180,7 +190,7 @@ describe('the gate runs at publish time', () => {
 
   it('publishes a clean post', async () => {
     const { repo, calls } = fakeRepo([post()])
-    const r = await runSocialPublishTick({
+    const r = await tick({
       isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
     })
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
@@ -191,7 +201,7 @@ describe('the gate runs at publish time', () => {
 describe('failure handling', () => {
   it('returns a first failure to the queue rather than giving up', async () => {
     const { repo, calls } = fakeRepo([post({ errorMessage: null })])
-    const r = await runSocialPublishTick({
+    const r = await tick({
       isEnabled: enabled, maxPerDay: cap(3), repo,
       publish: async () => ({ ok: false, detail: 'Meta 500' }),
     })
@@ -202,7 +212,7 @@ describe('failure handling', () => {
   it('goes terminal on the second failure instead of retrying forever', async () => {
     // A row already carrying an error message is on its second attempt.
     const { repo, calls } = fakeRepo([post({ errorMessage: 'Meta 500' })])
-    const r = await runSocialPublishTick({
+    const r = await tick({
       isEnabled: enabled, maxPerDay: cap(3), repo,
       publish: async () => ({ ok: false, detail: 'Meta 500 again' }),
     })
@@ -219,8 +229,37 @@ describe('the owner edit wins', () => {
       editedText: 'his rewrite, $19.99 today only',
     })])
     const publish = vi.fn()
-    const r = await runSocialPublishTick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
     expect(publish).not.toHaveBeenCalled()
     expect(r.attempts[0]?.findings?.map(f => f.check)).toContain('sale-price')
+  })
+})
+
+describe('the removal watch guards the tick', () => {
+  it('does not publish at all when the watch just turned the valve off', async () => {
+    // Order matters: the watch runs before listEligible, so a tick that has
+    // just stopped the channel does not then add two more posts to it.
+    const { repo } = fakeRepo([post()])
+    const publish = vi.fn()
+    const r = await runSocialPublishTick({
+      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      removalWatch: async () => ({
+        checked: 3, removed: [17], removalsInWindow: 2, unknown: 0, valveTurnedOff: true,
+      }),
+    })
+    expect(r.skipped).toBe('removal_pattern')
+    expect(publish).not.toHaveBeenCalled()
+  })
+
+  it('publishes normally after a single removal, which only steps volume down', async () => {
+    const { repo } = fakeRepo([post()])
+    const r = await runSocialPublishTick({
+      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      removalWatch: async () => ({
+        checked: 3, removed: [17], removalsInWindow: 1, unknown: 0, frequencySteppedTo: 1,
+      }),
+    })
+    expect(r.attempts[0]?.outcome).toBe('published')
+    expect(r.watch?.frequencySteppedTo).toBe(1)
   })
 })

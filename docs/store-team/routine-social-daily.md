@@ -145,9 +145,20 @@ down. The trigger moves from "the queue is getting long" to "something already l
 which is the only failure mode left once nothing can be caught before the fact. Read the last 3 days
 of `status:'posted'` Instagram rows and check three things:
 
-1. **A post was removed or the platform flagged it.** Stop drafting new Instagram posts entirely,
-   step volume down one tier per the `docs/ads-policy.md` escalation ladder, end the active campaign,
-   and file the incident. One post is never worth the account.
+1. **A post was removed or the platform flagged it.** A row at `status:'deleted'` is one Instagram
+   no longer has. **The detection is automated now** (ticket #2741): the publish tick checks the
+   eight most recent live posts each hour, marks anything Meta has taken down, steps
+   `social_freq_instagram` down by half, and on a second removal inside 14 days turns
+   `instagram_autopublish_enabled` off and files an owner blocker. So the quota you read at Step 2
+   may already be lower than yesterday's, and that is the system working, not a misconfiguration:
+   **never step it back up to "fix" it.** What is still yours: end the active campaign, and say in
+   the run summary what was removed and what you changed because of it. One post is never worth the
+   account.
+
+   One honest limit. The watcher sees a post *disappear*; it cannot tell a Meta takedown from the
+   owner deleting a post he did not like, and it treats both as a strike. That errs toward caution
+   on purpose. If a removal was his own doing, say so in the summary rather than reporting a
+   platform action that did not happen.
 2. **Owner feedback on a live post reads as a stop or a correction.** Throttle to one draft and
    address that specific complaint before anything else ships.
 3. **Neither fired, but a required gate cannot be satisfied cleanly this run** (no voice PASS, no
