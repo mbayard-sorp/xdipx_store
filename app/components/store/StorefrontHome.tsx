@@ -219,7 +219,10 @@ function Hero({
               className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink md:text-[4.4rem]"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
             >
-              {emmaHero.headline}
+              {/* A Sanity-driven headline gets the same one-word plum emphasis as
+                  the fallback below (doctrine §2). emphasisWord picks the word;
+                  unset falls back to italicizing the last word. */}
+              <EmphasizedHeading text={emmaHero.headline} emphasis={emmaHero.emphasisWord} />
             </h1>
           ) : (
             <h1
@@ -417,7 +420,7 @@ export function emphasisParts(text: string, emphasis: string): { before: string;
     `emphasis` is provided but not actually present in `text`, renders the
     heading plain -- no <em> is appended, so a mismatched Sanity emphasis
     field can never garble the published heading. */
-function EmphasizedHeading({ text, emphasis }: { text: string; emphasis?: string }) {
+function EmphasizedHeading({ text, emphasis }: { text: string; emphasis?: string | undefined }) {
   const trimmed = text.trim()
   if (emphasis) {
     const parts = emphasisParts(trimmed, emphasis)
@@ -1077,9 +1080,9 @@ function StillDecidingBand() {
             style={DISPLAY}
           >
             Tell me what you're into, or what you're{' '}
-            <em className="not-italic" style={{ fontStyle: 'italic', color: 'var(--color-coral-2)' }}>
-              curious
-            </em>{' '}
+            {/* Emphasis word is plum, not coral: doctrine §3 reserves coral for
+                action, so a coral emphasis word reads as a false affordance. */}
+            <em className="em">curious</em>{' '}
             about. Same thing.
           </h2>
           {/* "Show me", not "Find your fit →": the Meet Emma band above now

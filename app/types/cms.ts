@@ -502,6 +502,11 @@ export interface EmmaHeroSettings {
   heroVariant?: EmmaHeroVariant
   eyebrow?: string
   headline?: string
+  // One word within `headline` to italicize in the plum emphasis style (doctrine
+  // §2, one-emphasis-word treatment). Merged in from the additive
+  // singleton.emmaHeroStorefront doc by getEmmaHeroSettings(). Unset, or a word
+  // not present in the headline, falls back to italicizing the last word.
+  emphasisWord?: string
   body?: string
   aside?: string
   pullQuote?: string

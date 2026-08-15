@@ -12,6 +12,13 @@ export default {
   __experimental_actions: ['update', 'publish'], // singleton, no create/delete
   fields: [
     {
+      name: 'emphasisWord',
+      title: 'Headline emphasis word',
+      type: 'string',
+      description:
+        'One word from the hero headline to italicize in the plum emphasis style (doctrine §2). Must appear verbatim in the headline. Leave unset to italicize the last word by default.',
+    },
+    {
       name: 'primaryCtaLabel',
       title: 'Primary CTA label',
       type: 'string',
