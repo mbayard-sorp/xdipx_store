@@ -2,7 +2,8 @@
  * POST /api/team/social-post — DRAFT-ONLY social post writes.
  *
  *   { op: 'draft', platform, postType?, tweetText, mediaUrls?, dealHistoryId?,
- *     scheduledFor?, reworkedFrom? } -> { id }
+ *     scheduledFor?, reworkedFrom?,
+ *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id }
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
  *   { op: 'config' } -> { frequencies, autopostValve }
  *
@@ -12,6 +13,14 @@
  * and no import of twitter.server.ts — graduating to autoposting means
  * flipping `social_team_autopost` AND `X_AUTO_POST_ENABLED` and building that
  * path deliberately, not flipping a payload field.
+ *
+ * The `draft` op FAILS CLOSED on the voice gate (ticket #3208). Because this is
+ * the only path a draft reaches pending_review, the mandatory Step 4a
+ * emma-empathy-reviewer verdict is required in the payload as `voiceGate` and a
+ * missing or non-PASS verdict is a 400 — the draft is not created. If the voice
+ * gate could not run, the routine has no PASS to send and cannot draft, which is
+ * exactly the required behaviour: a draft never enters the review queue without a
+ * real voice-gate PASS asserted for it.
  *
  * Review state (approve / needs_changes / reject + feedback) is owner-only via
  * the /admin/socials action — there is no op here to write it. The agent READS
@@ -30,6 +39,7 @@ import {
   VALVE_KEYS,
 } from '~/lib/team.server'
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
+import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -46,6 +56,12 @@ export async function action({ request }: ActionFunctionArgs) {
     if (b['scheduledFor'] !== undefined &&
         (typeof b['scheduledFor'] !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b['scheduledFor']))) {
       return new Response('Bad Request: scheduledFor must be YYYY-MM-DD', { status: 400 })
+    }
+    // Fail-closed voice gate (ticket #3208): no PASS verdict, no draft. This is the
+    // only path to pending_review, so the mandatory Step 4a gate is enforced here.
+    const gate = parseVoiceGateVerdict(b['voiceGate'])
+    if (!gate.ok) {
+      return new Response(gate.error, { status: gate.status })
     }
     const mediaUrls = Array.isArray(b['mediaUrls'])
       ? (b['mediaUrls'] as unknown[]).filter((u): u is string => typeof u === 'string')

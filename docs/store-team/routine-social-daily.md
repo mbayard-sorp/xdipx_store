@@ -256,6 +256,14 @@ draft. Gate Instagram/TikTok/X drafts against the **social addendum**, LinkedIn 
 **LinkedIn addendum** (brand byline, industry-first, professional register). Neither lane is gated
 against the owned-channel product-copy register.
 
+This gate is enforced at the write, not on the honour system (ticket #3208). Step 6's `draft` op
+**requires** a `voiceGate` verdict `{ verdict, reviewer }`, and the server refuses (400, no row
+written) unless the verdict is a `PASS` from a named reviewer. So a draft cannot reach
+`pending_review` without a real voice-gate PASS asserted for it, and **if `emma-empathy-reviewer`
+cannot be invoked this run, you cannot draft** — you have no PASS to send. Do not substitute a
+self-check: report the gate as unreachable and draft nothing, exactly as the fail-closed rule
+requires.
+
 **4b — Platform-policy gate.** Self-check every draft against `docs/ads-policy.md` §Organic social
 and §Creative, and record the verdict in the draft's event summary. Any single "yes" is a BLOCK,
 and a blocked draft is rewritten or dropped, never softened until it squeaks past:
@@ -402,10 +410,15 @@ requesting, and only when the brief's numbers genuinely benefit from one.
 
 ## Step 6 — Write drafts
 
+The `voiceGate` field is **mandatory** (Step 4a, ticket #3208): pass the real `emma-empathy-reviewer`
+verdict for this exact caption. `verdict` must be `PASS` and `reviewer` names the gate that produced
+it; anything else (a missing verdict, a `REVISE`/`BLOCK`, or a gate that could not run) returns 400
+and writes no row.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>}'
+  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 One `event` per draft (`eventType:'step'`, `phase:'draft'`):
