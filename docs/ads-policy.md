@@ -11,7 +11,8 @@ API rejects proposals without one). The creative rules in §Creative apply to **
 
 Policies drift. Last verified **2026-07** against the platform sources listed at the bottom, except
 the Google sections (platform matrix row, §Google network eligibility, §Merchant Center), which were
-re-verified **2026-08-08**. If a proposal hinges on a policy detail, re-verify against the live
+re-verified **2026-08-08**, and §Meta Shops, which was added **2026-08-15** from the store's own
+live channel state. If a proposal hinges on a policy detail, re-verify against the live
 policy page that run and cite it in the `policyCheck`.
 
 ---
@@ -90,7 +91,7 @@ Explore or Reels distribution and invisibility under default Sensitive Content C
 
 | Platform | Organic posture | Hard limits | Risk |
 |---|---|---|---|
-| **Instagram / Facebook** | Editorial and educational only. The account is a publication; commerce lives at post → profile → link in bio → site. Adult products are barred from Instagram Shopping and in-app commerce entirely. | No sale attempt in the post (no price, discount, promo code, or shop CTA), no describing what a product does to a body, no product in hand or on a body. | **High.** Enforcement is account-level and retroactive; repeat strikes disable the account with little recourse. Appeal every removal. |
+| **Instagram / Facebook** | Editorial and educational only. The account is a publication; commerce lives at post → profile → link in bio → site. A Shops surface also exists and is live, see §Meta Shops; it is governed by Meta's Commerce Policies rather than by this row, and it loosens nothing here. | No sale attempt in the post (no price, discount, promo code, or shop CTA), no describing what a product does to a body, no product in hand or on a body. | **High.** Enforcement is account-level and retroactive; repeat strikes disable the account with little recourse. Appeal every removal. |
 | **TikTok** | Same posture as Instagram, applied harder — TikTok moderates the category more aggressively than Meta. | As above. Treat any borderline draft as a no. | **High.** |
 | **X** | The one genuinely permissive organic surface. X's adult-content policy allows the category; posts it covers must be labeled per X's own rules. | Still no explicit creative and no porn-adjacent aesthetics per §Creative. Paid remains prohibited. | **Medium.** |
 | **LinkedIn** | Industry authority only, no products (LinkedIn addendum, `docs/emma-voice.md`). | No product imagery, no store links, no promo codes. | **Low** when the addendum is followed. |
@@ -103,6 +104,49 @@ the draft.
 
 **Account hygiene.** Assume the account is loseable: push followers to email and SMS relentlessly,
 keep the audience somewhere we own, and never make platform reach load-bearing for revenue.
+
+## Meta Shops (Facebook and Instagram shops)
+
+**Correction, 2026-08-15.** The §Organic social table previously stated that adult products are
+barred from Instagram Shopping and in-app commerce entirely. That is not what this store's account
+shows, and the sentence has been removed. Anything written against it should be re-checked.
+
+The Shopify catalog is connected to Meta catalog `1551461513373481` through the Facebook & Instagram
+sales channel. Both the Facebook shop and the Instagram shop report **Active**. Meta reviews each
+product against its **Commerce Policies**, a third rulebook distinct from the ad policies in
+§Platform matrix and the community standards in §Organic social. A verdict on one says nothing about
+the others.
+
+Measured 2026-08-15 on the channel overview in Shopify admin:
+
+| Verdict | Products |
+|---|---|
+| Approved | 232 |
+| Rejected | 418 |
+| Has issues | 1 |
+
+651 of the 4,691 products published to the channel carried a verdict at that point; the rest had
+none yet. The rejected set spans every category the store sells, lubricant and condoms included, so
+a rejection is not evidence that a product is unusually explicit.
+
+What follows from this:
+
+- **Approved products can appear in the shops. Rejected ones cannot.** Meta's diagnostic scopes the
+  rejection to `mini_shops`, which is the shops surface, not ad delivery and not organic reach.
+- **Product tagging is a separate permission the store does not have.** Tagging a product in a post
+  requires a Facebook Login for Business token carrying `instagram_shopping_tag_products`. The
+  store's current Instagram token is an Instagram Login token and cannot read the catalog or tag
+  products, verified 2026-08-15. No post can carry a product tag today.
+- **Approval is not a licence and rejection is not a ban.** Commerce review judges a catalog item;
+  community standards judge a post. Never treat an approved product as permission to post something
+  §Organic social forbids, and never treat a rejected product as ineligible to appear in an
+  editorial post. Draft product selection is never filtered on catalog approval status
+  (`docs/store-team/routine-social-daily.md` Step 2.7).
+- **Do not hand-delete rejected items in Commerce Manager.** The catalog's only data source is the
+  Shopify partner integration, so deletions are re-created on the next sync. Unpublish from the
+  Facebook & Instagram channel in Shopify instead.
+
+Re-verify the counts before citing them. They move as Meta works through the review queue.
 
 ## Creative rules (paid AND organic)
 
