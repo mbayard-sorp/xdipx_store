@@ -1,6 +1,50 @@
 # Google Ads: first campaign launch plan
 
-Status: **proposed, awaiting owner sign-off.** Written 2026-08-08 from an `/all-hands` convening
+> # HELD BY THE OWNER, 2026-08-15
+>
+> **Owner direction, verbatim: "fix the AOV and CVR first, hold the ads."**
+>
+> This is a deliberate decision made *with* the numbers in §4, not a deferral for lack of a plan.
+> The plan below is complete and correct. It is held because the store cannot yet convert traffic
+> profitably, and buying traffic into a funnel that converts at 0.32% on a $26.47 AOV converts a
+> small problem into an expensive one.
+>
+> **Do not propose, launch, or re-litigate a Google Ads campaign while this hold stands.**
+> `ads-manager` reads this file: treat the hold as binding, and do not write `ad_campaigns`
+> proposals for Google against it. Recording the reasoning in an event is fine.
+>
+> ## What lifts the hold
+>
+> The hold lifts when **both** are true, measured rather than estimated:
+>
+> 1. **AOV at or above $45**, over at least 10 real orders. At $45 and a 37.3% contribution margin,
+>    break-even CPA is ~$16.80, which needs a ~5.9% CVR at a $1.00 CPC. That is reachable on
+>    model-name search intent. At today's $26.47 it needs 10.6%, which is not reachable by anyone.
+> 2. **Site-wide CVR at or above 1.5%**, sustained over 4 weeks. Today it is 0.32%.
+>
+> A third condition is a build, not a metric, and it gates the *first click* rather than the hold:
+> ticket #3422 (the gclid last hop) must ship before any paid spend, or the campaign cannot be
+> measured no matter how good the funnel is by then.
+>
+> **What is NOT a reason to lift the hold:** an approved proposal sitting in `ad_campaigns`, a
+> competitor being seen advertising, a slow traffic week, or the plan looking ready. The two numbers
+> above are the gate.
+>
+> ## What continues while held
+>
+> Everything with a long lead time that costs nothing to start, so the hold is not also a delay:
+>
+> - **Billing and advertiser identity verification** (checklist steps 3 and 4). These take 2-5 days
+>   and weeks respectively on a cold account, and starting the clock now costs nothing.
+> - **Ticket #3422**, the gclid last hop. It is the long pole on the measurement side.
+> - **Ticket #3425**, the feed shipping misrepresentation. It gates Merchant Center independently.
+> - **Keyword Planner** (checklist step 8), once billing clears. 20 minutes, and it replaces this
+>   document's guessed $1.20 CPC with real numbers that would change §4's arithmetic.
+>
+> The AOV and CVR work itself is tracked separately; see the tickets referenced from
+> `docs/store-team/mission-brief.md`.
+
+Status: **HELD (see above).** Written 2026-08-08 from an `/all-hands` convening
 (`ads-manager`, `homepage-cro`, `tech-architect`). **Revised 2026-08-15** by a second `/all-hands`
 convening after the 8/13-8/14 target slipped with nothing executed. Nothing here has been executed.
 

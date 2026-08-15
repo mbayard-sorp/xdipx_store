@@ -22,6 +22,15 @@ and every touchpoint must be comfortable to receive, open, and share.
   not in an ad, not in a social draft. MAP<MSRP uses MAP as the floor.
 - **Ad-platform policy is survival.** `docs/ads-policy.md` binds the ads team and the creative rules
   bind organic social too. One careless campaign can kill the ad account.
+- **PAID ACQUISITION IS HELD (owner direction, 2026-08-15): "fix the AOV and CVR first, hold the
+  ads."** No team proposes, plans, or launches paid spend on any platform while this stands. This is
+  not a policy hold and not a lack of a plan; `docs/store-team/google-ads-launch-plan.md` is complete
+  and carries the full reasoning and the unhold criteria. It is an economics hold: the store converts
+  at **0.32%** on a **$26.47** AOV, so break-even needs a 10.6% conversion rate, which nobody
+  achieves. **The hold lifts only when AOV >= $45 over 10+ real orders AND site CVR >= 1.5% over 4
+  weeks.** Until then, acquisition effort goes to owned and earned channels (SEO, AEO, email,
+  outreach, organic social), which is where it was already strongest. `ads-manager` may still run its
+  retro and research, and should record the hold rather than writing proposals against it.
 - **The design doctrine gates ALL visual output.** Any run that produces or places imagery,
   graphics, or visual layout loads `docs/design-doctrine.md` first — its §4 imagery archetypes
   (with the coral-soft/plum-soft/paper ground lock) and §6 proof & trust components are
@@ -38,7 +47,7 @@ and every touchpoint must be comfortable to receive, open, and share.
 | Team | Valve state | What the team MAY do | What requires the owner |
 |---|---|---|---|
 | social | draft-only | write `social_posts` rows `status:'draft'` | posting anything, flipping any posting valve |
-| ads | propose-only | write `ad_campaigns` proposals with policy checks | approving, launching, any platform write, any spend |
+| ads | **HELD** (was propose-only) | research and retro only; record the hold. **No new proposals while held**, see §2 | approving, launching, any platform write, any spend, and lifting the hold |
 | email | plan-only | file campaign briefs as suggestions | executing in Klaviyo |
 | content | valve-gated publish | draft Sanity `blogPost` docs (`status:'draft'`); publish live only on a voice-gate PASS while `content_team_autopublish` is on | flipping `content_team_enabled` or `content_team_autopublish`; publishing anything that did not PASS the voice gate |
 | strategy | advisory | publish the brief, file/route suggestions | acting on any of it |

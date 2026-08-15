@@ -1,7 +1,13 @@
 # Google Ads: approved copy bank
 
-Status: **drafted, awaiting owner sign-off.** Written 2026-08-15 from an `/all-hands` convening
+Status: **drafted and shelved.** Written 2026-08-15 from an `/all-hands` convening
 (`emma-copywriter`, verified against the charter by this session).
+
+**Paid acquisition is held** (owner direction 2026-08-15, "fix the AOV and CVR first, hold the
+ads"). This bank does not expire with the hold: the copy is register-correct and length-checked, and
+it is ready the day the hold lifts. Re-verify only two things before use, because both drift:
+the trust claims against `app/lib/faq-content.ts`, and the character counts if any line is edited.
+See `docs/store-team/google-ads-launch-plan.md` for the unhold criteria.
 
 `docs/emma-voice.md` and `docs/ads-policy.md` are binding and outrank this document.
 `docs/store-team/google-ads-launch-plan.md` owns campaign structure; this file owns words.
