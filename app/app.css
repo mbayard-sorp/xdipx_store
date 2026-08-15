@@ -44,6 +44,7 @@
   --color-plum:         #7A2BB8;
   --color-plum-2:       #5B1F8A;
   --color-plum-soft:    #F3E8FB;
+  --color-plum-on-dark: #B98BDE;       /* plum emphasis on ink grounds — see .em-on-dark */
   --color-sage:         #7C8F78;
 
   /* ─── Legacy v2 aliases — mapped onto the new palette so existing
@@ -106,6 +107,14 @@
 em.brand {
   font-style: italic;
   color: var(--color-plum);
+}
+
+/* Plum emphasis tuned for dark (bg-ink) grounds. The base .em plum (#7A2BB8)
+   clears only ~2.48:1 on #1A1418, below the doctrine large-display 3:1 floor;
+   this lighter tint of the same plum hue measures ~6.75:1 while still reading
+   as plum. Add alongside .em on any emphasis word placed on an ink section. */
+.em-on-dark {
+  color: var(--color-plum-on-dark);
 }
 
 /* Coral hairline link — Motif 02. "see all", "shop the deal", any anchor
