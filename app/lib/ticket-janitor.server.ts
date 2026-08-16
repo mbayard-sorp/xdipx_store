@@ -20,6 +20,27 @@
  * The reconcile step writes ONLY `suggestion_links` rows (pr-link `state`
  * refresh when GitHub disagrees). It never transitions a ticket: status moves
  * stay with the transition map in team.server.ts and its actors.
+ *
+ * Two later additions live here for the same non-protected-path reason:
+ *
+ * `supersededApproved` (tickets #3349, #3432, #253) flags an approved `code`
+ * ticket whose ask already shipped, so R-DEV stops burning a claim to
+ * re-diagnose it. It only ever FLAGS: `app/lib/team.server.ts` owns the
+ * transition map, and neither `approved -> blocked` nor a plain
+ * `system`-actor `approved -> dismissed` edge exists for kind `code`, so this
+ * module cannot close one of these rows without a protected-path change. The
+ * flag is surfaced in `computeTicketLoopHealth` (and the owner digest) for a
+ * human, or a future claim-time check, to act on; nothing here transitions a
+ * ticket status. Evidence is one of: (a) another row shares this ticket's
+ * `dedupe_key` and has already reached a tracked-or-shipped status, or (b) the
+ * ticket's own text cites a PR number that GitHub reports merged.
+ *
+ * `buildBlockedDigest` / `runBlockedTicketDigest` (#2863) is the weekly
+ * blocked-ticket parking-lot digest. It is NOT wired to a cron schedule:
+ * `vercel.json` and `server/cron*.ts` are protected paths this module cannot
+ * touch. `runBlockedTicketDigest` is ready to call from either once the owner
+ * adds the one-line schedule and route; see the PR description for the exact
+ * remainder.
  */
 
 import { and, eq, isNull, notInArray, or, sql } from 'drizzle-orm'
@@ -31,6 +52,8 @@ import {
   listOpenPullRequests,
   type PullRequestSummary,
 } from '~/lib/github.server'
+import { sendOwnerEmail } from '~/lib/owner-alerts.server'
+import { kvSetNX } from '~/lib/kv.server'
 
 /* ── SLA thresholds ────────────────────────────────────────────────────────── */
 
@@ -67,6 +90,10 @@ export interface StaleTicket {
 export interface BlockedTicket {
   id: number
   kind: string
+  /** Optional so existing fixtures/callers built before #2863 still typecheck;
+   *  the gatherer always sets it. Defaults to 3 (the same default the rest of
+   *  this module uses) when absent. */
+  priority?: number
   ageHours: number
   suggestion: string
   lastError: string | null
@@ -163,6 +190,7 @@ export function classifySlaBreaches(rows: readonly JanitorTicketRow[], now: Date
       blocked.push({
         id: r.id,
         kind: r.kind,
+        priority: r.priority,
         ageHours: Math.round(hoursBetween(r.updatedAt, now)),
         suggestion: r.suggestion,
         lastError: r.lastError,
@@ -435,6 +463,101 @@ export function computeNetPerDay(created: number, terminal: number, days = 7): n
   return Math.round(((created - terminal) / days) * 10) / 10
 }
 
+/* ── Superseded approved code (tickets #3349, #3432, #253) ─────────────────── */
+
+/**
+ * Ticket statuses meaning "QA already has this, or it already shipped". A row
+ * sharing an approved ticket's dedupe_key in one of these statuses is positive
+ * evidence the approved row's work is already tracked or done. Deliberately a
+ * separate literal from `TRACKED_SKIP_STATUSES` in
+ * release-ticket-autofile.server.ts rather than an import: the two hygiene
+ * checks are independently tunable and happen to agree today.
+ */
+export const ALREADY_COVERED_STATUSES: readonly string[] = ['pr_open', 'in_review', 'verified', 'applied']
+
+/**
+ * PR numbers a ticket's own body cites as already shipping its fix, e.g.
+ * "already shipped and merged in PR #654", "PR #324 + #349", "PRs #319".
+ * Requires the literal word PR/PRs immediately before the first `#`, so a bare
+ * `#654` elsewhere in the ticket (most often a different ticket id, like
+ * "ticket #3196") is never picked up on its own. A `+`/`,`/`&`-joined list of
+ * further `#N` immediately after the first is also captured, for the "PR #324
+ * + #349" convention ticket #253 itself uses.
+ *
+ * Purely a candidate extractor: the caller still confirms each number against
+ * GitHub before treating it as evidence, and this is FLAG-only evidence even
+ * then (see the module docstring). A wrong extraction here costs one spare
+ * GitHub read, never a wrong close.
+ */
+export function extractCitedPrNumbers(text: string): number[] {
+  const out = new Set<number>()
+  const re = /\bPRs?\s*#(\d{1,6})((?:\s*[+,&]\s*#\d{1,6})*)/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m[1]) out.add(Number(m[1]))
+    const rest = m[2] ?? ''
+    const numRe = /#(\d{1,6})/g
+    let n: RegExpExecArray | null
+    while ((n = numRe.exec(rest)) !== null) {
+      if (n[1]) out.add(Number(n[1]))
+    }
+  }
+  return [...out].sort((a, b) => a - b)
+}
+
+export type SupersededEvidence =
+  | { kind: 'dedupe-key'; matchedTicketId: number; matchedStatus: string }
+  | { kind: 'cited-pr-merged'; prNumber: number }
+
+export interface SupersededTicket {
+  ticketId: number
+  suggestion: string
+  evidence: SupersededEvidence[]
+}
+
+/** Human-readable evidence line for the digest. */
+export function describeSupersededEvidence(e: SupersededEvidence): string {
+  return e.kind === 'dedupe-key'
+    ? `shares a dedupe key with #${e.matchedTicketId} (${e.matchedStatus})`
+    : `cites PR #${e.prNumber}, which GitHub reports merged`
+}
+
+/** What the pure classifier consumes; the gatherer resolves both evidence
+ *  sources (DB dedupe-key lookup, GitHub merged checks) before calling it. */
+export interface SupersededCandidate {
+  ticketId: number
+  suggestion: string
+  /** Another tracked-or-shipped row sharing this ticket's dedupe_key, if any. */
+  dedupeMatch: { ticketId: number; status: string } | null
+  /** PR numbers this ticket's text cites, each resolved against GitHub by the
+   *  caller. `merged: null` means unread/unknown, never evidence. */
+  citedPrs: ReadonlyArray<{ prNumber: number; merged: boolean | null }>
+}
+
+/**
+ * Pure classification: an approved code ticket is flagged superseded when it
+ * carries at least one piece of positive evidence. Never dismisses or blocks
+ * anything itself — see the module docstring for why a status transition is
+ * not available here, and the hard rule this exists to honor: FLAG a
+ * suspected duplicate, never silently drop it.
+ */
+export function classifySupersededApprovedCode(
+  candidates: readonly SupersededCandidate[],
+): SupersededTicket[] {
+  const out: SupersededTicket[] = []
+  for (const c of candidates) {
+    const evidence: SupersededEvidence[] = []
+    if (c.dedupeMatch) {
+      evidence.push({ kind: 'dedupe-key', matchedTicketId: c.dedupeMatch.ticketId, matchedStatus: c.dedupeMatch.status })
+    }
+    for (const cited of c.citedPrs) {
+      if (cited.merged === true) evidence.push({ kind: 'cited-pr-merged', prNumber: cited.prNumber })
+    }
+    if (evidence.length > 0) out.push({ ticketId: c.ticketId, suggestion: c.suggestion, evidence })
+  }
+  return out
+}
+
 export interface TicketLoopHealth {
   generatedAt: string
   sla: SlaBreaches
@@ -447,6 +570,9 @@ export interface TicketLoopHealth {
   backlog: BacklogTrajectory
   /** Routines whose last run row is older than cadence plus grace. */
   routineFlags: RoutineLivenessFlag[]
+  /** Approved code tickets flagged as likely already shipped. FLAG only: see
+   *  the module docstring for why this list is never auto-dismissed. */
+  supersededApproved: SupersededTicket[]
 }
 
 const EMPTY_SLA: SlaBreaches = {
@@ -556,6 +682,81 @@ async function gatherConflictedPrs(readPr: PrReader): Promise<ConflictedPr[]> {
   return classifyConflictedPrs(candidates)
 }
 
+/** Approved code tickets scanned per superseded sweep. Bounds the DB read; the
+ *  GitHub reads it triggers are bounded separately by the shared PrReader cap. */
+const SUPERSEDE_SCAN_LIMIT = 100
+
+/**
+ * Gathers evidence and classifies approved `code` tickets as likely
+ * superseded. Two independent, additive evidence sources:
+ *
+ *   (a) dedupe-key match: a single extra query against the distinct dedupe
+ *       keys the scanned rows carry, matched against ALREADY_COVERED_STATUSES.
+ *       DB-only, no GitHub read.
+ *   (b) cited-PR match: PR numbers extracted from each ticket's own text
+ *       (extractCitedPrNumbers), resolved through the shared capped PrReader
+ *       so a number cited by several tickets costs one GitHub read.
+ *
+ * Never touches ticket status. See the module docstring and
+ * classifySupersededApprovedCode for why.
+ */
+async function gatherSupersededApprovedCode(readPr: PrReader): Promise<SupersededTicket[]> {
+  const res = await db.execute(sql`
+    SELECT id, suggestion, dedupe_key
+      FROM homepage_team_suggestions
+     WHERE status = 'approved' AND kind = 'code'
+     ORDER BY id ASC
+     LIMIT ${SUPERSEDE_SCAN_LIMIT}`)
+  const approvedCode = ((res.rows ?? []) as Array<Record<string, unknown>>).map(r => ({
+    id: Number(r['id'] ?? 0),
+    suggestion: String(r['suggestion'] ?? ''),
+    dedupeKey: r['dedupe_key'] == null ? null : String(r['dedupe_key']),
+  }))
+  if (approvedCode.length === 0) return []
+
+  // (a) dedupe-key evidence.
+  const keys = [...new Set(approvedCode.map(r => r.dedupeKey).filter((k): k is string => !!k))]
+  const dedupeMatchByKey = new Map<string, { ticketId: number; status: string }>()
+  if (keys.length > 0) {
+    const keyList = sql.join(keys.map(k => sql`${k}`), sql`, `)
+    const statusList = sql.join(ALREADY_COVERED_STATUSES.map(s => sql`${s}`), sql`, `)
+    const matchRes = await db.execute(sql`
+      SELECT id, status, dedupe_key
+        FROM homepage_team_suggestions
+       WHERE dedupe_key IN (${keyList}) AND status IN (${statusList})`)
+    for (const row of (matchRes.rows ?? []) as Array<Record<string, unknown>>) {
+      const dedupeKey = row['dedupe_key'] == null ? null : String(row['dedupe_key'])
+      if (!dedupeKey || dedupeMatchByKey.has(dedupeKey)) continue
+      dedupeMatchByKey.set(dedupeKey, { ticketId: Number(row['id'] ?? 0), status: String(row['status'] ?? '') })
+    }
+  }
+
+  // (b) cited-PR evidence, through the shared capped reader.
+  const citedByTicket = new Map<number, number[]>()
+  const allCited = new Set<number>()
+  for (const r of approvedCode) {
+    const nums = extractCitedPrNumbers(r.suggestion)
+    if (nums.length > 0) {
+      citedByTicket.set(r.id, nums)
+      for (const n of nums) allCited.add(n)
+    }
+  }
+  const mergedByNumber = new Map<number, boolean | null>()
+  for (const num of allCited) {
+    const pr = await readPr(num)
+    mergedByNumber.set(num, pr ? pr.merged : null)
+  }
+
+  const candidates: SupersededCandidate[] = approvedCode.map(r => ({
+    ticketId: r.id,
+    suggestion: r.suggestion,
+    dedupeMatch: r.dedupeKey ? dedupeMatchByKey.get(r.dedupeKey) ?? null : null,
+    citedPrs: (citedByTicket.get(r.id) ?? []).map(n => ({ prNumber: n, merged: mergedByNumber.get(n) ?? null })),
+  }))
+
+  return classifySupersededApprovedCode(candidates)
+}
+
 async function gatherBacklog(): Promise<BacklogTrajectory> {
   const res = await db.execute(sql`
     SELECT
@@ -597,6 +798,7 @@ export async function computeTicketLoopHealth(): Promise<TicketLoopHealth> {
     conflictedPrs: [],
     backlog: { created7d: 0, terminal7d: 0, netPerDay: 0 },
     routineFlags: [],
+    supersededApproved: [],
   }
 
   const readPr = createPrReadCache()
@@ -627,6 +829,11 @@ export async function computeTicketLoopHealth(): Promise<TicketLoopHealth> {
     health.routineFlags = await gatherRoutineFlags()
   } catch (err) {
     console.warn('[ticket-janitor] routine liveness failed:', String(err).slice(0, 200))
+  }
+  try {
+    health.supersededApproved = await gatherSupersededApprovedCode(readPr)
+  } catch (err) {
+    console.warn('[ticket-janitor] superseded-approved scan failed:', String(err).slice(0, 200))
   }
 
   return health
@@ -690,4 +897,199 @@ export async function reconcilePrLinkStates(
   }
 
   return { checked: byNumber.size, updated, skipped: false }
+}
+
+/* ── Weekly blocked-ticket digest (#2863) ──────────────────────────────────── */
+
+function digestEsc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function digestClip(s: string, n: number): string {
+  const t = s.replace(/\s+/g, ' ').trim()
+  return t.length <= n ? t : `${t.slice(0, n - 1)}…`
+}
+
+export interface BlockedDigestRow {
+  id: number
+  kind: string
+  priority: number
+  ageHours: number
+  suggestion: string
+  /** The single question or action that would clear this block, derived from
+   *  `lastError`/the note text, or the literal string below when neither
+   *  carries a reason. */
+  unblockQuestion: string
+}
+
+export interface BlockedDigestGroup {
+  priority: number
+  rows: BlockedDigestRow[]
+}
+
+export interface BlockedDigest {
+  generatedAt: string
+  totalCount: number
+  /** Rows with no `lastError` and no note: parked without a reason. */
+  reasonUnknownCount: number
+  /** Ascending by priority (1 = highest). Each group's rows are oldest first. */
+  byPriority: BlockedDigestGroup[]
+}
+
+/** The literal marker for a block that carries no reason anywhere (mirrors
+ *  `BlockedTicket.emptyReason`), so a silent park is visible as exactly that
+ *  rather than smoothed into a vague summary. */
+export const REASON_UNKNOWN = 'REASON UNKNOWN: no last_error and no note recorded on this row.'
+
+/**
+ * Turn a blocked ticket's reason text into the one question or action that
+ * would clear it. Heuristic only, never authoritative — it recognizes the
+ * phrasing R-DEV's own blocks already use (protected-path escalations,
+ * migration asks, explicit owner asks) and otherwise echoes the reason
+ * verbatim, clipped. `REASON_UNKNOWN` covers the emptyReason case.
+ */
+export function deriveUnblockQuestion(b: BlockedTicket): string {
+  const reason = (b.lastError?.trim() || b.noteRef?.trim() || '')
+  if (!reason) return REASON_UNKNOWN
+  if (/protected path/i.test(reason)) {
+    return `Owner-authored change needed (protected path): ${digestClip(reason, 160)}`
+  }
+  if (/\bmigration\b/i.test(reason)) {
+    return `Owner needs to apply a migration: ${digestClip(reason, 160)}`
+  }
+  if (/\bowner\b/i.test(reason)) {
+    return `Needs an owner decision: ${digestClip(reason, 160)}`
+  }
+  return digestClip(reason, 160)
+}
+
+/**
+ * Pure digest builder: group blocked rows by priority (ascending, 1 highest),
+ * oldest-first within each group, with a derived unblock question per row.
+ * Every row that comes in is represented in exactly one output row — nothing
+ * here may drop a blocked ticket, since a dropped row is the exact silent
+ * parking-lot failure #2863 exists to fix.
+ */
+export function buildBlockedDigest(rows: readonly BlockedTicket[], now: Date = new Date()): BlockedDigest {
+  const byPriority = new Map<number, BlockedDigestRow[]>()
+  let reasonUnknownCount = 0
+  for (const b of rows) {
+    if (b.emptyReason) reasonUnknownCount += 1
+    const priority = b.priority ?? 3
+    const row: BlockedDigestRow = {
+      id: b.id,
+      kind: b.kind,
+      priority,
+      ageHours: b.ageHours,
+      suggestion: b.suggestion,
+      unblockQuestion: deriveUnblockQuestion(b),
+    }
+    const list = byPriority.get(priority) ?? []
+    list.push(row)
+    byPriority.set(priority, list)
+  }
+  const byPriorityGroups: BlockedDigestGroup[] = [...byPriority.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([priority, groupRows]) => ({
+      priority,
+      rows: [...groupRows].sort((a, b) => b.ageHours - a.ageHours),
+    }))
+  return {
+    generatedAt: now.toISOString(),
+    totalCount: rows.length,
+    reasonUnknownCount,
+    byPriority: byPriorityGroups,
+  }
+}
+
+/**
+ * Approximate weekly bucket key for the send-once KV guard: `${year}-W${n}`,
+ * n = days since Jan 1 of that year divided by 7. Not calendar-precise ISO
+ * week numbering (no need — this only has to be stable within one calendar
+ * week and roll over once a week), kept simple and pure so it is testable
+ * without a clock library.
+ */
+export function weekBucketKey(date: Date): string {
+  const start = Date.UTC(date.getUTCFullYear(), 0, 1)
+  const diffDays = Math.floor((date.getTime() - start) / 86_400_000)
+  const week = Math.floor(diffDays / 7)
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
+export function blockedDigestSubject(digest: BlockedDigest): string {
+  const reasonSuffix = digest.reasonUnknownCount > 0 ? `, ${digest.reasonUnknownCount} REASON UNKNOWN` : ''
+  return `xdipx blocked-ticket digest: ${digest.totalCount} row${digest.totalCount === 1 ? '' : 's'}${reasonSuffix}`
+}
+
+/** Renders the weekly blocked-ticket email. Pure HTML string, no send side
+ *  effect, so it is testable without mocking the mail transport. */
+export function renderBlockedDigestEmail(digest: BlockedDigest): string {
+  if (digest.totalCount === 0) {
+    return '<p>No blocked tickets this week. The parking lot is empty.</p>'
+  }
+  const summary = `<p>${digest.totalCount} blocked ticket${digest.totalCount === 1 ? '' : 's'}`
+    + `${digest.reasonUnknownCount > 0 ? `, <strong>${digest.reasonUnknownCount} with REASON UNKNOWN</strong>` : ''}.</p>`
+  const groups = digest.byPriority.map(g => {
+    const rows = g.rows.map(r => (
+      `<li><strong>#${r.id}</strong> (${digestEsc(r.kind)}, ${r.ageHours}h old) `
+      + `${digestEsc(digestClip(r.suggestion, 90))}<br>`
+      + `<span style="color:#6f645c;">${digestEsc(digestClip(r.unblockQuestion, 200))}</span></li>`
+    )).join('')
+    return `<h3>Priority ${g.priority} (${g.rows.length})</h3><ul style="margin:0 0 10px;padding-left:18px;">${rows}</ul>`
+  }).join('')
+  return summary + groups
+}
+
+/** Every blocked ticket, whatever its age or kind. Reuses `gatherSlaRows` and
+ *  `classifySlaBreaches` rather than a second query, so the priority field and
+ *  the age/reason computation can never drift from the daily digest's. */
+async function gatherBlockedTickets(now: Date = new Date()): Promise<BlockedTicket[]> {
+  const rows = await gatherSlaRows()
+  return classifySlaBreaches(rows, now).blocked
+}
+
+/** KV key prefix for the weekly send-once guard. */
+export const BLOCKED_DIGEST_KV_PREFIX = 'blocked-digest:sent:'
+
+export interface BlockedDigestRunResult {
+  sent: boolean
+  skipped?: string
+  totalCount: number
+  reasonUnknownCount: number
+}
+
+/**
+ * Build and send the weekly blocked-ticket digest (#2863). NOT wired to a
+ * cron schedule: `vercel.json` and `server/cron*.ts` are protected paths this
+ * module cannot touch. Call this manually to verify (see the PR description
+ * for the exact one-line remainder needed to register `0 13 * * 1`), or from
+ * the owner-digest cron's Monday branch once that lands.
+ *
+ * KV-guarded once per calendar week (see `weekBucketKey`), the same
+ * once-per-period pattern `runOwnerDigest` uses daily. `force: true` bypasses
+ * the guard for manual testing. Sends nothing when there are zero blocked
+ * rows, same as a clean bill of health needs no email.
+ */
+export async function runBlockedTicketDigest(
+  opts: { force?: boolean; now?: Date } = {},
+): Promise<BlockedDigestRunResult> {
+  const now = opts.now ?? new Date()
+
+  if (!opts.force) {
+    const key = `${BLOCKED_DIGEST_KV_PREFIX}${weekBucketKey(now)}`
+    const first = await kvSetNX(key, String(Date.now()), 8 * 24 * 3600)
+    if (!first) {
+      return { sent: false, skipped: 'already sent this week (pass force=true to re-send)', totalCount: 0, reasonUnknownCount: 0 }
+    }
+  }
+
+  const rows = await gatherBlockedTickets(now)
+  const digest = buildBlockedDigest(rows, now)
+
+  if (digest.totalCount === 0) {
+    return { sent: false, skipped: 'no blocked tickets', totalCount: 0, reasonUnknownCount: 0 }
+  }
+
+  const result = await sendOwnerEmail(blockedDigestSubject(digest), renderBlockedDigestEmail(digest))
+  return { sent: result.sent, totalCount: digest.totalCount, reasonUnknownCount: digest.reasonUnknownCount }
 }

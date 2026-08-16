@@ -32,6 +32,22 @@
  * nothing, so the fallback can never guess. See findStrandedLinklessTickets and
  * findMergedPrForTicket.
  *
+ * A third stranding mode has a link, just not the one the first query reads.
+ * `markSuggestion` (the legacy `op:'mark'` path agent-editor's docs/instructions
+ * loop uses) writes the PR URL straight into the `apply_ref` column and never
+ * writes a `suggestion_links` 'pr' row. A ticket marked this way at
+ * `approved -> pr_open` and then carried the rest of the way by the ordinary QA
+ * lifecycle (`pr_open -> in_review -> verified`) ends up `verified` with a
+ * populated `apply_ref` and zero `suggestion_links` rows: invisible to the first
+ * query (no link to inner-join on) and only reachable by the second query's
+ * fuzzy text search (and only if the merged PR happens to say "ticket #<id>" in
+ * its title or body, which agent-editor's PRs do not reliably do). Ticket #2619
+ * sat exactly this way for 3 days after its PR #635 merged. `apply_ref` is
+ * stronger evidence than a text search — it was written deliberately, by the
+ * transition that opened the PR — so findStrandedApplyRefTickets reads it
+ * directly and is tried before the fuzzy fallback. See
+ * findStrandedApplyRefTickets.
+ *
  * Lives outside release-engine.server.ts on purpose. The engine's own file
  * documents a fixed safety model at the top and is a protected path; keeping
  * the query, the cap, and the transition here means the cadence and matching
@@ -39,7 +55,7 @@
  * owner-merged change every time.
  */
 
-import { and, desc, eq, inArray, lt, notExists, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, lt, notExists, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
 import { getGithubConfig, getPullRequest, githubRequest, type PullRequestSummary } from './github.server'
@@ -154,6 +170,48 @@ export async function findStrandedLinklessTickets(limit = SWEEP_MAX_TICKETS): Pr
     .limit(limit)
 
   return rows.map((r) => r.ticketId)
+}
+
+/**
+ * Stranded tickets tracked only through the legacy `apply_ref` column (the
+ * `op:'mark'` path), older than the grace period, with no `suggestion_links`
+ * 'pr' row at all. Distinct from findStrandedLinklessTickets: that function
+ * also selects link-less rows, but resolves them by a fuzzy PR-body text
+ * search; this one reads the PR the ticket itself already names, which is
+ * strictly stronger evidence. Returns bare candidates with no `prRef`, same
+ * as the link-less path, since there is no link row to reconcile.
+ */
+export async function findStrandedApplyRefTickets(limit = SWEEP_MAX_TICKETS): Promise<Candidate[]> {
+  const cutoff = new Date(Date.now() - SWEEP_MIN_AGE_MINUTES * 60_000)
+
+  const rows = await db
+    .select({ ticketId: homepageTeamSuggestions.id, applyRef: homepageTeamSuggestions.applyRef })
+    .from(homepageTeamSuggestions)
+    .where(and(
+      inArray(homepageTeamSuggestions.status, [...SWEEPABLE_STATUSES]),
+      isNotNull(homepageTeamSuggestions.applyRef),
+      lt(homepageTeamSuggestions.updatedAt, cutoff),
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(suggestionLinks)
+          .where(and(
+            eq(suggestionLinks.suggestionId, homepageTeamSuggestions.id),
+            eq(suggestionLinks.kind, 'pr'),
+          )),
+      ),
+    ))
+    .orderBy(homepageTeamSuggestions.updatedAt)
+    .limit(limit)
+
+  const out: Candidate[] = []
+  for (const row of rows) {
+    if (!row.applyRef) continue
+    const prNumber = prNumberFromRef(row.applyRef)
+    if (prNumber === null) continue
+    out.push({ ticketId: row.ticketId, prNumber })
+  }
+  return out
 }
 
 /**
@@ -294,13 +352,20 @@ async function applyCandidateIfMerged(c: Candidate, result: SweepResult): Promis
  * Never throws: a GitHub hiccup must not take down the release cycle, so
  * failures are collected and reported.
  *
- * Linked candidates are processed first (one GitHub call each), then any
- * remaining budget is spent on link-less tickets resolved by PR search. The
- * total tickets touched stays bounded by `limit`, so the GitHub calls one cycle
- * can make stay bounded too.
+ * Three tiers, strongest evidence first, sharing one `limit` budget: linked
+ * candidates (a `suggestion_links` 'pr' row) cost one GitHub call each;
+ * apply_ref-only candidates (the legacy `op:'mark'` path, see the module
+ * docstring's third stranding mode) also cost one GitHub call each; link-less
+ * candidates resolved by PR-body text search are tried last since they are the
+ * weakest signal. `considered` prevents a ticket the apply_ref tier already
+ * decided (merged, or not) from being re-searched by the link-less tier in the
+ * same sweep; both tiers select on the identical "no pr link row" condition,
+ * so without it they would overlap. The total tickets touched stays bounded by
+ * `limit`, so the GitHub calls one cycle can make stay bounded too.
  */
 export async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS): Promise<SweepResult> {
   const result: SweepResult = { checked: 0, applied: [], errors: [] }
+  const considered = new Set<number>()
 
   let linked: Candidate[] = []
   try {
@@ -311,15 +376,33 @@ export async function sweepOutOfBandMerges(limit = SWEEP_MAX_TICKETS): Promise<S
 
   for (const c of linked) {
     if (result.checked >= limit) break
+    considered.add(c.ticketId)
     result.checked += 1
     await applyCandidateIfMerged(c, result)
   }
 
-  const remaining = limit - result.checked
+  let remaining = limit - result.checked
+  if (remaining > 0) {
+    let applyRefOnly: Candidate[] = []
+    try {
+      applyRefOnly = await findStrandedApplyRefTickets(remaining)
+    } catch (err) {
+      result.errors.push(`apply_ref candidate query failed: ${String(err)}`)
+    }
+
+    for (const c of applyRefOnly) {
+      if (result.checked >= limit) break
+      considered.add(c.ticketId)
+      result.checked += 1
+      await applyCandidateIfMerged(c, result)
+    }
+  }
+
+  remaining = limit - result.checked
   if (remaining > 0) {
     let linkless: number[] = []
     try {
-      linkless = await findStrandedLinklessTickets(remaining)
+      linkless = (await findStrandedLinklessTickets(remaining)).filter((id) => !considered.has(id))
     } catch (err) {
       result.errors.push(`link-less candidate query failed: ${String(err)}`)
     }
