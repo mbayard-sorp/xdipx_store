@@ -103,14 +103,16 @@ Otherwise pick, in order, logging the source as a `step` event:
 3. The next unwritten entry in the content-plan §3 backlog.
 4. The strategy brief's content section.
 
-**Stale-claim reclaim (before selecting a fresh brief).** A crashed run leaves its brief in
-`drafted` with no published post, and the weekly curator sweep can hold that topic hostage for days.
-Do not wait for the sweep: if the top brief in the queue is already `status:'drafted'` but has no
-corresponding published `blogPost` (`*[_type == "blogPost" && slug.current == $slug && status == "published"][0]`
-returns nothing) and no run is currently in flight for it, treat it as **reclaimable** and pick it
-up as today's topic, recording a `step` event that says you reclaimed a stale drafted brief and
-which run stranded it. A brief that is `drafted` **and** already has a published post is genuinely
-done; leave it.
+**Stale-claim reclaim (before selecting a fresh brief).** A brief can be left in `drafted` with no
+published post two ways: a crashed run stranding its claim, or a live draft that failed a gate BLOCK
+and was deliberately left `drafted` rather than re-queued (Step 5 item 4 / Step 6, ticket #94). Either
+way the weekly curator sweep can hold that topic hostage for days. Do not wait for the sweep: if the
+top brief in the queue is already `status:'drafted'` but has no corresponding published `blogPost`
+(`*[_type == "blogPost" && slug.current == $slug && status == "published"][0]` returns nothing) and no
+run is currently in flight for it, treat it as **reclaimable** and pick it up as today's topic,
+recording a `step` event that says you reclaimed a stale drafted brief and which run stranded or
+blocked it. A brief that is `drafted` **and** already has a published post is genuinely done; leave
+it.
 
 When a brief is chosen: patch it `status:'drafted'` immediately **and `publish_documents` on it**
 (idempotent claim; a crashed run leaves it drafted, and the curator re-queues stale drafted briefs
@@ -122,14 +124,30 @@ weekly), and carry its `targetQuery`, keyword refs, `embedHints`, and `internalL
 > patched but never published is a no-op that will keep resurfacing. This applies to every Sanity
 > write in Steps 3, 4, and 6.
 
-Before drafting anything, GROQ-check the slug:
+Before drafting anything, check the slug against the **published** perspective, never the raw one:
+an unpublished draft at this slug must never read as a taken slug, or you skip past your own
+unfinished work (ticket #3401/#3405; run 327 held `blogPost-which-dildo-material-is-best` as a
+draft and needed an owner nudge to avoid exactly this):
 
-```groq
-*[_type == "blogPost" && slug.current == "<slug>"][0]._id
+```bash
+npx tsx scripts/check-slug-precheck.ts --slug "<slug>"
 ```
 
-If it exists, take the next queued topic and re-check. One `step` event with the chosen topic,
-slug, and source (brief / plan / strategy-brief fallback).
+This runs the corrected published-perspective GROQ (`*[_type == "blogPost" && slug.current ==
+"<slug>" && status == "published"][0]._id`) and prints one of three decisions:
+
+- `{"action":"slug-taken","reason":"published"}`: a published post already lives at this slug.
+  Take the next queued topic and re-check.
+- `{"action":"resume-draft","reason":"unpublished-draft","draftId":"..."}`: an unpublished draft
+  exists at this slug (typically a post Step 5 item 4 BLOCKed, or a crash-stranded claim). **Resume
+  that draft as today's post instead of selecting a fresh topic**: carry it into Step 4 in place of
+  drafting a new one, and record a `step` event naming which run stranded or blocked it (read the
+  brief's/post's most recent events) so the resume is traceable. Selecting a fresh topic here is
+  exactly what orphans finished work.
+- `{"action":"slug-free","reason":"no-post-at-slug"}`: nothing exists at this slug; proceed.
+
+One `step` event with the chosen topic, slug, source (brief / plan / strategy-brief fallback /
+resumed-draft), and whether it was a fresh topic or a resume.
 
 ## Step 4: Draft the post (Sanity, status draft)
 
@@ -280,6 +298,34 @@ One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
 ## Step 5: Dual gate (voice + accuracy; mandatory, no publish path without both)
 
+**Gate-subagent liveness (mandatory, applies to every gate launch below, including the shared
+rewrite's re-run).** A gate subagent that dies is a loud, ordinary failure. A gate that **stalls** is
+worse: run 176 launched the voice gate's cycle-2 re-run at 17:17 UTC, its transcript went silent at
+17:17:44, and at 19:29 (2h12m later) there was still no verdict: it had vanished from the running-
+agent set with no error and no completion notification, while the accuracy gate reviewing
+byte-identical text on the same run returned in 73 seconds. Silence is indistinguishable from a slow
+review unless you check liveness directly; waiting on a notification hangs indefinitely. So: note the
+wall-clock time you launch each gate (Task tool) and its most recent observed transcript activity,
+and before treating silence as "still working," run
+
+```bash
+npx tsx scripts/check-gate-liveness.ts --launched-at "<launch-iso>" \
+  --last-activity-at "<last-activity-iso>" --attempt <1|2>
+```
+
+- `{"status":"live"}`: keep waiting.
+- `{"status":"stalled-relaunch"}`: no transcript activity for 10+ minutes on the first launch.
+  Relaunch the SAME gate exactly once, on the **unchanged** draft: a stall is an infrastructure
+  failure, not a content defect, so this is not the shared rewrite cycle. Post a `step` event
+  `phase:'gate-stall'` naming which gate, elapsed time, and that it is infrastructure, not a verdict.
+- `{"status":"stalled-exhausted"}`: the relaunch also stalled. **Never** record this as a REVISE or
+  BLOCK: a gate that never rendered a judgment returned no judgment, and scoring silence as a verdict
+  would wrongly cost the post a rewrite cycle for a defect nothing ever found. Instead: file the Step
+  5 item 4 suggestion row with `category:'bug'` stating plainly that the gate infrastructure stalled
+  twice (not a content finding), and post a `decision` event `phase:'gate-stall-exhausted'` so the run
+  row and dashboard event feed show a run blocked on infrastructure rather than one that looks like it
+  is still working.
+
 Two reviewers, both binding, sequenced so a cheap voice failure never spends the accuracy pass:
 
 1. **Voice gate first.** Run the full draft through `emma-empathy-reviewer` against the charter +
@@ -360,10 +406,10 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      applies whenever the rewrite touches any accuracy-verified or frozen safety string.
 4. **BLOCK** (from either gate, either cycle) → the post stays `status:'draft'`, and you file a
    suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons. The blocked draft
-   still occupies its slug: the next run that picks this brief must **resume that draft**, not treat
-   the slug as taken and skip to another topic, or the finished work is silently orphaned. (The Step 3
-   slug pre-check currently matches the draft under the raw perspective; teaching it to read the
-   published perspective is a separate code fix.)
+   still occupies its slug: **leave its `seoContentBrief` status at `'drafted'` (do not re-queue it to
+   `'queued'`, see Step 6)**, so the next run that picks this brief resumes that draft via the Step 3
+   slug pre-check's `resume-draft` branch, instead of treating the slug as taken and skipping to
+   another topic, or the finished work is silently orphaned.
 5. **Sources insertion (mechanical, after the final PASS).** The accuracy gate returns 0-2
    citations it actually resolved. **Verify every returned URL through `/api/team/url-liveness`
    before appending it** — the endpoint enforces a fixed host allowlist (`CITATION_HOST_ALLOWLIST`
@@ -391,7 +437,10 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    automatically and come back `live:true`, so they no longer need a hand-picked canonical URL.
 
 Two `step` events: `phase:'voice-gate'` and `phase:'accuracy-gate'`, each with the verdict and
-cycle count (the accuracy event also records citation count and `web: ok|degraded`).
+cycle count (the accuracy event also records citation count, `web: ok|degraded`, and, for every
+candidate Sources URL, its `/api/team/url-liveness` result (`live:true/false`, `reason` when false),
+so each shipped citation is provably resolved directly from the run's event feed, not just asserted;
+ticket #2456's DONE WHEN).
 
 ## Step 6: Publish (only if both gates PASS, a hero is attached, and the valve is open)
 
@@ -417,11 +466,31 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
    stays queued and will be re-picked every day until someone notices — this is exactly what
    stranded two briefs whose posts had been live since 07-25 and 07-29.
 
-Valve off, either verdict not PASS, or no hero image could be produced → leave the post as a Sanity
+**Valve off, or no hero image could be produced, with both gates PASS** → leave the post as a Sanity
 draft, post an event saying exactly that, re-queue the brief if one was claimed
 (`seoContentBrief` → `'queued'`, `podcastReviewBrief` → `'pending'`), and finish the run as
 succeeded. Draft-only is a valid, honest outcome, not a failure; publishing a post with no hero
-image is not.
+image is not. This post is finished work waiting on an administrative gate, not a content defect, so
+`'queued'` correctly tells tomorrow's run "pick this back up" (Step 3's `resume-draft` branch will
+find and resume it either way, since it is still an unpublished draft at that slug).
+
+**A gate BLOCK is different: do not re-queue it to `'queued'` (ticket #94).** A drafted post already
+exists in Sanity for this brief. Re-queuing to `'queued'` puts it back in the Step 3 primary
+brief-queue GROQ (`status == "queued"`) looking indistinguishable from a topic that was never
+started, and the topic can cycle: pick it up, hit the slug pre-check, and either skip past your own
+unfinished work (pre-#3401 fix) or silently resume-and-retry it with no visibility beyond the one
+suggestion row filed at BLOCK time (Step 5 item 4). **Leave the brief's status at `'drafted'`**
+(already set by the Step 3 claim, do not touch it) so the Step 3 `resume-draft` branch finds and
+resumes it explicitly next time, and post a `step` event `phase:'gate-block-held'` naming the brief,
+its slug, and the BLOCK reason. If the SAME brief BLOCKs a second time, escalate: file (or bump the
+priority of) a `priority:2` suggestion row asking the owner to review the brief by hand: two
+independent drafts failing the same gate on the same topic is a signal the topic needs a human
+decision, not a third automated attempt. (A first-class `blocked`/`needs-owner` terminal status on
+the `seoContentBrief` schema would make this visible on the dashboard without depending on the
+suggestion feed, but adding it means extending the status enum in
+`studio/schemas/seo/seoContentBrief.js`, which the Sanity additive-only schema rule reserves for an
+owner-authored schema decision, not a routine edit; the enum extension half of #94 stays open for
+that.)
 
 ## Step 6b: Inbound suggestions (read your own mail)
 
