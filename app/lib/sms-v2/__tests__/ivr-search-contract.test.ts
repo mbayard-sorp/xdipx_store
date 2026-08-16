@@ -37,6 +37,22 @@ const { sanityFetchMock, getProductsByHandlesMock, searchProductsMock, sentryCap
   sentryCaptureMock: vi.fn(),
 }))
 
+// ivr-search.server reads SANITY_PROJECT_ID into a module-level const at
+// import time (see loadWithNoSanityClient below), so it has to be truthy
+// BEFORE the static `import ... from '~/lib/ivr-search.server'` a few lines
+// down evaluates, or getSanityClient() returns null for every test in this
+// file, not just the ones that opt into that via loadWithNoSanityClient().
+// vi.hoisted runs before all imports, which is what makes this reliable.
+// Locally this was masked: .env sets a real SANITY_PROJECT_ID that vitest
+// auto-loads into process.env. CI's `check` job sets only DATABASE_URL (see
+// .github/workflows/ci.yml), so without this every "normal path" test here
+// silently took the sanity-unavailable fallback branch instead of exercising
+// the GROQ query building this file exists to pin. `??=` leaves a real value
+// (local dev, or a future CI secret) untouched.
+vi.hoisted(() => {
+  process.env['SANITY_PROJECT_ID'] ??= 'test-sanity-project'
+})
+
 vi.mock('@sanity/client', () => ({
   createClient: vi.fn(() => ({ fetch: sanityFetchMock })),
 }))
