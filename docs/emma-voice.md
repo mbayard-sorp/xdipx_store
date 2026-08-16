@@ -1,4 +1,4 @@
-# xdipx Voice Charter (v5)
+# xdipx Voice Charter (v5.3)
 
 > The single source of truth for how xdipx speaks, everywhere: site copy, product copy, homepage merchandising, SMS/chat, email, ads, IVR, and support. Every AI prompt and every agent that writes customer-facing words loads this file before writing. If any other document disagrees with this one, this one wins.
 >
@@ -10,7 +10,9 @@
 >
 > Amended 2026-08-08 on Mike's explicit codify (option A): the social addendum gains the Instagram influencer register ("Emma off the clock"), the engagement close replaces any caption CTA (the existing no-CTA rule is confirmed, not weakened), trust-signal boilerplate is banned from social captions, presenter-in-frame imagery (Emma or clothed hands holding, unboxing, presenting) is licensed on top of the still-life default, verified brand-handle tagging becomes standard, and carousels become a first-class format. The 4-5 intensity cap and every core hard line (no lived experience above all) are unchanged, so this stays v5.
 >
-> Amended 2026-08-09 on Mike's explicit codify (licenses A-D): the social addendum gains the benefit-experience license (sell the ownership experience: honest outcomes and anticipation, never sensation or use narration), the scene-staging and visual-metaphor imagery licenses (product in lived-in scenes; deniable still-life metaphor as a carousel hook; packshot-only stills retired), the cast license (the approved Sanity `castMember` personas may present and react in frame, team-selected per post, performance never testimony), and the resource mandate (non-product education, inspiration, and insight are first-class content). The 4-5 intensity cap, the machine-moderation vocabulary fence, and every core hard line are unchanged, so this stays v5.
+> Amended 2026-08-09 on Mike's explicit codify (licenses A-D): the social addendum gains the benefit-experience license (sell the ownership experience: honest outcomes and anticipation, never sensation or use narration), the scene-staging and visual-metaphor imagery licenses (product in lived-in scenes; deniable still-life metaphor as a carousel hook; packshot-only stills retired), the cast license (the approved Sanity `castMember` personas may present and react in frame, team-selected per post, performance never testimony), and the resource mandate (non-product education, inspiration, and insight are first-class content). The 4-5 intensity cap, the machine-moderation vocabulary fence, and every core hard line are unchanged.
+>
+> Amended 2026-08-15, formal close-out of the 2026-08-09 codify (ticket #2216): the licenses above are now the governing text and supersede the improvement-bus suggestion row with dedupeKey `ig-creative-direction` item 4, which this entry retires. No fence, gate, or hard rule already in this charter is weakened or removed by that supersession; the imagery hard lines and the machine-moderation vocabulary fence in the social addendum stand exactly as written. This moves the charter to v5.3.
 
 <!-- core:start -->
 
