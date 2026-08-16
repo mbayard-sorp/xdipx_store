@@ -87,3 +87,23 @@ export function normalizeForTTS(input: string | null | undefined): string {
 
   return s
 }
+
+// The voice reply travels as SSML-shaped text ("<speak>it&apos;s...</speak>"),
+// but the engine that finally speaks it (ElevenLabs via Twilio
+// ConversationRelay) parses no SSML and no XML: it receives raw text. The
+// bridge used to strip tags and stop there, so every XML entity the producer
+// escaped ("&apos;", "&amp;") reached the TTS verbatim and was read aloud.
+// Entity order matters below: "&amp;" is decoded last so "&amp;apos;" cannot
+// double-decode into an apostrophe.
+export function ssmlToSpokenText(ssml: string | null | undefined): string {
+  if (!ssml) return ''
+  const unescaped = String(ssml)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+  return normalizeForTTS(unescaped)
+}

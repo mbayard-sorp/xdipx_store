@@ -23,6 +23,7 @@ import { buildSystemPrompt } from './prompts.ts'
 import { callQaTool } from './tools/catalog.ts'
 import type { OutboundMessage, TwilioInboundMessage } from './types.ts'
 import { callEngineV2 } from './v2-bridge.ts'
+import { normalizeForTTS, ssmlToSpokenText } from './tts-normalize.ts'
 
 // ---------------------------------------------------------------------------
 // Phase 9 — IVR pipeline version flag (mirrors Vercel-side ivr-pipeline-flag)
@@ -150,7 +151,7 @@ wss.on('connection', (ws, req) => {
 
         // Speak the greeting over WS instead of relying on TwiML's
         // welcomeGreeting attribute, which silently truncates long strings.
-        if (greetingFromUrl) sendText(ws, greetingFromUrl, true)
+        if (greetingFromUrl) sendSpoken(ws, greetingFromUrl, true)
 
         // Fetch admin-configured voice + farewells in parallel with collections.
         // A DB hiccup falls back to code defaults — see settings.ts.
@@ -168,7 +169,7 @@ wss.on('connection', (ws, req) => {
             // back to a DB-resolved copy so Claude still knows it greeted.
             if (!greetingFromUrl && s.greeting) {
               session.addTurn('assistant', s.greeting)
-              sendText(ws, s.greeting, true)
+              sendSpoken(ws, s.greeting, true)
             }
           })
           .catch(() => { /* already logged in loader */ })
@@ -295,7 +296,7 @@ function handlePromptV2(ws: WebSocket, session: Session, voicePrompt: string): v
           `[ivr] v2 engine unavailable callSid=${session.callSid} — staying on v2 (mid-call), asking caller to repeat`,
         )
         if (ws.readyState === ws.OPEN) {
-          sendText(ws, "Sorry, that one took me a second too long. Say that again for me?", true)
+          sendSpoken(ws, "Sorry, that one took me a second too long. Say that again for me?", true)
         }
         armInterTurnSilence(ws, session)
         return
@@ -311,13 +312,12 @@ function handlePromptV2(ws: WebSocket, session: Session, voicePrompt: string): v
 
     if (ws.readyState !== ws.OPEN) return
 
-    // Strip SSML tags for TTS — the Fly ConversationRelay bridge sends raw
-    // text to ElevenLabs. The SSML is for structuring the reply on the
-    // Vercel side; we extract the spoken text here.
-    const spokenText = reply.ssml
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
+    // ElevenLabs receives raw text (ConversationRelay parses no SSML), so the
+    // reply must be fully de-SSML'd here: tags stripped, XML entities decoded,
+    // and the reassembled string run through the shared TTS normalizer. The
+    // old tag-strip-only version left "&apos;" and friends in the text and the
+    // engine read them aloud.
+    const spokenText = ssmlToSpokenText(reply.ssml)
 
     if (spokenText) {
       sendText(ws, spokenText, true)
@@ -338,7 +338,7 @@ function handlePromptV2(ws: WebSocket, session: Session, voicePrompt: string): v
   }).catch((err) => {
     console.error(`[ivr] v2 handlePromptV2 unexpected error callSid=${session.callSid}`, err)
     if (ws.readyState === ws.OPEN) {
-      sendText(ws, "Sorry — I lost my train of thought. Can you say that again?", true)
+      sendSpoken(ws, "Sorry, I lost my train of thought. Can you say that again?", true)
     }
     armInterTurnSilence(ws, session)
   })
@@ -380,7 +380,7 @@ function handlePromptV1(ws: WebSocket, session: Session, voicePrompt: string): v
     onError: (err) => {
       console.error(`[ivr] claude error callSid=${session.callSid}`, err)
       if (ws.readyState === ws.OPEN) {
-        sendText(ws, "Sorry — I lost my train of thought. Can you say that again?", true)
+        sendSpoken(ws, "Sorry, I lost my train of thought. Can you say that again?", true)
       }
       armInterTurnSilence(ws, session)
     },
@@ -402,7 +402,7 @@ function onSilence(ws: WebSocket, session: Session): void {
   if (session.reEngageCount < session.limits.reEngageAttempts) {
     session.reEngageCount += 1
     console.log(`[ivr] re-engage callSid=${session.callSid} attempt=${session.reEngageCount}`)
-    sendText(ws, "Still with me? Just say what you're calling about.", true)
+    sendSpoken(ws, "Still with me? Just say what you're calling about.", true)
     armInterTurnSilence(ws, session)
     return
   }
@@ -437,7 +437,7 @@ function endCall(
   session.endReason = reason
   session.interrupt()
   session.clearTimers()
-  if (farewell) sendText(ws, farewell, true)
+  if (farewell) sendSpoken(ws, farewell, true)
   const end: OutboundMessage = { type: 'end', handoffData: JSON.stringify({ reason }) }
   try {
     ws.send(JSON.stringify(end))
@@ -449,6 +449,15 @@ function endCall(
 function sendText(ws: WebSocket, text: string, last: boolean): void {
   const msg: OutboundMessage = { type: 'text', token: text, last }
   ws.send(JSON.stringify(msg))
+}
+
+// For whole, non-streamed strings (greetings, farewells, error lines,
+// DB-sourced settings): run the TTS normalizer at the send site so an
+// admin-edited or hardcoded string can't smuggle an em-dash or emoji to the
+// engine. v1 streaming tokens must NOT go through this — they carry
+// deliberate spacing that a trim would destroy.
+function sendSpoken(ws: WebSocket, text: string, last: boolean): void {
+  sendText(ws, normalizeForTTS(text), last)
 }
 
 // ─── Boot ────────────────────────────────────────────────────────────────────

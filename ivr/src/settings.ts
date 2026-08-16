@@ -24,9 +24,9 @@ export const DEFAULT_GREETING =
 export const DEFAULT_FEELINGS = 'so happy,thrilled,super excited,really glad,pumped,stoked,delighted'
 export const DEFAULT_ACTIVITIES = "browsing the vault,curating today's deal,testing out some new arrivals,organizing the stockroom"
 
-export const DEFAULT_FAREWELL_GOODBYE = "Thanks for calling ex-dip-ex — have a great one!"
+export const DEFAULT_FAREWELL_GOODBYE = "Thanks for calling ex-dip-ex, have a great one!"
 export const DEFAULT_FAREWELL_MAX_PROMPTS =
-  "I really like you — but it might be easier if you send an email to hello at exdipex dot com and we can help you directly. Once again that's hello at exdipex dot com."
+  "I really like you, but it might be easier if you send an email to hello at exdipex dot com and we can help you directly. Once again that's hello at exdipex dot com."
 export const DEFAULT_FAREWELL_MAX_DURATION = DEFAULT_FAREWELL_MAX_PROMPTS
 export const DEFAULT_FAREWELL_SILENT = ''
 

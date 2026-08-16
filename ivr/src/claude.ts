@@ -204,26 +204,37 @@ async function runOneHop(
   )
 
   let textBuf = ''
-  let ttsBuffer = ''
+  // Raw (un-normalized) text awaiting a safe flush boundary. Normalizing each
+  // delta in isolation trimmed the whitespace that separated deltas, so the
+  // concatenated stream ran words together ("Heytherethatone'sgreat"), which is
+  // exactly the condition under which ElevenLabs starts spelling and
+  // verbalizing. Instead: buffer raw, cut only at whitespace (a word is never
+  // split across TTS tokens), normalize each cut chunk, and re-add the one
+  // separating space the normalizer trims.
+  let ttsRaw = ''
+  const flushChunk = (chunk: string, trailingSpace: boolean): void => {
+    const spoken = normalizeForTTS(chunk)
+    // Word-free fragments ("$", "&", stray punctuation) reach ElevenLabs as
+    // standalone tokens and get read aloud as words — drop them.
+    if (!spoken || !/\w/.test(spoken)) return
+    cb.onToken(trailingSpace ? `${spoken} ` : spoken)
+  }
   stream.on('text', (delta) => {
     textBuf += delta
-    const spoken = normalizeForTTS(delta)
-    if (!spoken) return
-    ttsBuffer += spoken
-    // Only flush when the buffer has word content — prevents standalone
-    // punctuation tokens (",", ".") from reaching ElevenLabs, which reads
-    // them aloud as "comma" or "period".
-    if (/\w/.test(ttsBuffer)) {
-      cb.onToken(ttsBuffer)
-      ttsBuffer = ''
+    ttsRaw += delta
+    const lastWs = Math.max(ttsRaw.lastIndexOf(' '), ttsRaw.lastIndexOf('\n'))
+    if (lastWs > 0) {
+      const chunk = ttsRaw.slice(0, lastWs)
+      ttsRaw = ttsRaw.slice(lastWs + 1)
+      flushChunk(chunk, true)
     }
   })
 
   const final = await stream.finalMessage()
-  // Flush any trailing punctuation that wasn't followed by a word delta.
-  if (ttsBuffer) {
-    cb.onToken(ttsBuffer)
-    ttsBuffer = ''
+  // Flush the tail (usually the final word plus sentence punctuation).
+  if (ttsRaw) {
+    flushChunk(ttsRaw, false)
+    ttsRaw = ''
   }
 
   // Cache fields exist on the API but SDK 0.32.1 Usage type omits them.
