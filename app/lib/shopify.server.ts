@@ -2780,7 +2780,19 @@ export async function getHandleByProductId(productId: string | number): Promise<
   }
 }
 
-export async function getWholesaleCostBySKU(sku: string): Promise<number> {
+/**
+ * Wholesale cost for a SKU, or `null` when it genuinely cannot be resolved.
+ *
+ * Returning `null` (UNKNOWN) rather than `0` is load-bearing. The order-created
+ * webhook writes this into the `xdipx.profit_<sku>` order metafield, and a
+ * fabricated `0` is indistinguishable from a real zero cost — it silently
+ * inflates a line to 100% margin. The product is located by a `nalpac-sku-<sku>`
+ * tag search, which only some products carry, so a miss is common and must be
+ * reported as UNKNOWN so the profit summary can exclude the line instead of
+ * counting it as pure margin (see costsFromOrderMetafields / costLineItem in
+ * profit.server.ts). Callers must treat `null` as "no cost known", never as 0.
+ */
+export async function getWholesaleCostBySKU(sku: string): Promise<number | null> {
   const data = await storefront<{
     products: { edges: { node: { metafields: { key: string; value: string }[] } }[] }
   }>(`
@@ -2797,7 +2809,11 @@ export async function getWholesaleCostBySKU(sku: string): Promise<number> {
     }
   `, { query: `tag:nalpac-sku-${sku}` })
   const raw = data.products.edges[0]?.node.metafields.find(m => m.key === 'wholesale_cost')?.value
-  return parseFloat(raw ?? '0')
+  // No product matched the tag, or the product carries no wholesale_cost
+  // metafield: the cost is unknown, not zero.
+  if (raw == null) return null
+  const parsed = parseFloat(raw)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 // ─── Sanity → Shopify push ─────────────────────────────────────────────────

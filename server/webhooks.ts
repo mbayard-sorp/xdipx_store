@@ -170,8 +170,13 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
   // inside Shopify's retry budget on multi-item orders. allSettled, not all:
   // one throwing line item must not take down the rest of the enrichment.
   await Promise.allSettled(orderLines.map(async lineItem => {
-    const cost   = await getWholesaleCostBySKU(lineItem.sku).catch(() => 0)
-    const profit = parseFloat(lineItem.price) - cost
+    // null = wholesale cost genuinely unknown for this SKU. Never coerce it to
+    // 0: a fabricated zero is indistinguishable from a real zero cost and would
+    // record the line at 100% margin. Recording null lets the profit summary
+    // exclude the line instead of counting it as pure profit.
+    const cost   = await getWholesaleCostBySKU(lineItem.sku).catch(() => null)
+    const price  = parseFloat(lineItem.price)
+    const profit = cost === null ? null : price - cost
 
     const metafieldWrite = shopifyAdmin(`/orders/${order.id}/metafields.json`, 'POST', {
       metafield: {
@@ -180,10 +185,10 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
         value:     JSON.stringify({
           sku:           lineItem.sku,
           wholesale_cost: cost,
-          deal_price:    parseFloat(lineItem.price),
+          deal_price:    price,
           profit_per_unit: profit,
           quantity:      lineItem.quantity,
-          total_profit:  profit * lineItem.quantity,
+          total_profit:  profit === null ? null : profit * lineItem.quantity,
         }),
         type: 'json',
       },

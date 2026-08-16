@@ -57,12 +57,15 @@ describe('costsFromOrderMetafields', () => {
     expect(costs.has('unrelated')).toBe(false)
   })
 
-  it('treats malformed, zero, and negative costs as absent rather than free', () => {
+  it('treats malformed, zero, negative, and unknown (null) costs as absent rather than free', () => {
     const costs = costsFromOrderMetafields([
       { key: 'profit_BAD', value: 'not json' },
       { key: 'profit_ZERO', value: JSON.stringify({ wholesale_cost: 0 }) },
       { key: 'profit_NEG', value: JSON.stringify({ wholesale_cost: -3 }) },
       { key: 'profit_STR', value: JSON.stringify({ wholesale_cost: 'free' }) },
+      // The order webhook now records an unresolved cost as null (UNKNOWN)
+      // instead of a fabricated 0. It must be excluded, same as a zero.
+      { key: 'profit_UNKNOWN', value: JSON.stringify({ wholesale_cost: null }) },
     ])
     expect(costs.size).toBe(0)
   })
