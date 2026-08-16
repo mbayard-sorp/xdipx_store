@@ -24,9 +24,13 @@ copy.
   `CRON_SECRET`). Sent on every API call as `x-team-secret: $HOMEPAGE_TEAM_TOKEN` (or
   `Authorization: Bearer $HOMEPAGE_TEAM_TOKEN`).
 - `BASE_URL` is the deployed site origin (e.g. `https://xdipx.com`).
-- Hard `maxTurns` (~24–28; raised from ~12–16 at the Phase E handover, 2026-07-29, when Step 5b
-  added the merchandised pages to this run's scope). If you loop without converging, stop and
-  report — do not re-run yourself.
+- Hard `maxTurns` (~36–40; raised from ~24–28 by owner decision 2026-08-16, resolving ticket
+  #2165's option (c): cold-start setup was starving runs before Step 5 published. Raised from
+  ~12–16 at the Phase E handover, 2026-07-29, when Step 5b added the merchandised pages to this
+  run's scope). **This line is the single source of truth for the cap; the agent definition
+  defers here.** The extra headroom is for reaching Step 5 publish + Step 7 verify on cold-start
+  days, not for optional-tier work — the turn-budget discipline ordering still binds. If you
+  loop without converging, stop and report — do not re-run yourself.
 
 The four endpoints, all secret-guarded:
 
