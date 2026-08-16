@@ -59,9 +59,14 @@ curl -s -X POST "$BASE_URL/api/team/run" \
    after a real publisher exists.
 
    **An unpublishable draft left at `approved` is a time bomb.** It becomes eligible the instant a
-   publisher lands and ships copy that is by then months old. The three Facebook rows (20, 29, 33)
-   were rejected on 2026-08-16 for this reason. **Three TikTok rows are still `approved` and remain
-   a live trap**; whoever wires the TikTok publisher rejects them before turning it on.
+   publisher lands and ships copy that is by then months old. Every such row was cleared on
+   2026-08-16: Facebook 20, 29, 33 and TikTok 19, 27, 31 are all `rejected`, so both queues are now
+   inert and a future publisher starts from an empty slate rather than a live one.
+
+   **The standing rule this leaves behind:** a draft for a platform that cannot publish should
+   never sit at `approved`. If a platform's publisher is a stub or missing, its frequency belongs
+   at 0 and any row already approved for it gets rejected, in the same pass. Wiring a publisher is
+   then a clean act rather than an archaeology problem.
 7. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
    `editedText` per row are the owner's verdicts on your last drafts.
 8. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
