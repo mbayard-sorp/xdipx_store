@@ -14,6 +14,10 @@ const loopHealthMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/ticket-janitor.server', () => ({
   computeTicketLoopHealth: loopHealthMock,
   reconcilePrLinkStates: reconcileMock,
+  describeSupersededEvidence: (e: { kind: string; matchedTicketId?: number; matchedStatus?: string; prNumber?: number }) =>
+    e.kind === 'dedupe-key'
+      ? `shares a dedupe key with #${e.matchedTicketId} (${e.matchedStatus})`
+      : `cites PR #${e.prNumber}, which GitHub reports merged`,
 }))
 vi.mock('~/lib/kv.server', () => ({
   kvGet: vi.fn(async () => null),
@@ -507,6 +511,7 @@ describe('renderTicketLoopSection', () => {
     conflictedPrs: [],
     backlog: { created7d: 10, terminal7d: 12, netPerDay: -0.3 },
     routineFlags: [],
+    supersededApproved: [],
   }
 
   it('reports an absent health object as unknown, never as a pass', () => {
@@ -583,6 +588,24 @@ describe('renderTicketLoopSection', () => {
 
   it('stays silent on conflicts when there are none', () => {
     expect(renderTicketLoopSection(healthyLoop)).not.toContain('merge-conflicted')
+  })
+
+  it('flags a superseded approved-code ticket without implying it was closed', () => {
+    const html = renderTicketLoopSection({
+      ...healthyLoop,
+      supersededApproved: [{
+        ticketId: 3204,
+        suggestion: 'url-liveness-samehost-redirect',
+        evidence: [{ kind: 'cited-pr-merged', prNumber: 654 }],
+      }],
+    })
+    expect(html).toContain('#3204')
+    expect(html).toContain('PR #654')
+    expect(html).toContain('not auto-dismissed')
+  })
+
+  it('stays silent on superseded flags when there are none', () => {
+    expect(renderTicketLoopSection(healthyLoop)).not.toContain('flagged as likely already shipped')
   })
 })
 
