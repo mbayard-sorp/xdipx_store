@@ -11,6 +11,7 @@ import {
   CAPTURE_SAMPLE,
   type EngagementCaptureRow,
   type EngagementReportRow,
+  type InstagramEngagementMetrics,
 } from './social-engagement.server'
 
 function jsonResponse(obj: unknown, status = 200): Response {
@@ -76,7 +77,7 @@ function row(id: number, externalPostId: string | null): EngagementCaptureRow {
 }
 
 describe('captureInstagramEngagement', () => {
-  it('fetches one report row per posted post and never writes anything', async () => {
+  it('fetches one report row per posted post; a repo without persistMetrics stays read-only', async () => {
     const rows = [row(1, 'ig_1'), row(2, 'ig_2')]
     const calls: string[] = []
     const report = await captureInstagramEngagement({
@@ -91,6 +92,20 @@ describe('captureInstagramEngagement', () => {
       { postId: 1, externalPostId: 'ig_1', metrics: { saved: 10 } },
       { postId: 2, externalPostId: 'ig_2', metrics: { saved: 2 } },
     ])
+  })
+
+  it('persists each successful fetch through the repo, and skips persist on a failed one', async () => {
+    const rows = [row(1, 'ig_1'), row(2, 'ig_2')]
+    const persisted: Array<[number, InstagramEngagementMetrics]> = []
+    await captureInstagramEngagement({
+      repo: {
+        recentPosted: async () => rows,
+        persistMetrics: async (id, metrics) => { persisted.push([id, metrics]) },
+      },
+      fetchEngagement: async (mediaId) =>
+        mediaId === 'ig_1' ? { ok: true, metrics: { saved: 10, reach: 90 } } : { ok: false, detail: 'HTTP 429' },
+    })
+    expect(persisted).toEqual([[1, { saved: 10, reach: 90 }]])
   })
 
   it('records a per-row error without aborting the rest of the sweep', async () => {

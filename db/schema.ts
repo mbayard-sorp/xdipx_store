@@ -183,6 +183,10 @@ export const socialPosts = pgTable('social_posts', {
   // to one social_posts row per target platform; posterUrl renders before playback.
   videoJobId:      integer('video_job_id'),
   posterUrl:       text('poster_url'),
+  // Engagement metrics (migration 079, ticket #3536). Per-row numbers for the
+  // row's own platform (reach/likes/comments/saved on IG), merged field-level
+  // like video_jobs.metrics_json; never estimated, only fetched.
+  metricsJson:     jsonb('metrics_json').$type<Record<string, number>>(),
 })
 
 export const adminRoles = pgTable('admin_roles', {
