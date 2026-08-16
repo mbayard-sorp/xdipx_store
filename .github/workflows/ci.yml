@@ -1,4 +1,4 @@
-# Static checks on every pull request.
+# Static checks on every pull request, and on main itself.
 #
 # Before this workflow the only PR check in the repo was `lighthouse`, which
 # skips cleanly whenever the Vercel preview is missing or protected, so a green
@@ -6,17 +6,38 @@
 # sessions, on the honor system. This job is the status check the autonomous
 # release engine gates merges on, so it must run on every path (docs PRs get a
 # fast green rather than no signal at all).
+#
+# Why it also runs on push to main: a PR's check proves that PR is green
+# against the main it was branched from, which is not the same claim as "main
+# is green". Every agent PR is tested in isolation, then squash-merged, so N
+# individually-green PRs can combine into a red main and nothing would report
+# it. On 2026-08-16 eighteen PRs were drained in one sitting, several touching
+# the same files, and the combined result had to be verified by hand in a
+# scratch worktree because CI had no opinion about main at all. This job is
+# that verification, automated. It gates nothing (the merge already happened);
+# it is the alarm that main regressed, and the signal a revert decision needs.
 name: ci
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
+  # PR runs supersede each other: only the newest commit on a branch matters,
+  # and cancelling the rest saves Actions minutes.
+  #
+  # main runs must NOT cancel. GitHub reports a superseded run as `cancelled`,
+  # which is indistinguishable from "no verdict" rather than from "green", and
+  # unlike a PR there is nothing watching main to notice and re-trigger it. A
+  # burst of merges would leave every commit but the last with no coverage,
+  # silently, which is the exact hole this trigger exists to close. Serialising
+  # them is the cost of every commit getting an answer.
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
