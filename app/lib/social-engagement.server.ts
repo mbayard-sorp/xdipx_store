@@ -14,25 +14,18 @@
  * token-from-env guard, same bounded per-tick sample size, same "return a
  * report, let the caller decide" shape.
  *
- * ## Why this only reports and never writes
+ * ## Persistence (migration 079)
  *
- * `social_posts` has no engagement column. The precedent this should follow
- * once one exists is `video_jobs.metricsJson` + `recordVideoMetrics` in
- * `video-pipeline.server.ts`: a per-platform JSON merge, submitted fields only
- * overwrite, nothing is ever estimated. Adding that column
- * (`social_posts.metrics_json jsonb`) is a migration, and `db/migrations/**`
- * plus `db/schema.ts` are protected paths, so this module cannot write it.
+ * `social_posts.metrics_json` exists since migration 079 (owner-applied
+ * 2026-08-16, ticket #3536). `captureInstagramEngagement` now merges each
+ * successful fetch into that column field-level, following the
+ * `recordVideoMetrics` precedent in `video-pipeline.server.ts`: fetched
+ * fields overwrite, absent fields keep their previous value, nothing is ever
+ * estimated. The write path lives on the repo (`persistMetrics`), so
+ * read-only callers and tests can still run the sweep without a database.
  *
- * So `captureInstagramEngagement` below is a pure read: it fetches live
- * numbers for recently-posted rows and returns them. Nothing here persists.
- * The moment the deferred migration lands, the missing half is one line per
- * row: `db.update(socialPosts).set({ metricsJson: merged }).where(...)`,
- * merged the same way `recordVideoMetrics` merges, see that function for the
- * exact shape to copy.
- *
- * Exposed read-only today via `POST /api/team/social-post { op: 'engagement' }`
- * so the social retro can read real numbers now rather than wait on the
- * migration to be worth building at all.
+ * Exposed via `POST /api/team/social-post { op: 'engagement' }` for the
+ * social retro; each call also refreshes the stored history.
  *
  * Saves matter more than likes here: the carousel format is explicitly built
  * for saves (per the voice charter), and capped/algorithmic distribution
@@ -98,6 +91,13 @@ export interface EngagementCaptureRow {
 export interface EngagementCaptureRepo {
   /** Newest posted Instagram rows, most-recently-posted first. */
   recentPosted: (limit: number) => Promise<EngagementCaptureRow[]>
+  /**
+   * Field-level merge of freshly fetched metrics into `metrics_json`
+   * (migration 079); fetched fields overwrite, absent fields keep their
+   * previous value, mirroring `recordVideoMetrics`. Optional so read-only
+   * callers and existing test doubles stay valid.
+   */
+  persistMetrics?: (id: number, metrics: InstagramEngagementMetrics) => Promise<void>
 }
 
 export const dbEngagementCaptureRepo: EngagementCaptureRepo = {
@@ -116,6 +116,18 @@ export const dbEngagementCaptureRepo: EngagementCaptureRepo = {
       ))
       .orderBy(desc(socialPosts.postedAt))
       .limit(limit)
+  },
+  persistMetrics: async (id, metrics) => {
+    const submitted = Object.fromEntries(
+      Object.entries(metrics).filter(([, v]) => v !== undefined),
+    ) as Record<string, number>
+    if (!Object.keys(submitted).length) return
+    const [row] = await db.select({ metricsJson: socialPosts.metricsJson })
+      .from(socialPosts).where(eq(socialPosts.id, id)).limit(1)
+    if (!row) return
+    await db.update(socialPosts)
+      .set({ metricsJson: { ...(row.metricsJson ?? {}), ...submitted } })
+      .where(eq(socialPosts.id, id))
   },
 }
 
@@ -140,9 +152,10 @@ export interface EngagementCaptureDeps {
 }
 
 /**
- * Read-only engagement sweep over the most recently posted Instagram rows.
- * Fetches live numbers; persists nothing (see module header). Safe to call
- * on demand, it makes at most `CAPTURE_SAMPLE` API calls and never writes.
+ * Engagement sweep over the most recently posted Instagram rows. Fetches
+ * live numbers, merges them into `metrics_json` when the repo can persist
+ * (see module header), and returns the report. Makes at most
+ * `CAPTURE_SAMPLE` API calls.
  */
 export async function captureInstagramEngagement(
   deps: EngagementCaptureDeps = {},
@@ -155,11 +168,12 @@ export async function captureInstagramEngagement(
   for (const row of rows) {
     if (!row.externalPostId) continue
     const result = await fetchEngagement(row.externalPostId)
-    report.push(
-      result.ok
-        ? { postId: row.id, externalPostId: row.externalPostId, metrics: result.metrics }
-        : { postId: row.id, externalPostId: row.externalPostId, error: result.detail },
-    )
+    if (result.ok) {
+      await repo.persistMetrics?.(row.id, result.metrics)
+      report.push({ postId: row.id, externalPostId: row.externalPostId, metrics: result.metrics })
+    } else {
+      report.push({ postId: row.id, externalPostId: row.externalPostId, error: result.detail })
+    }
   }
   return report
 }
