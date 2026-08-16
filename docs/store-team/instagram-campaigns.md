@@ -206,6 +206,26 @@ inherits the reference photo's neckline when you leave it unsaid, so an unstated
 accidental one rather than a chosen one. At least one approved cast reference has a deep V, and the
 2026-08-13 bralette was not asked for by the brief that produced it.
 
+**"Desire-forward" means the picture here, not the caption.** Owner direction 2026-08-16 asked for
+posts that are *"desire forward and product highlighting"*, and that phrase carries a specific
+meaning in `docs/emma-voice.md`: the intensity-9 register the store runs on owned channels. It does
+not travel to this platform, and the split is not squeamishness, it is which half of a post each
+rule governs.
+
+- **Imagery: yes, and we are under-using the licence we already have.** Everything in §3.2a is
+  available: a bed, a body, product against skin, lubricant texture, two people touching, arousal on
+  a face, implied use. The ceiling frames are the desire-forward ones, they are 2 of every 7 by
+  §3.2b, and they are chosen when the key art is planned rather than discovered on the day. A set
+  with no ceiling frame in it has quietly ignored this section.
+- **Caption: stays at register 4-5.** `docs/ads-policy.md` §Organic social and Step 4b question 2
+  both bar describing what a product does to a body, and the social addendum sets the register.
+  Platform policy outranks the charter on a rented surface, so this one cannot be traded for reach.
+  A register-9 line under a ceiling frame is what turns a compliant post into a removed one.
+
+The practical version: **let the image carry the desire and let the caption carry the reason.** That
+combination is fully licensed, it is what the owner asked for, and it is not what the account has
+been shipping.
+
 **Honest note on what this costs.** Lingerie plus a pleasure product in one frame is a stronger
 signal to Meta's classifier than either alone. That is a real increase in account exposure, taken
 deliberately by the owner rather than drifted into. It makes the removal watcher (ticket #2741) and
@@ -236,8 +256,17 @@ saved, and saves are the only metric that survives capped distribution.
 6. **Save close.** The takeaway as a keepable line on the punctuation ground, plus the engagement
    question. Identical template every carousel in the campaign; only the words change.
 
-Five slides is the floor, seven the ceiling. **Three carousels a week, not daily.** Daily triples
-cost, halves completion, and turns the save-close template from a signature into a tic. At most one
+**Four slides is the floor, seven the ceiling** (floor lowered from five on 2026-08-16, owner
+direction: *"4-5 panel slides with messages and images"*). At four, drop slides 4 and 5 and keep
+hook, question, substance, save close: the education and the save are the load-bearing pair, and the
+in-a-life and cast beats are the ones worth losing when a subject is tight. Never cut the substance
+slide to hit the floor, because a carousel with nothing learned in it is the shape that gets scrolled.
+
+**Up to 5 carousels a week, never two days running** (raised from three on 2026-08-16 to serve the
+advice lane in §4a). The reason for the old cap has not gone away: more carousels cost more, halve
+completion, and turn the save-close template from a signature into a tic. Rotate the save-close
+plate every campaign, and if saves or completion fall, drop back to three and say so in the run
+summary. At most one
 metaphor slide per carousel and it is always slide 1; the metaphor is never composited into the same
 frame as a product; the caption never names it. **No baked-in text on any slide.** Every word is
 rendered typography over a clean plate, and a generated word is a defect even when it is spelled
@@ -465,10 +494,17 @@ Rules that survive the slate, because they are what keep it a publication:
   that has not noticed yet.
 - **The rotation rule still binds inside a day.** Never two consecutive posts from the same pillar
   or in the same format, and consecutive means across the day boundary too.
-- **Carousels: up to 5 a week, never two days running.** Raised from 3 on 2026-08-16 to serve the
-  advice lane. The reason for the old cap has not gone away: daily carousels triple cost, halve
-  completion, and turn the save-close template into a tic. Rotate the save-close plate every
-  campaign, and if completion or saves fall, drop back to 3 and say so.
+- **Mix the shapes, not just the subjects.** A week that is all single stills is as monotonous as a
+  week that is all carousels. Carousel cadence and slide count live in §3.3: 4 slides floor, 7
+  ceiling, up to 5 a week, never two days running.
+- **The format library in §2 is a starting set, not a fence.** Owner direction 2026-08-16: *"I'm
+  giving the team license to create any type of post they think will be the most effective at
+  creating engagement and interest for our customers."* Invent a format when you have a real reason
+  to, name it in the run summary so it can be adopted or dropped on evidence, and understand exactly
+  what the licence does and does not cover: it frees the **shape** of a post, never a gate. A new
+  format still clears Step 4a voice, Step 4b platform policy, Step 2.6 stock, the §3.2a imagery
+  ceiling, and the §3.4b interest floor. Anything genuinely new that keeps working belongs in §2, so
+  file it rather than leaving it as one run's improvisation.
 
 ## 4b. Today's Pick, and the thing that cannot go in the caption
 
