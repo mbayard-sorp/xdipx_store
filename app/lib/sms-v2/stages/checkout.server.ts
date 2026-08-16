@@ -142,6 +142,18 @@ async function resolveVariantId(handle: string, customerText: string): Promise<s
     return matched.id
   }
 
+  // Multi-variant on paper but only one actually purchasable → that one is
+  // the only possible answer, so asking is pure friction. A voice caller was
+  // asked "comes in 'Light Purple'. Reply with the one you want" — a
+  // one-option multiple choice, in SMS phrasing, on a phone call.
+  const inStock = product.variants.filter((v) => v.availableForSale)
+  if (inStock.length === 1) {
+    const only = inStock[0]!
+    if (/gid:\/\/shopify\/ProductVariant\/\d+/.test(only.id)) {
+      return only.id
+    }
+  }
+
   // No match → ask the customer to pick. Throw a typed error the caller catches.
   throw new VariantPickRequiredError(
     handle,
@@ -272,9 +284,17 @@ export async function executeCheckoutStage(
     // treated as the variant pick.
     if (err instanceof VariantPickRequiredError) {
       const inStock = err.availableVariants.filter((v) => v.inStock)
-      const variantList = (inStock.length > 0 ? inStock : err.availableVariants)
-        .map((v) => `'${v.title}'`)
-        .join(', ')
+      const pickable = inStock.length > 0 ? inStock : err.availableVariants
+      const isVoice = ctx.channel === 'voice'
+      // Voice gets a speakable sentence: natural "A, B, or C" list, no quote
+      // marks (they read as escapes downstream), no "Reply with" (SMS idiom
+      // spoken on a call), no em-dash.
+      const titles = pickable.map((v) => v.title)
+      const spokenList =
+        titles.length > 1
+          ? `${titles.slice(0, -1).join(', ')}, or ${titles[titles.length - 1]}`
+          : titles[0] ?? ''
+      const variantList = pickable.map((v) => `'${v.title}'`).join(', ')
       console.warn(
         `[checkout_stage] variant pick required — asking customer`,
         { handle: err.handle, productTitle: err.productTitle, phone: ctx.conversation.phone, customerText },
@@ -284,8 +304,9 @@ export async function executeCheckoutStage(
         goalAchieved: false,
         segments: [
           {
-            prose:
-              `Quick check — ${err.productTitle} comes in ${variantList}. Reply with the one you want and I'll get the cart link ready.`,
+            prose: isVoice
+              ? `Quick question, ${err.productTitle} comes in ${spokenList}. Which one would you like?`
+              : `Quick check — ${err.productTitle} comes in ${variantList}. Reply with the one you want and I'll get the cart link ready.`,
           },
         ],
         stateWrites: {
@@ -336,6 +357,13 @@ export async function executeCheckoutStage(
       handlesToAdd.length > 1
         ? "Both in your cart — peek the drawer ♥"
         : "Added to your cart ♥"
+  } else if (ctx.channel === 'voice') {
+    // The admin-editable closing carries the checkout URL, which the voice
+    // adapter strips before TTS — leaving a dangling half-sentence ("Here's
+    // your checkout,") right before the adapter says "I just texted you a
+    // secure checkout link." Empty prose here lets the adapter's checkout CTA
+    // line be the single, complete thing the caller hears.
+    prose = ''
   } else {
     let closing = SMS_DEFAULTS.checkoutClosing
     try {
