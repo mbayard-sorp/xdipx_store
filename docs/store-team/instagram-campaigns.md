@@ -405,12 +405,18 @@ posture. It is the standing one, and the sections below are re-based for it.
 - **Target: the full daily slate in §4a**, sized by `social_freq_instagram`. Every post in the slate
   is a real editorial unit, not filler; a thin fourth post is worse than three good ones.
 - **10 per day is a hard ceiling** for an exceptional moment, never a target.
-- **Volume is earned in steps, and the ladder only climbs on a clean stretch.** Move up one post per
-  day at a time, and only after **7 consecutive clean days**: no removal, no post deleted, no gate
-  BLOCK on anything that shipped, no owner correction on a live post. This is the mirror of the
-  step-down that already exists, and it exists for the same reason: the account is rented. Noisy is
-  the destination, and a ladder is how you arrive still holding the account. Say in every run summary
-  which rung you are on and how many clean days are behind it.
+- **The owner set the starting rung at 3 on 2026-08-16.** `social_freq_instagram` was moved from 1
+  to 3 and `instagram_publish_max_per_day` from unset (3 by default) to 4, both audited to `owner`
+  from source `all-hands:2026-08-16`. Read the live values, never this sentence; it records where
+  the ladder starts, not where it is.
+- **Above that, volume is earned in steps, and the ladder only climbs on a clean stretch.** Move up
+  one post per day at a time, and only after **7 consecutive clean days**: no removal, no post
+  deleted, no gate BLOCK on anything that shipped, no owner correction on a live post. This is the
+  mirror of the step-down that already exists, and it exists for the same reason: the account is
+  rented. Say in every run summary which rung you are on and how many clean days are behind it.
+- **The publish cap sits one above the drafting quota on purpose.** Reworks and video fan-outs
+  compete for the same publish slots, so a cap equal to the quota strands the extra row for a day.
+  If the quota rises, raise the cap with it.
 - **Any post removal steps volume down one level immediately** and ends the campaign, per
   `docs/ads-policy.md` escalation. Volume is earned back by a clean stretch, not by waiting.
 
