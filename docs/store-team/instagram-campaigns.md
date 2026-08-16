@@ -59,6 +59,8 @@ start and drafts against them.
 | This Week at xdipx | Site news: a new aisle, a drop, a Notebook piece worth reading. |
 | Trend React | A reaction to an adopted trend brief. Never chases a trend we have no view on. |
 | Inspo Carousel | Multi-slide affirming or educational message over a metaphor hook. Built for saves. |
+| Field Notes | Advice slides, no product in frame at all. Toy advice or plain sex advice, the thing a reader would otherwise search for. The resource format (§4a). |
+| Today's Pick | One in-stock product, presented by a cast member. Editorial, never an offer: see §4b for what may and may not be said about its price. |
 
 **Rotation rule:** never two consecutive posts from the same pillar, and never two consecutive posts
 in the same format. A campaign that can only be told one way is too narrow; widen the subject or
@@ -183,9 +185,21 @@ all ceiling has no ceiling. Contrast is what stops a thumb, the charged frame la
 restrained one, and fourteen maximally charged tiles read as a porn account to a human and to a
 reviewer alike, which is the reading that gets an account actioned rather than a post.
 
-Per 7-post arc: **roughly 2 at the ceiling, 3 mid, 2 educational.** Same aggregate charge, sharper
+Per 7 posts: **roughly 2 at the ceiling, 3 mid, 2 educational.** Same aggregate charge, sharper
 peaks, and one bad classifier day costs a post instead of the channel. Do not round every frame up.
 Decide which two are the ceiling frames when the campaign's key art is planned (§3.4), not on the day.
+
+**These ratios are per rolling 7 posts, not per campaign** (re-based 2026-08-16, owner direction to
+raise volume). They were written when a campaign was 13 or 14 posts because one post a day made
+those the same number. At 3 or 4 posts a day a 13-day campaign is 39 to 56 posts, and a cap written
+"4 of 14 per campaign" silently stops meaning anything. So read every proportion in this document as
+a **rolling window over the most recent posts**, never as a per-campaign total:
+
+- **Charge:** roughly 2 ceiling, 3 mid, 2 educational per rolling 7.
+- **Cast:** at most 4 cast frames per rolling 14, and never more than one cast frame in a single
+  day. Still never three or more faces in one campaign; that one is about identity, not frequency,
+  and it does not re-base.
+- **Product-forward:** at most half of any single day's set, per `mission-brief.md` §6b.
 
 **State the garment in every prompt regardless.** Not a restriction, a fidelity rule: the model
 inherits the reference photo's neckline when you leave it unsaid, so an unstated wardrobe is an
@@ -382,10 +396,21 @@ depicted acts.
 **Cadence is context-driven, never a fixed ramp** (owner revision 2026-08-08, superseding the
 original ramp).
 
+**Owner direction 2026-08-16, verbatim:** *"I can't emphasize enough that I want the team to have a
+lot of activity on socials. I want the team to act as though they are our advertising and public
+messaging team. I want us to be noisy on Instagram."* Volume is no longer an exceptional-week
+posture. It is the standing one, and the sections below are re-based for it.
+
 - **Baseline: at least one Instagram post every day. No zero days.**
-- Scale to **2 to 4 per day** on weeks with something real happening: an aisle or drop going live, a
-  featured-brand week, a `marketing_calendar` promo, or an adopted trend brief.
+- **Target: the full daily slate in §4a**, sized by `social_freq_instagram`. Every post in the slate
+  is a real editorial unit, not filler; a thin fourth post is worse than three good ones.
 - **10 per day is a hard ceiling** for an exceptional moment, never a target.
+- **Volume is earned in steps, and the ladder only climbs on a clean stretch.** Move up one post per
+  day at a time, and only after **7 consecutive clean days**: no removal, no post deleted, no gate
+  BLOCK on anything that shipped, no owner correction on a live post. This is the mirror of the
+  step-down that already exists, and it exists for the same reason: the account is rented. Noisy is
+  the destination, and a ladder is how you arrive still holding the account. Say in every run summary
+  which rung you are on and how many clean days are behind it.
 - **Any post removal steps volume down one level immediately** and ends the campaign, per
   `docs/ads-policy.md` escalation. Volume is earned back by a clean stretch, not by waiting.
 
@@ -405,6 +430,103 @@ At Step 2 of every social run:
    telling this month. That boundary is deliberate.
 4. **Report honestly.** If the runway is short and a suggestion is already open, say so in the run
    summary rather than filing a duplicate.
+
+## 4a. The daily slate
+
+Owner direction 2026-08-16: *"I want different types of posts. Some can only be slides with sex
+advice or toy advice, they don't only need to be product focused. We need to be a resource for our
+potential customers."*
+
+The campaign supplies the subject and the look. The slate supplies the **shape of a day**, so volume
+arrives as a mix rather than as more of whatever the rotation happened to land on. Fill slots in
+order and stop when `social_freq_instagram` is met: at 1 a day you post slot A only, at 4 you post
+A through D.
+
+| Slot | Lane | Formats | Product in frame |
+|---|---|---|---|
+| **A** | **Resource.** The advice post, and the reason a non-buyer follows us. | Field Notes, Ask Emma, Inspo Carousel | **No** |
+| **B** | **Campaign.** The active campaign's next beat, on its pillar and format rotation. | any campaign format | Usually |
+| **C** | **Today's Pick.** One in-stock product presented by a cast member (§4b). | Today's Pick | Yes |
+| **D** | **What's new.** A Notebook promo when one is queued, else Brand Crush, This Week at xdipx, or Trend React. | those four | No |
+| **E** | **Carousel**, on the days a carousel is scheduled. | Inspo Carousel, Field Notes | Either |
+
+Rules that survive the slate, because they are what keep it a publication:
+
+- **At most half of a day's set is product-forward** (`mission-brief.md` §6b). At 4 posts that is B
+  and C, and it is a ceiling, not a quota.
+- **Slot A ships every day, including a one-post day.** If only one post goes out, it is the
+  resource post, not the product post. A feed that drops advice first under pressure is a catalog
+  that has not noticed yet.
+- **The rotation rule still binds inside a day.** Never two consecutive posts from the same pillar
+  or in the same format, and consecutive means across the day boundary too.
+- **Carousels: up to 5 a week, never two days running.** Raised from 3 on 2026-08-16 to serve the
+  advice lane. The reason for the old cap has not gone away: daily carousels triple cost, halve
+  completion, and turn the save-close template into a tic. Rotate the save-close plate every
+  campaign, and if completion or saves fall, drop back to 3 and say so.
+
+## 4b. Today's Pick, and the thing that cannot go in the caption
+
+Owner direction 2026-08-16, verbatim: *"We also need to post when we have deals. Most every
+competitor sells products with a percentage of savings. I would like the /all-hands team to pick a
+product every day that is a high percentage off and post about it. I would expect the posts to show
+the product with a cast member."*
+
+**The cast-plus-product half is licensed and is now a daily slot.** §3.6 already lets a cast member
+hold and present the bare product, so slot C is exactly that, every day, on the campaign's locked
+scheme.
+
+**The percentage cannot go in the post, and this is not a style preference.** Three binding
+documents and one piece of running code all say the same thing. `docs/ads-policy.md` §Organic
+social: *"No sale attempt in the post (no price, discount, promo code, or shop CTA)."* §6 of this
+file repeats it. The social addendum in `docs/emma-voice.md` repeats it again. And
+`runDeterministicPublishChecks` in `app/lib/social-publish-gate.server.ts` enforces it mechanically
+with `block`-severity checks named `sale-price`, `sale-discount`, `sale-promo-code`, `sale-cta` and
+`sale-pdp-link`; a `block` finding is final and no agent may overturn one. A caption reading "40%
+off" does not get argued about, it fails at the gate every single time.
+
+The reason behind the rule is worth carrying, because it is not squeamishness. Meta's Restricted
+Goods standard removes organic content that attempts to sell adult products, enforcement is
+account-level and retroactive, and a recurring daily deal format is precisely the repeated pattern
+that enforcement is built to catch. A percentage is the clearest sell signal available to us.
+
+**So the value lives one tap away, and the post carries the reason to take that tap:**
+
+- **In the post:** why this specific product is worth owning. Mechanism, material, build, who it
+  suits. Value as *quality*, which the charter's ownership register already licenses.
+- **On the profile:** the bio link, at most once a day, as a plain sentence and never as a closing
+  line.
+- **On `xdipx.com/social`:** the day's pick, with its real price. Keeping that landing page in sync
+  is already a daily duty in `routine-social-daily.md` Step 4c, and it is now the load-bearing half
+  of this lane rather than housekeeping.
+- **On X, in email, in SMS, and on the site:** the number itself, freely. X's organic policy permits
+  commerce and the PDP link, and the owned channels are where a real offer belongs.
+
+**Picking the product. Three filters, in this order, and none of them are optional.**
+
+1. **In the campaign's `product_scope`.** A lube markdown in the middle of the Vibrator Field Guide
+   is how a campaign turns into a product rotation with a hashtag, which §3.5 retired by name.
+2. **Instagram-eligible by category.** Never a dildo, never an anatomically realistic product. This
+   filter runs at *selection*, before any image is generated, and it matters most here: a deeply
+   discounted, slow-moving SKU is disproportionately likely to be exactly the excluded category.
+   Post #49 is what skipping it looks like.
+3. **In stock and ACTIVE**, per the Step 2.6 stock gate, and **not posted in the last 30 days**.
+
+**Say "our price against list", never "today's markdown".** This is an honesty rule and it is
+specific to how this store prices. The pricing engine writes `compare_at = msrp` on every product
+whose target-margin price lands under list, so **about 94% of the in-stock catalog shows a
+compare-at discount permanently**, roughly 1,000 products at 30% or more. Those percentages are
+real, and they are also the same tomorrow. Framing a permanent price relationship as a dated event
+is discount theatre, it is the fabricated-occasion cousin of the fabricated proof the design
+doctrine bans, and it collides with the charter's no-urgency rule. A genuine, dated, bounded deal is
+a different thing and it does exist: `promo-manager` proposes them, the owner approves them, and
+`scripts/execute-approved-promos.ts` mints them once `promo_execute_enabled` is on. When a real
+promo is live, **that** is a deal and the calendar knows its window.
+
+**MAP is a per-pick check, not an assumption.** 1,639 products carry `map_price == original_price`,
+which permits no discount framing anywhere, and the general product cards do not check MAP at all,
+so the grid is not a safe place to shop for a pick. Run `mapAllowsAdvertisedDiscount()` against the
+live metafields for the chosen product before any value framing goes anywhere, including the bio
+link and the `/social` page.
 
 ## 5. The schedule
 

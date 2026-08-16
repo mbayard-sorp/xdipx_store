@@ -48,6 +48,36 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 8. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
    `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
    adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).
+9. **Notebook promos, read here and not at Step 7b.** `POST /api/team/suggestion
+   {"op":"list","targetTeam":"social","status":"approved","orderBy":"age"}`, and pull every row
+   whose `dedupeKey` starts `notebook-promo:`. The content routine files one per published post
+   (`routine-content-daily.md` Step 6 item 4). **These have to be read at context load, not in the
+   Step 7b mail pass**, because 7b runs after drafting: a promo read there is a promo drafted
+   tomorrow at the earliest, which is how the first one sat untouched. Each row carries the title,
+   live URL, category, the accuracy-gate-cleared claims, the embedded product handles, and an
+   IG-eligibility verdict. Treat it as a first-class candidate for today's quota, not as overflow.
+
+   Three things that turn a promo into a removable post, so they are stated rather than inferred:
+
+   - **Never put the Notebook URL in the caption.** Step 4c already forbids a PDP link, and the same
+     reasoning binds here: caption URLs are not clickable on Instagram anyway, and a post whose
+     purpose reads as driving traffic is the commerce signal Meta's Restricted Goods standard
+     removes. The compliant form is to **teach the article's substance** with at most one plain
+     in-sentence pointer, and link-in-bio at most once a day, never as a closing line.
+   - **The engagement close still replaces any CTA.** Promoting an article licenses nothing the
+     charter bans.
+   - **Respect the eligibility verdict.** On a `generic-angle` row the source article's product
+     category may not appear in the caption, on-slide text, alt text, or a hashtag. The trap is
+     specific and it has already fired once: the natural way to point at a source article is to say
+     what it is about, and that sentence is exactly where the banned word enters.
+
+   Notebook promos are usually education, so they preferentially fill the pure-education,
+   no-product-in-frame slice of the mission brief's §6b mix, and they suit a carousel. Mark the row
+   `applied` when you draft from it. A row still unused after 14 days is stale news; mark it
+   `dismissed` in the queue-hygiene sweep and say so. Zero rows is a normal result.
+
+   Honest note so nobody reads the softer output as ignoring direction: the owner asked for
+   promotion, and the compliant version of promotion on this platform is teaching.
 
 ## Posting posture (read before Step 2b, Step 2.5, and Step 7)
 
@@ -196,7 +226,12 @@ carousels, and Brand Crush alike.
 - `inventory-sentinel` adds `social_posts` featured products to its watch scope, so a stock drop on a
   queued post surfaces as a flag rather than a deleted live post.
 
-## Step 3 — Draft (≤6 per run, reworks included)
+## Step 3 — Draft (reworks included)
+
+**The per-run cap is `sum(social_freq_*) + reworks`, floor 6.** It was a flat 6 and that number was
+written when Instagram ran at one a day; at a four-post slate plus X, TikTok and Facebook it would
+cap the run below its own quota. The cap is self-discipline, not a server limit, so it is on you to
+respect it and to say in the summary when you hit it.
 
 Draft counts come from the Step 2 config — up to `social_freq_<platform>` new posts per platform,
 minus any reworks already written for that platform today. Platform-appropriate, **editorial-first**
@@ -212,11 +247,17 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
 - **Rotate.** Never two consecutive Instagram posts from the same pillar, and never two consecutive
   posts in the same format. The ground follows the 4-beat cycle and the archetype follows the 7-beat
   spine (§3.1). Read the last few posted rows to find your position in both.
-- **Cadence is context-driven, not a fixed ramp.** Baseline is **at least one Instagram post every
-  day, no zero days**. Scale to 2-4/day on weeks with something real happening (an aisle or drop
-  going live, a featured-brand week, a calendar promo, an adopted trend brief); 10/day is a hard
-  ceiling for an exceptional moment, never a target. The strategy brief's Social Plan section sizes
-  this when present.
+- **Fill the daily slate** (`instagram-campaigns.md` §4a) in order, and stop when
+  `social_freq_instagram` is met: A resource, B campaign, C Today's Pick, D what's new, E carousel.
+  Slot A ships even on a one-post day. Baseline is at least one post daily, no zero days; 10/day is
+  a hard ceiling for an exceptional moment, never a target.
+- **Volume climbs a rung at a time, on 7 clean days** (§4 of the campaign doc). Name the rung and
+  the clean-day count in the run summary. Never step the quota up yourself to compensate for an
+  automated step-down.
+- **Today's Pick carries no percentage, no price, and no promo code** (§4b). The deterministic
+  publish gate blocks all five sale patterns outright, so a value claim in a caption is not a close
+  call, it is a guaranteed BLOCK. Value in the post is quality; the number lives on `/social`, on
+  X, in email, and on the site.
 - **Content mix** comes from `docs/store-team/mission-brief.md` §6b (roughly 40% product-in-scene or
   carousel, 30% pure education with no product in frame, 20% inspiring, 10% site news and trend
   reacts; at most half of a multi-post day is product-forward). The charter points at the brief for

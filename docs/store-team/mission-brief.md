@@ -146,6 +146,11 @@ interesting, the account becomes a resource.
 | ~20% | Inspiring or affirming |
 | ~10% | Site news and trend reacts |
 
+**The daily slate in `instagram-campaigns.md` §4a is how this ratio is met at volume** (owner
+direction 2026-08-16 to run the channel like the store's advertising and public messaging team).
+Slots A and D are the non-product 60%, B and C are the product 40%, and slot A ships even on a
+one-post day. The ratio did not change; the slate is the mechanism that holds it when volume rises.
+
 When posting more than once in a day, **at most half the set is product-forward**. A follower who
 never buys anything should still be getting value from the follow; that is what makes the account a
 publication rather than a catalog, and a catalog is what Meta's Restricted Goods standard removes.

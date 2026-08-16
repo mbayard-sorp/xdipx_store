@@ -466,6 +466,45 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
    stays queued and will be re-picked every day until someone notices — this is exactly what
    stranded two briefs whose posts had been live since 07-25 and 07-29.
 
+4. **Hand the live post to social (mandatory, owner direction 2026-08-15 and again 2026-08-16).**
+   Verbatim: *"When we write posts, I want to have them sent to the social media agents on the
+   /all-hands team to create a post to promote it through our instagram account"* and *"I want to
+   add new posts when we write articles in the blog too."* File one row, and only after
+   `publish_documents` has actually put the post live, so social never promotes something no reader
+   can open:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"create","team":"content","targetTeam":"social","kind":"campaign","priority":2,
+       "dedupeKey":"notebook-promo:<slug>",
+       "suggestion":"NOTEBOOK POST LIVE, ready for an Instagram draft. TITLE / URL / CATEGORY / the two or three teachable claims that cleared the accuracy gate / embedded product handles with their verified stock state / IG-ELIGIBILITY: <eligible | generic-angle: the transferable topic that can be named | route-to-X>"}'
+```
+
+   The claims are the point. The social drafter cannot re-verify anything and must not invent
+   substance, and a post that already cleared both gates is the cheapest citable teaching material
+   the store produces. One post per run, so this adds at most one row a day and cannot flood the
+   social queue.
+
+   **Check Instagram eligibility before filing, not after.** `instagram-campaigns.md` §2 is
+   categorical: never dildos and never anatomically realistic products. A Notebook post whose
+   *subject* is one of those cannot be promoted on Instagram even as pure education, because the
+   subject cannot be named: run 331 drafted a genuinely compliant product-free materials carousel
+   for `/notebook/which-dildo-material-is-best` and the voice gate correctly BLOCKed it on one
+   factual, non-sexual use of the word. Machine moderation reads words, not intent. So state the
+   verdict in the row itself:
+
+   - **eligible**: the subject can be named on Instagram. Normal handoff.
+   - **generic-angle**: name the transferable topic that *can* be said (here: body-safe materials
+     literacy) and say explicitly that the source article's product category may not appear in the
+     caption, on-slide text, alt text, or hashtags.
+   - **route-to-X**: the substance only works where the category can be named. X's organic
+     adult-content policy is genuinely more permissive at register 6-7.
+
+   Filing the row is your whole job here. You never decide the post is not worth promoting: you have
+   no visibility into this week's pillar rotation or quota, and social's own queue-hygiene pass
+   expires an unused row. **Do not file when the post stayed a draft.**
+
 **Valve off, or no hero image could be produced, with both gates PASS** → leave the post as a Sanity
 draft, post an event saying exactly that, re-queue the brief if one was claimed
 (`seoContentBrief` → `'queued'`, `podcastReviewBrief` → `'pending'`), and finish the run as
