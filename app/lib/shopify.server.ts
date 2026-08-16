@@ -7280,16 +7280,21 @@ const VARIANTS_BY_SKU_QUERY = `
           title
           vendor
           productType
-          metafields(identifiers: [
-            { namespace: "xdipx", key: "nalpac_sku" }
-            { namespace: "xdipx", key: "wholesale_cost" }
-            { namespace: "xdipx", key: "map_price" }
-            { namespace: "xdipx", key: "original_price" }
-            { namespace: "xdipx", key: "map_restricted" }
-          ]) {
-            namespace
-            key
-            value
+          # Admin API: Product.metafields is a MetafieldConnection. It rejects
+          # the Storefront-only lookup-by-identifier argument. All keys we need
+          # live in the xdipx namespace, so scope by namespace + keys instead.
+          metafields(namespace: "xdipx", keys: [
+            "nalpac_sku"
+            "wholesale_cost"
+            "map_price"
+            "original_price"
+            "map_restricted"
+          ], first: 10) {
+            nodes {
+              namespace
+              key
+              value
+            }
           }
         }
       }
@@ -7312,7 +7317,7 @@ interface VariantsBySkuResult {
         title: string
         vendor: string | null
         productType: string | null
-        metafields: Array<{ namespace: string; key: string; value: string } | null>
+        metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
       }
     }>
   }
@@ -7335,7 +7340,7 @@ export async function findVariantsBySkus(skus: string[]): Promise<VariantSkuMatc
 
     for (const node of data.productVariants.nodes) {
       const mfMap = new Map<string, string>()
-      for (const mf of node.product.metafields) {
+      for (const mf of node.product.metafields.nodes) {
         if (mf) mfMap.set(mf.key, mf.value)
       }
       const wholesaleRaw = mfMap.get('wholesale_cost')
