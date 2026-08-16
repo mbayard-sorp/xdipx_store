@@ -263,3 +263,104 @@ describe('the removal watch guards the tick', () => {
     expect(r.watch?.frequencySteppedTo).toBe(1)
   })
 })
+
+// ── Spend guard (X, 2026-08-16) ──────────────────────────────────────────────
+//
+// X bills per post, and a post carrying a link costs more than 13x a plain one.
+// These are the cases where getting the guard wrong costs actual money or
+// silently kills good posts: overshooting the ceiling, charging for posts that
+// never published, and the interaction with the two-strike failure rule.
+describe('X spend guard', () => {
+  /**
+   * A fresh success mock per test.
+   *
+   * Not the module-level `publishOk`: that one is shared across this file and
+   * never reset, and wrapping it carries its accumulated call count into these
+   * assertions.
+   */
+  const freshOk = () => vi.fn(async () => ({ ok: true as const, externalPostId: 'x_1' }))
+
+  const PDP = 'https://xdipx.com/products/rosales-maya'
+  /** A linked X post: $0.20 each. */
+  const xPost = (id: number) => post({
+    id, platform: 'x', tweetText: `a detail worth knowing ${PDP}`,
+  })
+
+  const xDeps = (spent: number, max: number) => ({
+    platform: 'x' as const,
+    isEnabled: async () => true,
+    maxPerDay: cap(10),
+    monthSpendUsd: async () => spent,
+    maxSpendUsd: async () => max,
+    removalWatch: async () => null,
+  })
+
+  it('skips the whole tick when the month is already spent', async () => {
+    const { repo, calls } = fakeRepo([xPost(1)])
+    const publish = freshOk()
+    const r = await tick({ ...xDeps(15, 15), publish, repo })
+    expect(r.skipped).toBe('spend_cap')
+    expect(publish).not.toHaveBeenCalled()
+    expect(calls.posted).toEqual([])
+  })
+
+  it('stops before a post that would cross the ceiling', async () => {
+    // $14.90 spent against a $15 ceiling leaves $0.10, and a linked post costs
+    // $0.20. Publishing it would overshoot, so it must not publish at all.
+    const { repo, calls } = fakeRepo([xPost(1)])
+    const publish = freshOk()
+    const r = await tick({ ...xDeps(14.9, 15), publish, repo })
+    expect(publish).not.toHaveBeenCalled()
+    expect(calls.posted).toEqual([])
+    expect(r.attempts[0]?.outcome).toBe('spend_cap')
+  })
+
+  it('leaves the unaffordable row untouched in the queue', async () => {
+    // The row is fine; we simply cannot afford it this month. Marking it failed
+    // would write an error message, which makes its NEXT attempt terminal under
+    // the two-strike rule, permanently killing a good post over a budget pause.
+    const { repo, calls } = fakeRepo([xPost(1)])
+    await tick({ ...xDeps(14.9, 15), publish: freshOk(), repo })
+    expect(calls.failed).toEqual([])
+    expect(calls.needsChanges).toEqual([])
+  })
+
+  it('publishes what fits and stops at the first post that does not', async () => {
+    // $14.75 leaves $0.25: exactly one $0.20 post fits, the second does not.
+    const { repo, calls } = fakeRepo([xPost(1), xPost(2)])
+    const publish = freshOk()
+    const r = await tick({ ...xDeps(14.75, 15), publish, repo })
+    expect(calls.posted).toEqual([1])
+    expect(publish).toHaveBeenCalledTimes(1)
+    expect(r.attempts.map(a => a.outcome)).toEqual(['published', 'spend_cap'])
+  })
+
+  it('does not charge the budget for a post that failed to publish', async () => {
+    // A failed publish costs nothing. Charging at claim time would shrink the
+    // month's budget for a post that never reached X.
+    const { repo } = fakeRepo([xPost(1), xPost(2)])
+    const publish = vi.fn(async () => ({ ok: false as const, detail: 'boom' }))
+    const r = await tick({ ...xDeps(14.75, 15), publish, repo })
+    // Both were attempted: the first failed and so spent nothing, leaving room
+    // for the second to be attempted too rather than being cut off.
+    expect(publish).toHaveBeenCalledTimes(2)
+    expect(r.spendUsd).toBeCloseTo(14.75, 10)
+  })
+
+  it('reports month-to-date spend including this tick', async () => {
+    const { repo } = fakeRepo([xPost(1)])
+    const r = await tick({ ...xDeps(1, 15), publish: freshOk(), repo })
+    expect(r.spendUsd).toBeCloseTo(1.2, 10)
+    expect(r.platform).toBe('x')
+  })
+
+  it('never budget-checks a platform that supplies no spend deps', async () => {
+    // Instagram publishing is free. Supplying neither half must leave the tick
+    // behaving exactly as it did before the guard existed.
+    const { repo, calls } = fakeRepo([post({ id: 1 })])
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: freshOk(), repo })
+    expect(calls.posted).toEqual([1])
+    expect(r.spendUsd).toBeUndefined()
+    expect(r.skipped).toBeUndefined()
+  })
+})

@@ -31,7 +31,7 @@ export interface PublishInput {
 }
 
 export interface SocialPublisher {
-  platform: 'instagram' | 'tiktok' | 'youtube'
+  platform: 'instagram' | 'tiktok' | 'youtube' | 'x'
   /** True when this platform's env keys are all present. */
   configured(): boolean
   publish(input: PublishInput): Promise<PublishResult>

@@ -219,8 +219,10 @@ export const SCENE_KIT: SceneKitScene[] = [
 
 /**
  * Standalone valves outside the per-team key sets:
- *  - social autopost: even with the social team enabled, live posting stays off
- *    until this AND the env-level X_AUTO_POST_ENABLED are both true.
+ *  - social autopost: LEGACY and gates nothing in code. It predates the
+ *    per-platform publish valves (instagram_autopublish_enabled,
+ *    x_autopublish_enabled) which are what actually control live posting. Kept
+ *    so the existing row is not silently reinterpreted as something live.
  *  - suggestion apply: kill switch for agent-editor turning approved
  *    instruction-suggestions into PRs.
  *  - content autopublish: with the content team enabled, blog posts go live
@@ -292,6 +294,14 @@ export const VALVE_KEYS = {
   // valve would arm it silently. Different platform, different risk profile.
   // Meta enforcement is account-level and retroactive. Default OFF.
   instagramAutopublish: 'instagram_autopublish_enabled',
+  // X autopublish. Its own valve for the same reason Instagram got one: a
+  // different platform with a different risk profile, and reusing an armed
+  // valve would arm this silently. Default OFF, like every other publish valve,
+  // and `getValve` treats the missing row as off so this ships inert with no
+  // migration. X's risk is not Meta-style retroactive enforcement but money:
+  // X bills per post since February 2026, so this valve is paired with
+  // `x_publish_max_spend_usd_month` rather than standing alone.
+  xAutopublish:       'x_autopublish_enabled',
   chatEnabled:        'chat_enabled',
   smsAgentEnabled:    'sms_agent_enabled',
 } as const

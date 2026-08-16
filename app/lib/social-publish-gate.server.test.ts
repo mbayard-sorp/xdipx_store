@@ -223,3 +223,87 @@ describe('isProductSellable', () => {
     expect(isProductSellable(undefined)).toBeNull()
   })
 })
+
+// ── Platform divergence (X, 2026-08-16) ──────────────────────────────────────
+//
+// The gate serves two platforms with genuinely different rules. These are the
+// cases where treating them the same would break one of them: Instagram removes
+// posts that attempt to sell and has no clickable caption link, while on X the
+// link is the entire point of posting. Getting this backwards either exposes
+// the Instagram account or makes X unable to drive a single click.
+describe('platform divergence', () => {
+  const PDP_CAPTION = `a detail worth knowing https://xdipx.com/products/rosales-maya`
+
+  it('blocks a PDP link on Instagram', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: PDP_CAPTION, mediaUrls: GOOD_MEDIA, platform: 'instagram',
+    })
+    expect(checks(r)).toContain('sale-pdp-link')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('defaults to Instagram when no platform is given', async () => {
+    // Every caller predating X omitted this. The default must stay Instagram or
+    // those callers silently lose the check.
+    const r = await runDeterministicPublishChecks({
+      caption: PDP_CAPTION, mediaUrls: GOOD_MEDIA,
+    })
+    expect(checks(r)).toContain('sale-pdp-link')
+  })
+
+  it('allows a PDP link on X', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: PDP_CAPTION, mediaUrls: GOOD_MEDIA, platform: 'x',
+    })
+    expect(checks(r)).not.toContain('sale-pdp-link')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('still blocks the other sale forms on X', async () => {
+    // Only the PDP-link rule diverges. A price or a promo code is a charter
+    // violation on any platform, and relaxing one rule must not relax the rest.
+    const r = await runDeterministicPublishChecks({
+      caption: 'just $19.99 today, code SAVE20', mediaUrls: GOOD_MEDIA, platform: 'x',
+    })
+    expect(checks(r)).toContain('sale-price')
+    expect(checks(r)).toContain('sale-promo-code')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('blocks an over-length X post, counting links at t.co width', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'x'.repeat(281), mediaUrls: GOOD_MEDIA, platform: 'x',
+    })
+    expect(checks(r)).toContain('caption-too-long')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('allows an X post that only fits once its link is weighted', async () => {
+    // 250 chars of text plus a 60-char URL is over 280 raw and under it as X
+    // counts. A naive length check would reject a publishable post.
+    const caption = `${'x'.repeat(250)} https://xdipx.com/products/some-quite-long-handle`
+    expect(caption.length).toBeGreaterThan(280)
+    const r = await runDeterministicPublishChecks({
+      caption, mediaUrls: GOOD_MEDIA, platform: 'x',
+    })
+    expect(checks(r)).not.toContain('caption-too-long')
+  })
+
+  it('does not length-check Instagram, whose ceiling is far higher', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'x'.repeat(600), mediaUrls: GOOD_MEDIA, platform: 'instagram',
+    })
+    expect(checks(r)).not.toContain('caption-too-long')
+  })
+
+  it('requires media on X as well as Instagram', async () => {
+    // Owner decision 2026-08-16: X would accept a text-only post, but every
+    // draft is built around a generated asset and silently dropping it is a
+    // content change nothing reviewed.
+    const r = await runDeterministicPublishChecks({
+      caption: 'a clean caption with nothing wrong', mediaUrls: [], platform: 'x',
+    })
+    expect(checks(r)).toContain('image-provenance')
+    expect(r.blocked).toBe(true)
+  })
+})

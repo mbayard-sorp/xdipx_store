@@ -17,9 +17,10 @@
  * The social-media-manager stub's only write path. Rows land in social_posts
  * with status='draft' AND review_status='pending_review' for human review in
  * /admin/socials (Social Studio). There is INTENTIONALLY no live-post op here
- * and no import of twitter.server.ts — graduating to autoposting means
- * flipping `social_team_autopost` AND `X_AUTO_POST_ENABLED` and building that
- * path deliberately, not flipping a payload field.
+ * and no import of twitter.server.ts. Unattended publishing happens on the
+ * hourly /cron/social-publish tick, gated per platform by
+ * `instagram_autopublish_enabled` and `x_autopublish_enabled`, and reads rows
+ * this route wrote. It is never reachable by flipping a payload field here.
  *
  * The `draft` op FAILS CLOSED on the voice gate (ticket #3208). Because this is
  * the only path a draft reaches pending_review, the mandatory Step 4a

@@ -30,6 +30,7 @@
  */
 
 import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset } from './social-media.server'
+import { X_CAPTION_MAX, T_CO_LENGTH, weightedTweetLength } from './social-publish/x-limits'
 
 /**
  * Is this product sellable right now?
@@ -59,9 +60,25 @@ export interface GateFinding {
   detail: string
 }
 
+/**
+ * Platforms these checks know how to reason about.
+ *
+ * Not every rule is universal: what Instagram removes a post for and what X
+ * removes a post for differ, and a gate that pretended otherwise would either
+ * under-protect Instagram or make X useless. Each divergence is annotated where
+ * it appears rather than collected here.
+ */
+export type GatePlatform = 'instagram' | 'x'
+
 export interface DeterministicGateInput {
   caption: string
   mediaUrls: readonly string[] | null | undefined
+  /**
+   * Defaults to Instagram, which is what every caller did before X existed.
+   * Keeping the default means the Instagram path is byte-identical and its
+   * tests never had to learn about this parameter.
+   */
+  platform?: GatePlatform
   /**
    * Handle of the product the post features, when it features one. License D
    * posts (education, inspiration) legitimately have none, and a missing handle
@@ -94,7 +111,13 @@ export interface DeterministicGateResult {
  * raciness: a tasteful photo with a clean caption is removable if the post is
  * selling. These are the machine-detectable forms of selling.
  */
-const SALE_PATTERNS: { check: string; re: RegExp; detail: string }[] = [
+const SALE_PATTERNS: {
+  check: string
+  re: RegExp
+  detail: string
+  /** Omitted means every platform. */
+  appliesTo?: readonly GatePlatform[]
+}[] = [
   {
     check: 'sale-price',
     re: /\$\s?\d/,
@@ -119,6 +142,13 @@ const SALE_PATTERNS: { check: string; re: RegExp; detail: string }[] = [
     check: 'sale-pdp-link',
     re: /xdipx\.com\/products\//i,
     detail: 'Caption points at a PDP. Instagram captions route commerce through the bio link only.',
+    // Instagram only, and the exception is the point rather than an oversight.
+    // Instagram has no clickable link in a caption, so a PDP URL there is both
+    // useless and a Restricted Goods signal. On X a link is the entire reason
+    // the post exists: it is clickable, it is how the account drives traffic,
+    // and X's own policy permits it. Blocking it there would leave the platform
+    // able to post and unable to sell.
+    appliesTo: ['instagram'],
   },
 ]
 
@@ -189,8 +219,14 @@ export async function runDeterministicPublishChecks(
 ): Promise<DeterministicGateResult> {
   const findings: GateFinding[] = []
   const caption = input.caption ?? ''
+  const platform: GatePlatform = input.platform ?? 'instagram'
 
   // ── Imagery provenance ────────────────────────────────────────────────────
+  //
+  // Media is required on X as well as Instagram. X would accept a text-only
+  // post, but every draft the social team writes is built around a generated
+  // asset, and a post that silently loses its image is a content change nothing
+  // reviewed. Owner decision 2026-08-16.
   const media = input.mediaUrls ?? []
   if (!allMediaAreGeneratedSocialAssets(media)) {
     const offenders = media.filter(u => !isGeneratedSocialAsset(u))
@@ -198,9 +234,26 @@ export async function runDeterministicPublishChecks(
       check: 'image-provenance',
       severity: 'block',
       detail: media.length === 0
-        ? 'Post has no media. An Instagram post cannot publish without it.'
+        ? `Post has no media. A ${platform === 'x' ? 'published X' : 'published Instagram'} post cannot go out without it.`
         : `Not generated social art: ${offenders.slice(0, 3).join(', ')}. Packshot-only stills are retired.`,
     })
+  }
+
+  // ── Length, X only ────────────────────────────────────────────────────────
+  //
+  // X rejects an over-length post, and it does so after the media upload has
+  // already been billed. Catching it here means the spend is never committed.
+  // Instagram's ceiling is 2200 and the publisher truncates to it, so there is
+  // nothing to check on that side.
+  if (platform === 'x') {
+    const length = weightedTweetLength(caption)
+    if (length > X_CAPTION_MAX) {
+      findings.push({
+        check: 'caption-too-long',
+        severity: 'block',
+        detail: `Post is ${length} characters as X counts them (limit ${X_CAPTION_MAX}; links count as ${T_CO_LENGTH} regardless of real length).`,
+      })
+    }
   }
 
   // ── Stock, re-checked at publish time ─────────────────────────────────────
@@ -233,6 +286,7 @@ export async function runDeterministicPublishChecks(
 
   // ── Caption: attempts to sell ─────────────────────────────────────────────
   for (const p of SALE_PATTERNS) {
+    if (p.appliesTo && !p.appliesTo.includes(platform)) continue
     if (p.re.test(caption)) {
       findings.push({ check: p.check, severity: 'block', detail: p.detail })
     }

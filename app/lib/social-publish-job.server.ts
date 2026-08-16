@@ -31,6 +31,7 @@ import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
 import { parseGateStamp } from './social-publish-approve.server'
 import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
+import { estimateXPostCostUsd, estimateXSpendUsd } from './social-publish/x-limits'
 
 /**
  * Per-tick ceiling. A code constant, not a valve: there is no reason for the
@@ -57,6 +58,8 @@ export type PublishOutcome =
   | 'no_gate_verdict'
   | 'failed'
   | 'claim_lost'
+  /** Publishing this post would cross the month's spend ceiling. */
+  | 'spend_cap'
 
 export interface PublishAttempt {
   postId: number
@@ -72,7 +75,20 @@ export interface PublishTickResult {
   publishedToday: number
   /** What the removal watch saw this tick, when it ran. */
   watch?: RemovalWatchResult | null
+  /** Which platform this tick ran for. */
+  platform?: PublishPlatform
+  /** Month-to-date estimated spend, when this platform meters spend. */
+  spendUsd?: number
 }
+
+/**
+ * Platforms the unattended job can publish for.
+ *
+ * TikTok and YouTube are deliberately absent: their adapters are stubs that
+ * return `not_configured`, and a tick that ran for them would do nothing except
+ * churn rows through `publishing` and back.
+ */
+export type PublishPlatform = 'instagram' | 'x'
 
 /**
  * Every data access the tick performs, behind an interface.
@@ -96,8 +112,26 @@ export interface PublishRepo {
 export type PostRow = typeof socialPosts.$inferSelect
 
 export interface PublishTickDeps {
+  /**
+   * Defaults to Instagram, which is what every caller did before X existed.
+   * Keeping the default means the Instagram tick and its tests are untouched.
+   */
+  platform?: PublishPlatform
   /** Reads the autopublish valve. Injected so tests never touch settings. */
   isEnabled: () => Promise<boolean>
+  /**
+   * Month-to-date spend in USD, and the ceiling it is checked against. Both
+   * optional, and supplied together or not at all.
+   *
+   * Instagram supplies neither: publishing there is free, so a spend guard
+   * would be a cap on nothing. X bills per post and a linked post costs more
+   * than 13x a plain one, so on X this is the difference between a valve the
+   * owner can leave on and one that quietly accrues a bill. When the ceiling is
+   * reached the tick stops publishing rather than failing rows, because there
+   * is nothing wrong with the posts.
+   */
+  monthSpendUsd?: () => Promise<number>
+  maxSpendUsd?: () => Promise<number>
   /** Daily publish ceiling, independent of the drafting quota. */
   maxPerDay: () => Promise<number>
   /** Publishes one post. Returns the external id on success. */
@@ -133,33 +167,14 @@ export interface PublishTickDeps {
   removalWatch?: () => Promise<RemovalWatchResult | null>
 }
 
-/** The live implementation. */
-export const dbPublishRepo: PublishRepo = {
-  sweepAbandoned: sweepAbandonedPublishing,
-  countPublishedToday,
-  claim: claimForPublish,
-  listEligible: async (limit) => db
-    .select()
-    .from(socialPosts)
-    .where(and(
-      eq(socialPosts.platform, 'instagram'),
-      eq(socialPosts.status, 'draft'),
-      eq(socialPosts.reviewStatus, 'approved'),
-      // `<=` today, not `=`: a post whose day was missed because the valve was
-      // off still goes out, instead of being silently skipped forever.
-      lte(socialPosts.scheduledFor, sql`current_date`),
-    ))
-    .orderBy(socialPosts.scheduledFor, socialPosts.id)
-    .limit(limit),
-  recentCaptions: async (limit) => {
-    const rows = await db
-      .select({ t: socialPosts.tweetText, e: socialPosts.editedText })
-      .from(socialPosts)
-      .where(and(eq(socialPosts.platform, 'instagram'), eq(socialPosts.status, 'posted')))
-      .orderBy(desc(socialPosts.postedAt))
-      .limit(limit)
-    return rows.map(r => (r.e?.trim() || r.t))
-  },
+/**
+ * Writes that address one row by id and so need no platform scope.
+ *
+ * Declared before `makeDbPublishRepo` deliberately: `dbPublishRepo` below calls
+ * that factory at module load, so a `const` declared after it would still be in
+ * the temporal dead zone and throw on import.
+ */
+const sharedRepoWrites: Pick<PublishRepo, 'markPosted' | 'markNeedsChanges' | 'markFailed'> = {
   markPosted: async (postId, externalPostId, at) => {
     await db.update(socialPosts)
       .set({ status: 'posted', externalPostId, postedAt: at })
@@ -179,6 +194,50 @@ export const dbPublishRepo: PublishRepo = {
       .where(eq(socialPosts.id, postId))
   },
 }
+
+/**
+ * The live implementation, bound to one platform.
+ *
+ * Every query here was `platform = 'instagram'` before X existed. Binding at
+ * construction rather than threading a platform argument through each method
+ * keeps `PublishRepo` the same shape it already was, which is why the existing
+ * tests inject their fake repo unchanged.
+ */
+export function makeDbPublishRepo(platform: PublishPlatform): PublishRepo {
+  return {
+    sweepAbandoned: () => sweepAbandonedPublishing(platform),
+    countPublishedToday: () => countPublishedToday(platform),
+    claim: claimForPublish,
+    listEligible: async (limit) => db
+      .select()
+      .from(socialPosts)
+      .where(and(
+        eq(socialPosts.platform, platform),
+        eq(socialPosts.status, 'draft'),
+        eq(socialPosts.reviewStatus, 'approved'),
+        // `<=` today, not `=`: a post whose day was missed because the valve was
+        // off still goes out, instead of being silently skipped forever.
+        lte(socialPosts.scheduledFor, sql`current_date`),
+      ))
+      .orderBy(socialPosts.scheduledFor, socialPosts.id)
+      .limit(limit),
+    recentCaptions: async (limit) => {
+      const rows = await db
+        .select({ t: socialPosts.tweetText, e: socialPosts.editedText })
+        .from(socialPosts)
+        .where(and(eq(socialPosts.platform, platform), eq(socialPosts.status, 'posted')))
+        .orderBy(desc(socialPosts.postedAt))
+        .limit(limit)
+      return rows.map(r => (r.e?.trim() || r.t))
+    },
+    markPosted: sharedRepoWrites.markPosted,
+    markNeedsChanges: sharedRepoWrites.markNeedsChanges,
+    markFailed: sharedRepoWrites.markFailed,
+  }
+}
+
+/** Kept for callers that predate the platform parameter. */
+export const dbPublishRepo: PublishRepo = makeDbPublishRepo('instagram')
 
 /**
  * Return abandoned `publishing` rows to `draft` so they can be retried.
@@ -206,11 +265,18 @@ export const dbPublishRepo: PublishRepo = {
  * to a public account twice. Such a row is left alone deliberately, for a human
  * to reconcile against the live feed.
  */
-export async function sweepAbandonedPublishing(): Promise<number> {
+export async function sweepAbandonedPublishing(
+  platform: PublishPlatform = 'instagram',
+): Promise<number> {
   const rows = await db
     .update(socialPosts)
     .set({ status: 'draft' })
     .where(and(
+      // Scoped to one platform, which matters now that more than one ticks.
+      // Unscoped, an Instagram tick would sweep an X row that a concurrent X
+      // tick had just claimed, handing the same row to two publishers. The
+      // non-overlap argument below holds within a platform, not across them.
+      eq(socialPosts.platform, platform),
       eq(socialPosts.status, 'publishing'),
       isNull(socialPosts.externalPostId),
     ))
@@ -236,17 +302,44 @@ export async function claimForPublish(postId: number) {
   return rows[0] ?? null
 }
 
-/** Count of Instagram posts already published today. */
-export async function countPublishedToday(): Promise<number> {
+/** Count of this platform's posts already published today. */
+export async function countPublishedToday(
+  platform: PublishPlatform = 'instagram',
+): Promise<number> {
   const rows = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(socialPosts)
     .where(and(
-      eq(socialPosts.platform, 'instagram'),
+      eq(socialPosts.platform, platform),
       eq(socialPosts.status, 'posted'),
       sql`${socialPosts.postedAt} >= date_trunc('day', now())`,
     ))
   return rows[0]?.n ?? 0
+}
+
+/**
+ * Month-to-date X spend in USD, estimated from what was actually posted.
+ *
+ * Estimated rather than measured because X's API returns no per-request cost
+ * and the store has no billing integration. The estimate is derived from the
+ * published caption: a post carrying a link is billed at the higher tier, and
+ * every other post at the lower one (see `x-limits.ts`). That makes this exact
+ * as long as X's list prices are, and wrong in the same direction as the bill
+ * if they change, which is why the prices live in one named constant.
+ *
+ * Reads `edited_text` in preference to `tweet_text`, because the edited text is
+ * what was actually published and is what the link check must run against.
+ */
+export async function estimateXSpendThisMonthUsd(): Promise<number> {
+  const rows = await db
+    .select({ t: socialPosts.tweetText, e: socialPosts.editedText })
+    .from(socialPosts)
+    .where(and(
+      eq(socialPosts.platform, 'x'),
+      eq(socialPosts.status, 'posted'),
+      sql`${socialPosts.postedAt} >= date_trunc('month', now())`,
+    ))
+  return estimateXSpendUsd(rows.map(r => r.e?.trim() || r.t))
 }
 
 /**
@@ -258,12 +351,13 @@ export async function countPublishedToday(): Promise<number> {
  */
 export async function runSocialPublishTick(deps: PublishTickDeps): Promise<PublishTickResult> {
   const now = deps.now?.() ?? new Date()
-  const repo = deps.repo ?? dbPublishRepo
+  const platform: PublishPlatform = deps.platform ?? 'instagram'
+  const repo = deps.repo ?? makeDbPublishRepo(platform)
 
   // Read fresh every tick, so flipping the valve off takes effect at the next
   // tick rather than at the next deploy.
   if (!(await deps.isEnabled())) {
-    return { skipped: 'valve_off', swept: 0, attempts: [], publishedToday: 0 }
+    return { skipped: 'valve_off', swept: 0, attempts: [], publishedToday: 0, platform }
   }
 
   const swept = await repo.sweepAbandoned()
@@ -287,7 +381,19 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
   const publishedToday = await repo.countPublishedToday()
   const maxPerDay = await deps.maxPerDay()
   if (publishedToday >= maxPerDay) {
-    return { skipped: 'daily_cap', swept, attempts: [], publishedToday }
+    return { skipped: 'daily_cap', swept, attempts: [], publishedToday, platform }
+  }
+
+  // Month-to-date spend, read once per tick. Both halves are optional and are
+  // supplied together; Instagram supplies neither because publishing is free.
+  let spendUsd: number | undefined
+  let maxSpendUsd: number | undefined
+  if (deps.monthSpendUsd && deps.maxSpendUsd) {
+    spendUsd = await deps.monthSpendUsd()
+    maxSpendUsd = await deps.maxSpendUsd()
+    if (spendUsd >= maxSpendUsd) {
+      return { skipped: 'spend_cap', swept, attempts: [], publishedToday, platform, spendUsd }
+    }
   }
 
   const room = Math.min(MAX_PER_TICK, maxPerDay - publishedToday)
@@ -295,8 +401,31 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
   const recentCaptions = await repo.recentCaptions(14)
 
   const attempts: PublishAttempt[] = []
+  let spentThisTick = 0
 
   for (const candidate of eligible) {
+    // Budget is checked BEFORE the claim, not after.
+    //
+    // A row is claimed by flipping it to `publishing`, and the only ways back
+    // are markPosted, markNeedsChanges, or markFailed. None of them fit "the
+    // post is fine, we simply cannot afford it this month": markFailed writes
+    // an error message, which makes the row's NEXT attempt terminal under the
+    // two-strike rule, so a budget pause would permanently kill a good post.
+    // Checking first leaves the row untouched in the queue for next month.
+    const cost = spendUsd !== undefined
+      ? estimateXPostCostUsd(candidate.editedText?.trim() || candidate.tweetText)
+      : 0
+    if (spendUsd !== undefined && maxSpendUsd !== undefined) {
+      if (spendUsd + spentThisTick + cost > maxSpendUsd) {
+        attempts.push({
+          postId: candidate.id,
+          outcome: 'spend_cap',
+          detail: `Would cost $${cost.toFixed(3)} against $${(maxSpendUsd - spendUsd - spentThisTick).toFixed(3)} left this month.`,
+        })
+        break
+      }
+    }
+
     const post = await repo.claim(candidate.id)
     if (!post) {
       attempts.push({ postId: candidate.id, outcome: 'claim_lost' })
@@ -337,6 +466,7 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       mediaUrls: post.mediaUrls ?? [],
       productHandle,
       recentCaptions,
+      platform,
     }, deps.gateDeps)
 
     if (gate.blocked || gate.held) {
@@ -349,6 +479,10 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     const result = await deps.publish(post)
     if (result.ok) {
       await repo.markPosted(post.id, result.externalPostId, now)
+      // Charged only here. A gate block or a failed publish costs nothing, so
+      // counting at claim time would shrink the month's budget for posts that
+      // never reached X.
+      spentThisTick += cost
       attempts.push({ postId: post.id, outcome: 'published' })
       continue
     }
@@ -366,5 +500,12 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     })
   }
 
-  return { swept, attempts, publishedToday, watch }
+  return {
+    swept,
+    attempts,
+    publishedToday,
+    watch,
+    platform,
+    ...(spendUsd !== undefined ? { spendUsd: spendUsd + spentThisTick } : {}),
+  }
 }

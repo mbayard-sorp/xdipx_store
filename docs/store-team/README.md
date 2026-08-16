@@ -68,7 +68,9 @@ OFF / conservative.
 | `{team}_team_daily_cents` | social/ads/email/content 500, strategy 300, homepage 1500 | Daily metered cap per team. Content moved 300 to 500 in migration 068 (accuracy-gate web verification + Saturday trend-scout run). |
 | `{team}_team_max_runs` | social 2, content 8 (double days — Sat trend-scout, Sun SEO curation, Wed podcast review — plus writer-retry headroom; 075), others 1, homepage 4 | Max-quota guard (runs/day). Counts run ROWS, not successes. |
 | `homepage_team_build_cents`, `homepage_team_max_images` | 10000 / 12 | Homepage-only extras. |
-| `social_team_autopost` | `false` | **Draft-mode valve.** Live posting also requires `X_AUTO_POST_ENABLED`, and only X has plumbing. |
+| `social_team_autopost` | `false` | **Legacy, gates nothing.** Kept only so the existing row is not reinterpreted. Publishing is controlled per platform by `instagram_autopublish_enabled` and `x_autopublish_enabled`. |
+| `instagram_autopublish_enabled` | `false` | **Publish valve (Instagram).** On = the hourly `/cron/social-publish` tick posts approved, due Instagram drafts. Capped by `instagram_publish_max_per_day`. |
+| `x_autopublish_enabled` | `false` | **Publish valve (X).** Same tick, same gates, plus X-only rules: a PDP link is allowed, posts are length-checked at 280. Capped by `x_publish_max_per_day` AND `x_publish_max_spend_usd_month`, because X bills per post (~$0.20 for a linked post). |
 | `content_team_autopublish` | `false` | **Publish valve (content).** On = a dual-gate PASS (voice + accuracy) publishes the blog post live; off = posts stay Sanity drafts. The routine keeps running either way. |
 | `trend_scout_enabled` | `false` | **Trend-scout kill switch.** Gates the weekly Saturday trend-scout routine (proposes trendTopicBrief docs for Sunday SEO curation). Seeded by migration 068. |
 | `suggestion_apply_enabled` | `false` | **Apply-path valve.** When on, agent-editor turns approved instruction-suggestions into PRs. |
@@ -91,9 +93,15 @@ merges. Full lifecycle: `docs/store-team/improvement-loop.md`.
 
 ## Stub graduation criteria (owner's call, suggested defaults)
 
-- **Social → autopost (X only):** ~20 consecutive drafts posted unedited with zero voice-gate
-  rejections, then flip `social_team_autopost` + set `X_AUTO_POST_ENABLED`. IG/TikTok stay manual
-  until posting plumbing is built (kind `code` suggestion → `rr7-engineer`).
+- **Social → autopublish (Instagram and X):** both platforms have live publishing plumbing and an
+  independent pre-publish gate. Graduating one is a single valve flip
+  (`instagram_autopublish_enabled` / `x_autopublish_enabled`), not an env var. The suggested bar is
+  unchanged: ~20 consecutive drafts posted unedited with zero voice-gate rejections on that
+  platform. On X, set `x_publish_max_spend_usd_month` before flipping, because the valve spends
+  money. TikTok and YouTube stay manual until their publisher stubs are built (kind `code`
+  suggestion → `rr7-engineer`).
+  *(Corrected 2026-08-16: this previously named `X_AUTO_POST_ENABLED`, an env var that was read once
+  to render a status pill and gated nothing. It has been retired.)*
 - **Ads → live spend:** never automatic. Approved proposals are launched by hand in-platform;
   automating creation would require granting write MCP tools deliberately (a reviewed decision, not
   a valve).

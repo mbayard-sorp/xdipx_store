@@ -163,11 +163,12 @@ Every one of these is a `pipeline_settings` row. Agents may never write `pipelin
 | `product_manager_enabled` | Import candidates are not actioned | `/admin/imports` |
 | `import_enrich_enabled` | Imported products never go draft to live | `/admin/imports` |
 | `seo_curation_enabled`, `trend_scout_enabled` | Those weekly routines exit before starting a run | content tab |
-| `social_team_autopost` | Social drafts are never posted live. **Money valve, owner-gated** | social tab |
+| `instagram_autopublish_enabled` | Instagram drafts are never posted live. **Owner-gated** | social tab |
+| `x_autopublish_enabled` | X drafts are never posted live. **Money valve, owner-gated** (X bills per post; paired with `x_publish_max_spend_usd_month`) | social tab |
 | `video_frame_review` | Video frames require owner review. **Money valve, owner-gated** | `/admin/video-studio` |
 | `import_enrich_enabled` (also listed above) | Imported products never go draft to live. **Money valve, owner-gated**. This replaced the retired `deal_status: approved` metafield row that used to sit here: daily deals were retired and `deal_status` was removed catalog-wide on 2026-08-03 (see `CLAUDE.md`, Shopify Metafields), so product publishing is the gate now | `/admin/imports` |
 
-The three money valves at the bottom (import enrich, video frame review, social autopost) are
+The three money valves at the bottom (import enrich, video frame review, X autopublish) are
 unchanged by anything on this page. The release engine never writes them, and every file that could
 change them is a protected path.
 
