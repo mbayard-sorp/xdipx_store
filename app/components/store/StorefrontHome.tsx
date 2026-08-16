@@ -818,7 +818,7 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
             <Link
               to={promoCtaLink}
               onClick={() => trackCtaClick('find-your-fit', 'mosaic-promo')}
-              className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
+              className="relative flex min-h-[360px] flex-wrap items-end justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
             >
               {hasPromoImage && (
                 <>
