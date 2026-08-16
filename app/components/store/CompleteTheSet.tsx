@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
 
-type FbtProduct = {
+type CrossLinkProduct = {
   handle: string
   title: string
   image: string | null
@@ -9,16 +9,23 @@ type FbtProduct = {
   compareAtPrice: number | null
 }
 
-interface FrequentlyBoughtWithProps {
-  products: FbtProduct[]
+interface CompleteTheSetProps {
+  products: CrossLinkProduct[]
 }
 
-export default function FrequentlyBoughtWith({ products }: FrequentlyBoughtWithProps) {
+/**
+ * Real-complement cross-link rail. Was "Frequently bought with" — a claim
+ * with zero real orders behind it (see ticket #3447 and
+ * docs/design-doctrine.md §6, which bans fabricated proof). Renamed to
+ * describe what it actually shows: more of a curated pairing, never a
+ * same-category substitute for the product on this page.
+ */
+export default function CompleteTheSet({ products }: CompleteTheSetProps) {
   if (products.length === 0) return null
 
   return (
     <section className="mt-12 mb-6">
-      <h2 className="font-display text-2xl font-bold text-ink mb-4">Frequently bought with</h2>
+      <h2 className="font-display text-2xl font-bold text-ink mb-4">Complete the set</h2>
       <ul className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {products.map(p => (
           <li key={p.handle}>

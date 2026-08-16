@@ -56,7 +56,7 @@ import { NotebookRail } from '~/components/blog/NotebookRail'
 import type { BlogPostCard } from '~/types/cms'
 // ProductTabs removed — content now lives in the SEO summary grid above.
 import RecentlyBrowsed            from '~/components/store/RecentlyBrowsed'
-import FrequentlyBoughtWith       from '~/components/store/FrequentlyBoughtWith'
+import CompleteTheSet             from '~/components/store/CompleteTheSet'
 import { SensationDial }          from '~/components/store/SensationDial'
 import { PairsWith, type PairsWithItem } from '~/components/store/PairsWith'
 import { VariantSelector, resolveVariant } from '~/components/store/VariantSelector'
@@ -275,27 +275,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     productHandle: deal.handle,
   })
 
-  // Add variantId so fbtProducts can be added to cart from the in-line
-  // "Customers also buy" mini-module above the Add-to-cart form. Drop items
-  // without a usable first variant — they can't be checked out anyway.
-  // Also defensively exclude self in case a recommendation source ever lets
-  // the current product through.
-  const fbtProducts = fbtResolved
-    .map(p => {
-      const variantId = p.variants[0]?.id
-      if (!variantId) return null
-      if (variantId === deal.variantId) return null
-      return {
-        handle:         p.handle,
-        title:          p.title,
-        image:          p.images[0]?.url ?? null,
-        price:          p.price,
-        compareAtPrice: p.compareAtPrice ?? null,
-        variantId,
-      }
-    })
-    .filter((x): x is NonNullable<typeof x> => x !== null)
-
   const pairsWithItems: PairsWithItem[] = hasPairing
     ? pairProducts
         .map(p => {
@@ -317,6 +296,38 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .filter((x): x is PairsWithItem => x !== null)
         .slice(0, 3)
     : []
+
+  // "Complete the set" rail — real complement signal only (ticket #3447: this
+  // used to fill from a same-tag/same-vendor cold-start fallback, which
+  // recommended SUBSTITUTES for the product the visitor was about to buy
+  // directly under the buy button). Two real sources, both already fetched
+  // above: actual order co-purchases (fbtResolved — empty until
+  // product_copurchase has rows) and the overflow of this product's curated
+  // accessory pairing beyond the top 3 already shown in "Pairs great with".
+  // No heuristic fallback of any kind — an empty rail here is correct, not a
+  // gap. Drop items without a usable first variant (can't be checked out) and
+  // defensively exclude self, in case a source ever lets the current product
+  // through.
+  const pairingOverflow = hasPairing ? pairProducts.slice(3) : []
+  const seenFbtHandles = new Set<string>()
+  const fbtProducts = [...fbtResolved, ...pairingOverflow]
+    .map(p => {
+      const variantId = p.variants[0]?.id
+      if (!variantId) return null
+      if (variantId === deal.variantId) return null
+      if (p.handle === deal.handle) return null
+      if (seenFbtHandles.has(p.handle)) return null
+      seenFbtHandles.add(p.handle)
+      return {
+        handle:         p.handle,
+        title:          p.title,
+        image:          p.images[0]?.url ?? null,
+        price:          p.price,
+        compareAtPrice: p.compareAtPrice ?? null,
+        variantId,
+      }
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
 
   // ── Emma contextual aside ─────────────────────────────────────────────────
   // SEO-visible static aside: deterministic, no Claude call. Either the admin-
@@ -570,8 +581,8 @@ function ProductPage() {
   // Internal linking: render BOTH cross-link rails when both have data. This
   // used to be either/or, which left most PDPs carrying only 3-4 internal
   // product links and starved the catalog of crawl paths. Pairs-with is Emma's
-  // curated pairing so it keeps priority and wins the dedupe; "frequently
-  // bought with" fills the remainder up to a combined cap so the page does not
+  // curated pairing so it keeps priority and wins the dedupe; "Complete the
+  // set" fills the remainder up to a combined cap so the page does not
   // sprawl. Both data sets are already in the loader payload, so this is a pure
   // derivation, no extra fetching.
   const pairedHandles = new Set(pairsWithItems.map(p => p.handle))
@@ -1241,7 +1252,7 @@ function ProductPage() {
         {/* Both rails render when both have data. Each component already
             returns null on an empty list. */}
         <PairsWith items={pairsWithItems} />
-        <FrequentlyBoughtWith products={fbtCrossLinks} />
+        <CompleteTheSet products={fbtCrossLinks} />
         <RecentlyBrowsed currentHandle={deal.handle} />
         {companionBundle && (
           <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />

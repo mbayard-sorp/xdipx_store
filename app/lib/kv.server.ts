@@ -365,7 +365,10 @@ export const KV_KEYS = {
   veoOperation:           (token: string) => `veo:op:${token}`,
   ltxOperation:           (token: string) => `ltx:op:${token}`,
   liveDealHandle:         'live-deal:handle',
-  fbt:                    (handle: string) => `fbt:${handle}`,
+  // v2: ticket #3447 — the old key cached substitute recommendations from the
+  // removed tag-based cold-start fallback. Bumping the key so a stale
+  // substitute list can't survive the deploy on cache TTL alone.
+  fbt:                    (handle: string) => `fbt:v2:${handle}`,
   collectionCursor:       (handle: string, page: number, sort = 'manual') => `vault:cursor:${handle}:${sort}:p${page}`,
   // v2 redesign — dial vote aggregates (5-min TTL)
   dialAggregate:          (shopifyProductId: string) => `dial:agg:${shopifyProductId}`,
