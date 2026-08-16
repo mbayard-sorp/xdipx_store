@@ -7,20 +7,33 @@ import { PLATFORM_LABELS } from './types'
  * graduation valves. Frequencies size the social team's per-platform draft
  * quota; the valves stay a deliberate flip on /admin/homepage-team.
  */
-export function FrequencyPanel({ frequencies, autopostValve, autoPostEnv }: {
+export function FrequencyPanel({ frequencies, igAutopublish, xAutopublish }: {
   frequencies: Record<string, number>
-  autopostValve: boolean
-  autoPostEnv: boolean
+  igAutopublish: boolean
+  xAutopublish: boolean
 }) {
+  const anyAutopublish = igAutopublish || xAutopublish
   return (
     <div className="space-y-4">
       <div className="rounded-2xl bg-coral-soft border border-coral/20 p-4">
-        <p className="text-sm font-semibold text-ink">Internal review mode</p>
+        <p className="text-sm font-semibold text-ink">
+          {anyAutopublish ? 'Autopublish is ON' : 'Internal review mode'}
+        </p>
         <p className="text-xs text-ink-3 mt-1">
-          Nothing posts publicly. Every draft waits for your review here, and live posting stays off
-          until you flip <code className="bg-white/60 px-1 rounded">social_team_autopost</code> (Agent
-          Teams page) and <code className="bg-white/60 px-1 rounded">X_AUTO_POST_ENABLED</code> (Vercel
-          env). Only X has live plumbing; Instagram and TikTok are posted by hand from approved drafts.
+          {anyAutopublish ? (
+            <>
+              Approved drafts publish on their own for{' '}
+              {[igAutopublish && 'Instagram', xAutopublish && 'X'].filter(Boolean).join(' and ')},
+              hourly, without waiting for you. The pre-publish gate is what approves them. Turn a
+              platform off on the Agent Teams page.
+            </>
+          ) : (
+            <>
+              Nothing posts publicly. Every draft waits for your review here. Flip a platform's
+              autopublish valve on the Agent Teams page to let approved drafts go out on their own.
+              TikTok and YouTube have no publisher and are always posted by hand.
+            </>
+          )}
         </p>
       </div>
 
@@ -37,16 +50,16 @@ export function FrequencyPanel({ frequencies, autopostValve, autoPostEnv }: {
       </section>
 
       <section className="bg-white rounded-2xl border border-line p-4 md:p-6 space-y-3">
-        <h3 className="text-sm font-semibold text-ink">Graduation valves (read-only)</h3>
+        <h3 className="text-sm font-semibold text-ink">Autopublish valves (read-only)</h3>
         <ValveStatus
-          label="social_team_autopost"
-          on={autopostValve}
-          note="DB valve. Flip on the Agent Teams page when the team has earned it."
+          label="instagram_autopublish_enabled"
+          on={igAutopublish}
+          note="Approved Instagram drafts publish hourly. Flip on the Agent Teams page."
         />
         <ValveStatus
-          label="X_AUTO_POST_ENABLED"
-          on={autoPostEnv}
-          note="Environment variable, toggled in Vercel."
+          label="x_autopublish_enabled"
+          on={xAutopublish}
+          note="Approved X drafts publish hourly, capped by x_publish_max_per_day and a monthly spend ceiling. X bills per post."
         />
       </section>
     </div>

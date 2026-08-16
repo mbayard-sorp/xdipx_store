@@ -62,10 +62,16 @@ const RELEASE_ENGINE_KEYS = {
  */
 const SOCIAL_EXTRA_KEYS = {
   instagramPublishMaxPerDay: 'instagram_publish_max_per_day',
+  xPublishMaxPerDay: 'x_publish_max_per_day',
+  xPublishMaxSpendUsdMonth: 'x_publish_max_spend_usd_month',
 } as const
 
 /** Mirrors DEFAULT_MAX_PER_DAY in social-publish-job.server.ts (unset = 3/day). */
 const INSTAGRAM_PUBLISH_MAX_PER_DAY_DEFAULT = 3
+
+/** Mirror the X defaults in social-publish-run.server.ts. */
+const X_PUBLISH_MAX_PER_DAY_DEFAULT = 2
+const X_PUBLISH_MAX_SPEND_USD_MONTH_DEFAULT = 15
 
 /**
  * Everything still in flight. The pre-070 board only knew proposed/approved/
@@ -156,6 +162,9 @@ interface LoaderData {
   videoEndcard: boolean
   instagramAutopublish: boolean
   instagramPublishMaxPerDay: number
+  xAutopublish: boolean
+  xPublishMaxPerDay: number
+  xPublishMaxSpendUsdMonth: number
   releaseEngine: boolean
   releaseEngineMaxMerges: number
 }
@@ -170,7 +179,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, releaseEngineRow] = await Promise.all([
+  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
@@ -194,6 +203,15 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, SOCIAL_EXTRA_KEYS.instagramPublishMaxPerDay)).limit(1)
       .then(rows => rows[0]?.value)
       .catch(() => undefined),
+    // X autopublish, and its two caps. X is the only platform with a spend
+    // ceiling because it is the only one that bills per post.
+    getValve(VALVE_KEYS.xAutopublish).catch(() => false),
+    db.select().from(pipelineSettings)
+      .where(inArray(pipelineSettings.key, [
+        SOCIAL_EXTRA_KEYS.xPublishMaxPerDay,
+        SOCIAL_EXTRA_KEYS.xPublishMaxSpendUsdMonth,
+      ]))
+      .catch(() => [] as Array<{ key: string; value: string }>),
     // Release-engine settings: read directly, same reason as frame review.
     db.select().from(pipelineSettings)
       .where(inArray(pipelineSettings.key, [RELEASE_ENGINE_KEYS.enabled, RELEASE_ENGINE_KEYS.maxMergesPerDay]))
@@ -205,6 +223,18 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const instagramPublishMaxPerDay = Number.isFinite(instagramPublishParsed) && instagramPublishParsed >= 0
     ? instagramPublishParsed
     : INSTAGRAM_PUBLISH_MAX_PER_DAY_DEFAULT
+  // Same zero-preserving parse for X. The spend ceiling is parsed as a float
+  // because it is dollars, not a count.
+  const xPerDayRaw = xPublishRows.find(r => r.key === SOCIAL_EXTRA_KEYS.xPublishMaxPerDay)?.value
+  const xPerDayParsed = xPerDayRaw == null ? NaN : parseInt(xPerDayRaw, 10)
+  const xPublishMaxPerDay = Number.isFinite(xPerDayParsed) && xPerDayParsed >= 0
+    ? xPerDayParsed
+    : X_PUBLISH_MAX_PER_DAY_DEFAULT
+  const xSpendRaw = xPublishRows.find(r => r.key === SOCIAL_EXTRA_KEYS.xPublishMaxSpendUsdMonth)?.value
+  const xSpendParsed = xSpendRaw == null ? NaN : parseFloat(xSpendRaw)
+  const xPublishMaxSpendUsdMonth = Number.isFinite(xSpendParsed) && xSpendParsed >= 0
+    ? xSpendParsed
+    : X_PUBLISH_MAX_SPEND_USD_MONTH_DEFAULT
   const releaseEngine = releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.enabled)?.value === 'true'
   const releaseEngineMaxMerges =
     Number(releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.maxMergesPerDay)?.value ?? 6) || 6
@@ -340,6 +370,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
     videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
+    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth,
     releaseEngine, releaseEngineMaxMerges,
   }
 }
@@ -466,6 +497,7 @@ export default function AgentTeamsPage() {
     briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
     seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
+    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth,
     releaseEngine, releaseEngineMaxMerges,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
@@ -571,8 +603,8 @@ export default function AgentTeamsPage() {
         {team === 'social' && (
           <>
             <ValveRow
-              label={`Autopost is ${autopost ? 'ON' : 'OFF'}`}
-              detail="Even when ON, live posting also requires X_AUTO_POST_ENABLED and only X has plumbing. Keep OFF while the team is draft-only."
+              label={`Autopost (legacy) is ${autopost ? 'ON' : 'OFF'}`}
+              detail="Historical flag. It gates nothing in code and never did: publishing is controlled by the per-platform autopublish valves below. Retained only so its existing row is not silently reinterpreted; safe to ignore."
               settingKey={VALVE_KEYS.socialAutopost}
               on={autopost}
             />
@@ -581,6 +613,12 @@ export default function AgentTeamsPage() {
               detail="When ON, the hourly /cron/social-publish job posts approved, due Instagram drafts to @hello_xdipx with no click from you. Only the social-publish-gate agent can mark a draft approved, and every post is re-checked at publish time for stock, imagery provenance, sale language, and repetition. OFF means drafts wait in the Social Studio exactly as before. Turning it off takes effect on the next tick, not the next deploy."
               settingKey={VALVE_KEYS.instagramAutopublish}
               on={instagramAutopublish}
+            />
+            <ValveRow
+              label={`X autopublish is ${xAutopublish ? 'ON' : 'OFF'}`}
+              detail="When ON, the same hourly job posts approved, due X drafts to @hello_xdipx with no click from you. Same gates as Instagram, plus two X-only ones: a PDP link is allowed here (it is the point of posting on X) and posts are length-checked at 280 with links counted at 23. X BILLS PER POST — roughly $0.20 for a post carrying a link — so the monthly ceiling below is a real spend control, not a formality. Turning it off takes effect on the next tick, not the next deploy."
+              settingKey={VALVE_KEYS.xAutopublish}
+              on={xAutopublish}
             />
             <ValveRow
               label={`Social trend scout is ${socialTrendScout ? 'ON' : 'OFF'}`}
@@ -594,7 +632,23 @@ export default function AgentTeamsPage() {
                 settingKey={SOCIAL_EXTRA_KEYS.instagramPublishMaxPerDay}
                 value={instagramPublishMaxPerDay}
               />
+              <SettingField
+                label="X posts / day (publish cap)"
+                settingKey={SOCIAL_EXTRA_KEYS.xPublishMaxPerDay}
+                value={xPublishMaxPerDay}
+              />
+              <SettingField
+                label="X spend ceiling / month ($)"
+                settingKey={SOCIAL_EXTRA_KEYS.xPublishMaxSpendUsdMonth}
+                value={xPublishMaxSpendUsdMonth}
+              />
             </div>
+            <p className="text-[11px] text-ink-4">
+              The X spend ceiling is checked before each post and estimated from what was actually
+              published this month, charging the linked-post rate to any post carrying a URL. When
+              the month's ceiling is reached the job stops publishing and leaves the queue intact:
+              nothing is failed or rejected, because there is nothing wrong with the posts.
+            </p>
             <p className="text-[11px] text-ink-4">
               The publish cap is independent of the drafting quota above: drafting can run ahead
               without the queue draining onto the account all at once. A tick posts at most 2, so a

@@ -5,9 +5,15 @@
  * lands in the Review tab as a platform-native preview the owner approves,
  * requests changes on (feedback goes back to the team verbatim), or rejects.
  * Per-platform posting frequency lives in Settings (social_freq_* keys).
- * This is the internal review period: nothing posts publicly except the
- * owner's own explicit clicks (Compose quick-post, Post-now on an approved X
- * draft) — autoposting stays behind social_team_autopost + X_AUTO_POST_ENABLED.
+ * Publishing has two paths. The owner's explicit clicks (Compose quick-post,
+ * Post-now on an approved draft) always work. Unattended publishing runs on the
+ * hourly /cron/social-publish tick and is gated per platform by
+ * instagram_autopublish_enabled and x_autopublish_enabled, both default off.
+ *
+ * The old X_AUTO_POST_ENABLED env var was retired 2026-08-16. It never gated
+ * anything: it was read once, here, to render a status pill, while the copy
+ * beside it told the owner it was one of two switches that controlled live
+ * posting. Two valves that gate nothing are worse than none.
  */
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData, useFetcher } from 'react-router'
@@ -39,7 +45,7 @@ export const meta: MetaFunction = () => [{ title: 'Social Studio — xdipx Admin
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
 
-  const [posts, liveDealRows, frequencies, autopostValve] = await Promise.all([
+  const [posts, liveDealRows, frequencies, igAutopublish, xAutopublish] = await Promise.all([
     db
       .select()
       .from(socialPosts)
@@ -51,7 +57,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .where(eq(dealHistory.status, 'live'))
       .limit(1),
     getSocialFrequencies(),
-    getValve(VALVE_KEYS.socialAutopost),
+    getValve(VALVE_KEYS.instagramAutopublish),
+    getValve(VALVE_KEYS.xAutopublish),
   ])
 
   const liveDeal = liveDealRows[0] ?? null
@@ -80,8 +87,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     liveDealTagline,
     liveDealCategory,
     frequencies,
-    autopostValve,
-    autoPostEnabled: process.env['X_AUTO_POST_ENABLED'] === 'true',
+    igAutopublish,
+    xAutopublish,
   }
 }
 
@@ -377,8 +384,8 @@ export default function AdminSocialsPage() {
       {tab === 'Settings' && (
         <FrequencyPanel
           frequencies={data.frequencies}
-          autopostValve={data.autopostValve}
-          autoPostEnv={data.autoPostEnabled}
+          igAutopublish={data.igAutopublish}
+          xAutopublish={data.xAutopublish}
         />
       )}
     </div>
