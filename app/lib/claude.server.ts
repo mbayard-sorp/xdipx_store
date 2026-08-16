@@ -21,6 +21,7 @@ import {
 // our JSON-only prompts. See header comment on `callClaude` below.
 import { type LLMClient } from '~/lib/llm-client.server'
 import { EMMA_VOICE_CORE, EMMA_VOICE_MARKETING } from '~/lib/emma-voice.server'
+import { DISCOVER_EXPERIENCE } from '~/lib/discovery-vocab'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
@@ -3000,7 +3001,11 @@ Return ONLY this JSON (no markdown):
 // expressed as either an empty array (no constraint) or all four levels. Drop
 // 'any' from the canonical vocabulary; the IVR search filter `$exp in array`
 // returns no constraint when the field is empty.
-export const IVR_EXPERIENCE_LEVELS = ['first-time', 'curious', 'experienced', 'advanced'] as const
+//
+// Single definition: the canonical experience vocabulary lives in the pure
+// discovery-vocab module (also the source for the discoverProducts tool enum),
+// re-exported here so classification and the tool schema cannot drift apart.
+export const IVR_EXPERIENCE_LEVELS = DISCOVER_EXPERIENCE
 export type IvrExperienceValue = typeof IVR_EXPERIENCE_LEVELS[number]
 export type IvrExperience      = IvrExperienceValue[]
 

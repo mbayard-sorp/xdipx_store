@@ -28,6 +28,12 @@ import {
   type SearchDiagnostics,
 } from '~/lib/ivr-search.server'
 import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
+import {
+  DISCOVER_MOOD,
+  DISCOVER_EXPERIENCE,
+  DISCOVER_USE_CASE,
+  DISCOVER_FEATURES,
+} from '~/lib/discovery-vocab'
 import { db } from '~/lib/db.server'
 import { draftOrders } from '~/../db/schema'
 import type { Product } from '~/types'
@@ -102,10 +108,10 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       properties: {
-        mood: { type: 'array', items: { type: 'string', enum: ['playful', 'romantic', 'luxurious', 'adventurous', 'relaxing'] }, description: 'Mood/vibe tags.' },
-        experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Experience level.' },
-        useCase: { type: 'array', items: { type: 'string', enum: ['solo', 'couples', 'date-night', 'gift', 'travel'] }, description: 'Use-case tags.' },
-        features: { type: 'array', items: { type: 'string', enum: ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] }, description: 'Feature tags.' },
+        mood: { type: 'array', items: { type: 'string', enum: [...DISCOVER_MOOD] }, description: 'Mood/vibe tags.' },
+        experience: { type: 'string', enum: [...DISCOVER_EXPERIENCE], description: 'Experience level.' },
+        useCase: { type: 'array', items: { type: 'string', enum: [...DISCOVER_USE_CASE] }, description: 'Use-case tags.' },
+        features: { type: 'array', items: { type: 'string', enum: [...DISCOVER_FEATURES] }, description: 'Feature tags.' },
         category: { type: 'string', enum: ['for-him', 'for-her', 'couples'], description: 'Audience tag. Multi-select on the doc — this filter matches any product that has the given tag among its category array.' },
         priceMax: { type: 'number', description: 'Max price in dollars.' },
         limit: { type: 'number', description: '1–5, default 3.' },
