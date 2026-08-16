@@ -795,6 +795,13 @@ export function createCronRoutes() {
    *
    * `?dryRun=1` (or `dry=1`) decides and logs without sending mail.
    *
+   * `?sha=<commit>` evaluates that commit instead of main's head. This is how
+   * the alert path gets exercised without breaking main, since the only other
+   * way to see a real alert is to push a broken commit and a red main deploys
+   * to production. Point it at a historically red commit and everything is
+   * real except which commit is being looked at. Probes are state-free and
+   * clearly marked in the subject and body; see the module header.
+   *
    * Always 200 on a completed pass, including a red main: the alert IS the
    * outcome, and a 503 would make Vercel's cron monitoring page for a condition
    * that has already been reported through the channel that matters. 503 is
@@ -805,8 +812,15 @@ export function createCronRoutes() {
       const q = req.query as Record<string, unknown>
       const flag = (v: unknown) => v === '1' || v === 'true'
       const dryRun = flag(q['dryRun']) || flag(q['dry'])
+      // 40-hex only. A free-form string here becomes a GitHub API path segment.
+      const rawSha = typeof q['sha'] === 'string' ? q['sha'].trim() : ''
+      const sha = /^[0-9a-f]{40}$/i.test(rawSha) ? rawSha : undefined
+      if (rawSha && !sha) {
+        res.status(400).json({ error: 'sha must be a full 40-character commit hash' })
+        return
+      }
       const { runMainCiWatch } = await import('../app/lib/main-ci-watch.server.js')
-      const result = await runMainCiWatch({ dryRun })
+      const result = await runMainCiWatch({ dryRun, sha })
       res.status(result.ok ? 200 : 503).json(result)
     } catch (err) {
       console.error('[cron:main-ci-watch]', err)

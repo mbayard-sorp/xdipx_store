@@ -4,6 +4,7 @@ import {
   MAIN_CI_ABSENT_GRACE_MS,
   RED_CONCLUSIONS,
   NO_VERDICT_CONCLUSIONS,
+  renderMainCiAlert,
   type MainCiFacts,
 } from '~/lib/main-ci-watch.server'
 
@@ -125,6 +126,33 @@ describe('decideMainCi', () => {
     })
   })
 
+  describe('probe safety', () => {
+    // A probe passes alertedSha: null. These lock in that the decision layer
+    // cannot then produce a `recover`, which is what would arm a spurious
+    // "main is green again" email against a commit that was never main.
+    it('cannot recover when alertedSha is null, even on a green commit', () => {
+      expect(decideMainCi(facts({ conclusion: 'success', alertedSha: null })).action).toBe('quiet')
+    })
+
+    it('still reports a real red verdict with alertedSha null', () => {
+      const d = decideMainCi(facts({ conclusion: 'failure', alertedSha: null }))
+      expect(d.action).toBe('alert')
+      expect(d.code).toBe('red')
+    })
+
+    it('no input with alertedSha null can produce recover', () => {
+      const conclusions = ['success', 'neutral', 'skipped', 'failure', 'cancelled', 'stale', null]
+      for (const conclusion of conclusions) {
+        for (const status of ['completed', 'queued', 'in_progress', null]) {
+          for (const ageMs of [0, MAIN_CI_ABSENT_GRACE_MS + 1]) {
+            const d = decideMainCi(facts({ conclusion, status, ageMs, alertedSha: null }))
+            expect(d.action).not.toBe('recover')
+          }
+        }
+      }
+    })
+  })
+
   it('never returns an action outside the known set', () => {
     const cases: Array<Partial<MainCiFacts>> = [
       { conclusion: 'success' },
@@ -137,5 +165,43 @@ describe('decideMainCi', () => {
     for (const c of cases) {
       expect(['quiet', 'alert', 'recover']).toContain(decideMainCi(facts(c)).action)
     }
+  })
+})
+
+describe('renderMainCiAlert', () => {
+  const SHA_RED = '74984bb72170be68707a77979d9f951398403b35'
+  const args = ['red', SHA_RED, 'check concluded failure', 'a commit subject\n\nand a body', null] as const
+
+  it('marks a probe unmistakably', () => {
+    expect(renderMainCiAlert(...args, true)).toContain('PROBE, not a real alert')
+  })
+
+  it('never marks a real alert as a probe', () => {
+    expect(renderMainCiAlert(...args, false)).not.toContain('PROBE')
+  })
+
+  it('is byte-identical to the real alert once the banner is removed', () => {
+    // The whole point of a probe is to show what production would send, so the
+    // banner must be purely additive. If this ever fails, the probe stops being
+    // evidence about the real thing.
+    const probe = renderMainCiAlert(...args, true)
+    const real = renderMainCiAlert(...args, false)
+    expect(probe.replace(/<div style="background:#FFE6DD[\s\S]*?<\/div>/, '')).toBe(real)
+  })
+
+  it('uses only the first line of the commit message', () => {
+    const html = renderMainCiAlert(...args, false)
+    expect(html).toContain('a commit subject')
+    expect(html).not.toContain('and a body')
+  })
+
+  it('escapes commit messages rather than interpolating markup', () => {
+    const html = renderMainCiAlert('red', SHA_RED, 'r', '<img src=x onerror=alert(1)>', null, false)
+    expect(html).not.toContain('<img')
+    expect(html).toContain('&lt;img')
+  })
+
+  it('omits the run link when there is no url', () => {
+    expect(renderMainCiAlert(...args, false)).not.toContain('View the run')
   })
 })
