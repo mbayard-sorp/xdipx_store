@@ -41,7 +41,7 @@ export interface GenerateAndPlaceHomepageImageOpts {
 }
 
 export interface HomepageMediaManifest {
-  provider: 'fal' | 'imagen' | 'none'
+  provider: 'atlas' | 'fal' | 'imagen' | 'none'
   model: string
   assetId?: string
   url?: string

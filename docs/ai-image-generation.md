@@ -8,12 +8,15 @@ Editors can generate AI lifestyle images directly inside Sanity Studio while edi
 
 1. The editor types a prompt in the generation panel (pre-populated from the sibling `imagePrompt` field if filled in).
 2. The Studio calls `POST /api/generate-image-studio` on the xdipx app, passing the prompt and a shared secret header.
-3. The API route authenticates the request and forwards the prompt to `generateImage()`, which tries fal.ai first and falls back to Google Gemini image via Vertex AI, returning up to 4 images as base64 JPEG.
+3. The API route authenticates the request and forwards the prompt to `generateImage()`, which tries Atlas Cloud first (primary since 2026-08-15), then fal.ai, then Google Gemini image via Vertex AI, returning up to 4 images as base64 JPEG.
 4. The editor picks an image; the Studio uploads it as a Sanity asset and sets it on the document field.
 
 > **Changed 2026-08-10.** This route used to call Gemini image directly with no fallback, so a
 > prompt Google refused simply failed, which is why tasteful sexual-wellness briefs so often came
-> back blocked. It now goes through the same fal-first path the homepage team uses. See
+> back blocked. It now goes through the same unified path the homepage team uses.
+>
+> **Changed 2026-08-15.** Atlas Cloud is now the primary provider in that path (owner
+> direction; fal's failure rate on this vertical). fal and Imagen remain as fallbacks. See
 > [media-model-routing.md](./media-model-routing.md).
 
 ## Environment variables

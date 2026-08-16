@@ -274,7 +274,7 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   prompt: string
   count: number
   saveDir: string
-  only?: 'fal' | 'imagen'
+  only?: 'atlas' | 'fal' | 'imagen'
   refImage?: string
 }) {
   const { generateImage } = await import('~/lib/generate-image.server')
@@ -419,7 +419,7 @@ async function main() {
   const count = Math.min(Math.max(1, Number(arg('count') ?? '1')), 4)
   const saveDir = arg('save-dir') ?? '.notebook-art'
   const uploadFile = arg('upload')
-  const only = arg('only') as 'fal' | 'imagen' | undefined
+  const only = arg('only') as 'atlas' | 'fal' | 'imagen' | undefined
   const refImage = arg('ref-image')
   const cast = arg('cast')
   const dryRun = hasFlag('dry-run')

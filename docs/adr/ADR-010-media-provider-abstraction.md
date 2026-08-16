@@ -1,8 +1,10 @@
 # ADR-010: Media-provider abstraction and the atlascloud.ai challenger
 
 Date: 2026-08-09
-Status: **Proposed** (queued for tech-architect)
-Author: rr7-engineer (SPIKE #2018); decision owner: tech-architect
+Status: **Accepted 2026-08-15** (owner direction, all-hands: Atlas Cloud is the
+PRIMARY still-image provider — beyond the spike's "additive" framing. fal remains
+video, background removal, and the still-image fallback. See Decision outcome below.)
+Author: rr7-engineer (SPIKE #2018); decision owner: tech-architect (superseded by owner direction)
 
 ## Context
 
@@ -57,7 +59,46 @@ build the atlascloud adapter and its key. Note the protected-path pieces
 (`db/schema.ts`/migrations for a provider-scoped model id format; any team-valve
 change) are owner-authored and are why the extraction is staged, not one PR.
 
-## Status note
+## Decision outcome (2026-08-15)
 
-Proposed by the spike. Awaiting tech-architect's decision and the owner's ToS
-artifact. No code beyond the scaffold ships under this ADR until it is Accepted.
+Owner direction at the 2026-08-15 all-hands settled this ADR, overtaking the
+tech-architect queue: **Atlas Cloud is the primary still-image provider for the
+site**, not merely an additive challenger. Rationale: fal's aggregate failure
+rate ("tons of failures and we rarely get what we want") made it unfit as the
+site pipeline, independent of the two hosted-model rejections the routing doc
+had traced. The owner provisioned `ATLAS_CLOUD_API_KEY` himself.
+
+What shipped under this decision (same-day PR):
+
+- `app/lib/atlas.server.ts` — the Atlas client (async generateImage/prediction
+  REST, Seedream v4.5 default, 1-10 reference images in one stage).
+- `generateImage()` order is now **Atlas → fal → Imagen**; `ad-creative` routes
+  through the seam instead of calling fal directly.
+- The seam registry gained the `atlascloud` ImageProvider;
+  `DEFAULT_IMAGE_PROVIDER = 'atlascloud'`, `DEFAULT_VIDEO_PROVIDER = 'fal'`.
+- POC evidence (2026-08-15): seedream-v4.5/edit passed the cast + insertable-toy
+  reference pairing twice, held exact product geometry, honored true 4:5 pixel
+  sizes; nano-banana blocked (same upstream Google filter as on fal);
+  nano-banana-pro passed but invented the product.
+
+What stays on fal, unchanged (the spike's carve-outs hold):
+
+- The entire video pipeline, including the OmniHuman audio-driven avatar tier
+  (§1.3 HARD blocker — no Atlas parity).
+- BiRefNet background removal (no Atlas equivalent surfaced).
+- The `composeSceneFrame` two-stage still path (qwen plate + FLUX.2 edit) until
+  the phase-2 port lands (ticket filed 2026-08-15): one-stage seedream edit
+  makes the plate pre-pass unnecessary for social/Notebook composites.
+
+### Gate 1 (adult-content ToS) outcome
+
+The first-party capture now exists: `docs/atlascloud-aup-capture-2026-08-15.md`.
+It did not cleanly clear the gate — the full legal AUP (§7) prohibits
+"illegal/adult content" while Atlas's own catalog sells "Spicy"/NSFW model
+tiers. The owner accepted the operational risk by provisioning the key and
+directing the migration. Residual owner action (open): obtain written
+confirmation from Atlas (contact@atlascloud.ai) that tasteful, non-explicit
+sexual-wellness product marketing imagery is permitted (contact address on
+atlascloud.ai/docs — the docs obfuscate it from crawlers, so read it logged in),
+and keep credit top-ups small until it arrives (credits are forfeitable on
+termination without notice).

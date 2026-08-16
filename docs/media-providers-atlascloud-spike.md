@@ -4,7 +4,13 @@ Date: 2026-08-09
 Owner direction: all-hands 2026-08-08 (evaluate atlascloud.ai; tech-architect seam spec)
 Ticket: #2018 (kind: code, strategy team)
 Author: rr7-engineer (SPIKE, evaluation only)
-Status: **Evaluation complete. Decision GATED on ADR-010 + a hard ToS gate (see §2).**
+Status: **Superseded 2026-08-15.** Owner direction (all-hands) made atlascloud the
+PRIMARY still-image provider; ADR-010 is Accepted with that scope and records what
+shipped. The ToS gate's first-party artifact now exists
+(`docs/atlascloud-aup-capture-2026-08-15.md`) and did not cleanly clear — the owner
+accepted the residual risk; see the capture doc's owner actions. The §1.3 avatar
+carve-out and §1.2 background-removal findings still hold: video and BiRefNet stay
+on fal.
 
 ## What this is and is not
 

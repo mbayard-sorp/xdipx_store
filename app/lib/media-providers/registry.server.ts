@@ -1,32 +1,38 @@
 /**
- * Provider id -> media adapter lookup (SPIKE scaffold, ticket #2018).
+ * Provider id -> media adapter lookup (ticket #2018 scaffold, adapter added
+ * under owner direction 2026-08-15).
  *
- * Mirrors app/lib/social-publish/registry.server.ts. Only `fal` is registered:
- * it is the incumbent, wrapped thinly. `atlascloud` is intentionally absent:
- * no adapter, no key, no call path, until ADR-010 decides additive vs
- * challenger vs rejected and the owner confirms atlascloud's adult-content ToS
- * in writing (see docs/media-providers-atlascloud-spike.md, both hard gates).
+ * Mirrors app/lib/social-publish/registry.server.ts. `atlascloud` is the
+ * still-image default (ADR-010 decision, owner-directed): fal's failure rate
+ * on this vertical made it unfit as the site image pipeline. Video stays on
+ * fal — the OmniHuman audio-driven avatar tier has no Atlas parity (the §1.3
+ * HARD blocker in docs/media-providers-atlascloud-spike.md), as does BiRefNet
+ * background removal.
  *
  * Server-only.
  */
 import type { ImageProvider, VideoProvider } from './types'
 import { falImageProvider, falVideoProvider } from './fal.server'
+import { atlascloudImageProvider } from './atlascloud.server'
 
 const IMAGE_PROVIDERS: Record<string, ImageProvider> = {
   fal: falImageProvider,
+  atlascloud: atlascloudImageProvider,
 }
 
 const VIDEO_PROVIDERS: Record<string, VideoProvider> = {
   fal: falVideoProvider,
 }
 
-/** The default provider until a challenger is graduated by ADR-010. */
-export const DEFAULT_MEDIA_PROVIDER = 'fal'
+/** Still-image default since 2026-08-15 (owner direction; ADR-010). */
+export const DEFAULT_IMAGE_PROVIDER = 'atlascloud'
+/** Video default: fal, for the avatar-tier parity reason above. */
+export const DEFAULT_VIDEO_PROVIDER = 'fal'
 
-export function getImageProvider(id: string = DEFAULT_MEDIA_PROVIDER): ImageProvider | null {
+export function getImageProvider(id: string = DEFAULT_IMAGE_PROVIDER): ImageProvider | null {
   return IMAGE_PROVIDERS[id] ?? null
 }
 
-export function getVideoProvider(id: string = DEFAULT_MEDIA_PROVIDER): VideoProvider | null {
+export function getVideoProvider(id: string = DEFAULT_VIDEO_PROVIDER): VideoProvider | null {
   return VIDEO_PROVIDERS[id] ?? null
 }
