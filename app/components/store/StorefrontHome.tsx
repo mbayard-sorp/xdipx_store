@@ -419,20 +419,26 @@ export function emphasisParts(text: string, emphasis: string): { before: string;
     `emphasis` is omitted, falls back to italicizing the last word. When
     `emphasis` is provided but not actually present in `text`, renders the
     heading plain -- no <em> is appended, so a mismatched Sanity emphasis
-    field can never garble the published heading. */
-function EmphasizedHeading({ text, emphasis }: { text: string; emphasis?: string | undefined }) {
+    field can never garble the published heading.
+
+    `onDark` switches the emphasis word to `.em-on-dark` (the lighter plum that
+    clears the doctrine contrast floor on ink/scrimmed grounds); pass it whenever
+    the heading sits on a dark or photo-scrimmed surface. Base `.em` plum only
+    clears ~2.48:1 there, under the large-display 3:1 floor. */
+function EmphasizedHeading({ text, emphasis, onDark = false }: { text: string; emphasis?: string | undefined; onDark?: boolean }) {
+  const emClass = onDark ? 'em em-on-dark' : 'em'
   const trimmed = text.trim()
   if (emphasis) {
     const parts = emphasisParts(trimmed, emphasis)
     if (!parts) return <>{trimmed}</>
-    return <>{parts.before}<em className="em">{parts.match}</em>{parts.after}</>
+    return <>{parts.before}<em className={emClass}>{parts.match}</em>{parts.after}</>
   }
   const trailing = trimmed.match(/[.?!]$/)?.[0] ?? ''
   const core = trailing ? trimmed.slice(0, -1) : trimmed
   const words = core.split(' ')
   if (words.length < 2) return <>{trimmed}</>
   const last = words.pop() as string
-  return <>{words.join(' ')} <em className="em">{last}</em>{trailing}</>
+  return <>{words.join(' ')} <em className={emClass}>{last}</em>{trailing}</>
 }
 
 /** Adapt a full Shopify product (team-rail fetch) to the lean grid-card shape.
@@ -738,6 +744,7 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
   // /discover. This fallback only renders when no wayfinderMosaic block is
   // published; once the team publishes, ctaLink is content-controlled.
   const promoCtaLink = promo?.ctaLink || '/discover'
+  const hasPromoImage = !!promo?.image?.url
 
   return (
     <section className="bg-paper py-16 md:py-20">
@@ -811,24 +818,43 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
             <Link
               to={promoCtaLink}
               onClick={() => trackCtaClick('find-your-fit', 'mosaic-promo')}
-              className="relative flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
+              className="relative flex min-h-[360px] flex-wrap items-end justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-plum-soft p-7 transition-transform hover:-translate-y-0.5 md:p-11"
             >
-              {promo?.image?.url && (
-                <OptimizedImage
-                  src={promo.image.url}
-                  alt={promo.image.alt ?? promoHeading}
-                  sizes="100vw"
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
+              {hasPromoImage && (
+                <>
+                  <OptimizedImage
+                    src={promo!.image!.url!}
+                    alt={promo!.image!.alt ?? promoHeading}
+                    sizes="100vw"
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                  {/* Ink scrim so the label stays legible over any promo photo,
+                      mirroring PhotoBand. Without it the ink text sat directly on
+                      the image (mission-brief §2 legibility rule). */}
+                  <div
+                    className="absolute inset-0"
+                    style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.72), rgba(26,20,24,0.05) 55%)' }}
+                    aria-hidden="true"
+                  />
+                </>
               )}
               <div className="relative z-[1] flex-1 basis-[320px]">
-                <p className="mb-3.5 text-[11px] uppercase tracking-[0.18em] text-plum" style={MONO}>
+                <p
+                  className="mb-3.5 text-[11px] uppercase tracking-[0.18em]"
+                  style={{ ...MONO, color: hasPromoImage ? 'white' : 'var(--color-plum)' }}
+                >
                   {promoEyebrow}
                 </p>
-                <h3 className="mb-3 text-[1.7rem] leading-[1.1] text-ink md:text-[2.5rem]" style={DISPLAY}>
-                  <EmphasizedHeading text={promoHeading} emphasis={promoEmphasis} />
+                <h3
+                  className="mb-3 text-[1.7rem] leading-[1.1] md:text-[2.5rem]"
+                  style={{ ...DISPLAY, color: hasPromoImage ? 'white' : 'var(--color-ink)' }}
+                >
+                  <EmphasizedHeading text={promoHeading} emphasis={promoEmphasis} onDark={hasPromoImage} />
                 </h3>
-                <p className="max-w-[46ch] text-[16px] leading-relaxed text-ink-3" style={BODY}>
+                <p
+                  className="max-w-[46ch] text-[16px] leading-relaxed"
+                  style={{ ...BODY, color: hasPromoImage ? 'rgba(255,255,255,0.85)' : 'var(--color-ink-3)' }}
+                >
                   {promoBody}
                 </p>
               </div>
@@ -1011,7 +1037,9 @@ function PhotoBand({
             className="text-[2.1rem] leading-[1.05] tracking-[-0.01em] md:text-[3.2rem]"
             style={{ ...DISPLAY, color: hasImage ? 'white' : 'var(--color-ink)' }}
           >
-            <EmphasizedHeading text={heading} emphasis={emphasis} />
+            {/* On the scrimmed photo the plum emphasis needs .em-on-dark; on the
+                flat coral-soft fallback the base .em plum reads fine. */}
+            <EmphasizedHeading text={heading} emphasis={emphasis} onDark={hasImage} />
           </h2>
           {hasImage && (
             <p className="mt-3 max-w-[42ch] text-[15px] leading-relaxed text-white/85" style={BODY}>
