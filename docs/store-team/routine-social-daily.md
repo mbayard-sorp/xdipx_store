@@ -252,13 +252,35 @@ carousels, and Brand Crush alike.
 
 ## Step 3 — Draft (reworks included)
 
-**The per-run cap is `sum(social_freq_*) + reworks`, floor 6.** It was a flat 6 and that number was
-written when Instagram ran at one a day; at a four-post slate plus X, TikTok and Facebook it would
-cap the run below its own quota. The cap is self-discipline, not a server limit, so it is on you to
-respect it and to say in the summary when you hit it.
+**THE QUOTA IS PER DAY, NOT PER RUN. Count today's rows before you draft anything.** The social
+routine fires **twice daily** (14:00 and 22:00 UTC, `routine-schedule.md` routine 6). Two runs each
+drafting a full quota is double the intended volume, and on Instagram that is the fastest way to get
+the account actioned. So the first thing Step 3 does is arithmetic:
+
+```
+today_remaining(platform) = social_freq_<platform>
+                          - rows already written for that platform today (any review_status)
+                          - reworks you wrote for it this run
+```
+
+Use the Step 2 item 7 list, filtered to today's date, to get that count. **If the remainder is 0,
+draft nothing for that platform and say so in the run summary.** A run that honestly drafts zero
+because the day is already full is a correct run, not a wasted one. Never treat a fresh
+`social_freq_*` as this run's allowance.
+
+This lives here, in the binding playbook, and not only in the evening trigger's prompt. A cloud
+trigger prompt is out-of-repo config that this file cannot see and that nobody reviews on a diff, so
+a playbook whose correctness depends on one is a playbook that is one silent edit away from being
+wrong.
+
+**The per-run cap is `sum(social_freq_*) + reworks`, floor 6**, applied on top of the per-day
+remainder above and never instead of it. It was a flat 6, written when Instagram ran at one a day;
+at a multi-post slate plus X it would cap a run below its own quota. The cap is self-discipline, not
+a server limit, so it is on you to respect it and to say in the summary when you hit it.
 
 Draft counts come from the Step 2 config — up to `social_freq_<platform>` new posts per platform,
-minus any reworks already written for that platform today. Platform-appropriate, **editorial-first**
+minus any reworks already written for that platform today, and minus everything already drafted
+today per the arithmetic above. Platform-appropriate, **editorial-first**
 (not product-first: on Instagram and TikTok a post that reads as an offer is removable under Meta's
 Restricted Goods standard regardless of how clean the image is), fresh language every time. X drafts fit 280 chars; Instagram and TikTok drafts are posted manually
 by the owner once approved. At most one promo-angle post per run, and only referencing

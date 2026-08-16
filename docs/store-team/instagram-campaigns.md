@@ -238,8 +238,10 @@ appearance words to the prompt on top of the reference, which competes with the 
 face; aspect-ratio mismatch between reference and output; and **compositing straight from a Shopify
 packshot**, which puts a legible manufacturer carton in the presenter's hand. The two-stage path
 exists to kill that class: stage 1 produces an unlabeled product plate, stage 2 composites it. Never
-skip the plate. Cap cast at 4 of 14 posts, which the 7-beat spine does automatically, and never run
-three or more faces in one campaign.
+skip the plate. Cap cast per the rolling window in §3.2b (at most 4 cast frames per rolling 14, and
+never more than one in a day), and never run three or more faces in one campaign. This used to read
+"4 of 14 posts, which the 7-beat spine does automatically", which was true only while a campaign was
+14 posts long; at a multi-post slate the spine no longer does it for you and the window is the rule.
 
 ### 3.3 Carousel arc: six slides
 
