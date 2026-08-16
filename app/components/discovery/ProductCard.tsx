@@ -8,7 +8,7 @@ import { Link } from 'react-router'
 import { trackSelectItem } from '~/lib/analytics.client'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { abbreviate, buildPieGradient } from '~/components/store/CircleOptionSelector'
-import { showDiscountBadge, formatSavings } from '~/lib/discount-badge'
+import { showDiscountBadge, formatSavings, mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 import type { DiscoveryProduct } from '~/types/discovery'
 
 interface ProductCardProps {
@@ -73,12 +73,18 @@ export function ProductCard({ product, index, listId, listName }: ProductCardPro
             "$min–$max" and skip the flat-savings line; single-price products
             show the struck compare-at + "You save $X (Y%)". */}
         {(() => {
-          const { price, priceMax, compareAtPrice, colorValues, sizeValues } = product
+          const { price, priceMax, compareAtPrice, mapPrice, colorValues, sizeValues } = product
           const hasRange = priceMax != null && priceMax > price
           // Struck price whenever there's any markdown; the "You save" line only
           // once the rounded discount clears MIN_DISCOUNT_BADGE_PCT (ticket #467,
-          // mirrors VaultCard and the home rails — no "1% off" theatre).
-          const hasCompare = !hasRange && compareAtPrice != null && compareAtPrice > price
+          // mirrors VaultCard and the home rails — no "1% off" theatre). Also
+          // gated on the MAP rule so a MAP-locked product advertises no discount
+          // (ticket #3675).
+          const hasCompare =
+            !hasRange &&
+            compareAtPrice != null &&
+            compareAtPrice > price &&
+            mapAllowsDiscountDisplay(mapPrice, compareAtPrice)
           const save = hasCompare ? compareAtPrice! - price : 0
           const pct = hasCompare ? Math.round((save / compareAtPrice!) * 100) : 0
           const showSaveLine = hasCompare && showDiscountBadge(pct)

@@ -4,7 +4,7 @@ import type { VaultDeal } from '~/types'
 import { HeartButton } from './HeartButton'
 import { CardMediaCarousel } from './CardMediaCarousel'
 import { abbreviate, buildPieGradient } from './CircleOptionSelector'
-import { showDiscountBadge, formatSavings, formatSavingsRange } from '~/lib/discount-badge'
+import { showDiscountBadge, formatSavings, formatSavingsRange, mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 
 interface VaultCardProps {
   deal: VaultDeal
@@ -21,6 +21,10 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
   const discount = deal.msrp > 0
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
+  // A struck MSRP + savings line is advertised-discount framing, so it is gated
+  // on the MAP rule: a MAP-locked product (map == MSRP, or map_restricted) shows
+  // neither, whatever the raw markdown (ticket #3675).
+  const canAdvertiseDiscount = mapAllowsDiscountDisplay(deal.mapPrice, deal.msrp, deal.mapRestricted)
 
   const addToCart = useFetcher<{ ok: boolean }>()
   const [justAdded, setJustAdded] = useState(false)
@@ -144,7 +148,7 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
                 : `$${deal.dealPrice.toFixed(2)}`}
             </span>
             {(deal.priceMin == null || deal.priceMax == null || deal.priceMax === deal.priceMin) &&
-              deal.msrp > deal.dealPrice && (
+              deal.msrp > deal.dealPrice && canAdvertiseDiscount && (
                 <span className="text-ink/40 text-sm line-through">${deal.msrp.toFixed(2)}</span>
               )}
           </div>
@@ -161,8 +165,8 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
             // Floor both savings lines at MIN_DISCOUNT_BADGE_PCT (ticket #467) so
             // a "You save $1.01 (1%)" line never appears; the struck MSRP above
             // still carries the markdown below the floor.
-            const showFlatSavings  = !quiet && showDiscountBadge(discount) && !hasPriceRange
-            const showRangeSavings = !quiet && hasPriceRange && (deal.maxSavingsAmount ?? 0) > 0 && showDiscountBadge(deal.maxSavingsPercent ?? 0)
+            const showFlatSavings  = !quiet && canAdvertiseDiscount && showDiscountBadge(discount) && !hasPriceRange
+            const showRangeSavings = !quiet && canAdvertiseDiscount && hasPriceRange && (deal.maxSavingsAmount ?? 0) > 0 && showDiscountBadge(deal.maxSavingsPercent ?? 0)
             if (!showFlatSavings && !showRangeSavings && !sizes && !colors) return null
             return (
               <div className="flex items-center gap-2 mt-1">

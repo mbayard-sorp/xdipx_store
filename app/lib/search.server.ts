@@ -35,6 +35,10 @@ export interface SearchProductResult {
   // Hydrated from Shopify
   price: string | null
   compareAtPrice: string | null
+  /** xdipx.map_price when hydrated and positive, else null/absent. Gates the
+   *  PLP tile's struck price + badge on the MAP rule (ticket #3675). Absent on
+   *  the fallback path, which hydrates no metafields, and read as "no MAP". */
+  mapPrice?: string | null
   featuredImage: { url: string; altText: string | null } | null
   shopifyId: string | null
   // Variant + video info for PLP tile interactions
@@ -577,6 +581,7 @@ export async function searchAll(params: {
         previewImageUrl: sp.previewImageUrl ?? null,
         price: shopify ? String(shopify.price) : null,
         compareAtPrice: shopify?.compareAtPrice ? String(shopify.compareAtPrice) : null,
+        mapPrice: shopify?.mapPrice != null ? String(shopify.mapPrice) : null,
         featuredImage: shopify?.images?.[0]
           ? { url: shopify.images[0].url, altText: shopify.images[0].altText ?? null }
           : sp.previewImageUrl
@@ -1010,6 +1015,9 @@ async function shopifyFallback(params: {
     previewImageUrl: p.featuredImage?.url ?? null,
     price: p.priceRange.minVariantPrice.amount,
     compareAtPrice: p.compareAtPriceRange.maxVariantPrice?.amount ?? null,
+    // Fallback path hydrates no metafields, so MAP is unknown here; null reads
+    // as "no MAP" (unchanged pre-#3675 behavior on this rarely-hit path).
+    mapPrice: null,
     featuredImage: p.featuredImage,
     shopifyId: p.id,
     defaultVariantId: null,

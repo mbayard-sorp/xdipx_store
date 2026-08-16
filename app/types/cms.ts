@@ -850,6 +850,9 @@ export interface CategoryCardProduct {
   title: string
   price: number
   compareAtPrice: number | null
+  /** xdipx.map_price when set and positive, else null. Gates the card's struck
+   *  price + badge on the MAP rule (ticket #3675); null = no MAP. */
+  mapPrice: number | null
   brand: string | null
   imageUrl: string | null
   imageAlt: string | null

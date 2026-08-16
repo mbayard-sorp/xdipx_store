@@ -6,6 +6,8 @@
  * product metadata.
  */
 
+import { mapAllowsDiscountDisplay } from './discount-badge'
+
 // ─── Category mapping ─────────────────────────────────────────────────────
 
 const GMC_CATEGORY_MAP: Record<string, string> = {
@@ -114,9 +116,10 @@ export function mapAllowsAdvertisedDiscount(
   mapRestricted: boolean,
   regularPrice: number,
 ): boolean {
-  if (mapRestricted) return false
-  if (!mapPrice || mapPrice <= 0) return true
-  return mapPrice < regularPrice - 0.005
+  // Single source of truth for the MAP rule lives in the client-safe
+  // discount-badge module so the storefront cards and this feed cannot drift
+  // apart (ticket #3675). Parameter order differs; delegate, do not re-derive.
+  return mapAllowsDiscountDisplay(mapPrice, regularPrice, mapRestricted)
 }
 
 // ─── Spec parser ──────────────────────────────────────────────────────────

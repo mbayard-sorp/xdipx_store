@@ -638,6 +638,7 @@ function nodeToProduct(node: ShopifyProductNode): Product {
   // fallback. undefined when neither exists (no fabricated reading).
   const sensationDialV2 = normalizeSensationDialV2(parseMetafieldJSON<unknown>(mf, 'sensation_dial_v2', null))
     ?? projectLegacyDial(parseMetafieldJSON<SensationDial>(mf, 'sensation_dial', {}) as SensationDial | undefined)
+  const mapPriceRaw = parseFloat(parseMetafield(mf, 'map_price') ?? '')
   return {
     id: node.id,
     handle: node.handle,
@@ -658,6 +659,7 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     })),
     price: parseFloat(variant?.price.amount ?? '0'),
     ...(variant?.compareAtPrice ? { compareAtPrice: parseFloat(variant.compareAtPrice.amount) } : {}),
+    ...(Number.isFinite(mapPriceRaw) && mapPriceRaw > 0 ? { mapPrice: mapPriceRaw } : {}),
     brand: node.vendor,
     tags: node.tags,
     ...(moodTags.length     > 0 ? { moodTags }     : {}),
