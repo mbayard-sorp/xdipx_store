@@ -7281,14 +7281,18 @@ const VARIANTS_BY_SKU_QUERY = `
           vendor
           productType
           # Admin API: Product.metafields is a MetafieldConnection. It rejects
-          # the Storefront-only lookup-by-identifier argument. All keys we need
-          # live in the xdipx namespace, so scope by namespace + keys instead.
-          metafields(namespace: "xdipx", keys: [
-            "nalpac_sku"
-            "wholesale_cost"
-            "map_price"
-            "original_price"
-            "map_restricted"
+          # the Storefront-only lookup-by-identifier argument, and it also
+          # rejects a namespace argument passed alongside keys ("Providing any of
+          # the namespace, withDefinitions, or withoutDefinitions arguments with
+          # the keys argument is not supported"). So ask for fully-qualified
+          # "namespace.key" strings with no separate namespace argument, exactly
+          # as the pricing query above does.
+          metafields(keys: [
+            "xdipx.nalpac_sku"
+            "xdipx.wholesale_cost"
+            "xdipx.map_price"
+            "xdipx.original_price"
+            "xdipx.map_restricted"
           ], first: 10) {
             nodes {
               namespace
@@ -7341,7 +7345,11 @@ export async function findVariantsBySkus(skus: string[]): Promise<VariantSkuMatc
     for (const node of data.productVariants.nodes) {
       const mfMap = new Map<string, string>()
       for (const mf of node.product.metafields.nodes) {
-        if (mf) mfMap.set(mf.key, mf.value)
+        // Queried WITH a `keys: [...]` filter, the Admin API returns `key` in
+        // the fully-qualified "xdipx.map_price" form, so normalize to the bare
+        // name before mapping. A map keyed on the raw `key` misses every lookup
+        // and silently returns null for cost/MAP/original price.
+        mfMap.set(normalizeMetafieldKey(mf), mf.value)
       }
       const wholesaleRaw = mfMap.get('wholesale_cost')
       const mapRaw = mfMap.get('map_price')
