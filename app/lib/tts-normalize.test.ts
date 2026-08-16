@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeForTTS } from './tts-normalize'
+import { normalizeForTTS, ssmlToSpokenText } from './tts-normalize'
 
 describe('normalizeForTTS', () => {
   it('returns empty string for null/undefined/empty/whitespace', () => {
@@ -85,5 +85,42 @@ describe('normalizeForTTS', () => {
       const twice = normalizeForTTS(once)
       expect(twice).toBe(once)
     }
+  })
+})
+
+describe('ssmlToSpokenText', () => {
+  it('returns empty string for null/undefined/empty', () => {
+    expect(ssmlToSpokenText(null)).toBe('')
+    expect(ssmlToSpokenText(undefined)).toBe('')
+    expect(ssmlToSpokenText('')).toBe('')
+  })
+
+  it('strips speak and break tags and decodes entities', () => {
+    // Verbatim shape of a stored v2 voice turn. The bridge used to strip the
+    // tags and hand "&apos;" to ElevenLabs, which read it aloud.
+    expect(
+      ssmlToSpokenText(
+        '<speak>It&apos;s water based so it&apos;s safe with that plug. <break time="300ms"/> Want me to text you the link?</speak>',
+      ),
+    ).toBe("It's water based so it's safe with that plug. Want me to text you the link?")
+  })
+
+  it('decodes all five XML entities without double-decoding &amp;', () => {
+    expect(ssmlToSpokenText('<speak>Tom &amp; Jerry say &quot;hi&quot;</speak>')).toBe(
+      'Tom & Jerry say hi',
+    )
+    // "&amp;apos;" must decode to the literal text "&apos;"-as-ampersand-form,
+    // never collapse twice into an apostrophe.
+    expect(ssmlToSpokenText('a &amp;apos; b')).toBe('a &apos; b')
+  })
+
+  it('normalizes what survives reassembly (em-dashes, emoji, markdown)', () => {
+    expect(ssmlToSpokenText('<speak>Great pick — you&apos;ll love it ❤️</speak>')).toBe(
+      "Great pick, you'll love it",
+    )
+  })
+
+  it('handles numeric apostrophe entities', () => {
+    expect(ssmlToSpokenText('<speak>it&#39;s here</speak>')).toBe("it's here")
   })
 })

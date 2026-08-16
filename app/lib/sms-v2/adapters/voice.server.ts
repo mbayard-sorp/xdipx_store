@@ -153,6 +153,39 @@ function isNegative(text: string): boolean {
   return NEGATIVE_RE.test(text.trim())
 }
 
+// Words that mean the caller is asking for a commerce ACTION (add to the
+// order, build the cart, take both), not merely permitting a link. "Yes. Add
+// it." used to be swallowed by the pending-link gate below and answered with
+// "Just texted it" — a PDP link instead of the cart the caller agreed to, and
+// the upsell revenue silently dropped. These utterances belong to the stage
+// machine, which knows how to mint the cart.
+const COMMERCE_ACTION_RE = /\b(add|cart|bag|buy|both|order|check\s?out)\b/i
+
+/**
+ * What to do with the caller's utterance while a PDP link is pending their
+ * permission. 'send' = a bare yes, text the link. 'decline' = clear it and let
+ * the stage handler hear the no. 'pass' = the utterance carries its own
+ * meaning (an add-to-cart, a new request); the stage machine owns it.
+ */
+export function pendingLinkDecision(text: string): 'send' | 'decline' | 'pass' {
+  const t = text.trim()
+  if (COMMERCE_ACTION_RE.test(t)) return 'pass'
+  if (isAffirmative(t)) return 'send'
+  if (isNegative(t)) return 'decline'
+  return 'pass'
+}
+
+/**
+ * True when the prose already ends by asking the caller something. Appending
+ * "Want me to text you the link?" after "Want me to add it?" gave the caller
+ * two different questions in one breath — the owner-reported "do you want me
+ * to add to your cart. Just texted it to you" confusion. One turn, one
+ * question.
+ */
+export function proseEndsWithQuestion(prose: string): boolean {
+  return /\?\s*$/.test(prose.trim())
+}
+
 // ---------------------------------------------------------------------------
 // Per-call session freshness
 // ---------------------------------------------------------------------------
@@ -325,7 +358,14 @@ export function proseNamesProduct(prose: string, title: string): boolean {
   if (!tokens.length) return false
   const haystack = prose.toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
   const hits = tokens.filter((t) => new RegExp(`\\b${t}\\b`).test(haystack)).length
-  return hits / tokens.length >= 0.6
+  // 0.5, not 0.6: catalog titles carry trailing feature qualifiers ("with
+  // Touch Control", "Rechargeable") that a well-written pitch correctly omits,
+  // and those qualifiers survive the stopword filter and inflate the
+  // denominator. "We Vibe Chorus Adjustable Couples Vibrator" vs the title
+  // "Chorus Adjustable Couples Vibrator with Touch Control" scored 2/4 and
+  // the caller heard the full title read back at them, twice, with two
+  // different prices.
+  return hits / tokens.length >= 0.5
 }
 
 /** True when the prose already asked permission to text the link. */
@@ -472,12 +512,20 @@ async function stageResponseToVoiceReply(
         ssmlParts.push(spoken)
       }
       if (card.pdpUrl) {
-        // The pending write is unconditional even when we stay silent — the
-        // caller's next "yes" still has to resolve to this URL.
-        pendingPdpUrlWrite = card.pdpUrl
-        if (!prose || !proseAsksToText(prose)) {
+        const askedInProse = prose ? proseAsksToText(prose) : false
+        // One turn, one question: only append the link ask when the prose
+        // didn't already ask it AND didn't end on a different question (the
+        // upsell closers all end "Want me to add it?" — stacking the link ask
+        // after that gave the caller two questions in one breath).
+        const appendAsk = !prose || (!askedInProse && !proseEndsWithQuestion(prose))
+        if (appendAsk) {
           ssmlParts.push("Want me to text you the link?")
         }
+        // Pending is set only when the link question was actually the thing
+        // asked this turn. When the turn ended on a DIFFERENT question, a
+        // later bare "yes" is answering that question, not this URL — so
+        // clear any stale pending instead of arming a hijack.
+        pendingPdpUrlWrite = askedInProse || appendAsk ? card.pdpUrl : null
       }
     }
 
@@ -707,7 +755,8 @@ export async function processVoiceMessageV2(
   // link, not the stage transition.
   if (conversation.pendingPdpUrl) {
     const pendingUrl = conversation.pendingPdpUrl
-    if (isAffirmative(customerText)) {
+    const decision = pendingLinkDecision(customerText)
+    if (decision === 'send') {
       // "Just texted it" used to be spoken unconditionally: sendSms threw into
       // a catch that only console.warn'd, and Emma told the caller the link was
       // on its way regardless. A failed send left them staring at a phone that
@@ -753,19 +802,18 @@ export async function processVoiceMessageV2(
         prompts: { kind: 'say-and-listen' },
       }
     }
-    if (isNegative(customerText)) {
-      try {
-        await applyStateWrites(callerPhone, { pendingPdpUrl: null })
-      } catch {
-        // Non-fatal.
-      }
-      // Fall through to normal dispatch — caller said "no" to the link but
-      // may want to keep talking about the product or pivot.
+    // 'decline': the caller said no to the link; clear it and let the stage
+    // handler hear the no (it may be a product decline too).
+    // 'pass': the utterance carries its own meaning — "Yes. Add it.", "text me
+    // the link to both", or a brand-new request. The stage machine owns it
+    // (UPSELL_ACCEPT mints the real cart and texts a checkout link), and the
+    // pending URL is cleared because the link-permission moment has passed; a
+    // stale pending was hijacking the NEXT turn's unrelated "yes" as well.
+    try {
+      await applyStateWrites(callerPhone, { pendingPdpUrl: null })
+    } catch {
+      // Non-fatal.
     }
-    // Ambiguous response (neither yes nor no): leave pending URL set, fall
-    // through to normal dispatch. Stage handler reply will likely re-engage
-    // the caller; if they answer the link question on the next turn we'll
-    // catch it.
   }
 
   // --- Step 3: v2 stage dispatch ---
