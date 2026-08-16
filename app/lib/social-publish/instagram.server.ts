@@ -38,14 +38,20 @@ function apiBase(): string {
   return `https://graph.instagram.com/${version}`
 }
 
-interface MetaError {
+export interface MetaError {
   message?: string
   code?: number
   error_subcode?: number
 }
 
-/** Meta returns 200-with-error often enough that status alone is not a verdict. */
-async function igRequest(
+/**
+ * Meta returns 200-with-error often enough that status alone is not a
+ * verdict. Exported so other Graph API callers on this account (the removal
+ * watcher's `getInstagramMediaState`, the engagement capture in
+ * `social-engagement.server.ts`) share one request/error convention instead
+ * of each reinventing it.
+ */
+export async function igRequest(
   path: string,
   init: { method: 'GET' | 'POST'; params: Record<string, string>; token: string },
 ): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: MetaError }> {
@@ -78,7 +84,7 @@ async function igRequest(
 }
 
 /** Token expiry is the predictable failure here, so name it precisely. */
-function describe(error: MetaError): string {
+export function describeInstagramApiError(error: MetaError): string {
   const base = error.message ?? 'Unknown Instagram API error'
   if (error.code === 190) {
     return `${base}. IG_GRAPH_ACCESS_TOKEN is expired or revoked. Regenerate it in the Meta App Dashboard (Instagram > API setup with Instagram business login) and update the Vercel env var.`
@@ -95,7 +101,7 @@ async function createContainer(
   token: string,
 ): Promise<{ ok: true; id: string } | { ok: false; detail: string }> {
   const created = await igRequest(`/${igId}/media`, { method: 'POST', params, token })
-  if (!created.ok) return { ok: false, detail: describe(created.error) }
+  if (!created.ok) return { ok: false, detail: describeInstagramApiError(created.error) }
   const id = String(created.data['id'] ?? '')
   if (!id) return { ok: false, detail: 'Instagram returned no container id' }
   return { ok: true, id }
@@ -116,7 +122,7 @@ async function pollUntilFinished(
       params: { fields: 'status_code' },
       token,
     })
-    if (!status.ok) return { ok: false, detail: describe(status.error) }
+    if (!status.ok) return { ok: false, detail: describeInstagramApiError(status.error) }
 
     const code = String(status.data['status_code'] ?? '')
     if (code === 'FINISHED') return { ok: true }
@@ -144,7 +150,7 @@ async function publishContainer(
     params: { creation_id: creationId },
     token,
   })
-  if (!published.ok) return { ok: false, detail: describe(published.error) }
+  if (!published.ok) return { ok: false, detail: describeInstagramApiError(published.error) }
   const id = String(published.data['id'] ?? '')
   if (!id) return { ok: false, detail: 'Instagram published but returned no media id' }
   return { ok: true, id }
@@ -248,9 +254,9 @@ export async function getInstagramMediaState(
 
   const { code, error_subcode: subcode } = res.error
   if (code === 100 && (subcode === 33 || subcode === undefined)) {
-    return { state: 'gone', detail: describe(res.error) }
+    return { state: 'gone', detail: describeInstagramApiError(res.error) }
   }
-  return { state: 'unknown', detail: describe(res.error) }
+  return { state: 'unknown', detail: describeInstagramApiError(res.error) }
 }
 
 /**
@@ -269,7 +275,7 @@ export async function getInstagramPublishingLimit(): Promise<
     params: { fields: 'config,quota_usage' },
     token,
   })
-  if (!res.ok) return { ok: false, detail: describe(res.error) }
+  if (!res.ok) return { ok: false, detail: describeInstagramApiError(res.error) }
 
   const row = (res.data['data'] as Array<Record<string, unknown>> | undefined)?.[0] ?? {}
   const config = (row['config'] as Record<string, unknown> | undefined) ?? {}

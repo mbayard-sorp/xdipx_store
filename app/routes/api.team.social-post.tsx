@@ -8,6 +8,11 @@
  *   { op: 'config' } -> { frequencies, autopostValve }
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
  *     productHandle? } } -> { ok, reviewStatus } | 422 { findings }
+ *   { op: 'engagement' } -> { report: [{ postId, externalPostId, metrics?, error? }] }
+ *     Live Instagram insights (reach/likes/comments/saves) for the most
+ *     recently posted rows, saves-first (ticket #2742). Read-only: nothing is
+ *     stored, because social_posts has no engagement column yet, see
+ *     social-engagement.server.ts for the deferred migration this needs.
  *
  * The social-media-manager stub's only write path. Rows land in social_posts
  * with status='draft' AND review_status='pending_review' for human review in
@@ -52,6 +57,7 @@ import {
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
 import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
 import { applyPublishGateVerdict, parsePublishGateVerdict } from '~/lib/social-publish-approve.server'
+import { captureInstagramEngagement, rankBySaves } from '~/lib/social-engagement.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -126,6 +132,14 @@ export async function action({ request }: ActionFunctionArgs) {
       )
     }
     return Response.json({ ok: true, reviewStatus: result.reviewStatus })
+  }
+
+  // Read-only Instagram engagement (ticket #2742). Fetches live insights for
+  // the most recently posted rows and ranks them saves-first; stores nothing,
+  // because social_posts has no engagement column yet.
+  if (b['op'] === 'engagement') {
+    const report = await captureInstagramEngagement()
+    return Response.json({ report: rankBySaves(report) })
   }
 
   if (b['op'] === 'config') {
