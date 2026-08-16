@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyBuyability,
   findDeadEmbeds,
+  groupByDeadHandle,
   type ProductBuyability,
 } from './blog-embed-stock-audit'
 
@@ -94,4 +95,41 @@ describe('findDeadEmbeds', () => {
     const posts = [{ slug: 'p', embedHandles: null as unknown as string[] }]
     expect(findDeadEmbeds(posts, [])).toEqual([])
   })
+})
+
+describe('groupByDeadHandle', () => {
+  it('returns an empty array when nothing is dead', () => {
+    expect(groupByDeadHandle([])).toEqual([])
+  })
+
+  it('groups two posts that share one dead handle under that handle', () => {
+    const posts = [
+      { slug: 'post-a', embedHandles: ['dead-handle', 'ok-handle'] },
+      { slug: 'post-b', embedHandles: ['dead-handle'] },
+    ]
+    const buyability = [buyable('ok-handle'), buyable('dead-handle', { totalInventory: 0 })]
+    const reports = findDeadEmbeds(posts, buyability)
+    const groups = groupByDeadHandle(reports)
+
+    expect(groups).toEqual([
+      { handle: 'dead-handle', reason: 'out-of-stock', slugs: ['post-a', 'post-b'] },
+    ])
+  })
+
+  it('sorts the group whose handle breaks the most posts first', () => {
+    const posts = [
+      { slug: 'p1', embedHandles: ['widely-broken'] },
+      { slug: 'p2', embedHandles: ['widely-broken'] },
+      { slug: 'p3', embedHandles: ['narrowly-broken'] },
+    ]
+    const buyability = [
+      buyable('widely-broken', { totalInventory: 0 }),
+      buyable('narrowly-broken', { found: false }),
+    ]
+    const reports = findDeadEmbeds(posts, buyability)
+    const groups = groupByDeadHandle(reports)
+
+    expect(groups.map((g) => g.handle)).toEqual(['widely-broken', 'narrowly-broken'])
+  })
+
 })

@@ -479,6 +479,14 @@ essentially the whole catalog and would flag every handle. A handle is dead when
 Admin product, status `ARCHIVED`, or PDP 404), `inactive` (Admin status set and not `ACTIVE`), or
 `out-of-stock` (`totalInventory <= 0`).
 
+The JSON output also includes `groupedByHandle`: the same dead embeds grouped by product handle
+instead of by post, sorted by how many posts each handle breaks (`app/lib/blog-embed-stock-audit.ts`,
+`groupByDeadHandle`). Read this before filing suggestions or remediating. Tickets #2828 and #2832
+(2026-08-15) turned out to be the same root cause: `magic-wand-mini-hv-135-rechargeable-massager`
+went out of stock and broke two unrelated posts at once, and nothing before this surfaced that
+connection, so it read as two separate investigations instead of one swap applied twice. When a
+group's `slugs` has more than one entry, treat it as one fix, not N.
+
 For each post the sweep reports, file **one deduped suggestion** at the content team so the
 remediation is tracked and the row refreshes every run instead of aging:
 
@@ -490,11 +498,17 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
        "suggestion":"Published post /notebook/<slug> has dead embeds: <handle> (<reason>) ... Swap each for an in-stock, buyable product (charter-voice pairing copy) or remove it. <slug> has NO buyable path and is remediated first.","cxRisk":"low"}'
 ```
 
-Then remediate the highest-priority post this run can reach through Step 6b's execute-what-you-can
-rule: a `kind:process` row is closeable by this routine, so swap the dead embed for an in-stock
+Then remediate through Step 6b's execute-what-you-can rule (up to 3 rows per run). Order the
+work from `groupedByHandle`, worst impact first: posts with no buyable path come first, then the
+highest-impact shared handle (`slugs.length > 1`), then everything else. When a dead handle breaks
+more than one post, remediate all of them in the same run with the same replacement product,
+instead of picking off one post per day and leaving its siblings to rot on the same root cause
+(exactly the shape of #2828 and #2832: one handle, `magic-wand-mini-hv-135-rechargeable-massager`,
+broke both posts at once, and the per-post view gave no signal that fixing one also cleared the
+other). A `kind:process` row is closeable by this routine, so swap the dead embed for an in-stock
 product with fresh charter-voice pairing copy (or remove the embed when no honest substitute fits),
-re-run the Step 6c sweep on that post to confirm it is clean, and close the row `applied`. Posts with
-no buyable path come first. Do not close a row you did not actually remediate.
+re-run the Step 6c sweep on every post touched to confirm it is clean, and close each remediated row
+`applied`. Do not close a row you did not actually remediate.
 
 ## Step 7: Retro + finish
 
