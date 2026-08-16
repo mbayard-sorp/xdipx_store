@@ -43,11 +43,65 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 5. Calendar (`GET /api/team/calendar`), current featured products/deals.
 6. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
    (`social_freq_*`; 0 = skip that platform entirely).
+
+   **`social_freq_facebook` and `social_freq_tiktok` are both 0 on purpose (owner, 2026-08-16).
+   Do not raise either.** Instagram and X are the live platforms. Nothing else can publish:
+   `app/lib/social-publish/registry.server.ts` carries instagram, tiktok and youtube, but the
+   tiktok and youtube entries are stubs that report the manual path, there is no facebook entry at
+   all, and the publish job filters `platform = 'instagram'` in SQL in both `listEligible` and
+   `recentCaptions`. **Drafting for either platform is writing into a queue with no exit**, which
+   is exactly what happened: 3 Facebook rows and 10 TikTok rows accumulated and none ever shipped.
+
+   On Facebook specifically, verified in Meta Business Suite on 2026-08-16: every post the Page has
+   ever shown is an Instagram row, the Page has 0 followers, and Instagram content published
+   through the Content Publishing API does **not** reach the Page via Accounts Center
+   cross-posting. The no-code mirror does not work for this store's setup. Raise the frequency only
+   after a real publisher exists.
+
+   **An unpublishable draft left at `approved` is a time bomb.** It becomes eligible the instant a
+   publisher lands and ships copy that is by then months old. Every such row was cleared on
+   2026-08-16: Facebook 20, 29, 33 and TikTok 19, 27, 31 are all `rejected`, so both queues are now
+   inert and a future publisher starts from an empty slate rather than a live one.
+
+   **The standing rule this leaves behind:** a draft for a platform that cannot publish should
+   never sit at `approved`. If a platform's publisher is a stub or missing, its frequency belongs
+   at 0 and any row already approved for it gets rejected, in the same pass. Wiring a publisher is
+   then a clean act rather than an archaeology problem.
 7. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
    `editedText` per row are the owner's verdicts on your last drafts.
 8. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
    `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
    adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).
+9. **Notebook promos, read here and not at Step 7b.** `POST /api/team/suggestion
+   {"op":"list","targetTeam":"social","status":"approved","orderBy":"age"}`, and pull every row
+   whose `dedupeKey` starts `notebook-promo:`. The content routine files one per published post
+   (`routine-content-daily.md` Step 6 item 4). **These have to be read at context load, not in the
+   Step 7b mail pass**, because 7b runs after drafting: a promo read there is a promo drafted
+   tomorrow at the earliest, which is how the first one sat untouched. Each row carries the title,
+   live URL, category, the accuracy-gate-cleared claims, the embedded product handles, and an
+   IG-eligibility verdict. Treat it as a first-class candidate for today's quota, not as overflow.
+
+   Three things that turn a promo into a removable post, so they are stated rather than inferred:
+
+   - **Never put the Notebook URL in the caption.** Step 4c already forbids a PDP link, and the same
+     reasoning binds here: caption URLs are not clickable on Instagram anyway, and a post whose
+     purpose reads as driving traffic is the commerce signal Meta's Restricted Goods standard
+     removes. The compliant form is to **teach the article's substance** with at most one plain
+     in-sentence pointer, and link-in-bio at most once a day, never as a closing line.
+   - **The engagement close still replaces any CTA.** Promoting an article licenses nothing the
+     charter bans.
+   - **Respect the eligibility verdict.** On a `generic-angle` row the source article's product
+     category may not appear in the caption, on-slide text, alt text, or a hashtag. The trap is
+     specific and it has already fired once: the natural way to point at a source article is to say
+     what it is about, and that sentence is exactly where the banned word enters.
+
+   Notebook promos are usually education, so they preferentially fill the pure-education,
+   no-product-in-frame slice of the mission brief's §6b mix, and they suit a carousel. Mark the row
+   `applied` when you draft from it. A row still unused after 14 days is stale news; mark it
+   `dismissed` in the queue-hygiene sweep and say so. Zero rows is a normal result.
+
+   Honest note so nobody reads the softer output as ignoring direction: the owner asked for
+   promotion, and the compliant version of promotion on this platform is teaching.
 
 ## Posting posture (read before Step 2b, Step 2.5, and Step 7)
 
@@ -196,10 +250,37 @@ carousels, and Brand Crush alike.
 - `inventory-sentinel` adds `social_posts` featured products to its watch scope, so a stock drop on a
   queued post surfaces as a flag rather than a deleted live post.
 
-## Step 3 — Draft (≤6 per run, reworks included)
+## Step 3 — Draft (reworks included)
+
+**THE QUOTA IS PER DAY, NOT PER RUN. Count today's rows before you draft anything.** The social
+routine fires **twice daily** (14:00 and 22:00 UTC, `routine-schedule.md` routine 6). Two runs each
+drafting a full quota is double the intended volume, and on Instagram that is the fastest way to get
+the account actioned. So the first thing Step 3 does is arithmetic:
+
+```
+today_remaining(platform) = social_freq_<platform>
+                          - rows already written for that platform today (any review_status)
+                          - reworks you wrote for it this run
+```
+
+Use the Step 2 item 7 list, filtered to today's date, to get that count. **If the remainder is 0,
+draft nothing for that platform and say so in the run summary.** A run that honestly drafts zero
+because the day is already full is a correct run, not a wasted one. Never treat a fresh
+`social_freq_*` as this run's allowance.
+
+This lives here, in the binding playbook, and not only in the evening trigger's prompt. A cloud
+trigger prompt is out-of-repo config that this file cannot see and that nobody reviews on a diff, so
+a playbook whose correctness depends on one is a playbook that is one silent edit away from being
+wrong.
+
+**The per-run cap is `sum(social_freq_*) + reworks`, floor 6**, applied on top of the per-day
+remainder above and never instead of it. It was a flat 6, written when Instagram ran at one a day;
+at a multi-post slate plus X it would cap a run below its own quota. The cap is self-discipline, not
+a server limit, so it is on you to respect it and to say in the summary when you hit it.
 
 Draft counts come from the Step 2 config — up to `social_freq_<platform>` new posts per platform,
-minus any reworks already written for that platform today. Platform-appropriate, **editorial-first**
+minus any reworks already written for that platform today, and minus everything already drafted
+today per the arithmetic above. Platform-appropriate, **editorial-first**
 (not product-first: on Instagram and TikTok a post that reads as an offer is removable under Meta's
 Restricted Goods standard regardless of how clean the image is), fresh language every time. X drafts fit 280 chars; Instagram and TikTok drafts are posted manually
 by the owner once approved. At most one promo-angle post per run, and only referencing
@@ -212,11 +293,17 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
 - **Rotate.** Never two consecutive Instagram posts from the same pillar, and never two consecutive
   posts in the same format. The ground follows the 4-beat cycle and the archetype follows the 7-beat
   spine (§3.1). Read the last few posted rows to find your position in both.
-- **Cadence is context-driven, not a fixed ramp.** Baseline is **at least one Instagram post every
-  day, no zero days**. Scale to 2-4/day on weeks with something real happening (an aisle or drop
-  going live, a featured-brand week, a calendar promo, an adopted trend brief); 10/day is a hard
-  ceiling for an exceptional moment, never a target. The strategy brief's Social Plan section sizes
-  this when present.
+- **Fill the daily slate** (`instagram-campaigns.md` §4a) in order, and stop when
+  `social_freq_instagram` is met: A resource, B campaign, C Today's Pick, D what's new, E carousel.
+  Slot A ships even on a one-post day. Baseline is at least one post daily, no zero days; 10/day is
+  a hard ceiling for an exceptional moment, never a target.
+- **Volume climbs a rung at a time, on 7 clean days** (§4 of the campaign doc). Name the rung and
+  the clean-day count in the run summary. Never step the quota up yourself to compensate for an
+  automated step-down.
+- **Today's Pick carries no percentage, no price, and no promo code** (§4b). The deterministic
+  publish gate blocks all five sale patterns outright, so a value claim in a caption is not a close
+  call, it is a guaranteed BLOCK. Value in the post is quality; the number lives on `/social`, on
+  X, in email, and on the site.
 - **Content mix** comes from `docs/store-team/mission-brief.md` §6b (roughly 40% product-in-scene or
   carousel, 30% pure education with no product in frame, 20% inspiring, 10% site news and trend
   reacts; at most half of a multi-post day is product-forward). The charter points at the brief for
