@@ -43,6 +43,20 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 5. Calendar (`GET /api/team/calendar`), current featured products/deals.
 6. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
    (`social_freq_*`; 0 = skip that platform entirely).
+
+   **`social_freq_facebook` is 0 on purpose (owner, 2026-08-16). Do not raise it.** There is no
+   Facebook publisher: `app/lib/social-publish/registry.server.ts` carries instagram, tiktok and
+   youtube only, and the publish job filters `platform = 'instagram'` in SQL in both `listEligible`
+   and `recentCaptions`, so a Facebook row cannot publish by any path. It was set to 1, and the
+   three drafts written under it (rows 20, 29, 33) have sat unpublishable since 08-12. Verified in
+   Meta Business Suite on 2026-08-16: every post the Page has ever shown is an Instagram row, the
+   Page itself has 0 followers, and Instagram content published through the Content Publishing API
+   does not reach the Page through Accounts Center cross-posting. Drafting for Facebook is writing
+   into a queue with no exit. Raise this only after a publisher exists.
+
+   **The three stranded rows are `approved`.** If a Facebook publisher ever ships, they become
+   eligible immediately and publish copy that is months old. Whoever builds that publisher marks
+   them `rejected` first.
 7. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
    `editedText` per row are the owner's verdicts on your last drafts.
 8. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
