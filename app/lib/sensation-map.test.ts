@@ -177,4 +177,65 @@ describe('matchSensationMap', () => {
     const lastWithImage = m.items.findIndex(p => p.imageUrl === null)
     expect(lastWithImage).toBe(-1) // no image-less product cracks the top 3
   })
+
+  describe('variant collapse + entry-price floor (#3527)', () => {
+    // Three size variants of one $418 product (same brand + title stem), plus a
+    // cheaper distinct product and an entry-price item.
+    const WEAR: DiscoveryProduct[] = [
+      mk({ id: 'j-s', handle: 'prowler-red-jeans-s', title: 'Prowler RED Jeans - Small', brand: 'Prowler RED', productTypeDial: 'wear', mood: ['Sensual'], price: 418 }),
+      mk({ id: 'j-m', handle: 'prowler-red-jeans-m', title: 'Prowler RED Jeans - Medium', brand: 'Prowler RED', productTypeDial: 'wear', mood: ['Sensual'], price: 418 }),
+      mk({ id: 'j-l', handle: 'prowler-red-jeans-l', title: 'Prowler RED Jeans - Large', brand: 'Prowler RED', productTypeDial: 'wear', mood: ['Sensual'], price: 418 }),
+      mk({ id: 'harn', handle: 'leather-harness', title: 'Leather Harness', brand: 'Other', productTypeDial: 'wear', mood: ['Sensual'], price: 120 }),
+      mk({ id: 'brief', handle: 'mesh-brief', title: 'Mesh Brief', brand: 'Other', productTypeDial: 'wear', mood: ['Sensual'], price: 22 }),
+    ]
+
+    it('collapses size variants of one product to a single card', () => {
+      const m = matchSensationMap(WEAR, { type: 'wear', feel: 'Sensual' })
+      const jeans = m.items.filter(p => p.id.startsWith('j-'))
+      expect(jeans).toHaveLength(1) // not three sizes of the same jeans
+    })
+
+    it('guarantees an entry-price (< $30) item in the set when one exists', () => {
+      const m = matchSensationMap(WEAR, { type: 'wear', feel: 'Sensual' })
+      expect(m.items.some(p => p.price < 30)).toBe(true) // the $22 brief is pulled in
+      expect(m.items.map(p => p.id)).toContain('brief')
+    })
+
+    it('swaps the weakest slot for an entry-price item when the top set is all pricier', () => {
+      // Three big-savings items outrank a cheap one, so without the floor the
+      // set would be all > $30. The $19 item (with an image) must be pulled in.
+      const PROMO: DiscoveryProduct[] = [
+        mk({ id: 'a', handle: 'a', productTypeDial: 'vibrator', price: 90, compareAtPrice: 200 }),
+        mk({ id: 'b', handle: 'b', productTypeDial: 'vibrator', price: 80, compareAtPrice: 180 }),
+        mk({ id: 'c', handle: 'c', productTypeDial: 'vibrator', price: 70, compareAtPrice: 160 }),
+        mk({ id: 'cheap', handle: 'cheap', productTypeDial: 'vibrator', price: 19 }),
+      ]
+      const m = matchSensationMap(PROMO, { type: 'vibrator', feel: null })
+      expect(m.items).toHaveLength(3)
+      expect(m.items.map(p => p.id)).toContain('cheap')
+      expect(m.items.map(p => p.id)).not.toContain('c') // weakest slot yielded
+    })
+
+    it('does not promote an image-less bargain (a poor card) over the imagery rule', () => {
+      const NOIMG: DiscoveryProduct[] = [
+        mk({ id: 'a', handle: 'a', productTypeDial: 'vibrator', price: 90, compareAtPrice: 200 }),
+        mk({ id: 'b', handle: 'b', productTypeDial: 'vibrator', price: 80, compareAtPrice: 180 }),
+        mk({ id: 'c', handle: 'c', productTypeDial: 'vibrator', price: 70, compareAtPrice: 160 }),
+        mk({ id: 'cheap-noimg', handle: 'cheap-noimg', productTypeDial: 'vibrator', price: 19, imageUrl: null }),
+      ]
+      const m = matchSensationMap(NOIMG, { type: 'vibrator', feel: null })
+      expect(m.items.map(p => p.id)).not.toContain('cheap-noimg')
+    })
+
+    it('does not collapse distinct products that merely share a trailing word', () => {
+      // "Jelle" and "Jelle Plus" are different products; "Plus" is not a size.
+      const LUBES: DiscoveryProduct[] = [
+        mk({ id: 'jelle', handle: 'jelle', title: 'Wicked Jelle', brand: 'Wicked', productTypeDial: 'lube', price: 14 }),
+        mk({ id: 'jelle-plus', handle: 'jelle-plus', title: 'Wicked Jelle Plus', brand: 'Wicked', productTypeDial: 'lube', price: 16 }),
+        mk({ id: 'aqua', handle: 'aqua', title: 'Wicked Aqua', brand: 'Wicked', productTypeDial: 'lube', price: 12 }),
+      ]
+      const m = matchSensationMap(LUBES, { type: 'lube', feel: null })
+      expect(m.items.map(p => p.id).sort()).toEqual(['aqua', 'jelle', 'jelle-plus'])
+    })
+  })
 })

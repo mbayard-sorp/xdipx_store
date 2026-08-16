@@ -27,7 +27,7 @@
  * emma-empathy-reviewer voice gate before merge.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { Reveal } from '~/components/motion/Reveal'
@@ -40,13 +40,14 @@ const BODY = { fontFamily: 'var(--font-body)' } as const
 
 /**
  * Verified collection handles only (checked live against
- * https://xdipx.com/sitemaps/collections.xml, each returns 200); everything
- * else resolves to best-sellers so the "See the full fit" link never 404s.
+ * https://xdipx.com/sitemaps/collections.xml, each returns 200). A type with no
+ * entry here has NO honest "see all" destination, so the link is not rendered
+ * at all rather than pointed at a collection that does not contain the shown set.
  *
  * `novelty`, `book-media`, and `sex-machine` have no matching live collection
  * (only brand-named collections like `curve-novelties`/`ns-novelties` for
- * novelty, and `sex-furniture` is a distinct category from "sex machine") and
- * stay on the best-sellers fallback.
+ * novelty, and `sex-furniture` is a distinct category from "sex machine"), so
+ * they render no "See the full fit" link.
  */
 const TYPE_COLLECTION: Partial<Record<ProductTypeDial, string>> = {
   vibrator:    '/collections/vibrators',
@@ -66,8 +67,13 @@ const TYPE_COLLECTION: Partial<Record<ProductTypeDial, string>> = {
   condom:      '/collections/condoms',
   wellness:    '/collections/wellness-care',
 }
-function fullFitHref(type: ProductTypeDial): string {
-  return TYPE_COLLECTION[type] ?? '/collections/best-sellers'
+/**
+ * The "See the full fit" destination for the RESOLVED type (the products
+ * actually shown), or null when no verified collection genuinely holds that set,
+ * in which case the caller renders no link rather than a mismatched one.
+ */
+function fullFitHref(type: ProductTypeDial): string | null {
+  return TYPE_COLLECTION[type] ?? null
 }
 
 function emmaLine(typeLabel: string, feel: string | null, relaxed: boolean): string {
@@ -89,22 +95,51 @@ interface SensationMapProps {
 }
 
 export function SensationMap({ types, feels, defaultState, defaultMatch }: SensationMapProps) {
-  const [state, setState] = useState<SensationDialState>(defaultState)
-  const fetcher = useFetcher<SensationMatch>()
+  // `applied` is the dial state whose products are on screen; `displayed` is
+  // that resolved set. `attempt` is the state we last asked the API for (still
+  // in flight, or the one that just failed) so a retry can re-run exactly it.
+  const [applied, setApplied] = useState<SensationDialState>(defaultState)
+  const [displayed, setDisplayed] = useState<SensationMatch>(defaultMatch)
+  const [attempt, setAttempt] = useState<SensationDialState | null>(null)
+  const [errored, setErrored] = useState(false)
+  const fetcher = useFetcher<SensationMatch | { error: string }>()
 
-  // Show the fetched set once it arrives; the SSR default until then. During a
-  // re-query fetcher.data still holds the previous set, which cross-fades out.
-  const match: SensationMatch = fetcher.data?.items ? fetcher.data : defaultMatch
   const loading = fetcher.state !== 'idle'
+  // The pill drawn active: the in-flight attempt (optimistic) until it either
+  // lands (becoming `applied`) or fails (reverting to `applied`). Never an
+  // active pill whose results did not actually change.
+  const activeState = errored || attempt === null ? applied : attempt
+
+  // Sync UI state to a COMPLETED fetcher result. This reacts to the fetcher; it
+  // does not fetch (the load lives in `select`), so the loader/useFetcher data
+  // discipline holds. On success we adopt the new set; on an error payload
+  // ({error} from the 400/429 paths, which carries no `items`) we keep the last
+  // good set, revert the pill, and surface a quiet retry instead of leaving a
+  // dead active pill.
+  useEffect(() => {
+    if (fetcher.state !== 'idle' || !fetcher.data || attempt === null) return
+    const data = fetcher.data
+    if ('items' in data && Array.isArray(data.items)) {
+      setDisplayed(data)
+      setApplied(attempt)
+      setAttempt(null)
+      setErrored(false)
+    } else {
+      setErrored(true)
+    }
+  }, [fetcher.state, fetcher.data, attempt])
 
   function select(next: SensationDialState) {
-    setState(next)
+    setErrored(false)
+    setAttempt(next)
     const params = new URLSearchParams({ type: next.type })
     if (next.feel) params.set('feel', next.feel)
     fetcher.load(`/api/sensation-map?${params.toString()}`)
   }
 
+  const match = displayed
   const resolvedLabel = TYPE_LABELS[match.resolved.type] ?? match.resolved.type
+  const fitHref = fullFitHref(match.resolved.type)
 
   return (
     <section className="bg-plum-soft py-16 md:py-20">
@@ -132,13 +167,13 @@ export function SensationMap({ types, feels, defaultState, defaultMatch }: Sensa
               </legend>
               <div className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {types.map(t => {
-                  const active = state.type === t.value
+                  const active = activeState.type === t.value
                   return (
                     <button
                       key={t.value}
                       type="button"
                       aria-pressed={active}
-                      onClick={() => select({ type: t.value, feel: state.feel })}
+                      onClick={() => select({ type: t.value, feel: activeState.feel })}
                       className={[
                         'flex-none snap-start whitespace-nowrap rounded-full px-[18px] py-2.5 text-[14px] font-medium transition-colors',
                         active
@@ -161,13 +196,13 @@ export function SensationMap({ types, feels, defaultState, defaultMatch }: Sensa
                   Dial B · Feel
                 </legend>
                 <div className="flex flex-wrap gap-2">
-                  <FeelChip label="Any" active={state.feel === null} onClick={() => select({ type: state.type, feel: null })} />
+                  <FeelChip label="Any" active={activeState.feel === null} onClick={() => select({ type: activeState.type, feel: null })} />
                   {feels.map(f => (
                     <FeelChip
                       key={f}
                       label={f}
-                      active={state.feel === f}
-                      onClick={() => select({ type: state.type, feel: f })}
+                      active={activeState.feel === f}
+                      onClick={() => select({ type: activeState.type, feel: f })}
                     />
                   ))}
                 </div>
@@ -179,6 +214,21 @@ export function SensationMap({ types, feels, defaultState, defaultMatch }: Sensa
               <span className="mr-1 not-italic" aria-hidden="true">♥</span>
               {emmaLine(resolvedLabel, match.resolved.feel, match.relaxed)}
             </p>
+
+            {/* Quiet retry when a dial change did not go through (rate limit or a
+                transient error). The pill has already reverted to the last set. */}
+            {errored && (
+              <p className="mt-3 text-[14px] text-ink-3" style={BODY} aria-live="polite">
+                That did not load just now.{' '}
+                <button
+                  type="button"
+                  onClick={() => attempt && select(attempt)}
+                  className="font-medium text-ink underline underline-offset-2 transition-colors hover:text-plum"
+                >
+                  Try again
+                </button>
+              </p>
+            )}
           </div>
 
           {/* Right column — the payoff: real, clickable product */}
@@ -198,13 +248,15 @@ export function SensationMap({ types, feels, defaultState, defaultMatch }: Sensa
               ))}
             </div>
 
-            <Link
-              to={fullFitHref(state.type)}
-              className="mt-5 inline-flex items-center gap-1.5 text-[15px] font-medium text-ink transition-colors hover:text-plum"
-              style={BODY}
-            >
-              See the full fit <span aria-hidden="true">→</span>
-            </Link>
+            {fitHref && (
+              <Link
+                to={fitHref}
+                className="mt-5 inline-flex items-center gap-1.5 text-[15px] font-medium text-ink transition-colors hover:text-plum"
+                style={BODY}
+              >
+                See the full fit <span aria-hidden="true">→</span>
+              </Link>
+            )}
           </div>
         </div>
       </div>
