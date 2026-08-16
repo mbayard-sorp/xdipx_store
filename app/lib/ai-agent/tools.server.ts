@@ -352,6 +352,13 @@ export function searchReasonGuidance(reason: SearchDiagnostics['reason']): strin
   switch (reason) {
     case 'matched':
       return undefined
+    case 'sanity-degraded':
+      // Ticket #1269: results are present and real (a Shopify fallback found
+      // them after Sanity came up empty or was unreachable). This must never
+      // collide with the sanity-unavailable/catalog-unavailable framing below,
+      // which tells the model to apologize for an outage: there is no outage
+      // to apologize for from the caller's side, just present the cards.
+      return undefined
     case 'filtered-to-zero':
       return 'Nothing matched every filter at once. Do not dead-end: offer to relax one, with agency. Pattern: "Want me to loosen the price cap or drop one of the features and look again?"'
     case 'no-base-results':

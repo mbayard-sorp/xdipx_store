@@ -125,8 +125,17 @@ export interface SearchDiagnostics {
    *                         often is the signal to backfill it rather than to keep
    *                         leaning on the fallback.
    * - 'sanity-unavailable'— the Sanity query layer could not be reached (client env
-   *                         vars missing, or the GROQ fetch threw). Shopify fallback
-   *                         may have been used.
+   *                         vars missing, or the GROQ fetch threw), AND the Shopify
+   *                         fallback also came back empty. Zero real products.
+   * - 'sanity-degraded'   - the Sanity query layer was unavailable, or a strict-category
+   *                         keyword search found nothing in Sanity, but the Shopify search
+   *                         fallback found real products. Distinct from 'sanity-unavailable'
+   *                         on purpose (ticket #1269): that reason tells the model "search is
+   *                         degraded, apologize, do not invent products" (see
+   *                         searchReasonGuidance), which is the wrong framing when cards ARE
+   *                         present and real. Present these normally; the reason exists so the
+   *                         degradation stays visible in diagnostics/telemetry even though the
+   *                         caller sees a normal result.
    * - 'catalog-unavailable'— Sanity returned candidates, but hydrating them against
    *                         the live Shopify catalog failed. A downstream outage, NOT
    *                         a Sanity one: kept distinct so it is neither mislabeled as
@@ -138,6 +147,7 @@ export interface SearchDiagnostics {
     | 'relaxed-audience'
     | 'no-base-results'
     | 'sanity-unavailable'
+    | 'sanity-degraded'
     | 'catalog-unavailable'
 }
 
@@ -327,6 +337,22 @@ async function retryWithoutAudienceTags(args: {
 }
 
 /**
+ * A Sanity candidate whose `shopifyHandle` did not resolve to a live Shopify
+ * product (ticket #1270). Previously these were dropped in the hydration loop
+ * with a silent `continue`, no log and no metric, so a growing handle-drift
+ * problem (a Sanity doc pointing at a renamed or archived Shopify handle) was
+ * invisible until a caller noticed thinner-than-expected results. Logs count
+ * plus a small sample so the drift shows up in normal error monitoring instead.
+ */
+function logHydrationMisses(fn: 'searchForIvr' | 'discoverForIvr', misses: string[]): void {
+  if (misses.length === 0) return
+  console.error(
+    `[ivr-search] ${fn}: ${misses.length} Sanity candidate(s) missed Shopify hydration`,
+    misses.slice(0, 5),
+  )
+}
+
+/**
  * Hydrate Sanity candidates against Shopify, apply the live-price budget filter,
  * and rank. Shared by the normal path and the relaxed-audience retry so the two
  * cannot drift apart.
@@ -340,15 +366,44 @@ async function hydrateAndRank(
   const shopifyMap = new Map<string, Product>(shopifyProducts.map((p) => [p.handle, p]))
 
   const cards: IvrProductCard[] = []
+  const missed: string[] = []
   for (const sr of sanityResults) {
     const product = shopifyMap.get(sr.handle)
-    if (!product) continue
+    if (!product) { missed.push(sr.handle); continue }
     cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
   }
+  logHydrationMisses('searchForIvr', missed)
 
   const priced = applyPriceMax(cards, opts.priceMax)
   const ranked = marginWeightedSelect(priced, opts.limit)
   return { cards: ranked, reason: ranked.length > 0 ? opts.reason : 'filtered-to-zero' }
+}
+
+/**
+ * Run the Shopify search fallback and classify the result (ticket #1269).
+ * `zeroReason` is what to report when the fallback also finds nothing, the
+ * same reason the caller would have returned anyway. When the fallback DOES
+ * find products, the reason is 'sanity-degraded', never `zeroReason` or
+ * 'matched': real products are present, but the primary Sanity index missed
+ * them, and that gap needs to stay visible instead of looking identical to a
+ * normal hit.
+ *
+ * Shopify's Storefront `search` only returns ACTIVE/published products, so the
+ * `archived` exclusion carries into the fallback automatically. `hiddenUntilLive`
+ * has no Shopify equivalent, it is a Sanity-only publish gate, so it cannot be
+ * expressed here; re-querying Sanity to check it would defeat the point of a
+ * fallback that exists for when Sanity is the thing that's down.
+ */
+async function fallbackSearch(
+  query: string,
+  limit: number,
+  priceMax: number | undefined,
+  zeroReason: SearchDiagnostics['reason'],
+): Promise<SearchDiagnostics> {
+  const pool = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
+  if (pool.length === 0) return { cards: [], reason: zeroReason }
+  const cards = marginWeightedSelect(pool, limit)
+  return { cards, reason: cards.length > 0 ? 'sanity-degraded' : zeroReason }
 }
 
 export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<SearchDiagnostics> {
@@ -358,8 +413,9 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
   if (!client) {
     await captureSearchOutage('searchForIvr', 'sanity-unavailable')
     const pool = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
+    if (pool.length === 0) return { cards: [], reason: 'sanity-unavailable' }
     const cards = shuffle(pool).slice(0, limit)
-    return { cards, reason: 'sanity-unavailable' }
+    return { cards, reason: 'sanity-degraded' }
   }
 
   // Distinguishes a Sanity-layer failure (the GROQ query itself) from a
@@ -471,23 +527,30 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
     if (!sanityResults || sanityResults.length === 0) {
       if (strictCategory) {
         // Determine whether the base query (without extra filters) would have
-        // found anything — if yes, it's filtered-to-zero; otherwise no-base-results.
+        // found anything: if yes, it's filtered-to-zero; otherwise no-base-results.
         if (hasExtraFilters) {
           // Re-query with only base conditions to check if unfiltered results exist
           const baseFilter = baseConditions.join(' && ')
           const baseGroq = `*[${baseFilter}] [0...1] { "handle": shopifyHandle }`
           const baseCheck = await cachedGroqFetch<{ handle: string }[]>(client, baseGroq, groqParams)
-          if (baseCheck.length === 0) return { cards: [], reason: 'no-base-results' }
+          if (baseCheck.length === 0) {
+            // No base match in Sanity either. Ticket #1269: this used to return
+            // straight to the caller with zero resilience. Try the Shopify search
+            // fallback before giving up: a strict-category term ("lube") is the
+            // highest-intent kind of query, so it gets the same fallback as the
+            // non-strict path below, not silence.
+            return await fallbackSearch(query, limit, priceMax, 'no-base-results')
+          }
 
           // filtered-to-zero: the keyword DID match the catalog and only the
           // extra filters emptied it. Returning nothing here is how a caller
-          // saying the two most ordinary things in a row — "a vibrator", "with
-          // a partner" — got zero results out of 696 vibrators. Audience tag
+          // saying the two most ordinary things in a row, "a vibrator", "with
+          // a partner", got zero results out of 696 vibrators. Audience tag
           // coverage is the reason: 2 of 696 vibrator-dial products carry
           // `couples` and 0 carry `for-him`, so ANDing an audience tag against
           // a category dial is very nearly a guaranteed empty set.
           //
-          // Audience is a soft preference, not a hard spec — the same reasoning
+          // Audience is a soft preference, not a hard spec, the same reasoning
           // mattersTags already documents above. Drop it and retry once before
           // giving up. Category, dial and price stay: those are the filters a
           // caller would actually notice being ignored.
@@ -495,23 +558,21 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
             client, baseConditions, filterConditions, groqParams,
             tags, boosts, candidatePool,
           })
-          if (relaxed === null) return { cards: [], reason: 'filtered-to-zero' }
+          if (relaxed === null) {
+            // Ticket #1269: the relax retry found nothing either. Last resort
+            // before returning silence is the Shopify fallback.
+            return await fallbackSearch(query, limit, priceMax, 'filtered-to-zero')
+          }
           sanityOk = true // past every Sanity query; a throw below is catalog-side
           return await hydrateAndRank(relaxed, { limit, priceMax, reason: 'relaxed-audience' })
         }
-        return { cards: [], reason: 'no-base-results' }
+        // Ticket #1269: strict-category zero results with no extra filters to
+        // blame previously returned straight to the caller. Try Shopify first.
+        return await fallbackSearch(query, limit, priceMax, 'no-base-results')
       }
       // Non-strict path: try Shopify fallback. If we had extra filters and
       // Shopify is also empty, classify as filtered-to-zero when filters were active.
-      const fallback = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
-      if (fallback.length === 0 && hasExtraFilters) {
-        return { cards: [], reason: 'filtered-to-zero' }
-      }
-      if (fallback.length === 0) {
-        return { cards: [], reason: 'no-base-results' }
-      }
-      const cards = marginWeightedSelect(fallback, limit)
-      return { cards, reason: cards.length > 0 ? 'matched' : 'no-base-results' }
+      return await fallbackSearch(query, limit, priceMax, hasExtraFilters ? 'filtered-to-zero' : 'no-base-results')
     }
 
     sanityOk = true // past every Sanity query; anything below is catalog-side
@@ -535,9 +596,7 @@ export async function searchForIvrWithDiagnostics(opts: IvrSearchOpts): Promise<
     }
     console.error('[ivr-search] Sanity search failed, falling back to Shopify:', err)
     await captureSearchOutage('searchForIvr', 'sanity-unavailable', err)
-    const pool = applyPriceMax(await shopifyFallback(query, Math.max(limit * 2, 8)), priceMax)
-    const cards = marginWeightedSelect(pool, limit)
-    return { cards, reason: 'sanity-unavailable' }
+    return await fallbackSearch(query, limit, priceMax, 'sanity-unavailable')
   }
 }
 
@@ -580,9 +639,18 @@ function shuffle<T>(items: T[]): T[] {
  * every conversation.
  */
 function marginWeightedSelect(cards: IvrProductCard[], limit: number): IvrProductCard[] {
-  if (cards.length <= limit) return shuffle(cards)
   const inStock = cards.filter((c) => c.inStock)
   const outOfStock = cards.filter((c) => !c.inStock)
+  if (cards.length <= limit) {
+    // Ticket #1270: the whole pool fits under `limit`, so nothing is being
+    // dropped either way, but out-of-stock items were previously shuffled in
+    // among in-stock ones instead of trailing them. When a caller only reads
+    // out the first couple of results (voice truncates), that put a sold-out
+    // item ahead of a sellable one for no reason. In-stock leads, out-of-stock
+    // still shows (never invent products to hit `limit`) but trails so the
+    // card/prose can say sold out on it.
+    return [...shuffle(inStock), ...shuffle(outOfStock)]
+  }
   // If we have enough in-stock candidates, only use those. Otherwise top off
   // with out-of-stock so we don't return fewer than `limit` cards.
   const primaryPool = inStock.length >= limit ? inStock : [...inStock, ...outOfStock]
@@ -616,6 +684,26 @@ function pickWeightedIndex(cards: IvrProductCard[]): number {
 // ─── Discovery search (structured filters, no free-text) ─────────────────────
 
 /**
+ * Discovery has no free-text query, only structured filters, so the Shopify
+ * search fallback (ticket #1269) needs a search string built out of the
+ * filters that were passed. Joins the terms most likely to match Shopify
+ * title/tag/description text: the type dial and category are closest to a
+ * real product noun, mood/useCase/features are looser signals. Returns an
+ * empty string when there is nothing to search on (a discover call with no
+ * filters at all), which the caller treats as "no fallback possible".
+ */
+function buildDiscoverFallbackQuery(opts: IvrDiscoverOpts): string {
+  const terms = [
+    opts.productTypeDial,
+    opts.category,
+    ...(opts.mood ?? []),
+    ...(opts.useCase ?? []),
+    ...(opts.features ?? []),
+  ].filter((t): t is string => Boolean(t && t.trim().length > 0))
+  return terms.join(' ')
+}
+
+/**
  * discoverForIvrWithDiagnostics — structured-filter discovery with reason code.
  */
 export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Promise<SearchDiagnostics> {
@@ -624,7 +712,12 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
 
   if (!client) {
     await captureSearchOutage('discoverForIvr', 'sanity-unavailable')
-    return { cards: [], reason: 'sanity-unavailable' }
+    // Ticket #1269: discoverForIvrWithDiagnostics used to return straight to
+    // the caller with zero resilience when the Sanity client was unavailable.
+    // Fall back to a Shopify keyword search built from the structured filters.
+    const fallbackQuery = buildDiscoverFallbackQuery(opts)
+    if (!fallbackQuery) return { cards: [], reason: 'sanity-unavailable' }
+    return await fallbackSearch(fallbackQuery, limit, priceMax, 'sanity-unavailable')
   }
 
   // Only a NARROWING filter (category / priceMax / productTypeDial) can reduce
@@ -752,15 +845,23 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
     const shopifyMap = new Map<string, Product>(shopifyProducts.map((p) => [p.handle, p]))
 
     const cards: IvrProductCard[] = []
+    const missed: string[] = []
     for (const sr of sanityResults) {
       const product = shopifyMap.get(sr.handle)
-      if (!product) continue
+      if (!product) { missed.push(sr.handle); continue }
       cards.push(toIvrCard(product, { tagline: sr.tagline ?? undefined, category: sr.category ?? undefined }))
     }
+    logHydrationMisses('discoverForIvr', missed)
 
-    const priced = applyPriceMax(cards, priceMax).slice(0, limit)
+    // Ticket #1270: this used to be a plain `.slice(0, limit)` on the
+    // Sanity-score-ordered pool, so an out-of-stock item ranked ahead of an
+    // in-stock one whenever Sanity's relevance score said so. Route through
+    // the same in-stock-first, margin-weighted selection the keyword search
+    // uses so stock honesty is not just a searchForIvr behavior.
+    const priced = applyPriceMax(cards, priceMax)
+    const ranked = marginWeightedSelect(priced, limit)
     // Cards existed but the live-price filter emptied them: filtered-to-zero.
-    return { cards: priced, reason: priced.length > 0 ? 'matched' : 'filtered-to-zero' }
+    return { cards: ranked, reason: ranked.length > 0 ? 'matched' : 'filtered-to-zero' }
   } catch (err) {
     if (sanityOk) {
       // Sanity returned candidates; the throw is a Shopify hydration failure, not
@@ -772,7 +873,11 @@ export async function discoverForIvrWithDiagnostics(opts: IvrDiscoverOpts): Prom
     }
     console.error('[ivr-search] Sanity discover failed:', err)
     await captureSearchOutage('discoverForIvr', 'sanity-unavailable', err)
-    return { cards: [], reason: 'sanity-unavailable' }
+    // Ticket #1269: true Sanity failure (not just zero results) used to return
+    // straight to the caller too. Same fallback as the client-null branch above.
+    const fallbackQuery = buildDiscoverFallbackQuery(opts)
+    if (!fallbackQuery) return { cards: [], reason: 'sanity-unavailable' }
+    return await fallbackSearch(fallbackQuery, limit, priceMax, 'sanity-unavailable')
   }
 }
 
