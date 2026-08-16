@@ -80,6 +80,17 @@ ground lock. The rules below stand; the doctrine wins where they drift.
   image via `--ref-image` on `scripts/gen-homepage-image.ts`), or a sensual
   human context matched to what the surface links to: lingerie on a body,
   silk against skin, hands, playful tension.
+- **Cast members are licensed in merchandising imagery (owner directive,
+  2026-08-15).** Generated images may feature approved cast members WITH
+  products: holding them, wearing them, mid-scene with them. Show people
+  who look sexy and are plainly having an amazing time — desire, delight,
+  anticipation, the grin of someone mid-discovery — never bored catalog
+  posing. The product stays the hero; a cast member is context, not the
+  subject. The doctrine's depicted-people hard rules bind unchanged:
+  unambiguous adulthood, nothing a premium lingerie campaign could not
+  run, vary age, body type, and skin tone across assets. Faces are
+  welcome (the never-face-on rule was withdrawn 2026-07-28). Emma's
+  likeness continues under the approved Emma-likeness policy.
 - **Bright, colorful, bold** (Mike, 2026-07-05, second directive). No dark,
   moody, candlelit scenes — the first product-forward round shipped
   near-black images and those are retired too. Default to daylight or
@@ -96,6 +107,18 @@ ground lock. The rules below stand; the doctrine wins where they drift.
   Copy belongs in the markup, never in the image. Add "no text, no words, no
   letters, no watermark, no logo, no caption" to the negative brief of every
   prompt, and reject on self-review any image with baked-in text.
+- **Rendered-text legibility over photography (owner directive, 2026-08-15).**
+  The no-text rule keeps words out of the pixels; this rule governs the copy
+  the SITE typesets on top of them. Any surface placing copy over a
+  photograph must either (a) put the text on a solid ground below or beside
+  the image, the door-tile pattern, or (b) run the redesign-v2-spec scrim:
+  bottom-anchored ink gradient with white text over a low-detail image
+  region. Plum emphasis on a dark ground always uses the `.em-on-dark`
+  lift, never bare `.em` (2.5:1 is illegible; the owner flagged two live
+  banners for exactly this). WCAG AA is the floor per the doctrine: 4.5:1
+  body, 3:1 large display. design-critic BLOCKS on text-over-image below
+  that floor, and the routine's image briefs must reserve low-detail
+  negative space wherever a label will land.
 - **The mood is playful curiosity with charge underneath.** A visitor
   should feel on the edge of finding something that will bring them
   pleasure, and smile on the way. Hard limits for legal / processor /
@@ -140,9 +163,24 @@ The homepage must be visibly different week over week. Sameness is a defect.
   marketing_calendar. Themes are editorial curricula, not sales events (per
   the charter: "Wand Week" teaches first, the offer rides along). Every daily
   run reads today's theme from the calendar and merchandises inside it.
-- Rotation minimums: hero product changes at least twice per week. Rails are
-  re-picked weekly under the theme. At least one module (tile art, rail
-  concept, mosaic arrangement) is visibly new each week.
+- Rotation minimums (owner direction 2026-08-15, supersedes the old
+  "rails are re-picked weekly" line, which contradicted the routine's
+  per-run rails surface and let the page sit still):
+  - Hero product changes at least twice per week; hero copy every run.
+  - Wired rails vary every run: each run visibly changes the wired-rails
+    slate (headings, order, or lineup). The one exception stays the
+    featured-brand rail, which rotates weekly per its own rule below.
+  - Every wired rail carries at least 4 products. The under-$30 entry
+    rail carries at least 6; three products next to an 8-card anchor grid
+    reads broken, and the catalog holds 20+ under $30 at all times.
+  - The panel deck is merchandising, not shell: the door tiles and the two
+    large banners (Discover / Just landed) get a visible refresh at least
+    weekly (art, labels, blurbs, or link targets). A `singleton.panelDeck`
+    `_updatedAt` more than 7 days old is a definition-of-done failure for
+    that day's run. (It sat untouched 2026-07-30 to 2026-08-15; the owner
+    noticed. Never again.)
+  - The anchor grid's backing collection is re-ordered or re-pointed at
+    least weekly.
 - No two consecutive weeks with the same hero product, the same rail lineup,
   or the same tile artwork. Check last week's run summaries before picking.
 - **Featured brand rail (owner direction #718, existing primitives only).** Run
