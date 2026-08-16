@@ -4,6 +4,7 @@ import type { LeanCardProduct } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
 import ProductTileMedia from '~/components/store/ProductTileMedia'
 import { Reveal } from '~/components/motion/Reveal'
+import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 
 interface ProductCarouselProps {
   block?: ProductCarouselBlock
@@ -190,7 +191,9 @@ function ProductCard({
 }) {
   const price   = product.price
   const compare = product.compareAtPrice
-  const onSale  = compare != null && compare > price
+  // Struck price is advertised-discount framing, gated on the MAP rule so a
+  // MAP-locked product shows none (ticket #3675).
+  const onSale  = compare != null && compare > price && mapAllowsDiscountDisplay(product.mapPrice, compare)
   const firstImage = product.images[0]
   const firstVideo = product.videos?.[0]
   const videoSrc = firstVideo?.sources?.[0]?.url

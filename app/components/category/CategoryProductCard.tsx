@@ -9,6 +9,7 @@ import { Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import type { CategoryCardProduct } from '~/types/cms'
 import { MONO, BODY, formatPrice } from './consts'
+import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 
 const DIAL_NOTCHES = 5
 
@@ -38,7 +39,12 @@ export function CategoryProductCard({
   priority?: boolean
   onSelect?: () => void
 }) {
-  const onSale = product.compareAtPrice != null && product.compareAtPrice > product.price
+  // Struck price is advertised-discount framing, gated on the MAP rule so a
+  // MAP-locked product (map == compare-at) shows none (ticket #3675).
+  const onSale =
+    product.compareAtPrice != null &&
+    product.compareAtPrice > product.price &&
+    mapAllowsDiscountDisplay(product.mapPrice, product.compareAtPrice)
 
   return (
     <Link

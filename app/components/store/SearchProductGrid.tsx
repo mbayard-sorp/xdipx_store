@@ -3,6 +3,7 @@ import { Link, useFetcher } from 'react-router'
 import type { SearchProductResult } from '~/lib/search.server'
 import ProductTileMedia from '~/components/store/ProductTileMedia'
 import LiveDealBadge from '~/components/store/LiveDealBadge'
+import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 
 export function InfiniteProductGrid({
   initialProducts,
@@ -111,8 +112,14 @@ export function SearchTile({
 
   const price = product.price ? parseFloat(product.price) : null
   const compareAt = product.compareAtPrice ? parseFloat(product.compareAtPrice) : null
-  const discount = price && compareAt && compareAt > price
-    ? Math.round(((compareAt - price) / compareAt) * 100)
+  const mapPrice = product.mapPrice ? parseFloat(product.mapPrice) : null
+  // Struck price + "% off" badge is advertised-discount framing, gated on the
+  // MAP rule so a MAP-locked product shows neither (ticket #3675).
+  const canShowDiscount =
+    price != null && compareAt != null && compareAt > price &&
+    mapAllowsDiscountDisplay(mapPrice, compareAt)
+  const discount = canShowDiscount
+    ? Math.round(((compareAt! - price!) / compareAt!) * 100)
     : 0
 
   const canAtc = product.availableForSale && !product.hasMultipleVariants && !!product.defaultVariantId
@@ -210,8 +217,8 @@ export function SearchTile({
             {price != null && (
               <span className="text-sm font-bold text-coral">${price.toFixed(2)}</span>
             )}
-            {compareAt != null && price != null && compareAt > price && (
-              <span className="text-xs text-ink/40 line-through">${compareAt.toFixed(2)}</span>
+            {canShowDiscount && (
+              <span className="text-xs text-ink/40 line-through">${compareAt!.toFixed(2)}</span>
             )}
           </div>
         </div>

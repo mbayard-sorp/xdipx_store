@@ -307,6 +307,13 @@ export interface Product {
   variants: ProductVariant[]
   price: number
   compareAtPrice?: number
+  /**
+   * xdipx.map_price (minimum advertised price) when set and positive. Lean-
+   * pipeline card surfaces (category cards) gate their struck price + badge on
+   * the MAP rule via `mapAllowsDiscountDisplay` so a MAP-locked product shows no
+   * discount framing it may not advertise (ticket #3675). Absent = no MAP.
+   */
+  mapPrice?: number
   brand?: string
   tags: string[]
   category?: string
@@ -345,6 +352,9 @@ export interface LeanCardProduct {
   title: string
   price: number
   compareAtPrice?: number
+  /** xdipx.map_price — gates the carousel card's struck price on the MAP rule
+   *  (ticket #3675). Absent = no MAP. */
+  mapPrice?: number
   brand?: string
   /** Server truncates to the first entry (or []). */
   images: ProductImage[]

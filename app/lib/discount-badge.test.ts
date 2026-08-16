@@ -7,6 +7,7 @@ import {
   formatSavings,
   formatSavingsRange,
   formatDiscountBadge,
+  mapAllowsDiscountDisplay,
 } from './discount-badge'
 
 /**
@@ -52,6 +53,75 @@ describe('every save-percentage surface routes through the shared floor', () => 
     it(`${rel.split('/').pop()} imports and uses showDiscountBadge`, () => {
       const src = read(rel)
       expect(src).toContain('showDiscountBadge')
+      expect(src).toContain("from '~/lib/discount-badge'")
+    })
+  }
+})
+
+describe('mapAllowsDiscountDisplay — the MAP gate (ticket #3675)', () => {
+  it('SUPPRESSES discount framing when map_price equals the regular price (MAP = MSRP)', () => {
+    // The exact live case: date-night-water-based-personal-lubricant, 15.99 vs
+    // an 18.99 compare-at, with map_price == original_price (18.99). 1,639
+    // active products had map == original on 2026-08-16; 113 were rendering a
+    // struck price + badge they may not advertise.
+    expect(mapAllowsDiscountDisplay(18.99, 18.99)).toBe(false)
+  })
+
+  it('allows discount framing when MAP sits below the regular price', () => {
+    expect(mapAllowsDiscountDisplay(12.0, 18.99)).toBe(true)
+  })
+
+  it('suppresses when MAP sits above the regular price', () => {
+    expect(mapAllowsDiscountDisplay(20.0, 18.99)).toBe(false)
+  })
+
+  it('allows discount framing when there is no MAP (null, undefined, or 0)', () => {
+    expect(mapAllowsDiscountDisplay(null, 18.99)).toBe(true)
+    expect(mapAllowsDiscountDisplay(undefined, 18.99)).toBe(true)
+    expect(mapAllowsDiscountDisplay(0, 18.99)).toBe(true)
+  })
+
+  it('never advertises a discount when map_restricted is set, whatever the prices', () => {
+    expect(mapAllowsDiscountDisplay(0, 18.99, true)).toBe(false)
+    expect(mapAllowsDiscountDisplay(1.0, 18.99, true)).toBe(false)
+  })
+
+  it('suppresses when there is no regular price to strike through', () => {
+    expect(mapAllowsDiscountDisplay(10.0, null)).toBe(false)
+    expect(mapAllowsDiscountDisplay(10.0, 0)).toBe(false)
+  })
+
+  it('tolerates sub-cent float noise at the equality boundary', () => {
+    // map effectively equal to regular (within half a cent) is not a discount.
+    expect(mapAllowsDiscountDisplay(18.99, 18.991)).toBe(false)
+    expect(mapAllowsDiscountDisplay(18.98, 18.99)).toBe(true)
+  })
+})
+
+describe('every discount-display surface routes through the MAP gate (ticket #3675)', () => {
+  const read = (rel: string) =>
+    readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8')
+
+  // The five general product cards + the PDP the ticket audited, plus VaultCard
+  // (the PLP card the others mirror) and the CMS carousel card. Before this
+  // shipped only the five hero surfaces and the Google feed consulted MAP; a
+  // card that computes a percentage straight from compare-at vs price is the
+  // exact defect, so every one of these must reference the shared gate.
+  const surfaces = [
+    '../components/store/StorefrontProductCard.tsx',
+    '../components/discovery/ProductCard.tsx',
+    '../components/category/CategoryProductCard.tsx',
+    '../components/store/SearchProductGrid.tsx',
+    '../components/store/ProductCard.tsx',
+    '../components/store/VaultCard.tsx',
+    '../components/cms/ProductCarousel.tsx',
+    '../routes/_layout.products.$slug.tsx',
+  ]
+
+  for (const rel of surfaces) {
+    it(`${rel.split('/').pop()} gates discount framing on mapAllowsDiscountDisplay`, () => {
+      const src = read(rel)
+      expect(src).toContain('mapAllowsDiscountDisplay')
       expect(src).toContain("from '~/lib/discount-badge'")
     })
   }

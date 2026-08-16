@@ -125,6 +125,14 @@ export interface DiscoveryProduct {
    * struck price + "You save $X (Y%)" line, mirroring the PLP VaultCard.
    */
   compareAtPrice: number | null
+  /**
+   * xdipx.map_price (minimum advertised price) when set and positive, else
+   * null. The card gates its struck-price + badge on `mapAllowsDiscountDisplay`
+   * so a MAP-locked product (map == compare-at) shows no discount framing it
+   * may not advertise (ticket #3675). Absent/null on pre-v9 index entries and
+   * read as "no MAP, discount allowed".
+   */
+  mapPrice?: number | null
   /** Distinct Color option values (only meaningful when length > 1). */
   colorValues: string[]
   /** Distinct Size/Length option values (only meaningful when length > 1). */

@@ -129,6 +129,7 @@ function toCardProduct(p: Product): CategoryCardProduct {
     title: p.title,
     price: p.price,
     compareAtPrice: p.compareAtPrice ?? null,
+    mapPrice: p.mapPrice ?? null,
     brand: p.brand ?? null,
     imageUrl: p.images[0]?.url ?? null,
     imageAlt: p.images[0]?.altText ?? null,

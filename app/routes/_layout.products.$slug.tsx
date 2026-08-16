@@ -43,6 +43,7 @@ import { checkRateLimit } from '~/lib/rate-limit.server'
 import { getFallbackAside } from '~/lib/emma-aside-templates'
 import { STOREFRONT_CACHE_HEADERS } from '~/lib/cache-headers'
 import { shopifyImageUrl } from '~/lib/shopify-image'
+import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 import BundleHero from '~/components/store/BundleHero'
 import BundleSaveCard from '~/components/store/BundleSaveCard'
 import { ProductStructuredData }  from '~/components/seo/ProductStructuredData'
@@ -832,6 +833,12 @@ function ProductPage() {
   const discount = deal.msrp > 0 && deal.msrp > price
     ? Math.round(((deal.msrp - price) / deal.msrp) * 100)
     : 0
+  // The struck MSRP + "% off" badge is advertised-discount framing, so it is
+  // gated on the MAP rule: a MAP-locked product (map == MSRP, or map_restricted)
+  // shows the single live price and no discount framing it may not advertise
+  // (ticket #3675).
+  const showAdvertisedDiscount =
+    deal.msrp > price && mapAllowsDiscountDisplay(deal.mapPrice, deal.msrp, deal.mapRestricted)
   const subscriptionOffer = !selectedPlanId
     ? getBestSubscriptionOffer(deal.sellingPlanGroups, basePrice)
     : null
@@ -988,7 +995,7 @@ function ProductPage() {
             >
               ${price.toFixed(2)}
             </span>
-            {deal.msrp > price && (
+            {showAdvertisedDiscount && (
               <>
                 <span className="text-ink/40 text-xl line-through">
                   ${deal.msrp.toFixed(2)}
@@ -1311,7 +1318,7 @@ function ProductPage() {
               style={{ fontFamily: 'var(--font-display)' }}
             >
               ${price.toFixed(2)}
-              {deal.msrp > price && (
+              {showAdvertisedDiscount && (
                 <span className="text-ink/40 line-through ml-2 font-normal">
                   ${deal.msrp.toFixed(2)}
                 </span>

@@ -3,6 +3,7 @@ import type { HeroVideo, ProductImage } from '~/types'
 import { HeartButton } from './HeartButton'
 import { CardVideo } from './CardVideo'
 import { shopifyImageUrl, shopifyImageSrcSet } from '~/lib/shopify-image'
+import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 
 interface ProductCardProps {
   id:         string
@@ -11,6 +12,9 @@ interface ProductCardProps {
   brand?:     string
   price:      number
   compareAt?: number
+  /** xdipx.map_price. Gates the struck price + badge on the MAP rule so a
+   *  MAP-locked product advertises no discount (ticket #3675). Absent = no MAP. */
+  mapPrice?:  number
   image?:     ProductImage
   heroVideo?: HeroVideo
   /** Optional coral "Editor's pick" / "New" pill, top-left. */
@@ -18,10 +22,14 @@ interface ProductCardProps {
 }
 
 export function ProductCard({
-  id, handle, title, brand, price, compareAt, image, heroVideo, badge,
+  id, handle, title, brand, price, compareAt, mapPrice, image, heroVideo, badge,
 }: ProductCardProps) {
-  const discount = compareAt && compareAt > price
-    ? Math.round(((compareAt - price) / compareAt) * 100)
+  // Advertised-discount framing (struck price + "% off") is gated on the MAP
+  // rule as well as on real savings (ticket #3675).
+  const canShowDiscount =
+    compareAt != null && compareAt > price && mapAllowsDiscountDisplay(mapPrice, compareAt)
+  const discount = canShowDiscount
+    ? Math.round(((compareAt! - price) / compareAt!) * 100)
     : 0
 
   return (
@@ -73,8 +81,8 @@ export function ProductCard({
           </h3>
           <div className="flex items-baseline gap-2 mt-2">
             <span className="text-coral font-bold">${price.toFixed(2)}</span>
-            {compareAt && compareAt > price && (
-              <span className="text-ink/40 text-sm line-through">${compareAt.toFixed(2)}</span>
+            {canShowDiscount && (
+              <span className="text-ink/40 text-sm line-through">${compareAt!.toFixed(2)}</span>
             )}
             {discount > 0 && (
               <span className="text-coral text-xs font-semibold">{discount}% off</span>

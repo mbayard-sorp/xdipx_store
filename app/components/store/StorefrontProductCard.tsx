@@ -9,7 +9,7 @@
 
 import { Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
-import { showDiscountBadge, formatDiscountBadge } from '~/lib/discount-badge'
+import { showDiscountBadge, formatDiscountBadge, mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 import type { DiscoveryProduct } from '~/types/discovery'
 
 function fmt(n: number): string {
@@ -27,7 +27,13 @@ interface StorefrontProductCardProps {
 }
 
 export function StorefrontProductCard({ product, priority = false, onSelect, fluid = false }: StorefrontProductCardProps) {
-  const onSale = product.compareAtPrice != null && product.compareAtPrice > product.price
+  // A struck price + badge is advertised-discount framing, so it is gated on the
+  // MAP rule as well as on real savings: a MAP-locked product (map == compare-at)
+  // shows neither (ticket #3675).
+  const onSale =
+    product.compareAtPrice != null &&
+    product.compareAtPrice > product.price &&
+    mapAllowsDiscountDisplay(product.mapPrice, product.compareAtPrice)
   const savePct = onSale
     ? Math.round(((product.compareAtPrice! - product.price) / product.compareAtPrice!) * 100)
     : 0

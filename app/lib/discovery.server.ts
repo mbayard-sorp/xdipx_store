@@ -55,7 +55,11 @@ import {
 // v8: added `brand` (Shopify product `vendor`) to the DiscoveryProduct shape.
 // Bumping the version namespaces the KV/Neon payload so a deploy with the new
 // shape never reads stale v7 entries that lack `brand`.
-const INDEX_VERSION = 'v8'
+// v9: added `mapPrice` (xdipx.map_price) so the storefront cards can gate the
+//     struck price + badge on the MAP rule (ticket #3675). v8 entries lack it;
+//     the gate reads a missing value as "no MAP", i.e. the pre-fix behavior, so
+//     the bump forces a rebuild that populates the field for MAP-locked SKUs.
+const INDEX_VERSION = 'v9'
 export const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 export const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
 
@@ -255,6 +259,7 @@ interface AdminProductNode {
   options: Array<{ name: string; optionValues: Array<{ name: string }> }>
   totalInventory:   number | null
   originalPriceRaw: { value: string | null } | null
+  mapPriceRaw:      { value: string | null } | null
   productTypeDial:  { value: string | null } | null
   moodTagsRaw:      { value: string | null } | null
   audienceTagsRaw:  { value: string | null } | null
@@ -290,6 +295,7 @@ function classifyOptionValues(
 function derivePricingAndOptions(n: AdminProductNode, price: number): {
   priceMax: number | null
   compareAtPrice: number | null
+  mapPrice: number | null
   colorValues: string[]
   sizeValues: string[]
 } {
@@ -306,8 +312,13 @@ function derivePricingAndOptions(n: AdminProductNode, price: number): {
     : Number.isFinite(compareRaw) ? compareRaw : NaN
   const compareAtPrice = Number.isFinite(msrp) && msrp > price ? msrp : null
 
+  // MAP floor for the discount-display gate (ticket #3675). Null when absent or
+  // zero, which the gate reads as "no MAP, discount framing allowed".
+  const mapRaw = Number(n.mapPriceRaw?.value)
+  const mapPrice = Number.isFinite(mapRaw) && mapRaw > 0 ? mapRaw : null
+
   const { colorValues, sizeValues } = classifyOptionValues(n.options ?? [])
-  return { priceMax, compareAtPrice, colorValues, sizeValues }
+  return { priceMax, compareAtPrice, mapPrice, colorValues, sizeValues }
 }
 
 interface AdminProductsPage {
@@ -335,6 +346,7 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
         options(first: 3) { name optionValues { name } }
         totalInventory
         originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
+        mapPriceRaw:      metafield(namespace: "xdipx", key: "map_price")          { value }
         productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
         moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
         audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
@@ -385,7 +397,7 @@ function nodeToDiscoveryProduct(
   const productType = (n.productType ?? '').trim() || null
   const productTypeDial = dial || null
 
-  const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price)
+  const { priceMax, compareAtPrice, mapPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price)
 
   return {
     id:          n.id,
@@ -395,6 +407,7 @@ function nodeToDiscoveryProduct(
     price,
     priceMax,
     compareAtPrice,
+    mapPrice,
     colorValues,
     sizeValues,
     imageUrl:    n.featuredImage?.url ?? null,
@@ -558,6 +571,7 @@ const NODES_BY_IDS_QUERY = /* GraphQL */ `
         options(first: 3) { name optionValues { name } }
         totalInventory
         originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
+        mapPriceRaw:      metafield(namespace: "xdipx", key: "map_price")          { value }
         productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
         moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
         audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
@@ -602,7 +616,7 @@ export async function fetchHonoraryProducts(
       const dial = (node.productTypeDial?.value as ProductTypeDial | null) ?? ''
       const subcategory = dialToSubcategory(dial) ?? category
       const productType = (node.productType ?? '').trim() || null
-      const { priceMax, compareAtPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price)
+      const { priceMax, compareAtPrice, mapPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price)
       out.push({
         id:             node.id,
         handle:         node.handle,
@@ -611,6 +625,7 @@ export async function fetchHonoraryProducts(
         price,
         priceMax,
         compareAtPrice,
+        mapPrice,
         colorValues,
         sizeValues,
         imageUrl:       node.featuredImage?.url ?? null,
