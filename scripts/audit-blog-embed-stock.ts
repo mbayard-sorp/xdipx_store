@@ -39,6 +39,7 @@ import { createClient } from '@sanity/client'
 import { adminGraphQL } from '../app/lib/shopify.server'
 import {
   findDeadEmbeds,
+  groupByDeadHandle,
   type EmbedAuditPost,
   type ProductBuyability,
 } from '../app/lib/blog-embed-stock-audit'
@@ -120,8 +121,10 @@ async function main(): Promise<void> {
 
   const reports = findDeadEmbeds(posts, buyability)
 
+  const groups = groupByDeadHandle(reports)
+
   if (AS_JSON) {
-    process.stdout.write(JSON.stringify(reports, null, 2) + '\n')
+    process.stdout.write(JSON.stringify({ reports, groupedByHandle: groups }, null, 2) + '\n')
   } else if (reports.length === 0) {
     process.stdout.write('No dead blog embeds found.\n')
   } else {
@@ -134,6 +137,17 @@ async function main(): Promise<void> {
             .join('\n') +
           `\n  embeds: ${r.embedHandles.join(', ')}\n\n`,
       )
+    }
+
+    const shared = groups.filter((g) => g.slugs.length > 1)
+    if (shared.length > 0) {
+      process.stdout.write('REMEDIATE BY ROOT CAUSE (one handle, multiple posts — fix once, clear all)\n')
+      for (const g of shared) {
+        process.stdout.write(
+          `  ${g.reason.padEnd(12)} ${g.handle}  ->  ${g.slugs.length} posts: ${g.slugs.join(', ')}\n`,
+        )
+      }
+      process.stdout.write('\n')
     }
   }
 

@@ -138,3 +138,56 @@ export function findDeadEmbeds(
 
   return reports
 }
+
+/** One dead handle and every published post it breaks. */
+export interface DeadHandleGroup {
+  handle: string
+  reason: EmbedDeadReason
+  slugs: string[]
+}
+
+const REASON_SEVERITY: Record<EmbedDeadReason, number> = { gone: 0, inactive: 1, 'out-of-stock': 2 }
+
+/**
+ * Group a sweep's dead embeds by handle instead of by post (ticket #2828/#2829/#2832: two of
+ * three dead-embed tickets filed the same day turned out to share one root cause, a single
+ * product going out of stock that broke two unrelated posts at once). findDeadEmbeds reports per
+ * post, which is the right shape for "what does this post need fixed", but it hides the shared
+ * cause: a reader (or a routine capped at remediating one post per run) has no way to see that
+ * fixing "the same product everywhere it appears" clears two rows in one pass instead of two
+ * separate investigations on two separate days.
+ *
+ * Sorted worst-impact first (most posts broken, then most severe reason, then handle) so the
+ * highest-leverage fix sorts to the top: swapping one handle that appears in three posts clears
+ * three rows for the price of one investigation.
+ */
+export function groupByDeadHandle(reports: PostEmbedReport[]): DeadHandleGroup[] {
+  const bySlugs = new Map<string, Set<string>>()
+  const byReason = new Map<string, EmbedDeadReason>()
+
+  for (const report of reports) {
+    for (const dead of report.deadEmbeds) {
+      if (!bySlugs.has(dead.handle)) bySlugs.set(dead.handle, new Set())
+      bySlugs.get(dead.handle)!.add(report.slug)
+
+      const seen = byReason.get(dead.handle)
+      if (!seen || REASON_SEVERITY[dead.reason] > REASON_SEVERITY[seen]) {
+        byReason.set(dead.handle, dead.reason)
+      }
+    }
+  }
+
+  const groups: DeadHandleGroup[] = [...bySlugs.entries()].map(([handle, slugs]) => ({
+    handle,
+    reason: byReason.get(handle)!,
+    slugs: [...slugs].sort(),
+  }))
+
+  groups.sort((a, b) => {
+    if (a.slugs.length !== b.slugs.length) return b.slugs.length - a.slugs.length
+    if (a.reason !== b.reason) return REASON_SEVERITY[b.reason] - REASON_SEVERITY[a.reason]
+    return a.handle.localeCompare(b.handle)
+  })
+
+  return groups
+}
