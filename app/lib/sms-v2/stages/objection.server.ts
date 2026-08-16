@@ -13,13 +13,14 @@
  * the product is referenced) and the real price. Mismatch swaps to a
  * deterministic fallback template.
  *
- * Tool list: searchForIvr only. kbLookup is a Phase 6c forward reference —
- * left as TODO comment; not registered here.
+ * Tool list: searchForIvr, kbLookup (returns/compatibility/troubleshooting
+ * facts to back up an objection response).
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
 import { getTurnSignal } from '../turn-deadline.server'
 import { searchForIvr } from '~/lib/ivr-search.server'
+import { kbLookup, type KbTopic } from '../tools/kb-lookup.server'
 import { executeConversationAgent } from '../conversation-agent.server'
 import { pickDiscoveryAgentVersion } from '../discovery-agent-flag.server'
 import { resolveTransition } from '../transitions.server'
@@ -68,8 +69,31 @@ const SEARCH_FOR_IVR_TOOL: Anthropic.Tool = {
   },
 }
 
-// TODO (Phase 6c): register kbLookup tool here once available.
-// const KB_LOOKUP_TOOL: Anthropic.Tool = { name: 'kbLookup', ... }
+const KB_LOOKUP_TOOL: Anthropic.Tool = {
+  name: 'kbLookup',
+  description:
+    "Answer a shipping, returns/refund, product-compatibility, or troubleshooting question from xdipx's knowledge base. Use this when the objection is about policy or how the product works (e.g. 'what if it breaks', 'does this work with my other toy', 'can I return it') so the response cites real KB content instead of guessing.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      topic: {
+        type: 'string',
+        enum: ['shipping', 'returns', 'compatibility', 'troubleshooting', 'brand'],
+        description: "Which knowledge-base area the objection falls under. 'returns' covers refunds. 'brand' is the catch-all for general policy/FAQ.",
+      },
+      query: {
+        type: 'string',
+        description: "The customer's concern in their own words. Used to rank within the topic.",
+      },
+      productCategory: {
+        type: 'string',
+        description: "Optional product category to scope compatibility/troubleshooting answers (e.g. 'vibrator', 'lube').",
+      },
+    },
+    required: ['topic'],
+    additionalProperties: false,
+  },
+}
 
 // ─── Main handler — flag-aware dispatch (Phase 6) ─────────────────────────────
 
@@ -195,7 +219,7 @@ async function executeObjectionStageGate(
       model:       SMS_MODEL,
       max_tokens:  320,
       system:      systemParam,
-      tools:       [SEARCH_FOR_IVR_TOOL],
+      tools:       [SEARCH_FOR_IVR_TOOL, KB_LOOKUP_TOOL],
       tool_choice: { type: 'auto' },
       messages,
     }, { signal: getTurnSignal() })
@@ -238,6 +262,16 @@ async function executeObjectionStageGate(
               priceMax: inp.priceMax,
             })
             toolResult = { results: cards }
+          } else if (tb.name === 'kbLookup') {
+            const inp = tb.input as { topic: KbTopic; query?: string; productCategory?: string }
+            const kb = await kbLookup({
+              topic:           inp.topic,
+              ...(inp.query ? { query: inp.query } : {}),
+              ...(inp.productCategory ? { productCategory: inp.productCategory } : {}),
+            })
+            toolResult = kb
+              ? { quickAnswer: kb.quickAnswer, sourceTitle: kb.sourceTitle, ...(kb.bodyExcerpt ? { bodyExcerpt: kb.bodyExcerpt } : {}) }
+              : { error: 'not_found', message: `No knowledge-base entry matched ${inp.topic}.` }
           } else {
             toolResult = { error: `Unknown tool: ${tb.name}` }
             toolOk    = false

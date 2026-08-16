@@ -242,7 +242,7 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'createDraftOrder',
     description:
-      "Create a Shopify draft order and send the caller a secure checkout link via SMS + email. Call this ONLY after you have: (1) confirmed each product + variant + quantity, (2) collected email, full name, and shipping address (address1, city, state, zip), (3) read back a generic summary and gotten explicit confirmation ('yes, send it'). Never collect card numbers — Shopify checkout handles payment. Hard caps: $500 order subtotal, 5 line items, 2 orders per 24h per phone number. If the tool returns a limit error, apologize and offer to have a human follow up.",
+      "Create a Shopify draft order and EMAIL the caller a secure checkout link. SMS is not wired up for this tool — delivery is email only. Call this ONLY after you have: (1) confirmed each product + variant + quantity, (2) collected email, full name, and shipping address (address1, city, state, zip), (3) read back a generic summary and gotten explicit confirmation ('yes, send it'). Never collect card numbers — Shopify checkout handles payment. Hard caps: $500 order subtotal, 5 line items, 2 orders per 24h per phone number. If the tool returns a limit error, apologize and offer to have a human follow up.",
     input_schema: {
       type: 'object',
       properties: {

@@ -22,8 +22,10 @@
  *   - segments[].productCard → speak "{title} — {price}" + outbound SMS with pdpUrl
  *   - segments[].cta.kind === 'checkout' → outboundSms with checkout URL
  *   - segments[].cta.kind === 'pdp' → no outbound SMS (IVR can't click links)
- *   - segments[].pillOptions → spoken "press 1 for X, press 2 for Y" hints
- *     (the Fly bridge owns the actual <Gather> TwiML — we just signal intent)
+ *   - segments[].pillOptions → spoken as a plain "X, or Y?" list. No DTMF
+ *     promise: the Fly bridge never sets up a Twilio digit-gather and any
+ *     'dtmf' event it does receive is discarded (ivr/src/server.ts), so a
+ *     caller who pressed a key would get silence back. See #1277.
  *   - stageOut === 'CHECKOUT' → hangup: false after SMS link sent
  */
 import { getOrCreateConversation, applyStateWrites } from '../conversation.server'
@@ -453,17 +455,25 @@ function wrapSsml(inner: string): string {
 }
 
 /**
- * Build spoken pill options — "press 1 for X, press 2 for Y".
- * The Fly bridge owns the actual DTMF <Gather>, but including these hints in
- * the SSML means the caller hears them and knows what to press.
+ * Build spoken pill options as a natural "X, or Y" list.
+ *
+ * #1277: this used to read "press 1 for X, press 2 for Y" — a promise the
+ * call can't keep. Twilio ConversationRelay is never told to gather digits
+ * (the Fly bridge doesn't read VoiceReply.prompts at all), and every 'dtmf'
+ * event that does arrive is logged and discarded (ivr/src/server.ts). A
+ * caller who pressed 1 got silence. No stage currently sets pillOptions for
+ * a voice segment (see upsell.server.ts — pills are web-only), so this is a
+ * dormant path; it now speaks the options as plain choices instead of
+ * offering a keypress nothing on this call can hear.
  */
-function pillOptionsToSsml(pills: string[]): string {
+export function pillOptionsToSsml(pills: string[]): string {
   if (!pills.length) return ''
-  const options = pills
-    .slice(0, 9) // DTMF digits 1-9 only
-    .map((p, i) => `press ${i + 1} for ${ssmlEscape(p)}`)
-    .join(', ')
-  return ` ${options}.`
+  const escaped = pills.map((p) => ssmlEscape(p))
+  const list =
+    escaped.length > 1
+      ? `${escaped.slice(0, -1).join(', ')}, or ${escaped[escaped.length - 1]}`
+      : escaped[0]!
+  return ` ${list}?`
 }
 
 // ---------------------------------------------------------------------------
@@ -565,12 +575,13 @@ async function stageResponseToVoiceReply(
   const innerSsml = ssmlParts.join(' <break time="300ms"/> ')
   const ssml = wrapSsml(innerSsml || "I'm here. What can I help you with?")
 
-  // Determine prompt kind based on stage and segment content
-  const hasGather = stageResp.segments.some((s) => (s.pillOptions?.length ?? 0) > 0)
+  // #1277: 'gather-digits' used to fire whenever a segment carried
+  // pillOptions, but the Fly bridge never reads VoiceReply.prompts — it
+  // always listens for open speech (or a 'dtmf' event it discards). Signaling
+  // a digit-gather that nothing on the call side sets up was itself part of
+  // the dead promise; always ask for the plain listen.
   const promptKind: VoiceReply['prompts'] = hangup
     ? { kind: 'hangup' }
-    : hasGather
-    ? { kind: 'gather-digits' }
     : { kind: 'say-and-listen' }
 
   const reply: VoiceReply = {

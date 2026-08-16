@@ -6,7 +6,15 @@
  * Brand: XDIPX (billing context only). In prose, site is xdipx.com.
  *
  * 4 status variants + 1 not-found fallback.
+ *
+ * #3519: SHIPPED_TEMPLATES built its sentence around trackingUrl. The voice
+ * adapter strips URLs before TTS, so a voice caller heard "Track it here,"
+ * trail off into nothing. SHIPPED now has a channel-aware pair: SMS keeps
+ * the link inline, VOICE speaks the carrier/status and asks a real question
+ * instead of dangling a half sentence.
  */
+
+export type SupportTemplateChannel = 'sms' | 'voice' | 'web'
 
 export interface SupportOrderSlots {
   orderName: string
@@ -68,6 +76,24 @@ function lastScanNote(): string {
   return ''
 }
 
+// Voice bank: never a bare "Track it here," — the voice adapter strips the
+// URL before TTS and leaves a dangling half sentence. Speak the carrier and
+// last scan instead, and ask (a real question) whether to text the tracking
+// link rather than asserting it's already been sent.
+const SHIPPED_VOICE_TEMPLATES: ReadonlyArray<(s: SupportOrderSlots) => string> = [
+  ({ orderName, carrier, lastScan }) =>
+    `${orderName} is on its way${carrier ? ` with ${carrier}` : ''}.${lastScan ? ` Last scan was ${lastScan}.` : ''} Want me to text you the tracking link?`,
+
+  ({ orderName, carrier }) =>
+    `${orderName} shipped${carrier ? ` via ${carrier}` : ''} and is moving. Want the tracking link texted to you?`,
+
+  ({ orderName, lastScan }) =>
+    `${orderName} is in transit.${lastScan ? ` Last update was ${lastScan}.` : ''} I can text you the full tracking link, want that?`,
+
+  ({ orderName, carrier }) =>
+    `Your order ${orderName} is moving${carrier ? ` with ${carrier}` : ''}. Should I text you the tracking link?`,
+]
+
 // ─── Delivered ───────────────────────────────────────────────────────────────
 
 const DELIVERED_TEMPLATES: ReadonlyArray<(s: SupportOrderSlots) => string> = [
@@ -103,12 +129,17 @@ const TEMPLATE_MAP: Record<StatusKey, ReadonlyArray<(s: SupportOrderSlots) => st
 /**
  * Pick a deterministic template by rotating on seconds-epoch / 7 mod N.
  * Stable within a few seconds; varied across calls.
+ *
+ * Channel default is 'sms' for backwards compatibility; voice callers must
+ * pass 'voice' explicitly. Only 'shipped' has a distinct voice bank — the
+ * others never carry a URL and are safe to speak as written.
  */
 export function pickSupportTemplate(
   status: StatusKey,
   slots: SupportOrderSlots,
+  channel: SupportTemplateChannel = 'sms',
 ): string {
-  const pool = TEMPLATE_MAP[status]
+  const pool = status === 'shipped' && channel === 'voice' ? SHIPPED_VOICE_TEMPLATES : TEMPLATE_MAP[status]
   const idx = Math.floor(Date.now() / 7000) % pool.length
   const fn = pool[idx]!
   return fn(slots)
