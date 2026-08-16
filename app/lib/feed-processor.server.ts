@@ -26,9 +26,76 @@ export function cleanDescription(raw: string): string {
   // Fix apostrophes: "doesn'ft." -> "doesn't"
   let clean = raw.replace(/(\w)ft\./g, "$1'")
   // Fix quotes: `in.` after non-digits -> `"`
-  // IMPORTANT: do NOT replace "in." after digits — those are inches
+  // IMPORTANT: do NOT replace "in." after digits, those are inches
   clean = clean.replace(/(?<!\d)in\./g, '"')
   return clean.replace(/\s+/g, ' ').trim()
+}
+
+// ─── Charter cleanup for already-stored PDP copy ───────────────────────────
+// Ticket #3010: the voice charter bans em-dashes everywhere, and Emma is an
+// AI guide with no lived experience (never "tried/tested/used/owns it"). Both
+// leaked into published product descriptionHtml via the enrichment pipeline.
+// This does not touch the Nalpac feed at all, it fixes already-written Emma
+// copy, so it lives next to cleanDescription rather than inside it.
+
+// The recurring enrichment template wrote "Pro tip from someone who's tested
+// plenty:" as its aside lead-in, which is Emma claiming to have personally
+// tested the product. Strip only that clause; the surrounding "Pro tip:" /
+// "My tip?" lead-in and the following colon are untouched.
+const LIVED_EXPERIENCE_CLAUSE_RE =
+  /\s*from someone who(?:'s|\s+is|\s+has been)?\s+[a-z](?:[a-z' ]*[a-z])?(?=[:,.]|<\/em>|<\/strong>)/gi
+
+// Two em-dashes bracketing a short aside ("known for — up to 6,300 RPM —
+// with...") read as a parenthetical, so both become commas.
+function collapseDoubleDash(input: string): string {
+  return input.replace(/\s*—\s*([^—<]{1,120}?)\s*—\s*/g, ', $1, ')
+}
+
+// The dominant template pattern is "<em>tip aside</em> — justification
+// clause". The clause after the dash is always its own thought, so this
+// becomes "<em>tip aside.</em> Justification clause" (capitalized, and no
+// double period if the aside already ends in terminal punctuation).
+function fixEmphasisCloseDash(input: string): string {
+  const re = /([^\s<])(\s*)<\/em>(\s*)—(\s*)/g
+  let out = ''
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(input))) {
+    out += input.slice(last, m.index)
+    const lastChar = m[1]!
+    out += (/[.?!]/.test(lastChar) ? lastChar : lastChar + '.') + '</em> '
+    last = m.index + m[0].length
+  }
+  out += input.slice(last)
+  return out.replace(/([.?!])<\/em> ([a-z])/g, (_full, punct, ch) => `${punct}</em> ${ch.toUpperCase()}`)
+}
+
+// Any remaining single em-dash in this catalog's copy is a mid-sentence
+// appositive or modifying phrase (verified against a live sample per ticket
+// #3010), so it becomes a comma. Nothing after it starts a new sentence, so
+// case is left untouched.
+function replaceRemainingDashes(input: string): string {
+  return input.replace(/\s*—\s*/g, ', ')
+}
+
+function squeezePunctuationWhitespace(input: string): string {
+  return input.replace(/ {2,}/g, ' ').replace(/ ,/g, ',').replace(/,\s*,/g, ',')
+}
+
+/**
+ * Fixes the two live PDP charter violations from ticket #3010 in already-
+ * published Shopify product copy (descriptionHtml): em-dashes, and the
+ * "from someone who's tested/tried..." lived-experience claim. Deterministic
+ * and idempotent, no AI call, safe to re-run.
+ */
+export function fixCharterCopy(input: string): { text: string; changed: boolean } {
+  let text = input
+  text = text.replace(LIVED_EXPERIENCE_CLAUSE_RE, '')
+  text = collapseDoubleDash(text)
+  text = fixEmphasisCloseDash(text)
+  text = replaceRemainingDashes(text)
+  text = squeezePunctuationWhitespace(text)
+  return { text, changed: text !== input }
 }
 
 // ─── Feed fetch ────────────────────────────────────────────────────────────

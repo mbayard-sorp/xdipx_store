@@ -15,22 +15,41 @@ vi.mock('~/lib/github.server', () => ({
   listOpenPullRequests: listOpenPullRequestsMock,
 }))
 
+const sendOwnerEmailMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/owner-alerts.server', () => ({ sendOwnerEmail: sendOwnerEmailMock }))
+
+const kvSetNXMock = vi.hoisted(() => vi.fn(() => Promise.resolve(true)))
+vi.mock('~/lib/kv.server', () => ({ kvSetNX: kvSetNXMock }))
+
 import {
+  ALREADY_COVERED_STATUSES,
+  BLOCKED_DIGEST_KV_PREFIX,
   CONFLICTED_PR_EXPLANATION,
   ELIGIBLE_BRANCH_PREFIXES,
+  REASON_UNKNOWN,
   ROUTINE_CADENCES,
   SLA,
   TERMINAL_STATUSES,
+  buildBlockedDigest,
   checkRoutineLiveness,
   classifyConflictedPrs,
   classifyOrphans,
   classifySlaBreaches,
+  classifySupersededApprovedCode,
   computeNetPerDay,
   computeTicketLoopHealth,
+  deriveUnblockQuestion,
+  describeSupersededEvidence,
+  extractCitedPrNumbers,
   parsePrNumber,
+  renderBlockedDigestEmail,
+  runBlockedTicketDigest,
+  weekBucketKey,
+  type BlockedTicket,
   type ConflictCandidate,
   type JanitorTicketRow,
   type OrphanCandidate,
+  type SupersededCandidate,
 } from '~/lib/ticket-janitor.server'
 
 const NOW = new Date('2026-08-05T18:00:00Z')
@@ -259,6 +278,7 @@ describe('ROUTINE_CADENCES', () => {
     expect([...keys].sort()).toEqual([
       'ads|ads',
       'email|email',
+      'homepage|design',
       'content|content',
       'content|manual',
       'content|seo-curation',
@@ -308,6 +328,14 @@ describe('ROUTINE_CADENCES', () => {
     expect(email?.team).toBe('email')
     expect(email?.kind).toBe('weekly')
     expect(email?.maxGapHours).toBe(194)
+    // Design Cycle / Routine B (manifest row 8, Wed 14:00) has a liveness
+    // watch; team and runType match the POST /api/homepage-team/run call in
+    // routine-design-cycle.md.
+    const design = ROUTINE_CADENCES.find(c => c.runType === 'design')
+    expect(design).toBeDefined()
+    expect(design?.team).toBe('homepage')
+    expect(design?.kind).toBe('weekly')
+    expect(design?.maxGapHours).toBe(194)
   })
 
   it('sizes each gap against the lane\'s real cron, not its nominal kind', () => {
@@ -385,5 +413,357 @@ describe('computeNetPerDay', () => {
     expect(computeNetPerDay(10, 24)).toBe(-2)
     expect(computeNetPerDay(1, 0)).toBe(0.1)
     expect(computeNetPerDay(5, 5)).toBe(0)
+  })
+})
+
+describe('extractCitedPrNumbers', () => {
+  it('reads a single "PR #N" citation', () => {
+    expect(extractCitedPrNumbers('already shipped and merged in PR #654 (ticket #3196, applied)')).toEqual([654])
+  })
+
+  it('reads a "+"-joined list after the first PR mention (ticket #253 convention)', () => {
+    expect(extractCitedPrNumbers('#88 by PR #324 + #349, and #77 by PR #319')).toEqual([319, 324, 349])
+  })
+
+  it('never picks up a bare "#N" that is not preceded by the word PR', () => {
+    // The whole safety property: a ticket id mentioned in prose (#3196, #3204)
+    // must not be mistaken for a cited fix PR.
+    expect(extractCitedPrNumbers('duplicate of #3204 and #3260, tracked as ticket #3196')).toEqual([])
+  })
+
+  it('is case-insensitive and de-duplicates', () => {
+    expect(extractCitedPrNumbers('prs #665, PR #665 again')).toEqual([665])
+  })
+
+  it('returns nothing when the text cites no PR', () => {
+    expect(extractCitedPrNumbers('add a new feature, no prior art')).toEqual([])
+  })
+})
+
+describe('classifySupersededApprovedCode', () => {
+  const cand = (o: Partial<SupersededCandidate>): SupersededCandidate => ({
+    ticketId: 1,
+    suggestion: 'do the thing',
+    dedupeMatch: null,
+    citedPrs: [],
+    ...o,
+  })
+
+  it('flags a ticket whose dedupe key matches an already-applied row', () => {
+    const out = classifySupersededApprovedCode([
+      cand({ ticketId: 3204, dedupeMatch: { ticketId: 3196, status: 'applied' } }),
+    ])
+    expect(out).toEqual([{
+      ticketId: 3204,
+      suggestion: 'do the thing',
+      evidence: [{ kind: 'dedupe-key', matchedTicketId: 3196, matchedStatus: 'applied' }],
+    }])
+  })
+
+  it('flags a ticket whose cited PR GitHub reports merged', () => {
+    const out = classifySupersededApprovedCode([
+      cand({ ticketId: 1704, citedPrs: [{ prNumber: 542, merged: true }] }),
+    ])
+    expect(out).toEqual([{
+      ticketId: 1704,
+      suggestion: 'do the thing',
+      evidence: [{ kind: 'cited-pr-merged', prNumber: 542 }],
+    }])
+  })
+
+  it('never flags a ticket whose cited PR is not merged, or unread', () => {
+    // The safety property: an open, closed-unmerged, or unreadable cited PR is
+    // never evidence.
+    expect(classifySupersededApprovedCode([cand({ citedPrs: [{ prNumber: 700, merged: false }] })])).toEqual([])
+    expect(classifySupersededApprovedCode([cand({ citedPrs: [{ prNumber: 701, merged: null }] })])).toEqual([])
+  })
+
+  it('never flags a ticket with no evidence at all', () => {
+    expect(classifySupersededApprovedCode([cand({})])).toEqual([])
+  })
+
+  it('carries both evidence kinds when both apply', () => {
+    const out = classifySupersededApprovedCode([
+      cand({
+        ticketId: 9,
+        dedupeMatch: { ticketId: 8, status: 'pr_open' },
+        citedPrs: [{ prNumber: 100, merged: true }],
+      }),
+    ])
+    expect(out[0]!.evidence).toEqual([
+      { kind: 'dedupe-key', matchedTicketId: 8, matchedStatus: 'pr_open' },
+      { kind: 'cited-pr-merged', prNumber: 100 },
+    ])
+  })
+})
+
+describe('describeSupersededEvidence', () => {
+  it('renders each evidence kind as one readable line', () => {
+    expect(describeSupersededEvidence({ kind: 'dedupe-key', matchedTicketId: 5, matchedStatus: 'applied' }))
+      .toBe('shares a dedupe key with #5 (applied)')
+    expect(describeSupersededEvidence({ kind: 'cited-pr-merged', prNumber: 654 }))
+      .toBe('cites PR #654, which GitHub reports merged')
+  })
+})
+
+describe('ALREADY_COVERED_STATUSES', () => {
+  it('names exactly the statuses meaning QA has it or it already shipped', () => {
+    expect([...ALREADY_COVERED_STATUSES].sort()).toEqual(['applied', 'in_review', 'pr_open', 'verified'])
+    // approved and blocked deliberately absent: neither means the work is
+    // tracked or done, so neither is evidence a sibling row is superseded.
+    expect(ALREADY_COVERED_STATUSES).not.toContain('approved')
+    expect(ALREADY_COVERED_STATUSES).not.toContain('blocked')
+  })
+})
+
+describe('computeTicketLoopHealth superseded-approved scan', () => {
+  it('flags a cited-PR match end to end when GitHub confirms the PR merged', async () => {
+    executeMock.mockReset()
+    githubConfiguredMock.mockReturnValue(false) // orphan/conflict scans skip entirely, no execute calls
+    getPullRequestMock.mockReset()
+    listOpenPullRequestsMock.mockReset()
+
+    executeMock
+      .mockResolvedValueOnce({ rows: [] }) // gatherSlaRows
+      .mockResolvedValueOnce({ rows: [] }) // gatherBacklog
+      .mockResolvedValueOnce({ rows: [] }) // gatherRoutineFlags
+      .mockResolvedValueOnce({
+        rows: [{ id: 3204, suggestion: 'already shipped and merged in PR #654', dedupe_key: null }],
+      }) // gatherSupersededApprovedCode: approved-code select (no dedupe_key, no second query)
+
+    getPullRequestMock.mockResolvedValue({
+      ok: true, status: 200, data: { number: 654, merged: true, state: 'closed' },
+    })
+
+    const health = await computeTicketLoopHealth()
+
+    expect(health.supersededApproved).toEqual([{
+      ticketId: 3204,
+      suggestion: 'already shipped and merged in PR #654',
+      evidence: [{ kind: 'cited-pr-merged', prNumber: 654 }],
+    }])
+  })
+
+  it('does not flag a ticket whose cited PR GitHub reports as not merged', async () => {
+    executeMock.mockReset()
+    githubConfiguredMock.mockReturnValue(false)
+    getPullRequestMock.mockReset()
+    listOpenPullRequestsMock.mockReset()
+
+    executeMock
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{ id: 99, suggestion: 'in progress, PR #700 not merged yet', dedupe_key: null }],
+      })
+
+    getPullRequestMock.mockResolvedValue({
+      ok: true, status: 200, data: { number: 700, merged: false, state: 'open' },
+    })
+
+    const health = await computeTicketLoopHealth()
+
+    expect(health.supersededApproved).toEqual([])
+  })
+
+  it('degrades to an empty list without throwing when the query fails', async () => {
+    executeMock.mockReset()
+    executeMock.mockRejectedValue(new Error('db down'))
+    githubConfiguredMock.mockReturnValue(false)
+    getPullRequestMock.mockReset()
+    listOpenPullRequestsMock.mockReset()
+
+    const health = await computeTicketLoopHealth()
+
+    expect(health.supersededApproved).toEqual([])
+  })
+})
+
+describe('deriveUnblockQuestion', () => {
+  const blk = (over: Partial<BlockedTicket>): BlockedTicket => ({
+    id: 1, kind: 'code', priority: 3, ageHours: 10, suggestion: 'stuck',
+    lastError: null, noteRef: null, emptyReason: true,
+    ...over,
+  })
+
+  it('returns REASON_UNKNOWN when there is no last_error and no note', () => {
+    expect(deriveUnblockQuestion(blk({}))).toBe(REASON_UNKNOWN)
+  })
+
+  it('names a protected-path block as needing an owner-authored change', () => {
+    const q = deriveUnblockQuestion(blk({ noteRef: 'Protected path: db/schema.ts', emptyReason: false }))
+    expect(q).toContain('Owner-authored change needed')
+  })
+
+  it('names a migration ask', () => {
+    const q = deriveUnblockQuestion(blk({ lastError: 'needs migration 068 applied', emptyReason: false }))
+    expect(q).toContain('Owner needs to apply a migration')
+  })
+
+  it('names an explicit owner ask', () => {
+    const q = deriveUnblockQuestion(blk({ lastError: 'the owner needs to flip the valve', emptyReason: false }))
+    expect(q).toContain('Needs an owner decision')
+  })
+
+  it('falls back to the raw reason, clipped, when no known pattern matches', () => {
+    const q = deriveUnblockQuestion(blk({ lastError: 'weird custom failure text', emptyReason: false }))
+    expect(q).toBe('weird custom failure text')
+  })
+})
+
+describe('buildBlockedDigest', () => {
+  const blk = (over: Partial<BlockedTicket>): BlockedTicket => ({
+    id: 1, kind: 'code', priority: 3, ageHours: 10, suggestion: 'stuck',
+    lastError: null, noteRef: null, emptyReason: true,
+    ...over,
+  })
+
+  it('represents every row exactly once, grouped by priority ascending, oldest first within a group', () => {
+    const rows = [
+      blk({ id: 1, priority: 1, ageHours: 5, lastError: 'needs migration', emptyReason: false }),
+      blk({ id: 2, priority: 1, ageHours: 50 }),
+      blk({ id: 3, priority: 4, ageHours: 20, noteRef: 'Protected path: team.server.ts', emptyReason: false }),
+    ]
+    const digest = buildBlockedDigest(rows, NOW)
+    expect(digest.totalCount).toBe(3)
+    expect(digest.reasonUnknownCount).toBe(1)
+    expect(digest.byPriority.map(g => g.priority)).toEqual([1, 4])
+    expect(digest.byPriority[0]!.rows.map(r => r.id)).toEqual([2, 1]) // oldest (50h) first
+  })
+
+  it('never drops a row, however many are blocked', () => {
+    // This is the exact failure #2863 exists to fix: a blocked row invisible
+    // to every check. The digest must account for all of them.
+    const rows = Array.from({ length: 15 }, (_, i) => blk({ id: 100 + i, priority: (i % 4) + 1 }))
+    const digest = buildBlockedDigest(rows, NOW)
+    expect(digest.totalCount).toBe(15)
+    const allIds = digest.byPriority.flatMap(g => g.rows.map(r => r.id))
+    expect(allIds.sort((a, b) => a - b)).toEqual(rows.map(r => r.id).sort((a, b) => a - b))
+  })
+
+  it('reports zero for an empty parking lot', () => {
+    const digest = buildBlockedDigest([], NOW)
+    expect(digest.totalCount).toBe(0)
+    expect(digest.reasonUnknownCount).toBe(0)
+    expect(digest.byPriority).toEqual([])
+  })
+})
+
+describe('renderBlockedDigestEmail', () => {
+  it('reports an empty parking lot plainly', () => {
+    expect(renderBlockedDigestEmail(buildBlockedDigest([], NOW))).toContain('empty')
+  })
+
+  it('renders every row with its unblock question under a priority heading', () => {
+    const rows = [{
+      id: 1, kind: 'code', priority: 1, ageHours: 5, suggestion: 'fix checkout',
+      lastError: 'needs migration 070', noteRef: null, emptyReason: false,
+    }]
+    const html = renderBlockedDigestEmail(buildBlockedDigest(rows, NOW))
+    expect(html).toContain('Priority 1')
+    expect(html).toContain('#1')
+    expect(html).toContain('fix checkout')
+    expect(html).toContain('Owner needs to apply a migration')
+  })
+})
+
+describe('weekBucketKey', () => {
+  it('is stable within the same calendar week and changes across a week boundary', () => {
+    const mon = new Date('2026-08-10T09:00:00Z')
+    const wed = new Date('2026-08-12T20:00:00Z')
+    const nextMon = new Date('2026-08-17T09:00:00Z')
+    expect(weekBucketKey(mon)).toBe(weekBucketKey(wed))
+    expect(weekBucketKey(mon)).not.toBe(weekBucketKey(nextMon))
+  })
+})
+
+describe('runBlockedTicketDigest', () => {
+  it('sends nothing when the weekly guard says this week is already sent', async () => {
+    kvSetNXMock.mockReset()
+    kvSetNXMock.mockResolvedValueOnce(false)
+    sendOwnerEmailMock.mockReset()
+
+    const res = await runBlockedTicketDigest({ now: NOW })
+
+    expect(res).toEqual({
+      sent: false,
+      skipped: 'already sent this week (pass force=true to re-send)',
+      totalCount: 0,
+      reasonUnknownCount: 0,
+    })
+    expect(sendOwnerEmailMock).not.toHaveBeenCalled()
+  })
+
+  it('guards on the expected weekly key', async () => {
+    kvSetNXMock.mockReset()
+    kvSetNXMock.mockResolvedValueOnce(true)
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+
+    await runBlockedTicketDigest({ now: NOW })
+
+    expect(kvSetNXMock).toHaveBeenCalledWith(
+      `${BLOCKED_DIGEST_KV_PREFIX}${weekBucketKey(NOW)}`,
+      expect.any(String),
+      expect.any(Number),
+    )
+  })
+
+  it('sends nothing, but does not error, when there are no blocked tickets', async () => {
+    kvSetNXMock.mockReset()
+    kvSetNXMock.mockResolvedValueOnce(true)
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    sendOwnerEmailMock.mockReset()
+
+    const res = await runBlockedTicketDigest({ now: NOW })
+
+    expect(res).toEqual({ sent: false, skipped: 'no blocked tickets', totalCount: 0, reasonUnknownCount: 0 })
+    expect(sendOwnerEmailMock).not.toHaveBeenCalled()
+  })
+
+  it('sends the digest with every blocked row represented when tickets exist', async () => {
+    kvSetNXMock.mockReset()
+    kvSetNXMock.mockResolvedValueOnce(true)
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({
+      rows: [
+        {
+          id: 1, status: 'blocked', kind: 'code', priority: 1, suggestion: 'p1 blocked',
+          last_error: 'needs a migration', created_at: hoursAgo(200).toISOString(),
+          updated_at: hoursAgo(200).toISOString(), note_ref: null,
+        },
+        {
+          id: 2, status: 'blocked', kind: 'code', priority: 2, suggestion: 'p2 blocked',
+          last_error: null, created_at: hoursAgo(10).toISOString(),
+          updated_at: hoursAgo(10).toISOString(), note_ref: null,
+        },
+      ],
+    })
+    sendOwnerEmailMock.mockReset()
+    sendOwnerEmailMock.mockResolvedValueOnce({ sent: true })
+
+    const res = await runBlockedTicketDigest({ now: NOW })
+
+    expect(res.sent).toBe(true)
+    expect(res.totalCount).toBe(2)
+    expect(res.reasonUnknownCount).toBe(1)
+    expect(sendOwnerEmailMock).toHaveBeenCalledTimes(1)
+    const call = sendOwnerEmailMock.mock.calls[0] as [string, string]
+    expect(call[0]).toContain('2 row')
+    expect(call[1]).toContain('#1')
+    expect(call[1]).toContain('#2')
+  })
+
+  it('force bypasses the weekly guard entirely', async () => {
+    kvSetNXMock.mockReset()
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+
+    const res = await runBlockedTicketDigest({ force: true, now: NOW })
+
+    expect(kvSetNXMock).not.toHaveBeenCalled()
+    expect(res.skipped).toBe('no blocked tickets')
   })
 })

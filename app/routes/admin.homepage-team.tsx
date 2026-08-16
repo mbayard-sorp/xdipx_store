@@ -27,10 +27,14 @@ import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import {
   gate, getTeamConfig, getValve, listRecentRuns, listRunEvents,
   listSuggestions, decideSuggestion, retireSuggestion, transitionSuggestion, listBriefs,
-  listAdCampaigns, decideAdCampaign,
+  listAdCampaigns, decideAdCampaign, SUGGESTION_LIST_MAX,
   type TeamConfig, type GateResult, type TicketStatus,
 } from '~/lib/team.server'
 import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
+import {
+  NO_EXECUTOR_KINDS, facetTotal, fmtAge, sumFacetCount, truncationNote,
+  type TicketFacetRow,
+} from '~/lib/ticket-queue-view'
 
 /**
  * Release-engine controls. Deliberately NOT added to VALVE_KEYS: that constant
@@ -109,10 +113,15 @@ interface TicketLink {
   state: string | null
 }
 
+type QueueSort = 'priority' | 'age' | 'created'
+
 interface TicketFilter {
-  status: string   // '' = the whole open set
+  status: string    // '' = the whole open set
   kind: string
   assignee: string
+  team: string        // filters on the FILING team (suggestions.team) — distinct
+                       // from the `?team=` page tab, which just picks the control panel
+  sort: QueueSort
 }
 
 interface LoaderData {
@@ -123,10 +132,16 @@ interface LoaderData {
   runs: RunRow[]
   selectedRun: { run: RunRow; events: EventRow[] } | null
   suggestions: SuggestionRow[]
+  /** No-executor homework (process/strategy/program/promo), oldest first, unfiltered by the board's own filters. */
+  needsYou: SuggestionRow[]
+  needsYouTotal: number
+  /** True count of rows matching the active filters, from the facet totals — not clipped to what the table renders. */
+  filteredOpenTotal: number
   ticketLinks: TicketLink[]
   filter: TicketFilter
   kindOptions: string[]
   assigneeOptions: string[]
+  teamOptions: string[]
   statusCounts: Array<{ status: string; n: number }>
   briefs: BriefRow[]
   campaigns: CampaignRow[]
@@ -209,27 +224,49 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   }
   // Filters live in the query string so a filtered board is a shareable URL and
   // a browser refresh keeps the owner where they were.
+  const sortParam = url.searchParams.get('sort')
   const filter: TicketFilter = {
     status:   url.searchParams.get('status') ?? '',
     kind:     url.searchParams.get('kind') ?? '',
     assignee: url.searchParams.get('assignee') ?? '',
+    team:     url.searchParams.get('filedBy') ?? '',
+    sort:     sortParam === 'age' || sortParam === 'created' ? sortParam : 'priority',
   }
   let ticketLinks: TicketLink[] = []
   let kindOptions: string[] = []
   let assigneeOptions: string[] = []
+  let teamOptions: string[] = []
   let statusCounts: LoaderData['statusCounts'] = []
+  let needsYou: SuggestionRow[] = []
+  let needsYouTotal = 0
+  let filteredOpenTotal = 0
   if (migrated) {
     suggestions = await listSuggestions({
       // An explicit status wins; otherwise the board is the whole open set.
       statuses: filter.status ? [filter.status] : OPEN_TICKET_STATUSES,
       ...(filter.kind ? { kinds: [filter.kind] } : {}),
       ...(filter.assignee ? { assignee: filter.assignee } : {}),
-      orderBy: 'priority',
-      limit: 120,
+      ...(filter.team && isTeamId(filter.team) ? { team: filter.team } : {}),
+      orderBy: filter.sort,
+      // Was hard-capped at 60-120 while 230+ rows sat open, so the owner could
+      // never see more than a fraction of the queue no matter the sort.
+      // SUGGESTION_LIST_MAX is the ceiling listSuggestions itself enforces —
+      // ask for everything the query layer will give us.
+      limit: SUGGESTION_LIST_MAX,
+    }).catch(() => [])
+
+    // No-executor homework (process/strategy/program/promo), oldest first,
+    // independent of the board's own filters above: this is the owner's
+    // "needs you" queue and it always shows the whole bucket, not a slice.
+    needsYou = await listSuggestions({
+      kinds: [...NO_EXECUTOR_KINDS],
+      statuses: ['proposed', 'approved'],
+      orderBy: 'age',
+      limit: SUGGESTION_LIST_MAX,
     }).catch(() => [])
 
     // Links for exactly the rows on screen: one query, not one per ticket.
-    const ids = suggestions.map(s => s.id)
+    const ids = [...new Set([...suggestions.map(s => s.id), ...needsYou.map(s => s.id)])]
     if (ids.length > 0) {
       ticketLinks = await db
         .select({
@@ -244,31 +281,44 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
         .catch(() => [])
     }
 
-    // Filter vocabularies and the status tally come from the table itself, so a
-    // kind or an agent this UI has never heard of still shows up in the picker.
-    const facets = await db
+    // Filter vocabularies and the status tally come from the table itself, so
+    // a kind, team, or agent this UI has never heard of still shows up in the
+    // picker. `team` (who filed the row) is grouped here too, not just kind/
+    // assignee, so the board can filter on it the same way.
+    const facets: TicketFacetRow[] = await db
       .select({
         status: homepageTeamSuggestions.status,
         kind:   homepageTeamSuggestions.kind,
+        team:   homepageTeamSuggestions.team,
         assignee: homepageTeamSuggestions.assignee,
         n:      sql<number>`count(*)::int`,
       })
       .from(homepageTeamSuggestions)
-      .groupBy(homepageTeamSuggestions.status, homepageTeamSuggestions.kind, homepageTeamSuggestions.assignee)
+      .groupBy(homepageTeamSuggestions.status, homepageTeamSuggestions.kind, homepageTeamSuggestions.team, homepageTeamSuggestions.assignee)
       .catch(() => [])
     const statusTally = new Map<string, number>()
     const kinds = new Set<string>()
     const assignees = new Set<string>()
+    const teams = new Set<string>()
     for (const f of facets) {
       statusTally.set(f.status, (statusTally.get(f.status) ?? 0) + f.n)
       if (f.kind) kinds.add(f.kind)
       if (f.assignee) assignees.add(f.assignee)
+      if (f.team) teams.add(f.team)
     }
     statusCounts = [...statusTally.entries()]
       .map(([status, n]) => ({ status, n }))
       .sort((a, b) => b.n - a.n)
     kindOptions = [...kinds].sort()
     assigneeOptions = [...assignees].sort()
+    teamOptions = [...teams].sort()
+
+    // Unbounded totals, computed from the facet counts rather than the
+    // (possibly truncated) row lists above: this is what lets the owner see
+    // the true size of the filtered set, and of the no-executor bucket, even
+    // when a table can only ever render SUGGESTION_LIST_MAX rows.
+    filteredOpenTotal = facetTotal(facets, filter, OPEN_TICKET_STATUSES)
+    needsYouTotal = sumFacetCount(facets, { kinds: NO_EXECUTOR_KINDS, statuses: ['proposed', 'approved'] })
 
     briefs = await listBriefs(8).catch(() => [])
     if (team === 'ads') campaigns = await listAdCampaigns(undefined, 30).catch(() => [])
@@ -285,8 +335,9 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   }
 
   return {
-    team, config, migrated, gateResult, runs, selectedRun, suggestions, ticketLinks, filter,
-    kindOptions, assigneeOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
+    team, config, migrated, gateResult, runs, selectedRun, suggestions, needsYou, needsYouTotal,
+    filteredOpenTotal, ticketLinks, filter,
+    kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
     videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
     releaseEngine, releaseEngineMaxMerges,
@@ -407,21 +458,11 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
   )
 }
 
-/** Whole-day age, computed on the server so SSR and hydration agree. */
-function fmtAge(from: Date | string | null): string {
-  if (!from) return '—'
-  const ms = Date.now() - new Date(from).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return '—'
-  const hours = Math.floor(ms / 3_600_000)
-  if (hours < 1) return '<1h'
-  if (hours < 48) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
-}
-
 export default function AgentTeamsPage() {
   const {
     team, config, migrated, gateResult, runs, selectedRun,
-    suggestions, ticketLinks, filter, kindOptions, assigneeOptions, statusCounts,
+    suggestions, needsYou, needsYouTotal, filteredOpenTotal,
+    ticketLinks, filter, kindOptions, assigneeOptions, teamOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
     seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
@@ -442,7 +483,8 @@ export default function AgentTeamsPage() {
     if (arr) arr.push(l)
     else linksById.set(l.suggestionId, [l])
   }
-  const filtered = filter.status !== '' || filter.kind !== '' || filter.assignee !== ''
+  const filtered = filter.status !== '' || filter.kind !== '' || filter.assignee !== '' || filter.team !== ''
+  const queueNote = truncationNote(suggestions.length, filteredOpenTotal)
 
   return (
     // max-w-5xl (not 4xl) so the ticket table's nine columns fit on a laptop
@@ -681,6 +723,33 @@ export default function AgentTeamsPage() {
         </section>
       )}
 
+      {/* ── Needs you (no automated executor) ───────────────────────────── */}
+      {migrated && (
+        <section>
+          <h2 className="kicker mb-3">Needs you — no automated executor</h2>
+          <p className="text-xs text-ink-4 mb-3">
+            Process, strategy, program, and promo tickets have nothing in the agent fleet scheduled to
+            act on them. Every one of these is owner homework (send an email, make a call, decide) — not
+            a claim/PR lane. Oldest first, so the ones waiting longest surface at the top.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <StatCard
+              label="Needs you"
+              value={String(needsYouTotal)}
+              tone={needsYouTotal > 0 ? 'warn' : 'ok'}
+              sub="proposed or approved, kinds: process/strategy/program/promo"
+            />
+          </div>
+          <TicketsTable
+            rows={needsYou}
+            linksById={linksById}
+            emptyMessage="Nothing waiting on you right now."
+            retireLabel="Mark handled"
+            retireTitle="Dismisses this ticket: use it once you've done the thing (sent the email, made the call) or decided not to. Reversible only by re-filing."
+          />
+        </section>
+      )}
+
       {/* ── Ticket queue (improvement bus) ───────────────────────────────── */}
       {migrated && (
         <section>
@@ -702,11 +771,13 @@ export default function AgentTeamsPage() {
           </div>
 
           {/* Filters. GET so a filtered board is a shareable, refreshable URL. */}
-          <Form method="get" className="flex flex-col gap-3 md:flex-row md:items-end mb-3">
+          <Form method="get" className="flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap mb-3">
             <input type="hidden" name="team" value={team} />
             <FilterSelect label="Status" name="status" value={filter.status} options={ALL_TICKET_STATUSES} allLabel="Open (all in flight)" />
             <FilterSelect label="Kind" name="kind" value={filter.kind} options={kindOptions} allLabel="Any kind" />
+            <FilterSelect label="Filed by" name="filedBy" value={filter.team} options={teamOptions} allLabel="Any team" />
             <FilterSelect label="Assignee" name="assignee" value={filter.assignee} options={assigneeOptions} allLabel="Anyone" />
+            <SortSelect value={filter.sort} />
             <div className="flex gap-2">
               <button className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:bg-paper-2">
                 Filter
@@ -722,136 +793,21 @@ export default function AgentTeamsPage() {
             </div>
           </Form>
 
-          {suggestions.length === 0 ? (
-            <p className="text-sm text-ink-4">
-              {filtered
+          <TicketsTable
+            rows={suggestions}
+            linksById={linksById}
+            emptyMessage={
+              filtered
                 ? 'No tickets match this filter.'
-                : 'Nothing in flight right now. Detectors, team retros, and process-optimizer file tickets here for your approval.'}
-            </p>
-          ) : (
-            <ResponsiveTable>
-              {/* Floor, not a width: 860px keeps the columns legible while
-                  still fitting inside the max-w-4xl shell on a laptop, so only
-                  phones do the horizontal scroll. */}
-              <table className="min-w-[860px] w-full bg-paper rounded-xl border border-line text-sm">
-                <thead>
-                  <tr className="text-left text-[11px] text-ink-4 kicker border-b border-line">
-                    <th className="px-3 py-2 font-normal">Ticket</th>
-                    <th className="px-3 py-2 font-normal">Status</th>
-                    <th className="px-3 py-2 font-normal">Pri</th>
-                    <th className="px-3 py-2 font-normal">Assignee</th>
-                    <th className="px-3 py-2 font-normal">Age</th>
-                    <th className="px-3 py-2 font-normal">Att</th>
-                    <th className="px-3 py-2 font-normal">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line align-top">
-                  {suggestions.map(s => {
-                    const links = linksById.get(s.id) ?? []
-                    return (
-                      <tr key={s.id}>
-                        <td className="px-3 py-3 max-w-[380px]">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-ink-4">
-                            <span className="font-mono">#{s.id}</span>
-                            <span className="text-plum">{s.team}</span>
-                            {s.targetTeam && <span>→ {s.targetTeam}</span>}
-                            <span className="rounded bg-paper-3 px-1.5 py-0.5 font-mono">{s.kind}</span>
-                            <span>{s.category}</span>
-                            <span className={s.cxRisk === 'high' ? 'text-coral' : s.cxRisk === 'med' ? 'text-plum' : ''}>
-                              cx:{s.cxRisk}
-                            </span>
-                            {Number(s.estSavingsUsd) > 0 && <span>~${Number(s.estSavingsUsd).toFixed(2)} saved</span>}
-                            {s.decidedBy === 'auto' && (
-                              <span className="rounded bg-plum-soft px-1.5 py-0.5 font-mono text-plum">auto</span>
-                            )}
-                          </div>
-                          <p className="mt-1 text-sm text-ink">{s.suggestion}</p>
-                          {s.lastError && (
-                            <p
-                              className="mt-1 text-[11px] text-coral truncate"
-                              title={s.lastError}
-                            >
-                              last error: {s.lastError}
-                            </p>
-                          )}
-                          {(links.length > 0 || s.applyRef) && (
-                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
-                              {links.map((l, i) => (
-                                <TicketRef key={`${l.ref}-${i}`} kind={l.kind} ref_={l.ref} state={l.state} />
-                              ))}
-                              {links.length === 0 && s.applyRef && (
-                                <TicketRef kind="pr" ref_={s.applyRef} state={null} />
-                              )}
-                            </div>
-                          )}
-                          {s.status === 'approved' && (
-                            <p className="mt-1 text-[11px] text-ink-4">
-                              {s.decidedBy === 'auto' ? 'Auto-approved. ' : ''}
-                              {s.kind === 'code'
-                                ? 'Claimable by the dev routine.'
-                                : 'Queued for agent-editor.'}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-3 py-3"><StatusBadge status={s.status} /></td>
-                        <td className="px-3 py-3">
-                          <PriorityForm id={s.id} priority={s.priority} />
-                        </td>
-                        <td className="px-3 py-3 text-xs text-ink-3 font-mono whitespace-nowrap">
-                          {s.assignee ?? <span className="text-ink-4">unassigned</span>}
-                        </td>
-                        <td className="px-3 py-3 text-xs text-ink-3 whitespace-nowrap">{fmtAge(s.createdAt)}</td>
-                        <td className={`px-3 py-3 text-xs whitespace-nowrap ${s.attemptCount >= 3 ? 'text-coral font-semibold' : 'text-ink-3'}`}>
-                          {s.attemptCount}
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="flex flex-col gap-1.5">
-                            {s.status === 'proposed' && (
-                              <>
-                                <IntentButton
-                                  intent="suggestion-approve"
-                                  id={s.id}
-                                  label="Approve"
-                                  className="bg-sage/20 text-sage hover:bg-sage/30"
-                                />
-                                <IntentButton
-                                  intent="suggestion-dismiss"
-                                  id={s.id}
-                                  label="Dismiss"
-                                  className="bg-paper-3 text-ink-3 hover:bg-paper-2"
-                                />
-                              </>
-                            )}
-                            {s.status === 'approved' && (
-                              <IntentButton
-                                intent="suggestion-retire"
-                                id={s.id}
-                                label="Retire"
-                                className="bg-paper-3 text-ink-3 hover:bg-coral-soft hover:text-coral"
-                                title="Retire this stale or superseded approved ticket (reversible)"
-                              />
-                            )}
-                            {s.status === 'blocked' && (
-                              <IntentButton
-                                intent="suggestion-unblock"
-                                id={s.id}
-                                label="Unblock"
-                                className="bg-plum-soft text-plum hover:bg-plum-soft/70"
-                                title="Send this ticket back to approved so an agent can claim it again"
-                              />
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </ResponsiveTable>
-          )}
+                : 'Nothing in flight right now. Detectors, team retros, and process-optimizer file tickets here for your approval.'
+            }
+            retireLabel="Retire"
+            retireTitle="Retire this stale or superseded approved ticket (reversible)"
+          />
+          {queueNote && <p className="text-xs text-coral mt-2">{queueNote}</p>}
           <p className="text-xs text-ink-4 mt-2">
-            Showing {suggestions.length} ticket{suggestions.length === 1 ? '' : 's'}
-            {filtered ? ' (filtered)' : ' in flight'} · {closedTotal} applied/dismissed on record.
+            Showing {suggestions.length} of {filteredOpenTotal} open ticket{filteredOpenTotal === 1 ? '' : 's'}
+            {filtered ? ' (filtered)' : ''} · {closedTotal} applied/dismissed on record.
           </p>
         </section>
       )}
@@ -992,6 +948,171 @@ function FilterSelect({
         ))}
       </select>
     </label>
+  )
+}
+
+const SORT_OPTIONS: Array<{ value: QueueSort; label: string }> = [
+  { value: 'priority', label: 'Priority (default)' },
+  { value: 'age', label: 'Oldest first' },
+  { value: 'created', label: 'Newest first' },
+]
+
+function SortSelect({ value }: { value: QueueSort }) {
+  return (
+    <label className="flex flex-col gap-1 md:w-44">
+      <span className="text-xs text-ink-4">Sort</span>
+      <select
+        name="sort"
+        defaultValue={value}
+        className="rounded-lg border border-line bg-paper-2 px-3 py-1.5 text-sm text-ink"
+      >
+        {SORT_OPTIONS.map(o => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/**
+ * Shared ticket table for both the main improvement-bus board and the
+ * "needs you" no-executor view: same columns, same status-driven action set
+ * (Approve/Dismiss on proposed, Retire on approved, Unblock on blocked), just
+ * a different row set and a caller-supplied label/title for the retire
+ * action so its wording can match the context it's shown in.
+ */
+function TicketsTable({
+  rows, linksById, emptyMessage, retireLabel, retireTitle,
+}: {
+  rows: SuggestionRow[]
+  linksById: Map<number, TicketLink[]>
+  emptyMessage: string
+  retireLabel: string
+  retireTitle: string
+}) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-ink-4">{emptyMessage}</p>
+  }
+  return (
+    <ResponsiveTable>
+      {/* Floor, not a width: 860px keeps the columns legible while still
+          fitting inside the max-w-5xl shell on a laptop, so only phones do
+          the horizontal scroll. */}
+      <table className="min-w-[860px] w-full bg-paper rounded-xl border border-line text-sm">
+        <thead>
+          <tr className="text-left text-[11px] text-ink-4 kicker border-b border-line">
+            <th className="px-3 py-2 font-normal">Ticket</th>
+            <th className="px-3 py-2 font-normal">Status</th>
+            <th className="px-3 py-2 font-normal">Pri</th>
+            <th className="px-3 py-2 font-normal">Assignee</th>
+            <th className="px-3 py-2 font-normal">Age</th>
+            <th className="px-3 py-2 font-normal">Att</th>
+            <th className="px-3 py-2 font-normal">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-line align-top">
+          {rows.map(s => {
+            const links = linksById.get(s.id) ?? []
+            return (
+              <tr key={s.id}>
+                <td className="px-3 py-3 max-w-[380px]">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-ink-4">
+                    <span className="font-mono">#{s.id}</span>
+                    <span className="text-plum">{s.team}</span>
+                    {s.targetTeam && <span>→ {s.targetTeam}</span>}
+                    <span className="rounded bg-paper-3 px-1.5 py-0.5 font-mono">{s.kind}</span>
+                    <span>{s.category}</span>
+                    <span className={s.cxRisk === 'high' ? 'text-coral' : s.cxRisk === 'med' ? 'text-plum' : ''}>
+                      cx:{s.cxRisk}
+                    </span>
+                    {Number(s.estSavingsUsd) > 0 && <span>~${Number(s.estSavingsUsd).toFixed(2)} saved</span>}
+                    {s.decidedBy === 'auto' && (
+                      <span className="rounded bg-plum-soft px-1.5 py-0.5 font-mono text-plum">auto</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm text-ink">{s.suggestion}</p>
+                  {s.lastError && (
+                    <p
+                      className="mt-1 text-[11px] text-coral truncate"
+                      title={s.lastError}
+                    >
+                      last error: {s.lastError}
+                    </p>
+                  )}
+                  {(links.length > 0 || s.applyRef) && (
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                      {links.map((l, i) => (
+                        <TicketRef key={`${l.ref}-${i}`} kind={l.kind} ref_={l.ref} state={l.state} />
+                      ))}
+                      {links.length === 0 && s.applyRef && (
+                        <TicketRef kind="pr" ref_={s.applyRef} state={null} />
+                      )}
+                    </div>
+                  )}
+                  {s.status === 'approved' && (
+                    <p className="mt-1 text-[11px] text-ink-4">
+                      {s.decidedBy === 'auto' ? 'Auto-approved. ' : ''}
+                      {s.kind === 'code'
+                        ? 'Claimable by the dev routine.'
+                        : 'Queued for agent-editor.'}
+                    </p>
+                  )}
+                </td>
+                <td className="px-3 py-3"><StatusBadge status={s.status} /></td>
+                <td className="px-3 py-3">
+                  <PriorityForm id={s.id} priority={s.priority} />
+                </td>
+                <td className="px-3 py-3 text-xs text-ink-3 font-mono whitespace-nowrap">
+                  {s.assignee ?? <span className="text-ink-4">unassigned</span>}
+                </td>
+                <td className="px-3 py-3 text-xs text-ink-3 whitespace-nowrap">{fmtAge(s.createdAt)}</td>
+                <td className={`px-3 py-3 text-xs whitespace-nowrap ${s.attemptCount >= 3 ? 'text-coral font-semibold' : 'text-ink-3'}`}>
+                  {s.attemptCount}
+                </td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-col gap-1.5">
+                    {s.status === 'proposed' && (
+                      <>
+                        <IntentButton
+                          intent="suggestion-approve"
+                          id={s.id}
+                          label="Approve"
+                          className="bg-sage/20 text-sage hover:bg-sage/30"
+                        />
+                        <IntentButton
+                          intent="suggestion-dismiss"
+                          id={s.id}
+                          label="Dismiss"
+                          className="bg-paper-3 text-ink-3 hover:bg-paper-2"
+                        />
+                      </>
+                    )}
+                    {s.status === 'approved' && (
+                      <IntentButton
+                        intent="suggestion-retire"
+                        id={s.id}
+                        label={retireLabel}
+                        className="bg-paper-3 text-ink-3 hover:bg-coral-soft hover:text-coral"
+                        title={retireTitle}
+                      />
+                    )}
+                    {s.status === 'blocked' && (
+                      <IntentButton
+                        intent="suggestion-unblock"
+                        id={s.id}
+                        label="Unblock"
+                        className="bg-plum-soft text-plum hover:bg-plum-soft/70"
+                        title="Send this ticket back to approved so an agent can claim it again"
+                      />
+                    )}
+                  </div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </ResponsiveTable>
   )
 }
 

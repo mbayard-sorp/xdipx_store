@@ -201,6 +201,11 @@ wss.on('connection', (ws, req) => {
         return
       }
       case 'dtmf': {
+        // #1277: digits are intentionally not routed anywhere. Neither this
+        // server nor the v2 Vercel engine sets up a Twilio digit-gather, and
+        // no caller-facing prompt should ever promise "press N" — see the
+        // v2 voice adapter's pillOptionsToSsml, which now speaks choices as
+        // plain language instead of DTMF hints for exactly this reason.
         console.log(`[ivr] dtmf callSid=${session.callSid} digit=${msg.digit}`)
         return
       }

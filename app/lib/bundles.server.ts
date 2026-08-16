@@ -55,7 +55,18 @@ function bundleTagFor(handle: string): string {
 }
 
 function buildBundle(doc: BundleDoc, components: BundleComponent[]): Bundle {
-  const discountPct = Math.max(0, Math.min(90, doc.bundleDiscountPct ?? 0))
+  // Ticket #3448: the discount ceiling is a trap. Simulated 40,000 bundles
+  // (one $35-$120 anchor + two $9-$25 consumables) on real catalog wholesale
+  // cost: contribution margin vs. selling the anchor alone is +$8.29 at 0%
+  // discount, +$3.64 at 5%, MINUS $1.04 at 10%, and gets worse from there —
+  // break-even is ~8.5%. The added consumables carry ~33.3% median margin
+  // against the toys' ~44.4%, so a bundle discount comes off the whole
+  // basket while only a third of it is high-margin. A cap of 90% here let
+  // anyone authoring a bundle in Sanity set 25% and quietly destroy margin
+  // with no gate. Authoring guidance: ship bundles at 0-5%. A bundle's value
+  // proposition here is Emma's curation, not a price cut — that is also
+  // on-brand (curation and discretion over discounting).
+  const discountPct = Math.max(0, Math.min(5, doc.bundleDiscountPct ?? 0))
   const originalTotal = components.reduce(
     (sum, c) => sum + (c.product.compareAtPrice ?? c.product.price) * c.quantity,
     0,

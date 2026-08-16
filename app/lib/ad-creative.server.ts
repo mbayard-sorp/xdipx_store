@@ -15,7 +15,9 @@ import { randomUUID } from 'node:crypto'
 import { eq, desc, inArray } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { adCreatives, mediaAssets, adCampaigns } from '../../db/schema'
-import { falGenerate, falConfigured } from '~/lib/fal.server'
+import { generateImage } from '~/lib/generate-image.server'
+import { atlasConfigured } from '~/lib/atlas.server'
+import { falConfigured } from '~/lib/fal.server'
 import { blobPut } from '~/lib/blob.server'
 import { logImageCost } from '~/lib/token-log.server'
 import { estimateImageCostUsd } from '~/lib/model-pricing.server'
@@ -25,9 +27,11 @@ import { createAdCampaign } from '~/lib/team.server'
 export const AD_FORMATS = ['1:1', '4:5', '9:16'] as const
 export type AdFormat = (typeof AD_FORMATS)[number]
 
-const FORMAT_TO_IMAGE_SIZE: Record<AdFormat, string> = {
+const FORMAT_TO_IMAGE_SIZE: Record<AdFormat, string | { width: number; height: number }> = {
   '1:1': 'square_hd',
-  '4:5': 'portrait_4_3', // closest supported ratio; ffmpeg-free approximation
+  // Exact 4:5 pixels: Atlas honors free-form sizes; the fal fallback maps the
+  // object form to its nearest supported aspect (3:4), same as before.
+  '4:5': { width: 1728, height: 2160 },
   '9:16': 'portrait_16_9',
 }
 
@@ -66,7 +70,9 @@ export interface GeneratedCreative {
 }
 
 export async function generateAdBatch(args: GenerateAdBatchArgs): Promise<{ campaignId: number; creatives: GeneratedCreative[]; costUsd: number }> {
-  if (!falConfigured()) throw new Error('FAL_KEY is not configured')
+  if (!atlasConfigured() && !falConfigured()) {
+    throw new Error('Neither ATLAS_CLOUD_API_KEY nor FAL_KEY is configured')
+  }
   if (args.policyCheck.trim().length < 20) {
     throw new Error('policyCheck must be a substantive compliance note (>= 20 chars) citing docs/ads-policy.md')
   }
@@ -86,15 +92,21 @@ export async function generateAdBatch(args: GenerateAdBatchArgs): Promise<{ camp
 
   const creatives: GeneratedCreative[] = []
   let images = 0
-  let costKeyUsed = 'fal/flux-kontext-dev'
+  let costKeyUsed = 'atlas/seedream-4.5-edit'
   for (const format of AD_FORMATS) {
     const angle = AD_ANGLES[creatives.length % AD_ANGLES.length]!
-    const { buffers, costKey, requestId } = await falGenerate({
+    // Through the unified seam (Atlas primary, fal fallback) rather than a
+    // direct provider call; logCost:false because the per-image spend rows
+    // below carry the batch ref this surface needs.
+    const { buffers, model: costKey } = await generateImage({
       prompt: buildAdPrompt(angle),
       count: 1,
       imageSize: FORMAT_TO_IMAGE_SIZE[format],
       refImageUrl,
-      telemetry: { feature: 'ads-creative', caller: 'ad-creative', sku: args.productHandle },
+      feature: 'ads-creative',
+      caller: 'ad-creative',
+      sku: args.productHandle,
+      logCost: false,
     })
     costKeyUsed = costKey
     const buf = buffers[0]
@@ -117,11 +129,9 @@ export async function generateAdBatch(args: GenerateAdBatchArgs): Promise<{ camp
       policyCheck: args.policyCheck,
     }).returning({ id: adCreatives.id })
     if (creative) creatives.push({ id: creative.id, format, blobUrl: url })
-    // One spend row per image, each carrying its own fal request_id (one
-    // falGenerate call per format), so an owner can resolve a fal request id to
-    // the exact ad creative it produced. ref_id `<batchId>#<format>` names the
-    // file; batch-level attribution is unaffected (/admin/usage groups by
-    // batch_id, and the batch total is the sum of these per-image rows).
+    // One spend row per image. ref_id `<batchId>#<format>` names the file;
+    // batch-level attribution is unaffected (/admin/usage groups by batch_id,
+    // and the batch total is the sum of these per-image rows).
     void logImageCost({
       feature: 'ads-creative',
       model: costKey,
@@ -129,7 +139,6 @@ export async function generateAdBatch(args: GenerateAdBatchArgs): Promise<{ camp
       caller: 'ad-creative.server',
       sku: args.productHandle,
       refId: `${batchId}#${format}`,
-      ...(requestId ? { requestId } : {}),
     })
     images++
   }

@@ -85,7 +85,7 @@ async function main() {
   const noRefReason = arg('no-ref-reason')
   const slide       = arg('slide') ? Number(arg('slide')) : undefined
   const date        = arg('date') ?? new Date().toISOString().slice(0, 10)
-  const only        = arg('only') as 'fal' | 'imagen' | undefined
+  const only        = arg('only') as 'atlas' | 'fal' | 'imagen' | undefined
   const caller      = arg('caller') ?? 'social-media-manager'
   const imagesSoFar = Number(arg('images-so-far') ?? '0')
   const runId       = arg('run-id')

@@ -61,13 +61,17 @@ export async function executeSupportStage(
       case 'fulfilled':
       case 'shipped':
       case 'delivered': {
-        prose = pickSupportTemplate(result.status, {
-          orderName: result.orderName,
-          ...(result.trackingUrl    != null ? { trackingUrl:    result.trackingUrl }    : {}),
-          ...(result.trackingNumber != null ? { trackingNumber: result.trackingNumber } : {}),
-          ...(result.carrier        != null ? { carrier:        result.carrier }        : {}),
-          ...(result.lastScan       != null ? { lastScan:       result.lastScan }       : {}),
-        })
+        prose = pickSupportTemplate(
+          result.status,
+          {
+            orderName: result.orderName,
+            ...(result.trackingUrl    != null ? { trackingUrl:    result.trackingUrl }    : {}),
+            ...(result.trackingNumber != null ? { trackingNumber: result.trackingNumber } : {}),
+            ...(result.carrier        != null ? { carrier:        result.carrier }        : {}),
+            ...(result.lastScan       != null ? { lastScan:       result.lastScan }       : {}),
+          },
+          ctx.channel ?? 'sms',
+        )
         break
       }
       case 'cancelled': {

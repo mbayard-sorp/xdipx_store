@@ -20,11 +20,11 @@ import { fileURLToPath } from 'node:url'
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8')
 
 describe('coral budget — prices are never coral below 24px', () => {
-  it('FrequentlyBoughtWith renders its price in ink, not coral', () => {
-    const src = read('./FrequentlyBoughtWith.tsx')
+  it('CompleteTheSet renders its price in ink, not coral', () => {
+    const src = read('./CompleteTheSet.tsx')
     // The price line is the one that formats p.price.
     const priceLine = src.split('\n').find(l => l.includes('${p.price.toFixed(2)}'))
-    expect(priceLine, 'FBT price line not found — did the markup change?').toBeTruthy()
+    expect(priceLine, 'Complete-the-set price line not found — did the markup change?').toBeTruthy()
     expect(priceLine!).not.toContain('text-coral')
     expect(priceLine!).toContain('text-ink')
   })

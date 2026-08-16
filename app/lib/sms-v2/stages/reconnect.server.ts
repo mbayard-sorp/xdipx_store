@@ -19,7 +19,7 @@ import {
 import { getCrossChannelHint } from '../cross-channel.server'
 import { pickCrossChannelTemplate } from '../templates/cross-channel-templates'
 import { runCatalogLookup } from './discovery.server'
-import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
+import type { EmmaContext, IntentResult, ProductRef, StageResponse } from '../types.server'
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
@@ -41,14 +41,28 @@ export async function executeReconnectStage(
   // that immediately and route to DISCOVERY so the next turn can pick up.
   const xchannel = getCrossChannelHint(ctx)
   if (xchannel && xchannel.topic.kind === 'product') {
+    const channel = ctx.channel ?? 'sms'
+    // #3519: the offer to "send the link" needs a real card behind it, not
+    // just prose. On voice this is what lets a later "yes" actually arm the
+    // adapter's pendingPdpUrl permission gate instead of promising a text
+    // that never gets sent.
+    const productCard: ProductRef = {
+      handle: xchannel.topic.handle,
+      title:  xchannel.topic.title ?? xchannel.topic.handle,
+      pdpUrl: `https://xdipx.com/products/${xchannel.topic.handle}`,
+    }
     return {
       stageOut: resolveTransition('RECONNECT', 'DISCOVERY'),
       goalAchieved: false,
       segments: [{
-        prose: pickCrossChannelTemplate({
-          channelLabel: xchannel.otherChannel === 'web' ? 'web chat' : 'text',
-          productTitle: xchannel.topic.title ?? xchannel.topic.handle,
-        }),
+        prose: pickCrossChannelTemplate(
+          {
+            channelLabel: xchannel.otherChannel === 'web' ? 'web chat' : 'text',
+            productTitle: productCard.title,
+          },
+          channel,
+        ),
+        productCard,
       }],
       stateWrites: { stage: 'DISCOVERY', currentPitchHandle: xchannel.topic.handle },
       telemetry: { intent: intent.intent, intentConfidence: intent.confidence },

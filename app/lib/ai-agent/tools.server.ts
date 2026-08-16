@@ -27,7 +27,13 @@ import {
   getIvrCardsByHandles,
   type SearchDiagnostics,
 } from '~/lib/ivr-search.server'
-import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
+import { getSimilarByTag } from '~/lib/recommendations.server'
+import {
+  DISCOVER_MOOD,
+  DISCOVER_EXPERIENCE,
+  DISCOVER_USE_CASE,
+  DISCOVER_FEATURES,
+} from '~/lib/discovery-vocab'
 import { db } from '~/lib/db.server'
 import { draftOrders } from '~/../db/schema'
 import type { Product } from '~/types'
@@ -102,10 +108,10 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       properties: {
-        mood: { type: 'array', items: { type: 'string', enum: ['playful', 'romantic', 'luxurious', 'adventurous', 'relaxing'] }, description: 'Mood/vibe tags.' },
-        experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Experience level.' },
-        useCase: { type: 'array', items: { type: 'string', enum: ['solo', 'couples', 'date-night', 'gift', 'travel'] }, description: 'Use-case tags.' },
-        features: { type: 'array', items: { type: 'string', enum: ['waterproof', 'quiet', 'rechargeable', 'app-controlled', 'body-safe'] }, description: 'Feature tags.' },
+        mood: { type: 'array', items: { type: 'string', enum: [...DISCOVER_MOOD] }, description: 'Mood/vibe tags.' },
+        experience: { type: 'string', enum: [...DISCOVER_EXPERIENCE], description: 'Experience level.' },
+        useCase: { type: 'array', items: { type: 'string', enum: [...DISCOVER_USE_CASE] }, description: 'Use-case tags.' },
+        features: { type: 'array', items: { type: 'string', enum: [...DISCOVER_FEATURES] }, description: 'Feature tags.' },
         category: { type: 'string', enum: ['for-him', 'for-her', 'couples'], description: 'Audience tag. Multi-select on the doc — this filter matches any product that has the given tag among its category array.' },
         priceMax: { type: 'number', description: 'Max price in dollars.' },
         limit: { type: 'number', description: '1–5, default 3.' },
@@ -242,7 +248,7 @@ export const QA_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
     name: 'createDraftOrder',
     description:
-      "Create a Shopify draft order and send the caller a secure checkout link via SMS + email. Call this ONLY after you have: (1) confirmed each product + variant + quantity, (2) collected email, full name, and shipping address (address1, city, state, zip), (3) read back a generic summary and gotten explicit confirmation ('yes, send it'). Never collect card numbers — Shopify checkout handles payment. Hard caps: $500 order subtotal, 5 line items, 2 orders per 24h per phone number. If the tool returns a limit error, apologize and offer to have a human follow up.",
+      "Create a Shopify draft order and EMAIL the caller a secure checkout link. SMS is not wired up for this tool — delivery is email only. Call this ONLY after you have: (1) confirmed each product + variant + quantity, (2) collected email, full name, and shipping address (address1, city, state, zip), (3) read back a generic summary and gotten explicit confirmation ('yes, send it'). Never collect card numbers — Shopify checkout handles payment. Hard caps: $500 order subtotal, 5 line items, 2 orders per 24h per phone number. If the tool returns a limit error, apologize and offer to have a human follow up.",
     input_schema: {
       type: 'object',
       properties: {
@@ -416,7 +422,7 @@ export async function runQaTool(
       const handle = String(input['handle'] ?? '').trim()
       if (!handle) return { ok: false, error: 'handle required' }
       const limit = Math.max(1, Math.min(3, Number(input['limit'] ?? 2)))
-      const handles = await getFrequentlyBoughtWith(handle, limit)
+      const handles = await getSimilarByTag(handle, limit)
       if (handles.length === 0) return { ok: true, data: { results: [] } }
       const cards = await getIvrCardsByHandles(handles)
       return { ok: true, data: { forHandle: handle, results: cards } }

@@ -19,7 +19,7 @@ import {
 } from './pricing-rules.server'
 import { getGroupForProductType } from './pricing-rules.server'
 import { computeVelocityBucket } from './pricing-velocity.server'
-import { updateVariantPricing } from './shopify.server'
+import { updateVariantPricing, normalizeMetafieldKey } from './shopify.server'
 import type { VelocityBucket } from './pricing-engine-v2.server'
 
 // ---------------------------------------------------------------------------
@@ -389,7 +389,7 @@ export async function recomputeVariant(
 
     const mfMap: Record<string, string> = {}
     for (const mf of data.product.metafields.nodes) {
-      mfMap[mf.key] = mf.value
+      mfMap[normalizeMetafieldKey(mf)] = mf.value
     }
 
     product = {

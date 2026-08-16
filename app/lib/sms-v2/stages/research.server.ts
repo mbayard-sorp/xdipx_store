@@ -16,13 +16,16 @@
  * handle present in the candidates set. Unknown product names trigger a
  * deterministic fallback template.
  *
- * Tool list: searchForIvr only. kbLookup is a Phase 6c forward reference.
+ * Tool list: searchForIvr (candidates pre-loaded above), kbLookup (policy /
+ * compatibility / troubleshooting facts for a comparison or "how does this
+ * work" question).
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { buildEmmaSystemBlocks } from '~/lib/claude.server'
 import { getTurnSignal } from '../turn-deadline.server'
 import { searchForIvr } from '~/lib/ivr-search.server'
 import type { IvrProductCard } from '~/lib/ivr-search.server'
+import { kbLookup, type KbTopic } from '../tools/kb-lookup.server'
 import type { EmmaContext, IntentResult, StageResponse } from '../types.server'
 import { fetchProductContext } from './_product-context.server'
 import { pickResearchFallbackTemplate } from '../templates/research-templates'
@@ -60,26 +63,37 @@ export function _setAnthropicClient(c: Anthropic): Anthropic {
 }
 
 // ─── Tool definition ──────────────────────────────────────────────────────────
+//
+// searchForIvr is deliberately NOT offered here: candidates are pre-fetched
+// above (sub-path A/B), and re-opening in-turn search would defeat that. The
+// only tool the model can reach for is kbLookup, for a policy/compatibility/
+// troubleshooting fact it needs to answer honestly.
 
-const SEARCH_FOR_IVR_TOOL: Anthropic.Tool = {
-  name: 'searchForIvr',
+const KB_LOOKUP_TOOL: Anthropic.Tool = {
+  name: 'kbLookup',
   description:
-    'Search the xdipx product catalog by keyword. Returns compact cards with title, handle, price, and tagline. Use to find products that match the customer\'s comparison question.',
+    "Answer a shipping, returns/refund, product-compatibility, or troubleshooting question from xdipx's knowledge base. Use this when the customer's comparison question is really a policy or how-it-works question ('does this work with my other toy', 'what's the return window', 'how do I clean it') so the answer cites real KB content instead of guessing.",
   input_schema: {
     type: 'object',
     properties: {
-      query:    { type: 'string',  description: 'Free-text search query.' },
-      limit:    { type: 'number',  description: 'Max results, 1-5. Default 3.' },
-      category: { type: 'string',  description: 'Optional: for-him, for-her, or couples.' },
-      priceMax: { type: 'number',  description: 'Optional max price in dollars.' },
+      topic: {
+        type: 'string',
+        enum: ['shipping', 'returns', 'compatibility', 'troubleshooting', 'brand'],
+        description: "Which knowledge-base area the question falls under. 'returns' covers refunds. 'brand' is the catch-all for general policy/FAQ.",
+      },
+      query: {
+        type: 'string',
+        description: "The customer's question in their own words. Used to rank within the topic.",
+      },
+      productCategory: {
+        type: 'string',
+        description: "Optional product category to scope compatibility/troubleshooting answers (e.g. 'vibrator', 'lube').",
+      },
     },
-    required: ['query'],
+    required: ['topic'],
     additionalProperties: false,
   },
 }
-
-// TODO (Phase 6c): register kbLookup tool here once available.
-// const KB_LOOKUP_TOOL: Anthropic.Tool = { name: 'kbLookup', ... }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -303,35 +317,96 @@ export async function executeResearchStage(
 
   let rawProse = ''
 
-  // Single hop — no tool loop needed; candidates already pre-fetched above
-  const response = await _anthropicClient.messages.create({
-    model:       SMS_MODEL,
-    max_tokens:  320,
-    system:      systemParam,
-    tools:       [SEARCH_FOR_IVR_TOOL],
-    tool_choice: { type: 'none' },  // candidates already loaded; no in-turn search
-    messages:    [{ role: 'user', content: userContent }],
-  }, { signal: getTurnSignal() })
+  // Candidates are already pre-fetched above, so searchForIvr stays off the
+  // table here — offering it again would re-open the in-turn search this
+  // stage deliberately avoids. kbLookup is the one optional tool: a single
+  // bounded hop lets a policy/compatibility/troubleshooting question get a
+  // real KB answer instead of the model guessing.
+  let messages: Anthropic.MessageParam[] = [{ role: 'user', content: userContent }]
+  const MAX_HOPS = 1
+  let hops = 0
 
-  const usage = response.usage as typeof response.usage & {
-    cache_creation_input_tokens?: number
-    cache_read_input_tokens?:     number
+  while (hops <= MAX_HOPS) {
+    const response = await _anthropicClient.messages.create({
+      model:       SMS_MODEL,
+      max_tokens:  320,
+      system:      systemParam,
+      tools:       [KB_LOOKUP_TOOL],
+      tool_choice: hops < MAX_HOPS ? { type: 'auto' } : { type: 'none' },
+      messages,
+    }, { signal: getTurnSignal() })
+
+    const usage = response.usage as typeof response.usage & {
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?:     number
+    }
+    inputTokens  += usage.input_tokens
+    outputTokens += usage.output_tokens
+    // B3.5 — best-effort token log
+    void import('../../token-log.server').then(({ logApiTokens }) =>
+      logApiTokens({
+        feature: 'sms', model: SMS_MODEL, source: 'sync', caller: 'sms/research',
+        inputTokens:         usage.input_tokens,
+        outputTokens:        usage.output_tokens,
+        cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+        cacheReadTokens:     usage.cache_read_input_tokens     ?? 0,
+      })
+    ).catch((err) => console.error('[sms/research] token-log failed (ignored):', err))
+
+    if (response.stop_reason === 'tool_use') {
+      const toolUseBlocks = response.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+      )
+      const toolResults: Anthropic.ToolResultBlockParam[] = []
+
+      for (const tb of toolUseBlocks) {
+        let toolResult: unknown
+        let toolOk = true
+        let toolError: string | undefined
+
+        try {
+          if (tb.name === 'kbLookup') {
+            const inp = tb.input as { topic: KbTopic; query?: string; productCategory?: string }
+            const kb = await kbLookup({
+              topic:           inp.topic,
+              ...(inp.query ? { query: inp.query } : {}),
+              ...(inp.productCategory ? { productCategory: inp.productCategory } : {}),
+            })
+            toolResult = kb
+              ? { quickAnswer: kb.quickAnswer, sourceTitle: kb.sourceTitle, ...(kb.bodyExcerpt ? { bodyExcerpt: kb.bodyExcerpt } : {}) }
+              : { error: 'not_found', message: `No knowledge-base entry matched ${inp.topic}.` }
+          } else {
+            toolResult = { error: `Unknown tool: ${tb.name}` }
+            toolOk    = false
+            toolError = `Unknown tool: ${tb.name}`
+          }
+        } catch (err) {
+          toolOk    = false
+          toolError = err instanceof Error ? err.message : String(err)
+          toolResult = { error: toolError }
+        }
+
+        toolCalls.push({ name: tb.name, input: tb.input, ok: toolOk, error: toolError })
+        toolResults.push({
+          type:        'tool_result',
+          tool_use_id: tb.id,
+          content:     JSON.stringify(toolResult),
+        })
+      }
+
+      messages = [
+        ...messages,
+        { role: 'assistant', content: response.content },
+        { role: 'user',      content: toolResults },
+      ]
+      hops++
+      continue
+    }
+
+    const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
+    rawProse = textBlock?.text?.trim() ?? ''
+    break
   }
-  inputTokens  += usage.input_tokens
-  outputTokens += usage.output_tokens
-  // B3.5 — best-effort token log
-  void import('../../token-log.server').then(({ logApiTokens }) =>
-    logApiTokens({
-      feature: 'sms', model: SMS_MODEL, source: 'sync', caller: 'sms/research',
-      inputTokens:         usage.input_tokens,
-      outputTokens:        usage.output_tokens,
-      cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
-      cacheReadTokens:     usage.cache_read_input_tokens     ?? 0,
-    })
-  ).catch((err) => console.error('[sms/research] token-log failed (ignored):', err))
-
-  const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
-  rawProse = textBlock?.text?.trim() ?? ''
 
   // ── 4. Fabrication validator ─────────────────────────────────────────────────
   // Spec: "any product mentioned by name in the prose must have its handle in

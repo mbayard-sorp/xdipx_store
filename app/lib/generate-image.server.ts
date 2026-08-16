@@ -1,17 +1,20 @@
 /**
  * Unified image generation with provider fallback + cost logging.
  *
- * Order: fal.ai (primary, least restrictive for this vertical) → Google Imagen
- * (fallback) → empty result (caller uses an existing catalog photo). Every
- * successful generation logs per-image spend to api_token_log via logImageCost
- * so it shows on /admin/usage and counts against the team's daily $ budget.
+ * Order: Atlas Cloud (primary per owner direction 2026-08-15 — fal's failure
+ * rate on this vertical made it unfit as the site pipeline) → fal.ai
+ * (fallback) → Google Imagen (last resort) → empty result (caller uses an
+ * existing catalog photo). Every successful generation logs per-image spend to
+ * api_token_log via logImageCost so it shows on /admin/usage and counts
+ * against the team's daily $ budget.
  *
  * This is the single entry point the media-manager / homepage team uses — never
- * call fal/imagen directly for net-new homepage art.
+ * call atlas/fal/imagen directly for net-new homepage art.
  *
  * Server-only.
  */
 
+import { atlasConfigured, atlasGenerate } from '~/lib/atlas.server'
 import { falConfigured, falGenerate } from '~/lib/fal.server'
 import { defaultMoodPrompt, generateMoodImage } from '~/lib/imagen.server'
 import { logImageCost } from '~/lib/token-log.server'
@@ -93,8 +96,8 @@ export interface GenerateImageOpts {
    * `referenceImageBuffers`).
    */
   refImageUrls?: string[]
-  /** Force a provider (testing). Default tries fal then imagen. */
-  only?: 'fal' | 'imagen'
+  /** Force a provider (testing). Default tries atlas, then fal, then imagen. */
+  only?: 'atlas' | 'fal' | 'imagen'
   /**
    * fal image_size enum or explicit {width,height} (fal path only; Imagen
    * keeps its own default aspect). Defaults to fal's landscape 16:9.
@@ -111,8 +114,8 @@ export interface GenerateImageOpts {
 
 export interface GenerateImageResult {
   buffers: Buffer[]
-  provider: 'fal' | 'imagen' | 'none'
-  /** Cost key / model used (e.g. 'fal/flux-dev', 'imagen', 'none'). */
+  provider: 'atlas' | 'fal' | 'imagen' | 'none'
+  /** Cost key / model used (e.g. 'atlas/seedream-4.5-edit', 'fal/flux-dev', 'imagen', 'none'). */
   model: string
 }
 
@@ -149,8 +152,35 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
     opts.imageSize
     ?? (opts.aspectRatio ? falImageSizeForAspect(opts.aspectRatio) : undefined)
 
-  // 1. fal.ai — primary (skip if only:'imagen' or unconfigured).
-  if (opts.only !== 'imagen' && falConfigured()) {
+  // 1. Atlas Cloud — primary (skip if forced to another provider or unconfigured).
+  // Unlike fal there is no single/multi reference model split: any reference
+  // routes to the same edit endpoint, so refImageUrl and refImageUrls merge.
+  if ((opts.only === undefined || opts.only === 'atlas') && atlasConfigured()) {
+    try {
+      const { buffers, costKey, requestId } = await atlasGenerate({
+        prompt,
+        count,
+        ...(opts.refImageUrls?.length ? { refImageUrls: opts.refImageUrls } : {}),
+        ...(refImageUrl ? { refImageUrl } : {}),
+        ...(imageSize ? { imageSize } : {}),
+        telemetry: {
+          feature,
+          ...(opts.caller ? { caller: opts.caller } : {}),
+          ...(opts.sku ? { sku: opts.sku } : {}),
+          ...(opts.productId ? { productId: opts.productId } : {}),
+        },
+      })
+      if (buffers.length) {
+        if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length, ...(requestId ? { requestId } : {}) })
+        return { buffers, provider: 'atlas', model: costKey }
+      }
+    } catch (err) {
+      console.warn('[generate-image] Atlas Cloud failed, falling back to fal:', err)
+    }
+  }
+
+  // 2. fal.ai — fallback (skip if only:'imagen'/'atlas' or unconfigured).
+  if (opts.only !== 'imagen' && opts.only !== 'atlas' && falConfigured()) {
     try {
       const { buffers, costKey, requestId } = await falGenerate({
         prompt,
@@ -177,8 +207,8 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
     }
   }
 
-  // 2. Google Imagen — fallback (skip if only:'fal').
-  if (opts.only !== 'fal') {
+  // 3. Google Imagen — last resort (skip if forced to another provider).
+  if (opts.only !== 'fal' && opts.only !== 'atlas') {
     try {
       const buffers = await generateMoodImage({
         categories: opts.categories ?? [],
@@ -212,6 +242,6 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
     }
   }
 
-  // 3. Both unavailable — caller uses an existing catalog photo.
+  // 4. All providers unavailable — caller uses an existing catalog photo.
   return EMPTY
 }
