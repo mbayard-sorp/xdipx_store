@@ -71,7 +71,7 @@ async function main() {
   const targetKind  = arg('target') as 'block' | 'tile' | 'promo' | undefined
   const blockKey    = arg('block-key')
   const tileKey     = arg('tile-key')
-  const only        = arg('only') as 'fal' | 'imagen' | undefined
+  const only        = arg('only') as 'atlas' | 'fal' | 'imagen' | undefined
   const imageSize   = arg('image-size')
   const refImage    = arg('ref-image')
   const noRef       = hasFlag('no-ref')

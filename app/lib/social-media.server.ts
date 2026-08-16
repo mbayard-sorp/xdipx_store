@@ -350,7 +350,7 @@ export interface GenerateSocialImageOpts {
    * centre crop. TikTok wants `portrait_16_9`.
    */
   imageSize?: string
-  only?: 'fal' | 'imagen'
+  only?: 'atlas' | 'fal' | 'imagen'
   caller?: string
   /**
    * Leave false when the caller owns the spend row (the CLI does), so the cost
@@ -363,7 +363,7 @@ export interface GenerateSocialImageResult {
   /** Permanent Shopify Files CDN URL, or null when generation produced nothing. */
   url: string | null
   filename: string
-  provider: 'fal' | 'imagen' | 'none'
+  provider: 'atlas' | 'fal' | 'imagen' | 'none'
   model: string
 }
 

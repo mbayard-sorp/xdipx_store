@@ -55,6 +55,14 @@ const IMAGE_RATES: Record<string, number> = {
                                 // the per-video ceiling never lowballs.
   'imagen':             0.04,  // Google Vertex gemini-2.5-flash-image
   'imagen-3':           0.04,
+  // Atlas Cloud (api.atlascloud.ai) — the primary still-image provider since
+  // 2026-08-15. List prices from the model pages, verified at POC time.
+  'atlas/seedream-4.5':           0.036, // ByteDance Seedream v4.5 text-to-image
+  'atlas/seedream-4.5-edit':      0.036, // Seedream v4.5 edit — 1-10 reference images
+  'atlas/seedream-5.0-lite':      0.032,
+  'atlas/seedream-5.0-lite-edit': 0.032,
+  'atlas/nano-banana-pro-edit':   0.14,  // Google filter blocks cast+toy pairings; premium alt only
+  'atlas/flux-dev':               0.01,
 }
 
 const DEFAULT_IMAGE_RATE = 0.04 // unknown model -> assume a flash-image-tier price
