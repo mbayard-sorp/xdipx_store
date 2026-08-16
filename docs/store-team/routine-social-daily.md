@@ -44,19 +44,24 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 6. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
    (`social_freq_*`; 0 = skip that platform entirely).
 
-   **`social_freq_facebook` is 0 on purpose (owner, 2026-08-16). Do not raise it.** There is no
-   Facebook publisher: `app/lib/social-publish/registry.server.ts` carries instagram, tiktok and
-   youtube only, and the publish job filters `platform = 'instagram'` in SQL in both `listEligible`
-   and `recentCaptions`, so a Facebook row cannot publish by any path. It was set to 1, and the
-   three drafts written under it (rows 20, 29, 33) have sat unpublishable since 08-12. Verified in
-   Meta Business Suite on 2026-08-16: every post the Page has ever shown is an Instagram row, the
-   Page itself has 0 followers, and Instagram content published through the Content Publishing API
-   does not reach the Page through Accounts Center cross-posting. Drafting for Facebook is writing
-   into a queue with no exit. Raise this only after a publisher exists.
+   **`social_freq_facebook` and `social_freq_tiktok` are both 0 on purpose (owner, 2026-08-16).
+   Do not raise either.** Instagram and X are the live platforms. Nothing else can publish:
+   `app/lib/social-publish/registry.server.ts` carries instagram, tiktok and youtube, but the
+   tiktok and youtube entries are stubs that report the manual path, there is no facebook entry at
+   all, and the publish job filters `platform = 'instagram'` in SQL in both `listEligible` and
+   `recentCaptions`. **Drafting for either platform is writing into a queue with no exit**, which
+   is exactly what happened: 3 Facebook rows and 10 TikTok rows accumulated and none ever shipped.
 
-   **The three stranded rows are `approved`.** If a Facebook publisher ever ships, they become
-   eligible immediately and publish copy that is months old. Whoever builds that publisher marks
-   them `rejected` first.
+   On Facebook specifically, verified in Meta Business Suite on 2026-08-16: every post the Page has
+   ever shown is an Instagram row, the Page has 0 followers, and Instagram content published
+   through the Content Publishing API does **not** reach the Page via Accounts Center
+   cross-posting. The no-code mirror does not work for this store's setup. Raise the frequency only
+   after a real publisher exists.
+
+   **An unpublishable draft left at `approved` is a time bomb.** It becomes eligible the instant a
+   publisher lands and ships copy that is by then months old. The three Facebook rows (20, 29, 33)
+   were rejected on 2026-08-16 for this reason. **Three TikTok rows are still `approved` and remain
+   a live trap**; whoever wires the TikTok publisher rejects them before turning it on.
 7. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
    `editedText` per row are the owner's verdicts on your last drafts.
 8. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
