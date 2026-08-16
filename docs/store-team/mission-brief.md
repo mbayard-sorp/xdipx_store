@@ -22,6 +22,25 @@ and every touchpoint must be comfortable to receive, open, and share.
   not in an ad, not in a social draft. MAP<MSRP uses MAP as the floor.
 - **Ad-platform policy is survival.** `docs/ads-policy.md` binds the ads team and the creative rules
   bind organic social too. One careless campaign can kill the ad account.
+- **PAID ACQUISITION IS HELD (owner direction, 2026-08-15): "fix the AOV and CVR first, hold the
+  ads."** No team proposes, plans, or launches paid spend on any platform while this stands. This is
+  not a policy hold and not a lack of a plan; `docs/store-team/google-ads-launch-plan.md` is complete
+  and carries the full reasoning and the unhold criteria. It is an **economics** hold: **AOV is n=0**
+  (no real customer order has ever been placed; the one non-test order is the owner's own purchase at
+  75% off), and at the ~$33 basket the catalog currently produces, break-even on paid needs a ~12%
+  conversion rate, which nobody achieves at any budget.
+  **The hold lifts when AOV >= $45 over 10+ real orders AND the measurement chain is trustworthy**
+  (tickets #3441 and #3422 shipped, plus a checkout step pixel). Until then, acquisition effort goes
+  to owned and earned channels (SEO, AEO, email, outreach, organic social), which is where it was
+  already strongest. `ads-manager` may still run its retro and research, and should record the hold
+  rather than writing proposals against it.
+- **Do not quote a site-wide CVR as if it were measured.** Of 311 sessions in 90 days, ~91 are a
+  single crawler on `search.google.com`, ~14 are `vercel.com` deploy previews, and much of Direct is
+  the owner. Genuinely cold humans number **30 to 40**. At user level, PDP to add-to-cart is 25% and
+  add-to-cart to begin-checkout is 100%. Any agent reporting a conversion rate, a bounce rate, or a
+  channel comparison must segment out `search.google.com`, `vercel.com`, and internal Direct first,
+  or say plainly that it could not. **At ~6 sessions a day no A/B test on this site is possible**, so
+  CX changes get shipped on judgment and reported as judgment, never dressed up as measured wins.
 - **The design doctrine gates ALL visual output.** Any run that produces or places imagery,
   graphics, or visual layout loads `docs/design-doctrine.md` first — its §4 imagery archetypes
   (with the coral-soft/plum-soft/paper ground lock) and §6 proof & trust components are
@@ -38,7 +57,7 @@ and every touchpoint must be comfortable to receive, open, and share.
 | Team | Valve state | What the team MAY do | What requires the owner |
 |---|---|---|---|
 | social | draft-only | write `social_posts` rows `status:'draft'` | posting anything, flipping any posting valve |
-| ads | propose-only | write `ad_campaigns` proposals with policy checks | approving, launching, any platform write, any spend |
+| ads | **HELD** (was propose-only) | research and retro only; record the hold. **No new proposals while held**, see §2 | approving, launching, any platform write, any spend, and lifting the hold |
 | email | plan-only | file campaign briefs as suggestions | executing in Klaviyo |
 | content | valve-gated publish | draft Sanity `blogPost` docs (`status:'draft'`); publish live only on a voice-gate PASS while `content_team_autopublish` is on | flipping `content_team_enabled` or `content_team_autopublish`; publishing anything that did not PASS the voice gate |
 | strategy | advisory | publish the brief, file/route suggestions | acting on any of it |
