@@ -180,12 +180,26 @@ const SUBJECTS: Record<string, (sha: string) => string> = {
   recovered: (sha) => `[xdipx] main is green again as of ${sha.slice(0, 8)}`,
 }
 
-function alertBody(
+/**
+ * Banner prepended in probe mode. Everything BELOW it is byte-identical to a
+ * real alert on purpose: the point of a probe is to see what production would
+ * actually send, so the marker is additive and never rewrites the content
+ * being verified.
+ */
+const PROBE_BANNER =
+  '<div style="background:#FFE6DD;border:1px solid #FF5A36;border-radius:8px;padding:10px 12px;margin:0 0 16px;font-size:13px;">'
+  + '<strong>PROBE, not a real alert.</strong> main is fine. This was triggered deliberately against a historical commit '
+  + 'to verify that the alert email renders. Everything below is exactly what a genuine alert would say.'
+  + '</div>'
+
+/** Exported so the body can be asserted in tests and previewed before a send. */
+export function renderMainCiAlert(
   code: MainCiCode,
   sha: string,
   reason: string,
   commitMessage: string | null,
   runUrl: string | null,
+  probe = false,
 ): string {
   const subjectLine = (commitMessage ?? '').split('\n')[0] ?? ''
   const rows: Array<[string, string]> = [
@@ -215,7 +229,7 @@ function alertBody(
     .join('')
 
   return `<div style="font-family:system-ui,sans-serif;color:#1A1418;max-width:640px;">
-<h2 style="margin:0 0 12px;">${escapeHtml(SUBJECTS[code]?.(sha) ?? `main CI: ${code}`)}</h2>
+${probe ? PROBE_BANNER : ''}<h2 style="margin:0 0 12px;">${escapeHtml(SUBJECTS[code]?.(sha) ?? `main CI: ${code}`)}</h2>
 <table style="border-collapse:collapse;font-size:14px;">${table}</table>
 <div style="margin-top:16px;font-size:14px;line-height:1.5;">${escapeHtml(guidance)}</div>
 ${link}
@@ -228,15 +242,38 @@ ${link}
  * Non-throwing by contract like the other owner-alert call sites, so a GitHub
  * hiccup degrades to a logged no-op rather than a 500 on a cron route.
  */
-export async function runMainCiWatch(opts: { dryRun?: boolean } = {}): Promise<MainCiWatchResult> {
+/**
+ * `sha` evaluates an arbitrary commit instead of main's head.
+ *
+ * This exists so the alert path can be exercised without breaking main, which
+ * is the only other way to see a real alert and is obviously unacceptable: a
+ * red main deploys to production. Point it at a historically red commit and the
+ * whole path runs on real data (real conclusion, real commit message, real
+ * render, real send), with only "which commit are we looking at" substituted.
+ *
+ * A probe is deliberately state-free. It never reads or writes the alerted-sha
+ * key, so it cannot emit a `recover`, and more importantly cannot leave a
+ * dangling alert that makes the NEXT real green send a spurious "main is green
+ * again" email. Per-sha dedupe still applies, so a stuck retry loop cannot mail
+ * repeatedly.
+ */
+export async function runMainCiWatch(
+  opts: { dryRun?: boolean | undefined; sha?: string | undefined } = {},
+): Promise<MainCiWatchResult> {
   const dryRun = opts.dryRun ?? false
+  const probeSha = opts.sha?.trim() || null
 
-  const ref = await getRef('heads/main', 'main-ci-watch')
-  if (!ref.ok) {
-    console.warn(`${LOG} could not read main: ${ref.error}`)
-    return { ok: false, error: `could not read main: ${ref.error}` }
+  let sha: string
+  if (probeSha) {
+    sha = probeSha
+  } else {
+    const ref = await getRef('heads/main', 'main-ci-watch')
+    if (!ref.ok) {
+      console.warn(`${LOG} could not read main: ${ref.error}`)
+      return { ok: false, error: `could not read main: ${ref.error}` }
+    }
+    sha = ref.data.sha
   }
-  const sha = ref.data.sha
 
   const checks = await getChecksForRef(sha, 'main-ci-watch')
   if (!checks.ok) {
@@ -272,7 +309,9 @@ export async function runMainCiWatch(opts: { dryRun?: boolean } = {}): Promise<M
     }
   }
 
-  const alertedSha = await kvGet<string>(KEY_ALERTED)
+  // A probe passes null so it can never resolve to `recover`, and so it never
+  // reads state it is not entitled to act on.
+  const alertedSha = probeSha ? null : await kvGet<string>(KEY_ALERTED)
 
   const decision = decideMainCi({
     sha,
@@ -299,7 +338,7 @@ export async function runMainCiWatch(opts: { dryRun?: boolean } = {}): Promise<M
     const commit = await getCommit(sha, 'main-ci-watch')
     const res = await sendOwnerEmail(
       SUBJECTS['recovered']!(sha),
-      alertBody('recovered', sha, decision.reason, commit.ok ? commit.data.message : null, check?.url ?? null),
+      renderMainCiAlert('recovered', sha, decision.reason, commit.ok ? commit.data.message : null, check?.url ?? null),
       { fromName: 'xdipx main ci' },
     )
     // Clear regardless of whether the email left the building. A send failure
@@ -320,9 +359,17 @@ export async function runMainCiWatch(opts: { dryRun?: boolean } = {}): Promise<M
   }
 
   const commit = await getCommit(sha, 'main-ci-watch')
+  const baseSubject = SUBJECTS[decision.code]?.(sha) ?? `[xdipx] main CI: ${decision.code} on ${sha.slice(0, 8)}`
   const res = await sendOwnerEmail(
-    SUBJECTS[decision.code]?.(sha) ?? `[xdipx] main CI: ${decision.code} on ${sha.slice(0, 8)}`,
-    alertBody(decision.code, sha, decision.reason, commit.ok ? commit.data.message : null, check?.url ?? null),
+    probeSha ? `[PROBE] ${baseSubject}` : baseSubject,
+    renderMainCiAlert(
+      decision.code,
+      sha,
+      decision.reason,
+      commit.ok ? commit.data.message : null,
+      check?.url ?? null,
+      Boolean(probeSha),
+    ),
     { fromName: 'xdipx main ci' },
   )
   if (!res.sent) console.warn(`${LOG} alert email not sent: ${res.error}`)
@@ -330,7 +377,11 @@ export async function runMainCiWatch(opts: { dryRun?: boolean } = {}): Promise<M
   // Remember the alert so the next green can close the loop. Written even when
   // the send failed: the condition is real either way, and a later "green
   // again" is still the correct thing to report.
-  await kvSet(KEY_ALERTED, sha, 30 * 24 * 3600)
+  //
+  // Never written for a probe. Doing so would arm a "main is green again"
+  // email against a commit that was never main, and the next real green cycle
+  // would send it.
+  if (!probeSha) await kvSet(KEY_ALERTED, sha, 30 * 24 * 3600)
 
   return { ...base, emailed: res.sent }
 }
