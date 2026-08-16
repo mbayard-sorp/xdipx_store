@@ -263,7 +263,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
               <button
                 onClick={() => setCartOpen(o => !o)}
                 className="relative flex items-center justify-center w-11 h-11 rounded-full hover:bg-cream-2 transition-colors"
-                aria-label={`Cart${cartCount > 0 ? ` — ${cartCount} item${cartCount > 1 ? 's' : ''}` : ''}`}
+                aria-label={`Cart${cartCount > 0 ? `, ${cartCount} item${cartCount > 1 ? 's' : ''}` : ''}`}
                 aria-expanded={cartOpen}
                 aria-controls="cart-drawer"
               >

@@ -179,7 +179,7 @@ function StepCircle({ step, index }: { step: Step; index: number }): ReactElemen
   return (
     <span
       role="img"
-      aria-label={`${step.label} — ${stateLabel(step.state)}`}
+      aria-label={`${step.label}, ${stateLabel(step.state)}`}
       className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${CIRCLE[step.state]}`}
       style={{ fontFamily: 'var(--font-display)' }}
     >
