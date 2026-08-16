@@ -27,7 +27,7 @@ import {
   getIvrCardsByHandles,
   type SearchDiagnostics,
 } from '~/lib/ivr-search.server'
-import { getFrequentlyBoughtWith } from '~/lib/recommendations.server'
+import { getSimilarByTag } from '~/lib/recommendations.server'
 import { db } from '~/lib/db.server'
 import { draftOrders } from '~/../db/schema'
 import type { Product } from '~/types'
@@ -409,7 +409,7 @@ export async function runQaTool(
       const handle = String(input['handle'] ?? '').trim()
       if (!handle) return { ok: false, error: 'handle required' }
       const limit = Math.max(1, Math.min(3, Number(input['limit'] ?? 2)))
-      const handles = await getFrequentlyBoughtWith(handle, limit)
+      const handles = await getSimilarByTag(handle, limit)
       if (handles.length === 0) return { ok: true, data: { results: [] } }
       const cards = await getIvrCardsByHandles(handles)
       return { ok: true, data: { forHandle: handle, results: cards } }
