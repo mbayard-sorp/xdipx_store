@@ -27,7 +27,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { EMMA_VOICE_CORE, EMMA_VOICE_MARKETING, EMMA_VOICE_FULL } from '~/lib/emma-voice.server'
+import { EMMA_VOICE_CORE, EMMA_VOICE_MARKETING, EMMA_VOICE_FULL } from '../app/lib/emma-voice.server'
 
 /** Line count of the excerpt this script prints. Exported for the test. */
 export function excerptLineCount(): number {
