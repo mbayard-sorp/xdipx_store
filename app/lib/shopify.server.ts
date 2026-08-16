@@ -7108,10 +7108,25 @@ interface PricingQueryResult {
   }
 }
 
-function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][number]): PricingProductSnapshot | null {
+// Shopify's Admin API returns metafield `key` as the bare name ("map_price")
+// when metafields are queried without a `keys` filter, but as the fully
+// qualified "namespace.key" form ("xdipx.map_price") when queried WITH a
+// `keys: [...]` filter, which is how every pricing query asks for them. A
+// lookup map keyed on the bare name alone misses every fully qualified key
+// and silently returns null for MAP price, original price, and wholesale
+// cost on every product. Normalize using the `namespace` field Shopify
+// already returns alongside `key`, so this works regardless of which shape
+// a given query style produces and cannot silently regress if that shape
+// changes again.
+export function normalizeMetafieldKey(mf: { namespace: string; key: string }): string {
+  const prefix = `${mf.namespace}.`
+  return mf.key.startsWith(prefix) ? mf.key.slice(prefix.length) : mf.key
+}
+
+export function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'][number]): PricingProductSnapshot | null {
   const mfMap = new Map<string, string>()
   for (const mf of raw.metafields.nodes) {
-    mfMap.set(mf.key, mf.value)
+    mfMap.set(normalizeMetafieldKey(mf), mf.value)
   }
 
   const variants = raw.variants.nodes.map(v => ({

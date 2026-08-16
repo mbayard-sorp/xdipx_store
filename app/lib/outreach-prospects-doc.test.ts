@@ -82,14 +82,17 @@ describe('parseProspectsDoc against the real doc', () => {
   )
   const parsed = parseProspectsDoc(doc)
 
-  it('finds the 6 email-reachable prospects vetted on 2026-08-01', () => {
+  it('finds the 3 email-reachable prospects after the 2026-08-16 re-verification', () => {
+    // 2026-08-16: a live re-verification pass demoted bestsextoys.com,
+    // sextoysblog.net, sexdollqueen.com, mynightmate.com and worldsexguide.org
+    // out of Ready into Rejected (see docs/store-team/outreach-prospects.md).
+    // The two rows that stayed in Ready (carasutra.com, pleasuresuperstore.com)
+    // don't have a literal email in the doc, so only the Conditional rows with
+    // a real address remain email-reachable.
     expect(parsed.map(p => p.domain).sort()).toEqual([
-      'bestsextoys.com',
       'chastityall.com',
       'chastitycage.co',
       'genpink.com',
-      'mynightmate.com',
-      'worldsexguide.org',
     ])
   })
 

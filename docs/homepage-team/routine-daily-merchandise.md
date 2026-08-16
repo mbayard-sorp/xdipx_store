@@ -12,8 +12,11 @@ free Max work to metered).
 
 ## Before Step 0 — Voice charter (mandatory, before any content is generated)
 
-Read `docs/emma-voice.md`. All copy written or edited in this run must comply. If the charter is
-missing from the checkout, STOP and report instead of writing copy.
+Run `npx tsx scripts/print-emma-voice-marketing.ts` (see "Cheaper mandatory reads" below — it prints
+the CORE + marketing-addendum slice, not the whole file) and read its output. All copy written or
+edited in this run must comply. If the command fails, fall back to reading `docs/emma-voice.md`
+directly; if the charter is missing from the checkout entirely, STOP and report instead of writing
+copy.
 
 ## Preconditions
 
@@ -35,6 +38,48 @@ The four endpoints, all secret-guarded:
 | `POST` | `/api/homepage-team/spend` | Record Max tokens + image cost into `api_token_log`. |
 
 ---
+
+## Turn-budget discipline (read this before Step 0 — binding ordering rule)
+
+A cold-start run (bare clone: git reset, npm install, the full charter/brief/doctrine reads, DB +
+Sanity introspection) can burn most of `maxTurns` before Step 5 ever writes anything. That is the
+confirmed root cause, not a flaw in the freshness rule or the detector: runs 210, 222, and 235 landed
+PARTIAL/HELD this way (#2165); run 294 named the identical starvation for Step 5b (#2977); and on
+2026-08-14/15 every mandatory-daily slot went stale on the same day — rails (#3198), hero (#3225),
+tiles (#3227), couples (#3228) — which is the signature of a run that never reached a Step 5 publish,
+not four independent picking mistakes. The fix is ordering and cost. `maxTurns` itself is not this
+routine's to raise (Preconditions, above); do not treat a bigger budget as the fix.
+
+**Ordering: reach a verified publish before spending a turn on anything optional.**
+
+| Tier | Steps | Rule |
+|---|---|---|
+| MANDATORY, first | 0, 1, 1b (cheaper-read note below), 2c (capture the baseline, do not yet analyze), 3 (minimal picks), 4 (fresh-art floor minimum only), 5 (the 7 per-run surfaces) | No optional-tier step runs until Step 5 has published. |
+| VERIFY, never skip | 7 | An unverified publish is worse than no publish (runs 8/10 lesson, cited in #2165's retro). Run it even if nothing below starts. |
+| OPTIONAL, after Step 7 verifies | 1c (Monday only — recon/theme run FIRST on Mondays, since Step 3 needs the theme), 2 (GA4/Nalpac/imports depth), 2b, 2d, 2e, 3.5 (a full scheme; the mandatory path uses a minimal one), 5b deep-refresh, 5c, 7.5, retro extras | Running out of turns here is a successful run that shipped its mandatory surfaces. Name what was skipped and why in the Step 8 summary — silence is the failure, not the skip. |
+
+**Cheaper mandatory reads.**
+
+- Voice charter: run `npx tsx scripts/print-emma-voice-marketing.ts` instead of reading the raw
+  `docs/emma-voice.md` cold. It prints the exact CORE + marketing-addendum slice
+  `app/lib/emma-voice.server.ts` already composes for every marketing-copy prompt in the app — the
+  only part of the charter this routine's copy answers to, none of the enrichment/conversational/
+  support addenda it never touches.
+- Mission brief (`docs/homepage-team/mission-brief.md`): sections 1, 2, 3, and 10 are load-bearing
+  for the mandatory per-run surfaces and are worth a full read every run. Sections 4-9 and 11 govern
+  weekly/optional work; skim headings first and read a section in full only once it is this run's
+  turn to act on it.
+- Design doctrine (`docs/design-doctrine.md`): §4 (imagery archetypes + ground lock) and §6 (proof/
+  trust) are what Steps 4-5 need. The rest backs Routine B and the design critic, not a cold-start
+  requirement.
+
+**Step 5b (category pages) starvation is a named, logged branch, not a silent one (#2977).** When the
+mandatory path above has consumed most of the run's turns, Step 5b is health-sweep only ($0,
+deterministic — never skip) and the day's scheduled deep-refresh pair defers to the next run. This is
+the same shape as the existing "theme-change day override" in Step 5b; treat cold-start budget as an
+equally valid trigger for it. Record the deferral as a `decision` event and name the reason every
+single time it fires — runs 152/166/172 went five-plus days with the pair unrefreshed and nobody
+stated it, which is the failure #2977 exists to close.
 
 ## Step 0 — Start the run
 
@@ -221,6 +266,16 @@ sessions said so. The sameness diff mandates *editorial cadence*: the page chang
 window changes, decided on margin, theme, and judgment. Sparse traffic changes HOW you pick; it
 never licenses shipping yesterday's page again.
 
+**Mechanical rails-freshness gate (capture now, assert at publish).** The rails slot is the one that
+kept going byte-identical (#2080, #3186, #3198), so back the eyeball diff with the verifier before you
+touch any rail:
+
+```bash
+BASELINE_RAILS=$(npx tsx scripts/rails-fingerprint.ts)   # first-4 rendered rail headings, joined
+```
+
+Hold `$BASELINE_RAILS` for the Step 5 rails DOD check below.
+
 ## Step 2d — Inbound suggestions (read your own mail)
 
 Other agents file findings *at* this team and, until 2026-07-29, nothing ever read them. This
@@ -312,7 +367,10 @@ The orchestrator (with `homepage-cro` as the pick gate) then scores the candidat
 - **Margin:** `msrp` minus `wholesale_cost`, per unit. **Nothing ships with unknown margin**: if
   `wholesale_cost` is missing for a candidate, swap it out or resolve the cost first.
 - **Price-point spread:** the featured set spans price points across the rails, and there is
-  **always one entry rail under $30**.
+  **always one entry rail under $30**. **Rail depth floor (owner direction 2026-08-15): every
+  wired rail carries at least 4 products, and the under-$30 entry rail at least 6.** The
+  under-30 collection holds 20+ SKUs at all times; a 3-card rail next to an 8-card anchor grid
+  reads broken and shipped live for two weeks before the owner flagged it.
 - **`deal_score`:** from the feed-processor scoring, as a tiebreaker within brand-fit picks.
 - **Stock depth:** enough inventory to sell for the whole placement window; thin stock loses to a
   comparable pick with depth.
@@ -479,6 +537,9 @@ Every merchandise run touches all of these, not just the hero and rails:
    pick (bare handle, verify it resolves 200).
 2. **Curated rails** — create/refresh `emmaCuratedRail` docs (Emma heading/eyebrow/aside + valid
    Shopify handles, verify each resolves 200) and wire 2–4 into `singleton.homepage.sections`.
+   **Depth floor (owner direction 2026-08-15): at least 4 products per wired rail, at least 6 in
+   the under-$30 entry rail.** `getProductsByHandles` silently drops handles that stop resolving,
+   so verify the RESOLVED count, not the authored count, meets the floor.
    **Every published rail MUST set `ctaLink` to a collection that matches its products.** A blank
    `ctaLink` silently falls back to `/collections/best-sellers`, which is why a lube rail's "See all"
    landed on best sellers on 2026-07-27. **A published rail with a blank `ctaLink` is a
@@ -507,6 +568,17 @@ Every merchandise run touches all of these, not just the hero and rails:
    first one to two rails and the trust bar, never replacing a top rail, rotated WEEKLY (not daily)
    and aligned with the social featured-brand-of-the-week series; `merch-calendar` proposes the brand
    queue. Its tiles link `/products/{slug}` like any rail, so the 70% PDP-link target holds.
+   **Rails-freshness DOD (every run).** After publishing, assert the rails slate actually moved:
+
+   ```bash
+   npx tsx scripts/rails-fingerprint.ts --baseline "$BASELINE_RAILS"
+   ```
+
+   A non-zero exit means the published rail headings are byte-identical to the start of the run — the
+   rails slot did not change. That is a FAILED run on the same footing as the See-all continuity check
+   above and the Step 2c sameness rule, unless the summary names an explicit hold reason. (The weekly
+   featured-brand rail holds for a week; the other wired rails still carry daily freshness, so the
+   fingerprint still moves every run.) Record the verdict JSON in the summary.
 3. **Wayfinder mosaic tiles** — refresh `tiles[]` (art, labels, links) every run. **At least two of
    the tiles target collections rather than individual products**: the page needs image-led entry
    doors into categories, not three deep links to single PDPs.
@@ -554,6 +626,14 @@ routine: structure and components stay Routine B.
 
 ### Tiered rotation (owner-locked cadence, replaces "refresh everything daily")
 
+- **Panel deck weekly floor (owner direction 2026-08-15).** The tiered cadence below must never
+  again let `singleton.panelDeck` fall through indefinitely (it sat untouched 2026-07-30 to
+  2026-08-15). At Step 5b, read the deck doc's `_updatedAt`. If it is more than 7 days old,
+  refreshing the deck THIS RUN is mandatory before any category deep-refresh: visibly change the
+  door tiles and/or the two large banners (art, labels, blurbs, or link targets), within the
+  usual gate, budget, and image caps. The large banners (Discover / Just landed) are
+  merchandising surfaces, not shell. Report the deck age and what changed in the run summary; a
+  deck older than 7 days at run end is a definition-of-done failure.
 - **Health sweep, every run, all live pages, $0.** The existing `/cron/homepage-healthcheck` sweeps
   every live merchandised page daily (report-only, deterministic) and posts results to the
   "Merchandised pages" panel on `/admin/homepage-team`. The routine READS those verdicts; it does

@@ -298,14 +298,17 @@ and a blocked draft is rewritten or dropped, never softened until it squeaks pas
 1. Does the post attempt a sale? Price, discount, promo code, shop CTA, or a caption pointing at a
    PDP. (This is the one that removed our first Instagram post's category of content.)
 2. Does it describe what the product does to a body? Act naming, arousal, orgasm, "you'll feel".
-3. Does the image show product on or against a body, in use or implied use, on a bed with a person,
-   or with fluid/lube texture? **A cast member holding and presenting the bare product is licensed**
-   (owner ruling 2026-08-12, recorded in `docs/store-team/instagram-campaigns.md` §3.6, which is the
-   operative rule for Instagram cast imagery). This item previously read "product in a hand" as a
-   BLOCK and carried an interim carton-only carve-out; both are superseded. What still blocks is the
-   body, the act, and the bed. `docs/ads-policy.md` has not caught up yet and still lists "in hand";
-   §3.6 says to treat itself as operative and escalate that conflict rather than silently killing a
-   frame.
+3. Does the image cross the ceiling in `docs/store-team/instagram-campaigns.md` §3.2a? That section
+   is the operative rule and it is a specification, not a ban list: a bed, a body, product against
+   skin, lubricant texture, two people touching, and implied use are all **licensed**. What blocks
+   is narrow and fixed: genitalia or nipples visible or outlined (sheer included), hands on genitals
+   over or under clothing, a depicted or discernible sex act, fluid on or near genitalia, product
+   against genitalia, and anything age-ambiguous.
+
+   Three earlier readings of this item are superseded and must not be reinstated: "product in a
+   hand" as a block, the interim carton-only carve-out, and "on a bed with a person" as a block.
+   Read §3.2a as it stands today, not as this gate historically enforced it. A REVISE for
+   insufficient charge is now as real a finding as one for excess.
 4. Does the caption, alt text, on-image text, or any hashtag carry explicit vocabulary, crude
    slang, or emoji-anatomy?
 5. Is anything in it coded to slip past a filter? Algospeak, character substitution, reclaimed

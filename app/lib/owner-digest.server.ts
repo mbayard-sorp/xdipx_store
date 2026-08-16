@@ -26,6 +26,7 @@ import { sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { getProfitReconciliation } from '~/lib/profit.server'
 import {
   computeTicketLoopHealth,
+  describeSupersededEvidence,
   reconcilePrLinkStates,
   type BlockedTicket,
   type ConflictedPr,
@@ -490,6 +491,10 @@ export function renderTicketLoopSection(h: TicketLoopHealth | null): string {
     parts.push(`<p style="margin:6px 0 2px;color:${WARN};">${h.sla.approvedCode.count} approved code ticket${h.sla.approvedCode.count === 1 ? '' : 's'} older than ${SLA_LABELS.approvedCode}${oldest ? `, oldest #${oldest.id} at ${agePhrase(oldest.ageHours)}` : ''}.</p>`)
   }
   parts.push(staleList(`proposed older than ${SLA_LABELS.proposed} (triage is not looking)`, h.sla.proposed))
+
+  if (h.supersededApproved.length) {
+    parts.push(`<p style="margin:6px 0 2px;color:${WARN};">${h.supersededApproved.length} approved code ticket${h.supersededApproved.length === 1 ? '' : 's'} flagged as likely already shipped (evidence only, not auto-dismissed &mdash; verify before R-DEV claims):</p><ul style="margin:0;padding-left:18px;">${h.supersededApproved.slice(0, 8).map(s => `<li>#${s.ticketId} &middot; ${esc(s.evidence.map(describeSupersededEvidence).join('; '))} &middot; ${esc(clip(s.suggestion, 80))}</li>`).join('')}</ul>`)
+  }
 
   if (h.sla.blocked.length) {
     const empty = h.sla.blocked.filter(b => b.emptyReason)
