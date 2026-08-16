@@ -783,6 +783,38 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/main-ci-watch
+   * Schedule: every 10 minutes. Emails the owner when main's `check` run is
+   * red, produced no verdict, or never happened at all.
+   *
+   * Deliberately NOT part of /cron/release-engine, despite the identical
+   * cadence and the engine already owning an escalate() helper. The engine is
+   * behind `release_engine_enabled`, and an alarm must not share a kill switch
+   * with the thing it watches: pausing automation is exactly when a broken main
+   * most needs to be shouted about. See the module header for the full argument.
+   *
+   * `?dryRun=1` (or `dry=1`) decides and logs without sending mail.
+   *
+   * Always 200 on a completed pass, including a red main: the alert IS the
+   * outcome, and a 503 would make Vercel's cron monitoring page for a condition
+   * that has already been reported through the channel that matters. 503 is
+   * reserved for the watcher itself being unable to reach a decision.
+   */
+  cronRoute('/main-ci-watch', async (req, res) => {
+    try {
+      const q = req.query as Record<string, unknown>
+      const flag = (v: unknown) => v === '1' || v === 'true'
+      const dryRun = flag(q['dryRun']) || flag(q['dry'])
+      const { runMainCiWatch } = await import('../app/lib/main-ci-watch.server.js')
+      const result = await runMainCiWatch({ dryRun })
+      res.status(result.ok ? 200 : 503).json(result)
+    } catch (err) {
+      console.error('[cron:main-ci-watch]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/checkout-probe-report
    * Ingests the browser-tier Playwright result (a ProbeResult JSON body) from
    * the GitHub Action and records + alerts through the same path as the HTTP
