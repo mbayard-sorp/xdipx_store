@@ -13,6 +13,10 @@ docs/store-team/outreach-prospects.md      (owner-vetted target list)
         |  scripts/seed-outreach-prospects.ts (idempotent upsert, status 'new')
         v
 outreach_prospects  <----  POST /api/team/outreach   (team-token auth)
+        ^                  ops: upsert-prospect | list | queue | send
+        |
+        +----------------  /admin/outreach            (admin session)
+                             the owner's read -> edit -> send surface
         |                    ops: upsert-prospect | list | queue | send
         |  'queue' marks a prospect sendable
         v
@@ -36,6 +40,37 @@ replied_negative | bounced`, plus hand-set `on_hold`, `landed`, `rejected`. Only
 `queued` prospect can be sent to; only `new`, `researching`, `on_hold` (and `queued`
 itself) can be queued via the API, so a replied or rejected row is never re-entered
 by an agent.
+
+## The approval UI (/admin/outreach)
+
+Added 2026-08-16. Before it, every part of this pipeline was reachable only by curl
+against `/api/team/outreach` with a team token, so drafted pitches sat in suggestion
+rows nobody could act on. The page is the owner's whole surface:
+
+- **Sending card** — the `outreach_send_enabled` valve and `outreach_daily_send_cap`,
+  with today's count. Both writes go through `setPipelineSettingAudited`, so a flip
+  from this page is attributable in `settings_audit_log` like any other valve change.
+- **Prospect table** — every row with status, contact, when the last pitch went out
+  (the 7-day quiet period at a glance), and how many replies are on file.
+- **Prospect detail** — the linked pitch draft, the full thread in both directions with
+  the poller's classification, Queue, the hand-set statuses (`on_hold`, `landed`,
+  `rejected`), and a contact-email field for rows the scout left incomplete.
+- **Composer** — subject and plain-text body, seeded from the pitch draft, showing the
+  identification footer that will be appended. Send calls the same
+  `sendOutreachEmail()` the API calls, so the valve, cap, queued status, contact
+  address, and dedupe window all still apply. When one of them would block, the page
+  says which and disables the button instead of failing after the click.
+- **Drafted pitches, not yet in the pipeline** — open `OFFSITE PITCH` suggestion rows
+  with no prospect to send from. On 2026-08-16 that was nine of them: the prospects
+  table had been seeded from the vetted doc while the scout filed its drafts as
+  suggestions, and the two sets did not share a single domain. Adopt files the prospect
+  (status `new`, linked back to the suggestion) with the domain, outlet name, and
+  contact guessed from the draft and editable before saving.
+
+What the page deliberately cannot do: set `sent`, `replied_positive`, or
+`replied_negative` by hand (those are consequences of the wire, not opinions), send to
+a prospect that is not queued, or bypass any guard. Seeding never invents copy — a
+draft with no subject line yields an empty subject field rather than a generated one.
 
 ## Support-inbox safety (read this before touching the poller)
 
@@ -99,9 +134,11 @@ are stored without a status change.
 4. Seed the vetted targets: `DATABASE_URL=<prod> npx tsx scripts/seed-outreach-prospects.ts`.
 5. Watch one cron cycle of `/cron/outreach-inbox` (it should report `skipped:
    'outreach not armed'`).
-6. Flip `outreach_send_enabled` to `true` (audited write). Keep the cap at 5 or lower.
-7. Queue one prospect, send one pitch via the API, and verify the outreach_messages row,
-   the Message-ID, and the received email before letting the routine drive it.
+6. Flip `outreach_send_enabled` to `true` from the Sending card on `/admin/outreach`
+   (audited write). Keep the cap at 5 or lower.
+7. On `/admin/outreach`: adopt one drafted pitch, queue it, read the seeded copy, and
+   send it. Then verify the outreach_messages row, the Message-ID, and the received
+   email before letting the routine drive it.
 
 ## Kill switch
 
