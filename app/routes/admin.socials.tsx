@@ -33,6 +33,7 @@ import { FrequencyPanel } from '~/components/admin/social/FrequencyPanel'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
 import { isVideoPost, type SocialPostRow } from '~/components/admin/social/types'
 import type { PublishMedia } from '~/lib/social-publish/types'
+import { decideManualPublish } from '~/lib/social-publish/manual-publish-gate.server'
 
 export const meta: MetaFunction = () => [{ title: 'Social Studio — xdipx Admin' }]
 
@@ -212,17 +213,22 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!post || post.status !== 'draft' || post.reviewStatus !== 'approved') {
       return { ok: false, error: 'Post must be an approved draft' }
     }
-    const valveOn = await getValve(VALVE_KEYS.videoAutopublish)
-    if (!valveOn) {
-      return { ok: false, stub: true, error: 'Autopublish valve is OFF (Homepage Team > Video tab). Copy the caption and download the media to post manually.' }
-    }
-    const { getPublisher } = await import('~/lib/social-publish/registry.server')
-    const publisher = getPublisher(post.platform)
-    if (!publisher) return { ok: false, stub: true, error: `No publisher for ${post.platform}` }
     const mediaUrls = post.mediaUrls ?? []
     const mediaUrl = mediaUrls[0]
     if (!mediaUrl) return { ok: false, error: 'Draft has no media URL' }
     const isVideo = post.videoJobId != null || !!mediaUrl.split('?')[0]?.endsWith('.mp4')
+    // The manual Post-now path enforces the same two refusals as the scheduled
+    // job: a publish-gate PASS stamp must exist (owner approval alone is not a
+    // licence to publish), and the surface's autopublish valve must be on — the
+    // Instagram kill switch for stills, the video team's valve for video. See
+    // manual-publish-gate.server.ts (ticket #3674, incident #3640).
+    const gate = await decideManualPublish({ feedback: post.feedback, isVideo }, getValve)
+    if (!gate.ok) {
+      return gate.stub ? { ok: false, stub: true, error: gate.error } : { ok: false, error: gate.error }
+    }
+    const { getPublisher } = await import('~/lib/social-publish/registry.server')
+    const publisher = getPublisher(post.platform)
+    if (!publisher) return { ok: false, stub: true, error: `No publisher for ${post.platform}` }
     // A still draft carrying more than one media URL publishes as a carousel;
     // a single still or any video keeps the existing single-container path.
     const media: PublishMedia = isVideo
