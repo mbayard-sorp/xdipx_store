@@ -91,6 +91,10 @@ function savings(p: DiscoveryProduct): number {
  * Deterministic "best of" ordering used for the Feel-agnostic tiers: products
  * with imagery first (the result cards are the payoff), then bigger savings,
  * then the cheaper entry point, then a stable tie-break by handle.
+ *
+ * Note the handle tie-break CLUSTERS size variants that a feed imports as
+ * separate products (same brand, near-identical handles), which is why the
+ * result set is de-duplicated with `collapseVariants` before it is sliced.
  */
 function qualityCompare(a: DiscoveryProduct, b: DiscoveryProduct): number {
   const ai = a.imageUrl ? 0 : 1
@@ -100,6 +104,72 @@ function qualityCompare(a: DiscoveryProduct, b: DiscoveryProduct): number {
   if (s !== 0) return s
   if (a.price !== b.price) return a.price - b.price
   return a.handle.localeCompare(b.handle)
+}
+
+/** Below this price a product reads as an accessible entry point. */
+const ENTRY_PRICE_MAX = 30
+
+/**
+ * Strip a trailing size/variant descriptor so the size variants a feed imports
+ * as separate products (same brand, titles differing only by size) collapse to
+ * one card. Deliberately conservative: it only removes a recognized size token
+ * sitting at the very end, so a genuine name that happens to end in a real word
+ * (e.g. "Jelle Plus", "System JO") is left intact.
+ */
+function titleStem(title: string): string {
+  // Unambiguous size words, optionally introduced by a separator or "size".
+  const sizeWord =
+    /\s*[-–,/|(]?\s*(?:size\s*)?(?:x-?small|xx-?small|x-?large|xx-?large|small|medium|large|xs|xl|xxl|xxxl|[2-5]xl)\)?\s*$/i
+  // Short/ambiguous tokens (single letters, o/s, petite) only when a separator
+  // clearly introduces them, so a name merely ending in "s"/"m"/"l" is kept.
+  const sizeDelim = /\s*[-–,/|(]\s*(?:size\s*)?(?:s|m|l|o\/?s|petite)\)?\s*$/i
+  let t = title.toLowerCase().trim()
+  let prev = ''
+  while (t !== prev) {
+    prev = t
+    t = t.replace(sizeWord, '').replace(sizeDelim, '').trim()
+  }
+  t = t.replace(/[\s\-–,/|(]+$/, '').trim()
+  return t || title.toLowerCase().trim()
+}
+
+/** Cluster key for near-identical products: same brand + same title stem. */
+function variantKey(p: DiscoveryProduct): string {
+  return `${p.brand ?? ''}|${titleStem(p.title)}`
+}
+
+/**
+ * Collapse near-identical products (same brand + title stem) to a single card,
+ * keeping the best-ranked one. Input must already be sorted best-first so the
+ * survivor is the strongest of each cluster. Stable; preserves input order.
+ */
+function collapseVariants(sorted: readonly DiscoveryProduct[]): DiscoveryProduct[] {
+  const seen = new Set<string>()
+  const out: DiscoveryProduct[] = []
+  for (const p of sorted) {
+    const k = variantKey(p)
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(p)
+  }
+  return out
+}
+
+/**
+ * Take the top `count` of an already-collapsed, best-first list, guaranteeing at
+ * least one accessible entry-price (< $30) card when the pool holds one worth
+ * showing. An entry-price item still needs an image to be a real card, so an
+ * image-less bargain is not promoted (that would regress the imagery-first
+ * ordering). When the top slice is all pricier, its weakest slot is swapped for
+ * the best-ranked qualifying entry-price item.
+ */
+function withEntryPrice(collapsed: readonly DiscoveryProduct[], count: number): DiscoveryProduct[] {
+  const top = collapsed.slice(0, count)
+  if (top.length < count) return top
+  if (top.some(p => p.price < ENTRY_PRICE_MAX)) return top
+  const entry = collapsed.find(p => p.price < ENTRY_PRICE_MAX && p.imageUrl)
+  if (!entry || top.includes(entry)) return top
+  return [...top.slice(0, count - 1), entry]
 }
 
 /**
@@ -175,16 +245,20 @@ export function matchSensationMap(
 ): SensationMatch {
   const ofType = index.filter(p => p.productTypeDial === state.type)
 
-  // Tier 1 — exact: Type + Feel-mood overlap, best overlap first.
+  // Tier 1 — exact: Type + Feel-mood overlap, best overlap first. Size variants
+  // are collapsed, so the tier only holds when >= MIN_RESULTS *distinct*
+  // products fit; otherwise it relaxes rather than showing one product thrice.
   if (state.feel) {
     const scoreState = { ...EMPTY_STATE, mood: [state.feel] }
     const scored = ofType
       .map(p => ({ p, s: scoreProduct(p, scoreState) }))
       .filter(x => x.s > 0)
       .sort((a, b) => b.s - a.s || qualityCompare(a.p, b.p))
-    if (scored.length >= MIN_RESULTS) {
+      .map(x => x.p)
+    const collapsed = collapseVariants(scored)
+    if (collapsed.length >= MIN_RESULTS) {
       return {
-        items: scored.slice(0, count).map(x => x.p),
+        items: withEntryPrice(collapsed, count),
         relaxed: false,
         relaxedReason: null,
         resolved: state,
@@ -192,10 +266,11 @@ export function matchSensationMap(
     }
   }
 
-  // Tier 2 — relax Feel: best of this Type.
-  if (ofType.length >= MIN_RESULTS) {
+  // Tier 2 — relax Feel: best of this Type (distinct products).
+  const ofTypeRanked = collapseVariants([...ofType].sort(qualityCompare))
+  if (ofTypeRanked.length >= MIN_RESULTS) {
     return {
-      items: [...ofType].sort(qualityCompare).slice(0, count),
+      items: withEntryPrice(ofTypeRanked, count),
       relaxed: !!state.feel, // dropping "any feel" is not a relaxation
       relaxedReason: state.feel ? 'Closest fit' : null,
       resolved: { type: state.type, feel: null },
@@ -208,7 +283,7 @@ export function matchSensationMap(
   const pool = index.filter(p => p.productTypeDial === fallbackType)
   const source = pool.length ? pool : [...index]
   return {
-    items: [...source].sort(qualityCompare).slice(0, count),
+    items: withEntryPrice(collapseVariants([...source].sort(qualityCompare)), count),
     relaxed: true,
     relaxedReason: 'Closest fit',
     resolved: { type: fallbackType, feel: null },
