@@ -312,7 +312,10 @@ The orchestrator (with `homepage-cro` as the pick gate) then scores the candidat
 - **Margin:** `msrp` minus `wholesale_cost`, per unit. **Nothing ships with unknown margin**: if
   `wholesale_cost` is missing for a candidate, swap it out or resolve the cost first.
 - **Price-point spread:** the featured set spans price points across the rails, and there is
-  **always one entry rail under $30**.
+  **always one entry rail under $30**. **Rail depth floor (owner direction 2026-08-15): every
+  wired rail carries at least 4 products, and the under-$30 entry rail at least 6.** The
+  under-30 collection holds 20+ SKUs at all times; a 3-card rail next to an 8-card anchor grid
+  reads broken and shipped live for two weeks before the owner flagged it.
 - **`deal_score`:** from the feed-processor scoring, as a tiebreaker within brand-fit picks.
 - **Stock depth:** enough inventory to sell for the whole placement window; thin stock loses to a
   comparable pick with depth.
@@ -479,6 +482,9 @@ Every merchandise run touches all of these, not just the hero and rails:
    pick (bare handle, verify it resolves 200).
 2. **Curated rails** — create/refresh `emmaCuratedRail` docs (Emma heading/eyebrow/aside + valid
    Shopify handles, verify each resolves 200) and wire 2–4 into `singleton.homepage.sections`.
+   **Depth floor (owner direction 2026-08-15): at least 4 products per wired rail, at least 6 in
+   the under-$30 entry rail.** `getProductsByHandles` silently drops handles that stop resolving,
+   so verify the RESOLVED count, not the authored count, meets the floor.
    **Every published rail MUST set `ctaLink` to a collection that matches its products.** A blank
    `ctaLink` silently falls back to `/collections/best-sellers`, which is why a lube rail's "See all"
    landed on best sellers on 2026-07-27. **A published rail with a blank `ctaLink` is a
@@ -554,6 +560,14 @@ routine: structure and components stay Routine B.
 
 ### Tiered rotation (owner-locked cadence, replaces "refresh everything daily")
 
+- **Panel deck weekly floor (owner direction 2026-08-15).** The tiered cadence below must never
+  again let `singleton.panelDeck` fall through indefinitely (it sat untouched 2026-07-30 to
+  2026-08-15). At Step 5b, read the deck doc's `_updatedAt`. If it is more than 7 days old,
+  refreshing the deck THIS RUN is mandatory before any category deep-refresh: visibly change the
+  door tiles and/or the two large banners (art, labels, blurbs, or link targets), within the
+  usual gate, budget, and image caps. The large banners (Discover / Just landed) are
+  merchandising surfaces, not shell. Report the deck age and what changed in the run summary; a
+  deck older than 7 days at run end is a definition-of-done failure.
 - **Health sweep, every run, all live pages, $0.** The existing `/cron/homepage-healthcheck` sweeps
   every live merchandised page daily (report-only, deterministic) and posts results to the
   "Merchandised pages" panel on `/admin/homepage-team`. The routine READS those verdicts; it does
