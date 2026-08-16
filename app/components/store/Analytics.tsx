@@ -7,6 +7,7 @@ import {
   updateConsent,
   setUserProperties,
 } from '~/lib/analytics.client'
+import { buildPageLocation } from '~/lib/ga4-page-location'
 import { useSession } from '~/lib/session-context'
 
 const CONSENT_KEY = 'xdipx_consent'
@@ -50,7 +51,7 @@ export function Analytics({ ga4Id }: AnalyticsProps) {
         // Consent flipped denied → granted: re-fire page_view for current path,
         // since the initial page_view was dropped while consent was denied.
         if (granted && wasDenied) {
-          trackPageView(location.pathname + location.search)
+          trackPageView(buildPageLocation(window.location.origin, location.pathname, location.search))
         }
       } catch { /* ignore */ }
     }
@@ -64,7 +65,7 @@ export function Analytics({ ga4Id }: AnalyticsProps) {
     const path = location.pathname + location.search
     if (path !== prevPath.current) {
       prevPath.current = path
-      trackPageView(path)
+      trackPageView(buildPageLocation(window.location.origin, location.pathname, location.search))
     }
   }, [ga4Id, location.pathname, location.search])
 

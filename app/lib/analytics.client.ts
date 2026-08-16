@@ -82,9 +82,19 @@ export function updateConsent(granted: boolean) {
 
 // ─── Page views ───────────────────────────────────────────────────────────────
 
-export function trackPageView(path: string, title?: string) {
+/**
+ * GA4's page_view uses `page_location` (the absolute URL) and `page_title`.
+ * `page_path` is a Universal Analytics field name (UA was sunset 2023-07-01)
+ * that gtag.js/GA4 does not read, so sending it left GA4 to fall back to
+ * whatever internal page_location it already had, corrupting the recorded
+ * landing URL and making campaign query params unparseable.
+ *
+ * `url` must be the full absolute URL (build it with buildPageLocation from
+ * the current origin/pathname/search) — never a bare path.
+ */
+export function trackPageView(url: string, title?: string) {
   gtag('event', 'page_view', {
-    page_path: path,
+    page_location: url,
     page_title: title ?? document.title,
   })
 }
