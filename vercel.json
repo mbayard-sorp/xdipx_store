@@ -119,6 +119,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/cron/main-ci-watch",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/cron/outreach-inbox",
       "schedule": "*/30 * * * *"
     },
