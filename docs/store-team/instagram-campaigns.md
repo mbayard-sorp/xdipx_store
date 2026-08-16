@@ -136,15 +136,56 @@ What is licensed: everyday and elevated loungewear, a shirt, a knit, a slip dres
 bralette worn as the visible garment, in the relaxed at-home register the cast references already
 establish.
 
-**What does not move, and is not what this ruling was about:**
+### 3.2a The ceiling (owner ruling 2026-08-16)
 
-- No nudity. No exposed nipples or genitalia, nothing sheer that renders either visible. The design
-  doctrine's hard limit still binds: nothing a premium lingerie campaign could not run.
-- The product is never on or against a body, and never in use or implied use. A hand holding it is
-  the licensed shape (§3.6). Wardrobe latitude does not buy body latitude, and the two together are
-  what a platform reviewer reads as a different kind of post.
-- No bed with a person in it, no fluid or lubricant texture.
-- Cast reactions stay performance, never testimony.
+Owner direction, verbatim: *"I want to make sure we are at the limit of what we can produce that is
+sexually charged for posts. This is for marketing, it's not making pornography, that is not the goal.
+This is to inspire better sexual wellness and exploration."*
+
+This section replaces a stack of prohibitions that were written conservatively, one at a time, and
+that together produced the failure the owner named three times: boring frames. It is deliberately a
+**specification rather than a list of bans**, because "be sexier" is not executable and a brief that
+cannot be executed produces the timid frame every time.
+
+**Licensed at the ceiling:**
+
+- **Wardrobe and skin.** Lingerie as the visible garment. Bare back, stomach, legs, shoulders,
+  cleavage. Fabric is opaque.
+- **Beds and posture.** On or in a bed. Arched, prone, tangled in sheets, gripping fabric. Aftermath
+  and anticipation are both licensed: the quiet after, the reach toward, the unopened box.
+- **Product against a body.** The product may touch or rest on skin: collarbone, sternum, stomach,
+  thigh, hip, the inside of a wrist. This is the single biggest unlock in this ruling and it is where
+  the tactile charge actually lives.
+- **Lubricant texture.** On hands, on fingers, stretched between them, beading on silicone.
+- **Two people.** Both in frame, touching. Hands on waist, hip, thigh, back, face.
+- **Expression.** Eyes closed, head back, parted lips. Arousal reads on a face at zero policy cost
+  and it is the cheapest charge available to us. We have never once used it.
+- **Implication.** Use may be implied by context, framing and caption. Occlusion under a sheet is
+  licensed **when the occluded shape is the product**.
+
+**The ceiling stops here, and these do not move:**
+
+- Genitalia or nipples visible or outlined, sheer fabric included.
+- Hands on genitals, over or under clothing.
+- A depicted or discernible sex act.
+- Fluid on or near genitalia.
+- Product against genitalia.
+- Anything age-ambiguous. Judged on ambiguity, not intent.
+- Anything built to defeat a classifier. Evasion risks the account, not the post.
+
+Cast reactions stay performance, never testimony: the register got hotter, the no-lived-experience
+rule did not move.
+
+### 3.2b The ceiling is a target for the set, not for every frame
+
+Owner-agreed 2026-08-16, and it is a **merchandising rule before it is a safety one**. A feed that is
+all ceiling has no ceiling. Contrast is what stops a thumb, the charged frame lands hardest beside a
+restrained one, and fourteen maximally charged tiles read as a porn account to a human and to a
+reviewer alike, which is the reading that gets an account actioned rather than a post.
+
+Per 7-post arc: **roughly 2 at the ceiling, 3 mid, 2 educational.** Same aggregate charge, sharper
+peaks, and one bad classifier day costs a post instead of the channel. Do not round every frame up.
+Decide which two are the ceiling frames when the campaign's key art is planned (§3.4), not on the day.
 
 **State the garment in every prompt regardless.** Not a restriction, a fidelity rule: the model
 inherits the reference photo's neckline when you leave it unsaid, so an unstated wardrobe is an
@@ -328,14 +369,13 @@ direction that does not reach the binding document has not landed.
   presenter's hand. That was never about the hand rule; it is the no-text-in-pixels rule, and it
   still binds.
 
-**One conflict remains open and is not resolved by this section.** `docs/ads-policy.md` §Organic
-social still lists "no product in hand or on a body" as an Instagram hard limit. That line is this
-store's own conservative fence rather than a quotation of Meta policy, which removes for *commerce*
-and for explicit content; brands in this category routinely show product in hand. But `ads-policy.md`
-sits outside this file's authority and outside the `agent-editor` allowlist, so it needs its own
-change. Until it is amended, a gate reading both documents will find them in conflict. **This
-section is the operative one for Instagram cast imagery**, and a gate that blocks on the ads-policy
-line alone should say so and escalate rather than silently kill the frame.
+**That conflict is now closed.** `docs/ads-policy.md` §Organic social carried "no product in hand or
+on a body" as an Instagram hard limit for four days after the 2026-08-12 hand ruling contradicted it,
+and the pre-publish gate had to reason around the contradiction on every run (it did so explicitly on
+the PASS that shipped post 47). The line was withdrawn by owner ruling 2026-08-16 and that row now
+points at §3.2a, which is the single operative rule for Instagram imagery. Product in hand and
+product against skin are both licensed; the fence moved to genitalia, hands on genitals, and
+depicted acts.
 
 ## 4. Cadence and continuity
 
