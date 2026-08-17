@@ -134,9 +134,15 @@ export interface PublishTickDeps {
   maxSpendUsd?: () => Promise<number>
   /** Daily publish ceiling, independent of the drafting quota. */
   maxPerDay: () => Promise<number>
-  /** Publishes one post. Returns the external id on success. */
+  /**
+   * Publishes one post. Returns the external id on success, and an optional
+   * `note` when the publish succeeded but with a caveat worth recording (e.g.
+   * an Instagram post that published untagged because its product was not
+   * approved for tagging, #3744). The note is attached to the `published`
+   * attempt so it survives into the tick report, not just a console line.
+   */
   publish: (post: typeof socialPosts.$inferSelect) => Promise<
-    { ok: true; externalPostId: string } | { ok: false; detail: string }
+    { ok: true; externalPostId: string; note?: string } | { ok: false; detail: string }
   >
   /**
    * Resolves the featured product handle for a post, when it has one.
@@ -483,7 +489,7 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       // counting at claim time would shrink the month's budget for posts that
       // never reached X.
       spentThisTick += cost
-      attempts.push({ postId: post.id, outcome: 'published' })
+      attempts.push({ postId: post.id, outcome: 'published', ...(result.note ? { detail: result.note } : {}) })
       continue
     }
 

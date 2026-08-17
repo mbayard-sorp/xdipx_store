@@ -90,8 +90,12 @@ async function publishViaRegistry(post: PostRow) {
     productTagHandle: parseGateStamp(post.feedback)?.productHandle ?? null,
   })
   if (out.ok && out.note) console.warn(`[social-publish] post ${post.id}: ${out.note}`)
+  // Thread the adapter's note (e.g. "published untagged: product not approved
+  // for tagging") back through the return so it reaches the tick report, not
+  // only the Vercel console (#3744). An untagged-with-reason publish must be
+  // distinguishable from a normal tagged one in the run event.
   return out.ok
-    ? { ok: true as const, externalPostId: out.externalPostId }
+    ? { ok: true as const, externalPostId: out.externalPostId, ...(out.note ? { note: out.note } : {}) }
     : { ok: false as const, detail: out.detail ?? out.reason ?? 'Publish failed' }
 }
 
