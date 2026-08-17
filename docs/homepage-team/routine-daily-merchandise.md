@@ -272,15 +272,17 @@ never licenses shipping yesterday's page again.
 
 **Mechanical merch-freshness gate (capture now, assert at publish).** The rails slot is the one that
 kept going byte-identical (#2080, #3186, #3198), and #3531 extended the same verifier to the panel
-deck and the hero pin. Capture the per-slot fingerprints before you touch anything:
+deck, the hero pin, and the couples band (sameness:hero #3225, sameness:couples #3228). Capture the
+per-slot fingerprints before you touch anything:
 
 ```bash
-BASELINE_MERCH=$(npx tsx scripts/rails-fingerprint.ts)   # JSON: {"rails":…,"deck":…,"hero":…}
+BASELINE_MERCH=$(npx tsx scripts/rails-fingerprint.ts)   # JSON: {"rails":…,"deck":…,"hero":…,"couples":…}
 ```
 
 `rails` covers wired rail keys + headings + resolved handle lists (a product swap inside a rail
 counts as a change), `deck` covers the panelDeck publish stamp + tile labels/links, `hero` covers
-the pinned handle + headline. Hold `$BASELINE_MERCH` for the Step 5 DOD check below.
+the pinned handle + headline, `couples` covers the playTogetherBanner image + copy + handles. Hold
+`$BASELINE_MERCH` for the Step 5 DOD check below.
 
 ## Step 2d — Inbound suggestions (read your own mail)
 
@@ -584,9 +586,11 @@ Every merchandise run touches all of these, not just the hero and rails:
    npx tsx scripts/rails-fingerprint.ts --baseline "$BASELINE_MERCH" --assert-changed rails
    ```
 
-   Pass `--assert-changed rails,hero` on any run whose plan changes the hero pin, and add `deck`
-   only on the panel deck's scheduled refresh (it runs a 7-day floor per the mission brief — do not
-   make it must-change daily). A non-zero exit lists every byte-identical must-change slot — the run
+   Add to the `--assert-changed` list every slot the day's plan changes: `rails,hero` on a hero
+   re-pin, `rails,hero,couples` when the couples band refreshes (Step 5 says it refreshes every
+   run, so that is the normal invocation), and add `deck` only on the panel deck's scheduled
+   refresh (it runs a 7-day floor per the mission brief — do not make it must-change daily). A
+   non-zero exit lists every byte-identical must-change slot — the run
    cannot report done with an unchanged must-change slot. That is a FAILED run on the same footing
    as the See-all continuity check above and the Step 2c sameness rule, unless the summary names an
    explicit hold reason. (The weekly featured-brand rail holds for a week; the other wired rails

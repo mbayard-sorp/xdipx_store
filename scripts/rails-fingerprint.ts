@@ -38,6 +38,8 @@
  *   deck  — singleton.panelDeck _updatedAt + every tile label>destination.
  *   hero  — singleton.emmaHeroStorefront featuredProductHandle + the merged
  *           hero headline.
+ *   couples — the active playTogetherBanner's image ref + heading/body copy +
+ *           resolved handle list (sameness:couples #3228).
  *
  * Exit codes:
  *   0 — printed the fingerprints, or every must-change slot changed
@@ -51,6 +53,7 @@ import {
   MERCH_SLOTS,
   type MerchSlot,
   type MerchSlotFingerprints,
+  couplesSlotFingerprint,
   deckSlotFingerprint,
   evaluateMerchFreshness,
   evaluateRailsFreshness,
@@ -114,6 +117,14 @@ interface HeroRaw {
   cta?: { featuredProductHandle?: string | null } | null
 }
 
+interface CouplesRaw {
+  imageRef?: string | null
+  heading?: string | null
+  body?: string | null
+  active?: boolean | null
+  productHandles?: ProductHandleEntry[] | null
+}
+
 interface SlotReads {
   fingerprints: MerchSlotFingerprints
   /** Legacy headings-joined rails string, for pre-#3531 plain-string baselines. */
@@ -132,6 +143,7 @@ async function readPublishedSlots(): Promise<SlotReads> {
     rails: RailRow[] | null
     deck: DeckRaw | null
     hero: HeroRaw | null
+    couples: CouplesRaw | null
   }>(`{
     "rails": *[_id == "singleton.homepage"][0].sections[_type == "emmaCuratedRailRef"]{
       "key": _key,
@@ -153,6 +165,13 @@ async function readPublishedSlots(): Promise<SlotReads> {
     "hero": {
       "settings": *[_id == "singleton.emmaHero"][0]{ headline },
       "cta": *[_id == "singleton.emmaHeroStorefront"][0]{ featuredProductHandle }
+    },
+    "couples": *[_id == "singleton.homepage"][0].sections[_type == "playTogetherBanner" && active == true][0]{
+      "imageRef": image.asset._ref,
+      heading,
+      body,
+      active,
+      productHandles
     }
   }`)
 
@@ -187,6 +206,16 @@ async function readPublishedSlots(): Promise<SlotReads> {
       hero: heroSlotFingerprint(
         raw.hero?.cta?.featuredProductHandle ?? null,
         raw.hero?.settings?.headline ?? null,
+      ),
+      couples: couplesSlotFingerprint(
+        raw.couples
+          ? {
+              imageRef: raw.couples.imageRef ?? null,
+              heading: raw.couples.heading ?? null,
+              body: raw.couples.body ?? null,
+              handles: normalizeProductHandles(raw.couples.productHandles),
+            }
+          : null,
       ),
     },
     railsLegacy: railsSlateFingerprint(railInputs.map((r) => r.heading)),
@@ -224,7 +253,7 @@ async function main(): Promise<number> {
     process.stdout.write(`${JSON.stringify(fingerprints)}\n`)
     process.stderr.write(
       `captured merch fingerprints (${railCount} wired rail(s); deck ${fingerprints.deck ? 'published' : 'absent'}; ` +
-        `hero ${fingerprints.hero ? 'set' : 'unset'})\n`,
+        `hero ${fingerprints.hero ? 'set' : 'unset'}; couples ${fingerprints.couples ? 'active' : 'absent'})\n`,
     )
     return 0
   }

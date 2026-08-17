@@ -6,6 +6,7 @@ import {
   railsSlotFingerprint,
   deckSlotFingerprint,
   heroSlotFingerprint,
+  couplesSlotFingerprint,
   evaluateMerchFreshness,
   parseMustChangeSlots,
 } from './rails-freshness'
@@ -113,28 +114,47 @@ describe('heroSlotFingerprint', () => {
   })
 })
 
+describe('couplesSlotFingerprint', () => {
+  it('is empty when no active couples band is published', () => {
+    expect(couplesSlotFingerprint(null)).toBe('')
+  })
+
+  it('moves on an image swap, a copy change, and a handle change', () => {
+    const base = { imageRef: 'image-1', heading: 'Play together', body: 'B', handles: ['a', 'b'] }
+    const a = couplesSlotFingerprint(base)
+    expect(a).not.toBe(couplesSlotFingerprint({ ...base, imageRef: 'image-2' }))
+    expect(a).not.toBe(couplesSlotFingerprint({ ...base, body: 'C' }))
+    expect(a).not.toBe(couplesSlotFingerprint({ ...base, handles: ['a', 'c'] }))
+  })
+})
+
 describe('evaluateMerchFreshness', () => {
-  const base = { rails: 'r1', deck: 'd1', hero: 'h1' }
+  const base = { rails: 'r1', deck: 'd1', hero: 'h1', couples: 'c1' }
 
   it('fails listing exactly the byte-identical must-change slots', () => {
-    const v = evaluateMerchFreshness(base, { rails: 'r1', deck: 'd1', hero: 'h2' }, ['rails', 'hero'])
+    const v = evaluateMerchFreshness(base, { rails: 'r1', deck: 'd1', hero: 'h2', couples: 'c1' }, ['rails', 'hero', 'couples'])
     expect(v.ok).toBe(false)
-    expect(v.stale).toEqual(['rails'])
+    expect(v.stale).toEqual(['rails', 'couples'])
   })
 
   it('passes when every must-change slot moved, even if advisory slots did not', () => {
-    const v = evaluateMerchFreshness(base, { rails: 'r2', deck: 'd1', hero: 'h1' }, ['rails'])
+    const v = evaluateMerchFreshness(base, { rails: 'r2', deck: 'd1', hero: 'h1', couples: 'c1' }, ['rails'])
     expect(v.ok).toBe(true)
     expect(v.perSlot.deck.fresh).toBe(false)
+    expect(v.perSlot.couples.fresh).toBe(false)
   })
 
   it('treats a missing baseline slot as fresh (first-run rule per slot)', () => {
-    const v = evaluateMerchFreshness({ rails: 'r1' }, { rails: 'r2', deck: 'd1', hero: 'h1' }, ['rails', 'deck', 'hero'])
+    const v = evaluateMerchFreshness(
+      { rails: 'r1' },
+      { rails: 'r2', deck: 'd1', hero: 'h1', couples: 'c1' },
+      ['rails', 'deck', 'hero', 'couples'],
+    )
     expect(v.ok).toBe(true)
   })
 
   it('an empty current must-change slot is stale (a run that unpublished the slot did not refresh it)', () => {
-    const v = evaluateMerchFreshness(base, { rails: '', deck: 'd2', hero: 'h2' }, ['rails'])
+    const v = evaluateMerchFreshness(base, { rails: '', deck: 'd2', hero: 'h2', couples: 'c2' }, ['rails'])
     expect(v.ok).toBe(false)
     expect(v.stale).toEqual(['rails'])
   })
@@ -148,6 +168,7 @@ describe('parseMustChangeSlots', () => {
 
   it('parses a comma list', () => {
     expect(parseMustChangeSlots('rails, hero')).toEqual(['rails', 'hero'])
+    expect(parseMustChangeSlots('rails,couples')).toEqual(['rails', 'couples'])
   })
 
   it('throws on an unknown slot', () => {

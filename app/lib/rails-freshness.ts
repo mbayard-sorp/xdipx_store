@@ -72,13 +72,14 @@ export function evaluateRailsFreshness(previous: string | null, current: string)
  * Multi-slot merchandising fingerprints (ticket #3531).
  *
  * The rails-only gate above caught the recurring `sameness:rails` miss, but a
- * run can just as silently no-op the panel deck or the hero pin. These helpers
- * extend the same capture-then-assert contract to the three merchandised slots
- * the daily run owns. Still pure and dependency-free: the Sanity reads live in
+ * run can just as silently no-op the panel deck, the hero pin, or the couples
+ * band (sameness:hero #3225, sameness:couples #3228). These helpers extend the
+ * same capture-then-assert contract to the four merchandised slots the daily
+ * run owns. Still pure and dependency-free: the Sanity reads live in
  * scripts/rails-fingerprint.ts, these only compare strings.
  * ──────────────────────────────────────────────────────────────────────────── */
 
-export const MERCH_SLOTS = ['rails', 'deck', 'hero'] as const
+export const MERCH_SLOTS = ['rails', 'deck', 'hero', 'couples'] as const
 export type MerchSlot = (typeof MERCH_SLOTS)[number]
 
 /** One stable string per merchandised homepage slot. */
@@ -89,6 +90,8 @@ export interface MerchSlotFingerprints {
   deck: string
   /** Pinned featured product handle + hero headline. */
   hero: string
+  /** Couples band (playTogetherBanner): image ref + copy + resolved handles. */
+  couples: string
 }
 
 /** A rail as the fingerprint sees it: ref key, heading, resolved handles. */
@@ -127,6 +130,22 @@ export function deckSlotFingerprint(
 export function heroSlotFingerprint(featuredProductHandle: string | null, headline: string | null): string {
   if (!featuredProductHandle && !headline) return ''
   return `${(featuredProductHandle ?? '').trim()}#${(headline ?? '').trim()}`
+}
+
+/** Couples band (playTogetherBanner) fingerprint: image + copy + handles. */
+export function couplesSlotFingerprint(banner: {
+  imageRef: string | null
+  heading: string | null
+  body: string | null
+  handles: readonly string[]
+} | null): string {
+  if (banner === null) return ''
+  return [
+    (banner.imageRef ?? '').trim(),
+    (banner.heading ?? '').trim(),
+    (banner.body ?? '').trim(),
+    banner.handles.join(','),
+  ].join('#')
 }
 
 export interface MerchFreshnessVerdict {
