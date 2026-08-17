@@ -5,6 +5,7 @@ import { kvGet, kvSet } from './kv.server'
 import { fetchAllNalpacFeeds } from './nalpac-feeds.server'
 import { bulkFetchProductsForPricing, updateVariantPricing, updateProductMetafield } from './shopify.server'
 import { computeTargetPrice } from './pricing-engine.server'
+import { enforceMapFloor } from './pricing-engine-v2.server'
 import type { PricingSnapshot, PricingRules } from './pricing-engine.server'
 import { buildPricingReport, sendPricingReportEmail } from './pricing-report.server'
 import type { PricingChangeRecord } from './pricing-report.server'
@@ -176,9 +177,12 @@ export async function applyApprovedChange(changeId: number, approvedBy: string):
   if (!row) throw new Error(`pricing_changes row ${changeId} not found`)
   if (row.status !== 'pending') throw new Error(`Row ${changeId} is not pending (status: ${row.status})`)
 
+  // MAP floor invariant (ticket #3714): even an owner-approved price may not
+  // land below MAP. Clamp up to the row's recorded MAP before writing.
+  const rowMap = row.mapPrice != null ? parseFloat(String(row.mapPrice)) : null
   await updateVariantPricing(
     row.variantId,
-    String(row.newPrice),
+    String(enforceMapFloor(parseFloat(String(row.newPrice)), rowMap)),
     String(row.newCompareAt ?? row.newPrice),
   )
 
@@ -312,9 +316,10 @@ export async function runDailyPriceReview(opts: RunOptions): Promise<RunResult> 
 
         if (applyNow) {
           try {
+            // MAP floor invariant (ticket #3714): never write a price below MAP.
             await updateVariantPricing(
               variant.variantId,
-              String(computation.newPrice),
+              String(enforceMapFloor(computation.newPrice, nalpacSnap.mapPrice)),
               String(computation.newCompareAt),
             )
 
