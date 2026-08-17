@@ -5,10 +5,11 @@
  * the path api.revalidate.blog.tsx doesn't: a human editor publishing a
  * blogPost directly in Studio (the automated content-writer routine already
  * calls api.revalidate.blog.tsx right after its own publish, which pings
- * search engines too — see the comment there). This route just fires the
- * IndexNow discovery ping (app/lib/search-ping.server.ts); it does not touch
- * caches, since Studio publishes are already picked up by the blog cache's
- * own 60s TTL.
+ * search engines too, see the comment there). This route fires the
+ * IndexNow discovery ping (app/lib/search-ping.server.ts) and files the
+ * social team's notebook-promo suggestion (ticket #3735, dedupe-safe against
+ * the content run's own handoff); it does not touch caches, since Studio
+ * publishes are already picked up by the blog cache's own 60s TTL.
  *
  * Inert unless SEARCH_PING_ENABLED === 'true' (search-ping.server.ts gate).
  * Never throws — a ping failure must not surface as a webhook error to Sanity.
@@ -74,6 +75,35 @@ export async function action({ request }: ActionFunctionArgs) {
     await pingSearchEngines([`/notebook/${slug}`, `/notebook/${slug}.md`, '/notebook'])
   } catch (err) {
     console.error('[sanity-publish webhook] search ping failed (non-blocking):', err)
+  }
+
+  // Event-driven backstop for the Notebook-to-social handoff (ticket #3735).
+  // The content run's prose handoff (routine-content-daily.md Step 6 item 4)
+  // files the same row when it completes; this path covers the run failing or
+  // being skipped, and a human publishing directly in Studio. The shared
+  // dedupe key (notebook-promo:<slug>) collapses the two paths to one ticket.
+  // Runs INLINE before the response: on Vercel any work after res is sent is
+  // discarded, so a fire-and-forget here would silently never file anything.
+  try {
+    // The webhook projection only carries _type and slug; pull title/category
+    // from Sanity so the ticket names the post. Best-effort: the suggestion
+    // degrades to the slug when the fetch misses (e.g. CDN lag right after
+    // publish).
+    let title: string | undefined
+    let category: string | undefined
+    try {
+      const { getBlogPost } = await import('~/lib/sanity.server')
+      const post = await getBlogPost(slug)
+      title = post?.title
+      category = post?.category?.name
+    } catch {
+      // Non-fatal: file with the slug alone.
+    }
+    const { buildNotebookPromoSuggestion } = await import('~/lib/notebook-promo-suggestion')
+    const { createSuggestion } = await import('~/lib/team.server')
+    await createSuggestion(buildNotebookPromoSuggestion({ slug, title, category }))
+  } catch (err) {
+    console.error('[sanity-publish webhook] promo suggestion filing failed (non-blocking):', err)
   }
 
   return Response.json({ ok: true, slug })

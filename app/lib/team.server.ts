@@ -1985,15 +1985,24 @@ export async function proposeCalendarEvent(input: {
   name: string
   type?: string | undefined   // holiday|promo|campaign
   theme?: string | undefined
+  /**
+   * Structured campaign payload (ticket #2736): endDate, pillars, formats,
+   * product_scope, visualScheme. Until this landed nothing in app/ wrote
+   * assets_json, so instagram-campaigns.md was the only authority for a
+   * campaign window and posts could not be joined to their campaign without
+   * reading markdown.
+   */
+  assetsJson?: Record<string, unknown> | undefined
 }): Promise<number> {
   const [row] = await db
     .insert(marketingCalendar)
     .values({
-      eventDate: input.eventDate,
-      name:      input.name,
-      type:      input.type ?? 'promo',
-      theme:     input.theme ?? null,
-      status:    'planned',
+      eventDate:  input.eventDate,
+      name:       input.name,
+      type:       input.type ?? 'promo',
+      theme:      input.theme ?? null,
+      status:     'planned',
+      assetsJson: input.assetsJson ?? null,
     })
     .returning({ id: marketingCalendar.id })
   return row!.id
