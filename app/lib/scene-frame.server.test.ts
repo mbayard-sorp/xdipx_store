@@ -7,6 +7,17 @@
 // reporting that the per-video ceiling depends on.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// Atlas Cloud is mocked so the provider routing is deterministic regardless of
+// whether ATLAS_CLOUD_API_KEY is present in the test env (#3570). Default
+// atlasConfigured=false exercises the fal two-stage path the tests below assert;
+// the Atlas describe flips it on and stubs atlasGenerate.
+const atlasConfigured = vi.fn(() => false)
+const atlasGenerate = vi.fn()
+vi.mock('~/lib/atlas.server', () => ({
+  atlasConfigured: () => atlasConfigured(),
+  atlasGenerate: (...args: unknown[]) => atlasGenerate(...args),
+}))
+
 const PRESENTER = 'https://cdn.sanity.io/presenter.jpg'
 const PRODUCT = 'https://cdn.shopify.com/packshot.jpg'
 const PLATE = 'https://fal.media/plate.jpg'
@@ -62,11 +73,15 @@ function mockFal(
   })
 }
 
-describe('composeSceneFrame (two-stage)', () => {
+describe('composeSceneFrame (fal two-stage — Atlas fallback path)', () => {
   const realFetch = globalThis.fetch
 
   beforeEach(() => {
     process.env['FAL_KEY'] = 'test-key'
+    // Atlas unconfigured → the fal two-stage path runs. These tests assert that
+    // path; the Atlas describe below covers the primary route.
+    atlasConfigured.mockReturnValue(false)
+    atlasGenerate.mockReset()
   })
   afterEach(() => {
     globalThis.fetch = realFetch
@@ -295,6 +310,116 @@ describe('composeSceneFrame (two-stage)', () => {
   })
 })
 
+describe('composeSceneFrame (Atlas one-stage, #3570)', () => {
+  const realFetch = globalThis.fetch
+
+  beforeEach(() => {
+    process.env['FAL_KEY'] = 'test-key'
+    atlasConfigured.mockReturnValue(true)
+    atlasGenerate.mockReset().mockResolvedValue({
+      buffers: [],
+      urls: ['https://cdn.atlas/a.jpg', 'https://cdn.atlas/b.jpg', 'https://cdn.atlas/c.jpg'],
+      requestIds: ['pred-a', 'pred-b', 'pred-c'],
+      costKey: 'atlas/seedream-4.5-edit',
+      requestId: 'pred-a',
+    })
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    vi.resetModules()
+  })
+
+  it('composites presenter + product in ONE Atlas call (no plate) and returns the Atlas cost key', async () => {
+    // Fail loudly if the fal path is touched: the whole point is one stage.
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('fal must not be called when Atlas is configured')
+    }) as unknown as typeof fetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+
+    const res = await composeSceneFrame({
+      prompt: 'sunlit bedroom corner',
+      presenterImageUrl: PRESENTER,
+      productImageUrl: PRODUCT,
+      count: 3,
+    })
+
+    expect(atlasGenerate).toHaveBeenCalledTimes(1)
+    const arg = atlasGenerate.mock.calls[0]![0] as {
+      refImageUrls: string[]
+      prompt: string
+      count: number
+      download: boolean
+      imageSize: { width: number; height: number }
+    }
+    // Presenter + product in a single reference array — no separate plate call.
+    expect(arg.refImageUrls).toEqual([PRESENTER, PRODUCT])
+    expect(arg.count).toBe(3)
+    expect(arg.download).toBe(false)
+    expect(arg.imageSize).toEqual({ width: 1080, height: 1920 }) // default 9:16
+    // The no-carton rule moved into the prompt (there is no plate to strip it).
+    expect(arg.prompt).toContain('sunlit bedroom corner')
+    expect(arg.prompt).toContain('bare product itself exactly')
+    expect(arg.prompt).toContain('true real-world size') // scale cue kept
+
+    expect(res.urls).toEqual(['https://cdn.atlas/a.jpg', 'https://cdn.atlas/b.jpg', 'https://cdn.atlas/c.jpg'])
+    expect(res.requestIds).toEqual(['pred-a', 'pred-b', 'pred-c'])
+    expect(res.costKey).toBe('atlas/seedream-4.5-edit')
+    expect(res.plate).toBeUndefined() // one stage, no plate spend
+  })
+
+  it('passes the 4:5 pixel dims through to Atlas', async () => {
+    globalThis.fetch = realFetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+    await composeSceneFrame({
+      prompt: 'p',
+      presenterImageUrl: PRESENTER,
+      productImageUrl: PRODUCT,
+      aspectRatio: '4:5',
+    })
+    const arg = atlasGenerate.mock.calls[0]![0] as { imageSize: { width: number; height: number } }
+    expect(arg.imageSize).toEqual({ width: 1080, height: 1350 })
+  })
+
+  it('does not add the scale cue or carton clause to a talking-head frame (no product)', async () => {
+    const { composeSceneFrame } = await import('./fal-video.server')
+    await composeSceneFrame({ prompt: 'sunlit bedroom corner', presenterImageUrl: PRESENTER })
+    const arg = atlasGenerate.mock.calls[0]![0] as { prompt: string; refImageUrls: string[] }
+    expect(arg.prompt).toBe('sunlit bedroom corner')
+    expect(arg.refImageUrls).toEqual([PRESENTER])
+  })
+
+  it('falls back to the fal two-stage path when the Atlas call throws', async () => {
+    atlasGenerate.mockReset().mockRejectedValue(new Error('atlas boom'))
+    const calls: Call[] = []
+    globalThis.fetch = mockFal(calls) as unknown as typeof fetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+
+    const res = await composeSceneFrame({
+      prompt: 'p',
+      presenterImageUrl: PRESENTER,
+      productImageUrl: PRODUCT,
+      count: 2,
+    })
+
+    // Atlas was tried, then the fal two-stage path produced the frames.
+    expect(atlasGenerate).toHaveBeenCalledTimes(1)
+    expect(calls.some(c => c.url.includes('qwen-image-edit'))).toBe(true) // plate ran
+    expect(res.costKey).toBe('fal/flux-2-edit')
+    expect(res.plate).toEqual({ costKey: 'fal/qwen-image-edit', count: 1 })
+  })
+
+  it('uses fal directly, never Atlas, when Atlas is unconfigured', async () => {
+    atlasConfigured.mockReturnValue(false)
+    const calls: Call[] = []
+    globalThis.fetch = mockFal(calls) as unknown as typeof fetch
+    const { composeSceneFrame } = await import('./fal-video.server')
+
+    await composeSceneFrame({ prompt: 'p', presenterImageUrl: PRESENTER, productImageUrl: PRODUCT, count: 1 })
+    expect(atlasGenerate).not.toHaveBeenCalled()
+    expect(calls.some(c => c.url.includes('flux-2/lora/edit'))).toBe(true)
+  })
+})
+
 describe('scene-frame cost keys', () => {
   it('prices both stages so the per-video ceiling does not under-report', async () => {
     const { estimateImageCostUsd } = await import('./model-pricing.server')
@@ -304,5 +429,12 @@ describe('scene-frame cost keys', () => {
     expect(estimateImageCostUsd(SCENE_PLATE_COST_KEY, 1)).toBe(0.035)
     expect(estimateImageCostUsd(SCENE_FRAME_COST_KEY, 1)).toBe(0.07)
     expect(estimateImageCostUsd(SCENE_FRAME_COST_KEY, 3)).toBeCloseTo(0.21, 5)
+  })
+
+  it('prices the Atlas one-stage cost key so its spend does not under-report (#3570)', async () => {
+    const { estimateImageCostUsd } = await import('./model-pricing.server')
+    // The Atlas path returns this key; it must be known to model-pricing.
+    expect(estimateImageCostUsd('atlas/seedream-4.5-edit', 1)).toBe(0.036)
+    expect(estimateImageCostUsd('atlas/seedream-4.5-edit', 3)).toBeCloseTo(0.108, 5)
   })
 })
