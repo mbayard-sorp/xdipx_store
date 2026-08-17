@@ -27,12 +27,12 @@ import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import {
   gate, getTeamConfig, getValve, listRecentRuns, listRunEvents,
   listSuggestions, decideSuggestion, retireSuggestion, transitionSuggestion, listBriefs,
-  listAdCampaigns, decideAdCampaign, SUGGESTION_LIST_MAX,
+  listAdCampaigns, decideAdCampaign, SUGGESTION_LIST_MAX, getSocialFrequencies,
   type TeamConfig, type GateResult, type TicketStatus,
 } from '~/lib/team.server'
-import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
+import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, type TeamId, type SocialPlatform } from '~/lib/team-keys'
 import {
-  NO_EXECUTOR_KINDS, facetTotal, fmtAge, sumFacetCount, truncationNote,
+  NO_EXECUTOR_KINDS, classifyTeamTablesError, facetTotal, fmtAge, sumFacetCount, truncationNote,
   type TicketFacetRow,
 } from '~/lib/ticket-queue-view'
 
@@ -65,6 +65,16 @@ const SOCIAL_EXTRA_KEYS = {
   xPublishMaxPerDay: 'x_publish_max_per_day',
   xPublishMaxSpendUsdMonth: 'x_publish_max_spend_usd_month',
 } as const
+
+/** Display names for the per-platform drafting-quota fields (ticket #3676). */
+const SOCIAL_PLATFORM_LABELS: Record<SocialPlatform, string> = {
+  x: 'X',
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+  facebook: 'Facebook',
+  youtube: 'YouTube',
+  linkedin: 'LinkedIn',
+}
 
 /** Mirrors DEFAULT_MAX_PER_DAY in social-publish-job.server.ts (unset = 3/day). */
 const INSTAGRAM_PUBLISH_MAX_PER_DAY_DEFAULT = 3
@@ -134,6 +144,14 @@ interface LoaderData {
   team: TeamId
   config: TeamConfig
   migrated: boolean
+  /**
+   * True when gate()/listRecentRuns threw a NON-42P01 error: the tables exist,
+   * the read just failed this once (a transient Neon hiccup). The page renders
+   * its sections with a visible could-not-load banner instead of silently
+   * hiding the whole ticket queue, which is what `migrated=false` does and is
+   * reserved for the genuine pre-migration state (ticket #3770).
+   */
+  loadError: boolean
   gateResult: GateResult | null
   runs: RunRow[]
   selectedRun: { run: RunRow; events: EventRow[] } | null
@@ -165,6 +183,13 @@ interface LoaderData {
   xAutopublish: boolean
   xPublishMaxPerDay: number
   xPublishMaxSpendUsdMonth: number
+  /**
+   * Per-platform drafting quota (social_freq_* keys, posts/day, 0 = off).
+   * Ticket #3676: this is the knob that sizes the daily slate, and until it
+   * appeared here the only writer was a raw POST to admin.socials or a direct
+   * DB row, which is why it sat at 1 while the direction was more volume.
+   */
+  socialFrequencies: Record<SocialPlatform, number>
   releaseEngine: boolean
   releaseEngineMaxMerges: number
 }
@@ -179,7 +204,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow] = await Promise.all([
+  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
@@ -216,6 +241,10 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     db.select().from(pipelineSettings)
       .where(inArray(pipelineSettings.key, [RELEASE_ENGINE_KEYS.enabled, RELEASE_ENGINE_KEYS.maxMergesPerDay]))
       .catch(() => [] as Array<{ key: string; value: string }>),
+    // Per-platform drafting quotas (social_freq_*). Same reader the social
+    // routine uses via {op:'config'}, so the tab shows exactly what the next
+    // run will read. Falls back to the defaults on a read failure.
+    getSocialFrequencies().catch(() => ({ ...SOCIAL_FREQ_DEFAULTS })),
   ])
   // Parsed exactly as the cron parses it, zero included: `|| DEFAULT` would turn
   // a deliberate 0 (pause publishing without touching the valve) back into 3.
@@ -239,8 +268,14 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const releaseEngineMaxMerges =
     Number(releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.maxMergesPerDay)?.value ?? 6) || 6
 
-  // The team tables (049/051) may not be applied yet — degrade cleanly.
+  // The team tables (049/051) may not be applied yet — degrade cleanly. But
+  // only 42P01 (undefined table) means "not migrated"; any other throw is a
+  // transient DB error on a healthy install, and hiding the ticket queue for
+  // it made a Neon pooler timeout look like the filters had been removed
+  // (ticket #3770). On a transient error the queue sections still render
+  // (their own queries degrade to empty via .catch) under an explicit banner.
   let migrated = true
+  let loadError = false
   let gateResult: GateResult | null = null
   let runs: RunRow[] = []
   let suggestions: SuggestionRow[] = []
@@ -249,8 +284,9 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   try {
     gateResult = await gate(team)
     runs = await listRecentRuns(team, 25)
-  } catch {
-    migrated = false
+  } catch (err) {
+    if (classifyTeamTablesError(err) === 'unmigrated') migrated = false
+    else loadError = true
   }
   // Filters live in the query string so a filtered board is a shareable URL and
   // a browser refresh keeps the owner where they were.
@@ -365,12 +401,12 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   }
 
   return {
-    team, config, migrated, gateResult, runs, selectedRun, suggestions, needsYou, needsYouTotal,
+    team, config, migrated, loadError, gateResult, runs, selectedRun, suggestions, needsYou, needsYouTotal,
     filteredOpenTotal, ticketLinks, filter,
     kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
     videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
-    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth,
+    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges,
   }
 }
@@ -391,6 +427,11 @@ export async function action({ request }: ActionFunctionArgs) {
     ...Object.values(VALVE_KEYS),
     ...Object.values(SOCIAL_EXTRA_KEYS),
     ...Object.values(RELEASE_ENGINE_KEYS),
+    // Per-platform drafting quotas (ticket #3676). The keys already exist in
+    // team-keys.ts (socialFreqKey) and are read by getSocialFrequencies();
+    // this allowlists them for the audited write path so the owner can size
+    // the daily slate from the Social tab instead of a raw POST.
+    ...SOCIAL_PLATFORMS.map(p => socialFreqKey(p)),
   ])
 
   // Routed through the audited write path so a valve flip is attributable
@@ -406,6 +447,15 @@ export async function action({ request }: ActionFunctionArgs) {
     const key = String(form.get('key') ?? '')
     const value = intent === 'toggle' ? String(form.get('next') ?? 'false') : String(form.get('value') ?? '')
     if (!allowed.has(key)) return Response.json({ ok: false, error: 'bad key' }, { status: 400 })
+    // Drafting quotas are bounded integers. Same 0-5 posts/day range the
+    // admin.socials set-frequency handler enforces, so the two write paths
+    // cannot disagree about what a legal value is.
+    if (key.startsWith('social_freq_')) {
+      const n = parseInt(value, 10)
+      if (!Number.isInteger(n) || String(n) !== value.trim() || n < 0 || n > 5) {
+        return Response.json({ ok: false, error: 'Frequency must be an integer 0-5 posts/day' }, { status: 400 })
+      }
+    }
     await upsertSetting(key, value)
     return Response.json({ ok: true })
   }
@@ -491,13 +541,13 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
 
 export default function AgentTeamsPage() {
   const {
-    team, config, migrated, gateResult, runs, selectedRun,
+    team, config, migrated, loadError, gateResult, runs, selectedRun,
     suggestions, needsYou, needsYouTotal, filteredOpenTotal,
     ticketLinks, filter, kindOptions, assigneeOptions, teamOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
     seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
-    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth,
+    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
@@ -547,6 +597,16 @@ export default function AgentTeamsPage() {
           gate, suggestions, and briefs are inactive. Apply with{' '}
           <code className="font-mono">npx tsx scripts/apply-migrations.ts --from 049</code>. You can
           still configure the controls below.
+        </div>
+      )}
+
+      {loadError && (
+        <div className="rounded-xl border border-coral bg-coral-soft/50 px-4 py-3 text-sm text-ink">
+          The gate and run data could not be loaded just now (a transient database error, not a
+          missing migration). The sections below may show empty or stale data.{' '}
+          <Link to={`/admin/homepage-team?team=${team}`} className="link-coral font-semibold">
+            Retry
+          </Link>
         </div>
       )}
 
@@ -626,6 +686,22 @@ export default function AgentTeamsPage() {
               settingKey={VALVE_KEYS.socialTrendScout}
               on={socialTrendScout}
             />
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+              {SOCIAL_PLATFORMS.map(p => (
+                <SettingField
+                  key={p}
+                  label={`${SOCIAL_PLATFORM_LABELS[p]} drafts / day`}
+                  settingKey={socialFreqKey(p)}
+                  value={socialFrequencies[p]}
+                />
+              ))}
+            </div>
+            <p className="text-[11px] text-ink-4">
+              Drafting quotas (social_freq_*, 0 = platform off, max 5). This is the knob that sizes
+              the daily slate: the social routine reads these at run start to decide how many drafts
+              to write per platform. Changes are recorded in the settings audit log with an actor.
+              Independent of the publish caps below, which control how fast approved drafts go live.
+            </p>
             <div className="grid gap-4 sm:grid-cols-3">
               <SettingField
                 label="Instagram posts / day (publish cap)"

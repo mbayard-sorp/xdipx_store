@@ -1,4 +1,4 @@
-# xdipx Design Doctrine (v1.1)
+# xdipx Design Doctrine (v1.2)
 
 > The single source of truth for how xdipx **looks**, everywhere: homepage, PLP,
 > PDP, discovery, admin. Every design agent (`homepage-designer`, `rr7-engineer`,
@@ -176,10 +176,21 @@ they outlive any single run. Every merchandising image obeys all of them.
 2. **Bright, colorful, bold.** Daylight or high-key studio light, tinted
    color-block backdrops from the ground lock below (coral-soft, plum-soft,
    paper), product LARGE in frame. Premium DTC-launch energy.
+   **Clarification (2026-08-11): high-key governs shadow DENSITY, not shadow
+   SHAPE.** Hard-edged directional light and a named hour are compliant; a
+   hard window-mullion shadow raking across a bright wall at 8am is dramatic
+   and fully high-key at once. High-key was never a mandate for flat noon,
+   and a literal flat-noon reading must not reject the best available frames.
 3. **Banned looks, retired for cause:** tableware (tea cups, mugs, bowls,
    notebooks, candles, fruit, napkins, empty styled tables — the July 2026
    housewares failure); near-black / candlelit / boudoir-gloom (the moody round
    that followed); anything clinical or explicit.
+   **Carve-out (2026-08-11): a WORN or CARRIED personal item** (garment, slip
+   strap, robe belt, hair tie, key, shoe) **supporting a product is NOT a
+   housewares prop.** The distinction that matters: housewares props are
+   evidence of a household, worn items are evidence of a person, and evidence
+   of a person is the entire point. Without this carve-out a robe belt gets
+   rejected as prop salad.
 4. **No text in the pixels.** No words, letters, captions, labels, logos,
    watermarks baked in. Copy lives in the markup. Add "no text, no words, no
    letters, no watermark, no logo, no caption" to every negative prompt.
@@ -256,6 +267,129 @@ mixed-vendor catalog read as one funded brand; the teardown's core finding is
 that **consistency, not budget, is the "million dollars" signal** — normalizing
 ground and light behind inconsistent supplier photos is the highest-leverage
 move and needs zero reshoots.
+
+## 4.1 The interest floor: what makes an image interesting rather than boring
+
+Ported verbatim from `docs/store-team/instagram-campaigns.md` §3.4b (owner
+direction 2026-08-11) so it binds every imagery surface and `media-manager`'s
+vision gate, not only the social routine; the social doc now points here. The
+doctrine wins on pixels.
+
+Owner direction 2026-08-11, the third time on this theme: **"The images need to be interesting and
+artistic. Evoke emotion and curiosity. Not boring."** and **"we are selling sex toys and pleasure
+products. Not housewares."** The two earlier rounds failed because the remedy was adjectives, and
+adjectives are not executable. This is the executable version.
+
+**The one line that does the most work: housewares props are evidence of a *household*. We need
+evidence of a *person*.** That is the real reason the July 2026 housewares set failed, and it is a
+sharper rule than "no mugs."
+
+**The rule.** Every campaign image must exhibit **at least four** of the ten properties below,
+**including at least one from the narrative group**. The brief names which properties it is buying,
+by number, before generation, and a reviewer rejects on the count by number.
+
+*Narrative group, which is what actually creates curiosity:*
+
+- **P1. Evidence of a person, with no person in frame.** One physical trace only a human could have
+  left in the last minute. The trace comes from the **worn, carried, or body-adjacent world** (a robe
+  belt, a slip strap, a hair tie, one earring, a key, a shoe, a pushed-aside textile), never the
+  kitchen or the spa. That clause is what separates this from prop salad and keeps it clear of the
+  houseware ban.
+- **P2. Interrupted state.** Something is mid-action and stopped: a drawer half open, a lid off and
+  beside rather than removed, a charging cable still connected. **The one-second test:** say what
+  happened one second before and one second after. If both answers are "nothing," it fails.
+- **P3. The unexplained second object.** Exactly one object the viewer cannot fully account for.
+  Two is not mystery, it is clutter.
+- **P9. A frame edge that implies a bigger room.** Something enters or exits the crop: a cable
+  running out of frame, a curtain edge, a shadow whose caster is off-screen.
+
+*Craft group, which makes it look expensive but on its own creates no curiosity:*
+
+- **P4. A named hour.** Can a reviewer name the hour within two hours from shadow angle and colour?
+  "Seamless studio noon" fails by definition.
+- **P5. Instability.** Something is not at rest: overhanging an edge, leaning, propped.
+- **P6. A load-bearing void.** The empty area *means* something: where the light comes from, where
+  the person was. If the answer is "it is for the headline," it is padding and does not count.
+- **P7. Scale surprise.** Reads wrong for a beat, resolves on the second look. If the *resemblance*
+  is the point, that is metaphor and it is capped separately.
+- **P8. One colour doing something wrong on purpose, inside the palette.**
+- **P10. Three planes.** Foreground occluder, sharp subject, soft background. Being *behind*
+  something makes the viewer feel like they are looking rather than being shown.
+
+**Two tests that run on top of the count.**
+
+- **The story test.** Say in one sentence what happened just before the frame, without naming a
+  product feature. If you cannot, and no narrative property is present, it is boring.
+- **The withholding test.** Name what the frame makes you want to see that it does not show. If the
+  answer is **a body or an act**, it is over the fence and the frame is killed, not softened. If the
+  answer is **the person's next move, or the rest of the room**, it is exactly right.
+
+**The unlock that makes this possible without darkness.** High-key constrains shadow **density**, not
+shadow **shape**. Drama comes from the edge and angle of a shadow, not from how black it is. A
+hard-edged window-mullion shadow raking across a bright plum-soft wall at 8am is dramatic and fully
+high-key at once. Related: **the ground lock is a hue lock, not a surface lock.** Nothing requires a
+seamless studio backdrop; plum-soft as raw plaster and paper as a bare wall with a light bar across
+it are both inside the lock and both carry an hour, a texture, and a room.
+
+**Failure taxonomy. Reject by name.**
+
+| Name | Detection cue | The one change that fixes it |
+|---|---|---|
+| Catalog-on-a-table | Product whole, at rest, on a horizontal surface. One-second test returns nothing. | Remove the at-rest condition. Put it mid-interruption. |
+| Symmetrical-and-centered | Fold the frame vertically and it matches; the shadow falls straight down. | Move light and subject off-axis in opposite directions so the shadow becomes a second subject. |
+| Empty-lifestyle prop salad | More than one object you cannot attribute to a specific human action. | Cut to exactly one unexplained object, and make it something a person wore or carried. |
+| Stock-photo-neutral | Swap the product for a face cream and nothing changes. | Give it an hour and a wall. |
+| Over-styled showroom | Every textile pressed, nothing has obeyed gravity. | One imperfection with a named cause. |
+| Negative-space-as-padding | The brief says "clean negative space" and nothing else about that area. | Make the void the light's origin or the vacated spot. |
+| Deniability collapse | It is interesting *because* it is suggestive; the withholding test answers "a body." | Kill the frame. Do not soften it. |
+
+**The staging language this replaces.** "Product in a lived-in scene: nightstand, open drawer,
+bathroom shelf, bedside table" came from ticket #2213 and was itself the boring failure wearing a
+lifestyle costume. Moving a packshot from white seamless onto a nightstand is a lateral move, which
+is why the complaint returned twice. **Tableware props are banned outright** (bowls, dishes, cups,
+candles, fruit, napkins, folded towels, empty styled tables), matching the ban the homepage, notebook
+and content lanes have carried since July 2026 and which the social lane never inherited.
+
+**What interesting costs.** Not money: a narrative frame costs the same single generation as a boring
+one. It costs **specification length** (the boring prompt was 46 words; a working one is about 200,
+because models default to centered, at-rest, noon and symmetric, and every deviation must be named)
+and **variance** (budget roughly 1.5 calls per keeper). The retry rule changes accordingly: **a
+second attempt drops exactly one property, never all of them**, and the packshot is the third
+resort, never the second. A brief that misses twice must not fall back to the thing this section
+exists to prevent.
+
+**Interest is a property of a frame. Variety is a property of the set.** This section does not
+license rotating the look mid-campaign. A campaign's locked visual scheme still holds: fourteen
+individually arresting posts that share nothing look like fourteen strangers in a 3-wide grid.
+
+## 4.2 The levity license (owner ruling 2026-08-11, binds every imagery surface)
+
+Owner ruling, verbatim: **"Sexuality is a serious thing and it demands levity, so if we can't
+laugh a little at an oversized dildo and a woman with a shocked face, we are boring."** This is
+broader than Notebook heroes: it applies to every owned imagery surface (Notebook heroes,
+homepage merchandising art, social, video thumbnails).
+
+1. **Comic register is LICENSED, not merely tolerated.** Humour, visual wit, and playing an
+   expression bigger than life are a first-class option for xdipx imagery, not a concession.
+   The archetype E surreal/witty license (owner, 2026-07-28) was read narrowly as applying only
+   to object still lifes; it extends to human figures. Earnestness is not the safe default;
+   boring is its own failure.
+2. **Deliberate scale exaggeration is LICENSED** when it stages the post's or surface's
+   question. Context: the owner reviewed two test composites for "What Size Sex Toy Should a
+   Beginner Start With?" and preferred the one rendering a 5.5-inch product at roughly 12
+   inches, calling it "great". The oversized prop plus a shocked face IS the hook, because it
+   stages the reader's fear instead of describing it. The vision gate carries **no
+   real-world-proportion reject**.
+3. **The bound: hyperbole yes, misrepresentation no.** Shape, colour, finish and product
+   identity stay faithful to the reference image; scale and expression may be played for
+   effect. Never on health-adjacent topics, where a wrong size or a joke reads as a safety
+   claim rather than as wit.
+4. **Unchanged, and do not read this as loosening any of it:** the warm-light lock and
+   high-key mandate still bind (drama lives in the face and the hands, never in the light);
+   the charter visual cap of 6-7 holds; never crude, never porn-adjacent, no explicit anatomy,
+   no nudity, no bodies in sexual contact, no product-in-use; adults-only hard rules and the
+   uncanny-face reject are untouched. Witty never crude. The craft is what makes it art
+   instead of a shitpost.
 
 ---
 
@@ -397,6 +531,15 @@ binding IA — the spine never overrides the routine-design-cycle IA fence.
 4. Fixed aspect ratios on all media frames.
 
 ---
+
+*v1.2, 2026-08-16. Transcribes the owner's imagery direction of 2026-08-11/12
+(bus tickets #2748/#2755/#2756): adds §4.1 the interest floor (ported verbatim
+from `docs/store-team/instagram-campaigns.md` §3.4b, which now points here) and
+§4.2 the levity license (comic register and deliberate scale exaggeration
+licensed on every owned imagery surface, with the
+hyperbole-yes-misrepresentation-no bound); clarifies §4 item 2 (high-key
+governs shadow density, not shadow shape) and §4 item 3 (worn or carried
+personal items are evidence of a person, not housewares props).*
 
 *v1.1 — 2026-07-21. Adds the four imagery archetypes, the proof & trust
 components, and the refreshed reference bench from the live competitor teardown

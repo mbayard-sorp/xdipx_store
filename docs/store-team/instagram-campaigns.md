@@ -35,7 +35,7 @@ start and drafts against them.
 | `subject` | One sentence. Either a product category ("wands") or a live-better theme ("talking about it before you need to"). |
 | `pillars` | Which content pillars this campaign draws from (§2). Never fewer than two, so a week of posts does not collapse into one shape. |
 | `formats` | Which recurring formats are in rotation (§2). |
-| `product_scope` | A **rule**, not a frozen SKU list, so the Step 2.6 stock gate can swap a product without breaking the campaign ("in-stock, ACTIVE, product_type_dial = wand"). |
+| `product_scope` | A **rule**, not a frozen SKU list, so the Step 2.6 stock gate can swap a product without breaking the campaign ("in-stock, ACTIVE, product_type_dial = wand"). Catalog approval status is never part of a `product_scope` rule; see `routine-social-daily.md` Step 2.7. |
 | `visual_scheme` | The look that makes the posts read as one campaign (§3). |
 | `end_condition` | Normally the `ends` date. A post removal ends a campaign early and steps volume down per `docs/ads-policy.md`. |
 
@@ -87,7 +87,7 @@ the *next* campaign.
 | `surfaceMaterial` | One repeated surface: raw plaster, pale oak, ribbed glass, washed linen. |
 | `castSlate` | One `castMember` slug, two maximum, with an exact versioned `referencePhotoUrl` (§3.2). |
 | `wardrobeRegister` | One line that **describes the reference photo**, never instructs against it. |
-| `cropSignature` | One repeated framing move (subject on the right third, air left) so slide-1 tiles stack. |
+| `cropSignature` | One repeated framing move (subject on the right third, air left) so slide-1 tiles stack. **Flip-tolerant by definition (ticket #3526):** the generator reversed a locked left/right composition on 3 of 3 attempts in the first end-to-end publish run, and the fix that worked was a post-hoc horizontal flip, not a regeneration. A mirror-image candidate satisfies the signature; Step 5 flip-corrects it as a routine post-pass before offering it, rather than burning generations chasing handedness the model structurally cannot hold. A lock the generator cannot hit is a lock that stops posts. |
 | `retiredForCampaign` | What this campaign will not show, so it cannot drift into the last one. |
 
 **Campaign-to-campaign difference rule.** The next campaign changes at least **three of five** among
@@ -285,92 +285,19 @@ and generate only what the pool is missing.
 
 ### 3.4b The interest floor: what makes an image interesting rather than boring
 
-Owner direction 2026-08-11, the third time on this theme: **"The images need to be interesting and
-artistic. Evoke emotion and curiosity. Not boring."** and **"we are selling sex toys and pleasure
-products. Not housewares."** The two earlier rounds failed because the remedy was adjectives, and
-adjectives are not executable. This is the executable version.
-
-**The one line that does the most work: housewares props are evidence of a *household*. We need
-evidence of a *person*.** That is the real reason the July 2026 housewares set failed, and it is a
-sharper rule than "no mugs."
-
-**The rule.** Every campaign image must exhibit **at least four** of the ten properties below,
-**including at least one from the narrative group**. The brief names which properties it is buying,
-by number, before generation, and a reviewer rejects on the count by number.
-
-*Narrative group, which is what actually creates curiosity:*
-
-- **P1. Evidence of a person, with no person in frame.** One physical trace only a human could have
-  left in the last minute. The trace comes from the **worn, carried, or body-adjacent world** (a robe
-  belt, a slip strap, a hair tie, one earring, a key, a shoe, a pushed-aside textile), never the
-  kitchen or the spa. That clause is what separates this from prop salad and keeps it clear of the
-  houseware ban.
-- **P2. Interrupted state.** Something is mid-action and stopped: a drawer half open, a lid off and
-  beside rather than removed, a charging cable still connected. **The one-second test:** say what
-  happened one second before and one second after. If both answers are "nothing," it fails.
-- **P3. The unexplained second object.** Exactly one object the viewer cannot fully account for.
-  Two is not mystery, it is clutter.
-- **P9. A frame edge that implies a bigger room.** Something enters or exits the crop: a cable
-  running out of frame, a curtain edge, a shadow whose caster is off-screen.
-
-*Craft group, which makes it look expensive but on its own creates no curiosity:*
-
-- **P4. A named hour.** Can a reviewer name the hour within two hours from shadow angle and colour?
-  "Seamless studio noon" fails by definition.
-- **P5. Instability.** Something is not at rest: overhanging an edge, leaning, propped.
-- **P6. A load-bearing void.** The empty area *means* something: where the light comes from, where
-  the person was. If the answer is "it is for the headline," it is padding and does not count.
-- **P7. Scale surprise.** Reads wrong for a beat, resolves on the second look. If the *resemblance*
-  is the point, that is metaphor and it is capped separately.
-- **P8. One colour doing something wrong on purpose, inside the palette.**
-- **P10. Three planes.** Foreground occluder, sharp subject, soft background. Being *behind*
-  something makes the viewer feel like they are looking rather than being shown.
-
-**Two tests that run on top of the count.**
-
-- **The story test.** Say in one sentence what happened just before the frame, without naming a
-  product feature. If you cannot, and no narrative property is present, it is boring.
-- **The withholding test.** Name what the frame makes you want to see that it does not show. If the
-  answer is **a body or an act**, it is over the fence and the frame is killed, not softened. If the
-  answer is **the person's next move, or the rest of the room**, it is exactly right.
-
-**The unlock that makes this possible without darkness.** High-key constrains shadow **density**, not
-shadow **shape**. Drama comes from the edge and angle of a shadow, not from how black it is. A
-hard-edged window-mullion shadow raking across a bright plum-soft wall at 8am is dramatic and fully
-high-key at once. Related: **the ground lock is a hue lock, not a surface lock.** Nothing requires a
-seamless studio backdrop; plum-soft as raw plaster and paper as a bare wall with a light bar across
-it are both inside the lock and both carry an hour, a texture, and a room.
-
-**Failure taxonomy. Reject by name.**
-
-| Name | Detection cue | The one change that fixes it |
-|---|---|---|
-| Catalog-on-a-table | Product whole, at rest, on a horizontal surface. One-second test returns nothing. | Remove the at-rest condition. Put it mid-interruption. |
-| Symmetrical-and-centered | Fold the frame vertically and it matches; the shadow falls straight down. | Move light and subject off-axis in opposite directions so the shadow becomes a second subject. |
-| Empty-lifestyle prop salad | More than one object you cannot attribute to a specific human action. | Cut to exactly one unexplained object, and make it something a person wore or carried. |
-| Stock-photo-neutral | Swap the product for a face cream and nothing changes. | Give it an hour and a wall. |
-| Over-styled showroom | Every textile pressed, nothing has obeyed gravity. | One imperfection with a named cause. |
-| Negative-space-as-padding | The brief says "clean negative space" and nothing else about that area. | Make the void the light's origin or the vacated spot. |
-| Deniability collapse | It is interesting *because* it is suggestive; the withholding test answers "a body." | Kill the frame. Do not soften it. |
-
-**The staging language this replaces.** "Product in a lived-in scene: nightstand, open drawer,
-bathroom shelf, bedside table" came from ticket #2213 and was itself the boring failure wearing a
-lifestyle costume. Moving a packshot from white seamless onto a nightstand is a lateral move, which
-is why the complaint returned twice. **Tableware props are banned outright** (bowls, dishes, cups,
-candles, fruit, napkins, folded towels, empty styled tables), matching the ban the homepage, notebook
-and content lanes have carried since July 2026 and which the social lane never inherited.
-
-**What interesting costs.** Not money: a narrative frame costs the same single generation as a boring
-one. It costs **specification length** (the boring prompt was 46 words; a working one is about 200,
-because models default to centered, at-rest, noon and symmetric, and every deviation must be named)
-and **variance** (budget roughly 1.5 calls per keeper). The retry rule changes accordingly: **a
-second attempt drops exactly one property, never all of them**, and the packshot is the third
-resort, never the second. A brief that misses twice must not fall back to the thing this section
-exists to prevent.
-
-**Interest is a property of a frame. Variety is a property of the set.** This section does not
-license rotating the look mid-campaign. §3's lock still holds: fourteen individually arresting posts
-that share nothing look like fourteen strangers in a 3-wide grid.
+**Moved verbatim to `docs/design-doctrine.md` §4.1, which is canonical** (ticket #2756, owner
+direction 2026-08-11: "The images need to be interesting and artistic. Evoke emotion and
+curiosity. Not boring." / "we are selling sex toys and pleasure products. Not housewares.").
+The doctrine wins on pixels, so the floor now binds every imagery surface and `media-manager`'s
+vision gate, not only this routine; this doc points at it instead of carrying its own copy so
+the two cannot drift. Everything this section defined lives there unchanged and every reference
+to it in this file still resolves through the doctrine: the ten checkable properties (P1-P10;
+four required, at least one from the narrative group, named by number in the brief), the
+one-second/story/withholding tests, the shadow-density and hue-lock-not-surface-lock unlocks,
+the seven-name failure taxonomy, the tableware ban, the ~200-word specification cost and the
+drop-exactly-one-property retry rule. §3's lock still holds on top of it: interest is a property
+of a frame, variety is a property of the set, and nothing in the floor licenses rotating the
+look mid-campaign.
 
 ### 3.5 Directions that are already retired
 
@@ -613,7 +540,7 @@ the look on 2026-08-13 and confirmed its proportion. Reference frame:
 | `surfaceMaterial` | Textured plaster wall. |
 | `castSlate` | `priya`, reference `https://cdn.sanity.io/images/0nlwk8cf/production/46d6016c81db7a1725425af6f72231786845cb32-576x1024.jpg`. Pin this exact URL; a re-upload changes the person. |
 | `wardrobeRegister` | Soft pink lace bralette with fine straps plus matching pyjama shorts, relaxed at-home loungewear. Licensed by the 2026-08-13 ruling in §3.2. **State it in every prompt**, and state the coverage, not just the garment name: "lace bralette" alone spans a wide range and the model will pick from it. |
-| `cropSignature` | Three-quarter to camera, waist-up, subject left of centre with the light and the open wall to her right. |
+| `cropSignature` | Three-quarter to camera, waist-up, subject left of centre with the light and the open wall to her right. Flip-tolerant per §3: a mirrored candidate is compliant once flip-corrected in the Step 5 post-pass. |
 | `productScale` | Derived from `xdipx.specifications`, never from a preset. See below. |
 | `retiredForCampaign` | Styled tabletops, packshots, centred symmetrical framing, anything the model invents in place of the real SKU. |
 
@@ -630,9 +557,12 @@ Check every candidate against the real packshot before offering it, and expect t
 
 **Calendar rows.** Each campaign's start date gets a `marketing_calendar` row via
 `POST /api/team/calendar {op:'propose', eventDate:<starts>, name:<name>, type:'campaign', theme:<subject>}`,
-landing at `planned`. The `propose` op does not currently accept `assetsJson`, so **this file is the
+landing at `planned`. Since ticket #2736 the `propose` op accepts an optional `assetsJson` object
+(endDate, pillars, formats, product_scope, visualScheme), so a campaign row can carry its own
+structured window and scope. **For rows proposed without `assetsJson`, this file remains the
 authority for `ends`, pillars, formats, and product scope**; the calendar row carries the name, the
-start date, and the status.
+start date, and the status. `scripts/pick-todays-product.ts` reads `assetsJson.product_scope`
+(shape `{ "dials": ["vibrator", ...] }`) when present and falls back to its mirror of the §5 table.
 
 **Instagram rows are named with an `IG: ` prefix.** The table has no channel column and the homepage
 track shares it, so the prefix is how the two are told apart at a glance and in a query. `IG: Wand
@@ -706,6 +636,9 @@ Recorded so no run pretends otherwise, and so the gap is visible rather than qui
 ## 8. Brand tagging
 
 Tag a maker only from a **verified** handle. `docs/store-team/brand-ig-handles.json` is the registry
-named by the charter; it does not exist yet and `.json` sits outside the `agent-editor` allowlist, so
-until it is created by a code ticket the rule is simple: **no verified registry, no tag.** Never guess
-a handle. A wrong tag is worse than no tag.
+named by the charter, created by ticket #3732 with per-entry verification evidence and validated by
+`scripts/check-brand-handles.ts`. Only non-null entries may be cited for tagging; an all-null entry
+is a documented "could not verify", not an invitation to guess. The rule is unchanged: **not in the
+registry with a handle, no tag.** Never guess a handle. A wrong tag is worse than no tag. Note that
+an IG @mention today is caption text only (it notifies but is not a tag); real `user_tags` plumbing
+in the publisher is a separate follow-up.

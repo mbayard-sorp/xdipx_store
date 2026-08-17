@@ -9,9 +9,14 @@ compound; this file is where they stop evaporating.
   write prompts from scratch.
 - After every run, append prompts that produced keepers to the surface's **Keepers** list (with
   the placed asset URL as the thumbnail reference) and add failed patterns to **Rejects**.
-- All scaffolds inherit `docs/design-doctrine.md` §4: real product via `--ref-image` (FLUX
-  Kontext) wherever a product is featured or linked; bright/high-key light; v3 palette; nothing
-  a premium lingerie campaign could not run.
+- All scaffolds inherit `docs/design-doctrine.md` §4: real product via `--ref-image` wherever a
+  product is featured or linked; bright/high-key light; v3 palette; nothing a premium lingerie
+  campaign could not run.
+- **Provider note (2026-08-15, PR #692):** stills are Atlas-primary via `generateImage()` (Atlas
+  `seedream-v4.5`/`seedream-v4.5/edit`, then fal, then Imagen); `docs/media-model-routing.md` is
+  the single routing source, do not restate routing here. The fal-specific lore in this file
+  (FLUX Kontext label garbling, the black-JPEG safety retry, known-garble products) applies on
+  the fal fallback path, not to Atlas-primary generations.
 - **`--ref-image` vs `--no-ref` by what the surface links to.** FLUX Kontext faithfully reproduces
   the product **label text** from the Shopify reference photo, which violates the no-text-in-pixels
   rule and, on a surface that links to a whole collection, also misleads by pinning one SKU's label.
@@ -27,6 +32,13 @@ compound; this file is where they stop evaporating.
   macro — and uses the scaffold tagged with it below. **Ground lock:** backdrops only from
   coral-soft, plum-soft, and paper tints (doctrine §4; sage is an accent, never a ground); a
   scaffold's color slots resolve within that set.
+- **The ground lock is a hue lock, not a surface lock** (doctrine §4.1, owner direction
+  2026-08-11). Nothing requires a seamless studio backdrop: plum-soft as raw plaster and paper
+  as a bare wall with a light bar across it are both inside the lock and both carry an hour, a
+  texture, and a room. "Seamless" is no longer the default surface in any scaffold; a brief
+  that wants a seamless sweep must name it. High-key constrains shadow **density**, not shadow
+  **shape**: a hard-edged directional shadow on a bright wall is dramatic and fully high-key
+  at once.
 - **Mandatory negative prompt on every generation:** `no text, no words, no letters, no
   watermark, no logo, no caption, no gradient backgrounds, no plastic or clinical look, no
   housewares still-life, no tableware, no candles, no dim or candlelit scene, no distorted
@@ -40,8 +52,10 @@ compound; this file is where they stop evaporating.
 
 Scaffold (always with `--ref-image` = the hero product's Shopify photo):
 
-> The {product} standing large and centered on a {coral-soft | plum-soft | paper} seamless
-> studio backdrop, bright high-key lighting, crisp single shadow, premium DTC launch
+> The {product} standing large and centered on a {coral-soft | plum-soft | paper} ground with
+> a real surface and a named hour (bare painted wall, raw plaster, paper backdrop with a
+> hard-edged window shadow raking across it; the ground lock is a hue lock, not a surface
+> lock, doctrine §4.1), bright high-key lighting, crisp single shadow, premium DTC launch
 > campaign photography, editorial and confident, product fills most of the frame, shallow
 > depth of field, shot on medium format
 
@@ -57,8 +71,9 @@ table (reads housewares).
 
 Scaffold (always with `--ref-image`):
 
-> The {product} bold and centered on a {plum-soft | coral-soft | paper} seamless
-> backdrop, bright studio light, crisp shadow, square crop, product large in frame, premium
+> The {product} bold and centered on a {plum-soft | coral-soft | paper} ground carrying an
+> hour and a texture (painted wall, plaster, a light band across it; hue lock, not a surface
+> lock), bright studio light, crisp shadow, square crop, product large in frame, premium
 > sexual-wellness brand catalog photography, playful and confident
 
 **Keepers:**
@@ -97,7 +112,8 @@ unchanged.
 
 Scaffold (always with `--ref-image` when the promo targets a product or collection):
 
-> The {product} on a {coral-soft | plum-soft | paper} seamless backdrop with {theme prop, small
+> The {product} on a {coral-soft | plum-soft | paper} ground with a real surface texture and a
+> named hour (hue lock, not a surface lock) with {theme prop, small
 > and supporting, its color echoing the theme}, bright pop-art studio light, bold and celebratory, product is the
 > unmistakable star, premium campaign photography
 
@@ -113,7 +129,8 @@ detail frame per product. Scaffold (always with `--ref-image` = the product's Sh
 
 > {Extreme macro of the {product}'s surface texture filling the frame | one relaxed, undistorted
 > hand holding the {product} to show true size | close detail of the {product}'s tip and contour},
-> on a {coral-soft | plum-soft | paper} seamless ground, silk or linen surface beneath, bright
+> on a {coral-soft | plum-soft | paper} ground (hue lock, not a surface lock; give it an hour
+> when the crop shows the ground), silk or linen surface beneath, bright
 > high-key daylight, crisp focus on the product, skin tones natural and warm, premium
 > sexual-wellness catalog photography, keep the product's shape, color, and finish exactly as the
 > reference image
@@ -121,6 +138,43 @@ detail frame per product. Scaffold (always with `--ref-image` = the product's Sh
 **Keepers:**
 
 **Rejects:** (hand-anatomy failures go here; the vision gate hard-checks hands per doctrine §4)
+
+## Social still (4:5, Instagram feed/grid): Archetype B or C, under the doctrine §4.1 interest floor
+
+New section (ticket #2756): there was previously NO social still-life scaffold at all, which is
+part of why a from-scratch prompt produced the housewares frame. Seeded from the narrative frames
+validated against the interest floor on 2026-08-12. Every social still is briefed against
+`docs/design-doctrine.md` §4.1 (the interest floor): the brief names, by number, at least four of
+the ten properties it is buying, including at least one from the narrative group (P1 evidence of
+a person, P2 interrupted state, P3 the unexplained second object, P9 a frame edge that implies a
+bigger room), and a reviewer rejects on the count by number. The active campaign's locked visual
+scheme (`docs/store-team/instagram-campaigns.md` §3) supplies ground, light signature, rhyme
+prop, and cast reference; this scaffold never overrides a locked scheme.
+
+Scaffold (`--ref-image` = the product's Shopify photo when a product is in frame; 4:5 portrait):
+
+> Bright high-key editorial photograph, {named hour} sunlight from a window out of frame throwing
+> one hard-edged directional shadow band across a {coral-soft | plum-soft | paper} {textured
+> plaster wall | bare painted wall | paper wall with a light bar across it}, open detailed
+> shadows, never black. The {product} {mid-interruption, not at rest, e.g. half out of its
+> open drawer, charging cable still connected, resting where a hand just set it down}, keep its
+> shape, color, and finish exactly as the reference image. One physical trace of a person from
+> the worn or carried world ({a robe belt | a slip strap | a hair tie | one earring | a key},
+> never kitchen or spa), {one element entering or exiting the crop: a cable running out of
+> frame, a curtain edge, a shadow whose caster is off-screen}. Private sunlit room, premium
+> sexual-wellness brand photography, tasteful and non-explicit. No tableware, no mugs, no cups,
+> no bowls, no candles, no fruit, no napkins, no folded towels, no styled tabletop, no text, no
+> words, no logos, not dark, not moody, not clinical, no gradient wall.
+
+Run the §4.1 tests before offering a candidate: the one-second test, the story test, and the
+withholding test (if what the frame withholds is a body or an act, kill the frame, do not soften
+it). Reject by the §4.1 failure-taxonomy names (catalog-on-a-table, prop salad,
+stock-photo-neutral, over-styled showroom). Retry rule: a second attempt drops exactly one
+property, never all of them; the packshot is the third resort, never the second.
+
+**Keepers:**
+
+**Rejects:**
 
 ## Notebook — Daily post hero (`docs/notebook-team/image-brief.md` §0, ~1200×900)
 
@@ -165,6 +219,52 @@ detail frame per product. Scaffold (always with `--ref-image` = the product's Sh
 
 Vision gate for §0-H: hard reject on youthful ambiguity (reject on ambiguity, not intent),
 uncanny faces, moody or dark grading, sexualized bodies, or no identifiable human presence.
+
+### §0-H two-reference scaffold: question + product co-primary (owner direction 2026-08-11)
+
+**This scaffold supersedes the single-reference §0-H human scaffold above.** The old scaffold was
+written for a single-reference world that ended when multi-reference compositing shipped
+(2026-08-11), and its worked expressive slot ("sitting on the edge of an unmade bed, face turned
+toward the window, tired and tender") is verbatim the mood-not-question failure the owner named.
+Use this scaffold for every §0-H human hero. Binding rules live in
+`docs/notebook-team/image-brief.md` §0-H: the subject stages the headline's QUESTION with the
+post's embedded product held at co-primary scale; the question-to-gesture table; casting by
+`castMember` slug (`maya`, `sofia`, `jade`, `priya`, `marcus`, `diego`, or Emma via
+`singleton.editor`), no repeat within 5 consecutive human heroes; the Daylight Theater test (if
+the frame got more dramatic because the light got darker it failed; if because the face got
+louder it passed); the levity license and its bound; and the no-product fallback, whose reason
+MUST be written into this file's keeper log, never left as a silent default.
+
+Two references per generation: **reference 1** = the cast member's `referencePhoto` (the figure);
+**reference 2** = a de-cartoned plate of the post's embedded product (its real Shopify photo,
+packaging removed). `landscape_4_3`, 2 candidates:
+
+> Bright warm editorial magazine photograph, soft directional window daylight, high-key, calm
+> private sunlit room, tasteful and non-explicit. {The cast member from reference 1, described:
+> age band, build, hair}, clearly adult, fully clothed in soft casual clothing, **holding the
+> {product} from reference 2 in hand, large and co-primary with the face**, keep the product's
+> shape, color, and finish exactly as reference 2. {Gesture from the §0-H question-to-gesture
+> table, staging the headline's question, e.g. "product held up in one hand at eye level, head
+> tilted at it, brow up, free hand palm-up asking the room"}, expression theatrically big:
+> {reader emotion}, drama in the face and the hands, never in the light. {Optional, licensed:
+> deliberate scale exaggeration of the held product when it stages the question, never on
+> health-adjacent topics.} Coral-soft and plum-soft warmth in the light, white and warm-neutral
+> surfaces, generous negative space in the {zone} for a title overlay. No children, no
+> teenagers, no youthful ambiguity, no nudity, no bare torso, no sexual contact, no
+> product-in-use, no uncanny faces, no warped features, no extra fingers, no mugs, no cups, no
+> candles, no folded blankets, no towels, no text, no words, no logos, not moody, not dark, no
+> candlelight, no orange, no amber, no gradient wall, not clinical.
+
+Vision gate for this scaffold, on top of the §0-H gate above: reject a frame whose gesture would
+fit any other post equally well (the swap test), and reject a missing product with no documented
+reason in the keeper log. **No real-world-proportion reject**: deliberate scale exaggeration
+under the levity license is compliant while shape, color, finish, and product identity stay
+faithful to reference 2.
+
+**Keepers:** (append `cast slug + product handle + gesture → placed asset URL` lines here; a
+no-product hero MUST log its reason in its entry)
+
+**Rejects:**
 
 ### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
 
@@ -402,7 +502,7 @@ Archetype B on the 4 squares, richer photo reserved for the large panels). Scaff
 `--ref-image` = the product's Shopify photo; `--doc-id singleton.panelDeck`):
 
 > The {product} as a clean single-product cutout still, bold and centered on a flat solid
-> {coral-soft | plum-soft | paper-2 | paper-3} seamless tint ground matching the tile, soft even
+> {coral-soft | plum-soft | paper-2 | paper-3} tint ground matching the tile, soft even
 > studio light, one crisp shadow, square crop, generous negative space around the product, premium
 > sexual-wellness catalog photography, single product only, no text, no words, no letters
 
@@ -643,7 +743,7 @@ to the real-photo fallback path rather than attempt Kontext.
 
 ---
 
-## Instagram carousel — cast + product compositing (`fal-ai/nano-banana/edit`, License B/C)
+## Instagram carousel — cast + product compositing (License B/C)
 
 Not a homepage surface, but the same multi-reference compositing pattern belongs here so it
 isn't re-discovered from scratch. Route: `composeSceneFrame()` in `app/lib/fal-video.server.ts`
@@ -651,11 +751,21 @@ isn't re-discovered from scratch. Route: `composeSceneFrame()` in `app/lib/fal-v
 use, plus `extraImageUrls` for references beyond presenter/product — pass `'4:5'` for a
 feed/carousel still). `image_urls` order does not matter to the model.
 
-**Model note (2026-08-10):** the run below was on `fal-ai/nano-banana/edit`. That path has
+**Update (2026-08-15, Atlas migration, PR #692):** the primary route for cast + product
+composites is now ONE-STAGE Atlas `bytedance/seedream-v4.5/edit` via `generateImage()` (and the
+`composeSceneFrame()` successor once the `atlas-composite-port` ticket lands). The Atlas POC
+passed the cast-presenter + insertable-toy reference pairing that nano-banana 422s on, twice,
+with exact product geometry and true 4:5 output; see `docs/media-model-routing.md` for the
+routing table and evidence. The two-stage plate + composite below remains the fal FALLBACK path
+and the video-frame path until that port lands. The nano-banana content-policy fence and the
+black-JPEG retry lore apply only on the fal fallback path.
+
+**Model note (2026-08-10):** the run below was on `fal-ai/nano-banana/edit`. That fal path has
 since been replaced by the two-stage plate + `fal-ai/flux-2/lora/edit` composite (see the
 bake-off notes at the top of `fal-video.server.ts`), which was adopted precisely because
-nano-banana's non-configurable safety filter blocked much of the catalog. Read the fence below
-as a record of why the swap happened, not as a live constraint on the current route.
+nano-banana's non-configurable safety filter blocked much of the catalog. The fal fallback
+route has in turn been superseded as primary by the one-stage Atlas route above. Read the fence
+below as a record of why the swaps happened, not as a live constraint on the current route.
 
 **Hard content-policy fence (verified 2026-08-09, 4 independent prompt variations, all failed
 identically):** `fal-ai/nano-banana/edit` 422s with `content_policy_violation` on the *pairing*

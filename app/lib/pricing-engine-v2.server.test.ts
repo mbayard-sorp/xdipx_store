@@ -3,6 +3,7 @@ import {
   applyVelocityModifier,
   computeDiscontinuedPrice,
   computePrice,
+  enforceMapFloor,
   roundPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
   type PricingConfig,
@@ -38,26 +39,47 @@ describe('computePrice — basic', () => {
 })
 
 describe('computePrice — MAP enforcement', () => {
-  it('at_map: cost below MAP target -> snaps to MAP', () => {
-    // cost=10, target_margin=0.50 -> target=20, MAP=25 -> sell snaps to MAP=25
-    // roundPsychological(25) = 24.99
+  it('at_map: cost below MAP target -> snaps to MAP exactly (never below)', () => {
+    // cost=10, target_margin=0.50 -> target=20, MAP=25 -> sell snaps to MAP=25.
+    // roundPsychological(25) would give 24.99, which is BELOW MAP (ticket #3714);
+    // the post-round re-clamp lands the price exactly on MAP instead.
     const r = computePrice({ cost: 10, map: 25, msrp: 60, cfg: cfg({ map_behavior: 'at_map' }) })
+    expect(r?.sell).toBe(25.00)
+  })
+
+  it('at_map: MAP ending in .99 is honored exactly (regression, ticket #3714)', () => {
+    // MAP=24.99: roundPsychological(24.99) = 23.99, a full dollar below the
+    // advertised floor. This was the systematic below-MAP write bug.
+    const r = computePrice({ cost: 10, map: 24.99, msrp: 60, cfg: cfg({ map_behavior: 'at_map' }) })
     expect(r?.sell).toBe(24.99)
   })
 
-  it('above_map_only: snaps to MAP + $0.01 when target < MAP', () => {
-    // cost=10, target=20, MAP=25 -> sell=25+0.01=25.01, round -> 25.01 stays (floor(25.01)=25 -> 24.99)
-    // Actually: roundPsychological(25.01) = floor(25.01)-0.01 = 25-0.01 = 24.99
-    // But sell is set to 25.01 before rounding. floor(25.01)=25, candidate=24.99.
-    // That means at_map and above_map_only both yield 24.99 here. Spec says +$0.01 before rounding.
-    // The difference is only visible when MAP is a round number that rounding would hit exactly.
+  it('above_map_only: lands one cent over MAP when target < MAP', () => {
     const rAtMap     = computePrice({ cost: 10, map: 25, msrp: 60, cfg: cfg({ map_behavior: 'at_map' }) })
     const rAboveMap  = computePrice({ cost: 10, map: 25, msrp: 60, cfg: cfg({ map_behavior: 'above_map_only' }) })
-    // Both round to same psychological price in this scenario, but above_map_only's
-    // pre-round value is 25.01 while at_map's is 25.00. After rounding they may differ
-    // only when target lands exactly on a round integer.
-    // Verify above_map_only >= at_map (it cannot be cheaper than at_map).
-    expect(rAboveMap!.sell).toBeGreaterThanOrEqual(rAtMap!.sell)
+    expect(rAtMap!.sell).toBe(25.00)
+    expect(rAboveMap!.sell).toBe(25.01)
+    expect(rAboveMap!.sell).toBeGreaterThan(25)
+  })
+
+  it('invariant: sell >= MAP for every MAP-respecting behavior', () => {
+    const maps = [3.49, 9.99, 14.5, 19.99, 24.99, 25, 33.33, 49.99, 100]
+    for (const map of maps) {
+      for (const behavior of ['at_map', 'above_map_only'] as const) {
+        const r = computePrice({ cost: 1, map, msrp: 200, cfg: cfg({ map_behavior: behavior }) })
+        expect(r).not.toBeNull()
+        expect(r!.sell).toBeGreaterThanOrEqual(map)
+      }
+    }
+  })
+
+  it('MAP == MSRP: prices exactly at MAP with no compare_at strike-through', () => {
+    // The common Nalpac case (1,639 active products on 2026-08-16): MAP=MSRP
+    // means no advertised discount is allowed. Price sits exactly at MAP and
+    // compare_at stays null (sell is not < msrp).
+    const r = computePrice({ cost: 10, map: 50, msrp: 50, cfg: cfg({ map_behavior: 'at_map' }) })
+    expect(r?.sell).toBe(50.00)
+    expect(r?.compare_at).toBeNull()
   })
 
   it('ignore_map: MAP present but ignored', () => {
@@ -418,6 +440,37 @@ describe('buildPatches — camelCase GroupRuleValues -> snake_case patch shape',
       'global:global': { targetMarginPct: 0.45, marginFloorPct: 0.20, mapBehavior: 'at_map', compareAtStrategy: 'msrp', velocityModifierEnabled: false },
     }
     expect(buildPatches(edits)).toHaveLength(3)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// enforceMapFloor (ticket #3714 write-path invariant)
+// ---------------------------------------------------------------------------
+
+describe('enforceMapFloor', () => {
+  it('raises a below-MAP price to MAP', () => {
+    expect(enforceMapFloor(23.99, 24.99)).toBe(24.99)
+  })
+
+  it('leaves an at-MAP price alone', () => {
+    expect(enforceMapFloor(24.99, 24.99)).toBe(24.99)
+  })
+
+  it('leaves an above-MAP price alone', () => {
+    expect(enforceMapFloor(29.99, 24.99)).toBe(29.99)
+  })
+
+  it('no MAP (null) -> price unchanged', () => {
+    expect(enforceMapFloor(9.99, null)).toBe(9.99)
+    expect(enforceMapFloor(9.99, undefined)).toBe(9.99)
+  })
+
+  it('MAP of 0 means no floor', () => {
+    expect(enforceMapFloor(9.99, 0)).toBe(9.99)
+  })
+
+  it('rounds the clamped MAP to 2 decimals', () => {
+    expect(enforceMapFloor(10, 12.345)).toBe(12.35)
   })
 })
 

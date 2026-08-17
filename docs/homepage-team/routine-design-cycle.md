@@ -90,12 +90,13 @@ plus the retired-route denylist stand.
   ambition compounds across cycles.
 - **While traffic-gated, keep the cycle cheap: bank design capital, defer expensive builds.** With
   GA4 far below the 300-sessions/week weighting threshold, no shipped homepage change is currently
-  GA4-measurable, so big asset-generation or new-machinery builds (fal.ai imagery waves, interactive
+  GA4-measurable, so big asset-generation or new-machinery builds (generated-imagery waves, interactive
   finders, a reviews slot) would ship to almost no one. While sessions < 300/week the ambition
   mandate is satisfied by **wires / prototypes + cheap, certain real-defect fixes**; expensive
   asset-generation and new-machinery builds wait until either traffic returns or the change is
   cheap-and-certain. This is not a call to stop inventing — it is a call to bank ambition as design
-  proposals now and spend build / fal.ai budget when it can actually be seen.
+  proposals now and spend build / image-generation budget (`generateImage()`, routing per
+  `docs/media-model-routing.md`) when it can actually be seen.
 
 ### 2. Prototype on a branch
 
@@ -115,6 +116,16 @@ imagery via `media-manager` (reuse-first), copy via `emma-copywriter`.
   the change is non-trivial.
 - `qa-reviewer` — typecheck, build, tests, and the prototype exercised in the preview MCP at 375px +
   desktop, with a CLS check and proof screenshots.
+- **Variant-b quarantine audit (ticket #1450, mandatory whenever a legacy component is quarantined
+  off the v3 storefront via an allow-list like `VARIANT_B_SECTION_TYPES`).** Grep every call site of
+  the excluded COMPONENT (grep the component name, not just the block type) and confirm no wrapper
+  re-introduces it. The section-type exclusion cannot see wrapper paths: `productCarousel` was
+  correctly excluded, but the semantically equivalent `emmaCuratedRail` → `EmmaCuratedRail` →
+  `ProductCarousel` wrapper path bypassed the guard and shipped stale v2 card chrome (rounded-2xl,
+  drop-shadow, border-cream-2) on the team's main lever, undetected until run 183's live
+  self-capture (PR #506). Any wrapper that must stay carries v3 chrome explicitly, and the
+  quarantine's code comment should say so (that comment amendment is a code change and rides its
+  own PR, not this checklist).
 - **`design-critic` — mandatory design gate.** Reviews screenshots of every changed surface at
   375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
   type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
@@ -246,7 +257,10 @@ see `docs/store-team/improvement-loop.md`.
 **Append the design changelog.** When a design/shell PR ships this cycle (or is opened for the
 release engine), append one dated entry to `docs/homepage-team/design-changelog.md` in that file's
 entry format (Routine B, what changed, why, and the evidence probe touched — the PR number and the
-signal or directive that drove the change). Newest entry above the append marker. It may ride the
+signal or directive that drove the change). **Append at the BOTTOM of the file, directly above the
+end-of-file append marker (after the most recent existing entry), and rebase onto latest
+`origin/main` immediately before opening the PR** (ticket #2878): the old fixed anchor right after
+`## Entries` made every concurrent changelog PR conflict on the same line. It may ride the
 same shell PR or, when the cycle produced only content-label work, a small docs append; either way the
 changelog is on the agent-editor allowlist and gates nothing.
 

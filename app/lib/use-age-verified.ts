@@ -5,7 +5,7 @@ const EXPIRY_DAYS    = 30
 const POLICY_VERSION = '1.0'
 const SYNC_EVENT     = 'xdipx:age-verified'
 
-function readVerified(): boolean {
+export function readVerified(): boolean {
   if (typeof window === 'undefined') return false
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -18,11 +18,21 @@ function readVerified(): boolean {
   }
 }
 
-function writeVerified(): void {
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ verified: true, timestamp: Date.now(), version: POLICY_VERSION }),
-  )
+export function writeVerified(): void {
+  // Guarded like readVerified: localStorage.setItem throws in private
+  // browsing modes and when storage is full. Unguarded, the throw killed the
+  // confirm() click handler before setVerifiedState(true) ran, permanently
+  // locking the visitor out of their own cart with no error shown (ticket
+  // #3424). Now the in-memory state still flips; verification simply will
+  // not persist across reloads.
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ verified: true, timestamp: Date.now(), version: POLICY_VERSION }),
+    )
+  } catch {
+    // Storage unavailable. Session continues unverified-on-next-load.
+  }
 }
 
 export function useAgeVerified(): { verified: boolean; confirm: () => void } {

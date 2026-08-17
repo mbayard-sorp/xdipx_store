@@ -49,8 +49,10 @@ import {
   activateShopifyProduct,
   pushProductToShopify,
   appendProductTag,
+  getHandleByProductId,
   type ProductPageDoc,
 } from '~/lib/shopify.server'
+import { createSuggestion } from '~/lib/team.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { ensureProductTypeForPublish } from '~/lib/product-type.server'
 import { getPipelineSetting, deriveSection } from '~/lib/feed-processor.server'
@@ -814,6 +816,7 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
       sku:        dealHistory.sku,
       title:      dealHistory.seoTitle,
       categories: dealHistory.categories,
+      brand:      dealHistory.brand,
     })
     .from(importCandidates)
     .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
@@ -825,6 +828,9 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
 
   let published = 0
   let failed = 0
+  // Collected for the social team's new-product suggestion below (#3736):
+  // handle, title, category, vendor per product that actually went live.
+  const wentLive: Array<{ handle: string; title: string; category: string; vendor: string }> = []
   for (const r of rows) {
     if (!r.productId) continue
     try {
@@ -855,6 +861,20 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
         .set({ publishedAt: new Date(), updatedAt: new Date() })
         .where(eq(importCandidates.id, r.id))
       published++
+
+      // Best-effort handle lookup for the social suggestion below. A miss
+      // falls back to the SKU so the row still names the product somehow.
+      try {
+        const handle = await getHandleByProductId(r.productId)
+        wentLive.push({
+          handle:   handle ?? r.sku,
+          title:    r.title ?? r.sku,
+          category: (r.categories ?? []).filter(c => !!c && c !== '(uncategorized)').join(', ') || 'uncategorized',
+          vendor:   r.brand ?? 'unknown',
+        })
+      } catch {
+        wentLive.push({ handle: r.sku, title: r.title ?? r.sku, category: 'uncategorized', vendor: r.brand ?? 'unknown' })
+      }
     } catch (err) {
       console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err)
       failed++
@@ -873,6 +893,36 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
       triggerDiscoveryRebuild()
     } catch (err) {
       console.warn('[import-enrich] discovery index refresh after publish failed (will self-heal on next /cron/warm):', err)
+    }
+  }
+
+  // Tell the social team products went live (ticket #3736). One batched row
+  // per publish run, never one row per product, so a bulk publish cannot flood
+  // the bus; the social routine reads its inbound mail at Step 7b. The daily
+  // dedupe key means a re-run on the same day extends the open conversation
+  // instead of opening a second one. Products activated OUTSIDE this chain
+  // (manual Shopify status flip) are caught by handleProductUpdated in
+  // server/webhooks.ts, which skips products this chain just published.
+  if (wentLive.length > 0) {
+    try {
+      const day = new Date().toISOString().slice(0, 10)
+      const lines = wentLive
+        .map(p => `- ${p.title} (handle: ${p.handle}, category: ${p.category}, vendor: ${p.vendor})`)
+        .join('\n')
+      await createSuggestion({
+        team:      'social',
+        kind:      'campaign',
+        category:  'social-automation',
+        dedupeKey: `new-products:enrich:${day}`,
+        suggestion:
+          `${wentLive.length} product(s) went live on the storefront via the enrich-to-publish ` +
+          `chain (owner direction 2026-08-16: posts about new products we now have on the site):\n` +
+          `${lines}\n` +
+          `Consider a new-arrivals post per routine-social-daily.md Step 7b. Every pick still ` +
+          `passes the usual gates: Instagram category eligibility, stock, and the voice gate.`,
+      })
+    } catch (err) {
+      console.warn('[import-enrich] new-product social suggestion filing failed (non-blocking):', err)
     }
   }
 

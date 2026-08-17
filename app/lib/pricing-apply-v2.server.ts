@@ -12,6 +12,7 @@ import {
   computePrice,
   computeDiscontinuedPrice,
   applyVelocityModifier,
+  enforceMapFloor,
 } from './pricing-engine-v2.server'
 import {
   resolvePricingConfig,
@@ -319,10 +320,20 @@ async function recomputeFromData(
 
   if (status === 'auto_applied') {
     try {
+      // MAP floor invariant (ticket #3714): last-line guard at the write path.
+      // decideStatus already rejects below-MAP prices and computePrice clamps
+      // after rounding, but nothing may reach Shopify below a positive MAP.
+      // Discontinued items are exempt (clearance ladder, MAP does not apply),
+      // as is an explicit ignore_map config.
+      const mapFloor = !isDiscontinued && cfg.map_behavior !== 'ignore_map' ? map : null
+      const guardedSell = enforceMapFloor(newSell, mapFloor)
+      if (guardedSell !== newSell) {
+        console.warn(`[pricing-apply-v2] MAP floor guard raised ${sku} from $${newSell} to $${guardedSell}`)
+      }
       await updateVariantPricing(
         variantId,
-        String(newSell),
-        newCompare != null ? String(newCompare) : String(newSell),
+        String(guardedSell),
+        newCompare != null ? String(newCompare) : String(guardedSell),
       )
       applied = true
     } catch (err) {

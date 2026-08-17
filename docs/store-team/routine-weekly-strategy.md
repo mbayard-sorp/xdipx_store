@@ -133,11 +133,39 @@ every blocked row and its latest `suggestion_links` note (that note is where R-D
 Report the three counts (resolved / wrong-lane / genuinely-blocked) in the run summary so a growing
 blocked pile is visible.
 
+## Step 3d — Social drift check (the healing loop)
+
+Owner direction 2026-08-16 ("a healing loop on our strategy so we don't drift"), ticket #3737. Read
+`docs/store-team/social-crossplatform-strategy.md` §8 plus the week's `social_posts` rows, and put
+a six-line verdict in the weekly brief, one yes/no per line, where **yes is the healthy answer**:
+
+1. Every platform ran the active campaign spine.
+2. X companion beats shipped for the week's Instagram product posts.
+3. Toy posts carried their lube pairing.
+4. Every caption stayed inside its platform register cap (4-5 IG/TikTok, 6-7 X).
+5. The campaign runway is at least 4 weeks.
+6. Every maker engagement (like/reply/reshare) was flagged to `offsite-scout`. A week with no maker
+   engagement is a yes, said plainly.
+
+Every "no" becomes a suggestion row filed the same run at the team that owns it, with a
+`dedupeKey`, never a narrative-only note. Once migration 079 lands (ticket #3536), the check also
+reads the engagement op and names the week's best and worst theme by saves; until then, say plainly
+in the brief that engagement is unmeasured.
+
 ## Step 4 — Sub-specialists (sequence, same $RUN_ID)
 
 1. `inventory-sentinel` — catalog stock/price sweep → targeted suggestions + scoreboard event.
 2. `promo-manager` — MAP-guarded promo designs for the coming window → kind `promo` suggestions +
-   calendar proposals.
+   calendar proposals. **Category-sale license (owner direction 2026-08-16, ticket #3738):**
+   promo-manager proposes at least one category-level sale per month, priced anywhere down to
+   break-even (`wholesale_cost` is the floor, never below), always inside the MAP rules
+   (`mapAllowsAdvertisedDiscount`, hardened in #3675/PR #703: `map_price == original_price`
+   products get no discount framing anywhere). Every proposal is a `marketing_calendar` promo
+   window plus a suggestion row so the channels fire together per
+   `docs/store-team/social-crossplatform-strategy.md` §7: X, email, SMS, social, and site say the
+   number; Instagram raises the theme without the number. Execution unchanged: the owner still
+   creates the code in Shopify Admin (or the valve-gated 2b path below mints approved rows);
+   nothing in this license mints a discount by itself.
 2b. **Execute approved promos (valve-gated).** For promo rows the owner has already approved, mint
    the Shopify discount code. Gated by `promo_execute_enabled`, default **off**; with the valve off
    the script exits without touching Shopify. It is fail-closed: a row flagged with a MAP conflict,

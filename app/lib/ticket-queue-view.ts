@@ -89,6 +89,38 @@ export function fmtAge(from: Date | string | null, now: Date = new Date()): stri
 }
 
 /**
+ * Why the team-tables load in the /admin/homepage-team loader failed.
+ *
+ * The loader's original `migrated` flag flipped false on ANY throw from
+ * gate()/listRecentRuns, which conflated two very different situations: the
+ * 049/051 tables genuinely not existing yet (hide the queue, show the
+ * apply-migrations banner) and a transient Neon pooler hiccup (the tables are
+ * fine, the query just failed this once). The second case silently removed the
+ * whole ticket queue, filters and all, from a healthy install (ticket #3770).
+ *
+ * Postgres reports a missing table as SQLSTATE 42P01 (undefined_table), which
+ * drivers surface as a `code` property somewhere on the error or its `cause`
+ * chain, or as `relation "..." does not exist` in the message. Anything else
+ * is treated as transient: the caller should render the section shell with an
+ * explicit error state instead of hiding it.
+ */
+export function classifyTeamTablesError(err: unknown): 'unmigrated' | 'transient' {
+  const missingRelation = (msg: string): boolean =>
+    msg.includes('42P01') || /relation "[^"]+" does not exist/.test(msg)
+  if (typeof err === 'string') return missingRelation(err) ? 'unmigrated' : 'transient'
+  let cur: unknown = err
+  // Bounded walk down the cause chain: drizzle and the Neon driver both wrap
+  // the raw pg error, so the 42P01 code can sit a level or two deep.
+  for (let depth = 0; cur != null && typeof cur === 'object' && depth < 5; depth++) {
+    const rec = cur as Record<string, unknown>
+    if (rec['code'] === '42P01') return 'unmigrated'
+    if (typeof rec['message'] === 'string' && missingRelation(rec['message'])) return 'unmigrated'
+    cur = rec['cause']
+  }
+  return 'transient'
+}
+
+/**
  * When the rendered table is smaller than the true filtered total (the
  * board caps at SUGGESTION_LIST_MAX), say so plainly instead of letting a
  * clipped table read as complete. Returns null when nothing is hidden.

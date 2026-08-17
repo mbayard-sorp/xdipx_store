@@ -133,10 +133,14 @@ What follows from this:
 
 - **Approved products can appear in the shops. Rejected ones cannot.** Meta's diagnostic scopes the
   rejection to `mini_shops`, which is the shops surface, not ad delivery and not organic reach.
-- **Product tagging is a separate permission the store does not have.** Tagging a product in a post
-  requires a Facebook Login for Business token carrying `instagram_shopping_tag_products`. The
-  store's current Instagram token is an Instagram Login token and cannot read the catalog or tag
-  products, verified 2026-08-15. No post can carry a product tag today.
+- **Product tagging is live as of 2026-08-16** (ticket #3744). The owner added the
+  `instagram_shopping_tag_products` permission, and the publisher
+  (`app/lib/social-publish/instagram.server.ts`) now tags the gate stamp's featured product on feed
+  photos and carousels when Meta's `available_catalog_product_search` returns it, which by
+  construction limits tags to Shops-approved products. A tag is additive and loosens nothing: the
+  sale-attempt checks in this document still bind, the post stays editorial, and any tag failure
+  (no approved match, missing scope, API refusal) degrades to publishing without the tag, never to
+  a failed publish. The pre-2026-08-16 claim that no post can carry a product tag is obsolete.
 - **Approval is not a licence and rejection is not a ban.** Commerce review judges a catalog item;
   community standards judge a post. Never treat an approved product as permission to post something
   §Organic social forbids, and never treat a rejected product as ineligible to appear in an

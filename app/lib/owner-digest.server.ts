@@ -27,6 +27,7 @@ import { getProfitReconciliation } from '~/lib/profit.server'
 import {
   computeTicketLoopHealth,
   describeSupersededEvidence,
+  reconcileOrphanedTickets,
   reconcilePrLinkStates,
   type BlockedTicket,
   type ConflictedPr,
@@ -360,6 +361,69 @@ export function renderOwnerQueueSection(f: OwnerQueueFacts): string {
   return parts.join('')
 }
 
+/* ── Section: Ad campaigns awaiting launch ─────────────────────────────────── */
+
+export interface AdCampaignQueueRow {
+  id: number
+  platform: string
+  name: string
+  objective: string
+  plannedDailyCents: number
+  ageDays: number
+}
+
+/** Approved proposals older than this get the warning color. */
+const STALE_AD_CAMPAIGN_DAYS = 7
+
+/**
+ * Approved ad_campaigns proposals with no external campaign id yet. Launching
+ * is a human action in-platform (the ads agent is propose-only), so an approved
+ * row with no externalCampaignId is a task only the owner can move, and until
+ * this section existed nothing ever surfaced it: three proposals sat approved
+ * for a month while the Google Ads launch quietly stalled (ticket #3423). A row
+ * leaves this list the moment externalCampaignId is set.
+ */
+export function renderAdCampaignQueueSection(rows: readonly AdCampaignQueueRow[]): string {
+  if (rows.length === 0) {
+    return `<p style="margin:0;color:${GOOD};">No approved ad campaign proposal is waiting on a launch.</p>`
+  }
+  const studio = `<a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`
+  const items = rows
+    .map(r => {
+      const ageColor = r.ageDays >= STALE_AD_CAMPAIGN_DAYS ? WARN : MUTED
+      const budget = r.plannedDailyCents > 0 ? ` &middot; $${(r.plannedDailyCents / 100).toFixed(2)}/day planned` : ''
+      return `<li style="margin-bottom:3px;">#${r.id} <strong>${esc(clip(r.name, 60))}</strong> (${esc(r.platform)}, ${esc(r.objective)})${budget} &middot; <span style="color:${ageColor};">approved ${r.ageDays}d ago</span></li>`
+    })
+    .join('')
+  return `<p style="margin:0 0 4px;color:${WARN};"><strong>${rows.length} approved ad campaign${rows.length === 1 ? '' : 's'} not launched.</strong> Approving is not launching: only you can create ${rows.length === 1 ? 'it' : 'them'} in-platform. Review at ${studio}.</p><ul style="margin:0;padding-left:18px;">${items}</ul>`
+}
+
+async function gatherAdCampaignQueue(): Promise<AdCampaignQueueRow[]> {
+  try {
+    const res = await db.execute(sql`
+      SELECT id, platform, name, objective, planned_daily_cents,
+             EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
+        FROM ad_campaigns
+       WHERE status = 'approved'
+         AND (external_campaign_id IS NULL OR external_campaign_id = '')
+       ORDER BY created_at ASC LIMIT 10`)
+    return (res.rows ?? []).map(r => {
+      const row = r as Record<string, unknown>
+      return {
+        id: Number(row['id'] ?? 0),
+        platform: String(row['platform'] ?? ''),
+        name: String(row['name'] ?? ''),
+        objective: String(row['objective'] ?? ''),
+        plannedDailyCents: Number(row['planned_daily_cents'] ?? 0),
+        ageDays: Math.round(Number(row['age_days'] ?? 0)),
+      }
+    })
+  } catch (err) {
+    console.warn('[owner-digest] ad-campaign queue unavailable:', String(err).slice(0, 200))
+    return []
+  }
+}
+
 /* ── Section 7: Ops watchdogs ──────────────────────────────────────────────── */
 
 export interface OpsWatchFacts {
@@ -541,6 +605,8 @@ export interface NeedsMikeFacts {
   /** PRs GitHub reports merge-conflicted, on which CI structurally cannot run. */
   conflictedPrs: ConflictedPr[]
   missedRoutines: RoutineLivenessFlag[]
+  /** Approved ad_campaigns rows with no externalCampaignId: launch is owner-only. */
+  adCampaigns?: AdCampaignQueueRow[]
 }
 
 /**
@@ -568,6 +634,9 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   }
   for (const m of f.missedRoutines.slice(0, 5)) {
     items.push(`Routine ${esc(m.routine)} missed its window (${esc(m.schedule)} UTC): ${m.lastRunAt ? `last run ${m.hoursSince}h ago` : 'no run row ever'}`)
+  }
+  for (const c of (f.adCampaigns ?? []).slice(0, 5)) {
+    items.push(`Ad campaign #${c.id} &ldquo;${esc(clip(c.name, 60))}&rdquo; (${esc(c.platform)}) approved ${c.ageDays}d ago and never launched, only you can create it in-platform: <a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`)
   }
   if (items.length === 0) {
     return `<p style="margin:0;color:${GOOD};">Nothing on this list today.</p>`
@@ -1137,7 +1206,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // the kind of invisible mutation this digest was built to surface. The nightly
   // scheduled run is the only thing that ages anything out.
   const agedOut = opts.force ? null : await ageOutStaleSuggestions()
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows] =
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
@@ -1152,12 +1221,19 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
         return null
       }),
       // Best-effort for the same reason: the janitor reads GitHub. The
-      // reconcile runs first so pr-link states are fresh when health is
-      // computed; its own failure costs nothing but freshness, never the
-      // digest and never the health computation behind it.
+      // reconciles run first so pr-link states are fresh and merged-PR orphans
+      // are already off the live queue when health is computed (#3582: an
+      // orphan the reconcile applies vanishes from Needs-Mike in the same
+      // digest, and one the protected-path check skips stays listed). Each
+      // step's own failure costs nothing but freshness, never the digest and
+      // never the health computation behind it.
       reconcilePrLinkStates()
         .catch(err => {
           console.warn('[owner-digest] pr-link reconcile failed:', String(err).slice(0, 200))
+        })
+        .then(() => reconcileOrphanedTickets())
+        .catch(err => {
+          console.warn('[owner-digest] orphan reconcile failed:', String(err).slice(0, 200))
         })
         .then(() => computeTicketLoopHealth())
         .catch((err): null => {
@@ -1165,6 +1241,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
           return null
         }),
       gatherStaleOwnerRows(),
+      gatherAdCampaignQueue(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
@@ -1180,6 +1257,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     orphans: loopHealth?.orphans ?? [],
     conflictedPrs: loopHealth?.conflictedPrs ?? [],
     missedRoutines: loopHealth?.routineFlags ?? [],
+    adCampaigns: adCampaignQueue,
   }
 
   // ── Compose ───────────────────────────────────────────────────────────────
@@ -1291,6 +1369,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section(`Shipped, last 24h (${shipped.length})`, renderShippedSection(shipped))}
       ${section('Homepage now', renderHomepageNowSection(homepageNow))}
       ${section(`Needs a decision from you${ownerQueue.totalCount > 0 ? ` (${ownerQueue.totalCount})` : ''}`, renderOwnerQueueSection(ownerQueue))}
+      ${section(`Ad campaigns awaiting launch${adCampaignQueue.length > 0 ? ` (${adCampaignQueue.length})` : ''}`, renderAdCampaignQueueSection(adCampaignQueue))}
       ${section('Orders and profit (last 8 days)', `<table style="border-collapse:collapse;">${profitRows || '<tr><td>no rows</td></tr>'}</table>${reconLine}`)}
       ${section('Ops watch', renderOpsWatchSection(opsWatch))}
       ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || '<tr><td>no runs</td></tr>'}</table>`)}

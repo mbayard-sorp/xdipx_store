@@ -36,6 +36,17 @@ function round2(n: number): number {
 }
 
 /**
+ * MAP floor invariant (ticket #3714): a sell price may never be written below
+ * a positive MAP. Pure clamp shared by every Shopify price write path, so a
+ * write path that skips computePrice still cannot set price below map_price.
+ * Returns the price unchanged when no MAP applies.
+ */
+export function enforceMapFloor(price: number, map: number | null | undefined): number {
+  if (map == null || map <= 0) return price
+  return price < map ? round2(map) : price
+}
+
+/**
  * Psychological rounding: result ends in .99 and is <= input.
  * Convention: floor(n) - 0.01. e.g. 24.37 -> floor=24 -> 23.99.
  * For n < 1 we skip the ladder and return round2(n).
@@ -118,6 +129,17 @@ export function computePrice(params: {
   }
 
   sell = roundPsychological(sell)
+
+  // MAP re-clamp AFTER rounding (ticket #3714). roundPsychological only rounds
+  // down, so a MAP-clamped sell came out below MAP (MAP 25.00 -> 24.99, and
+  // MAP 24.99 -> 23.99, a full dollar under the advertised floor). That made
+  // the engine's own output violate its MAP floor, decideStatus then rejected
+  // the recompute, and any product already priced below MAP stayed there
+  // forever. Compliance beats the .99 aesthetic: land exactly on MAP
+  // (above_map_only lands a cent over).
+  if (cfg.map_behavior !== 'ignore_map' && map != null && sell < map) {
+    sell = cfg.map_behavior === 'above_map_only' ? round2(map + 0.01) : round2(map)
+  }
 
   const compare_at =
     cfg.compare_at_strategy === 'msrp' && msrp != null && sell < msrp

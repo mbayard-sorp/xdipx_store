@@ -16,6 +16,7 @@ export function ComingSoon({ block }: { block: Block }) {
   return (
     <div id={block.anchorId} data-block={block._type}>
       <EmailSubscribe
+        location="category"
         {...(block.heading ? { heading: block.heading } : {})}
         {...(block.body ? { subcopy: block.body } : {})}
       />

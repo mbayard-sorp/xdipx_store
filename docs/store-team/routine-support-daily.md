@@ -10,10 +10,12 @@ template, or a route, and it never answers a customer.
 Runs on the **Max subscription**: own reasoning, the site is for data reads and spend logging only.
 Never call the site's Anthropic-keyed endpoints.
 
-The support team infrastructure — the `support` team gate/budget and the `support_team_enabled` kill
-switch — lands with PR #457. Until it does, this routine no-ops honestly at the gate: the cloud
-trigger is an owner action created at enablement, and the routine stays dormant until
-`support_team_enabled` flips on.
+The support team is **live**. The `support` team gate/budget and the `support_team_enabled` kill
+switch landed with PR #457, the switch is ON (`GET /api/team/gate?team=support` returns
+`enabled:true`, dailyCents 300, maxRunsPerDay 2), and the cloud trigger
+`trig_01J4JPPmzdtgg8UBpHDmbwTu` fires daily at 16:30 UTC (routine 21 in
+`docs/store-team/routine-schedule.md`, first fire 2026-08-16). If the switch is ever flipped off,
+the routine no-ops honestly at the gate.
 
 Auth on every `/api/team/*` call: header `x-team-secret: $TEAM_TOKEN` (falls back to
 `$HOMEPAGE_TEAM_TOKEN`, then `$CRON_SECRET`). `BASE_URL` = deployed origin.
@@ -39,11 +41,13 @@ and **stop**. Skip honestly; never work around the gate.
 
 ## Step 2: Sample the last 24h across all three channels
 
-Read a bounded N per channel from the DB the way the other data routines do (`DATABASE_URL`, psql /
-neon-http over HTTPS, since 5432 is firewalled). You are spot-checking quality, not auditing every
-message.
+Read from the DB the way the other data routines do (`DATABASE_URL`, psql / neon-http over HTTPS,
+since 5432 is firewalled). SMS and web chat are bounded samples (spot-checking quality); voice is
+**exhaustive** (every turn since the previous run, per the owner direction recorded in the
+support-analyst agent definition) for as long as daily voice volume stays under 50 turns.
 
-- **Voice:** `call_log` plus the call transcripts.
+- **Voice:** every turn since the previous run: `sms_turns` where `channel='voice'`, plus
+  `call_log` and the call transcripts.
 - **SMS:** `sms_turns`.
 - **Web chat:** `emma_chat_turns`.
 
@@ -94,17 +98,36 @@ curl -s -X POST "$BASE_URL/api/team/run" \
   -d '{"op":"update","id":'$RUN_ID',"update":{"finished":true,"status":"succeeded","summary":"<sampled counts + findings filed + top pattern>"}}'
 ```
 
-## Appendix: Enablement
+## IG comment replies (dormant: active only when the comments lane ships)
 
-The routine ships inert. To turn it on, in order:
+Owner direction 2026-08-08. This posture activates when the IG comments lane ships (ticket
+dedupeKey `ig-comments-support-lane`); nothing in this section runs before that. When live,
+`customer-service-emma` drafts the replies and this routine adds IG comment threads to its daily
+conversation-quality review. Reply rules:
 
-1. **Land the support-team infrastructure (PR #457):** the `support` team gate/budget and the
-   `support_team_enabled` kill switch.
-2. **Flip the kill switch:** `support_team_enabled` → on.
-3. **Create the cloud trigger** (routine 21 in `docs/store-team/routine-schedule.md`): the owner
-   creates it at enablement, `30 16 * * *` (16:30 UTC daily), team `support`, feature label
-   `support-review`.
-4. **One supervised manual run:** fire the routine by hand, watch the run row and events, confirm the
-   sample reads across all three channels and findings land with executor kinds.
+- Emma support voice: warm, human, short.
+- Product questions answered from catalog knowledge, with a soft link to the PDP.
+- NEVER claim lived experience.
+- No trust-signal boilerplate unless the commenter explicitly asks about privacy or shipping; then
+  answer plainly.
+- Complaints and order issues move to hello@xdipx.com, with a one-line public acknowledgment.
+- Never argue, never engage trolls (mark ignored). Harassment and spam get hidden via the API where
+  supported and marked ignored.
+- No medical advice; redirect to the Notebook education posts.
+- Every reply passes the voice gate before entering the approval queue.
 
-Until steps 1-2 are done, every fire no-ops honestly at the gate.
+DONE WHEN (for the activating ticket): the posture is live and the first 10 approved replies have
+shipped through the queue.
+
+## Appendix: Enablement (historical)
+
+The routine shipped inert and has since been enabled. Status of the original enablement steps:
+
+1. **Support-team infrastructure (PR #457):** DONE. The `support` team gate/budget and the
+   `support_team_enabled` kill switch are live.
+2. **Kill switch:** DONE. `support_team_enabled` is on.
+3. **Cloud trigger:** DONE. `trig_01J4JPPmzdtgg8UBpHDmbwTu`, `30 16 * * *` (16:30 UTC daily),
+   team `support`, feature label `support-review`, created 2026-08-15, first fire 2026-08-16.
+4. **One supervised manual run:** the only step that may still be open: fire the routine by hand,
+   watch the run row and events, confirm the reads land across all three channels and findings carry
+   executor kinds. If a supervised run has already happened, this appendix is fully closed.

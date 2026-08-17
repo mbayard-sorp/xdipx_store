@@ -168,10 +168,19 @@ Create idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `
   post's publishing category and (b) point at the §0 **hero router** in
   `docs/notebook-team/image-brief.md`, which is binding: guides/comparisons/care/wellness-basics
   posts get the §0-P product hero (subject = one of the post's `blogProductEmbed` handles via its
-  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**
-  (expressive adult figure — Emma or a fictional friend — reflecting how the reader might feel at
-  the headline; faces visible; warm light; adults-only hard rules). Pass the headline and its
-  feeling with the request on §0-H posts. Never a domestic metaphor object in either archetype.
+  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**.
+  On §0-H posts the hero request is a **structured payload**, not "category plus a pointer to
+  the router" (owner direction 2026-08-11, ticket #2748). It carries all six fields:
+  - `headline`: the post's title, verbatim (the hero stages this question);
+  - `thesis`: the post's thesis in one line;
+  - `heroEmbedHandle`: the `blogProductEmbed.productHandle` the figure holds at co-primary
+    scale (or the explicit no-product reason per §0-H, which media-manager must write into
+    the keeper log);
+  - `sceneBeat`: the one-sentence scene, built from the §0-H question-to-gesture table;
+  - `readerEmotion`: the feeling the reader brings to the headline;
+  - `castSlug`: the cast member by slug (`maya`, `sofia`, `jade`, `priya`, `marcus`, `diego`,
+    or Emma), respecting the no-repeat-within-5 rule.
+  Never a domestic metaphor object in either archetype.
   **A hero image is mandatory on every published post** (owner directive, 2026-07). If imagery
   genuinely cannot be produced, hold the post as a Sanity `status:'draft'` for the owner and say
   so in the retro; do not publish it heroless.
@@ -218,7 +227,7 @@ access and cannot see cross-post reuse, so this check runs here, not at the gate
 deterministic checker and drive it to exit 0 before submitting to the voice gate:
 
 ```bash
-npx tsx scripts/check-fresh-language.ts --category <categoryId> --draft <draft.json>
+npx tsx scripts/check-fresh-language.ts --category <categoryId> --slug <slug> --draft <draft.json>
 ```
 
 Like `check-hero-embed-match.ts`, and unlike the two prose checkers below, it reads Sanity live: it
@@ -230,6 +239,16 @@ did not overlap, and the 6-gram threshold ignores the short structural headings 
 talk") that repeat by format on purpose. Added after that pair of live posts (ticket #3009); the
 manual diff it replaces had let the tic through. The limit is zero shared 6-grams; rewrite each
 recycled phrase, do not loosen the check.
+
+`--slug` is not optional (ticket #3650). The script takes the self-exclusion slug as a separate flag
+and defaults it to the empty string, so without it the query's `slug.current != $slug` excludes
+nothing, and any re-run after the Sanity doc exists reports the post colliding with ITSELF.
+Reproduced in run 346: the documented slug-less command reported 66 shared 6-grams, every one the
+post matching its own title and H2s, flagged high risk; the same command with `--slug <self-slug>`
+returned 0 across the same 5 prior posts. This bites exactly on the re-run path, i.e. runs that
+already took a gate REVISE, and a run that trusts a slug-less result is instructed to rewrite its
+own title and every H2 to escape phantom collisions. Before rewriting anything, confirm each
+reported collision is with a different post's slug.
 
 ```groq
 *[_type == "blogPost" && category._ref == $categoryId && slug.current != $slug]
@@ -373,6 +392,17 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      the OTHER gate's criteria too. Does this new sentence assert a spec, a comparative, a
      frequency, or an outcome that was not there before? This catches a voice fix that introduces
      an accuracy defect, and an accuracy fix that introduces a voice defect.
+   - **Contradiction and scope-widening scan (part of the same pre-resubmit self-check, ticket
+     #3400):** for every rewritten string, scan the rest of the document for a claim it now
+     contradicts, especially strings a gate PASSed in an earlier cycle. A rewrite that widens the
+     scope of a claim is the high-risk shape: check whether the wider claim is still true of every
+     material, product, or case the post discusses elsewhere. Run 327 lost its publish to this class
+     twice in one post (the accuracy gate's own cycle-1 rewrite contradicted a silicone-lube claim
+     two sections earlier, then the cycle-2 rewrite widened a storage claim into contradiction with
+     the already-PASSed glass line), and run 329 fixed it in one sentence, so the defect is cheap to
+     fix and expensive to detect late. Cheap mechanical hint: a scope-widening rewrite almost always
+     introduces a universal quantifier (whatever, anything, everything, always, never), so treat any
+     of those words appearing in a rewrite as a prompt to re-read the rest of the post.
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.
@@ -392,12 +422,23 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      the remainder of the post lifecycle and is not re-litigated in later cycles. The checker is the
      single source of truth for the count; this is what makes the rewrite cycles converge instead of
      the reviewer recounting by judgement and self-contradicting across passes.
-   - **The voice gate never supplies replacement wording for a claim-carrying string.** For any string
-     carrying a factual, comparative, frequency, or causal claim, the voice reviewer names the defect
-     and the constraints but does **not** hand over literal replacement prose: it does not web-verify
-     and cannot judge claim strength, so gate-supplied wording can inject an overclaim that carries a
-     gate verdict's authority (twice in one day, runs 201/204 — a supply-side claim drifted to a
-     population claim, and a thesis drifted to majority causation). The writer drafts the replacement
+   - **Neither gate supplies replacement wording for a claim-carrying string.** For any string
+     carrying a factual, comparative, frequency, or causal claim, a reviewer names the defect
+     and the constraints but does **not** hand over literal replacement prose. The voice gate,
+     because it does not web-verify and cannot judge claim strength, so gate-supplied wording can
+     inject an overclaim that carries a gate verdict's authority (twice in one day, runs 201/204: a
+     supply-side claim drifted to a population claim, and a thesis drifted to majority causation).
+     The ACCURACY gate too (extended after run 311, ticket #3182): its cycle-1 suggested rewrite
+     authored a comparative clause that the same reviewer could not verify on cycle 2 after eight
+     searches, and the post BLOCKed on the gate's own sentence. Accuracy-gate wording is arguably the
+     more dangerous source because it arrives carrying verified authority, so a writer has every
+     reason to adopt it verbatim. The accuracy gate may state which facts it HAS verified; it still
+     does not hand over literal replacement prose for a claim-carrying string. Where either gate
+     offers wording anyway, the writer treats every comparative, superlative, quantifier, and named
+     variable in that wording as unverified: trace each independently or drop it before resubmitting.
+     This guard sits upstream, at the point the suggestion is written, because run 311 proved the
+     downstream re-check alone is not enough, and one shared rewrite cycle means a gate-authored
+     claim that fails re-verification costs the whole post. The writer drafts the replacement
      and the accuracy gate rules on it. Any claim-carrying string rewritten for a **style** reason
      **always** re-runs the accuracy gate, regardless of the selective re-run carve-out below.
    - **Selective re-run carve-out:** if one gate PASSed clean and the shared rewrite provably
