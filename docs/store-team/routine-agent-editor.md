@@ -89,8 +89,15 @@ on evidence.
    rekind sends the row to R-DEV's claim queue, and a row with no implementable code diff is a wasted
    claim that R-DEV can only block, then the undated dedupe key reopens it and it loops (R-DEV run 259
    claimed four such misroutes and blocked all four, three of them from one rekind batch). So rekind
-   to `code` **only** when you can name a concrete repo file or symbol, under a **non-protected**
-   path, that a code diff would actually touch. Do **not** rekind to `code` when the row's DONE WHEN is:
+   to `code` **only** when you can cite a concrete `file:symbol`, under a **non-protected** path,
+   that is currently **wrong or missing**, a defect the code diff would correct. The mere
+   EXISTENCE of a related helper or file does not qualify: that looser existence reading cost two
+   tickets in the 2026-08-14 R-DEV pass (#2080, rekinded on the existence of rail-adjacent code when
+   no code path writes `emmaCuratedRail` content, now blocked 9 times and ping-ponging; #2815,
+   rekinded when the specific `/social` bare-link it named was already fixed on main in run #282, so
+   R-DEV could only add a guard test, not the described fix). State the defect (what is wrong or
+   missing, and where) in the rekind note. (Strengthened per #3069.) Do **not** rekind to `code`
+   when the row's DONE WHEN is:
    - a deploy/publish/generate action (Sanity Studio deploy, image or content generation, content
      publish) — that is an ops/owner or content-lane action, not a code PR;
    - a cloud-routine env, trigger, schedule, or `maxTurns` change — infra/owner, not a persisted repo
