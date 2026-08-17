@@ -1,11 +1,11 @@
-# DRAFT — Video script channel addendum for docs/emma-voice.md
+# CODIFIED — Video script channel addendum for docs/emma-voice.md
 
-> STATUS: DRAFT, NOT CODIFIED. The voice charter is edited only on Mike's explicit "codify"
-> instruction. Until then this draft is advisory; the binding video rules live in
-> `.claude/agents/video-producer.md` and runtime prompts load the charter core + marketing
-> addendum. When codified, this text would slot into `docs/emma-voice.md` as
-> `<!-- video:start -->` ... `<!-- video:end -->` and `emma-voice.server.ts` would gain an
-> `EMMA_VOICE_VIDEO` slice.
+> STATUS: CODIFIED 2026-08-16 on Mike's explicit instruction at the video-scripts all-hands.
+> The governing text now lives in `docs/emma-voice.md` (v5.4) between
+> `<!-- addendum:video:start -->` and `<!-- addendum:video:end -->`, and
+> `emma-voice.server.ts` exports the `EMMA_VOICE_VIDEO` slice. The codified version extends
+> this draft with the per-surface register table and the eight craft rules from that
+> all-hands. This file is retained as history only; do not edit it, edit the charter.
 
 ## Proposed addendum text
 
