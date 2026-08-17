@@ -14,6 +14,8 @@ import { pickWebPipelineVersion } from '~/lib/sms-v2/web-pipeline-flag.server'
 import { getKillSwitch } from '~/lib/team.server'
 import { VALVE_KEYS } from '~/lib/team-keys'
 import { processWebMessageV2 } from '~/lib/sms-v2/adapters/web.server'
+import { logWebFallbackTurn } from '~/lib/sms-v2/web-turn-logger.server'
+import { Sentry } from '~/lib/sentry.server'
 import { kvGet, kvSet } from '~/lib/kv.server'
 
 const ALLOWED_ORIGINS = new Set([
@@ -180,6 +182,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
   const webPipelineVersion = pickWebPipelineVersion(emmaSessionCookieId)
 
+  // Set when the v2 path is chosen but throws and we fall through to v1 (#3915).
+  // The v1 block below stamps a distinguishable sms_turns.pipeline_version so
+  // this silent-fallback rate is queryable, and the catch also raises a
+  // Sentry-visible signal.
+  let v2FellBack = false
+
   // --- v2 path ---
   if (webPipelineVersion === 'v2') {
     try {
@@ -216,7 +224,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return Response.json(v2Payload, { headers })
     } catch (err) {
       console.error('[api.ask-emma] v2 generate failed — falling through to v1', err)
-      // Fall through to v1 on error.
+      // A v2 failure that silently serves v1 makes a web cutover look healthy
+      // while it is not. Raise a Sentry-visible signal tagged so the fallback
+      // rate is alertable, then fall through to v1 (#3915).
+      v2FellBack = true
+      Sentry.captureException(err, { tags: { api: 'ask-emma', pipeline: 'v2-fallback-to-v1' } })
     }
   }
 
@@ -263,6 +275,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } catch (err) {
         console.error('[api.ask-emma] log turns failed', err)
       }
+    }
+
+    // #3915: when this v1 turn is a v2->v1 fallback (not a normal v1-assigned
+    // session), stamp a distinguishable sms_turns.pipeline_version so the
+    // fallback rate is queryable on the existing column. Fire-and-forget and
+    // best-effort — never blocks or fails the reply.
+    if (v2FellBack) {
+      void logWebFallbackTurn({
+        sessionId: emmaSessionCookieId,
+        customerMsg: message,
+        emmaMsg: result.reply,
+        latencyMs,
+      }).catch((err) => console.error('[api.ask-emma] fallback marker log failed', err))
     }
 
     const headers = new Headers()
