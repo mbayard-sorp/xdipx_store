@@ -35,7 +35,7 @@ start and drafts against them.
 | `subject` | One sentence. Either a product category ("wands") or a live-better theme ("talking about it before you need to"). |
 | `pillars` | Which content pillars this campaign draws from (§2). Never fewer than two, so a week of posts does not collapse into one shape. |
 | `formats` | Which recurring formats are in rotation (§2). |
-| `product_scope` | A **rule**, not a frozen SKU list, so the Step 2.6 stock gate can swap a product without breaking the campaign ("in-stock, ACTIVE, product_type_dial = wand"). |
+| `product_scope` | A **rule**, not a frozen SKU list, so the Step 2.6 stock gate can swap a product without breaking the campaign ("in-stock, ACTIVE, product_type_dial = wand"). Catalog approval status is never part of a `product_scope` rule; see `routine-social-daily.md` Step 2.7. |
 | `visual_scheme` | The look that makes the posts read as one campaign (§3). |
 | `end_condition` | Normally the `ends` date. A post removal ends a campaign early and steps volume down per `docs/ads-policy.md`. |
 
@@ -87,7 +87,7 @@ the *next* campaign.
 | `surfaceMaterial` | One repeated surface: raw plaster, pale oak, ribbed glass, washed linen. |
 | `castSlate` | One `castMember` slug, two maximum, with an exact versioned `referencePhotoUrl` (§3.2). |
 | `wardrobeRegister` | One line that **describes the reference photo**, never instructs against it. |
-| `cropSignature` | One repeated framing move (subject on the right third, air left) so slide-1 tiles stack. |
+| `cropSignature` | One repeated framing move (subject on the right third, air left) so slide-1 tiles stack. **Flip-tolerant by definition (ticket #3526):** the generator reversed a locked left/right composition on 3 of 3 attempts in the first end-to-end publish run, and the fix that worked was a post-hoc horizontal flip, not a regeneration. A mirror-image candidate satisfies the signature; Step 5 flip-corrects it as a routine post-pass before offering it, rather than burning generations chasing handedness the model structurally cannot hold. A lock the generator cannot hit is a lock that stops posts. |
 | `retiredForCampaign` | What this campaign will not show, so it cannot drift into the last one. |
 
 **Campaign-to-campaign difference rule.** The next campaign changes at least **three of five** among
@@ -613,7 +613,7 @@ the look on 2026-08-13 and confirmed its proportion. Reference frame:
 | `surfaceMaterial` | Textured plaster wall. |
 | `castSlate` | `priya`, reference `https://cdn.sanity.io/images/0nlwk8cf/production/46d6016c81db7a1725425af6f72231786845cb32-576x1024.jpg`. Pin this exact URL; a re-upload changes the person. |
 | `wardrobeRegister` | Soft pink lace bralette with fine straps plus matching pyjama shorts, relaxed at-home loungewear. Licensed by the 2026-08-13 ruling in §3.2. **State it in every prompt**, and state the coverage, not just the garment name: "lace bralette" alone spans a wide range and the model will pick from it. |
-| `cropSignature` | Three-quarter to camera, waist-up, subject left of centre with the light and the open wall to her right. |
+| `cropSignature` | Three-quarter to camera, waist-up, subject left of centre with the light and the open wall to her right. Flip-tolerant per §3: a mirrored candidate is compliant once flip-corrected in the Step 5 post-pass. |
 | `productScale` | Derived from `xdipx.specifications`, never from a preset. See below. |
 | `retiredForCampaign` | Styled tabletops, packshots, centred symmetrical framing, anything the model invents in place of the real SKU. |
 
