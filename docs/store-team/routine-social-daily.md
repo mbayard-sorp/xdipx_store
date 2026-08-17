@@ -2,9 +2,11 @@
 
 The playbook for the scheduled social routine. Entry agent: `social-media-manager`. **You draft; you
 never publish.** Every post you write lands in `social_posts` as `status:'draft'`,
-`review_status:'pending_review'`. What happens next is not yours: on Instagram the independent
-`social-publish-gate` decides (Step 6.5) and, when `instagram_autopublish_enabled` is on, the hourly
-publish job ships what it approved. On every other platform the owner still acts in `/admin/socials`.
+`review_status:'pending_review'`. What happens next is not yours: on **Instagram and X** the
+independent `social-publish-gate` decides (Step 6.5) and, when that platform's valve
+(`instagram_autopublish_enabled`, `x_autopublish_enabled`) is on, the hourly publish job ships what
+it approved. On LinkedIn, TikTok, Facebook and YouTube the owner still acts in `/admin/socials`,
+because nothing publishes those unattended.
 
 That separation is the design, not a formality. The drafter deciding what ships is the failure mode
 the gate was built to remove, so there is no live-posting step in this playbook and none may be
@@ -50,10 +52,12 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 
    **`social_freq_facebook` and `social_freq_tiktok` are both 0 on purpose (owner, 2026-08-16).
    Do not raise either.** Instagram and X are the live platforms. Nothing else can publish:
-   `app/lib/social-publish/registry.server.ts` carries instagram, tiktok and youtube, but the
+   `app/lib/social-publish/registry.server.ts` carries instagram, x, tiktok and youtube, but the
    tiktok and youtube entries are stubs that report the manual path, there is no facebook entry at
-   all, and the publish job filters `platform = 'instagram'` in SQL in both `listEligible` and
-   `recentCaptions`. **Drafting for either platform is writing into a queue with no exit**, which
+   all, and the scheduled tick only runs the platforms in `SCHEDULED_PUBLISH_PLATFORMS`
+   (`app/lib/social-publish-run.server.ts`), which is instagram and x. The publish gate refuses to
+   approve anything outside that list for the same reason.
+   **Drafting for either platform is writing into a queue with no exit**, which
    is exactly what happened: 3 Facebook rows and 10 TikTok rows accumulated and none ever shipped.
 
    On Facebook specifically, verified in Meta Business Suite on 2026-08-16: every post the Page has
@@ -113,12 +117,15 @@ Owner direction 2026-08-11: **"I don't want to be the bottle neck for posts to g
 them once they are live and give feedback to the team."**
 
 That is a decision to remove the pre-publish human gate on Instagram, and it is the owner's to make.
+It was extended to X on 2026-08-16 23:36 when he turned `x_autopublish_enabled` on, and X published
+nothing at all in the day that followed because Step 6.5 gated Instagram only. Read the rest of this
+section as applying to both.
 It is not a valve flip, because of one fact that is easy to miss: **nothing sets
 `review_status:'approved'` except the owner's own click in the Social Studio.** Remove the click and
 nothing ever becomes approved, so a publish job would find nothing to publish. Something has to fill
 that slot, and what fills it is an independent pre-publish gate, not an absence.
 
-**All four prerequisites now exist. The posture is decided by one valve.** They were:
+**All four prerequisites now exist. The posture is decided by the platform's valve.** They were:
 
 1. A social image-generation path, so posts stop carrying retired bare-SKU packshots.
    **Built** — `scripts/gen-social-image.ts` (Step 5).
@@ -128,13 +135,18 @@ that slot, and what fills it is an independent pre-publish gate, not an absence.
    **Built** — the `social-publish-gate` agent plus its deterministic half, run at Step 6.5 below.
 3. A publish job with a publish-time stock re-check, an image-provenance check, a daily publish cap
    independent of the drafting quota, and its own kill switch.
-   **Built** — `/cron/social-publish`, hourly, behind `instagram_autopublish_enabled`.
+   **Built** — `/cron/social-publish`, hourly, one tick per platform behind its own valve
+   (`instagram_autopublish_enabled`, `x_autopublish_enabled`). X additionally carries a monthly
+   spend ceiling, because X bills per post.
 4. The owner can leave feedback on a **posted** row, so his stated loop can close.
    **Built** — the live-post verdict in the Social Studio.
 
 So the live question is no longer "what is missing" but "is the valve on", and the routine **reads
 it rather than assuming either answer**: `POST /api/team/social-post {"op":"config"}` at Step 2, and
-the Social tab of `/admin/homepage-team` is where the owner flips it.
+the Social tab of `/admin/homepage-team` is where the owner flips it. There is one valve per
+publishing platform and they move independently, so "the valve" below means the valve for the
+platform you are talking about. Report them separately in the run summary; a single "autopost is on"
+hid the fact that X's valve was on and shipping nothing.
 
 - **Valve OFF:** drafts land `pending_review`, the gate still runs at Step 6.5, and approved posts
   wait for the owner's click in `/admin/socials`. Say plainly in the run summary that posts are
@@ -605,17 +617,35 @@ curl -s -X POST "$BASE_URL/api/team/event" \
 
 Note the field is `summary`, not `message` — this is `POST /api/team/event`, not an op on `/api/team/run`.
 
-## Step 6.5 — Publish gate (every Instagram draft, no exceptions)
+## Step 6.5 — Publish gate (every Instagram and X draft, no exceptions)
 
 Step 4a asked whether the words are right. This asks whether the **finished post** should reach a
 public, rented, loseable account. They are different questions and a draft can sail through one
 while failing the other: a flawless register-4 Emma line is exactly the caption that gets a post
 pulled for the image beside it.
 
+**Instagram and X both, and X is the one this step used to miss.** The gate covers exactly the two
+platforms the hourly job publishes, because `approved` means "the unattended publisher may ship
+this". From X's launch on 2026-08-16 it did not: the valve was on and the tick ran X hourly, but
+this step gated Instagram only, so every X draft sat at `pending_review` and **no X post has ever
+published**.
+An ungated X row is not a safe X row; it is a row that can never go out. The gate knows the
+platforms apart (a link is a BLOCK on Instagram and the point of the post on X, length binds on X,
+grid composition binds on Instagram); you do not have to brief it on the difference, only to run it.
+
+Platforms with no publisher (LinkedIn, TikTok, Facebook, YouTube) never go to the gate. Approving
+one leaves a row that ships stale copy the day a publisher lands, which is the trap Step 2 item 6
+describes. The server 409s them, and the owner acts on those in `/admin/socials`.
+
 **Spawn `social-publish-gate` as a fresh subagent, one per draft you wrote this run.** Fresh is
 load-bearing. The gate is adversarial by design and explicitly must not read your reasoning about
 why the post is compliant, because that reasoning is the thing under test. Handing it your context
 turns an independent check into a second opinion from yourself.
+
+**Also sweep any gate-eligible draft still waiting, not only the ones you wrote this run.** X rows
+predating this step's widening (ids 52, 54 and 55 as of 2026-08-17) are sitting at `pending_review`
+with nothing that will ever pick them up otherwise. Gate them the same way, oldest first, and drop
+any whose `scheduled_for` has passed far enough that the copy is stale rather than approving it late.
 
 **Also sweep fanned-out video rows (ticket #3733).** List Instagram `pending_review` drafts
 (`{op:'list', status:'draft', reviewStatus:'pending_review'}`) and gate any row carrying a
