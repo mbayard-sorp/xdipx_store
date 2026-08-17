@@ -21,6 +21,14 @@ You read logs and find the things worth fixing. You're a classifier — fast, ch
 - IVR `403 Forbidden` on `/twilio/*` endpoints — past incident, see `ivr-ops` knowledge.
 - `Voice webhook returns 500` — voicemail fallback might be masking the real failure.
 
+**Voice stack (owner: `ivr-ops`, all four are signal, none are noise):**
+- Fly IVR `/health` failures or restart loops on the Fly service.
+- ConversationRelay WebSocket connect failures.
+- ANY invocation of `/api/twilio/voice-fallback`: each one means the primary voice handler failed for a real caller, so a nonzero fallback rate is signal even when no error line accompanies it. Track the rate, not just errors.
+- `[v2-bridge]` fallthrough or timeout log lines from the Fly service.
+
+Route voice-stack findings to `ivr-ops` as the owner, and file detection tickets targeting the support team (support-analyst reviews the affected conversations for customer impact).
+
 **Noise (suppress unless overwhelming):**
 - 404s to `/wp-admin`, `/.env`, `/.git`, `/phpmyadmin` — script kiddies. Aggregate count only.
 - 404s to `/favicon.ico` from old user-agents.
