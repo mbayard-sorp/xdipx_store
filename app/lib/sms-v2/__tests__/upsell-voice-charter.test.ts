@@ -14,6 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   pickUpsellTemplate,
+  renderCuratedUpsellTemplate,
   type UpsellTemplateChannel,
 } from '../templates/upsell-templates'
 import { buildMultiResultProse } from '../stages/discovery.server'
@@ -66,6 +67,35 @@ describe('upsell closer rotation keyed to pitch ordinal (#3218)', () => {
     expect(pickUpsellTemplate(SLOTS, 'sms', BANK_SIZE)).toBe(
       pickUpsellTemplate(SLOTS, 'sms', 0),
     )
+  })
+})
+
+describe('renderCuratedUpsellTemplate — curated blurb framing (#3516)', () => {
+  const SLOTS_C = { name: 'Refresh Toy Cleaner', price: '$10', pdpUrl: 'https://xdipx.com/products/refresh' }
+
+  for (const channel of CHANNELS) {
+    it(`${channel}: leads with the blurb and stays free of banned phrasing / em-dashes`, () => {
+      const prose = renderCuratedUpsellTemplate(SLOTS_C, 'Keep it fresh so it lasts', channel)
+      expect(prose).toContain('Keep it fresh so it lasts')
+      expect(prose).toContain('Refresh Toy Cleaner')
+      expect(prose).not.toContain('—')
+      for (const re of BANNED) expect(prose).not.toMatch(re)
+    })
+
+    it(`${channel}: a blurb that ends on a question never yields two question marks (principle 11)`, () => {
+      // The blurb is authored in a metafield this function does not control; a
+      // rhetorical-question blurb must not collide with the "?" closer.
+      const prose = renderCuratedUpsellTemplate(SLOTS_C, 'Ever wonder what that feels like?', channel)
+      expect((prose.match(/\?/g) ?? []).length).toBeLessThanOrEqual(1)
+    })
+  }
+
+  it('voice speaks no URL; sms drops the PDP URL on its own line', () => {
+    const voice = renderCuratedUpsellTemplate(SLOTS_C, 'Smooth everything out', 'voice')
+    expect(voice).not.toContain('https')
+    expect(voice).not.toContain('/products/')
+    const sms = renderCuratedUpsellTemplate(SLOTS_C, 'Smooth everything out', 'sms')
+    expect(sms).toContain('https://xdipx.com/products/refresh')
   })
 })
 

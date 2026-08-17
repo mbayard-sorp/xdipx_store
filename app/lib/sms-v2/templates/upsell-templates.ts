@@ -153,7 +153,12 @@ export function renderCuratedUpsellTemplate(
   pairingWhy: string,
   channel: UpsellTemplateChannel = 'sms',
 ): string {
-  const blurb = pairingWhy.trim().replace(/\s+/g, ' ')
+  // Normalize the authored blurb to end on a single period. The blurb comes
+  // from a metafield this function does not control, and the voice/web closers
+  // below end in "?"; a blurb that itself ended on "?" would put two question
+  // marks in one reply, which the empathy gate hard-BLOCKS (principle 11). A
+  // rhetorical-question blurb becomes a statement lead instead.
+  const blurb = pairingWhy.trim().replace(/\s+/g, ' ').replace(/[?!.]+$/, '') + '.'
   const { name, price, pdpUrl } = slots
 
   if (channel === 'voice') {
