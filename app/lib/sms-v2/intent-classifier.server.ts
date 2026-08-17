@@ -135,6 +135,19 @@ const REGEX_BANK: RegexEntry[] = [
     stages: ['UPSELL'],
   },
 
+  // ─── ASK_UPSELL (#3909) — "what pairs with this / what else do I need" ───
+  // The customer explicitly asks to be pointed at add-ons for the current
+  // pitch. High-precision: only phrasings that unambiguously request a pairing,
+  // so it never steals a plain product lookup ("show me a wand") or a buy
+  // signal ("add to cart"). Placed before NAME_ITEM so "what lube goes with
+  // this" reads as a pairing ask, not a bare category mention. pickEffectiveStage
+  // routes this to the UPSELL pitch (curated accessory_product_ids) when a pitch
+  // is set, else to DISCOVERY so there is a product to pair against.
+  {
+    re: /\b(what(?:\s+else)?\s+(?:pairs?|goes?)\s+(?:well\s+)?(?:with|together)|what\s+else\s+(?:do|should|would|could)\s+i\s+(?:need|get|add|want|pair)|what\s+should\s+i\s+(?:add|pair)|(?:pairs?|goes?)\s+(?:well\s+)?with\s+(?:this|it|that)|anything\s+(?:else\s+)?i\s+(?:need|should\s+(?:get|add))|(?:what\s+)?(?:other\s+)?(?:accessor(?:y|ies)|add[-\s]?ons?)\b)/i,
+    intent: 'ASK_UPSELL',
+  },
+
   // NAME_ITEM — "show me [X]", "tell me about [X]", "what about [X]", "I want to see [X]"
   {
     re: /\b(show\s+me|tell\s+me\s+about|what\s+about|more\s+about|info\s+on|details\s+on|i\s+want\s+to\s+see|can\s+you\s+show|find\s+me|look\s+up)\b/i,
@@ -185,6 +198,7 @@ const HaikuIntentSchema = z.object({
     'COMMIT_PICK',
     'UPSELL_ACCEPT',
     'UPSELL_DECLINE',
+    'ASK_UPSELL',
     'NAME_ITEM',
     'SUPPORT',
     'OBJECTION',
@@ -198,7 +212,7 @@ const HaikuIntentSchema = z.object({
 const HAIKU_SYSTEM = `You classify the intent of an inbound SMS message sent to an 18+ sexual-wellness brand called xdipx. The customer is chatting with Emma, the brand's editorial voice.
 
 Return ONLY a JSON object with these fields:
-  intent: one of STOP_HELP_START | AGE_CONFIRM | COMMIT_PICK | UPSELL_ACCEPT | UPSELL_DECLINE | NAME_ITEM | SUPPORT | OBJECTION | RESEARCH | OFF_TOPIC
+  intent: one of STOP_HELP_START | AGE_CONFIRM | COMMIT_PICK | UPSELL_ACCEPT | UPSELL_DECLINE | ASK_UPSELL | NAME_ITEM | SUPPORT | OBJECTION | RESEARCH | OFF_TOPIC
   confidence: float 0.0–1.0 (your certainty)
   slots: optional object of extracted entities (e.g. {"item": "vibrator"})
 
@@ -208,6 +222,7 @@ Intent definitions:
 - COMMIT_PICK: ready to buy / add to cart
 - UPSELL_ACCEPT: accepting an add-on product offer
 - UPSELL_DECLINE: declining an add-on product offer
+- ASK_UPSELL: proactively asking what pairs with / goes with the current product, what else they need, or what to add (a request for an add-on suggestion, not a specific named product)
 - NAME_ITEM: asking about a specific product or category
 - SUPPORT: order status, returns, account, shipping question
 - OBJECTION: concern about price, shipping time, compatibility, safety

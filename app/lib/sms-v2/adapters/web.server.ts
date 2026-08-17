@@ -313,7 +313,7 @@ export async function processWebMessageV2(
   }
 
   // --- Step 4: Stage dispatch ---
-  const effectiveStage = pickEffectiveStage(conversation.stage, intentResult)
+  const effectiveStage = pickEffectiveStage(conversation.stage, intentResult, conversation.currentPitchHandle)
   const stageRespPromise = dispatchStage(effectiveStage, ctx, intentResult, customerText)
 
   let stageResp: StageResponse

@@ -44,6 +44,7 @@ import { executePostCheckoutStage } from './stages/post-checkout.server'
  *   UPSELL       + RESEARCH      → DISCOVERY   (question mid-upsell, #3214)
  *   UPSELL       + OBJECTION     → OBJECTION   (pushback mid-upsell, #3214)
  *   OBJECTION    + COMMIT_PICK   → CHECKOUT
+ *   ANY          + ASK_UPSELL    → UPSELL when a pitch is set, else DISCOVERY (#3909)
  *   DISCOVERY    + NAME_ITEM     → DISCOVERY (handler itself decides)
  *
  * All other pairs: return currentStage unchanged.
@@ -54,8 +55,23 @@ import { executePostCheckoutStage } from './stages/post-checkout.server'
  * dispatch — see the Step 0 compliance block in processor.server.ts. We
  * deliberately leave that on v1 — it's well-tested and shouldn't drift.
  */
-export function pickEffectiveStage(currentStage: Stage, intent: IntentResult): Stage {
+export function pickEffectiveStage(
+  currentStage: Stage,
+  intent: IntentResult,
+  currentPitchHandle?: string | null,
+): Stage {
   const i = intent.intent
+
+  // ASK_UPSELL (#3909): an explicit "what pairs with this / what else do I need"
+  // from ANY stage routes to the deterministic UPSELL pitch, which offers the
+  // current pitch's curated accessory_product_ids (#3516). Guard: only when we
+  // have a product to pair against — without a currentPitchHandle there is
+  // nothing to upsell, so send them to DISCOVERY to find a product first.
+  // Without this, an ask-to-be-upsold utterance falls to RESEARCH/OFF_TOPIC and
+  // the curated pitch never fires.
+  if (i === 'ASK_UPSELL') {
+    return currentPitchHandle ? 'UPSELL' : 'DISCOVERY'
+  }
 
   switch (currentStage) {
     case 'GREETING':
