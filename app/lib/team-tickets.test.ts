@@ -77,6 +77,7 @@ vi.mock('~/lib/kv.server', () => ({
 import {
   ALLOWED,
   AGENT_EDITOR_APPLY_KINDS,
+  AGENT_EVIDENCE_RETIRE_KINDS,
   BOUNCE_LEASE_SEC,
   CLAIM_LEASE_DEFAULT_SEC,
   TICKET_STATUSES,
@@ -87,8 +88,12 @@ import {
   findTransitionRule,
   isTicketActor,
   isTransitionAllowed,
+  agentRetireSuggestion,
+  countSuggestions,
   markSuggestion,
   normalizeTicketKind,
+  parseSupersessionRef,
+  resolveListOrder,
   runWithOutOfBandReconcile,
   transitionSuggestion,
   KNOWN_TICKET_KINDS,
@@ -1130,5 +1135,318 @@ describe('unknown-kind coercion on create', () => {
     const values = h.state.inserts[0] as Record<string, unknown>
     expect(values['kind']).toBe('process')
     expect(String(values['kind']).length).toBeLessThanOrEqual(16)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Delegated supersession dismissal (#3573) + supersedesId on create (#3406)
+// ---------------------------------------------------------------------------
+
+describe('parseSupersessionRef', () => {
+  it('finds a GitHub PR URL and prefers it over a ticket ref', () => {
+    expect(parseSupersessionRef('replaced by https://github.com/o/r/pull/676 and ticket #3531'))
+      .toEqual({ kind: 'pr', url: 'https://github.com/o/r/pull/676' })
+  })
+
+  it('finds a ticket reference', () => {
+    expect(parseSupersessionRef('superseded by #3531 after the all-hands'))
+      .toEqual({ kind: 'ticket', id: 3531 })
+  })
+
+  it('returns null when the note carries no reference', () => {
+    expect(parseSupersessionRef('this row is stale, closing')).toBeNull()
+    expect(parseSupersessionRef('')).toBeNull()
+    // A bare non-GitHub URL is not a supersession reference.
+    expect(parseSupersessionRef('see https://example.com/pull/9')).toBeNull()
+  })
+})
+
+describe('delegated supersession edges (#3573)', () => {
+  it('opens exactly proposed/approved -> dismissed for agent actors under the declaration', () => {
+    const agentActors = ACTORS.filter(a => a.startsWith('agent:'))
+    for (const from of TICKET_STATUSES) {
+      for (const actor of agentActors) {
+        const want = from === 'proposed' || from === 'approved'
+        expect(isTransitionAllowed(from, 'dismissed', actor, {
+          kind: 'code', viaDelegatedSupersession: true,
+        })).toBe(want)
+      }
+    }
+  })
+
+  it('grants nothing without the declaration and nothing to non-agent actors', () => {
+    // Without the flag, the plain matrix stands (the exhaustive test above
+    // already proves it; this pins the specific edge).
+    expect(isTransitionAllowed('approved', 'dismissed', 'agent:rr7-engineer', { kind: 'code' }))
+      .toBe(false)
+    // `auto` and `system` are not agent actors; the declaration adds nothing.
+    for (const actor of ['auto', 'system'] as TicketActor[]) {
+      expect(isTransitionAllowed('approved', 'dismissed', actor, {
+        kind: 'code', viaDelegatedSupersession: true,
+      })).toBe(false)
+    }
+    // And it opens no other target status.
+    expect(isTransitionAllowed('approved', 'applied', 'agent:rr7-engineer', {
+      kind: 'code', viaDelegatedSupersession: true,
+    })).toBe(false)
+  })
+
+  it('dismisses on a note carrying a PR URL, with the delegated marker recorded', async () => {
+    seedTicket({ status: 'approved', kind: 'code' })
+    await transitionSuggestion(42, 'dismissed', 'agent:all-hands', {
+      note: 'Superseded by https://github.com/o/r/pull/676 (owner direction 2026-08-16)',
+    })
+    const patch = h.state.patches[0]!
+    expect(patch['status']).toBe('dismissed')
+    // Honest attribution: the true agent actor, not 'owner'.
+    expect(patch['decidedBy']).toBe('agent:all-hands')
+    const links = h.state.inserts[0] as Array<Record<string, unknown>>
+    const refs = links.map(l => String(l['ref']))
+    expect(refs.some(r => r.startsWith('Superseded by https://github.com/o/r/pull/676'))).toBe(true)
+    expect(refs.some(r => r.includes('delegated_by=owner') && r.includes('agent:all-hands'))).toBe(true)
+  })
+
+  it('verifies a ticket reference against the DB before unlocking the edge', async () => {
+    // Live replacement -> dismissal succeeds.
+    h.state.selects.push([{ ...TICKET, status: 'approved', kind: 'code' }])
+    h.state.selects.push([{ id: 3531, status: 'approved' }])  // the replacement row
+    h.state.updates.push([{ ...TICKET, status: 'dismissed' }])
+    await transitionSuggestion(42, 'dismissed', 'agent:all-hands', { note: 'superseded by #3531' })
+    expect(h.state.patches[0]!['status']).toBe('dismissed')
+  })
+
+  it('409s when the cited replacement is dismissed, missing, or the row itself', async () => {
+    h.state.selects.push([{ ...TICKET, status: 'approved', kind: 'code' }])
+    h.state.selects.push([{ id: 3531, status: 'dismissed' }])
+    expect(await status(
+      transitionSuggestion(42, 'dismissed', 'agent:all-hands', { note: 'superseded by #3531' }),
+    )).toBe(409)
+
+    h.state.selects.push([{ ...TICKET, status: 'approved', kind: 'code' }])
+    h.state.selects.push([])  // replacement does not exist
+    expect(await status(
+      transitionSuggestion(42, 'dismissed', 'agent:all-hands', { note: 'superseded by #99999' }),
+    )).toBe(409)
+
+    // A note citing the row's own id is not a supersession.
+    h.state.selects.push([{ ...TICKET, status: 'approved', kind: 'code' }])
+    expect(await status(
+      transitionSuggestion(42, 'dismissed', 'agent:all-hands', { note: 'see #42' }),
+    )).toBe(409)
+  })
+
+  it('409s a note-less or reference-less agent dismissal exactly as before', async () => {
+    h.state.selects.push([{ ...TICKET, status: 'approved', kind: 'code' }])
+    expect(await status(transitionSuggestion(42, 'dismissed', 'agent:all-hands'))).toBe(409)
+    h.state.selects.push([{ ...TICKET, status: 'approved', kind: 'code' }])
+    expect(await status(
+      transitionSuggestion(42, 'dismissed', 'agent:all-hands', { note: 'do not want' }),
+    )).toBe(409)
+  })
+
+  it('leaves the owner-dashboard dismissal unchanged', async () => {
+    seedTicket({ status: 'approved', kind: 'code' })
+    await transitionSuggestion(42, 'dismissed', 'owner')
+    expect(h.state.patches[0]!['status']).toBe('dismissed')
+    expect(h.state.patches[0]!['decidedBy']).toBe('owner')
+  })
+})
+
+describe('supersedesId on create (#3406)', () => {
+  it('persists supersedesId and dismisses an approved superseded row with a note naming the new row', async () => {
+    h.state.selects.push([])                       // getTeamConfig
+    h.state.insertResults.push([{ id: 3405 }])     // the new row
+    h.state.selects.push([{ id: 3401, status: 'approved' }])  // resolveSupersession read
+    // transitionSuggestion inside the supersession: row read, replacement
+    // verify (#3405 is live: it was just created), then the update.
+    h.state.selects.push([{ ...TICKET, id: 3401, status: 'approved', kind: 'code' }])
+    h.state.selects.push([{ id: 3405, status: 'approved' }])
+    h.state.updates.push([{ ...TICKET, id: 3401, status: 'dismissed' }])
+
+    const res = await createSuggestionDetailed({
+      team: 'content', category: 'bug', kind: 'code',
+      suggestion: 'the replacement filing',
+      supersedesId: 3401, actor: 'agent:all-hands',
+    })
+    expect(res).toEqual({ id: 3405, deduped: false, superseded: { id: 3401, outcome: 'dismissed' } })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['supersedesId']).toBe(3401)
+    // The dismissal carries the pointer at the new row and the agent actor.
+    expect(h.state.patches[0]!['status']).toBe('dismissed')
+    expect(h.state.patches[0]!['decidedBy']).toBe('agent:all-hands')
+    const links = (h.state.inserts[1] ?? []) as Array<Record<string, unknown>>
+    expect(links.some(l => String(l['ref']).includes('#3405'))).toBe(true)
+  })
+
+  it('notes instead of dismissing when the superseded row is in flight', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 90 }])
+    h.state.selects.push([{ id: 80, status: 'pr_open' }])
+
+    const res = await createSuggestionDetailed({
+      team: 'content', category: 'bug', kind: 'code',
+      suggestion: 'x', supersedesId: 80, actor: 'agent:all-hands',
+    })
+    expect(res.superseded).toEqual({ id: 80, outcome: 'noted' })
+    // No status patch; only a note link on the old row.
+    expect(h.state.patches).toEqual([])
+    const links = (h.state.inserts[1] ?? []) as Array<Record<string, unknown>>
+    expect(links.some(l =>
+      String(l['ref']).includes('superseded by #90') && String(l['ref']).includes('pr_open'),
+    )).toBe(true)
+  })
+
+  it('reports not-found and never fails the create itself', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 91 }])
+    h.state.selects.push([])  // superseded row missing
+    const res = await createSuggestionDetailed({
+      team: 'content', category: 'bug', kind: 'code', suggestion: 'x', supersedesId: 12345,
+    })
+    expect(res).toEqual({ id: 91, deduped: false, superseded: { id: 12345, outcome: 'not-found' } })
+  })
+
+  it('persists links passed on create (#1686)', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 92 }])
+    await createSuggestionDetailed({
+      team: 'content', category: 'other', kind: 'code', suggestion: 'x',
+      links: [{ kind: 'pr', ref: 'https://github.com/o/r/pull/527', state: 'open' }],
+    })
+    const links = (h.state.inserts[1] ?? []) as Array<Record<string, unknown>>
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({
+      suggestionId: 92, kind: 'pr', ref: 'https://github.com/o/r/pull/527', state: 'open',
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Evidence-carrying retire (#2864)
+// ---------------------------------------------------------------------------
+
+describe('evidence-carrying retire (#2864)', () => {
+  it('fences the evidence edge to agent-editor on instructions/agent-def only', () => {
+    for (const kind of AGENT_EVIDENCE_RETIRE_KINDS) {
+      expect(isTransitionAllowed('approved', 'dismissed', 'agent:agent-editor', {
+        kind, viaRetireEvidence: true,
+      })).toBe(true)
+      // Without the declaration the fence holds exactly as before.
+      expect(isTransitionAllowed('approved', 'dismissed', 'agent:agent-editor', { kind })).toBe(false)
+    }
+    // Never for code/config, evidence or not; never for other actors.
+    for (const kind of ['code', 'config']) {
+      expect(isTransitionAllowed('approved', 'dismissed', 'agent:agent-editor', {
+        kind, viaRetireEvidence: true,
+      })).toBe(false)
+    }
+    expect(isTransitionAllowed('approved', 'dismissed', 'agent:rr7-engineer', {
+      kind: 'instructions', viaRetireEvidence: true,
+    })).toBe(false)
+    // And only from `approved`.
+    expect(isTransitionAllowed('pr_open', 'dismissed', 'agent:agent-editor', {
+      kind: 'instructions', viaRetireEvidence: true,
+    })).toBe(false)
+  })
+
+  it('retires an instructions row when the superseding row names it', async () => {
+    h.state.selects.push([{ id: 2732, status: 'applied', suggestion: 'consolidated rewrite replacing #2213' }])
+    h.state.selects.push([{ ...TICKET, id: 2213, status: 'approved', kind: 'instructions' }])
+    h.state.updates.push([{ ...TICKET, id: 2213, status: 'dismissed' }])
+    await agentRetireSuggestion(2213, 'agent:agent-editor', 'superseded, see evidence',
+      { supersededById: 2732 })
+    expect(h.state.patches[0]!['status']).toBe('dismissed')
+    const links = h.state.inserts[0] as Array<Record<string, unknown>>
+    expect(links.some(l => String(l['ref']).includes('superseded by #2732 (applied)'))).toBe(true)
+  })
+
+  it('rejects supersession evidence that does not hold', async () => {
+    // The superseding row never names the retired one.
+    h.state.selects.push([{ id: 2732, status: 'applied', suggestion: 'says nothing about that row' }])
+    expect(await status(
+      agentRetireSuggestion(2213, 'agent:agent-editor', 'superseded', { supersededById: 2732 }),
+    )).toBe(409)
+    // #2213 must not match inside #22130.
+    h.state.selects.push([{ id: 2732, status: 'applied', suggestion: 'replaces #22130' }])
+    expect(await status(
+      agentRetireSuggestion(2213, 'agent:agent-editor', 'superseded', { supersededById: 2732 }),
+    )).toBe(409)
+    // A dismissed superseding row is not live-or-applied.
+    h.state.selects.push([{ id: 2732, status: 'dismissed', suggestion: 'replaces #2213' }])
+    expect(await status(
+      agentRetireSuggestion(2213, 'agent:agent-editor', 'superseded', { supersededById: 2732 }),
+    )).toBe(409)
+    // A missing one certainly is not.
+    h.state.selects.push([])
+    expect(await status(
+      agentRetireSuggestion(2213, 'agent:agent-editor', 'superseded', { supersededById: 999 }),
+    )).toBe(409)
+    expect(h.state.patches).toEqual([])
+  })
+
+  it('retires on a satisfiedBy doc path or PR URL and records it as a link', async () => {
+    h.state.selects.push([{ ...TICKET, id: 7, status: 'approved', kind: 'agent-def' }])
+    h.state.updates.push([{ ...TICKET, id: 7, status: 'dismissed' }])
+    await agentRetireSuggestion(7, 'agent:agent-editor', 'rule already in the doc',
+      { satisfiedBy: 'docs/store-team/routine-content-daily.md#voice-gate' })
+    expect(h.state.patches[0]!['status']).toBe('dismissed')
+    const links = h.state.inserts[0] as Array<Record<string, unknown>>
+    expect(links.some(l =>
+      l['kind'] === 'doc' && l['ref'] === 'docs/store-team/routine-content-daily.md#voice-gate',
+    )).toBe(true)
+  })
+
+  it('rejects a satisfiedBy that is neither a PR URL nor a doc path', async () => {
+    expect(await status(
+      agentRetireSuggestion(7, 'agent:agent-editor', 'x', { satisfiedBy: 'trust me' }),
+    )).toBe(409)
+    expect(await status(
+      agentRetireSuggestion(7, 'agent:agent-editor', 'x', { satisfiedBy: 'https://example.com/pull/9' }),
+    )).toBe(409)
+  })
+
+  it('keeps the evidence-free retire exactly as before: allowed kinds pass, own kinds 409', async () => {
+    // AGENT_RETIRE_KINDS still work with no evidence.
+    seedTicket({ status: 'approved', kind: 'process' })
+    await agentRetireSuggestion(42, 'agent:agent-editor', 'run-observation, note to nobody')
+    expect(h.state.patches[0]!['status']).toBe('dismissed')
+    // instructions without evidence still 409s (the note carries no
+    // supersession reference, so the delegated edge stays closed too).
+    h.state.patches = []
+    h.state.selects.push([{ ...TICKET, status: 'approved', kind: 'instructions' }])
+    expect(await status(
+      agentRetireSuggestion(42, 'agent:agent-editor', 'do not like it'),
+    )).toBe(409)
+    expect(h.state.patches).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// List ordering + total (#2071)
+// ---------------------------------------------------------------------------
+
+describe('list ordering and total (#2071)', () => {
+  it('defaults a status-filtered list to oldest-first so truncation cannot hide the oldest rows', () => {
+    expect(resolveListOrder({ status: 'approved' })).toBe('age')
+    expect(resolveListOrder({ statuses: ['approved', 'blocked'] })).toBe('age')
+    // With oldest-first and the row set larger than any limit, the oldest row
+    // is in the first page by construction; only the NEWEST rows wait, and a
+    // newly filed row is re-listed next run. That is the invariant the ticket
+    // demands ("with more than the default limit of approved rows present,
+    // the oldest row is included in the response").
+  })
+
+  it('keeps explicit orderBy wins and the unfiltered default (admin dashboard) unchanged', () => {
+    expect(resolveListOrder({ status: 'approved', orderBy: 'created' })).toBe('created')
+    expect(resolveListOrder({ status: 'approved', orderBy: 'priority' })).toBe('priority')
+    expect(resolveListOrder({})).toBe('created')
+    expect(resolveListOrder({ statuses: [] })).toBe('created')
+  })
+
+  it('counts matching rows ignoring limit so truncation is detectable', async () => {
+    h.state.selects.push([{ n: 137 }])
+    expect(await countSuggestions({ status: 'approved' })).toBe(137)
+    h.state.selects.push([])
+    expect(await countSuggestions({ status: 'approved' })).toBe(0)
   })
 })
