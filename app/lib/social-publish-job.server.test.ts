@@ -5,8 +5,10 @@
 // publishing, publishing past a cap, publishing something the gate blocked, and
 // retrying forever against a live API.
 import { describe, it, expect, vi } from 'vitest'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import {
   runSocialPublishTick,
+  eligibleWhere,
   MAX_PER_TICK,
   type PublishRepo,
   type PostRow,
@@ -418,5 +420,37 @@ describe('X spend guard', () => {
     expect(calls.posted).toEqual([1])
     expect(r.spendUsd).toBeUndefined()
     expect(r.skipped).toBeUndefined()
+  })
+})
+
+// ── The eligibility predicate ────────────────────────────────────────────────
+//
+// Rendered to SQL rather than run, because what went wrong here was the shape
+// of the predicate and not the tick logic that consumes it: an approved row
+// with a NULL scheduled_for satisfied no comparison and so was invisible to the
+// only thing that publishes it, forever and silently.
+
+describe('eligibleWhere', () => {
+  const render = (platform: 'instagram' | 'x') => {
+    const q = new PgDialect().sqlToQuery(eligibleWhere(platform)!)
+    return { sql: q.sql, params: q.params }
+  }
+
+  it('treats an undated approved row as due', () => {
+    const { sql } = render('instagram')
+    expect(sql).toContain('is null')
+    expect(sql).toContain('current_date')
+    // Undated OR due, not undated AND due.
+    expect(sql.toLowerCase()).toContain(' or ')
+  })
+
+  it('still requires an approved draft on the tick\'s own platform', () => {
+    const { sql, params } = render('x')
+    expect(params).toContain('x')
+    expect(params).toContain('draft')
+    expect(params).toContain('approved')
+    // A NULL date must widen the date test only. If it ever widened the review
+    // test, an unreviewed draft would publish itself.
+    expect(sql.slice(0, sql.indexOf('is null'))).toContain('review_status')
   })
 })
