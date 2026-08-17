@@ -357,9 +357,12 @@ export async function runImportMonitor(
         const priceDropped  = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct)
 
         if (scoreImproved || priceDropped) {
+          // Reopening clears the watch-era review stamp: a pending row must
+          // never carry reviewed_by, or it reads as claimed and pollutes the
+          // per-day action-cap count (ticket #554).
           await db
             .update(importCandidates)
-            .set({ ...upsertPayload, status: 'pending' })
+            .set({ ...upsertPayload, status: 'pending', reviewedBy: null, reviewedAt: null })
             .where(eq(importCandidates.masterKey, masterKey))
           candidatesResurfaced++
           candidatesFound++
@@ -717,10 +720,12 @@ export async function stageMasterCandidatesBySkus(
       }).onConflictDoNothing()
       staged++
     } else if (existingStatus === 'watching') {
-      // Re-open watching rows to pending when explicitly staged.
+      // Re-open watching rows to pending when explicitly staged. Clears the
+      // watch-era review stamp for the same reason as the score/price reopen
+      // above: a pending row must never carry reviewed_by (ticket #554).
       await db
         .update(importCandidates)
-        .set({ ...upsertPayload, status: 'pending' })
+        .set({ ...upsertPayload, status: 'pending', reviewedBy: null, reviewedAt: null })
         .where(eq(importCandidates.masterKey, masterKey))
       staged++
     } else {
@@ -838,7 +843,20 @@ export async function getRecentImportRuns(limit: number): Promise<ImportMonitorR
 /**
  * Update candidate status. When setting 'watching', snapshot current
  * dealScore -> watchScore and proposedPrice -> watchPrice.
+ *
+ * reviewed_by/reviewed_at are stamped ONLY on the terminal statuses
+ * ('rejected' here; approveAndImport stamps 'imported' the same way), never
+ * on a non-terminal one (ticket #554). A 'watching' stamp used to survive the
+ * monitor's watching->pending reopen, leaving pending rows carrying a
+ * product-manager-agent stamp: run137's sweep found 77 of them, each burning
+ * the endpoint's daily action cap on the day it was stamped and cluttering
+ * every later sweep. Watch/unwatch are cheap bookkeeping moves, not reviews;
+ * the action cap exists to bound the expensive approve chain (see the
+ * MAX_APPROVALS_PER_REQUEST note in api.team.import-candidate-action), and
+ * rejects still count because rejected is terminal.
  */
+const REVIEW_TERMINAL_STATUSES = new Set(['rejected', 'imported'])
+
 export async function updateCandidateStatus(
   id: number,
   status: string,
@@ -847,10 +865,12 @@ export async function updateCandidateStatus(
   const now = new Date()
   const base: Partial<typeof importCandidates.$inferInsert> = {
     status:          status as ImportCandidateRow['status'],
-    reviewedAt:      now,
-    reviewedBy:      opts.reviewedBy,
     rejectionReason: opts.rejectionReason,
     updatedAt:       now,
+  }
+  if (REVIEW_TERMINAL_STATUSES.has(status)) {
+    base.reviewedAt = now
+    base.reviewedBy = opts.reviewedBy
   }
 
   if (status === 'watching') {
