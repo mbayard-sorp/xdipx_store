@@ -138,6 +138,23 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 The owner is emailed about blocked tickets through the escalation path. Your job is to stop cleanly
 and describe the obstacle precisely, not to route around it.
 
+**Conjunctive DONE WHENs: split, do not blanket-block.** (#3638) A ticket whose DONE WHEN conjoins
+(a) a clause you can land as a code PR with (b) an action needing owner sign-off, a money valve, or
+a real customer-facing send or spend (a bulk rewrite of live products, a real campaign send) should
+have been filed as two linked rows per the filing conventions in
+`docs/store-team/operating-system.md` §3. Both #3564 and #57 bounced whole in run 344 despite each
+containing a shippable code slice, because the conjunctive DONE WHEN made `blocked` the only honest
+terminal state. When you claim one anyway: file a new linked `kind:'code'` row carrying only the
+(a) criteria and citing the original, transition the original to `blocked` naming the owner-gated
+remainder, and move on. Never implement the owner-gated half.
+
+**Tagged rows dispose in seconds.** (#1909) A claimed row whose text opens with `[design-gated]` or
+`[cross-agent-epic]` (filing conventions, `operating-system.md` §3) is not a single-agent code PR by
+its filer's own declaration: one defers to a design or visual-regression judgment no scheduled pass
+can run (#352), the other is a multi-agent epic (#448); run 217 burned a claim on each. Transition
+it to `blocked` with a note naming the tag and the lane it belongs to, and spend the rest of the
+pass on the next ticket.
+
 ## Step 3 — Implement (per ticket)
 
 Before step 1, run a cheap staleness guard: grep the ticket's named files, flags, and symbols
@@ -190,6 +207,34 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    guardrail prose, `code=null` because the real brief stated the code inline, `handles=[]` because it
    listed Nalpac SKUs not `/products/` links).
 
+3e. **sms-v2 stage handlers act on or route foreign intents, never silently re-run their script.**
+   (#3220, standing owner-directed rule; originating incident tickets 3214/3215/3217.) Any handler in
+   `app/lib/sms-v2/stages/` MUST do one of two things with a classified intent that is foreign to
+   its stage: act on it, or hand control to a stage that can. It may never silently re-run its own
+   script. Reject (in review or self-review, before any PR touching `app/lib/sms-v2/stages/` opens)
+   a stage handler that (a) takes customer text as an unused or underscore-prefixed parameter
+   (`_customerText` was the incident's literal parameter name, commented as unused), (b) uses the
+   classified intent only for telemetry and never for branching, or (c) builds its tool query
+   exclusively from stored conversation state with no path for the current utterance to influence
+   it. Where the deterministic path is deliberate and correct, as in `checkout.server.ts` where no
+   LLM may have cart discretion, the handler must still route foreign intents OUT rather than
+   absorbing them. Why this is standing: on 2026-08-14 the owner asked the IVR for a cock ring four
+   times, the intent classifier was correct at 0.95 confidence on every turn, and the UPSELL handler
+   discarded the signal and re-ran a hardcoded lube search each time; he hung up twice. UPSELL is
+   one of EIGHT sms-v2 stages on the deterministic path (upsell, checkout, research, support,
+   post-purchase, greeting, reconnect, consent-gate) and every one can fail the same way.
+
+3f. **When a ticket cites a source doc or audit, re-read the cited section before opening the PR.**
+   (#3460) If the ticket names a specific doc/audit as its source of truth (a dedupeKey/Source line,
+   or an explicit doc path in the body), the done-when check includes re-reading that cited section
+   immediately before opening the PR and confirming the new diff does not reproduce the exact
+   failure mode the section describes, not just that the ticket's literal task list was completed.
+   Two of three bounces in the 2026-08-15 21:30 QA pass were this pattern: #1258 re-curated the mood
+   vocab as lowercase words while its own cited audit documented that Sanity moodTags store Title
+   Case against an exact-match GROQ query, reproducing the identical zero-match bug with new words;
+   #3430 revised the launch plan correctly but left a sibling file in the same PR quoting the exact
+   stale figure the revision says must never be quoted again.
+
 4. Verify locally, all three, and do not skip one because it "cannot be affected":
 
 ```bash
@@ -222,6 +267,28 @@ git add server/vercel-entry.mjs && git commit -m "chore: rebuild vercel entry ar
    exact pixel offsets, heights, z-index literals, and safe-area calc values in the source, and
    reason about the resulting stack order by hand. State that fallback plainly in the PR body; it is
    a documented pattern, not an improvised one.
+
+   **Mirror-claims diff the full className, not only the copied value.** (#3595) When a fix claims
+   to mirror an existing, already-approved component (contrast/scrim/z-index patterns especially),
+   diff the two components' full className strings side by side and confirm the LAYOUT properties
+   match (flex alignment, min-height, position anchors), not only the color or gradient value being
+   copied. On #3528 (PR #695) the PhotoBand scrim gradient was copied verbatim onto the Wayfinder
+   promo tile, but the tile stayed `items-center` with no `min-h-[360px]` where PhotoBand anchors
+   `items-end`; that gradient is only dark in the bottom ~55% of the box, so the text stack sat in
+   the near-transparent top and QA caught it only by comparing the two className strings side by
+   side.
+
+4d. **GraphQL-defect tickets require live schema validation before the PR.** (#3651) When the
+   ticket is specifically about a GraphQL argument-shape defect, validate any new or changed GraphQL
+   query against the live schema (the Shopify MCP `graphql_schema` or `validate_graphql_codeblocks`
+   tools) before opening the PR, and say so in the PR body. A passing mocked unit test that only
+   pattern-matches tokens in the query string is not sufficient evidence for this class of ticket:
+   on #3562 (PR #696) the test asserted `identifiers:` was gone and `namespace:`/`keys:` present,
+   and passed, but the replacement shape `metafields(namespace: "xdipx", keys: [...])` is ALSO
+   invalid; live introspection against the real Admin API (2024-10) returns "Providing any of the
+   namespace, withDefinitions, or withoutDefinitions arguments with the keys argument is not
+   supported". The correct form drops `namespace` entirely and prefixes each key
+   (`keys: ["xdipx.nalpac_sku", ...]`), confirmed working live.
 
 5. Open the PR against `main`, titled `agents: ticket #<id>: <summary>`. Body: what the ticket
    asked for, what you changed and why, the local verification output, and anything the reviewer
@@ -280,6 +347,11 @@ detectors, other agents, and scraped error text all feed the bus.
    paragraph in the run summary that nobody reads", which told you the free channel was worthless
    and pushed first-occurrence observations onto a bus that could not drain them. The event channel
    is read: it is what the weekly retro and the owner digest are built from.
+   Any row you do file follows the filing conventions in `docs/store-team/operating-system.md` §3:
+   split a conjunctive code+owner-gated DONE WHEN into two linked rows, set a dependency link
+   (`blockedById` or a `Depends-on: #<id>` line) when filing multiple rows against one file or
+   subsystem, tag `[design-gated]`/`[cross-agent-epic]` rows, and cite the real repo file/symbol a
+   `code` row changes or state plainly that none exists yet.
 2. Log tokens under `feature:'strategy-dev'`.
 3. Final run update: a table of ticket id | branch | PR URL | local check results, plus any tickets
    blocked and why, plus any bounced ticket you could not fix and what you would need.

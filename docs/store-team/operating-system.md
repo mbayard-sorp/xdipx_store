@@ -100,6 +100,48 @@ and smoke-checked, so "applied" always means "actually running on xdipx.com".
 Claims are leased. An agent that dies mid-ticket does not park the work forever; the lease expires
 and the ticket returns to `approved` for the next pass.
 
+### Filing conventions
+
+Binding on every ticket filer: detectors, routines, QA retros, and interactive sessions alike.
+Codified 2026-08-16 from rows #3638, #1693, #1909, and #2446 (the companion rekind-guard
+strengthening, #3069, lives in `routine-agent-editor.md`). The bus has no schema for any of this;
+the row text and its links are the only carriers, so the conventions are the contract.
+
+1. **Split conjunctive DONE WHENs.** (#3638) When a DONE WHEN conjoins (a) a change R-DEV can land
+   as a code PR with (b) an action needing owner sign-off, a money valve, or a real customer-facing
+   send or spend, file TWO linked rows: one `kind:'code'` carrying only the (a) criteria, and one
+   for the owner-gated (b) part. A single conjunctive row makes `blocked` the only honest terminal
+   state and strands the shippable slice (#3564 mixed a generator guard with an owner-gated bulk
+   rewrite of 1,811 live products; #57 mixed a draft-only Klaviyo client with a real customer send;
+   both blocked whole in R-DEV run 344). The same split applies to protected-path cores: file the
+   protected core as an owner row and the non-protected seam as its own code row. Self-check at
+   filing time: read the DONE WHEN for an "and" joining a code clause to an owner clause. A `code`
+   row's DONE WHEN must be fully in-repo actionable, and it cites the real repo file/symbol it
+   changes, or states plainly that none exists yet.
+2. **Dependency links are mandatory for same-file chains.** (#1693) When one audit or session files
+   multiple tickets against the same file or subsystem, set an explicit dependency (`blockedById`,
+   or a `Depends-on: #<id>` line in the row text) so downstream siblings enter the bus already
+   blocked on the lead ticket instead of being claimed and re-blocked by hand. A chained row is not
+   claimable before its lead ticket lands. Concrete instance: conv-audit-2026-08-04 P1 items
+   10/11/13 became tickets 1268/1269/1270, all reworking the same functions in
+   `app/lib/ivr-search.server.ts`; R-DEV claimed the siblings independently and had to hand-block
+   both, two wasted claims, where blind parallel implementation would have collided semantically.
+3. **Tag design-gated and cross-agent-epic rows.** (#1909) A row that defers to a design decision,
+   needs a visual-regression judgment no scheduled pass can run, or is a self-described multi-agent
+   epic is either split into single-agent scoped tickets before filing, or tagged at the head of its
+   suggestion text (`[design-gated]` / `[cross-agent-epic]`) so R-DEV disposes of it on first read
+   instead of spending an implementation attempt (#352 and #448 each burned a claim in run 217).
+   Honest limit: the claim filter cannot see these tags today, so the tag saves the implementation
+   effort, not the claim itself. Making the filter skip tagged rows is a `team.server.ts` change, a
+   protected path, and an owner decision; bus row #3768 puts that choice to the owner.
+4. **Self-filed PR-tracking tickets carry the `pr` link and land at `pr_open`.** (#2446) A routine
+   or session that opens a PR and files its own tracking ticket per ADR-008 step 3 attaches the
+   `pr` link and lands the row at `pr_open` (or files it `kind:'instructions'` for the docs lane),
+   never as a bare `kind:'code'` row at `approved`. A bare code row drops into R-DEV's claim queue,
+   where tracking a draft PR costs a claim to un-draft and link (#2418, PR #598) and tracking an
+   already-merged PR is pure phantom rework (#1683, PR #527, merged days earlier); both burned
+   claims on run 255 that a `pr_open`+link row would have sent straight to QA.
+
 ---
 
 ## 4. The gates
