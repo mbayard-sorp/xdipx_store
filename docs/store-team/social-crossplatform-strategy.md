@@ -50,9 +50,10 @@ count; re-verify before citing, the queue moves). Strategy:
 - **Approval is not a licence** (`docs/ads-policy.md` §Meta Shops). Commerce review judges a catalog
   item; community standards judge a post. Never treat an approved product as permission to post
   something §Organic social forbids, and never exclude a rejected product from editorial posts.
-- Product tagging in posts requires a token permission the store does not hold today
-  (`instagram_shopping_tag_products`); until the owner upgrades the token, no post carries a product
-  tag and no draft pretends to.
+- Product tagging is live as of 2026-08-16: the owner added `instagram_shopping_tag_products`, and
+  the publisher tags the gate stamp's featured product on feed photos and carousels when it is
+  Shops-approved (`docs/ads-policy.md` §Meta Shops). Non-approved products publish untagged with
+  the reason logged. A tag is additive; it changes nothing about what passes the gate.
 
 ## 3. The pairing rule: a toy never travels alone
 

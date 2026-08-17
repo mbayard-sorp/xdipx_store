@@ -40,6 +40,7 @@ import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
 import { isVideoPost, type SocialPostRow } from '~/components/admin/social/types'
 import type { PublishMedia } from '~/lib/social-publish/types'
 import { decideManualPublish } from '~/lib/social-publish/manual-publish-gate.server'
+import { parseGateStamp } from '~/lib/social-publish-approve.server'
 
 export const meta: MetaFunction = () => [{ title: 'Social Studio — xdipx Admin' }]
 
@@ -205,6 +206,19 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'post-approved-draft') {
     const postId = parseInt(form.get('postId') as string)
     if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    // The same stamp refusal the media path below enforces (ticket #3739).
+    // Until this, X Post-now checked only status/review_status, which is
+    // exactly the bypass that put post #49 on Instagram (incident #3640): an
+    // owner click on a row nothing adversarial had read. The gate skips the
+    // valve read for X; the click is the approval, the stamp is the review.
+    const [draft] = await db.select({ feedback: socialPosts.feedback })
+      .from(socialPosts).where(eq(socialPosts.id, postId)).limit(1)
+    if (!draft) return { ok: false, error: 'Post not found' }
+    const gate = await decideManualPublish(
+      { feedback: draft.feedback, isVideo: false, platform: 'x' },
+      getValve,
+    )
+    if (!gate.ok) return { ok: false, error: gate.error }
     const result = await postApprovedDraft(postId)
     return { ok: result.ok, intent: 'post-approved-draft', tweetId: result.tweetId, error: result.error }
   }
@@ -247,6 +261,10 @@ export async function action({ request }: ActionFunctionArgs) {
       postId,
       media,
       caption: post.editedText?.trim() || post.tweetText,
+      // The featured product from the gate stamp, for adapters that can tag
+      // it on the post (#3744). Additive only; a tag failure degrades to an
+      // untagged publish inside the adapter, never to a failed publish.
+      productTagHandle: parseGateStamp(post.feedback)?.productHandle ?? null,
     })
     if (!result.ok) {
       return {

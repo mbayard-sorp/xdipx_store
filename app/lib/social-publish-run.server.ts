@@ -74,6 +74,7 @@ export function mediaForPost(post: PostRow):
 /** The publish closure both platforms share, routed through the registry. */
 async function publishViaRegistry(post: PostRow) {
   const { getPublisher } = await import('./social-publish/registry.server')
+  const { parseGateStamp } = await import('./social-publish-approve.server')
   const publisher = getPublisher(post.platform)
   if (!publisher) return { ok: false as const, detail: `No publisher for ${post.platform}` }
 
@@ -84,7 +85,11 @@ async function publishViaRegistry(post: PostRow) {
     postId: post.id,
     media: media.media,
     caption: post.editedText?.trim() || post.tweetText,
+    // The featured product from the gate stamp, for adapters that can tag it
+    // on the post (#3744). Additive only; adapters without tagging ignore it.
+    productTagHandle: parseGateStamp(post.feedback)?.productHandle ?? null,
   })
+  if (out.ok && out.note) console.warn(`[social-publish] post ${post.id}: ${out.note}`)
   return out.ok
     ? { ok: true as const, externalPostId: out.externalPostId }
     : { ok: false as const, detail: out.detail ?? out.reason ?? 'Publish failed' }
@@ -109,12 +114,12 @@ export async function instagramTickDeps(): Promise<PublishTickDeps> {
  * The spend guard is supplied, because X bills per post. Instagram passes
  * neither half and so is never budget-checked.
  *
- * The removal watch is explicitly disabled rather than left to default. The
+ * The removal watch is supplied explicitly rather than left to default. The
  * default is `runRemovalWatch`, which reads Instagram media state through the
  * Graph API and, on a pattern, turns the INSTAGRAM valve off. Running it under
  * an X tick would check the wrong account and could disable the wrong channel.
- * X has no equivalent watcher yet; that gap is real and worth its own ticket,
- * because X suspends accounts too and nothing here would notice.
+ * `runXRemovalWatch` (ticket #3745) is the X-side mirror: same step-down and
+ * valve-off semantics against `social_freq_x` and `x_autopublish_enabled`.
  */
 export async function xTickDeps(): Promise<PublishTickDeps> {
   const { getValve, VALVE_KEYS } = await import('./team.server')
@@ -125,7 +130,10 @@ export async function xTickDeps(): Promise<PublishTickDeps> {
     monthSpendUsd: () => estimateXSpendThisMonthUsd(),
     maxSpendUsd: () => numericSetting('x_publish_max_spend_usd_month', X_DEFAULT_MAX_SPEND_USD_MONTH),
     publish: publishViaRegistry,
-    removalWatch: async () => null,
+    removalWatch: async () => {
+      const { runXRemovalWatch } = await import('./x-removal-watch.server')
+      return runXRemovalWatch()
+    },
   }
 }
 
