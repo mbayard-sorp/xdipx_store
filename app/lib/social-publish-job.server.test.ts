@@ -197,6 +197,27 @@ describe('the gate runs at publish time', () => {
     expect(calls.posted).toEqual([1])
   })
 
+  it('carries a publish note into the tick report, so an untagged-with-reason publish is visible in the run event (ticket #3744)', async () => {
+    // The exact drop this ticket bounced on: an IG post that published but
+    // untagged (product not approved for tagging) returns { ok, note } from the
+    // adapter. If the tick discards the note, the run event cannot tell an
+    // untagged publish from a normal one, which is half of the DONE WHEN.
+    const { repo, calls } = fakeRepo([post()])
+    const note = 'published untagged: product femmefunn-ultra-bullet not approved for tagging'
+    const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_1', note }))
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published', detail: note }])
+    expect(calls.posted).toEqual([1])
+  })
+
+  it('leaves the published attempt detail-free when the adapter returns no note', async () => {
+    // A normal tagged (or note-less) publish must not sprout an empty detail.
+    const { repo } = fakeRepo([post()])
+    const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_1' }))
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+  })
+
   it('publishes a fanned-out video row once the gate has PASSed it (ticket #3733)', async () => {
     // The row exactly as the Video Studio fanout + a gate PASS leave it: a
     // pipeline final on Blob (which must clear image-provenance without a
