@@ -91,7 +91,7 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 18 | xdipx — Daily Dev (R-DEV) | `trig_01MEQYsg5sHPbM4v39FqssAD` (live 2026-07-28; one trigger, `0 14,20 * * *`, covering both passes; prompt reissued 2026-08-05, now `rdev-daily-0003`: claim cap 5, leaseSeconds 10800, branch `ticket/<id>`) |
 | 19 | xdipx — Daily QA Gate (R-QA) | `trig_019GjVP9hGBU1gmXRBYtYURm` (live 2026-07-28; cron changed 2026-08-05 from `30 15 * * *` to `30 3,15 * * *`, prompt `rqa-daily-0002` resumes `in_review` first) |
 | 20 | xdipx — Weekly Social Trend Scout | `trig_012k7r4rTiiUvzTzfarQwTZZ` (created 2026-08-05, `0 17 * * 1`, **ENABLED** 2026-08-06 once `social_team_max_runs` was raised to 4; next run 2026-08-10 17:07. Now watched by `ROUTINE_CADENCES` in `ticket-janitor.server.ts`) |
-| 21 | xdipx — Daily Support Review | none — support-team infrastructure (`support_team_enabled` kill switch + gate/budget) lands with PR #457; owner creates the trigger at enablement, so this is expected-missing until then |
+| 21 | xdipx — Daily Support Review | `trig_01J4JPPmzdtgg8UBpHDmbwTu` (created 2026-08-15 at owner direction; `30 16 * * *` UTC, fresh session per fire, first fire 2026-08-16 16:30 UTC; `support_team_enabled` is ON with gate dailyCents 300 / maxRunsPerDay 2; a missing run is a fault, not expected-missing) |
 | 22 | xdipx — PR Queue Watchdog (R-WATCH) | `trig_01VfvyDpQkkcsy3DyfwzmBPQ` (live 2026-08-07, `0 */3 * * *`, prompt `pr-queue-watchdog-0001`) |
 
 Routine 11 (Weekly Off-site Scout) was created 2026-07-23 as `trig_0131NQ3PLTRpcgdMU4wdoxh8` (Tue

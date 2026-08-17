@@ -208,7 +208,9 @@ the other categories stay answer-shaped per the blog addendum):
    **Products appear only in this resolution section, never in the problem framing** — that is
    the anti-sleaze rule, **and it binds the hero image too**: Real Talk heroes are §0-H human
    heroes per `docs/notebook-team/image-brief.md`, never a product hero promoting a remedy to
-   the thesis.
+   the thesis. **A human hero holding the post's embedded product is NOT a product hero**,
+   because the person asking is the subject and the object is what they are asking about
+   (owner direction 2026-08-11; §0-H requires the held product at co-primary scale).
 4. FAQ section as always — this is where the question-shaped material concentrates.
 
 **Upstream substance (Real Talk only):** before drafting, the `intimacy-advisor` contributor

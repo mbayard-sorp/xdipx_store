@@ -58,7 +58,7 @@ import {
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
 import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
 import { applyPublishGateVerdict, parsePublishGateVerdict } from '~/lib/social-publish-approve.server'
-import { captureInstagramEngagement, rankBySaves } from '~/lib/social-engagement.server'
+import { captureSocialEngagement, rankBySaves } from '~/lib/social-engagement.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -135,12 +135,15 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ ok: true, reviewStatus: result.reviewStatus })
   }
 
-  // Read-only Instagram engagement (ticket #2742). Fetches live insights for
-  // the most recently posted rows and ranks them saves-first; stores nothing,
-  // because social_posts has no engagement column yet.
+  // Engagement readback (tickets #2742 IG, #3734 X). Fetches live numbers for
+  // the most recently posted rows on both platforms and refreshes the stored
+  // history in metrics_json (migration 079). IG rows rank saves-first per the
+  // charter; X rows follow in recency order, since saves is not an X metric.
   if (b['op'] === 'engagement') {
-    const report = await captureInstagramEngagement()
-    return Response.json({ report: rankBySaves(report) })
+    const report = await captureSocialEngagement()
+    const igRows = rankBySaves(report.filter(r => r.platform !== 'x'))
+    const xRows = report.filter(r => r.platform === 'x')
+    return Response.json({ report: [...igRows, ...xRows] })
   }
 
   if (b['op'] === 'config') {

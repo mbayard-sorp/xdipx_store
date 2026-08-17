@@ -125,3 +125,142 @@ describe('instagramPublisher carousel', () => {
     expect(result).toEqual({ ok: false, reason: 'not_configured' })
   })
 })
+
+/**
+ * Product tags (ticket #3744). Same fake-Graph convention, extended with the
+ * available_catalog_product_search read and an optional refusal of tagged
+ * container creation, so the degrade path is exercised end to end.
+ */
+function installFakeGraphWithCatalog(opts: {
+  catalogMatches?: Array<{ product_id: number; name: string }>
+  rejectTaggedContainers?: boolean
+} = {}): Captured[] {
+  vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+  vi.stubEnv('IG_BUSINESS_ACCOUNT_ID', 'ig-1')
+  const calls: Captured[] = []
+  let itemCounter = 0
+
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+    const url = new URL(String(input))
+    const method = init?.method ?? 'GET'
+
+    if (method === 'POST') {
+      const params = Object.fromEntries(new URLSearchParams(String(init?.body)))
+      calls.push({ path: url.pathname, params })
+      if (params['product_tags'] && opts.rejectTaggedContainers) {
+        return jsonResponse({ error: { message: 'Product tagging not enabled for this account', code: 10 } })
+      }
+      if (url.pathname.endsWith('/media_publish')) return jsonResponse({ id: 'published-1' })
+      if (params['is_carousel_item'] === 'true') return jsonResponse({ id: `item-${itemCounter++}` })
+      if (params['media_type'] === 'CAROUSEL') return jsonResponse({ id: 'carousel-1' })
+      return jsonResponse({ id: 'single-1' })
+    }
+
+    if (url.pathname.endsWith('/available_catalog_product_search')) {
+      calls.push({ path: url.pathname, params: Object.fromEntries(url.searchParams) })
+      return jsonResponse({ data: opts.catalogMatches ?? [] })
+    }
+
+    return jsonResponse({ status_code: 'FINISHED' })
+  }))
+
+  return calls
+}
+
+describe('instagramPublisher product tags (ticket #3744)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('tags a Shops-approved product on a feed photo', async () => {
+    const calls = installFakeGraphWithCatalog({
+      catalogMatches: [{ product_id: 999, name: 'Lace Set' }],
+    })
+    const result = await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'image', imageUrl: 'a.jpg' },
+      caption: 'a still',
+      productTagHandle: 'lace-set',
+    })
+    expect(result).toEqual({ ok: true, externalPostId: 'published-1' })
+
+    // The search query is the handle with hyphens as spaces.
+    const search = calls.find(c => c.path.endsWith('/available_catalog_product_search'))
+    expect(search?.params['q']).toBe('lace set')
+
+    const create = calls.find(c => c.params['image_url'] === 'a.jpg')
+    expect(JSON.parse(create?.params['product_tags'] ?? '[]')).toEqual([
+      { product_id: '999', x: 0.5, y: 0.9 },
+    ])
+  })
+
+  it('degrades to an untagged publish when the tagged container is refused', async () => {
+    const calls = installFakeGraphWithCatalog({
+      catalogMatches: [{ product_id: 999, name: 'Lace Set' }],
+      rejectTaggedContainers: true,
+    })
+    const result = await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'image', imageUrl: 'a.jpg' },
+      caption: 'a still',
+      productTagHandle: 'lace-set',
+    })
+    // The post is the point: it publishes, and the note says why untagged.
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.externalPostId).toBe('published-1')
+      expect(result.note).toMatch(/published untagged/i)
+    }
+    const creates = calls.filter(c => c.params['image_url'] === 'a.jpg')
+    expect(creates).toHaveLength(2)
+    expect(creates[0]?.params['product_tags']).toBeDefined()
+    expect(creates[1]?.params['product_tags']).toBeUndefined()
+  })
+
+  it('publishes untagged with the reason when no approved catalog match exists', async () => {
+    const calls = installFakeGraphWithCatalog({ catalogMatches: [] })
+    const result = await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'image', imageUrl: 'a.jpg' },
+      caption: 'a still',
+      productTagHandle: 'rejected-product',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.note).toMatch(/No Shops-approved catalog match/)
+    expect(calls.some(c => c.params['product_tags'])).toBe(false)
+  })
+
+  it('rides the tag on the first carousel slide only', async () => {
+    const calls = installFakeGraphWithCatalog({
+      catalogMatches: [{ product_id: 42, name: 'Wand' }],
+    })
+    const result = await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'carousel', imageUrls: ['a.jpg', 'b.jpg'] },
+      caption: 'two slides',
+      productTagHandle: 'wand',
+    })
+    expect(result).toEqual({ ok: true, externalPostId: 'published-1' })
+    const items = calls.filter(c => c.params['is_carousel_item'] === 'true')
+    expect(items).toHaveLength(2)
+    expect(items[0]?.params['product_tags']).toBeDefined()
+    expect(items[1]?.params['product_tags']).toBeUndefined()
+    // The parent CAROUSEL container never carries the tag.
+    const parent = calls.find(c => c.params['media_type'] === 'CAROUSEL')
+    expect(parent?.params['product_tags']).toBeUndefined()
+  })
+
+  it('never searches the catalog without a product handle', async () => {
+    const calls = installFakeGraphWithCatalog({
+      catalogMatches: [{ product_id: 999, name: 'Lace Set' }],
+    })
+    await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'image', imageUrl: 'a.jpg' },
+      caption: 'a still',
+    })
+    expect(calls.some(c => c.path.endsWith('/available_catalog_product_search'))).toBe(false)
+  })
+})

@@ -97,19 +97,80 @@ serves, with the product as the unmistakable subject.
 
 ### §0-H. Human hero (human-experience articles)
 
-The subject is a **person**: Emma or one of her fictional friends, expressive, reflecting how a
-customer might be feeling when they read the headline. These are hyperbolic, editorial,
-openly-fictional images — a means of expression, not a lived-experience claim (owner ruling,
-2026-07-28). Emma's *written* no-lived-experience rule is unchanged; images are expression,
-words are claims.
+Rewritten to the owner's direction of 2026-08-11 (all-hands, verbatim): *"the image did not
+match the context of the post... she is asking a question, so show her in a dramatic way. Put a
+product in her hand that is also in the post. They need to make sense or no one is going to be
+curious enough to read them and click on the products to buy them... Use the cast, use Emma to
+show an emotion that relates to the post."* The previous version of this section directed a
+mood; a mood is not enough. The subject of a human hero is the headline's **question**, staged.
+These remain hyperbolic, editorial, openly-fictional images, a means of expression, not a
+lived-experience claim (owner ruling, 2026-07-28). Emma's *written* no-lived-experience rule
+is unchanged; images are expression, words are claims.
 
-- **Subject.** One or two adults, faces visible and expressive (gesture, mood, tenderness,
-  exhaustion, delight — matched to the headline's feeling). The post's embedded product MAY
-  appear at secondary scale in the scene (on a nightstand, in the setting) but is never
-  required and never the subject.
-- **Emotional range.** Sad, tired, pensive, longing, overjoyed — all licensed, **inside the
-  warm-light lock**. Sad in sunlight reads tender; sad in shadow reads moody, and the
-  bright/warm doctrine still binds. No near-black, no boudoir gloom.
+- **Subject: a person staging the headline's QUESTION, holding the post's product at
+  co-primary scale.** The figure is visibly asking, weighing, or confronting the specific
+  question the headline asks, and holds the post's own embedded product
+  (`blogProductEmbed.productHandle`) in hand, co-primary with the face: person and product
+  share top billing, the product is in the hand, not parked on a nightstand. Headline,
+  gesture, and product must make sense together as one post. The swap test binds: if the
+  frame could be moved onto any other post and nobody would notice, it fails.
+- **Question-to-gesture table.** Match the gesture to the shape of the headline's question;
+  drama lives in the face and the hands (see the Daylight Theater register below).
+
+  | Headline question shape | Gesture direction |
+  |---|---|
+  | "Is this normal?" / "Is it just me?" | Product held up in one hand at eye level, head tilted at it, brow up, mid-question; the free hand palm-up, asking the room. |
+  | "Which one?" / this-or-that | Product in one hand weighed against the open other palm like a scale, eyes moving between them, undecided on purpose. |
+  | "How do I even start?" | Product held out at arm's length in both hands, leaning back from it, wide-eyed, reading it like instructions in a language she almost knows. |
+  | "Will it hurt / is it safe?" | Product held close with both hands, shoulders up, a hopeful wince straight to camera. |
+  | "How big / how loud / how much?" | Product held up beside the face for scale, jaw dropped, staring at it sideways (scale exaggeration licensed per the levity license below). |
+  | "Why does nobody talk about this?" | Product brandished like the exhibit in an argument, the free hand thrown up, mid-sentence face. |
+
+- **Casting: the approved roster, named by slug.** Casting draws from the live, approved
+  `castMember` docs in Sanity, each of which carries a `referencePhoto`: `maya`, `sofia`,
+  `jade`, `priya`, `marcus`, `diego`, plus Emma (canonical photo: Sanity `singleton.editor`).
+  The brief and the keeper log name the cast member by slug. No member repeats within 5
+  consecutive human heroes. Diversity is deliberate: vary age, body type, and skin tone
+  across posts so "feel seen" is real, not twelve variations of one 25-year-old.
+- **Emma in frame (owner ruling 2026-08-11, verbatim):** *"It's fine to show emma with
+  products in hand. She's not claiming to be using them, she's just showing them."* Emma is
+  licensed in frame holding the post's product and showing the emotion the post is about.
+  Only depicting her USING it, or implying she has tried it, stays banned. There is no
+  Emma-only-in-guide-mode restriction.
+- **Two-reference compositing.** Every human hero composites two references: the cast
+  member's `referencePhoto` as the figure reference plus a de-cartoned plate of the post's
+  embedded product (its real Shopify photo, packaging removed), per the two-reference
+  scaffold in `docs/homepage-team/image-prompt-library.md`. The product's shape, color, and
+  finish stay faithful to the plate.
+- **Register: Daylight Theater.** Expression plays theatrically big while the light stays
+  bright and warm. The binding test: **if the frame got more dramatic because the light got
+  darker, it failed; if because the face got louder, it passed.** Drama lives in the face and
+  the hands, never in the light; the warm-light lock is unchanged. Sad, tired, pensive,
+  longing, overjoyed, shocked: all licensed, inside the warm-light lock. No near-black, no
+  boudoir gloom.
+- **The levity license (owner ruling 2026-08-11, verbatim):** *"Sexuality is a serious thing
+  and it demands levity, so if we can't laugh a little at an oversized dildo and a woman with
+  a shocked face, we are boring."* Comic register is licensed, not merely tolerated: humor,
+  visual wit, and playing an expression bigger than life are a first-class option for xdipx
+  imagery, not a concession, and the archetype E surreal/witty license extends to human
+  figures, not only object still lifes. Earnestness is not the safe default; boring is its
+  own failure. **Deliberate scale exaggeration is licensed** when it stages the post's
+  question: the owner reviewed two test composites for a beginner-sizing post and preferred
+  the one rendering a 5.5-inch product at roughly 12 inches, calling it "great"; the
+  oversized prop plus a shocked face IS the hook, because it stages the reader's fear instead
+  of describing it. The bound: hyperbole yes, misrepresentation no. Shape, color, finish, and
+  product identity stay faithful to the reference image; scale and expression may be played
+  for effect. Never on † health-adjacent topics, where a wrong size or a joke reads as a
+  safety claim rather than as wit. Unchanged, and none of it loosened: the warm-light lock
+  and high-key mandate, the charter visual cap of 6-7, never crude, never porn-adjacent, no
+  explicit anatomy, no nudity, no bodies in sexual contact, no product-in-use, the
+  adults-only hard rules, and the uncanny-face reject. Witty never crude; the craft is what
+  makes it art instead of a shitpost.
+- **No-product fallback logs its reason.** Leaving the product out of a human hero is a
+  documented exception, never a silent default. It is allowed only when the brief states why
+  (the post has zero embeds, or a held product would read as a safety claim on a
+  health-adjacent topic), and that reason is written into the keeper log entry in the prompt
+  library. A missing product with no documented reason is a vision-gate reject.
 - **Hard rules (binding, every human hero):**
   - **Adults only, written for how generation actually fails:** every prompt states adult age
     markers explicitly (e.g. "adults in their 30s"), and the vision gate hard-rejects any face
@@ -118,8 +179,6 @@ words are claims.
   - **Uncanny-face hard reject.** Faces are where generation visibly fails: wrong teeth,
     dead eyes, warped features, extra fingers near a face. Any uncanny artifact is an
     automatic reject, no salvage crop.
-  - **Diversity is deliberate.** Vary age, body type, and skin tone across posts so "feel
-    seen" is real, not twelve variations of one 25-year-old.
   - Never explicit anatomy, never nudity, never bodies in sexual contact, no readable
     invented text.
 - **Emma's likeness.** Emma may appear (canonical photo: Sanity `singleton.editor` as ref
@@ -150,10 +209,14 @@ words are claims.
   product-family fallback), if the product is small, incidental, or invented rather than
   ref-image-placed, or if the frame passes the home-goods-catalog test. §0-H: reject hard on
   youthful ambiguity, uncanny faces, moody/dark grading, sexualized bodies, or a frame with no
-  identifiable human presence. Two failures on §0-P: fall back to the product's real Shopify
-  photo cropped editorially. Two failures on §0-H: retry with a simpler single-figure
-  composition; if that also fails, the post holds as a Sanity draft for the owner rather than
-  publishing heroless.
+  identifiable human presence; **also reject a frame whose gesture would fit any other post
+  equally well** (the swap test), **and a missing product with no documented reason** in the
+  brief and keeper log. The gate carries **no real-world-proportion reject**: deliberate scale
+  exaggeration under the levity license is compliant, provided shape, color, finish, and
+  product identity stay faithful to the reference. Two failures on §0-P: fall back to the
+  product's real Shopify photo cropped editorially. Two failures on §0-H: retry with a simpler
+  single-figure composition; if that also fails, the post holds as a Sanity draft for the
+  owner rather than publishing heroless.
 
 ---
 

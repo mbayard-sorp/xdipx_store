@@ -9,7 +9,7 @@
  */
 
 export type PublishResult =
-  | { ok: true; externalPostId: string }
+  | { ok: true; externalPostId: string; note?: string }
   | { ok: false; reason: 'not_configured' | 'error'; detail?: string }
 
 /**
@@ -28,6 +28,14 @@ export interface PublishInput {
   postId: number
   media: PublishMedia
   caption: string
+  /**
+   * The featured product's Shopify handle, from the publish-gate stamp, for
+   * adapters that can tag a catalog product on the post (ticket #3744;
+   * Instagram only today). Always additive: a tag failure must degrade to
+   * publishing without the tag, never to a failed publish, and a tag never
+   * changes what passes the gate.
+   */
+  productTagHandle?: string | null
 }
 
 export interface SocialPublisher {
