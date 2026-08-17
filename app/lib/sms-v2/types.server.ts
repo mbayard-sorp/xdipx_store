@@ -18,6 +18,7 @@ export type Intent =
   | 'COMMIT_PICK'
   | 'UPSELL_ACCEPT'
   | 'UPSELL_DECLINE'
+  | 'ASK_UPSELL'
   | 'NAME_ITEM'
   | 'SUPPORT'
   | 'OBJECTION'

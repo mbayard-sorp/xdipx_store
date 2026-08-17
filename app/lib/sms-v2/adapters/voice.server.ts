@@ -828,7 +828,7 @@ export async function processVoiceMessageV2(
   }
 
   // --- Step 3: v2 stage dispatch ---
-  const effectiveStage = pickEffectiveStage(conversation.stage as Stage, intentResult)
+  const effectiveStage = pickEffectiveStage(conversation.stage as Stage, intentResult, conversation.currentPitchHandle)
   const stageLabel = conversation.stage as string
 
   let stageResp: StageResponse | null = null

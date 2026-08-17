@@ -187,7 +187,7 @@ async function runV2Turn(
   // intent-driven pre-transitions), then try to dispatch to a v2 handler.
   // Stages without a handler (GREETING, CONSENT_GATE, RECONNECT, SUPPORT, etc.)
   // return null here and fall through to v1.
-  const effectiveStage = pickEffectiveStage(conversation.stage as Stage, intentResult)
+  const effectiveStage = pickEffectiveStage(conversation.stage as Stage, intentResult, conversation.currentPitchHandle)
   const stageLabel = conversation.stage as string
 
   let result: Awaited<ReturnType<typeof processSmsMessage>>
