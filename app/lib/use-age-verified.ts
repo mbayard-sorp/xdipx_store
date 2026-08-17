@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useRouteLoaderData } from 'react-router'
 
 const STORAGE_KEY    = 'xdipx_age_verified'
 const EXPIRY_DAYS    = 30
@@ -38,6 +39,15 @@ export function writeVerified(): void {
 export function useAgeVerified(): { verified: boolean; confirm: () => void } {
   const [verified, setVerifiedState] = useState(false)
 
+  // QA preview bypass (ticket #2826): the root loader sets qaAgeVerified true
+  // ONLY when the request carried a valid team-secret-derived HMAC header
+  // (app/lib/qa-preview.server.ts) — i.e. a server-side QA proxy fetch, which
+  // executes no JS and could otherwise never get past this client-only gate.
+  // Real visitors cannot produce the header, so for them this is always false
+  // and the localStorage gate below is unchanged.
+  const rootData = useRouteLoaderData('root') as { qaAgeVerified?: boolean } | undefined
+  const qaAgeVerified = rootData?.qaAgeVerified === true
+
   useEffect(() => {
     setVerifiedState(readVerified())
     const onSync = () => setVerifiedState(readVerified())
@@ -51,5 +61,5 @@ export function useAgeVerified(): { verified: boolean; confirm: () => void } {
     window.dispatchEvent(new Event(SYNC_EVENT))
   }
 
-  return { verified, confirm }
+  return { verified: verified || qaAgeVerified, confirm }
 }

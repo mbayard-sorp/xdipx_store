@@ -58,3 +58,8 @@ apply-shadow.log
 # Scratch dir the media-manager agent writes one-off fetch/generate helpers into
 # during a hero-image run. Working files only; the keeper is the uploaded asset.
 scripts/.tmp-media/
+
+# Playwright visual harness artifacts (tests/visual/__screenshots__ baselines ARE committed)
+test-results/
+playwright-report/
+.design-snapshots/

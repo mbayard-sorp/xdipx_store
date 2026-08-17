@@ -181,6 +181,18 @@ is unchanged; images are expression, words are claims.
     automatic reject, no salvage crop.
   - Never explicit anatomy, never nudity, never bodies in sexual contact, no readable
     invented text.
+- **Emma's likeness.** Emma may appear (canonical photo: Sanity `singleton.editor` as ref
+  image) in both guide-mode (gesturing, hosting, explaining) and expressive-mode (reflecting
+  the reader's feeling). Her friends are the named cast (`castMember` docs) — cast selection
+  reads the doc's `archetype` / `ageRange` / `description` / `emotionTags` fields (match the
+  post's reader-emotion to `emotionTags`, rotate deliberately) rather than eyeballing photos,
+  and §0-H compositing uses `editorialPhoto ?? referencePhoto` (the editorial reference is the
+  crew-neck, waist-up, plain-tinted-ground register; the video-register `referencePhoto`'s
+  wardrobe propagates into composited frames otherwise — ticket #2751).
+  **Guide-mode camera distance is stated explicitly in every prompt:** "waist-up framing, room
+  on both sides of the subject" (or wider). Emma's canonical photo is portrait 768×1376; into a
+  4:3 landscape hero an unstated distance arrives as a tight head-and-shoulders crop with no
+  room for the product she is meant to be holding.
 
 ### Shared rules (both archetypes)
 
@@ -325,7 +337,12 @@ extending the design system off-site (the Satori / `@vercel/og` path).
 
 - All assets: sRGB, optimized (WebP/AVIF with JPEG fallback), @1x and @2x where noted.
 - Alt text supplied per asset in Emma voice, descriptive and non-explicit (charter).
-- Every asset logged to the prompt library with its keeper prompt and cluster key.
+- Every asset logged to the prompt library with its keeper prompt and cluster key, **plus a
+  fixed `cast:` field on every keeper entry** — `cast: <slug>` (e.g. `cast: maya`) when a cast
+  member appears, `cast: emma` for Emma, `cast: none` otherwise. The field is mandatory and
+  machine-greppable (`grep '^cast:'` or `grep 'cast: <slug>'`) so the no-repeat-within-5 cast
+  rotation is checkable in one command instead of living in a prose paragraph that does not
+  survive a context reset (ticket #2751).
 - Category and series accents verified against the identity map in `notebook-art-direction.md`.
 - Vision gate passed (bright/warm, product-or-context match, palette-compatible, no artifacts,
   tasteful) or the asset falls back to the product's real Shopify photo.

@@ -20,6 +20,7 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
+import { QA_AGE_BYPASS_HEADER, qaAgeBypassToken } from '~/lib/qa-preview.server'
 import {
   classifyChangedFiles,
   findPreviewUrl,
@@ -266,6 +267,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // Keeps the bypass from being written into the preview's own cookie jar.
     headers['x-vercel-set-bypass-cookie'] = 'false'
   }
+  // Age-gate bypass for the proxied render (ticket #2826): a team-secret-derived
+  // HMAC the preview's root loader verifies server-side, so the returned HTML
+  // shows past-the-gate content instead of the AgeGatePanel branch on every
+  // gated route. Inert when the preview deployment lacks the secret; real
+  // visitors cannot produce the value. The visitor-facing gate is unchanged.
+  const ageBypass = qaAgeBypassToken()
+  if (ageBypass) headers[QA_AGE_BYPASS_HEADER] = ageBypass
 
   try {
     const res = await fetch(target, {

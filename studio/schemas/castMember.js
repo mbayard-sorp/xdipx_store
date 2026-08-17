@@ -11,6 +11,8 @@
  * personal testimony, and every video featuring one carries the AI disclosure.
  */
 
+import castMemberEditorialFields from './castMemberEditorialFields'
+
 export default {
   name: 'castMember',
   title: 'Cast Member (Friend of Emma)',
@@ -81,6 +83,10 @@ export default {
       initialValue: false,
       description: 'Owner sign-off on this exact look. Stays OFF until Mike confirms; the pipeline hard-fails on unapproved characters rather than substituting Emma.',
     },
+    // Ticket #2751 editorial extension (selection metadata + editorialPhoto),
+    // spread in from its own file so this file's original definitions stay
+    // untouched (additive-only rule). See ./castMemberEditorialFields.js
+    ...castMemberEditorialFields,
   ],
 
   preview: {
