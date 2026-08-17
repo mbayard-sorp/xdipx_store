@@ -295,6 +295,18 @@ export interface CastMember {
   photoAlt: string | null
   shortBio: string | null
   personaNotes: string | null
+  // Ticket #2751 — selection metadata so an agent can cast deliberately
+  // (rotate, match reader-emotion) without opening each photo.
+  archetype: string | null
+  ageRange: string | null
+  description: string | null
+  emotionTags: string[]
+  /**
+   * Notebook-register reference (crew-neck, waist-up, plain tinted ground).
+   * §0-H editorial compositing should use editorialPhotoUrl ?? photoUrl; the
+   * video pipeline keeps photoUrl (referencePhoto) for identity consistency.
+   */
+  editorialPhotoUrl: string | null
 }
 
 export async function getApprovedCastMembers(): Promise<CastMember[]> {
@@ -310,7 +322,12 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         "photoUrl": referencePhoto.asset->url,
         "photoAlt": photoAlt,
         shortBio,
-        personaNotes
+        personaNotes,
+        archetype,
+        ageRange,
+        description,
+        emotionTags,
+        "editorialPhotoUrl": editorialPhoto.asset->url
       }`,
     )
     return (raw ?? [])
@@ -323,6 +340,11 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         photoAlt:     m.photoAlt ?? null,
         shortBio:     m.shortBio ?? null,
         personaNotes: m.personaNotes ?? null,
+        archetype:    m.archetype ?? null,
+        ageRange:     m.ageRange ?? null,
+        description:  m.description ?? null,
+        emotionTags:  Array.isArray(m.emotionTags) ? m.emotionTags : [],
+        editorialPhotoUrl: m.editorialPhotoUrl ?? null,
       }))
   } catch (err) {
     console.error('[sanity] getApprovedCastMembers error:', err)

@@ -172,7 +172,13 @@ async function resolveCastPhotoUrl(castSlug: string): Promise<string> {
   if (!member) {
     throw new Error(`Cast member '${castSlug}' not found or not approved for use (castMember.active && approvedForUse)`)
   }
-  return member.photoUrl
+  // §0-H reads editorialPhoto ?? referencePhoto (ticket #2751): referencePhotos
+  // were shot for video presenting and their wardrobe register propagates into
+  // every composited frame (Maya's deep-V neckline carried into "elevated
+  // loungewear" briefs — docs/media-model-routing.md). The video pipeline keeps
+  // referencePhoto for identity consistency; only this editorial path prefers
+  // the tamer editorial reference.
+  return member.editorialPhotoUrl ?? member.photoUrl
 }
 
 async function resolveProductPhotoUrl(handle: string): Promise<string> {

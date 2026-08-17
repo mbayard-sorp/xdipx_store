@@ -270,15 +270,17 @@ sessions said so. The sameness diff mandates *editorial cadence*: the page chang
 window changes, decided on margin, theme, and judgment. Sparse traffic changes HOW you pick; it
 never licenses shipping yesterday's page again.
 
-**Mechanical rails-freshness gate (capture now, assert at publish).** The rails slot is the one that
-kept going byte-identical (#2080, #3186, #3198), so back the eyeball diff with the verifier before you
-touch any rail:
+**Mechanical merch-freshness gate (capture now, assert at publish).** The rails slot is the one that
+kept going byte-identical (#2080, #3186, #3198), and #3531 extended the same verifier to the panel
+deck and the hero pin. Capture the per-slot fingerprints before you touch anything:
 
 ```bash
-BASELINE_RAILS=$(npx tsx scripts/rails-fingerprint.ts)   # first-4 rendered rail headings, joined
+BASELINE_MERCH=$(npx tsx scripts/rails-fingerprint.ts)   # JSON: {"rails":…,"deck":…,"hero":…}
 ```
 
-Hold `$BASELINE_RAILS` for the Step 5 rails DOD check below.
+`rails` covers wired rail keys + headings + resolved handle lists (a product swap inside a rail
+counts as a change), `deck` covers the panelDeck publish stamp + tile labels/links, `hero` covers
+the pinned handle + headline. Hold `$BASELINE_MERCH` for the Step 5 DOD check below.
 
 ## Step 2d — Inbound suggestions (read your own mail)
 
@@ -389,7 +391,10 @@ product to the hero or a rail, download and look at its Shopify PRIMARY image an
 it if it is a packaging shot (product small on white with large empty bands, or baked-in packaging
 text). `imgs > 0` is not the check. If a cleaner sibling image exists on the product, promote it with
 `setMediaAsPrimary` before pinning. Roughly 29% of the catalog leads with a packaging shot, so expect
-this to fire.
+this to fire. For the catalog-wide version of this check (ticket #90), run
+`npx tsx scripts/sweep-packshot-primaries.ts` — dry-run by default, it lists every product whose
+primary is a Nalpac `…A` packaging shot with a cleaner `…B/C` sibling (plus `--pixels` to flag wide
+white-band primaries for eyeballing); `--apply` promotes the confident candidates in one pass.
 
 **Sensation-direction guard (theme-aware, cheap, prevents a visible register mismatch).** When the
 active `marketing_calendar` theme is cooling or cool-down oriented, hero and rail copy must not lead
@@ -572,17 +577,21 @@ Every merchandise run touches all of these, not just the hero and rails:
    first one to two rails and the trust bar, never replacing a top rail, rotated WEEKLY (not daily)
    and aligned with the social featured-brand-of-the-week series; `merch-calendar` proposes the brand
    queue. Its tiles link `/products/{slug}` like any rail, so the 70% PDP-link target holds.
-   **Rails-freshness DOD (every run).** After publishing, assert the rails slate actually moved:
+   **Merch-freshness DOD (every run).** After publishing, assert the must-change slots actually
+   moved:
 
    ```bash
-   npx tsx scripts/rails-fingerprint.ts --baseline "$BASELINE_RAILS"
+   npx tsx scripts/rails-fingerprint.ts --baseline "$BASELINE_MERCH" --assert-changed rails
    ```
 
-   A non-zero exit means the published rail headings are byte-identical to the start of the run — the
-   rails slot did not change. That is a FAILED run on the same footing as the See-all continuity check
-   above and the Step 2c sameness rule, unless the summary names an explicit hold reason. (The weekly
-   featured-brand rail holds for a week; the other wired rails still carry daily freshness, so the
-   fingerprint still moves every run.) Record the verdict JSON in the summary.
+   Pass `--assert-changed rails,hero` on any run whose plan changes the hero pin, and add `deck`
+   only on the panel deck's scheduled refresh (it runs a 7-day floor per the mission brief — do not
+   make it must-change daily). A non-zero exit lists every byte-identical must-change slot — the run
+   cannot report done with an unchanged must-change slot. That is a FAILED run on the same footing
+   as the See-all continuity check above and the Step 2c sameness rule, unless the summary names an
+   explicit hold reason. (The weekly featured-brand rail holds for a week; the other wired rails
+   still carry daily freshness, so the rails fingerprint still moves every run.) The verdict JSON
+   also reports the advisory slots' changed/unchanged state — record it in the summary.
 3. **Wayfinder mosaic tiles** — refresh `tiles[]` (art, labels, links) every run. **At least two of
    the tiles target collections rather than individual products**: the page needs image-led entry
    doors into categories, not three deep links to single PDPs.

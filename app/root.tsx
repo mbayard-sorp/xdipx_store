@@ -25,6 +25,7 @@ import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { SITE_ORIGIN } from '~/lib/social-meta'
 import { captureUTM, captureFbClickId, captureGoogleClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
+import { isQaAgeBypassRequest } from '~/lib/qa-preview.server'
 
 const BOTID_PROTECTED_ROUTES = [
   { path: '/api/waitlist',  method: 'POST' },
@@ -180,6 +181,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return data({
     utm,
     refCode,
+    // QA preview age-gate bypass (ticket #2826): true only when the request
+    // carries a valid team-secret-derived HMAC header (see qa-preview.server).
+    // useAgeVerified() ORs this in so the server render of a proxied QA fetch
+    // shows past-the-gate content. Never persisted, never cookie-backed; real
+    // traffic cannot produce the header value.
+    qaAgeVerified: isQaAgeBypassRequest(request),
     ENV: {
       GA4_ID:            ga4.id,
       GA4_SOURCE:        ga4.source,
