@@ -46,6 +46,12 @@ vi.mock('~/lib/sanity.server', () => ({
   getStorefrontHomeLayout: vi.fn(),
 }))
 
+// The pin path's hero-dial fetch (ticket #3530) is the only Shopify call this
+// module makes; stub it so the suite stays hermetic.
+vi.mock('~/lib/shopify.server', () => ({
+  getProductByHandle: vi.fn(() => Promise.resolve(null)),
+}))
+
 import {
   assembleStorefrontHome,
   railSeedBucket,
@@ -62,6 +68,7 @@ import {
 } from '~/lib/homepage-payload.server'
 import { getSensationMapData } from '~/lib/sensation-map.server'
 import { getEmmaHeroSettings, getBlogPosts, getEditor } from '~/lib/sanity.server'
+import { getProductByHandle } from '~/lib/shopify.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
 
 describe('railSeedBucket', () => {
@@ -305,5 +312,102 @@ describe('hydrateStorefrontPayloadB', () => {
     expect(data.contentBlocks).not.toBeInstanceOf(Promise)
     expect(data.contentBlocks.sections).toHaveLength(1)
     expect(data.contentBlocks.sections[0]!._type).toBe('emmaCuratedRail')
+  })
+
+  it('exposes the pinned product dial as heroSensationDial (ticket #3530)', () => {
+    const dial = { items: [{ label: 'Intensity', value: 4 }, { label: 'Quietness', value: 3 }] }
+    const data = hydrateStorefrontPayloadB(payload({
+      pinnedProduct: product('pinned-one'),
+      pinnedSensationDial: dial as unknown as NonNullable<HomepagePayloadB['pinnedSensationDial']>,
+    }))
+    expect(data.heroSensationDial).toEqual(dial)
+  })
+
+  it('never surfaces a dial without a pin, even if the blob carries one', () => {
+    // The dial describes the pinned product; with no pin featured[0] rotates
+    // per rail-shuffle bucket, so serving stored readings would attribute one
+    // product's dial to another (doctrine section 6, never fabricate proof).
+    const dial = { items: [{ label: 'Intensity', value: 4 }] }
+    const data = hydrateStorefrontPayloadB(payload({
+      pinnedProduct: null,
+      pinnedSensationDial: dial as unknown as NonNullable<HomepagePayloadB['pinnedSensationDial']>,
+    }))
+    expect(data.heroSensationDial).toBeNull()
+  })
+
+  it('defaults heroSensationDial to null when the blob predates the field', () => {
+    const legacy = payload({ pinnedProduct: product('pinned-one') })
+    delete (legacy as { pinnedSensationDial?: unknown }).pinnedSensationDial
+    expect(hydrateStorefrontPayloadB(legacy).heroSensationDial).toBeNull()
+  })
+})
+
+/* ── build-time hero dial fetch (ticket #3530) ───────────────────────────── */
+
+describe('assembleStorefrontHome — hero sensation dial', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Blob miss -> live build, one populated rail so a pin can resolve.
+    vi.mocked(readHomepagePayloadB).mockResolvedValue(null)
+    vi.mocked(getDiscoveryRails).mockResolvedValue({
+      rails: [rail('Pleasure', ['a', 'b'])], total: 2,
+    } as unknown as Awaited<ReturnType<typeof getDiscoveryRails>>)
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue(null)
+    vi.mocked(getBlogPosts).mockResolvedValue({ posts: [], total: 0 })
+    vi.mocked(getEditor).mockResolvedValue(null)
+    vi.mocked(getSensationMapData).mockResolvedValue({
+      types: [], feels: [], defaultState: null, defaultMatch: null,
+    } as unknown as Awaited<ReturnType<typeof getSensationMapData>>)
+    vi.mocked(buildHomeContentBlocksLean).mockResolvedValue({
+      sections: [], carouselProductMap: {},
+    } as unknown as Awaited<ReturnType<typeof buildHomeContentBlocksLean>>)
+    vi.mocked(getProductByHandle).mockResolvedValue(null)
+  })
+
+  it('fetches the pinned product dial and serves it on the hero payload', async () => {
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue({
+      featuredProductHandle: 'a',
+    } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
+    const dial = { items: [{ label: 'Intensity', value: 4 }, { label: 'Softness', value: 2 }] }
+    vi.mocked(getProductByHandle).mockResolvedValue({
+      handle: 'a', sensationDialV2: dial,
+    } as unknown as Awaited<ReturnType<typeof getProductByHandle>>)
+
+    const data = await assembleStorefrontHome()
+
+    expect(getProductByHandle).toHaveBeenCalledWith('a')
+    expect(data.featured[0]!.handle).toBe('a')
+    expect(data.heroSensationDial).toEqual(dial)
+  })
+
+  it('does not touch Shopify when no product is pinned', async () => {
+    const data = await assembleStorefrontHome()
+    expect(getProductByHandle).not.toHaveBeenCalled()
+    expect(data.heroSensationDial).toBeNull()
+  })
+
+  it('degrades to null (never rejects) when the dial fetch fails', async () => {
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue({
+      featuredProductHandle: 'a',
+    } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
+    vi.mocked(getProductByHandle).mockRejectedValue(new Error('shopify down'))
+
+    const data = await assembleStorefrontHome()
+
+    expect(data.heroSensationDial).toBeNull()
+    expect(data.featured[0]!.handle).toBe('a')
+  })
+
+  it('serves null when the pinned product simply has no dial data', async () => {
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue({
+      featuredProductHandle: 'a',
+    } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
+    vi.mocked(getProductByHandle).mockResolvedValue({
+      handle: 'a',
+    } as unknown as Awaited<ReturnType<typeof getProductByHandle>>)
+
+    const data = await assembleStorefrontHome()
+
+    expect(data.heroSensationDial).toBeNull()
   })
 })

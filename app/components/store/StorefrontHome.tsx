@@ -56,7 +56,7 @@ import type {
   TrustBarBlock,
   HomepageFaqBlock,
 } from '~/types/cms'
-import type { LeanCardProduct } from '~/types'
+import type { LeanCardProduct, SensationDialV2 } from '~/types'
 
 /* Team-controlled Sanity block types the storefront renders (everything else
    in `singleton.homepage` is shell-owned or legacy and intentionally ignored). */
@@ -151,13 +151,86 @@ const SECONDARY_CTA_FALLBACK_HREF = '/collections/best-sellers'
  *  and the Nº 09 closer read as one duplicated CTA. */
 const MEET_EMMA_CTA_LABEL = 'Find your fit →'
 
+/** How many dial dimensions the hero readout shows. The hero is a glance, not
+ *  the PDP: the ticket brief (#3530) asks for 2 to 4 dimensions, and three
+ *  keeps the row on one line at 375px. */
+const HERO_DIAL_MAX_ITEMS = 3
+const HERO_DIAL_MIN_ITEMS = 2
+
+/**
+ * Compact "how it feels" readout for the pinned hero product (ticket #3530).
+ *
+ * Renders up to three dial dimensions as mono kicker labels over five-notch
+ * meters. Fill discipline: sage for reached notches with plum marking the
+ * topmost reached one, so the hero's single coral spend stays on the primary
+ * CTA. Data comes from the xdipx.sensation_dial metafields via the build-time
+ * pin path; when there is no dial (or fewer than two usable readings) this
+ * renders nothing at all, never empty chrome (doctrine section 6).
+ *
+ * Server-rendered from loader data with fixed-height rows, so it can never
+ * shift layout, and it sits BELOW the product frame so it never delays or
+ * wraps the LCP image.
+ */
+function HeroSensationDial({ dial }: { dial: SensationDialV2 }) {
+  const items = (dial.items ?? [])
+    .filter(it => it && typeof it.label === 'string' && it.label.trim().length > 0)
+    .map(it => ({
+      label: it.label.trim(),
+      value: Math.max(0, Math.min(5, Math.round(it.value ?? 0))),
+    }))
+    .filter(it => it.value > 0)
+    .slice(0, HERO_DIAL_MAX_ITEMS)
+
+  if (items.length < HERO_DIAL_MIN_ITEMS) return null
+
+  return (
+    <div className="mt-4 flex flex-wrap items-start gap-x-7 gap-y-3">
+      <span
+        className="pt-px text-[10px] uppercase tracking-[0.18em] text-ink-4"
+        style={MONO}
+      >
+        How it feels
+      </span>
+      {items.map(({ label, value }) => (
+        <div key={label}>
+          <span
+            className="block text-[10px] uppercase tracking-[0.16em] text-ink-4"
+            style={MONO}
+          >
+            {label}
+          </span>
+          <div
+            className="mt-1.5 flex gap-1"
+            role="img"
+            aria-label={`${label}: ${value} of 5`}
+          >
+            {Array.from({ length: 5 }).map((_, i) => (
+              <span
+                key={i}
+                aria-hidden="true"
+                className={[
+                  'h-1.5 w-5 rounded-full',
+                  i === value - 1 ? 'bg-plum' : i < value ? 'bg-sage' : 'bg-line-2',
+                ].join(' ')}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Hero({
   featured,
   emmaHero,
+  sensationDial,
   trustBar,
 }: {
   featured: DiscoveryProduct[]
   emmaHero?: EmmaHeroSettings | null
+  /** Pinned hero product's dial, or null. Null renders no readout at all. */
+  sensationDial?: SensationDialV2 | null
   trustBar?: TrustBarBlock | undefined
 }) {
   const lead = featured[0]
@@ -334,6 +407,12 @@ function Hero({
               )}
             </div>
           </Link>
+
+          {/* Nº 01a · Sensation dial readout (ticket #3530) — under the product
+              frame, so it annotates the pick without touching the LCP image or
+              the text column's fold budget. Renders nothing when the pinned
+              product has no dial data. */}
+          {sensationDial ? <HeroSensationDial dial={sensationDial} /> : null}
         </div>
       </div>
 
@@ -1310,7 +1389,7 @@ export function resolveBandOrder(
   return order
 }
 
-export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks, emmaHero, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout, panelDeck }: StorefrontData) {
+export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks, emmaHero, heroSensationDial, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout, panelDeck }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
   // per page view; the localStorage flag distinguishes first-time visitors.
   useEffect(() => {
@@ -1398,7 +1477,7 @@ export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks,
      band that has nothing to show still returns null here rather than being
      omitted, so the map stays total and a missing key is a real bug. */
   const bands: Record<BandName, ReactNode> = {
-    hero: <Hero featured={featured} emmaHero={emmaHero} trustBar={trustBarBlock} />,
+    hero: <Hero featured={featured} emmaHero={emmaHero} sensationDial={heroSensationDial} trustBar={trustBarBlock} />,
 
     /* Nº 03 · A good place to start — the curated anchor collection (default
        best-sellers, discovery best-of fallback) as a bright static grid. This

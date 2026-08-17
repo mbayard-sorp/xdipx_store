@@ -28,7 +28,7 @@ import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import { getHomepageSections } from '~/lib/sanity.server'
 import { normalizeProductHandles } from '~/lib/product-handles'
 import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~/lib/shopify.server'
-import type { Product, LeanCardProduct } from '~/types'
+import type { Product, LeanCardProduct, SensationDialV2 } from '~/types'
 import type { DiscoveryProduct } from '~/types/discovery'
 import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, PlayTogetherBannerBlock, EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout, ResolvedPanelDeck } from '~/types/cms'
 import type { SensationMapData } from '~/lib/sensation-map.server'
@@ -529,8 +529,12 @@ export function reshuffleRailsWithSeed(rails: Rail[], seed: number): Rail[] {
  *     validated destinations). A b4 blob has no such field, so the deck would
  *     stay invisible after the team published it. Null = no deck, which is the
  *     launch state.
+ * b7: added `pinnedSensationDial` (the pinned hero product's sensation dial,
+ *     ticket #3530). A b6 blob has no such field, so the hero would keep
+ *     hiding the dial after a pin gained data. Null = no dial, which renders
+ *     nothing (doctrine section 6, never fabricate proof).
  */
-export const HOMEPAGE_PAYLOAD_B_VERSION = 'b6'
+export const HOMEPAGE_PAYLOAD_B_VERSION = 'b7'
 
 /** KV key for the precomputed storefront blob. Versioned. */
 export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`
@@ -553,6 +557,16 @@ export interface HomepagePayloadB {
    * full-index read this precompute exists to eliminate. Null = rotating hero.
    */
   pinnedProduct: DiscoveryProduct | null
+  /**
+   * The pinned product's sensation dial (xdipx.sensation_dial_v2, legacy
+   * sensation_dial projected), fetched from Shopify AT BUILD TIME for the
+   * hero's "how it feels" readout (ticket #3530). The discovery index does not
+   * carry the dial, so the pin path resolves it once per build rather than the
+   * request path paying a Shopify round-trip. Null when there is no pin, the
+   * product carries no dial data, or the Shopify leg failed. Null renders
+   * nothing, never placeholder chrome.
+   */
+  pinnedSensationDial?: SensationDialV2 | null
   /**
    * Products for the promoted Nº 03 anchor grid, sourced from the team's
    * `anchorCollectionHandle` collection (default best-sellers) in its curated
