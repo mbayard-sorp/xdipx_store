@@ -5,6 +5,7 @@ import { HeartButton } from './HeartButton'
 import { CardMediaCarousel } from './CardMediaCarousel'
 import { abbreviate, buildPieGradient } from './CircleOptionSelector'
 import { showDiscountBadge, formatSavings, formatSavingsRange, mapAllowsDiscountDisplay } from '~/lib/discount-badge'
+import { trackAddToCart } from '~/lib/analytics.client'
 
 interface VaultCardProps {
   deal: VaultDeal
@@ -36,6 +37,16 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
       wasSubmitting.current = false
       if (addToCart.data?.ok) {
         setJustAdded(true)
+        // GA4: quick-add was invisible before this (ticket #3424) — collection
+        // ad groups had their primary leading indicator dark. Fires only on a
+        // confirmed add, so failed POSTs never count.
+        trackAddToCart({
+          item_id: deal.handle,
+          item_name: deal.seoTitle,
+          ...(deal.brand ? { item_brand: deal.brand } : {}),
+          price: deal.dealPrice,
+          quantity: 1,
+        })
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('xdipx:cart-added'))
         }
