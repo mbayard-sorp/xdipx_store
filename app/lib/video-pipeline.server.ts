@@ -1199,10 +1199,17 @@ export async function regenerateVideoJob(jobRowId: number, feedback: string): Pr
 
 /**
  * Fan a finished, owner-approved video out to one social_posts row per target
- * platform. Rows land status='draft' + reviewStatus='approved': the Video
- * Studio approval IS the editorial review; the Social Studio Approved tab is
- * the posting surface (copy caption / download / stubbed Post now), not a
- * second review queue. Nothing here posts anywhere.
+ * platform. Rows land status='draft' + reviewStatus='pending_review', never
+ * 'approved' (ticket #3733): both publish paths refuse an approved row without
+ * a publish-gate stamp in `feedback`, and only `applyPublishGateVerdict` may
+ * write one. Video Studio approval is the editorial review of the VIDEO; the
+ * publish gate still owns whether the finished POST ships (repetition across
+ * the feed, caption patterns, stock at publish time are its checks, not frame
+ * review's). Instagram rows are swept by the social routine's Step 6.5 gate
+ * pass; other platforms stay pending for the owner in the Social Studio.
+ * `scheduledFor` is set to today because the publish job's eligibility query
+ * requires `scheduled_for <= current_date`; a NULL there never matches, which
+ * would strand the row even once gated. Nothing here posts anywhere.
  */
 export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: string): Promise<number[]> {
   const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
@@ -1232,9 +1239,11 @@ export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: st
       videoJobId: job.id,
       status: 'draft',
       createdBy: 'agent',
-      reviewStatus: 'approved',
+      reviewStatus: 'pending_review',
+      scheduledFor: new Date().toISOString().slice(0, 10),
+      // Who approved the VIDEO, kept for audit; the POST's reviewer is whoever
+      // the gate stamp names once it verdicts.
       reviewedBy,
-      reviewedAt: new Date(),
     }).returning({ id: socialPosts.id })
     if (row) ids.push(row.id)
   }
