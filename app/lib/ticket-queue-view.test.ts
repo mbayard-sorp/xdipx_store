@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   NO_EXECUTOR_KINDS,
+  classifyTeamTablesError,
   facetTotal,
   fmtAge,
   sumFacetCount,
@@ -112,5 +113,46 @@ describe('truncationNote', () => {
     expect(note).not.toBeNull()
     expect(note).toContain('49')
     expect(note).toContain('230')
+  })
+})
+
+describe('classifyTeamTablesError', () => {
+  // Ticket #3770: the loader's migrated flag must only hide the queue for the
+  // genuine pre-migration state. Everything else renders the shell + banner.
+
+  it('treats a pg 42P01 code as unmigrated', () => {
+    const err = Object.assign(new Error('relation "homepage_team_runs" does not exist'), { code: '42P01' })
+    expect(classifyTeamTablesError(err)).toBe('unmigrated')
+  })
+
+  it('finds 42P01 buried on the cause chain, where drizzle wraps the driver error', () => {
+    const pg = Object.assign(new Error('undefined table'), { code: '42P01' })
+    const wrapped = new Error('Failed query: select ...', { cause: pg })
+    expect(classifyTeamTablesError(wrapped)).toBe('unmigrated')
+  })
+
+  it('recognises the missing-relation message even without a code property', () => {
+    expect(classifyTeamTablesError(new Error('relation "homepage_team_suggestions" does not exist')))
+      .toBe('unmigrated')
+    expect(classifyTeamTablesError('error: 42P01 undefined_table')).toBe('unmigrated')
+  })
+
+  it('classifies a transient pooler timeout as transient, never as unmigrated', () => {
+    // The 2026-08-16 repro: a Neon pooler timeout hid the whole ticket queue.
+    expect(classifyTeamTablesError(new Error('Connection terminated due to connection timeout')))
+      .toBe('transient')
+    expect(classifyTeamTablesError(Object.assign(new Error('canceling statement'), { code: '57014' })))
+      .toBe('transient')
+    expect(classifyTeamTablesError(new Error('fetch failed'))).toBe('transient')
+  })
+
+  it('handles junk shapes without throwing', () => {
+    expect(classifyTeamTablesError(null)).toBe('transient')
+    expect(classifyTeamTablesError(undefined)).toBe('transient')
+    expect(classifyTeamTablesError(42)).toBe('transient')
+    // A self-referential cause chain must not loop forever.
+    const circular: Record<string, unknown> = { message: 'x' }
+    circular['cause'] = circular
+    expect(classifyTeamTablesError(circular)).toBe('transient')
   })
 })
