@@ -96,17 +96,36 @@ export function assertTeamAuth(request: Request): void {
  * another 82 seconds, and content runs 102/111 ran 190 and 200 minutes and
  * survived only because the reaper's 5-minute throttle happened to miss them.
  *
- * The threshold is generous on purpose. Measured over 21 days of SUCCEEDED
- * runs, healthy routines go quiet for long stretches between steps: content
- * p95 45.6 min and max 155.6, strategy max 102.5, homepage max 36.5. Anything
- * near 20 minutes re-creates the bug. The failure modes are asymmetric, since
- * a false reap corrupts the record and masks real failures, while a late reap
- * only leaves a dead row marked 'running' a while longer.
+ * The default threshold is generous on purpose. Measured over 21 days of
+ * SUCCEEDED runs, healthy routines go quiet for long stretches between steps:
+ * content p95 45.6 min and max 155.6, strategy max 102.5, homepage max 36.5.
+ * Anything near 20 minutes re-creates the bug. The failure modes are
+ * asymmetric, since a false reap corrupts the record and masks real failures,
+ * while a late reap only leaves a dead row marked 'running' a while longer.
  *
  * This also releases the concurrency lock, because isRunInProgress() only
  * counts status='running' rows: reaping a dead run is what frees its team.
+ *
+ * Per-team overrides (ticket #3191): one flat threshold sized for the slowest
+ * team makes a hung run on a FAST team invisible for hours. Social routines
+ * finish in 10-15 min, yet stuck run 251 held the social gate for 5h42m and
+ * silently cost the weekly trend-scout its whole cycle (run 254 skipped on
+ * run_in_progress with no retry until the next Monday). 60 min is 4-6x
+ * social's normal runtime, so a healthy-but-slow social run is still safe,
+ * while a silent one stops blocking the gate the moment it crosses the hour
+ * (isRunInProgress filters on activity, so the unblock does not even wait for
+ * the reaper sweep). Teams with measured long quiet stretches keep the 240
+ * default; add a team here only with runtime data to back the number.
  */
-const RUN_IDLE_TIMEOUT_MIN = 240
+const RUN_IDLE_TIMEOUT_MIN_DEFAULT = 240
+const RUN_IDLE_TIMEOUT_MIN_BY_TEAM: Partial<Record<TeamId, number>> = {
+  social: 60,
+}
+
+/** Idle minutes after which a silent run of this team is presumed dead. */
+export function runIdleTimeoutMin(team: TeamId): number {
+  return RUN_IDLE_TIMEOUT_MIN_BY_TEAM[team] ?? RUN_IDLE_TIMEOUT_MIN_DEFAULT
+}
 
 /**
  * Last sign of life for a run: the newest event it posted, falling back to its
@@ -339,7 +358,7 @@ export async function getTodayImageCount(team: TeamId = 'homepage'): Promise<num
  * Callers that already hold a run row pass excludeRunId to avoid self-blocking.
  */
 export async function isRunInProgress(team: TeamId, excludeRunId?: number): Promise<boolean> {
-  const since = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 60_000)
+  const since = new Date(Date.now() - runIdleTimeoutMin(team) * 60_000)
   const conditions = [
     eq(homepageTeamRuns.team, team),
     eq(homepageTeamRuns.status, 'running'),
@@ -355,20 +374,77 @@ export async function isRunInProgress(team: TeamId, excludeRunId?: number): Prom
 }
 
 /**
+ * The sibling run currently holding this team's concurrency lock, with how
+ * long it has been silent, or null when none is. Same predicate as
+ * isRunInProgress; the extra detail exists so a gate refusal can NAME the
+ * blocker (id + idle age) instead of a bare run_in_progress, which is what
+ * lets a low-frequency routine decide to wait out a suspiciously quiet
+ * sibling rather than silently forfeiting its weekly slot (ticket #3191).
+ */
+export async function getBlockingRun(
+  team: TeamId,
+  excludeRunId?: number,
+): Promise<{ id: number; runType: string; idleMinutes: number } | null> {
+  const since = new Date(Date.now() - runIdleTimeoutMin(team) * 60_000)
+  const conditions = [
+    eq(homepageTeamRuns.team, team),
+    eq(homepageTeamRuns.status, 'running'),
+    sql`${lastActivityAt} >= ${since}`,
+  ]
+  if (excludeRunId !== undefined) conditions.push(ne(homepageTeamRuns.id, excludeRunId))
+  const [row] = await db
+    .select({
+      id: homepageTeamRuns.id,
+      runType: homepageTeamRuns.runType,
+      idleSec: sql<number>`EXTRACT(epoch FROM now() - ${lastActivityAt})::float8`,
+    })
+    .from(homepageTeamRuns)
+    .where(and(...conditions))
+    .orderBy(desc(homepageTeamRuns.startedAt))
+    .limit(1)
+  if (!row) return null
+  return {
+    id: row.id,
+    runType: row.runType ?? '',
+    idleMinutes: Math.max(0, Math.floor(Number(row.idleSec ?? 0) / 60)),
+  }
+}
+
+/**
  * Mark zombie rows failed across ALL teams: status='running' with no recorded
- * activity for the idle timeout, meaning the routine died without posting a
- * final update. A slow-but-reporting run is not a zombie and is left alone.
+ * activity for the team's idle timeout, meaning the routine died without
+ * posting a final update. A slow-but-reporting run is not a zombie and is left
+ * alone. Teams with a shorter override sweep on their own cutoff; everything
+ * else, including any unknown/legacy team value, falls under the default so a
+ * zombie can never dodge the reaper by having an unrecognised team.
  */
 export async function expireStaleRuns(): Promise<void> {
-  const cutoff = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN * 60_000)
+  const overrides = Object.entries(RUN_IDLE_TIMEOUT_MIN_BY_TEAM) as Array<[TeamId, number]>
+  const expireSet = (mins: number) => ({
+    status: 'failed',
+    error: `auto-expired: no recorded activity for ${mins} minutes`,
+    finishedAt: new Date(),
+  })
+  const defaultCutoff = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN_DEFAULT * 60_000)
+  const defaultConds = [eq(homepageTeamRuns.status, 'running'), sql`${lastActivityAt} < ${defaultCutoff}`]
+  if (overrides.length > 0) {
+    defaultConds.push(sql`${homepageTeamRuns.team} NOT IN (${sql.join(overrides.map(([t]) => sql`${t}`), sql`, `)})`)
+  }
   await db
     .update(homepageTeamRuns)
-    .set({
-      status: 'failed',
-      error: `auto-expired: no recorded activity for ${RUN_IDLE_TIMEOUT_MIN} minutes`,
-      finishedAt: new Date(),
-    })
-    .where(and(eq(homepageTeamRuns.status, 'running'), sql`${lastActivityAt} < ${cutoff}`))
+    .set(expireSet(RUN_IDLE_TIMEOUT_MIN_DEFAULT))
+    .where(and(...defaultConds))
+  for (const [team, mins] of overrides) {
+    const cutoff = new Date(Date.now() - mins * 60_000)
+    await db
+      .update(homepageTeamRuns)
+      .set(expireSet(mins))
+      .where(and(
+        eq(homepageTeamRuns.status, 'running'),
+        eq(homepageTeamRuns.team, team),
+        sql`${lastActivityAt} < ${cutoff}`,
+      ))
+  }
 }
 
 export interface GateResult {
@@ -376,6 +452,13 @@ export interface GateResult {
   enabled: boolean
   /** Why a run is refused, when ok=false. */
   reason?: 'disabled' | 'over_budget' | 'over_run_cap' | 'run_in_progress' | 'over_image_cap'
+  /**
+   * Present only when reason='run_in_progress': the sibling run holding the
+   * lock and how long it has been silent. A weekly-cadence routine uses this
+   * to decide whether to re-check the gate later in the same session (its
+   * only same-day retry path) instead of forfeiting the week (ticket #3191).
+   */
+  blockingRun?: { id: number; runType: string; idleMinutes: number }
   ok: boolean
   dailyCents: number
   spentCents: number
@@ -407,14 +490,14 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     // Same throttle, same reason: both are "a worker died holding something".
     await Promise.all([expireStaleRuns(), expireStaleClaims()])
   }
-  const [cfg, spentCents, runsToday, imagesToday, inProgress, briefId, autopublish] = await Promise.all([
+  const [cfg, spentCents, runsToday, imagesToday, blockingRun, briefId, autopublish] = await Promise.all([
     getTeamConfig(team),
     getTodaySpendCents(team),
     getTodayRunCount(team, excludeRunId),
     // Counted for every team with image features, not just homepage (#3390):
     // getTodayImageCount returns 0 on its own for a team with none configured.
     getTodayImageCount(team),
-    isRunInProgress(team, excludeRunId),
+    getBlockingRun(team, excludeRunId),
     getActiveBriefId(),
     team === 'content' ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(undefined),
   ])
@@ -435,7 +518,7 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     ...(team === 'content' ? { contentSlot: contentSlotForDate(new Date()) } : {}),
   }
   if (!cfg.enabled)                   return { ...base, ok: false, reason: 'disabled' }
-  if (inProgress)                     return { ...base, ok: false, reason: 'run_in_progress' }
+  if (blockingRun)                    return { ...base, ok: false, reason: 'run_in_progress', blockingRun }
   if (remainingCents <= 0)            return { ...base, ok: false, reason: 'over_budget' }
   if (runsToday >= cfg.maxRunsPerDay) return { ...base, ok: false, reason: 'over_run_cap' }
   // Image-cap enforcement for every team with a cap configured, not homepage
@@ -1936,15 +2019,24 @@ export async function proposeCalendarEvent(input: {
   name: string
   type?: string | undefined   // holiday|promo|campaign
   theme?: string | undefined
+  /**
+   * Structured campaign payload (ticket #2736): endDate, pillars, formats,
+   * product_scope, visualScheme. Until this landed nothing in app/ wrote
+   * assets_json, so instagram-campaigns.md was the only authority for a
+   * campaign window and posts could not be joined to their campaign without
+   * reading markdown.
+   */
+  assetsJson?: Record<string, unknown> | undefined
 }): Promise<number> {
   const [row] = await db
     .insert(marketingCalendar)
     .values({
-      eventDate: input.eventDate,
-      name:      input.name,
-      type:      input.type ?? 'promo',
-      theme:     input.theme ?? null,
-      status:    'planned',
+      eventDate:  input.eventDate,
+      name:       input.name,
+      type:       input.type ?? 'promo',
+      theme:      input.theme ?? null,
+      status:     'planned',
+      assetsJson: input.assetsJson ?? null,
     })
     .returning({ id: marketingCalendar.id })
   return row!.id

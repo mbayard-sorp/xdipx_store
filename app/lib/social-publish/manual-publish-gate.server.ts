@@ -29,7 +29,17 @@ export function manualPublishValveKey(isVideo: boolean): (typeof VALVE_KEYS)[key
 }
 
 export async function decideManualPublish(
-  input: { feedback: string | null | undefined; isVideo: boolean },
+  input: {
+    feedback: string | null | undefined
+    isVideo: boolean
+    /**
+     * Defaults to 'instagram', which is what every caller was before X grew a
+     * manual path (ticket #3739). On 'x' the stamp refusal below applies
+     * unchanged, and the valve read is skipped: the owner's click is the human
+     * approval, and `x_autopublish_enabled` governs only the scheduled tick.
+     */
+    platform?: 'instagram' | 'x'
+  },
   getValve: (key: (typeof VALVE_KEYS)[keyof typeof VALVE_KEYS]) => Promise<boolean>,
 ): Promise<ManualPublishDecision> {
   // 1. Refuse anything the pre-publish gate never looked at. `review_status`
@@ -48,6 +58,12 @@ export async function decideManualPublish(
         '(POST /api/team/social-post {op:"gate"}); it re-verdicts and, on a PASS, re-approves.',
     }
   }
+
+  // X stops here (ticket #3739). The stamp requirement is the point: the
+  // owner's click stays the human approval, but the stamp proves something
+  // adversarial read the post (MAP framing, false claims, repetition), which
+  // one reviewer at 11pm does not. No valve is required for an owner click.
+  if (input.platform === 'x') return { ok: true }
 
   // 2. The autopublish valve that governs the SURFACE must be on. Video keeps
   //    the video team's valve; a still on Instagram is governed by the Instagram

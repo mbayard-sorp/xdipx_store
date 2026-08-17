@@ -59,7 +59,9 @@ import {
   renderShippedSection,
   renderTicketLoopSection,
   renderTicketsSection,
+  renderAdCampaignQueueSection,
   runOwnerDigest,
+  type AdCampaignQueueRow,
   type EscalationFacts,
   type HomepageNowFacts,
   type NeedsMikeFacts,
@@ -701,5 +703,50 @@ describe('renderNeedsMikeSection', () => {
     })
     expect(html).toContain('#7 is blocked')
     expect(html).toContain('no reason recorded')
+  })
+
+  it('lists an approved-but-unlaunched ad campaign as owner-only work', () => {
+    const html = renderNeedsMikeSection({
+      ...emptyFacts,
+      adCampaigns: [{
+        id: 12, platform: 'google', name: 'Branded search test', objective: 'conversions',
+        plannedDailyCents: 500, ageDays: 30,
+      }],
+    })
+    expect(html).toContain('Ad campaign #12')
+    expect(html).toContain('approved 30d ago and never launched')
+    expect(html).toContain('/admin/ad-studio')
+  })
+})
+
+describe('renderAdCampaignQueueSection', () => {
+  const row: AdCampaignQueueRow = {
+    id: 12, platform: 'google', name: 'Branded search test', objective: 'conversions',
+    plannedDailyCents: 500, ageDays: 30,
+  }
+
+  it('says plainly when nothing is waiting on a launch', () => {
+    const html = renderAdCampaignQueueSection([])
+    expect(html).toContain('No approved ad campaign proposal is waiting on a launch')
+  })
+
+  it('lists each approved proposal with its age and points at /admin/ad-studio', () => {
+    // The root cause of ticket #3423: three proposals sat approved for a month
+    // and nothing prompted the owner. Age and the studio link are load-bearing.
+    const html = renderAdCampaignQueueSection([row, { ...row, id: 13, name: 'PMax probe', ageDays: 2 }])
+    expect(html).toContain('2 approved ad campaigns not launched')
+    expect(html).toContain('#12')
+    expect(html).toContain('Branded search test')
+    expect(html).toContain('approved 30d ago')
+    expect(html).toContain('approved 2d ago')
+    expect(html).toContain('$5.00/day planned')
+    expect(html).toContain('https://xdipx.com/admin/ad-studio')
+    expect(html).toContain('Approving is not launching')
+  })
+
+  it('escapes campaign names, which are agent-authored text', () => {
+    const html = renderAdCampaignQueueSection([{ ...row, name: '<script>x</script>' }])
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
   })
 })

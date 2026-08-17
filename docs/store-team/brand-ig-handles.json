@@ -1,0 +1,106 @@
+{
+  "$comment": "Verified brand social-handle registry (ticket #3732, instagram-campaigns.md section 8). Keys are exact Shopify vendor strings. A handle appears here ONLY when verified: the brand's own site links to the account, or the account and the brand's other official profiles cross-link. Unverifiable vendors carry explicit nulls, never a guess: a wrong tag is worse than no tag. Maker tagging (Brand Crush, Featured Brand of the Week) may cite only non-null entries. Note: an IG @mention today is caption text only (notifies, does not tag); real user_tags plumbing in the publisher is a separate follow-up. Validated by scripts/check-brand-handles.ts.",
+  "updated": "2026-08-16",
+  "vendors": {
+    "Doc Johnson": {
+      "instagram": "docjohnsonusa",
+      "x": "theoriginaldoc",
+      "verified": { "date": "2026-08-16", "evidence": "docjohnson.com blocks fetch (403); IG @docjohnsonusa (98K followers) and X @TheOriginalDoc cross-reference each other as Doc Johnson's official accounts (X profile directs to instagram.com/docjohnsonusa)." }
+    },
+    "XR Brands": {
+      "instagram": "xr_brandstoys",
+      "x": "xrbrands",
+      "verified": { "date": "2026-08-16", "evidence": "xrbrands.com footer links instagram.com/xr_brandstoys and twitter.com/xrbrands." }
+    },
+    "Tantus": {
+      "instagram": "tantusinc",
+      "x": "tantus",
+      "verified": { "date": "2026-08-16", "evidence": "tantusinc.com footer links instagram.com/tantusinc and x.com/tantus." }
+    },
+    "Sportsheets": {
+      "instagram": "sportsheets",
+      "x": null,
+      "verified": { "date": "2026-08-16", "evidence": "sportsheets.com links instagram.com/sportsheets; no X link on site." }
+    },
+    "Pastease": {
+      "instagram": "pastease",
+      "x": null,
+      "verified": { "date": "2026-08-16", "evidence": "pastease.com links instagram.com/pastease; no X link on site." }
+    },
+    "System JO": {
+      "instagram": "_shopjo",
+      "x": null,
+      "verified": { "date": "2026-08-16", "evidence": "systemjo.com 301s to shopjo.com, whose footer links instagram.com/_shopjo; no X link on site." }
+    },
+    "FemmeFunn": {
+      "instagram": "femmefunn",
+      "x": null,
+      "verified": { "date": "2026-08-16", "evidence": "femmefunn.com links instagram.com/femmefunn; no X link on site." }
+    },
+    "Prowler RED": {
+      "instagram": "prowleruk",
+      "x": "prowlerstores",
+      "verified": { "date": "2026-08-16", "evidence": "Prowler RED is Prowler's product line; prowler.co.uk links instagram.com/prowleruk and x.com/prowlerstores. No separate Prowler RED account found." }
+    },
+    "Screaming O": {
+      "instagram": "screamingo",
+      "x": "screamingo",
+      "verified": { "date": "2026-08-16", "evidence": "screamingo.com links instagram.com/screamingo and x.com/screamingo." }
+    },
+    "Fantasy Lingerie": {
+      "instagram": "fantasylingerie",
+      "x": null,
+      "verified": { "date": "2026-08-16", "evidence": "fantasylingerie.com links instagram.com/fantasylingerie; no X link on site." }
+    },
+    "Male Power": {
+      "instagram": "malepower_official",
+      "x": "malepowerusa",
+      "verified": { "date": "2026-08-16", "evidence": "malepower.com 301s to malepowerofficial.com, which links instagram.com/malepower_official and x.com/MalePowerUSA." }
+    },
+    "Blush": {
+      "instagram": null,
+      "x": null,
+      "note": "Likely @blushglobal (25K followers, matches the brand's positioning) but blushbrands.us blocks fetch (403) so no site-to-handle link could be confirmed. Do not tag until verified."
+    },
+    "Shots": {
+      "instagram": null,
+      "x": null,
+      "note": "shots.nl renders no social links in its footer; no handle verifiable in-session."
+    },
+    "Pipedream": {
+      "instagram": null,
+      "x": null,
+      "note": "pipedreamproducts.com renders no social links; no handle verifiable in-session."
+    },
+    "b-Vibe": {
+      "instagram": null,
+      "x": null,
+      "note": "bvibe.com shows creator @mentions but no official brand profile link; no handle verifiable in-session."
+    },
+    "Oxballs": {
+      "instagram": null,
+      "x": null,
+      "note": "oxballs.com renders no social links; no handle verifiable in-session."
+    },
+    "Me You Us": {
+      "instagram": null,
+      "x": null,
+      "note": "Distributor line (Creative Conceptions); no official brand account verifiable in-session."
+    },
+    "Global Novelties": {
+      "instagram": null,
+      "x": null,
+      "note": "No official brand account verifiable in-session."
+    },
+    "NS Novelties": {
+      "instagram": null,
+      "x": null,
+      "note": "nsnovelties.com renders no social links; no handle verifiable in-session."
+    },
+    "PDX Brands": {
+      "instagram": null,
+      "x": null,
+      "note": "Pipedream line; adult-content accounts in this category are frequently removed, so nothing is assumed. No handle verifiable in-session."
+    }
+  }
+}

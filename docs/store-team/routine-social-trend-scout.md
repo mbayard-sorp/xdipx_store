@@ -36,10 +36,31 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 curl -s "$BASE_URL/api/team/gate?team=social&excludeRun=$RUN_ID" -H "x-team-secret: $TEAM_TOKEN"
 ```
 
-`ok:false` → post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","finished":true,"summary":"gate refused: <reason>"}}`
+`ok:false` with any reason other than `run_in_progress` → post
+`{"op":"update","id":$RUN_ID,"update":{"status":"skipped","finished":true,"summary":"gate refused: <reason>"}}`
 and stop. The gate enforces the social team's enable switch, daily budget, and run cap; this
 routine shares them with the daily social-drafts run, so the social run cap must leave room for
 both on Mondays (see the enablement runbook).
+
+**`reason:"run_in_progress"` gets a same-day retry, not an immediate skip (ticket #3191).**
+This routine fires once a week, so accepting that refusal costs the entire cycle: stuck run 251
+held the social gate silently for hours and zeroed out a whole week of trend research. The gate
+names the blocker (`blockingRun: {id, runType, idleMinutes}`), and the social team's staleness
+threshold is 60 minutes, so a genuinely hung sibling stops blocking the gate within the hour on
+its own. Instead of skipping:
+
+```bash
+for i in 1 2 3 4 5 6 7 8; do   # ~2h of re-checks, 15 min apart
+  sleep 900
+  GATE=$(curl -s "$BASE_URL/api/team/gate?team=social&excludeRun=$RUN_ID" -H "x-team-secret: $TEAM_TOKEN")
+  # ok:true → break and continue from Step 2
+done
+```
+
+Post one `step` event when entering the wait (`phase:'gate-wait'`, naming the blocking run id and
+its idleMinutes) so the stall window is visible on the dashboard. If the gate opens inside the
+window, continue from Step 2 normally. Only if it is still `run_in_progress` after the full
+window: post the skipped update with a summary naming the blocking run id, and stop.
 
 ## Step 2: Read state
 

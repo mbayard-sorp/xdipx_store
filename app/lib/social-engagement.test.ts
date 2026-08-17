@@ -6,12 +6,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   fetchInstagramEngagement,
+  fetchXEngagement,
   captureInstagramEngagement,
+  captureXEngagement,
   rankBySaves,
   CAPTURE_SAMPLE,
   type EngagementCaptureRow,
   type EngagementReportRow,
   type InstagramEngagementMetrics,
+  type XEngagementMetrics,
 } from './social-engagement.server'
 
 function jsonResponse(obj: unknown, status = 200): Response {
@@ -139,6 +142,125 @@ describe('captureInstagramEngagement', () => {
       fetchEngagement: async () => ({ ok: true, metrics: {} }),
     })
     expect(requested).toBe(CAPTURE_SAMPLE)
+  })
+})
+
+describe('fetchXEngagement', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  function stubXKeys() {
+    vi.stubEnv('X_API_KEY', 'k')
+    vi.stubEnv('X_API_SECRET', 's')
+    vi.stubEnv('X_ACCESS_TOKEN', 't')
+    vi.stubEnv('X_ACCESS_TOKEN_SECRET', 'ts')
+  }
+
+  it('renames public_metrics counters and reports a deleted tweet as gone', async () => {
+    stubXKeys()
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: [{
+        id: 'tw_1',
+        public_metrics: {
+          impression_count: 900, like_count: 40, reply_count: 3,
+          retweet_count: 7, quote_count: 1, bookmark_count: 12,
+        },
+      }],
+      errors: [{
+        value: 'tw_2',
+        title: 'Not Found Error',
+        type: 'https://api.twitter.com/2/problems/resource-not-found',
+        detail: 'Could not find tweet with ids: [tw_2].',
+      }],
+    })))
+
+    const result = await fetchXEngagement(['tw_1', 'tw_2'])
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.metrics.get('tw_1')).toEqual({
+        impressions: 900, likes: 40, replies: 3, reposts: 7, quotes: 1, bookmarks: 12,
+      })
+      expect(result.gone.get('tw_2')).toMatch(/Could not find tweet/)
+    }
+  })
+
+  it('surfaces a whole-request failure as ok:false, not as empty metrics', async () => {
+    stubXKeys()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('Unauthorized', { status: 401 })))
+    const result = await fetchXEngagement(['tw_1'])
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.detail).toMatch(/401/)
+  })
+})
+
+describe('captureXEngagement', () => {
+  it('fetches the batch once, persists per row, and tags rows with the platform', async () => {
+    const rows = [row(1, 'tw_1'), row(2, 'tw_2')]
+    const persisted: Array<[number, XEngagementMetrics]> = []
+    const batches: string[][] = []
+    const report = await captureXEngagement({
+      repo: {
+        recentPosted: async () => rows,
+        persistMetrics: async (id, metrics) => { persisted.push([id, metrics]) },
+      },
+      fetchEngagement: async (ids) => {
+        batches.push(ids)
+        return {
+          ok: true,
+          metrics: new Map([['tw_1', { bookmarks: 5 }], ['tw_2', { bookmarks: 1 }]]),
+          gone: new Map(),
+        }
+      },
+    })
+    expect(batches).toEqual([['tw_1', 'tw_2']])
+    expect(persisted).toEqual([[1, { bookmarks: 5 }], [2, { bookmarks: 1 }]])
+    expect(report).toEqual([
+      { postId: 1, externalPostId: 'tw_1', metrics: { bookmarks: 5 }, platform: 'x' },
+      { postId: 2, externalPostId: 'tw_2', metrics: { bookmarks: 1 }, platform: 'x' },
+    ])
+  })
+
+  it('reports a gone tweet as a per-row error and does not persist for it', async () => {
+    const rows = [row(1, 'tw_1'), row(2, 'tw_2')]
+    const persisted: number[] = []
+    const report = await captureXEngagement({
+      repo: {
+        recentPosted: async () => rows,
+        persistMetrics: async (id) => { persisted.push(id) },
+      },
+      fetchEngagement: async () => ({
+        ok: true,
+        metrics: new Map([['tw_2', { likes: 3 }]]),
+        gone: new Map([['tw_1', 'Could not find tweet with ids: [tw_1].']]),
+      }),
+    })
+    expect(persisted).toEqual([2])
+    expect(report[0]).toMatchObject({ postId: 1, error: expect.stringMatching(/Could not find/) })
+  })
+
+  it('turns a whole-batch failure into an error row per post, aborting nothing', async () => {
+    const rows = [row(1, 'tw_1'), row(2, 'tw_2')]
+    const report = await captureXEngagement({
+      repo: { recentPosted: async () => rows },
+      fetchEngagement: async () => ({ ok: false, detail: 'HTTP 429' }),
+    })
+    expect(report).toEqual([
+      { postId: 1, externalPostId: 'tw_1', error: 'HTTP 429', platform: 'x' },
+      { postId: 2, externalPostId: 'tw_2', error: 'HTTP 429', platform: 'x' },
+    ])
+  })
+
+  it('skips rows with no external post id and never fetches an empty batch', async () => {
+    const fetchSpy = vi.fn()
+    const report = await captureXEngagement({
+      repo: { recentPosted: async () => [row(1, null)] },
+      fetchEngagement: fetchSpy,
+    })
+    expect(report).toEqual([])
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
 

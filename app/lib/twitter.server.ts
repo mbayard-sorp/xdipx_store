@@ -134,6 +134,85 @@ export async function replyToTweet(
   return res.data
 }
 
+// ─── Batch Tweet Lookup ──────────────────────────────────────────────────
+
+/** The counters X returns under `tweet.fields=public_metrics`. */
+export interface TweetPublicMetrics {
+  impression_count?: number
+  like_count?: number
+  reply_count?: number
+  retweet_count?: number
+  quote_count?: number
+  bookmark_count?: number
+}
+
+export interface TweetLookupResult {
+  /** Tweets X returned normally, keyed by id. */
+  found: Map<string, { publicMetrics?: TweetPublicMetrics }>
+  /** Ids X reported gone (deleted or withheld), keyed to the error detail. */
+  gone: Map<string, string>
+  /** Per-id errors that are not a verdict (rate limit shapes etc.). */
+  unknown: Map<string, string>
+}
+
+interface TweetLookupError {
+  value?: string
+  resource_id?: string
+  title?: string
+  type?: string
+  detail?: string
+}
+
+/**
+ * One GET /2/tweets for up to 100 ids, shared by the removal watch (ticket
+ * #3745) and the engagement capture (ticket #3734), so both read X on the
+ * same request/error convention.
+ *
+ * A deleted tweet does not 404: the request succeeds and the id comes back in
+ * the `errors` array as `resource-not-found`. A withheld or suspended-account
+ * tweet comes back as `not-authorized-for-resource`. Both mean the post is no
+ * longer publicly on the account, which is the removal watcher's question, so
+ * both land in `gone`. Anything else per-id is `unknown`, and a whole-request
+ * failure (expired keys, a 429) is `{ ok: false }` so the caller can tell a
+ * broken credential from a purged feed.
+ */
+export async function lookupTweets(
+  ids: string[],
+): Promise<{ ok: true; result: TweetLookupResult } | { ok: false; detail: string }> {
+  const result: TweetLookupResult = { found: new Map(), gone: new Map(), unknown: new Map() }
+  if (ids.length === 0) return { ok: true, result }
+
+  const url = `https://api.x.com/2/tweets?ids=${encodeURIComponent(ids.join(','))}&tweet.fields=${encodeURIComponent('public_metrics')}`
+
+  let res: { data?: Array<{ id: string; public_metrics?: TweetPublicMetrics }>; errors?: TweetLookupError[] }
+  try {
+    res = await xFetch(url, 'GET')
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) }
+  }
+
+  for (const tweet of res.data ?? []) {
+    result.found.set(tweet.id, tweet.public_metrics ? { publicMetrics: tweet.public_metrics } : {})
+  }
+  for (const error of res.errors ?? []) {
+    const id = error.resource_id ?? error.value
+    if (!id) continue
+    const detail = error.detail ?? error.title ?? 'X reported an error for this tweet'
+    if (error.type?.endsWith('resource-not-found') || error.type?.endsWith('not-authorized-for-resource')) {
+      result.gone.set(id, detail)
+    } else {
+      result.unknown.set(id, detail)
+    }
+  }
+  // An id X neither returned nor flagged has no verdict either way.
+  for (const id of ids) {
+    if (!result.found.has(id) && !result.gone.has(id) && !result.unknown.has(id)) {
+      result.unknown.set(id, 'X returned no data and no error for this id')
+    }
+  }
+  return { ok: true, result }
+}
+
 // ─── Media Upload (v1.1 endpoint) ────────────────────────────────────────
 
 export async function uploadMedia(
