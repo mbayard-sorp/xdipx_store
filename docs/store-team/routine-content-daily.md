@@ -168,10 +168,19 @@ Create idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `
   post's publishing category and (b) point at the §0 **hero router** in
   `docs/notebook-team/image-brief.md`, which is binding: guides/comparisons/care/wellness-basics
   posts get the §0-P product hero (subject = one of the post's `blogProductEmbed` handles via its
-  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**
-  (expressive adult figure — Emma or a fictional friend — reflecting how the reader might feel at
-  the headline; faces visible; warm light; adults-only hard rules). Pass the headline and its
-  feeling with the request on §0-H posts. Never a domestic metaphor object in either archetype.
+  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**.
+  On §0-H posts the hero request is a **structured payload**, not "category plus a pointer to
+  the router" (owner direction 2026-08-11, ticket #2748). It carries all six fields:
+  - `headline`: the post's title, verbatim (the hero stages this question);
+  - `thesis`: the post's thesis in one line;
+  - `heroEmbedHandle`: the `blogProductEmbed.productHandle` the figure holds at co-primary
+    scale (or the explicit no-product reason per §0-H, which media-manager must write into
+    the keeper log);
+  - `sceneBeat`: the one-sentence scene, built from the §0-H question-to-gesture table;
+  - `readerEmotion`: the feeling the reader brings to the headline;
+  - `castSlug`: the cast member by slug (`maya`, `sofia`, `jade`, `priya`, `marcus`, `diego`,
+    or Emma), respecting the no-repeat-within-5 rule.
+  Never a domestic metaphor object in either archetype.
   **A hero image is mandatory on every published post** (owner directive, 2026-07). If imagery
   genuinely cannot be produced, hold the post as a Sanity `status:'draft'` for the owner and say
   so in the retro; do not publish it heroless.
