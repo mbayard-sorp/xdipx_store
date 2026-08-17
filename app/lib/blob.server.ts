@@ -17,13 +17,22 @@
  *   cast/{slug}/portrait-{n}.jpg    casting-call candidates
  */
 
+/**
+ * The store was connected to Vercel with the XDIPX env prefix, so the token
+ * ships as XDIPX_READ_WRITE_TOKEN; BLOB_READ_WRITE_TOKEN is checked first so a
+ * standard-named token wins if one is ever added.
+ */
+function resolveToken(): string | undefined {
+  return process.env['BLOB_READ_WRITE_TOKEN']?.trim() || process.env['XDIPX_READ_WRITE_TOKEN']?.trim()
+}
+
 export function blobConfigured(): boolean {
-  return !!process.env['BLOB_READ_WRITE_TOKEN']?.trim()
+  return !!resolveToken()
 }
 
 function requireToken(): string {
-  const token = process.env['BLOB_READ_WRITE_TOKEN']
-  if (!token) throw new Error('BLOB_READ_WRITE_TOKEN env var is required for Blob storage')
+  const token = resolveToken()
+  if (!token) throw new Error('A Blob read-write token (BLOB_READ_WRITE_TOKEN or XDIPX_READ_WRITE_TOKEN) is required for Blob storage')
   return token
 }
 
