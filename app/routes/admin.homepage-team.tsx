@@ -32,7 +32,7 @@ import {
 } from '~/lib/team.server'
 import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, type TeamId } from '~/lib/team-keys'
 import {
-  NO_EXECUTOR_KINDS, facetTotal, fmtAge, sumFacetCount, truncationNote,
+  NO_EXECUTOR_KINDS, classifyTeamTablesError, facetTotal, fmtAge, sumFacetCount, truncationNote,
   type TicketFacetRow,
 } from '~/lib/ticket-queue-view'
 
@@ -134,6 +134,14 @@ interface LoaderData {
   team: TeamId
   config: TeamConfig
   migrated: boolean
+  /**
+   * True when gate()/listRecentRuns threw a NON-42P01 error: the tables exist,
+   * the read just failed this once (a transient Neon hiccup). The page renders
+   * its sections with a visible could-not-load banner instead of silently
+   * hiding the whole ticket queue, which is what `migrated=false` does and is
+   * reserved for the genuine pre-migration state (ticket #3770).
+   */
+  loadError: boolean
   gateResult: GateResult | null
   runs: RunRow[]
   selectedRun: { run: RunRow; events: EventRow[] } | null
@@ -239,8 +247,14 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const releaseEngineMaxMerges =
     Number(releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.maxMergesPerDay)?.value ?? 6) || 6
 
-  // The team tables (049/051) may not be applied yet — degrade cleanly.
+  // The team tables (049/051) may not be applied yet — degrade cleanly. But
+  // only 42P01 (undefined table) means "not migrated"; any other throw is a
+  // transient DB error on a healthy install, and hiding the ticket queue for
+  // it made a Neon pooler timeout look like the filters had been removed
+  // (ticket #3770). On a transient error the queue sections still render
+  // (their own queries degrade to empty via .catch) under an explicit banner.
   let migrated = true
+  let loadError = false
   let gateResult: GateResult | null = null
   let runs: RunRow[] = []
   let suggestions: SuggestionRow[] = []
@@ -249,8 +263,9 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   try {
     gateResult = await gate(team)
     runs = await listRecentRuns(team, 25)
-  } catch {
-    migrated = false
+  } catch (err) {
+    if (classifyTeamTablesError(err) === 'unmigrated') migrated = false
+    else loadError = true
   }
   // Filters live in the query string so a filtered board is a shareable URL and
   // a browser refresh keeps the owner where they were.
@@ -365,7 +380,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   }
 
   return {
-    team, config, migrated, gateResult, runs, selectedRun, suggestions, needsYou, needsYouTotal,
+    team, config, migrated, loadError, gateResult, runs, selectedRun, suggestions, needsYou, needsYouTotal,
     filteredOpenTotal, ticketLinks, filter,
     kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
@@ -491,7 +506,7 @@ function StatCard({ label, value, sub, tone }: { label: string; value: string; s
 
 export default function AgentTeamsPage() {
   const {
-    team, config, migrated, gateResult, runs, selectedRun,
+    team, config, migrated, loadError, gateResult, runs, selectedRun,
     suggestions, needsYou, needsYouTotal, filteredOpenTotal,
     ticketLinks, filter, kindOptions, assigneeOptions, teamOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
@@ -547,6 +562,16 @@ export default function AgentTeamsPage() {
           gate, suggestions, and briefs are inactive. Apply with{' '}
           <code className="font-mono">npx tsx scripts/apply-migrations.ts --from 049</code>. You can
           still configure the controls below.
+        </div>
+      )}
+
+      {loadError && (
+        <div className="rounded-xl border border-coral bg-coral-soft/50 px-4 py-3 text-sm text-ink">
+          The gate and run data could not be loaded just now (a transient database error, not a
+          missing migration). The sections below may show empty or stale data.{' '}
+          <Link to={`/admin/homepage-team?team=${team}`} className="link-coral font-semibold">
+            Retry
+          </Link>
         </div>
       )}
 
