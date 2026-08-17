@@ -80,8 +80,15 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -d '{"op":"create","team":"content","category":"other","kind":"config","suggestion":"Cluster merge map (run scripts/merge-seo-clusters.ts --map after approval): <the JSON>","cxRisk":"low"}'
 ```
 
-Never repoint refs or archive clusters yourself. If last week's map is still `proposed`, do not
-file a duplicate; note it in the report instead. One `step` event (`phase:'clusters'`).
+Never repoint refs or archive clusters yourself. Do not file a merge map that re-covers families
+already named in an earlier map that has not yet been executed — and "not yet executed" includes a
+map that was **`approved` but never run**, not only one still `proposed`. Execution is a manual
+`scripts/merge-seo-clusters.ts --map` step with no cron or owner routine behind it, so an approved
+map can sit unexecuted indefinitely (as of 2026-08-16 both #100 and #3600 were approved and still
+unrun); filing a fresh map over the same slugs just accumulates rows that can never reach a terminal
+state. Instead emit a one-line report note naming the pending maps (e.g.
+`merge backlog pending execution (#100, #3600)`) and reserve any new map for genuinely new families
+whose slugs do not overlap the pending ones. One `step` event (`phase:'clusters'`).
 
 ## Step 4b: Trend review (adopt / skip / expire, before planning)
 
