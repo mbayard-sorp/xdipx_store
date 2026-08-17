@@ -1200,6 +1200,83 @@ export async function getProductsByHandles(handles: string[]): Promise<Product[]
   return results.filter((p): p is Product => p !== null)
 }
 
+// ─── Curated upsell attach source (SMS/voice UPSELL stage) ────────────────────
+
+export interface CuratedUpsellCandidate {
+  handle: string
+  title: string
+  price: number
+  /** True when at least one variant is purchasable. */
+  inStock: boolean
+  /**
+   * Emma-voice pairing blurb from the PITCHED product's xdipx.pairing_why,
+   * correlated to this accessory by GID — the same key the PDP Pairs-with grid
+   * reads (`deal.pairingWhy?.[p.id]`). Undefined when the pitched product has no
+   * authored blurb for this accessory.
+   */
+  pairingWhy?: string
+}
+
+export interface CuratedUpsellData {
+  /** Pitched product's lowercased Shopify tags — the UPSELL handler classifies
+   *  the category-aware lube fallback from these. Empty when the product could
+   *  not be resolved. */
+  pitchedTags: string[]
+  /** Pitched product's xdipx.product_type_dial, when set. */
+  pitchedTypeDial?: string
+  /** Curated accessories from the pitched product's xdipx.accessory_product_ids,
+   *  in curation order, each correlated to its pairing_why blurb. */
+  candidates: CuratedUpsellCandidate[]
+}
+
+/**
+ * Curated attach source for the deterministic UPSELL stage (#3516).
+ *
+ * The pitched product's own `xdipx.accessory_product_ids` (hand-curated by
+ * editorial) are the primary upsell candidates, each correlated to the pitched
+ * product's `xdipx.pairing_why` blurb by GID so Emma can speak the curated
+ * pairing rationale instead of a generic template. Also returns the pitched
+ * product's tags and type dial so the caller can pick a category-aware lube
+ * fallback when no curated accessory is available (never anal lube for a
+ * non-anal pitch — the production failure this replaces).
+ *
+ * Degrades gracefully: an unresolved product or a resolver failure returns
+ * empty candidates so the caller falls back to category search. Never throws.
+ */
+export async function getCuratedUpsellCandidates(pitchedHandle: string): Promise<CuratedUpsellData> {
+  const empty: CuratedUpsellData = { pitchedTags: [], candidates: [] }
+  try {
+    const deal = await getDealByHandle(pitchedHandle)
+    if (!deal) return empty
+
+    const base: CuratedUpsellData = {
+      pitchedTags: deal.tags.map((t) => t.toLowerCase()),
+      candidates: [],
+      ...(deal.productTypeDial ? { pitchedTypeDial: deal.productTypeDial } : {}),
+    }
+
+    if (deal.accessoryProductIds.length === 0) return base
+
+    const pairing = deal.pairingWhy ?? {}
+    const products = await getProductsByIds(deal.accessoryProductIds)
+    base.candidates = products.map((p) => {
+      const candidate: CuratedUpsellCandidate = {
+        handle: p.handle,
+        title: p.title,
+        price: p.price,
+        inStock: (p.variants ?? []).some((v) => v.availableForSale),
+      }
+      const blurb = pairing[p.id]
+      if (blurb && blurb.trim()) candidate.pairingWhy = blurb.trim()
+      return candidate
+    })
+    return base
+  } catch (err) {
+    console.error('[shopify] getCuratedUpsellCandidates failed for', pitchedHandle, err)
+    return empty
+  }
+}
+
 export interface PairingCandidate {
   productId:       string  // GID
   handle:          string

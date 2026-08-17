@@ -132,3 +132,36 @@ export function pickUpsellTemplate(
   const fn = bank[idx]!
   return fn(slots)
 }
+
+/**
+ * Render an upsell using a CURATED pairing blurb as the lead (#3516).
+ *
+ * When the pitched product carries an editorial `xdipx.pairing_why` aside for
+ * this accessory, that curated, product-specific line replaces the generic
+ * "expertise beat" the rotating templates open with — it already says why the
+ * two belong together, in Emma's voice. The channel mechanics are unchanged
+ * from the templates above: voice speaks no URL and no emoji, SMS drops the PDP
+ * URL on its own line for the iMessage preview, web leans on the product card
+ * and its tap chips. The blurb is authored copy (emma-product-enricher, gated),
+ * so it is used verbatim; only the framing closer is templated here.
+ *
+ * Callers pass this only when a blurb exists; with no blurb they fall back to
+ * pickUpsellTemplate so a curated product with no aside still gets a pitch.
+ */
+export function renderCuratedUpsellTemplate(
+  slots: UpsellTemplateSlots,
+  pairingWhy: string,
+  channel: UpsellTemplateChannel = 'sms',
+): string {
+  const blurb = pairingWhy.trim().replace(/\s+/g, ' ')
+  const { name, price, pdpUrl } = slots
+
+  if (channel === 'voice') {
+    return `${blurb} ${name} runs about ${price}. Want me to add it?`
+  }
+  if (channel === 'web') {
+    return `${blurb} **${name}** (${price}). Toss it in?`
+  }
+  // sms — PDP URL on its own line so iMessage renders the OG preview.
+  return `${blurb}\n\n${name} (${price}).\n\n${pdpUrl}\n\n👍 to toss it in, 'no' to skip.`
+}
