@@ -381,7 +381,7 @@ surface, at scripting time, in the brief:
 
 | Surface | Register | Licensed at it |
 |---|---|---|
-| Instagram Reel / YouTube Short, spoken line | 6-7 | Sensory implication, acts implied never named, the wanting nameable plainly; no anatomy, no involuntary body responses, no mechanism narration |
+| Instagram Reel / YouTube Short, spoken line | 6-7 | Sensory implication, acts implied never named, the wanting nameable plainly; no erogenous anatomy named (neutral location words like hand or collarbone are ordinary nouns), no involuntary body responses, no mechanism narration |
 | TikTok, spoken line | 5 | Sensory fragment and brand personality only; a script written for the 6-7 band is re-cut for TikTok, never re-read faster |
 | Caption (IG/TikTok) | 4-5 | Conversational, one engagement question as the close; never a CTA, never trust boilerplate; the social addendum governs |
 | Site-hosted cut (PDP hero, /social, email) | 9 | The full desire-forward register per the core charter; this is where the uncut version of a reel lives |
