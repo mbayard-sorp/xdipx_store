@@ -103,12 +103,25 @@ export interface AtlasGenerateOpts {
   refImageUrl?: string
   /** Multiple reference images; wins over refImageUrl when non-empty. Cap 10. */
   refImageUrls?: string[]
+  /**
+   * When false, skip downloading the output URLs to Buffers and return
+   * `buffers: []`. Callers that only need the hosted URLs (Atlas URLs live 14
+   * days and are publicly fetchable) avoid a wasteful download round-trip.
+   * Defaults to true so existing callers keep getting Buffers unchanged.
+   */
+  download?: boolean
   /** Attribution for block telemetry, same shape as the fal client's. */
   telemetry?: { feature?: string; caller?: string; sku?: string; productId?: string }
 }
 
 export interface AtlasGenerateResult {
   buffers: Buffer[]
+  /** Hosted output URLs (14-day TTL), index-aligned with `requestIds` and, when
+   *  downloaded, with `buffers`. Always populated. */
+  urls: string[]
+  /** Prediction id per output URL, index-aligned with `urls`. Each image is its
+   *  own single prediction, so this identifies one image, not a batch. */
+  requestIds: (string | undefined)[]
   /** Cost key for model-pricing (e.g. 'atlas/seedream-4.5-edit'). */
   costKey: string
   /** Prediction id of the FIRST request in this batch, for spend tracing. */
@@ -252,18 +265,32 @@ export async function atlasGenerate(opts: AtlasGenerateOpts): Promise<AtlasGener
     Array.from({ length: count }, () => runOne(key, model, body, opts.telemetry)),
   )
 
-  const urls = runs.flatMap(r => r.urls)
-  const buffers = await Promise.all(
-    urls.map(async url => {
-      const r = await fetch(url)
-      if (!r.ok) throw new Error(`atlas image download failed: ${r.status}`)
-      return Buffer.from(await r.arrayBuffer())
-    }),
-  )
+  // Flatten to output URLs while keeping each URL's originating prediction id
+  // index-aligned (a run can in principle return more than one URL).
+  const urls: string[] = []
+  const requestIds: (string | undefined)[] = []
+  for (const r of runs) {
+    for (const u of r.urls) {
+      urls.push(u)
+      requestIds.push(r.predictionId)
+    }
+  }
+
+  const buffers = opts.download === false
+    ? []
+    : await Promise.all(
+        urls.map(async url => {
+          const r = await fetch(url)
+          if (!r.ok) throw new Error(`atlas image download failed: ${r.status}`)
+          return Buffer.from(await r.arrayBuffer())
+        }),
+      )
 
   const requestId = runs[0]?.predictionId
   return {
     buffers,
+    urls,
+    requestIds,
     costKey: ATLAS_COST_KEY[model] ?? 'atlas/seedream-4.5',
     ...(requestId ? { requestId } : {}),
   }

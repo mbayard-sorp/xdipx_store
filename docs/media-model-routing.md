@@ -24,8 +24,9 @@ Rabbit with Maya as the presenter.
 | Still fallback, no product ref | one shot | `fal-ai/flux/dev` | `fal/flux-dev` | fallback when Atlas unconfigured/errors |
 | Still fallback, with product ref | one shot | `fal-ai/flux-kontext/dev` | `fal/flux-kontext-dev` | fallback; best fal-side product fidelity, ~25s |
 | Admin + Sanity Studio hand-driven generation | one shot | via `generateImage()` | as above | was Imagen-only; now Atlas first, fal then Imagen fallback |
-| Video scene frame, stage 1 (product plate) | plate | `fal-ai/qwen-image-edit-2511` | `fal/qwen-image-edit` | still on fal pending the phase-2 composite port to Atlas (one-stage seedream edit makes the plate pre-pass unnecessary; ticket filed 2026-08-15) |
-| Video scene frame, stage 2 (composite) | composite | `fal-ai/flux-2/lora/edit` | `fal/flux-2-edit` | same as above |
+| Video / cast scene frame, primary | one shot | atlas `bytedance/seedream-v4.5/edit` | `atlas/seedream-4.5-edit` | phase-2 port (ticket #3570, 2026-08-15): seedream holds product geometry from the ref AND composites the presenter in one call, so the two-stage plate + FLUX.2 route collapses to one `composeSceneFrame` → `atlasGenerate`. No plate pre-pass; the no-packshot-carton rule moves into the prompt (`ATLAS_NO_CARTON_CLAUSE`). Consumers unchanged (`composeSceneFrame` signature + `SceneFrameResult` identical; `plate` absent) |
+| Video scene frame, fallback stage 1 (product plate) | plate | `fal-ai/qwen-image-edit-2511` | `fal/qwen-image-edit` | fal two-stage fallback, used when Atlas is unconfigured or the Atlas call errors |
+| Video scene frame, fallback stage 2 (composite) | composite | `fal-ai/flux-2/lora/edit` | `fal/flux-2-edit` | same fallback path as above |
 
 ## Rejected, with reasons
 

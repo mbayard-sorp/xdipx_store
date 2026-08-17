@@ -15,6 +15,7 @@
  */
 
 import { recordFalBlock, readFalRequestId } from '~/lib/fal.server'
+import { atlasConfigured, atlasGenerate } from '~/lib/atlas.server'
 
 const FAL_QUEUE_ENDPOINT = 'https://queue.fal.run'
 const FAL_SYNC_ENDPOINT = 'https://fal.run'
@@ -377,6 +378,19 @@ const PRODUCT_SCALE_CUE =
   'sits in proportion within the hand and is not oversized.'
 
 /**
+ * No-packshot-carton rule for the Atlas one-stage path (#3570). The fal route
+ * enforces this with a dedicated stage-1 plate that strips packaging; Atlas
+ * skips that stage, so the rule moves into the composite prompt. Mirrors
+ * PLATE_PROMPT/PLATE_NEGATIVE: reproduce the bare product from its reference,
+ * never the retail box or any brand text on it.
+ */
+const ATLAS_NO_CARTON_CLAUSE =
+  'Show the bare product itself exactly as it appears in its reference image, ' +
+  'with the same shape, proportions, color, and finish. Do not show any ' +
+  'packaging, retail box, carton, sleeve, or insert, and no text, words, ' +
+  'letters, watermark, logo, or brand name on the product or anywhere in the frame.'
+
+/**
  * Stage-2 output dimensions per caller-requested ratio. FLUX.2 edit takes explicit
  * pixel dimensions rather than fal's `aspect_ratio` string, so the ratio resolves
  * here. Pinning exact pixels also avoids the under-ratio drift the old
@@ -511,7 +525,80 @@ async function composeOneSceneFrame(
   return { url, ...(requestId ? { requestId } : {}) }
 }
 
+/**
+ * Atlas Cloud one-stage composite (bytedance/seedream-v4.5/edit). Phase 2 of the
+ * Atlas migration (ticket #3570): seedream holds the product's geometry from the
+ * reference photo AND composites the presenter in a single call, so it collapses
+ * fal's two-stage qwen-plate + FLUX.2-edit route to one atlasGenerate call — no
+ * plate pre-pass. The two-stage fal path stays as the fallback in
+ * composeSceneFrame() when Atlas is unconfigured or errors.
+ *
+ * The plate pre-pass existed to keep the retail carton out of frame. Skipping it
+ * here means the no-packshot-carton rule moves into the prompt (ATLAS_NO_CARTON_CLAUSE),
+ * relying on seedream honoring it plus the ref geometry. Verify with a
+ * branded-carton product in output review (a DONE-WHEN check on #3570).
+ */
+async function composeSceneFrameAtlas(opts: ComposeSceneFrameOpts): Promise<SceneFrameResult> {
+  const count = Math.min(Math.max(1, opts.count ?? 3), 4)
+
+  // A talking-head frame or a no-presenter base (product photo IS the base)
+  // composites no separate product, so it gets neither the scale cue nor the
+  // carton clause — same conditions as the fal path's `needsPlate`.
+  const hasProduct = !!opts.productImageUrl && opts.productImageUrl !== opts.presenterImageUrl
+  const framePrompt = hasProduct
+    ? `${opts.prompt} ${PRODUCT_SCALE_CUE} ${ATLAS_NO_CARTON_CLAUSE}`
+    : opts.prompt
+
+  const refImageUrls = [
+    opts.presenterImageUrl,
+    ...(hasProduct ? [opts.productImageUrl!] : []),
+    ...(opts.extraImageUrls ?? []),
+  ]
+  const imageSize = SCENE_FRAME_SIZES[opts.aspectRatio ?? '9:16']
+
+  const result = await atlasGenerate({
+    prompt: framePrompt,
+    count,
+    refImageUrls,
+    imageSize,
+    // Only the hosted URLs are needed here; callers persist them to Blob/Sanity
+    // promptly (Atlas URLs live 14 days), exactly as they did with fal's URLs.
+    download: false,
+    telemetry: { feature: 'video-frames', caller: 'composeSceneFrame:atlas' },
+  })
+
+  if (!result.urls.length) throw new Error('atlas composeSceneFrame returned no images')
+
+  // One stage, so no plate spend. costKey is the Atlas edit key
+  // ('atlas/seedream-4.5-edit'), already priced in model-pricing IMAGE_RATES.
+  return {
+    urls: result.urls,
+    requestIds: result.requestIds,
+    costKey: result.costKey,
+  }
+}
+
+/**
+ * Compose a scene frame. Atlas Cloud one-stage is the primary path (ticket
+ * #3570); the fal two-stage path is the fallback when Atlas is unconfigured or
+ * throws. The signature and SceneFrameResult contract are identical on both, so
+ * callers are provider-agnostic — only `costKey` and the absence of `plate`
+ * distinguish an Atlas result.
+ */
 export async function composeSceneFrame(opts: ComposeSceneFrameOpts): Promise<SceneFrameResult> {
+  if (atlasConfigured()) {
+    try {
+      return await composeSceneFrameAtlas(opts)
+    } catch (err) {
+      // Fall back to the fal two-stage path rather than failing the frame. The
+      // fallback is the whole reason the qwen-plate + FLUX.2 route is kept.
+      console.error('[composeSceneFrame] Atlas one-stage failed, falling back to fal two-stage:', err)
+    }
+  }
+  return composeSceneFrameFal(opts)
+}
+
+async function composeSceneFrameFal(opts: ComposeSceneFrameOpts): Promise<SceneFrameResult> {
   const key = requireKey()
   const count = Math.min(Math.max(1, opts.count ?? 3), 4)
 
