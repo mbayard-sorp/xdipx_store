@@ -72,6 +72,12 @@ export async function logWebTurn(opts: {
   outputTokens?: number
   toolCalls?: Array<{ name: string; input: unknown; ok: boolean; error?: string | undefined }>
   fabricationCaught?: string
+  /**
+   * pipeline_version stamped on the row. Defaults to 'v2-web' (the normal web
+   * v2 turn). The v2->v1 fallback marker (#3915) passes 'v1-web-fallback' so the
+   * fallback rate is queryable on the existing column with no migration.
+   */
+  pipelineVersion?: string
 }): Promise<number | null> {
   const {
     sessionId,
@@ -86,6 +92,7 @@ export async function logWebTurn(opts: {
     outputTokens,
     toolCalls,
     fabricationCaught,
+    pipelineVersion = 'v2-web',
   } = opts
 
   const phone = sentinelPhone(sessionId)
@@ -118,7 +125,7 @@ export async function logWebTurn(opts: {
         intentConfidence,
         customerMsg,
         latencyMs,
-        pipelineVersion: 'v2-web',
+        pipelineVersion,
         channel: 'web',
         ...(inputTokens !== undefined && { inputTokens }),
         ...(outputTokens !== undefined && { outputTokens }),
@@ -146,7 +153,7 @@ export async function logWebTurn(opts: {
         intentConfidence,
         emmaMsg,
         latencyMs,
-        pipelineVersion: 'v2-web',
+        pipelineVersion,
         channel: 'web',
         ...(inputTokens !== undefined && { inputTokens }),
         ...(outputTokens !== undefined && { outputTokens }),
@@ -159,6 +166,36 @@ export async function logWebTurn(opts: {
   }
 
   return inboundId
+}
+
+/**
+ * Log a marker turn for a v2 -> v1 web fallback (#3915).
+ *
+ * When api.ask-emma's v2 path throws and the request is served by v1, the v1
+ * web reply path (emma-log.server) writes no distinguishable pipeline_version,
+ * so a web cutover can look healthy while quietly serving v1. This reuses
+ * logWebTurn to stamp `pipeline_version = 'v1-web-fallback'` on the existing
+ * sms_turns column (no migration), making the fallback rate queryable. Fully
+ * best-effort: it inherits logWebTurn's graceful skip when no web_conversations
+ * row exists yet, and its callers fire-and-forget.
+ */
+export async function logWebFallbackTurn(opts: {
+  sessionId: string
+  customerMsg: string
+  emmaMsg: string | null
+  latencyMs: number
+}): Promise<number | null> {
+  return logWebTurn({
+    sessionId: opts.sessionId,
+    customerMsg: opts.customerMsg,
+    emmaMsg: opts.emmaMsg,
+    latencyMs: opts.latencyMs,
+    stageIn: 'V1_FALLBACK',
+    stageOut: 'V1_FALLBACK',
+    intent: 'UNKNOWN',
+    intentConfidence: 0,
+    pipelineVersion: 'v1-web-fallback',
+  })
 }
 
 /**
