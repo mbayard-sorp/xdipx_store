@@ -368,6 +368,13 @@ Emma voice gate). Emma owns brand fit and voice; she does not own the final slat
 
 The orchestrator (with `homepage-cro` as the pick gate) then scores the candidates on:
 
+- **Lead-surface price floor (mission brief §5, ticket #3446; enforced here, at the pick gate,
+  so it survives the daily reshuffle).** Anchor products on the lead surfaces (the hero, the
+  FIRST rail, and the Compass finder's default results) are priced at or above $39. Consumables
+  (lube, cleaner, attach inventory) are attach-only: never the hero, never slots 1-3 of the first
+  rail. A slate whose hero or first-rail lead slots hold a consumable or a sub-$39 anchor fails
+  the gate; swap before publish. The under-$30 entry rail keeps its place and its depth floor
+  below the first rail; the full catalog stays reachable via search and category pages.
 - **Margin:** `msrp` minus `wholesale_cost`, per unit. **Nothing ships with unknown margin**: if
   `wholesale_cost` is missing for a candidate, swap it out or resolve the cost first.
 - **Price-point spread:** the featured set spans price points across the rails, and there is
@@ -451,7 +458,7 @@ product-linked surface; no text in pixels. Full rules: doctrine §4 — do not r
 prompts, follow them.
 
 Imagery follows mission brief section 2: the product is the star — pass the product's real
-Shopify photo as a Kontext reference (`--ref-image`) for every product-linked surface, or use sensual
+Shopify photo as a reference image (`--ref-image`) for every product-linked surface, or use sensual
 human context (lingerie on a body, skin, playful tension) matched to what the surface sells. Housewares
 still-lifes with no product are banned, and so are dark/moody/candlelit scenes: bright daylight or
 high-key studio light, tinted color-block backdrops from the doctrine ground lock, the product bold and large in frame. Fun and
@@ -468,9 +475,10 @@ Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counte
    [--tile-key <k>] --prompt "<scene>" --alt "<screen-reader alt>" [--ref-image <shopify-photo-url>]
    --images-so-far <n> --run-id $RUN_ID --caller "merch-routine/<surface>"`. `--run-id` keeps the
    script's internal gate re-check from refusing on your own running row. `--ref-image` routes to
-   FLUX Kontext so the real product appears in the scene — use it whenever the surface links to a
-   product.
-3. The script **gates → generates (fal FLUX → Imagen) → uploads to a Sanity asset → patches
+   the ref-image path of `generateImage()` (Atlas `seedream-v4.5/edit` primary, fal Kontext
+   fallback; routing per `docs/media-model-routing.md`) so the real product appears in the
+   scene — use it whenever the surface links to a product.
+3. The script **gates → generates (Atlas → fal → Imagen) → uploads to a Sanity asset → patches
    `singleton.homepage` → posts spend → prints a JSON manifest**. Read the manifest; if
    `placed:true`, increment `imagesSoFar`. If `skipped:true`, stop the imagery loop.
 
@@ -824,8 +832,8 @@ first publish would block its own corrective rotation for a month.
    asset must be **permanently hosted, publicly fetchable, and already exactly 1200x630**. It is a
    plain URL string, not an asset reference: `buildSocialMeta` (`app/lib/social-meta.ts:41,61`) pipes
    it through Shopify-flavoured resize params and then declares 1200x630 regardless, so a wrong-sized
-   or non-Shopify URL makes the declared dimensions a lie. Never a signed or expiring URL: fal.ai
-   URLs die in 24h and a dead OG image breaks the social card sitewide.
+   or non-Shopify URL makes the declared dimensions a lie. Never a signed or expiring URL: generator
+   output URLs expire (fal 24h, Atlas ~14 days) and a dead OG image breaks the social card sitewide.
 4. Patch the copy fields **and** `note` in ONE transaction, then publish, then verify:
 
 ```bash
@@ -865,7 +873,7 @@ image spend and trip the $/day cap at half budget. For reference, the row the sc
 
 ```jsonc
 // posted BY the script, not by you:
-{"kind":"image","feature":"homepage-images","model":"fal/flux-dev","count":1,"caller":"merch-routine/<surface>"}
+{"kind":"image","feature":"homepage-images","model":"atlas/seedream-4.5","count":1,"caller":"merch-routine/<surface>"}
 ```
 
 Token rows (above) and image rows (from Step 4) both land in `api_token_log` and surface on
@@ -988,9 +996,14 @@ fold the results into the summary:
 **Append the design changelog.** On any run that changed what the page shows (hero, rails, wayfinder
 tiles, imagery, copy, or section order), append one dated entry to
 `docs/homepage-team/design-changelog.md` in that file's entry format (Routine A, what changed, why,
-and the evidence probe touched — the run id and the sameness-diff surfaces from Step 2c). Newest entry
-above the append marker. A run that shipped a visible change without a changelog entry is incomplete.
-This is a docs append on the agent-editor allowlist; it carries no code.
+and the evidence probe touched — the run id and the sameness-diff surfaces from Step 2c). **Append at
+the BOTTOM of the file, directly above the end-of-file append marker (after the most recent existing
+entry), and rebase onto latest `origin/main` immediately before opening the PR** (ticket #2878). The
+old convention (insert at a fixed anchor right after the `## Entries` heading) put every concurrent
+PR's entry on the same line and produced real git conflicts between semantically independent appends
+(PR #609 went `mergeable:false` once #619 merged first); bottom-append makes same-day PRs stack
+naturally instead of colliding. A run that shipped a visible change without a changelog entry is
+incomplete. This is a docs append on the agent-editor allowlist; it carries no code.
 
 ```bash
 curl -s -X POST "$BASE_URL/api/homepage-team/run" \
