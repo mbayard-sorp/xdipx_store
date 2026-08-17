@@ -6,11 +6,22 @@ type Rate = { input: number; output: number }
 
 const RATES: Record<string, Rate> = {
   'claude-sonnet-4-20250514':  { input: 3,   output: 15 },
+  'claude-sonnet-4':           { input: 3,   output: 15 }, // undated alias
   'claude-sonnet-4-6':         { input: 3,   output: 15 }, // legacy alias used by ai-agent/chat
   'claude-haiku-4-5-20251001': { input: 1,   output: 5  },
+  'claude-haiku-4-5':          { input: 1,   output: 5  }, // undated alias
+  // Opus rates were missing entirely (ticket #96): any Opus-class row fell
+  // through to a Sonnet-priced default and under-reported by ~5x, which
+  // quietly loosened every daily $ cap computed from api_token_log.
+  'claude-opus-4-20250514':    { input: 15,  output: 75 },
+  'claude-opus-4-1-20250805':  { input: 15,  output: 75 },
+  'claude-opus-4-1':           { input: 15,  output: 75 }, // undated alias
 }
 
-const DEFAULT_RATE: Rate = { input: 3, output: 15 } // unknown model -> assume Sonnet
+// Unknown model -> assume the premium (Opus) tier so estimates never lowball,
+// matching the DEFAULT_VIDEO_RATE convention below. Overcounting an unknown
+// model tightens a budget gate; undercounting silently loosens it (#96).
+const DEFAULT_RATE: Rate = { input: 15, output: 75 }
 
 export function estimateCostUsd(args: {
   model: string

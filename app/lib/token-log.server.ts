@@ -115,9 +115,11 @@ export interface TokenLogEntry {
  */
 async function bumpTeamSpendCounters(feature: string, costUsd: number, imageCount?: number): Promise<void> {
   try {
-    const { teamFromFeature, teamSpendKvKey, teamImagesKvKey } = await import('./team-keys')
+    const { teamFromFeature, imageTeamFromFeature, teamSpendKvKey, teamImagesKvKey } = await import('./team-keys')
     const { kvGet, kvIncrBy } = await import('./kv.server')
     const day = new Date().toISOString().slice(0, 10)
+    // teamFromFeature includes FEATURE_TEAM_OVERRIDES, so 'notebook-images'
+    // bumps the content spend counter instead of silently no-opping (#581).
     const team = teamFromFeature(feature)
     if (team) {
       const cents = Math.round(costUsd * 100)
@@ -126,8 +128,11 @@ async function bumpTeamSpendCounters(feature: string, costUsd: number, imageCoun
         if ((await kvGet<number>(key)) != null) await kvIncrBy(key, cents)
       }
     }
-    if (feature === 'homepage-images' && imageCount && imageCount > 0) {
-      const key = teamImagesKvKey(day)
+    // Image counter is per team (was hardcoded to 'homepage-images', which
+    // made every other team's image cap decorative — #3678/#3390).
+    const imageTeam = imageTeamFromFeature(feature)
+    if (imageTeam && imageCount && imageCount > 0) {
+      const key = teamImagesKvKey(imageTeam, day)
       if ((await kvGet<number>(key)) != null) await kvIncrBy(key, imageCount)
     }
   } catch (err) {

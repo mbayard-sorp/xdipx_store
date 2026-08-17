@@ -29,14 +29,16 @@
  *
  * Sequence:
  *   1. Gate re-check — GET /api/team/gate?team=social. Refuses (exit 0) when
- *      the team is disabled or out of budget.
- *   2. Image cap. Prefers the gate's own maxImagesPerDay; falls back to a
- *      conservative local default because `social_team_max_images` is not
- *      wired server-side yet (ticket #2735). The DOLLAR cap is real and
- *      enforced either way: the gate sums spend on `feature LIKE 'social-%'`.
+ *      the team is disabled, out of budget, or over the image cap (the gate
+ *      enforces `social_team_max_images` server-side since ticket #3678).
+ *   2. Image cap. Uses the gate's own maxImagesPerDay/imagesToday (counted
+ *      against feature 'social-images'); falls back to SOCIAL_MAX_IMAGES_DEFAULT
+ *      only when talking to an older server that omits the field. The DOLLAR
+ *      cap is enforced either way: the gate sums spend on 'social-%' features.
  *   3. --dry-run prints the resolved plan and exits without generating.
  *   4. Generate + rehost to Shopify Files.
- *   5. POST the spend row once — this script is its single owner.
+ *   5. POST the spend row once — this script is its single owner. Spend posts
+ *      for every BILLED generation, rehosted or not (#887).
  *   6. Print one JSON manifest line.
  *
  * Never run without the gate passing: this costs real money per image.
@@ -56,12 +58,13 @@ function hasFlag(name: string): boolean {
 }
 
 /**
- * Fallback image cap, used only while the gate reports 0 because
- * `social_team_max_images` has no server-side key yet. Deliberately well under
- * what $5/day of generation would buy, so the local default can never be the
- * thing that overspends: the dollar gate remains the real ceiling.
+ * Fallback image cap, used only when the gate response OMITS maxImagesPerDay
+ * (an older server). Derived from the server-side default rather than standing
+ * alone (#3678), so the script and the gate can never disagree about what the
+ * unset cap is. A gate that reports 0 is an owner-configured "no images" and
+ * is honored, not treated as unset.
  */
-const LOCAL_IMAGE_CAP_FALLBACK = 12
+import { SOCIAL_MAX_IMAGES_DEFAULT } from '~/lib/team-keys'
 
 const ARCHETYPES = ['scene', 'cast', 'metaphor', 'macro', 'plate']
 
@@ -147,6 +150,7 @@ async function main() {
     ok?: boolean
     reason?: string
     remainingCents?: number
+    imagesToday?: number
     maxImagesPerDay?: number
   }
   if (!gateRes.ok || !gateJson.ok) {
@@ -159,13 +163,18 @@ async function main() {
   }
 
   // ── 2. Image cap ──────────────────────────────────────────────────────────
-  // Prefer the server's number the moment it becomes real (ticket #2735); until
-  // then it reports 0 for social, which means "unset", not "none allowed".
-  const serverCap = gateJson.maxImagesPerDay ?? 0
-  const cap = serverCap > 0 ? serverCap : LOCAL_IMAGE_CAP_FALLBACK
-  const capSource = serverCap > 0 ? 'gate' : 'local_fallback_social_team_max_images_unwired'
-  if (imagesSoFar >= cap) {
-    console.log(JSON.stringify({ skipped: true, reason: 'max_images', cap, capSource }))
+  // The gate's number is real since #3678: `social_team_max_images` (default
+  // SOCIAL_MAX_IMAGES_DEFAULT) counted against feature 'social-images'. A
+  // reported 0 is an owner-configured "no images" and refuses; the local
+  // fallback applies only when the field is absent entirely. The count is the
+  // MAX of the server's imagesToday and the caller's own running counter, so
+  // neither a cold KV counter nor a stale --images-so-far can under-count.
+  const serverCap = typeof gateJson.maxImagesPerDay === 'number' ? gateJson.maxImagesPerDay : undefined
+  const cap = serverCap ?? SOCIAL_MAX_IMAGES_DEFAULT
+  const capSource = serverCap !== undefined ? 'gate' : 'local_fallback_gate_omitted_cap'
+  const imagesCounted = Math.max(imagesSoFar, typeof gateJson.imagesToday === 'number' ? gateJson.imagesToday : 0)
+  if (imagesCounted >= cap) {
+    console.log(JSON.stringify({ skipped: true, reason: 'max_images', cap, capSource, imagesCounted }))
     process.exit(0)
   }
 
@@ -274,9 +283,12 @@ async function main() {
     ...(only ? { only } : {}),
   })
 
-  // ── 5. Spend, once ────────────────────────────────────────────────────────
+  // ── 5. Spend, once. Posted for every BILLED generation (provider !== 'none'),
+  //      whether or not the rehost produced a usable asset: counting only on
+  //      upload let a run that kept failing its vision gate spend real dollars
+  //      without ever moving the number the cap enforces (#887). ─────────────
   let spendPosted = false
-  if (result.url && result.provider !== 'none') {
+  if (result.provider !== 'none') {
     const spendRes = await fetch(`${BASE_URL}/api/homepage-team/spend`, {
       method: 'POST',
       headers: teamHeaders,

@@ -52,8 +52,10 @@ export interface HomepageMediaManifest {
 
 /**
  * Generate an editorial image and place it on a homepage surface. Returns
- * `placed:false` (no throw) when generation comes back empty, so callers can
- * fall back to an existing photo instead of leaving a gray box.
+ * `placed:false` (no throw) when generation comes back empty (provider 'none')
+ * OR when upload/placement fails after a billed generation (provider set), so
+ * callers can fall back to an existing photo instead of leaving a gray box —
+ * and still post the spend row for the billed case (#887).
  */
 export async function generateAndPlaceHomepageImage(
   opts: GenerateAndPlaceHomepageImageOpts,
@@ -73,29 +75,40 @@ export async function generateAndPlaceHomepageImage(
     return { provider: res.provider, model: res.model, target: opts.target, alt: opts.alt, placed: false }
   }
 
-  const filename = `homepage-${opts.target.blockKey}-${Date.now()}.png`
-  const { assetId, url } = await uploadBufferToSanity(res.buffers[0]!, filename, 'image/png')
+  // Upload/placement failure must not throw past this point: the generation
+  // above is already billed by the provider, and an exception here used to
+  // unwind the CLI before it posted the spend row, so the billed image never
+  // counted against the daily $ or image cap (#887). `placed:false` with a
+  // real provider tells the caller "billed but unplaced" — it must still post
+  // spend.
+  try {
+    const filename = `homepage-${opts.target.blockKey}-${Date.now()}.png`
+    const { assetId, url } = await uploadBufferToSanity(res.buffers[0]!, filename, 'image/png')
 
-  const docId = opts.docId ?? 'singleton.homepage'
-  switch (opts.target.kind) {
-    case 'blockImage':
-      await updateCmsBlock(opts.target.blockKey, { image: sanityImageRef(assetId, opts.alt) }, docId)
-      break
-    case 'tileImage':
-      await updateCmsTileImage(opts.target.blockKey, opts.target.tileKey, assetId, opts.alt, docId)
-      break
-    case 'promoImage':
-      await updateCmsPromoImage(opts.target.blockKey, assetId, opts.alt, docId)
-      break
-  }
+    const docId = opts.docId ?? 'singleton.homepage'
+    switch (opts.target.kind) {
+      case 'blockImage':
+        await updateCmsBlock(opts.target.blockKey, { image: sanityImageRef(assetId, opts.alt) }, docId)
+        break
+      case 'tileImage':
+        await updateCmsTileImage(opts.target.blockKey, opts.target.tileKey, assetId, opts.alt, docId)
+        break
+      case 'promoImage':
+        await updateCmsPromoImage(opts.target.blockKey, assetId, opts.alt, docId)
+        break
+    }
 
-  return {
-    provider: res.provider,
-    model: res.model,
-    assetId,
-    url,
-    target: opts.target,
-    alt: opts.alt,
-    placed: true,
+    return {
+      provider: res.provider,
+      model: res.model,
+      assetId,
+      url,
+      target: opts.target,
+      alt: opts.alt,
+      placed: true,
+    }
+  } catch (err) {
+    console.error('[homepage-media] upload/placement failed (generation billed, unplaced):', err)
+    return { provider: res.provider, model: res.model, target: opts.target, alt: opts.alt, placed: false }
   }
 }
