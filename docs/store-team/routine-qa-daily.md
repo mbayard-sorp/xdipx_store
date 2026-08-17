@@ -38,6 +38,34 @@ this rule existed those rows were stranded until a human noticed. Re-read the ro
 `{"op":"get","id":<id>}` and take it straight to a verdict (Steps 3 to 6); do not re-transition it
 to `in_review`, it is already there.
 
+**Merged-PR fast-path (run before opening any full review).** (#2503) For every listed row that
+carries a `pr` link, hit `/api/team/pr?number=<n>` first. Any row whose PR already shows
+`merged:true` is stale bookkeeping, not review work: the release engine merges a docs-only
+agent-editor PR on the allowlist path without requiring the ticket to reach `verified` first, and
+nothing writes the ticket status forward when it takes that path, so the row sits at `pr_open`
+indefinitely. The 2026-08-11 03:30 pass found 16 of 17 queue rows in this state, some merged 3 days
+earlier, and burned full review passes re-verifying shipped code. For a `merged:true` row, skip the
+diff read and the local checks and take it through a lightweight verified transition instead:
+`in_review`, then `verified` with a note of the shape "PR #<n> already merged by the release engine
+(docs-allowlist path); CI was green at merge time", still confirming the transition landed per Step
+6. The engine-side half of the fix (the engine writing the status forward itself when it merges via
+the docs-allowlist path) is release-engine code, a protected path, and owner work; until that
+ships, this fast-path is the only drain for these rows.
+
+**PR-number recovery for note-only rows (bounded).** (#3265) A `pr_open`/`in_review` row whose only
+link is a `note` (no `pr`-kind link, typically an interactive session that wrote "implemented and
+pushed; CI running" instead of attaching the PR URL per ADR-008 step 3) leaves you no direct path
+to the PR, since `/api/team/pr` requires a number and `api.github.com` is unreachable. Recover it
+with this bounded procedure, in order: (1) `git log --all --grep '<ticket id>'` for a commit naming
+the ticket, then `git branch -r --contains <sha>` for its branch; (2) probe `/api/team/pr?number=<n>`
+over a window of at most 10 numbers anchored on the nearest known PR number from same-day rows,
+checking each result's branch/title against the ticket. Hard cap: 10 probe calls. If the PR still
+cannot be identified, do not guess and do not bounce blind; record the row as unreachable in the
+run summary with what you tried, and note on the row that the filer must attach the `pr` link
+before QA can reach a verdict. (This recovery worked on #3214/#3221 → PR #657 only because the
+commit message named both tickets; it does not generalize, which is why the note-only pattern is a
+filing defect, not a QA gap.)
+
 Empty queue is a clean, short, successful run. Work in priority order (1 is P0), oldest first
 within a priority. Take each ticket to a verdict before starting the next one; a half-reviewed
 ticket left in `in_review` blocks the engine.

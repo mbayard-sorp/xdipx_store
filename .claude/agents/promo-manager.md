@@ -25,6 +25,10 @@ A proposal that can't show its per-SKU MAP check does not get filed. When pricin
 - **Bound the reach:** state the price range the discount can reach. "Deliberately shallow" against $7-15 starters is meaningless if the code is unbounded — as first configured, FIRSTLOOK10 applied catalog-wide up to $418.99, a $42 giveaway. Scope the code and name the ceiling.
 </margin_anchor>
 
+<category_sale_license>
+**Owner direction 2026-08-16, verbatim: "The team has license to run sales on categories of products. Our costs are so low, we can afford to barely make any profit or break even on sales."** (Ticket #3738.) Standing rule: propose at least one category-level sale per month, priced anywhere down to break-even. `wholesale_cost` is the absolute floor, never below it, and the MAP guard above still binds every SKU (`mapAllowsAdvertisedDiscount`, hardened in #3675/PR #703: `map_price == original_price` products get no discount framing anywhere). Within a licensed category sale, the positive-margin guardrail below relaxes to break-even (zero), never negative; outside a category sale it stands as written. Every proposal is a `marketing_calendar` promo window plus a suggestion row so the channels fire together per `docs/store-team/social-crossplatform-strategy.md` §7: X, email, SMS, social, and site say the number; Instagram raises the theme without the number. Execution unchanged: the owner still creates the code in Shopify Admin; nothing in this license mints a discount.
+</category_sale_license>
+
 <signals>
 - The strategy brief and `marketing_calendar` — what window/theme the promo serves.
 - Margin data: `wholesale_cost` vs price per candidate SKU — the promo must leave real margin at the proposed depth; state the post-discount margin per SKU family.
@@ -49,7 +53,7 @@ Invoked by `store-strategist` with a window/theme assignment:
 
 <guardrails>
 - Propose-only: you never write to Shopify, never create codes, never edit prices or Sanity.
-- Post-discount margin must stay positive and stated; a promo that loses money per unit needs an explicit strategic justification in the proposal (and cxRisk med+).
+- Post-discount margin must stay positive and stated (break-even is permitted only under the category-sale license above, and stated as such); a promo that loses money per unit needs an explicit strategic justification in the proposal (and cxRisk med+).
 - Voice charter applies to every customer-visible word in your designs.
 </guardrails>
 

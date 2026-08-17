@@ -27,6 +27,7 @@ import { Fragment, useEffect, useRef, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
+import { TrustStrip } from '~/components/store/TrustStrip'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { SensationMap } from '~/components/store/SensationMap'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
@@ -337,58 +338,13 @@ function Hero({
       </div>
 
       {/* Nº 02 · Trust strip — raised into the hero band, inside the first viewport.
-          Content-controlled: a published `trustBar` block wins, the array below
-          is the fallback. */}
-      <Reveal variant="fade" as="div" className="border-t border-line">
-        <div className="mx-auto grid max-w-[1320px] grid-cols-2 gap-x-6 gap-y-3.5 px-6 py-[18px] md:grid-cols-5 md:items-start md:gap-x-8 md:px-16">
-          {trustStripItems(trustBar).map(item => (
-            <div key={item.headline} className="flex items-start gap-2.5 text-[13.5px] text-ink-3" style={BODY}>
-              <span className="mt-px shrink-0 text-sage" aria-hidden="true">♥</span>
-              <span>
-                {item.headline}
-                {item.subheadline && (
-                  <span className="block text-[12px] text-ink-4">{item.subheadline}</span>
-                )}
-              </span>
-            </div>
-          ))}
-        </div>
-      </Reveal>
+          Content-controlled: a published `trustBar` block wins, the shared
+          fallback in TrustStrip.tsx covers the shell. Extracted to
+          ~/components/store/TrustStrip so collection pages render the same
+          trust content under their masthead (ticket #3424). */}
+      <TrustStrip trustBar={trustBar} />
     </section>
   )
-}
-
-/**
- * Shell fallback for the Nº 02 trust strip, used when the team has published no
- * `trustBar` block.
- *
- * Per docs/design-doctrine.md §6, discretion copy names the dreaded moments
- * (the box, the label, the card statement) rather than stating a flat fact, so
- * "Billed as XDIPX" is now a promise about what a partner or a bank statement
- * will actually show. The free-shipping line is the verified Shopify delivery
- * profile threshold ($99 US; HI/AK/PR differs and is stated at checkout, not
- * promised here). No fabricated proof: every line is a mechanic we can honor.
- */
-const TRUST_STRIP_FALLBACK: TrustStripItem[] = [
-  { headline: 'Ships in plain packaging' },
-  { headline: 'No logo on the box, no product name on the label' },
-  { headline: 'Your statement reads XDIPX' },
-  { headline: 'Free US shipping over $99' },
-  { headline: 'Hand-checked, not auto-listed' },
-]
-
-interface TrustStripItem {
-  headline: string
-  subheadline?: string | undefined
-}
-
-/** Published trust items win; drop null/inactive refs, then fall back to the
- *  shell array when nothing usable survives (never render an empty strip). */
-function trustStripItems(block?: TrustBarBlock | undefined): TrustStripItem[] {
-  const published = (block?.trustItems ?? [])
-    .filter(i => i != null && i.active !== false && !!i.headline)
-    .map(i => ({ headline: i.headline, subheadline: i.subheadline }))
-  return published.length > 0 ? published : TRUST_STRIP_FALLBACK
 }
 
 /* ── 3 · Meet Emma ─────────────────────────────────────────────────────────

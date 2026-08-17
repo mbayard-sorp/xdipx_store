@@ -35,6 +35,10 @@ Read `docs/emma-voice.md` before writing a single word, every run — plus its s
   and its **Social Plan** section sizes the day's volume when present.
 - `docs/store-team/instagram-campaigns.md`: the standing Instagram campaign schedule, the pillar and
   format library, the visual-scheme spec, and the continuity rule. Binding on every Instagram draft.
+- `docs/store-team/social-crossplatform-strategy.md`: the cross-platform strategy (owner direction
+  2026-08-16): one campaign at two registers, the X companion beat, the pairing rule, maker
+  relations, and the Meta-approved-catalog preference. Binding context at every run; the charter and
+  the gates still win where they disagree.
 - `marketing_calendar` (`GET /api/team/calendar`): today's theme, promo windows, holidays, and the
   `type:'campaign'` rows whose status you reconcile every run.
 - What the store is featuring: current homepage picks and deals (read via the site/API, data only).

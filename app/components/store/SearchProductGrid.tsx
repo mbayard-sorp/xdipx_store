@@ -4,6 +4,7 @@ import type { SearchProductResult } from '~/lib/search.server'
 import ProductTileMedia from '~/components/store/ProductTileMedia'
 import LiveDealBadge from '~/components/store/LiveDealBadge'
 import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
+import { trackAddToCart } from '~/lib/analytics.client'
 
 export function InfiniteProductGrid({
   initialProducts,
@@ -103,6 +104,16 @@ export function SearchTile({
       wasSubmitting.current = false
       if (addToCart.data?.ok) {
         setJustAdded(true)
+        // GA4: quick-add was invisible before this (ticket #3424) — collection
+        // and search ad groups had their primary leading indicator dark. Fires
+        // only on a confirmed add, so failed POSTs never count.
+        trackAddToCart({
+          item_id: product.handle,
+          item_name: product.title,
+          ...(product.vendor ? { item_brand: product.vendor } : {}),
+          price: product.price ? parseFloat(product.price) : 0,
+          quantity: 1,
+        })
         window.dispatchEvent(new CustomEvent('xdipx:cart-added'))
         const t = setTimeout(() => setJustAdded(false), 1200)
         return () => clearTimeout(t)

@@ -11,8 +11,12 @@ homepage routines append here as their last content/design step:
 
 ## Entry format
 
-One dated entry per change, newest first. Each entry names **what changed**, **why**, and the
-**evidence probe touched** (the run/PR/event or GA4/GSC signal that motivated or verifies it):
+One dated entry per change, **appended at the bottom of the file, directly above the end-of-file
+append marker** (ticket #2878: the old newest-first fixed anchor after `## Entries` made every
+concurrent changelog PR conflict on the same line; bottom-append lets same-day PRs stack). Rebase
+onto latest `origin/main` before opening a PR that appends here. Each entry names **what changed**,
+**why**, and the **evidence probe touched** (the run/PR/event or GA4/GSC signal that motivated or
+verifies it):
 
 ```
 ### YYYY-MM-DD — [Routine A|Routine B] — <one-line what changed>

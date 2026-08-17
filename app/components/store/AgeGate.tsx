@@ -7,8 +7,29 @@ interface AgeGatePanelProps {
   verificationLevel?: VerificationLevel
 }
 
+// ── Declined notice ──────────────────────────────────────────────────────────
+// Shown in place of the gate when the visitor says they are under 18. This
+// used to be an href to google.com, a one-tap exit that handed a paid click
+// straight back to Google (ticket #3424); a decline now stays on-site with a
+// polite dead end and no navigation.
+function DeclinedNotice() {
+  return (
+    <p
+      className="text-lg md:text-xl font-semibold text-white leading-snug max-w-sm text-center fade-in"
+      style={{ fontFamily: 'var(--font-display)' }}
+      role="status"
+    >
+      No worries. This part of the shop is for grown-ups, so we will keep it
+      closed for now. See you when you are 18. ♥
+    </p>
+  )
+}
+
 // ── Click-through (default) ──────────────────────────────────────────────────
 function ClickThroughGate({ onConfirm }: { onConfirm: () => void }) {
+  const [declined, setDeclined] = useState(false)
+  if (declined) return <DeclinedNotice />
+
   return (
     <div className="flex flex-col items-center gap-6 fade-in text-center">
       <p
@@ -28,13 +49,14 @@ function ClickThroughGate({ onConfirm }: { onConfirm: () => void }) {
         >
           Yes, let me in ♥
         </button>
-        <a
-          href="https://google.com"
+        <button
+          type="button"
+          onClick={() => setDeclined(true)}
           className="flex-1 bg-white/20 text-white font-semibold py-3 px-6 rounded-full text-lg text-center transition-all hover:bg-white/30"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Not yet
-        </a>
+        </button>
       </div>
     </div>
   )
@@ -46,6 +68,7 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
   const [day,   setDay]   = useState('')
   const [year,  setYear]  = useState('')
   const [error, setError] = useState('')
+  const [declined, setDeclined] = useState(false)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -59,6 +82,8 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
     if (age < 18)             { setError("Sorry, you must be 18 or older."); return }
     onConfirm()
   }
+
+  if (declined) return <DeclinedNotice />
 
   return (
     <form
@@ -102,9 +127,13 @@ function DobEntryGate({ onConfirm }: { onConfirm: () => void }) {
         Enter ♥
       </button>
 
-      <a href="https://google.com" className="text-white/50 text-sm underline">
+      <button
+        type="button"
+        onClick={() => setDeclined(true)}
+        className="text-white/50 text-sm underline"
+      >
         Not old enough
-      </a>
+      </button>
     </form>
   )
 }

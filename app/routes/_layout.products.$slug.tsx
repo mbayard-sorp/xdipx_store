@@ -1295,7 +1295,7 @@ function ProductPage() {
         </div>
       )}
 
-      <EmailSubscribe />
+      <EmailSubscribe location="pdp" />
 
       {/* Sticky mobile CTA — lifted above the MobileExploreMenu (56px tab bar
           + safe-area). When the buy CTA is visible, it sits between the page
