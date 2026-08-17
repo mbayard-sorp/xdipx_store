@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
-import { isRestockCrossing, parseWebhookBody, runWebhookWork } from './webhooks'
+import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled } from './webhooks'
+
+vi.mock('../app/lib/reviews.server.js', () => ({
+  getReviewSettings: vi.fn(async () => ({ inviteDelayDays: 3 })),
+  createInvite: vi.fn(async () => ({})),
+  getInvitedProductIdsForOrder: vi.fn(async () => new Set<string>()),
+}))
 
 // Guards the inventory webhook's back-in-stock branch: a notification must fire
 // only on a genuine sold-out -> in-stock transition, never on routine positive
@@ -132,5 +138,79 @@ describe('runWebhookWork', () => {
     await runWebhookWork('product-created', Promise.resolve(), 5000)
     expect(clear).toHaveBeenCalled()
     clear.mockRestore()
+  })
+})
+
+// ─── handleOrderFulfilled: review invites (ticket #3443) ──────────────────
+
+describe('handleOrderFulfilled', () => {
+  const baseOrder = {
+    id: 111,
+    order_number: 1002,
+    email: '',
+    total_price: '50.00',
+    line_items: [
+      { id: 1, product_id: 100, sku: 'A1', title: 'Product A', quantity: 1, price: '20.00' },
+    ],
+    fulfillments: [],
+  }
+
+  async function mocks() {
+    const mod = await import('../app/lib/reviews.server.js')
+    return mod as unknown as {
+      createInvite: ReturnType<typeof vi.fn>
+      getInvitedProductIdsForOrder: ReturnType<typeof vi.fn>
+    }
+  }
+
+  it('logs a failure instead of silently returning when the payload has no email', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { createInvite } = await mocks()
+    createInvite.mockClear()
+
+    await handleOrderFulfilled({ ...baseOrder } as Parameters<typeof handleOrderFulfilled>[0])
+
+    // The Basic plan redacts PII from Admin API reads; if webhook payloads are
+    // redacted the same way this branch is every future invite's fate, so it
+    // must be loud (same silent-success class as ADR-009).
+    expect(spy.mock.calls.some(c => String(c[0]).includes('no email in the payload'))).toBe(true)
+    expect(createInvite).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('falls back to customer.email when order.email is empty', async () => {
+    const { createInvite } = await mocks()
+    createInvite.mockClear()
+
+    await handleOrderFulfilled({
+      ...baseOrder,
+      customer: { id: 9, email: 'cust@example.com' },
+    } as Parameters<typeof handleOrderFulfilled>[0])
+
+    expect(createInvite).toHaveBeenCalledTimes(1)
+    expect(createInvite.mock.calls[0]![0]).toMatchObject({
+      reviewerEmail: 'cust@example.com',
+      shopifyProductId: 'gid://shopify/Product/100',
+      shopifyOrderId: '111',
+    })
+  })
+
+  it('collapses duplicate products and skips products already invited for the order', async () => {
+    const { createInvite, getInvitedProductIdsForOrder } = await mocks()
+    createInvite.mockClear()
+    getInvitedProductIdsForOrder.mockResolvedValueOnce(new Set(['gid://shopify/Product/300']))
+
+    await handleOrderFulfilled({
+      ...baseOrder,
+      email: 'buyer@example.com',
+      line_items: [
+        { id: 1, product_id: 200, sku: 'B1', title: 'B', quantity: 1, price: '10.00' },
+        { id: 2, product_id: 200, sku: 'B2', title: 'B variant', quantity: 1, price: '10.00' },
+        { id: 3, product_id: 300, sku: 'C1', title: 'C already invited', quantity: 1, price: '10.00' },
+      ],
+    } as Parameters<typeof handleOrderFulfilled>[0])
+
+    expect(createInvite).toHaveBeenCalledTimes(1)
+    expect(createInvite.mock.calls[0]![0]).toMatchObject({ shopifyProductId: 'gid://shopify/Product/200' })
   })
 })

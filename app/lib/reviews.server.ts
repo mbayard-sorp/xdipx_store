@@ -586,6 +586,19 @@ export async function createInvite(input: CreateInviteInput): Promise<ReviewInvi
   return rowToInvite(rows[0] as Record<string, unknown>)
 }
 
+/**
+ * Product ids already invited for an order, so the fulfillment webhook (which
+ * Shopify fires per fulfillment event and retries) and the backfill script can
+ * both be idempotent. review_invites has no unique constraint on
+ * (order, product); this check is the dedupe.
+ */
+export async function getInvitedProductIdsForOrder(shopifyOrderId: string): Promise<Set<string>> {
+  const rows = await sql`
+    SELECT shopify_product_id FROM review_invites WHERE shopify_order_id = ${shopifyOrderId}
+  `
+  return new Set(rows.map(r => r['shopify_product_id'] as string))
+}
+
 /** Scheduled invites whose send_after has passed — the daily cron sends these. */
 export async function getDueScheduledInvites(limit = 200): Promise<ReviewInvite[]> {
   const rows = await sql`

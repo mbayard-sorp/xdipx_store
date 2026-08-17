@@ -47,6 +47,8 @@ interface ShopifyOrder {
   id: number
   order_number: number
   email: string
+  /** Present on some payloads when `email` is empty (e.g. phone checkouts). */
+  contact_email?: string | null
   total_price: string
   currency?: string
   created_at?: string
@@ -329,11 +331,38 @@ interface ShopifyFulfilledOrder extends ShopifyOrder {
   }
 }
 
-async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void> {
-  if (!order.email || order.line_items.length === 0) return
+export async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void> {
+  // PII note (verified 2026-08-16): this store is on the Basic plan, and the
+  // Admin API refuses customer PII outright ("Access to personally identifiable
+  // information ... is only available on Shopify, Advanced, and Plus plans";
+  // REST silently nulls email/contact_email/customer.*). If webhook payloads
+  // are redacted the same way, every invite dies right here — so a missing
+  // email is a loud failure, never a silent return (ticket #3443; same
+  // silent-success class as ADR-009). The fallback chain covers payloads where
+  // `email` is empty but contact_email or customer.email survives.
+  const reviewerEmail = order.email || order.contact_email || order.customer?.email || null
+  if (!reviewerEmail) {
+    console.error(
+      `[webhook:order-fulfilled] order ${order.id} (#${order.order_number}) has no email in the payload ` +
+      `(email/contact_email/customer.email all empty — PII likely redacted on the Basic plan); ` +
+      `cannot create review invites. Owner action: upgrade plan or grant PII access, then run ` +
+      `scripts/backfill-review-invites.ts for this order.`,
+    )
+    return
+  }
+  if (!Array.isArray(order.line_items) || order.line_items.length === 0) {
+    console.warn(`[webhook:order-fulfilled] order ${order.id} has no line items, nothing to invite`)
+    return
+  }
 
-  const { getReviewSettings, createInvite } = await import('../app/lib/reviews.server.js')
+  const { getReviewSettings, createInvite, getInvitedProductIdsForOrder } = await import('../app/lib/reviews.server.js')
   const settings = await getReviewSettings()
+
+  // Shopify fires orders/fulfilled per fulfillment event and retries failed
+  // deliveries; without this check a partial fulfillment or retry duplicates
+  // every invite (and two line items of the same product already did).
+  const alreadyInvited = await getInvitedProductIdsForOrder(String(order.id))
+    .catch(() => new Set<string>())
 
   // Insert scheduled invite rows immediately; a serverless instance does not
   // live long enough for a days-long setTimeout (the previous approach, which
@@ -358,6 +387,9 @@ async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void>
     }
 
     const shopifyProductId = `gid://shopify/Product/${productId}`
+    if (alreadyInvited.has(shopifyProductId)) continue
+    alreadyInvited.add(shopifyProductId)
+
     const reviewerName = [
       order.customer?.first_name,
       order.customer?.last_name,
@@ -367,7 +399,7 @@ async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promise<void>
       shopifyOrderId:    String(order.id),
       shopifyCustomerId: order.customer?.id ? String(order.customer.id) : undefined,
       shopifyProductId,
-      reviewerEmail:     order.email,
+      reviewerEmail,
       reviewerName,
       sendAfter,
     }).catch(err => console.error('[webhook:invite-create]', err))
