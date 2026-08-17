@@ -88,4 +88,34 @@ describe('decideManualPublish', () => {
     expect(manualPublishValveKey(false)).toBe(VALVE_KEYS.instagramAutopublish)
     expect(manualPublishValveKey(true)).toBe(VALVE_KEYS.videoAutopublish)
   })
+
+  // Ticket #3739: X Post-now used to check only status/review_status — the
+  // same bypass that put post #49 on Instagram. The stamp refusal now applies
+  // to X with the same shape; the valve stays not-required for owner clicks.
+  it('refuses an X row with no gate stamp, with the same refusal shape as IG', async () => {
+    const getValve = vi.fn(async () => true)
+    const decision = await decideManualPublish({ feedback: '', isVideo: false, platform: 'x' }, getValve)
+
+    expect(decision.ok).toBe(false)
+    if (!decision.ok) expect(decision.error).toMatch(/no publish-gate PASS/i)
+    expect(getValve).not.toHaveBeenCalled()
+  })
+
+  it('refuses a non-PASS stamp on X', async () => {
+    const stamp = formatGateStamp(
+      { verdict: 'BLOCK', reviewer: 'social-publish-gate', notes: 'no', productHandle: null },
+      new Date('2026-08-16T00:00:00Z'),
+    )
+    const decision = await decideManualPublish({ feedback: stamp, isVideo: false, platform: 'x' }, valveAlwaysOn)
+    expect(decision.ok).toBe(false)
+  })
+
+  it('allows a PASS-stamped X row without reading any valve', async () => {
+    // The owner's click is the human approval; x_autopublish_enabled governs
+    // only the scheduled tick. An OFF valve must not block an owner click.
+    const getValve = vi.fn(async () => false)
+    const decision = await decideManualPublish({ feedback: PASS_STAMP, isVideo: false, platform: 'x' }, getValve)
+    expect(decision).toEqual({ ok: true })
+    expect(getValve).not.toHaveBeenCalled()
+  })
 })
