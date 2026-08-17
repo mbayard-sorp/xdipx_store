@@ -94,7 +94,15 @@ export function isGeneratedSocialAsset(url: string): boolean {
   const path = url.split(/[?#]/)[0] ?? ''
   const basename = (path.split('/').pop() ?? '').toLowerCase()
   if (!basename) return false
-  return SOCIAL_ASSET_PREFIXES.some(prefix => basename.startsWith(prefix))
+  if (SOCIAL_ASSET_PREFIXES.some(prefix => basename.startsWith(prefix))) return true
+  // A video pipeline final (`video/{jobId}/final.mp4` on Blob, random suffix
+  // appended before the extension) is generated art by construction: it exists
+  // only because a video job rendered, frame review passed, and the owner
+  // approved it in the Video Studio. Only the assembled final qualifies; raw
+  // clips, per-aspect masters, and frames under the same path stay refused so
+  // an intermediate artifact cannot ship by URL alone.
+  const segments = path.toLowerCase().split('/')
+  return segments.includes('video') && basename.startsWith('final') && basename.endsWith('.mp4')
 }
 
 /**

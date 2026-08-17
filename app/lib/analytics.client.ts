@@ -187,6 +187,21 @@ export function trackBeginCheckout(items: GA4Item[], value: number, currency = '
   gtag('event', 'begin_checkout', { currency, value, items })
 }
 
+// ─── Lead capture: generate_lead ──────────────────────────────────────────────
+// Fired on a successful email capture (EmailSubscribe). generate_lead is a GA4
+// recommended event, so it reports natively; `lead_location` says which surface
+// captured the address (home / pdp / category / notebook variants).
+//
+// NOTE for the launch checklist: lead_location must be registered as an
+// event-scoped custom dimension in the GA4 admin (owner-only action) or the
+// parameter is collected but unreadable in reports, like panel_click's were.
+
+export type LeadLocation = 'home' | 'pdp' | 'category' | 'admin-gallery'
+
+export function trackGenerateLead(location: LeadLocation) {
+  gtag('event', 'generate_lead', { lead_location: location })
+}
+
 // ─── Search ───────────────────────────────────────────────────────────────────
 
 export function trackSearch(term: string) {

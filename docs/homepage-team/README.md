@@ -57,7 +57,7 @@ genuinely-paid bits on metered services.**
 | Workload | Runs on | Billed to | Counts vs the $/day cap? |
 |---|---|---|---|
 | Orchestrator, IA, designer, copywriter, SEO, QA reasoning | Claude cloud routine (authenticated scheduled session) | **Max subscription** | No (`source:'agent-sdk'` → $0) |
-| Image generation (fal.ai primary, Imagen fallback) | fal.ai / Google Vertex | **Paid per image** | **Yes — the main cost** |
+| Image generation (`generateImage()`: Atlas primary → fal → Imagen, per `docs/media-model-routing.md`) | Atlas Cloud / fal.ai / Google Vertex | **Paid per image** | **Yes — the main cost** |
 | Daily Vercel cron (gate, log, trigger, healthcheck) | Vercel | Vercel compute (negligible) | No |
 | Any LLM call that hits the **site's** Anthropic-keyed API | Anthropic API key | **Metered API** | **Yes — avoid** |
 
@@ -71,7 +71,7 @@ genuinely-paid bits on metered services.**
   metered. Copy generation happens *inside* the routine (`emma-copywriter`), not by calling
   `claude.server.ts`.
 - **Realistic daily spend** ≈ just images. A day featuring top-100 products that already have art =
-  **~$0**; a day generating 3–6 new fal.ai images ≈ **$0.10–0.50**. The cap (default $15/day) mostly
+  **~$0**; a day generating 3–6 new images via `generateImage()` ≈ **$0.10–0.50**. The cap (default $15/day) mostly
   bounds the weekly design cycle and runaway loops.
 - **Observability caveat:** Max (`agent-sdk`) rows appear on `/admin/usage` at **$0 cost but with
   token counts** *only if the routine reports usage via `POST /spend`*. `/admin/usage` faithfully
@@ -153,8 +153,10 @@ too. Spend itself is on `/admin/usage` under features `homepage-merchandise`, `h
 
 ## Access checklist (before turning the team on)
 
-- [ ] **fal.ai** account + `FAL_KEY` (Vercel envs **and** worktree `.env*` via `scripts/setup-worktree.sh`,
-      **and** the routine's secret store). Confirm a model choice + pricing/TOS for adult-wellness imagery.
+- [ ] **Image providers**: Atlas Cloud account + `ATLAS_CLOUD_API_KEY` (primary stills) and fal.ai
+      account + `FAL_KEY` (video, background removal, still fallback), both in Vercel envs **and**
+      worktree `.env*` via `scripts/setup-worktree.sh`, **and** the routine's secret store. Routing:
+      `docs/media-model-routing.md`. Confirm model choice + pricing/TOS for adult-wellness imagery.
 - [ ] **Scheduled Claude cloud agent** enabled for this repo, with repo/git access, Sanity MCP, GA4 MCP,
       image tooling, and the design stack (`taste-skill`, `ui-ux-pro-max`, shadcn/ui MCP, Emil Kowalski's
       skill). Confirm **Max headroom** for a daily routine without starving interactive Claude Code.

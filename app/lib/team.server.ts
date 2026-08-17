@@ -697,7 +697,31 @@ export interface SuggestionInput {
   dedupeKey?: string | undefined
   /** Soft deadline for the ticket, ISO string or Date (070). */
   dueAt?: string | Date | undefined
+  /**
+   * Id of the live row this filing replaces (#3406). Persisted to the
+   * `supersedes_id` column, and on a successful create the superseded row is
+   * moved out of the active set (proposed/approved -> dismissed) with a note
+   * pointing at the new row. A superseded row already in flight (in_progress,
+   * pr_open, in_review, verified, blocked) is never yanked out from under its
+   * executor: it gets a note link naming the successor instead.
+   */
+  supersedesId?: number | undefined
+  /**
+   * Links to persist with the filing (#1686). Same shape as the transition
+   * op's links, so ADR-008's "every agent PR ticket carries a pr link" is
+   * satisfiable in the single create call.
+   */
+  links?: readonly TicketLinkInput[] | undefined
+  /**
+   * The agent doing the filing, used only to attribute the supersession
+   * dismissal (#3406). Falls back to `agent:<team>` when absent so the
+   * dismissal is never written as `owner` or `system` from an API call.
+   */
+  actor?: TicketActor | undefined
 }
+
+/** What happened to the row a create with `supersedesId` pointed at. */
+export type SupersededOutcome = 'dismissed' | 'noted' | 'not-found' | 'error'
 
 /**
  * File a suggestion. Returns the new row's id, or 0 when the insert was
@@ -720,7 +744,7 @@ export async function createSuggestion(s: SuggestionInput): Promise<number> {
  */
 export async function createSuggestionDetailed(
   s: SuggestionInput,
-): Promise<{ id: number; deduped: boolean }> {
+): Promise<{ id: number; deduped: boolean; superseded?: { id: number; outcome: SupersededOutcome } }> {
   // Owner triage (proposed -> approved) is automated per-team via the
   // `{team}_team_auto_approve_suggestions` valve. Key it off the team that ACTS
   // on the suggestion — its targetTeam, or the proposer when unrouted — so a
@@ -754,12 +778,15 @@ export async function createSuggestionDetailed(
       priority:      s.priority ?? 3,
       dedupeKey:     s.dedupeKey ?? null,
       dueAt:         s.dueAt == null ? null : new Date(s.dueAt),
+      // #3406: previously silently dropped, so no supersession was ever
+      // recorded in data and superseded rows sat approved forever.
+      supersedesId:  s.supersedesId ?? null,
     })
     // Untargeted DO NOTHING so the dedupe_key partial-unique index (070)
     // swallows a repeat filing instead of throwing inside a cron handler.
     .onConflictDoNothing()
     .returning({ id: homepageTeamSuggestions.id })
-  if (row?.id) return { id: row.id, deduped: false }
+  if (row?.id) return finishCreate(s, row.id, false)
   if (!s.dedupeKey) return { id: 0, deduped: false }
   // The insert was absorbed by uq_team_sugg_dedupe_key: find the live ticket
   // that owns the key so the caller can point at the open conversation.
@@ -785,7 +812,80 @@ export async function createSuggestionDetailed(
   if (live.status === 'blocked') {
     await reopenBlockedOnRepeatObservation(live.id, s.suggestion)
   }
-  return { id: live.id, deduped: true }
+  return finishCreate(s, live.id, true)
+}
+
+/**
+ * Post-insert side effects shared by the fresh-insert and dedupe branches of
+ * createSuggestionDetailed: persist any links the filing carried (#1686), and
+ * resolve the supersession the filing declared (#3406). On the dedupe branch
+ * the links attach to the live row that absorbed the filing, which is where
+ * the release engine will look for a pr link, and the supersession still
+ * resolves — the caller declared the old row replaced by whichever row now
+ * tracks the signal.
+ */
+async function finishCreate(
+  s: SuggestionInput,
+  id: number,
+  deduped: boolean,
+): Promise<{ id: number; deduped: boolean; superseded?: { id: number; outcome: SupersededOutcome } }> {
+  if (s.links?.length) {
+    try {
+      await addTicketLinks(id, s.links)
+    } catch (err) {
+      console.warn(`[team] create #${id}: persisting links failed:`, String(err).slice(0, 200))
+    }
+  }
+  if (s.supersedesId == null || s.supersedesId === id) return { id, deduped }
+  const actor: TicketActor = s.actor && AGENT_ACTOR_RE.test(s.actor) ? s.actor : `agent:${s.team}`
+  const outcome = await resolveSupersession(s.supersedesId, id, actor)
+  return { id, deduped, superseded: { id: s.supersedesId, outcome } }
+}
+
+/**
+ * #3406: a create carrying `supersedesId` moves the superseded row out of the
+ * active set. Only `proposed`/`approved` rows are dismissed — those are the
+ * statuses where nothing is in flight, and they are exactly the edges the
+ * delegated-supersession rule (#3573) opens for an agent actor whose note
+ * references a live replacement. A row already claimed or in review keeps its
+ * status and gets a note link naming the successor, so its executor decides.
+ * Never throws: a failed supersession must not fail the create that carried
+ * it, so failures degrade to a note (or to 'error' when even that fails).
+ */
+async function resolveSupersession(
+  oldId: number,
+  newId: number,
+  actor: TicketActor,
+): Promise<SupersededOutcome> {
+  try {
+    const [old] = await db
+      .select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status })
+      .from(homepageTeamSuggestions)
+      .where(eq(homepageTeamSuggestions.id, oldId))
+      .limit(1)
+    if (!old) return 'not-found'
+    if ((TERMINAL_TICKET_STATUSES as readonly string[]).includes(old.status ?? '')) {
+      // Already closed; the supersedes_id column on the new row records the
+      // lineage and there is nothing to move.
+      return 'noted'
+    }
+    if (old.status === 'proposed' || old.status === 'approved') {
+      await transitionSuggestion(oldId, 'dismissed', actor, {
+        note: `Superseded by #${newId}: replaced by a newer filing on create (supersedesId).`,
+      })
+      return 'dismissed'
+    }
+    // In flight: never yank a claimed/reviewed row out from under its executor.
+    await addTicketLinks(oldId, [{
+      kind: 'note',
+      ref: `superseded by #${newId} (filed while this row was ${old.status}; left for its executor)`,
+      state: old.status ?? undefined,
+    }])
+    return 'noted'
+  } catch (err) {
+    console.warn(`[team] supersession #${oldId} -> #${newId} failed:`, String(err).slice(0, 200))
+    return 'error'
+  }
 }
 
 /**
@@ -911,8 +1011,27 @@ export interface SuggestionListFilter {
 
 export const SUGGESTION_LIST_MAX = 200
 
-export async function listSuggestions(filter: SuggestionListFilter = {}) {
-  const conditions = []
+/**
+ * The effective sort mode a list call will use (#2071). Explicit orderBy wins.
+ * A status-filtered call with no orderBy sorts OLDEST first ('age'): a
+ * status-filtered list is a work queue, and under truncation a desc default
+ * silently and permanently hides the oldest rows — exactly the stale ones —
+ * while an asc default only delays the newest, which are re-listed next run
+ * anyway (verified live 2026-08-08: row #12, 26 days old, sat just past the
+ * newest-100 cut and was invisible to six consecutive apply passes). An
+ * unfiltered call keeps 'created' (newest first), which is what the admin
+ * dashboard has always had.
+ */
+export function resolveListOrder(
+  filter: Pick<SuggestionListFilter, 'orderBy' | 'status' | 'statuses'>,
+): 'priority' | 'age' | 'created' {
+  if (filter.orderBy) return filter.orderBy
+  if (filter.status || filter.statuses?.length) return 'age'
+  return 'created'
+}
+
+function listConditions(filter: SuggestionListFilter): SQL[] {
+  const conditions: SQL[] = []
   if (filter.team) conditions.push(eq(homepageTeamSuggestions.team, filter.team))
   if (filter.targetTeam) conditions.push(eq(homepageTeamSuggestions.targetTeam, filter.targetTeam))
   if (filter.status) conditions.push(eq(homepageTeamSuggestions.status, filter.status))
@@ -929,10 +1048,16 @@ export async function listSuggestions(filter: SuggestionListFilter = {}) {
   if (filter.updatedSince) {
     conditions.push(gte(homepageTeamSuggestions.updatedAt, filter.updatedSince))
   }
+  return conditions
+}
+
+export async function listSuggestions(filter: SuggestionListFilter = {}) {
+  const conditions = listConditions(filter)
+  const mode = resolveListOrder(filter)
   const order =
-    filter.orderBy === 'priority'
+    mode === 'priority'
       ? [asc(homepageTeamSuggestions.priority), asc(homepageTeamSuggestions.createdAt)]
-      : filter.orderBy === 'age'
+      : mode === 'age'
         ? [asc(homepageTeamSuggestions.createdAt)]
         : [desc(homepageTeamSuggestions.createdAt)]
   const limit = Math.min(SUGGESTION_LIST_MAX, Math.max(1, filter.limit ?? 100))
@@ -940,6 +1065,22 @@ export async function listSuggestions(filter: SuggestionListFilter = {}) {
   return (conditions.length ? q.where(and(...conditions)) : q)
     .orderBy(...order)
     .limit(limit)
+}
+
+/**
+ * Total rows matching a list filter, ignoring limit/order (#2071). Returned
+ * alongside every list response so truncation is detectable by the caller:
+ * `total > suggestions.length` means the cap bit and a narrower filter (or
+ * paging by age) is needed. Before this the cut was invisible — no count, no
+ * has-more flag — and rows past it could neither be executed nor retired.
+ */
+export async function countSuggestions(filter: SuggestionListFilter = {}): Promise<number> {
+  const conditions = listConditions(filter)
+  const q = db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(homepageTeamSuggestions)
+  const [row] = await (conditions.length ? q.where(and(...conditions)) : q)
+  return row?.n ?? 0
 }
 
 /** Owner decision from the admin UI: proposed -> approved | dismissed. */
@@ -1036,17 +1177,100 @@ export async function rekindSuggestion(
   return updated[0]!
 }
 
+/** Evidence an agent may attach to a retire (#2864). At least one member must
+ *  be present and must VALIDATE for the evidence edge to open. */
+export interface RetireEvidence {
+  /** Id of the live-or-applied row that superseded the retired one. Its text
+   *  must name the retired row (`#<id>`), or the evidence is rejected. */
+  supersededById?: number | undefined
+  /** A PR URL, or a repo doc path with an anchor (e.g.
+   *  `docs/store-team/routine-agent-editor.md#step-2`), showing the rule
+   *  already exists in the target doc. */
+  satisfiedBy?: string | undefined
+}
+
+/** `docs/foo/bar.md` or `docs/foo/bar.md#anchor` — a repo doc reference. */
+const SATISFIED_BY_DOC_RE = /^[\w./-]+\.md(#[\w./-]+)?$/
+const SATISFIED_BY_PR_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d{1,6}\b/
+
 /**
- * agent-editor retiring an approved row with no executor, during its hygiene
- * pass. Thin wrapper over the transition map so ALLOWED stays the only source
- * of transition authority (the kind fence lives in the map, not here).
+ * agent-editor retiring an approved row, during its hygiene pass. Thin wrapper
+ * over the transition map so ALLOWED stays the only source of transition
+ * authority (the kind fences live in the map, not here).
+ *
+ * Two tiers (#2864). Without evidence this is the original call: it can walk
+ * only the AGENT_RETIRE_KINDS edge (process/strategy/program) and 409s on
+ * everything else. With evidence that validates, it can also walk the
+ * `retireEvidenceOnly` edge for AGENT_EVIDENCE_RETIRE_KINDS
+ * (instructions/agent-def): the evidence is verified here — a superseding row
+ * must exist, be live-or-applied, and literally name the retired row; a
+ * satisfied-by ref must be a PR URL or a repo doc path — recorded as links on
+ * the ticket, and only then does the transition carry the `viaRetireEvidence`
+ * declaration the map demands. Invalid evidence throws 409 rather than
+ * silently downgrading to the plain edge, so a caller cannot discover-by-retry
+ * what evidence shape slips through.
  */
 export async function agentRetireSuggestion(
   id: number,
   actor: TicketActor,
   note: string,
+  evidence?: RetireEvidence,
 ): Promise<TicketRow> {
-  return transitionSuggestion(id, 'dismissed', actor, { note })
+  if (!evidence || (evidence.supersededById == null && !evidence.satisfiedBy)) {
+    return transitionSuggestion(id, 'dismissed', actor, { note })
+  }
+
+  const links: TicketLinkInput[] = []
+  if (evidence.supersededById != null) {
+    const [sup] = await db
+      .select({
+        id: homepageTeamSuggestions.id,
+        status: homepageTeamSuggestions.status,
+        suggestion: homepageTeamSuggestions.suggestion,
+      })
+      .from(homepageTeamSuggestions)
+      .where(eq(homepageTeamSuggestions.id, evidence.supersededById))
+      .limit(1)
+    if (!sup) {
+      throw new Response(
+        `Conflict: retire evidence rejected — superseding row #${evidence.supersededById} does not exist`,
+        { status: 409 },
+      )
+    }
+    if (sup.status === 'dismissed') {
+      throw new Response(
+        `Conflict: retire evidence rejected — superseding row #${sup.id} is dismissed, not live-or-applied`,
+        { status: 409 },
+      )
+    }
+    if (!new RegExp(`#${id}(?!\\d)`).test(sup.suggestion ?? '')) {
+      throw new Response(
+        `Conflict: retire evidence rejected — row #${sup.id} does not name #${id} in its text`,
+        { status: 409 },
+      )
+    }
+    links.push({
+      kind: 'note',
+      ref: `retire evidence: superseded by #${sup.id} (${sup.status}), whose text names #${id}`,
+    })
+  }
+  if (evidence.satisfiedBy) {
+    const ref = evidence.satisfiedBy.trim()
+    const isPr = SATISFIED_BY_PR_RE.test(ref)
+    if (!isPr && !SATISFIED_BY_DOC_RE.test(ref)) {
+      throw new Response(
+        'Conflict: retire evidence rejected — satisfiedBy must be a GitHub PR URL or a repo doc path (optionally with #anchor)',
+        { status: 409 },
+      )
+    }
+    links.push({ kind: isPr ? 'pr' : 'doc', ref })
+  }
+
+  return transitionSuggestion(id, 'dismissed', actor, {
+    note,
+    links,
+    viaRetireEvidence: true,
+  })
 }
 
 /**
@@ -1167,6 +1391,21 @@ export const CLAIMANT_ACTORS: readonly TicketActor[] = ['agent:rr7-engineer', 'a
 export const AGENT_RETIRE_KINDS: readonly string[] = ['process', 'strategy', 'program']
 
 /**
+ * Kinds agent-editor may retire WITH EVIDENCE (#2864, all-hands audit
+ * 2026-08-12 gap 3). Its own work queue (`instructions`/`agent-def`) stays
+ * unretirable on the plain edge — being able to retire your own instruction
+ * rows is being able to dismiss the suggestions that constrain you — but a row
+ * it can PROVE superseded or already satisfied used to be un-closable by
+ * anyone, re-listed every run forever. The evidence requirement is the fence:
+ * an evidence-free retire on these kinds still 409s (see `retireEvidenceOnly`
+ * on the rule and the validation in `agentRetireSuggestion`), and every
+ * evidence retire lands with the evidence attached as links and is listed in
+ * the owner digest like any other retire. `config` is deliberately absent:
+ * config rows are valve-adjacent and stay the owner's.
+ */
+export const AGENT_EVIDENCE_RETIRE_KINDS: readonly string[] = ['instructions', 'agent-def']
+
+/**
  * Entry agents for the daily routines, permitted to close an inbound
  * operational row they acted on.
  *
@@ -1202,9 +1441,11 @@ export interface TransitionRule {
   /**
    * Literal actors permitted on this edge. The pseudo-actor `assignee` matches
    * whoever currently holds the claim, so "only the agent that claimed it may
-   * open its PR" is one entry rather than a special case in the code.
+   * open its PR" is one entry rather than a special case in the code. The
+   * pseudo-actor `any-agent` matches every `agent:<slug>` actor, used only by
+   * the fenced delegated-supersession dismissal (#3573).
    */
-  actors: readonly (TicketActor | 'assignee')[]
+  actors: readonly (TicketActor | 'assignee' | 'any-agent')[]
   /** When present, the ticket's `kind` must be one of these. */
   kinds?: readonly string[]
   /** Edges that always burn a fix attempt (QA bounce, smoke-failure bounce). */
@@ -1223,6 +1464,27 @@ export interface TransitionRule {
    * /api/team/suggestion can reach these edges at all.
    */
   outOfBandReconcileOnly?: boolean
+  /**
+   * The fence on the owner-delegated dismissal edges (#3573, owner-approved
+   * 2026-08-16). A rule carrying this flag matches only when the transition's
+   * note contains a VERIFIED supersession reference — a GitHub PR URL, or a
+   * `#<ticketId>` that `transitionSuggestion` has resolved against the DB to a
+   * live (non-dismissed) replacement row. The flag is computed server-side
+   * from the note; nothing in the HTTP body can assert it directly. Every walk
+   * of a flagged rule records the true agent actor in `decided_by` plus a
+   * `delegated_by=owner` note link, mirroring the settings_audit_log
+   * actor+source pattern from migration 072.
+   */
+  delegatedSupersessionOnly?: boolean
+  /**
+   * The fence on agent-editor's evidence-carrying retire (#2864). Matches only
+   * when the call came through `agentRetireSuggestion` with evidence that
+   * validated (a superseding row that names this one, or a satisfied-by ref).
+   * Like the reconcile fence, the flag is an internal signal the transition op
+   * on /api/team/suggestion never forwards; only the retire op's evidence
+   * validation can set it.
+   */
+  retireEvidenceOnly?: boolean
 }
 
 /** Every non-terminal status can be retired by the owner. */
@@ -1238,6 +1500,11 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // sits open it holds the undated dedupe key, so the detector can never file
     // for that slot again. That is how four homepage freshness slots went mute.
     { to: 'applied', actors: ['system'], kinds: DETECTOR_SELF_CLOSE_KINDS },
+    // Owner-delegated supersession dismissal (#3573): any agent may retract a
+    // proposed row its own filing replaced, provided the note carries a
+    // verified reference to the replacement. See the flag's doc on
+    // TransitionRule for the fence mechanics.
+    { to: 'dismissed', actors: ['any-agent'], delegatedSupersessionOnly: true },
     OWNER_DISMISS,
   ],
   approved: [
@@ -1270,6 +1537,15 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // agent-editor's hygiene pass retiring a row with no executor. Kinds are
     // fenced so it can never dismiss the instruction rows aimed at itself.
     { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_RETIRE_KINDS },
+    // Owner-delegated supersession dismissal (#3573): an interactive session's
+    // agent actor retiring a row that owner direction has superseded, with the
+    // replacement named in the note. Motivating rows: 3186/3198/3227, which
+    // sat approved after PR #676 + ticket #3531 replaced them because writing
+    // actor 'owner' from a session is (correctly) impersonation.
+    { to: 'dismissed', actors: ['any-agent'], delegatedSupersessionOnly: true },
+    // agent-editor retiring a superseded/satisfied instructions row WITH
+    // EVIDENCE (#2864). Evidence-free retires on these kinds still 409.
+    { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
     OWNER_DISMISS,
   ],
   in_progress: [
@@ -1358,6 +1634,32 @@ export interface TransitionContext {
   /** True only when the call arrives through the out-of-band reconcile path.
    *  Rules flagged `outOfBandReconcileOnly` match on no other condition. */
   viaOutOfBandReconcile?: boolean | undefined
+  /** True only when the transition note carried a supersession reference that
+   *  verified (#3573). Rules flagged `delegatedSupersessionOnly` match on no
+   *  other condition. Computed inside transitionSuggestion, never taken from
+   *  the HTTP body. */
+  viaDelegatedSupersession?: boolean | undefined
+  /** True only when agentRetireSuggestion validated retire evidence (#2864).
+   *  Rules flagged `retireEvidenceOnly` match on no other condition. */
+  viaRetireEvidence?: boolean | undefined
+}
+
+/** A supersession reference parsed out of a dismissal note (#3573). */
+export type SupersessionRef =
+  | { kind: 'pr'; url: string }
+  | { kind: 'ticket'; id: number }
+
+/**
+ * Find the supersession reference in a note: a GitHub PR URL wins, else the
+ * first `#<id>` ticket reference. Pure; the DB liveness check on a ticket ref
+ * happens in transitionSuggestion. Exported for the route docs and tests.
+ */
+export function parseSupersessionRef(note: string): SupersessionRef | null {
+  const pr = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d{1,6})\b/.exec(note)
+  if (pr) return { kind: 'pr', url: pr[0] }
+  const ticket = /#(\d{1,7})(?!\d)/.exec(note)
+  if (ticket?.[1]) return { kind: 'ticket', id: Number(ticket[1]) }
+  return null
 }
 
 /**
@@ -1393,13 +1695,19 @@ export function findTransitionRule(
   for (const rule of ALLOWED[from] ?? []) {
     if (rule.to !== to) continue
     const actorOk = rule.actors.some(a =>
-      a === 'assignee' ? !!ctx.assignee && ctx.assignee === actor : a === actor,
+      a === 'assignee' ? !!ctx.assignee && ctx.assignee === actor
+      : a === 'any-agent' ? AGENT_ACTOR_RE.test(actor)
+      : a === actor,
     )
     if (!actorOk) continue
     if (rule.kinds && !rule.kinds.includes(ctx.kind ?? '')) continue
     // The reconcile fence: these rules are invisible to any caller that has
     // not declared itself the out-of-band reconcile path.
     if (rule.outOfBandReconcileOnly && ctx.viaOutOfBandReconcile !== true) continue
+    // The delegated-supersession fence (#3573) and the retire-evidence fence
+    // (#2864): invisible without their server-side-verified declarations.
+    if (rule.delegatedSupersessionOnly && ctx.viaDelegatedSupersession !== true) continue
+    if (rule.retireEvidenceOnly && ctx.viaRetireEvidence !== true) continue
     return rule
   }
   return null
@@ -1437,6 +1745,13 @@ export interface TransitionOpts {
    * declaration ambiently via `runWithOutOfBandReconcile`.
    */
   viaOutOfBandReconcile?: boolean | undefined
+  /**
+   * Declares this call an evidence-carrying retire (#2864), unlocking the
+   * `retireEvidenceOnly` edge. Set only by `agentRetireSuggestion` AFTER its
+   * evidence validation passes; the /api/team/suggestion transition op does
+   * not forward it, so the fence cannot be crossed by a bare transition call.
+   */
+  viaRetireEvidence?: boolean | undefined
 }
 
 export type TicketRow = typeof homepageTeamSuggestions.$inferSelect
@@ -1493,10 +1808,44 @@ export async function transitionSuggestion(
   // out-of-band sweep module, whose transition calls live outside the engine).
   const viaOutOfBandReconcile =
     opts.viaOutOfBandReconcile === true || outOfBandReconcileScope.getStore() === true
+  // The delegated-supersession declaration (#3573) is EARNED, never asserted:
+  // computed here from the note, with ticket references resolved against the
+  // DB so a note citing a dismissed or nonexistent row does not unlock the
+  // edge. Scoped to the only shape the delegated rules cover (agent actor
+  // dismissing a proposed/approved row) so no other transition pays the check.
+  let viaDelegatedSupersession = false
+  let supersessionRefText: string | null = null
+  if (
+    to === 'dismissed'
+    && (from === 'proposed' || from === 'approved')
+    && AGENT_ACTOR_RE.test(actor)
+    && opts.note
+  ) {
+    const ref = parseSupersessionRef(opts.note)
+    if (ref?.kind === 'pr') {
+      viaDelegatedSupersession = true
+      supersessionRefText = ref.url
+    } else if (ref?.kind === 'ticket' && ref.id !== id) {
+      const [replacement] = await db
+        .select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status })
+        .from(homepageTeamSuggestions)
+        .where(eq(homepageTeamSuggestions.id, ref.id))
+        .limit(1)
+      // "Live replacement": the row exists and was not itself dismissed.
+      // `applied` counts — a replacement that already shipped is still the
+      // thing that superseded this row.
+      if (replacement && replacement.status !== 'dismissed') {
+        viaDelegatedSupersession = true
+        supersessionRefText = `#${ref.id}`
+      }
+    }
+  }
   const rule = findTransitionRule(from, to, actor, {
     assignee: row.assignee,
     kind: row.kind,
     viaOutOfBandReconcile,
+    viaDelegatedSupersession,
+    viaRetireEvidence: opts.viaRetireEvidence === true,
   })
   if (!rule) {
     throw new Response(
@@ -1574,6 +1923,17 @@ export async function transitionSuggestion(
 
   const links: TicketLinkInput[] = [...(opts.links ?? [])]
   if (opts.note) links.push({ kind: 'note', ref: opts.note, state: to })
+  // Honest attribution on the delegated dismissal (#3573): decided_by above
+  // records the true agent actor; this marker records that the authority was
+  // delegated by the owner and what supersession earned it — the same
+  // actor+source pattern settings_audit_log uses (migration 072).
+  if (rule.delegatedSupersessionOnly) {
+    links.push({
+      kind: 'note',
+      ref: `delegated_by=owner: '${from}' -> 'dismissed' by ${actor} via supersession ${supersessionRefText ?? ''}`.trim(),
+      state: to,
+    })
+  }
   await addTicketLinks(id, links)
 
   return updated[0]!

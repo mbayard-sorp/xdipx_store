@@ -3,18 +3,42 @@
  * the ticket board for the self-healing loop.
  *
  *   { op: 'create', team, targetTeam?, runId?, category, kind?, suggestion,
- *     estSavingsUsd?, cxRisk?, priority?, dedupeKey?, dueAt? }
- *       -> { id } | { deduped: true, id }
+ *     estSavingsUsd?, cxRisk?, priority?, dedupeKey?, dueAt?, links?,
+ *     supersedesId?, actor? }
+ *       -> { id, superseded? } | { deduped: true, id, superseded? }
+ *     links (#1686) persist with the filing, so ADR-008's pr link fits in the
+ *     one call. supersedesId (#3406) records the row this filing replaces and
+ *     moves it out of the active set (proposed/approved -> dismissed with a
+ *     note naming the new row; an in-flight row is noted, never yanked);
+ *     `superseded: { id, outcome: 'dismissed'|'noted'|'not-found'|'error' }`
+ *     reports what happened. actor attributes that dismissal (agent:<slug>;
+ *     defaults to agent:<team>).
  *   { op: 'list', team?, targetTeam?, status?, statuses?, kind?, assignee?,
- *     updatedSince?, limit?, orderBy? } -> { suggestions: [...] }
+ *     updatedSince?, limit?, orderBy? } -> { suggestions: [...], total }
+ *     total (#2071) is the full matching count, so truncation is detectable:
+ *     total > suggestions.length means the cap bit. A status-filtered list
+ *     with no orderBy returns OLDEST first, so truncation can only delay the
+ *     newest rows (re-listed next run), never permanently hide the oldest.
  *   { op: 'mark', id, status: 'pr_open'|'applied', applyRef } -> { ok }
  *   { op: 'claim', assignee, leaseSeconds?, id?, filter? }
  *       -> { claimed: true, ...ticket } | { empty: true }
  *   { op: 'transition', id, to, actor, note?, links?, lastError? }
  *       -> { ok: true, suggestion }
+ *     Delegated dismissal (#3573, owner-approved): an agent actor MAY
+ *     transition a proposed/approved row to dismissed when the note contains
+ *     a supersession reference — a GitHub PR URL, or `#<id>` of a live
+ *     replacement row (verified server-side). The event records the agent
+ *     actor plus a delegated_by=owner note link. Without a verifying
+ *     reference the transition 409s exactly as before.
  *   { op: 'get', id } -> { suggestion, links, events }
  *   { op: 'rekind', id, kind, actor, note? } -> { ok: true, suggestion }
- *   { op: 'retire', id, actor, note } -> { ok: true, suggestion }
+ *   { op: 'retire', id, actor, note, supersededById?, satisfiedBy? }
+ *       -> { ok: true, suggestion }
+ *     Evidence retire (#2864): with supersededById (a live-or-applied row
+ *     whose text names this one) or satisfiedBy (PR URL or doc path#anchor),
+ *     agent-editor may also retire instructions/agent-def rows; the evidence
+ *     is validated server-side and recorded as links. Evidence-free retires
+ *     on those kinds still 409.
  *   { op: 'note', id, ref } -> { ok: true }
  *
  * Lifecycle (app/lib/team.server.ts ALLOWED is the single source of truth):
@@ -36,6 +60,7 @@ import {
   agentRetireSuggestion,
   assertTeamAuth,
   claimSuggestion,
+  countSuggestions,
   createSuggestionDetailed,
   getTicket,
   rekindSuggestion,
@@ -101,7 +126,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const priority = typeof b['priority'] === 'number' && b['priority'] >= 1 && b['priority'] <= 5
       ? Math.round(b['priority'])
       : undefined
-    const { id, deduped } = await createSuggestionDetailed({
+    const { id, deduped, superseded } = await createSuggestionDetailed({
       team:          b['team'],
       targetTeam:    isTeamId(b['targetTeam']) ? b['targetTeam'] : undefined,
       runId:         typeof b['runId'] === 'number' ? b['runId'] : undefined,
@@ -113,14 +138,24 @@ export async function action({ request }: ActionFunctionArgs) {
       priority,
       dedupeKey:     typeof b['dedupeKey'] === 'string' && b['dedupeKey'] ? b['dedupeKey'].slice(0, 64) : undefined,
       dueAt:         parseDate(b['dueAt']),
+      // #1686: links persist with the filing instead of being silently dropped.
+      links:         parseLinks(b['links']),
+      // #3406: record and resolve the supersession the filing declares.
+      supersedesId:  typeof b['supersedesId'] === 'number' && Number.isInteger(b['supersedesId']) && b['supersedesId'] > 0
+                       ? b['supersedesId'] : undefined,
+      actor:         isTicketActor(b['actor']) ? b['actor'] : undefined,
     })
     // A duplicate is a normal outcome, not an error: the signal is already
     // being tracked, and the caller gets the live ticket to comment on.
-    return Response.json(deduped ? { deduped: true, id } : { id })
+    return Response.json({
+      ...(deduped ? { deduped: true } : {}),
+      id,
+      ...(superseded ? { superseded } : {}),
+    })
   }
 
   if (b['op'] === 'list') {
-    const suggestions = await listSuggestions({
+    const filter = {
       team:         isTeamId(b['team']) ? b['team'] : undefined,
       targetTeam:   isTeamId(b['targetTeam']) ? b['targetTeam'] : undefined,
       status:       typeof b['status'] === 'string' ? b['status'] : undefined,
@@ -132,8 +167,14 @@ export async function action({ request }: ActionFunctionArgs) {
       orderBy:      (ORDER_BY as readonly string[]).includes(b['orderBy'] as string)
                       ? (b['orderBy'] as (typeof ORDER_BY)[number])
                       : undefined,
-    })
-    return Response.json({ suggestions })
+    }
+    // total (#2071) makes truncation detectable: the limit caps `suggestions`,
+    // never the count, so total > suggestions.length means rows fell off.
+    const [suggestions, total] = await Promise.all([
+      listSuggestions(filter),
+      countSuggestions(filter),
+    ])
+    return Response.json({ suggestions, total })
   }
 
   if (b['op'] === 'mark') {
@@ -225,7 +266,21 @@ export async function action({ request }: ActionFunctionArgs) {
       // A retirement with no stated reason is indistinguishable from a mistake.
       return new Response('Bad Request: note required (say why it is being retired)', { status: 400 })
     }
-    const suggestion = await agentRetireSuggestion(b['id'], b['actor'], b['note'])
+    // #2864: optional evidence unlocks the instructions/agent-def retire edge.
+    // Validation (superseding row must exist, be live-or-applied, and name
+    // this row; satisfiedBy must be a PR URL or doc path) lives in
+    // agentRetireSuggestion, next to the transition map it feeds.
+    const supersededById =
+      typeof b['supersededById'] === 'number' && Number.isInteger(b['supersededById']) && b['supersededById'] > 0
+        ? b['supersededById'] : undefined
+    const satisfiedBy =
+      typeof b['satisfiedBy'] === 'string' && b['satisfiedBy'].trim() ? b['satisfiedBy'].trim() : undefined
+    const suggestion = await agentRetireSuggestion(
+      b['id'],
+      b['actor'],
+      b['note'],
+      supersededById != null || satisfiedBy ? { supersededById, satisfiedBy } : undefined,
+    )
     return Response.json({ ok: true, suggestion })
   }
 

@@ -55,7 +55,7 @@ Taste skills choose the look; these layer on top and are non-negotiable:
 - Section structure / what sections exist → `homepage-ia` (design within the IA, don't redefine it).
 - Component + layout build → `rr7-engineer` (Routine B → PR; the team never merges, the release engine merges after CI + QA + the protected-path check).
 - New Sanity block schema → `sanity-content-builder` (additive only).
-- Production imagery → `media-manager` (reuse-first, fal.ai primary). Hand over the imagery brief; don't burn image budget on comps.
+- Production imagery → `media-manager` (reuse-first; generation via `generateImage()`, routing per `docs/media-model-routing.md`). Hand over the imagery brief; don't burn image budget on comps.
 - Copy in any mock → `emma-copywriter`, gated by `emma-empathy-reviewer`.
 - Final visual/perf acceptance → `qa-reviewer` (preview MCP, CLS check).
 </handoffs>

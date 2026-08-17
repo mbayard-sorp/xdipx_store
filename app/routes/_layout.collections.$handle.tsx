@@ -20,6 +20,7 @@ import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredD
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { readRecentHandles } from '~/lib/recent-views.server'
 import { NotebookRail } from '~/components/blog/NotebookRail'
+import { TrustStrip } from '~/components/store/TrustStrip'
 import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 
 const FACET_PARAMS = ['mood', 'audience', 'matters', 'budgetMax'] as const
@@ -490,6 +491,12 @@ export default function CollectionPage() {
           </h1>
         </header>
       )}
+
+      {/* Trust content hoisted directly under the masthead (ticket #3424):
+          plain packaging, the XDIPX billing descriptor, and the shipping
+          promise previously rendered below ~74% page depth, invisible to a
+          cold paid click. Same shared strip the storefront hero band uses. */}
+      <TrustStrip variant="card" className="mb-8" />
 
       <div className="flex flex-col md:flex-row gap-8">
         {/* The Emma rails are short; in a stretched flex row they left the left

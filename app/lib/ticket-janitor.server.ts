@@ -17,9 +17,21 @@
  * instead of failing whole. GitHub reads go through `app/lib/github.server.ts`
  * helpers, which already skip gracefully when the token env is absent.
  *
- * The reconcile step writes ONLY `suggestion_links` rows (pr-link `state`
- * refresh when GitHub disagrees). It never transitions a ticket: status moves
- * stay with the transition map in team.server.ts and its actors.
+ * The pr-link reconcile step (`reconcilePrLinkStates`) writes ONLY
+ * `suggestion_links` rows (pr-link `state` refresh when GitHub disagrees) and
+ * never transitions a ticket.
+ *
+ * `reconcileOrphanedTickets` (#3582) is the one exception to "detect only",
+ * and it goes THROUGH the transition map, never around it: an orphaned ticket
+ * whose linked PR GitHub itself reports merged, in a status the map's
+ * `outOfBandReconcileOnly` edges cover (approved/blocked/pr_open/in_review),
+ * and whose changed files are all non-protected, is transitioned to `applied`
+ * inside `runWithOutOfBandReconcile` — the same fenced machinery the engine's
+ * out-of-band sweep uses, unreachable from the team HTTP API. A protected-path
+ * PR is never auto-applied (the owner merged it deliberately; its ticket stays
+ * surfaced in the digest's Needs-Mike list), and a closed-unmerged PR's ticket
+ * is never touched (also surfaced, owner's call). Everything else in this
+ * module stays flag-only.
  *
  * Two later additions live here for the same non-protected-path reason:
  *
@@ -47,11 +59,14 @@ import { and, eq, isNull, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { suggestionLinks } from '../../db/schema'
 import {
+  classifyChangedFiles,
   getPullRequest,
   isGithubConfigured,
   listOpenPullRequests,
+  listPullRequestFiles,
   type PullRequestSummary,
 } from '~/lib/github.server'
+import { runWithOutOfBandReconcile, transitionSuggestion } from '~/lib/team.server'
 import { sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { kvSetNX } from '~/lib/kv.server'
 
@@ -263,6 +278,149 @@ export function classifyOrphans(candidates: readonly OrphanCandidate[]): OrphanT
     }
   }
   return out
+}
+
+/* ── Orphan reconcile (#3582): merged-PR orphans off the live queue ────────── */
+
+/**
+ * Statuses the orphan reconcile may move to `applied`. Exactly the statuses
+ * the transition map's `outOfBandReconcileOnly` edges cover — this module adds
+ * no edge of its own. `in_progress` is excluded (an active lease means an
+ * agent is mid-work; a PR link on it may be a superseded earlier attempt),
+ * `proposed` is excluded (never triaged, so "its fix shipped" is not a claim
+ * anyone made), and `verified` is the engine's own reconcile lane already.
+ */
+export const RECONCILABLE_ORPHAN_STATUSES: readonly string[] = [
+  'approved', 'blocked', 'pr_open', 'in_review',
+]
+
+export type OrphanReconcileAction =
+  | 'apply'            // merged, reconcilable status, no protected files
+  | 'skip-protected'   // merged but the PR touched a protected path: owner's
+  | 'skip-closed'      // PR closed unmerged: never auto-applied, stays surfaced
+  | 'skip-status'      // status outside the fenced reconcile edges
+  | 'skip-unknown'     // changed files unreadable: unknown never classifies
+
+/**
+ * Pure decision for one orphan. Only a `merged` verdict from GitHub plus a
+ * clean (non-protected, successfully read) file list yields `apply`;
+ * everything else stays a flag for the digest, which is where these tickets
+ * were already surfaced before #3582.
+ */
+export function classifyOrphanReconcile(
+  orphan: Pick<OrphanTicket, 'status' | 'prOutcome'>,
+  files: { ok: boolean; protected: boolean },
+): OrphanReconcileAction {
+  if (orphan.prOutcome === 'closed') return 'skip-closed'
+  if (!RECONCILABLE_ORPHAN_STATUSES.includes(orphan.status)) return 'skip-status'
+  if (!files.ok) return 'skip-unknown'
+  if (files.protected) return 'skip-protected'
+  return 'apply'
+}
+
+/** Most tickets the orphan reconcile will transition per run. Same bound the
+ *  out-of-band sweep uses, for the same reason: one digest cycle stays cheap. */
+export const ORPHAN_RECONCILE_MAX = 5
+
+export interface OrphanReconcileResult {
+  /** Orphans considered (post-classification input count). */
+  checked: number
+  /** Ticket ids transitioned to `applied`. */
+  applied: number[]
+  /** Merged orphans left alone because their PR touched a protected path. */
+  skippedProtected: number[]
+  errors: string[]
+  /** True when GitHub was unconfigured and nothing was attempted. */
+  skipped: boolean
+}
+
+/**
+ * Move merged-PR orphans off the live queue (#3582).
+ *
+ * Cost of not doing this, measured in the 2026-08-16 08:00 R-DEV pass: #1258
+ * (PR #671 merged) and #3215 (PR #657 merged) both cycled approved/blocked ->
+ * claim -> block -> owner re-approve, burning a claim per cycle, because the
+ * janitor detected the orphan but nothing was allowed to act on it.
+ *
+ * Safety model, in order:
+ *  - Only a `merged: true` from GitHub itself makes a candidate (the orphan
+ *    classification upstream), so unmerged work can never be marked shipped.
+ *  - Only the four statuses the map's fenced reconcile edges cover.
+ *  - The PR's changed files are read from GitHub and classified against
+ *    PROTECTED_GLOBS; any protected match (or an unreadable file list) skips
+ *    the ticket — a protected-path merge was the owner's deliberate act and
+ *    its ticket stays in the digest's Needs-Mike list for the owner.
+ *  - The transition itself runs inside `runWithOutOfBandReconcile`, so it
+ *    walks the map's `outOfBandReconcileOnly` edges as actor `system` exactly
+ *    like the engine's sweep. No new edge, no bypass; a 409 (something else
+ *    moved the row first) is swallowed as normal.
+ */
+export async function reconcileOrphanedTickets(
+  opts: { maxApplied?: number } = {},
+): Promise<OrphanReconcileResult> {
+  const result: OrphanReconcileResult = {
+    checked: 0, applied: [], skippedProtected: [], errors: [], skipped: false,
+  }
+  if (!isGithubConfigured()) return { ...result, skipped: true }
+  const maxApplied = opts.maxApplied ?? ORPHAN_RECONCILE_MAX
+
+  const readPr = createPrReadCache()
+  let orphans: OrphanTicket[] = []
+  try {
+    orphans = (await gatherOrphans(readPr)).orphans
+  } catch (err) {
+    result.errors.push(`orphan gather failed: ${String(err).slice(0, 200)}`)
+    return result
+  }
+
+  for (const orphan of orphans) {
+    if (result.applied.length >= maxApplied) break
+    result.checked += 1
+
+    const prNumber = parsePrNumber(orphan.prRef)
+    if (prNumber === null) continue
+
+    let files: { ok: boolean; protected: boolean } = { ok: false, protected: true }
+    if (orphan.prOutcome === 'merged' && RECONCILABLE_ORPHAN_STATUSES.includes(orphan.status)) {
+      try {
+        const res = await listPullRequestFiles(prNumber, 'ticket-janitor')
+        files = res.ok
+          ? { ok: true, protected: classifyChangedFiles(res.data).protected }
+          : { ok: false, protected: true }
+      } catch (err) {
+        result.errors.push(`ticket #${orphan.ticketId}: file read failed: ${String(err).slice(0, 200)}`)
+      }
+    }
+
+    const action = classifyOrphanReconcile(orphan, files)
+    if (action === 'skip-protected') {
+      result.skippedProtected.push(orphan.ticketId)
+      continue
+    }
+    if (action !== 'apply') continue
+
+    try {
+      await runWithOutOfBandReconcile(() =>
+        transitionSuggestion(orphan.ticketId, 'applied', 'system', {
+          note:
+            `orphan reconcile (#3582): PR #${prNumber} is merged per GitHub and touches no protected path, `
+            + `so the fix is live while this ticket sat ${orphan.status}.`,
+          links: [{ kind: 'pr', ref: orphan.prRef, state: 'merged' }],
+        }),
+      )
+      result.applied.push(orphan.ticketId)
+      console.log(`[ticket-janitor] orphan #${orphan.ticketId} applied: PR #${prNumber} merged`)
+    } catch (err) {
+      // 409 = the row moved underneath us (engine, sweep, or owner got there
+      // first) — the normal race, not an error.
+      const msg = String(err)
+      if (!msg.includes('409')) {
+        result.errors.push(`ticket #${orphan.ticketId}: ${msg.slice(0, 200)}`)
+      }
+    }
+  }
+
+  return result
 }
 
 /* ── Conflicted PRs: CI structurally cannot run ────────────────────────────── */

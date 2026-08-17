@@ -40,6 +40,10 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 4. `docs/store-team/instagram-campaigns.md` (mandatory before any Instagram drafting): the standing
    campaign schedule, the pillar and format library, the rotation rule, and the continuity rule.
    Missing → STOP and report.
+4b. `docs/store-team/social-crossplatform-strategy.md` (binding context, owner direction
+   2026-08-16): the one-campaign-two-registers through line, the X companion beat, the pairing
+   rule, maker relations, and the Meta-approved-catalog preference. Where it and a charter or gate
+   disagree, the charter and the gate win, as that file itself states.
 5. Calendar (`GET /api/team/calendar`), current featured products/deals.
 6. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
    (`social_freq_*`; 0 = skip that platform entirely).
@@ -250,6 +254,25 @@ carousels, and Brand Crush alike.
 - `inventory-sentinel` adds `social_posts` featured products to its watch scope, so a stock drop on a
   queued post surfaces as a flag rather than a deleted live post.
 
+## Step 2.7 — What catalog approval gates, and what it does not
+
+The Shopify catalog is connected to Meta (catalog 1551461513373481) and both the Facebook and
+Instagram shops are live. Meta reviews each item. That verdict decides whether an item appears in
+those shops and whether it can carry a product tag. It does not decide whether an organic post may
+feature the product. Organic posts are judged post by post against Meta's community standards.
+
+So: never filter draft product selection on catalog approval status. As of 2026-08-15, 418 of the
+651 reviewed products are rejected, so that filter would remove roughly two thirds of the reviewed
+catalog for no benefit on the organic surface. The gates that do bind an Instagram draft are
+unchanged: the voice charter, `docs/ads-policy.md` §Organic social and §Creative, Step 2.6 stock,
+and `social-publish-gate`.
+
+Where approval does bind, hard: the approved set is the only set that can appear in the shop or
+carry a product tag. If and when product tagging is wired into the publisher, a tag may reference
+an approved product only, and an unapproved one is a publish-time block, not a warning.
+
+Until tagging exists, commerce on Instagram runs post to profile to link in bio to `/social` to PDP.
+
 ## Step 3 — Draft (reworks included)
 
 **THE QUOTA IS PER DAY, NOT PER RUN. Count today's rows before you draft anything.** The social
@@ -315,6 +338,38 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   "Wand Week" is not permission to sell wands.
 - **Any post removal ends the campaign** and steps volume down one level immediately, per
   `docs/ads-policy.md` escalation. Volume is earned back by a clean stretch, not by waiting.
+
+**Rotate the hook shape across the run (ticket #3639).** No two Instagram drafts in one run may
+open with the same hook construction. The voice gate PASSes each caption alone, so a repeated
+opener pattern (filler word, then a category-detail claim with an audience-reaction tag) is
+invisible to it and drifts into a house tic; run 345 flagged it twice. Alternate shapes to rotate:
+a question opener (the question the reader already has), a myth-to-retire opener (name the
+misconception, then correct it), and a scene-first opener (start inside the moment, then land the
+point).
+
+**The X companion beat (crossplatform strategy §1).** For each Instagram slate post featuring a
+product, draft an X companion when the X quota allows: same campaign subject, register 6-7 per the
+social addendum, PDP link with channel UTMs, and a fresh sentence, never the IG caption reheated.
+The companion belongs to the campaign the same way the IG post does.
+
+**The pairing rule: a toy never travels alone (crossplatform strategy §3).** When a post features a
+toy, it also names a lubricant from the catalog that genuinely suits it. Source the pairing from
+the product's `accessory_product_ids` / `pairing_why` metafields when present; otherwise pick by
+material compatibility (silicone toy → water-based lube) and say why in one plain clause. On X,
+link both PDPs with UTMs. On Instagram, name the pairing without a link; the `/social` bio-link
+page carries both that week. A pairing that pushes an IG caption into sale territory fails Step 4b
+as usual: the pairing is advice, the sale lives on X and the site.
+
+**Author quotes are real or absent (crossplatform strategy §4).** Quotes from educators and authors
+in the space are licensed and encouraged: short, attributed by name, and verified against a real
+source in the run. Never from memory, never fabricated, never longer than a sentence or two. When
+in doubt, paraphrase with a name-check instead.
+
+**Prefer Meta-approved products for Instagram product features, all else equal (crossplatform
+strategy §2).** An approved product resolves inside Meta's own commerce surface, so the platform
+carries part of the funnel. Approval is never a posting licence and never a draft filter (Step 2.7
+and `docs/ads-policy.md` §Meta Shops): it is a tiebreaker between otherwise-equal candidates, and a
+rejected product stays fully available to editorial posts.
 
 **Plain nouns first.** Name the product category and anatomy with the charter's plain nouns
 (`docs/emma-voice.md`, "Say the word, drop the wink") — vibrator, clitoral, prostate, penetration —
@@ -429,8 +484,10 @@ while a working generator sat unused because this step never named it.
 
 Ask `media-manager` first for an existing Shopify Files / Sanity asset (reuse-first). When nothing
 fits, **generate one with `scripts/gen-social-image.ts`**, re-checking the gate before each run. It
-handles generation, rehosting to Shopify Files (fal URLs expire in 24h and Instagram fetches the
-image server-side at publish time), and the spend row.
+handles generation, rehosting to Shopify Files (generator URLs expire, Atlas output URLs in ~14
+days and fal URLs in 24h, and Instagram fetches the image server-side at publish time, so every
+asset is rehosted regardless of provider; routing per `docs/media-model-routing.md`), and the
+spend row.
 
 **Product post, cast composite.** The presenter holds and shows the product (§3.6):
 
@@ -559,6 +616,13 @@ pulled for the image beside it.
 load-bearing. The gate is adversarial by design and explicitly must not read your reasoning about
 why the post is compliant, because that reasoning is the thing under test. Handing it your context
 turns an independent check into a second opinion from yourself.
+
+**Also sweep fanned-out video rows (ticket #3733).** List Instagram `pending_review` drafts
+(`{op:'list', status:'draft', reviewStatus:'pending_review'}`) and gate any row carrying a
+`videoJobId` exactly the same way, one fresh subagent per row. These are Reels the owner approved
+in the Video Studio; that approval reviewed the video, not the finished post, so they wait here
+for the same verdict your own drafts get. Skipping them strands them: no other pass gates a video
+row, and an ungated row can never publish.
 
 Give it only the post id. It gathers its own inputs: the caption as it will publish, every media URL
 opened and actually looked at, the charter as it reads today, the ads policy, the campaign's visual

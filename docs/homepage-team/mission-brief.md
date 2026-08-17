@@ -76,8 +76,9 @@ scaffold in `docs/homepage-team/image-prompt-library.md`. Canonical rules:
 ground lock. The rules below stand; the doctrine wins where they drift.
 
 - **Every merchandising image shows what we sell.** Either the actual
-  product (its real Shopify photo submitted to fal as a Kontext reference
-  image via `--ref-image` on `scripts/gen-homepage-image.ts`), or a sensual
+  product (its real Shopify photo submitted as a reference image via
+  `--ref-image` on `scripts/gen-homepage-image.ts`; `generateImage()` routes
+  it, Atlas primary, per `docs/media-model-routing.md`), or a sensual
   human context matched to what the surface links to: lingerie on a body,
   silk against skin, hands, playful tension.
 - **Cast members are licensed in merchandising imagery (owner directive,
@@ -102,7 +103,8 @@ ground lock. The rules below stand; the doctrine wins where they drift.
   candles, fruit, napkins, empty styled tables — any still life a homewares
   store could run. Props may support a product; they may never replace it.
 - **No text in generated images** (Mike's directive, 2026-07-06). Every
-  fal.ai / Imagen output must be text-free: no words, letters, captions,
+  generated-image output, whatever provider `generateImage()` routed it to,
+  must be text-free: no words, letters, captions,
   labels, logos, watermarks, or typographic overlays baked into the pixels.
   Copy belongs in the markup, never in the image. Add "no text, no words, no
   letters, no watermark, no logo, no caption" to the negative brief of every
@@ -237,6 +239,22 @@ re-deriving the field from scratch.
 Featuring a product is a bet; place it deliberately. When choosing the hero
 and rail products (on top of the selection criteria in Routine A):
 
+- **Lead-surface price floor (the AOV lever, ticket #3446, P1).** The lead
+  surfaces carry anchors priced at or above $39: the hero, the FIRST rail,
+  collection landing sort order, and the Compass finder's default results.
+  Consumables (lube, cleaner, and other attach inventory) appear only in
+  attach position: never in the hero, and never in slots 1-3 of the first
+  rail. Why: basket size is ~1.24 items, so the anchor item's price
+  essentially IS the AOV. On 2026-08-15 the live first rail led with four
+  lubricants and a toy cleaner, which is leading with the attach inventory.
+  The rule constrains LEAD surfaces only, never the catalog: search,
+  category pages, and direct navigation keep everything, and the $12.99
+  lube stays two clicks away as an attach. The under-$30 entry rail (§3)
+  still exists and keeps its 6-product depth floor; it just is never the
+  first rail. Demoting the under-25/under-30/under-50 collections out of
+  primary nav is the shell half of this rule and goes through Routine B.
+  Enforcement lives in the Routine A pick gate (`homepage-cro`), not only
+  in this brief, so it survives the daily reshuffle.
 - **Photogenic first, inside the theme.** A featured product needs photography
   that can carry a bright, bold image — strong silhouette, saturated color,
   clean shots. A great product with murky photos loses the hero slot to a good

@@ -9,9 +9,14 @@ compound; this file is where they stop evaporating.
   write prompts from scratch.
 - After every run, append prompts that produced keepers to the surface's **Keepers** list (with
   the placed asset URL as the thumbnail reference) and add failed patterns to **Rejects**.
-- All scaffolds inherit `docs/design-doctrine.md` §4: real product via `--ref-image` (FLUX
-  Kontext) wherever a product is featured or linked; bright/high-key light; v3 palette; nothing
-  a premium lingerie campaign could not run.
+- All scaffolds inherit `docs/design-doctrine.md` §4: real product via `--ref-image` wherever a
+  product is featured or linked; bright/high-key light; v3 palette; nothing a premium lingerie
+  campaign could not run.
+- **Provider note (2026-08-15, PR #692):** stills are Atlas-primary via `generateImage()` (Atlas
+  `seedream-v4.5`/`seedream-v4.5/edit`, then fal, then Imagen); `docs/media-model-routing.md` is
+  the single routing source, do not restate routing here. The fal-specific lore in this file
+  (FLUX Kontext label garbling, the black-JPEG safety retry, known-garble products) applies on
+  the fal fallback path, not to Atlas-primary generations.
 - **`--ref-image` vs `--no-ref` by what the surface links to.** FLUX Kontext faithfully reproduces
   the product **label text** from the Shopify reference photo, which violates the no-text-in-pixels
   rule and, on a surface that links to a whole collection, also misleads by pinning one SKU's label.
@@ -738,7 +743,7 @@ to the real-photo fallback path rather than attempt Kontext.
 
 ---
 
-## Instagram carousel — cast + product compositing (`fal-ai/nano-banana/edit`, License B/C)
+## Instagram carousel — cast + product compositing (License B/C)
 
 Not a homepage surface, but the same multi-reference compositing pattern belongs here so it
 isn't re-discovered from scratch. Route: `composeSceneFrame()` in `app/lib/fal-video.server.ts`
@@ -746,11 +751,21 @@ isn't re-discovered from scratch. Route: `composeSceneFrame()` in `app/lib/fal-v
 use, plus `extraImageUrls` for references beyond presenter/product — pass `'4:5'` for a
 feed/carousel still). `image_urls` order does not matter to the model.
 
-**Model note (2026-08-10):** the run below was on `fal-ai/nano-banana/edit`. That path has
+**Update (2026-08-15, Atlas migration, PR #692):** the primary route for cast + product
+composites is now ONE-STAGE Atlas `bytedance/seedream-v4.5/edit` via `generateImage()` (and the
+`composeSceneFrame()` successor once the `atlas-composite-port` ticket lands). The Atlas POC
+passed the cast-presenter + insertable-toy reference pairing that nano-banana 422s on, twice,
+with exact product geometry and true 4:5 output; see `docs/media-model-routing.md` for the
+routing table and evidence. The two-stage plate + composite below remains the fal FALLBACK path
+and the video-frame path until that port lands. The nano-banana content-policy fence and the
+black-JPEG retry lore apply only on the fal fallback path.
+
+**Model note (2026-08-10):** the run below was on `fal-ai/nano-banana/edit`. That fal path has
 since been replaced by the two-stage plate + `fal-ai/flux-2/lora/edit` composite (see the
 bake-off notes at the top of `fal-video.server.ts`), which was adopted precisely because
-nano-banana's non-configurable safety filter blocked much of the catalog. Read the fence below
-as a record of why the swap happened, not as a live constraint on the current route.
+nano-banana's non-configurable safety filter blocked much of the catalog. The fal fallback
+route has in turn been superseded as primary by the one-stage Atlas route above. Read the fence
+below as a record of why the swaps happened, not as a live constraint on the current route.
 
 **Hard content-policy fence (verified 2026-08-09, 4 independent prompt variations, all failed
 identically):** `fal-ai/nano-banana/edit` 422s with `content_policy_violation` on the *pairing*

@@ -2,9 +2,11 @@
  * admin.video-studio.tsx — Video Studio: the owner's single review surface for
  * the fal.ai social video pipeline.
  *
- * One approval fans out: approving a finished video writes pre-approved
- * social_posts drafts for every target platform (Social Studio is the posting
- * surface, not a second review), optionally graduates the clip to Shopify
+ * One approval fans out: approving a finished video writes social_posts drafts
+ * at pending_review for every target platform (ticket #3733: the publish gate,
+ * not this approval, is the only writer of a publishable 'approved'; Instagram
+ * rows are gated by the social routine's Step 6.5 sweep, other platforms wait
+ * for the owner in the Social Studio), optionally graduates the clip to Shopify
  * (product media gallery, or the hero_video card/PDP metafield), and can flag
  * it as an ad-creative candidate for the Ad Studio.
  *

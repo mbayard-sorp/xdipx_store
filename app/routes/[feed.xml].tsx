@@ -10,6 +10,7 @@ import {
   parseSpecValue,
 } from '~/lib/gmc-metafields.server'
 import { cached } from '~/lib/kv.server'
+import { feedShippingLines, stripDollarAmounts } from '~/lib/gmc-feed'
 import type { VaultDeal } from '~/types'
 
 // Google Merchant Center restricts most sexual-wellness products -- do not submit
@@ -68,8 +69,11 @@ function toEntry(d: VaultDeal): string {
   const availability  = d.qty > 0 ? 'in stock' : 'out of stock'
   const price         = fmtPrice(d.dealPrice)
 
-  // Description: prefer seo_meta_description, fall back to template
-  const rawDesc = opt(d.seoDesc)
+  // Description: prefer seo_meta_description, fall back to template.
+  // stripDollarAmounts: generated descriptions must never carry a literal
+  // price -- the pricing agent moves prices daily and a stale "$29.99"
+  // reads as misrepresentation in Merchant Center (ticket #3425).
+  const rawDesc = stripDollarAmounts(opt(d.seoDesc))
   const description = xmlEscape(
     rawDesc ||
     `${d.seoTitle} curated by xdipx. Adult wellness product, shipped discreetly.`
@@ -207,7 +211,10 @@ function toEntry(d: VaultDeal): string {
       `</g:product_detail>`
     )
   }
-  lines.push(`      <g:shipping><g:country>US</g:country><g:service>Standard</g:service><g:price>0.00 USD</g:price></g:shipping>`)
+  // Shipping mirrors checkout for a single-unit cart at the deal price:
+  // $9.99 US Standard, free when the item alone clears the threshold
+  // (HI/AK/PR clear at their higher threshold). See app/lib/gmc-feed.ts.
+  lines.push(...feedShippingLines(d.dealPrice))
   lines.push(`      <g:min_handling_time>1</g:min_handling_time>`)
   lines.push(`      <g:max_handling_time>3</g:max_handling_time>`)
   lines.push(`    </item>`)
@@ -226,7 +233,7 @@ function toLeanEntry(p: FeedCatalogProduct): string {
   const title = xmlEscape(p.title)
   const brand = xmlEscape(p.brand || 'xdipx')
   const description = xmlEscape(
-    opt(p.description) ||
+    stripDollarAmounts(opt(p.description)) ||
     `${p.title} curated by xdipx. Adult wellness product, shipped discreetly.`
   )
 
@@ -275,8 +282,11 @@ function toLeanEntry(p: FeedCatalogProduct): string {
   } else {
     lines.push(`      <g:identifier_exists>false</g:identifier_exists>`)
   }
-  // No per-item shipping block on lean entries: at ~4k items it adds ~0.4MB
-  // to the uncompressed payload for a value that is constant store-wide.
+  // Shipping on every item (ticket #3425): a missing block defaults to the
+  // Merchant Center account setting, and an absent-or-0.00 feed while
+  // checkout charges $9.99 is a misrepresentation suspension risk. The
+  // ~0.5MB it adds across ~4k items is the cost of an honest feed.
+  lines.push(...feedShippingLines(p.price))
   lines.push(`    </item>`)
 
   return lines.join('\n')
@@ -321,7 +331,9 @@ export async function loader() {
   // layer (no Map/Set/Date). If the payload ever exceeds the KV value limit,
   // kvSet degrades to the in-memory L1 with a warn, so the route still serves;
   // the CDN s-maxage below absorbs most traffic either way.
-  const body = await cached('feed:xml:v1', 900, buildFeedXml)
+  // v2: real shipping blocks + price-free descriptions (ticket #3425); the
+  // key bump serves the new shape immediately instead of after KV TTL.
+  const body = await cached('feed:xml:v2', 900, buildFeedXml)
 
   return new Response(body, {
     headers: {
