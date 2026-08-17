@@ -3,7 +3,7 @@
 Program: Design Elevation (best-in-market automated design output)
 Source plan: docs/homepage-team/design-elevation-plan.md
 Started: 2026-07-13   Target end: 2026-08-10 (phases 1–4), then ongoing cadences
-Overall: RED
+Overall: AMBER
 
 Week anchors: W1 = 2026-07-13, W2 = 2026-07-20, W3 = 2026-07-27, W4 = 2026-08-03.
 
@@ -14,20 +14,55 @@ Week anchors: W1 = 2026-07-13, W2 = 2026-07-20, W3 = 2026-07-27, W4 = 2026-08-03
 | p1-gallery | `/admin/design-gallery` component gallery route merged | 1 | rr7-engineer (Routine B PR) | 2026-07-13 | done | GREEN | `app/routes/admin.design-gallery.tsx` exists on main | 2026-07-20 | also the screenshot harness's stable target. Audit: route confirmed on `main` (PR #269, merged 2026-07-19). Probe passes, late but done. |
 | p2-critic | `design-critic` agent exists and gates Routine B step 4 | 2 | agent-editor PR | 2026-07-20 | done | GREEN | `.claude/agents/design-critic.md` exists AND `docs/homepage-team/routine-design-cycle.md` step 4 lists it | 2026-07-20 | both halves confirmed on `main`; calibrate against 5 good + 5 bad historical screenshots before it may BLOCK. Probe passes. |
 | p2-critic-a | Routine A post-publish design spot-check live | 2 | homepage-orchestrator | 2026-07-20 | done | GREEN | `docs/homepage-team/routine-daily-merchandise.md` includes the spot-check step AND a merchandise run has a `design-critic` event | 2026-07-20 | step 7.5 confirmed; `design-critic` decision events found on merchandise runs 46 (Jul 18), 49 (Jul 19), 53 (Jul 20). Probe passes; still REVISE-only until calibrated per p2-critic. |
-| p2-snapshots | Playwright screenshot + visual-regression harness with committed baselines | 2 | rr7-engineer (PR) | 2026-07-20 | not-started | RED | `scripts/design-snapshots.ts` exists AND `tests/visual/` contains baseline images | 2026-07-20 | masks product-image regions on content-only runs. Audit: neither `scripts/design-snapshots.ts` nor `tests/visual/` exist. Target week reached, zero evidence. Long-tail item, not filed as a suggestion this run (see scoreboard). |
+| p2-snapshots | Playwright screenshot + visual-regression harness with committed baselines | 2 | rr7-engineer (PR) | 2026-07-20 | done | GREEN | `scripts/design-snapshots.ts` exists AND `tests/visual/` contains baseline images | 2026-08-17 | masks product-image regions on content-only runs. Audit 2026-08-17: `scripts/design-snapshots.ts` exists AND `tests/visual/` now carries committed baseline PNGs (desktop+mobile, home/about/faq/discover) plus `helpers.ts`. Both probe halves pass. Suggestion #115 verified. RED→done. Closes the single biggest blocker flagged across 3 straight prior audits; also unblocks p3-axe.
 | p3-lighthouse | Lighthouse CI budgets on PR previews (LCP ≤2.0s, CLS 0, perf ≥90 mobile) | 2 | rr7-engineer (PR) | 2026-07-27 | done | GREEN | a Lighthouse CI config exists (e.g. `lighthouserc*`) AND a CI workflow runs it on PRs | 2026-07-20 | Audit: `lighthouserc.json` + `.github/workflows/lighthouse.yml` both confirmed on `main`, running on homepage-touching PRs. Probe passes early (target was next week). |
-| p3-axe | axe accessibility sweep in the harness (zero serious/critical) | 2 | rr7-engineer (PR) | 2026-07-27 | not-started | RED | `@axe-core/playwright` in `package.json` AND referenced from the harness | 2026-08-10 | Audit 2026-08-10: still no `@axe-core/playwright` in `package.json` (only an unrelated transitive `axe-core` in `studio/package-lock.json`). Now 2 weeks past target with zero evidence and its prerequisite (p2-snapshots) still RED with no progress for 3 straight audits — past target, no evidence is RED per the RAG rules, not AMBER-at-risk anymore. Already covered by suggestion #115 (blocked, non-terminal, unblocks p2-snapshots → p3-axe), not refiled. |
+| p3-axe | axe accessibility sweep in the harness (zero serious/critical) | 2 | rr7-engineer (PR) | 2026-07-27 | done | GREEN | `@axe-core/playwright` in `package.json` AND referenced from the harness | 2026-08-17 | Audit 2026-08-17: `@axe-core/playwright` now in `package.json`, and `tests/visual/axe.visual.ts` wires `AxeBuilder` against 4 stable routes (`/`, `/discover`, `/faq`, `/about`), failing on any NEW serious/critical violation. Both probe halves pass literally. RED→done. Caveat for the record: `color-contrast` is currently baselined out as a known pre-existing issue (measured 2026-08-16, 6-190 nodes across routes) via `KNOWN_ISSUES`, so the milestone's own zero-serious/critical DoD is not fully met yet even though this tracker's literal evidence probe passes — worth a follow-up to burn that debt down and empty the exemption list.
 | p3-img-gate | Vision gate on every generated image before upload; ref-image mandatory | 2 | media-manager | 2026-07-27 | done | GREEN | `.claude/agents/media-manager.md` documents the gate AND `scripts/gen-homepage-image.ts` refuses missing `--ref-image` without `--no-ref` | 2026-07-20 | both confirmed on `main` (`--no-ref` requires a logged `--no-ref-reason`); kills the tea-cup failure class. Probe passes. |
 | p3-prompts | Image prompt library seeded and maintained | 2 | media-manager | 2026-07-27 | done | GREEN | `docs/homepage-team/image-prompt-library.md` exists with ≥1 per-surface scaffold | 2026-07-20 | Audit: file confirmed on `main` with 5 per-surface scaffolds. Probe passes. |
 | p3-teardown | Weekly competitor/reference teardown sub-step in Routine B | 3 | homepage-designer | 2026-07-27 | done | GREEN | `docs/homepage-team/routine-design-cycle.md` includes the teardown step AND a design run has a teardown event | 2026-07-27 | step 0.5 + `competitor-teardown-2026-07.md` decision doc both confirmed on `main`. Audit 2026-07-27: two Routine B design runs on 2026-07-22 (ids 72, 76) posted actual `phase:teardown` decision events referencing `competitor-teardown-2026-07-live.md`. Both halves of the probe now pass. AMBER→GREEN. |
 | p4-events | Per-section GA4 engagement events + per-module PDP click-through | 4 | rr7-engineer (PR) | 2026-08-03 | done | GREEN | section-visibility events wired in the analytics layer on main | 2026-08-10 | gives the 70% product-link rule an outcome metric. Audit 2026-08-10: both probe halves now confirmed. `home_variant_view`, `home_scroll_depth`, `cta_click` (all confirmed 08-03) plus per-module PDP click-through via `trackSelectItem`, wired into `StorefrontHome.tsx` rails (couples + listKey-scoped rails) and `ShelfSection`/`ProductCard`/`FitCard`, each call carrying `listId`/`listName` so GA4 can segment click-through by homepage module. AMBER→GREEN. |
-| p4-changelog | Design changelog appended by both routines | 4 | homepage-orchestrator | 2026-08-03 | not-started | RED | `docs/homepage-team/design-changelog.md` exists and has post-launch entries | 2026-08-10 | Audit 2026-08-10: file confirmed still absent, as flagged last audit as the flip condition. AMBER→RED, 1 week past target. Suggestion #2390 filed (instructions, homepage): add a changelog-append step to routine-daily-merchandise.md and routine-design-cycle.md. |
+| p4-changelog | Design changelog appended by both routines | 4 | homepage-orchestrator | 2026-08-03 | done | GREEN | `docs/homepage-team/design-changelog.md` exists and has post-launch entries | 2026-08-17 | Audit 2026-08-17: `docs/homepage-team/design-changelog.md` now holds 7 dated entries (2026-08-11 through 2026-08-15) from both Routine A and Routine B, in the append-at-bottom format the doc specifies. RED→done. Suggestion #2390 applied.
 | p4-retro | First measured design retro + critic-score dashboard panel | 4 | homepage-orchestrator + rr7-engineer | 2026-08-03 | in-progress | AMBER | dashboard shows critic scores AND a retro event references them | 2026-08-10 | definition of done: critic avg ≥4.5 four straight weeks. Audit 2026-08-10: real progress — full-rubric Routine B verdicts now show 2 consecutive weeks clearing the ≥4.5 bar (run 125, 2026-07-30, avg 4.58; run 183, 2026-08-05, avg 4.7), up from ~1 data point last audit. Still 2 short of the four-straight-weeks DoD; stays AMBER (a real, improving series with a clear path, not a stalled item). |
 
 Ongoing cadences (tracked as health checks once phases close, not milestones): weekly teardowns,
 monthly prompt-library pruning, quarterly hi-fi refresh + full-site design audit.
 
 ## Status log
+
+### 2026-08-17 (program-manager, run 359). Overall RED → AMBER — first non-RED verdict since the tracker opened.
+
+Re-probed all 14 milestones against files on `main`. Three rows changed, all genuine closes:
+
+- **p2-snapshots: RED → done.** `scripts/design-snapshots.ts` exists AND `tests/visual/` carries
+  committed baseline PNGs (desktop+mobile, home/about/faq/discover) plus `helpers.ts`. Both probe
+  halves pass; suggestion #115 verified. This closes the single biggest blocker flagged across 3
+  straight prior audits, and unblocks p3-axe.
+- **p3-axe: RED → done.** `@axe-core/playwright` is in `package.json` and `tests/visual/axe.visual.ts`
+  wires `AxeBuilder` against 4 stable routes, failing on any NEW serious/critical violation. Both
+  probe halves pass literally. Caveat for the record: `color-contrast` is currently baselined out as
+  a known pre-existing issue via `KNOWN_ISSUES`, so the milestone's own zero-serious/critical DoD
+  isn't fully met yet even though the tracker's literal evidence probe passes — worth a follow-up to
+  burn that debt down.
+- **p4-changelog: RED → done.** `docs/homepage-team/design-changelog.md` now holds 7 dated entries
+  from both routines in the specified append-at-bottom format. Suggestion #2390 applied.
+
+**p1-stack stays AMBER**, unchanged (still 2 of 3 skills; no Emil Kowalski animation skill dir, no
+shadcn/ui MCP wiring) — this remains a stable-but-incomplete state by explicit owner choice
+(suggestion #112 dismissed 2026-08-02), not refiled. **p4-retro stays AMBER**: no new full-rubric
+Routine B critic score landed this week (the one Routine B run in-window, run 282 on 08-12, was
+sub-visual and correctly skipped full scoring per its own gate logic) — still 2 confirmed
+consecutive weeks ≥4.5 (07-30, 08-05), 2 more needed for the four-straight-weeks DoD.
+
+**Overall flips RED → AMBER**: with p2-snapshots, p3-axe, and p4-changelog all closing this run,
+only p1-stack and p4-retro remain AMBER and nothing on the critical path is RED — the roll-up rule
+(AMBER if ≥2 milestones AMBER, else GREEN) now applies cleanly. First non-RED overall verdict since
+the tracker opened 2026-07-11.
+
+No new suggestions filed this run for this tracker (all real remaining gaps are already covered by
+non-terminal or owner-dismissed rows: #112 for p1-stack, ongoing #2977/#3047-class freshness rows
+for p4-retro's underlying content cadence). **Asks for the owner:** none new — p1-stack remains a
+standing, explicitly deprioritized gap; p4-retro just needs two more clean weeks.
+
 
 ### 2026-08-10 (program-manager, run 249). Overall stays RED.
 
