@@ -560,6 +560,13 @@ load-bearing. The gate is adversarial by design and explicitly must not read you
 why the post is compliant, because that reasoning is the thing under test. Handing it your context
 turns an independent check into a second opinion from yourself.
 
+**Also sweep fanned-out video rows (ticket #3733).** List Instagram `pending_review` drafts
+(`{op:'list', status:'draft', reviewStatus:'pending_review'}`) and gate any row carrying a
+`videoJobId` exactly the same way, one fresh subagent per row. These are Reels the owner approved
+in the Video Studio; that approval reviewed the video, not the finished post, so they wait here
+for the same verdict your own drafts get. Skipping them strands them: no other pass gates a video
+row, and an ungated row can never publish.
+
 Give it only the post id. It gathers its own inputs: the caption as it will publish, every media URL
 opened and actually looked at, the charter as it reads today, the ads policy, the campaign's visual
 scheme, and the last 10 to 14 live posts.

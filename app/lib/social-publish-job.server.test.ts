@@ -196,6 +196,41 @@ describe('the gate runs at publish time', () => {
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
     expect(calls.posted).toEqual([1])
   })
+
+  it('publishes a fanned-out video row once the gate has PASSed it (ticket #3733)', async () => {
+    // The row exactly as the Video Studio fanout + a gate PASS leave it: a
+    // pipeline final on Blob (which must clear image-provenance without a
+    // `social-` filename), a videoJobId, a scheduledFor, and a stamp naming the
+    // product so the stock re-check runs.
+    const stamped =
+      '[publish-gate PASS by social-publish-gate on 2026-08-16, product: femmefunn-ultra-bullet]\nWatched the final, checked stock and the last two weeks of the feed.'
+    const reel = post({
+      postType: 'video_reel',
+      mediaUrls: ['https://abc123.public.blob.vercel-storage.com/video/6f9c2f1e-2b7d-4a83-9b1a-000000000000/final-Ab12Cd.mp4'],
+      videoJobId: 7,
+      feedback: stamped,
+    })
+    const { repo, calls } = fakeRepo([reel])
+    const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_reel_1' }))
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      gateDeps: { getAvailability: async () => true },
+    })
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+    expect(calls.posted).toEqual([1])
+  })
+
+  it('still refuses a raw pipeline intermediate (clip, not final) as post media', async () => {
+    const { repo, calls } = fakeRepo([post({
+      mediaUrls: ['https://abc123.public.blob.vercel-storage.com/video/6f9c2f1e-2b7d-4a83-9b1a-000000000000/clip-Xy34Zw.mp4'],
+      videoJobId: 7,
+    })])
+    const publish = vi.fn()
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    expect(publish).not.toHaveBeenCalled()
+    expect(r.attempts[0]?.outcome).toBe('blocked_by_gate')
+    expect(calls.needsChanges[0]?.feedback).toContain('image-provenance')
+  })
 })
 
 describe('failure handling', () => {

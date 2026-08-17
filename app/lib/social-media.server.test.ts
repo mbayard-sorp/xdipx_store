@@ -44,6 +44,21 @@ describe('isGeneratedSocialAsset', () => {
     expect(isGeneratedSocialAsset('://///')).toBe(false)
   })
 
+  it('accepts a video pipeline final, and only the final (ticket #3733)', () => {
+    const BLOB = 'https://abc123.public.blob.vercel-storage.com/video/6f9c2f1e-2b7d-4a83-9b1a-000000000000'
+    // Blob appends a random suffix before the extension; both shapes are real.
+    expect(isGeneratedSocialAsset(`${BLOB}/final.mp4`)).toBe(true)
+    expect(isGeneratedSocialAsset(`${BLOB}/final-Ab12Cd.mp4`)).toBe(true)
+    // Intermediates under the same job path never ship by URL alone.
+    expect(isGeneratedSocialAsset(`${BLOB}/clip-Xy34Zw.mp4`)).toBe(false)
+    expect(isGeneratedSocialAsset(`${BLOB}/clip-vo.mp4`)).toBe(false)
+    expect(isGeneratedSocialAsset(`${BLOB}/9x16.mp4`)).toBe(false)
+    expect(isGeneratedSocialAsset(`${BLOB}/frame-0.jpg`)).toBe(false)
+    expect(isGeneratedSocialAsset(`${BLOB}/poster.jpg`)).toBe(false)
+    // A `final.mp4` outside a video/ path is not a pipeline artifact.
+    expect(isGeneratedSocialAsset(`${CDN}/final.mp4`)).toBe(false)
+  })
+
   it('matches on the basename, not anywhere in the path', () => {
     // A directory called "social-" must not launder a packshot.
     expect(isGeneratedSocialAsset('https://cdn.example.com/social-assets/77292A.jpg')).toBe(false)
