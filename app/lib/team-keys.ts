@@ -28,16 +28,58 @@ export function teamSpendKvKey(team: TeamId, utcDay: string): string {
   return `team:spend:${team}:${utcDay}`
 }
 
-export function teamImagesKvKey(utcDay: string): string {
-  return `team:images:homepage:${utcDay}`
+export function teamImagesKvKey(team: TeamId, utcDay: string): string {
+  return `team:images:${team}:${utcDay}`
+}
+
+/**
+ * Feature labels whose spend belongs to a team even though the label does not
+ * start with '{team}-'. The one live case: media-manager logs Notebook heroes
+ * under 'notebook-images', which matched no team prefix, so the content team's
+ * daily $ gate and image counter both silently skipped every hero it billed
+ * (tickets #581/#96). The SQL aggregation in team.server.ts and the KV
+ * write-through bump in token-log.server.ts both consult this map so the two
+ * attribution paths cannot drift apart again.
+ */
+export const FEATURE_TEAM_OVERRIDES: Readonly<Record<string, TeamId>> = {
+  'notebook-images': 'content',
+}
+
+/** Override feature labels attributed to `team` (for the SQL spend window). */
+export function extraSpendFeaturesForTeam(team: TeamId): string[] {
+  return Object.entries(FEATURE_TEAM_OVERRIDES)
+    .filter(([, t]) => t === team)
+    .map(([feature]) => feature)
+}
+
+/**
+ * Image-generation feature labels counted toward each team's daily image cap.
+ * Only teams with a configured maxImagesPerDay appear here. The homepage label
+ * is the original hardcoded one; content counts the Notebook labels; social
+ * counts 'social-images' (ticket #3678 — never 'homepage-images').
+ */
+export const TEAM_IMAGE_FEATURES: Readonly<Partial<Record<TeamId, readonly string[]>>> = {
+  homepage: ['homepage-images'],
+  content:  ['notebook-images', 'content-images'],
+  social:   ['social-images'],
+}
+
+/** Which team's image counter a feature label bumps (null = none). */
+export function imageTeamFromFeature(feature: string): TeamId | null {
+  for (const [team, features] of Object.entries(TEAM_IMAGE_FEATURES)) {
+    if (features.includes(feature)) return team as TeamId
+  }
+  return null
 }
 
 /**
  * Map an api_token_log feature label to its owning team, mirroring the SQL
- * attribution rule `feature LIKE '{team}-%'`. Returns null for non-team
- * features ('enrichment', 'sms', ...).
+ * attribution rule `feature LIKE '{team}-%'` plus FEATURE_TEAM_OVERRIDES.
+ * Returns null for non-team features ('enrichment', 'sms', ...).
  */
 export function teamFromFeature(feature: string): TeamId | null {
+  const override = FEATURE_TEAM_OVERRIDES[feature]
+  if (override) return override
   const i = feature.indexOf('-')
   if (i <= 0) return null
   const prefix = feature.slice(0, i)
@@ -88,10 +130,12 @@ export const HOMEPAGE_EXTRA_KEYS = {
 
 /**
  * Content-team extra: how many hero/mood images the daily Notebook routine may
- * generate per day (via media-manager). Advisory cap the content routine
- * self-limits to; unlike homepage it is not hard-gated (content makes ~1 hero a
- * day). 0 means the routine ships posts heroless. Owner-editable in the Content
- * tab of /admin/homepage-team; seeded by migration 055.
+ * generate per day (via media-manager). Hard-gated since tickets #3390/#581:
+ * gate() counts the content image features (TEAM_IMAGE_FEATURES) and refuses
+ * with over_image_cap once a positive cap is reached. 0 means the routine
+ * ships posts heroless (no image budget; the run itself still proceeds).
+ * Owner-editable in the Content tab of /admin/homepage-team; seeded by
+ * migration 055.
  */
 export const CONTENT_EXTRA_KEYS = {
   maxImagesPerDay: 'content_team_max_images',
@@ -99,6 +143,24 @@ export const CONTENT_EXTRA_KEYS = {
 
 /** Default content image cap when the key is unset (conservative; migration seeds 5). */
 export const CONTENT_MAX_IMAGES_DEFAULT = 0
+
+/**
+ * Social-team extra (ticket #3678): daily image-generation cap for the social
+ * slate, enforced by gate() against feature 'social-images'. Before this key
+ * was wired server-side, the only binding limit was a client-side fallback
+ * constant in scripts/gen-social-image.ts pretending to be a cap.
+ */
+export const SOCIAL_EXTRA_KEYS = {
+  maxImagesPerDay: 'social_team_max_images',
+} as const
+
+/**
+ * Default social image cap when the key is unset. 12 on purpose: it equals the
+ * LOCAL_IMAGE_CAP_FALLBACK that was the de-facto binding cap before the key
+ * was wired, so wiring the server-side cap changes nothing until the owner
+ * edits the setting (spend-control invariant: count and enforce, never raise).
+ */
+export const SOCIAL_MAX_IMAGES_DEFAULT = 12
 
 /**
  * Video-team extras (065). max_cost_cents is the HARD per-video ceiling: the

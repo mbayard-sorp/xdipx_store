@@ -42,10 +42,11 @@
  *      short-circuit so the routine doesn't burn a gate round-trip per image).
  *   3. --dry-run prints the resolved plan and exits without generating.
  *   4. generateAndPlaceHomepageImage() — generate, upload to Sanity, patch.
- *   5. On successful placement, POST /api/homepage-team/spend once (this
- *      script is the SINGLE owner of the image spend row — generateImage()
- *      is called with logCost:false internally so the cost isn't double
- *      logged).
+ *   5. On any BILLED generation (placed or not), POST /api/homepage-team/spend
+ *      once (this script is the SINGLE owner of the image spend row —
+ *      generateImage() is called with logCost:false internally so the cost
+ *      isn't double logged). Spend counts at generation time, not placement
+ *      time, so a billed-but-rejected image still moves the cap (#887).
  *   6. Print one JSON manifest line.
  *
  * Never run without the gate passing — this costs real money per image.
@@ -176,9 +177,13 @@ async function main() {
       : {}),
   })
 
-  // ── 5. Post spend once — this script is the single owner of the row ──────
+  // ── 5. Post spend once — this script is the single owner of the row. Spend
+  //      is posted for every BILLED generation (provider !== 'none'), placed or
+  //      not: a candidate rejected or lost before placement was still billed by
+  //      the provider, and counting only on placement let failing runs spend
+  //      without ever moving the number the cap enforces (#887). ─────────────
   let spendPosted = false
-  if (manifest.placed && manifest.provider !== 'none') {
+  if (manifest.provider !== 'none') {
     const spendRes = await fetch(`${BASE_URL}/api/homepage-team/spend`, {
       method: 'POST',
       headers: teamHeaders,

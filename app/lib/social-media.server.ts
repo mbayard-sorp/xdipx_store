@@ -317,14 +317,21 @@ export async function generateCastComposite(
       date: opts.date,
       slide: opts.slide ?? i + 1,
     })
-    const res = await fetch(falUrl)
-    if (!res.ok) continue
-    const buffer = Buffer.from(await res.arrayBuffer())
-    urls.push(await uploadMoodImageToShopifyFiles(buffer, filename))
-    filenames.push(filename)
-    // Keep aligned with the surviving urls/filenames (a fetch failure above
-    // skips both this filename and its request id).
-    requestIds.push(frame.requestIds[i])
+    // A candidate that fails to fetch or rehost is dropped from urls/filenames
+    // but stays BILLED: the caller's `costs` remainder row accounts for it, so
+    // spend and the image cap count at generation time, not upload time (#887).
+    try {
+      const res = await fetch(falUrl)
+      if (!res.ok) continue
+      const buffer = Buffer.from(await res.arrayBuffer())
+      urls.push(await uploadMoodImageToShopifyFiles(buffer, filename))
+      filenames.push(filename)
+      // Keep aligned with the surviving urls/filenames (a fetch or upload
+      // failure above skips both this filename and its request id).
+      requestIds.push(frame.requestIds[i])
+    } catch (err) {
+      console.error(`[social-media] cast candidate rehost failed (billed, dropped): ${filename}`, err)
+    }
   }
 
   return {
@@ -368,7 +375,11 @@ export interface GenerateSocialImageOpts {
 }
 
 export interface GenerateSocialImageResult {
-  /** Permanent Shopify Files CDN URL, or null when generation produced nothing. */
+  /**
+   * Permanent Shopify Files CDN URL. Null when generation produced nothing
+   * (provider 'none' — nothing billed) OR when rehosting failed after a billed
+   * generation (provider set — the caller must still post the spend row, #887).
+   */
   url: string | null
   filename: string
   provider: 'atlas' | 'fal' | 'imagen' | 'none'
@@ -410,6 +421,15 @@ export async function generateAndUploadSocialImage(
   const buffer = result.buffers[0]
   if (!buffer) return { url: null, filename, provider: 'none', model: result.model }
 
-  const url = await uploadMoodImageToShopifyFiles(buffer, filename)
-  return { url, filename, provider: result.provider, model: result.model }
+  // Rehost failure must not throw: the generation above is already billed by
+  // the provider, and an exception here used to unwind the caller before it
+  // could post the spend row, leaving billed generations uncounted (#887).
+  // `url: null` with a real provider tells the caller "billed but unshipped".
+  try {
+    const url = await uploadMoodImageToShopifyFiles(buffer, filename)
+    return { url, filename, provider: result.provider, model: result.model }
+  } catch (err) {
+    console.error(`[social-media] rehost failed (generation billed, no asset): ${filename}`, err)
+    return { url: null, filename, provider: result.provider, model: result.model }
+  }
 }

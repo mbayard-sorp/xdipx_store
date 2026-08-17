@@ -37,6 +37,10 @@ import {
   VALVE_KEYS,
   CONTENT_EXTRA_KEYS,
   CONTENT_MAX_IMAGES_DEFAULT,
+  SOCIAL_EXTRA_KEYS,
+  SOCIAL_MAX_IMAGES_DEFAULT,
+  TEAM_IMAGE_FEATURES,
+  extraSpendFeaturesForTeam,
   VIDEO_EXTRA_KEYS,
   VIDEO_MAX_COST_CENTS_DEFAULT,
   VIDEO_MAX_VARIANTS_PER_SET_DEFAULT,
@@ -194,6 +198,8 @@ async function getTeamConfigUncached(team: TeamId): Promise<TeamConfig> {
     cfg.maxImagesPerDay = num(map.get(TEAM_KEYS.maxImagesPerDay), 12)
   } else if (team === 'content') {
     cfg.maxImagesPerDay = num(map.get(CONTENT_EXTRA_KEYS.maxImagesPerDay), CONTENT_MAX_IMAGES_DEFAULT)
+  } else if (team === 'social') {
+    cfg.maxImagesPerDay = num(map.get(SOCIAL_EXTRA_KEYS.maxImagesPerDay), SOCIAL_MAX_IMAGES_DEFAULT)
   } else if (team === 'video') {
     cfg.maxCostCents = num(map.get(VIDEO_EXTRA_KEYS.maxCostCents), VIDEO_MAX_COST_CENTS_DEFAULT)
     cfg.maxVariantsPerSet = num(map.get(VIDEO_EXTRA_KEYS.maxVariantsPerSet), VIDEO_MAX_VARIANTS_PER_SET_DEFAULT)
@@ -286,13 +292,22 @@ async function counterRead(
   return fresh
 }
 
-/** Today's team spend (USD cents) from api_token_log feature '{team}-%'. */
+/**
+ * Today's team spend (USD cents) from api_token_log feature '{team}-%', plus
+ * any override labels attributed to the team (FEATURE_TEAM_OVERRIDES — e.g.
+ * 'notebook-images' bills to content even though it carries no team prefix;
+ * ticket #581 found those real dollars counting against no team at all).
+ */
 export async function getTodaySpendCents(team: TeamId): Promise<number> {
   return counterRead(teamSpendKvKey(team, utcDay()), async () => {
+    const extras = extraSpendFeaturesForTeam(team)
+    const featureCond = extras.length
+      ? sql`(feature LIKE ${team + '-%'} OR feature IN (${sql.join(extras.map(f => sql`${f}`), sql`, `)}))`
+      : sql`feature LIKE ${team + '-%'}`
     const res = await db.execute(
       sql`SELECT COALESCE(SUM(est_cost_usd), 0)::float8 AS dollars
           FROM api_token_log
-          WHERE ts >= current_date AND feature LIKE ${team + '-%'}`,
+          WHERE ts >= current_date AND ${featureCond}`,
     )
     const dollars = Number((res.rows?.[0] as { dollars?: number } | undefined)?.dollars ?? 0)
     return Math.round(dollars * 100)
@@ -315,16 +330,23 @@ export async function getTodayRunCount(team: TeamId, excludeRunId?: number): Pro
 }
 
 /**
- * Count of images the homepage team generated today (feature='homepage-images').
- * Only the homepage team generates images today; other teams request imagery
- * through media-manager, which logs under the homepage feature labels.
+ * Count of images `team` generated today, summed over that team's image
+ * feature labels (TEAM_IMAGE_FEATURES: homepage-images, notebook-images/
+ * content-images, social-images). Was hardcoded to the homepage feature, which
+ * made every other team's cap decorative (tickets #3678/#3390/#581). Rows land
+ * in api_token_log at GENERATION time, so rejected-then-never-uploaded
+ * candidates still count (ticket #887). Returns 0 for a team with no image
+ * features configured.
  */
-export async function getTodayImageCount(): Promise<number> {
-  return counterRead(teamImagesKvKey(utcDay()), async () => {
+export async function getTodayImageCount(team: TeamId = 'homepage'): Promise<number> {
+  const features = TEAM_IMAGE_FEATURES[team]
+  if (!features?.length) return 0
+  return counterRead(teamImagesKvKey(team, utcDay()), async () => {
     const res = await db.execute(
       sql`SELECT COALESCE(SUM(request_count), 0)::int AS n
           FROM api_token_log
-          WHERE ts >= current_date AND feature = 'homepage-images'`,
+          WHERE ts >= current_date
+            AND feature IN (${sql.join(features.map(f => sql`${f}`), sql`, `)})`,
     )
     return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
   })
@@ -443,7 +465,7 @@ export interface GateResult {
   remainingCents: number
   runsToday: number
   maxRunsPerDay: number
-  /** Homepage-only; 0/0 for other teams. */
+  /** Real count for every team with a configured image cap; 0/0 otherwise. */
   imagesToday: number
   maxImagesPerDay: number
   /** Active strategy brief id, so routines know to fetch it (null = none yet). */
@@ -457,7 +479,8 @@ export interface GateResult {
 /**
  * The gate every scheduled routine calls before doing anything paid. Returns
  * ok=false (with a reason) when disabled, over budget, over the daily run cap,
- * over the image cap (homepage only), or a same-team run is already in progress.
+ * over the image cap (any team with a cap configured), or a same-team run is
+ * already in progress.
  */
 export async function gate(team: TeamId, excludeRunId?: number): Promise<GateResult> {
   // Zombie cleanup is time-based housekeeping, not a per-call invariant:
@@ -471,7 +494,9 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     getTeamConfig(team),
     getTodaySpendCents(team),
     getTodayRunCount(team, excludeRunId),
-    team === 'homepage' ? getTodayImageCount() : Promise.resolve(0),
+    // Counted for every team with image features, not just homepage (#3390):
+    // getTodayImageCount returns 0 on its own for a team with none configured.
+    getTodayImageCount(team),
     getBlockingRun(team, excludeRunId),
     getActiveBriefId(),
     team === 'content' ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(undefined),
@@ -496,7 +521,16 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
   if (blockingRun)                    return { ...base, ok: false, reason: 'run_in_progress', blockingRun }
   if (remainingCents <= 0)            return { ...base, ok: false, reason: 'over_budget' }
   if (runsToday >= cfg.maxRunsPerDay) return { ...base, ok: false, reason: 'over_run_cap' }
-  if (team === 'homepage' && imagesToday >= maxImagesPerDay)
+  // Image-cap enforcement for every team with a cap configured, not homepage
+  // only (#3390/#3678). Homepage keeps its exact historical semantics (a cap
+  // of 0 refuses the run). For the other capped teams a cap of 0 has always
+  // meant "no image budget, run proceeds without art" (content ships posts
+  // heroless), so 0 refuses image generation at the gen scripts — which read
+  // imagesToday/maxImagesPerDay from this gate — rather than refusing the
+  // whole run here.
+  const imageCapEnforced =
+    cfg.maxImagesPerDay != null && (team === 'homepage' || maxImagesPerDay > 0)
+  if (imageCapEnforced && imagesToday >= maxImagesPerDay)
     return { ...base, ok: false, reason: 'over_image_cap' }
   return { ...base, ok: true }
 }

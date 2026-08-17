@@ -55,7 +55,7 @@ export async function getTodayRunCount(excludeRunId?: number): Promise<number> {
 }
 
 export async function getTodayImageCount(): Promise<number> {
-  return team.getTodayImageCount()
+  return team.getTodayImageCount('homepage')
 }
 
 export async function isRunInProgress(excludeRunId?: number): Promise<boolean> {
