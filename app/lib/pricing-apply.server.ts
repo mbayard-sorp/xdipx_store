@@ -1,5 +1,6 @@
 import { pricingChanges } from '../../db/schema'
 import { updateVariantPricing, updateProductMetafield } from './shopify.server'
+import { enforceMapFloor } from './pricing-engine-v2.server'
 import type { PriceComputation } from './pricing-engine.server'
 import type { ApprovalMode } from './pricing-agent.server'
 
@@ -76,9 +77,10 @@ export async function decideAndApply(params: DecideAndApplyParams): Promise<Deci
 
   if (applyNow) {
     try {
+      // MAP floor invariant (ticket #3714): never write a price below MAP.
       await updateVariantPricing(
         variant.variantId,
-        String(computation.newPrice),
+        String(enforceMapFloor(computation.newPrice, mapPrice)),
         String(computation.newCompareAt),
       )
       applied = true
