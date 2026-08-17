@@ -57,6 +57,7 @@ const MARKETING_ADDENDUM      = slice(charter, '<!-- addendum:marketing:start --
 const ENRICHMENT_ADDENDUM     = slice(charter, '<!-- addendum:enrichment:start -->', '<!-- addendum:enrichment:end -->')
 const CONVERSATIONAL_ADDENDUM = slice(charter, '<!-- addendum:conversational:start -->', '<!-- addendum:conversational:end -->')
 const SUPPORT_ADDENDUM        = slice(charter, '<!-- addendum:support:start -->', '<!-- addendum:support:end -->')
+const VIDEO_ADDENDUM          = slice(charter, '<!-- addendum:video:start -->', '<!-- addendum:video:end -->')
 
 /** CORE + the marketing/advertising addendum (site, email, ads, themed calendar copy). */
 export const EMMA_VOICE_MARKETING = `${EMMA_VOICE_CORE}\n\n${MARKETING_ADDENDUM}`
@@ -69,6 +70,9 @@ export const EMMA_VOICE_CONVERSATIONAL = `${EMMA_VOICE_CORE}\n\n${CONVERSATIONAL
 
 /** CORE + the support addendum (customer service replies). */
 export const EMMA_VOICE_SUPPORT = `${EMMA_VOICE_CORE}\n\n${SUPPORT_ADDENDUM}`
+
+/** CORE + the video addendum (reel/short scripts and their captions; codified 2026-08-16). */
+export const EMMA_VOICE_VIDEO = `${EMMA_VOICE_CORE}\n\n${VIDEO_ADDENDUM}`
 
 /** The full charter text, unsliced, for callers that want everything (e.g. an eval judge). */
 export const EMMA_VOICE_FULL = charter
