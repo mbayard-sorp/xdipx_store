@@ -24,6 +24,8 @@ import {
   type HomepagePayloadB,
 } from '~/lib/homepage-payload.server'
 import { getSensationMapData, type SensationMapData } from '~/lib/sensation-map.server'
+import { getProductByHandle } from '~/lib/shopify.server'
+import type { SensationDialV2 } from '~/types'
 import { getEmmaHeroSettings, getBlogPosts, getEditor, getStorefrontHomeLayout } from '~/lib/sanity.server'
 import { getPanelDeck } from '~/lib/panel-deck.server'
 import { withTimeout } from '~/lib/with-timeout.server'
@@ -36,6 +38,10 @@ const EDITOR_TIMEOUT_MS = 4000
 // Layout is a single small singleton read; it degrades to the shipped order, so
 // it gets the same short budget as the other Sanity legs.
 const LAYOUT_TIMEOUT_MS = 4000
+// The pinned hero product's dial fetch (ticket #3530). Build-time only, never
+// on the request path, so it gets the same short budget as the Sanity legs and
+// degrades to null (hero renders no dial, never placeholder chrome).
+const PIN_DIAL_TIMEOUT_MS = 4000
 /**
  * Wall-clock ceiling for the team's Sanity merchandising surface. This leg is
  * now resolved BEFORE the response is sent (see `contentBlocks` below), so it
@@ -78,6 +84,15 @@ export interface StorefrontData {
    * rotating out from under the hero copy. Unset = rotating behavior.
    */
   emmaHero: EmmaHeroSettings | null
+  /**
+   * The pinned featured product's sensation dial for the hero's compact "how
+   * it feels" readout (ticket #3530). Non-null only when the team has pinned a
+   * hero product AND that product carries xdipx.sensation_dial_v2 (or legacy
+   * sensation_dial, projected). Null hides the readout entirely, no empty
+   * chrome, per doctrine section 6 (never fabricate proof). Always describes
+   * `featured[0]`, because the pin is what forces `featured[0]`.
+   */
+  heroSensationDial: SensationDialV2 | null
   /**
    * Meet Emma portrait (Nº 04). Prefers the additive homepage-only situational
    * portrait `singleton.editor.homepagePhoto` (`getEditor().homepagePhotoUrl`)
@@ -264,6 +279,10 @@ export function hydrateStorefrontPayloadB(payload: HomepagePayloadB): Storefront
     // passed through verbatim (no per-bucket reshuffle like `rails`).
     anchorProducts: payload.anchorProducts ?? [],
     emmaHero: payload.emmaHero,
+    // The dial belongs to the pin: it was fetched for `pinnedProduct` at build
+    // time, and only a pin holds `featured[0]` still. Guarding on the pin means
+    // a rotating hero can never show another product's readings.
+    heroSensationDial: pinned ? payload.pinnedSensationDial ?? null : null,
     emmaPhotoUrl: payload.emmaPhotoUrl,
     emmaPhotoAlt: payload.emmaPhotoAlt,
     featured,
@@ -371,6 +390,24 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     }
   }
 
+  // Hero sensation dial (ticket #3530). The discovery index does not carry the
+  // dial metafields, so the pin path resolves them from Shopify once per build.
+  // Pinned products only: a rotating hero changes product every rail-shuffle
+  // bucket, so its dial would describe the wrong product within one blob
+  // lifetime. Degrades to null on any failure; null renders nothing.
+  let pinnedSensationDial: SensationDialV2 | null = null
+  if (pinnedProduct) {
+    pinnedSensationDial = await withTimeout(
+      getProductByHandle(pinnedProduct.handle).then(p => p?.sensationDialV2 ?? null),
+      PIN_DIAL_TIMEOUT_MS,
+      null,
+      'getProductByHandle(hero sensation dial)',
+    ).catch((err: unknown) => {
+      console.warn('[storefront-home] hero sensation dial fetch failed, rendering without it:', err)
+      return null
+    })
+  }
+
   // Nº 03 anchor grid source: the team's curated collection (default
   // best-sellers), resolved to lean cards HERE at build time so the read path
   // stays a pure blob hydrate. This depends on the resolved emmaHero (its
@@ -393,6 +430,7 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     anchorProducts,
     total: railsResult.total,
     pinnedProduct,
+    pinnedSensationDial,
     emmaHero,
     // Nº 04 prefers the additive homepage-only situational portrait
     // (`editor.homepagePhoto`) and falls back to the canonical `photo`. Only

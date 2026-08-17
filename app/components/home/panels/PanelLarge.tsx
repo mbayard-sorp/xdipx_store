@@ -9,30 +9,35 @@ const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 450 } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
 
-// The art zone is w-[42%] of a large panel: ~42vw of the viewport at 1-up
-// (below sm) and ~21vw at 2-up (from sm). Left on the hero defaults it would
-// fetch a 768w image for a box that is ~268px at 412px and ~277px at desktop.
-// A real sizes plus a ladder that tops out at 640w right-sizes the request.
-const ART_WIDTHS = [200, 280, 360, 480, 640]
-const ART_SIZES = '(min-width: 640px) 21vw, 42vw'
+// The art zone now spans the full card width: ~92vw at 1-up (below sm) and
+// ~46vw at 2-up (from sm, deck capped at 1320px so ~630px max). A single-item
+// row stays full container width (~1190px max). The ladders keep the browser
+// from requesting a rendition wider than the box it fills.
+const ART_WIDTHS_PAIR = [320, 480, 640, 768, 960]
+const ART_SIZES_PAIR = '(min-width: 640px) 46vw, 92vw'
+const ART_WIDTHS_SINGLE = [320, 480, 640, 768, 1024, 1280]
+const ART_SIZES_SINGLE = '(min-width: 1320px) 1190px, 92vw'
 
 /**
  * The deck's merchandising drivers (Discover, New): the two panels with room
  * for a kicker, a blurb, and richer photography.
  *
- * Text never overlays the image. The panel splits into a copy zone and an art
- * zone, so a photograph can fill its half edge to edge without the label ever
- * depending on it for contrast — the pattern that replaced the text-over-
- * packshot overlay the owner rejected on 2026-07-20.
+ * Layout is the door-tile pattern the square tiles established: image on top,
+ * copy below on the panel's own solid ground (paper / coral-soft / plum-soft
+ * per the doctrine ground lock). Owner feedback 2026-08-15 (ticket #3529):
+ * the old side-by-side split read as copy competing with the artwork, and the
+ * "Discover" banner's text was hard to read. Text never sits on photography.
  *
- * The art zone always bleeds to the card edge — never an inset plate inside the
- * rectangle (owner direction 2026-07-30). What makes a bleed work on any ground
- * is the image itself: these are abstract compositions built out of a real
- * product, filling the frame edge to edge with form and tint, so there is no
- * backdrop to butt against the card and no seam to hide. On a light ground the
- * composition is built on the panel's own tint and the seam simply dissolves;
- * on ink, the composition carries its own dark passages, so the boundary reads
- * as a crop rather than as a pale rectangle laid on top.
+ * The art zone holds ONE fixed aspect, 2:1, at every breakpoint (ticket #352,
+ * doctrine 8.4: fixed aspect ratios on all media frames). The old split gave
+ * the art zone a fluid ratio that swung roughly 0.55 to 1.03 across 375/768/
+ * 1024/1320, so one image brief could not compose for all four crops. With a
+ * constant 2:1 box, object-cover always shows the same framing and the prompt
+ * library can stop hedging with mid-range safe areas.
+ *
+ * The image still bleeds to the card edges (top and sides), never an inset
+ * plate inside the rectangle (owner direction 2026-07-30). Fixed aspect also
+ * means zero CLS: the box reserves its height before the image arrives.
  */
 export function PanelLargeRow({
   items,
@@ -64,14 +69,32 @@ export function PanelLargeRow({
               data-panel={dataAttr}
               onClick={() => onPanelClick?.(dataAttr, panel.href)}
               className={[
-                'relative flex min-h-[154px] overflow-hidden md:h-[240px]',
+                'relative flex flex-col overflow-hidden',
+                panel.imageUrl ? '' : 'min-h-[154px] justify-end',
                 'rounded-[22px]',
                 ruled ? 'border border-line bg-paper-2' : s.bg,
                 panelInteractionClasses(!ruled && s.darkGround),
               ].join(' ')}
             >
-              {/* Copy zone */}
-              <div className="flex flex-1 flex-col justify-between p-4 md:p-6">
+              {/* Art zone. Fixed 2:1 at every breakpoint (ticket #352), image
+                  bleeding to the top and side edges with the copy zone below on
+                  the flat tint, exactly like the square door tiles. */}
+              {panel.imageUrl ? (
+                <div className="pointer-events-none relative aspect-[2/1] w-full overflow-hidden">
+                  <OptimizedImage
+                    src={panel.imageUrl}
+                    alt={panel.imageAlt ?? ''}
+                    width={960}
+                    height={480}
+                    sizes={single ? ART_SIZES_SINGLE : ART_SIZES_PAIR}
+                    widths={single ? ART_WIDTHS_SINGLE : ART_WIDTHS_PAIR}
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                </div>
+              ) : null}
+
+              {/* Copy zone: solid panel ground, never over the photograph. */}
+              <div className="flex flex-1 flex-col p-4 md:p-6">
                 <div>
                   {panel.kicker ? (
                     <span
@@ -82,14 +105,14 @@ export function PanelLargeRow({
                     </span>
                   ) : null}
                   <span
-                    className={`block text-[20px] leading-[1.05] tracking-[-0.01em] md:text-[34px] ${ruled ? 'text-ink' : s.text}`}
+                    className={`block text-[20px] leading-[1.05] tracking-[-0.01em] md:text-[28px] ${ruled ? 'text-ink' : s.text}`}
                     style={DISPLAY}
                   >
                     {panel.label}
                   </span>
                   {panel.blurb ? (
                     <span
-                      className={`mt-2 hidden max-w-[36ch] text-[13px] leading-snug md:block ${ruled ? 'text-ink-3' : s.muted}`}
+                      className={`mt-2 hidden max-w-[44ch] text-[13px] leading-snug md:block ${ruled ? 'text-ink-3' : s.muted}`}
                       style={BODY}
                     >
                       {panel.blurb}
@@ -100,7 +123,7 @@ export function PanelLargeRow({
                   // The deck's ONE coral spend (§3 budget): the dark panel's CTA.
                   // Light grounds keep ink so coral stays a single primary.
                   <span
-                    className={`inline-flex items-center gap-1.5 text-[13px] font-semibold md:text-[14px] ${ruled ? 'text-ink' : s.darkGround ? 'text-coral' : s.text}`}
+                    className={`mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold md:mt-4 md:text-[14px] ${ruled ? 'text-ink' : s.darkGround ? 'text-coral' : s.text}`}
                     style={BODY}
                   >
                     {arrowText}
@@ -114,25 +137,11 @@ export function PanelLargeRow({
                 ) : null}
               </div>
 
-              {/* Art zone — image fills its half edge to edge; mark is the
-                  empty state, sized up for the wide box. */}
-              {panel.imageUrl ? (
-                <div className="pointer-events-none relative w-[42%] shrink-0">
-                  <OptimizedImage
-                    src={panel.imageUrl}
-                    alt={panel.imageAlt ?? ''}
-                    width={480}
-                    height={480}
-                    sizes={ART_SIZES}
-                    widths={ART_WIDTHS}
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                </div>
-              ) : panel.mark && isMarkName(panel.mark) ? (
-                // Empty state: no reserved art column (which read as an
-                // unfinished plate) — the copy zone keeps the full width and
-                // the mark sits anchored to the CTA baseline, scaled to a real
-                // graphic element (design-critic cold start).
+              {/* Empty state: no reserved art zone (which read as an unfinished
+                  plate). The copy zone keeps the full card and the mark sits
+                  anchored bottom-right, scaled to a real graphic element
+                  (design-critic cold start). */}
+              {!panel.imageUrl && panel.mark && isMarkName(panel.mark) ? (
                 <div
                   className={`pointer-events-none absolute bottom-4 right-4 md:bottom-6 md:right-6 ${ruled ? 'text-ink-4' : s.accent}`}
                 >
