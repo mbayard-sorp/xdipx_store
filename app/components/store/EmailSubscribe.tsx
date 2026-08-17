@@ -1,27 +1,42 @@
 import { useFetcher } from 'react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { trackGenerateLead, type LeadLocation } from '~/lib/analytics.client'
 
 interface EmailSubscribeProps {
   heading?: string
   subcopy?: string
   buttonLabel?: string
+  /** GA4 lead attribution: which surface captured the address. Email capture
+      is the primary month-one success metric of paid search, so every render
+      site names itself (ticket #3424). */
+  location?: LeadLocation
 }
 
 export function EmailSubscribe({
   heading = "Get tomorrow's deal before it drops.",
   subcopy = 'No spam. No fluff. Just one email when the next deal goes live.',
   buttonLabel = 'Dip In ♥',
+  location = 'home',
 }: EmailSubscribeProps = {}) {
   const fetcher = useFetcher()
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
+  const leadFired = useRef(false)
 
   useEffect(() => {
     const data = fetcher.data as { ok?: boolean; error?: string } | undefined
     if (!data) return
-    if (data.ok) setSubmitted(true)
+    if (data.ok) {
+      setSubmitted(true)
+      // Fire once per successful capture; the ref dedupes StrictMode
+      // double-effects and later fetcher.data re-renders.
+      if (!leadFired.current) {
+        leadFired.current = true
+        trackGenerateLead(location)
+      }
+    }
     if (data.error) setError(data.error)
-  }, [fetcher.data])
+  }, [fetcher.data, location])
 
   const isPending = fetcher.state !== 'idle'
 

@@ -437,6 +437,7 @@ export default function DesignGalleryPage() {
           <p className="mb-3 text-[13px] font-semibold text-ink-3" style={BODY}>Email capture (EmailSubscribe)</p>
           <div className="overflow-hidden rounded-[var(--radius-lg)] border border-line">
             <EmailSubscribe
+              location="admin-gallery"
               heading="Good taste, delivered quietly."
               subcopy="Emma's picks, on an irregular schedule. Discreet, direct."
               buttonLabel="I'm in ♥"
