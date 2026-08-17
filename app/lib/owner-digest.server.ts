@@ -27,6 +27,7 @@ import { getProfitReconciliation } from '~/lib/profit.server'
 import {
   computeTicketLoopHealth,
   describeSupersededEvidence,
+  reconcileOrphanedTickets,
   reconcilePrLinkStates,
   type BlockedTicket,
   type ConflictedPr,
@@ -1152,12 +1153,19 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
         return null
       }),
       // Best-effort for the same reason: the janitor reads GitHub. The
-      // reconcile runs first so pr-link states are fresh when health is
-      // computed; its own failure costs nothing but freshness, never the
-      // digest and never the health computation behind it.
+      // reconciles run first so pr-link states are fresh and merged-PR orphans
+      // are already off the live queue when health is computed (#3582: an
+      // orphan the reconcile applies vanishes from Needs-Mike in the same
+      // digest, and one the protected-path check skips stays listed). Each
+      // step's own failure costs nothing but freshness, never the digest and
+      // never the health computation behind it.
       reconcilePrLinkStates()
         .catch(err => {
           console.warn('[owner-digest] pr-link reconcile failed:', String(err).slice(0, 200))
+        })
+        .then(() => reconcileOrphanedTickets())
+        .catch(err => {
+          console.warn('[owner-digest] orphan reconcile failed:', String(err).slice(0, 200))
         })
         .then(() => computeTicketLoopHealth())
         .catch((err): null => {

@@ -9,10 +9,37 @@ vi.mock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
 const githubConfiguredMock = vi.hoisted(() => vi.fn(() => false))
 const getPullRequestMock = vi.hoisted(() => vi.fn())
 const listOpenPullRequestsMock = vi.hoisted(() => vi.fn())
+const listPullRequestFilesMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/github.server', () => ({
   isGithubConfigured: githubConfiguredMock,
   getPullRequest: getPullRequestMock,
   listOpenPullRequests: listOpenPullRequestsMock,
+  listPullRequestFiles: listPullRequestFilesMock,
+  // Shape-compatible stand-in for the real classifier (which has its own
+  // tests): protected iff any filename mentions 'protected'.
+  classifyChangedFiles: (files: Array<{ filename?: string }> | null | undefined) => ({
+    protected: (files ?? []).some(f => String(f?.filename ?? '').includes('protected')),
+  }),
+}))
+
+// The orphan reconcile must go THROUGH the fenced transition machinery, so the
+// test asserts both the transition call and that it ran inside the
+// runWithOutOfBandReconcile wrapper.
+const transitionSuggestionMock = vi.hoisted(() => vi.fn(async () => ({})))
+const reconcileScopeDepth = vi.hoisted(() => ({ current: 0, seenInside: [] as number[] }))
+vi.mock('~/lib/team.server', () => ({
+  transitionSuggestion: (...args: unknown[]) => {
+    reconcileScopeDepth.seenInside.push(reconcileScopeDepth.current)
+    return (transitionSuggestionMock as unknown as (...a: unknown[]) => unknown)(...args)
+  },
+  runWithOutOfBandReconcile: async (fn: () => Promise<unknown>) => {
+    reconcileScopeDepth.current += 1
+    try {
+      return await fn()
+    } finally {
+      reconcileScopeDepth.current -= 1
+    }
+  },
 }))
 
 const sendOwnerEmailMock = vi.hoisted(() => vi.fn())
@@ -33,7 +60,10 @@ import {
   buildBlockedDigest,
   checkRoutineLiveness,
   classifyConflictedPrs,
+  classifyOrphanReconcile,
   classifyOrphans,
+  reconcileOrphanedTickets,
+  RECONCILABLE_ORPHAN_STATUSES,
   classifySlaBreaches,
   classifySupersededApprovedCode,
   computeNetPerDay,
@@ -765,5 +795,148 @@ describe('runBlockedTicketDigest', () => {
 
     expect(kvSetNXMock).not.toHaveBeenCalled()
     expect(res.skipped).toBe('no blocked tickets')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Orphan reconcile (#3582)
+// ---------------------------------------------------------------------------
+
+describe('classifyOrphanReconcile', () => {
+  const clean = { ok: true, protected: false }
+  it('applies only a merged orphan in a reconcilable status with a clean file list', () => {
+    for (const status of RECONCILABLE_ORPHAN_STATUSES) {
+      expect(classifyOrphanReconcile({ status, prOutcome: 'merged' }, clean)).toBe('apply')
+    }
+  })
+
+  it('never applies a closed-unmerged PR, whatever the status', () => {
+    for (const status of [...RECONCILABLE_ORPHAN_STATUSES, 'proposed', 'in_progress']) {
+      expect(classifyOrphanReconcile({ status, prOutcome: 'closed' }, clean)).toBe('skip-closed')
+    }
+  })
+
+  it('skips statuses outside the fenced reconcile edges', () => {
+    for (const status of ['proposed', 'in_progress', 'verified']) {
+      expect(classifyOrphanReconcile({ status, prOutcome: 'merged' }, clean)).toBe('skip-status')
+    }
+  })
+
+  it('skips protected-path PRs and unreadable file lists (unknown never classifies)', () => {
+    expect(classifyOrphanReconcile({ status: 'approved', prOutcome: 'merged' },
+      { ok: true, protected: true })).toBe('skip-protected')
+    expect(classifyOrphanReconcile({ status: 'approved', prOutcome: 'merged' },
+      { ok: false, protected: false })).toBe('skip-unknown')
+  })
+})
+
+describe('reconcileOrphanedTickets', () => {
+  function resetAll() {
+    executeMock.mockReset()
+    githubConfiguredMock.mockReset()
+    getPullRequestMock.mockReset()
+    listPullRequestFilesMock.mockReset()
+    transitionSuggestionMock.mockReset()
+    transitionSuggestionMock.mockResolvedValue({})
+    reconcileScopeDepth.current = 0
+    reconcileScopeDepth.seenInside = []
+  }
+
+  it('does nothing when GitHub is unconfigured', async () => {
+    resetAll()
+    githubConfiguredMock.mockReturnValue(false)
+    const res = await reconcileOrphanedTickets()
+    expect(res.skipped).toBe(true)
+    expect(executeMock).not.toHaveBeenCalled()
+    expect(transitionSuggestionMock).not.toHaveBeenCalled()
+  })
+
+  it('applies a merged-PR orphan through the fenced reconcile, and leaves a still-open PR alone', async () => {
+    resetAll()
+    githubConfiguredMock.mockReturnValue(true)
+    // gatherOrphans candidate rows: one merged orphan, one still-open control.
+    executeMock.mockResolvedValue({ rows: [
+      { id: 1258, status: 'approved', ref: 'https://github.com/o/r/pull/671' },
+      { id: 2000, status: 'pr_open', ref: 'https://github.com/o/r/pull/700' },
+    ] })
+    getPullRequestMock.mockImplementation(async (num: number) => ({
+      ok: true, status: 200,
+      data: num === 671
+        ? { number: 671, merged: true, state: 'closed' }
+        : { number: 700, merged: false, state: 'open' },
+    }))
+    listPullRequestFilesMock.mockResolvedValue({
+      ok: true, status: 200, data: [{ filename: 'app/lib/ticket-janitor.server.ts' }],
+    })
+
+    const res = await reconcileOrphanedTickets()
+
+    expect(res.applied).toEqual([1258])
+    expect(res.errors).toEqual([])
+    expect(transitionSuggestionMock).toHaveBeenCalledTimes(1)
+    const [id, to, actor, opts] = transitionSuggestionMock.mock.calls[0] as unknown as [
+      number, string, string, { links: Array<{ kind: string; ref: string; state: string }> },
+    ]
+    expect([id, to, actor]).toEqual([1258, 'applied', 'system'])
+    expect(opts.links).toEqual([
+      { kind: 'pr', ref: 'https://github.com/o/r/pull/671', state: 'merged' },
+    ])
+    // The transition ran inside runWithOutOfBandReconcile, not as a plain call.
+    expect(reconcileScopeDepth.seenInside).toEqual([1])
+  })
+
+  it('skips a merged orphan whose PR touched a protected path', async () => {
+    resetAll()
+    githubConfiguredMock.mockReturnValue(true)
+    executeMock.mockResolvedValue({ rows: [
+      { id: 2071, status: 'blocked', ref: 'https://github.com/o/r/pull/800' },
+    ] })
+    getPullRequestMock.mockResolvedValue({
+      ok: true, status: 200, data: { number: 800, merged: true, state: 'closed' },
+    })
+    listPullRequestFilesMock.mockResolvedValue({
+      ok: true, status: 200, data: [{ filename: 'app/lib/protected-thing.server.ts' }],
+    })
+
+    const res = await reconcileOrphanedTickets()
+
+    expect(res.applied).toEqual([])
+    expect(res.skippedProtected).toEqual([2071])
+    expect(transitionSuggestionMock).not.toHaveBeenCalled()
+  })
+
+  it('skips when the changed-file list cannot be read: unknown never classifies as safe', async () => {
+    resetAll()
+    githubConfiguredMock.mockReturnValue(true)
+    executeMock.mockResolvedValue({ rows: [
+      { id: 3, status: 'approved', ref: 'https://github.com/o/r/pull/801' },
+    ] })
+    getPullRequestMock.mockResolvedValue({
+      ok: true, status: 200, data: { number: 801, merged: true, state: 'closed' },
+    })
+    listPullRequestFilesMock.mockResolvedValue({ ok: false, status: 500, error: 'boom' })
+
+    const res = await reconcileOrphanedTickets()
+
+    expect(res.applied).toEqual([])
+    expect(transitionSuggestionMock).not.toHaveBeenCalled()
+  })
+
+  it('swallows the 409 race when something else moved the row first', async () => {
+    resetAll()
+    githubConfiguredMock.mockReturnValue(true)
+    executeMock.mockResolvedValue({ rows: [
+      { id: 4, status: 'in_review', ref: 'https://github.com/o/r/pull/802' },
+    ] })
+    getPullRequestMock.mockResolvedValue({
+      ok: true, status: 200, data: { number: 802, merged: true, state: 'closed' },
+    })
+    listPullRequestFilesMock.mockResolvedValue({ ok: true, status: 200, data: [{ filename: 'docs/a.md' }] })
+    transitionSuggestionMock.mockRejectedValue(new Error('409 Conflict: moved'))
+
+    const res = await reconcileOrphanedTickets()
+
+    expect(res.applied).toEqual([])
+    expect(res.errors).toEqual([])
   })
 })

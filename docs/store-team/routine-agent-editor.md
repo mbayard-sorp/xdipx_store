@@ -29,13 +29,13 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -d '{"op":"list","status":"approved","orderBy":"age","limit":200}'
 ```
 
-**Pass `orderBy:"age"` and `limit:200` — this is not cosmetic.** `listSuggestions`
-(`app/lib/team.server.ts`) defaults `limit` to 100 and orders `desc(created_at)`, so a bare
-`{"op":"list","status":"approved"}` returns only the **newest 100** approved rows. Once the approved
-backlog passes 100, the oldest rows fall off the bottom and become permanently invisible: a truncated
-row can be neither executed nor retired, because every disposal op in Step 1.5 operates on rows this
-run can see. `orderBy:"age"` is `asc(created_at)` (oldest first) and `200` is `SUGGESTION_LIST_MAX`.
-Apply the same `orderBy:"age"` and `limit:200` to the three per-kind list calls in Step 1.5.
+**Pass `orderBy:"age"` and `limit:200` — still, even though the default got safer.** Since ticket
+#2071 a status-filtered list with no `orderBy` defaults to `asc(created_at)` (oldest first), so a
+bare `{"op":"list","status":"approved"}` no longer permanently hides the oldest rows — but it still
+caps at 100, and `limit:200` (`SUGGESTION_LIST_MAX`) is what actually shows the whole queue. The
+response now carries `total` alongside `suggestions`: if `total` exceeds the rows returned, the
+backlog is bigger than one call shows — say so in the run summary. Apply the same `orderBy:"age"`
+and `limit:200` to the three per-kind list calls in Step 1.5.
 
 Yours: kind `instructions` | `agent-def` | `config` (doc-level only). Everything else is skipped
 silently (kind `code` waits for a human + rr7-engineer; `campaign`/`promo`/`program` are the
@@ -196,20 +196,37 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
    the check for the *whole* PR, permanently — so a suggestion asking you to touch anything else is
    a suggestion you cannot execute on an `agents/` branch. Say so in a `decision` event and leave
    the row for the owner.
-   Diff-before-write: if the file already satisfies the suggestion, do not open an empty PR. You
-   cannot mark it `applied` yourself, the API returns 409 because `instructions` rows are not
-   retirable by this lane, so post a `decision` event citing where it already shipped and leave the
-   row `approved` for the owner to dismiss.
+   Diff-before-write: if the file already satisfies the suggestion, do not open an empty PR.
+   **Retire it with evidence instead of leaving it** (ticket #2864): the retire op accepts evidence
+   that unlocks `instructions`/`agent-def` rows, and only those, only for you:
+
+   ```bash
+   # The rule already exists in the target doc — cite where:
+   -d '{"op":"retire","id":123,"actor":"agent:agent-editor","note":"already satisfied","satisfiedBy":"docs/store-team/routine-content-daily.md#voice-gate"}'
+   # A later consolidated row replaced this one — cite it (its text must name #123):
+   -d '{"op":"retire","id":123,"actor":"agent:agent-editor","note":"superseded","supersededById":2732}'
+   ```
+
+   `satisfiedBy` is a GitHub PR URL or a repo doc path (with an optional `#anchor`) showing the rule
+   already lives in the binding text. `supersededById` must point at a live-or-applied row whose own
+   text names the retired row (`#<id>`); a pointer the API cannot verify is rejected. An
+   evidence-free retire on these kinds still 409s, every evidence retire lands `dismissed` with the
+   evidence attached as links, and it shows in the next owner digest like any other retire. When you
+   have no citable evidence, the old rule stands: post a `decision` event and leave the row
+   `approved` for the owner.
 4. **Refuse and flag** any suggestion that would weaken a money valve, the Emma voice gate, MAP
    rules, propose-only discipline, or the improvement loop's own human gates. Post a `decision`
    event stating what it would have weakened, and **leave the row approved** for the owner.
 
    Do not try to retire or rekind it. Your apply queue is `instructions`/`agent-def`/`config`, and
-   the bus rejects both ops on exactly those kinds: `AGENT_RETIRE_KINDS` is
+   the bus rejects the plain ops on exactly those kinds: `AGENT_RETIRE_KINDS` is
    `process|strategy|program` and `REKIND_FROM_KINDS` is `process`, so either call returns 409. That
    fence is deliberate, and the code comment says why — being able to retire your own instruction
    rows is being able to dismiss the suggestions that constrain you. An earlier version of this step
-   told you to dispose of the row anyway, which was an instruction the API could not honour.
+   told you to dispose of the row anyway, which was an instruction the API could not honour. The
+   evidence retire from Step 2.3 does **not** apply here: a refusal is a judgment, not supersession
+   or satisfied evidence, and citing unrelated evidence to clear a row you refused is exactly the
+   hole the fence exists to close.
 
    Yes, this means a refused row is re-listed on every future run. Re-reading it is cheap; the
    alternative is a hole in the only fence pointed at you. Skip it fast on sight of your own prior
