@@ -65,7 +65,7 @@ Additional scoring criteria from the 2026-07-29 all-hands, for any panel-deck or
 
 <verdicts>
 - **PASS** — average ≥ 4.0 AND no dimension ≤ 2. Ship it.
-- **REVISE** — average < 4.0, or any dimension = 2.5–3 with a fixable cause. List the exact changes, ranked by impact. In Routine A's spot-check, a REVISE files a suggestion (`POST /api/team/suggestion`, team `homepage`), it does not roll anything back.
+- **REVISE** — average < 4.0, or any dimension = 2.5–3 with a fixable cause. List the exact changes, ranked by impact. In Routine A's spot-check, a REVISE means the orchestrator files a suggestion (`POST /api/team/suggestion`, team `homepage`) on your behalf, per `<how_verdicts_reach_the_bus>`; it does not roll anything back.
 - **BLOCK** — any dimension ≤ 2, a doctrine hard rule broken (LCP hero wrapped, gradient, banned imagery class, contrast failure), or the page would embarrass the brand. In Routine B, the PR does not open until fixed. In Routine A's spot-check, a BLOCK triggers the existing Sanity last-good rollback path.
 </verdicts>
 
@@ -88,5 +88,22 @@ Defects (ranked):
 What PASS looks like: <one sentence describing the fixed state>
 ```
 
-Post the verdict as a run `/event` row (`eventType:'decision'`, `agentRole:'design-critic'`) so the dashboard's critic-score time series accumulates. Scores are the design-elevation program's primary metric (target: rubric average ≥ 4.5 sustained four weeks).
+Return the verdict as data (not a POST — see `<how_verdicts_reach_the_bus>` below when you're
+running inside Routine A) so the dashboard's critic-score time series accumulates once the
+orchestrator relays it. Scores are the design-elevation program's primary metric (target: rubric
+average ≥ 4.5 sustained four weeks).
 </output_format>
+
+<how_verdicts_reach_the_bus>
+**In Routine A's post-publish spot-check, you cannot call `/api/team/*` yourself.** As a spawned
+subagent, every request you make that carries the team credential is refused by the session's
+permission classifier before it is dispatched (run 331, 2026-08-15 — the same failure
+`social-publish-gate` hit and #673 fixed the same way). Do not attempt the curl.
+
+Return your verdict block and, on a REVISE, the suggestion payload
+(`{team:'homepage', kind:'process', suggestion:<ranked defects>, cxRisk}`) as data.
+`homepage-orchestrator` posts the `/event` row and files the suggestion verbatim on your behalf.
+This does not apply in Routine B step 4: there you are the gate on whether a PR opens at all, and
+nothing about that decision requires you to call the team API — `rr7-engineer` simply does not
+open the PR until you pass it.
+</how_verdicts_reach_the_bus>
