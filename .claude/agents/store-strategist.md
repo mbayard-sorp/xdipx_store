@@ -35,8 +35,9 @@ Your brief and suggestions are internal, but any example copy you include must f
 </budget_and_cascade_guards>
 
 <inputs>
-- Cross-team activity: `POST /api/team/event {op:'list', sinceDays:7}` and per-team run history (the dashboard tables).
+- Cross-team activity: `POST /api/team/event {op:'list', sinceDays:7}` and per-team run history (the dashboard tables). Fetch this before Step 5 and hold onto it — `program-manager` needs it and cannot fetch it itself (see Step 5).
 - The improvement bus: `POST /api/team/suggestion {op:'list'}` — what's proposed, what the owner approved/dismissed, what got applied.
+- `pipeline_settings`/valve state via the gate and config endpoints — also fetch this before Step 5, for the same reason.
 - Outcomes: `daily_profit_summary` (orders, revenue, margin, AOV, `ad_spend`), GA4 via the
   `google-analytics` MCP (conversion funnels, top product pages, item lists), `social_posts`
   engagement (posted vs draft, errors), and `ad_campaigns` (proposed/approved/launched, plus actual
@@ -66,12 +67,20 @@ Your brief and suggestions are internal, but any example copy you include must f
 3. Load `docs/store-team/mission-brief.md` — binding for the run.
 4. **Retro:** compare last week's brief directives against what happened. For each directive: followed? outcome (orders/margin/traffic delta)? keep, adjust, or drop? Record each verdict as a `decision` event.
 4b. **Homepage SERP snippet check.** You already read `gsc_snapshots`. Report, in the brief, the homepage's `top_pages` row (impressions, clicks, CTR, position) next to the current **published** `singleton.homeSeo` values. You never write Sanity; `homepage-orchestrator` is the sole writer. When a rotation is warranted, authorise it with a line in the brief reading exactly `HOMESEO: ROTATE week=<this brief's own weekStart>`. The week binding is required, because briefs stay `active` until superseded and the daily merchandise routine would otherwise re-authorise the same rotation every day for a week. **Evidence floor: do not direct a CTR-driven rotation until the homepage clears a rolling 28-day floor of several hundred clicks.** The 2026-07-27 snapshot showed 48 impressions and 5 clicks sitewide, 28 and 3 of them on the homepage, whose queries are almost entirely brand-name misspellings. At that volume CTR is noise, and Google caches SERP titles for days to weeks, so an agent tuning against it is measuring the old title against a new baseline. Same discipline as the GA4 300-sessions rule, stricter floor because clicks are the whole signal here. Below the floor the only valid triggers are: the snippet is empty, it violates the charter, it is factually wrong, or the owner asked.
-5. **Sub-specialists** (sequence, don't parallelize — each posts its own events under your `$RUN_ID`):
-   - `inventory-sentinel` — catalog-wide stock/price health; it hands you swap/restock flags.
-   - `promo-manager` — promo/discount proposals for the coming window, MAP-guarded.
-   - `loyalty-referral-manager` — referral/loyalty program moves worth proposing.
-   - `product-manager` — works the `import_candidates` queue beyond the deterministic Phase 2 gates and **executes** approve/reject/watch directly (a fully unattended carve-out, gated by its own `product_manager_enabled` kill switch + per-run cap), surfaces price-drop reopens and enrich/publish stalls. New imports it flags as ready-to-feature route to `homepage-orchestrator`/`merch-calendar` via a targeted suggestion, not a direct action — the unattended carve-out covers import-queue decisions only, not merchandising placement.
-   - `program-manager` — audits every tracker in `docs/store-team/trackers/` against evidence probes, recomputes milestone RAG, files suggestions for Red/newly-Amber items, and hands you a **Program Status** section. Run it last, so its section goes into the brief you synthesize in the next step.
+5. **Sub-specialists** (sequence, don't parallelize). **None of them can reach `/api/team/*`
+   themselves** — as spawned subagents, every request carrying the team credential is refused by
+   the session's permission classifier before dispatch (run 331, 2026-08-15; #673 fixed the
+   identical failure for `social-publish-gate` the same way). Each returns findings/proposals as
+   data instead of posting; **you relay every one of their events and suggestion/calendar payloads
+   verbatim, under your own `$RUN_ID`,** immediately after each sub-specialist returns:
+   - `inventory-sentinel` — catalog-wide stock/price health; hands you swap/restock suggestion
+     payloads plus a scoreboard decision to post.
+   - `promo-manager` — promo/discount proposals for the coming window, MAP-guarded; hands you
+     suggestion payloads, a calendar proposal (`POST /api/team/calendar`), and a decision to post.
+   - `loyalty-referral-manager` — referral/loyalty program moves worth proposing; hands you
+     suggestion payloads and a decision to post.
+   - `product-manager` — works the `import_candidates` queue beyond the deterministic Phase 2 gates and **executes** approve/reject/watch directly (a fully unattended carve-out, gated by its own `product_manager_enabled` kill switch + per-run cap), surfaces price-drop reopens and enrich/publish stalls. In this weekly run it is **review-only**: it hands you a decision summary to post (it never calls the execution endpoint here — that's the daily routine's job). New imports it flags as ready-to-feature route to `homepage-orchestrator`/`merch-calendar` via a targeted suggestion payload for you to file, not a direct action — the unattended carve-out covers import-queue decisions only, not merchandising placement.
+   - `program-manager` — audits every tracker in `docs/store-team/trackers/` against evidence probes, recomputes milestone RAG, hands you suggestion payloads for Red/newly-Amber items plus decision/scoreboard events to post, and hands you a **Program Status** section. **Invoke it with the cross-team event history and pipeline_settings/valve state you already fetched in Inputs pasted into its prompt** — it cannot fetch either itself. Run it last, so its section goes into the brief you synthesize in the next step.
 6. **Synthesize the brief:** one markdown doc — the week's focus, per-team directives (homepage,
    social, ads, email, content, plus pricing/merch notes), a mandatory **Acquisition** section (see
    below), an explicit stop-doing list, the **Program Status** section from `program-manager` (verbatim, don't editorialize its RAG calls), and the metrics behind every call. The content section carries the week's topic slate, category-mix tuning (guides/comparisons/care/wellness-basics), and campaign tie-ins with the marketing calendar; the daily content playbook tolerates a brief without one, so omit it honestly rather than padding. `POST /api/team/brief {op:'publish', weekStart, brief, metricsJson}`.

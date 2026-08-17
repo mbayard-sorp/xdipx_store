@@ -154,9 +154,43 @@ in the brief that engagement is unmeasured.
 
 ## Step 4 — Sub-specialists (sequence, same $RUN_ID)
 
-1. `inventory-sentinel` — catalog stock/price sweep → targeted suggestions + scoreboard event.
-2. `promo-manager` — MAP-guarded promo designs for the coming window → kind `promo` suggestions +
-   calendar proposals. **Category-sale license (owner direction 2026-08-16, ticket #3738):**
+**You make every API call below, not the sub-specialist.** A spawned subagent in this runtime
+cannot reach `/api/team/*` at all: run 331 on 2026-08-15 verified that every request carrying the
+team credential is refused by the session permission classifier before dispatch, while the same
+URL without the header returns a normal 401 from the app. This is the identical failure #673 fixed
+for `social-publish-gate` — same fix, applied here to `inventory-sentinel`, `promo-manager`,
+`loyalty-referral-manager`, `product-manager`'s weekly pass, and `program-manager`. Each one
+returns its findings to you as data; **you relay them verbatim**, immediately after each
+sub-specialist returns, before moving to the next:
+
+```bash
+# a targeted suggestion (inventory-sentinel, promo-manager, loyalty-referral-manager,
+# product-manager, program-manager all hand you zero or more of these)
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"create","team":"strategy","targetTeam":"<team>","category":"other",
+       "kind":"<kind>","suggestion":"<verbatim>","cxRisk":"<risk>","dedupeKey":"<if given>"}'
+
+# a decision or step event under YOUR $RUN_ID, agentRole set to whichever sub-specialist produced it
+curl -s -X POST "$BASE_URL/api/team/event" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"runId":'"$RUN_ID"',"eventType":"decision","agentRole":"<sub-specialist name>","summary":"<verbatim>"}'
+
+# promo-manager's calendar proposal only
+curl -s -X POST "$BASE_URL/api/team/calendar" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"propose", ...<verbatim>}'
+```
+
+Verbatim is the contract: you do not soften a finding, upgrade a risk rating, or invent a
+suggestion for a sub-specialist that returned nothing. This is the same trust model Step 4a-style
+relays run on elsewhere in the fleet, and it is backed the same way — every endpoint re-validates
+its payload server-side, so a relay error still cannot write something the API itself would refuse.
+
+1. `inventory-sentinel` — catalog stock/price sweep → hands you targeted suggestion payloads + a
+   scoreboard decision to relay.
+2. `promo-manager` — MAP-guarded promo designs for the coming window → hands you kind `promo`
+   suggestion payloads + calendar proposals to relay. **Category-sale license (owner direction 2026-08-16, ticket #3738):**
    promo-manager proposes at least one category-level sale per month, priced anywhere down to
    break-even (`wholesale_cost` is the floor, never below), always inside the MAP rules
    (`mapAllowsAdvertisedDiscount`, hardened in #3675/PR #703: `map_price == original_price`
@@ -176,37 +210,42 @@ in the brief that engagement is unmeasured.
    ```bash
    tsx scripts/execute-approved-promos.ts
    ```
-3. `loyalty-referral-manager` — retention/referral moves → kind `program` suggestions.
+3. `loyalty-referral-manager` — retention/referral moves → hands you kind `program` suggestion
+   payloads to relay.
 4. `product-manager` (**review-only in the weekly run**) — do NOT call the import-candidate action
    endpoint here; the daily product routine (`routine-product-daily.md`) owns queue execution.
    Aggregate the week's daily product/import decisions (its `decision` events), judge whether the
    catalog mix matches the brief's theme, surface systemic patterns (a brand over-imported, category
-   gaps, a growing needs-review or price-drop backlog), and hand catalog direction into the brief.
+   gaps, a growing needs-review or price-drop backlog), and hand catalog direction into the brief —
+   plus a `decision` summary for you to post under your own `$RUN_ID`.
 5. `program-manager` (run last) — audits `docs/store-team/trackers/*.md` against each
-   milestone's evidence probe, recomputes status + RAG per the trackers README, posts a
-   `decision` event per RAG change + an audit scoreboard event, reports each milestone's
-   **status** only in those events and the Program Status brief section (a RED tracker line is a
-   report, never a suggestion row — a status has no executor and can never reach a terminal state
-   on the bus), files a suggestion **only when a milestone genuinely needs work done** and then in
-   an executable kind (`code` for R-DEV, `instructions` for agent-editor, **never** `process`) with
-   `dedupeKey:'tracker:<milestone-tag>'` so a re-file is a no-op, opens a docs-only tracker PR
-   (`pm/tracker-<date>`, never merged by the PM, and **not merged by the release engine either**:
-   the `pm/` prefix is not engine-eligible and the allowlist does not cover
-   `docs/store-team/trackers/`, so the PR waits for the owner. See `program-manager.md` step 6)
-   when rows changed, and hands the strategist a
+   milestone's evidence probe, recomputes status + RAG per the trackers README, and hands you a
+   `decision` payload per RAG change + an audit scoreboard payload to post. **Before invoking it,
+   paste in the cross-team event history and `pipeline_settings`/valve state you fetched in Step 2**
+   (or wherever your Inputs step gathers it) — it has no way to fetch either itself. It reports each
+   milestone's **status** only in those events and the Program Status brief section (a RED tracker
+   line is a report, never a suggestion row — a status has no executor and can never reach a
+   terminal state on the bus), hands you a suggestion payload to relay **only when a milestone
+   genuinely needs work done** and then in an executable kind (`code` for R-DEV, `instructions` for
+   agent-editor, **never** `process`) with `dedupeKey:'tracker:<milestone-tag>'` so a re-file is a
+   no-op, opens a docs-only tracker PR itself (`pm/tracker-<date>`, never merged by the PM, and
+   **not merged by the release engine either**: the `pm/` prefix is not engine-eligible and the
+   allowlist does not cover `docs/store-team/trackers/`, so the PR waits for the owner — this part
+   is `git`/`gh`, not a team-API call, so `program-manager` still does it directly; see
+   `program-manager.md` step 6) when rows changed, and hands you a
    **Program Status** section (overall RAG + top risks + owner asks per program) to include
    verbatim in the brief. It also verifies **routine coverage**, and the scope is *derived from
    `routine-schedule.md`, never enumerated here*:
 
    - Read every routine row in `docs/store-team/routine-schedule.md`. For each, decide whether it is
      **expected to run**: a trigger id is recorded, or its gating valve is on.
-   - Expected-to-run with no `homepage_team_runs` row in the last 7 days → file a `process`
-     suggestion. A stalled drain backs its queue up quietly (the daily product routine is the
-     easiest to miss).
-   - **Gating valve ON but no trigger id recorded** → also a mandatory `process` suggestion. This is
-     the half-enabled state: on 2026-07-28 the trend-scout and social-trend-scout valves were turned
-     on and their triggers were never created, so two lanes were live-but-dead and three downstream
-     consumers starved with nothing reporting it.
+   - Expected-to-run with no `homepage_team_runs` row in the last 7 days → a `process` suggestion
+     payload for you to relay. A stalled drain backs its queue up quietly (the daily product routine
+     is the easiest to miss).
+   - **Gating valve ON but no trigger id recorded** → also a mandatory `process` suggestion payload.
+     This is the half-enabled state: on 2026-07-28 the trend-scout and social-trend-scout valves
+     were turned on and their triggers were never created, so two lanes were live-but-dead and three
+     downstream consumers starved with nothing reporting it.
    - Valve off AND no trigger → expected-missing, exempt, say nothing.
 
    Never hardcode routine numbers in this step or in the trigger prompt. That list has gone stale
@@ -214,7 +253,8 @@ in the brief that engagement is unmeasured.
    was outside the watchdog's scope by construction), and a coverage check that cannot see a new
    lane is worse than none, because it reports "zero misses" either way.
 
-Each posts its own events under `$RUN_ID` with its `agentRole`.
+None of these five call `/api/team/*` themselves — you relay every event and suggestion/calendar
+payload under `$RUN_ID` with the originating agent's name in `agentRole`, per the curl shapes above.
 
 ## Step 5 — Publish the brief
 

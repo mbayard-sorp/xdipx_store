@@ -973,12 +973,15 @@ exist precisely so you can tell the two apart.
 ## Step 7.5 — Post-publish design spot-check (`design-critic`)
 
 After self-validation passes, run `design-critic` once against the live homepage: capture a 375px
-screenshot (768/1440 optional on content-only runs), score the rubric against
-`docs/design-doctrine.md`, and post the verdict + scores as an `/event` row
+screenshot (768/1440 optional on content-only runs) and score the rubric against
+`docs/design-doctrine.md`. **It cannot post its own verdict.** As a spawned subagent, every
+request it makes carrying the team credential is refused by the session's permission classifier
+before dispatch (run 331, 2026-08-15 — the same failure #673 fixed for `social-publish-gate`). It
+returns the verdict block to you; **you post it verbatim** as an `/event` row
 (`eventType:'decision'`, `agentRole:'design-critic'`).
 
 - **PASS** — proceed to Step 8.
-- **REVISE** — proceed, but file the defects as a suggestion
+- **REVISE** — proceed, but file the defects it returned as a suggestion on its behalf
   (`POST /api/team/suggestion {op:'create', team:'homepage', kind:'process', ...}`).
 - **BLOCK** — a doctrine hard rule is broken on the live page: trigger the existing Sanity
   last-good rollback path (same as a failed Step 7 validation), record status `rolled_back`.
