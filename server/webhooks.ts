@@ -381,6 +381,12 @@ interface ShopifyProductWebhook {
   handle: string
   title: string
   images?: { src: string }[]
+  // Present on products/update payloads; used by the new-product social
+  // trigger below (#3736). All optional so older fixtures keep parsing.
+  status?: string
+  vendor?: string
+  product_type?: string
+  published_at?: string | null
 }
 
 async function handleProductCreated(product: ShopifyProductWebhook): Promise<void> {
@@ -425,7 +431,77 @@ async function handleProductUpdated(product: ShopifyProductWebhook): Promise<voi
   // Admin API caller for ~60s per tick.
   const { markDiscoveryIndexDirty } = await import('../app/lib/discovery.server.js')
   await markDiscoveryIndexDirty(`products/update ${product.handle}`)
+
+  // New-product social trigger (ticket #3736). Runs INLINE before the
+  // response: on Vercel any work after res.json() is silently discarded, the
+  // exact failure mode that killed six webhook handlers for months. Isolated
+  // try/catch so a filing hiccup never breaks the cache purge above.
+  try {
+    await maybeFileNewProductSuggestion(product)
+  } catch (err) {
+    console.warn(`[webhook:product-updated] new-product suggestion filing failed (non-blocking) for ${product.handle}:`, err)
+  }
+
   console.log(`[webhook:product-updated] purged markdown + PDP cache for ${product.handle}`)
+}
+
+/**
+ * Tell the social team a product just went live (ticket #3736, owner
+ * direction 2026-08-16: posts about new products we now have on the site).
+ *
+ * Shopify's products/update payload carries no previous status, so the
+ * "transition to active" is detected by proxy: status is active AND
+ * published_at (stamped when the product first goes live on the online
+ * store) is within the last hour. Later edits to an active product keep
+ * their original published_at, so they fall outside the window and file
+ * nothing.
+ *
+ * Products the enrich-to-publish chain just activated are skipped here:
+ * that chain files its own batched one-row-per-run suggestion
+ * (publishEnrichedProducts in app/lib/import-enrich.server.ts), and filing
+ * both would double every bulk publish. The dedupe key (new-product:<handle>)
+ * additionally absorbs Shopify's own webhook retries and multi-update bursts
+ * while the ticket is live.
+ */
+const NEW_PRODUCT_LIVE_WINDOW_MS = 60 * 60 * 1000
+const ENRICH_CHAIN_LOOKBACK_MS = 2 * 60 * 60 * 1000
+
+async function maybeFileNewProductSuggestion(product: ShopifyProductWebhook): Promise<void> {
+  if (product.status !== 'active' || !product.published_at || !product.handle) return
+  const publishedAtMs = Date.parse(product.published_at)
+  if (!Number.isFinite(publishedAtMs) || Date.now() - publishedAtMs > NEW_PRODUCT_LIVE_WINDOW_MS) return
+
+  // Cheap DB check, only reached for genuinely-recent activations: did the
+  // enrich chain publish this product? Its batched suggestion already covers it.
+  const { db } = await import('../app/lib/db.server.js')
+  const { importCandidates, dealHistory } = await import('../db/schema.js')
+  const { and, eq, gte } = await import('drizzle-orm')
+  const [enrichPublished] = await db
+    .select({ id: importCandidates.id })
+    .from(importCandidates)
+    .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
+    .where(and(
+      eq(dealHistory.shopifyProductId, String(product.id)),
+      gte(importCandidates.publishedAt, new Date(Date.now() - ENRICH_CHAIN_LOOKBACK_MS)),
+    ))
+    .limit(1)
+  if (enrichPublished) return
+
+  const { createSuggestion } = await import('../app/lib/team.server.js')
+  await createSuggestion({
+    team:      'social',
+    kind:      'campaign',
+    category:  'social-automation',
+    dedupeKey: `new-product:${product.handle}`,
+    suggestion:
+      `Product just went live on the storefront: "${product.title}" ` +
+      `(handle: ${product.handle}, category: ${product.product_type || 'unknown'}, ` +
+      `vendor: ${product.vendor || 'unknown'}). Activated outside the enrich chain ` +
+      `(manual Shopify status flip). Consider a new-arrival post per ` +
+      `routine-social-daily.md Step 7b; the usual gates apply, including Instagram ` +
+      `category eligibility and stock.`,
+  })
+  console.log(`[webhook:product-updated] filed new-product social suggestion for ${product.handle}`)
 }
 
 // ─── Inventory update: auto-rotate on sold-out ──────────────────────────

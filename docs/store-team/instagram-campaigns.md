@@ -630,9 +630,12 @@ Check every candidate against the real packshot before offering it, and expect t
 
 **Calendar rows.** Each campaign's start date gets a `marketing_calendar` row via
 `POST /api/team/calendar {op:'propose', eventDate:<starts>, name:<name>, type:'campaign', theme:<subject>}`,
-landing at `planned`. The `propose` op does not currently accept `assetsJson`, so **this file is the
+landing at `planned`. Since ticket #2736 the `propose` op accepts an optional `assetsJson` object
+(endDate, pillars, formats, product_scope, visualScheme), so a campaign row can carry its own
+structured window and scope. **For rows proposed without `assetsJson`, this file remains the
 authority for `ends`, pillars, formats, and product scope**; the calendar row carries the name, the
-start date, and the status.
+start date, and the status. `scripts/pick-todays-product.ts` reads `assetsJson.product_scope`
+(shape `{ "dials": ["vibrator", ...] }`) when present and falls back to its mirror of the §5 table.
 
 **Instagram rows are named with an `IG: ` prefix.** The table has no channel column and the homepage
 track shares it, so the prefix is how the two are told apart at a glance and in a query. `IG: Wand
@@ -706,6 +709,9 @@ Recorded so no run pretends otherwise, and so the gap is visible rather than qui
 ## 8. Brand tagging
 
 Tag a maker only from a **verified** handle. `docs/store-team/brand-ig-handles.json` is the registry
-named by the charter; it does not exist yet and `.json` sits outside the `agent-editor` allowlist, so
-until it is created by a code ticket the rule is simple: **no verified registry, no tag.** Never guess
-a handle. A wrong tag is worse than no tag.
+named by the charter, created by ticket #3732 with per-entry verification evidence and validated by
+`scripts/check-brand-handles.ts`. Only non-null entries may be cited for tagging; an all-null entry
+is a documented "could not verify", not an invitation to guess. The rule is unchanged: **not in the
+registry with a handle, no tag.** Never guess a handle. A wrong tag is worse than no tag. Note that
+an IG @mention today is caption text only (it notifies but is not a tag); real `user_tags` plumbing
+in the publisher is a separate follow-up.

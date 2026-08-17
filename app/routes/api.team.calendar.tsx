@@ -2,8 +2,15 @@
  * /api/team/calendar — shared marketing calendar (reads + proposals + IG status).
  *
  *   GET ?from=YYYY-MM-DD&to=YYYY-MM-DD -> { events: [...] }
- *   POST { op: 'propose', eventDate, name, type?, theme? } -> { id }  (status 'planned')
+ *   POST { op: 'propose', eventDate, name, type?, theme?, assetsJson? } -> { id }  (status 'planned')
  *   POST { op: 'setStatus', id, status } -> { ok, id, status }        (IG-guarded)
+ *
+ * `assetsJson` (ticket #2736) is an optional plain object carrying the
+ * structured campaign fields the row itself has no columns for: endDate,
+ * pillars, formats, product_scope, visualScheme. It lands in the existing
+ * marketing_calendar.assets_json column, which nothing in app/ wrote before
+ * this, so a campaign window and its posts can be joined without reading
+ * docs/store-team/instagram-campaigns.md.
  *
  * Every team routine reads this for today's theme/promo window. Proposals land
  * as 'planned' — merch-calendar / the owner activate them.
@@ -71,11 +78,27 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response('Bad Request: name required', { status: 400 })
     }
     const type = b['type'] === 'holiday' || b['type'] === 'campaign' ? b['type'] : 'promo'
+    // Optional structured campaign payload (ticket #2736). Must be a plain
+    // object (not an array, not a scalar) and small: this is campaign metadata
+    // (endDate, pillars, formats, product_scope, visualScheme), not an asset
+    // dump, so an oversized payload is a caller bug worth refusing loudly.
+    let assetsJson: Record<string, unknown> | undefined
+    if (b['assetsJson'] !== undefined && b['assetsJson'] !== null) {
+      const a = b['assetsJson']
+      if (typeof a !== 'object' || Array.isArray(a)) {
+        return new Response('Bad Request: assetsJson must be a plain JSON object', { status: 400 })
+      }
+      if (JSON.stringify(a).length > 8192) {
+        return new Response('Bad Request: assetsJson too large (8KB max)', { status: 400 })
+      }
+      assetsJson = a as Record<string, unknown>
+    }
     const id = await proposeCalendarEvent({
       eventDate: b['eventDate'],
       name:      b['name'],
       type,
       theme:     typeof b['theme'] === 'string' ? b['theme'] : undefined,
+      assetsJson,
     })
     return Response.json({ id })
   }
