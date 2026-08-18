@@ -31,7 +31,7 @@ import { getProductsByTag, getCollectionProducts, getProductsByHandles } from '~
 import type { Product, LeanCardProduct, SensationDialV2 } from '~/types'
 import type { DiscoveryProduct } from '~/types/discovery'
 import type { ContentBlock, ProductCarouselBlock, EmmaCuratedRailBlock, PlayTogetherBannerBlock, EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout, ResolvedPanelDeck } from '~/types/cms'
-import type { SensationMapData } from '~/lib/sensation-map.server'
+import type { CuriosityShelfData } from '~/types/curiosity'
 
 /**
  * Bump on ANY shape change to `HomepagePayloadA` (mirrors INDEX_VERSION in
@@ -533,8 +533,14 @@ export function reshuffleRailsWithSeed(rails: Rail[], seed: number): Rail[] {
  *     ticket #3530). A b6 blob has no such field, so the hero would keep
  *     hiding the dial after a pin gained data. Null = no dial, which renders
  *     nothing (doctrine section 6, never fabricate proof).
+ * b8: replaced `sensationMap` (SensationMapData) with `curiosityShelf`
+ *     (CuriosityShelfData | null), ticket #3532. The Sensation Map band was
+ *     retired for the Curiosity Shelf; the field shape is different, so a b7
+ *     blob's `sensationMap` would read as absent and the new band render
+ *     nothing. Null = band skipped (cold index / < 3 lanes), the same shape as
+ *     the retired band's cold-index skip.
  */
-export const HOMEPAGE_PAYLOAD_B_VERSION = 'b7'
+export const HOMEPAGE_PAYLOAD_B_VERSION = 'b8'
 
 /** KV key for the precomputed storefront blob. Versioned. */
 export const HOMEPAGE_PAYLOAD_B_KV_KEY = `homepage:payload:b:${HOMEPAGE_PAYLOAD_B_VERSION}`
@@ -600,7 +606,8 @@ export interface HomepagePayloadB {
    */
   contentBlocks: HomeContentBlocksLean
   notebookPosts: BlogPostCard[]
-  sensationMap: SensationMapData
+  /** Nº 07 Curiosity Shelf, fully resolved at build time. Null = band skipped. */
+  curiosityShelf: CuriosityShelfData | null
   /**
    * Band order + per-band chrome overrides from `singleton.storefrontHome`.
    *

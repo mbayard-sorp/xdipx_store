@@ -35,8 +35,8 @@ vi.mock('~/lib/homepage-payload.server', async () => {
   }
 })
 
-vi.mock('~/lib/sensation-map.server', () => ({
-  getSensationMapData: vi.fn(),
+vi.mock('~/lib/curiosity-shelf.server', () => ({
+  getCuriosityShelfData: vi.fn(),
 }))
 
 vi.mock('~/lib/sanity.server', () => ({
@@ -66,7 +66,7 @@ import {
   HOMEPAGE_PAYLOAD_B_VERSION,
   type HomepagePayloadB,
 } from '~/lib/homepage-payload.server'
-import { getSensationMapData } from '~/lib/sensation-map.server'
+import { getCuriosityShelfData } from '~/lib/curiosity-shelf.server'
 import { getEmmaHeroSettings, getBlogPosts, getEditor } from '~/lib/sanity.server'
 import { getProductByHandle } from '~/lib/shopify.server'
 import type { DiscoveryProduct, Rail } from '~/types/discovery'
@@ -127,9 +127,7 @@ describe('assembleStorefrontHome — contentBlocks resolution', () => {
     vi.mocked(getEmmaHeroSettings).mockResolvedValue(null)
     vi.mocked(getBlogPosts).mockResolvedValue({ posts: [], total: 0 })
     vi.mocked(getEditor).mockResolvedValue(null)
-    vi.mocked(getSensationMapData).mockResolvedValue({
-      types: [], feels: [], defaultState: null, defaultMatch: null,
-    } as unknown as Awaited<ReturnType<typeof getSensationMapData>>)
+    vi.mocked(getCuriosityShelfData).mockResolvedValue(null)
   }
 
   beforeEach(() => {
@@ -225,7 +223,7 @@ function payload(over: Partial<HomepagePayloadB> = {}): HomepagePayloadB {
     emmaPhotoAlt: null,
     contentBlocks: { sections: [], carouselProductMap: {} },
     notebookPosts: [],
-    sensationMap: { types: [], feels: [], defaultState: null, defaultMatch: null },
+    curiosityShelf: null,
     layout: null,
     panelDeck: null,
     builtAt: 0,
@@ -265,13 +263,13 @@ describe('hydrateStorefrontPayloadB', () => {
     expect(data.featured.filter(p => p.handle === 'a')).toHaveLength(1)
   })
 
-  it('passes rails, total and sensation map through untouched', () => {
+  it('passes rails, total and curiosity shelf through untouched', () => {
     const p = payload({ total: 42 })
     const data = hydrateStorefrontPayloadB(p)
     expect(data.total).toBe(42)
     expect(data.variant).toBe('b')
     expect(data.rails).toHaveLength(2)
-    expect(data.sensationMap).toEqual(p.sensationMap)
+    expect(data.curiosityShelf).toEqual(p.curiosityShelf)
   })
 
   it('passes the anchor collection products through verbatim (ticket #464)', () => {
@@ -355,9 +353,7 @@ describe('assembleStorefrontHome — hero sensation dial', () => {
     vi.mocked(getEmmaHeroSettings).mockResolvedValue(null)
     vi.mocked(getBlogPosts).mockResolvedValue({ posts: [], total: 0 })
     vi.mocked(getEditor).mockResolvedValue(null)
-    vi.mocked(getSensationMapData).mockResolvedValue({
-      types: [], feels: [], defaultState: null, defaultMatch: null,
-    } as unknown as Awaited<ReturnType<typeof getSensationMapData>>)
+    vi.mocked(getCuriosityShelfData).mockResolvedValue(null)
     vi.mocked(buildHomeContentBlocksLean).mockResolvedValue({
       sections: [], carouselProductMap: {},
     } as unknown as Awaited<ReturnType<typeof buildHomeContentBlocksLean>>)

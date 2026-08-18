@@ -23,7 +23,8 @@ import {
   type HomeContentBlocksLean,
   type HomepagePayloadB,
 } from '~/lib/homepage-payload.server'
-import { getSensationMapData, type SensationMapData } from '~/lib/sensation-map.server'
+import { getCuriosityShelfData } from '~/lib/curiosity-shelf.server'
+import type { CuriosityShelfData } from '~/types/curiosity'
 import { getProductByHandle } from '~/lib/shopify.server'
 import type { SensationDialV2 } from '~/types'
 import { getEmmaHeroSettings, getBlogPosts, getEditor, getStorefrontHomeLayout } from '~/lib/sanity.server'
@@ -148,11 +149,12 @@ export interface StorefrontData {
    */
   notebookPosts: BlogPostCard[]
   /**
-   * Nº 07 Sensation Map instrument data: the Type + Feel dial notches, the SSR
-   * default dial state, and the default matched product set. `defaultState` is
-   * null on a cold/empty index, in which case StorefrontHome skips the band.
+   * Nº 07 Curiosity Shelf data: the eyebrow/heading/emphasis/band-line plus the
+   * fully-resolved lanes (each a shelf of six real products). Null on a cold
+   * index or when fewer than three lanes can fill six, in which case
+   * StorefrontHome skips the band. The band never fetches at runtime.
    */
-  sensationMap: SensationMapData
+  curiosityShelf: CuriosityShelfData | null
   /**
    * Band order + per-band chrome overrides from `singleton.storefrontHome`.
    * Null means render the shipped order, which is the normal state and what
@@ -294,7 +296,7 @@ export function hydrateStorefrontPayloadB(payload: HomepagePayloadB): Storefront
     // removes the Sanity round-trip from the request path entirely.
     contentBlocks: payload.contentBlocks,
     notebookPosts: payload.notebookPosts,
-    sensationMap: payload.sensationMap,
+    curiosityShelf: payload.curiosityShelf,
     // Resolved at build time for the same reason contentBlocks is: the shell
     // cannot decide what to render from a value that arrives after it flushes.
     layout: payload.layout ?? null,
@@ -417,11 +419,11 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
   // or a failed Shopify leg → the component falls back to the discovery best-of.
   const anchorProducts = await getAnchorCollectionProducts(emmaHero?.anchorCollectionHandle)
 
-  // Sensation Map (Nº 07). Reads the discovery index, already warmed into the
+  // Curiosity Shelf (Nº 07). Reads the discovery index, already warmed into the
   // L1 memo by the getDiscoveryRails call above, so this is an in-memory hit and
-  // never a second KV round-trip. Degrades to an empty payload (band skipped)
-  // on a cold index, same as the rails.
-  const sensationMap = await getSensationMapData()
+  // never a second KV round-trip. Returns null (band skipped) on a cold index or
+  // when fewer than three lanes can fill six, same shape as the rails' cold skip.
+  const curiosityShelf = await getCuriosityShelfData()
 
   return {
     version: HOMEPAGE_PAYLOAD_B_VERSION,
@@ -441,7 +443,7 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
     emmaPhotoAlt: editor?.homepagePhotoAlt ?? editor?.photoAlt ?? null,
     contentBlocks, // resolved above — team-managed Sanity surface, lean/slimmed for variant b
     notebookPosts: notebook.posts,
-    sensationMap,
+    curiosityShelf,
     layout,
     panelDeck,
     builtAt: Date.now(),

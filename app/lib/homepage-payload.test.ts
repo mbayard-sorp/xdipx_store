@@ -95,17 +95,17 @@ describe('VARIANT_B_SECTION_TYPES', () => {
 })
 
 describe('HOMEPAGE_PAYLOAD_B_VERSION', () => {
-  it('is past b6, so blobs built before the pinnedSensationDial field miss', () => {
+  it('is past b7, so blobs built before the curiosityShelf field miss', () => {
     // The blob is read verbatim from KV and Neon. Shipping a new payload shape
     // without bumping this serves the OLD shape until the caches expire, and
     // none of the new content appears live. b5 added `panelDeck`; b6 added
     // `anchorProducts` (ticket #464); b7 added `pinnedSensationDial` (ticket
-    // #3530): a b6 blob has no such field, so the hero would keep hiding the
-    // dial after a pinned product gained sensation data.
-    expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b4')
+    // #3530); b8 replaced `sensationMap` with `curiosityShelf` (ticket #3532):
+    // a b7 blob has the old band shape, so the new band would render nothing.
     expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b5')
     expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b6')
-    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b7')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).not.toBe('b7')
+    expect(HOMEPAGE_PAYLOAD_B_VERSION).toBe('b8')
   })
 
   it('embeds the version in the KV key so old blobs cannot be read back', () => {

@@ -29,7 +29,7 @@ import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { EmailSubscribe } from '~/components/store/EmailSubscribe'
 import { TrustStrip } from '~/components/store/TrustStrip'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
-import { SensationMap } from '~/components/store/SensationMap'
+import { CuriosityShelf } from '~/components/store/CuriosityShelf'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { NotebookRail } from '~/components/blog/NotebookRail'
 import type { BlogPostCard } from '~/types/cms'
@@ -1389,7 +1389,7 @@ export function resolveBandOrder(
   return order
 }
 
-export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks, emmaHero, heroSensationDial, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, sensationMap, layout, panelDeck }: StorefrontData) {
+export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks, emmaHero, heroSensationDial, emmaPhotoUrl, emmaPhotoAlt, notebookPosts, curiosityShelf, layout, panelDeck }: StorefrontData) {
   // Segment variant-b sessions in GA4 (flip keep/rollback analysis). Fires once
   // per page view; the localStorage flag distinguishes first-time visitors.
   useEffect(() => {
@@ -1534,19 +1534,13 @@ export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks,
       </>
     ),
 
-    /* Nº 07 · The Sensation Map — a plum-soft discovery instrument between the
-       Emma's edit rail (paper-2) and Couples (paper-3) for a tinted beat in
-       the ground rhythm. Skipped entirely on a cold index (no defaultState),
-       so it never renders an empty band. */
-    sensationMap:
-      sensationMap.defaultState && sensationMap.defaultMatch ? (
-        <SensationMap
-          types={sensationMap.types}
-          feels={sensationMap.feels}
-          defaultState={sensationMap.defaultState}
-          defaultMatch={sensationMap.defaultMatch}
-        />
-      ) : null,
+    /* Nº 07 · The Curiosity Shelf — a plum-soft discovery band between the Emma's
+       edit rail (paper-2) and Couples (paper-3) for a tinted beat in the ground
+       rhythm. Fully resolved in the SSR payload (the band never fetches);
+       skipped entirely on a cold index or when fewer than three lanes can fill
+       six, so it never renders an empty band. The band key stays `sensationMap`
+       so an already-published storefrontHome layout keeps ordering it. */
+    sensationMap: curiosityShelf ? <CuriosityShelf data={curiosityShelf} /> : null,
 
     /* Nº 08 · Couples — the `playTogetherBanner` block supplies the band's
        photo + copy when published; fallback renders the coral-soft band

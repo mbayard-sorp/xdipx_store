@@ -122,6 +122,11 @@ import homeBand            from '../schemas/blocks/homeBand.js'
 import homeMoodPills       from '../schemas/blocks/homeMoodPills.js'
 import panelDeckSection    from '../schemas/blocks/panelDeckSection.js'
 import storefrontHome      from '../schemas/storefrontHome.js'
+// Curiosity Shelf (Nº 07) — daily-editable discovery band replacing the Sensation
+// Map. Additive singleton + lane object; the storefront renders the code-side
+// default until this is published, so it is a pure override.
+import curiosityLane       from '../schemas/blocks/curiosityLane.js'
+import curiosityShelf      from '../schemas/curiosityShelf.js'
 
 // Merchandised category and drop pages. Additive docs that enrich the existing
 // /collections/{handle} and /new surfaces; no new routes, no URL churn.
@@ -271,6 +276,9 @@ export const schemaTypes = [
   homeBand,
   homeMoodPills,
   panelDeckSection,
+  // Curiosity Shelf (Nº 07) — daily-editable discovery band. Singleton + lane.
+  curiosityShelf,
+  curiosityLane,
   // Merchandised category + drop pages (enrich existing collection routes).
   categoryPage,
   dropPage,

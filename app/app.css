@@ -205,6 +205,23 @@ em.brand {
   animation: marquee 20s linear infinite;
 }
 
+/* Curiosity Shelf (Nº 07) restock crossfade. A state transition (a lane tap or a
+   reshuffle replacing the six visible cards), NOT a scroll reveal, which is why
+   it is CSS and not <Reveal>. Each card wrapper sets --i for a 40ms stagger; the
+   grid is fixed six-slot with fixed-aspect media, so this touches opacity and a
+   4px translate only — zero CLS. Reduced motion renders the final state. */
+@keyframes shelf-restock {
+  from { opacity: 0.25; transform: translateY(4px); }
+  to   { opacity: 1;    transform: none; }
+}
+.shelf-restock {
+  animation: shelf-restock var(--duration-base) var(--ease-entrance) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .shelf-restock { animation: none; }
+}
+
 /* Respect reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
