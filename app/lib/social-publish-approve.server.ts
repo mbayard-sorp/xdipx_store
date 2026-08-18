@@ -51,7 +51,37 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
-import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
+import {
+  runDeterministicPublishChecks,
+  type GateFinding,
+  type GatePlatform,
+} from './social-publish-gate.server'
+
+/**
+ * Platforms this gate may verdict.
+ *
+ * The list is exactly the platforms the hourly tick can publish
+ * (`SCHEDULED_PUBLISH_PLATFORMS` in social-publish-run.server.ts), and that
+ * correspondence is the rule rather than a coincidence. `approved` means "the
+ * unattended publisher may ship this", so granting it to a platform with no
+ * publisher writes a row that either sits forever or, worse, becomes eligible
+ * months later when a publisher lands and ships stale copy. The routine
+ * playbook calls that an unpublishable draft left at `approved`, and it has
+ * already happened once on Facebook and TikTok.
+ *
+ * X was gate-eligible in every part of this system except this line. The
+ * deterministic checks have carried a `platform` parameter with X's divergences
+ * annotated since 2026-08-16, the publish job ticks X hourly, and
+ * `x_autopublish_enabled` was turned on. But the write path refused every
+ * non-Instagram row, and nothing else in the fleet writes `approved`, so X
+ * drafts sat at `pending_review` and the valve fed an empty pipe: zero X posts
+ * have ever published.
+ */
+export const GATE_PLATFORMS: readonly GatePlatform[] = ['instagram', 'x']
+
+function isGatePlatform(platform: string): platform is GatePlatform {
+  return (GATE_PLATFORMS as readonly string[]).includes(platform)
+}
 
 /**
  * The four verdicts `social-publish-gate` returns.
@@ -260,7 +290,16 @@ export type ApplyResult =
  */
 export interface ApproveRepo {
   load: (id: number) => Promise<PostRow | null>
-  recentCaptions: (limit: number) => Promise<string[]>
+  /**
+   * Captions of recent posted rows, for the repetition check.
+   *
+   * Scoped to one platform, because the check asks "would a reader of THIS feed
+   * see the same line twice". Instagram and X are different feeds with largely
+   * different audiences, and the companion-post pattern in the crossplatform
+   * strategy deliberately says related things on both. Comparing across them
+   * would block that by design.
+   */
+  recentCaptions: (limit: number, platform: GatePlatform) => Promise<string[]>
   write: (id: number, patch: {
     reviewStatus: ReviewStatus
     feedback: string
@@ -286,11 +325,11 @@ export const dbApproveRepo: ApproveRepo = {
     const [row] = await db.select().from(socialPosts).where(eq(socialPosts.id, id)).limit(1)
     return row ?? null
   },
-  recentCaptions: async (limit) => {
+  recentCaptions: async (limit, platform) => {
     const rows = await db
       .select({ t: socialPosts.tweetText, e: socialPosts.editedText })
       .from(socialPosts)
-      .where(and(eq(socialPosts.platform, 'instagram'), eq(socialPosts.status, 'posted')))
+      .where(and(eq(socialPosts.platform, platform), eq(socialPosts.status, 'posted')))
       .orderBy(desc(socialPosts.postedAt))
       .limit(limit)
     return rows.map(r => (r.e?.trim() || r.t))
@@ -303,8 +342,9 @@ export const dbApproveRepo: ApproveRepo = {
 /**
  * Write a gate verdict onto one draft.
  *
- * Only ever moves a row that is waiting for exactly this decision: an Instagram
- * `draft` at `pending_review`. Everything else is a 409 rather than a write.
+ * Only ever moves a row that is waiting for exactly this decision: a `draft` at
+ * `pending_review`, on a platform the unattended publisher can actually ship
+ * (see `GATE_PLATFORMS`). Everything else is a 409 rather than a write.
  * That narrowness is the point. A gate that could re-verdict a rejected row
  * could resurrect one, and a gate that could touch a posted row could relabel
  * history; neither is a capability this needs, and both are capabilities worth
@@ -320,9 +360,17 @@ export async function applyPublishGateVerdict(
 
   const post = await repo.load(id)
   if (!post) return { ok: false, status: 404, error: `No social post ${id}` }
-  if (post.platform !== 'instagram') {
-    return { ok: false, status: 409, error: `Post ${id} is ${post.platform}; this gate is Instagram-only` }
+  if (!isGatePlatform(post.platform)) {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        `Post ${id} is ${post.platform}; this gate verdicts ${GATE_PLATFORMS.join(' and ')} only. ` +
+        'Nothing publishes the other platforms unattended, so approving one would leave a row ' +
+        'that ships stale copy the day a publisher lands. The owner acts on those in /admin/socials.',
+    }
   }
+  const platform: GatePlatform = post.platform
   if (post.status !== 'draft' || post.reviewStatus !== 'pending_review') {
     return {
       ok: false,
@@ -352,8 +400,9 @@ export async function applyPublishGateVerdict(
   const gate = await runDeterministicPublishChecks({
     caption,
     mediaUrls: post.mediaUrls ?? [],
+    platform,
     productHandle: input.productHandle ?? null,
-    recentCaptions: await repo.recentCaptions(14),
+    recentCaptions: await repo.recentCaptions(14, platform),
   }, deps.gateDeps)
 
   if (gate.blocked || gate.held) {

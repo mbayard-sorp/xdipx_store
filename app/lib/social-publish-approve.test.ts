@@ -148,12 +148,13 @@ function row(over: Partial<PostRow> = {}): PostRow {
 
 function fakeRepo(post: PostRow | null, recent: string[] = []) {
   const writes: Array<{ reviewStatus: ReviewStatus; feedback: string }> = []
+  const captionScopes: string[] = []
   const repo: ApproveRepo = {
     load: async () => post,
-    recentCaptions: async () => recent,
+    recentCaptions: async (_limit, platform) => { captionScopes.push(platform); return recent },
     write: async (_id, patch) => { writes.push({ reviewStatus: patch.reviewStatus, feedback: patch.feedback }) },
   }
-  return { repo, writes }
+  return { repo, writes, captionScopes }
 }
 
 const verdict = (over: Record<string, unknown> = {}) => {
@@ -256,9 +257,63 @@ describe('applyPublishGateVerdict', () => {
       { reviewStatus: 'rejected' as const },
       { reviewStatus: 'approved' as const },
       { status: 'posted' as const },
-      { platform: 'x' as const },
     ]) {
       const { repo, writes } = fakeRepo(row(over))
+      const r = await applyPublishGateVerdict(7, verdict(), { repo, ...inStock })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.status).toBe(409)
+      expect(writes).toHaveLength(0)
+    }
+  })
+
+  // ── Platform scope ────────────────────────────────────────────────────────
+  //
+  // X ticks hourly and its valve is on, but until this gate would verdict an X
+  // row, nothing in the fleet could write `approved` for it: every X draft sat
+  // at pending_review and zero X posts ever published.
+
+  it('approves a clean PASS on an X draft', async () => {
+    const { repo, writes, captionScopes } = fakeRepo(row({ platform: 'x' }))
+    const r = await applyPublishGateVerdict(7, verdict(), { repo, ...inStock })
+    expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
+    expect(writes[0]?.reviewStatus).toBe('approved')
+    // Repetition is judged against X's own feed, not Instagram's. The
+    // crossplatform companion-post pattern says related things on both by
+    // design, so a shared pool would block it.
+    expect(captionScopes).toEqual(['x'])
+  })
+
+  it('applies X-only deterministic checks to an X draft', async () => {
+    // Over-length is the check that exists on X and not on Instagram. It has to
+    // run here rather than at publish time, because X bills for the media
+    // upload before it rejects the post.
+    const { repo, writes } = fakeRepo(row({ platform: 'x', tweetText: 'a'.repeat(400) }))
+    const r = await applyPublishGateVerdict(7, verdict(), { repo, ...inStock })
+    expect(r.ok).toBe(false)
+    if (!r.ok && r.status === 422) {
+      expect(r.findings.map(f => f.check)).toContain('caption-too-long')
+    } else {
+      throw new Error(`expected a 422 from the deterministic checks, got ${JSON.stringify(r)}`)
+    }
+    expect(writes[0]?.reviewStatus).toBe('needs_changes')
+  })
+
+  it('does not apply an Instagram-only check to an X draft', async () => {
+    // A PDP link is a Restricted Goods signal on Instagram and the entire point
+    // of the post on X. Gate-eligibility must not quietly export IG's rules.
+    const { repo, writes } = fakeRepo(
+      row({ platform: 'x', tweetText: 'What a wand actually does https://xdipx.com/products/dame-aer' }),
+    )
+    const r = await applyPublishGateVerdict(7, verdict(), { repo, ...inStock })
+    expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
+    expect(writes[0]?.reviewStatus).toBe('approved')
+  })
+
+  it('refuses a platform nothing publishes unattended', async () => {
+    // Approving one of these writes a row that either sits forever or ships
+    // stale copy the day a publisher lands. Both already happened once.
+    for (const platform of ['linkedin', 'tiktok', 'facebook', 'youtube'] as const) {
+      const { repo, writes } = fakeRepo(row({ platform }))
       const r = await applyPublishGateVerdict(7, verdict(), { repo, ...inStock })
       expect(r.ok).toBe(false)
       if (!r.ok) expect(r.status).toBe(409)

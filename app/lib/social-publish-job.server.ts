@@ -25,7 +25,7 @@
  *    which killed six webhook handlers for months. The caller must AWAIT this.
  */
 
-import { and, desc, eq, isNull, lte, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, lte, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
@@ -209,6 +209,35 @@ const sharedRepoWrites: Pick<PublishRepo, 'markPosted' | 'markNeedsChanges' | 'm
  * keeps `PublishRepo` the same shape it already was, which is why the existing
  * tests inject their fake repo unchanged.
  */
+/**
+ * What makes a row publishable by an unattended tick.
+ *
+ * Exported and separate from the query so the predicate itself is testable: it
+ * is the whole safety boundary of this module (an approved draft whose day has
+ * come, on this platform, and nothing else), and it was also where a row could
+ * be silently stranded. A test can render this to SQL without a database.
+ */
+export function eligibleWhere(platform: PublishPlatform) {
+  return and(
+    eq(socialPosts.platform, platform),
+    eq(socialPosts.status, 'draft'),
+    eq(socialPosts.reviewStatus, 'approved'),
+    // `<=` today, not `=`: a post whose day was missed because the valve was
+    // off still goes out, instead of being silently skipped forever.
+    //
+    // NULL counts as due, and that is a fix rather than a nicety. Not every
+    // path that creates a draft sets a date: rows written outside the scheduled
+    // drafting routine land with `scheduled_for` NULL, and a NULL never
+    // satisfies `<=`, so an APPROVED row could be permanently invisible to the
+    // only thing that publishes it. That is the same silent-skip this `<=` was
+    // written to prevent, reached by a different door. It had already caught
+    // one live row (#53, gate-approved 2026-08-16, still unpublished). An
+    // undated approved row means "ship this when there is room", so treat it
+    // that way.
+    or(isNull(socialPosts.scheduledFor), lte(socialPosts.scheduledFor, sql`current_date`)),
+  )
+}
+
 export function makeDbPublishRepo(platform: PublishPlatform): PublishRepo {
   return {
     sweepAbandoned: () => sweepAbandonedPublishing(platform),
@@ -217,14 +246,10 @@ export function makeDbPublishRepo(platform: PublishPlatform): PublishRepo {
     listEligible: async (limit) => db
       .select()
       .from(socialPosts)
-      .where(and(
-        eq(socialPosts.platform, platform),
-        eq(socialPosts.status, 'draft'),
-        eq(socialPosts.reviewStatus, 'approved'),
-        // `<=` today, not `=`: a post whose day was missed because the valve was
-        // off still goes out, instead of being silently skipped forever.
-        lte(socialPosts.scheduledFor, sql`current_date`),
-      ))
+      .where(eligibleWhere(platform))
+      // NULLs sort last under Postgres ASC, which is the order we want: a row
+      // someone dated for a specific day keeps its claim on the day's room, and
+      // undated rows fill what is left. The daily cap still binds either way.
       .orderBy(socialPosts.scheduledFor, socialPosts.id)
       .limit(limit),
     recentCaptions: async (limit) => {
