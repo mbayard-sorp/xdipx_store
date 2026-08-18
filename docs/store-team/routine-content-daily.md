@@ -470,7 +470,18 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    allowlisted host returned 401/403/429, i.e. bot/WAF protection rejecting the checker's fixed
    user-agent, not a bad path — `mayoclinic.org` does this even at its bare origin. In that case the
    page is very likely live; **keep the citation only when `sex-wellness-reviewer` has independently
-   confirmed that page's content supports the claim**, and drop it otherwise. Any other `live:false`
+   confirmed that page's content supports the claim**, and drop it otherwise.
+
+   `reason:'challenge'` is the silent cousin of `blocked` and is treated identically (ticket #3946).
+   Some bot-protection services do not refuse with a 403 at all — they answer **200 with the
+   challenge page as the whole document** (Cloudflare "Just a moment", reCAPTCHA/hCaptcha gates,
+   Incapsula, PerimeterX), so the endpoint used to report `live:true` and an unread challenge page
+   could ship as a citation. Run 362 hit exactly this: a PMC article came back `live:true status:200`
+   but the title was `Checking your browser - reCAPTCHA`. The checker now inspects the 2xx body and
+   returns `live:false reason:'challenge'` (with the resolved page title surfaced) for these. Handle
+   it the same as `blocked`: the page is very likely live, but we never saw its content, so keep the
+   citation **only** when `sex-wellness-reviewer` has independently confirmed the source supports the
+   claim, and drop it otherwise. Any other `live:false`
    (`reason:'dead'` for a genuine 404/410, `host-not-allowlisted`, `redirect-off-allowlist`,
    `too-many-redirects`, `timeout`, `fetch-failed`) is a real miss: drop the URL, never ship it. Do
    not blanket-keep a `blocked` URL — a dead or paywalled page shipping as a citation is worse than

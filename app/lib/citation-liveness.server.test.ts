@@ -4,6 +4,7 @@ import {
   CITATION_HOST_ALLOWLIST,
   classifyStatus,
   extractTitle,
+  isChallengePage,
   resolveRedirectTarget,
   validateCitationUrl,
 } from './citation-liveness.server'
@@ -168,5 +169,46 @@ describe('resolveRedirectTarget', () => {
   it('refuses a missing or empty Location', () => {
     expect(resolveRedirectTarget(cdc, null).ok).toBe(false)
     expect(resolveRedirectTarget(cdc, '   ').ok).toBe(false)
+  })
+})
+
+describe('isChallengePage (2xx bot-protection interstitial)', () => {
+  it('flags the exact page that shipped ticket #3946 (200 titled "Checking your browser - reCAPTCHA")', () => {
+    // Run 362 fetched a PMC article; the endpoint answered live:true status:200
+    // but the title was the challenge page, not the paper.
+    expect(isChallengePage('Checking your browser - reCAPTCHA', '<html><body>...</body></html>')).toBe(
+      true,
+    )
+  })
+
+  it('flags Cloudflare "Just a moment..." and "Attention Required" titles', () => {
+    expect(isChallengePage('Just a moment...', '')).toBe(true)
+    expect(isChallengePage('Attention Required! | Cloudflare', '')).toBe(true)
+  })
+
+  it('flags challenge machinery in the body even when the title looks innocuous', () => {
+    expect(
+      isChallengePage(null, '<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page"></script>'),
+    ).toBe(true)
+    expect(isChallengePage('Loading', '<div class="g-recaptcha" data-sitekey="x"></div>')).toBe(true)
+    expect(isChallengePage(null, '<script src="https://hcaptcha.com/1/api.js"></script>')).toBe(true)
+    expect(isChallengePage('Pardon Our Interruption', 'Incapsula incident ID: 123-456')).toBe(true)
+    expect(isChallengePage(null, 'window._pxhd = "..."; var pxCaptcha;')).toBe(true)
+    expect(isChallengePage(null, 'Please enable JavaScript and cookies to continue')).toBe(true)
+  })
+
+  it('does not flag a genuine health article that merely mentions captcha/Cloudflare in prose', () => {
+    // The real page title from the #3946 citation, plus incidental mentions.
+    expect(
+      isChallengePage(
+        'Menthol and capsaicin activate distinct nerve receptors - PMC',
+        'The site was recently migrated behind Cloudflare. Some forms use a captcha to reduce spam.',
+      ),
+    ).toBe(false)
+  })
+
+  it('does not flag empty or plainly-live content', () => {
+    expect(isChallengePage(null, '')).toBe(false)
+    expect(isChallengePage('Cock Rings 101', '<html><body>A full article.</body></html>')).toBe(false)
   })
 })
