@@ -124,6 +124,14 @@ Slots, from `docs/store-team/content-plan.md`: Mon guide (theme-synced to the ac
 podcast-notes per the content plan, and none of those slots can take a guides/comparisons/care/
 wellness-basics brief, so the week's briefs are spread across Mon/Wed/Sat/Sun only.
 
+**Structured comparison-doc quota (content-plan §2, #3892): while fewer than 3-5 `_type:comparison`
+docs exist, seed one per week.** The Sunday comparison is normally a `blogCategory:comparisons`
+Notebook post, but the separate `_type:comparison` Sanity doc that powers `/compare/{slug}` is still
+at zero (milestone `p1-2-compare` is RED for lack of content, not code). Until 3-5 are live, when the
+Sunday comparison slot's head-to-head is a clean, in-stock, both-sides-real match, plan it as a
+`comparison` doc for the content lane to author (ItemList/FAQ-shaped, `.md` twin) instead of only the
+Notebook post. No honest head-to-head available a given week -> skip and say so; never fabricate one.
+
 Eligible clusters: `status == 'active'`, approved count ≥ 3, not covered (no published brief
 references it), no queued brief already. Category inference from the cluster's keyword shapes
 (vs/versus → comparisons; clean/store/care → care; body-safe/material/basics → wellness-basics;
