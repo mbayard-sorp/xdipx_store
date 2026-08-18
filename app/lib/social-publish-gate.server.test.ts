@@ -307,3 +307,80 @@ describe('platform divergence', () => {
     expect(r.blocked).toBe(true)
   })
 })
+
+// ── Removal-tier caption lexicon (ticket #4062) ──────────────────────────────
+//
+// The gate blocked banned emoji and nothing else lexical, while the vocabulary
+// that actually gets accounts in this category REMOVED — explicit anatomy and
+// graphic acts, the class that suspended @bellesaco for the word "clitoris" —
+// passed straight through on Instagram. This check closes that gap, and only on
+// the rented, machine-moderated surfaces: X policy permits the vocabulary and
+// the owned channels are where plain anatomy belongs.
+describe('removal-tier caption lexicon', () => {
+  it('blocks a removal-tier word in an Instagram caption', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'the anatomy nobody explains: your clitoris has more nerve endings than you think',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).toContain('caption-lexicon')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('lets the identical caption through on X, whose policy permits it', async () => {
+    // DONE WHEN #2: the same text that blocks on Instagram must pass untouched
+    // on X. Blocking it there gags the account for no safety gain.
+    const r = await runDeterministicPublishChecks({
+      caption: 'the anatomy nobody explains: your clitoris has more nerve endings than you think',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'x',
+    })
+    expect(checks(r)).not.toContain('caption-lexicon')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('scans on-image text, not only the caption', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: CLEAN,
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+      onImageText: 'HOW TO FIND YOUR G-SPOT AND MAKE HER SQUIRT',
+    })
+    expect(checks(r)).toContain('caption-lexicon')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('scans alt text, not only the caption', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: CLEAN,
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+      altText: 'a wand held against a vulva',
+    })
+    expect(checks(r)).toContain('caption-lexicon')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('does not fire on clinical mechanism copy, the rewrite target', async () => {
+    // "arousal", "stimulation", "pleasure", "climax" sit in the RESTRICTED
+    // (age-gate) tier, not removal, and are exactly what a blocked drafter should
+    // rewrite toward. Blocking them would make the check unusable.
+    const r = await runDeterministicPublishChecks({
+      caption: 'external stimulation, blood flow, and pleasure are the whole mechanism here. arousal builds toward a climax.',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).not.toContain('caption-lexicon')
+  })
+
+  it('respects word boundaries, so ordinary words never trip it', async () => {
+    // "document" contains "cum", "peacock" contains "cock", "analysis" contains
+    // "anal". None is the flagged word, and \b keeps them clear.
+    const r = await runDeterministicPublishChecks({
+      caption: 'a document, a peacock, and an honest analysis of what the shape does',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).not.toContain('caption-lexicon')
+  })
+})

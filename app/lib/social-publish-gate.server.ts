@@ -92,6 +92,19 @@ export interface DeterministicGateInput {
   productHandle?: string | null
   /** Captions of recent posted rows, newest first, for the repetition check. */
   recentCaptions?: readonly string[]
+  /**
+   * Text baked into the image the post ships with, when the drafter supplies it.
+   * Moderation reads on-image text the same way it reads the caption, so the
+   * lexicon check scans it too. `social_posts` has no column for this yet, so
+   * like `productHandle` it is caller-supplied and absent means "nothing to
+   * scan", never "cleared".
+   */
+  onImageText?: string | null
+  /**
+   * Alt text attached to the media. Same story as `onImageText`: caller-supplied
+   * today, scanned by the lexicon check when present.
+   */
+  altText?: string | null
 }
 
 export interface DeterministicGateResult {
@@ -162,6 +175,96 @@ const BANNED_EMOJI = ['🍑', '🍆', '💦', '🌊', '🍒'] as const
 /** Words that make a caption read as lived experience, which Emma never has. */
 const LIVED_EXPERIENCE_RE =
   /\bI\s+(tried|tested|used|owned|own|bought|felt|wore)\b|\bmy\s+(favou?rite|go-to)\s+toy\b/i
+
+/**
+ * Vocabulary that the rented, machine-moderated platforms REMOVE accounts over,
+ * not merely age-gate (ticket #4062).
+ *
+ * Meta's Adult Sexual Solicitation standard
+ * (transparency.meta.com/policies/community-standards/sexual-solicitation, last
+ * read 2025-05-15) puts explicit or graphic detail about three things —
+ * Genitals, States of sexual arousal, and Sexual Encounters — in the PROHIBITED
+ * tier, whose remedy is removal. Merely discussing sexual practices in clinical
+ * or mechanism terms sits in the RESTRICTED tier (an 18+ age gate), which is not
+ * an account risk and is deliberately NOT listed here. The line this constant
+ * draws is exactly that tier boundary: explicit anatomy and acts block; the
+ * mechanism-and-health vocabulary the drafter should rewrite toward
+ * ("stimulation", "pleasure", "sensation", "arousal", "climax", "pelvic floor")
+ * passes untouched. This is why the remedy is a redraft, never a coded spelling:
+ * docs/ads-policy.md line 100 forbids character substitution and reclaimed
+ * hashtags, and Instagram's teen-account search block now extends to misspelled
+ * variants, so leetspeak buys nothing and costs discoverability.
+ *
+ * Anchored to documented removals: @bellesaco (~700K) was suspended 2026-03-28
+ * for the clinical word "clitoris" in ORGANIC content and the appeal was upheld,
+ * so clinical genital anatomy is in the PROHIBITED tier on these surfaces even
+ * though it is plain health language on the owned channels.
+ *
+ * This is the single, reviewable place to tune the list: one exported constant,
+ * each entry tagged with its Meta policy category, edited here rather than
+ * scattered through prompts.
+ */
+export const CAPTION_LEXICON: {
+  /** Human-readable label used in the finding detail. */
+  label: string
+  /** Word-boundaried so "document" never trips "cum" and "peacock" never trips "cock". */
+  re: RegExp
+  /** Which of Meta's three PROHIBITED-tier categories this belongs to. */
+  category: 'genitals' | 'sexual-encounters' | 'states-of-arousal'
+}[] = [
+  // ── Genitals (PROHIBITED). Clinical nouns included: the Bellesa removal was
+  //    the clinical word "clitoris", so these are an account risk here even
+  //    though they are plain health language on email/SMS/storefront/Notebook.
+  { label: 'clitoris', re: /\bclit(oris|oral|s)?\b/i, category: 'genitals' },
+  { label: 'vulva', re: /\bvulvas?\b/i, category: 'genitals' },
+  { label: 'vagina', re: /\bvaginas?\b|\bvaginal\b/i, category: 'genitals' },
+  { label: 'labia', re: /\blabias?\b/i, category: 'genitals' },
+  { label: 'penis', re: /\bpenis(es)?\b/i, category: 'genitals' },
+  { label: 'anus', re: /\banus\b|\banal\b/i, category: 'genitals' },
+  // Explicit slang for genitals — higher moderation risk than the clinical nouns.
+  { label: 'cock', re: /\bcocks?\b/i, category: 'genitals' },
+  { label: 'dick', re: /\bdicks?\b/i, category: 'genitals' },
+  { label: 'pussy', re: /\bpuss(y|ies)\b/i, category: 'genitals' },
+  { label: 'cunt', re: /\bcunts?\b/i, category: 'genitals' },
+  // ── Sexual Encounters (PROHIBITED). Graphic act vocabulary; the mechanism
+  //    rewrite ("external stimulation", "internal", "solo") passes instead.
+  { label: 'penetration', re: /\bpenetrat(e|es|ed|ing|ion|ive)\b/i, category: 'sexual-encounters' },
+  { label: 'masturbation', re: /\bmasturbat(e|es|ed|ing|ion|ory)\b/i, category: 'sexual-encounters' },
+  { label: 'ejaculation', re: /\bejaculat(e|es|ed|ing|ion)\b/i, category: 'sexual-encounters' },
+  { label: 'cum', re: /\bcum(ming|s)?\b/i, category: 'sexual-encounters' },
+  { label: 'squirt', re: /\bsquirt(s|ed|ing)?\b/i, category: 'sexual-encounters' },
+  { label: 'blowjob', re: /\bblow\s?jobs?\b/i, category: 'sexual-encounters' },
+  { label: 'handjob', re: /\bhand\s?jobs?\b/i, category: 'sexual-encounters' },
+  { label: 'cunnilingus', re: /\bcunnilingus\b/i, category: 'sexual-encounters' },
+  { label: 'fellatio', re: /\bfellatio\b/i, category: 'sexual-encounters' },
+  { label: 'intercourse', re: /\bintercourse\b/i, category: 'sexual-encounters' },
+  // ── States of sexual arousal (PROHIBITED, graphic only). The clinical umbrella
+  //    word "arousal" is RESTRICTED, not removal, and is intentionally absent so
+  //    mechanism copy is not blocked; only the graphic forms are listed.
+  { label: 'horny', re: /\bhorny\b/i, category: 'states-of-arousal' },
+  { label: 'throbbing', re: /\bthrobbing\b/i, category: 'states-of-arousal' },
+]
+
+/**
+ * Platforms whose automated moderation removes accounts over the vocabulary in
+ * CAPTION_LEXICON, so the check runs there and nowhere else.
+ *
+ * Instagram and TikTok are the rented, machine-moderated surfaces this protects.
+ * X is out: its policy permits this vocabulary and blocking it there would gag
+ * the account for no safety gain (DONE WHEN #2). The owned channels — email,
+ * SMS, the storefront, the Notebook — are out for the opposite reason: plain
+ * anatomical language is exactly where it belongs, and none of them route
+ * through this gate anyway.
+ *
+ * TikTok is named in the ticket and belongs in this set, but it is not yet a
+ * `GatePlatform`: the approve path 409s a tiktok row before it reaches this gate
+ * (see `isGatePlatform` in social-publish-approve.server.ts). It slots into this
+ * allowlist automatically the day TikTok becomes gate-eligible. Today the only
+ * in-union member is Instagram, and the allowlist form — rather than a
+ * `platform !== 'x'` denylist — means a future OWNED platform added to the union
+ * is not silently swept in.
+ */
+const CAPTION_LEXICON_PLATFORMS: readonly GatePlatform[] = ['instagram']
 
 /** Normalise for shingle comparison: lowercase, strip punctuation, collapse space. */
 function normalizeForShingles(s: string): string {
@@ -307,6 +410,30 @@ export async function runDeterministicPublishChecks(
       severity: 'block',
       detail: 'Caption claims lived experience. Emma is an AI guide and has none.',
     })
+  }
+
+  // ── Caption: removal-tier lexicon (Instagram/TikTok only) ─────────────────
+  //
+  // Meta and TikTok REMOVE accounts over explicit anatomy and graphic acts, so
+  // this scans everything moderation reads — the caption, any on-image text the
+  // drafter supplied, and the alt text — and blocks the draft. The remedy is a
+  // rewrite in mechanism-and-health framing, never a coded spelling. X and the
+  // owned channels are out of scope; see CAPTION_LEXICON_PLATFORMS.
+  if (CAPTION_LEXICON_PLATFORMS.includes(platform)) {
+    const lexiconText = [caption, input.onImageText ?? '', input.altText ?? ''].join('\n')
+    const hits = CAPTION_LEXICON.filter(t => t.re.test(lexiconText))
+    if (hits.length) {
+      findings.push({
+        check: 'caption-lexicon',
+        severity: 'block',
+        detail:
+          `Caption, on-image text, or alt text carries removal-tier vocabulary: ` +
+          `${hits.map(h => h.label).join(', ')}. Meta and TikTok remove accounts for this, they do ` +
+          `not age-gate it. Rewrite in mechanism-and-health framing (e.g. "external stimulation", ` +
+          `not the explicit term); do not use coded spellings, which the charter forbids and search ` +
+          `blocks anyway.`,
+      })
+    }
   }
 
   // ── Repetition across the live feed ───────────────────────────────────────
