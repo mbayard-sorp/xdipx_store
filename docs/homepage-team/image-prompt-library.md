@@ -305,6 +305,72 @@ Every candidate failed at least one hard gate check on close inspection:
 **Conclusion:** no candidate cleared the gate. Held as a Sanity draft rather than publishing a
 non-compliant hero; heroImage/heroImageAlt/imagePrompt were not set.
 
+**Retry (content run 385, same post, image cap raised 5→50):** picked up from round 2's prompt per
+content-writer direction in run 385 (the owner raised the image cap; the prompt-reuse call was the
+routing agent's, not his), changing only the backdrop clause.
+
+> **Scope note (added by content-writer, run 385):** rounds 4-7 below were generated against
+> `wicked-simply-timeless-jelle`, which the post no longer embeds. Mid-retry the voice gate
+> REVISEd that SKU on a card-vs-copy conflict (its catalog name is "Personal Lubricant &
+> Moisturizer", contradicting the section's lubricant-vs-moisturizer thesis) and the embed was
+> swapped to `sliquid-naturals-satin-personal-moisturizer`. So the backdrop and label findings
+> below stand as reusable craft lessons, but the label-fidelity result is specific to the Wicked
+> bottle and none of these candidates is usable as this post's hero. **Backdrop fix that worked, record for reuse:**
+stop describing the ground-lock tint as "pale coral" (drifted saturated on rounds 2 and 3 above,
+both times) — instead lead with "off-white paper wall" as the base noun and describe the coral as
+only "the faintest warm blush mixed in, essentially white, not a colored wall," with an explicit
+"NOT a colored wall" clause. This landed the backdrop cleanly within the ground lock (visibly
+near-white/paper, no salmon, no saturation) on 3 consecutive rounds (6/6 candidates) once adopted —
+treat "off-white with a whisper of X" as the standing phrasing for any pale-tint backdrop ask on
+this or any scaffold, and stop asking for "pale {color}" alone. Label fidelity was also solid on
+every one of these 6 candidates (WICKED / simply / timeless / AQUA JELLE all legible, matching the
+reference) — fal Kontext dev can hold this product's label once the backdrop instruction stops
+competing for attention with color-correction language.
+- Round 4 (2 candidates, backdrop-only fix applied on top of round 2's exact prompt otherwise):
+  backdrop fixed but Kontext dev returned a near-untouched product packshot on white — the human
+  figure and gesture were dropped entirely on both candidates. Read as: a very long prompt
+  front-loaded with hedging/negative color language ("if in doubt render lighter," a full paragraph
+  of NOT-clauses before the human description) pushed this edit-style model toward a
+  minimal-transform response instead of the requested scene rebuild. Fix: keep backdrop correction
+  short (one sentence, no hex/RGB codes — Kontext dev does not appear to use them usefully and they
+  may have contributed to the collapse) and keep the human/gesture description in its original
+  early position in the prompt.
+- Round 5 (2 candidates, shortened backdrop clause, structure otherwise matching round 2): human,
+  age, gesture-adjacent pose, and label all returned correctly and the backdrop landed in-band —
+  but framing came in as a tight headshot-plus-product crop on both candidates, cropping the frame
+  before the second, free "asking" hand entered shot. Best candidates of this retry on every check
+  except the explicit free-hand gesture.
+- Round 6 (2 candidates, added explicit "medium shot, waist-up, show both hands" framing
+  instruction): framing widened as asked, but the compound asymmetric gesture (one hand up with
+  product, other hand separately open palm-up) did not hold — candidate 1 reverted to both hands
+  cradling the single bottle with a big open grin (wrong gesture, wrong expression, both banned by
+  the brief); candidate 2 duplicated the product into two bottles, one held up in each hand
+  (product-identity failure, not just a gesture miss).
+- Round 7 (2 candidates, simplified the ask to "right hand holds product near face, left hand
+  empty and relaxed at her side in a small half-shrug," explicit "only ONE bottle" and "NOT
+  smiling" clauses added): product duplication fixed, backdrop and label held, but the free hand
+  dropped out of frame again on both candidates (cropped out this time rather than duplicated), and
+  the expression came back as a warm closed-mouth smile despite the explicit "NOT smiling, NOT
+  laughing" instruction on both candidates.
+**Conclusion (updated):** across rounds 4-7 (4 rounds, 8 candidates, this retry only), fal Kontext
+dev reliably solved backdrop, label, age presentation, and human presence, but never once produced
+the brief's specific compound ask — one hand raised with the product at eye level AND a separate
+free hand open palm-up "asking the room" AND a worried/quizzical (not smiling) expression — all at
+the same time. It always sacrifices exactly one of those three: drops the second hand, duplicates
+the product instead of differentiating the two hands' poses, or overrides the requested expression
+with a pleasant default. This reads as a genuine capability ceiling of this route on compound
+asymmetric-gesture instructions, not a prompt-wording problem — the wording was iterated four
+distinct ways (long/hedged, short, framing-only, pose-simplified) with the same trade-off recurring
+each time. **Recommendation:** this needs either (a) `ATLAS_CLOUD_API_KEY` configured so
+`seedream-v4.5/edit` (the documented-primary, stronger-reference-fidelity route per
+`docs/media-model-routing.md`) can attempt this composite instead of the fal Kontext fallback this
+environment is stuck on, or (b) an editorial call on relaxing the sceneBeat's explicit second-hand
+requirement for this product (accept a single-hand hold with a quizzical/inspecting expression as
+passing the swap test, since the literal free-hand-asking staging is not reachable on the only
+configured route). Held as a Sanity draft again rather than shipping a non-compliant hero;
+heroImage/heroImageAlt/imagePrompt were not set this retry either. Spend this retry: 4 generations
+@ 5 cents/round (2 images each) = 20 cents (8 images total).
+
 ### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
 
 For owned surfaces only: homepage editorial tiles, §0-P surreal-option blog heroes (never on †
