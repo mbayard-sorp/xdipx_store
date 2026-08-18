@@ -54,6 +54,16 @@ export interface VideoModelSpec {
    */
   nativeAudio: boolean
   /**
+   * The model writes and speaks its OWN dialogue, in a voice that is not Emma's,
+   * with words no gate has read (veo31, veo31-fast, seedance2, grok). This is a
+   * strict subset of `nativeAudio`: it is the INVENTED half. It exists because
+   * `nativeAudio` conflates two opposite things — a model performing OUR authored
+   * ElevenLabs track (audio-driven: keep it) versus a model inventing its own
+   * (overdub or strip it). The lipsync stage keys on this to decide whether the
+   * clip's audio may ship as-is. Never set together with `audioDriven`.
+   */
+  inventsDialogue?: boolean
+  /**
    * Audio-first model: consumes a speech track (audio_url) plus ONE identity
    * frame and performs it. Video length = audio length, so allowedDurations
    * does not apply (kept empty) and duration validation is skipped.
@@ -77,6 +87,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     costKey: 'fal/veo3.1',
     ratePerSecondUsd: 0.40,
     nativeAudio: true,
+    inventsDialogue: true,
     allowedDurations: [4, 6, 8],
   },
   'veo31-fast': {
@@ -86,6 +97,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     costKey: 'fal/veo3.1-fast',
     ratePerSecondUsd: 0.15,
     nativeAudio: true,
+    inventsDialogue: true,
     allowedDurations: [4, 6, 8],
   },
   'kling25-pro': {
@@ -104,6 +116,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     costKey: 'fal/seedance-2.0',
     ratePerSecondUsd: 0.31,
     nativeAudio: true,
+    inventsDialogue: true,
     allowedDurations: [4, 5, 6, 8, 10, 12],
   },
   // Grok Imagine 1.5 (bake-off 2026-08-17, ticket #3991): cleared the content
@@ -123,6 +136,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     costKey: 'fal/grok-imagine-1.5',
     ratePerSecondUsd: 0.14, // pinned to 720p (480p $0.08, 720p $0.14, 1080p $0.25)
     nativeAudio: true,
+    inventsDialogue: true,
     allowedDurations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   },
   // Talking heads are AUDIO-FIRST (proven 2026-07-24): TTS speech track + one
@@ -159,6 +173,36 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
 
 export function isVideoModelId(v: unknown): v is VideoModelId {
   return typeof v === 'string' && v in VIDEO_MODELS
+}
+
+/**
+ * What the lipsync stage does with a clip's audio, decided from the model spec
+ * and whether the script carries voiceover text. Pure and exported so the
+ * decision is unit-testable without a render.
+ *
+ *  - `authored`      the model's audio is OURS to keep: an audio-driven avatar
+ *                    (OmniHuman) performing our ElevenLabs track, or a lipsync
+ *                    compound tier. Muxing over it would stomp the performance.
+ *  - `overdubbed`    a voiceover exists and the model's audio is not authored, so
+ *                    Emma's ElevenLabs track REPLACES whatever the clip carried
+ *                    (silent Kling OR an invented veo/seedance/grok track).
+ *  - `stripped`      no voiceover, and the model invents its own dialogue. The
+ *                    invented, non-Emma, ungated track must not ship, so it is
+ *                    silenced.
+ *  - `native-silent` no voiceover, and the model does not invent dialogue (Kling):
+ *                    nothing to voice and nothing to strip.
+ *
+ * The bug this fixes: the old skip keyed on `nativeAudio`, which conflated
+ * `authored` with `stripped`/`overdubbed`, so every veo/seedance/grok clip
+ * skipped the mux and shipped model-invented speech on an owned channel.
+ */
+export type AudioPath = 'authored' | 'overdubbed' | 'stripped' | 'native-silent'
+
+export function classifyAudioPath(spec: VideoModelSpec, hasVoiceover: boolean): AudioPath {
+  if (spec.audioDriven || spec.lipsync) return 'authored'
+  if (hasVoiceover) return 'overdubbed'
+  if (spec.inventsDialogue) return 'stripped'
+  return 'native-silent'
 }
 
 // ---------------------------------------------------------------------------

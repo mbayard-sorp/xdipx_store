@@ -36,8 +36,10 @@ import {
   SCENE_PLATE_COST_KEY,
   assertSceneFrameContract,
   probeImageDimensions,
+  classifyAudioPath,
   type VideoModelId,
   type VideoModelSpec,
+  type AudioPath,
   type QueueHandle,
 } from '~/lib/fal-video.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
@@ -55,7 +57,7 @@ import {
   isVideoTone,
 } from '~/lib/team-keys'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
-import { extractPoster, applyWatermark, probeDurationSeconds, muxAudio, renderAspectMaster, type AspectMaster } from '~/lib/video-assembly.server'
+import { extractPoster, applyWatermark, probeDurationSeconds, muxAudio, stripAudio, renderAspectMaster, type AspectMaster } from '~/lib/video-assembly.server'
 import { concatWithAudio, runPostPass, buildEndCard } from '~/lib/video-postpass.server'
 import {
   TTS_CHARS_PER_SECOND,
@@ -826,23 +828,60 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
 // avatar tier estimates with its own conservative AVATAR_TTS_CHARS_PER_SECOND).
 const TTS_COST_KEY = 'elevenlabs/tts'
 
+/** Record which audio path a job took, for the console job trail (ticket #3996). */
+function logAudioPath(job: VideoJobRow, path: AudioPath): void {
+  console.info(`[video-pipeline] job ${job.jobId} audio path: ${path} (tier ${job.modelTier})`)
+}
+
 async function advanceLipsync(job: VideoJobRow): Promise<AdvanceOutcome> {
-  // Premium tiers (Veo, Seedance) generate their own audio; muxing over them
-  // would stomp it. Silent tiers (Kling) get an ElevenLabs voiceover in the
-  // active IVR voice (the owner's pick in /admin/voice-and-sms) muxed here.
-  // Scripts must frame these as b-roll/product shots: there is no lip sync,
-  // so an on-camera speaking presenter would read as dubbed. The sync-lipsync
-  // compound tier IS the sanctioned talking path on a standard-tier budget:
-  // it performs the presenterLine onto the finished base clip below.
+  // The old skip keyed on nativeAudio, which conflated two opposite things: an
+  // audio-DRIVEN avatar performing OUR ElevenLabs track (keep it), and a model
+  // that INVENTS its own dialogue in a non-Emma voice no gate read (never ship
+  // it). classifyAudioPath separates them; see fal-video.server.ts.
+  //   - authored:      OmniHuman / lipsync perform our track; never re-mux.
+  //   - overdubbed:    voiceover exists, so Emma's track REPLACES the clip's
+  //                    audio (silent Kling OR an invented veo/seedance/grok track).
+  //   - stripped:      no voiceover + inventsDialogue: silence the invented track.
+  //   - native-silent: no voiceover + no invented audio (Kling): pass through.
   const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
   if (spec?.lipsync) return advanceLipsyncPerform(job, spec)
 
   const voiceover = typeof job.scriptJson['voiceover'] === 'string' ? (job.scriptJson['voiceover'] as string).trim() : ''
-  if (spec?.nativeAudio || !voiceover) {
+  const path: AudioPath = spec ? classifyAudioPath(spec, voiceover.length > 0) : (voiceover ? 'overdubbed' : 'native-silent')
+
+  if (path === 'authored' || path === 'native-silent') {
+    logAudioPath(job, path)
     await touch(job, { stage: 'assembly', status: 'queued' })
     return 'progressed'
   }
 
+  if (path === 'stripped') {
+    // The model wrote and spoke its own dialogue; strip it to silence so an
+    // unreviewed, non-Emma voice never ships on an owned channel. The strip
+    // helper leaves a silent audio track so the end card concat and watermark
+    // stream-copy still have a stream to work with.
+    const clip = await latestAssetByPurpose(job.id, 'clip')
+    if (!clip) throw new Error('No clip asset to strip')
+    const clipBuf = await blobFetchToBuffer(clip.blobUrl)
+    const silent = await stripAudio(clipBuf)
+    const { url } = await blobPut(`video/${job.jobId}/clip-silent.mp4`, silent, { contentType: 'video/mp4' })
+    // Same purpose as the source clip: assembly picks the newest 'clip' asset.
+    await db.insert(mediaAssets).values({
+      kind: 'video',
+      purpose: 'clip',
+      blobUrl: url,
+      contentType: 'video/mp4',
+      sourceModel: `${spec!.costKey}+strip`,
+      videoJobId: job.id,
+    })
+    logAudioPath(job, path)
+    await touch(job, { stage: 'assembly', status: 'queued' })
+    return 'progressed'
+  }
+
+  // path === 'overdubbed': mux Emma's ElevenLabs voiceover over the clip. muxAudio
+  // maps 0:v + 1:a, so the model's own track (if any) is dropped, not mixed.
+  logAudioPath(job, path)
   const clip = await latestAssetByPurpose(job.id, 'clip')
   if (!clip) throw new Error('No clip asset to voice over')
   const clipBuf = await blobFetchToBuffer(clip.blobUrl)
