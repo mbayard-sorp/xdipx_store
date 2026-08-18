@@ -8,11 +8,13 @@
  *   { op: 'config' } -> { frequencies, autopostValve }
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
  *     productHandle? } } -> { ok, reviewStatus } | 422 { findings }
- *   { op: 'engagement' } -> { report: [{ postId, externalPostId, metrics?, error? }] }
+ *   { op: 'engagement' } -> { report: [{ postId, externalPostId, metrics?, error? }],
+ *                             account: { account?: { followersCount, ... }, error? } }
  *     Live Instagram insights (reach/likes/comments/saves) for the most
- *     recently posted rows, saves-first (ticket #2742). Read-only: nothing is
- *     stored, because social_posts has no engagement column yet, see
- *     social-engagement.server.ts for the deferred migration this needs.
+ *     recently posted rows, saves-first (ticket #2742), merged into metrics_json
+ *     (migration 079). The `account` block carries the follower-count
+ *     denominator per-post reach needs (ticket #4064); each sweep also persists
+ *     a timestamped follower reading to KV so trend is derivable.
  *
  * The social-media-manager stub's only write path. Rows land in social_posts
  * with status='draft' AND review_status='pending_review' for human review in
@@ -58,7 +60,7 @@ import {
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
 import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
 import { applyPublishGateVerdict, parsePublishGateVerdict } from '~/lib/social-publish-approve.server'
-import { captureSocialEngagement, rankBySaves } from '~/lib/social-engagement.server'
+import { captureSocialEngagement, captureInstagramAccount, rankBySaves } from '~/lib/social-engagement.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -140,10 +142,16 @@ export async function action({ request }: ActionFunctionArgs) {
   // history in metrics_json (migration 079). IG rows rank saves-first per the
   // charter; X rows follow in recency order, since saves is not an X metric.
   if (b['op'] === 'engagement') {
-    const report = await captureSocialEngagement()
+    // Per-post rows and the account block are fetched independently so an
+    // account-fetch failure degrades to an `error` on the account block without
+    // dropping the per-post rows (ticket #4064).
+    const [report, account] = await Promise.all([
+      captureSocialEngagement(),
+      captureInstagramAccount(),
+    ])
     const igRows = rankBySaves(report.filter(r => r.platform !== 'x'))
     const xRows = report.filter(r => r.platform === 'x')
-    return Response.json({ report: [...igRows, ...xRows] })
+    return Response.json({ report: [...igRows, ...xRows], account })
   }
 
   if (b['op'] === 'config') {

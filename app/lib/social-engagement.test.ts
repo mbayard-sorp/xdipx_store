@@ -6,15 +6,19 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   fetchInstagramEngagement,
+  fetchInstagramAccount,
+  captureInstagramAccount,
   fetchXEngagement,
   captureInstagramEngagement,
   captureXEngagement,
   rankBySaves,
   CAPTURE_SAMPLE,
+  FOLLOWER_HISTORY_MAX,
   type EngagementCaptureRow,
   type EngagementReportRow,
   type InstagramEngagementMetrics,
   type XEngagementMetrics,
+  type FollowerReading,
 } from './social-engagement.server'
 
 function jsonResponse(obj: unknown, status = 200): Response {
@@ -72,6 +76,96 @@ describe('fetchInstagramEngagement', () => {
     const result = await fetchInstagramEngagement('media-1')
     expect(result).toEqual({ ok: false, detail: 'Instagram keys are not configured' })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+// ─── Account-level readings (ticket #4064) ───────────────────────────────────
+
+describe('fetchInstagramAccount', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('parses followers/follows/media counts and hits the account node with the fields param', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    vi.stubEnv('IG_BUSINESS_ACCOUNT_ID', 'acct-1')
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(String(input))
+      expect(url.pathname).toBe('/v23.0/acct-1')
+      expect(url.searchParams.get('fields')).toBe('followers_count,follows_count,media_count')
+      return jsonResponse({ followers_count: 214, follows_count: 30, media_count: 6 })
+    }))
+
+    const result = await fetchInstagramAccount()
+    expect(result).toEqual({ ok: true, metrics: { followersCount: 214, followsCount: 30, mediaCount: 6 } })
+  })
+
+  it('surfaces the token-expiry message on a code 190 error, like the per-post fetch', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    vi.stubEnv('IG_BUSINESS_ACCOUNT_ID', 'acct-1')
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ error: { message: 'Error validating access token', code: 190 } }),
+    ))
+    const result = await fetchInstagramAccount()
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.detail).toMatch(/IG_GRAPH_ACCESS_TOKEN is expired or revoked/)
+  })
+
+  it('returns not-configured without keys, and never calls fetch', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', '')
+    vi.stubEnv('IG_BUSINESS_ACCOUNT_ID', '')
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const result = await fetchInstagramAccount()
+    expect(result).toEqual({ ok: false, detail: 'Instagram keys are not configured' })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('captureInstagramAccount', () => {
+  it('returns the account block and persists a timestamped reading on success', async () => {
+    const persisted: FollowerReading[] = []
+    const report = await captureInstagramAccount({
+      fetchAccount: async () => ({ ok: true, metrics: { followersCount: 214, followsCount: 30, mediaCount: 6 } }),
+      persistReading: async (reading) => { persisted.push(reading) },
+      now: () => new Date('2026-08-18T08:00:00.000Z'),
+    })
+    expect(report).toEqual({ account: { followersCount: 214, followsCount: 30, mediaCount: 6 } })
+    expect(persisted).toEqual([
+      { followersCount: 214, followsCount: 30, mediaCount: 6, ts: '2026-08-18T08:00:00.000Z' },
+    ])
+  })
+
+  it('degrades an account-fetch failure to an error entry and persists nothing', async () => {
+    const persisted: FollowerReading[] = []
+    const report = await captureInstagramAccount({
+      fetchAccount: async () => ({ ok: false, detail: 'IG_GRAPH_ACCESS_TOKEN is expired or revoked' }),
+      persistReading: async (reading) => { persisted.push(reading) },
+    })
+    expect(report).toEqual({ error: 'IG_GRAPH_ACCESS_TOKEN is expired or revoked' })
+    expect(persisted).toEqual([])
+  })
+
+  it('still returns the account block when the history write throws', async () => {
+    // Persistence is best-effort: a KV failure must not sink the live reading.
+    const report = await captureInstagramAccount({
+      fetchAccount: async () => ({ ok: true, metrics: { followersCount: 5 } }),
+      persistReading: async () => { throw new Error('KV down') },
+    })
+    expect(report).toEqual({ account: { followersCount: 5 } })
+  })
+
+  it('keeps the history bounded to FOLLOWER_HISTORY_MAX readings', () => {
+    // The cap is what keeps the KV value small as readings accumulate.
+    const prior: FollowerReading[] = Array.from({ length: FOLLOWER_HISTORY_MAX }, (_, i) => ({
+      followersCount: i, ts: `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}.000Z`,
+    }))
+    const next = [...prior, { followersCount: 999, ts: '2026-08-18T08:00:00.000Z' }].slice(-FOLLOWER_HISTORY_MAX)
+    expect(next).toHaveLength(FOLLOWER_HISTORY_MAX)
+    expect(next.at(-1)).toEqual({ followersCount: 999, ts: '2026-08-18T08:00:00.000Z' })
+    expect(next.at(0)?.followersCount).toBe(1) // the oldest (index 0) dropped off the front
   })
 })
 
