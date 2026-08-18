@@ -65,6 +65,11 @@ function hasFlag(name: string): boolean {
  * is honored, not treated as unset.
  */
 import { SOCIAL_MAX_IMAGES_DEFAULT } from '~/lib/team-keys'
+// Type-only: erased at runtime, so importing it never loads shopify.server /
+// db.server into the sandbox. Generation + rehost now run SERVER-SIDE via
+// POST /api/team/social-image (ticket #4133), where the Shopify Admin token
+// lives. The sandbox never touches the Admin API or its token.
+import type { GenerateSocialImageResult, GenerateCastCompositeResult } from '~/lib/social-media.server'
 
 const ARCHETYPES = ['scene', 'cast', 'metaphor', 'macro', 'plate']
 
@@ -143,6 +148,29 @@ async function main() {
   const TEAM_TOKEN = process.env['TEAM_TOKEN'] ?? process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
   const teamHeaders = { 'x-team-secret': TEAM_TOKEN, 'content-type': 'application/json' }
 
+  // Generation + rehost run server-side via POST /api/team/social-image, where
+  // SHOPIFY_ADMIN_ACCESS_TOKEN lives (ticket #4133). A 403 is the server's own
+  // budget gate closing between our step-1 check and this call: treat it as a
+  // clean skip like step 1, not a failure. Any other non-2xx is a real error.
+  async function callSocialImageRoute<T>(payload: Record<string, unknown>): Promise<T> {
+    const res = await fetch(`${BASE_URL}/api/team/social-image`, {
+      method: 'POST',
+      headers: teamHeaders,
+      body: JSON.stringify(payload),
+    })
+    if (res.status === 403) {
+      const j = await res.json().catch(() => ({})) as { reason?: string }
+      console.log(JSON.stringify({ skipped: true, reason: j.reason ?? 'gated' }))
+      process.exit(0)
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.log(JSON.stringify({ error: true, reason: `social_image_route_http_${res.status}`, body: body.slice(0, 500) }))
+      process.exit(1)
+    }
+    return res.json() as Promise<T>
+  }
+
   // ── 1. Gate re-check ──────────────────────────────────────────────────────
   const gateUrl = `${BASE_URL}/api/team/gate?team=social${runId && /^\d+$/.test(runId) ? `&excludeRun=${runId}` : ''}`
   const gateRes = await fetch(gateUrl, { headers: teamHeaders })
@@ -204,8 +232,8 @@ async function main() {
   // the presenter and invents the product. Anything with a presenter goes
   // through composeSceneFrame instead, which takes both references.
   if (presenter) {
-    const { generateCastComposite } = await import('~/lib/social-media.server')
-    const result = await generateCastComposite({
+    const result = await callSocialImageRoute<GenerateCastCompositeResult>({
+      op: 'cast',
       prompt,
       handle,
       mood,
@@ -216,6 +244,7 @@ async function main() {
       ...(extraRef ? { extraImageUrls: [extraRef] } : {}),
       count: Number(arg('candidates') ?? '2'),
       caller,
+      ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),
     })
 
     let spendPosted = true
@@ -263,24 +292,23 @@ async function main() {
     process.exit(0)
   }
 
-  // ── 4. Generate + rehost (imported after the short-circuits so a skipped or
-  //      dry run never pays the shopify/db module-eval cost) ────────────────
-  const { generateAndUploadSocialImage } = await import('~/lib/social-media.server')
-
-  const result = await generateAndUploadSocialImage({
+  // ── 4. Generate + rehost, SERVER-SIDE (ticket #4133) ──────────────────────
+  // The privileged rehost (Shopify Files, needs the Admin token) runs on the
+  // server via the route below, not in this sandbox. The route generates with
+  // logCost off, so this script stays the single owner of the spend row (#887).
+  const result = await callSocialImageRoute<GenerateSocialImageResult>({
+    op: 'generate',
     prompt,
     handle,
-    archetype: archetype as never,
+    archetype,
     mood,
     date,
     imageSize,
     caller,
-    // This script owns the spend row; logging inside would double-count and
-    // trip the daily cap at half budget.
-    logCost: false,
     ...(slide ? { slide } : {}),
     ...(refImage ? { refImageUrl: refImage } : {}),
     ...(only ? { only } : {}),
+    ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),
   })
 
   // ── 5. Spend, once. Posted for every BILLED generation (provider !== 'none'),
