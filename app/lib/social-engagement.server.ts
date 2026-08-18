@@ -100,6 +100,111 @@ export async function fetchInstagramEngagement(
   return { ok: true, metrics }
 }
 
+// ─── Account-level readings (ticket #4064) ───────────────────────────────────
+//
+// Per-post reach is uninterpretable without the account's follower count: a
+// reach of 5 is normal against 5 followers and suppression against 200. Nothing
+// read the denominator, so the team could not tell distribution from delivery.
+// The engagement sweep now fetches the account fields once and persists a
+// timestamped reading so trend is derivable later.
+
+/** Account-level fields, named in the ticket, in the vocabulary the retro reads. */
+export interface InstagramAccountMetrics {
+  followersCount?: number
+  followsCount?: number
+  mediaCount?: number
+}
+
+/** One persisted reading: the metrics plus the ISO timestamp it was taken. */
+export interface FollowerReading extends InstagramAccountMetrics {
+  ts: string
+}
+
+/**
+ * How many readings the history keeps. One sweep per run, so 180 is roughly six
+ * months of daily readings — enough to see trend, bounded so the KV value stays
+ * small. Oldest readings drop off the front.
+ */
+export const FOLLOWER_HISTORY_MAX = 180
+
+/** The account fields the ticket names. */
+const ACCOUNT_FIELDS = 'followers_count,follows_count,media_count'
+
+/**
+ * Live account-level fields for the IG business account. A pure read, mirroring
+ * `fetchInstagramEngagement`: same token guard, same `describeInstagramApiError`
+ * on the error path, nothing stored here (the caller persists).
+ */
+export async function fetchInstagramAccount(): Promise<
+  { ok: true; metrics: InstagramAccountMetrics } | { ok: false; detail: string }
+> {
+  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+  const igId = process.env['IG_BUSINESS_ACCOUNT_ID']?.trim()
+  if (!token || !igId) return { ok: false, detail: 'Instagram keys are not configured' }
+
+  const res = await igRequest(`/${igId}`, { method: 'GET', params: { fields: ACCOUNT_FIELDS }, token })
+  if (!res.ok) return { ok: false, detail: describeInstagramApiError(res.error) }
+
+  const metrics: InstagramAccountMetrics = {}
+  if (typeof res.data['followers_count'] === 'number') metrics.followersCount = res.data['followers_count'] as number
+  if (typeof res.data['follows_count'] === 'number') metrics.followsCount = res.data['follows_count'] as number
+  if (typeof res.data['media_count'] === 'number') metrics.mediaCount = res.data['media_count'] as number
+  return { ok: true, metrics }
+}
+
+/**
+ * Append a reading to the capped KV history. No migration and no
+ * `pipeline_settings` write: the history lives in KV (durable, no TTL), which is
+ * the non-protected home the ticket asks for. Best-effort by contract — the
+ * caller swallows a throw so a persist failure never sinks the account block.
+ */
+export async function persistFollowerReading(reading: FollowerReading): Promise<void> {
+  const { kvGet, kvSet, KV_KEYS } = await import('./kv.server')
+  const prior = (await kvGet<FollowerReading[]>(KV_KEYS.socialFollowerHistory)) ?? []
+  const next = [...prior, reading].slice(-FOLLOWER_HISTORY_MAX)
+  await kvSet(KV_KEYS.socialFollowerHistory, next)
+}
+
+/** The account block returned alongside the per-post rows. */
+export interface InstagramAccountReport {
+  /** Present on success. */
+  account?: InstagramAccountMetrics
+  /** Present when the account fetch failed; `account` is absent then. */
+  error?: string
+}
+
+export interface AccountCaptureDeps {
+  fetchAccount?: () => ReturnType<typeof fetchInstagramAccount>
+  persistReading?: (reading: FollowerReading) => Promise<void>
+  now?: () => Date
+}
+
+/**
+ * Fetch the account block and persist a timestamped reading. Separate from the
+ * per-post sweep so its failure is isolated: an account-fetch error becomes an
+ * `error` entry on the block and never stops the per-post rows from returning
+ * (the route calls both and each stands alone).
+ */
+export async function captureInstagramAccount(
+  deps: AccountCaptureDeps = {},
+): Promise<InstagramAccountReport> {
+  const fetchAccount = deps.fetchAccount ?? fetchInstagramAccount
+  const persistReading = deps.persistReading ?? persistFollowerReading
+  const now = deps.now ?? (() => new Date())
+
+  const result = await fetchAccount()
+  if (!result.ok) return { error: result.detail }
+
+  try {
+    await persistReading({ ...result.metrics, ts: now().toISOString() })
+  } catch (err) {
+    // Persistence is best-effort; a failed history write must not drop the live
+    // account block the retro needs this run.
+    console.warn('[social-engagement] follower reading persist failed:', err instanceof Error ? err.message : err)
+  }
+  return { account: result.metrics }
+}
+
 export interface EngagementCaptureRow {
   id: number
   externalPostId: string | null

@@ -406,6 +406,11 @@ export const KV_KEYS = {
   // (same semantics as enrichmentPollerIdle, owned by video-pipeline.server.ts).
   videoJob:                    (jobId: string) => `video-job:${jobId}`,
   videoPollerIdle:             'video:poller:idle',
+  // Instagram follower-count history (ticket #4064). A capped, timestamped list
+  // of account readings from the engagement sweep, so per-post reach has a
+  // denominator and follower trend is derivable. No TTL: written with a plain
+  // kvSet so Upstash keeps it indefinitely (unlike the caches above).
+  socialFollowerHistory:       'social:ig:follower_history',
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────
