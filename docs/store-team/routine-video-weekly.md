@@ -44,7 +44,7 @@ curl -s "$BASE_URL/api/team/gate?team=video&excludeRun=$RUN_ID" -H "x-team-secre
    means that scene already has an owner-approved Emma frame the pipeline will reuse).
    Talking-head scenes come from sceneKit only.
 5b. The viral checklist: `docs/store-team/social-video-viral-checklist.md` (binding, all 20
-   rules; loaded again by the voice gate).
+   numbered rules plus the eight craft rules CR1-CR8; loaded again by the voice gate).
 6. Training data: `POST /api/team/video-job {"op":"list"}` -> prior jobs with frame-retry
    feedback, regenerate notes, rejections, and owner caption edits on fanned-out drafts. Read the
    feedback verbatim and let it change this week's scripts before drafting anything new.
@@ -66,10 +66,18 @@ cuts), `durationSeconds` (from the tier's allowed list for b-roll; DERIVED from 
 speech length on the avatar tier, so omit choosing one), per-platform `captions`, `hook`,
 `cta`.
 
-Pre-enqueue gate, in order: (1) self-check every script against all 20 rules of
-`docs/store-team/social-video-viral-checklist.md`; a script that cannot PASS all 20 does not go
-forward. (2) Route EVERY script (spoken lines, presenterLine, and all captions together) through
-`emma-empathy-reviewer`, which also verdicts the checklist rule by rule: PASS -> proceed.
+**Brief discipline before the voice gate (blog-style, per script).** Before drafting a line, give
+each script a brief the same way the content lane briefs a post: its platform-bound register number
+(the intensity cap for the target platform — IG/YT 6-7, TikTok 5), a script-specific banned-move
+list (the tics and orphaned-referent shapes this concept must avoid), and a mechanical self-check
+run against that list and the craft rules. The self-check is mechanical, not by ear: read the script
+line by line against each rule rather than judging the whole for vibe.
+
+Pre-enqueue gate, in order: (1) self-check every script against all 20 numbered rules and the eight
+craft rules (CR1-CR8) of `docs/store-team/social-video-viral-checklist.md`; a script that cannot
+PASS them all does not go forward. (2) Route EVERY script (spoken lines, presenterLine, and all
+captions together) through `emma-empathy-reviewer`, which also verdicts the checklist rule by rule:
+PASS -> proceed.
 REVISE -> apply and re-gate once. BLOCK -> drop the item and record why. Also self-check the
 video-specific hard rules: no lived-experience claims, no named acts in audio/on-screen text, no
 device-on-body depiction, judge wardrobe by the most revealing frame.

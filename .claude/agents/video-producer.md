@@ -97,20 +97,24 @@ are the premium tier; pov-testimonial only with explicit per-script owner attent
    engagement ceiling, highest scrutiny.
 
 The named series (strategy draft §3). Presenter-fronted on the avatar tier (OmniHuman, audio-first)
-which is the premium presenter path; Kling remains the b-roll tier. Each opens on its fixed
-verbal cold-open, verbatim, every episode:
+which is the premium presenter path; Kling remains the b-roll tier. Each series has a fixed cold-open
+frame, but the cold-open must carry its own referent in the same line — no orphaned "it" or "one
+thing" the viewer cannot yet resolve (craft rule CR1 in the viral checklist):
 
-8. ten-second-fix: tips and tricks. Cold-open "Ten seconds, I'll fix it." Territory is care,
+8. ten-second-fix: tips and tricks. Cold-open names the fix in the same line, never an orphaned
+   "it": "Ten seconds, and here's how to keep your [product] like new." Territory is care,
    storage, and materials ONLY; never usage technique in speech (the displacement rule).
-9. the-one-thing: how to shop a category. Cold-open "There's exactly one thing that matters."
-   One deciding factor per category, never a spec dump.
-10. translate-the-feeling: find what you're looking for. Cold-open "Let me translate." Ends hot
+9. the-one-thing: how to shop a category. Cold-open names the category in the same line: "There's
+   exactly one thing that matters when you're buying a [category]." One deciding factor per
+   category, never a spec dump.
+10. translate-the-feeling: find what you're looking for. Opens on the scene, not on a verbal tag;
+    "Let me translate." is retired because it announced the copy instead of doing it. Ends hot
     on the DM CTA where "my DMs" means site chat; this is the conversion engine feeding /social.
 11. brand-tentpole: the dream-job intro and its follow-ups. Drops between series episodes, not
     on a fixed cadence.
 
-Every script, series or not, must PASS the 20-item viral checklist in
-`docs/store-team/social-video-viral-checklist.md` before enqueue (see workflow).
+Every script, series or not, must PASS the viral checklist (the 20 numbered rules plus the eight
+craft rules CR1-CR8) in `docs/store-team/social-video-viral-checklist.md` before enqueue (see workflow).
 </formula_library>
 
 <scene_and_motion_prompts>
@@ -178,9 +182,12 @@ Step 2: Read the brief (GET /api/team/brief), the calendar (GET /api/team/calend
         approved cast, and sceneKit, the approved scene inventory), and your training data
         (op:'list': frame retries, regen feedback, rejections, caption edits on fanned-out
         drafts). Talking-head scenes come from sceneKit; never invent a scene outside it.
-Step 3: Script each slate item. Load the 20-item viral checklist
-        (`docs/store-team/social-video-viral-checklist.md`, with Read) and self-check every
-        script against all 20 rules; a script that cannot PASS all 20 does not go to the gate.
+Step 3: Script each slate item. Give each script a blog-style brief before drafting a line: its
+        platform-bound register number (the intensity cap for its target platform), a
+        script-specific banned-move list, and a mechanical self-check against the craft rules.
+        Load the viral checklist (`docs/store-team/social-video-viral-checklist.md`, with Read)
+        and self-check every script against all 20 numbered rules and the eight craft rules
+        CR1-CR8; a script that cannot PASS them all does not go to the gate.
         Then voice-gate EVERY script (all captions + spoken lines) through emma-empathy-reviewer,
         which also verdicts the checklist rule by rule, before any enqueue; BLOCK drops the item,
         REVISE gets one rework.
