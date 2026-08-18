@@ -87,6 +87,18 @@ export async function action({ request }: ActionFunctionArgs) {
     const mediaUrls = Array.isArray(b['mediaUrls'])
       ? (b['mediaUrls'] as unknown[]).filter((u): u is string => typeof u === 'string')
       : undefined
+    // Fail-closed X media requirement (ticket #4140, split from #4131). The
+    // pre-publish gate BLOCKs an X post with no media (owner decision
+    // 2026-08-16, social-publish-gate.server.ts), so a media-less X draft is
+    // born unpublishable and the routine would only be manufacturing rows that
+    // can never pass the gate. Refuse it at write time, mirroring the gate and
+    // failing closed exactly like the voiceGate check above.
+    if (b['platform'] === 'x' && (!mediaUrls || mediaUrls.length === 0)) {
+      return new Response(
+        'Bad Request: an X draft requires at least one mediaUrls entry (the pre-publish gate blocks a media-less X post; owner decision 2026-08-16)',
+        { status: 400 },
+      )
+    }
     const id = await createDraftSocialPost({
       platform:      b['platform'],
       postType:      typeof b['postType'] === 'string' && b['postType'].length <= 20 ? b['postType'] : 'manual',
