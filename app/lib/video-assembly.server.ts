@@ -159,6 +159,39 @@ export async function muxAudio(video: Buffer, audio: Buffer): Promise<Buffer> {
   }
 }
 
+/**
+ * Replace a clip's audio with silence, dropping whatever it carried (used to
+ * strip model-invented dialogue that no gate has read — ticket #3996). The video
+ * stream is copied; the original audio is discarded and a silent stereo AAC
+ * track of the same length takes its place.
+ *
+ * We keep a (silent) audio stream rather than using `-an` on purpose: a
+ * stream-less file breaks `concatWithAudio` (which maps `[i:a]` for the end
+ * card) and leaves the watermark's `-c:a copy` with nothing to copy. A silent
+ * track is the same result to a viewer and safe through the rest of assembly.
+ */
+export async function stripAudio(video: Buffer): Promise<Buffer> {
+  const videoIn = tmp('strip-v.mp4')
+  const output = tmp('strip-out.mp4')
+  try {
+    writeFileSync(videoIn, video)
+    execFileSync(ffmpegPath!, [
+      '-y',
+      '-i', videoIn,
+      '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+      '-map', '0:v', '-map', '1:a',
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-shortest',
+      '-movflags', '+faststart',
+      output,
+    ], { timeout: 60_000 })
+    return readFileSync(output)
+  } finally {
+    cleanup([videoIn, output])
+  }
+}
+
 // ── Multi-aspect masters ─────────────────────────────────────────────────────
 
 export type AspectMaster = '1:1' | '4:5'
