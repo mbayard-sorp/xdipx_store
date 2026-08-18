@@ -360,11 +360,13 @@ export interface GenerateSocialImageOpts {
    */
   refImageUrl?: string
   /**
-   * fal image_size. Instagram feed art is `portrait_4_5`-shaped: the profile
-   * grid crops tiles to 3:4, so the subject has to survive both that and a 1:1
-   * centre crop. TikTok wants `portrait_16_9`.
+   * fal image_size: either a named token (Instagram feed art is
+   * `portrait_4_5`-shaped, so the subject survives the profile grid's 3:4 tile
+   * crop and a 1:1 centre crop; TikTok wants `portrait_16_9`) or an explicit
+   * `{ width, height }` pixel pair (the CLI passes the platform's feed size).
+   * Both are forwarded to `generateImage`, which accepts either.
    */
-  imageSize?: string
+  imageSize?: string | { width: number; height: number }
   only?: 'atlas' | 'fal' | 'imagen'
   caller?: string
   /**
