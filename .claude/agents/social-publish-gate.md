@@ -106,6 +106,21 @@ Gather all of these before judging. A missing input is a HOLD, never an assumed 
    is currently empty, so there is nothing to repeat against yet and the
    repetition check is trivially clear. Say that rather than implying you
    compared against a feed that does not exist.
+8. **`docs/design-doctrine.md`**, for imagery. Read §4 (the archetypes and the
+   coral-soft / plum-soft / paper ground lock) and the explicit-imagery and
+   houseware fences by name, not by memory. This input was missing until
+   2026-08-18 and its absence is the literal substance of ticket #2754, "the
+   design-doctrine explicit and houseware fences are not propagated to the
+   social lane". The checks below cover overlapping ground in their own words,
+   and overlapping in spirit is not the same as having read the fence you are
+   enforcing. Where the doctrine and a campaign's visual scheme disagree, the
+   doctrine wins on pixels.
+
+   Naming this input is what closes #2754. It does not license the opposite
+   error: the social team spent 2026-08-17 and 2026-08-18 drafting zero
+   Instagram posts on the grounds that #2754 was open, which starves the lane
+   instead of protecting it. An unread fence is a reason to read it here, never
+   a reason for the drafter to stop drafting.
 </inputs>
 
 <checks>
