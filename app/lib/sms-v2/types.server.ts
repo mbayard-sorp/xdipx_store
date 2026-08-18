@@ -38,6 +38,16 @@ export interface ProductRef {
   price?: string | undefined
   imageUrl?: string | undefined
   pdpUrl: string
+  /**
+   * Whether this product is actually purchasable, sourced from real availability
+   * at hydration time (`variants.some(v => v.availableForSale)`). REQUIRED so no
+   * pipeline site can silently assert stock it never checked (ticket #3542): the
+   * web adapter and the research stage used to hardcode `true` here. A site that
+   * builds a bare handle-hint ref without fetching the product sets `false` — the
+   * honest conservative value, because "not verified" must never render as
+   * available. Consumers present a product as in-stock only when this is `true`.
+   */
+  inStock: boolean
 }
 
 export interface CustomerContext {

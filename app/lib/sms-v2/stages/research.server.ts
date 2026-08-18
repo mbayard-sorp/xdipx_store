@@ -242,7 +242,7 @@ export async function executeResearchStage(
           handle:    pitchedCtx.handle,
           category:  '',
           tagline:   pitchedCtx.description ?? '',
-          inStock:   true,
+          inStock:   pitchedCtx.inStock, // real availability from hydration (#3542)
           price:     pitchedCtx.price ? Number(pitchedCtx.price.replace(/^\$/, '')) : 0,
           pctOff:    0,
           phrasing:  'deal',

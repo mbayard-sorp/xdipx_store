@@ -105,6 +105,10 @@ export async function buildWebEmmaContext(
       handle: extras.pageContext.handle,
       title: extras.pageContext.handle,  // Stage handler will enrich if needed.
       pdpUrl: `https://xdipx.com/products/${extras.pageContext.handle}`,
+      // Page-context hint only: product details are not fetched here, so stock is
+      // unverified. Conservatively false — the stage handler re-hydrates via
+      // fetchProductContext (real inStock) before presenting (ticket #3542).
+      inStock: false,
     }
   }
 

@@ -983,6 +983,9 @@ export async function executeConversationAgent(
         title: pitched.title,
         price: `$${pitched.price.toFixed(2)}`,
         pdpUrl: `https://xdipx.com/products/${pitched.handle}`,
+        // The pitched IvrProductCard already carries real availability from
+        // search/hydration — thread it, never assume (ticket #3542).
+        inStock: pitched.inStock,
       }
     : undefined
 

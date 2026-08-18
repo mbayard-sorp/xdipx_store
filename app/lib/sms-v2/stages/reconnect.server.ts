@@ -50,6 +50,10 @@ export async function executeReconnectStage(
       handle: xchannel.topic.handle,
       title:  xchannel.topic.title ?? xchannel.topic.handle,
       pdpUrl: `https://xdipx.com/products/${xchannel.topic.handle}`,
+      // Cross-channel hint: the topic carries no fetched availability, so stock is
+      // unverified. Conservatively false — DISCOVERY re-hydrates on the next turn
+      // and never asserts stock we did not check (ticket #3542).
+      inStock: false,
     }
     return {
       stageOut: resolveTransition('RECONNECT', 'DISCOVERY'),
