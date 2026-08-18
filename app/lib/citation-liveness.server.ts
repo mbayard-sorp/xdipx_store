@@ -30,6 +30,16 @@
  * page is gone". A blocked page is still `live:false` — a 403 is never treated
  * as live, since a dead or paywalled page shipping as a citation is worse than
  * losing one.
+ *
+ * A third distinction, added for ticket #3946: some bot-protection services do
+ * not refuse with a 403 at all, they answer 200 with the challenge page as the
+ * whole document (Cloudflare "Just a moment", reCAPTCHA/hCaptcha gates,
+ * Incapsula, PerimeterX). classifyStatus reads that 200 as `live`, so without a
+ * body inspection an unread challenge page would ship as a citation. A 2xx whose
+ * body/title is a challenge interstitial reports `reason:'challenge'` and stays
+ * `live:false`. This is the silent cousin of `blocked`: the page is very likely
+ * live, but we never saw its content, so it is treated the same way — kept only
+ * when the accuracy gate independently confirms the source supports the claim.
  */
 
 /**
@@ -75,8 +85,10 @@ export interface LivenessResult {
   /**
    * Present when the URL was rejected before or after the request. Notable
    * values: `'blocked'` (allowlisted host refused us, 401/403/429 — refused, not
-   * gone), `'dead'` (a genuine 404/410 or other non-2xx), `'redirect-off-allowlist'`
-   * (a 3xx pointing off the allowlist or to non-https), `'too-many-redirects'`,
+   * gone), `'challenge'` (a 2xx whose body is a bot-protection interstitial, e.g.
+   * Cloudflare/reCAPTCHA/Incapsula — the real page was never seen), `'dead'` (a
+   * genuine 404/410 or other non-2xx), `'redirect-off-allowlist'` (a 3xx pointing
+   * off the allowlist or to non-https), `'too-many-redirects'`,
    * `'host-not-allowlisted'`, `'not-https'`, `'timeout'`, `'fetch-failed'`.
    */
   reason?: string
@@ -179,6 +191,46 @@ export function extractTitle(html: string): string | null {
   return decoded === '' ? null : decoded
 }
 
+/**
+ * Detect a bot-protection / WAF interstitial served with a 2xx status. Some
+ * challenge services (Cloudflare "Just a moment", reCAPTCHA/hCaptcha gates,
+ * Incapsula/Imperva, PerimeterX) answer 200 with the challenge as the whole
+ * document rather than a 401/403, so classifyStatus reads them as `live` and,
+ * without this check, the unread challenge page would ship as a citation
+ * (ticket #3946: run 362 fetched a PMC article and got back a 200 titled
+ * "Checking your browser - reCAPTCHA").
+ *
+ * Title signals are matched as human-readable phrases; body signals are matched
+ * only against WAF-specific machinery (script hooks, resource paths, challenge
+ * tokens), never bare English words, so a genuine health article that merely
+ * mentions "captcha" or "Cloudflare" in its prose is not misflagged. Pure and
+ * exported so the 200-challenge case is unit-testable without a network call.
+ */
+export function isChallengePage(title: string | null, bodyText: string): boolean {
+  const t = (title ?? '').toLowerCase()
+  const titleSignals = [
+    'checking your browser',
+    'just a moment',
+    'attention required', // "Attention Required! | Cloudflare"
+    'verifying you are human',
+    'access denied',
+    'are you a robot',
+    'one more step', // classic Cloudflare captcha page
+  ]
+  if (titleSignals.some((s) => t.includes(s))) return true
+
+  const bodySignals: readonly RegExp[] = [
+    /cf-browser-verification|cf_chl_|cf-challenge|challenge-platform/i, // Cloudflare
+    /g-?recaptcha|grecaptcha\.render|www\.google\.com\/recaptcha/i, // reCAPTCHA
+    /h-?captcha\.com|\bhcaptcha\b/i, // hCaptcha
+    /_incapsula_resource|incapsula incident/i, // Incapsula / Imperva
+    /perimeterx|px-captcha|_pxhd\b/i, // PerimeterX
+    /enable javascript and cookies to continue/i, // generic JS/cookie gate
+    /ddos protection by cloudflare/i,
+  ]
+  return bodySignals.some((re) => re.test(bodyText))
+}
+
 async function checkOne(raw: string): Promise<LivenessResult> {
   const v = validateCitationUrl(raw)
   if (!v.ok) {
@@ -217,7 +269,15 @@ async function checkOne(raw: string): Promise<LivenessResult> {
       if (cls === 'live') {
         let title: string | null = null
         if ((res.headers.get('content-type') ?? '').includes('html') && res.body) {
-          title = extractTitle(await readCapped(res))
+          const body = await readCapped(res)
+          title = extractTitle(body)
+          if (isChallengePage(title, body)) {
+            // A 2xx whose body is a bot-protection interstitial: the real page
+            // was never seen. Report it distinctly from a plain 403 `blocked`,
+            // still `live:false`, and surface the challenge title (the title is
+            // exactly what exposed this on ticket #3946).
+            return { url: raw, live: false, status: res.status || null, title, reason: 'challenge' }
+          }
         }
         return { url: raw, live: true, status: res.status || null, title }
       }
