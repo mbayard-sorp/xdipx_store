@@ -47,6 +47,29 @@ export function enforceMapFloor(price: number, map: number | null | undefined): 
 }
 
 /**
+ * Brands whose MAP is formally (contractually) enforced. Owner direction
+ * 2026-08-18: only Lovense and Playground are MAP-restricted; every other
+ * brand's map_price is advisory and must never raise the sell price. Matched
+ * case-insensitively against the Shopify vendor. Overridable at runtime via the
+ * `pricing_map_enforced_brands` pipeline setting (see getMapEnforcedBrands).
+ */
+export const DEFAULT_MAP_ENFORCED_BRANDS: readonly string[] = ['lovense', 'playground']
+
+/**
+ * True when a product's brand (Shopify vendor) is on the MAP-enforced list, so
+ * the MAP floor binds. For every other brand the caller must treat MAP as
+ * non-binding: pass map=null into computePrice and skip the write-path guard.
+ */
+export function isMapEnforcedBrand(
+  vendor: string | null | undefined,
+  brands: readonly string[] = DEFAULT_MAP_ENFORCED_BRANDS,
+): boolean {
+  if (!vendor) return false
+  const v = vendor.trim().toLowerCase()
+  return brands.some(b => b.trim().toLowerCase() === v)
+}
+
+/**
  * Psychological rounding: result ends in .99 and is <= input.
  * Convention: floor(n) - 0.01. e.g. 24.37 -> floor=24 -> 23.99.
  * For n < 1 we skip the ladder and return round2(n).

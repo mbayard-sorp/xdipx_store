@@ -4,6 +4,8 @@ import {
   computeDiscontinuedPrice,
   computePrice,
   enforceMapFloor,
+  isMapEnforcedBrand,
+  DEFAULT_MAP_ENFORCED_BRANDS,
   roundPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
   type PricingConfig,
@@ -514,5 +516,54 @@ describe('roundPsychological', () => {
 
   it('exact integer 50 -> 49.99', () => {
     expect(roundPsychological(50)).toBe(49.99)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isMapEnforcedBrand — MAP binds only for formally MAP-restricted brands
+// (owner direction 2026-08-18: Lovense + Playground)
+// ---------------------------------------------------------------------------
+
+describe('isMapEnforcedBrand', () => {
+  it('enforces the default brands (Lovense, Playground)', () => {
+    expect(isMapEnforcedBrand('Lovense')).toBe(true)
+    expect(isMapEnforcedBrand('Playground')).toBe(true)
+  })
+
+  it('is case- and whitespace-insensitive', () => {
+    expect(isMapEnforcedBrand('  lovense ')).toBe(true)
+    expect(isMapEnforcedBrand('PLAYGROUND')).toBe(true)
+  })
+
+  it('does not enforce other brands', () => {
+    expect(isMapEnforcedBrand('Doc Johnson')).toBe(false)
+    expect(isMapEnforcedBrand('Lelo')).toBe(false)
+    expect(isMapEnforcedBrand('')).toBe(false)
+    expect(isMapEnforcedBrand(null)).toBe(false)
+    expect(isMapEnforcedBrand(undefined)).toBe(false)
+  })
+
+  it('honours a custom brand list (settings override)', () => {
+    expect(isMapEnforcedBrand('Lelo', ['Lelo'])).toBe(true)
+    expect(isMapEnforcedBrand('Lovense', ['Lelo'])).toBe(false)
+  })
+
+  it('exposes the default list', () => {
+    expect(DEFAULT_MAP_ENFORCED_BRANDS).toContain('lovense')
+    expect(DEFAULT_MAP_ENFORCED_BRANDS).toContain('playground')
+  })
+})
+
+// The engine effect the brand gate relies on: a below-target MAP only lifts the
+// price when a map value is passed. The apply layer passes map=null for
+// non-enforced brands, so this is the exact behaviour they get.
+describe('computePrice — brand gate relies on map being dropped', () => {
+  it('non-enforced brand (map=null) prices on margin, not up to MAP', () => {
+    // cost 54.45, target 45% -> ~99; a $199 MAP would otherwise force $199.
+    const c = cfg({ target_margin_pct: 0.45, map_behavior: 'at_map' })
+    const enforced = computePrice({ cost: 54.45, map: 199, msrp: 199, cfg: c })
+    const relaxed  = computePrice({ cost: 54.45, map: null, msrp: 199, cfg: c })
+    expect(enforced?.sell).toBe(199)          // MAP binds
+    expect(relaxed?.sell).toBeLessThan(150)   // MAP dropped: margin price stands
   })
 })

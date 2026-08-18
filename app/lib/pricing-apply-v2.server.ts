@@ -13,6 +13,8 @@ import {
   computeDiscontinuedPrice,
   applyVelocityModifier,
   enforceMapFloor,
+  isMapEnforcedBrand,
+  DEFAULT_MAP_ENFORCED_BRANDS,
 } from './pricing-engine-v2.server'
 import {
   resolvePricingConfig,
@@ -130,6 +132,34 @@ async function getApprovalMode(): Promise<ApprovalMode> {
   return 'balanced'
 }
 
+/**
+ * The brands whose MAP is formally enforced. Defaults to Lovense + Playground
+ * (owner direction 2026-08-18); overridable without a deploy via the
+ * `pricing_map_enforced_brands` pipeline setting, stored as a JSON array of
+ * vendor strings (e.g. `["Lovense","Playground"]`). A malformed or empty
+ * setting falls back to the default rather than enforcing MAP on nothing.
+ */
+async function getMapEnforcedBrands(): Promise<readonly string[]> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, 'pricing_map_enforced_brands'))
+      .limit(1)
+    const raw = rows[0]?.value
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const brands = parsed.filter((b): b is string => typeof b === 'string' && b.trim() !== '')
+        if (brands.length > 0) return brands
+      }
+    }
+  } catch {
+    // fall through to default
+  }
+  return DEFAULT_MAP_ENFORCED_BRANDS
+}
+
 // ---------------------------------------------------------------------------
 // Single-variant recompute
 // ---------------------------------------------------------------------------
@@ -160,6 +190,8 @@ interface RunContext {
   trigger:    RecomputeVariantParams['trigger']
   mode:       ApprovalMode
   thresholds: Record<ApprovalMode, number>
+  /** Brands whose MAP floor binds; every other brand's MAP is advisory. */
+  mapEnforcedBrands: readonly string[]
 }
 
 // Minimal variant/product data the compute core needs. Matches both the
@@ -174,6 +206,8 @@ interface VariantInput {
 
 interface ProductInput {
   productType: string | null
+  /** Shopify vendor / brand. Gates MAP enforcement (see isMapEnforcedBrand). */
+  vendor: string | null
   metafields: {
     wholesaleCost:  number | null
     mapPrice:       number | null
@@ -204,6 +238,13 @@ async function recomputeFromData(
   const productType = product.productType
   const sku         = variant.sku
 
+  // MAP is a binding floor only for formally MAP-restricted brands (Lovense,
+  // Playground per owner direction 2026-08-18). For every other brand map_price
+  // is advisory and must not raise the sell price, so it is dropped from the
+  // pricing math. The real metafield value is still logged (old_map/new_map).
+  const enforceMap  = isMapEnforcedBrand(product.vendor, ctx.mapEnforcedBrands)
+  const mapForPricing = enforceMap ? map : null
+
   const cfg   = await resolvePricingConfig(productType)
   const group = await getGroupForProductType(productType)
 
@@ -232,7 +273,7 @@ async function recomputeFromData(
     const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg })
     if (result) { newSell = result.sell; newCompare = result.compare_at }
   } else {
-    const result = computePrice({ cost, map, msrp, cfg: effectiveCfg })
+    const result = computePrice({ cost, map: mapForPricing, msrp, cfg: effectiveCfg })
     if (result) {
       newSell = result.sell
       newCompare = result.compare_at
@@ -324,8 +365,10 @@ async function recomputeFromData(
       // decideStatus already rejects below-MAP prices and computePrice clamps
       // after rounding, but nothing may reach Shopify below a positive MAP.
       // Discontinued items are exempt (clearance ladder, MAP does not apply),
-      // as is an explicit ignore_map config.
-      const mapFloor = !isDiscontinued && cfg.map_behavior !== 'ignore_map' ? map : null
+      // as is an explicit ignore_map config, as is any brand whose MAP is not
+      // formally enforced (otherwise the guard would re-raise the very prices
+      // the brand gate above intentionally left below MAP).
+      const mapFloor = !isDiscontinued && enforceMap && cfg.map_behavior !== 'ignore_map' ? map : null
       const guardedSell = enforceMapFloor(newSell, mapFloor)
       if (guardedSell !== newSell) {
         console.warn(`[pricing-apply-v2] MAP floor guard raised ${sku} from $${newSell} to $${guardedSell}`)
@@ -405,6 +448,7 @@ export async function recomputeVariant(
 
     product = {
       productType: data.product.productType,
+      vendor: data.product.vendor ?? null,
       metafields: {
         wholesaleCost:  mfMap['wholesale_cost']  ? parseFloat(mfMap['wholesale_cost'])  : null,
         mapPrice:       mfMap['map_price']        ? parseFloat(mfMap['map_price'])       : null,
@@ -426,8 +470,9 @@ export async function recomputeVariant(
 
   const mode       = await getApprovalMode()
   const thresholds = await getModeThresholds()
+  const mapEnforcedBrands = await getMapEnforcedBrands()
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds })
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapEnforcedBrands })
 }
 
 
@@ -492,6 +537,7 @@ export async function dryRunRuleChange(opts: {
   const { bulkFetchProductsForPricing } = await import('./shopify.server')
   const mode = await getApprovalMode()
   const thresholds = await getModeThresholds()
+  const mapEnforcedBrands = await getMapEnforcedBrands()
 
   const result: DryRunResult = {
     totalAffected: 0,
@@ -545,6 +591,12 @@ export async function dryRunRuleChange(opts: {
 
         if (cost == null) continue
 
+        // Same brand gate as the live path: MAP only binds for enforced brands.
+        const mapForPricing = isMapEnforcedBrand(
+          (product as { vendor?: string | null }).vendor ?? null,
+          mapEnforcedBrands,
+        ) ? map : null
+
         const isDiscontinued = group?.usesClearanceLadder === true || productType === 'Discontinued'
         let newSell: number | null = null
 
@@ -556,7 +608,7 @@ export async function dryRunRuleChange(opts: {
           const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued, cfg })
           if (r) newSell = r.sell
         } else {
-          const r = computePrice({ cost, map, msrp, cfg })
+          const r = computePrice({ cost, map: mapForPricing, msrp, cfg })
           if (r) {
             newSell = r.sell
             // Treat below-floor results as "will queue" in dry-run
@@ -657,7 +709,8 @@ export async function recomputeCatalog(opts: {
   // serverless limit on manual runs.)
   const mode       = await getApprovalMode()
   const thresholds = await getModeThresholds()
-  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds }
+  const mapEnforcedBrands = await getMapEnforcedBrands()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapEnforcedBrands }
 
   for (const product of products) {
     for (const variant of product.variants) {
