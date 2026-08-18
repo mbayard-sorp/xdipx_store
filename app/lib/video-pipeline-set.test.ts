@@ -140,3 +140,15 @@ describe('enqueueVideoJobSet', () => {
     expect(state.inserts).toHaveLength(2)
   })
 })
+
+describe('estimateJobCostUsd — Grok Imagine tier (ticket #3991)', () => {
+  it('prices the clip at 0.14/s; reused frame leaves exactly 0.14*duration', () => {
+    // reuseFrame zeroes the frame cost, so the estimate is the pure clip cost.
+    expect(estimateJobCostUsd('grok', 8, { reuseFrame: true })).toBeCloseTo(1.12, 5)
+    expect(estimateJobCostUsd('grok', 5, { reuseFrame: true })).toBeCloseTo(0.7, 5)
+  })
+
+  it('adds the frame cost when a frame must be composed', () => {
+    expect(estimateJobCostUsd('grok', 8, { reuseFrame: false })).toBeGreaterThan(1.12)
+  })
+})

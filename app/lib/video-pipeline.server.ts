@@ -34,6 +34,8 @@ import {
   uploadToFalStorage,
   SCENE_FRAME_COST_KEY,
   SCENE_PLATE_COST_KEY,
+  assertSceneFrameContract,
+  probeImageDimensions,
   type VideoModelId,
   type VideoModelSpec,
   type QueueHandle,
@@ -599,6 +601,18 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
 
     const [frame] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.sceneFrameAssetId)).limit(1)
     if (!frame) throw new Error('Approved scene-frame asset not found')
+
+    // Grok image-to-video has no aspect_ratio param and its product fidelity
+    // tracks the input frame's resolution (ticket #3991), so a degraded frame
+    // must fail before the paid submit. Probe the real pixels of the frame
+    // (stored dims are not persisted on scene_frame assets) and assert the
+    // 9:16 full-resolution contract. Other tiers pass aspect_ratio explicitly
+    // to fal and are not subject to this failure mode.
+    if (clipModelId === 'grok') {
+      const frameBuf = await blobFetchToBuffer(frame.blobUrl)
+      const { width, height } = await probeImageDimensions(frameBuf)
+      assertSceneFrameContract(width, height)
+    }
 
     const handle = await submitVideoRequest(clipModelId, {
       prompt: motionPrompt,
