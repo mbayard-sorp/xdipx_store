@@ -315,6 +315,8 @@ async function executePresentationStageGate(
     price:    productCtx.price,
     imageUrl: productCtx.imageUrl,
     pdpUrl:   productCtx.pdpUrl,
+    // productCtx came from fetchProductContext, so this is real stock (#3542).
+    inStock:  productCtx.inStock,
   }
 
   return {

@@ -29,6 +29,10 @@ export async function fetchProductContext(handle: string): Promise<ProductContex
     handle,
     title:  product.seoTitle || product.title,
     pdpUrl: `https://xdipx.com/products/${handle}`,
+    // Real stock, sourced from Shopify variant availability at hydration time
+    // (ticket #3542). This is the value the web adapter and research stage read
+    // instead of the old hardcoded `true`.
+    inStock: product.variants.some(v => v.availableForSale),
   }
 
   // Price — variants[0].price is a string like "49.99"

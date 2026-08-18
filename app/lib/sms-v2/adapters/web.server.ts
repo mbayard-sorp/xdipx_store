@@ -84,7 +84,9 @@ function relativizePdpUrl(url: string): string {
   return url
 }
 
-function productRefToCard(ref: ProductRef | ProductContext): ChatProductCard {
+// Exported for unit tests (ticket #3542): the web path must present a product as
+// in-stock only when the ProductRef genuinely is.
+export function productRefToCard(ref: ProductRef | ProductContext): ChatProductCard {
   // Parse price string like "$49.99" → number of dollars.
   // ChatProductCard.price is dollars (matches v1 productToCard, which uses
   // Number(variant.price)); AskEmmaProductCard's formatPrice does
@@ -110,7 +112,7 @@ function productRefToCard(ref: ProductRef | ProductContext): ChatProductCard {
     price,
     pctOff: 0,
     phrasing: 'msrp_only',
-    inStock: true,         // Assume in-stock; stage handler validated this
+    inStock: ref.inStock,  // Real availability threaded on ProductRef (#3542)
     variantId: '',         // Stage handler doesn't carry variantId in ProductRef
     url: relativizePdpUrl(ref.pdpUrl),
   }

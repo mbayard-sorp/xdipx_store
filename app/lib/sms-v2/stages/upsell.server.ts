@@ -153,11 +153,15 @@ export async function executeUpsellStage(
     const pdpUrl = `https://xdipx.com/products/${pick.handle}`
 
     // Fetch image URL from Shopify (IvrProductCard / curated candidate don't
-    // carry an image). Non-fatal — the MMS image is optional.
+    // carry an image). Non-fatal — the MMS image is optional. The same fetch
+    // yields real availability, so we thread stock rather than assume it (#3542);
+    // a failed/absent fetch resolves to false — never assert unchecked stock.
     let imageUrl: string | undefined
+    let inStock = false
     try {
       const fullProduct = await getProductByHandle(pick.handle)
       imageUrl = fullProduct?.images?.[0]?.url
+      inStock = fullProduct?.variants.some(v => v.availableForSale) ?? false
     } catch {
       // non-fatal
     }
@@ -168,6 +172,7 @@ export async function executeUpsellStage(
       title: pick.title,
       price: priceStr,
       pdpUrl,
+      inStock,
       ...(imageUrl ? { imageUrl } : {}),
     }
 

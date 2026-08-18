@@ -59,6 +59,9 @@ async function fetchTodaysPick(): Promise<ProductContext | undefined> {
       handle,
       title: deal.seoTitle || deal.tagline || 'Emma\'s Pick',
       pdpUrl: `https://xdipx.com/products/${handle}`,
+      // Real stock from the deal's variants (ticket #3542). Empty/absent variants
+      // resolve to false — never assert availability we did not check.
+      inStock: (deal.variants ?? []).some(v => v.availableForSale),
     }
 
     // dealPrice is a number — format as currency string
