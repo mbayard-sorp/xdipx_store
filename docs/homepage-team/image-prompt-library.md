@@ -395,27 +395,69 @@ hand optional.
 - **Round 10 (2 candidates, kept round 9's expression language, added "held large and close to the
   camera so the label fills a good portion of the frame height... unaltered and legible down to the
   smallest printed line, do not blur the label" per the Sliquid Naturals H2O close-crop precedent
-  above) → KEEPER, candidate 1:**
+  above) → shipped as keeper, candidate 1, THEN REJECTED on content-writer review (see below):**
   `image-8c10cc9701e9466afc6631a1f2a71092175b839f-1184x880-jpg` (post:
   `what-helps-when-menopause-changes-sex`). Holding the bottle larger and closer measurably improved
   label sharpness ("Satin" and "by sliquid" both legible, only the smallest description line still
-  soft) and produced a calm, composed, non-smiling expression with direct eye contact — closed
-  neutral mouth, no upturn, reads as serious/searching rather than pleased. Off-white paper backdrop
-  landed cleanly in the ground lock again (4th consecutive round). Candidate 2 rejected: two-handed
-  cradle with the face mostly cropped out of frame, no usable expression. `check-hero-embed-match.ts`
-  initially failed on this keeper even with a correct image — the generated `imagePrompt` never
-  named the product by brand/line words ("moisturizer bottle... silver flower logo" reads as generic
-  to the token matcher), so `heroNamesAnyProduct` found no catalog match. Fixed by rewriting
-  `heroImageAlt` to include every one of the productPage title's distinctive tokens as whole words
-  (`naturals`, `satin`, `aloe`, `infused`, `daily`, `intimate`, `moisturizer`, and `4.2oz` for the
-  `2oz` token) rather than a loose paraphrase — the matcher requires ALL distinctive title tokens
-  present verbatim in `heroImageAlt` + `imagePrompt` combined, not just the brand name. **Standing
-  rule:** always check the post's `productPage.title` distinctive tokens before writing hero alt
-  text on a product-embedding post, and use them literally rather than a natural paraphrase, or
-  `check-hero-embed-match.ts` will fail on an otherwise-correct hero.
-**Conclusion:** cleared the gate on round 10 of this retry (round 13 counting run 379). Total spend
-across both content runs on this hero: run 379 = 12.5 cents (5 images), this retry rounds 4-10 = 35
-cents (14 images) = 47.5 cents total, trivial against the daily content-team budget.
+  soft). Off-white paper backdrop landed cleanly in the ground lock again (4th consecutive round).
+  Candidate 2 rejected: two-handed cradle with the face mostly cropped out of frame, no usable
+  expression. `check-hero-embed-match.ts` initially failed on this keeper even with a correct image
+  — the generated `imagePrompt` never named the product by brand/line words ("moisturizer bottle...
+  silver flower logo" reads as generic to the token matcher), so `heroNamesAnyProduct` found no
+  catalog match. Fixed by rewriting `heroImageAlt` to include every one of the productPage title's
+  distinctive tokens as whole words (`naturals`, `satin`, `aloe`, `infused`, `daily`, `intimate`,
+  `moisturizer`, and `4.2oz` for the `2oz` token) rather than a loose paraphrase — the matcher
+  requires ALL distinctive title tokens present verbatim in `heroImageAlt` + `imagePrompt` combined,
+  not just the brand name. **Standing rule:** always check the post's `productPage.title` distinctive
+  tokens before writing hero alt text on a product-embedding post, and use them literally rather than
+  a natural paraphrase, or `check-hero-embed-match.ts` will fail on an otherwise-correct hero.
+  The prior session logged this candidate's expression as "calm, composed, non-smiling... reads as
+  serious/searching" — **content-writer review (2026-08-18, content run 385) overturned that read. This was the routine's call, not the owner's.** On a
+  fresh look the figure is looking straight into the lens with a pleasant closed-mouth smile, which
+  the content-writer flagged as the visual grammar of a customer testimonial (person smiles at
+  camera while presenting the product), and the mission brief bans fabricating proof/testimonials on
+  any surface — worst possible failure mode on a † health-adjacent post. **Standing lesson: an
+  agent's own read of "not smiling" from a still is not reliable enough to gate on alone; eyeline
+  (camera vs. product) is the sharper, more legible tell for testimonial-grammar risk than mouth
+  shape, and should be checked explicitly going forward, not inferred from "no visible teeth."**
+- **Round 11 (gaze-only retry, 2 candidates, single targeted change from round 10's exact prompt:
+  added explicit gaze-lock language — "her eyes are looking directly at the bottle... her gaze is
+  locked on the product the entire time... she is not looking toward the camera at all, no eye
+  contact with the viewer, not looking at the lens" as a positive clause plus matching negative-list
+  entries ("no eye contact with camera, no looking at viewer, no looking at lens"); expression
+  language left untouched per the brief's own guidance not to fight affect and gaze in the same
+  round) → BOTH REJECTED, same failure on both candidates:** despite the explicit, repeated,
+  multiply-worded instruction, both candidates render the figure looking directly into the lens with
+  a warm, pleasant, closed-mouth smile — visually indistinguishable in kind from round 10's rejected
+  frame. Backdrop, label fidelity, age presentation, and hand anatomy all held clean on both (this
+  route's genuine strengths, confirmed again). Gaze direction did not move at all.
+**Conclusion:** per the run's own stop condition ("if both come back with her eyeline on the lens,
+STOP"), stopping here rather than grinding further. Round 11 extends the round 4-9 capability-limit
+finding from *expression* control to *gaze* control on this same route: fal Kontext dev (`fal-ai/
+flux-kontext/dev`) reliably holds product fidelity, backdrop, age presentation, and hand anatomy on
+this composite, but does not follow instructions that fight its default of a frontal, camera-facing,
+pleasant expression — not for "don't smile," and, per this round, not for "don't look at camera"
+either. Two independent controls (mouth affect, eye gaze) have now each failed against an explicit,
+isolated, repeatedly-worded instruction on this route. **This reads as a genuine capability ceiling,
+not a prompt-wording problem, and repeating this pattern a third time (e.g. head-angle-only,
+three-quarter-profile-only) is not expected to be more productive without more evidence than one
+round supplies.** Recommendation unchanged from rounds 4-7: this needs `ATLAS_CLOUD_API_KEY`
+configured so `seedream-v4.5/edit` (the documented-primary, stronger-reference-fidelity route per
+`docs/media-model-routing.md`) can attempt this composite instead of the fal Kontext fallback this
+environment is stuck on. No keeper exists for this post as of this run; the post remains a Sanity
+`status:'draft'` doc, and its `heroImage`/`heroImageAlt`/`imagePrompt` were deliberately left
+untouched (still pointing at the round-10 asset, now known-rejected) rather than cleared, since
+**Superseded by content-writer, same run:** the rejected round-10 asset was subsequently unset from
+the doc (`heroImage`, `heroImageAlt` and `imagePrompt` all cleared). Leaving a known-rejected frame
+attached made the doc read `hasHero:true` to any future publish check, putting a rejected image one
+auto-publish away from going live; an honest missing-hero state is strictly safer than a known-bad
+one. `check-hero-embed-match.ts` now correctly exits non-zero and the post cannot publish, which is
+the intended outcome under the heroless directive. Regenerating still needs Atlas configured, or an
+owner override of the content-plan §8B rule that Real Talk heroes are §0-H human heroes and never a
+product hero.
+Total spend across both content runs on this hero: run 379 = 12.5 cents (5 images), first retry
+rounds 4-10 = 35 cents (14 images), this gaze-only retry round 11 = 5 cents (2 images) = 52.5 cents
+total (21 images), still trivial against the daily content-team budget.
 
 > **REJECTED by content-writer on review (run 385).** This keeper did not ship. The round-10
 > self-assessment above records a "non-smiling expression... closed neutral mouth, no upturn";
