@@ -268,11 +268,17 @@ export function buildRationale(p: RationaleParams): string {
     return `Velocity: ${label} -> target margin ${dir}; new sell ${newFmt} (was ${oldFmt}).`
   }
 
-  // Queued because delta exceeds threshold.
+  // Queued because delta exceeds threshold. Direction is taken from the actual
+  // sell prices, not the (abs) magnitude, so an increase is never labelled a
+  // "drop" (a below-MAP product raised to MAP is an increase, not a drop).
   if (p.status === 'pending' && p.deltaPct != null && p.approvalThreshold != null) {
     const pct = Math.round(Math.abs(p.deltaPct) * 100)
     const thr = Math.round(p.approvalThreshold * 100)
-    return `Queued: ${pct}% price drop exceeds ${thr}% auto-approve threshold.`
+    const dir =
+      p.oldSell != null && p.newSell != null && p.newSell < p.oldSell
+        ? 'drop'
+        : 'increase'
+    return `Queued: ${pct}% price ${dir} exceeds ${thr}% auto-approve threshold.`
   }
 
   // Cost change with MAP held.

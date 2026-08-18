@@ -83,7 +83,7 @@ describe('buildRationale', () => {
     expect(r).toContain('-10pp')
   })
 
-  it('returns queued: threshold exceeded string', () => {
+  it('returns queued: threshold exceeded string (drop)', () => {
     const r = buildRationale({
       oldCost: 10, newCost: 10, oldSell: 30, newSell: 22,
       status: 'pending', trigger: 'webhook',
@@ -93,6 +93,21 @@ describe('buildRationale', () => {
     expect(r).toContain('Queued')
     expect(r).toContain('27%')
     expect(r).toContain('5%')
+    expect(r).toContain('price drop')
+  })
+
+  it('labels a queued increase as an increase, not a drop', () => {
+    // Below-MAP product raised to MAP: $98.99 -> $199.00 is a +101% increase.
+    const r = buildRationale({
+      oldCost: 54.45, newCost: 54.45, oldSell: 98.99, newSell: 199.0,
+      status: 'pending', trigger: 'batch',
+      mapHeld: false, marginAfter: 0.73,
+      deltaPct: 1.01, approvalThreshold: 0.6,
+    })
+    expect(r).toContain('Queued')
+    expect(r).toContain('101%')
+    expect(r).toContain('price increase')
+    expect(r).not.toContain('price drop')
   })
 
   it('returns MAP-held cost-change string', () => {
