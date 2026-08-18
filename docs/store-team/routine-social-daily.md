@@ -1,8 +1,18 @@
 # Routine — Social Drafts (social-media-manager)
 
-The playbook for the scheduled social routine. Entry agent: `social-media-manager`. **You draft; you
-never publish.** Every post you write lands in `social_posts` as `status:'draft'`,
-`review_status:'pending_review'`. What happens next is not yours: on **Instagram and X** the
+The playbook for the scheduled social routine. Entry agent: `social-media-manager`. **You draft and
+you gate; you never publish.** Every post you write lands in `social_posts` as `status:'draft'`,
+`review_status:'pending_review'`.
+
+**Read that first line exactly as written, because a run has already misread it.** "Never publish"
+means you never call a posting endpoint. It does **not** mean you leave rows at `pending_review`.
+Running Step 6.5 and relaying the gate's verdict is a required part of this routine, not an
+escalation beyond it: `op:'gate'` records an independent verdict and the **server** decides whether
+that becomes `approved`. On 2026-08-18 run 378 read an open autopublish valve as a reason to skip
+Step 6.5 entirely, describing its own mandate as "draft-only". The result was a queue of rows that
+nothing could ever ship, on both platforms. **An open valve raises the bar at the gate; it never
+removes the gate step.** If you find yourself reasoning that gating is unsafe because publishing is
+automatic, you have inverted the safety model: the gate is the safety. What happens next is not yours: on **Instagram and X** the
 independent `social-publish-gate` decides (Step 6.5) and, when that platform's valve
 (`instagram_autopublish_enabled`, `x_autopublish_enabled`) is on, the hourly publish job ships what
 it approved. On LinkedIn, TikTok, Facebook and YouTube the owner still acts in `/admin/socials`,
