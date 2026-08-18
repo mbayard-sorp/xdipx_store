@@ -235,6 +235,22 @@ of `status:'posted'` Instagram rows and check three things:
    compliant image asset, campaign reconciliation failed). Throttle to one. Never force volume to
    fill a quota that is now unsupervised on the way out.
 
+**Imagery-feasibility preflight (run start, before any Instagram drafting).** Step 5 today covers
+the budget-exhausted degraded path but not the cannot-generate-at-all case, so run 361 produced zero
+Instagram drafts because it only discovered mid-run that it could not produce a publishable IG
+asset: `scripts/gen-social-image.ts` does generation plus the mandatory Shopify-Files rehost
+locally, which needs the Shopify Admin token, and a scheduled cloud sandbox without that token
+cannot produce any publishable IG/TikTok image (fal/Atlas URLs expire and Instagram fetches the
+asset server-side at publish). So at run start, before drafting, check whether THIS run can actually
+land a publishable IG asset: is a reuse path available (an existing Shopify Files / Sanity asset
+`media-manager` can return, or an approved campaign key-art pool), OR is generation-plus-Shopify-rehost
+reachable (the Shopify Admin token is present)? If neither holds, declare IG image-drafting
+**degraded-to-zero for this run**, record an `event` saying so, pivot the run's volume to X and
+LinkedIn (which do not depend on the IG image path), and treat a zero-IG run as an intentional,
+logged, channel-scoped outcome rather than a silent miss. The "no zero days" baseline is understood
+as channel-scoped when the imagery path is down; it never licenses shipping an IG draft with no
+publishable asset.
+
 Reworks (Step 2.5) and Step 7b suggestion handling run as normal under both postures. This only
 sizes down *new* drafting; it never touches a gate.
 
@@ -371,6 +387,17 @@ material compatibility (silicone toy → water-based lube) and say why in one pl
 link both PDPs with UTMs. On Instagram, name the pairing without a link; the `/social` bio-link
 page carries both that week. A pairing that pushes an IG caption into sale territory fails Step 4b
 as usual: the pairing is advice, the sale lives on X and the site.
+
+**Pairing-presence self-check (every toy-featuring draft, at draft time).** The pairing rule is a
+rule only if a run verifies it before shipping; the week of 2026-08-17 it did not, and four
+toy-featuring posts (Womanizer Premium 2, Ferri, Dame Pom, Fifty Shades Ace Pro) all went out with
+no lube named. So before writing any draft that features a toy, confirm one of two things is true
+and record which in the draft's event summary: either the caption names a compatible lubricant
+(Instagram: named in the caption, no link; X: the lube PDP linked with channel UTMs), or no pairing
+genuinely applies (a no-product education beat, or a feature that is not a toy) and the summary says
+in one clause why none applies. A toy-featuring draft that names no lube and logs no reason has
+failed this check and is not ready to ship. This is real helpfulness sourced from
+`accessory_product_ids` / `pairing_why` or material compatibility, never upsell theater.
 
 **Author quotes are real or absent (crossplatform strategy §4).** Quotes from educators and authors
 in the space are licensed and encouraged: short, attributed by name, and verified against a real
