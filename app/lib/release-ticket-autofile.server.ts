@@ -68,12 +68,36 @@ export interface AutofiledTicket {
 }
 
 /**
+ * In-flight autofile executions, keyed by PR number. Two release-engine cycles
+ * can overlap on the same warm serverless instance (a slow cycle running into
+ * the next ten-minute tick), and each would otherwise run the full pre-check (a
+ * GitHub read plus a bus read) and attempt the insert for the same PR. This map
+ * collapses concurrent same-process invocations for one PR onto a single
+ * execution, so exactly one ticket-file attempt happens and both callers observe
+ * the same result (ticket #3775).
+ *
+ * This is the in-process complement to the cross-process guard, not a
+ * replacement for it: a duplicate ROW is already impossible across processes
+ * because `fileTicketForOpenPr` inserts under the partial unique index
+ * `uq_team_sugg_dedupe_key` (migration 070, `WHERE dedupe_key IS NOT NULL AND
+ * status NOT IN ('applied','dismissed')`) with `onConflictDoNothing()`, so a
+ * second insert of the same `autofile:pr-N` key while a live row exists is a
+ * no-op that returns 0. Coalescing additionally spares the redundant pre-check
+ * API calls and makes "exactly one file" deterministic and unit-testable.
+ */
+const inFlightAutofiles = new Map<number, Promise<AutofiledTicket | null>>()
+
+/**
  * File a ticket for one PR the engine just declined for `no-ticket`.
  *
  * Returns the ticket, or null when nothing was written (dry run, or the insert
  * was deduped and no live row came back). Never throws: a failure here must not
  * take down the release cycle, since the cycle's real job is merging and this is
  * a convenience that can retry in ten minutes.
+ *
+ * Concurrent invocations for the same PR number are coalesced onto one execution
+ * (see `inFlightAutofiles`) so a pair of overlapping cycles cannot both run the
+ * pre-check and file; they share one result.
  */
 export async function autoFileTicketForPr(
   pr: { number: number; title: string; htmlUrl: string; headRef: string },
@@ -84,6 +108,23 @@ export async function autoFileTicketForPr(
     return null
   }
 
+  // Coalesce concurrent same-process invocations for this PR onto one run. The
+  // map is written synchronously before returning, so a second call that arrives
+  // before the first settles observes the in-flight promise rather than starting
+  // its own pre-check + insert (ticket #3775).
+  const inFlight = inFlightAutofiles.get(pr.number)
+  if (inFlight) return inFlight
+
+  const run = fileTicketForPrUncoalesced(pr).finally(() => {
+    inFlightAutofiles.delete(pr.number)
+  })
+  inFlightAutofiles.set(pr.number, run)
+  return run
+}
+
+async function fileTicketForPrUncoalesced(
+  pr: { number: number; title: string; htmlUrl: string; headRef: string },
+): Promise<AutofiledTicket | null> {
   // Ticket #3302. Two redundant-autofile guards. Both fail toward filing: this
   // module is the safety net that keeps a ticket-less PR from stranding on the
   // owner, so a guard that cannot decide must never suppress the ticket. A
