@@ -14,6 +14,7 @@
  * fal-hosted output URLs live ~24h; download promptly and re-home to Blob.
  */
 
+import sharp from 'sharp'
 import { recordFalBlock, readFalRequestId } from '~/lib/fal.server'
 import { atlasConfigured, atlasGenerate } from '~/lib/atlas.server'
 
@@ -35,7 +36,7 @@ export function falVideoConfigured(): boolean {
 // fal reprices. costKey must have a matching entry in model-pricing VIDEO_RATES.
 // ---------------------------------------------------------------------------
 
-export type VideoModelId = 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'omnihuman' | 'sync-lipsync'
+export type VideoModelId = 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'grok' | 'omnihuman' | 'sync-lipsync'
 
 export interface VideoModelSpec {
   /** fal queue endpoint path. */
@@ -105,6 +106,25 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     nativeAudio: true,
     allowedDurations: [4, 5, 6, 8, 10, 12],
   },
+  // Grok Imagine 1.5 (bake-off 2026-08-17, ticket #3991): cleared the content
+  // filter 8/8 on real catalog product including a raw Shopify packshot, the
+  // class nano-banana / fal-hosted Seedream reject with 422 content_policy.
+  // ~$0.14/s at 720p (55% under Seedance), ~30s renders, native audio ALWAYS
+  // on. The image-to-video schema accepts any integer duration 1-15 (no enum),
+  // has no aspect_ratio / negative_prompt param, and audio is unconditional —
+  // buildInput emits only { prompt, image_url, duration, resolution }. Because
+  // there is no aspect_ratio and product fidelity tracks the input frame's
+  // resolution, the clip stage asserts the 9:16 full-res frame contract before
+  // submit (assertSceneFrameContract).
+  'grok': {
+    falModel: 'xai/grok-imagine-video/v1.5/image-to-video',
+    label: 'Grok Imagine 1.5 (native audio)',
+    tier: 'standard',
+    costKey: 'fal/grok-imagine-1.5',
+    ratePerSecondUsd: 0.14, // pinned to 720p (480p $0.08, 720p $0.14, 1080p $0.25)
+    nativeAudio: true,
+    allowedDurations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  },
   // Talking heads are AUDIO-FIRST (proven 2026-07-24): TTS speech track + one
   // approved identity frame -> performed video. Never route talking heads
   // through Kling/LTX + sync-lipsync. 30s input-audio cap per render; longer
@@ -139,6 +159,64 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
 
 export function isVideoModelId(v: unknown): v is VideoModelId {
   return typeof v === 'string' && v in VIDEO_MODELS
+}
+
+// ---------------------------------------------------------------------------
+// Scene-frame contract for image-to-video submits (ticket #3991).
+//
+// Grok Imagine has no aspect_ratio param, so an image-to-video clip INHERITS
+// the input frame's aspect ratio, and its product fidelity tracks the input
+// frame's resolution. Bake-off evidence: a 464x688 re-encoded frame lost the
+// product entirely by t=1.0s, while the same model from a clean 1584x2816 frame
+// held it through 8s. So a degraded frame must fail BEFORE the paid submit, not
+// after a wasted render. The frame is composed at 1080x1920 for 9:16
+// (SCENE_FRAME_SIZES in this file), which is the full-resolution floor here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Acceptance floor for a 9:16 scene frame. The frame is composed at exactly
+ * 1080x1920, but the stage-2 compositor drifts ~1% off requested pixels and the
+ * stored frame is not resized, so the floor sits ~5% under the composed target:
+ * it tolerates that drift while still rejecting the degraded class outright (the
+ * bake-off's 464x688 frame is 43% of target and fails comfortably).
+ */
+export const SCENE_FRAME_MIN_WIDTH = 1024
+export const SCENE_FRAME_MIN_HEIGHT = 1820
+/** Aspect tolerance: the stage-2 compositor drifts ~1% off requested pixels. */
+const SCENE_FRAME_ASPECT_TOLERANCE = 0.02
+
+/**
+ * Assert an image-to-video scene frame is 9:16 and at full resolution, throwing
+ * a clear error otherwise. Pure and exported so the contract is unit-testable
+ * without a network call or an image decode. (ticket #3991)
+ */
+export function assertSceneFrameContract(
+  width: number | null | undefined,
+  height: number | null | undefined,
+): void {
+  if (!width || !height || width <= 0 || height <= 0) {
+    throw new Error(
+      `scene frame has unknown dimensions (${width}x${height}); refusing to submit an image-to-video job on an unverifiable frame`,
+    )
+  }
+  if (width < SCENE_FRAME_MIN_WIDTH || height < SCENE_FRAME_MIN_HEIGHT) {
+    throw new Error(
+      `scene frame ${width}x${height} is below full resolution (min ${SCENE_FRAME_MIN_WIDTH}x${SCENE_FRAME_MIN_HEIGHT}); a degraded frame loses the product in image-to-video`,
+    )
+  }
+  const target = 9 / 16
+  const ratio = width / height
+  if (Math.abs(ratio - target) > SCENE_FRAME_ASPECT_TOLERANCE) {
+    throw new Error(
+      `scene frame ${width}x${height} is not 9:16 (ratio ${ratio.toFixed(3)}, expected ~${target.toFixed(3)}); image-to-video inherits the input aspect ratio`,
+    )
+  }
+}
+
+/** Probe the pixel dimensions of an encoded image buffer. */
+export async function probeImageDimensions(buf: Buffer): Promise<{ width: number; height: number }> {
+  const meta = await sharp(buf).metadata()
+  return { width: meta.width ?? 0, height: meta.height ?? 0 }
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +276,17 @@ function buildInput(model: VideoModelId, input: VideoRequestInput): Record<strin
         aspect_ratio: aspect,
         resolution: '720p',
         ...(input.negativePrompt ? { negative_prompt: input.negativePrompt } : {}),
+      }
+    case 'grok':
+      // Grok's image-to-video schema (ticket #3991) takes ONLY these four:
+      // no aspect_ratio (inherited from the input frame), no negative_prompt,
+      // no generate_audio (native audio is unconditional). Resolution is pinned
+      // to 720p so the per-second-only cost model stays correct.
+      return {
+        prompt: input.prompt,
+        image_url: input.imageUrl,
+        duration: input.durationSeconds,
+        resolution: '720p',
       }
     case 'omnihuman':
       // Audio-first: no prompt, no duration. Video length = audio length.

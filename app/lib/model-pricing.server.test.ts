@@ -2,7 +2,7 @@
 // and the unknown-model fallback assumes the premium tier so spend estimates
 // never lowball a daily budget gate.
 import { describe, it, expect } from 'vitest'
-import { estimateCostUsd, estimateImageCostUsd } from './model-pricing.server'
+import { estimateCostUsd, estimateImageCostUsd, estimateVideoCostUsd } from './model-pricing.server'
 
 const MTOK = 1_000_000
 
@@ -66,5 +66,17 @@ describe('estimateImageCostUsd', () => {
 
   it('falls back to a nonzero rate for unknown image models', () => {
     expect(estimateImageCostUsd('mystery/model', 1)).toBeGreaterThan(0)
+  })
+})
+
+describe('estimateVideoCostUsd', () => {
+  it('prices the Grok Imagine tier at 0.14/s (ticket #3991)', () => {
+    expect(estimateVideoCostUsd('fal/grok-imagine-1.5', 8)).toBe(1.12)
+    expect(estimateVideoCostUsd('fal/grok-imagine-1.5', 1)).toBe(0.14)
+  })
+
+  it('never goes negative and falls back to premium for unknown video models', () => {
+    expect(estimateVideoCostUsd('fal/grok-imagine-1.5', -5)).toBe(0)
+    expect(estimateVideoCostUsd('mystery/video', 1)).toBeGreaterThan(0)
   })
 })
