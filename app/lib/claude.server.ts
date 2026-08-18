@@ -22,6 +22,7 @@ import {
 import { type LLMClient } from '~/lib/llm-client.server'
 import { EMMA_VOICE_CORE, EMMA_VOICE_MARKETING } from '~/lib/emma-voice.server'
 import { DISCOVER_EXPERIENCE } from '~/lib/discovery-vocab'
+import { cached, KV_KEYS } from '~/lib/kv.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
@@ -145,7 +146,7 @@ function buildLegacySystemBlocks(): ReadonlyArray<{ text: string; cache?: boolea
  * Wrap a plain system string as a single `cache_control: ephemeral` block.
  *
  * The high-volume Haiku copy paths (`generateWithSystem` for asides,
- * `generateEmmaTagline`) send a system prompt that is ~90% a static
+ * `generateEmmaTaglineBank`) send a system prompt that is ~90% a static
  * voice-charter prefix, and each caller's system string is constant across a
  * burst (a catalog-wide regen sweep hits the same string thousands of times).
  * Sending it as a plain string re-bills the whole charter at full input price
@@ -2006,13 +2007,44 @@ const EMMA_TAGLINE_FALLBACKS = [
   'tell me what you’re curious about ♥',
 ]
 
-export async function generateEmmaTagline(): Promise<string> {
+/** Taglines per generated bank, and how long a bank is served before refresh. */
+export const EMMA_TAGLINE_BANK_SIZE = 10
+const EMMA_TAGLINE_BANK_TTL_SECONDS = 6 * 60 * 60 // 6h → ~4 refreshes/day
+
+/**
+ * Normalize one raw model line into a valid Emma tagline, or null if unusable.
+ * Strips wrapping quotes / list bullets / numbering, collapses whitespace, and
+ * guarantees exactly the trailing ♥ glyph. Pure and exported so the parse rules
+ * are unit-testable without a network call. (ticket #3981)
+ */
+export function normalizeTaglineLine(raw: string): string | null {
+  const line = raw
+    .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '') // leading bullet / "1." / "2)"
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (line.length <= 4 || line.length > 80) return null
+  // Keep at most one ♥ and pin it to the end.
+  const withoutHearts = line.replace(/\s*♥\s*/g, ' ').replace(/\s+/g, ' ').trim()
+  if (withoutHearts.length <= 4) return null
+  return `${withoutHearts} ♥`
+}
+
+/**
+ * Generate a bank of distinct Emma status-line taglines in a SINGLE model call.
+ * Returns only the valid lines, or the static fallbacks if the call fails or
+ * yields nothing usable. This is the expensive path; it runs at most once per
+ * `EMMA_TAGLINE_BANK_TTL_SECONDS` (see `getEmmaTagline`), replacing the old
+ * per-request call that cost ~1000 model calls/week for a decorative line.
+ * (ticket #3981)
+ */
+export async function generateEmmaTaglineBank(count = EMMA_TAGLINE_BANK_SIZE): Promise<string[]> {
   const system = `You are Emma, xdipx's AI guide. You write like a trusted, funny friend. Tasteful, warm, curious. Never clinical. Never sleazy. Never "sex" as an adjective.
 
 ${EMMA_VOICE_CORE}`
-  const user = `Write ONE short tagline for the Emma chat window's status line. It sits right under "Ask Emma · Online".
+  const user = `Write ${count} DISTINCT short taglines for the Emma chat window's status line. It sits right under "Ask Emma · Online".
 
-Rules:
+Rules for EACH tagline:
 - 5 to 9 words, lowercase (first word may be capitalized).
 - First-person Emma voice.
 - Ends with the ♥ glyph (exactly one).
@@ -2021,12 +2053,13 @@ Rules:
 - Never claim lived experience (no "I've tried", "I've tested"). Speak from catalog knowledge.
 - Feel friendly and specific, the kind of thing a friend might say when you open the chat. Examples of the vibe (don't copy): "here to help you find what you're into ♥", "pick my brain, I know the catalog cold ♥".
 
-Return ONLY the tagline text, nothing else.`
+Make the ${count} lines genuinely different from one another.
+Return ONLY the taglines, ONE PER LINE, no numbering, no other text.`
 
   try {
     const msg = await client.messages.create({
       model: MODEL_FAST,
-      max_tokens: 80,
+      max_tokens: 400,
       // Cache the static charter prefix this system carries (B3.3 fix):
       // byte-identical model input, cache-read pricing on burst repeats.
       system: cacheableSystem(system),
@@ -2034,31 +2067,60 @@ Return ONLY the tagline text, nothing else.`
     })
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('non-text response')
-    // B3.3 bypass: feature 'contextual-tagline', caller 'generateEmmaTagline'
+    // Preserve cost attribution under the same feature name; now billed at most
+    // once per bank refresh instead of once per request.
     const uTagline = msg.usage as typeof msg.usage & {
       cache_creation_input_tokens?: number
       cache_read_input_tokens?:     number
     }
     void import('./token-log.server').then(({ logApiTokens }) =>
       logApiTokens({
-        feature: 'contextual-tagline', model: MODEL_FAST, source: 'sync', caller: 'generateEmmaTagline',
+        feature: 'contextual-tagline', model: MODEL_FAST, source: 'sync', caller: 'generateEmmaTaglineBank',
         inputTokens: uTagline.input_tokens, outputTokens: uTagline.output_tokens,
         cacheCreationTokens: uTagline.cache_creation_input_tokens ?? 0,
         cacheReadTokens:     uTagline.cache_read_input_tokens     ?? 0,
       })
-    ).catch((err) => console.error('[claude] generateEmmaTagline token-log failed (ignored):', err))
-    const line = block.text
-      .trim()
-      .replace(/^["'`]|["'`]$/g, '')
-      .replace(/\s+/g, ' ')
-      .split('\n')[0]
-      ?.trim()
-    if (line && line.length > 4 && line.length <= 80 && line.includes('♥')) return line
-    if (line && line.length > 4 && line.length <= 80) return `${line} ♥`
+    ).catch((err) => console.error('[claude] generateEmmaTaglineBank token-log failed (ignored):', err))
+
+    const seen = new Set<string>()
+    const bank: string[] = []
+    for (const rawLine of block.text.split('\n')) {
+      const norm = normalizeTaglineLine(rawLine)
+      if (!norm) continue
+      const dedupeKey = norm.toLowerCase()
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+      bank.push(norm)
+    }
+    if (bank.length > 0) return bank
   } catch (err) {
-    console.error('[generateEmmaTagline] falling back:', err)
+    console.error('[generateEmmaTaglineBank] falling back:', err)
   }
-  return EMMA_TAGLINE_FALLBACKS[Math.floor(Math.random() * EMMA_TAGLINE_FALLBACKS.length)]!
+  return [...EMMA_TAGLINE_FALLBACKS]
+}
+
+/**
+ * Serve one Emma tagline for the chat status line. Reads a shared, pre-generated
+ * bank from KV (two-tier `cached`, refreshed at most once per
+ * `EMMA_TAGLINE_BANK_TTL_SECONDS`) and returns a random pick, so the visitor
+ * still sees a fresh-looking rotating line with zero per-request model calls.
+ * On a cold cache the bank is generated once inline; the static fallbacks are
+ * the cold-cache/error backstop. (ticket #3981)
+ */
+export async function getEmmaTagline(): Promise<string> {
+  let bank: string[]
+  try {
+    bank = await cached(
+      KV_KEYS.emmaTaglineBank,
+      EMMA_TAGLINE_BANK_TTL_SECONDS,
+      () => generateEmmaTaglineBank(),
+    )
+  } catch (err) {
+    console.error('[getEmmaTagline] bank read failed, using fallbacks:', err)
+    bank = [...EMMA_TAGLINE_FALLBACKS]
+  }
+  const pool = bank.length > 0 ? bank : EMMA_TAGLINE_FALLBACKS
+  return pool[Math.floor(Math.random() * pool.length)]!
 }
 
 export async function generateBlogSEO(

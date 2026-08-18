@@ -365,6 +365,11 @@ export const KV_KEYS = {
   veoOperation:           (token: string) => `veo:op:${token}`,
   ltxOperation:           (token: string) => `ltx:op:${token}`,
   liveDealHandle:         'live-deal:handle',
+  // Emma chat status-line tagline bank (ticket #3981). A shared, pre-generated
+  // rotating bank replaces the old per-request model call; the loader serves a
+  // random pick. Multi-hour TTL, so one small refresh batch replaces ~1000
+  // model calls/week. Bumpable suffix so a stale bank can't outlive a copy fix.
+  emmaTaglineBank:        'emma:tagline:bank:v1',
   // v2: ticket #3447 — the old key cached substitute recommendations from the
   // removed tag-based cold-start fallback. Bumping the key so a stale
   // substitute list can't survive the deploy on cache TTL alone.
