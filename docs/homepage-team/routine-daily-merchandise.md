@@ -507,7 +507,22 @@ spend in Step 6 — the script already posts exactly one `{kind:'image'}` row pe
 | Notebook | The "From the Notebook" section **auto-populates** with the latest 3 published posts (homepage loader `getBlogPosts`), so fresh content reaches the homepage with no action from you. An `editorialTiles` block in `singleton.homepage.sections[]` (`tiles[]`: label/body/link/linkLabel/emoji/image) is an **optional override** — publish one only for a deliberate editorial pick, never just to keep the section current. **Two hard rules (owner direction 2026-07-21, after run 8 shipped a defective override):** (1) an override must never link products already merchandised in another section of the same page render (the wayfinder, rails, or grid) — duplicating the page's own products reads as filler, delete the override instead; (2) never publish an override tile without an `image` — an imageless override renders as an empty tinted plate and reads broken; auto-populate is always the better fallback. Doctrine: `docs/store-team/internal-linking.md`. | storefront `/` |
 | Wayfinder mosaic | `wayfinderMosaic` block in `singleton.homepage.sections[]` — the "Find your way in" tiles + "Discover You" promo. `tiles[]` (label/link/emmaAside/image, 3-4) + `promo` (eyebrow/heading/emphasis/body/cta/image). Empty/unset → the storefront renders its hardcoded fallback tiles (never blank). Place tile images via `--target tile --tile-key`, the promo via `--target promo`. | storefront `/` |
 | Couples band | `playTogetherBanner` block in `singleton.homepage.sections[]` — the "Play intimately together" band (heading/body/cta/image). It **does** render on the storefront (it is whitelisted in `homepage-payload.server.ts`); an unset image renders an imageless plate, so always place art. Place it via `--target block --block-key` like any other block image. | storefront `/` |
+| Curiosity shelf | `singleton.curiosityShelf` (`curiosityShelf`): `eyebrow`, `heading`, `emphasis`, `emmaLine`, `lanes[]`. Lane labels and Emma lines are voice-gated copy (`emma-empathy-reviewer` before publish); each lane's `productHandles` are the curated deck (pinned to page 1) and `backfill.typeDial` is the required category floor. Absent/`enabled:false` → code `DEFAULT_SHELF_CONTENT`. The week's `marketing_calendar` theme should tint at least the eyebrow and one lane label. Write it with `sanity-content-cli.ts` (never the Sanity MCP), one `patch` + one `publish` per day, batched with the rest of the page's writes. A "reviewed, no change" day must not touch Sanity — log a `decision` event instead. | storefront `/` Nº 07 |
 | Announcement ticker | `announcementBar` messages in `singleton.homepage` (the layout pins it site-wide). | all pages |
+
+**Curiosity shelf write (Nº 07).** One `patch` + one `publish` per day, batched with the rest of
+the page's writes. Dry-run first, exactly as with every other Sanity surface:
+
+```bash
+npx tsx scripts/sanity-content-cli.ts patch --id singleton.curiosityShelf \
+  --set '{"eyebrow":"...","heading":"...","emphasis":"...","emmaLine":"...","lanes":[...],"updatedAt":"..."}' --dry-run
+npx tsx scripts/sanity-content-cli.ts patch --id singleton.curiosityShelf --set '{...}'
+npx tsx scripts/sanity-content-cli.ts publish --id singleton.curiosityShelf
+```
+
+Each lane is `{label, key, emmaLine, productHandles[], backfill:{typeDial, mood?, minPrice?, maxPrice?}, seeAllHandle, enabled}`.
+Keep `key` stable across days (analytics), labels ≤16 chars and act-anchored (never taxonomy words),
+and rotate out any label that has run more than a week.
 
 **Incoming slots (design-elevation P1 — do NOT patch before the shell PR lands).** These surfaces
 are on the Routine B backlog and activate one by one as their reviewed PRs merge; their

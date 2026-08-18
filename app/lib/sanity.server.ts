@@ -2492,3 +2492,62 @@ export async function getStorefrontHomeLayout(preview = false): Promise<Storefro
   if (preview) return fetcher()
   return cached('sanity:storefront-home-layout', 60, fetcher)
 }
+
+// ─── Curiosity Shelf (Nº 07) ─────────────────────────────────────────────────
+
+const CURIOSITY_SHELF_GROQ = `
+  *[_id == "singleton.curiosityShelf"][0]{
+    enabled, eyebrow, heading, emphasis, emmaLine,
+    lanes[]{
+      label, key, emmaLine, productHandles,
+      backfill{ typeDial, mood, minPrice, maxPrice },
+      seeAllHandle, enabled
+    }
+  }
+`
+
+/**
+ * Raw shape of the `singleton.curiosityShelf` document. Every field is optional
+ * because the doc may be partially authored or absent; validation and defaulting
+ * live in `curiosity-shelf.server.ts`. Plain JSON only — no Map/Set/Date — so it
+ * survives the `cached()` round-trip.
+ */
+export interface CuriosityShelfDoc {
+  enabled?: boolean
+  eyebrow?: string
+  heading?: string
+  emphasis?: string
+  emmaLine?: string
+  lanes?: Array<{
+    label?: string
+    key?: string
+    emmaLine?: string
+    productHandles?: string[]
+    backfill?: { typeDial?: string; mood?: string; minPrice?: number; maxPrice?: number }
+    seeAllHandle?: string
+    enabled?: boolean
+  }>
+}
+
+/**
+ * The daily-editable curiosity-shelf slate, or null when unpublished/absent (the
+ * caller then renders the code-side default, so unpublishing is a full rollback).
+ * Modelled directly on `getStorefrontHomeLayout`: try/catch to null, 60s cache.
+ */
+export async function getCuriosityShelf(preview = false): Promise<CuriosityShelfDoc | null> {
+  if (!projectId) return null
+
+  const fetcher = async (): Promise<CuriosityShelfDoc | null> => {
+    try {
+      const client = getClient(false, preview)
+      if (!client) return null
+      return (await client.fetch<CuriosityShelfDoc | null>(CURIOSITY_SHELF_GROQ)) ?? null
+    } catch (err) {
+      console.error('[sanity] getCuriosityShelf error:', err)
+      return null
+    }
+  }
+
+  if (preview) return fetcher()
+  return cached('sanity:curiosity-shelf', 60, fetcher)
+}
