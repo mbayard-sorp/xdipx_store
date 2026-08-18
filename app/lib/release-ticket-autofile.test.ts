@@ -151,6 +151,28 @@ describe('autoFileTicketForPr', () => {
     vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
     expect(await autoFileTicketForPr(PR)).toEqual({ prNumber: 494, ticketId: 1234, created: true })
   })
+
+  // Ticket #3775: two overlapping engine cycles can invoke autofile for the same
+  // PR at once. Coalescing collapses them onto one execution, so exactly one
+  // ticket is filed and the pre-check runs once. Without it both calls would
+  // reach `fileTicketForOpenPr` (twice) and both run the GitHub merged-check.
+  it('coalesces concurrent invocations for one PR into a single file', async () => {
+    vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
+    const [r1, r2] = await Promise.all([autoFileTicketForPr(PR), autoFileTicketForPr(PR)])
+    expect(fileTicketForOpenPr).toHaveBeenCalledTimes(1)
+    expect(getPullRequest).toHaveBeenCalledTimes(1)
+    expect(r1).toEqual({ prNumber: 494, ticketId: 1234, created: true })
+    expect(r2).toBe(r1) // both callers observe the same coalesced result
+  })
+
+  // The coalescing key must clear once the run settles, or a later cycle would
+  // be wrongly memoized to the first result instead of re-deciding the PR.
+  it('does not coalesce sequential calls once the first has settled', async () => {
+    vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
+    await autoFileTicketForPr(PR)
+    await autoFileTicketForPr(PR)
+    expect(fileTicketForOpenPr).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('prNumberFromLinkRef', () => {
