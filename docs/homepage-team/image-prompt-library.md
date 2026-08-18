@@ -264,7 +264,218 @@ faithful to reference 2.
 **Keepers:** (append `cast slug + product handle + gesture → placed asset URL` lines here; a
 no-product hero MUST log its reason in its entry)
 
-**Rejects:**
+**Rejects:** `cast: none (roster gap, documented exception)` + Wicked Simply Timeless Water-Based
+Personal Lubricant & Moisturizer 4oz (`wicked-simply-timeless-jelle`), "How Does Menopause Change
+Sex, and What Helps?" (real-talk, † health-adjacent, content run 379). **Casting decision:** all
+six approved `castMember` docs (`maya`, `sofia`, `jade`, `priya`, `marcus`, `diego`) present late
+20s to early 30s per their `ageRange` field; none can be honestly rendered at menopause age from
+their reference photo without contradicting the documented identity, and on a † topic an
+age-wrong figure reads as a factual error rather than as wit. Per content-writer direction in
+run 379 (2026-08-18; no owner was involved in this call): generated a standalone age-appropriate figure (woman presenting mid-50s, explicit adult age
+markers: silver-streaked hair, visible laugh lines and crow's feet) instead of forcing a roster
+slug. **This is a logged roster gap** — the six-member roster has zero coverage above early 30s;
+a separate suggestion is filed for a 50s-appropriate cast addition. Gesture per the §0-H
+question-to-gesture "Is this normal?" row: product held up in one hand at eye level, head tilted
+toward it, brow up, free hand palm-up asking the room.
+
+Three rounds, 5 candidates total (content-team daily image cap reached, all against the fal
+Kontext dev fallback — `ATLAS_*` is not configured in this environment so the Atlas primary path
+in `docs/media-model-routing.md` was unavailable; flagged for a config fix so future label-heavy
+§0-H composites get Atlas's stronger reference fidelity instead of falling straight to Kontext).
+Every candidate failed at least one hard gate check on close inspection:
+- Round 1 (2 candidates): backdrop rendered as a dramatic amber/orange gradient wall with a
+  visible sunbeam and hard directional shadow — hard ground-lock and light-register fail (doctrine
+  §4 backdrops are coral-soft/plum-soft/paper tints only; no orange, no amber, no gradient wall,
+  no golden hour). Candidate 1 also badly garbled the label ("Aqva ETE" nonsense in place of "Aqua
+  Jelle").
+- Round 2 (2 candidates, corrected prompt): label crisp on the primary brand lockup, correct
+  gesture (candidate 2 nailed the free-palm-up-asking pose), correct age presentation — but the
+  backdrop rendered as full-saturation coral (`#FF5A36`-strength) standing in as a background
+  field rather than the pale `coral-soft` (`#FFE6DD`) tint the ground lock requires, and the fine
+  print under "AQUA JELLE" stayed a garbled smudge on both candidates under 2x zoom.
+- Round 3 (1 candidate, backdrop-only correction, explicit "pale, low-chroma, NOT saturated"
+  language added): backdrop lightened to a salmon-pink roughly 60-70% of the way toward true
+  coral-soft but still didn't land in the tint band on pixel sample (~(250,160,150) vs. target
+  ~(255,230,221)), the gesture reverted to both hands cradling the bottle (lost the free
+  asking-hand), and the fine print stayed garbled.
+- A post-process attempt (BiRefNet cutout of round 2 candidate 2, recomposited onto a true
+  coral-soft field) was tried and rejected: the cutout carried a visible coral color-spill halo
+  baked into the hair/edge pixels from the original saturated backdrop, which reads as an obvious
+  mismatched-recomposite artifact on a new lighter ground — worse than shipping the original.
+**Conclusion:** no candidate cleared the gate. Held as a Sanity draft rather than publishing a
+non-compliant hero; heroImage/heroImageAlt/imagePrompt were not set.
+
+**Retry (content run 385, same post, image cap raised 5→50):** picked up from round 2's prompt per
+content-writer direction in run 385 (the owner raised the image cap; the prompt-reuse call was the
+routing agent's, not his), changing only the backdrop clause.
+
+> **Scope note (added by content-writer, run 385):** rounds 4-7 below were generated against
+> `wicked-simply-timeless-jelle`, which the post no longer embeds. Mid-retry the voice gate
+> REVISEd that SKU on a card-vs-copy conflict (its catalog name is "Personal Lubricant &
+> Moisturizer", contradicting the section's lubricant-vs-moisturizer thesis) and the embed was
+> swapped to `sliquid-naturals-satin-personal-moisturizer`. So the backdrop and label findings
+> below stand as reusable craft lessons, but the label-fidelity result is specific to the Wicked
+> bottle and none of these candidates is usable as this post's hero. **Backdrop fix that worked, record for reuse:**
+stop describing the ground-lock tint as "pale coral" (drifted saturated on rounds 2 and 3 above,
+both times) — instead lead with "off-white paper wall" as the base noun and describe the coral as
+only "the faintest warm blush mixed in, essentially white, not a colored wall," with an explicit
+"NOT a colored wall" clause. This landed the backdrop cleanly within the ground lock (visibly
+near-white/paper, no salmon, no saturation) on 3 consecutive rounds (6/6 candidates) once adopted —
+treat "off-white with a whisper of X" as the standing phrasing for any pale-tint backdrop ask on
+this or any scaffold, and stop asking for "pale {color}" alone. Label fidelity was also solid on
+every one of these 6 candidates (WICKED / simply / timeless / AQUA JELLE all legible, matching the
+reference) — fal Kontext dev can hold this product's label once the backdrop instruction stops
+competing for attention with color-correction language.
+- Round 4 (2 candidates, backdrop-only fix applied on top of round 2's exact prompt otherwise):
+  backdrop fixed but Kontext dev returned a near-untouched product packshot on white — the human
+  figure and gesture were dropped entirely on both candidates. Read as: a very long prompt
+  front-loaded with hedging/negative color language ("if in doubt render lighter," a full paragraph
+  of NOT-clauses before the human description) pushed this edit-style model toward a
+  minimal-transform response instead of the requested scene rebuild. Fix: keep backdrop correction
+  short (one sentence, no hex/RGB codes — Kontext dev does not appear to use them usefully and they
+  may have contributed to the collapse) and keep the human/gesture description in its original
+  early position in the prompt.
+- Round 5 (2 candidates, shortened backdrop clause, structure otherwise matching round 2): human,
+  age, gesture-adjacent pose, and label all returned correctly and the backdrop landed in-band —
+  but framing came in as a tight headshot-plus-product crop on both candidates, cropping the frame
+  before the second, free "asking" hand entered shot. Best candidates of this retry on every check
+  except the explicit free-hand gesture.
+- Round 6 (2 candidates, added explicit "medium shot, waist-up, show both hands" framing
+  instruction): framing widened as asked, but the compound asymmetric gesture (one hand up with
+  product, other hand separately open palm-up) did not hold — candidate 1 reverted to both hands
+  cradling the single bottle with a big open grin (wrong gesture, wrong expression, both banned by
+  the brief); candidate 2 duplicated the product into two bottles, one held up in each hand
+  (product-identity failure, not just a gesture miss).
+- Round 7 (2 candidates, simplified the ask to "right hand holds product near face, left hand
+  empty and relaxed at her side in a small half-shrug," explicit "only ONE bottle" and "NOT
+  smiling" clauses added): product duplication fixed, backdrop and label held, but the free hand
+  dropped out of frame again on both candidates (cropped out this time rather than duplicated), and
+  the expression came back as a warm closed-mouth smile despite the explicit "NOT smiling, NOT
+  laughing" instruction on both candidates.
+**Conclusion (updated):** across rounds 4-7 (4 rounds, 8 candidates, this retry only), fal Kontext
+dev reliably solved backdrop, label, age presentation, and human presence, but never once produced
+the brief's specific compound ask — one hand raised with the product at eye level AND a separate
+free hand open palm-up "asking the room" AND a worried/quizzical (not smiling) expression — all at
+the same time. It always sacrifices exactly one of those three: drops the second hand, duplicates
+the product instead of differentiating the two hands' poses, or overrides the requested expression
+with a pleasant default. This reads as a genuine capability ceiling of this route on compound
+asymmetric-gesture instructions, not a prompt-wording problem — the wording was iterated four
+distinct ways (long/hedged, short, framing-only, pose-simplified) with the same trade-off recurring
+each time. **Recommendation:** this needs either (a) `ATLAS_CLOUD_API_KEY` configured so
+`seedream-v4.5/edit` (the documented-primary, stronger-reference-fidelity route per
+`docs/media-model-routing.md`) can attempt this composite instead of the fal Kontext fallback this
+environment is stuck on, or (b) an editorial call on relaxing the sceneBeat's explicit second-hand
+requirement for this product (accept a single-hand hold with a quizzical/inspecting expression as
+passing the swap test, since the literal free-hand-asking staging is not reachable on the only
+configured route). Held as a Sanity draft again rather than shipping a non-compliant hero;
+heroImage/heroImageAlt/imagePrompt were not set this retry either. Spend this retry: 4 generations
+@ 5 cents/round (2 images each) = 20 cents (8 images total).
+
+**Resolved same run:** the post's embedded product changed mid-flight from
+`wicked-simply-timeless-jelle` to `sliquid-naturals-satin-personal-moisturizer` (content-writer
+edit, confirmed by a fresh Sanity `_updatedAt` timestamp and independently by
+`check-hero-embed-match.ts`) — everything in rounds 4-7 above targeted the now-wrong product and was
+discarded unused. The content-writer routine (run 385) also relaxed the §0-H free-asking-hand
+requirement for this frame specifically, on its own authority and not the owner's: the gesture table is staging *guidance*, not a hard rule,
+and the swap test (does the frame read as *this* post) is what actually binds. Revised ask: single
+hand holds the product near the face, studying it, quizzical/wary NOT-smiling expression; second
+hand optional.
+- Round 8 (2 candidates, Sliquid Satin bottle, original two-hand ask kept): backdrop and label held,
+  but expression drifted warm/pleased (soft closed smile one candidate, open delighted smile the
+  other) — same "Kontext defaults to a pleasant expression despite an explicit ask" pattern as the
+  gesture-drift seen on the Wicked bottle, just showing up as expression drift instead of gesture
+  drift once the second-hand requirement stopped competing for attention.
+- Round 9 (2 candidates, single-hand only, expression-only correction: "eyebrows pinched, crease of
+  doubt, eyes narrowed and searching, mouth closed and neutral, NOT smiling, NOT laughing, no
+  visible teeth"): expression pulled back toward neutral/composed (no teeth, closed mouth) but still
+  reads more content-and-curious than wary — a real improvement over round 8, not a full hit. Label
+  fine print (the "by sliquid" sub-line and description lines) stayed a garbled smudge on both
+  candidates, consistent with every round this session; the flower logo and "Satin" primary lockup
+  stayed crisp and accurate to the reference on both.
+- **Round 10 (2 candidates, kept round 9's expression language, added "held large and close to the
+  camera so the label fills a good portion of the frame height... unaltered and legible down to the
+  smallest printed line, do not blur the label" per the Sliquid Naturals H2O close-crop precedent
+  above) → shipped as keeper, candidate 1, THEN REJECTED on content-writer review (see below):**
+  `image-8c10cc9701e9466afc6631a1f2a71092175b839f-1184x880-jpg` (post:
+  `what-helps-when-menopause-changes-sex`). Holding the bottle larger and closer measurably improved
+  label sharpness ("Satin" and "by sliquid" both legible, only the smallest description line still
+  soft). Off-white paper backdrop landed cleanly in the ground lock again (4th consecutive round).
+  Candidate 2 rejected: two-handed cradle with the face mostly cropped out of frame, no usable
+  expression. `check-hero-embed-match.ts` initially failed on this keeper even with a correct image
+  — the generated `imagePrompt` never named the product by brand/line words ("moisturizer bottle...
+  silver flower logo" reads as generic to the token matcher), so `heroNamesAnyProduct` found no
+  catalog match. Fixed by rewriting `heroImageAlt` to include every one of the productPage title's
+  distinctive tokens as whole words (`naturals`, `satin`, `aloe`, `infused`, `daily`, `intimate`,
+  `moisturizer`, and `4.2oz` for the `2oz` token) rather than a loose paraphrase — the matcher
+  requires ALL distinctive title tokens present verbatim in `heroImageAlt` + `imagePrompt` combined,
+  not just the brand name. **Standing rule:** always check the post's `productPage.title` distinctive
+  tokens before writing hero alt text on a product-embedding post, and use them literally rather than
+  a natural paraphrase, or `check-hero-embed-match.ts` will fail on an otherwise-correct hero.
+  The prior session logged this candidate's expression as "calm, composed, non-smiling... reads as
+  serious/searching" — **content-writer review (2026-08-18, content run 385) overturned that read. This was the routine's call, not the owner's.** On a
+  fresh look the figure is looking straight into the lens with a pleasant closed-mouth smile, which
+  the content-writer flagged as the visual grammar of a customer testimonial (person smiles at
+  camera while presenting the product), and the mission brief bans fabricating proof/testimonials on
+  any surface — worst possible failure mode on a † health-adjacent post. **Standing lesson: an
+  agent's own read of "not smiling" from a still is not reliable enough to gate on alone; eyeline
+  (camera vs. product) is the sharper, more legible tell for testimonial-grammar risk than mouth
+  shape, and should be checked explicitly going forward, not inferred from "no visible teeth."**
+- **Round 11 (gaze-only retry, 2 candidates, single targeted change from round 10's exact prompt:
+  added explicit gaze-lock language — "her eyes are looking directly at the bottle... her gaze is
+  locked on the product the entire time... she is not looking toward the camera at all, no eye
+  contact with the viewer, not looking at the lens" as a positive clause plus matching negative-list
+  entries ("no eye contact with camera, no looking at viewer, no looking at lens"); expression
+  language left untouched per the brief's own guidance not to fight affect and gaze in the same
+  round) → BOTH REJECTED, same failure on both candidates:** despite the explicit, repeated,
+  multiply-worded instruction, both candidates render the figure looking directly into the lens with
+  a warm, pleasant, closed-mouth smile — visually indistinguishable in kind from round 10's rejected
+  frame. Backdrop, label fidelity, age presentation, and hand anatomy all held clean on both (this
+  route's genuine strengths, confirmed again). Gaze direction did not move at all.
+**Conclusion:** per the run's own stop condition ("if both come back with her eyeline on the lens,
+STOP"), stopping here rather than grinding further. Round 11 extends the round 4-9 capability-limit
+finding from *expression* control to *gaze* control on this same route: fal Kontext dev (`fal-ai/
+flux-kontext/dev`) reliably holds product fidelity, backdrop, age presentation, and hand anatomy on
+this composite, but does not follow instructions that fight its default of a frontal, camera-facing,
+pleasant expression — not for "don't smile," and, per this round, not for "don't look at camera"
+either. Two independent controls (mouth affect, eye gaze) have now each failed against an explicit,
+isolated, repeatedly-worded instruction on this route. **This reads as a genuine capability ceiling,
+not a prompt-wording problem, and repeating this pattern a third time (e.g. head-angle-only,
+three-quarter-profile-only) is not expected to be more productive without more evidence than one
+round supplies.** Recommendation unchanged from rounds 4-7: this needs `ATLAS_CLOUD_API_KEY`
+configured so `seedream-v4.5/edit` (the documented-primary, stronger-reference-fidelity route per
+`docs/media-model-routing.md`) can attempt this composite instead of the fal Kontext fallback this
+environment is stuck on. No keeper exists for this post as of this run; the post remains a Sanity
+`status:'draft'` doc, and its `heroImage`/`heroImageAlt`/`imagePrompt` were deliberately left
+untouched (still pointing at the round-10 asset, now known-rejected) rather than cleared, since
+**Superseded by content-writer, same run:** the rejected round-10 asset was subsequently unset from
+the doc (`heroImage`, `heroImageAlt` and `imagePrompt` all cleared). Leaving a known-rejected frame
+attached made the doc read `hasHero:true` to any future publish check, putting a rejected image one
+auto-publish away from going live; an honest missing-hero state is strictly safer than a known-bad
+one. `check-hero-embed-match.ts` now correctly exits non-zero and the post cannot publish, which is
+the intended outcome under the heroless directive. Regenerating still needs Atlas configured, or an
+owner override of the content-plan §8B rule that Real Talk heroes are §0-H human heroes and never a
+product hero.
+Total spend across both content runs on this hero: run 379 = 12.5 cents (5 images), first retry
+rounds 4-10 = 35 cents (14 images), this gaze-only retry round 11 = 5 cents (2 images) = 52.5 cents
+total (21 images), still trivial against the daily content-team budget.
+
+> **REJECTED by content-writer on review (run 385).** This keeper did not ship. The round-10
+> self-assessment above records a "non-smiling expression... closed neutral mouth, no upturn";
+> on direct inspection of the delivered frame that is not accurate — the figure has a soft
+> closed-mouth smile and, more importantly, **direct eye contact with the lens**. Two failures
+> follow. (1) The frame does not stage the headline's question, so it fails the §0-H swap test:
+> it could move onto any post about this product unnoticed. (2) A figure smiling at camera while
+> presenting a product is the visual grammar of a **customer testimonial**, which the mission
+> brief bans on every surface and which the cast license rules out explicitly (performance is
+> never testimony) — worst of all on a † health-adjacent topic. Note that round 10's own change,
+> holding the bottle larger and closer to camera, improved label legibility but pushed the frame
+> further toward product-presentation staging, which is what made the testimonial read worse.
+> **Standing lesson: direct eye contact plus a held product is testimonial grammar regardless of
+> expression.** A replacement round was commissioned changing one thing only, the figure's gaze
+> moving from the lens to the bottle, on the reasoning that gaze direction is a far more
+> tractable control on this route than affect (five rounds failed to suppress the pleasant
+> default expression), and that someone studying a product is visibly weighing a question while
+> someone meeting the viewer's eye is endorsing one.
 
 ### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
 
