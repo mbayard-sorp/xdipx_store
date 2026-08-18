@@ -264,7 +264,46 @@ faithful to reference 2.
 **Keepers:** (append `cast slug + product handle + gesture → placed asset URL` lines here; a
 no-product hero MUST log its reason in its entry)
 
-**Rejects:**
+**Rejects:** `cast: none (roster gap, documented exception)` + Wicked Simply Timeless Water-Based
+Personal Lubricant & Moisturizer 4oz (`wicked-simply-timeless-jelle`), "How Does Menopause Change
+Sex, and What Helps?" (real-talk, † health-adjacent, content run 379). **Casting decision:** all
+six approved `castMember` docs (`maya`, `sofia`, `jade`, `priya`, `marcus`, `diego`) present late
+20s to early 30s per their `ageRange` field; none can be honestly rendered at menopause age from
+their reference photo without contradicting the documented identity, and on a † topic an
+age-wrong figure reads as a factual error rather than as wit. Per content-writer direction in
+run 379 (2026-08-18; no owner was involved in this call): generated a standalone age-appropriate figure (woman presenting mid-50s, explicit adult age
+markers: silver-streaked hair, visible laugh lines and crow's feet) instead of forcing a roster
+slug. **This is a logged roster gap** — the six-member roster has zero coverage above early 30s;
+a separate suggestion is filed for a 50s-appropriate cast addition. Gesture per the §0-H
+question-to-gesture "Is this normal?" row: product held up in one hand at eye level, head tilted
+toward it, brow up, free hand palm-up asking the room.
+
+Three rounds, 5 candidates total (content-team daily image cap reached, all against the fal
+Kontext dev fallback — `ATLAS_*` is not configured in this environment so the Atlas primary path
+in `docs/media-model-routing.md` was unavailable; flagged for a config fix so future label-heavy
+§0-H composites get Atlas's stronger reference fidelity instead of falling straight to Kontext).
+Every candidate failed at least one hard gate check on close inspection:
+- Round 1 (2 candidates): backdrop rendered as a dramatic amber/orange gradient wall with a
+  visible sunbeam and hard directional shadow — hard ground-lock and light-register fail (doctrine
+  §4 backdrops are coral-soft/plum-soft/paper tints only; no orange, no amber, no gradient wall,
+  no golden hour). Candidate 1 also badly garbled the label ("Aqva ETE" nonsense in place of "Aqua
+  Jelle").
+- Round 2 (2 candidates, corrected prompt): label crisp on the primary brand lockup, correct
+  gesture (candidate 2 nailed the free-palm-up-asking pose), correct age presentation — but the
+  backdrop rendered as full-saturation coral (`#FF5A36`-strength) standing in as a background
+  field rather than the pale `coral-soft` (`#FFE6DD`) tint the ground lock requires, and the fine
+  print under "AQUA JELLE" stayed a garbled smudge on both candidates under 2x zoom.
+- Round 3 (1 candidate, backdrop-only correction, explicit "pale, low-chroma, NOT saturated"
+  language added): backdrop lightened to a salmon-pink roughly 60-70% of the way toward true
+  coral-soft but still didn't land in the tint band on pixel sample (~(250,160,150) vs. target
+  ~(255,230,221)), the gesture reverted to both hands cradling the bottle (lost the free
+  asking-hand), and the fine print stayed garbled.
+- A post-process attempt (BiRefNet cutout of round 2 candidate 2, recomposited onto a true
+  coral-soft field) was tried and rejected: the cutout carried a visible coral color-spill halo
+  baked into the hair/edge pixels from the original saturated backdrop, which reads as an obvious
+  mismatched-recomposite artifact on a new lighter ground — worse than shipping the original.
+**Conclusion:** no candidate cleared the gate. Held as a Sanity draft rather than publishing a
+non-compliant hero; heroImage/heroImageAlt/imagePrompt were not set.
 
 ### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
 
