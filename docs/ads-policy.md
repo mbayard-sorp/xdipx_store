@@ -173,6 +173,16 @@ platform-by-platform reads rather than in a new document.
 **Do not propose listing any Nalpac-sourced physical product on Etsy, bundled or not.** Custom
 bundles built from the existing toy catalog are not a viable Etsy lane under current policy.
 
+**Never disguise a prohibited item as a different listing to route it past moderation.** A
+"digital guide" listing that ships a physical toy and lube alongside it, undisclosed in the
+photos/description, does not escape the item-type ban — Etsy determines category from what ships,
+not from what the seller chose to photograph, and it stacks a materially bigger risk than a
+takedown: Etsy Payments settles through card networks with their own high-risk merchant-category
+rules for sex toys, and a listing structured specifically to route a prohibited item past content
+review reads as payment-category evasion, which risks frozen funds or account termination for
+cause. Same principle as §Organic social's "never route around a filter" — if a listing only works
+by hiding what it actually is, kill it.
+
 **What is viable, each with a caveat:**
 
 - **Adult party games** (bachelorette/couples novelty games, signage) as original, xdipx-designed
@@ -187,6 +197,27 @@ bundles built from the existing toy catalog are not a viable Etsy lane under cur
 - **Digital artwork/illustrated downloads** — same nudity/photorealism ceiling as the guides above;
   stylized/suggestive illustration is the safe lane, explicit art is not.
 
+**A cheap guide that links out to xdipx.com is a distinct, structurally sound lane — nothing
+physical ships through Etsy at all.** A low-priced digital guide (e.g. $0.99) whose content
+recommends specific products with links to their xdipx.com product pages does not engage either
+Etsy blocker: Etsy never sees a toy transaction, only the guide transaction plus a hyperlink. This
+is different from the disguised-bundle case above because no physical item ships from the Etsy
+order. Etsy's **Off-Platform Transactions** policy bars completing *the same transaction* off-Etsy
+(soliciting a buyer to pay outside Etsy to dodge the fee on that item) — it does not bar linking
+from delivered content to a *different* product on a site the Etsy shop doesn't itself sell, which
+is standard practice among Etsy digital sellers (pattern/recipe PDFs linking to external supply
+lists). Three conditions keep this compliant, not blockers:
+  1. The guide must be a genuine, substantive item for sale, not a bare link list — Etsy requires
+     listings to offer a real item; a thin wrapper whose only purpose is redirecting risks removal
+     as non-substantive, independent of the adult-content questions.
+  2. Mature-content tagging still applies to the guide's own content if it describes sexual acts or
+     use, per the same rules as the standalone-guide lane above.
+  3. No Etsy-hosted checkout for the toy itself — links go to xdipx.com for a separate purchase,
+     never a "buy this here" flow inside the Etsy listing.
+  Re-verify the Off-Platform Transactions policy before scaling this beyond a pilot; it was read
+  2026-08-19 via search, not fetched directly from Etsy (egress to etsy.com was blocked from this
+  environment that day).
+
 **Market read, honestly:** party games and POD are real, active Etsy categories, but commodity-
 crowded; the edge is original design and personalization, not the "adult" framing itself. Treat any
 Etsy lane as a small side experiment against the $2,000/month storefront goal, not a strategic bet,
@@ -198,7 +229,7 @@ manual shop. This deliberately avoids protected paths (no cart, checkout, paymen
 touches). A synced or automated integration, or a dedicated `marketplace-ops` agent, is future scope
 only after the manual lane proves out — do not build infrastructure for an unvalidated channel.
 
-Sources: [Etsy Prohibited Items Policy](https://www.etsy.com/legal/policy/prohibited-items-policy-effective/1475031537022), [Etsy Adult Nudity and Sexual Content policy](https://www.etsy.com/legal/policy/adult-nudity-and-sexual-content/1269612959532), [Listing Mature Content Correctly](https://www.etsy.com/legal/policy/listing-mature-content-correctly/242665462117), [Etsy Seller Policy](https://www.etsy.com/legal/policy/seller-policy-effective-through-july-8/1489086421092).
+Sources: [Etsy Prohibited Items Policy](https://www.etsy.com/legal/policy/prohibited-items-policy-effective/1475031537022), [Etsy Adult Nudity and Sexual Content policy](https://www.etsy.com/legal/policy/adult-nudity-and-sexual-content/1269612959532), [Listing Mature Content Correctly](https://www.etsy.com/legal/policy/listing-mature-content-correctly/242665462117), [Etsy Seller Policy](https://www.etsy.com/legal/policy/seller-policy-effective-through-july-8/1489086421092), [Off-Platform Transactions policy](https://www.etsy.com/legal/policy/off-platform-transactions/1254654515806).
 
 ## Creative rules (paid AND organic)
 
