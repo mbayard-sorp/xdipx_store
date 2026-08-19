@@ -88,8 +88,15 @@ export interface ResolvedLane {
   label: string
   key: string
   emmaLine: string
-  /** Verified `/collections/{handle}` (or `/collections/best-sellers`). */
-  seeAllHref: string
+  /**
+   * Verified `/collections/{handle}`, or `null` when the authored handle is not a
+   * live, in-stock collection. A `null` href renders NO "See the full fit" link
+   * rather than pointing somewhere plausible: mission brief §1 bans a silent
+   * best-sellers fallback for auto-generated modules (its ranking is a different
+   * order from the discovery index that fills a lane, so it is structurally
+   * guaranteed to mismatch the six the visitor just looked at).
+   */
+  seeAllHref: string | null
   /** 6..12 products. page0 = deck[0..5]; page1 = deck[6..11] when present. */
   deck: DiscoveryProduct[]
 }

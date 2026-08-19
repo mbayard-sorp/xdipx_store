@@ -403,3 +403,72 @@ added, no existing Sanity schema modified. The shipped fix is presentational +
 instrumentation on one existing route inside the locked Nº01-Nº11 shell; the
 First Tap concept stays a proposal pending IA review + additive schema before any
 build.
+
+---
+
+## Delta — 2026-08-19 (Routine B, run 397)
+
+**Egress reality this run.** External competitor/reference fetches were blocked
+by the network egress proxy (`EGRESS_BLOCKED` on `getmaude.com` and
+`lovehoney.com`). Wednesday is outside the Monday-only competitor-domain
+allowlist window (see `routine-network-requirements.md` §2), so this is an
+environment gate, not a judgment. No competitor copy is quoted from memory
+below; any field reference is tagged prior-knowledge and drove no claim about a
+live competitor state. Recon turned inward to our own newest surface, as the
+2026-08-12 delta did.
+
+**Self-capture (actually fetched).** `xdipx.com/?variant=b` returns **200** and
+serves the storefront homepage. Inspected the Nº 07 **Curiosity Shelf** (shipped
+2026-08-18, PR for ticket #3532), the discovery band that replaced the Sensation
+Map. The live band renders the **code-side default** content (`eyebrow` reads
+"TONIGHT'S CURIOSITIES", the `DEFAULT_SHELF_CONTENT` string), i.e. no
+`singleton.curiosityShelf` Sanity doc is authored yet, so the evergreen default
+lanes are live. The SSR-default lane ("Worn, not held") renders a correct
+`See the full fit → /collections/wear` (a verified collection).
+
+**Code-level audit found one real, cheap-and-certain defect on the newest band:**
+The Curiosity Shelf reintroduced the exact anti-pattern the module it replaced
+was shipped to retire. `curiosity-shelf.ts` resolved an unverified `seeAllHandle`
+to `/collections/best-sellers` (`FALLBACK_COLLECTION`), and `toContent` defaulted
+a missing handle to `best-sellers` as well. Mission brief §1 (binding owner
+direction, all-hands 2026-07-30) **bans** best-sellers as a silent See-all
+fallback for an auto-generated module: best-sellers is a different ranking from
+the discovery index that fills a lane, so it is *structurally guaranteed to
+mismatch* the six the visitor just looked at, and the prescribed remedy is to
+ship the module with **NO See-all** rather than point it somewhere plausible. The
+component (`CuriosityShelf.tsx`) could not even express "no See-all" — it always
+rendered the link. Honest scope: with today's all-verified default handles the
+fallback is **latent, not currently firing**; it fires the moment Routine A
+authors a lane whose handle is not a live in-stock collection, or any default
+collection unstocks (verification requires `productsCount > 0`).
+
+**Decision this delta forces (recon that changes nothing is wasted):** ship the
+See-all correctness fix this cycle. `ResolvedLane.seeAllHref` becomes
+`string | null`; an unverified handle resolves to `null`; the component renders
+the See-all only when present (and skips the whole footer rule when a lane has
+neither a second page nor a See-all); the `best-sellers` magic add and default
+are removed; the redesign spec's now-stale acceptance lines (§j item 10, the
+`seeAllHref` rule, the `seeAllHandle` field row) are corrected to match binding
+direction. This is one band's resolver + render + tests + spec, no protected
+path, gates green (typecheck / 2795 tests / build). This cycle's shell PR.
+
+**Adopted this cycle:** the Curiosity Shelf See-all correctness fix (a live
+structural DoD violation in the newest-shipped band, enforcing binding owner
+direction the band's own author contradicted).
+**Rejected/deferred this cycle (logged so ambition compounds):** the four-site
+external competitor sweep, **deferred by force** (egress blocked, not judgment);
+generated imagery for the band, still gated on asset-generation spend and
+unmeasurable while sessions < 300/wk; and repointing the *verified* category
+See-alls (e.g. `/collections/wear` for "Worn, not held") — those genuinely
+contain the lane's set and only differ in order, which is defensible continuity,
+so they are out of scope for a best-sellers-only structural fix. The
+ambition-mandate concept carried this cycle is a **design doc + wire only**,
+`docs/homepage-team/concepts/curiosity-echo.md` (a self-discovery "what your taps
+say about you" reflection beat layered on the Curiosity Shelf), shipping-
+disciplined per mission brief §9.
+
+**IA fence respected:** no new section type, no new route, no `/discover` link
+added, no existing Sanity schema modified. The shipped fix is a resolver +
+render correctness change on one existing band inside the locked Nº01-Nº11
+shell; the Curiosity Echo concept stays a proposal pending IA review + additive
+schema before any build.
