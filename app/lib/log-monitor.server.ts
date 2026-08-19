@@ -173,13 +173,138 @@ export async function fetchRecentLogs({ windowMinutes }: { windowMinutes: number
     }))
 }
 
+// #3982 — known-noise line patterns, copied straight from the agent def's
+// <critical_knowledge> "Noise" bullets (.claude/agents/log-monitor.md). Lines
+// that match are dropped in CODE before the prompt is built, so noise is
+// never paid for as model input tokens. A line is NEVER classified as noise
+// if it also matches SIGNAL_LINE_PATTERNS below — signal always wins.
+const NOISE_LINE_PATTERNS: RegExp[] = [
+  /(wp-admin|\.env\b|\.git\b|phpmyadmin|xmlrpc\.php).{0,40}\b40[14]\b/i, // bot/crawler scans
+  /\b40[14]\b.{0,40}(wp-admin|\.env\b|\.git\b|phpmyadmin|xmlrpc\.php)/i,
+  /favicon\.ico.{0,40}\b404\b/i,
+  /\b404\b.{0,40}favicon\.ico/i,
+  /\bOPTIONS\b.{0,40}\b204\b/i,
+  /\b204\b.{0,40}\bOPTIONS\b/i,
+  /\/api\/health\b/i,
+  /vercel[- ]?internal.*(ping|health)/i,
+  /healthcheck/i,
+  /\/api\/waitlist\b.{0,40}\b(400|422)\b/i, // expected validation rejects only
+  /\b(400|422)\b.{0,40}\/api\/waitlist\b/i,
+]
+
+// Lines matching any of these are ALWAYS kept, uncapped, regardless of the
+// token budget in filterAndCapLogs. This is the correctness bar from #3982:
+// a real incident must survive filtering even if it means exceeding budget.
+// Note: 5xx is treated as signal even though the agent def calls "one-off
+// 504s during a known cold-start window" noise — a code-side regex cannot
+// safely tell a one-off cold-start 504 from a sustained outage, so we never
+// silently drop a 5xx here; that judgment call stays with the model.
+const SIGNAL_LINE_PATTERNS: RegExp[] = [
+  /FUNCTION_INVOCATION_FAILED/,
+  /\b5\d\d\b/, // any 5xx status code
+  /Unhandled promise rejection/i,
+  /\bTypeError\b/,
+  /\bReferenceError\b/,
+  /Cannot find module/i,
+  /ETIMEDOUT|ECONNRESET/,
+  /403\s*Forbidden/i,
+  /traceback/i,
+  /\bat\s+\S+\s*\(.*:\d+:\d+\)/, // stack trace frame, e.g. "at foo (/var/task/x.js:12:34)"
+]
+
+export function isSignalLine(line: LogLine): boolean {
+  if (/^error$/i.test(line.level)) return true
+  const text = `${line.level} ${line.source} ${line.message}`
+  return SIGNAL_LINE_PATTERNS.some((re) => re.test(text))
+}
+
+export function isNoiseLine(line: LogLine): boolean {
+  if (isSignalLine(line)) return false
+  const text = `${line.level} ${line.source} ${line.message}`
+  return NOISE_LINE_PATTERNS.some((re) => re.test(text))
+}
+
+const DEFAULT_TOKEN_BUDGET = 18_000
+const CHARS_PER_TOKEN = 4 // rough estimate for English/log text (no tokenizer dep)
+
+export interface FilterAndCapResult {
+  keptLogs:        LogLine[]
+  noiseSuppressed: number
+  capTruncated:    number
+}
+
+/**
+ * Pre-filter the log window before it reaches the model (#3982).
+ * 1. Drop lines matching a known-noise pattern (never drops a signal line).
+ * 2. Cap what's left to a bounded token budget: ALL signal lines are kept
+ *    uncapped, then the most recent routine lines fill the remaining budget,
+ *    oldest routine lines are truncated first.
+ */
+export function filterAndCapLogs(
+  logs: LogLine[],
+  tokenBudget: number = DEFAULT_TOKEN_BUDGET,
+): FilterAndCapResult {
+  const charBudget = tokenBudget * CHARS_PER_TOKEN
+  const lineLen = (l: LogLine) => `[${l.timestamp}] ${l.level} ${l.source}: ${l.message}`.length + 1
+
+  let noiseSuppressed = 0
+  const nonNoise: Array<{ line: LogLine; index: number }> = []
+  logs.forEach((line, index) => {
+    if (isNoiseLine(line)) {
+      noiseSuppressed++
+    } else {
+      nonNoise.push({ line, index })
+    }
+  })
+
+  const mustKeep = nonNoise.filter(({ line }) => isSignalLine(line))
+  const rest     = nonNoise.filter(({ line }) => !isSignalLine(line))
+
+  let usedChars = mustKeep.reduce((sum, { line }) => sum + lineLen(line), 0)
+
+  // Fill remaining budget with the most recent routine lines first.
+  const restByRecency = [...rest].sort((a, b) => {
+    const ta = Date.parse(a.line.timestamp)
+    const tb = Date.parse(b.line.timestamp)
+    if (Number.isNaN(ta) || Number.isNaN(tb)) return b.index - a.index
+    return tb - ta
+  })
+
+  const keptRest: typeof rest = []
+  let capTruncated = 0
+  for (const item of restByRecency) {
+    const len = lineLen(item.line)
+    if (usedChars + len <= charBudget) {
+      keptRest.push(item)
+      usedChars += len
+    } else {
+      capTruncated++
+    }
+  }
+
+  const kept = [...mustKeep, ...keptRest].sort((a, b) => a.index - b.index)
+
+  return {
+    keptLogs: kept.map(({ line }) => line),
+    noiseSuppressed,
+    capTruncated,
+  }
+}
+
 async function classifyLogs(logs: LogLine[]): Promise<LogMonitorReport> {
   if (logs.length === 0) return { groups: [], suppressedNoiseCount: 0 }
 
+  const { keptLogs, noiseSuppressed, capTruncated } = filterAndCapLogs(logs)
+  if (keptLogs.length === 0) {
+    return { groups: [], suppressedNoiseCount: noiseSuppressed + capTruncated }
+  }
+
   const userPayload =
     `Window: ${logs[0]?.timestamp} to ${logs[logs.length - 1]?.timestamp}\n` +
-    `Total lines: ${logs.length}\n\n` +
-    logs.map((l) => `[${l.timestamp}] ${l.level} ${l.source}: ${l.message}`).join('\n')
+    `Total lines: ${logs.length} ` +
+    `(${keptLogs.length} after pre-filter; ${noiseSuppressed} known-noise dropped, ` +
+    `${capTruncated} routine lines truncated to fit budget)\n\n` +
+    keptLogs.map((l) => `[${l.timestamp}] ${l.level} ${l.source}: ${l.message}`).join('\n')
 
   const msg = await anthropic.messages.create({
     model:      MODEL,
@@ -207,7 +332,11 @@ async function classifyLogs(logs: LogLine[]): Promise<LogMonitorReport> {
       cacheReadTokens:     uMon.cache_read_input_tokens     ?? 0,
     })
   ).catch((err) => console.error('[log-monitor] token-log failed (ignored):', err))
-  return block.input as LogMonitorReport
+  const report = block.input as LogMonitorReport
+  return {
+    ...report,
+    suppressedNoiseCount: (report.suppressedNoiseCount ?? 0) + noiseSuppressed + capTruncated,
+  }
 }
 
 /**
