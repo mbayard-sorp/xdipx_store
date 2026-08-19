@@ -340,13 +340,17 @@ direction that does not reach the binding document has not landed.
 
 **What is unchanged, and is not what this ruling was about:**
 
-- No simulated or implied use. Presenting a product is not using it.
-- The product is not on or against a body. In a hand, held out or held up, is the licensed shape.
-- No fluid or lubricant texture, no bed with a person in it, nothing explicit.
 - Cast reactions stay performance, never testimony. No persona claims to have used anything.
 - Stage 1 of the composite still strips packaging, so a manufacturer carton never reaches a
   presenter's hand. That was never about the hand rule; it is the no-text-in-pixels rule, and it
   still binds.
+
+**Four bullets were removed from this list on 2026-08-19 (ticket #4206 follow-up).** They read "no
+simulated or implied use", "the product is not on or against a body", and "no fluid or lubricant
+texture, no bed with a person in it". Every one of those was superseded by §3.2a on 2026-08-16, as
+this section's own closing paragraph already said, so the list contradicted the page it sits on and
+gave a run its pick of two answers. **§3.2a is the ceiling. This section is only about what may be
+in a hand.** Do not restate a ceiling here again.
 
 **That conflict is now closed.** `docs/ads-policy.md` §Organic social carried "no product in hand or
 on a body" as an Instagram hard limit for four days after the 2026-08-12 hand ruling contradicted it,
@@ -355,6 +359,80 @@ the PASS that shipped post 47). The line was withdrawn by owner ruling 2026-08-1
 points at §3.2a, which is the single operative rule for Instagram imagery. Product in hand and
 product against skin are both licensed; the fence moved to genitalia, hands on genitals, and
 depicted acts.
+
+### 3.7 A cast member in a scene, on every product post (owner ruling 2026-08-19)
+
+Owner direction, verbatim: *"Emma is also a cast member. All instagram product post images need to
+be with at least one cast member in a scene. You can include a solo product shot as a second slide
+in an image series if it's relevant. The social media team can pick the scene, I want variety. This
+needs to look like the team we have is out in the wild talking about these products."*
+
+**The rule.** Every Instagram **product** post carries at least one approved cast member, in a
+scene, in the lead image. A product photographed alone is no longer a publishable lead frame, and
+neither is a styled still life with no person in it. The lead slide is a person somewhere real,
+with the product, not an object on a surface.
+
+**Emma is a cast member.** She is treated exactly like any other approved presenter for imagery
+purposes and may appear in scenes, hold and present product, and appear alongside other cast. Her
+existing likeness policy is unchanged: her likeness is licensed for merchandising imagery, the
+product stays the hero, and she never claims lived experience. What changed is only that she is now
+in the rotation rather than a separate case.
+
+**The premise this serves.** The feed should read as *a group of people who are out in the world
+talking about these products*, not as a catalogue. That premise is the test to apply when a frame
+is technically compliant but feels wrong: would this read as a person with a life, or as a product
+listing with a human decoration attached?
+
+**Solo product shot: licensed, as slide 2, and it must still be generated art.** A product-only
+frame may run as the second slide of a carousel when it is genuinely useful (showing scale, finish,
+controls, or what is in the box). It may **never** be the lead. And there is a hard mechanical
+constraint that is easy to get wrong: `allMediaAreGeneratedSocialAssets` is an `every()`, so
+**every slide** must pass `isGeneratedSocialAsset`, which requires a `social-` or `ig-` prefixed
+basename. **A raw Shopify CDN packshot as slide 2 BLOCKs the entire post, lead slide included.**
+Generate the solo shot with archetype `plate`, which renders a packaging-free product frame that
+passes provenance. Never reach for the catalog image. See `routine-social-daily.md` Step 5.
+
+**Non-product posts** (education, a campaign kickoff, a Notebook handoff, a resource carousel) are
+not covered by the cast mandate and may run cast-free art per the archetypes in §3.2a. The mandate
+is about product posts, because that is where a lonely packshot reads as a catalogue.
+
+**Sequencing, and this is the part that decides whether anything ships.** This rule is only
+satisfiable when approved `castMember` documents exist in Sanity with a `referencePhoto`. As of
+2026-08-19 there were **zero**. Until at least one exists, an honest run declares Instagram product
+drafting degraded-to-zero and says so, exactly as Step 2b requires. **It does not fall back to a
+packshot to fill the slot.** That fallback is what produced row 59.
+
+### 3.8 Scene and location variety, and how it is kept honest
+
+Owner direction, verbatim: *"Variety is key here. Put them on a beach, or camping, doing some fun
+intimate activity, giving as a gift to another cast member. The possibilities are endless, so make
+choices in the context of the brand."*
+
+**The team picks the scene.** This is delegated, not prescribed. What follows is a starting bank,
+not a menu to cycle through in order, and inventing a new location that fits the brand is the
+preferred move over reusing one from this list.
+
+**Starting bank.** Bedroom. Bathroom and shower-adjacent. Kitchen at night. A guest chair on a
+podcast set, headphones on, mid-sentence. Beach and beach house. Camping and a tent at golden hour.
+A hotel room and an open suitcase. A car at a trailhead. A bookshop or a market. A rooftop or a
+balcony at dusk. A gift being handed from one cast member to another. Two cast members getting
+ready to go out. A bath being run. Packing for a trip. A long weekend morning with nowhere to be.
+
+**What makes a location on-brand.** Warm, lived-in, private or semi-private, and plausibly this
+person's actual life. Not a studio, not a showroom, not a props table. The ground lock and the
+warm-light mandate in `docs/design-doctrine.md` §4 still bind, and the ceiling is §3.2a as always.
+
+**Variety is a rule, not an aspiration.**
+
+- **No location repeat inside 8 consecutive Instagram product posts.** Bedroom is the default every
+  model reaches for, so it is the one most likely to violate this.
+- **No cast member carries more than 2 of any 5 consecutive product posts.** A rotation with one
+  face is not a cast.
+- **Every run states, in its decision event, the location and cast member chosen and the last time
+  each was used.** A rule nobody reports on is a rule nobody keeps. Until the rotation is tracked
+  in data (ticket filed 2026-08-19), derive it by reading the last 8 posted and drafted rows.
+- **Two cast members in frame is licensed and encouraged**, including one giving the product to the
+  other. §3.2a already licenses two people touching.
 
 ## 4. Cadence and continuity
 
