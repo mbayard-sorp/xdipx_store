@@ -28,6 +28,13 @@ interface ChatApiResponse {
   sessionId?: string
 }
 
+interface SmsOptinResponse {
+  ok: boolean
+  alreadyConsented?: boolean
+  error?: string
+  reply: string
+}
+
 const STORAGE_KEY = 'xdipx:emma:state:v1'
 const TAGLINE_KEY = 'xdipx:emma:tagline:v2'
 const TAGLINE_TTL_MS = 5 * 60 * 1000
@@ -61,7 +68,13 @@ export function AskEmmaWidget() {
   // and send it back as `sessionId` in the request body as a fallback when the
   // HttpOnly cookie is absent (preview environment navigation issue).
   const [persistedSessionId, setPersistedSessionId] = useState<string | null>(null)
+  // Ticket #3916: opt-in "text me this, continue on SMS" beat.
+  const [smsPanelOpen, setSmsPanelOpen] = useState(false)
+  const [smsPhone, setSmsPhone] = useState('')
+  const [smsConsent, setSmsConsent] = useState(false)
+  const [smsResult, setSmsResult] = useState<SmsOptinResponse | null>(null)
   const fetcher = useFetcher<ChatApiResponse>()
+  const smsFetcher = useFetcher<SmsOptinResponse>()
   const revalidator = useRevalidator()
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -234,6 +247,16 @@ export function AskEmmaWidget() {
       startReveal(reply.length)
     }, holdMs)
   }, [fetcher.state, fetcher.data, open])
+
+  // Ticket #3916: land the opt-in SMS response once the fetcher settles.
+  useEffect(() => {
+    if (smsFetcher.state !== 'idle' || !smsFetcher.data) return
+    setSmsResult(smsFetcher.data)
+    if (smsFetcher.data.ok) {
+      setSmsPhone('')
+      setSmsConsent(false)
+    }
+  }, [smsFetcher.state, smsFetcher.data])
 
   function startReveal(total: number) {
     if (revealTimerRef.current) clearInterval(revealTimerRef.current)
@@ -444,6 +467,19 @@ export function AskEmmaWidget() {
                 <p className="mt-1 text-[11px] opacity-90">Online · {tagline}</p>
               </div>
               <div className="flex items-center gap-1">
+                {turns.length > 0 && persistedSessionId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSmsResult(null)
+                      setSmsPanelOpen((v) => !v)
+                    }}
+                    className="rounded-full px-2 py-1 text-[11px] font-semibold opacity-80 hover:bg-white/10 hover:opacity-100"
+                    aria-label="Text me this conversation"
+                  >
+                    Text me this ♥
+                  </button>
+                )}
                 {turns.length > 0 && (
                   <button
                     type="button"
@@ -480,6 +516,67 @@ export function AskEmmaWidget() {
               ))}
               {isSending && <TypingBubble />}
             </div>
+
+            {smsPanelOpen && (
+              <div className="border-t border-line bg-white px-3 py-3">
+                {smsResult ? (
+                  <div className="flex items-start justify-between gap-2 rounded-xl bg-cream-2 px-3 py-2.5 text-xs text-ink">
+                    <span>{smsResult.reply}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSmsResult(null)
+                        if (smsResult.ok) setSmsPanelOpen(false)
+                      }}
+                      className="shrink-0 font-semibold text-coral"
+                    >
+                      {smsResult.ok ? 'Done' : 'Retry'}
+                    </button>
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (!smsConsent || !smsPhone.trim() || !persistedSessionId) return
+                      smsFetcher.submit(
+                        JSON.stringify({ phone: smsPhone.trim(), sessionId: persistedSessionId, consent: true }),
+                        { method: 'post', action: '/api/web-sms-optin', encType: 'application/json' },
+                      )
+                    }}
+                    className="space-y-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        value={smsPhone}
+                        onChange={(e) => setSmsPhone(e.target.value)}
+                        placeholder="Your phone number"
+                        className="min-w-0 flex-1 rounded-xl border border-line bg-cream px-3 py-2 text-sm text-ink placeholder:text-ink/40 focus:border-coral/60 focus:outline-none focus:ring-2 focus:ring-coral/20"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!smsConsent || !smsPhone.trim() || smsFetcher.state !== 'idle'}
+                        className="shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                        style={{ background: 'var(--color-coral)' }}
+                      >
+                        {smsFetcher.state !== 'idle' ? 'Sending…' : 'Send it ♥'}
+                      </button>
+                    </div>
+                    <label className="flex items-start gap-2 px-0.5 text-[11px] leading-snug text-ink/70">
+                      <input
+                        type="checkbox"
+                        checked={smsConsent}
+                        onChange={(e) => setSmsConsent(e.target.checked)}
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-ink/30"
+                      />
+                      <span>I want to keep this conversation going by text from xdipx.</span>
+                    </label>
+                  </form>
+                )}
+              </div>
+            )}
 
             <form
               onSubmit={(e) => {
