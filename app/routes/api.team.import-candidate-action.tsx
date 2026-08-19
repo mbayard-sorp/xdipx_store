@@ -13,13 +13,32 @@ import { importCandidates } from '../../db/schema'
 
 const DEFAULT_MAX_ACTIONS_PER_RUN = 20
 
-// Each approve runs ~10-20s of sequential Shopify Admin calls (variant images,
-// inventory items, metafields, all rate-limit-paced). Larger batches in one
-// serverless request risk the 300s maxDuration and die mid-batch with a 500,
-// leaving no response for the ids that DID import. Overflow ids come back in
-// `deferred` for the caller to resubmit. Reject/watch are cheap DB writes and
-// are not clamped.
-const MAX_APPROVALS_PER_REQUEST = 10
+// Each approve runs ~12-15s of sequential Shopify Admin calls (variant images,
+// inventory items, metafields, all rate-limit-paced). A 10-id chunk (~120-150s)
+// reliably meets or exceeds the serverless+proxy timeout and can reset the
+// connection mid-chunk (confirmed 2026-08-18, curl exit 35), leaving no
+// response for the ids that DID import even though they landed in Shopify.
+// Overflow ids come back in `deferred` for the caller to resubmit. Reject/
+// watch are cheap DB writes and are not clamped. Ticket #4099: lowered from
+// 10 to 5 so a full-cap (20-action) approve batch stays comfortably under the
+// timeout in a single request; the `deferred` slice below drains whatever is
+// left across as many follow-up requests as it takes, at any chunk size.
+const MAX_APPROVALS_PER_REQUEST = 5
+
+/**
+ * Split capped ids into the chunk that this request will process and the
+ * remainder to hand back as `deferred` for the caller to resubmit. Approve
+ * is clamped to `perRequestLimit` (see MAX_APPROVALS_PER_REQUEST); reject and
+ * watch are cheap DB writes and go through in one request regardless of size.
+ */
+export function splitApprovalChunk(
+  capAllowed: number[],
+  intent: string,
+  perRequestLimit: number = MAX_APPROVALS_PER_REQUEST,
+): { toProcess: number[]; deferred: number[] } {
+  const limit = intent === 'approve' ? perRequestLimit : capAllowed.length
+  return { toProcess: capAllowed.slice(0, limit), deferred: capAllowed.slice(limit) }
+}
 
 async function countProcessedToday(reviewedBy: string): Promise<number> {
   const res = await db
@@ -89,9 +108,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const skippedDueToCap = ids.slice(remaining)
 
     // Chunk approvals per request; overflow is returned for resubmission.
-    const perRequestLimit = intent === 'approve' ? MAX_APPROVALS_PER_REQUEST : capAllowed.length
-    const toProcess = capAllowed.slice(0, perRequestLimit)
-    const deferred = capAllowed.slice(perRequestLimit)
+    const { toProcess, deferred } = splitApprovalChunk(capAllowed, intent)
 
     // One feed fetch + master collapse shared by the whole batch — without this
     // every approveAndImport re-fetches and re-collapses the ~17k-SKU feed.
