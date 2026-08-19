@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   # PR runs supersede each other: only the newest commit on a branch matters,
@@ -90,3 +91,91 @@ jobs:
             git diff --stat
             exit 1
           fi
+
+  # Real-Postgres dry-run for migration PRs (ticket: migration 080 merged and
+  # sat unapplied for ~20h, 500ing the social lane; scripts/apply-additive-
+  # migrations.ts now auto-applies additive migrations at build time, but
+  # nothing had proven the SQL in a new migration file actually executes
+  # cleanly before it reached a PR review). This job spins up a throwaway
+  # postgres:16 service and runs the same classifier + executor the
+  # production build uses, in --dry-run mode (no production gate, no ledger
+  # writes, see the script for both).
+  #
+  # Deliberately NOT part of the `check` job: `check` is the release engine's
+  # REQUIRED_CHECK gate (app/lib/release-engine.server.ts), and every PR that
+  # touches db/migrations/** is already a protected path
+  # (PROTECTED_GLOBS in app/lib/github.server.ts) that stops for the owner
+  # regardless of CI. Folding this in would only slow down every non-migration
+  # PR for a check that can never change their merge eligibility. It still
+  # needs to be a real, visible check on the PR though, which is what a
+  # separate job gives us: it always runs and reports (skipping its real work
+  # when the PR does not touch migrations), so a migration PR shows a genuine
+  # pass/fail rather than nothing.
+  migration-dry-run:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Real connection to the service container above (not the check job's
+      # placeholder): --dry-run actually executes every additive-classified
+      # migration file against this database.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same source of truth as .github/workflows/agent-allowlist.yml: the
+      # PR's changed-file list from the API, not a local branch diff (which
+      # would need full history and a merge-base guess) and not PR text.
+      - name: Determine whether this PR touches db/migrations/**
+        id: touch
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename' > files.txt
+          if grep -q '^db/migrations/' files.txt; then
+            echo "Migration files changed:"
+            grep '^db/migrations/' files.txt | sed 's/^/  /'
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No db/migrations/** changes on this PR. Skipping dry-run."
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.touch.outputs.touched == 'true'
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        if: steps.touch.outputs.touched == 'true'
+        run: npm ci
+
+      - name: Wait for Postgres
+        if: steps.touch.outputs.touched == 'true'
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U ci && exit 0
+            sleep 1
+          done
+          echo "::error::postgres service never became ready"
+          exit 1
+
+      - name: Migration dry-run against real Postgres
+        if: steps.touch.outputs.touched == 'true'
+        run: npx tsx scripts/apply-additive-migrations.ts --dry-run
