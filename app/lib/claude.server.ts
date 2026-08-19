@@ -3760,3 +3760,115 @@ Rules:
     turns: turn,
   }
 }
+
+export interface GeneratePairingWhyOnlyResult {
+  pairingWhy: PairingWhyProposal[]
+  turns: number
+}
+
+/**
+ * Narrower sibling of generateRails() for bulk backfills (ticket #3451):
+ * generates ONLY pairing_why blurbs for a hand-curated accessory list, via
+ * the same propose_pairing_why tool + executeRailTool dispatcher generateRails
+ * uses — restricted to that one tool so the model can't also propose rails
+ * (which would write unreviewed Sanity drafts for every anchor SKU, out of
+ * scope for a metafield-only backfill). Used by scripts/backfill-pairswith.ts.
+ */
+export async function generatePairingWhyOnly(opts: {
+  anchor: {
+    title: string
+    brand?: string
+    category?: string[]
+    tagline?: string
+    productTypeDial?: string
+  }
+  accessories: { id: string; title: string; brand?: string }[]
+  brandVoice?: string
+}): Promise<GeneratePairingWhyOnlyResult> {
+  const { anchor, accessories } = opts
+  if (accessories.length === 0) return { pairingWhy: [], turns: 0 }
+  const brandVoice = opts.brandVoice ?? (await getPipelineSetting('brandVoice')) ?? DEFAULT_BRAND_VOICE
+
+  const state = createRailGenState([])
+  const pairingOnlyTools = RAIL_TOOLS.filter(t => t.name === 'propose_pairing_why')
+
+  const anchorContext = [
+    `Title: ${anchor.title}`,
+    anchor.brand ? `Brand: ${anchor.brand}` : '',
+    anchor.category?.length ? `Category: ${anchor.category.join(', ')}` : '',
+    anchor.tagline ? `Tagline: ${anchor.tagline}` : '',
+    anchor.productTypeDial ? `Product type: ${anchor.productTypeDial}` : '',
+  ].filter(Boolean).join('\n')
+
+  const system = `${EMMA_SYSTEM_PROMPT}\n\n${brandVoice}
+
+You are writing "Pairs great with" copy for a product detail page. For each
+accessory listed below, call propose_pairing_why exactly once with a short
+Emma-voice sentence (at most 120 characters) explaining why it complements
+the anchor product. Speak from catalog knowledge only, never lived
+experience. Once you have proposed one blurb per accessory, stop responding
+(end_turn). Do not summarize.`
+
+  const userPrompt = `Anchor product:\n${anchorContext}\n\nAccessories needing pairing_why blurbs:\n${accessories.map(a => `- ${a.id} — ${a.title}${a.brand ? ` (${a.brand})` : ''}`).join('\n')}\n\nCall propose_pairing_why once per accessory, in the order listed.`
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: any[] = [{ role: 'user', content: userPrompt }]
+  const MAX_TURNS = 4
+  let turn = 0
+
+  while (turn < MAX_TURNS) {
+    turn++
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: pairingOnlyTools as any,
+      messages,
+    })
+
+    messages.push({ role: 'assistant', content: response.content })
+
+    // B3.3 bypass: feature 'rail-gen', caller 'generatePairingWhyOnly' (per-turn, best-effort)
+    {
+      const u = response.usage as typeof response.usage & {
+        cache_creation_input_tokens?: number
+        cache_read_input_tokens?:     number
+      }
+      void import('./token-log.server').then(({ logApiTokens }) =>
+        logApiTokens({
+          feature: 'rail-gen', model: MODEL, source: 'sync', caller: 'generatePairingWhyOnly',
+          inputTokens: u.input_tokens, outputTokens: u.output_tokens,
+          cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+          cacheReadTokens:     u.cache_read_input_tokens     ?? 0,
+        })
+      ).catch((err) => console.error('[claude] generatePairingWhyOnly token-log failed (ignored):', err))
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolUses = response.content.filter((b: any) => b.type === 'tool_use') as { id: string; name: string; input: unknown }[]
+
+    if (response.stop_reason === 'end_turn' || response.stop_reason === 'max_tokens') break
+    if (toolUses.length === 0) break
+
+    const toolResults = await Promise.all(
+      toolUses.map(async tu => {
+        try {
+          const result = await executeRailTool(tu.name, tu.input, state, [])
+          return { type: 'tool_result' as const, tool_use_id: tu.id, content: JSON.stringify(result) }
+        } catch (err) {
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: tu.id,
+            is_error: true,
+            content: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+          }
+        }
+      }),
+    )
+
+    messages.push({ role: 'user', content: toolResults })
+  }
+
+  return { pairingWhy: state.pairingWhy, turns: turn }
+}
