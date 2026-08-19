@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   campaignPushEnabled,
   parseCampaignBrief,
@@ -7,6 +7,9 @@ import {
   klaviyoCampaignEditUrl,
   buildCampaignOwnerEmail,
   pushApprovedCampaign,
+  createKlaviyoCampaign,
+  previewKlaviyoCampaign,
+  listKlaviyoCampaigns,
   EMAIL_CAMPAIGN_PUSH_VALVE,
   type CampaignPushDeps,
 } from './klaviyo-campaigns.server'
@@ -213,5 +216,84 @@ describe('pushApprovedCampaign', () => {
     expect(res.pushed).toBe(false)
     expect(res.reason).toContain('klaviyo-error')
     expect(deps.addNote).not.toHaveBeenCalled()
+  })
+})
+
+// ─── Draft-only Campaigns client: create / preview / list (#4222) ───────────
+
+describe('Klaviyo Campaigns client (draft-only, no send)', () => {
+  const okJson = (body: unknown, status = 200) =>
+    ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) }) as unknown as Response
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('createKlaviyoCampaign POSTs to /campaigns/ and returns the new id', async () => {
+    const fetchMock = vi.fn(async () => okJson({ data: { id: '01NEW', type: 'campaign' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const payload = buildCampaignPayload({
+      name: 'aug', subject: 'Sub', previewText: 'Prev', listId: 'MAIN1',
+      fromEmail: 'hello@xdipx.com', fromLabel: 'xdipx',
+    })
+    const res = await createKlaviyoCampaign(payload)
+
+    expect(res).toEqual({ id: '01NEW' })
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://a.klaviyo.com/api/campaigns/')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual(payload)
+  })
+
+  it('createKlaviyoCampaign throws when Klaviyo returns no id', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ data: {} })))
+    await expect(createKlaviyoCampaign({ data: {} })).rejects.toThrow(/no id/)
+  })
+
+  it('previewKlaviyoCampaign GETs the campaign with its messages included', async () => {
+    const fetchMock = vi.fn(async () => okJson({
+      data: { id: '01ABC', type: 'campaign', attributes: { name: 'aug' } },
+      included: [
+        { id: 'm1', type: 'campaign-message', attributes: { definition: { channel: 'email' } } },
+        { id: 't1', type: 'tag' }, // unrelated included resource, must be filtered out
+      ],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await previewKlaviyoCampaign('01ABC')
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://a.klaviyo.com/api/campaigns/01ABC/?include=campaign-messages')
+    expect(init.method).toBe('GET')
+    expect(res.campaign.id).toBe('01ABC')
+    expect(res.messages).toHaveLength(1)
+    expect(res.messages[0]!.id).toBe('m1')
+  })
+
+  it('listKlaviyoCampaigns requires the channel filter Klaviyo mandates', async () => {
+    const fetchMock = vi.fn(async () => okJson({ data: [{ id: 'c1', type: 'campaign' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await listKlaviyoCampaigns({ channel: 'email' })
+    const [url] = fetchMock.mock.calls[0] as unknown as [string]
+    // The filter is URL-encoded equals(messages.channel,"email").
+    expect(url).toBe(
+      'https://a.klaviyo.com/api/campaigns/?filter=' +
+      encodeURIComponent('equals(messages.channel,"email")'),
+    )
+    expect(res.map(c => c.id)).toEqual(['c1'])
+  })
+
+  it('never touches a campaign-send-job endpoint (no send path)', async () => {
+    const fetchMock = vi.fn(async () => okJson({ data: { id: 'x', type: 'campaign' }, included: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createKlaviyoCampaign({ data: {} })
+    await previewKlaviyoCampaign('x')
+    await listKlaviyoCampaigns({ channel: 'email' })
+
+    for (const call of fetchMock.mock.calls as unknown as unknown[][]) {
+      expect(String(call[0])).not.toContain('campaign-send-job')
+    }
   })
 })

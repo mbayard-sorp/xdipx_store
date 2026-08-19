@@ -15,6 +15,13 @@ import { addSuggestionNote } from './team.server'
  * or sends. The whole path is gated behind `email_campaign_push_enabled`, which
  * defaults OFF in code (a missing setting reads as off), so with the valve off
  * nothing changes.
+ *
+ * The draft-only Campaigns client is create / preview / list only
+ * (`createKlaviyoCampaign`, `previewKlaviyoCampaign`, `listKlaviyoCampaigns`).
+ * There is deliberately NO send helper: triggering a send is a campaign-send-job
+ * (POST /api/campaign-send-jobs/), an owner-attended money-valve surface that
+ * stays in #57 and must never be reachable from an unattended routine (#4222,
+ * the shippable code slice split from #57 clause 1).
  */
 
 /** Valve key. Read via the generic pipeline-settings getter. Default OFF. */
@@ -234,35 +241,98 @@ export interface CampaignPushDeps {
   }
 }
 
-/** Live Klaviyo campaign create. Returns the new campaign's id. */
-async function createKlaviyoCampaignLive(
-  payload: Record<string, unknown>,
-): Promise<{ id: string }> {
-  const res = await fetch(`${KLAVIYO_BASE}/campaigns/`, {
-    method: 'POST',
+// ─── Draft-only Campaigns client (create / preview / list) ──────────────────
+// #4222: the shippable, no-spend slice of #57 clause 1. No send helper lives
+// here — see the module header.
+
+/**
+ * Thin fetch wrapper for the Klaviyo Campaigns API. Shared by create, preview,
+ * and list so auth, revision, and error handling stay in one place.
+ */
+async function klaviyoCampaignsApi<T>(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+): Promise<T> {
+  const init: RequestInit = {
+    method,
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
       revision: KLAVIYO_REVISION,
       Authorization: `Klaviyo-API-Key ${process.env['KLAVIYO_API_KEY']}`,
     },
-    body: JSON.stringify(payload),
-  })
+  }
+  if (body !== undefined) init.body = JSON.stringify(body)
+  const res = await fetch(`${KLAVIYO_BASE}${path}`, init)
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`Klaviyo campaign create ${res.status}: ${text}`)
+    throw new Error(`Klaviyo campaigns API ${method} ${path} ${res.status}: ${text}`)
   }
-  const json = (await res.json()) as { data?: { id?: string } }
+  const text = await res.text()
+  return (text ? JSON.parse(text) : {}) as T
+}
+
+/** JSON:API resource object, loosely typed — callers read named fields. */
+export interface KlaviyoCampaignResource {
+  type: string
+  id: string
+  attributes?: Record<string, unknown>
+}
+
+/**
+ * Create a campaign. Klaviyo creates it in DRAFT status; this sends nothing.
+ * Pass a payload from `buildCampaignPayload` (or an equivalent Campaigns API
+ * body). Returns the new campaign's id.
+ */
+export async function createKlaviyoCampaign(
+  payload: Record<string, unknown>,
+): Promise<{ id: string }> {
+  const json = await klaviyoCampaignsApi<{ data?: { id?: string } }>('/campaigns/', 'POST', payload)
   const id = json.data?.id
   if (!id) throw new Error('Klaviyo campaign create returned no id')
   return { id }
+}
+
+/**
+ * Read a campaign back for preview — the draft plus its message content. A GET:
+ * it renders nothing to a customer and sends nothing. `messages` holds the
+ * included campaign-message resources so a reviewer can see the subject/body.
+ */
+export async function previewKlaviyoCampaign(
+  campaignId: string,
+): Promise<{ campaign: KlaviyoCampaignResource; messages: KlaviyoCampaignResource[] }> {
+  const json = await klaviyoCampaignsApi<{ data: KlaviyoCampaignResource; included?: KlaviyoCampaignResource[] }>(
+    `/campaigns/${encodeURIComponent(campaignId)}/?include=campaign-messages`,
+    'GET',
+  )
+  return {
+    campaign: json.data,
+    messages: (json.included ?? []).filter(r => r.type === 'campaign-message'),
+  }
+}
+
+/**
+ * List campaigns for one channel. Klaviyo's List Campaigns endpoint REQUIRES a
+ * filter on `messages.channel`, so the channel is mandatory here — omitting it
+ * is a 400 from Klaviyo, not an optional convenience.
+ */
+export async function listKlaviyoCampaigns(
+  opts: { channel: 'email' | 'sms' },
+): Promise<KlaviyoCampaignResource[]> {
+  const filter = `equals(messages.channel,"${opts.channel}")`
+  const json = await klaviyoCampaignsApi<{ data?: KlaviyoCampaignResource[] }>(
+    `/campaigns/?filter=${encodeURIComponent(filter)}`,
+    'GET',
+  )
+  return json.data ?? []
 }
 
 /** Production wiring of the dependency seam. */
 export function defaultCampaignPushDeps(): CampaignPushDeps {
   return {
     getSetting: getPipelineSetting,
-    createCampaign: createKlaviyoCampaignLive,
+    createCampaign: createKlaviyoCampaign,
     sendOwnerEmail,
     addNote: addSuggestionNote,
     env: {
