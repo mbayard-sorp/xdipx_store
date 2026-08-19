@@ -256,6 +256,54 @@ describe('the gate runs at publish time', () => {
   })
 })
 
+// ── End-to-end X media path (ticket #4131) ───────────────────────────────────
+//
+// #4131's second DONE WHEN: "a gated X draft with a generated asset publishes
+// live via /cron/social-publish." The write-time guard (ticket #4140,
+// api.team.social-post.tsx) stops a media-less X draft from ever being
+// created; this proves the other half of the pipeline actually works once a
+// draft DOES carry media — that a real (non-stubbed) run of
+// `runDeterministicPublishChecks` lets it through and the tick reaches the
+// platform's publish call, exactly as `/cron/social-publish` does per
+// `social-publish-run.server.ts`'s `xTickDeps` (server/cron.ts registers the
+// route and only awaits `runAllSocialPublishTicks`, so this tick-level test is
+// the real substance behind that route).
+describe('an X draft with a generated asset reaches the publish call (ticket #4131)', () => {
+  it('gates PASS and publishes an X row that carries mediaUrls', async () => {
+    // platform: 'x', mediaUrls carried from post()'s default (a generated
+    // `social-` asset), reviewStatus 'approved', and a real gate-stamp PASS —
+    // exactly what the write-time guard now requires before a draft can exist.
+    // No gateDeps override: the real runDeterministicPublishChecks runs.
+    const { repo, calls } = fakeRepo([post({ platform: 'x' })])
+    const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'x_42' }))
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+    expect(publish).toHaveBeenCalledTimes(1)
+    // The mocked publish call stands in for the X API adapter (no live
+    // network); the row reaching it is the thing under test.
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+      id: 1,
+      platform: 'x',
+      mediaUrls: expect.arrayContaining([expect.stringContaining('social-')]),
+    }))
+    expect(calls.posted).toEqual([1])
+  })
+
+  it('still blocks an X row that reached this far with no media (belt and suspenders behind the write-time guard)', async () => {
+    // The write-time guard makes this row impossible to draft going forward,
+    // but the publish-time gate is the independent, non-bypassable backstop —
+    // this is what actually protects a row that predates the guard.
+    const { repo, calls } = fakeRepo([post({ platform: 'x', mediaUrls: [] })])
+    const publish = vi.fn()
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+
+    expect(publish).not.toHaveBeenCalled()
+    expect(r.attempts[0]?.outcome).toBe('blocked_by_gate')
+    expect(calls.needsChanges[0]?.feedback).toContain('image-provenance')
+  })
+})
+
 describe('failure handling', () => {
   it('returns a first failure to the queue rather than giving up', async () => {
     const { repo, calls } = fakeRepo([post({ errorMessage: null })])
