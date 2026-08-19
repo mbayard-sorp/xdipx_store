@@ -191,7 +191,11 @@ function single(text: string | null, outcome: ProcessSmsResult['outcome']): Proc
     : { replies: [{ body: text }], reply: text, outcome }
 }
 
-async function hasAgeConsent(phone: string): Promise<boolean> {
+// Exported for the web<->SMS opt-in linker (#3916): it needs to know whether
+// a phone has already cleared the age/consent gate before deciding which
+// outbound message to send (AGE_GATE_REPLY for a brand-new number vs. a
+// cross-channel continuation message for an already-consented one).
+export async function hasAgeConsent(phone: string): Promise<boolean> {
   try {
     const rows = await db
       .select({ phone: smsAgeConsent.phone })
