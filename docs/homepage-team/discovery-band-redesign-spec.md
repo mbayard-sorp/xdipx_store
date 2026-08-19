@@ -250,7 +250,7 @@ array in `studio/schemaTypes/index.js`, which is how every previous additive blo
 | `backfill.typeDial` | string (list = `PRODUCT_TYPE_DIALS`) | required unless `productHandles` ≥ 6 | The category floor. This is what makes an absurd result impossible. |
 | `backfill.mood` | string | optional | One mood tag from the live vocab; scored, not filtered hard. |
 | `backfill.minPrice` / `maxPrice` | number | optional, 0–500 | Lane price window. `maxPrice` overrides the global $150 shelf ceiling when a lane genuinely wants to sell up. |
-| `seeAllHandle` | string | required, handle pattern | Bare collection handle for "See the full fit →". Validated against the live collection list at build; falls back to `best-sellers`. |
+| `seeAllHandle` | string | required, handle pattern | Bare collection handle for "See the full fit →". Validated against the live collection list at build; an unverified handle drops the See-all (renders no link), never falling back to `best-sellers` (mission brief §1). |
 | `enabled` | boolean | default true | Hide a lane without deleting the curation. |
 
 ### New singleton document — `studio/schemas/curiosityShelf.js`, id `singleton.curiosityShelf`
@@ -379,8 +379,11 @@ HIGH_BAND            = > 80
   because paging needs multiples of 6. Measure this during the build cycle and record the
   number in the PR.
 - `seeAllHref` = `/collections/{lane.seeAllHandle}` when the handle is in the verified
-  collection list, else `/collections/best-sellers`. Validated at **build**, so a bad
-  handle can never ship a 404 into the band.
+  collection list, else `null` (the lane renders NO "See the full fit" link). Validated
+  at **build**, so a bad handle can never ship a 404 into the band, and per mission
+  brief §1 an auto-generated module never silently falls back to `best-sellers` (a
+  different ranking from the lane's discovery-index deck, structurally guaranteed to
+  mismatch the six on screen).
 
 **Payload version:** the shape of `HomepagePayloadB` changes, so
 `HOMEPAGE_PAYLOAD_B_VERSION` must go `b6` → `b7`. Without the bump, deployed code reads
@@ -613,7 +616,9 @@ renders the final state. Content and behaviour are identical.
 8. Deck rotation: `dayBucket` N and N+1 produce different page-0 sets; curated handles hold
    position 0..n in both.
 9. Absent/invalid Sanity doc → `DEFAULT_LANES` render.
-10. Every lane's `seeAllHref` resolves to a verified collection or `best-sellers`.
+10. Every lane's `seeAllHref` resolves to a verified collection, or `null` (no See-all
+    link) when the authored handle is not a live, in-stock collection. No `best-sellers`
+    fallback (mission brief §1).
 
 ### QA acceptance (`qa-reviewer`, preview MCP)
 

@@ -237,8 +237,6 @@ export interface ResolveOptions {
   verifiedCollections: ReadonlySet<string>
 }
 
-const FALLBACK_COLLECTION = 'best-sellers'
-
 /**
  * Resolve one lane to a shelf of real products, or `null` when the lane cannot
  * honestly fill six. Curated handles are pinned to the front and never rotated;
@@ -308,17 +306,22 @@ export function resolveLane(
   // page, fall back to a single honest page rather than a short one.
   if (deck.length < wantPages * SHELF_SLOTS) deck = deck.slice(0, SHELF_SLOTS)
 
-  // 7. See-all: authored handle when verified, else best-sellers — validated here
-  //    so a bad handle can never ship a 404 into the band.
-  const seeAllHandle = opts.verifiedCollections.has(lane.seeAllHandle)
-    ? lane.seeAllHandle
-    : FALLBACK_COLLECTION
+  // 7. See-all: the authored handle ONLY when it is a live, in-stock collection.
+  //    An unverified handle drops the See-all entirely (`null`) rather than
+  //    pointing at best-sellers: mission brief §1 forbids that silent fallback for
+  //    an auto-generated module, because best-sellers is a different ranking from
+  //    the discovery index that fills this lane and is structurally guaranteed to
+  //    mismatch the six the visitor just looked at. Validated here so a bad handle
+  //    can never ship a 404 (or a mismatched destination) into the band.
+  const handle = lane.seeAllHandle.trim()
+  const seeAllHref =
+    handle && opts.verifiedCollections.has(handle) ? `/collections/${handle}` : null
 
   return {
     label: lane.label,
     key: lane.key,
     emmaLine: lane.emmaLine,
-    seeAllHref: `/collections/${seeAllHandle}`,
+    seeAllHref,
     deck,
   }
 }

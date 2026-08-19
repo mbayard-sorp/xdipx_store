@@ -54,7 +54,7 @@ function toContent(doc: CuriosityShelfDoc | null): CuriosityShelfContent | null 
         minPrice: coerceNumber(l.backfill?.minPrice),
         maxPrice: coerceNumber(l.backfill?.maxPrice),
       },
-      seeAllHandle: typeof l.seeAllHandle === 'string' ? l.seeAllHandle : 'best-sellers',
+      seeAllHandle: typeof l.seeAllHandle === 'string' ? l.seeAllHandle : '',
       enabled: l.enabled !== false,
     }))
 
@@ -89,9 +89,12 @@ export async function getCuriosityShelfData(
   const doc = await getCuriosityShelf()
   const content = toContent(doc) ?? DEFAULT_SHELF_CONTENT
 
-  // Verified see-all destinations: collections that exist AND have stock. A
-  // Shopify hiccup degrades to "trust the authored handles" rather than repointing
-  // every lane at best-sellers (mirrors panel-deck's build-time validation).
+  // Verified see-all destinations: collections that exist AND have stock. An
+  // authored handle that is not on this list drops that lane's See-all (the
+  // resolver renders no link) rather than repointing it at best-sellers, whose
+  // ranking is structurally guaranteed to mismatch a lane's discovery-index deck
+  // (mission brief §1). A Shopify hiccup degrades to "trust the authored handles"
+  // so a transient API failure does not strip every See-all off the band.
   let verifiedCollections: Set<string>
   try {
     const collections = await getCollectionList()
@@ -100,9 +103,8 @@ export async function getCuriosityShelfData(
     )
   } catch (err) {
     console.warn('[curiosity-shelf] collection list unavailable, trusting authored handles:', err)
-    verifiedCollections = new Set(content.lanes.map(l => l.seeAllHandle))
+    verifiedCollections = new Set(content.lanes.map(l => l.seeAllHandle).filter(Boolean))
   }
-  verifiedCollections.add('best-sellers')
 
   const dayBucket = Math.floor(now().getTime() / 86_400_000)
   return resolveShelf(content, index, { dayBucket, verifiedCollections })

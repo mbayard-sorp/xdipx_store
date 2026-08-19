@@ -152,13 +152,28 @@ describe('resolveLane', () => {
     expect(set0).not.toBe(set1)
   })
 
-  // ── 10. seeAllHref resolves to a verified collection or best-sellers ────────
-  it('validates seeAllHandle against the verified list and falls back to best-sellers', () => {
+  // ── 10. seeAllHref resolves to a verified collection, else drops to null ─────
+  it('validates seeAllHandle against the verified list and drops the See-all when unverified', () => {
     const index = typePool('vibrator', 8, i => 30 + i)
     const good = resolveLane(lane({ key: 'hums', seeAllHandle: 'vibrators' }), index, 0, OPTS())!
     expect(good.seeAllHref).toBe('/collections/vibrators')
+    // Mission brief §1: no silent best-sellers fallback for an auto-generated
+    // module. An unverified handle renders NO See-all rather than a mismatch.
     const bad = resolveLane(lane({ key: 'hums', seeAllHandle: 'does-not-exist' }), index, 0, OPTS())!
-    expect(bad.seeAllHref).toBe('/collections/best-sellers')
+    expect(bad.seeAllHref).toBeNull()
+    // An empty authored handle (the partial-doc default) also drops the See-all,
+    // never accidentally verifying against a live best-sellers collection.
+    const empty = resolveLane(lane({ key: 'hums', seeAllHandle: '' }), index, 0, OPTS())!
+    expect(empty.seeAllHref).toBeNull()
+    // best-sellers is no longer magic: even if it is a real collection it only
+    // renders when a lane genuinely authored it AND it verifies as in-stock.
+    const bestSellersUnverified = resolveLane(
+      lane({ key: 'hums', seeAllHandle: 'best-sellers' }),
+      index,
+      0,
+      { dayBucket: 0, verifiedCollections: new Set(['vibrators']) },
+    )!
+    expect(bestSellersUnverified.seeAllHref).toBeNull()
   })
 })
 
