@@ -20,10 +20,14 @@ import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 // lane's scope.
 
 // Documented Shopify US delivery-profile free-shipping TOTAL_PRICE condition.
-// Verified 2026-07-27 (see app/lib/shipping.ts). Update this in the SAME change
-// as any Shopify delivery-profile edit, or the constant and the storefront copy
-// drift apart.
-const SHOPIFY_US_FREE_SHIP_TOTAL_PRICE = 99
+// Ticket #3450 (2026-08-19): moved to 59 as the code half of the change. Live
+// Shopify was read via Admin GraphQL on 2026-08-19 and was STILL 99.0 at that
+// time -- an owner must change the delivery profile's US-Standard TOTAL_PRICE
+// rate-range condition to 59.0 for this pin to be true in production (see
+// app/lib/shipping.ts and the ticket #3450 PR description). Update this in the
+// SAME change as any Shopify delivery-profile edit, or the constant and the
+// storefront copy drift apart.
+const SHOPIFY_US_FREE_SHIP_TOTAL_PRICE = 59
 
 describe('FREE_SHIPPING_THRESHOLD coupling guard', () => {
   it('matches the live Shopify US free-shipping condition', () => {

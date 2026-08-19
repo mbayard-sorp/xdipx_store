@@ -11,13 +11,24 @@
  * A <g:shipping> block is per item: Merchant Center evaluates it as what a
  * customer pays to ship that one item. Cart-total-conditional rates cannot be
  * expressed per item, so the honest per-item value is the single-unit cart:
- *   - contiguous US: $9.99, free when the item price alone reaches $99
- *   - HI / AK / PR: $9.99, free when the item price alone reaches $145
+ *   - contiguous US: $9.99, free when the item price alone reaches
+ *     FREE_SHIPPING_THRESHOLD
+ *   - HI / AK / PR: $9.99, free when the item price alone reaches
+ *     REMOTE_FREE_SHIPPING_THRESHOLD
  * Threshold values mirror the live Shopify delivery profile via
  * FREE_SHIPPING_THRESHOLD (see app/lib/shipping.ts and its coupling guard).
- * The fuller conditional-rate model (free over $99 on multi-item carts)
+ * The fuller conditional-rate model (free over threshold on multi-item carts)
  * belongs in Merchant Center account-level shipping settings, an owner
  * action in the GMC UI, not in the feed.
+ *
+ * TICKET #3450 (2026-08-19): this feed reads FREE_SHIPPING_THRESHOLD directly,
+ * so the moment that constant changes, the feed's declared free-shipping
+ * price changes too -- even before the live Shopify delivery profile matches
+ * it. A feed/checkout shipping mismatch is a Merchant Center misrepresentation
+ * finding (suspension-level, see above), not just a storefront-copy problem.
+ * Do not deploy a FREE_SHIPPING_THRESHOLD change ahead of the matching
+ * Shopify delivery-profile change for this reason as well as the cart-copy
+ * one documented in app/lib/shipping.ts.
  *
  * Plain module (no .server suffix) so vitest can unit-test it directly; it
  * has no server-only dependencies.
