@@ -2226,13 +2226,61 @@ export interface DraftSocialPostInput {
   posterUrl?: string | undefined
 }
 
+/** Review states a still-open draft can sit in before the gate or the owner
+ *  resolves it. A row in one of these is "the same post, still in flight" —
+ *  a repeat draft attempt should land on it, not next to it. `rejected` and
+ *  `approved` (which moves the row on to publish/`posted`) are terminal for
+ *  this purpose: a legitimate rework after either is a new row by design
+ *  (`reworkedFrom` chains it), so the guard does not fire on them. */
+const SOCIAL_DRAFT_OPEN_REVIEW_STATUSES = ['pending_review', 'needs_changes'] as const
+
+/**
+ * Ticket #4069: five rows (ids 43-47) for one Instagram caption were written
+ * in a single ~30-minute window on 2026-08-16 — id 46 sat `pending_review`,
+ * unresolved, when id 47 was drafted eight minutes later with byte-identical
+ * `tweetText` and went on to publish. Nothing stopped a second draft call for
+ * a post already in flight from landing as a sibling row instead of being
+ * recognized as the same post. This checks for that sibling before inserting.
+ */
+async function findOpenDuplicateDraft(
+  p: Pick<DraftSocialPostInput, 'platform' | 'tweetText' | 'scheduledFor'>,
+): Promise<number | null> {
+  const conditions = [
+    eq(socialPosts.platform, p.platform),
+    eq(socialPosts.tweetText, p.tweetText),
+    inArray(socialPosts.reviewStatus, [...SOCIAL_DRAFT_OPEN_REVIEW_STATUSES]),
+  ]
+  // Scope to the same campaign day when the caller gave us one (the routine
+  // always sets scheduledFor per its workflow). Without a day to scope by,
+  // matching on platform + exact caption + open status alone is still a
+  // faithful "same post, still in flight" signal.
+  if (p.scheduledFor) conditions.push(eq(socialPosts.scheduledFor, p.scheduledFor))
+  const [existing] = await db
+    .select({ id: socialPosts.id })
+    .from(socialPosts)
+    .where(and(...conditions))
+    .orderBy(desc(socialPosts.createdAt))
+    .limit(1)
+  return existing?.id ?? null
+}
+
 /**
  * Insert a DRAFT social post for human review in /admin/socials. This is the
  * only write path the social-media-manager stub has — there is intentionally
  * no code path from here to postTweet()/live posting. Every draft enters the
  * review queue as pending_review; only the owner (admin action) moves it.
+ *
+ * Idempotency guard (#4069): a same-platform, same-caption row still open
+ * (`pending_review`/`needs_changes`) for the same campaign day is a conflict,
+ * not a new post — the existing row's id comes back with `deduped:true`
+ * instead of a sibling row, mirroring the suggestion bus's dedupeKey shape
+ * (`createSuggestionDetailed`, `{id, deduped}`).
  */
-export async function createDraftSocialPost(p: DraftSocialPostInput): Promise<number> {
+export async function createDraftSocialPost(
+  p: DraftSocialPostInput,
+): Promise<{ id: number; deduped: boolean }> {
+  const existingId = await findOpenDuplicateDraft(p)
+  if (existingId != null) return { id: existingId, deduped: true }
   const [row] = await db
     .insert(socialPosts)
     .values({
@@ -2250,7 +2298,7 @@ export async function createDraftSocialPost(p: DraftSocialPostInput): Promise<nu
       posterUrl:     p.posterUrl ?? null,
     })
     .returning({ id: socialPosts.id })
-  return row!.id
+  return { id: row!.id, deduped: false }
 }
 
 export async function listSocialPosts(status?: string, limit = 50, reviewStatus?: string) {

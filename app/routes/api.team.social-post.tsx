@@ -3,7 +3,10 @@
  *
  *   { op: 'draft', platform, postType?, tweetText, mediaUrls?, dealHistoryId?,
  *     scheduledFor?, reworkedFrom?,
- *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id }
+ *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id, deduped }
+ *     `deduped:true` means a still-open (pending_review/needs_changes) row for
+ *     the same platform, caption, and campaign day already existed and `id`
+ *     is THAT row, not a new one (ticket #4069 — see createDraftSocialPost).
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
  *   { op: 'config' } -> { frequencies, autopostValve }
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
@@ -99,7 +102,10 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 },
       )
     }
-    const id = await createDraftSocialPost({
+    // Idempotency guard (#4069): a same-platform, same-caption row still open
+    // for the same campaign day comes back as `deduped:true` with the
+    // existing id rather than a new sibling row — see createDraftSocialPost.
+    const { id, deduped } = await createDraftSocialPost({
       platform:      b['platform'],
       postType:      typeof b['postType'] === 'string' && b['postType'].length <= 20 ? b['postType'] : 'manual',
       tweetText:     b['tweetText'],
@@ -110,7 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
       videoJobId:    typeof b['videoJobId'] === 'number' ? b['videoJobId'] : undefined,
       posterUrl:     typeof b['posterUrl'] === 'string' ? b['posterUrl'] : undefined,
     })
-    return Response.json({ id })
+    return Response.json({ id, deduped })
   }
 
   if (b['op'] === 'list') {

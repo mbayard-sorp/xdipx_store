@@ -53,7 +53,7 @@ const voiceGate = { verdict: 'PASS', reviewer: 'emma-empathy-reviewer' }
 beforeEach(() => {
   vi.clearAllMocks()
   voiceGateMock.mockReturnValue({ ok: true, verdict: voiceGate })
-  createDraftMock.mockResolvedValue(42)
+  createDraftMock.mockResolvedValue({ id: 42, deduped: false })
 })
 
 describe('draft op — X media preflight', () => {
@@ -76,7 +76,7 @@ describe('draft op — X media preflight', () => {
       mediaUrls: ['https://cdn.shopify.com/files/social-x-scene-20260818.jpg'],
     })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ id: 42 })
+    expect(await res.json()).toEqual({ id: 42, deduped: false })
     expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
       platform: 'x',
       mediaUrls: ['https://cdn.shopify.com/files/social-x-scene-20260818.jpg'],
@@ -94,5 +94,20 @@ describe('draft op — X media preflight', () => {
     const res = await post({ op: 'draft', platform: 'x', tweetText: 'no gate' })
     expect(res.status).toBe(400)
     expect(createDraftMock).not.toHaveBeenCalled()
+  })
+})
+
+// Ticket #4069: the route surfaces whatever createDraftSocialPost decides —
+// a fresh row or the existing open duplicate — verbatim, so a caller can tell
+// the two apart instead of always seeing a bare `{ id }`.
+describe('draft op — idempotency surfacing (#4069)', () => {
+  it('passes through deduped:true and the existing row id unchanged', async () => {
+    createDraftMock.mockResolvedValue({ id: 46, deduped: true })
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'starting a little series', voiceGate,
+      mediaUrls: ['https://cdn.shopify.com/files/ig-scene.jpg'], scheduledFor: '2026-08-16',
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ id: 46, deduped: true })
   })
 })
