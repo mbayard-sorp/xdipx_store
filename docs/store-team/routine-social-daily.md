@@ -343,7 +343,9 @@ Draft counts come from the Step 2 config — up to `social_freq_<platform>` new 
 minus any reworks already written for that platform today, and minus everything already drafted
 today per the arithmetic above. Platform-appropriate, **editorial-first**
 (not product-first: on Instagram and TikTok a post that reads as an offer is removable under Meta's
-Restricted Goods standard regardless of how clean the image is), fresh language every time. X drafts fit 280 chars; Instagram and TikTok drafts are posted manually
+Restricted Goods standard regardless of how clean the image is), fresh language every time. X drafts
+fit 280 chars **and require media, same as Instagram and TikTok** (Step 5) — an X draft is never text
+plus a link alone. Instagram and TikTok drafts are posted manually
 by the owner once approved. At most one promo-angle post per run, and only referencing
 owner-approved promo codes. Propose a `scheduledFor` date for every draft (default: tomorrow) so
 the Studio's calendar strip populates.
@@ -516,7 +518,7 @@ per-platform, and on Instagram it is a hard line the Step 4b sale gate already e
 | Platform | PDP link in caption | Shoppable path |
 |---|---|---|
 | Instagram | **Never.** Caption URLs are not clickable on IG, and a PDP link is the clearest "attempting to sell" signal under Meta Restricted Goods. | post → profile → link in bio → site. The bio-link landing page at `xdipx.com/social`, plus comment replies (an answered "where do I get this?" is not a sale attempt; the support-drafted reply carries the direct PDP link). |
-| X | Allowed and encouraged, per the existing X lane. | direct PDP link with channel UTMs. |
+| X | Allowed and encouraged, per the existing X lane. **Also requires media** — see Step 5; a text-plus-link X draft is not a lighter-weight option, it is unpublishable. | direct PDP link with channel UTMs. |
 | LinkedIn | Site links fine, PDP links avoided, per the LinkedIn addendum. | site/editorial links only. |
 
 **`/social` sync is a daily-routine duty.** The bio-link landing page's product modules must be kept
@@ -525,11 +527,21 @@ resolves to what the feed is actually featuring. Do this as part of the run and 
 
 ## Step 5 — Imagery (every visual platform draft ships with a real asset)
 
-An Instagram or TikTok draft **must carry at least one `mediaUrls` entry**. This is not a quality
-preference, it is a publish requirement: the pre-publish gate blocks a post with no media and blocks
-a post carrying a bare SKU packshot, so a draft with either is drafting into a wall. On 2026-08-13
-all four pending Instagram drafts were blocked, three for packshots and one for no image at all,
-while a working generator sat unused because this step never named it.
+An Instagram, TikTok, **or X** draft **must carry at least one `mediaUrls` entry**. This is not a
+quality preference, it is a publish requirement: the pre-publish gate blocks a post with no media on
+every platform it publishes (`social-publish-gate.server.ts`, "Media is required on X as well as
+Instagram" — owner decision 2026-08-16) and blocks a post carrying a bare SKU packshot, so a draft
+with either is drafting into a wall. On 2026-08-13 all four pending Instagram drafts were blocked,
+three for packshots and one for no image at all, while a working generator sat unused because this
+step never named it.
+
+**X is not the exception this playbook used to imply.** Earlier language described an X draft as
+text plus a PDP link, with no mention of media, and the gap went unnoticed for two days: X's valve
+turned on 2026-08-17 while seven X rows (ids 52, 54, 55, 56, 57, 58, 60) sat drafted with zero media,
+so every one was a guaranteed gate BLOCK. `POST /api/team/social-post {op:'draft'}` now refuses a
+`platform:'x'` draft with no `mediaUrls` at write time (400, ticket #4140/#4131) — the same
+fail-closed shape as the voice-gate check above — so treat X exactly like Instagram and TikTok in
+this step: generate or reuse an asset before you draft, never after.
 
 Ask `media-manager` first for an existing Shopify Files / Sanity asset (reuse-first). When nothing
 fits, **generate one with `scripts/gen-social-image.ts`**, re-checking the gate before each run. It
@@ -642,6 +654,16 @@ and writes no row.
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+```
+
+**X drafts carry `mediaUrls` too — never omit it.** The server 400s a `platform:'x'` draft with an
+empty or missing `mediaUrls` array (ticket #4131), the same fail-closed shape as a missing
+`voiceGate`:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/social-post" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"draft","platform":"x","postType":"manual","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 One `event` per draft (`eventType:'step'`, `phase:'draft'`):
