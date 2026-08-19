@@ -571,7 +571,10 @@ export function AskEmmaWidget() {
                         onChange={(e) => setSmsConsent(e.target.checked)}
                         className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-ink/30"
                       />
-                      <span>I want to keep this conversation going by text from xdipx.</span>
+                      <span>
+                        I want to keep this conversation going by text from xdipx. Msg &amp; data
+                        rates may apply, reply STOP anytime.
+                      </span>
                     </label>
                   </form>
                 )}

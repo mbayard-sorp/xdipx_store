@@ -92,7 +92,11 @@ export async function action({ request }: ActionFunctionArgs) {
     const result = await linkWebSessionToSms({ sessionId, phone })
     if (!result.ok) {
       return Response.json(
-        { ok: false, error: 'opted_out', reply: "That number's opted out of texts from us. I can't text it ♥" },
+        {
+          ok: false,
+          error: 'opted_out',
+          reply: "That number's already opted out of texts from us, so I'm not able to send anything to it.",
+        },
         { status: 200 },
       )
     }
@@ -106,8 +110,8 @@ export async function action({ request }: ActionFunctionArgs) {
       ok: true,
       alreadyConsented: result.alreadyConsented,
       reply: result.alreadyConsented
-        ? "Sent ♥ Keep going any time by text."
-        : "Sent ♥ Reply YES on your phone to keep the conversation going by text.",
+        ? "Sent ♥. Keep going any time by text."
+        : "Sent ♥. Reply YES on your phone to keep the conversation going by text.",
     })
   } catch (err) {
     console.error('[api.web-sms-optin] link failed', err)
