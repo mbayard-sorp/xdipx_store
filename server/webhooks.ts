@@ -43,6 +43,24 @@ interface ShopifyLineItem {
 
 interface ShopifyNoteAttribute { name: string; value: string }
 
+/**
+ * Referral code carried on an order's note_attributes.
+ *
+ * The key is `_ref_code`: that is what api.cart stamps onto the cart via
+ * applyAttributionAttrs (app/lib/attribution-cart.server.ts), matching the
+ * underscore-prefixed convention of every other attribution key (_fbp, _fbc,
+ * _ga_cid, _utm_*) and the Klaviyo reader further down in handleOrderCreated.
+ * This reader historically looked for `ref_source`, a key nothing ever writes,
+ * so every referral click was silently dropped and the referrals table stayed
+ * empty for its entire lifetime. Kept as an exported pure helper so the exact
+ * attribute-name data contract is unit-tested and cannot drift again.
+ */
+export function referralCodeFromNoteAttributes(
+  attrs: readonly ShopifyNoteAttribute[] | undefined,
+): string | undefined {
+  return attrs?.find(a => a.name === '_ref_code')?.value
+}
+
 interface ShopifyOrder {
   id: number
   order_number: number
@@ -245,8 +263,9 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
     }
   }
 
-  // Capture referral code from note_attributes
-  const refCode = order.note_attributes?.find(a => a.name === 'ref_source')?.value
+  // Capture referral code from note_attributes (stamped as `_ref_code` by the
+  // cart; see referralCodeFromNoteAttributes for the data contract).
+  const refCode = referralCodeFromNoteAttributes(order.note_attributes)
   if (refCode) {
     await db.insert(referrals).values({
       refCode,
