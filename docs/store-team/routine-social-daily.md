@@ -626,15 +626,53 @@ stops.
   cast rule is unsatisfiable, and the run says so rather than pretending it passed. Unblocking this
   is owner blocker id3.
 - **The imagery fence does not move with the caption register.** X captions run 6-7 against
-  Instagram's 4-5 because X's organic policy is more permissive. The picture standard is unchanged,
-  and the reason is mechanical rather than a matter of taste: the charter's permission is conditional
-  on posts covered by that policy being "labeled per X's own rules", and `postTweet`
-  (`app/lib/twitter.server.ts:95`) accepts only text and media ids, with no sensitive-media flag. We
-  cannot label, so we must not post anything that would need labeling. The design doctrine's
-  explicit-imagery and wardrobe-coverage fences bind identically on both platforms.
+  Instagram's 4-5 because X's organic policy is more permissive. The picture standard is unchanged.
+  The charter settled it in the harder direction already (imagery stays a visual 6-7 even on owned
+  channels where copy runs at 9), `docs/ads-policy.md` §Creative binds "paid AND organic" and names
+  X, and `social-publish-gate.md` states that everything about the image binds identically across
+  platforms. There is a mechanical reason too: the charter's permission is conditional on covered
+  posts being "labeled per X's own rules", and `postTweet` (`app/lib/twitter.server.ts:95`) accepts
+  only text and media ids, with no sensitive-media flag. We cannot label, so we must not post
+  anything that would need labeling. A hotter X frame only manufactures rows the gate blocks.
+- **Presentation, never testimony, and it binds harder on X than on Instagram.** The cast are
+  AI-generated personas (`scripts/generate-cast-candidates.ts`), not photographed people. On
+  Instagram that rule costs nothing because Instagram may not name a price. On X the same generated
+  face sits beside a price, a promo code, and a checkout link. No caption beside a cast frame on X
+  may attribute an opinion to that person: no "she loves it", no "our favourite", no reaction shot
+  that reads as a verdict. Discuss the product and the price freely; never route the enthusiasm
+  through the face.
+- **Compose for a small landscape card, not a portrait tile.** Chest-up-with-hands is the X default
+  crop, never full-length: X renders a single image around 500px wide in a scrolling column, so a
+  mid-shot puts a thumbnail of a person on a phone. Face and held product belong in the same crop,
+  both legible at 500px, and the hand-and-product cluster occupies **no less than a third of frame
+  height** (16:9 is short, so a product briefed for a 1350px-tall Instagram frame loses a third of
+  its pixels here). Interest-floor properties: buy P9 and P10, which read as depth at any scale,
+  plus P4 and one of P5/P8. **P3, the unexplained second object, is not bought on X** because at
+  500px it reads as clutter rather than mystery. Keep the four-property count; swap which four.
+- **The X frame is a click thumbnail, because X carries a link and Instagram cannot.** Someone who
+  taps must land on the object they just saw, so product identity (shape, colour, finish, true
+  scale) is a hard check here rather than a preference, and no metaphor-only frame goes on an X post
+  carrying a PDP link. The candidate-versus-packshot check below binds harder on X: a mismatch is a
+  bounce off a PDP, not just a weak vibe.
+- **X's timeline is dark-mode dominant and the ground lock does not change for it.** A paper or
+  coral-soft ground floating in a dark column is an attention asset. Do not darken the ground to
+  match the UI; that is how the moody-boudoir round started.
 - **Product-free X post** (education beat, Notebook promo companion): still a cast frame, just
   without the product. Drop `--presenter-image` and pass the cast reference as `--ref-image`, exactly
   as the Instagram product-free form does below.
+- **The Instagram cast caps are Instagram-scoped and do not cap X.** `instagram-campaigns.md` §7
+  says "at most 4 cast frames per rolling 14, and never more than one cast frame in a single day".
+  Read account-wide, that makes this rule impossible on day one: X runs 4 posts a day. The caps are
+  a **grid** rule, and the reasoning is visibly grid-shaped in that same section (no pairing repeats
+  in the same grid position). Instagram's profile is a persistent browsable mosaic where a repeated
+  face reads as a personal account; X is an ephemeral timeline with no grid, so the reason does not
+  transfer. **X therefore has no per-day cast cap.**
+- **X gets a rotation floor instead, which is what the cap was really protecting.** The roster is
+  six, and a feed where one or two faces carry everything reads as a personal account just as surely
+  on X as on Instagram. So: **no single cast member appears in more than a third of X posts in a
+  rolling 14**, and never the same face two days running. Ticket #4120's roster gap (nobody presents
+  above their early 30s) makes this sharper, not softer, because the available range is already
+  narrow. Report the rotation in the run summary when you draft more than two X posts in a day.
 - **A cast frame you cannot produce is a reason to draft fewer X posts, not a reason to fall back to
   a product-only image or a packshot.** Say which it was in the run summary. This is the same
   degraded-to-zero honesty the Step 2b imagery preflight already requires for Instagram: the "no zero

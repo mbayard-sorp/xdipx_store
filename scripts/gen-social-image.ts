@@ -253,6 +253,11 @@ async function main() {
       productImageUrl: refImage!,
       scale: scale!,
       ...(extraRef ? { extraImageUrls: [extraRef] } : {}),
+      // The cast path takes a frame shape, not a pixel size: 4:5 for the
+      // Instagram grid, 16:9 for X's timeline. Without this the composite came
+      // back 4:5 whatever --platform said, and X centre-cropped away the
+      // hand-and-product band the composite exists to show.
+      aspectRatio: platform === 'x' ? '16:9' : '4:5',
       count: Number(arg('candidates') ?? '2'),
       caller,
       ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),

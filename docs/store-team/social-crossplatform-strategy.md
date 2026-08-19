@@ -50,9 +50,21 @@ Two consequences worth stating rather than inferring:
   The charter's own clause is conditional: posts covered by that policy "must be labeled per X's own
   rules", and `postTweet` (`app/lib/twitter.server.ts:95`) has no sensitive-media parameter, so this
   store cannot label a post even when X would require it. An unlabelable post must therefore stay
-  inside the non-sensitive fence, which is the design doctrine's fence, unchanged. These are real
-  people's likenesses on both surfaces and the doctrine is the pixel charter regardless of which
-  timeline the frame lands in.
+  inside the non-sensitive fence, which is the design doctrine's fence, unchanged. The charter had
+  already settled this in the harder direction: `docs/emma-voice.md` holds imagery to a visual 6-7
+  even on owned channels where the copy runs at 9, so imagery does not follow copy up on a surface
+  we own outright, let alone a rented one. `docs/ads-policy.md` §Creative is titled "paid AND
+  organic" and names X specifically. What X's permissiveness buys is caption register, a clickable
+  link, and the number. It buys nothing inside the frame.
+
+- **A cast frame on X is a presentation, never a testimonial.** The cast are AI-generated personas
+  (`scripts/generate-cast-candidates.ts`), not photographed people, so there is no likeness release
+  question. There is a sharper one instead. On Instagram the "performance, never testimony" rule is
+  nearly free, because Instagram may not name a price at all. On X the same synthetic face now sits
+  beside a price, a promo code, and a checkout link, which is much closer to a fabricated
+  endorsement. So: no caption beside a cast frame on X may attribute an opinion to that person.
+  "She loves it", "our favourite", a reaction shot that reads as a verdict, all out. Talking about
+  the price is fine. Routing the enthusiasm through a generated face beside a buy link is not.
 
 **The X escalation of an IG beat is a format, not an accident.** For each IG slate post that
 features a product, the same run drafts an X companion when quota allows: the campaign subject, the

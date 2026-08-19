@@ -389,6 +389,15 @@ export interface GenerateCastCompositeOpts {
   scale: ProductScale | string
   /** Candidate count (1-4). More candidates is the cheap way to survive hand anatomy. */
   count?: number
+  /**
+   * Frame shape. Defaults to 4:5, the Instagram feed/grid still.
+   *
+   * Pass '16:9' for X, whose timeline crops anything taller. This is an option
+   * rather than a constant because the two surfaces genuinely differ: Instagram
+   * is a portrait tile that must also survive a 3:4 grid crop, X is a landscape
+   * card in a fast scroll. Re-cropping one into the other loses the product.
+   */
+  aspectRatio?: '4:5' | '16:9'
   caller?: string
 }
 
@@ -420,9 +429,10 @@ export async function generateCastComposite(
     presenterImageUrl: opts.presenterImageUrl,
     productImageUrl: opts.productImageUrl,
     ...(opts.extraImageUrls?.length ? { extraImageUrls: opts.extraImageUrls } : {}),
-    // 4:5 is the feed/grid still. The default is 9:16, which is a video frame
-    // and would be cropped to nothing in a profile grid.
-    aspectRatio: '4:5',
+    // 4:5 is the Instagram feed/grid still and stays the default; composeSceneFrame's
+    // own default is 9:16, a video frame that would be cropped to nothing in a
+    // profile grid. X passes '16:9' (owner direction 2026-08-19).
+    aspectRatio: opts.aspectRatio ?? '4:5',
     count: opts.count ?? 2,
   })
 
