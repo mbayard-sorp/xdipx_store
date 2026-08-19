@@ -563,6 +563,16 @@ so every one was a guaranteed gate BLOCK. `POST /api/team/social-post {op:'draft
 fail-closed shape as the voice-gate check above — so treat X exactly like Instagram and TikTok in
 this step: generate or reuse an asset before you draft, never after.
 
+**Step 5.0, invoke `social-art-director` FIRST, before any image is generated.** It chooses the
+location and the cast member, enforces the §3.8 variety windows against the last 8 product posts,
+holds cast continuity across the campaign, and hands back the scene brief with its negatives and
+its scale cue. You do not write the image prompt inline any more. That improvisation is exactly
+what produced a feed of interchangeable frames and the owner's *"Variety is key here"* on
+2026-08-19: the picture was always the last thing written, so it always reverted to the safest
+option. Pass it today's product handle, the real Shopify photo URL, the product's real dimensions,
+and the campaign beat. If it declares degraded-to-zero because no approved cast member exists,
+that verdict stands and you do not work around it.
+
 **A cast member in a scene is MANDATORY on every Instagram product post (owner ruling 2026-08-19,
 spec §3.7).** The lead image is a person somewhere real, with the product. A product alone, however
 beautifully styled, is not a publishable lead frame. Emma is a cast member and is in the rotation.
