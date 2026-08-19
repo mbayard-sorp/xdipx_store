@@ -87,7 +87,7 @@ Visuals stay suggestive-editorial (a visual 6-7; imagery does not follow copy to
 - **Visual wit and surreal brand art (owner license, 2026-07-28, full).** Fun, artistic, blended-shape images are licensed and encouraged on owned surfaces: form hybrids (a dildo cactus, an air-pulsation dolphin), sexually euphemistic still lifes (an eggplant in a puddle, a rabbit vibrator nested in an orchid whose forms echo anatomy), and inventions nobody has seen. Humor in imagery is welcome; the deliberate sight gag is now a licensed register, not an over-dial. Boring makes customers bounce; a shareable image is a growth asset. Three fences: (1) witty never crude. The joke is clever euphemism and craft, never porn-adjacent, never explicit anatomy rendered literally; (2) **owned channels only**. The social addendum's stricter imagery rules still govern social (euphemistic sexual imagery is exactly what platform moderation removes; make these shareable via OG images and let readers carry them there); (3) wit follows the same clinical-beat fence as written humor: never on a surface carrying a health-heavy or emotionally raw topic (a §0-H human-hero post keeps a sincere hero).
 - Lighting: warm, low, skin-toned palettes, shallow depth of field. Bedroom-adjacent without a bed as the subject.
 
-Hard lines: on merchandising surfaces the product is the hero (brand-art pieces may star the invented hybrid instead); never product-in-use; never bodies in sexual context; no text baked into generated images.
+Hard lines, scoped by surface (owner ruling 2026-08-19). On **on-site merchandising** surfaces (homepage, PLP, PDP, discovery) the product is the hero, brand-art pieces may star the invented hybrid instead, and product-in-use and bodies in sexual context stay out. On **social** surfaces those two bans are withdrawn: the operative ceiling is `docs/store-team/instagram-campaigns.md` §3.2a via the social addendum below, and it licenses product against skin, beds, touch, and implied use. No text baked into generated images, on every surface.
 
 ## Emma
 
@@ -344,9 +344,23 @@ Draft against both, and understand which one you are avoiding.
      the fence of deniability: a fig reads as a fig at a glance, the metaphor is never composited
      into the same frame as a product, the caption and on-slide text never name it, and at most
      one metaphor slide runs per carousel.
-  Still banned, unchanged: simulated or implied use, product on or against a body, a person on a
-  bed with product in frame, fluid or lube texture, lips or tongue in frame. A closed drawer is
-  staging; a body is a violation.
+  **Superseded on 2026-08-16, and again by owner ruling 2026-08-19.** This bullet used to end
+  "still banned, unchanged: simulated or implied use, product on or against a body, a person on a
+  bed with product in frame, fluid or lube texture, lips or tongue in frame." Every one of those
+  is now LICENSED. The three archetypes above are a floor, not the ceiling. The operative ceiling
+  for social imagery is `docs/store-team/instagram-campaigns.md` §3.2a, which licenses lingerie
+  and bare skin, beds and arched posture, product resting against skin, lubricant texture, two
+  people touching, arousal on a face, and use implied by framing or occlusion under a sheet.
+  Read §3.2a before briefing any social image. Do not reason from this list alone.
+
+  What §3.2a still fences, and these do not move: genitalia or nipples visible or outlined,
+  sheer fabric included; hands on genitals over or under clothing; a depicted or discernible sex
+  act; fluid on or near genitalia; product against genitalia; anything age-ambiguous, judged on
+  ambiguity rather than intent; anything built to defeat a classifier. Platform policy still
+  outranks this charter on a rented surface: where Meta's rules are tighter, Meta wins.
+
+  Cast reactions stay performance, never testimony. The register got hotter; the
+  no-lived-experience rule did not move.
 - **Alt text, hashtags, and on-image text are moderated copy too** and follow every rule above. No
   reclaimed or coded tag sets to route around a blocked term: evasion is its own violation and
   risks the account rather than the post.

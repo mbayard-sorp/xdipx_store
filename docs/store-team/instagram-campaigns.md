@@ -140,6 +140,13 @@ establish.
 
 ### 3.2a The ceiling (owner ruling 2026-08-16)
 
+**This section is the single operative imagery ceiling for social.** `docs/design-doctrine.md`
+§4.3 (v1.3, owner ruling 2026-08-19) defers to it by name and deliberately does not restate it,
+and the `docs/emma-voice.md` social addendum points here rather than carrying its own list. Those
+three documents used to disagree; ticket #4206 closed that. If you are briefing a social image,
+this section is the rule. Do not reason from a summary of it elsewhere, and if you find another
+document restating a ceiling, that document is the stale one.
+
 Owner direction, verbatim: *"I want to make sure we are at the limit of what we can produce that is
 sexually charged for posts. This is for marketing, it's not making pornography, that is not the goal.
 This is to inspire better sexual wellness and exploration."*
@@ -517,8 +524,8 @@ Working titles. Every caption still goes through the voice gate; a name here is 
 | 2026-08-12 → 08-24 (13d) | **The Vibrator Field Guide** | category | Vibrators, air-pulsation, wands: how each mechanism actually differs, which style suits which body, care and cleaning. | Hands into the homepage's Wand Week at the tail (08-24). |
 | 2026-08-25 → 09-06 (13d) | **Talk Yourself Into It** | live-better | Communication, consent, checking in, asking for what you want as a learnable skill. | Echoes the homepage's "Start Here, No Wrong Answers" (08-31). |
 | 2026-09-07 → 09-19 (13d) | **Lube, Actually** | category | Water, silicone, hybrid. Body-safe materials, what degrades what, why the right one changes everything. | Coincides with the homepage's "The Long Weekend In" (09-07). |
-| 2026-09-20 → 10-02 (13d) | **The Orgasm Gap, Closed** | live-better | Clitoral anatomy, foreplay, why partnered pleasure is unequal by default and what changes it. Education and inspiration, no single hero SKU. | Standalone. |
-| 2026-10-03 → 10-15 (13d) | **Prostate 101** | category | Prostate massagers, anal-safe materials, prep. An under-discussed category treated plainly. | Standalone. |
+| 2026-09-20 → 10-02 (13d) | **The Orgasm Gap, Closed** | live-better | Why partnered pleasure is unequal by default, what actually closes the gap, and how external stimulation and taking more time change the outcome. Mechanism and experience, not anatomy: see §6a. Education and inspiration, no single hero SKU. | Standalone. The anatomical version of this subject runs on the Notebook, in email, and on X. |
+| 2026-10-03 → 10-15 (13d) | **Prostate 101** | category | The category, body-safe materials, prep, and going slowly. Same §6a exposure as the 09-20 window: on Instagram the copy is mechanism, material and comfort, never anatomical vocabulary. | Standalone. The anatomical version runs on the Notebook, in email, and on X. |
 | 2026-10-16 → 10-29 (14d) | **Spooky Season, Sensory Play** | seasonal | Temperature play, texture, blindfolds, sensory deprivation. Halloween-adjacent without costume gimmicks. | Standalone. |
 | 2026-10-30 → 11-09 (11d) | **Aftercare Is Not Optional** | live-better | Aftercare as a practice, post-play communication, self-care. Closes into cuffing season. | Standalone. |
 
@@ -598,6 +605,36 @@ because a named campaign is exactly the thing that tempts a routine to make an e
   daily publish cap is spent. The run summary reports both and never conflates them. The posture that
   replaced the owner's click is in `routine-social-daily.md` §Posting posture. **Autopublish changed
   who approves a post. It changed no gate, and no gate may be relaxed to make it easier to ship.**
+
+## 6a. Subject versus surface: a campaign may be anatomical, an Instagram caption may not
+
+**Standing rule (ticket #4065).** The *subject* of a campaign may be anatomical. **Instagram
+surface copy never is.** The anatomical version of the same campaign runs on the Notebook, in
+email, and on X, where policy permits it and where xdipx owns the surface. The Instagram beat
+points at it and drives the reader there.
+
+**Why this is a rule and not caution.** Bellesa (@bellesaco), roughly 700K followers in this exact
+category, was suspended on 2026-03-28 for sexually explicit language in **organic** content,
+reportedly the word "clitoris", and the appeal was upheld. Meta's Community Standards put explicit
+or graphic detail about genitals in the **removal** tier, not the age-gate tier. Sources:
+riverfronttimes.com/metabannedbellesa/ and xtramagazine.com/video/bellesa-instagram-ban-sexual-health-281447;
+full context in `docs/store-team/competitor-social-teardown-2026-08.md` §2. One honest correction
+to keep the citation accurate: @bellesaco resolves today as an age-gated but existing profile, so
+the account came back through a path the coverage does not record. **Cite the ban. Never cite the
+deletion as final.**
+
+**What to do instead, and it is not a euphemism treadmill.** Meta's ad standards permit content
+whose focus is health and medical efficacy and prohibit a focus on pleasure or enhancement, so
+mechanism-and-health framing is the one workaround grounded in Meta's own written policy rather
+than in folklore. Write the mechanism and the experience: "external stimulation", "most people need
+more time", "what actually works for most bodies", "where the sensation comes from". These are
+truthful, they are on charter, and they carry the same information.
+
+**What this rule does NOT do.** It does not cancel a subject. The orgasm gap is a real, on-charter,
+high-value topic and it is exactly the resource content the owner asked for. Only the **register**
+and the **lexicon** move, and only on Instagram. This is the charter working as designed:
+`docs/ads-policy.md` §Organic social already says platform policy outranks the charter on a rented
+surface.
 
 ## 7. What this needs that does not exist yet
 
