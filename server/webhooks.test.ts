@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled } from './webhooks'
+import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled, referralCodeFromNoteAttributes } from './webhooks'
 
 vi.mock('../app/lib/reviews.server.js', () => ({
   getReviewSettings: vi.fn(async () => ({ inviteDelayDays: 3 })),
@@ -33,6 +33,35 @@ describe('isRestockCrossing', () => {
   it('does not fire on the first observation (unknown prior)', () => {
     expect(isRestockCrossing(null, 5)).toBe(false)
     expect(isRestockCrossing(null, 0)).toBe(false)
+  })
+})
+
+// The referral loop was broken by a silent key-name mismatch: the cart stamps
+// the referral code onto note_attributes as `_ref_code` (matching every other
+// attribution key), but the order webhook read a never-written `ref_source`,
+// so the referrals table stayed empty for its whole lifetime. This guards the
+// exact attribute-name data contract so it cannot drift back.
+describe('referralCodeFromNoteAttributes', () => {
+  it('reads the referral code from the `_ref_code` note attribute the cart writes', () => {
+    expect(referralCodeFromNoteAttributes([{ name: '_ref_code', value: 'TEST' }])).toBe('TEST')
+  })
+
+  it('finds `_ref_code` among the sibling attribution keys', () => {
+    const attrs = [
+      { name: '_fbp', value: 'fb.1.2.3' },
+      { name: '_utm_source', value: 'newsletter' },
+      { name: '_ref_code', value: 'AFF42' },
+    ]
+    expect(referralCodeFromNoteAttributes(attrs)).toBe('AFF42')
+  })
+
+  it('does NOT read the legacy `ref_source` key that nothing writes', () => {
+    expect(referralCodeFromNoteAttributes([{ name: 'ref_source', value: 'TEST' }])).toBeUndefined()
+  })
+
+  it('returns undefined when there is no referral code (or no attributes)', () => {
+    expect(referralCodeFromNoteAttributes([])).toBeUndefined()
+    expect(referralCodeFromNoteAttributes(undefined)).toBeUndefined()
   })
 })
 
