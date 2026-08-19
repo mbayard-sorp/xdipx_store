@@ -111,3 +111,35 @@ describe('draft op — idempotency surfacing (#4069)', () => {
     expect(await res.json()).toEqual({ id: 46, deduped: true })
   })
 })
+
+// Ticket #2212: the durable product link the publish-time stock guard reads.
+describe('draft op — shopifyProductId pass-through', () => {
+  it('threads a supplied shopifyProductId to createDraftSocialPost', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'A fresh line about the wand', voiceGate,
+      shopifyProductId: 'gid://shopify/Product/123',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      shopifyProductId: 'gid://shopify/Product/123',
+    }))
+  })
+
+  it('is optional: a draft with no featured product omits it rather than forcing one', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'License D, no product', voiceGate })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      shopifyProductId: undefined,
+    }))
+  })
+
+  it('drops a non-string shopifyProductId rather than passing it through', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'bad type', voiceGate, shopifyProductId: 12345,
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      shopifyProductId: undefined,
+    }))
+  })
+})

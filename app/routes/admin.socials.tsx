@@ -40,6 +40,7 @@ import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
 import { isVideoPost, type SocialPostRow } from '~/components/admin/social/types'
 import type { PublishMedia } from '~/lib/social-publish/types'
 import { decideManualPublish } from '~/lib/social-publish/manual-publish-gate.server'
+import { checkLinkedProductStock } from '~/lib/social-publish/stock-guard.server'
 import { parseGateStamp } from '~/lib/social-publish-approve.server'
 
 export const meta: MetaFunction = () => [{ title: 'Social Studio — xdipx Admin' }]
@@ -237,6 +238,22 @@ export async function action({ request }: ActionFunctionArgs) {
     const mediaUrls = post.mediaUrls ?? []
     const mediaUrl = mediaUrls[0]
     if (!mediaUrl) return { ok: false, error: 'Draft has no media URL' }
+    // Publish-time stock guard (ticket #2212). Independent of the gate stamp's
+    // own (caller-supplied) product handle: shopify_product_id is durable, set
+    // at draft time, so a product that went out of stock after approval still
+    // blocks the owner's manual Post-now click. A row with no linkage is
+    // unaffected — see stock-guard.server.ts.
+    const stock = await checkLinkedProductStock(post.shopifyProductId)
+    if (!stock.ok) {
+      await db.update(socialPosts)
+        .set({
+          status: 'draft',
+          reviewStatus: 'needs_changes',
+          feedback: `[stock-guard] ${stock.detail} Swap the product or re-draft before this can publish.`,
+        })
+        .where(eq(socialPosts.id, postId))
+      return { ok: false, error: `${stock.detail} Moved to Needs Changes.` }
+    }
     const isVideo = post.videoJobId != null || !!mediaUrl.split('?')[0]?.endsWith('.mp4')
     // The manual Post-now path enforces the same two refusals as the scheduled
     // job: a publish-gate PASS stamp must exist (owner approval alone is not a

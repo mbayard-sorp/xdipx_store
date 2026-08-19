@@ -31,6 +31,7 @@ import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
 import { parseGateStamp } from './social-publish-approve.server'
 import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
+import { checkLinkedProductStock } from './social-publish/stock-guard.server'
 import { estimateXPostCostUsd, estimateXSpendUsd } from './social-publish/x-limits'
 
 /**
@@ -60,6 +61,8 @@ export type PublishOutcome =
   | 'claim_lost'
   /** Publishing this post would cross the month's spend ceiling. */
   | 'spend_cap'
+  /** The row's durable shopify_product_id is not available for sale (#2212). */
+  | 'out_of_stock'
 
 export interface PublishAttempt {
   postId: number
@@ -164,6 +167,15 @@ export interface PublishTickDeps {
    * gate does the real lookup.
    */
   gateDeps?: { getAvailability?: (handle: string) => Promise<boolean | null> }
+  /**
+   * The publish-time stock guard's product lookup (ticket #2212). Defaults to
+   * the real Storefront availability check; a test injects a stub here to
+   * decide stock for `shopify_product_id` without a network call. Independent
+   * of `gateDeps.getAvailability` above, which the deterministic gate uses for
+   * the caller-supplied (gate-stamp) `productHandle` — this one is keyed by
+   * the durable column instead.
+   */
+  checkStockByProductId?: (shopifyProductId: string) => Promise<boolean | null>
   /**
    * Looks at what is already live before this tick adds to it (ticket #2741).
    *
@@ -460,6 +472,24 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     const post = await repo.claim(candidate.id)
     if (!post) {
       attempts.push({ postId: candidate.id, outcome: 'claim_lost' })
+      continue
+    }
+
+    // Durable stock guard (ticket #2212). shopify_product_id is set once at
+    // draft time and never depends on whether a gate call happened to supply
+    // a productHandle, so a stale approved row cannot slip an out-of-stock
+    // product past this even when the gate stamp is missing or wrong. Rows
+    // with no linkage are unaffected (checkLinkedProductStock returns ok:true
+    // immediately) and fall through to the rest of the checks below. An
+    // ineligible row here does not stop the tick — it goes back to the queue
+    // and the loop moves on to the next candidate.
+    const stock = await checkLinkedProductStock(post.shopifyProductId, deps.checkStockByProductId)
+    if (!stock.ok) {
+      await repo.markNeedsChanges(
+        post.id,
+        `[stock-guard] ${stock.detail} Swap the product or re-draft before this can publish.`,
+      )
+      attempts.push({ postId: post.id, outcome: 'out_of_stock', ...(stock.detail ? { detail: stock.detail } : {}) })
       continue
     }
 

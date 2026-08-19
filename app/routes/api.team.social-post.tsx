@@ -2,11 +2,14 @@
  * POST /api/team/social-post — DRAFT-ONLY social post writes.
  *
  *   { op: 'draft', platform, postType?, tweetText, mediaUrls?, dealHistoryId?,
- *     scheduledFor?, reworkedFrom?,
+ *     scheduledFor?, reworkedFrom?, shopifyProductId?,
  *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id, deduped }
  *     `deduped:true` means a still-open (pending_review/needs_changes) row for
  *     the same platform, caption, and campaign day already existed and `id`
  *     is THAT row, not a new one (ticket #4069 — see createDraftSocialPost).
+ *     shopifyProductId (migration 080, ticket #2212) is the durable product
+ *     link the publish-time stock guard reads; optional, set only when the
+ *     post features a specific product.
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
  *   { op: 'config' } -> { frequencies, autopostValve }
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
@@ -115,6 +118,10 @@ export async function action({ request }: ActionFunctionArgs) {
       reworkedFrom:  typeof b['reworkedFrom'] === 'number' ? b['reworkedFrom'] : undefined,
       videoJobId:    typeof b['videoJobId'] === 'number' ? b['videoJobId'] : undefined,
       posterUrl:     typeof b['posterUrl'] === 'string' ? b['posterUrl'] : undefined,
+      shopifyProductId:
+        typeof b['shopifyProductId'] === 'string' && b['shopifyProductId'].length > 0 && b['shopifyProductId'].length <= 60
+          ? b['shopifyProductId']
+          : undefined,
     })
     return Response.json({ id, deduped })
   }

@@ -2224,6 +2224,11 @@ export interface DraftSocialPostInput {
   reworkedFrom?: number | undefined  // id of the needs_changes draft this replaces
   videoJobId?: number | undefined    // video pipeline linkage (065)
   posterUrl?: string | undefined
+  // Durable product linkage (migration 080, ticket #2212). Set by the writer
+  // when the post features a specific product; the publish-time stock guard
+  // reads this fresh on every publish attempt. Optional — a post with no
+  // featured product (education, inspiration) leaves it unset.
+  shopifyProductId?: string | undefined
 }
 
 /** Review states a still-open draft can sit in before the gate or the owner
@@ -2296,6 +2301,7 @@ export async function createDraftSocialPost(
       reworkedFrom:  p.reworkedFrom ?? null,
       videoJobId:    p.videoJobId ?? null,
       posterUrl:     p.posterUrl ?? null,
+      shopifyProductId: p.shopifyProductId ?? null,
     })
     .returning({ id: socialPosts.id })
   return { id: row!.id, deduped: false }
