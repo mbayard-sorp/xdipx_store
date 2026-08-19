@@ -164,6 +164,23 @@ describe('the gate runs at publish time', () => {
     expect(calls.needsChanges[0]?.feedback).toContain('social-publish-gate')
   })
 
+  it('does not tell the operator to re-gate the row it just bounced to needs_changes', async () => {
+    // Ticket #4057: the row lands at needs_changes here, and applyPublishGateVerdict
+    // only accepts draft/pending_review, so an instruction to run op:'gate' on this
+    // exact row always 409s. The remedy has to point at the rework path instead
+    // (a new draft carrying reworkedFrom:<id>, which lands at pending_review and
+    // gets gated there), and it has to distinguish the two real causes so the
+    // owner reading the feedback column in Social Studio understands what happened.
+    const { repo, calls } = fakeRepo([post({ feedback: null })])
+    const publish = vi.fn()
+    await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    const message = calls.needsChanges[0]?.feedback ?? ''
+    expect(message).not.toMatch(/op:\s*['"]gate['"]/)
+    expect(message).toContain('reworkedFrom')
+    expect(message).toMatch(/pre-gate leftover/i)
+    expect(message).toMatch(/hand|owner approved it/i)
+  })
+
   it('refuses a row whose gate stamp is not a PASS', async () => {
     const held = '[publish-gate HOLD by social-publish-gate on 2026-08-12, product: none]\nNovel situation.'
     const { repo, calls } = fakeRepo([post({ feedback: held })])

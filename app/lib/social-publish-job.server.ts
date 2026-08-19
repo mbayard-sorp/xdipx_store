@@ -479,8 +479,13 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       await repo.markNeedsChanges(
         post.id,
         'Approved without a publish-gate PASS, so nothing independent has reviewed it. ' +
-        'Run social-publish-gate over this draft (POST /api/team/social-post {op:"gate"}); ' +
-        'it re-verdicts and, on a PASS, re-approves.',
+        'Either it is a pre-gate leftover (approved before social-publish-gate covered this ' +
+        'platform) or the owner approved it by hand in Social Studio, which does not stamp a ' +
+        'gate verdict. This row is now needs_changes, and the gate only verdicts draft/' +
+        'pending_review, so re-gating it in place is not possible. The way out is a rework ' +
+        'draft carrying reworkedFrom:' + post.id + ' (POST /api/team/social-post {op:"draft", ' +
+        '..., "reworkedFrom":' + post.id + '}); that lands at pending_review by default and ' +
+        'gets gated there on the next run (routine-social-daily.md Step 2.5).',
       )
       attempts.push({ postId: post.id, outcome: 'no_gate_verdict' })
       continue
