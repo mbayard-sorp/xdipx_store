@@ -26,6 +26,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, type SQ
 import { db } from '~/lib/db.server'
 import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
 import { formatLiveFeedback, type LivePostVerdict } from '~/lib/live-post-feedback'
+import { parseGateStamp } from '~/lib/social-publish-approve.server'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import { cached, invalidateCache, kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
 import {
@@ -2332,12 +2333,80 @@ export interface ReviewSocialPostInput {
   reviewedBy: string
 }
 
+export type ReviewSocialPostResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found'; error: string }
+  | { ok: false; reason: 'gate_block'; error: string }
+
+/** Matches the BLOCK form of the stamp `formatGateStamp` writes (see STAMP_RE
+ * in social-publish-approve.server.ts), as a Postgres regex literal. Used as
+ * an atomic WHERE guard so the refusal below does not depend on winning a
+ * read-then-write race. Plain JS string, bound as a query parameter by the
+ * `sql` tag below rather than interpolated into the query text. */
+const BLOCK_STAMP_REGEX = '^\\[publish-gate BLOCK by '
+
+/**
+ * Would approving a row right now silently clear an unresolved
+ * social-publish-gate BLOCK? Pure and exported so the one predicate this
+ * account-safety rule turns on is a direct unit test rather than something
+ * only provable by reading `reviewSocialPost` or standing up a DB fixture.
+ * `feedback` is the row's CURRENT stored value — a BLOCK verdict stamps
+ * exactly this shape (`applyPublishGateVerdict`), and nothing else does.
+ */
+export function wouldClearGateBlock(feedback: string | null | undefined): boolean {
+  return parseGateStamp(feedback)?.verdict === 'BLOCK'
+}
+
 /**
  * Owner-only review transition for a social draft (admin action; agents have
  * no write path to review state). Refuses to review already-posted rows —
  * review is an editorial gate on drafts, not a way to relabel history.
+ *
+ * Ticket #3895 (incident id49, 2026-08-16): a social-publish-gate BLOCK is an
+ * account-safety hard stop the owner's click may never silently clear. A
+ * BLOCK verdict lands here as `reviewStatus:'rejected'` with a stamped
+ * `[publish-gate BLOCK ...]` feedback (`applyPublishGateVerdict`). Before this
+ * fix nothing here refused a request that targets that row with
+ * `reviewStatus:'approved'` — the Review tab's UI happens to hide rejected
+ * drafts today (`ReviewQueue` only ever receives `pending_review` /
+ * `needs_changes` rows), but a UI omission is not a server-side guarantee,
+ * and this is the write path a future UI change, a stray fetcher call, or a
+ * replayed request could still reach directly. This is that guarantee.
+ *
+ * There is no override, logged or otherwise: this codebase has no path that
+ * can re-verdict a `rejected` row at all — `applyPublishGateVerdict` 409s any
+ * row that is not `draft`/`pending_review` — so "an explicit, logged
+ * BLOCK-override that re-runs the gate" would be new infrastructure this fix
+ * deliberately does not add. The one BLOCKed post the owner needs published
+ * has to come back as a fresh draft the gate verdicts on its own merits. That
+ * also means the ads-policy imagery-ceiling BLOCK the gate agent can return
+ * — one BLOCK reason among others, with no separate code path of its own —
+ * inherits the same "never overridable" guarantee every BLOCK gets here.
  */
-export async function reviewSocialPost(id: number, input: ReviewSocialPostInput): Promise<boolean> {
+export async function reviewSocialPost(id: number, input: ReviewSocialPostInput): Promise<ReviewSocialPostResult> {
+  if (input.reviewStatus === 'approved') {
+    const [current] = await db
+      .select({ feedback: socialPosts.feedback, status: socialPosts.status })
+      .from(socialPosts)
+      .where(eq(socialPosts.id, id))
+      .limit(1)
+    if (!current || current.status === 'posted') {
+      return { ok: false, reason: 'not_found', error: 'Post not found or already posted' }
+    }
+    if (wouldClearGateBlock(current.feedback)) {
+      const stamp = parseGateStamp(current.feedback)
+      return {
+        ok: false,
+        reason: 'gate_block',
+        error:
+          `This draft carries an unresolved publish-gate BLOCK (${stamp?.reviewer}, ${stamp?.day}) ` +
+          'and cannot be approved. A gate BLOCK has no manual override. The way forward is a ' +
+          `fresh draft (POST /api/team/social-post {op:"draft", ..., "reworkedFrom":${id}}) that ` +
+          'the gate verdicts on its own merits.',
+      }
+    }
+  }
+
   const result = await db
     .update(socialPosts)
     .set({
@@ -2347,9 +2416,19 @@ export async function reviewSocialPost(id: number, input: ReviewSocialPostInput)
       reviewedBy:   input.reviewedBy,
       reviewedAt:   new Date(),
     })
-    .where(and(eq(socialPosts.id, id), ne(socialPosts.status, 'posted')))
+    .where(and(
+      eq(socialPosts.id, id),
+      ne(socialPosts.status, 'posted'),
+      // Second, atomic layer: even if the read above raced a concurrent
+      // write, a row whose CURRENT feedback carries a stamped BLOCK verdict
+      // never transitions to approved through this WHERE clause.
+      input.reviewStatus === 'approved'
+        ? or(isNull(socialPosts.feedback), sql`NOT (${socialPosts.feedback} ~ ${BLOCK_STAMP_REGEX})`)
+        : sql`true`,
+    ))
     .returning({ id: socialPosts.id })
-  return result.length > 0
+  if (result.length > 0) return { ok: true }
+  return { ok: false, reason: 'not_found', error: 'Post not found or already posted' }
 }
 
 /**
