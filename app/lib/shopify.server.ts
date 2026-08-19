@@ -86,6 +86,40 @@ export async function shopifyAdmin<T>(path: string, method = 'GET', body?: unkno
   return res.json() as Promise<T>
 }
 
+/** Shopify's leaky-bucket cost block, as it arrives on a GraphQL response. */
+interface ShopifyQueryCost {
+  requestedQueryCost?: number
+  throttleStatus?: { currentlyAvailable?: number; restoreRate?: number }
+}
+
+/**
+ * How long the leaky bucket needs to refill enough to afford the requested
+ * query, in ms, from Shopify's own cost block. 0 when Shopify didn't give us
+ * both a shortfall and a restore rate (so the caller falls back to its own
+ * backoff). Shared by adminGraphQL's in-loop backoff and the ShopifyThrottleError
+ * hint so the two never drift.
+ */
+export function shopifyThrottleRefillMs(cost: ShopifyQueryCost | undefined): number {
+  const needed = (cost?.requestedQueryCost ?? 0) - (cost?.throttleStatus?.currentlyAvailable ?? 0)
+  const restoreRate = cost?.throttleStatus?.restoreRate ?? 0
+  return needed > 0 && restoreRate > 0 ? Math.ceil((needed / restoreRate) * 1000) : 0
+}
+
+/**
+ * A THROTTLED GraphQL error that survived adminGraphQL's own short retries. It
+ * carries Shopify's refill estimate so a caller that can afford a longer, single
+ * rest (the daily pricing batch) waits the real amount instead of guessing. Its
+ * message is still "Throttled", so callers that match on the message keep working.
+ */
+export class ShopifyThrottleError extends Error {
+  readonly retryAfterMs: number
+  constructor(message: string, retryAfterMs: number) {
+    super(message)
+    this.name = 'ShopifyThrottleError'
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
 export async function adminGraphQL<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   const doFetch = () => fetch(ADMIN_GQL_ENDPOINT, {
     method: 'POST',
@@ -128,16 +162,26 @@ export async function adminGraphQL<T>(query: string, variables?: Record<string, 
     if (throttled && attempt < MAX_ATTEMPTS) {
       // Wait long enough for the leaky bucket to refill to the requested cost,
       // when Shopify tells us the rates; otherwise fall back to exponential.
-      const cost = body.extensions?.cost
-      const needed = (cost?.requestedQueryCost ?? 0) - (cost?.throttleStatus?.currentlyAvailable ?? 0)
-      const restoreRate = cost?.throttleStatus?.restoreRate ?? 0
-      const refillMs = needed > 0 && restoreRate > 0 ? (needed / restoreRate) * 1000 : 0
+      // Capped at 5s here so an interactive caller isn't stalled — a caller that
+      // can afford the full refill reads it off ShopifyThrottleError below.
+      const refillMs = shopifyThrottleRefillMs(body.extensions?.cost)
       const backoffMs = refillMs || 2 ** (attempt - 1) * 500
       await new Promise(r => setTimeout(r, Math.min(backoffMs, 5000)))
       continue
     }
 
-    if (body.errors?.length) throw new Error(body.errors[0]?.message ?? 'Shopify Admin GraphQL error')
+    if (body.errors?.length) {
+      // A throttle that outlived every short retry throws a typed error carrying
+      // Shopify's own refill estimate, so a batch caller can rest the real amount
+      // in one go instead of re-entering these too-short retries and giving up.
+      if (throttled) {
+        throw new ShopifyThrottleError(
+          body.errors[0]?.message ?? 'Throttled',
+          shopifyThrottleRefillMs(body.extensions?.cost),
+        )
+      }
+      throw new Error(body.errors[0]?.message ?? 'Shopify Admin GraphQL error')
+    }
     return body.data
   }
 }
@@ -7366,6 +7410,23 @@ const PRICING_FETCH_PAGE_DELAY_MS = 500
 // and a non-throttle error still fails fast and unchanged.
 const PRICING_FETCH_THROTTLE_RETRIES = 4
 const PRICING_FETCH_THROTTLE_BACKOFF_MS = 5000
+// One page's rest is capped so a pathological throttle can't eat the whole
+// cron budget, but it is well above adminGraphQL's own 5s cap: the point is to
+// give the bucket a single wait long enough to actually refill, which the
+// 2026-08-19 failure never got because every layer capped its wait at 5s and
+// gave up before the bucket recovered.
+const PRICING_FETCH_THROTTLE_MAX_WAIT_MS = 30_000
+
+/**
+ * How long to rest before re-fetching a throttled pricing page. Prefers
+ * Shopify's own refill estimate (carried on ShopifyThrottleError), floors it
+ * with an escalating rest so a missing or short estimate still backs off, and
+ * caps it so one page can't run away with the cron budget.
+ */
+export function pricingThrottleWaitMs(retryAfterMsHint: number, attempt: number): number {
+  const escalating = attempt * PRICING_FETCH_THROTTLE_BACKOFF_MS
+  return Math.min(Math.max(retryAfterMsHint, escalating), PRICING_FETCH_THROTTLE_MAX_WAIT_MS)
+}
 
 async function fetchPricingPageWithBackoff(
   variables: { first: number; after: string | null; query: string },
@@ -7375,8 +7436,10 @@ async function fetchPricingPageWithBackoff(
       return await adminGraphQL<PricingQueryResult>(PRICING_PRODUCTS_QUERY, variables)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      if (attempt > PRICING_FETCH_THROTTLE_RETRIES || !/throttl/i.test(message)) throw err
-      await new Promise(r => setTimeout(r, attempt * PRICING_FETCH_THROTTLE_BACKOFF_MS))
+      const isThrottle = err instanceof ShopifyThrottleError || /throttl/i.test(message)
+      if (attempt > PRICING_FETCH_THROTTLE_RETRIES || !isThrottle) throw err
+      const hint = err instanceof ShopifyThrottleError ? err.retryAfterMs : 0
+      await new Promise(r => setTimeout(r, pricingThrottleWaitMs(hint, attempt)))
     }
   }
 }
