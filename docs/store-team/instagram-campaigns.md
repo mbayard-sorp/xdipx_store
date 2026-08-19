@@ -584,6 +584,96 @@ so the grid is not a safe place to shop for a pick. Run `mapAllowsAdvertisedDisc
 live metafields for the chosen product before any value framing goes anywhere, including the bio
 link and the `/social` page.
 
+## 4c. Event triggers: what on the site earns a post
+
+Owner question, 2026-08-19: *"What are all of the events on the site the team can come up with as a
+reason to create a new post on Instagram to promote?"*
+
+This section is the answer, and it is deliberately a **short list with evidence** rather than a long
+list of everything imaginable. Each entry says whether the data behind it actually exists, because a
+trigger with an empty table behind it is a proposal, not a trigger, and writing it down as though it
+were real is how a routine ends up waiting for an event that can never fire.
+
+**The governing finding, and it is counter-intuitive: the frequent events are the bad triggers and
+the rare events are the good ones.** New products go live in bursts of a dozen a day and most are
+interchangeable. A genuine restock after a real stockout happens rarely and is worth saying every
+time. Volume is not signal.
+
+**An event does not buy a new slot.** The daily slate (§4a) is already fully assigned. An event wins
+**first right of refusal on the slot that was going to be a generic instance of that format anyway**,
+and it still obeys the campaign's visual scheme, the §3.7 cast mandate, and the §3.8 variety rules.
+Budget roughly **one event-sourced post per day, at most**. An event never justifies skipping a gate,
+and "it is news" is not a reason to cut the cast composite.
+
+### Tier 1: live today, with data behind them
+
+| Event | Where it comes from | Cadence | State |
+|---|---|---|---|
+| **Notebook post published** | `routine-content-daily.md` Step 6 files a `notebook-promo:<slug>` row targeted at social | near-daily | **Working.** Read at Step 1 item 9, never at Step 7b. |
+| **New product live** | `server/webhooks.ts` files `kind:'campaign'`, `dedupeKey:'new-product:<handle>'` | bursty, ~15/day when an import batch lands | **Fires into a dead end.** See below. |
+
+### Tier 2: the detector exists, it just does not reach social
+
+**Restock after a true stockout.** `isRestockCrossing()` and `handleInventoryUpdate()`
+(`server/webhooks.ts:580`) already detect a genuine 0-to-positive crossing, with guards against
+routine noise and against the first observation. Today the crossing calls `triggerBackInStock()`,
+which is Klaviyo email only, and files nothing at social. This is the **highest-intent and cheapest
+remaining trigger**: the hard part is built and tested. Frame it as mechanism or quality ("why this
+one keeps selling out"), never as scarcity. "Back in stock" as urgency is the sale-signal register
+the charter and the gate both refuse.
+
+### Tier 3: schemas waiting for traffic. Do NOT build against these yet
+
+Stated so nobody proposes them again without checking:
+
+- **Reviews.** `reviews` holds **one** row, a test from 2026-04-03. `review_media` 0,
+  `review_attribute_ratings` 0, `review_invites` 0, and `order_line_items` is empty, so the
+  invite chain has no input. There is no threshold to cross.
+- **Co-purchase.** `product_copurchase` is **0 rows**, and `app/lib/recommendations.server.ts`
+  documents that it returns `[]` for every handle. No writer job exists. This is not a someday
+  trigger, it is a never-started one.
+- **Wishlists.** 33 items ever, top product at 2 saves, stale since 2026-07-29. "Most saved"
+  on n=2 is fabricated proof, which §6 of the doctrine bans outright.
+- **Dial and product votes.** `pdp_dial_votes` and `pdp_product_votes` are both 0.
+- **`deal_history`.** 5,018 rows but `max(deal_date)` is the sentinel 2099-12-31, left from the
+  retired daily-deal system. Dead table. Do not read it as live.
+
+### Never on Instagram, and this is settled
+
+**Price drops, clearance, sales, and promo codes.** `social-publish-gate.server.ts` blocks
+`sale-price`, `sale-discount`, `sale-promo-code`, `sale-cta`, and `sale-pdp-link` by construction,
+and §6 says the same. The volume is real (`pricing_audit_log` carried 194 discontinued-clearance and
+226 margin-recompute entries in a fortnight) and it is all unpostable here. **Route every price event
+to email and X and do not build an Instagram price lane.** Do not attempt a clever framing that
+technically clears the regex; the gate is doing its job.
+
+### The exclude list, for any product-triggered post
+
+Learned from sampling the 37 stranded rows. A product that trips any of these does not get a post,
+however new it is:
+
+- **Discontinued or on clearance.** A "new find" post for a SKU that 404s in three weeks is the
+  worst available outcome. `pricing_audit_log` rationale containing `Discontinued` is a hard exclude.
+- **Dead velocity.** Rationale `dead -> target margin`. The pricing engine's own words say nobody is
+  buying it.
+- **Commodity consumables.** Condoms, toy cleaner, coconut oil lube, delay wipes, oral gel. These are
+  accessory-tier restocks that happened to get a fresh Shopify id, not launches. A mandatory cast
+  composite is real spend, and there is nothing new to say.
+- **Off-theme novelty.** The current batch contains a cannabis-leaf sticky-note pad sitting beside
+  the featured vibrators. One such post undercuts "editorially curated sexual wellness" for a week.
+- **No distinct story.** If the SKU has no distinct mechanism, material, or use case versus ten
+  others already in the catalogue, it is filler. At this account size filler reads as having nothing
+  to say, which is worse than posting less often.
+
+### Why the product-live trigger has produced zero posts
+
+It files `kind:'campaign'`. `RUN_CLOSE_KINDS` is `['process','strategy']`
+(`app/lib/team.server.ts:1427`), so a run **cannot** close a `campaign` row, and `campaign` has no
+automated executor at all. 37 rows accumulated at `approved` inside 60 hours and every one is inert.
+**The trigger works; the executor does not exist.** Filing into a kind nothing can action is the
+defect, not the detection. Until that is fixed, do not treat the queue as a source of drafts, and do
+not hand-close rows to make the number go down.
+
 ## 5. The schedule
 
 **The Instagram track is parallel to the homepage theme week, not the same campaign.** Three real
