@@ -1061,6 +1061,29 @@ export async function getDealByHandle(handle: string): Promise<Deal | null> {
   })
 }
 
+/**
+ * Is any variant of this product available for sale, right now?
+ *
+ * Accepts either a bare numeric Shopify product id or a full
+ * `gid://shopify/Product/...` string (normalized internally). Returns `null`
+ * when the product does not resolve on the Storefront API at all (archived,
+ * draft, deleted, or an unknown id) — distinct from "every variant is out of
+ * stock" and, like `isProductSellable` in social-publish-gate.server.ts,
+ * something callers should treat as unverifiable and fail closed on, not as
+ * in-stock by default.
+ *
+ * Used by the social-publish stock guard (ticket #2212) to re-check a linked
+ * product at actual publish time, independent of any gate-time snapshot.
+ */
+export async function isProductAvailableForSaleById(shopifyProductId: string): Promise<boolean | null> {
+  const gid = shopifyProductId.startsWith('gid://')
+    ? shopifyProductId
+    : `gid://shopify/Product/${shopifyProductId}`
+  const [product] = await getProductsByIds([gid])
+  if (!product) return null
+  return product.variants.some(v => v.availableForSale)
+}
+
 export async function getProductsByIds(ids: string[]): Promise<Product[]> {
   if (ids.length === 0) return []
   // `nodes` yields null for any id the Storefront API cannot resolve, which is

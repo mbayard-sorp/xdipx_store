@@ -187,6 +187,13 @@ export const socialPosts = pgTable('social_posts', {
   // row's own platform (reach/likes/comments/saved on IG), merged field-level
   // like video_jobs.metrics_json; never estimated, only fetched.
   metricsJson:     jsonb('metrics_json').$type<Record<string, number>>(),
+  // Durable product linkage (migration 080, ticket #2212). Nullable: not every
+  // post features a product, and this is additive on rows that predate it.
+  // Set once by the drafting writer when the post features a specific product;
+  // read fresh at every publish attempt (manual and scheduled) so a product
+  // that goes out of stock after approval still blocks the post, independent
+  // of the pre-publish gate's own caller-supplied productHandle snapshot.
+  shopifyProductId: varchar('shopify_product_id', { length: 60 }),
 })
 
 export const adminRoles = pgTable('admin_roles', {

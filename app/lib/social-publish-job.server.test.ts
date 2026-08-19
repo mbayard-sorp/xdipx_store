@@ -34,6 +34,7 @@ function post(over: Partial<PostRow> = {}): PostRow {
     reviewStatus: 'approved', feedback: PASS_STAMP, editedText: null,
     reviewedBy: null, reviewedAt: null, scheduledFor: '2026-08-12',
     reworkedFrom: null, videoJobId: null, posterUrl: null,
+    metricsJson: null, shopifyProductId: null,
     ...over,
   } as PostRow
 }
@@ -125,6 +126,93 @@ describe('claiming', () => {
     const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'claim_lost' }])
     expect(publish).not.toHaveBeenCalled()
+  })
+})
+
+// ── Durable stock guard (ticket #2212) ───────────────────────────────────────
+//
+// shopify_product_id is set once at draft time and read fresh on every
+// publish attempt, independent of the gate stamp's own caller-supplied
+// productHandle. These cases are the ones the gate-stamp check alone cannot
+// cover: a row whose product went OOS with no gate re-check available, and the
+// requirement that an ineligible row does not stop the rest of the tick.
+describe('the durable stock guard (shopify_product_id)', () => {
+  it('does not publish a linked product that is out of stock, and does not touch the network', async () => {
+    const { repo, calls } = fakeRepo([post({ shopifyProductId: 'gid://shopify/Product/999' })])
+    const publish = vi.fn()
+    const checkStockByProductId = vi.fn(async () => false)
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish, repo, checkStockByProductId,
+    })
+    expect(publish).not.toHaveBeenCalled()
+    expect(r.attempts).toEqual([{
+      postId: 1, outcome: 'out_of_stock',
+      detail: 'Linked product gid://shopify/Product/999 is out of stock.',
+    }])
+    expect(calls.needsChanges[0]?.feedback).toContain('stock-guard')
+    expect(calls.needsChanges[0]?.feedback).toContain('out of stock')
+    expect(checkStockByProductId).toHaveBeenCalledWith('gid://shopify/Product/999')
+  })
+
+  it('fails closed when the linked product cannot be verified at all', async () => {
+    const { repo, calls } = fakeRepo([post({ shopifyProductId: 'gid://shopify/Product/404' })])
+    const publish = vi.fn()
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      checkStockByProductId: async () => null,
+    })
+    expect(publish).not.toHaveBeenCalled()
+    expect(r.attempts[0]?.outcome).toBe('out_of_stock')
+    expect(calls.needsChanges[0]?.feedback).toContain('could not be verified')
+  })
+
+  it('publishes a linked product that is in stock', async () => {
+    const { repo, calls } = fakeRepo([post({ shopifyProductId: 'gid://shopify/Product/1' })])
+    const checkStockByProductId = vi.fn(async () => true)
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo, checkStockByProductId,
+    })
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+    expect(calls.posted).toEqual([1])
+    expect(checkStockByProductId).toHaveBeenCalledWith('gid://shopify/Product/1')
+  })
+
+  it('skips the check entirely for a row with no product linkage, unaffected by the guard', async () => {
+    const { repo, calls } = fakeRepo([post({ shopifyProductId: null })])
+    const checkStockByProductId = vi.fn(async () => false)
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo, checkStockByProductId,
+    })
+    expect(checkStockByProductId).not.toHaveBeenCalled()
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+    expect(calls.posted).toEqual([1])
+  })
+
+  it('does not stop the tick: an OOS row is skipped and the next eligible candidate still publishes', async () => {
+    const oos = post({ id: 1, shopifyProductId: 'gid://shopify/Product/999' })
+    const clean = post({ id: 2, shopifyProductId: null })
+    const { repo, calls } = fakeRepo([oos, clean])
+    const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_2' }))
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      checkStockByProductId: async (id) => id !== 'gid://shopify/Product/999',
+    })
+    expect(r.attempts.map(a => ({ postId: a.postId, outcome: a.outcome }))).toEqual([
+      { postId: 1, outcome: 'out_of_stock' },
+      { postId: 2, outcome: 'published' },
+    ])
+    expect(calls.posted).toEqual([2])
+    expect(publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('defaults to no stock check when checkStockByProductId is not supplied and the row has no linkage', async () => {
+    // Production callers omit checkStockByProductId; must not throw or hang
+    // on an unlinked row (the real lookup only runs when shopify_product_id
+    // is actually set).
+    const { repo, calls } = fakeRepo([post({ shopifyProductId: null })])
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+    expect(calls.posted).toEqual([1])
   })
 })
 
