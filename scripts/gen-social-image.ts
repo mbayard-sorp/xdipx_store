@@ -13,7 +13,7 @@
  * Usage:
  *   npx tsx scripts/gen-social-image.ts \
  *     --prompt "..." --handle we-vibe-chorus --archetype scene --mood nightstand \
- *     [--platform instagram|tiktok] [--ref-image <shopify-product-photo-url>] \
+ *     [--platform instagram|tiktok|x] [--ref-image <shopify-product-photo-url>] \
  *     [--no-ref --no-ref-reason "metaphor hook, no product target"] \
  *     [--slide 2] [--date 2026-08-12] [--images-so-far 3] \
  *     [--only fal|imagen] [--caller social-media-manager] [--dry-run]
@@ -25,7 +25,8 @@
  *
  * Aspect defaults to 1080x1350 (4:5) for Instagram, because the profile grid
  * crops tiles to 3:4 and the subject has to survive both that and a 1:1 centre
- * crop. TikTok defaults to 1080x1920.
+ * crop. TikTok defaults to 1080x1920, X to 1600x900 (16:9, its timeline-native
+ * single-image ratio).
  *
  * Sequence:
  *   1. Gate re-check — GET /api/team/gate?team=social. Refuses (exit 0) when
@@ -73,10 +74,19 @@ import type { GenerateSocialImageResult, GenerateCastCompositeResult } from '~/l
 
 const ARCHETYPES = ['scene', 'cast', 'metaphor', 'macro', 'plate']
 
-/** Feed-native sizes. Instagram is 4:5; the grid crops it to 3:4. */
+/**
+ * Feed-native sizes. Instagram is 4:5; the grid crops it to 3:4.
+ *
+ * X is 16:9, not a crop of the Instagram frame. X renders a single image in the
+ * timeline at 16:9 and crops anything taller, which takes the top and bottom off
+ * a 4:5 cast composite: the product in the hand is exactly what a centre crop
+ * loses. Owner direction 2026-08-19 is that X posts carry a cast image, so X
+ * needs its own generation rather than a re-crop of IG key art.
+ */
 const PLATFORM_SIZE: Record<string, { width: number; height: number }> = {
   instagram: { width: 1080, height: 1350 },
   tiktok:    { width: 1080, height: 1920 },
+  x:         { width: 1600, height: 900 },
 }
 
 async function main() {
@@ -100,7 +110,7 @@ async function main() {
   const dryRun      = hasFlag('dry-run')
 
   if (!prompt || !handle || !archetype || !mood) {
-    console.error('Usage: gen-social-image.ts --prompt <p> --handle <h> --archetype scene|cast|metaphor|macro|plate --mood <m> [--platform instagram|tiktok] [--ref-image <url>] [--no-ref --no-ref-reason "<why>"] [--slide <n>] [--date YYYY-MM-DD] [--images-so-far <n>] [--only fal|imagen] [--caller <c>] [--run-id <n>] [--dry-run]')
+    console.error('Usage: gen-social-image.ts --prompt <p> --handle <h> --archetype scene|cast|metaphor|macro|plate --mood <m> [--platform instagram|tiktok|x] [--ref-image <url>] [--no-ref --no-ref-reason "<why>"] [--slide <n>] [--date YYYY-MM-DD] [--images-so-far <n>] [--only fal|imagen] [--caller <c>] [--run-id <n>] [--dry-run]')
     process.exit(1)
   }
   if (!ARCHETYPES.includes(archetype)) {

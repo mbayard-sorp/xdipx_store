@@ -12,7 +12,9 @@ that becomes `approved`. On 2026-08-18 run 378 read an open autopublish valve as
 Step 6.5 entirely, describing its own mandate as "draft-only". The result was a queue of rows that
 nothing could ever ship, on both platforms. **An open valve raises the bar at the gate; it never
 removes the gate step.** If you find yourself reasoning that gating is unsafe because publishing is
-automatic, you have inverted the safety model: the gate is the safety. What happens next is not yours: on **Instagram and X** the
+automatic, you have inverted the safety model: the gate is the safety.
+
+What happens next is not yours: on **Instagram and X** the
 independent `social-publish-gate` decides (Step 6.5) and, when that platform's valve
 (`instagram_autopublish_enabled`, `x_autopublish_enabled`) is on, the hourly publish job ships what
 it approved. On LinkedIn, TikTok, Facebook and YouTube the owner still acts in `/admin/socials`,
@@ -694,10 +696,13 @@ carrying a bare Nalpac/Shopify SKU packshot — shipping either is drafting into
 - **Product-free art (metaphor hook, typography plate):** the single-image form,
   `--archetype scene|metaphor|macro|plate ... --ref-image <url>`, or `--no-ref --no-ref-reason
   "<why>"` for genuinely product-free art.
-- **Dependency, stated plainly:** the cast-composite path and the `--scale` cue ride the unmerged
-  publish-job PR, so **the single-image form works today and the cast-composite form lands with that
-  merge.** Until then, generate single product-in-scene images for product posts (never a bare
-  packshot), and note the degraded cast path in the run summary.
+- **The cast-composite path is LIVE. Do not degrade to the single-image form.** This bullet used to
+  say the cast form was waiting on an unmerged publish-job PR; that PR merged, and
+  `generateCastComposite` and `scaleCueFromLengthInches` both ship in
+  `app/lib/social-media.server.ts`. Row 50 (Ferri, published 2026-08-17) is a cast composite that
+  cleared the gate, so the path is proven in production, not just present. Runs kept reading the
+  stale caveat and reaching for the weaker form; if a cast composite genuinely fails, say what failed
+  in the run summary rather than citing a dependency that no longer exists.
 - **Generate the campaign key-art set at kickoff, not one image per draft-day** (Step 2a): the
   campaign pool comes from `docs/store-team/instagram-campaigns.md` §3.4b, so a campaign produces its
   reusable set once rather than a fresh one-off per caption.
