@@ -205,20 +205,57 @@ export type ChangedFile = {
   previousFilename?: string
 }
 
+/** Statuses GitHub is known to return transiently on `pulls/{n}/files` while it
+ *  is still computing the diff for that PR, distinct from a real 404 (PR does
+ *  not exist / no access) or a real client error. Retrying these is safe.
+ *  Retrying 401/403/422 is not: it would just spin on a real permission or
+ *  request problem and delay surfacing it. */
+const RETRYABLE_FILES_STATUSES = new Set([404, 502, 503, 504])
+const FILES_RETRY_ATTEMPTS = 3
+const FILES_RETRY_DELAY_MS = [500, 1500]
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 /** Every changed file on a PR, paginated. This list is the ONLY input the
- *  protected-path classifier is allowed to see. */
+ *  protected-path classifier is allowed to see.
+ *
+ * `pulls/{n}/files` computes the diff lazily and can 404 (occasionally 502)
+ * for a PR that unambiguously exists and that `getPullRequest` on the very
+ * same number just answered 200 for, because GitHub has not finished the
+ * diff yet. That is a different failure than a real 404 (deleted/renamed/no access),
+ * which every other endpoint on this PR would also be 404ing for. So each
+ * page retries a bounded, short number of times on the known-transient
+ * statuses before giving up and returning the upstream error as-is. */
 export async function listPullRequestFiles(number: number, context = 'github'): Promise<GithubResult<ChangedFile[]>> {
   const out: ChangedFile[] = []
   let status = 200
   for (let page = 1; page <= MAX_FILE_PAGES; page++) {
-    const res = await githubRequest<Array<{
+    let res: GithubResult<Array<{
       filename: string
       status: string
       additions?: number
       deletions?: number
       previous_filename?: string
-    }>>(`/repos/{owner}/{repo}/pulls/${number}/files?per_page=100&page=${page}`, { context })
-    if (!res.ok) return res
+    }>> | null = null
+    for (let attempt = 0; attempt < FILES_RETRY_ATTEMPTS; attempt++) {
+      res = await githubRequest<Array<{
+        filename: string
+        status: string
+        additions?: number
+        deletions?: number
+        previous_filename?: string
+      }>>(`/repos/{owner}/{repo}/pulls/${number}/files?per_page=100&page=${page}`, { context })
+      if (res.ok || !RETRYABLE_FILES_STATUSES.has(res.status)) break
+      const delay = FILES_RETRY_DELAY_MS[attempt]
+      if (delay === undefined) break
+      console.warn(
+        `[${context}] pulls/${number}/files page ${page} -> ${res.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${FILES_RETRY_ATTEMPTS})`,
+      )
+      await sleep(delay)
+    }
+    if (!res || !res.ok) return res ?? err(0, `pulls/${number}/files: no response`)
     status = res.status
     for (const f of res.data) {
       out.push({

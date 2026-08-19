@@ -8,11 +8,12 @@
  *      being judged by.
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PROTECTED_GLOBS,
   UNRESOLVED_PATH_GLOB,
   classifyChangedFiles,
+  listPullRequestFiles,
   matchProtectedGlobs,
   normalizeChangedPath,
   sanitizePreviewPath,
@@ -219,6 +220,89 @@ describe('classifyChangedFiles', () => {
     ]) {
       expect(PROTECTED_GLOBS).toContain(glob)
     }
+  })
+})
+
+describe('listPullRequestFiles', () => {
+  // Ticket #3927: `pulls/{n}/files` computes the diff lazily and was seen
+  // returning a bare 404 (once a 502) for PRs that unambiguously exist and
+  // that `getPullRequest` on the same number just answered 200 for. This
+  // covers the fix: retry the known-transient statuses a bounded number of
+  // times, but never retry a real permission/client error, which would just
+  // spin on a scope problem instead of surfacing it.
+  const fetchMock = vi.fn()
+  const filePage = () =>
+    JSON.stringify([{ filename: 'app/lib/foo.ts', status: 'modified', additions: 1, deletions: 0 }])
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+    process.env['GITHUB_TOKEN'] = 'test-token'
+    process.env['GITHUB_OWNER'] = 'test-owner'
+    process.env['GITHUB_REPO'] = 'test-repo'
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    delete process.env['GITHUB_TOKEN']
+    delete process.env['GITHUB_OWNER']
+    delete process.env['GITHUB_REPO']
+  })
+
+  it('retries a transient 404 and succeeds once GitHub has finished computing the diff', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response('Not Found', { status: 404 }))
+      .mockResolvedValueOnce(new Response(filePage(), { status: 200 }))
+
+    const promise = listPullRequestFiles(730, 'test')
+    await vi.advanceTimersByTimeAsync(600)
+    const result = await promise
+
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.data).toEqual([
+      { filename: 'app/lib/foo.ts', status: 'modified', additions: 1, deletions: 0 },
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a transient 502 the same as a 404', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response('Bad Gateway', { status: 502 }))
+      .mockResolvedValueOnce(new Response(filePage(), { status: 200 }))
+
+    const promise = listPullRequestFiles(730, 'test')
+    await vi.advanceTimersByTimeAsync(600)
+    const result = await promise
+
+    expect(result.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('gives up after exhausting retries on a sustained 404 and returns the upstream error, not a hang', async () => {
+    // mockImplementation (not mockResolvedValue) so every call mints a fresh
+    // Response: a Response body can only be read once.
+    fetchMock.mockImplementation(async () => new Response('Not Found', { status: 404 }))
+
+    const promise = listPullRequestFiles(730, 'test')
+    await vi.advanceTimersByTimeAsync(2100)
+    const result = await promise
+
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe(404)
+    // 1 initial attempt + 2 retries, matching the two configured backoff delays.
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not retry a real permission error, so a token/scope problem surfaces immediately', async () => {
+    fetchMock.mockImplementation(async () => new Response('Forbidden', { status: 403 }))
+
+    const result = await listPullRequestFiles(730, 'test')
+
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe(403)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 
