@@ -55,7 +55,7 @@ function TrustItemEl({ item }: { item: TrustItem }) {
           {item.headline}
         </p>
         {item.subheadline && (
-          <p className="text-ink/50 text-[11px] leading-tight whitespace-nowrap">
+          <p className="text-ink-3 text-[11px] leading-tight whitespace-nowrap">
             {item.subheadline}
           </p>
         )}

@@ -57,7 +57,7 @@ function QuickLinkRow({ heading, links }: { heading: string; links: QuickLink[] 
   if (links.length === 0) return null
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:gap-4">
-      <h3 className="shrink-0 text-[11px] uppercase tracking-widest text-white/35 sm:w-32">
+      <h3 className="shrink-0 text-[11px] uppercase tracking-widest text-white/50 sm:w-32">
         {heading}
       </h3>
       <ul className="flex flex-wrap items-baseline gap-x-3 gap-y-1 sm:gap-x-4 sm:gap-y-1.5">
@@ -182,7 +182,7 @@ export function Footer({ socialLinks = [], footerColumns = [], brandLinks, categ
 
         {/* Divider */}
         <div className="border-t border-white/10 pt-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-white/40">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-white/50">
             <p>© {currentYear} {copyright || 'XD Inc. All rights reserved.'}</p>
             <p className="text-center sm:text-right max-w-sm leading-relaxed">
               {disclaimer || 'Age restricted. You must be 18 or older to purchase. All orders ship discreetly, and we do not sell to minors.'}

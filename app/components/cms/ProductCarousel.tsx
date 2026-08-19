@@ -239,7 +239,7 @@ function ProductCard({
           )}
         </div>
         <div className="p-4">
-          <p className="text-ink/50 text-xs">{product.brand}</p>
+          <p className="text-ink-3 text-xs">{product.brand}</p>
           <p
             className="font-semibold text-ink text-sm mt-0.5 line-clamp-2 group-hover:text-coral transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
@@ -249,7 +249,7 @@ function ProductCard({
           <div className="flex items-center gap-2 mt-2">
             <span className="text-ink font-bold text-sm">${price.toFixed(2)}</span>
             {onSale && (
-              <span className="text-ink/40 text-xs line-through">${compare!.toFixed(2)}</span>
+              <span className="text-ink-3 text-xs line-through">${compare!.toFixed(2)}</span>
             )}
           </div>
         </div>

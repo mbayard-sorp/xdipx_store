@@ -6,6 +6,14 @@
  * reveals settled) so it audits the real past-the-gate storefront, not the
  * AgeGatePanel. Only `serious` and `critical` fail the test; the full
  * violation list is attached to the report either way.
+ *
+ * The `color-contrast` known-issue carve-out (baselined 2026-08-16) was
+ * retired in ticket #3789 (2026-08-19): every serious/critical node on these
+ * four routes was fixed at the source (darkened `--color-coral`, `--color-
+ * ink-4`, `--color-sage` tokens plus a handful of raw-opacity text colors
+ * swapped for solid ink-3/white-50 tokens). Zero serious/critical is now the
+ * real, unconditional bar — do not reintroduce a KNOWN_ISSUES exemption
+ * without re-litigating this decision.
  */
 
 import AxeBuilder from '@axe-core/playwright'
@@ -13,16 +21,6 @@ import { expect, test } from '@playwright/test'
 import { openSettled } from './helpers'
 
 const ROUTES = ['/', '/discover', '/faq', '/about']
-
-/**
- * Pre-existing debt, measured live 2026-08-16: `color-contrast` fails serious
- * on all four routes (6-190 nodes; largest on /discover). Baselined here so
- * the sweep is green-by-default and still hard-fails on any NEW serious or
- * critical rule id. Burn the debt down, then delete the entry — the p3-axe
- * definition of done is zero serious/critical with this list EMPTY. Run with
- * AXE_STRICT=1 to see the full bar with no known-issue exemptions.
- */
-const KNOWN_ISSUES = new Set(process.env['AXE_STRICT'] === '1' ? [] : ['color-contrast'])
 
 for (const path of ROUTES) {
   test(`axe sweep ${path}`, async ({ page }, testInfo) => {
@@ -37,16 +35,8 @@ for (const path of ROUTES) {
     const serious = results.violations.filter(
       (v) => v.impact === 'serious' || v.impact === 'critical',
     )
-    const known = serious.filter((v) => KNOWN_ISSUES.has(v.id))
-    for (const v of known) {
-      process.stderr.write(
-        `KNOWN ISSUE ${path}: ${v.impact}: ${v.id} (${v.nodes.length} node(s)) — ${v.help}\n`,
-      )
-    }
-
-    const blocking = serious.filter((v) => !KNOWN_ISSUES.has(v.id))
     expect(
-      blocking.map((v) => `${v.impact}: ${v.id} (${v.nodes.length} node(s)) — ${v.help}`),
+      serious.map((v) => `${v.impact}: ${v.id} (${v.nodes.length} node(s)) — ${v.help}`),
     ).toEqual([])
   })
 }

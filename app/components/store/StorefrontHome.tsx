@@ -1135,7 +1135,10 @@ function StillDecidingBand() {
   return (
     <section id="discover" className="bg-ink text-paper">
         <Reveal variant="up" className="mx-auto max-w-[1320px] px-6 py-20 text-center md:px-16 md:py-32">
-          <p className="mb-6 text-[11px] uppercase tracking-[0.18em] text-coral" style={MONO}>
+          {/* coral-2, not coral: this band is bg-ink, and the base coral token
+              (darkened for AA on paper grounds, ticket #3789) reads only
+              3.29:1 here. coral-2 stays light enough to clear 7:1 on ink. */}
+          <p className="mb-6 text-[11px] uppercase tracking-[0.18em] text-coral-2" style={MONO}>
             Still deciding?
           </p>
           <h2

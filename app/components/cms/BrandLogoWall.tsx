@@ -17,7 +17,7 @@ export function BrandLogoWall({ block }: BrandLogoWallProps) {
     <section className={`py-10 px-4 border-t border-cream-2 ${bgClass(style)}`}>
       <div className="max-w-5xl mx-auto">
         {heading && (
-          <p className={`text-center text-xs font-semibold uppercase tracking-widest mb-6 ${dark ? 'text-white/50' : 'text-ink/40'}`}>
+          <p className={`text-center text-xs font-semibold uppercase tracking-widest mb-6 ${dark ? 'text-white/50' : 'text-ink-3'}`}>
             {heading}
           </p>
         )}
