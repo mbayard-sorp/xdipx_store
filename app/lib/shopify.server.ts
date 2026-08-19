@@ -2041,6 +2041,67 @@ export async function getCollectionDeals(
   }
 }
 
+// Ticket #3889: Ask Emma facets (mood/audience/matters tags, budgetMax) are
+// list.text metafields. Shopify Storefront API's `productMetafield` filter on
+// `collection.products(filters:)` only supports exact-value match against the
+// raw metafield value — unusable for "any of these tags" list semantics or a
+// numeric budget ceiling — so there is no query-level way to push these
+// facets into the Shopify request. Fetching the whole collection and
+// filtering server-side (instead of trusting the client to filter whatever
+// single page happened to load) is the documented fallback for an
+// enrichment-dependent field a query-level filter can't reach.
+const COLLECTION_FULL_TTL = 300 // 5 min — matches COLLECTION_CURSOR_TTL's "stable short-term" assumption
+const COLLECTION_FULL_PAGE_SIZE = 250 // Storefront API's per-request cap
+const COLLECTION_FULL_MAX_PAGES = 4 // safety cap: 1000 products/collection ceiling per fetch
+
+/**
+ * Full, unpaginated product list for one collection — every product Shopify
+ * has for `handle`, not just one page. KV-cached (short TTL) so a burst of
+ * filtered requests against the same collection+sort pays the full-collection
+ * fetch cost once per cache window rather than once per request.
+ */
+export async function getCollectionAllDeals(
+  handle: string,
+  sort: CollectionSort = 'manual',
+): Promise<VaultDeal[]> {
+  const cacheKey = KV_KEYS.collectionFull(handle, sort)
+  const cached = await kvGet<VaultDeal[]>(cacheKey)
+  if (cached) return cached
+
+  const { sortKey, reverse } = sortToStorefront(sort)
+  const out: VaultDeal[] = []
+  let after: string | null = null
+
+  for (let page = 0; page < COLLECTION_FULL_MAX_PAGES; page++) {
+    const data: {
+      collection: {
+        products: {
+          pageInfo: { hasNextPage: boolean }
+          edges: { cursor: string; node: ShopifyProductCardNode }[]
+        }
+      } | null
+    } = await storefront(`
+      query GetCollectionAllDeals($handle: String!, $first: Int!, $after: String, $sortKey: ProductCollectionSortKeys!, $reverse: Boolean!) {
+        collection(handle: $handle) {
+          products(first: $first, after: $after, sortKey: $sortKey, reverse: $reverse) {
+            pageInfo { hasNextPage }
+            edges { cursor node { ${PRODUCT_CARD_FRAGMENT} } }
+          }
+        }
+      }
+    `, { handle, first: COLLECTION_FULL_PAGE_SIZE, after, sortKey, reverse })
+
+    if (!data.collection) break
+    const edges = data.collection.products.edges
+    out.push(...edges.map(e => nodeToVaultDeal(e.node)))
+    if (!data.collection.products.pageInfo.hasNextPage || edges.length === 0) break
+    after = edges[edges.length - 1]!.cursor
+  }
+
+  await kvSet(cacheKey, out, COLLECTION_FULL_TTL)
+  return out
+}
+
 /**
  * Paginated, newest-first product list scoped to a Shopify tag rather than a
  * Collection object. Powers /new (New Arrivals, tag:new-arrival) and any
