@@ -28,6 +28,7 @@ policy page that run and cite it in the `policyCheck`.
 | **Reddit** | Effectively prohibited for adult products in its ads program. | Organic community participation where subreddit rules allow (unpaid, social team's judgment). | Low spend exposure since there's no viable paid path. |
 | **Adult ad networks** (e.g. category-specialist networks) | **Allowed — it's their business.** | Display/native on adult and adjacent inventory. Vet each network's traffic quality and brand-safety before proposing; model conservative conversion rates. | Quality/fraud risk, not policy risk. Attribution via UTMs is mandatory. |
 | **Owned + earned channels** | No gatekeeper. | Email/SMS to consented lists (the email team), SEO/AEO (already invested), affiliates and creator/newsletter sponsorships (disclosure required, creator's platform rules apply), the referral program once built. | Lowest risk, best margins — the default recommendation when paid math is thin. |
+| **Etsy** | Not an ad platform for this store; the question is whether xdipx's catalog can list there at all. **The Nalpac-fulfilled physical toy catalog cannot, in any form.** See §Etsy for the two independent policy blockers. | A narrow, digital-only, design-original lane (adult party games, printables, digital art), disconnected from the Nalpac catalog and from Shopify inventory. Manual, owner-run; not an automated channel. | **High if physical toys are listed** (policy-prohibited item type, twice over). **Low** for the digital-only lane if kept to original designs with proper mature-content tagging. |
 
 **Channel priority for proposals:** (1) owned/earned, (2) Google restricted-serving Search,
 (3) vetted adult networks and newsletter/creator sponsorships, (4) Google Shopping via Merchant
@@ -151,6 +152,84 @@ What follows from this:
   Facebook & Instagram channel in Shopify instead.
 
 Re-verify the counts before citing them. They move as Meta works through the review queue.
+
+## Etsy
+
+Added 2026-08-19 following an owner idea run past the team (custom bundles, how-to guides, party
+games, print-on-demand, digital artwork). This is not a paid-ads surface; it is a listing-policy
+question about whether xdipx can sell there at all, so it lives here alongside the other
+platform-by-platform reads rather than in a new document.
+
+**The Nalpac-fulfilled physical toy catalog is blocked twice over, independently:**
+
+1. Etsy's Adult Nudity and Sexual Content / Prohibited Items policy (effective 2026-08-11) bans
+   **insertable/penetrable adult toys** outright — dildos, vibrators, anal plugs, sex dolls,
+   fleshlights. That is the core of the store's catalog. Only non-insertable accessories
+   (restraints, harnesses, nipple clamps, impact-play gear) are permitted at all.
+2. Independent of the item-type ban, Etsy's Seller Policy bars reselling mass-produced goods and
+   bars dropship-sourced items as a seller's "production." A Nalpac-fulfilled catalog fails this on
+   its own, even for the sliver of items the item-type rule would otherwise allow.
+
+**Do not propose listing any Nalpac-sourced physical product on Etsy, bundled or not.** Custom
+bundles built from the existing toy catalog are not a viable Etsy lane under current policy.
+
+**Never disguise a prohibited item as a different listing to route it past moderation.** A
+"digital guide" listing that ships a physical toy and lube alongside it, undisclosed in the
+photos/description, does not escape the item-type ban — Etsy determines category from what ships,
+not from what the seller chose to photograph, and it stacks a materially bigger risk than a
+takedown: Etsy Payments settles through card networks with their own high-risk merchant-category
+rules for sex toys, and a listing structured specifically to route a prohibited item past content
+review reads as payment-category evasion, which risks frozen funds or account termination for
+cause. Same principle as §Organic social's "never route around a filter" — if a listing only works
+by hiding what it actually is, kill it.
+
+**What is viable, each with a caveat:**
+
+- **Adult party games** (bachelorette/couples novelty games, signage) as original, xdipx-designed
+  printables or print-on-demand goods — not resold Nalpac items. The best entry point: an
+  established, non-toy Etsy category with real demand.
+- **How-to / intimacy-education guides** as digital PDFs — text/illustration only, no photorealistic
+  depiction of sex acts or genitalia, proper mature-content tagging and thumbnail obscuring per
+  Etsy's listing rules.
+- **Print-on-demand goods** (apparel, mugs, cards) with original designs through a disclosed POD
+  production partner (e.g. Printify/Printful) — standard, policy-compliant path as long as imagery
+  avoids explicit nudity/sex acts.
+- **Digital artwork/illustrated downloads** — same nudity/photorealism ceiling as the guides above;
+  stylized/suggestive illustration is the safe lane, explicit art is not.
+
+**A cheap guide that links out to xdipx.com is a distinct, structurally sound lane — nothing
+physical ships through Etsy at all.** A low-priced digital guide (e.g. $0.99) whose content
+recommends specific products with links to their xdipx.com product pages does not engage either
+Etsy blocker: Etsy never sees a toy transaction, only the guide transaction plus a hyperlink. This
+is different from the disguised-bundle case above because no physical item ships from the Etsy
+order. Etsy's **Off-Platform Transactions** policy bars completing *the same transaction* off-Etsy
+(soliciting a buyer to pay outside Etsy to dodge the fee on that item) — it does not bar linking
+from delivered content to a *different* product on a site the Etsy shop doesn't itself sell, which
+is standard practice among Etsy digital sellers (pattern/recipe PDFs linking to external supply
+lists). Three conditions keep this compliant, not blockers:
+  1. The guide must be a genuine, substantive item for sale, not a bare link list — Etsy requires
+     listings to offer a real item; a thin wrapper whose only purpose is redirecting risks removal
+     as non-substantive, independent of the adult-content questions.
+  2. Mature-content tagging still applies to the guide's own content if it describes sexual acts or
+     use, per the same rules as the standalone-guide lane above.
+  3. No Etsy-hosted checkout for the toy itself — links go to xdipx.com for a separate purchase,
+     never a "buy this here" flow inside the Etsy listing.
+  Re-verify the Off-Platform Transactions policy before scaling this beyond a pilot; it was read
+  2026-08-19 via search, not fetched directly from Etsy (egress to etsy.com was blocked from this
+  environment that day).
+
+**Market read, honestly:** party games and POD are real, active Etsy categories, but commodity-
+crowded; the edge is original design and personalization, not the "adult" framing itself. Treat any
+Etsy lane as a small side experiment against the $2,000/month storefront goal, not a strategic bet,
+until it proves revenue.
+
+**Architecture, if pursued:** keep it manual and digital-only. No Etsy listing, inventory, or order
+data syncs with Shopify or Nalpac; no `app/lib/etsy.server.ts` exists and none is needed for a
+manual shop. This deliberately avoids protected paths (no cart, checkout, payment, or migration
+touches). A synced or automated integration, or a dedicated `marketplace-ops` agent, is future scope
+only after the manual lane proves out — do not build infrastructure for an unvalidated channel.
+
+Sources: [Etsy Prohibited Items Policy](https://www.etsy.com/legal/policy/prohibited-items-policy-effective/1475031537022), [Etsy Adult Nudity and Sexual Content policy](https://www.etsy.com/legal/policy/adult-nudity-and-sexual-content/1269612959532), [Listing Mature Content Correctly](https://www.etsy.com/legal/policy/listing-mature-content-correctly/242665462117), [Etsy Seller Policy](https://www.etsy.com/legal/policy/seller-policy-effective-through-july-8/1489086421092), [Off-Platform Transactions policy](https://www.etsy.com/legal/policy/off-platform-transactions/1254654515806).
 
 ## Creative rules (paid AND organic)
 
