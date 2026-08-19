@@ -322,6 +322,45 @@ function resolveSeoContentType(type: GenerateCopyRequest['type']): SeoContentTyp
   return 'pdp'
 }
 
+/**
+ * Shared Emma no-lived-experience guard for enrichment prompts (ticket #4115,
+ * split from #3776). Emma is an AI guide with no lived experience; a copy prompt
+ * must never instruct a first-person use claim. The bullet-style enrichment
+ * prompts elsewhere in this file already carry an equivalent "NEVER say I
+ * tried/tested/used" rule inline; this is the reusable form so the
+ * quiet_endorsement prompt (which used to frame Emma as "a friend who has
+ * actually tried this") cannot drift back into fabrication.
+ */
+export const EMMA_NO_USE_CLAIM_GUARD =
+  'Emma is an AI guide with no lived experience: never write that she tried, tested, owns, keeps, or reached for the product. Speak to what the reader will feel, never to what Emma has felt.'
+
+/**
+ * Build the primary + retry prompts for the "quiet endorsement" homepage
+ * template. Extracted as a pure, exported function so the voice invariant is
+ * unit-testable without a model call (the enrichment path's `callClaude` always
+ * uses the live SDK, so a fake `LLMClient` cannot capture the prompt).
+ */
+export function buildQuietEndorsementPrompt(opts: {
+  mapRestricted: boolean
+  productContext: string
+}): { primary: string; retry: string } {
+  const mapNote = opts.mapRestricted
+    ? 'This product is MAP-restricted — do NOT reference a discount or a strike price. The hook must be Emma\'s endorsement, not the price.'
+    : 'You may reference a pleasant price or value if it flows naturally, but the hook should still be Emma\'s endorsement, not the discount.'
+  const primary = `Write the four short strings for Emma's "quiet endorsement" homepage template. Emma voice: a trusted, funny friend and curator who knows this catalog cold and quietly can't stop recommending this one. ${EMMA_NO_USE_CLAIM_GUARD} Never "Buy now" — never countdowns — never "sex" as an adjective. Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction".
+${mapNote}
+
+Return ONLY a raw JSON object (no markdown) with these exact keys:
+- eyebrow: a tag line ≤ 60 chars, two short phrases joined by " · " (middle dot, U+00B7). Example shape: "quiet endorsement · works for MAP-restricted".
+- subhead: one short line, lowercase, casual — something like "updated whenever I change my mind".
+- body: 1–2 sentences (≤ 200 chars total). First-person curator voice (Emma recommending, never claiming to have used it). Wrap one 1–4 word phrase in underscores like _slow-burn energy_ so the UI can highlight it in coral. End with a soft curiosity nudge ("Come see.", "Worth a peek.", etc).
+- bannerHeadline: ≤ 30 chars, italic-editorial feel, product name in Emma's words. Use " · " as separator if you have two parts. Example: "Slowburn · the Hush".
+
+${opts.productContext}`
+  const retry = `Return ONLY raw JSON. No markdown, no prose before or after. Shape: {"eyebrow": "...", "subhead": "...", "body": "...", "bannerHeadline": "..."}. Follow Emma voice rules. ${EMMA_NO_USE_CLAIM_GUARD} ${opts.productContext}`
+  return { primary, retry }
+}
+
 export async function generateCopy(req: GenerateCopyRequest, llmClient?: LLMClient): Promise<GenerateCopyResult> {
   const { type, product } = req
 
@@ -523,20 +562,12 @@ Voice: light Emma — observational, warm, specific. Not a generic SEO template,
     }
 
     case 'quiet_endorsement': {
-      const mapNote = product.mapRestricted
-        ? 'This product is MAP-restricted — do NOT reference a discount or a strike price. The hook must be Emma\'s endorsement, not the price.'
-        : 'You may reference a pleasant price or value if it flows naturally, but the hook should still be Emma\'s endorsement, not the discount.'
-      const primaryPrompt = `Write the four short strings for Emma's "quiet endorsement" homepage template. Emma voice: a trusted, funny friend who has actually tried this and quietly can't stop thinking about it. Never "Buy now" — never countdowns — never "sex" as an adjective. Use "intimate", "pleasure", "wellness", "slow-burn", "satisfaction".
-${mapNote}
-
-Return ONLY a raw JSON object (no markdown) with these exact keys:
-- eyebrow: a tag line ≤ 60 chars, two short phrases joined by " · " (middle dot, U+00B7). Example shape: "quiet endorsement · works for MAP-restricted".
-- subhead: one short line, lowercase, casual — something like "updated whenever I change my mind".
-- body: 1–2 sentences (≤ 200 chars total). First person, Emma voice. Wrap one 1–4 word phrase in underscores like _slow-burn energy_ so the UI can highlight it in coral. End with a soft curiosity nudge ("Come see.", "Worth a peek.", etc).
-- bannerHeadline: ≤ 30 chars, italic-editorial feel, product name in Emma's words. Use " · " as separator if you have two parts. Example: "Slowburn · the Hush".
-
-${productContext}`
-      const retryPrompt = `Return ONLY raw JSON. No markdown, no prose before or after. Shape: {"eyebrow": "...", "subhead": "...", "body": "...", "bannerHeadline": "..."}. Follow Emma voice rules. ${productContext}`
+      // Voice framing + the no-lived-experience guard live in the exported pure
+      // builder so the invariant is unit-testable (ticket #4115).
+      const { primary: primaryPrompt, retry: retryPrompt } = buildQuietEndorsementPrompt({
+        mapRestricted: !!product.mapRestricted,
+        productContext,
+      })
 
       const isValid = (v: unknown): v is import('~/types').QuietEndorsementCopy => {
         if (!v || typeof v !== 'object') return false
