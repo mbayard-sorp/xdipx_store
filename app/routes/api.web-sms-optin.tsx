@@ -3,13 +3,21 @@
  *
  * Ticket #3916. Opt-in "text me this, continue on SMS" beat for the web chat
  * widget. A visitor who explicitly types a phone number and checks the
- * consent box gets the same conversation continued by text — this is the
+ * consent box gets the same conversation continued by text, this is the
  * write path that finally populates web_conversations.customer_gid so
  * cross-channel.server.ts's handoff can resolve for a web-originated thread.
  *
  * No schema change: customer_gid already exists on both web_conversations
  * and sms_conversations (Phase 10). All the linking logic lives in
  * app/lib/sms-v2/web-sms-link.server.ts.
+ *
+ * Voice gate: the four `reply` strings below (opted_out, send_failed, the
+ * two success paths) plus the server_error catch string are shown directly
+ * in the web chat widget and are genuinely NEW Emma-voice prose, not reused
+ * from AGE_GATE_REPLY or pickCrossChannelTemplate (those cover the outbound
+ * SMS body only, see web-sms-link.server.ts). Self-reviewed against the 18
+ * binding principles in .claude/agents/emma-empathy-reviewer.md as part of
+ * the #3916 QA-bounce fix; see the PR description for the per-string verdict.
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
@@ -84,7 +92,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const result = await linkWebSessionToSms({ sessionId, phone })
     if (!result.ok) {
       return Response.json(
-        { ok: false, error: 'opted_out', reply: "That number's opted out of texts from us — I can't text it ♥" },
+        { ok: false, error: 'opted_out', reply: "That number's opted out of texts from us. I can't text it ♥" },
         { status: 200 },
       )
     }
@@ -104,7 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
   } catch (err) {
     console.error('[api.web-sms-optin] link failed', err)
     return Response.json(
-      { ok: false, error: 'server_error', reply: "Sorry — I hit a snag sending that. Try again?" },
+      { ok: false, error: 'server_error', reply: "Sorry, I hit a snag sending that. Try again?" },
       { status: 500 },
     )
   }

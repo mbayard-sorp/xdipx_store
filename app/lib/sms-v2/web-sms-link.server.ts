@@ -23,11 +23,14 @@
  *
  * Compliance: a phone number that has never cleared the SMS age/consent gate
  * gets the exact same AGE_GATE_REPLY a cold inbound text would get (verbatim
- * from compliance-templates.ts) — typing a phone into a web form is not a
+ * from compliance-templates.ts), typing a phone into a web form is not a
  * substitute for the carrier-required "reply YES" opt-in. An already-
  * consented number gets the reviewed cross-channel continuation copy from
- * cross-channel-templates.ts instead. Neither path introduces new customer-
- * facing prose, so this file does not need a fresh empathy-reviewer pass.
+ * cross-channel-templates.ts instead. Neither outbound SMS body introduces
+ * new customer-facing prose, so this file's own strings did not need a fresh
+ * empathy-reviewer pass. The in-widget "reply" copy shown back to the web
+ * visitor lives in app/routes/api.web-sms-optin.tsx, not here, and IS new
+ * prose — see the voice-gate note in that file's header.
  */
 import { getOrCreateConversation, applyStateWrites, bridgeSummary } from './conversation.server'
 import { getOrCreateWebConversation, applyWebStateWrites } from './web-conversation.server'
