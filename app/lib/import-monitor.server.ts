@@ -30,6 +30,7 @@ import {
   needsReview,
 } from '~/lib/master-collapse.server'
 import type { MasterRecord } from '~/lib/master-collapse.server'
+import { flagSustainedOutOfStock } from '~/lib/oos-monitor.server'
 import type { BulkImportRow, BulkVariantRow, MasterProductGroup } from '~/types'
 
 // ─── Public row types ──────────────────────────────────────────────────────────
@@ -240,6 +241,27 @@ export async function runImportMonitor(
       }
     } catch (err) {
       console.error('[import-monitor] cost-sync threw unexpectedly:', err)
+    }
+
+    // 3c. Sustained out-of-stock flag (suggestion #3884). Flags carried SKUs at
+    // supplier qty=0 for N consecutive days so a human can hide/backorder-badge
+    // them; never archives (that stays the Nalpac-discontinued sweep's job).
+    // Best-effort and internally non-throwing, wrapped anyway so it can never
+    // fail the whole import-monitor run.
+    try {
+      const oos = await flagSustainedOutOfStock({
+        snapshots:   feedResult.snapshots,
+        carriedSkus,
+        todayStr,
+      })
+      if (oos.flaggedCount > 0) {
+        console.info(
+          `[import-monitor] oos-monitor: zero=${oos.zeroCount} sustained=${oos.flaggedCount} ` +
+          `tickets=${oos.ticketsFiled} capped=${oos.capped}`,
+        )
+      }
+    } catch (err) {
+      console.error('[import-monitor] oos-monitor threw unexpectedly:', err)
     }
 
     // 4. New-product diff vs prior feed-SKU snapshot in KV.
