@@ -603,6 +603,48 @@ shipped as a packshot and was rejected. Declare Instagram product drafting degra
 in the summary, and pivot volume to X, LinkedIn, and non-product Instagram posts. **Never fall back
 to a product-only frame to fill the slot.**
 
+### X carries a cast member. Owner direction 2026-08-19.
+
+**Every X post ships an image, and a cast member is in it.** Not a product-only frame, not a
+typography plate, not a reused packshot. The cast is what makes the account read as a publication
+instead of a link feed, and X is the surface where that difference decides whether a fast scroll
+stops.
+
+- **Generate at 16:9 with `--platform x`** (1600x900). Do not re-crop Instagram key art by default:
+  IG frames are 4:5 for the 3:4 profile grid, and a centre crop to 16:9 takes off exactly the top and
+  bottom where the product-in-hand sits. Reuse a pool frame only when you have checked that it
+  survives the crop with the product still legible, and say in the run summary that you reused rather
+  than generated.
+- **Same two-stage cast composite as Instagram** (`--archetype cast --presenter-image <approved
+  castMember referencePhoto> --ref-image <real product photo> --extra-ref <same> --scale <cue>`).
+  **Roster reality, corrected 2026-08-19:** this bullet previously claimed six approved members
+  (Diego, Jade, Marcus, Maya, Priya, Sofia). That was never true. Sanity held **zero** `castMember`
+  docs and zero docs with a `referencePhoto`, verified by GROQ count; the six exist only as specs in
+  `scripts/generate-cast-candidates.ts`, which uploads nothing until the owner confirms each face.
+  **Emma was seeded on 2026-08-19 and is currently the only approved cast member.** Rotate as soon
+  as there is more than one face; until then every post carries Emma, the section 3.8 two-of-five
+  cast rule is unsatisfiable, and the run says so rather than pretending it passed. Unblocking this
+  is owner blocker id3.
+- **The imagery fence does not move with the caption register.** X captions run 6-7 against
+  Instagram's 4-5 because X's organic policy is more permissive. The picture standard is unchanged,
+  and the reason is mechanical rather than a matter of taste: the charter's permission is conditional
+  on posts covered by that policy being "labeled per X's own rules", and `postTweet`
+  (`app/lib/twitter.server.ts:95`) accepts only text and media ids, with no sensitive-media flag. We
+  cannot label, so we must not post anything that would need labeling. The design doctrine's
+  explicit-imagery and wardrobe-coverage fences bind identically on both platforms.
+- **Product-free X post** (education beat, Notebook promo companion): still a cast frame, just
+  without the product. Drop `--presenter-image` and pass the cast reference as `--ref-image`, exactly
+  as the Instagram product-free form does below.
+- **A cast frame you cannot produce is a reason to draft fewer X posts, not a reason to fall back to
+  a product-only image or a packshot.** Say which it was in the run summary. This is the same
+  degraded-to-zero honesty the Step 2b imagery preflight already requires for Instagram: the "no zero
+  days" baseline is channel-scoped, and a wrong image on a linked post is worse than a missing post.
+- **Cost note.** A cast composite runs `--candidates 2`, so a full 4-post X day plus a 4-post
+  Instagram day draws roughly 16 billed generations against `social_team_max_images`, which defaults
+  to 12 and is currently unset. Reuse-first genuinely matters here, and if runs start reporting the
+  image cap as the binding constraint that is an owner config item, not something to work around by
+  dropping the cast.
+
 **Only a generated, rehosted asset is publishable.** The URL you put in `mediaUrls` must have a
 `social-` or `ig-` prefixed basename, because `isGeneratedSocialAsset` checks exactly that and the
 gate BLOCKs anything else on image-provenance (ticket #4134). A Shopify product CDN URL never
