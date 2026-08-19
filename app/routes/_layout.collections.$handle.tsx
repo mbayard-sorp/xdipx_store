@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LoaderFunctionArgs, MetaDescriptor, MetaFunction } from 'react-router'
 import { useLoaderData, useSearchParams, Link } from 'react-router'
-import { getCollection, getCollectionDeals, getMainMenu, type CollectionSort } from '~/lib/shopify.server'
+import { getCollection, getCollectionDeals, getCollectionAllDeals, getMainMenu, type CollectionSort } from '~/lib/shopify.server'
+import type { VaultDeal } from '~/types'
 import { getCollectionPage, getEmmaPresets, getBlogPosts, getNotebookPostsForProductHandles } from '~/lib/sanity.server'
 import { getCategoryPage, getDropPage } from '~/lib/category-page.server'
 import { CategoryBlockRenderer } from '~/components/category/CategoryBlockRenderer'
@@ -121,6 +122,52 @@ function titleCase(handle: string): string {
     .join(' ')
 }
 
+type FacetSourceProduct = { moodTags?: string[]; audienceTags?: string[]; mattersTags?: string[]; price: number }
+
+function toFacetSource(d: VaultDeal): FacetSourceProduct {
+  return {
+    ...(d.moodTags ? { moodTags: d.moodTags } : {}),
+    ...(d.audienceTags ? { audienceTags: d.audienceTags } : {}),
+    ...(d.mattersTags ? { mattersTags: d.mattersTags } : {}),
+    price: d.dealPrice,
+  }
+}
+
+/**
+ * Ticket #3889: facet filtering (mood/audience/matters/budgetMax) used to run
+ * client-side, in the browser, over only the single page of 24 items the
+ * loader had already fetched — silently hiding the rest of a collection that
+ * would otherwise have matched. When a facet param is present this now fetches
+ * the WHOLE collection (KV-cached, see getCollectionAllDeals) and filters +
+ * paginates server-side before anything reaches the client. With no facet
+ * param, the fast per-page Shopify cursor fetch is unchanged.
+ *
+ * `facetSource` is also returned so the Ask Emma rail can offer chips from
+ * the full collection rather than whatever page happens to be on screen —
+ * previously the rail's available-chip set was derived from the current
+ * page's 24 items too.
+ */
+async function loadCollectionDeals(
+  handle: string,
+  page: number,
+  sort: CollectionSort,
+  filtersApplied: boolean,
+  searchParams: URLSearchParams,
+): Promise<{ deals: VaultDeal[]; hasNextPage: boolean; facetSource: FacetSourceProduct[] }> {
+  if (!filtersApplied) {
+    const { deals, hasNextPage } = await getCollectionDeals(handle, page, PAGE_SIZE, sort)
+    return { deals, hasNextPage, facetSource: deals.map(toFacetSource) }
+  }
+
+  const allDeals = await getCollectionAllDeals(handle, sort)
+  const facetSource = allDeals.map(toFacetSource)
+  const filteredAll = allDeals.filter(d => matchesAskEmmaFilters(toFacetSource(d), searchParams))
+  const start = (page - 1) * PAGE_SIZE
+  const deals = filteredAll.slice(start, start + PAGE_SIZE)
+  const hasNextPage = start + PAGE_SIZE < filteredAll.length
+  return { deals, hasNextPage, facetSource }
+}
+
 export async function loader({ params, request }: LoaderFunctionArgs) {
   const handle = params.handle!
   const url = new URL(request.url)
@@ -135,10 +182,10 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // Treat them like filters for indexing purposes — see meta() above.
   const nonCanonicalVariant = filtersApplied || sort !== 'manual'
 
-  const [collection, sanity, { deals, hasNextPage }, presets, menu, notebook, categoryPage] = await Promise.all([
+  const [collection, sanity, dealsResult, presets, menu, notebook, categoryPage] = await Promise.all([
     getCollection(handle),
     getCollectionPage(handle),
-    getCollectionDeals(handle, page, PAGE_SIZE, sort),
+    loadCollectionDeals(handle, page, sort, filtersApplied, url.searchParams),
     getEmmaPresets(),
     getMainMenu(),
     // Notebook rail — only loaded for page 1 (it's hidden on deeper pages
@@ -162,6 +209,8 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   if (!collection) {
     throw new Response('Collection not found', { status: 404 })
   }
+
+  const { deals, hasNextPage, facetSource } = dealsResult
 
   // Notebook rail relevance: prefer posts that feature a product from this
   // collection (reverse lookup on blogProductEmbed.productHandle), falling back
@@ -244,6 +293,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   return {
     deals,
     hasNextPage,
+    facetSource,
     page,
     handle,
     h1,
@@ -285,6 +335,7 @@ export default function CollectionPage() {
   const {
     deals,
     hasNextPage,
+    facetSource,
     page,
     handle,
     h1,
@@ -330,21 +381,12 @@ export default function CollectionPage() {
   }, [handle, page])
   const [starred, setStarred] = useState<Record<string, string>>({})
 
-  const filtered = useMemo(
-    () => deals.filter(d => matchesAskEmmaFilters(
-      {
-        ...(d.moodTags     ? { moodTags:     d.moodTags     } : {}),
-        ...(d.audienceTags ? { audienceTags: d.audienceTags } : {}),
-        ...(d.mattersTags  ? { mattersTags:  d.mattersTags  } : {}),
-        price: d.dealPrice,
-      },
-      params,
-    )),
-    [deals, params],
-  )
-
+  // Server-filtered already (ticket #3889 — loadCollectionDeals() in the
+  // loader applies matchesAskEmmaFilters across the WHOLE collection, not
+  // just this page), so `deals` IS the filtered result set. No client-side
+  // re-filtering here.
   const candidates = useMemo(
-    () => filtered.slice(0, 20).map(d => ({
+    () => deals.slice(0, 20).map(d => ({
       handle:      d.handle,
       title:       d.seoTitle,
       vendor:      d.brand ?? null,
@@ -353,7 +395,7 @@ export default function CollectionPage() {
       moodTags:    d.moodTags ?? [],
       mattersTags: d.mattersTags ?? [],
     })),
-    [filtered],
+    [deals],
   )
 
   const activeFilters = useMemo(() => ({
@@ -363,19 +405,13 @@ export default function CollectionPage() {
     budgetMax: params.get('budgetMax') ? Number(params.get('budgetMax')) : null,
   }), [params])
 
-  const facetProducts = useMemo(
-    () => deals.map(d => ({
-      ...(d.moodTags     ? { moodTags:     d.moodTags     } : {}),
-      ...(d.audienceTags ? { audienceTags: d.audienceTags } : {}),
-      ...(d.mattersTags  ? { mattersTags:  d.mattersTags  } : {}),
-      price: d.dealPrice,
-    })),
-    [deals],
-  )
-
+  // facetSource is the whole-collection tag/price universe from the loader
+  // (full collection when filters are active, current page otherwise) — the
+  // Ask Emma rail's available chips and dead-end-chip guard both need the
+  // full universe, not just the post-filter page of results in `deals`.
   const { moods, audiences, matters, priceMin, priceMax } = useMemo(
-    () => deriveFacets(facetProducts),
-    [facetProducts],
+    () => deriveFacets(facetSource),
+    [facetSource],
   )
 
   function pageHref(p: number) {
@@ -518,7 +554,7 @@ export default function CollectionPage() {
             availableMatters={matters}
             priceMin={priceMin}
             priceMax={priceMax}
-            products={facetProducts}
+            products={facetSource}
             presets={presets}
             relatedCategories={relatedCollections}
           />
@@ -556,9 +592,9 @@ export default function CollectionPage() {
               </div>
             </div>
           )}
-          {filtered.length > 0 ? (
+          {deals.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {filtered.map((deal, i) => (
+              {deals.map((deal, i) => (
                 <div
                   key={deal.id}
                   onClickCapture={() => trackSelectItem(listId, listId, toCollectionGA4Item(deal, i), i)}
@@ -571,7 +607,7 @@ export default function CollectionPage() {
                 </div>
               ))}
             </div>
-          ) : deals.length > 0 ? (
+          ) : filtersApplied ? (
             <div className="text-center py-20">
               <p className="text-ink/60 text-sm mb-3">Nothing matches those filters in {h1}.</p>
               <p className="text-muted text-xs">Try loosening a chip above — or ask Emma for a different preset.</p>

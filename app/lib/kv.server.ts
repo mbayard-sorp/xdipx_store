@@ -375,6 +375,11 @@ export const KV_KEYS = {
   // substitute list can't survive the deploy on cache TTL alone.
   fbt:                    (handle: string) => `fbt:v2:${handle}`,
   collectionCursor:       (handle: string, page: number, sort = 'manual') => `vault:cursor:${handle}:${sort}:p${page}`,
+  // Full (unpaginated) collection product list — powers server-side Ask Emma
+  // facet filtering (ticket #3889) across the WHOLE collection, not just the
+  // one page a shopper happens to be on. Short TTL: collection order is stable
+  // short-term, matching COLLECTION_CURSOR_TTL below.
+  collectionFull:         (handle: string, sort = 'manual') => `vault:full:${handle}:${sort}`,
   // v2 redesign — dial vote aggregates (5-min TTL)
   dialAggregate:          (shopifyProductId: string) => `dial:agg:${shopifyProductId}`,
   // PDP product-level aggregate vote (thumbs up/down on the whole dial)
