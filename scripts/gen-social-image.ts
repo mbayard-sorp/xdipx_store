@@ -210,13 +210,14 @@ async function main() {
 
   // ── 3. Dry run ────────────────────────────────────────────────────────────
   if (dryRun) {
-    const { buildSocialAssetFilename } = await import('~/lib/social-media.server')
+    const { buildSocialAssetFilename, socialAspectFromImageSize } = await import('~/lib/social-media.server')
+    const aspect = socialAspectFromImageSize(imageSize)
     console.log(JSON.stringify({
       dryRun: true,
       plan: {
-        prompt, handle, archetype, mood, platform, imageSize, date,
+        prompt, handle, archetype, mood, platform, imageSize, aspect, date,
         ...(slide ? { slide } : {}),
-        filename: buildSocialAssetFilename({ handle, archetype: archetype as never, mood, date, ...(slide ? { slide } : {}) }),
+        filename: buildSocialAssetFilename({ handle, archetype: archetype as never, mood, date, aspect, ...(slide ? { slide } : {}) }),
         only: presenter ? 'composeSceneFrame (qwen plate -> flux-2 lora edit)' : (only ?? 'fal-then-imagen'),
         ...(presenter ? { presenter, mode: 'cast-composite', scale } : {}),
         caller, cap, capSource,

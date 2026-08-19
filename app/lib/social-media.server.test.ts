@@ -10,6 +10,9 @@ import {
   buildSocialAssetFilename,
   isGeneratedSocialAsset,
   allMediaAreGeneratedSocialAssets,
+  socialAssetAspect,
+  socialAssetMatchesAspect,
+  socialAspectFromImageSize,
   PRODUCT_SCALES,
   isProductScale,
   withProductScale,
@@ -128,6 +131,69 @@ describe('buildSocialAssetFilename', () => {
     })
     expect(name).toBe('social-untitled-plate-editorial-20260812.jpg')
     expect(isGeneratedSocialAsset(`${CDN}/${name}`)).toBe(true)
+  })
+
+  it('4:5 stays token-less so pre-#4205 names are unchanged', () => {
+    const base = { handle: 'pom', archetype: 'cast' as const, mood: 'warm', date: '2026-08-12' }
+    expect(buildSocialAssetFilename({ ...base, aspect: '4:5' }))
+      .toBe('social-pom-cast-warm-20260812.jpg')
+    // Absent aspect is 4:5 too — identical name.
+    expect(buildSocialAssetFilename(base)).toBe('social-pom-cast-warm-20260812.jpg')
+  })
+
+  it('stamps a non-4:5 aspect into the name, before the slide suffix (#4205)', () => {
+    const base = { handle: 'pom', archetype: 'cast' as const, mood: 'warm', date: '2026-08-12' }
+    expect(buildSocialAssetFilename({ ...base, aspect: '16:9' }))
+      .toBe('social-pom-cast-warm-20260812-16x9.jpg')
+    expect(buildSocialAssetFilename({ ...base, aspect: '16:9', slide: 3 }))
+      .toBe('social-pom-cast-warm-20260812-16x9-3.jpg')
+    expect(buildSocialAssetFilename({ ...base, aspect: '9:16' }))
+      .toBe('social-pom-cast-warm-20260812-9x16.jpg')
+    // Still a recognised generated asset with the token present.
+    expect(isGeneratedSocialAsset(`${CDN}/${buildSocialAssetFilename({ ...base, aspect: '16:9' })}`))
+      .toBe(true)
+  })
+})
+
+describe('social asset aspect — reuse-first shape guard (#4205)', () => {
+  it('reads the aspect back out of a filename, defaulting to 4:5 by absence', () => {
+    expect(socialAssetAspect('social-pom-cast-warm-20260812.jpg')).toBe('4:5')
+    expect(socialAssetAspect('social-pom-cast-warm-20260812-16x9.jpg')).toBe('16:9')
+    expect(socialAssetAspect('social-pom-cast-warm-20260812-16x9-3.jpg')).toBe('16:9')
+    expect(socialAssetAspect('social-pom-cast-warm-20260812-9x16.jpg')).toBe('9:16')
+    // Grandfathered ig- names have no date and are all 4:5.
+    expect(socialAssetAspect('ig-pom-aloe-nightstand-drawer-v2.jpg')).toBe('4:5')
+    // Works off a full CDN URL with a ?v= cache buster too.
+    expect(socialAssetAspect(`${CDN}/social-pom-cast-warm-20260812-16x9.jpg?v=1786293941`)).toBe('16:9')
+  })
+
+  it('does not misread a token-shaped handle or mood before the date as an aspect', () => {
+    // The date anchors the scan; anything before it is handle/archetype/mood.
+    expect(socialAssetAspect('social-16x9-scene-16x9-20260812.jpg')).toBe('4:5')
+  })
+
+  it('an Instagram (4:5) reuse lookup cannot return an X (16:9) frame — the DONE WHEN', () => {
+    const igFrame = 'social-pom-cast-warm-20260812.jpg'          // 4:5, token-less
+    const xFrame = 'social-pom-cast-warm-20260812-16x9.jpg'      // 16:9
+    const pool = [igFrame, xFrame]
+    const forInstagram = pool.filter(f => socialAssetMatchesAspect(f, '4:5'))
+    expect(forInstagram).toEqual([igFrame])
+    expect(forInstagram).not.toContain(xFrame)
+    // And the reverse: an X slot cannot pick up the Instagram 4:5 frame.
+    const forX = pool.filter(f => socialAssetMatchesAspect(f, '16:9'))
+    expect(forX).toEqual([xFrame])
+  })
+
+  it('classifies fal image sizes into an aspect (the name-it source of truth)', () => {
+    expect(socialAspectFromImageSize({ width: 1080, height: 1350 })).toBe('4:5')  // Instagram feed
+    expect(socialAspectFromImageSize({ width: 1920, height: 1080 })).toBe('16:9') // X landscape
+    expect(socialAspectFromImageSize({ width: 1080, height: 1920 })).toBe('9:16') // TikTok
+    expect(socialAspectFromImageSize({ width: 1080, height: 1080 })).toBe('1:1')
+    expect(socialAspectFromImageSize('landscape_16_9')).toBe('16:9')
+    expect(socialAspectFromImageSize('portrait_16_9')).toBe('9:16')
+    // Absent or unusable size falls back to the historical 4:5 default.
+    expect(socialAspectFromImageSize(undefined)).toBe('4:5')
+    expect(socialAspectFromImageSize({ width: 0, height: 0 })).toBe('4:5')
   })
 })
 

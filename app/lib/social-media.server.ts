@@ -47,6 +47,37 @@ export const SOCIAL_ARCHETYPES: readonly SocialArchetype[] = [
   'scene', 'cast', 'metaphor', 'macro', 'plate',
 ]
 
+/**
+ * Feed aspect ratios a social still can be generated at. Instagram's grid still
+ * is 4:5; X carries a 16:9 landscape frame of the same campaign and product
+ * (PR #770). The reuse-first pool is looked up by filename, so a name that does
+ * not encode its shape lets an Instagram slot pick up a 16:9 X frame (which the
+ * 3:4 grid tile crops to nothing) and vice versa — the exact loss PR #770 exists
+ * to prevent (#4205).
+ */
+export type SocialAspect = '4:5' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4'
+
+/**
+ * Aspect → filename token. 4:5 is the historical default and stays TOKEN-LESS:
+ * every asset generated before #4205 is 4:5 and carries no token, so absence
+ * must keep meaning 4:5 or the whole existing pool stops matching itself.
+ */
+const SOCIAL_ASPECT_TOKEN: Record<SocialAspect, string> = {
+  '4:5': '',
+  '16:9': '16x9',
+  '9:16': '9x16',
+  '1:1': '1x1',
+  '4:3': '4x3',
+  '3:4': '3x4',
+}
+
+/** Non-empty filename token → aspect. The reverse of SOCIAL_ASPECT_TOKEN. */
+const SOCIAL_ASPECT_BY_TOKEN: Record<string, SocialAspect> = Object.fromEntries(
+  (Object.entries(SOCIAL_ASPECT_TOKEN) as [SocialAspect, string][])
+    .filter(([, token]) => token !== '')
+    .map(([aspect, token]) => [token, aspect]),
+)
+
 /** Slug a fragment for use inside a filename. Never returns an empty string. */
 function slugFragment(raw: string, fallback: string): string {
   const s = raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
@@ -55,12 +86,16 @@ function slugFragment(raw: string, fallback: string): string {
 
 /**
  * Build the canonical social asset filename:
- *   social-{handle}-{archetype}-{mood}-{yyyymmdd}[-{n}].jpg
+ *   social-{handle}-{archetype}-{mood}-{yyyymmdd}[-{aspect}][-{n}].jpg
  *
  * The name is not decoration. It is the reuse index the campaign key-art pool
  * is looked up by, and it is what `isGeneratedSocialAsset()` reads, so a
  * generated asset that skips this builder is indistinguishable from a packshot
  * and will be refused at publish time.
+ *
+ * The aspect token (`socialAssetAspect` reads it back) is what lets a reuse
+ * lookup filter by shape so an Instagram slot never picks up a 16:9 X frame
+ * (#4205). 4:5 stays token-less for backward compatibility.
  */
 export function buildSocialAssetFilename(opts: {
   handle: string
@@ -70,12 +105,104 @@ export function buildSocialAssetFilename(opts: {
   date: string
   /** 1-based slide index for a carousel; omitted for a single image. */
   slide?: number
+  /**
+   * Feed shape. Defaults to 4:5, which stays TOKEN-LESS so every pre-#4205 name
+   * (all 4:5) keeps matching. A non-4:5 shape (e.g. the 16:9 X frame) is stamped
+   * into the name so reuse-first can filter by shape.
+   */
+  aspect?: SocialAspect
 }): string {
   const handle = slugFragment(opts.handle, 'untitled')
   const mood = slugFragment(opts.mood, 'editorial')
   const day = opts.date.replace(/-/g, '')
+  const aspectToken = SOCIAL_ASPECT_TOKEN[opts.aspect ?? '4:5']
+  const aspectPart = aspectToken ? `-${aspectToken}` : ''
   const slide = opts.slide && opts.slide > 0 ? `-${opts.slide}` : ''
-  return `social-${handle}-${opts.archetype}-${mood}-${day}${slide}.jpg`
+  return `social-${handle}-${opts.archetype}-${mood}-${day}${aspectPart}${slide}.jpg`
+}
+
+/**
+ * Read the aspect a social asset was generated at back out of its filename or
+ * URL. Absence of any aspect token means 4:5 — every asset from before #4205 is
+ * 4:5 and token-less. The date (yyyymmdd) anchors the scan: only a hyphen
+ * segment AFTER the date can be an aspect token, so a handle or mood that
+ * happens to look like one can't be misread. Grandfathered `ig-` names carry no
+ * date and are all 4:5, so they resolve to 4:5 too.
+ */
+export function socialAssetAspect(urlOrName: string): SocialAspect {
+  if (!urlOrName) return '4:5'
+  const path = urlOrName.split(/[?#]/)[0] ?? ''
+  const basename = (path.split('/').pop() ?? '').toLowerCase().replace(/\.[a-z0-9]+$/, '')
+  if (!basename) return '4:5'
+  const segments = basename.split('-')
+  // The date (yyyymmdd) is the last 8-digit segment: aspect tokens ('16x9') and
+  // slide numbers are never 8 digits, and it always follows handle/archetype/
+  // mood, so scanning from the end survives a handle that itself contains an
+  // 8-digit run.
+  let dateIdx = -1
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (/^\d{8}$/.test(segments[i]!)) { dateIdx = i; break }
+  }
+  const tail = dateIdx >= 0 ? segments.slice(dateIdx + 1) : []
+  for (const seg of tail) {
+    const aspect = SOCIAL_ASPECT_BY_TOKEN[seg]
+    if (aspect) return aspect
+  }
+  return '4:5'
+}
+
+/**
+ * Does this asset match the shape a slot needs? The guard that keeps reuse-first
+ * from handing an Instagram (4:5) slot a 16:9 X frame, or the reverse (#4205).
+ * Filter a reuse candidate pool through this before offering any of it to a slot.
+ */
+export function socialAssetMatchesAspect(urlOrName: string, want: SocialAspect): boolean {
+  return socialAssetAspect(urlOrName) === want
+}
+
+/**
+ * Classify a fal `image_size` — a named token ('portrait_16_9') or an explicit
+ * `{ width, height }` pair (what the CLI passes as the platform feed size) —
+ * into the aspect the asset is actually being generated at, so the filename can
+ * name it. Unknown or absent sizes fall back to 4:5, the historical default.
+ * This is what makes "the filename names its aspect" true in production without
+ * every caller having to remember a new field (#4205).
+ */
+export function socialAspectFromImageSize(
+  imageSize: string | { width: number; height: number } | undefined,
+): SocialAspect {
+  if (!imageSize) return '4:5'
+  if (typeof imageSize === 'object') {
+    const { width, height } = imageSize
+    if (!(width > 0) || !(height > 0)) return '4:5'
+    const ratio = width / height
+    const candidates: [SocialAspect, number][] = [
+      ['4:5', 4 / 5], ['16:9', 16 / 9], ['9:16', 9 / 16],
+      ['1:1', 1], ['4:3', 4 / 3], ['3:4', 3 / 4],
+    ]
+    let best: SocialAspect = '4:5'
+    let bestErr = Infinity
+    for (const [aspect, r] of candidates) {
+      // Compare in log space so an off-by-a-few-pixels size still lands on the
+      // nearest true ratio rather than favouring the larger denominators.
+      const err = Math.abs(Math.log(ratio / r))
+      if (err < bestErr) {
+        bestErr = err
+        best = aspect
+      }
+    }
+    return best
+  }
+  const NAMED: Record<string, SocialAspect> = {
+    portrait_4_5: '4:5',
+    landscape_16_9: '16:9',
+    portrait_16_9: '9:16',
+    square: '1:1',
+    square_hd: '1:1',
+    landscape_4_3: '4:3',
+    portrait_4_3: '3:4',
+  }
+  return NAMED[imageSize.toLowerCase()] ?? '4:5'
 }
 
 /**
@@ -367,6 +494,12 @@ export interface GenerateSocialImageOpts {
    * Both are forwarded to `generateImage`, which accepts either.
    */
   imageSize?: string | { width: number; height: number }
+  /**
+   * Feed shape, stamped into the filename so reuse-first can filter by aspect
+   * (#4205). Defaults to whatever `imageSize` classifies to, so a caller that
+   * already passes the platform feed size gets a correctly-named asset for free.
+   */
+  aspect?: SocialAspect
   only?: 'atlas' | 'fal' | 'imagen'
   caller?: string
   /**
@@ -403,6 +536,11 @@ export async function generateAndUploadSocialImage(
     archetype: opts.archetype,
     mood: opts.mood,
     date: opts.date,
+    // Name the asset at the shape it is actually generated at, so reuse-first
+    // can never hand an Instagram slot a 16:9 X frame (#4205). An explicit
+    // aspect wins; otherwise it is classified from the image size the caller
+    // already passes.
+    aspect: opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
     ...(opts.slide ? { slide: opts.slide } : {}),
   })
 
