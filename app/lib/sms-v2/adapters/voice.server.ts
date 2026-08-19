@@ -20,7 +20,10 @@
  * Voice-specific translation rules for StageResponse → VoiceReply:
  *   - segments[].prose → escaped SSML text, paragraph breaks → <break>
  *   - segments[].productCard → speak "{title} — {price}" + outbound SMS with pdpUrl
- *   - segments[].cta.kind === 'checkout' → outboundSms with checkout URL
+ *   - segments[].cta.kind === 'checkout' → text the checkout URL now, from this
+ *     adapter, as a verified send: the confirmation line is only spoken when the
+ *     SMS actually went out (#4299 — it used to be spoken unconditionally while
+ *     nothing downstream ever sent the text).
  *   - segments[].cta.kind === 'pdp' → no outbound SMS (IVR can't click links)
  *   - segments[].pillOptions → spoken as a plain "X, or Y?" list. No DTMF
  *     promise: the Fly bridge never sets up a Twilio digit-gather and any
@@ -54,7 +57,10 @@ export interface ProcessVoiceInput {
 export interface VoiceReply {
   ssml: string                // <speak>...</speak> for Twilio ConversationRelay
   prompts?: { kind: 'say-and-listen' | 'gather-digits' | 'hangup' } | undefined
-  outboundSms?: { body: string } | undefined  // when Emma needs to send a checkout/PDP link
+  // No outboundSms field: the adapter sends the checkout/PDP link itself (see
+  // stageResponseToVoiceReply and the pending-PDP gate in processVoiceMessageV2).
+  // It once carried the checkout URL back on the reply, but no consumer ever
+  // read or sent it, so every voice checkout claimed a text that never left (#4299).
   hangup?: boolean | undefined
 }
 
@@ -490,12 +496,15 @@ interface VoiceReplyBuildResult {
   pendingPdpUrlWrite?: string | null
 }
 
-async function stageResponseToVoiceReply(
+export async function stageResponseToVoiceReply(
   stageResp: StageResponse,
-  _callerPhone: string,
+  callerPhone: string,
 ): Promise<VoiceReplyBuildResult> {
   const ssmlParts: string[] = []
-  let outboundSms: VoiceReply['outboundSms'] = undefined
+  // True once we've handled a checkout CTA this turn (whether or not the send
+  // succeeded). Drives the POST_CHECKOUT hangup gate below, which used to key
+  // off outboundSms being set.
+  let checkoutLinkHandled = false
   let hangup = false
   let pendingPdpUrlWrite: string | null | undefined = undefined
 
@@ -542,14 +551,31 @@ async function stageResponseToVoiceReply(
     // 3. CTA
     if (seg.cta) {
       if (seg.cta.kind === 'checkout') {
-        // Checkout URL — caller already committed at this stage, so we send
-        // immediately (no permission gate). Clear any pending pdp link since
-        // we're past PDP-share territory.
-        outboundSms = { body: seg.cta.url }
-        pendingPdpUrlWrite = null
-        hangup = false // stay on call after sending link (caller confirms receipt)
+        // Checkout URL — the caller already committed at this stage, so we send
+        // it immediately with no permission gate. But we only SAY the link went
+        // out if it actually did. This used to hand the URL back on the reply as
+        // outboundSms and speak the confirmation unconditionally, while nothing
+        // downstream ever sent the text, so every completed voice purchase told
+        // the caller a link was texted and none ever was (#4299). Mirror the
+        // pending-PDP verified-send gate in processVoiceMessageV2: await the
+        // send, speak the confirmation only on success, be honest otherwise.
+        let sent = true
+        try {
+          await sendSms(callerPhone, seg.cta.url)
+        } catch (err) {
+          sent = false
+          console.warn(
+            `[voice-adapter] outbound checkout SMS failed callerPhone=${callerPhone}`,
+            err,
+          )
+        }
+        checkoutLinkHandled = true
+        pendingPdpUrlWrite = null // past PDP-share territory; clear any pending link
+        hangup = false // stay on the call after the link (caller confirms receipt)
         ssmlParts.push(
-          `I just texted you a secure checkout link. Check your messages. ${CONTINUE_VIA_TEXT}`,
+          sent
+            ? `I just texted you a secure checkout link. Check your messages. ${CONTINUE_VIA_TEXT}`
+            : `That checkout text didn't want to go through just now. Text me at this number and I'll try sending it again.`,
         )
       }
       // pdp / collection CTAs are browser-only — skip for voice
@@ -563,7 +589,7 @@ async function stageResponseToVoiceReply(
   }
 
   // Stage-level hangup signal
-  if (stageResp.stageOut === 'POST_CHECKOUT' && !outboundSms) {
+  if (stageResp.stageOut === 'POST_CHECKOUT' && !checkoutLinkHandled) {
     hangup = true
   }
 
@@ -587,7 +613,6 @@ async function stageResponseToVoiceReply(
   const reply: VoiceReply = {
     ssml,
     prompts: promptKind,
-    ...(outboundSms !== undefined && { outboundSms }),
     ...(hangup && { hangup }),
   }
   return pendingPdpUrlWrite !== undefined
