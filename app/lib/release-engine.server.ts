@@ -234,6 +234,13 @@ const KEYS = {
    * again.
    */
   ciRetrigger: (sha: string) => `release-engine:ci-retrigger:${sha}`,
+  /**
+   * Once-a-week dedupe for the "merged but never got a Vercel deployment
+   * record" email, keyed on the merge SHA so a retriggered deploy that later
+   * DOES produce a record (READY or terminal) gets its own fresh escalation
+   * budget if it fails again later.
+   */
+  noDeployRecord: (sha: string) => `release-engine:no-deploy-record:${sha}`,
 } as const
 
 /**
@@ -990,12 +997,28 @@ export async function findPreviousReadyDeployment(badSha: string): Promise<Verce
   )
 }
 
+export interface PromoteResult {
+  ok: boolean
+  via: string
+  error?: string
+  /**
+   * True when Vercel's response says the target is already the live
+   * production deployment: a 409 ("already the current production
+   * deployment") from the promote endpoint, or a 422 ("Cannot rollback to
+   * this deployment") from the rollback fallback. That is not a failed
+   * mitigation, it is Vercel confirming nothing new ever shipped -- exactly
+   * the signature a merge with no deployment record produces when something
+   * upstream still tries to "re-promote" the previous build.
+   */
+  alreadyCurrent?: boolean
+}
+
 /**
  * Promote a previous deployment back to production. Vercel has moved this
  * endpoint more than once, so the current promote path is tried first and the
  * older rollback path is the fallback; both are logged.
  */
-export async function promoteDeployment(deploymentId: string): Promise<{ ok: boolean; via: string; error?: string }> {
+export async function promoteDeployment(deploymentId: string): Promise<PromoteResult> {
   const cfg = vercelConfig()
   if (!cfg) return { ok: false, via: 'none', error: 'VERCEL_TOKEN/VERCEL_PROJECT_ID not set' }
 
@@ -1011,7 +1034,13 @@ export async function promoteDeployment(deploymentId: string): Promise<{ ok: boo
   )
   if (rollback.ok) return { ok: true, via: 'v9-rollback' }
 
-  return { ok: false, via: 'none', error: `promote: ${promote.error}; rollback: ${rollback.error}` }
+  const alreadyCurrent = promote.status === 409 || rollback.status === 422
+  return {
+    ok: false,
+    via: 'none',
+    error: `promote: ${promote.error}; rollback: ${rollback.error}`,
+    alreadyCurrent,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,7 +1218,7 @@ async function loadTicketFacts(id: number): Promise<TicketFacts | null> {
 // Escalation
 // ---------------------------------------------------------------------------
 
-type EscalationKind = 'protected' | 'attempts' | 'merge-attempts' | 'revert-ci' | 'circuit' | 'ci-stuck'
+type EscalationKind = 'protected' | 'attempts' | 'merge-attempts' | 'revert-ci' | 'circuit' | 'ci-stuck' | 'no-deploy'
 
 /**
  * One email per PR per escalation kind, deduped in KV for a week. Without this
@@ -1234,7 +1263,7 @@ function emailShell(title: string, rows: Array<[string, string]>, body: string):
 // Cycle
 // ---------------------------------------------------------------------------
 
-interface PendingMerge {
+export interface PendingMerge {
   prNumber: number
   prUrl: string
   headRef: string
@@ -1254,6 +1283,7 @@ export type CyclePhase =
   | 'merged'
   | 'applied'
   | 'rolled-back'
+  | 'no-deploy-record'
 
 export interface ReleaseCycleResult {
   ok: boolean
@@ -1264,7 +1294,7 @@ export interface ReleaseCycleResult {
   /** Set when this cycle merged something. */
   merged?: { prNumber: number; sha: string; ticketId: number | null }
   /** Set when this cycle resolved a pending merge. */
-  resolved?: { prNumber: number; outcome: 'applied' | 'rolled-back' | 'waiting'; evidence?: string }
+  resolved?: { prNumber: number; outcome: 'applied' | 'rolled-back' | 'waiting' | 'no-deploy-record'; evidence?: string }
   errors: string[]
 }
 
@@ -2010,7 +2040,7 @@ async function mergeOne(
  * pending row for the next cycle until the 15-minute deadline turns silence
  * into a failure.
  */
-async function resolvePending(pending: PendingMerge, dryRun: boolean): Promise<ReleaseCycleResult> {
+export async function resolvePending(pending: PendingMerge, dryRun: boolean): Promise<ReleaseCycleResult> {
   const result = baseResult(dryRun)
   const deadline = Date.now() + POLL_BUDGET_MS
 
@@ -2023,6 +2053,45 @@ async function resolvePending(pending: PendingMerge, dryRun: boolean): Promise<R
     deployment = await findDeploymentBySha(pending.mergeSha)
   }
 
+  const settled = await settleDeployment(pending, deployment, dryRun)
+  if (settled) return settled
+
+  if (Date.now() - pending.mergedAt <= DEPLOY_TIMEOUT_MS) {
+    return {
+      ...result,
+      phase: 'awaiting-deploy',
+      resolved: { prNumber: pending.prNumber, outcome: 'waiting' },
+      message: `PR #${pending.prNumber} merged ${Math.round((Date.now() - pending.mergedAt) / 60_000)} min ago, deployment ${deployment?.readyState ?? 'not found yet'}`,
+    }
+  }
+
+  // The deploy window has closed. A deployment record that exists but never
+  // reached READY (stuck QUEUED/BUILDING/INITIALIZING) is a real, durable
+  // failure worth reverting. NO record at all is a different situation --
+  // see handleMissingDeploymentRecord for why it must not take the same path.
+  if (!deployment) {
+    return handleMissingDeploymentRecord(pending, dryRun)
+  }
+
+  return failAndRollback(
+    pending,
+    `production deployment ${deployment.uid} stuck in ${deployment.readyState} for over ${Math.round(DEPLOY_TIMEOUT_MS / 60_000)} min`,
+    dryRun,
+  )
+}
+
+/**
+ * READY -> run smoke and apply or roll back on failure. A record in a
+ * terminal failure state (ERROR/CANCELED/DELETED) -> roll back, the bad
+ * build did exist. Returns null when the deployment has not settled yet
+ * (still building, or absent), which is the caller's cue to keep waiting or
+ * to escalate rather than to treat "not settled" as "failed".
+ */
+async function settleDeployment(
+  pending: PendingMerge,
+  deployment: VercelDeployment | null,
+  dryRun: boolean,
+): Promise<ReleaseCycleResult | null> {
   if (deployment?.readyState === 'READY') {
     if (pending.ticketId !== null && !dryRun) {
       await addTicketLink(pending.ticketId, {
@@ -2041,19 +2110,91 @@ async function resolvePending(pending: PendingMerge, dryRun: boolean): Promise<R
     return failAndRollback(pending, `production deployment ${deployment.uid} is ${deployment.readyState}`, dryRun)
   }
 
-  if (Date.now() - pending.mergedAt > DEPLOY_TIMEOUT_MS) {
-    return failAndRollback(
-      pending,
-      `no READY production deployment for ${pending.mergeSha.slice(0, 7)} within ${Math.round(DEPLOY_TIMEOUT_MS / 60_000)} min`,
-      dryRun,
-    )
+  return null
+}
+
+/**
+ * The merge SHA has no Vercel deployment record at all, after the full
+ * DEPLOY_TIMEOUT_MS window: not queued, not building, not errored, simply
+ * absent. This is NOT the same failure as `isTerminalFailure` (a deployment
+ * that shipped and then failed) or a stuck build (a deployment that exists
+ * but never reached READY): here nothing new ever went live, production is
+ * still serving the previous commit, and there is nothing to roll back.
+ * Calling `failAndRollback` anyway opens a revert PR for good, unshipped
+ * work and spends a rollback-circuit-breaker slot for a release that never
+ * happened.
+ *
+ * Evidence: merge commits 2fd28c7 (PR #560, ticket #619) and 7d30082 (PR
+ * #569, ticket #2015), both merged 2026-08-08, had no Vercel deployment
+ * record in any state for their SHA while every other push to main that day
+ * deployed normally. The old code path reverted both anyway (PR #563, PR
+ * #573); the second rollback tripped `release-engine:rollbacks:<day>` at
+ * 22:51:36Z and took the merge lane down for a day. The tell in both cases
+ * was `promoteDeployment` coming back 409 "already the current production
+ * deployment" (or 422 "Cannot rollback to this deployment" on the fallback
+ * endpoint) when it tried to re-promote the previous build: Vercel saying the
+ * mitigation target was already live, because nothing new ever shipped.
+ *
+ * Response here: one fresh retry of the lookup (the Vercel deployment list
+ * can lag the GitHub push slightly), then escalate to the owner only if that
+ * retry is ALSO empty. The pending merge is left exactly as it is either
+ * way -- never reverted, never deleted -- so a later cycle finishes the job
+ * the moment a real deployment record appears, and the owner can retrigger
+ * the Vercel deploy (or clear the pending row) in the meantime.
+ */
+export async function handleMissingDeploymentRecord(pending: PendingMerge, dryRun: boolean): Promise<ReleaseCycleResult> {
+  const result = baseResult(dryRun)
+  const minutesSinceMerge = Math.round((Date.now() - pending.mergedAt) / 60_000)
+
+  const retry = await findDeploymentBySha(pending.mergeSha)
+  const settled = await settleDeployment(pending, retry, dryRun)
+  if (settled) return settled
+
+  if (retry) {
+    // The retry found a record after all (queued/building) -- this is a slow
+    // deploy, not a missing one. Keep waiting for it the normal way.
+    return {
+      ...result,
+      phase: 'awaiting-deploy',
+      resolved: { prNumber: pending.prNumber, outcome: 'waiting' },
+      message: `PR #${pending.prNumber} merged ${minutesSinceMerge} min ago, deployment ${retry.readyState} (found on retry)`,
+    }
   }
+
+  console.error(
+    `${LOG} PR #${pending.prNumber} (${pending.mergeSha.slice(0, 7)}) has NO Vercel deployment record at all `
+    + `${minutesSinceMerge} min after merge, even after a retry. Nothing shipped, so nothing is being rolled back.`,
+  )
+
+  await escalate(
+    'no-deploy',
+    KEYS.noDeployRecord(pending.mergeSha),
+    `[xdipx] release engine: PR #${pending.prNumber} merged but never deployed`,
+    emailShell(
+      'A merge to main has no Vercel deployment record at all',
+      [
+        ['PR', `#${pending.prNumber}`],
+        ['Merge SHA', pending.mergeSha],
+        ['Minutes since merge', String(minutesSinceMerge)],
+      ],
+      `<p>The release engine merged this PR and polled for a production deployment matching `
+      + `<code>${escapeHtml(pending.mergeSha)}</code>, retrying once, but Vercel has no deployment record for that `
+      + `SHA in any state: not queued, not building, not errored, simply absent. Production never moved off the `
+      + `previous commit, so nothing shipped and nothing was rolled back or reverted. This usually means the `
+      + `GitHub-to-Vercel deploy hook did not fire for this push. Check the Vercel deployments list for this SHA `
+      + `and retrigger a deploy if needed. The merge is still on <code>main</code> and the pending row is `
+      + `untouched, so the engine will finish the job automatically the moment a real deployment appears.</p>`,
+    ),
+    dryRun,
+  )
 
   return {
     ...result,
-    phase: 'awaiting-deploy',
-    resolved: { prNumber: pending.prNumber, outcome: 'waiting' },
-    message: `PR #${pending.prNumber} merged ${Math.round((Date.now() - pending.mergedAt) / 60_000)} min ago, deployment ${deployment?.readyState ?? 'not found yet'}`,
+    phase: 'no-deploy-record',
+    resolved: { prNumber: pending.prNumber, outcome: 'no-deploy-record' },
+    message:
+      `PR #${pending.prNumber} merged ${minutesSinceMerge} min ago, no Vercel deployment record for `
+      + `${pending.mergeSha.slice(0, 7)} at all after a retry; escalated to the owner, left on main`,
   }
 }
 
@@ -2127,8 +2268,18 @@ async function failAndRollback(pending: PendingMerge, evidence: string, dryRun: 
   const previous = await findPreviousReadyDeployment(pending.mergeSha)
   if (previous) {
     const promoted = await promoteDeployment(previous.uid)
-    promotedTo = promoted.ok ? `${previous.uid} (${promoted.via})` : `failed: ${promoted.error}`
-    if (!promoted.ok) errors.push(`re-promote failed: ${promoted.error}`)
+    if (promoted.ok) {
+      promotedTo = `${previous.uid} (${promoted.via})`
+    } else if (promoted.alreadyCurrent) {
+      // Vercel says the "previous" deployment is already the live one. That
+      // is not a failed mitigation, it confirms production was already
+      // sitting there -- nothing new ever made it to production for this
+      // merge, so there was nothing to mitigate away from.
+      promotedTo = `${previous.uid} (already the current production deployment, nothing new had shipped)`
+    } else {
+      promotedTo = `failed: ${promoted.error}`
+      errors.push(`re-promote failed: ${promoted.error}`)
+    }
   } else {
     errors.push('no previous READY production deployment to re-promote')
   }
