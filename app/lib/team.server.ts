@@ -1423,8 +1423,20 @@ export const RUN_CLOSE_ACTORS: readonly TicketActor[] = [
   'agent:store-strategist',
 ]
 
-/** Operational kinds a daily run may close once it has executed the ask. */
-export const RUN_CLOSE_KINDS: readonly string[] = ['process', 'strategy']
+/**
+ * Operational kinds a daily run may close once it has executed the ask.
+ *
+ * `campaign`/`promo` joined `process`/`strategy` here 2026-08-19: the social
+ * lane files roughly 14 campaign rows a day ("product went live, post about
+ * it"), and with no agent close edge those sat `approved` forever even after
+ * the drafting routine had actually executed the ask, inflating the owner's
+ * daily decision queue with rows that were already done. Closing one to
+ * `applied` records only that a RUN_CLOSE_ACTORS routine executed the ask in
+ * this run (e.g. drafted and gated the post) — it grants no publishing power.
+ * A social send still requires the emma voice gate, the social-publish-gate
+ * verdict, and the instagram/x autopublish valves; nothing here touches those.
+ */
+export const RUN_CLOSE_KINDS: readonly string[] = ['process', 'strategy', 'campaign', 'promo']
 
 /**
  * Kinds a detector may close on its own evidence, as actor `system`.
