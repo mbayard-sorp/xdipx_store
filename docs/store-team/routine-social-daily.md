@@ -245,21 +245,41 @@ of `status:'posted'` Instagram rows and check three things:
    compliant image asset, campaign reconciliation failed). Throttle to one. Never force volume to
    fill a quota that is now unsupervised on the way out.
 
-**Imagery-feasibility preflight (run start, before any Instagram drafting).** Step 5 today covers
-the budget-exhausted degraded path but not the cannot-generate-at-all case, so run 361 produced zero
-Instagram drafts because it only discovered mid-run that it could not produce a publishable IG
-asset: `scripts/gen-social-image.ts` does generation plus the mandatory Shopify-Files rehost
-locally, which needs the Shopify Admin token, and a scheduled cloud sandbox without that token
-cannot produce any publishable IG/TikTok image (fal/Atlas URLs expire and Instagram fetches the
-asset server-side at publish). So at run start, before drafting, check whether THIS run can actually
-land a publishable IG asset: is a reuse path available (an existing Shopify Files / Sanity asset
-`media-manager` can return, or an approved campaign key-art pool), OR is generation-plus-Shopify-rehost
-reachable (the Shopify Admin token is present)? If neither holds, declare IG image-drafting
-**degraded-to-zero for this run**, record an `event` saying so, pivot the run's volume to X and
-LinkedIn (which do not depend on the IG image path), and treat a zero-IG run as an intentional,
-logged, channel-scoped outcome rather than a silent miss. The "no zero days" baseline is understood
-as channel-scoped when the imagery path is down; it never licenses shipping an IG draft with no
+**Imagery-feasibility preflight (run start, before any Instagram drafting).** Step 5 covers the
+budget-exhausted degraded path; this covers the cannot-generate-at-all case, which is what made run
+361 produce zero Instagram drafts.
+
+**The sandbox CAN generate images. Do not assume otherwise (corrected 2026-08-19, ticket #4133).**
+This preflight used to tell you to check for `SHOPIFY_ADMIN_ACCESS_TOKEN` and to declare IG
+degraded-to-zero when it was absent. The scheduled cloud sandbox never carries that token, so that
+instruction resolved to "degrade to zero" on **every** scheduled run, permanently. It is obsolete:
+generation and the mandatory Shopify-Files rehost now run **server-side** via
+`POST /api/team/social-image`, where the Admin token already lives, and
+`scripts/gen-social-image.ts` calls that route rather than doing the privileged work locally. The
+sandbox needs only `BASE_URL` and a team token, which every run already has. **Never declare IG
+degraded-to-zero on the grounds that the Admin token is missing.** If image generation genuinely
+fails, quote the actual error from the route.
+
+So at run start, before drafting, confirm THIS run can land a publishable IG asset: either a reuse
+path is available (an existing Shopify Files / Sanity asset `media-manager` can return, or an
+approved campaign key-art pool), or `POST /api/team/social-image` answers and the social money gate
+is open. If neither holds, declare IG image-drafting **degraded-to-zero for this run**, record an
+`event` quoting the failure, pivot the run's volume to X and LinkedIn, and treat a zero-IG run as an
+intentional, logged, channel-scoped outcome rather than a silent miss. The "no zero days" baseline is
+channel-scoped when the imagery path is down; it never licenses shipping an IG draft with no
 publishable asset.
+
+**A raw catalog packshot is NOT a way to satisfy this preflight (ticket #4134).** A product image
+straight from the Shopify CDN (`27540.jpg` and friends) fails `isGeneratedSocialAsset`
+(`app/lib/social-media.server.ts`), which requires a `social-` or `ig-` prefixed basename, and
+`runDeterministicPublishChecks` then BLOCKs it on image-provenance, server-side, on relay. Row 59
+(2026-08-18, the only Instagram draft that day) was written this way and was unpublishable the
+moment it existed, while the run summary described it as a real product photo, which reads as a
+feature rather than the defect it is. Packshot-only stills are retired by the voice charter; this is
+the enforcement arm of that rule. **Reaching for a catalog image converts an honest
+degraded-to-zero into a silent unpublishable draft that looks like output, which is worse than
+zero, because zero is visible.** If the imagery path is down, write zero Instagram drafts and say
+so, exactly as runs 361 and 368 correctly did.
 
 Reworks (Step 2.5) and Step 7b suggestion handling run as normal under both postures. This only
 sizes down *new* drafting; it never touches a gate.
@@ -543,12 +563,19 @@ so every one was a guaranteed gate BLOCK. `POST /api/team/social-post {op:'draft
 fail-closed shape as the voice-gate check above — so treat X exactly like Instagram and TikTok in
 this step: generate or reuse an asset before you draft, never after.
 
+**Only a generated, rehosted asset is publishable.** The URL you put in `mediaUrls` must have a
+`social-` or `ig-` prefixed basename, because `isGeneratedSocialAsset` checks exactly that and the
+gate BLOCKs anything else on image-provenance (ticket #4134). A Shopify product CDN URL never
+satisfies this, no matter how good the photo is. There is no path where a catalog packshot becomes
+a valid Instagram asset, so do not spend a slot discovering that again.
+
 Ask `media-manager` first for an existing Shopify Files / Sanity asset (reuse-first). When nothing
-fits, **generate one with `scripts/gen-social-image.ts`**, re-checking the gate before each run. It
-handles generation, rehosting to Shopify Files (generator URLs expire, Atlas output URLs in ~14
-days and fal URLs in 24h, and Instagram fetches the image server-side at publish time, so every
-asset is rehosted regardless of provider; routing per `docs/media-model-routing.md`), and the
-spend row.
+fits, **generate one with `scripts/gen-social-image.ts`**, re-checking the gate before each run. The
+script now delegates generation and the rehost to `POST /api/team/social-image` so the privileged
+Shopify Admin call runs server-side (ticket #4133); the sandbox needs no Admin token. The rehost is
+mandatory and unchanged: generator URLs expire (Atlas output in ~14 days, fal in 24h) and Instagram
+fetches the image server-side at publish time, so every asset is rehosted regardless of provider,
+routing per `docs/media-model-routing.md`. The script also writes the spend row.
 
 **Product post, cast composite.** The presenter holds and shows the product (§3.6):
 
@@ -777,8 +804,28 @@ had, so the replacement is not optional. Read instead:
    This is the highest-value signal and the only one guaranteed to carry judgment.
 2. **Removals and platform flags.** The hard safety floor. Binary and rare, and it teaches nothing
    about quality above the floor, but it is the one signal that must never be missed.
-3. **Engagement**, once it is captured: which *angle* landed with real people, independent of
+3. **Engagement. Call it every run, before you write the retro (ticket #4063).** This is not
+   conditional and you may not skip it by reporting the capability as missing. The call is:
+
+   ```bash
+   curl -s -X POST "$BASE_URL/api/team/social-post" \
+     -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+     -d '{"op":"engagement"}'
+   ```
+
+   It is backed by `app/lib/social-engagement.server.ts` and persists to
+   `social_posts.metrics_json` (migration 079, applied in production). It works today and until
+   2026-08-17 nothing had ever called it: no cron, no playbook, no script. Report the numbers in
+   the `decision` event, and read them for which *angle* landed with real people, independent of
    whether the owner liked it.
+
+   **Report the number honestly, including when it is bad.** First reading, 2026-08-17: six
+   published Instagram posts, total reach **27**, with zero likes, zero comments and zero saves
+   across all of them (id17 reach 4, id24 reach 4, id25 reach 7, id47 reach 4, id49 reach 7, id50
+   reach 1). **When a post reaches fewer people than the account has followers, say exactly that in
+   the run summary.** A day where nothing was removed and nobody complained is not a good day if
+   nobody saw the post; reporting it as normal is how the loop stayed blind while holding a working
+   instrument.
 4. **A retroactive self-audit**, because none of the above is guaranteed to arrive on any given day.
    Pull the last N posted Instagram rows and re-judge them against today's charter and today's
    campaign rules, logging any that would not pass the gate as written now. On a run where the owner

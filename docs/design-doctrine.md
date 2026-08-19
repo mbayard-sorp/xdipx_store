@@ -1,4 +1,4 @@
-# xdipx Design Doctrine (v1.2)
+# xdipx Design Doctrine (v1.3)
 
 > The single source of truth for how xdipx **looks**, everywhere: homepage, PLP,
 > PDP, discovery, admin. Every design agent (`homepage-designer`, `rr7-engineer`,
@@ -8,7 +8,9 @@
 >
 > **Authority.** Where this doctrine disagrees with an agent-definition summary,
 > the mission brief's visual notes, or a stray CLAUDE.md line, **this doctrine
-> wins** for visual/layout decisions. Where it disagrees with `docs/emma-voice.md`
+> wins** for visual/layout decisions. The one carve-out is the imagery ceiling:
+> on social surfaces `docs/store-team/instagram-campaigns.md` §3.2a wins, by
+> owner ruling 2026-08-19, and §4.3 below records that deferral. Where it disagrees with `docs/emma-voice.md`
 > on anything about words, the voice charter wins. Where it disagrees with a hard
 > engineering constraint (SSR, zero-CLS, the `.server.ts` boundary), the
 > constraint wins. It never overrides Shopify-as-source-of-truth or the
@@ -386,10 +388,50 @@ homepage merchandising art, social, video thumbnails).
    claim rather than as wit.
 4. **Unchanged, and do not read this as loosening any of it:** the warm-light lock and
    high-key mandate still bind (drama lives in the face and the hands, never in the light);
-   the charter visual cap of 6-7 holds; never crude, never porn-adjacent, no explicit anatomy,
-   no nudity, no bodies in sexual contact, no product-in-use; adults-only hard rules and the
-   uncanny-face reject are untouched. Witty never crude. The craft is what makes it art
-   instead of a shitpost.
+   the charter visual cap of 6-7 holds; never crude, never porn-adjacent; adults-only hard
+   rules and the uncanny-face reject are untouched. Witty never crude. The craft is what makes
+   it art instead of a shitpost.
+
+   **Amended 2026-08-19 (v1.3).** This item used to also read "no explicit anatomy, no nudity,
+   no bodies in sexual contact, no product-in-use" as a flat ban on every surface. That is no
+   longer accurate and it is now scoped by surface. See §4.3.
+
+---
+
+## 4.3 The imagery ceiling, and which document owns it (owner ruling 2026-08-19)
+
+There is exactly one ceiling per surface, and this section says which document carries it. An
+agent must never resolve a ceiling question by picking whichever document suits the frame it
+wants. That is how an explicit frame reached the live feed on 2026-08-16.
+
+**Social surfaces** (Instagram, X, and any campaign key art produced for them). The operative
+ceiling is `docs/store-team/instagram-campaigns.md` §3.2a, the owner ruling of 2026-08-16. It
+licenses lingerie and bare skin, beds and arched posture, product resting against skin,
+lubricant texture, two people touching, arousal on a face, and use implied by framing or by
+occlusion under a sheet when the occluded shape is the product. It fences genitalia and nipples
+visible or outlined, hands on genitals, depicted or discernible sex acts, fluid on or near
+genitalia, product against genitalia, anything age-ambiguous, and anything built to defeat a
+classifier. **This doctrine defers to §3.2a on social imagery and does not restate it**, so the
+ceiling has one home and cannot drift out of sync again. Platform policy still outranks the
+charter on a rented surface: where Meta's rules are tighter, Meta wins.
+
+**On-site merchandising surfaces** (homepage, PLP, PDP, discovery). The product is the hero.
+Product-in-use and bodies in sexual contact stay out. Cast and human figures are welcome, and
+§4.1 and §4.2 apply in full: a body in frame is not the same thing as a body in sexual contact,
+and the interest floor still binds. Brand-art pieces may star the invented hybrid instead.
+
+**Notebook heroes.** `docs/notebook-team/image-brief.md` carries the ceiling, and it tracks the
+on-site line above rather than the social one.
+
+**Why this section exists.** Between 2026-08-16 and 2026-08-19 four documents disagreed about
+the same ceiling: this doctrine, `docs/emma-voice.md` in both its core hard-lines and its social
+addendum, `docs/ads-policy.md`, and instagram-campaigns.md §3.2a. `ads-policy.md` was corrected
+on 2026-08-16. The other three were corrected on 2026-08-19 (ticket #4206) after the social
+addendum, which is loaded into every social prompt at runtime by
+`app/lib/emma-voice.server.ts`, was found to still ban product-against-a-body a week after the
+owner licensed it. **The rule that prevents a repeat: a ceiling lives in exactly one document,
+and every other document points at it rather than restating it.** A restatement is a copy that
+will go stale.
 
 ---
 
