@@ -1,5 +1,6 @@
 import { Reveal } from '~/components/motion/Reveal'
 import type { TrustBarBlock } from '~/types/cms'
+import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 
 const BODY = { fontFamily: 'var(--font-body)' } as const
 
@@ -15,15 +16,18 @@ export interface TrustStripItem {
  * Per docs/design-doctrine.md §6, discretion copy names the dreaded moments
  * (the box, the label, the card statement) rather than stating a flat fact, so
  * "Billed as XDIPX" is now a promise about what a partner or a bank statement
- * will actually show. The free-shipping line is the verified Shopify delivery
- * profile threshold ($99 US; HI/AK/PR differs and is stated at checkout, not
- * promised here). No fabricated proof: every line is a mechanic we can honor.
+ * will actually show. The free-shipping line interpolates the shared
+ * FREE_SHIPPING_THRESHOLD (~/lib/shipping) rather than a hardcoded dollar
+ * figure, precisely so this line can't drift from the Shopify-verified
+ * threshold the way a hand-typed "$99" would (HI/AK/PR differs and is stated
+ * at checkout, not promised here). No fabricated proof: every line is a
+ * mechanic we can honor.
  */
 export const TRUST_STRIP_FALLBACK: TrustStripItem[] = [
   { headline: 'Ships in plain packaging' },
   { headline: 'No logo on the box, no product name on the label' },
   { headline: 'Your statement reads XDIPX' },
-  { headline: 'Free US shipping over $99' },
+  { headline: `Free US shipping over $${FREE_SHIPPING_THRESHOLD}` },
   { headline: 'Hand-checked, not auto-listed' },
 ]
 

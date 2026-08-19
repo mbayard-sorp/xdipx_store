@@ -4,9 +4,27 @@
  * Plain module (no .server suffix) because the cart drawer, a client
  * component, needs the threshold to render its free-shipping progress bar.
  *
- * Source of truth is the Shopify delivery profile. Verified 2026-07-27:
- *   - US Standard ships free at TOTAL_PRICE >= $99.00
- *   - HI / AK / PR ship free at $145.00
+ * Source of truth is the Shopify delivery profile.
+ *
+ * !!! TICKET #3450 (2026-08-19): CODE-SIDE ONLY. SHOPIFY NOT YET UPDATED !!!
+ * This constant was moved to 59 as the code half of ticket #3450 (lower US
+ * free-shipping threshold $99 -> $59, a CVR move, see the ticket for the
+ * modeling). Read live via the Shopify Admin GraphQL API on 2026-08-19
+ * (gid://shopify/DeliveryProfile/103413973163, zone Domestic, method
+ * gid://shopify/DeliveryMethodDefinition/818015142059): the US-Standard
+ * delivery profile's TOTAL_PRICE rate-range condition was STILL 99.0, not 59.
+ * Changing the Shopify rate rule is an owner-gated checkout money-path
+ * mutation (docs/store-team/operating-system.md §7) that no agent may make.
+ * UNTIL AN OWNER CHANGES THE SHOPIFY US-STANDARD FREE-SHIPPING CONDITION TO
+ * 59.0, MERGING/DEPLOYING THIS CONSTANT ALONE MEANS THE STOREFRONT (cart
+ * drawer progress bar, collection/PLP copy, trust strip) ADVERTISES FREE
+ * SHIPPING AT $59 THAT CHECKOUT WILL NOT HONOR for a $59.00-$98.99 order —
+ * a customer-facing lie, the same failure mode that blocked ticket #420.
+ * This PR and the Shopify change must land together; see the PR description
+ * for the required manual owner step.
+ *
+ * Other prior-threshold values, for reference:
+ *   - HI / AK / PR ship free at $145.00 (unchanged by ticket #3450)
  *   - base US rate is $9.99
  *
  * Any on-site copy that advertises a different threshold over-promises and
@@ -27,4 +45,4 @@
  * assertion, which requires a vercel.json cron entry and is out of the dev
  * lane's scope.)
  */
-export const FREE_SHIPPING_THRESHOLD = 99
+export const FREE_SHIPPING_THRESHOLD = 59
