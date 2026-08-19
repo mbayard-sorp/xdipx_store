@@ -563,11 +563,56 @@ so every one was a guaranteed gate BLOCK. `POST /api/team/social-post {op:'draft
 fail-closed shape as the voice-gate check above — so treat X exactly like Instagram and TikTok in
 this step: generate or reuse an asset before you draft, never after.
 
+**Step 5.0, invoke `social-art-director` FIRST, before any image is generated.** It chooses the
+location and the cast member, enforces the §3.8 variety windows against the last 8 product posts,
+holds cast continuity across the campaign, and hands back the scene brief with its negatives and
+its scale cue. You do not write the image prompt inline any more. That improvisation is exactly
+what produced a feed of interchangeable frames and the owner's *"Variety is key here"* on
+2026-08-19: the picture was always the last thing written, so it always reverted to the safest
+option. Pass it today's product handle, the real Shopify photo URL, the product's real dimensions,
+and the campaign beat. If it declares degraded-to-zero because no approved cast member exists,
+that verdict stands and you do not work around it.
+
+**A cast member in a scene is MANDATORY on every Instagram product post (owner ruling 2026-08-19,
+spec §3.7).** The lead image is a person somewhere real, with the product. A product alone, however
+beautifully styled, is not a publishable lead frame. Emma is a cast member and is in the rotation.
+Use the `cast` op, which composites an approved presenter with a packaging-free plate of the real
+product and is hardcoded to 4:5:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/social-image" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"cast","prompt":"<scene, location, wardrobe, light, negatives>",
+       "handle":"<product-handle>","mood":"<short-token>","date":"<YYYY-MM-DD>",
+       "presenterImageUrl":"<castMember referencePhoto, the exact versioned URL>",
+       "productImageUrl":"<real Shopify product photo>",
+       "extraImageUrls":["<the same product photo again>"],
+       "scale":"<cue from the product real dimensions>","count":2,
+       "caller":"social-media-manager"}'
+```
+
+**Pick the location from §3.8 and respect the variety rules**: no location repeat inside 8
+consecutive product posts, no cast member on more than 2 of any 5. State both choices and their
+last-used dates in the retro decision event.
+
+**If there is no approved cast member, you cannot draft an Instagram product post.** As of
+2026-08-19 Sanity held zero `castMember` docs with a `referencePhoto`, which is exactly why row 59
+shipped as a packshot and was rejected. Declare Instagram product drafting degraded-to-zero, say so
+in the summary, and pivot volume to X, LinkedIn, and non-product Instagram posts. **Never fall back
+to a product-only frame to fill the slot.**
+
 **Only a generated, rehosted asset is publishable.** The URL you put in `mediaUrls` must have a
 `social-` or `ig-` prefixed basename, because `isGeneratedSocialAsset` checks exactly that and the
 gate BLOCKs anything else on image-provenance (ticket #4134). A Shopify product CDN URL never
 satisfies this, no matter how good the photo is. There is no path where a catalog packshot becomes
 a valid Instagram asset, so do not spend a slot discovering that again.
+
+**Carousels: the check is `every`, not `some`.** `allMediaAreGeneratedSocialAssets` runs
+`urls.every(isGeneratedSocialAsset)`, so **one bad slide BLOCKs the whole post**, lead slide
+included. The owner licenses a solo product shot as slide 2 (§3.7); produce it with archetype
+`plate`, which renders a packaging-free product frame that passes provenance. Dropping the raw
+catalog packshot in as slide 2 does not "add a detail shot", it kills the post. Instagram carousels
+accept 2 to 10 slides.
 
 Ask `media-manager` first for an existing Shopify Files / Sanity asset (reuse-first). When nothing
 fits, **generate one with `scripts/gen-social-image.ts`**, re-checking the gate before each run. The
