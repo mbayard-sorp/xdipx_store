@@ -28,6 +28,7 @@ import {
   isEligible,
   gapScore,
   needsReview,
+  isNoveltyCategory,
 } from '~/lib/master-collapse.server'
 import type { MasterRecord } from '~/lib/master-collapse.server'
 import type { BulkImportRow, BulkVariantRow, MasterProductGroup } from '~/types'
@@ -105,6 +106,18 @@ function buildMasterUpsertPayload(
   }
 
   if (overrides?.gapReason) gapReason = overrides.gapReason
+
+  // Novelty / gag-gift hold (suggestion #3882). Off-brand novelties (gag gifts,
+  // penis candy, joke books, party favors) are recurring editorial rejects, not
+  // financial ones. Hold them out of tier promotion (→ D, so Phase-2 auto-import,
+  // which admits only A/B/C, never ships one) and pre-tag the reason so the daily
+  // import routine disposes of them at a glance instead of re-reasoning each row.
+  // Editorial only: no markup/qty/gap floor is touched, and the row is still
+  // surfaced at tier D for manual approval, so a false positive is recoverable.
+  if (isNoveltyCategory(master)) {
+    tier = 'D'
+    gapReason = `[novelty] ${gapReason}`
+  }
 
   const score = gapScore(master)
 

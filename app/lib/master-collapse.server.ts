@@ -682,3 +682,37 @@ export const NEEDS_REVIEW_THRESHOLD = 30
 export function needsReview(master: MasterRecord): boolean {
   return master.variantCount > NEEDS_REVIEW_THRESHOLD
 }
+
+// ─── Novelty / gag-gift category flag ─────────────────────────────────────────
+
+/**
+ * High-precision token list for off-brand novelty / gag-gift SKUs — the bounded
+ * set named in suggestion #3882's weekly rollup: gag gifts, candy/edibles
+ * marketed as pranks, joke books, party novelties, and their kin (plushies,
+ * bachelorette favors, keychains). These recur as editorial rejects (crude /
+ * not a wellness product per the voice charter), NOT financial rejects.
+ *
+ * Tokens are deliberately multi-word or unambiguous so this never catches a
+ * legitimate wellness SKU: `gag gift` (not a bare "gag", which is bondage),
+ * `penis candy` (not a bare "penis", which is a pump/ring/sleeve), `joke book`,
+ * `party favor`. A category or title only has to match one. The tokens mirror
+ * the canonical novelty subtypes in claude.server.ts (candy-edible, pin-keychain,
+ * plushie-pillow, novelty-gift, party-supply); `game` is left out on purpose so
+ * legitimate couples games are never held.
+ *
+ * The consequence of a match is intentionally soft (see buildMasterUpsertPayload):
+ * the candidate is held out of tier promotion and pre-tagged, but STILL surfaced
+ * for manual approval — so a rare false positive costs a human one extra look,
+ * never a dropped product, and no markup/qty/gap floor is touched.
+ */
+export const NOVELTY_PATTERNS =
+  /\b(?:gag\s*gifts?|joke\s*books?|party\s*(?:favou?rs?|supplies|supply|novelt\w+)|bachelorette|pecker|boob(?:ie|y)\s*(?:candy|candies|straws?)|(?:penis|dick|willy)\s*(?:candy|candies|gumm\w+|pasta|straws?|sprinkles?|mints?|soap|ice)|plush(?:ie|\s*toy)|novelt(?:y|ies)|key\s*chains?|keychains?|pi[nñ]atas?)\b/i
+
+/**
+ * True when a master looks like an off-brand novelty / gag gift, tested against
+ * its Nalpac sub-category and its display title. See NOVELTY_PATTERNS.
+ */
+export function isNoveltyCategory(master: MasterRecord): boolean {
+  return NOVELTY_PATTERNS.test(master.category) ||
+    NOVELTY_PATTERNS.test(master.displayTitle)
+}
