@@ -109,7 +109,7 @@ export function ProductCard({ product, index, listId, listName }: ProductCardPro
                     : `$${price.toFixed(2)}`}
                 </span>
                 {hasCompare && (
-                  <span className="text-ink/40 text-xs line-through">
+                  <span className="text-ink-3 text-xs line-through">
                     ${compareAtPrice!.toFixed(2)}
                   </span>
                 )}

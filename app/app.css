@@ -35,17 +35,29 @@
   --color-ink:      #1A1418;
   --color-ink-2:    #3D2F3A;
   --color-ink-3:    #6B5F68;
-  --color-ink-4:    #9A8F97;
+  /* was #9A8F97 (ticket #3789, 2026-08-19): the old value read 3.1:1 or worse
+     as text against every ground it's used on (white, paper-2, coral-soft,
+     plum-soft) — an axe sweep (PR #725) caught it failing AA everywhere it
+     appears as text, not just at one call site. Darkened to clear 4.5:1
+     against all four grounds; see the PR body for the full before/after. */
+  --color-ink-4:    #726673;
 
   /* ─── Accent · use sparingly ───────────────────── */
-  --color-coral:        #FF5A36;
+  /* was #FF5A36 (ticket #3789, 2026-08-19): white-on-coral CTA buttons and
+     coral-as-text both measured 3.1:1, failing AA everywhere the pairing is
+     used (286 call sites). Darkened to clear 4.5:1 against white/paper-2/
+     coral-soft/plum-soft with margin; still reads as coral, just deeper. */
+  --color-coral:        #C2350F;
   --color-coral-2:      #FF7A5A;
   --color-coral-soft:   #FFE6DD;
   --color-plum:         #7A2BB8;
   --color-plum-2:       #5B1F8A;
   --color-plum-soft:    #F3E8FB;
   --color-plum-on-dark: #B98BDE;       /* plum emphasis on ink grounds — see .em-on-dark */
-  --color-sage:         #7C8F78;
+  /* was #7C8F78 (ticket #3789, 2026-08-19): same everywhere-fails story as
+     ink-4/coral above — sage-as-text read 3.46:1 or worse on white/paper-2.
+     Darkened to clear 4.5:1 with margin. */
+  --color-sage:         #596756;
 
   /* ─── Legacy v2 aliases — mapped onto the new palette so existing
          utility classes continue to compile. Do not use in new code. */

@@ -122,8 +122,11 @@ export function PanelLargeRow({
                 {arrowText ? (
                   // The deck's ONE coral spend (§3 budget): the dark panel's CTA.
                   // Light grounds keep ink so coral stays a single primary.
+                  // coral-2, not coral: the base token was darkened for AA on
+                  // paper grounds (ticket #3789) and only reads 3.29:1 on a
+                  // dark panel; coral-2 stays light enough to clear 7:1 on ink.
                   <span
-                    className={`mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold md:mt-4 md:text-[14px] ${ruled ? 'text-ink' : s.darkGround ? 'text-coral' : s.text}`}
+                    className={`mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold md:mt-4 md:text-[14px] ${ruled ? 'text-ink' : s.darkGround ? 'text-coral-2' : s.text}`}
                     style={BODY}
                   >
                     {arrowText}

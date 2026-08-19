@@ -95,7 +95,7 @@ export function EmailSubscribe({
           </>
         )}
 
-        <p className="text-ink/40 text-xs mt-4">
+        <p className="text-ink-3 text-xs mt-4">
           Unsubscribe anytime. We're not needy.
         </p>
       </div>
