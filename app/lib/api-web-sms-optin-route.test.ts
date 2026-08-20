@@ -118,3 +118,64 @@ describe('api.web-sms-optin reply copy (#3916) — no em-dashes', () => {
     expect(json.reply).not.toContain(EM_DASH)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Audit #4301 (standing pattern "claim-before-verify"): a customer-facing
+// reply may only ACKNOWLEDGE a send that actually happened, composed from the
+// confirmed post-action result — never asserted pre-action. This route is the
+// wired composition point for the web "text me the link" flow: it must say
+// "Sent" if and only if linkWebSessionToSms reports sent:true, and every
+// non-sent branch (send failure, opt-out, thrown error) must reply WITHOUT the
+// completed-send acknowledgement. Mirrors the pendingPdpUrl gate the ticket
+// cites as the reference pattern (adapters/voice.server.ts: await sendSms,
+// branch the spoken line on the real outcome).
+//
+// The discriminator is the standalone past-tense word "sent": the failure
+// branches phrase around it ("not able to send", "sending that", "didn't want
+// to go through"), so it appears only on the confirmed-send path.
+describe('api.web-sms-optin — send claim is gated on a confirmed send (audit #4301)', () => {
+  const COMPLETED_SEND = /\bsent\b/i
+
+  it('acknowledges the send only when the result confirms sent:true', async () => {
+    mocks.linkWebSessionToSms.mockResolvedValue({
+      ok: true,
+      sent: true,
+      alreadyConsented: true,
+      customerGidLinked: true,
+    })
+    const res = await post(validPayload)
+    const json = await res.json()
+    expect(json.ok).toBe(true)
+    expect(json.reply).toMatch(COMPLETED_SEND)
+  })
+
+  it('does NOT claim a send when the send failed (sent:false)', async () => {
+    mocks.linkWebSessionToSms.mockResolvedValue({
+      ok: true,
+      sent: false,
+      alreadyConsented: false,
+      customerGidLinked: false,
+    })
+    const res = await post(validPayload)
+    const json = await res.json()
+    expect(json.ok).toBe(false)
+    expect(json.error).toBe('send_failed')
+    expect(json.reply).not.toMatch(COMPLETED_SEND)
+  })
+
+  it('does NOT claim a send when the number is opted out', async () => {
+    mocks.linkWebSessionToSms.mockResolvedValue({ ok: false, reason: 'opted_out' })
+    const res = await post(validPayload)
+    const json = await res.json()
+    expect(json.ok).toBe(false)
+    expect(json.reply).not.toMatch(COMPLETED_SEND)
+  })
+
+  it('does NOT claim a send when the link call throws', async () => {
+    mocks.linkWebSessionToSms.mockRejectedValue(new Error('db down'))
+    const res = await post(validPayload)
+    const json = await res.json()
+    expect(json.error).toBe('server_error')
+    expect(json.reply).not.toMatch(COMPLETED_SEND)
+  })
+})
