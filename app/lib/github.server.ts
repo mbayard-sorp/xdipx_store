@@ -815,6 +815,13 @@ export const PROTECTED_GLOBS: readonly string[] = [
   '**/package-lock.json',
   // Nested env files, not just repo root.
   '**/.env*',
+  // Deploy-critical build steps. apply-additive-migrations.ts runs against
+  // the production database on every prod build (see the --build gate in the
+  // file itself); build-vercel.mjs decides what code that build ships. Either
+  // one is a way to change what happens during a deploy without going through
+  // the paths already protected above.
+  'scripts/apply-additive-migrations.ts',
+  'scripts/build-vercel.mjs',
 ]
 
 const RE_SPECIALS = /[.+?^${}()|[\]\\]/g
