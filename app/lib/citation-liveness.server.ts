@@ -40,6 +40,15 @@
  * `live:false`. This is the silent cousin of `blocked`: the page is very likely
  * live, but we never saw its content, so it is treated the same way — kept only
  * when the accuracy gate independently confirms the source supports the claim.
+ *
+ * Body excerpt (ticket #4285): the accuracy gate's own WebFetch is blocked by
+ * the agent sandbox egress policy, so it could confirm a URL was live but never
+ * read the page to confirm the page supports the claim, and every post shipped
+ * with zero Sources. With `includeBody`, a `live:true` html page also returns a
+ * readable-text `excerpt` (script/style/markup stripped, capped), read here on
+ * the server's open egress. This is the sanctioned server-side read path when
+ * WebFetch is blocked; the excerpt is never populated for a blocked, challenge,
+ * dead, or non-html result, so it can never carry unread interstitial text.
  */
 
 /**
@@ -92,6 +101,28 @@ export interface LivenessResult {
    * `'host-not-allowlisted'`, `'not-https'`, `'timeout'`, `'fetch-failed'`.
    */
   reason?: string
+  /**
+   * Readable-text excerpt of the fetched page body (ticket #4285), present only
+   * when the caller opted in with `includeBody` AND the URL resolved `live:true`
+   * from an html 2xx. This is the sanctioned server-side read path for the
+   * accuracy gate when its own WebFetch is blocked by the agent sandbox's egress
+   * policy: the reviewer confirms the page supports the claim from this text
+   * instead of opening the page itself. Script/style/markup are stripped and the
+   * text is capped at MAX_BODY_TEXT_CHARS. Never populated for a `blocked`,
+   * `challenge`, `dead`, or non-html result, so an excerpt can never come from an
+   * unread challenge page.
+   */
+  excerpt?: string | null
+}
+
+/** Per-request options for a liveness batch. */
+export interface LivenessOptions {
+  /**
+   * Return a readable-text excerpt of each live page's body (ticket #4285).
+   * Opt-in because it makes the response much larger; the default liveness use
+   * (status + title only) is unchanged when this is absent or false.
+   */
+  includeBody?: boolean
 }
 
 /** Max candidate URLs accepted in one request. */
@@ -99,6 +130,19 @@ export const MAX_LIVENESS_URLS = 10
 const REQUEST_TIMEOUT_MS = 8_000
 /** Cap on bytes read to find the <title>, so a huge page can't exhaust memory. */
 const MAX_TITLE_SCAN_BYTES = 200_000
+/**
+ * Cap on bytes read when the caller asked for a body excerpt (ticket #4285).
+ * Larger than the title cap because the claim-supporting sentence can sit deep
+ * in a long health article, but still bounded so one huge page can't exhaust
+ * memory.
+ */
+const MAX_BODY_SCAN_BYTES = 800_000
+/**
+ * Cap on characters of readable text returned in an excerpt. Enough for the
+ * accuracy gate to confirm a claim from the main article body, while keeping a
+ * 10-URL batch response bounded (10 x 20k chars).
+ */
+export const MAX_BODY_TEXT_CHARS = 20_000
 /**
  * Max same-host redirect hops followed before giving up. Small on purpose: a
  * canonicalizing redirect (www→apex, http→https, trailing slash) is one hop, so
@@ -192,6 +236,46 @@ export function extractTitle(html: string): string | null {
 }
 
 /**
+ * Extract a readable-text excerpt from an html string (ticket #4285), so the
+ * accuracy gate can confirm a page supports a claim server-side when its own
+ * WebFetch is blocked by the sandbox egress policy. Drops the parts that carry
+ * no prose (script, style, noscript, head, svg, comments), strips the remaining
+ * tags, decodes the common entities, collapses whitespace, and truncates to
+ * `maxChars`. Deliberately simple and dependency-free: this is a reading aid for
+ * a human-grade reviewer, not a parser, so approximate text is fine. Pure and
+ * exported so the extraction is unit-testable without a network call.
+ */
+export function extractReadableText(html: string, maxChars: number): string {
+  const text = html
+    // Whole non-prose elements, contents included.
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    // Any remaining tag.
+    .replace(/<[^>]+>/g, ' ')
+    // Common entities (superset of extractTitle's, plus nbsp).
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&rsquo;/gi, "'")
+    .replace(/&lsquo;/gi, "'")
+    .replace(/&ldquo;/gi, '"')
+    .replace(/&rdquo;/gi, '"')
+    .replace(/&mdash;/gi, ', ')
+    .replace(/&ndash;/gi, '-')
+    // Collapse all whitespace runs to single spaces.
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.length > maxChars ? text.slice(0, maxChars) : text
+}
+
+/**
  * Detect a bot-protection / WAF interstitial served with a 2xx status. Some
  * challenge services (Cloudflare "Just a moment", reCAPTCHA/hCaptcha gates,
  * Incapsula/Imperva, PerimeterX) answer 200 with the challenge as the whole
@@ -231,7 +315,7 @@ export function isChallengePage(title: string | null, bodyText: string): boolean
   return bodySignals.some((re) => re.test(bodyText))
 }
 
-async function checkOne(raw: string): Promise<LivenessResult> {
+async function checkOne(raw: string, opts: LivenessOptions = {}): Promise<LivenessResult> {
   const v = validateCitationUrl(raw)
   if (!v.ok) {
     return { url: raw, live: false, status: null, title: null, reason: v.reason }
@@ -268,18 +352,28 @@ async function checkOne(raw: string): Promise<LivenessResult> {
 
       if (cls === 'live') {
         let title: string | null = null
+        let excerpt: string | null = null
         if ((res.headers.get('content-type') ?? '').includes('html') && res.body) {
-          const body = await readCapped(res)
+          // When a body excerpt is requested, read further into the page (the
+          // claim can sit deep in a long article) instead of stopping at the
+          // <title>.
+          const body = await readCapped(res, opts.includeBody === true)
           title = extractTitle(body)
           if (isChallengePage(title, body)) {
             // A 2xx whose body is a bot-protection interstitial: the real page
             // was never seen. Report it distinctly from a plain 403 `blocked`,
             // still `live:false`, and surface the challenge title (the title is
-            // exactly what exposed this on ticket #3946).
+            // exactly what exposed this on ticket #3946). No excerpt: an unread
+            // challenge page must never be handed to the reviewer as source text.
             return { url: raw, live: false, status: res.status || null, title, reason: 'challenge' }
           }
+          if (opts.includeBody === true) {
+            excerpt = extractReadableText(body, MAX_BODY_TEXT_CHARS)
+          }
         }
-        return { url: raw, live: true, status: res.status || null, title }
+        return opts.includeBody === true
+          ? { url: raw, live: true, status: res.status || null, title, excerpt }
+          : { url: raw, live: true, status: res.status || null, title }
       }
 
       // Non-2xx, non-3xx: refused (blocked) vs gone (dead), reported distinctly so
@@ -299,20 +393,29 @@ async function checkOne(raw: string): Promise<LivenessResult> {
   }
 }
 
-/** Read at most MAX_TITLE_SCAN_BYTES of a response body as text. */
-async function readCapped(res: Response): Promise<string> {
+/**
+ * Read a capped slice of a response body as text. In the default (title-only)
+ * mode it reads at most MAX_TITLE_SCAN_BYTES and stops as soon as the <title>
+ * has closed. When `wantBody` is set (ticket #4285), it reads up to
+ * MAX_BODY_SCAN_BYTES without the early stop, so the returned text covers the
+ * article body the excerpt is extracted from.
+ */
+async function readCapped(res: Response, wantBody = false): Promise<string> {
   const reader = res.body?.getReader()
   if (!reader) return ''
   const decoder = new TextDecoder()
+  const cap = wantBody ? MAX_BODY_SCAN_BYTES : MAX_TITLE_SCAN_BYTES
   let out = ''
   let read = 0
   try {
-    while (read < MAX_TITLE_SCAN_BYTES) {
+    while (read < cap) {
       const { done, value } = await reader.read()
       if (done) break
       read += value.byteLength
       out += decoder.decode(value, { stream: true })
-      if (/<\/title>/i.test(out)) break // stop early once the title has closed
+      // In title-only mode, stop as soon as the title has closed. In body mode,
+      // read on to the cap so the excerpt reaches the article prose.
+      if (!wantBody && /<\/title>/i.test(out)) break
     }
   } finally {
     await reader.cancel().catch(() => {})
@@ -323,8 +426,12 @@ async function readCapped(res: Response): Promise<string> {
 /**
  * Check a batch of candidate citation URLs. Rejected (non-allowlisted / malformed)
  * URLs come back with live:false and a reason and never trigger a request.
- * Runs the allowed ones concurrently.
+ * Runs the allowed ones concurrently. Pass `{ includeBody: true }` to also get a
+ * readable-text excerpt of each live page (ticket #4285).
  */
-export async function checkCitationUrls(urls: string[]): Promise<LivenessResult[]> {
-  return Promise.all(urls.slice(0, MAX_LIVENESS_URLS).map((u) => checkOne(u)))
+export async function checkCitationUrls(
+  urls: string[],
+  opts: LivenessOptions = {},
+): Promise<LivenessResult[]> {
+  return Promise.all(urls.slice(0, MAX_LIVENESS_URLS).map((u) => checkOne(u, opts)))
 }

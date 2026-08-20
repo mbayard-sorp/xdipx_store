@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CITATION_HOST_ALLOWLIST,
+  MAX_BODY_TEXT_CHARS,
   classifyStatus,
+  extractReadableText,
   extractTitle,
   isChallengePage,
   resolveRedirectTarget,
@@ -95,6 +97,43 @@ describe('extractTitle', () => {
   it('returns null when there is no title or it is empty', () => {
     expect(extractTitle('<html><body>no title</body></html>')).toBeNull()
     expect(extractTitle('<title>   </title>')).toBeNull()
+  })
+})
+
+describe('extractReadableText (ticket #4285 body excerpt)', () => {
+  it('strips tags and returns the prose', () => {
+    const html = '<html><body><h1>Cock Rings</h1><p>They restrict blood flow.</p></body></html>'
+    expect(extractReadableText(html, MAX_BODY_TEXT_CHARS)).toBe('Cock Rings They restrict blood flow.')
+  })
+
+  it('drops script, style, noscript, head and svg contents entirely', () => {
+    const html = [
+      '<head><title>t</title><meta name="x" content="hidden"></head>',
+      '<style>.a{color:red}</style>',
+      '<script>var claim = "fake supporting text"</script>',
+      '<noscript>enable js</noscript>',
+      '<svg><path d="M0 0"/></svg>',
+      '<body><p>The real claim the reviewer needs.</p></body>',
+    ].join('')
+    const text = extractReadableText(html, MAX_BODY_TEXT_CHARS)
+    expect(text).toBe('The real claim the reviewer needs.')
+    expect(text).not.toContain('fake supporting text')
+    expect(text).not.toContain('color:red')
+    expect(text).not.toContain('enable js')
+  })
+
+  it('decodes common entities and collapses whitespace', () => {
+    const html = '<p>water-based\n\n  &amp; silicone   lube&rsquo;s pH</p>'
+    expect(extractReadableText(html, MAX_BODY_TEXT_CHARS)).toBe("water-based & silicone lube's pH")
+  })
+
+  it('truncates to the char cap', () => {
+    const html = `<p>${'a'.repeat(500)}</p>`
+    expect(extractReadableText(html, 100)).toHaveLength(100)
+  })
+
+  it('returns empty string for a body with no prose', () => {
+    expect(extractReadableText('<script>x()</script>', MAX_BODY_TEXT_CHARS)).toBe('')
   })
 })
 
