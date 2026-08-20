@@ -25,6 +25,15 @@
  *     the production gate (there is no production to protect from a scratch
  *     DB) and never writes to the ledger table (the scratch DB is discarded
  *     after the job, so there is nothing to remember).
+ *     KNOWN GAP as of 2026-08-20 (see docs/store-team/ci-flake-register.md):
+ *     a scratch DB starts empty, and this mode does not execute
+ *     'manual'-classified files, so any 'auto'-classified file that targets
+ *     a table/column only a 'manual' file creates will fail dry-run even
+ *     though it is fine against the real (already-populated) production DB.
+ *     db/migrations/0002_fluffy_james_howlett.sql (indexes order_line_items,
+ *     created by the 'manual' 009_copurchase.sql) hits this today, which
+ *     means this job cannot pass as designed until that is resolved -- see
+ *     the register and PR #791 for the options considered.
  *
  * Ledger: schema_migrations_applied (migration 081) records which files this
  * script has already run, so re-running it on every build only applies files
@@ -63,7 +72,10 @@ CREATE TABLE IF NOT EXISTS schema_migrations_applied (
 /**
  * Strip `-- line` and block comments, leaving string literals alone (a
  * semicolon or `--` inside a quoted string must not be treated as SQL).
- * Handles the standard `''` escaped-quote form inside single-quoted strings.
+ * Handles the standard `''` escaped-quote form inside single-quoted strings,
+ * and Postgres dollar-quoted strings (`$$...$$` / `$tag$...$tag$`, as used by
+ * PL/pgSQL function/trigger bodies): once opened, everything up to the
+ * matching closing delimiter is opaque, not re-tokenized as comments/strings.
  */
 export function stripSqlComments(sql: string): string {
   let out = ''
@@ -71,11 +83,24 @@ export function stripSqlComments(sql: string): string {
   let inLineComment = false
   let inBlockComment = false
   let inString = false
+  let dollarTag: string | null = null
 
   while (i < sql.length) {
     const c = sql[i] as string
     const c2 = sql[i + 1]
 
+    if (dollarTag !== null) {
+      const closer = `$${dollarTag}$`
+      if (sql.startsWith(closer, i)) {
+        out += closer
+        i += closer.length
+        dollarTag = null
+        continue
+      }
+      out += c
+      i++
+      continue
+    }
     if (inLineComment) {
       if (c === '\n') {
         inLineComment = false
@@ -112,6 +137,15 @@ export function stripSqlComments(sql: string): string {
       i++
       continue
     }
+    if (c === '$') {
+      const match = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
+      if (match) {
+        dollarTag = match[1] ?? ''
+        out += match[0]
+        i += match[0].length
+        continue
+      }
+    }
     if (c === '-' && c2 === '-') {
       inLineComment = true
       i += 2
@@ -131,17 +165,33 @@ export function stripSqlComments(sql: string): string {
 /**
  * Split a (comment-stripped) SQL file into individual statements on `;`,
  * respecting single-quoted strings so a semicolon inside a string literal
- * does not split the statement in two. Empty/whitespace-only chunks (e.g. a
- * trailing newline after the last `;`) are dropped.
+ * does not split the statement in two, and respecting Postgres dollar-quoted
+ * strings (`$$...$$` / `$tag$...$tag$`) so a semicolon inside a PL/pgSQL
+ * function/trigger body doesn't fragment it into invalid partial statements.
+ * Empty/whitespace-only chunks (e.g. a trailing newline after the last `;`)
+ * are dropped.
  */
 export function splitStatements(sql: string): string[] {
   const out: string[] = []
   let current = ''
   let inString = false
+  let dollarTag: string | null = null
   for (let i = 0; i < sql.length; i++) {
     const c = sql[i] as string
     const c2 = sql[i + 1]
     current += c
+
+    if (dollarTag !== null) {
+      if (c === '$') {
+        const closer = `$${dollarTag}$`
+        if (sql.startsWith(closer, i)) {
+          current += closer.slice(1)
+          i += closer.length - 1
+          dollarTag = null
+        }
+      }
+      continue
+    }
     if (inString) {
       if (c === "'") {
         if (c2 === "'") {
@@ -156,6 +206,15 @@ export function splitStatements(sql: string): string[] {
     if (c === "'") {
       inString = true
       continue
+    }
+    if (c === '$') {
+      const match = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
+      if (match) {
+        dollarTag = match[1] ?? ''
+        current += match[0].slice(1)
+        i += match[0].length - 1
+        continue
+      }
     }
     if (c === ';') {
       const trimmed = current.slice(0, -1).trim()
