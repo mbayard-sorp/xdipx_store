@@ -438,6 +438,10 @@ interface ShopifyProductWebhook {
   vendor?: string
   product_type?: string
   published_at?: string | null
+  // Shopify sends the full product on products/update, variants included. Used
+  // by the new-product curation gate (#4360) to look up pricing_audit_log rows
+  // by SKU. All optional so older fixtures keep parsing.
+  variants?: { id?: number; sku?: string | null }[]
 }
 
 async function handleProductCreated(product: ShopifyProductWebhook): Promise<void> {
@@ -500,6 +504,12 @@ async function handleProductUpdated(product: ShopifyProductWebhook): Promise<voi
  * Tell the social team a product just went live (ticket #3736, owner
  * direction 2026-08-16: posts about new products we now have on the site).
  *
+ * Filed as kind:'process' (was kind:'campaign' until #4360). RUN_CLOSE_KINDS is
+ * ['process','strategy'], so a campaign row could never be closed by a routine
+ * (Step 7b returned 409) and campaign has no automated executor at all, which
+ * is why 37 rows sat inert at 'approved'. A process row the social routine can
+ * read, act on, and close is the fix.
+ *
  * Shopify's products/update payload carries no previous status, so the
  * "transition to active" is detected by proxy: status is active AND
  * published_at (stamped when the product first goes live on the online
@@ -513,9 +523,18 @@ async function handleProductUpdated(product: ShopifyProductWebhook): Promise<voi
  * both would double every bulk publish. The dedupe key (new-product:<handle>)
  * additionally absorbs Shopify's own webhook retries and multi-update bursts
  * while the ticket is live.
+ *
+ * A curation gate (#4360, newProductPostExcludeReason) runs before filing:
+ * posting every product that goes live is filler, so discontinued, dead-
+ * velocity, commodity-consumable, and off-theme SKUs file nothing, and a weekly
+ * cap refuses the burst. See docs/store-team/instagram-campaigns.md section 4c.
  */
 const NEW_PRODUCT_LIVE_WINDOW_MS = 60 * 60 * 1000
 const ENRICH_CHAIN_LOOKBACK_MS = 2 * 60 * 60 * 1000
+// Pricing rationales (discontinued/dead-velocity) are persistent editorial
+// signals; a 90-day lookback catches them without an unbounded scan.
+const PRICING_RATIONALE_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000
+const NEW_PRODUCT_WEEKLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 async function maybeFileNewProductSuggestion(product: ShopifyProductWebhook): Promise<void> {
   if (product.status !== 'active' || !product.published_at || !product.handle) return
@@ -538,10 +557,57 @@ async function maybeFileNewProductSuggestion(product: ShopifyProductWebhook): Pr
     .limit(1)
   if (enrichPublished) return
 
+  // Curation gate (#4360): posting every product that goes live is filler.
+  // Gather the DB-derived signals, then let the pure filter decide. Reuses
+  // `and`/`gte` already imported above; pulls in the extra operators it needs.
+  const { newProductPostExcludeReason } = await import('../app/lib/new-product-social-filter.js')
+  const { pricingAuditLog, homepageTeamSuggestions } = await import('../db/schema.js')
+  const { inArray, like, count } = await import('drizzle-orm')
+
+  // Recent pricing_audit_log rationales for this product's SKUs. A discontinued
+  // or dead-velocity marker is a hard exclude.
+  const skus = (product.variants ?? [])
+    .map(v => v?.sku)
+    .filter((s): s is string => typeof s === 'string' && s.length > 0)
+  let pricingRationales: (string | null)[] = []
+  if (skus.length > 0) {
+    const rows = await db
+      .select({ rationale: pricingAuditLog.rationale })
+      .from(pricingAuditLog)
+      .where(and(
+        inArray(pricingAuditLog.sku, skus),
+        gte(pricingAuditLog.occurredAt, new Date(Date.now() - PRICING_RATIONALE_LOOKBACK_MS)),
+      ))
+      .limit(50)
+    pricingRationales = rows.map(r => r.rationale)
+  }
+
+  // How many product-triggered rows have been filed this week, across all
+  // statuses, keyed off the dedupeKey prefix this trigger owns.
+  const weeklyRows = await db
+    .select({ n: count() })
+    .from(homepageTeamSuggestions)
+    .where(and(
+      like(homepageTeamSuggestions.dedupeKey, 'new-product:%'),
+      gte(homepageTeamSuggestions.createdAt, new Date(Date.now() - NEW_PRODUCT_WEEKLY_WINDOW_MS)),
+    ))
+  const weeklyCount = Number(weeklyRows[0]?.n ?? 0)
+
+  const excludeReason = newProductPostExcludeReason({
+    title:       product.title,
+    productType: product.product_type,
+    pricingRationales,
+    weeklyCount,
+  })
+  if (excludeReason) {
+    console.log(`[webhook:product-updated] new-product social suggestion skipped for ${product.handle}: ${excludeReason}`)
+    return
+  }
+
   const { createSuggestion } = await import('../app/lib/team.server.js')
   await createSuggestion({
     team:      'social',
-    kind:      'campaign',
+    kind:      'process',
     category:  'social-automation',
     dedupeKey: `new-product:${product.handle}`,
     suggestion:
