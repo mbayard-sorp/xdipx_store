@@ -36,6 +36,21 @@ attributed orders, not opens). Frequency guard: a subscriber never gets more tha
 per week, flows included where visible. Discounts only reference owner-approved promo codes with the
 MAP note.
 
+**Pre-voice-gate drafting checklist (run before Step 4, do not re-derive it per campaign).** The
+voice gate caught these same two tells in 4/4 product paragraphs and both Emma intros on run 270;
+they are avoidable at draft time:
+
+1. **No mechanism or spec vocabulary in the narrative selling body.** "Ten settings", "ten modes",
+   "the fourth setting", "steer it from a phone", "a deeper setting" belong in a spec block or a
+   feature-bullet list, never in the desire-forward paragraph. Sell what the reader will feel, not
+   how the toy works (charter: "sell the experience, never the mechanism").
+2. **The Emma intro is plain-warm and makes no self-nature claim.** Emma never argues her own
+   impartiality as a trust device — "no favorites of my own", "no body or favorite" is self-narration
+   the charter bans unless the disclosure is load-bearing, and in a marketing email it is not. State
+   only how she works. Reuse this canonical intro verbatim so the tell cannot re-enter per campaign:
+
+   > I'm Emma. I work from the specs and the review patterns to help you find the fit.
+
 ## Step 4 — Voice gate (mandatory)
 
 All subjects and body copy through `emma-empathy-reviewer` to a clean PASS.
