@@ -12,9 +12,13 @@ import {
   formatGateStamp,
   parseGateStamp,
   PASS_NOTES_MIN,
+  parseReworkInput,
+  reworkSocialPost,
   type ApproveRepo,
   type PostRow,
   type ReviewStatus,
+  type ReworkRepo,
+  type ReworkPatch,
 } from './social-publish-approve.server'
 
 const REAL_NOTES = 'Opened both frames, checked the bullet against the packshot, read the last 12 captions.'
@@ -326,5 +330,125 @@ describe('applyPublishGateVerdict', () => {
     const r = await applyPublishGateVerdict(7, verdict(), { repo })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.status).toBe(404)
+  })
+})
+
+// A gate REVISE strands a row at needs_changes; the {op:'draft'} idempotency
+// guard (#4069) dedupes on caption so an imagery-only rework cannot land through
+// draft, and applyPublishGateVerdict refuses anything not draft/pending_review
+// so the gate cannot re-judge it. reworkSocialPost is the missing primitive that
+// unsticks it via the team API — without weakening #4069's duplicate protection.
+describe('parseReworkInput (#4351)', () => {
+  it('accepts an imagery-only rework (mediaUrls, no caption change)', () => {
+    const r = parseReworkInput({ mediaUrls: [`${CDN}/reworked-lead.jpg`] })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.input.mediaUrls).toEqual([`${CDN}/reworked-lead.jpg`])
+      expect(r.input.tweetText).toBeUndefined()
+    }
+  })
+
+  it('accepts a copy-only rework (tweetText, no media change)', () => {
+    const r = parseReworkInput({ tweetText: 'a cleaner line' })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.input.tweetText).toBe('a cleaner line')
+      expect(r.input.mediaUrls).toBeUndefined()
+    }
+  })
+
+  it('rejects a bare re-gate that changes nothing (would loop)', () => {
+    const r = parseReworkInput({})
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(400)
+  })
+
+  it('rejects an empty mediaUrls array', () => {
+    const r = parseReworkInput({ mediaUrls: [] })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(400)
+  })
+
+  it('rejects an empty tweetText', () => {
+    const r = parseReworkInput({ tweetText: '   ' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(400)
+  })
+
+  it('drops non-string mediaUrls entries and keeps the real ones', () => {
+    const r = parseReworkInput({ mediaUrls: [`${CDN}/a.jpg`, 3, '', null, `${CDN}/b.jpg`] })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.input.mediaUrls).toEqual([`${CDN}/a.jpg`, `${CDN}/b.jpg`])
+  })
+})
+
+function fakeReworkRepo(post: PostRow | null) {
+  const writes: Array<{ id: number; patch: ReworkPatch }> = []
+  const repo: ReworkRepo = {
+    load: async () => post,
+    write: async (id, patch) => { writes.push({ id, patch }) },
+  }
+  return { repo, writes }
+}
+
+describe('reworkSocialPost (#4351)', () => {
+  it('returns a needs_changes row to draft/pending_review with the new imagery', async () => {
+    const { repo, writes } = fakeReworkRepo(
+      row({ reviewStatus: 'needs_changes', feedback: '[publish-gate REVISE ...] set-dressing mug', reviewedBy: 'social-publish-gate', reviewedAt: new Date('2026-08-19') }),
+    )
+    const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/reworked-lead.jpg`] }, { repo })
+    expect(r).toEqual({ ok: true, reviewStatus: 'pending_review' })
+    expect(writes).toHaveLength(1)
+    const patch = writes[0]!.patch
+    expect(patch.status).toBe('draft')
+    expect(patch.reviewStatus).toBe('pending_review')
+    expect(patch.mediaUrls).toEqual([`${CDN}/reworked-lead.jpg`])
+    // The stale gate stamp is cleared so the row re-enters the queue clean.
+    expect(patch.feedback).toBeNull()
+    expect(patch.reviewedBy).toBeNull()
+    expect(patch.reviewedAt).toBeNull()
+    // An imagery-only rework must NOT touch the caption (that is the #4069 trap).
+    expect(patch.tweetText).toBeUndefined()
+  })
+
+  it('updates the caption on a copy rework', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes' }))
+    const r = await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    expect(r.ok).toBe(true)
+    expect(writes[0]!.patch.tweetText).toBe('a cleaner line')
+  })
+
+  it('404s on a post that does not exist', async () => {
+    const { repo, writes } = fakeReworkRepo(null)
+    const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/x.jpg`] }, { repo })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(404)
+    expect(writes).toHaveLength(0)
+  })
+
+  it('refuses to resurrect a rejected (BLOCK) row', async () => {
+    // BLOCK means drop the post; rework must never bring one back — the same
+    // anti-capability applyPublishGateVerdict refuses.
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'rejected' }))
+    const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/x.jpg`] }, { repo })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(409)
+    expect(writes).toHaveLength(0)
+  })
+
+  it('refuses an already-approved row, keeping #4069 protection intact', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'approved' }))
+    const r = await reworkSocialPost(7, { tweetText: 'nope' }, { repo })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(409)
+    expect(writes).toHaveLength(0)
+  })
+
+  it('refuses a still-pending row (nothing to rework yet)', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'pending_review' }))
+    const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/x.jpg`] }, { repo })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(409)
+    expect(writes).toHaveLength(0)
   })
 })

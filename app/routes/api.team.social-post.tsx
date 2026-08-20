@@ -14,6 +14,11 @@
  *   { op: 'config' } -> { frequencies, autopostValve }
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
  *     productHandle? } } -> { ok, reviewStatus } | 422 { findings }
+ *   { op: 'rework', id, mediaUrls?, tweetText? } -> { ok, reviewStatus } | 404 | 409
+ *     Refile a row the gate bounced to needs_changes (ticket #4351): update the
+ *     corrected imagery/copy in place and reset it to pending_review so the gate
+ *     re-judges it. At least one of mediaUrls/tweetText is required. Only a
+ *     needs_changes row is a target, so #4069's duplicate-draft guard is intact.
  *   { op: 'engagement' } -> { report: [{ postId, externalPostId, metrics?, error? }],
  *                             account: { account?: { followersCount, ... }, error? } }
  *     Live Instagram insights (reach/likes/comments/saves) for the most
@@ -65,7 +70,7 @@ import {
 } from '~/lib/team.server'
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
 import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
-import { applyPublishGateVerdict, parsePublishGateVerdict } from '~/lib/social-publish-approve.server'
+import { applyPublishGateVerdict, parsePublishGateVerdict, reworkSocialPost, parseReworkInput } from '~/lib/social-publish-approve.server'
 import { captureSocialEngagement, captureInstagramAccount, rankBySaves } from '~/lib/social-engagement.server'
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -158,6 +163,26 @@ export async function action({ request }: ActionFunctionArgs) {
         },
         { status: result.status },
       )
+    }
+    return Response.json({ ok: true, reviewStatus: result.reviewStatus })
+  }
+
+  // Refile a bounced draft (#4351). A gate REVISE lands a row at needs_changes;
+  // the {op:'draft'} idempotency guard (#4069) dedupes on caption, so an
+  // imagery-only rework could not land through 'draft' and the row was stranded
+  // where the gate could not re-judge it. This updates the bounced row in place
+  // and returns it to pending_review so the gate re-judges it. It never mints a
+  // row (so #4069's protection is untouched) and only touches a needs_changes row.
+  if (b['op'] === 'rework') {
+    if (typeof b['id'] !== 'number' || !Number.isFinite(b['id'])) {
+      return new Response('Bad Request: id required', { status: 400 })
+    }
+    const parsed = parseReworkInput({ mediaUrls: b['mediaUrls'], tweetText: b['tweetText'] })
+    if (!parsed.ok) return new Response(parsed.error, { status: parsed.status })
+
+    const result = await reworkSocialPost(b['id'], parsed.input)
+    if (!result.ok) {
+      return Response.json({ error: result.error }, { status: result.status })
     }
     return Response.json({ ok: true, reviewStatus: result.reviewStatus })
   }

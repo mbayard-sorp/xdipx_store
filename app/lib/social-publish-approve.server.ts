@@ -440,3 +440,167 @@ export async function applyPublishGateVerdict(
   await write('approved', formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now))
   return { ok: true, reviewStatus: 'approved' }
 }
+
+// ── Reworking a bounced draft ─────────────────────────────────────────────────
+
+/**
+ * The corrected content for a row the gate sent back.
+ *
+ * A gate REVISE lands a draft at `needs_changes` (see `applyPublishGateVerdict`).
+ * The drafting routine then has to file the correction and get the row re-judged
+ * — but the `{op:'draft'}` idempotency guard (#4069) dedupes on platform +
+ * caption + campaign day, and an imagery-only REVISE by definition does not
+ * change the caption, so every imagery rework deduped straight back into the
+ * open row it was trying to fix, updating nothing. The row was then stranded:
+ * `applyPublishGateVerdict` refuses anything that is not `draft`/`pending_review`,
+ * so the gate could not re-judge it either, and the only escape was a direct DB
+ * write. This op is the honest primitive that flow was missing (#4351): it
+ * updates the bounced row in place and returns it to `pending_review` so the
+ * gate re-judges it, using only the team API. #4069's duplicate-draft protection
+ * is untouched — this op never creates a row, and only a row the gate itself
+ * bounced (`needs_changes`) is a rework target.
+ */
+export interface ReworkInput {
+  /** Regenerated media for an imagery REVISE. When present, non-empty. */
+  mediaUrls?: string[]
+  /** Rewritten caption for a copy REVISE. When present, non-empty. */
+  tweetText?: string
+}
+
+export type ReworkParse =
+  | { ok: true; input: ReworkInput }
+  | { ok: false; status: 400; error: string }
+
+/** Captions/URLs can be long, but not unbounded — reject a caller bug loudly. */
+const REWORK_TWEET_MAX = 2000
+
+/**
+ * Validate a rework payload. Pure and side-effect-free so the contract is unit
+ * tested directly rather than only through the route.
+ *
+ * At least one of `mediaUrls`/`tweetText` must be present: a rework has to carry
+ * the correction the REVISE asked for. A bare re-gate would re-submit the exact
+ * content the gate already bounced, which loops rather than fixes.
+ */
+export function parseReworkInput(raw: unknown): ReworkParse {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, status: 400, error: 'Bad Request: rework payload must be an object' }
+  }
+  const r = raw as Record<string, unknown>
+
+  let mediaUrls: string[] | undefined
+  if (r['mediaUrls'] !== undefined) {
+    if (!Array.isArray(r['mediaUrls'])) {
+      return { ok: false, status: 400, error: 'Bad Request: rework.mediaUrls must be an array of strings' }
+    }
+    const urls = (r['mediaUrls'] as unknown[]).filter((u): u is string => typeof u === 'string' && u.trim() !== '')
+    if (urls.length === 0) {
+      return { ok: false, status: 400, error: 'Bad Request: rework.mediaUrls, when present, must hold at least one non-empty URL' }
+    }
+    mediaUrls = urls
+  }
+
+  let tweetText: string | undefined
+  if (r['tweetText'] !== undefined) {
+    if (typeof r['tweetText'] !== 'string' || r['tweetText'].trim() === '') {
+      return { ok: false, status: 400, error: 'Bad Request: rework.tweetText, when present, must be a non-empty string' }
+    }
+    if (r['tweetText'].length > REWORK_TWEET_MAX) {
+      return { ok: false, status: 400, error: `Bad Request: rework.tweetText must be at most ${REWORK_TWEET_MAX} characters` }
+    }
+    tweetText = r['tweetText']
+  }
+
+  if (mediaUrls === undefined && tweetText === undefined) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        'Bad Request: rework must change something — supply mediaUrls (imagery REVISE) and/or tweetText ' +
+        '(copy REVISE). Re-gating the exact content the gate already bounced would only loop.',
+    }
+  }
+
+  const input: ReworkInput = {}
+  if (mediaUrls !== undefined) input.mediaUrls = mediaUrls
+  if (tweetText !== undefined) input.tweetText = tweetText
+  return { ok: true, input }
+}
+
+export interface ReworkPatch {
+  status: 'draft'
+  reviewStatus: 'pending_review'
+  feedback: null
+  reviewedBy: null
+  reviewedAt: null
+  mediaUrls?: string[]
+  tweetText?: string
+}
+
+export interface ReworkRepo {
+  load: (id: number) => Promise<PostRow | null>
+  write: (id: number, patch: ReworkPatch) => Promise<void>
+}
+
+/** The live implementation. Reuses the approve repo's loader. */
+export const dbReworkRepo: ReworkRepo = {
+  load: dbApproveRepo.load,
+  write: async (id, patch) => {
+    await db.update(socialPosts).set(patch).where(eq(socialPosts.id, id))
+  },
+}
+
+export type ReworkResult =
+  | { ok: true; reviewStatus: 'pending_review' }
+  | { ok: false; status: 404 | 409; error: string }
+
+export interface ReworkDeps {
+  repo?: ReworkRepo
+}
+
+/**
+ * Refile a bounced draft in place and return it to the gate's inbox.
+ *
+ * Only a row the gate bounced (`needs_changes`) is a rework target. A `rejected`
+ * (BLOCK) row is deliberately excluded: BLOCK means drop the post, and letting
+ * rework resurrect one would be exactly the "gate that could re-verdict a
+ * rejected row could resurrect one" capability `applyPublishGateVerdict` refuses
+ * to have. `approved`/`posted`/`pending_review` rows are likewise not reworkable,
+ * which is what keeps #4069's duplicate-draft protection intact from this angle:
+ * this op never mints a row and never touches one that is not already awaiting
+ * replacement. The reset clears the stale gate stamp so the row reads as a clean
+ * `draft`/`pending_review` — the exact state `applyPublishGateVerdict` requires
+ * to re-judge it.
+ */
+export async function reworkSocialPost(
+  id: number,
+  input: ReworkInput,
+  deps: ReworkDeps = {},
+): Promise<ReworkResult> {
+  const repo = deps.repo ?? dbReworkRepo
+
+  const post = await repo.load(id)
+  if (!post) return { ok: false, status: 404, error: `No social post ${id}` }
+  if (post.reviewStatus !== 'needs_changes') {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        `Post ${id} is ${post.status}/${post.reviewStatus}, not */needs_changes. Rework refiles a row the ` +
+        'pre-publish gate sent back for changes; a rejected, approved, posted, or already-pending row is ' +
+        'not a rework target.',
+    }
+  }
+
+  const patch: ReworkPatch = {
+    status: 'draft',
+    reviewStatus: 'pending_review',
+    feedback: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    ...(input.mediaUrls !== undefined ? { mediaUrls: input.mediaUrls } : {}),
+    ...(input.tweetText !== undefined ? { tweetText: input.tweetText } : {}),
+  }
+  await repo.write(id, patch)
+  return { ok: true, reviewStatus: 'pending_review' }
+}
