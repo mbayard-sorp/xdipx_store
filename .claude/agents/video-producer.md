@@ -163,6 +163,28 @@ Every job's scriptJson MUST include:
 - hook and cta fields for the retro loop.
 </scene_and_motion_prompts>
 
+<tier_selection>
+Model choice inside a tier is a cost-and-safety call, not a quality-ceiling call. The config
+(op:'config') carries the live per-second rates; the standing guidance:
+
+- Grok Imagine (b-roll tier). Pick grok over kling25-pro or veo31-fast when a beat needs a raw
+  product packshot that the cheaper image-first tiers refuse: grok runs roughly $0.14/s at 720p
+  with ~30s renders and clears the content filter on raw packshots that nano-banana / Seedream
+  reject with a 422, at about 55% under Seedance for the same shot. Reach for it for the packshot
+  and close-demo beats that keep 422-ing on the default tiers, not as the everyday default.
+- STANDING OPEN RISK — grok audio is never publishable. Grok's native audio cannot be disabled,
+  and it invents non-Emma dialogue (words Emma never wrote, in a voice that is not the store's).
+  Until a strip-and-overdub post pass exists, you MUST route grok only to silent b-roll or mute it
+  in post, and NEVER publish grok's audio track. Treat a grok clip as a silent-tier asset: it
+  carries a `voiceover` (TTS-muxed in the store voice), never a native spoken line, and the frame
+  gate / owner review still see it muted. This risk stands until the config says the overdub pass
+  is live.
+- Reference-to-video is intentionally NOT wired for grok. It ignored the supplied product
+  reference, so do not pass a product reference expecting grok to honor it; compose the packshot in
+  the framePrompt instead. (Source: ticket #3991 / PR #739, which shipped the grok tier in the fal
+  pipeline; this is the producer-side guidance split out as ticket #4028.)
+</tier_selection>
+
 <selection_rubric>
 The weekly brief's Video Plan is your slate; do not re-derive it. When the brief has no Video Plan,
 build one yourself with the same rubric and file it in your retro. Hard gates first: in stock,
