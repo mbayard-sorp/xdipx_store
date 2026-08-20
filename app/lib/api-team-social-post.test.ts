@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const createDraftMock = vi.hoisted(() => vi.fn())
 const voiceGateMock = vi.hoisted(() => vi.fn())
+const reworkParseMock = vi.hoisted(() => vi.fn())
+const reworkMock = vi.hoisted(() => vi.fn())
 
 vi.mock('~/lib/team.server', () => ({
   assertTeamAuth: vi.fn(),
@@ -30,6 +32,8 @@ vi.mock('~/lib/social-voice-gate.server', () => ({ parseVoiceGateVerdict: voiceG
 vi.mock('~/lib/social-publish-approve.server', () => ({
   applyPublishGateVerdict: vi.fn(),
   parsePublishGateVerdict: vi.fn(),
+  parseReworkInput: reworkParseMock,
+  reworkSocialPost: reworkMock,
 }))
 vi.mock('~/lib/social-engagement.server', () => ({
   captureSocialEngagement: vi.fn().mockResolvedValue([]),
@@ -141,5 +145,39 @@ describe('draft op — shopifyProductId pass-through', () => {
     expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
       shopifyProductId: undefined,
     }))
+  })
+})
+
+describe('rework op — wiring (#4351)', () => {
+  it('rejects a rework with no id', async () => {
+    const res = await post({ op: 'rework', mediaUrls: ['https://cdn/x.jpg'] })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/id required/)
+    expect(reworkMock).not.toHaveBeenCalled()
+  })
+
+  it('returns the parse error and does not call reworkSocialPost when the payload is invalid', async () => {
+    reworkParseMock.mockReturnValue({ ok: false, status: 400, error: 'rework must change something' })
+    const res = await post({ op: 'rework', id: 61 })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/change something/)
+    expect(reworkMock).not.toHaveBeenCalled()
+  })
+
+  it('passes the parsed input to reworkSocialPost and returns its success result', async () => {
+    reworkParseMock.mockReturnValue({ ok: true, input: { mediaUrls: ['https://cdn/reworked.jpg'] } })
+    reworkMock.mockResolvedValue({ ok: true, reviewStatus: 'pending_review' })
+    const res = await post({ op: 'rework', id: 61, mediaUrls: ['https://cdn/reworked.jpg'] })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, reviewStatus: 'pending_review' })
+    expect(reworkMock).toHaveBeenCalledWith(61, { mediaUrls: ['https://cdn/reworked.jpg'] })
+  })
+
+  it('relays a 409 (e.g. the row is not needs_changes) from reworkSocialPost', async () => {
+    reworkParseMock.mockReturnValue({ ok: true, input: { tweetText: 'x' } })
+    reworkMock.mockResolvedValue({ ok: false, status: 409, error: 'Post 61 is draft/approved, not */needs_changes.' })
+    const res = await post({ op: 'rework', id: 61, tweetText: 'x' })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toMatch(/needs_changes/)
   })
 })
