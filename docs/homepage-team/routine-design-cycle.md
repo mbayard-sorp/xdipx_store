@@ -126,6 +126,18 @@ imagery via `media-manager` (reuse-first), copy via `emma-copywriter`.
   self-capture (PR #506). Any wrapper that must stay carries v3 chrome explicitly, and the
   quarantine's code comment should say so (that comment amendment is a code change and rides its
   own PR, not this checklist).
+- **See-all destination cross-check (ticket #4270, mandatory whenever a module ships an
+  auto-generated or backfilled product set with a "See all" affordance).** Every See-all on an
+  auto-generated or backfilled module must resolve to a collection that CONTAINS the module's set,
+  or render no link at all — and it must NEVER fall back to `/collections/best-sellers`. This is
+  binding mission-brief §1 (no silent best-sellers fallback for auto-generated modules; ship NO
+  See-all instead). The gate is spec-and-code, not screenshot: read the module's design spec and its
+  See-all/href code path and confirm neither encodes a best-sellers fallback as an acceptance
+  criterion. The Curiosity Shelf (PR #750, #3532) shipped a `/collections/best-sellers` See-all in
+  both its code AND its own spec §j item 10, and no gate caught it because the spec itself encoded
+  the anti-pattern. The reviewer flags any new module code path that emits `/collections/best-sellers`
+  as a fallback destination; a lint/test guard is the stronger version of this check and may ride its
+  own code PR, but the review note here is mandatory and does not wait on it.
 - **`design-critic` — mandatory design gate.** Reviews screenshots of every changed surface at
   375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
   type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
