@@ -105,13 +105,21 @@ one plain clause). This is helpfulness, not upsell theater: the pairing advice m
 
 ## 4. Maker relations: get the brands talking back
 
-The goal is reciprocal notice: a manufacturer reshare or influencer quote is the single cheapest
-reach event available to this store. Standing behaviors:
+Maker reshare is a nice-to-have, **not the cheapest reach event available to this store** (corrected
+2026-08-18, ticket #4068). The 2026-08 teardown of five manufacturer grids (Womanizer, We-Vibe,
+Satisfyer, Doc Johnson, Femme Funn) found zero retailer tags, zero available-at posts, and zero
+retailer reposts — a clean sweep (`docs/store-team/competitor-social-teardown-2026-08.md` §5). Several
+verified handles are age-gated (Tantus, Screaming O, Fun Factory US) so a tag returns no logged-out
+discovery at all, and one (Femme Funn) is actively D2C-competitive. So treat maker tagging as a
+zero-cost habit, not a reach strategy: tag a verified maker when a post naturally features their
+product, and route real brand-partner *outreach* (e.g. the Satisfyer store-finder listing and the Doc
+Johnson channel pitch) to `offsite-scout` rather than expecting reciprocity from a tag. Standing
+behaviors:
 
-- **Featured Brand of the Week** (`routine-social-daily.md`) stays the cadence: one feature post
-  per platform per week, tagging the brand, genuinely enthusiastic about what their product does
-  well. Praise is specific and product-true, never generic flattery, and never lived-experience
-  testimony (Emma has none).
+- **Featured Brand of the Week** (`routine-social-daily.md`) is **reactive and incidental, not a
+  weekly cadence** (ticket #4068): feature a brand only when a post already features their product,
+  tag from the verified registry, and never reserve a slot for it. Praise is specific and
+  product-true, never generic flattery, and never lived-experience testimony (Emma has none).
 - **Tag only from the verified registry.** `docs/store-team/brand-ig-handles.json` is the source of
   truth; no verified registry entry, no tag. Never guess a handle.
 - **React on X.** When a carried brand posts something real (a launch, a good explainer), quote-post
@@ -123,6 +131,49 @@ reach event available to this store. Standing behaviors:
   encouraged: short quotes, named attribution, verified against a real source in the run (never
   from memory, never fabricated, never longer than a sentence or two). A misattributed quote in
   this category is a credibility wound; when in doubt, paraphrase with a name-check instead.
+
+## 4a. X imagery: a cast member in every post (owner direction 2026-08-19, reaffirmed 2026-08-20)
+
+Owner direction, verbatim: *"There should be at least one cast member in every post to X."*
+
+**Every X post carries an image, and an approved cast member is in it.** Not a product-only frame,
+not a typography plate, not a bare packshot, and not a reused Instagram frame that happens to have
+a person somewhere in it. This is stricter than the Instagram rule on purpose: Instagram's mandate
+(`instagram-campaigns.md` §3.7) covers **product** posts and exempts education and resource posts,
+whereas on X the cast is required on **every** post including the education beats and Notebook
+companions. That asymmetry is deliberate and is the owner's call. X is the lower-volume, higher-
+register surface, and the cast is what makes it read as a publication rather than a link feed.
+
+**This section exists so the gate can enforce it.** `social-publish-gate` reads this file as its
+X-only reference (its step 6b) and does not read `routine-social-daily.md`, so an X imagery rule
+written only in the drafting playbook would never reach the thing that judges the post. A rule the
+gate cannot see is advisory.
+
+- **Generate at 16:9 with `--platform x`.** Do not re-crop Instagram key art by default: IG frames
+  are 4:5 for the profile grid, and a centre crop to 16:9 removes exactly the top and bottom where
+  a product-in-hand sits. Reusing a pool frame is allowed only after checking it survives the crop
+  with both the cast member and the product still legible, and the run summary says it reused.
+- **Product-free X posts still carry cast.** An education beat or a Notebook companion drops the
+  product, never the person.
+- **A cast frame you cannot produce is a reason to draft fewer X posts**, never a reason to fall
+  back to a product-only image, a packshot, or a typography plate. Say which in the run summary.
+  The no-zero-days baseline is channel-scoped.
+- **The imagery fence does not widen with X's hotter caption register.** X captions run 6-7 against
+  Instagram's 4-5 because X's organic policy is more permissive. The picture standard is unchanged,
+  and the reason is mechanical rather than taste: the charter's permission is conditional on posts
+  being labeled per X's own rules, and `postTweet` (`app/lib/twitter.server.ts`) accepts only text
+  and media ids with no sensitive-media flag. We cannot label, so we must not post anything that
+  would need labeling. The ceiling remains `instagram-campaigns.md` §3.2a on both platforms.
+- **Roster reality, 2026-08-20.** Sanity holds exactly **one** approved `castMember` (Emma, seeded
+  2026-08-19). Until more faces are approved, every X post carries her and the §3.8 two-of-five
+  rotation rule is unsatisfiable. Report that honestly rather than treating it as passed. Owner
+  blocker id3 is what clears it.
+
+**Known enforcement gap, stated rather than assumed.** There is no deterministic check that a person
+is in a frame; `isGeneratedSocialAsset` verifies provenance, not content. Until `cast_slug` is
+persisted on the row (ticket #4345), this rule is enforced by the gate's own reading of the image,
+which is a judgment call and not a mechanical guarantee. Do not describe it as automatically
+enforced.
 
 ## 5. Hooks, sayings, and the viral formula
 

@@ -75,6 +75,22 @@ at an X row, that is the case this section exists for. Judge it, do not skip it.
   binds on both, but judged against that platform's own feed: the crossplatform
   strategy's companion-post pattern deliberately says related things on both, so
   an X post echoing an Instagram post is the plan, not a repeat.
+- **Cast presence is stricter on X than on Instagram, and this is the one
+  imagery rule that is NOT symmetric.** Owner direction 2026-08-19, reaffirmed
+  2026-08-20: *"There should be at least one cast member in every post to X."*
+  Instagram's mandate (`instagram-campaigns.md` section 3.7) covers **product**
+  posts and exempts education and resource posts. On X the cast is required on
+  **every** post, education beats and Notebook companions included. A
+  product-only frame, a typography plate, a bare packshot, or a scene with no
+  person in it is a REVISE on X even when the identical frame would pass on
+  Instagram. The rule and its reasoning live in
+  `docs/store-team/social-crossplatform-strategy.md` section 4a, which you
+  already read at step 6b. Two honest limits to carry: there is no deterministic
+  person-in-frame check, so this is your judgment and not a mechanical
+  guarantee; and the approved roster is currently one member, so every X post
+  legitimately carries the same face and the two-of-five rotation rule cannot be
+  satisfied. Do not REVISE a post for repeating Emma while she is the only
+  approved cast member.
 - **Everything about the image binds identically.** Provenance, product
   identity, proportion, baked-in text, anatomy and age ambiguity, and the
   withholding test are about what is in the frame, and a frame that would lose
