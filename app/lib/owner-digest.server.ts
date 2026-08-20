@@ -19,8 +19,8 @@
 
 import { sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { gate, getValve, TEAM_IDS } from '~/lib/team.server'
-import { VALVE_KEYS } from '~/lib/team-keys'
+import { gate, getValve, TEAM_IDS, RUN_CLOSE_KINDS } from '~/lib/team.server'
+import { VALVE_KEYS, VIDEO_EXTRA_KEYS } from '~/lib/team-keys'
 import { getTrackers, latestOwnerAsks } from '~/lib/tracker.server'
 import { sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { getProfitReconciliation } from '~/lib/profit.server'
@@ -306,36 +306,45 @@ export interface OwnerQueueFacts {
   /** Total matching rows, which may exceed what is shown. */
   totalCount: number
   /**
-   * Rows auto-dismissed by the ager on this run, or `null` when the ager did
-   * not run at all because this was a forced (test) send. Null and zero mean
-   * different things and the email says which.
+   * Count of process/strategy owner asks past the 21-day escalation age
+   * (`countStaleUndecidedOwnerAsks`). These are escalated, never dismissed
+   * (#4356). `null` means the count was not computed on this run (a forced test
+   * send); null and zero mean different things and the email says which.
    */
-  agedOut: number | null
+  staleUndecided: number | null
 }
 
 /**
- * Everything sitting `approved` in a kind no automation will ever execute.
+ * Everything sitting `approved` in a kind that ONLY the owner can execute.
  *
- * This replaces a single line that named only the oldest approved row. That
- * line was technically true and practically useless: 52 `process` rows had
- * accumulated behind it, including live merchandising defects filed nine days
- * earlier, and the digest showed exactly one of them. The taxonomy routes these
- * kinds to "the owner acts directly", and with auto-approve on they never pass
- * through a triage click either, so this table is the only place they surface.
+ * Derived, not hand-listed, so it tracks the transition map instead of drifting
+ * from it. The candidate set is the non-`code`, non-`instructions` kinds (those
+ * two have agent lanes: R-DEV and agent-editor). Of the candidates, any kind an
+ * entry-agent daily run can close to `applied` once it has executed the ask
+ * (`RUN_CLOSE_KINDS` in team.server.ts) is NOT owner-only — a routine drains it
+ * — so it is excluded here. Since PR #789 (merged 2026-08-20) added
+ * `campaign`/`promo` to `RUN_CLOSE_KINDS` alongside `process`/`strategy`,
+ * `program` is currently the only candidate with no agent close edge.
+ *
+ * Listing agent-closeable rows here misrepresented them as owner work and
+ * inflated the queue (#4356): a campaign row already drafted-and-gated by the
+ * social run belongs in the ticket-loop/stale surfaces, not on "needs a decision
+ * from you". A process/strategy row that a routine has NOT drained is surfaced
+ * instead by the stale-ask escalation below, never silently dismissed.
  */
-export const OWNER_DECISION_KINDS: readonly string[] = [
+const OWNER_DECISION_CANDIDATE_KINDS: readonly string[] = [
   'process', 'strategy', 'program', 'campaign', 'promo',
 ]
+export const OWNER_DECISION_KINDS: readonly string[] =
+  OWNER_DECISION_CANDIDATE_KINDS.filter(k => !RUN_CLOSE_KINDS.includes(k))
 
 /** Rows older than this are called out: nothing here should age quietly. */
 const STALE_QUEUE_DAYS = 7
 
 export function renderOwnerQueueSection(f: OwnerQueueFacts): string {
   const parts: string[] = []
-  if (f.agedOut === null) {
-    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">Forced send: the stale-row ager did not run, so nothing was dismissed.</p>`)
-  } else if (f.agedOut > 0) {
-    parts.push(`<p style="margin:0 0 6px;color:${MUTED};">${f.agedOut} stale row${f.agedOut === 1 ? '' : 's'} aged out automatically (21 days old, low priority).</p>`)
+  if (f.staleUndecided !== null && f.staleUndecided > 0) {
+    parts.push(`<p style="margin:0 0 6px;color:${WARN};">${f.staleUndecided} process/strategy ask${f.staleUndecided === 1 ? '' : 's'} ${f.staleUndecided === 1 ? 'has' : 'have'} sat approved past 21 days with no routine draining ${f.staleUndecided === 1 ? 'it' : 'them'}. Nothing was auto-dismissed. Decide or dismiss at /admin/homepage-team.</p>`)
   }
   if (f.rows.length === 0) {
     parts.push(`<p style="margin:0;color:${GOOD};">Nothing waiting on a decision from you.</p>`)
@@ -607,6 +616,13 @@ export interface NeedsMikeFacts {
   missedRoutines: RoutineLivenessFlag[]
   /** Approved ad_campaigns rows with no externalCampaignId: launch is owner-only. */
   adCampaigns?: AdCampaignQueueRow[]
+  /**
+   * Video jobs parked at awaiting_frame_approval while `video_frame_review` is
+   * on: the owner picks the frame in /admin/video-studio, so nothing else moves
+   * them. `null` when the valve is off (the pipeline auto-advances, so there is
+   * nothing owner-only to surface). (#4356)
+   */
+  parkedVideoFrames?: { count: number; oldestDays: number | null } | null
 }
 
 /**
@@ -637,6 +653,11 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   }
   for (const c of (f.adCampaigns ?? []).slice(0, 5)) {
     items.push(`Ad campaign #${c.id} &ldquo;${esc(clip(c.name, 60))}&rdquo; (${esc(c.platform)}) approved ${c.ageDays}d ago and never launched, only you can create it in-platform: <a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`)
+  }
+  const frames = f.parkedVideoFrames
+  if (frames && frames.count > 0) {
+    const oldest = frames.oldestDays != null ? ` (oldest ${frames.oldestDays}d)` : ''
+    items.push(`${frames.count} video ${frames.count === 1 ? 'frame is' : 'frames are'} awaiting your pick${oldest}, only you can approve ${frames.count === 1 ? 'it' : 'them'}: <a href="https://xdipx.com/admin/video-studio" style="color:#c2410c;">/admin/video-studio</a>`)
   }
   if (items.length === 0) {
     return `<p style="margin:0;color:${GOOD};">Nothing on this list today.</p>`
@@ -856,51 +877,46 @@ async function gatherTicketMetrics(statusCounts: string): Promise<TicketMetrics>
 }
 
 /**
- * Auto-dismiss suggestions nobody is ever going to act on.
+ * Count owner asks that have sat undecided long enough to escalate.
  *
- * Inflow of owner-decision rows runs at roughly 30 a week and there was no
- * drain at all, so the pile only grew. Rather than ask the owner (or a weekly
- * agent pass) to grind through it, the clearly-abandoned tail closes itself:
- * low priority and three weeks old. Anything marked urgent, or of a kind that
- * carries real defect/roadmap work, is exempt and stays for a human. Returns
- * how many it closed so the digest can say so.
+ * This used to silently auto-DISMISS these rows (status='dismissed', system).
+ * That violated the standing rule that an owner ask must never exit undecided
+ * (#4356): a low-priority `process`/`strategy` row three weeks old is not
+ * necessarily abandoned, and closing it as a side effect of rendering the daily
+ * email is exactly the kind of invisible mutation this digest exists to surface.
+ * So nothing is written now — the digest escalates the count instead
+ * (rule-5 style: an old item on the owner surface is surfaced, never reaped).
  *
- * Clock: this keys off `created_at`, NOT `updated_at`. `updated_at` is bumped by
+ * Clock: keys off `created_at`, NOT `updated_at`. `updated_at` is bumped by
  * claims, QA bounces, lease expiries and dedupe hits, and migration 070
  * backfilled it across every pre-existing row, so an `updated_at` window matched
  * zero rows on a queue whose real age (created_at) reached 20 days (ticket #879).
- * `created_at` only moves when a row is genuinely new, so the age it measures is
- * the age a human perceives.
+ * `created_at` only moves when a row is genuinely new.
  *
- * Scope: rows routed at a team (`target_team IS NOT NULL`) are no longer exempt
- * (ticket #879) — a cross-team row abandoned for three weeks is as dead as an
- * untargeted one. The exemption for live customer-facing defect work is carried
- * entirely by the `kind`/`priority` filters below: a defect is filed as `code`
- * (never `process`/`strategy`) and/or at P0-P2 (`priority < 3`), so it is never
- * in this predicate's reach.
+ * Scope: `process`/`strategy` (a customer-facing defect is filed as `code`, never
+ * these) at P3+ (`priority >= 3`, so P0-P2 defect/roadmap work is out of reach),
+ * still `approved` past 21 days. These kinds have an agent close edge
+ * (`RUN_CLOSE_KINDS`), so a row this old is one no routine has drained — worth an
+ * owner nudge, never a silent dismissal.
  */
-export async function ageOutStaleSuggestions(): Promise<number> {
+export async function countStaleUndecidedOwnerAsks(): Promise<number> {
   try {
     const res = await db.execute(sql`
-      UPDATE homepage_team_suggestions
-         SET status = 'dismissed',
-             decided_by = 'system',
-             decided_at = now(),
-             updated_at = now()
+      SELECT COUNT(*)::int AS n
+        FROM homepage_team_suggestions
        WHERE status = 'approved'
          AND kind IN ('process', 'strategy')
          AND priority >= 3
-         AND created_at < now() - interval '21 days'
-       RETURNING id`)
-    return (res.rows ?? []).length
+         AND created_at < now() - interval '21 days'`)
+    return Number((res.rows ?? [])[0]?.['n'] ?? 0)
   } catch (err) {
-    console.warn('[owner-digest] suggestion ager skipped:', String(err).slice(0, 200))
+    console.warn('[owner-digest] stale-ask count skipped:', String(err).slice(0, 200))
     return 0
   }
 }
 
-async function gatherOwnerQueue(agedOut: number | null): Promise<OwnerQueueFacts> {
-  const out: OwnerQueueFacts = { rows: [], totalCount: 0, agedOut }
+async function gatherOwnerQueue(staleUndecided: number | null): Promise<OwnerQueueFacts> {
+  const out: OwnerQueueFacts = { rows: [], totalCount: 0, staleUndecided }
   try {
     const kinds = sql.join(OWNER_DECISION_KINDS.map(k => sql`${k}`), sql`, `)
     const [listRes, countRes] = await Promise.all([
@@ -1068,6 +1084,40 @@ async function gatherStaleOwnerRows(): Promise<StaleOwnerRow[]> {
   }
 }
 
+/**
+ * Video jobs parked awaiting the owner's frame pick (#4356).
+ *
+ * With `video_frame_review` ON the pipeline parks every job at
+ * `awaiting_frame_approval` for the owner's pick in /admin/video-studio, and
+ * nothing else advances it — so a parked job is owner-only work that appeared in
+ * no digest section before this. Returns `null` when the valve is off (the
+ * pipeline auto-advances, so there is nothing owner-only to surface).
+ */
+async function gatherParkedVideoFrames(): Promise<{ count: number; oldestDays: number | null } | null> {
+  try {
+    // Read the valve exactly as the pipeline does (getPipelineSetting, defaults
+    // ON): a missing row means frame review is on. Read inline as raw SQL to keep
+    // this file's no-heavy-imports gatherer style.
+    const valveRes = await db.execute(sql`
+      SELECT value FROM pipeline_settings WHERE key = ${VIDEO_EXTRA_KEYS.frameReview} LIMIT 1`)
+    const valveValue = ((valveRes.rows ?? [])[0] as Record<string, unknown> | undefined)?.['value']
+    if (valveValue === 'false') return null // valve off: the pipeline auto-advances
+    const res = await db.execute(sql`
+      SELECT COUNT(*)::int AS n,
+             EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 86400 AS oldest_days
+        FROM video_jobs
+       WHERE status = 'awaiting_frame_approval'`)
+    const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+    return {
+      count: Number(row?.['n'] ?? 0),
+      oldestDays: row?.['oldest_days'] == null ? null : Math.round(Number(row['oldest_days'])),
+    }
+  } catch (err) {
+    console.warn('[owner-digest] parked video-frame sweep failed:', String(err).slice(0, 200))
+    return null
+  }
+}
+
 async function gatherEscalations(): Promise<EscalationFacts> {
   const out: EscalationFacts = { protectedPrs: [], exhausted: [] }
   try {
@@ -1197,22 +1247,18 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // degrades to "not reported", because a digest that does not send is worse
   // than a digest with one thin section.
   const statusCountsLine = sugg.map(s => `${esc(s.status)}: ${s.n}`).join(' &middot; ')
-  // The ager runs before the queue is read so the email reports the pile as it
-  // stands after the sweep, not as it stood before.
-  //
-  // Never on a forced send. `force` exists to re-send while testing (see the
-  // route doc in server/cron.ts), and the ager is a production write: dismissing
-  // real rows as a side effect of checking whether the email renders is exactly
-  // the kind of invisible mutation this digest was built to surface. The nightly
-  // scheduled run is the only thing that ages anything out.
-  const agedOut = opts.force ? null : await ageOutStaleSuggestions()
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue] =
+  // The stale-ask count is read-only now (#4356): nothing is dismissed, the
+  // digest escalates the number instead. It is still skipped on a forced (test)
+  // send so a re-render does not imply a real escalation happened; `null` renders
+  // as "not computed", distinct from a real zero.
+  const staleUndecided = opts.force ? null : await countStaleUndecidedOwnerAsks()
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
       gatherTicketMetrics(statusCountsLine),
       gatherEscalations(),
-      gatherOwnerQueue(agedOut),
+      gatherOwnerQueue(staleUndecided),
       gatherOpsWatch(),
       // Best-effort: this one calls Shopify, and a digest that does not send is
       // worse than a digest missing one line.
@@ -1242,6 +1288,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
         }),
       gatherStaleOwnerRows(),
       gatherAdCampaignQueue(),
+      gatherParkedVideoFrames(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
@@ -1258,6 +1305,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     conflictedPrs: loopHealth?.conflictedPrs ?? [],
     missedRoutines: loopHealth?.routineFlags ?? [],
     adCampaigns: adCampaignQueue,
+    parkedVideoFrames,
   }
 
   // ── Compose ───────────────────────────────────────────────────────────────
