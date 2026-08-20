@@ -536,6 +536,12 @@ const SCENE_FRAME_SIZES = {
   // Landscape Notebook hero (image-brief §0). The stage-2 model drifts ~1% off
   // requested pixels, so callers must resize to the exact target themselves.
   '4:3': { width: 1200, height: 900 },
+  // X timeline still. X renders a single image at 16:9 and crops anything
+  // taller, and a 4:5 composite centre-cropped to 16:9 keeps only 1080x608:
+  // 45% of the height, with the hand-and-product band among the 55% discarded.
+  // Owner direction 2026-08-19 puts a cast member in every X image, so the cast
+  // path needs a real 16:9 rather than a crop of the Instagram frame.
+  '16:9': { width: 1600, height: 900 },
 } as const
 
 export interface ComposeSceneFrameOpts {

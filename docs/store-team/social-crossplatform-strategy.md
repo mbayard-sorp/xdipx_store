@@ -28,8 +28,43 @@ not just Instagram. A campaign is one story told at two temperatures:
 
 Every X post during a campaign window belongs to that campaign: same subject, same arc position,
 hotter register, and a link Instagram is not allowed to carry. When someone sees the IG post and
-the X post in the same week, they should read as one voice on one subject. The campaign's key-art
-pool serves both platforms; X may also run text-only beats, which cost nothing and keep cadence up.
+the X post in the same week, they should read as one voice on one subject.
+
+**Every X post carries an image, and that image has a cast member in it. Owner direction
+2026-08-19.** The text-only beat this section used to license is retired: it is no longer possible
+(the `draft` op rejects an X row with no `mediaUrls`, and the publish gate blocks one) and it is no
+longer wanted. X is a fast timeline where a naked text post from a store nobody follows yet is
+invisible, and the cast is the one asset that makes the account look like a publication rather than
+a feed of links.
+
+Two consequences worth stating rather than inferring:
+
+- **The key-art pool does not simply serve both platforms.** Instagram key art is generated 4:5
+  because the profile grid crops to 3:4; X renders a single timeline image at 16:9 and crops
+  anything taller. A centre crop of a 4:5 cast composite removes the top and bottom, which is
+  exactly where the product-in-hand sits. Reuse a pool frame on X only when it genuinely survives a
+  16:9 crop with the product still legible; otherwise generate the X frame at 1600x900
+  (`--platform x`).
+- **The imagery fence does NOT move with the register.** Caption register goes 4-5 on Instagram to
+  6-7 on X because X's organic adult-content policy is more permissive. The *pictures* do not follow.
+  The charter's own clause is conditional: posts covered by that policy "must be labeled per X's own
+  rules", and `postTweet` (`app/lib/twitter.server.ts:95`) has no sensitive-media parameter, so this
+  store cannot label a post even when X would require it. An unlabelable post must therefore stay
+  inside the non-sensitive fence, which is the design doctrine's fence, unchanged. The charter had
+  already settled this in the harder direction: `docs/emma-voice.md` holds imagery to a visual 6-7
+  even on owned channels where the copy runs at 9, so imagery does not follow copy up on a surface
+  we own outright, let alone a rented one. `docs/ads-policy.md` §Creative is titled "paid AND
+  organic" and names X specifically. What X's permissiveness buys is caption register, a clickable
+  link, and the number. It buys nothing inside the frame.
+
+- **A cast frame on X is a presentation, never a testimonial.** The cast are AI-generated personas
+  (`scripts/generate-cast-candidates.ts`), not photographed people, so there is no likeness release
+  question. There is a sharper one instead. On Instagram the "performance, never testimony" rule is
+  nearly free, because Instagram may not name a price at all. On X the same synthetic face now sits
+  beside a price, a promo code, and a checkout link, which is much closer to a fabricated
+  endorsement. So: no caption beside a cast frame on X may attribute an opinion to that person.
+  "She loves it", "our favourite", a reaction shot that reads as a verdict, all out. Talking about
+  the price is fine. Routing the enthusiasm through a generated face beside a buy link is not.
 
 **The X escalation of an IG beat is a format, not an accident.** For each IG slate post that
 features a product, the same run drafts an X companion when quota allows: the campaign subject, the

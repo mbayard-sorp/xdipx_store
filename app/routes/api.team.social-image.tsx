@@ -99,6 +99,13 @@ export async function action({ request }: ActionFunctionArgs) {
         ? (b['extraImageUrls'] as unknown[]).filter((u): u is string => typeof u === 'string' && u.length > 0)
         : undefined
       const count = num(b['count'])
+      // Frame shape, not pixel size. Only the two social stills shapes are
+      // accepted: 4:5 for the Instagram grid, 16:9 for X's timeline. Anything
+      // else falls through to the 4:5 default rather than reaching the model,
+      // so a typo degrades to Instagram's shape instead of an odd frame.
+      const aspectRatio = b['aspectRatio'] === '16:9' ? '16:9' as const
+        : b['aspectRatio'] === '4:5' ? '4:5' as const
+        : undefined
 
       const { generateCastComposite } = await import('~/lib/social-media.server')
       const result = await generateCastComposite({
@@ -113,6 +120,7 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(slide ? { slide } : {}),
         ...(count ? { count } : {}),
         ...(extraImageUrls?.length ? { extraImageUrls } : {}),
+        ...(aspectRatio ? { aspectRatio } : {}),
       })
       return Response.json(result)
     }

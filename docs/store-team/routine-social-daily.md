@@ -12,7 +12,9 @@ that becomes `approved`. On 2026-08-18 run 378 read an open autopublish valve as
 Step 6.5 entirely, describing its own mandate as "draft-only". The result was a queue of rows that
 nothing could ever ship, on both platforms. **An open valve raises the bar at the gate; it never
 removes the gate step.** If you find yourself reasoning that gating is unsafe because publishing is
-automatic, you have inverted the safety model: the gate is the safety. What happens next is not yours: on **Instagram and X** the
+automatic, you have inverted the safety model: the gate is the safety.
+
+What happens next is not yours: on **Instagram and X** the
 independent `social-publish-gate` decides (Step 6.5) and, when that platform's valve
 (`instagram_autopublish_enabled`, `x_autopublish_enabled`) is on, the hourly publish job ships what
 it approved. On LinkedIn, TikTok, Facebook and YouTube the owner still acts in `/admin/socials`,
@@ -601,6 +603,86 @@ shipped as a packshot and was rejected. Declare Instagram product drafting degra
 in the summary, and pivot volume to X, LinkedIn, and non-product Instagram posts. **Never fall back
 to a product-only frame to fill the slot.**
 
+### X carries a cast member. Owner direction 2026-08-19.
+
+**Every X post ships an image, and a cast member is in it.** Not a product-only frame, not a
+typography plate, not a reused packshot. The cast is what makes the account read as a publication
+instead of a link feed, and X is the surface where that difference decides whether a fast scroll
+stops.
+
+- **Generate at 16:9 with `--platform x`** (1600x900). Do not re-crop Instagram key art by default:
+  IG frames are 4:5 for the 3:4 profile grid, and a centre crop to 16:9 takes off exactly the top and
+  bottom where the product-in-hand sits. Reuse a pool frame only when you have checked that it
+  survives the crop with the product still legible, and say in the run summary that you reused rather
+  than generated.
+- **Same two-stage cast composite as Instagram** (`--archetype cast --presenter-image <approved
+  castMember referencePhoto> --ref-image <real product photo> --extra-ref <same> --scale <cue>`).
+  **Roster reality, corrected 2026-08-19:** this bullet previously claimed six approved members
+  (Diego, Jade, Marcus, Maya, Priya, Sofia). That was never true. Sanity held **zero** `castMember`
+  docs and zero docs with a `referencePhoto`, verified by GROQ count; the six exist only as specs in
+  `scripts/generate-cast-candidates.ts`, which uploads nothing until the owner confirms each face.
+  **Emma was seeded on 2026-08-19 and is currently the only approved cast member.** Rotate as soon
+  as there is more than one face; until then every post carries Emma, the section 3.8 two-of-five
+  cast rule is unsatisfiable, and the run says so rather than pretending it passed. Unblocking this
+  is owner blocker id3.
+- **The imagery fence does not move with the caption register.** X captions run 6-7 against
+  Instagram's 4-5 because X's organic policy is more permissive. The picture standard is unchanged.
+  The charter settled it in the harder direction already (imagery stays a visual 6-7 even on owned
+  channels where copy runs at 9), `docs/ads-policy.md` §Creative binds "paid AND organic" and names
+  X, and `social-publish-gate.md` states that everything about the image binds identically across
+  platforms. There is a mechanical reason too: the charter's permission is conditional on covered
+  posts being "labeled per X's own rules", and `postTweet` (`app/lib/twitter.server.ts:95`) accepts
+  only text and media ids, with no sensitive-media flag. We cannot label, so we must not post
+  anything that would need labeling. A hotter X frame only manufactures rows the gate blocks.
+- **Presentation, never testimony, and it binds harder on X than on Instagram.** The cast are
+  AI-generated personas (`scripts/generate-cast-candidates.ts`), not photographed people. On
+  Instagram that rule costs nothing because Instagram may not name a price. On X the same generated
+  face sits beside a price, a promo code, and a checkout link. No caption beside a cast frame on X
+  may attribute an opinion to that person: no "she loves it", no "our favourite", no reaction shot
+  that reads as a verdict. Discuss the product and the price freely; never route the enthusiasm
+  through the face.
+- **Compose for a small landscape card, not a portrait tile.** Chest-up-with-hands is the X default
+  crop, never full-length: X renders a single image around 500px wide in a scrolling column, so a
+  mid-shot puts a thumbnail of a person on a phone. Face and held product belong in the same crop,
+  both legible at 500px, and the hand-and-product cluster occupies **no less than a third of frame
+  height** (16:9 is short, so a product briefed for a 1350px-tall Instagram frame loses a third of
+  its pixels here). Interest-floor properties: buy P9 and P10, which read as depth at any scale,
+  plus P4 and one of P5/P8. **P3, the unexplained second object, is not bought on X** because at
+  500px it reads as clutter rather than mystery. Keep the four-property count; swap which four.
+- **The X frame is a click thumbnail, because X carries a link and Instagram cannot.** Someone who
+  taps must land on the object they just saw, so product identity (shape, colour, finish, true
+  scale) is a hard check here rather than a preference, and no metaphor-only frame goes on an X post
+  carrying a PDP link. The candidate-versus-packshot check below binds harder on X: a mismatch is a
+  bounce off a PDP, not just a weak vibe.
+- **X's timeline is dark-mode dominant and the ground lock does not change for it.** A paper or
+  coral-soft ground floating in a dark column is an attention asset. Do not darken the ground to
+  match the UI; that is how the moody-boudoir round started.
+- **Product-free X post** (education beat, Notebook promo companion): still a cast frame, just
+  without the product. Drop `--presenter-image` and pass the cast reference as `--ref-image`, exactly
+  as the Instagram product-free form does below.
+- **The Instagram cast caps are Instagram-scoped and do not cap X.** `instagram-campaigns.md` §7
+  says "at most 4 cast frames per rolling 14, and never more than one cast frame in a single day".
+  Read account-wide, that makes this rule impossible on day one: X runs 4 posts a day. The caps are
+  a **grid** rule, and the reasoning is visibly grid-shaped in that same section (no pairing repeats
+  in the same grid position). Instagram's profile is a persistent browsable mosaic where a repeated
+  face reads as a personal account; X is an ephemeral timeline with no grid, so the reason does not
+  transfer. **X therefore has no per-day cast cap.**
+- **X gets a rotation floor instead, which is what the cap was really protecting.** The roster is
+  six, and a feed where one or two faces carry everything reads as a personal account just as surely
+  on X as on Instagram. So: **no single cast member appears in more than a third of X posts in a
+  rolling 14**, and never the same face two days running. Ticket #4120's roster gap (nobody presents
+  above their early 30s) makes this sharper, not softer, because the available range is already
+  narrow. Report the rotation in the run summary when you draft more than two X posts in a day.
+- **A cast frame you cannot produce is a reason to draft fewer X posts, not a reason to fall back to
+  a product-only image or a packshot.** Say which it was in the run summary. This is the same
+  degraded-to-zero honesty the Step 2b imagery preflight already requires for Instagram: the "no zero
+  days" baseline is channel-scoped, and a wrong image on a linked post is worse than a missing post.
+- **Cost note.** A cast composite runs `--candidates 2`, so a full 4-post X day plus a 4-post
+  Instagram day draws roughly 16 billed generations against `social_team_max_images`, which defaults
+  to 12 and is currently unset. Reuse-first genuinely matters here, and if runs start reporting the
+  image cap as the binding constraint that is an owner config item, not something to work around by
+  dropping the cast.
+
 **Only a generated, rehosted asset is publishable.** The URL you put in `mediaUrls` must have a
 `social-` or `ig-` prefixed basename, because `isGeneratedSocialAsset` checks exactly that and the
 gate BLOCKs anything else on image-provenance (ticket #4134). A Shopify product CDN URL never
@@ -694,10 +776,13 @@ carrying a bare Nalpac/Shopify SKU packshot — shipping either is drafting into
 - **Product-free art (metaphor hook, typography plate):** the single-image form,
   `--archetype scene|metaphor|macro|plate ... --ref-image <url>`, or `--no-ref --no-ref-reason
   "<why>"` for genuinely product-free art.
-- **Dependency, stated plainly:** the cast-composite path and the `--scale` cue ride the unmerged
-  publish-job PR, so **the single-image form works today and the cast-composite form lands with that
-  merge.** Until then, generate single product-in-scene images for product posts (never a bare
-  packshot), and note the degraded cast path in the run summary.
+- **The cast-composite path is LIVE. Do not degrade to the single-image form.** This bullet used to
+  say the cast form was waiting on an unmerged publish-job PR; that PR merged, and
+  `generateCastComposite` and `scaleCueFromLengthInches` both ship in
+  `app/lib/social-media.server.ts`. Row 50 (Ferri, published 2026-08-17) is a cast composite that
+  cleared the gate, so the path is proven in production, not just present. Runs kept reading the
+  stale caveat and reaching for the weaker form; if a cast composite genuinely fails, say what failed
+  in the run summary rather than citing a dependency that no longer exists.
 - **Generate the campaign key-art set at kickoff, not one image per draft-day** (Step 2a): the
   campaign pool comes from `docs/store-team/instagram-campaigns.md` §3.4b, so a campaign produces its
   reusable set once rather than a fresh one-off per caption.
