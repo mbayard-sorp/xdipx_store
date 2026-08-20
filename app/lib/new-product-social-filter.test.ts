@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   NEW_PRODUCT_WEEKLY_CAP,
   newProductPostExcludeReason,
+  restockPostExcludeReason,
 } from './new-product-social-filter'
 
 describe('newProductPostExcludeReason', () => {
@@ -94,5 +95,44 @@ describe('newProductPostExcludeReason', () => {
     expect(
       newProductPostExcludeReason({ title: 'Rose Air Pulse', productType: 'Air Pulsation' }),
     ).toBeNull()
+  })
+})
+
+describe('restockPostExcludeReason', () => {
+  it('posts a genuine restock crossing with no adverse pricing signal', () => {
+    expect(restockPostExcludeReason({ pricingRationales: ['sync -> in stock'] })).toBeNull()
+  })
+
+  it('treats no pricing signal as clean, not excluded', () => {
+    expect(restockPostExcludeReason({})).toBeNull()
+    expect(restockPostExcludeReason({ pricingRationales: [] })).toBeNull()
+  })
+
+  // A product returning to stock on its way OUT of the catalogue is not news:
+  // the discontinued/dead-velocity excludes match the new-product gate exactly
+  // so the two triggers never drift apart (section 4c).
+  it('excludes a discontinued SKU from the pricing rationale', () => {
+    const reason = restockPostExcludeReason({
+      pricingRationales: ['Discontinued in feed -> clearance sell price'],
+    })
+    expect(reason).toMatch(/discontinued/i)
+  })
+
+  it('excludes a dead-velocity SKU from the pricing rationale', () => {
+    const reason = restockPostExcludeReason({ pricingRationales: ['dead -> target margin'] })
+    expect(reason).toMatch(/dead velocity/i)
+  })
+
+  it('tolerates null/undefined rationale entries', () => {
+    expect(
+      restockPostExcludeReason({ pricingRationales: [null, undefined, 'sync -> in stock'] }),
+    ).toBeNull()
+  })
+
+  // Unlike the new-product gate, restock has no title/commodity filter and no
+  // weekly cap: a true crossing is rare enough to self-limit, so only the hard
+  // pricing excludes apply.
+  it('does not apply commodity or novelty title filters (crossing is self-limiting)', () => {
+    expect(restockPostExcludeReason({ pricingRationales: ['sync -> in stock'] })).toBeNull()
   })
 })

@@ -116,3 +116,39 @@ export function newProductPostExcludeReason(input: NewProductGateInput): string 
 
   return null
 }
+
+export interface RestockGateInput {
+  /**
+   * Rationale strings from recent `pricing_audit_log` rows for this product's
+   * SKU. `[]` (or omitted) means "no pricing signal", not "clean".
+   */
+  pricingRationales?: readonly (string | null | undefined)[]
+}
+
+/**
+ * Curation gate for the restock -> social event trigger (ticket #4361).
+ *
+ * A sold-out -> in-stock crossing is the rarest, highest-intent signal in
+ * ecommerce, so unlike the new-product trigger it needs no weekly cap and no
+ * commodity/novelty title filter: a true crossing is self-limiting and worth a
+ * post on its own. The one thing it must still refuse is a SKU the pricing
+ * engine has flagged discontinued or dead-velocity, because something returning
+ * to stock on its way out of the catalogue is not good news. That hard exclude
+ * shares the exact `pricing_audit_log` markers as the new-product gate (section
+ * 4c) so the two triggers never drift apart on what "on its way out" means.
+ *
+ * Returns a short human-readable reason NOT to file, or `null` if the restock
+ * may be posted. Pure, so callers can unit-test it without a database.
+ */
+export function restockPostExcludeReason(input: RestockGateInput): string | null {
+  for (const rationale of input.pricingRationales ?? []) {
+    const r = (rationale ?? '').toLowerCase()
+    if (r.includes(DISCONTINUED_MARKER)) {
+      return 'discontinued or on clearance (restocking on the way out is not news)'
+    }
+    if (r.includes(DEAD_VELOCITY_MARKER)) {
+      return 'dead velocity (pricing engine flagged nobody is buying it)'
+    }
+  }
+  return null
+}
