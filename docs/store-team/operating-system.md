@@ -131,9 +131,18 @@ the row text and its links are the only carriers, so the conventions are the con
    epic is either split into single-agent scoped tickets before filing, or tagged at the head of its
    suggestion text (`[design-gated]` / `[cross-agent-epic]`) so R-DEV disposes of it on first read
    instead of spending an implementation attempt (#352 and #448 each burned a claim in run 217).
-   Honest limit: the claim filter cannot see these tags today, so the tag saves the implementation
-   effort, not the claim itself. Making the filter skip tagged rows is a `team.server.ts` change, a
-   protected path, and an owner decision; bus row #3768 puts that choice to the owner.
+   **Tag cloud-runner-unavailable-capability rows the same way.** (#4142) A `code` row whose DONE
+   WHEN hinges on a capability the scheduled cloud runner structurally lacks gets the same head-of-text
+   tag so R-DEV disposes of it on first read instead of spending an implementation claim reaching a
+   block: `[owner-env]` for an env secret or Vercel var the owner must set (section 7 — e.g. #4139's
+   `ATLAS_CLOUD_API_KEY`), and `[needs-visual-harness]` for anything needing the Playwright / axe /
+   screenshot baseline the cloud runner does not have (section 5 — e.g. #3789's contrast pass and
+   visual-harness re-baseline). Filers and QA retros apply the tag at filing time, and it routes the
+   row to an owner-attended or harness-capable lane rather than R-DEV's code queue.
+   Honest limit: the claim filter cannot see any of these tags today, so the tag saves the
+   implementation effort, not the claim itself. Making the filter skip tagged rows is a
+   `team.server.ts` change, a protected path, and an owner decision; bus row #3768 puts that choice to
+   the owner.
 4. **Self-filed PR-tracking tickets carry the `pr` link and land at `pr_open`.** (#2446) A routine
    or session that opens a PR and files its own tracking ticket per ADR-008 step 3 attaches the
    `pr` link and lands the row at `pr_open` (or files it `kind:'instructions'` for the docs lane),
@@ -141,6 +150,21 @@ the row text and its links are the only carriers, so the conventions are the con
    where tracking a draft PR costs a claim to un-draft and link (#2418, PR #598) and tracking an
    already-merged PR is pure phantom rework (#1683, PR #527, merged days earlier); both burned
    claims on run 255 that a `pr_open`+link row would have sent straight to QA.
+5. **A code row split from an owner-gated external change names a code-checkable completion signal.**
+   (#4239) The conjunctive split in rule 1 sends the code half to R-DEV, but the release engine gates
+   only on `PROTECTED_GLOBS` file matching, so a non-protected code PR sails to auto-merge even when
+   its sibling half is a still-pending owner-only change made *outside the repo* (a Shopify Admin
+   setting, a delivery-profile value, an ad-platform toggle) that the diff has no way to see. #3450
+   (free-shipping threshold 99→59) touched no protected globs but could not safely merge before the
+   owner changed the matching Shopify delivery-profile value; nothing structural stood between a
+   verified verdict and a live storefront/GMC misrepresentation — the same #420 failure mode, now
+   with the coordination step outside the repo entirely. So when the owner-gated half is an external
+   config change, the `code` row's DONE WHEN must name a **code-checkable completion signal** for it:
+   a config/env/setting value the owner flips that the code can read and gate on (feature-flag,
+   pipeline_settings key, env var), rather than a code comment plus QA discretion. If no code-visible
+   signal can exist, the row says so, and QA treats a PR whose own comments or title state a
+   still-pending owner-only precondition as a mandatory bounce regardless of CI or protected-path
+   status.
 
 ---
 
