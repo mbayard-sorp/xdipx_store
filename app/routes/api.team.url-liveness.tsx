@@ -7,7 +7,12 @@
  * Sources URL before appending it. See ticket #2417 and
  * app/lib/citation-liveness.server.ts.
  *
- *   { urls: string[] } -> { results: LivenessResult[] }
+ *   { urls: string[], includeBody?: boolean } -> { results: LivenessResult[] }
+ *
+ * With `includeBody:true` each live html page also returns a readable-text
+ * `excerpt` of its body (ticket #4285), so the accuracy gate can confirm the
+ * page supports a claim from here when its own WebFetch is blocked by the
+ * sandbox egress policy. Default (omitted/false) is status + title only.
  *
  * Only https URLs on the citation host allowlist are ever fetched; everything
  * else comes back live:false with a reason and no request is made. Team-token
@@ -32,6 +37,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   const urls = raw.map((u) => (typeof u === 'string' ? u : String(u)))
 
-  const results = await checkCitationUrls(urls)
+  const includeBody = b['includeBody'] === true
+  const results = await checkCitationUrls(urls, { includeBody })
   return Response.json({ results })
 }

@@ -465,6 +465,19 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    is exempt from re-gating. If the gate reported `[web: degraded]`, follow its strip/soften
    instructions and ship without a Sources section; zero citations is a valid outcome, never padded.
 
+   **When `sex-wellness-reviewer`'s own `WebFetch` is blocked by the sandbox egress policy, read the
+   source through this endpoint (ticket #4285), the sanctioned server-side read path.** The agent
+   sandbox blocks `WebFetch` to the citation hosts (runs 311 and 400 hit `EGRESS_BLOCKED` on every
+   allowlisted host, including a `healthline.com` control), while `/api/team/url-liveness` runs on the
+   server's open egress. POST the candidate URLs with `{"includeBody": true}` and each `live:true`
+   html result carries a readable-text `excerpt` of the page body (script/style/markup stripped,
+   capped at `MAX_BODY_TEXT_CHARS`). Confirm the source supports the claim from that `excerpt` instead
+   of opening the page, then keep the citation exactly as for a `live:true` result. This does not
+   relax the citation rule: the reviewer must still read the source and confirm it supports the claim
+   (routine Step 5 item 5), it just reads the server-fetched excerpt rather than the blocked page. An
+   `excerpt` is never returned for a `blocked`, `challenge`, `dead`, or non-html result, so it can
+   never come from an unread interstitial; those stay drops exactly as below.
+
    **`live:false` is not always "drop it" — read the `reason`.** The endpoint distinguishes a host
    that *refused* us from a page that is *gone* (ticket #3196). `reason:'blocked'` means an
    allowlisted host returned 401/403/429, i.e. bot/WAF protection rejecting the checker's fixed
