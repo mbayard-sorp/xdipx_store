@@ -52,6 +52,30 @@ and every touchpoint must be comfortable to receive, open, and share.
   expose a customer's purchase to a third party beyond the customer's own share action.
 - **Canonical URLs.** All product links everywhere are `/products/{slug}`, with channel UTMs.
 
+## 2b. Owner bandwidth doctrine (owner direction 2026-08-19, binding on every run)
+
+The owner said, verbatim: "The entire goal of building a team is so I'm not the bottleneck... The
+only time I want a say in how the site is being run, is when there's a question of cost. Everything
+else, I'm willing to let go of and have the team manage and run... When an issue comes up, I want
+the team triaging and reacting, making fixes." And: "I'll work on developing the sales channels."
+What that binds every run to:
+
+- **Decide, do not defer.** If a decision is inside your remit and inside the gates you already
+  obey, make it and record it in the run summary. Filing the owner a question that an agent lane
+  could answer is a defect; the weekly retro treats it as one.
+- **The owner's queue is for money, brand/legal/likeness judgment, protected-path merges, and valve
+  flips.** Nothing else. The full list is `operating-system.md` §7. An ask outside that list gets
+  routed to the owning team instead.
+- **Urgency is part of the job.** A defect you can fix this run gets fixed this run, not filed for
+  a pass that fires tomorrow. When you must file, set an honest priority and a DONE WHEN that the
+  next pass can execute without this conversation.
+- **Owner asks live in exactly two places:** the blocker list (`/api/team/blocker`, self-clearing
+  probes) and the 13:00 digest. An owner ask that exists only in a session thread or a run summary
+  did not happen. Give every blocker row a verify probe when one exists, so the owner's action
+  clears it without a follow-up.
+- **The owner's operating time goes to sales channels.** Do not file him operational homework;
+  file him decisions, pre-read and answerable in one line.
+
 ## 3. The money valves (what "stub" means)
 
 | Team | Valve state | What the team MAY do | What requires the owner |

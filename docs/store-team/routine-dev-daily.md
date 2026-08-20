@@ -109,18 +109,21 @@ A bounced ticket counts against this pass's limit of 5 like any other. A ticket 
 three attempts is blocked and escalated by the release engine within the hour, so if you see one at
 `attempt_count` 3 still assigned to you, leave it: the owner has it now.
 
-## Step 2 — Protected paths: stop, do not code
+## Step 2 — Protected paths: author, never merge
 
-Before writing a line, work out which files the ticket would change. If **any** of them is a
-protected path, transition the ticket to `blocked` with a note explaining which path and why, and
-move on to the next ticket. Do not implement a partial version, do not refactor around it, do not
-open the PR anyway "for the owner to look at".
+**Changed 2026-08-19 by owner direction ("I'm not the bottleneck; the team triages, reacts, and
+fixes").** The old rule was: any protected file means transition to `blocked` and walk away, which
+made every protected change an owner-authored work session. The new rule: **you author the diff;
+the owner's only job is to read it and click merge.** The merge gate has not moved a millimeter.
+The release engine classifies protected PRs from the GitHub changed-file list, always escalates
+them (`needs-owner` label plus one email), and never merges one. What changed is who writes the
+code, not who approves it.
 
-Protected paths:
+Protected paths (the classifier's globs in `app/lib/github.server.ts` are the source of truth):
 
 - checkout and payment, and cart (`**/checkout*`, `app/lib/emma-cart.server.ts`,
   `app/components/store/CartDrawer.tsx`, `app/lib/checkout-probe*`)
-- `db/migrations/**` and `db/schema.ts`
+- `db/migrations/**` and `db/schema.ts` — **still block, see the carve-out below**
 - auth and session (`app/lib/*auth*`, `app/lib/*session*`)
 - team valves and spend controls (`app/lib/team.server.ts`, `app/lib/team-keys.ts`,
   anything writing `pipeline_settings`)
@@ -128,15 +131,35 @@ Protected paths:
 - the release engine's own files (`app/lib/release-engine.server.ts`, `app/lib/github.server.ts`,
   `/cron/release-engine`)
 
+For a protected ticket, author it like any other ticket (branch, tests, typecheck, build), with
+three extra requirements:
+
+1. **The PR body opens with a "Protected-path diff" section** stating: which protected invariant
+   this diff touches, how the diff preserves it, and what you ran to prove it. An owner reading
+   cold must be able to approve or reject from the body plus the diff alone.
+2. **Never author a diff that widens agent permissions or weakens a gate**: no edits to
+   `PROTECTED_GLOBS`, no new agent write paths to `pipeline_settings`, no valve default changes, no
+   loosening of the transition map, no touching money-valve semantics (`import_enrich_enabled`,
+   `video_frame_review`, `instagram/x_autopublish_enabled`). A ticket that asks for any of those
+   still goes to `blocked` with the reason; that is an owner decision, not an authoring task.
+3. Transition the ticket to `pr_open` as normal. QA reviews it against the protected-path
+   checklist in `routine-qa-daily.md`; the engine escalates it to the owner for merge.
+
+**Carve-out, DB class:** tickets whose diff touches `db/migrations/**` or `db/schema.ts` still go
+to `blocked` exactly as before, because CI cannot execute SQL today (the check job never opens a
+database connection), so a green check proves nothing about a migration. This carve-out lifts once
+the migration dry-run CI job (PR opened 2026-08-19) has been merged and running clean for two
+weeks; whoever lifts it updates this paragraph in the same PR.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"transition","id":<id>,"to":"blocked","actor":"agent:rr7-engineer",
-       "note":"Requires a change to db/schema.ts (protected path). Needs an owner-authored migration."}'
+       "note":"Requires a change to db/schema.ts (DB carve-out: CI cannot dry-run SQL yet). Needs an owner-attended migration."}'
 ```
 
-The owner is emailed about blocked tickets through the escalation path. Your job is to stop cleanly
-and describe the obstacle precisely, not to route around it.
+The owner is emailed about blocked tickets through the escalation path. When you do block, stop
+cleanly and describe the obstacle precisely; never route around it.
 
 **Conjunctive DONE WHENs: split, do not blanket-block.** (#3638) A ticket whose DONE WHEN conjoins
 (a) a clause you can land as a code PR with (b) an action needing owner sign-off, a money valve, or

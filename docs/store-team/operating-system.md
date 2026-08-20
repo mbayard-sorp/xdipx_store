@@ -218,29 +218,39 @@ change them is a protected path.
 
 ## 7. What the owner is still on the hook for
 
-Short list, deliberately. If it is not here, the system is supposed to handle it.
+**Rewritten 2026-08-19 on owner direction, verbatim: "The only time I want a say in how the site
+is being run, is when there's a question of cost. Everything else, I'm willing to let go of and
+have the team manage and run."** The list below is the whole intended surface. Every routine and
+every filer treats it as binding: work that is not on this list must never be parked on the owner,
+and an owner ask must land on the blocker list or the 13:00 digest, never only in a session thread.
 
-- **Triage for every team except homepage.** `proposed → approved` is the owner's call, and no agent
-  can make it. Homepage delegates it to a valve; the rest do not.
-- **Every protected-path merge.** Checkout and payment, cart, migrations and schema, auth and
-  session, valves and spend controls, CI and deploy config, the release engine itself. The engine
-  will prepare, label, and email these, and will never merge one.
-- **The three money valves.** Import enrich (draft to live), video frame review, social autopost.
-  Nothing automates these and nothing is proposing to. (Deal approval used to be the first of
-  these; daily deals and the `deal_status` metafield were retired 2026-08-03.)
+- **Money and spend.** The three money valves (import enrich draft-to-live, video frame review,
+  social autopost arming), team daily budgets and run caps, any real ad spend, any real send to
+  customers that costs money (Klaviyo campaign sends until a draft-reviewed client exists), pricing
+  floors, and the paid-acquisition hold. This is the "question of cost" domain and it is the
+  owner's on purpose.
+- **Protected-path merges, as a read-and-click.** The engine prepares, labels, and emails these and
+  never merges one. Since 2026-08-19 agents author these diffs (R-DEV Step 2, QA protected
+  checklist), so the owner's job here is reading a pre-verified diff and clicking merge, not
+  writing code. The DB class (migrations/schema) keeps the old owner-authored path until the
+  migration dry-run CI job has run clean for two weeks.
+- **Brand, legal, and likeness judgment.** Cast approvals, charter changes ("codify"), anything
+  with legal exposure.
 - **The five escalations in §5**, when they land. That is the intended inbox volume: rare.
 - **Turning the engine back on after a circuit break**, once you understand why it tripped.
-- **Strategic direction.** The weekly brief is written by agents from evidence, but what the store
-  is *for*, what it sells, what the voice is, and what a good week looks like remain the owner's.
 - **One-time setup that only an owner can do:** GitHub branch protection and the merge token, Vercel
-  environment variables, creating cloud-routine triggers and their secret stores.
-- **Authoring protected-path code**, not merely merging it. No agent in the roster may write a
-  protected-path diff: R-DEV blocks the ticket instead. Until that changes, this work happens in an
-  owner-attended session. See §9, fact two.
+  environment variables and secrets, cloud-routine triggers and their secret stores, valve flips
+  (agents never write `pipeline_settings`).
+- **Sales channels.** Owner direction 2026-08-19: the owner's operating time goes to developing
+  sales channels. Teams do not file him operational homework; they file him decisions.
 
-**If you are the owner and you are merging more than the list above**, the cause is almost never a
-gate misfiring. It is that the change never entered the ticket bus, so the engine was never allowed
-to look at it. §9 has the measurements.
+What came OFF this list on 2026-08-19: per-team triage (auto-approve is the norm; a team with the
+valve off is an exception someone should question, not a default), authoring protected-path code
+(now agent-authored, owner-merged), and executing `campaign`/`promo` rows that a routine can
+execute inside existing gates (run-close edge, pending the owner's merge of the transition-map PR).
+
+**If you are the owner and you are doing more than the list above**, the system is failing its
+design goal. File what happened as a `process` ticket so the next retro closes the gap.
 
 ---
 
@@ -309,11 +319,16 @@ all three. Note what did **not** change: the auto-filed ticket lands at `pr_open
 verify it before the engine will merge, and a protected-path PR is never auto-filed. Re-measure the
 table above before quoting the 58% figure again.
 
-**Fact two: protected-path work has no agent lane at all.** `routine-dev-daily.md` Step 2 requires
-R-DEV to transition a ticket to `blocked` rather than write a line of code when any changed file is
-protected, and it is right to. But nothing else picks that work up. There is no agent anywhere in the
-roster permitted to author a protected-path diff, so every such change must be written in an
-owner-attended session and merged by the owner.
+**Fact two: protected-path work had no agent lane at all — narrowed 2026-08-19.**
+`routine-dev-daily.md` Step 2 used to require R-DEV to transition a ticket to `blocked` rather than
+write a line of code when any changed file was protected, so every such change was written in an
+owner-attended session and merged by the owner. Since 2026-08-19 (owner direction), R-DEV authors
+protected-path diffs like any other ticket, under the extra rules in Step 2 (a "Protected-path
+diff" PR-body section, never widening agent permissions or weakening a gate) and the QA
+protected-path checklist. The merge is still the owner's, always: the engine classifies from the
+changed-file list and escalates, unconditionally. The DB class (`db/migrations/**`,
+`db/schema.ts`) keeps the old blocked path until the migration dry-run CI job has run clean for
+two weeks, because CI cannot execute SQL today and a green check proves nothing about a migration.
 
 This has a consequence worth stating plainly, because it looks like a paradox and gets rediscovered
 every few weeks: **the changes that would reduce the owner's merge load are themselves almost all

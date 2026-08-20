@@ -893,15 +893,32 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -d '{"op":"list","targetTeam":"social","status":"approved","orderBy":"age"}'
 ```
 
-Act on up to **3 per run**, oldest first, and only what this run can actually execute within the
-gates it already obeys. Close each one you did execute so tomorrow's run does not re-read it:
+Act on up to **3 per run** for `process`/`strategy` rows, oldest first, and only what this run can
+actually execute within the gates it already obeys. Close each one you did execute so tomorrow's
+run does not re-read it:
 
 ```bash
 -d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:social-media-manager","note":"<what changed>"}'
 ```
-Only `process` and `strategy` rows can be closed this way (`RUN_CLOSE_KINDS`). A `campaign`,
-`promo`, `instructions`, or `code` row returns 409 — those have their own executor, or the owner's,
-and are not yours to end. Note them instead.
+
+**Campaign and promo rows are yours to execute too (owner direction 2026-08-19).** The
+product-went-live signals (`kind:'campaign'`) are exactly what feeds the "what's new" slate slot,
+so consume them there rather than treating them as someone else's mail:
+
+- When picking slot D (what's new), read the approved `campaign` rows for team social first and
+  prefer the freshest in-stock ones as the slot's candidates. When a run drafts and gates the post
+  a row asked for, close that row `applied` with the draft id in the note.
+- **Age out honestly.** A product-launch signal older than 14 days is no longer "new"; close it
+  `applied` with a note saying it aged past the what's-new window without a slot (that is the
+  system deciding, which is the point; it is not a failure). Do this for up to 5 aged rows per run
+  so the queue converges instead of growing at the detectors' filing rate.
+- Until the `RUN_CLOSE_KINDS` change (PR opened 2026-08-19) is merged by the owner, the `applied`
+  transition on a `campaign`/`promo` row returns 409. On a 409, leave a `note` op on the row with
+  the draft id and move on; do not treat the 409 as an error. Once the PR merges, the closes work
+  and this paragraph can be deleted.
+
+`instructions` and `code` rows still have their own executors (agent-editor, R-DEV) and are never
+yours to end. Note them instead.
 
 
 Looked but deliberately did not act (out of scope, no longer true, needs code)? Post a note with

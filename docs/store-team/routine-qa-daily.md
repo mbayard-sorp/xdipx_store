@@ -190,6 +190,27 @@ and oldest-age for both tables); until it ships, an honest "unverified: no cloud
 the correct verdict on this sub-check. Sub-checks (2) and (3) run over xdipx.com endpoints and stay
 verifiable.
 
+**Protected-path PRs get an extra checklist (added 2026-08-19).** Since owner direction 2026-08-19,
+R-DEV authors protected-path diffs (except the DB carve-out) instead of blocking them; the engine
+still never merges these, it escalates them to the owner. Your `verified` verdict is what makes the
+owner's merge a one-click read instead of a re-derivation, so it carries more weight here, not
+less. In addition to the normal checks, require ALL of:
+
+1. The PR body opens with a "Protected-path diff" section naming the protected invariant, how the
+   diff preserves it, and the evidence. Missing or vague section is an automatic bounce.
+2. The diff does not widen agent permissions or weaken a gate: no `PROTECTED_GLOBS` edits, no new
+   agent write path to `pipeline_settings`, no valve default changes, no transition-map loosening,
+   no money-valve semantics changes. If it does any of these, bounce it and say which line; that
+   class is owner-decided, not agent-authored.
+3. For auth/session diffs: the body states the specific invariant preserved (e.g. "admin session
+   cookie scope unchanged") and you confirmed it against the diff.
+4. For migration diffs (only after the DB carve-out lifts): dry-run evidence against a scratch
+   Postgres is present in the body or CI.
+
+A protected PR you verify still ends at the owner: the engine labels it `needs-owner` and emails
+once. Say in your verdict note that the checklist passed, so the owner's email reads as
+"pre-verified, read and merge".
+
 **PASS needs evidence.** A verdict of `verified` without the specific things you checked is worse
 than no verdict, because the engine merges on it.
 
