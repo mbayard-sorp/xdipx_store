@@ -70,13 +70,21 @@ one plain clause). This is helpfulness, not upsell theater: the pairing advice m
 
 ## 4. Maker relations: get the brands talking back
 
-The goal is reciprocal notice: a manufacturer reshare or influencer quote is the single cheapest
-reach event available to this store. Standing behaviors:
+Maker reshare is a nice-to-have, **not the cheapest reach event available to this store** (corrected
+2026-08-18, ticket #4068). The 2026-08 teardown of five manufacturer grids (Womanizer, We-Vibe,
+Satisfyer, Doc Johnson, Femme Funn) found zero retailer tags, zero available-at posts, and zero
+retailer reposts — a clean sweep (`docs/store-team/competitor-social-teardown-2026-08.md` §5). Several
+verified handles are age-gated (Tantus, Screaming O, Fun Factory US) so a tag returns no logged-out
+discovery at all, and one (Femme Funn) is actively D2C-competitive. So treat maker tagging as a
+zero-cost habit, not a reach strategy: tag a verified maker when a post naturally features their
+product, and route real brand-partner *outreach* (e.g. the Satisfyer store-finder listing and the Doc
+Johnson channel pitch) to `offsite-scout` rather than expecting reciprocity from a tag. Standing
+behaviors:
 
-- **Featured Brand of the Week** (`routine-social-daily.md`) stays the cadence: one feature post
-  per platform per week, tagging the brand, genuinely enthusiastic about what their product does
-  well. Praise is specific and product-true, never generic flattery, and never lived-experience
-  testimony (Emma has none).
+- **Featured Brand of the Week** (`routine-social-daily.md`) is **reactive and incidental, not a
+  weekly cadence** (ticket #4068): feature a brand only when a post already features their product,
+  tag from the verified registry, and never reserve a slot for it. Praise is specific and
+  product-true, never generic flattery, and never lived-experience testimony (Emma has none).
 - **Tag only from the verified registry.** `docs/store-team/brand-ig-handles.json` is the source of
   truth; no verified registry entry, no tag. Never guess a handle.
 - **React on X.** When a carried brand posts something real (a launch, a good explainer), quote-post
