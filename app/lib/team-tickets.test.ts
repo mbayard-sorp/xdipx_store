@@ -330,6 +330,30 @@ describe('ALLOWED transition matrix', () => {
     }
   })
 
+  // `campaign`/`promo` joined RUN_CLOSE_KINDS 2026-08-19 so social-media-manager
+  // can close an approved "product went live, post about it" row once its
+  // routine has actually drafted and gated the post, instead of it sitting
+  // approved forever. Closing to `applied` is bookkeeping only: it grants no
+  // publishing power, so this is asserted separately from the general case
+  // above with campaign/promo specifically exercised.
+  it('lets social-media-manager close approved campaign/promo rows it acted on', () => {
+    for (const kind of ['campaign', 'promo']) {
+      expect(isTransitionAllowed('approved', 'applied', 'agent:social-media-manager', { kind }))
+        .toBe(true)
+    }
+    // Same edge, any other RUN_CLOSE_ACTOR.
+    for (const actor of RUN_CLOSE_ACTORS) {
+      expect(isTransitionAllowed('approved', 'applied', actor, { kind: 'campaign' })).toBe(true)
+      expect(isTransitionAllowed('approved', 'applied', actor, { kind: 'promo' })).toBe(true)
+    }
+    // A non-RUN_CLOSE actor still cannot, campaign/promo included.
+    expect(isTransitionAllowed('approved', 'applied', 'agent:qa-reviewer', { kind: 'campaign' }))
+      .toBe(false)
+    expect(isTransitionAllowed('approved', 'applied', 'agent:media-manager', { kind: 'promo' }))
+      .toBe(false)
+    expect(isTransitionAllowed('approved', 'applied', 'owner', { kind: 'campaign' })).toBe(false)
+  })
+
   it('fences agent-editor retirement to the kinds with no executor', () => {
     for (const kind of AGENT_RETIRE_KINDS) {
       expect(isTransitionAllowed('approved', 'dismissed', 'agent:agent-editor', { kind })).toBe(true)
