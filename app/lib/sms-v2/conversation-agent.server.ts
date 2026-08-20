@@ -106,6 +106,17 @@ const MAX_TOKENS_WEB = 700
  */
 const SESSION_RECOVERY_PROSE = "I lost the thread for a sec. What were you hoping to find?"
 
+/**
+ * Forced fallback when the customer asked a materials/body-safety compatibility
+ * question, `lookupPolicy` returned not_found, and nothing else grounded an
+ * answer this turn, yet the reply made a safety claim anyway (ticket #4300).
+ * This defers the customer to the human team instead of shipping an unverified
+ * safety claim. Reviewed by emma-empathy-reviewer before shipping (empathy gate,
+ * routine-dev-daily.md Step 5).
+ */
+const POLICY_SAFETY_FALLBACK_PROSE =
+  "Email hello@xdipx.com so the team can confirm the right pairing for you. I don't want to guess on materials safety."
+
 // ─── Core conversational rules ───────────────────────────────────────────────
 
 /**
@@ -546,6 +557,73 @@ export function isUngroundedPricePitch(prose: string, toolCardCount: number): bo
   return SPOKEN_PRICE_RE.test(prose ?? '')
 }
 
+// ─── Ungrounded-safety-claim guard (ticket #4300) ────────────────────────────
+
+/**
+ * Assertion shapes a materials / body-safety / product-compatibility ANSWER
+ * takes: a lube-type verdict ("water-based is the safe call"), a degradation
+ * claim ("silicone breaks down the material"), a compatibility verdict, or
+ * body-safety vocabulary. Matched only to decide whether the reply is *making*
+ * such a claim; the guard that uses this has already established (from the tool
+ * log) that the claim is ungrounded.
+ */
+const MATERIALS_SAFETY_CLAIM_RE: readonly RegExp[] = [
+  /\b(?:water|silicone|oil)[- ]?based\b/i,
+  /\bsafe (?:with|to use|for|call|bet|choice|pairing|option)\b/i,
+  /\b(?:break|breaks|broke|breaking) down\b/i,
+  /\b(?:degrade|degrades|degrading|deteriorate|deteriorates|corrode|corrodes)\b/i,
+  /\b(?:not )?compatible\b/i,
+  /\bincompatible\b/i,
+  /\b(?:body[- ]?safe|non[- ]?porous|porous|phthalate)\b/i,
+]
+
+/**
+ * Does the reply make a materials / body-safety claim? Pure and exported so the
+ * detector is unit-testable. Deliberately shape-based (not a full NLU): the
+ * caller only reaches a decision to suppress when the claim is already known to
+ * be ungrounded, so a false positive at worst swaps a correct deferral for the
+ * canonical deferral, never a grounded answer.
+ */
+export function isMaterialsSafetyClaim(prose: string): boolean {
+  const p = prose ?? ''
+  return MATERIALS_SAFETY_CLAIM_RE.some((re) => re.test(p))
+}
+
+/** Minimal tool-call shape this guard reads (matches telemetry.toolCalls). */
+interface GuardToolCall {
+  name: string
+  ok: boolean
+  error?: string | undefined
+}
+
+/**
+ * A materials/body-safety claim spoken to the customer with no successful tool
+ * result behind it (ticket #4300). Fires only when, THIS turn:
+ *   - `lookupPolicy` returned not_found (the KB had no answer), AND
+ *   - no `lookupPolicy` call succeeded (nothing grounded a policy answer), AND
+ *   - the reply makes a materials/body-safety claim.
+ *
+ * In that state the claim came from the model's own context, not the knowledge
+ * base, on exactly the safety-adjacent question the system prompt says to defer
+ * ("if it returns not_found, don't guess a policy, offer to connect them with
+ * the team"). Verified on sms_turns 1575: lookupPolicy returned not_found and
+ * Emma still answered "water based lube is the safe call... silicone can break
+ * down the material". Same class as the ungrounded-price guard (#3216), on
+ * body-safety rather than price. Pure and exported so the guard is unit-testable.
+ */
+export function isUnattributedSafetyClaim(
+  prose: string,
+  toolCalls: readonly GuardToolCall[],
+): boolean {
+  const policyNotFound = toolCalls.some(
+    (t) => t.name === 'lookupPolicy' && !t.ok && t.error === 'not_found',
+  )
+  if (!policyNotFound) return false
+  const policyGrounded = toolCalls.some((t) => t.name === 'lookupPolicy' && t.ok)
+  if (policyGrounded) return false
+  return isMaterialsSafetyClaim(prose)
+}
+
 // ─── productCard detection ───────────────────────────────────────────────────
 
 /**
@@ -917,6 +995,21 @@ export async function executeConversationAgent(
     )
     finalProse = SESSION_RECOVERY_PROSE
     fabricationCaught = fabricationCaught ? `${fabricationCaught}|price` : 'price'
+    pitched = undefined
+  }
+
+  // ── Ungrounded-safety-claim guard (#4300) ──────────────────────────────────
+  // The customer asked a materials/body-safety question, lookupPolicy returned
+  // not_found, and nothing grounded a policy answer, yet the reply makes a
+  // safety claim. The system prompt says to defer, not guess, on exactly this
+  // case, so fail closed to the human-handoff line rather than ship an
+  // unverified safety claim to the caller.
+  if (isUnattributedSafetyClaim(finalProse, toolCalls)) {
+    console.warn(
+      `[conversation-agent] unattributed safety claim after lookupPolicy not_found, forcing handoff stage=${stage} channel=${channel}`,
+    )
+    finalProse = POLICY_SAFETY_FALLBACK_PROSE
+    fabricationCaught = fabricationCaught ? `${fabricationCaught}|policy_safety` : 'policy_safety'
     pitched = undefined
   }
 
