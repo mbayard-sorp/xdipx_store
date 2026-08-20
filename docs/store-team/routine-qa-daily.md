@@ -181,14 +181,21 @@ order landed in the last 24h, it has a resolved ledger row; (3) `POST /cron/purc
 not a failure on a day with zero orders; this check is orders-versus-reported, never an absolute
 count.
 
-Sub-check (1) is **not reachable from a cloud session today**: there is no `/api/team/*` route that
-exposes `meta_capi_failures` / `ga4_purchase_failures`, and a direct `psql` to `DATABASE_URL` from a
-cloud routine hangs and times out because egress is restricted to xdipx.com. When you cannot reach the
-tables, **record sub-check (1) as `unverified` and say why — never guess PASS/FAIL on it.** The fix is
-a code ticket (a small authenticated `GET /api/team/conversion-status` returning the unresolved-count
-and oldest-age for both tables); until it ships, an honest "unverified: no cloud-reachable route" is
-the correct verdict on this sub-check. Sub-checks (2) and (3) run over xdipx.com endpoints and stay
-verifiable.
+Sub-check (1) **is reachable now** (route shipped 2026-08-19, ticket #4177 / PR #773). Call the
+authenticated route instead of recording `unverified`:
+
+```bash
+curl -s "https://xdipx.com/api/team/conversion-status" -H "x-team-secret: $TEAM_TOKEN"
+# -> {metaCapiUnresolvedCount, metaCapiOldestAgeHours, ga4UnresolvedCount, ga4OldestAgeHours}
+```
+
+Read the pass/fail off the response: **PASS** when both `metaCapiUnresolvedCount` and
+`ga4UnresolvedCount` are `0`, or nonzero but with `oldestAgeHours` under the one-hour threshold (the
+retry queue is still inside its window and working). **FAIL** when either count is nonzero and its
+`oldestAgeHours` has grown past one hour (the queue is stuck, not draining). Report the four numbers
+in the verdict rather than a bare PASS/FAIL. Only if the route itself is unreachable (non-200) do you
+fall back to `unverified: no cloud-reachable route` and say so. Sub-checks (2) and (3) run over
+xdipx.com endpoints and stay verifiable.
 
 **Protected-path PRs get an extra checklist (added 2026-08-19).** Since owner direction 2026-08-19,
 R-DEV authors protected-path diffs (except the DB carve-out) instead of blocking them; the engine
