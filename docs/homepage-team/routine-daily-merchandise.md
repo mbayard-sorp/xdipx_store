@@ -58,9 +58,9 @@ routine's to raise (Preconditions, above); do not treat a bigger budget as the f
 
 | Tier | Steps | Rule |
 |---|---|---|
-| MANDATORY, first | 0, 1, 1b (cheaper-read note below), 2c (capture the baseline, do not yet analyze), 3 (minimal picks), 4 (fresh-art floor minimum only), 5 (the 7 per-run surfaces) | No optional-tier step runs until Step 5 has published. |
+| MANDATORY, first | 0, 1, 1b (cheaper-read note below), 2c (capture the baseline, do not yet analyze), 3 (minimal picks), 4 (fresh-art floor minimum only), 5 (the 7 per-run surfaces), **5b deck-floor when the panel deck is >7 days old (minimal door/banner refresh only — see Step 5b)** | No optional-tier step runs until Step 5 has published. The deck-floor exception is the one Step 5b item in this tier: it runs even on cold-start and theme-change days, ahead of the optional deep-refresh. |
 | VERIFY, never skip | 7 | An unverified publish is worse than no publish (runs 8/10 lesson, cited in #2165's retro). Run it even if nothing below starts. |
-| OPTIONAL, after Step 7 verifies | 1c (Monday only — recon/theme run FIRST on Mondays, since Step 3 needs the theme), 2 (GA4/Nalpac/imports depth), 2b, 2d, 2e, 3.5 (a full scheme; the mandatory path uses a minimal one), 5b deep-refresh, 5c, 7.5, retro extras | Running out of turns here is a successful run that shipped its mandatory surfaces. Name what was skipped and why in the Step 8 summary — silence is the failure, not the skip. |
+| OPTIONAL, after Step 7 verifies | 1c (Monday only — recon/theme run FIRST on Mondays, since Step 3 needs the theme), 2 (GA4/Nalpac/imports depth), 2b, 2d, 2e, 3.5 (a full scheme; the mandatory path uses a minimal one), 5b deep-refresh pair, 5c, 7.5, retro extras | Running out of turns here is a successful run that shipped its mandatory surfaces. Name what was skipped and why in the Step 8 summary — silence is the failure, not the skip. |
 
 **Cheaper mandatory reads.**
 
@@ -79,11 +79,19 @@ routine's to raise (Preconditions, above); do not treat a bigger budget as the f
 
 **Step 5b (category pages) starvation is a named, logged branch, not a silent one (#2977).** When the
 mandatory path above has consumed most of the run's turns, Step 5b is health-sweep only ($0,
-deterministic — never skip) and the day's scheduled deep-refresh pair defers to the next run. This is
-the same shape as the existing "theme-change day override" in Step 5b; treat cold-start budget as an
+deterministic — never skip) and the day's scheduled deep-refresh **pair** defers to the next run. This
+is the same shape as the existing "theme-change day override" in Step 5b; treat cold-start budget as an
 equally valid trigger for it. Record the deferral as a `decision` event and name the reason every
 single time it fires — runs 152/166/172 went five-plus days with the pair unrefreshed and nobody
 stated it, which is the failure #2977 exists to close.
+
+**One carve-out from this deferral: the panel-deck 7-day floor still runs.** The health-sweep-only
+branch defers the *deep-refresh pair*, not the deck floor. When `singleton.panelDeck._updatedAt` is
+more than 7 days old, a minimal deck refresh (door tiles and/or the two large banners — copy, labels,
+or link targets, reusing existing art so no image budget is needed) is a MANDATORY-tier item and runs
+this run regardless of cold-start or a theme change, ahead of the deferred pair. This closes the exact
+gap seen on run 395 (2026-08-19), where the deck read 20 days stale while the run correctly deferred
+the deep-refresh pair under this branch and the floor was silently skipped with it.
 
 ## Step 0 — Start the run
 
@@ -674,6 +682,14 @@ routine: structure and components stay Routine B.
   usual gate, budget, and image caps. The large banners (Discover / Just landed) are
   merchandising surfaces, not shell. Report the deck age and what changed in the run summary; a
   deck older than 7 days at run end is a definition-of-done failure.
+  **This floor is MANDATORY-tier and survives cold-start.** It runs BEFORE the category
+  deep-refresh, and — unlike the deep-refresh pair — it is NOT deferred by the cold-start (#2977)
+  or theme-change-day branches below. On a starved run, scope the floor down rather than skipping
+  it: a minimal copy/label/link touch on the door tiles or banners, reusing existing art (no
+  `--ref-image` generation, so it costs no image budget), is enough to satisfy the floor and move
+  `_updatedAt`. A full art regeneration is the deep-refresh version and may still defer; the
+  minimal copy touch may not. Run 395 (2026-08-19) deferred the whole of Step 5b under the
+  cold-start branch and left the deck 20 days stale — that is the failure this carve-out closes.
 - **Health sweep, every run, all live pages, $0.** The existing `/cron/homepage-healthcheck` sweeps
   every live merchandised page daily (report-only, deterministic) and posts results to the
   "Merchandised pages" panel on `/admin/homepage-team`. The routine READS those verdicts; it does
@@ -700,7 +716,9 @@ routine: structure and components stay Routine B.
   Step 5b is scoped to the health sweep only; defer the day's scheduled category deep-refresh pair
   to the next non-changeover run and record the deferral as a `decision` event. This is a defined
   branch, not an ad-hoc shortfall, because the homepage-wide theme transition plus the Step 4
-  fresh-art floor reliably consumes this run's turn budget on changeover days.
+  fresh-art floor reliably consumes this run's turn budget on changeover days. **Exception: the
+  panel-deck 7-day floor above still runs** (minimal copy/label/link touch), the same carve-out
+  that applies to the cold-start branch; only the deep-refresh pair defers.
 
 ### Shelf-lead curation rule (deep refresh only)
 
