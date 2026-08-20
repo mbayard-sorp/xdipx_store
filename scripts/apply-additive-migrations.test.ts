@@ -23,6 +23,16 @@ describe('stripSqlComments', () => {
     const sql = "ALTER TABLE t ADD COLUMN IF NOT EXISTS note text DEFAULT 'it''s fine';"
     expect(stripSqlComments(sql)).toBe(sql)
   })
+
+  it('leaves a -- and a semicolon inside a $$-quoted function body alone', () => {
+    const sql = "CREATE FUNCTION f() RETURNS trigger AS $$\nBEGIN\n  -- not a real comment to drop\n  INSERT INTO t (id) VALUES (1);\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql;"
+    expect(stripSqlComments(sql)).toBe(sql)
+  })
+
+  it('leaves content inside a tagged dollar-quote ($tag$...$tag$) alone', () => {
+    const sql = 'CREATE FUNCTION f() RETURNS void AS $body$ -- inner comment; not stripped $body$ LANGUAGE sql;'
+    expect(stripSqlComments(sql)).toBe(sql)
+  })
 })
 
 describe('splitStatements', () => {
@@ -39,6 +49,29 @@ describe('splitStatements', () => {
   it('drops empty trailing chunks', () => {
     const out = splitStatements('CREATE TABLE IF NOT EXISTS a (id int);\n\n  \n')
     expect(out).toEqual(['CREATE TABLE IF NOT EXISTS a (id int)'])
+  })
+
+  it('does not split on semicolons inside a $$-quoted function/trigger body (repro: db/migrations/004_reviews.sql)', () => {
+    const sql = [
+      'CREATE FUNCTION refresh() RETURNS trigger AS $$',
+      'BEGIN',
+      '  INSERT INTO agg (id) VALUES (NEW.id);',
+      '  UPDATE agg SET n = n + 1;',
+      '  RETURN NEW;',
+      'END;',
+      '$$ LANGUAGE plpgsql;',
+      'CREATE TABLE IF NOT EXISTS t (id int);',
+    ].join('\n')
+    const out = splitStatements(sql)
+    expect(out).toHaveLength(2)
+    expect(out[0]).toContain('BEGIN')
+    expect(out[0]).toContain('END;\n$$ LANGUAGE plpgsql')
+    expect(out[1]).toBe('CREATE TABLE IF NOT EXISTS t (id int)')
+  })
+
+  it('does not split on a semicolon inside a tagged dollar-quote ($tag$...$tag$)', () => {
+    const out = splitStatements('CREATE FUNCTION f() RETURNS void AS $body$ SELECT 1; SELECT 2; $body$ LANGUAGE sql;')
+    expect(out).toEqual(['CREATE FUNCTION f() RETURNS void AS $body$ SELECT 1; SELECT 2; $body$ LANGUAGE sql'])
   })
 })
 
