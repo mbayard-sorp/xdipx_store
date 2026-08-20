@@ -171,12 +171,18 @@ terminal state. When you claim one anyway: file a new linked `kind:'code'` row c
 (a) criteria and citing the original, transition the original to `blocked` naming the owner-gated
 remainder, and move on. Never implement the owner-gated half.
 
-**Tagged rows dispose in seconds.** (#1909) A claimed row whose text opens with `[design-gated]` or
-`[cross-agent-epic]` (filing conventions, `operating-system.md` §3) is not a single-agent code PR by
-its filer's own declaration: one defers to a design or visual-regression judgment no scheduled pass
-can run (#352), the other is a multi-agent epic (#448); run 217 burned a claim on each. Transition
-it to `blocked` with a note naming the tag and the lane it belongs to, and spend the rest of the
-pass on the next ticket.
+**Tagged rows dispose in seconds.** (#1909, extended #4142) A claimed row whose text opens with
+`[design-gated]`, `[cross-agent-epic]`, `[owner-env]`, or `[needs-visual-harness]` (filing
+conventions, `operating-system.md` §3) is not a single-agent code PR by its filer's own declaration:
+`[design-gated]` defers to a design or visual-regression judgment no scheduled pass can run (#352),
+`[cross-agent-epic]` is a multi-agent epic (#448), `[owner-env]` needs an env secret or Vercel var
+only the owner can set (§7 — #4139's `ATLAS_CLOUD_API_KEY`), and `[needs-visual-harness]` needs the
+Playwright / axe / screenshot baseline the cloud runner does not have (§5 — #3789). Run 217 burned a
+claim on each of the first two, and run 386 on #4139 and #3789. Transition it to `blocked` with a
+note naming the tag and the lane it belongs to, and spend the rest of the pass on the next ticket.
+Watch for the capability even when the tag is missing: a DONE WHEN that hinges on an env secret or the
+visual harness is disposed the same way and flagged for the tag, since filers are still learning to
+apply it.
 
 ## Step 3 — Implement (per ticket)
 
@@ -257,6 +263,19 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    Case against an exact-match GROQ query, reproducing the identical zero-match bug with new words;
    #3430 revised the launch plan correctly but left a sibling file in the same PR quoting the exact
    stale figure the revision says must never be quoted again.
+
+3g. **A voice-rule prompt fix greps its replacement text against the adjacent hard rules, not only
+   the one named.** (#4123) When a ticket targets a specific `docs/emma-voice.md` hard-rule violation
+   in an existing prompt or copy string (e.g. a lived-experience claim in a `claude.server.ts`
+   prompt), the fix step also greps the full **replacement** wording against the *other* hard rules
+   that sit in the same charter subsection before opening the PR — no lived experience, no
+   omniscience, and no self-narration all live together around `emma-voice.md` lines ~95-100. Trading
+   one voice defect for its neighbor in the same sentence is the failure mode: #4115 (PR #753) removed
+   a fabricated lived-experience claim from the `quiet_endorsement` prompt but its replacement ("a
+   trusted, funny friend and curator who knows this catalog cold") reintroduced the banned "I know the
+   catalog cold" omniscience example almost verbatim, and the PR's own new test only asserted the
+   lived-experience guard, so it did not catch it. Any test added for a voice-rule fix asserts the
+   adjacent rules too, not just the one named in the ticket.
 
 4. Verify locally, all three, and do not skip one because it "cannot be affected":
 
