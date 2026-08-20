@@ -382,6 +382,19 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   `social_freq_instagram` is met: A resource, B campaign, C Today's Pick, D what's new, E carousel.
   Slot A ships even on a one-post day. Baseline is at least one post daily, no zero days; 10/day is
   a hard ceiling for an exceptional moment, never a target.
+- **Draft slot A FIRST, before any product post (ticket #4066).** Slot A is the product-free resource
+  post; it is drafted before slot B, C, or D, not after. A run that fills the day with product posts
+  and then reports it could not produce slot A has the order backwards, and that is the exact drift
+  this rule stops: as measured 2026-08-17, all six published Instagram posts were product-forward and
+  zero were slot A, against a §4a rule that already caps product-forward at half a day's set and
+  already requires slot A every day. Across 33 competitor accounts, product-forward share of grid is
+  inversely correlated with account size almost monotonically (evidence:
+  `docs/store-team/competitor-social-teardown-2026-08.md` §1), so slot A is the growth lever, not a
+  nicety.
+- **When slot A genuinely cannot ship, post LESS, not more product.** Substituting a product post for
+  the resource post is the specific failure this rule exists to stop. If slot A cannot be produced
+  this run, the run posts fewer times and says so in the summary with the reason; it never backfills
+  the slot with an extra product post.
 - **Volume climbs a rung at a time, on 7 clean days** (§4 of the campaign doc). Name the rung and
   the clean-day count in the run summary. Never step the quota up yourself to compensate for an
   automated step-down.
@@ -472,20 +485,29 @@ mechanism ("dual-density build known for a grounded feel"), never by an implied 
 
 ## Featured Brand of the Week
 
-A standing series, not a daily task. Source of truth for the current brand: the Shopify `vendor`
-field, kept aligned with the homepage featured-brand rail and the `marketing_calendar`.
+**Reactive and incidental, not a weekly cadence duty (ticket #4068).** This is not a slot to reserve
+or a post to draft from scratch on a schedule. The 2026-08-08 teardown of five manufacturer grids
+(Womanizer, We-Vibe, Satisfyer, Doc Johnson, Femme Funn) found zero retailer tags, zero
+available-at posts, and zero retailer reposts: a clean sweep, not a thin signal
+(`docs/store-team/competitor-social-teardown-2026-08.md` §5). Reciprocal notice from a brand's social
+team is therefore **not an expected outcome** and is **not a run success criterion**. Tag a verified
+maker when a post naturally features their product, because it costs nothing and occasionally
+converts; that is the whole of the habit. Source of truth for the current brand stays the Shopify
+`vendor` field, aligned with the homepage featured-brand rail and the `marketing_calendar`.
 
-- **Cadence:** one feature post per platform per week for the current brand, tagging the brand.
+- **No reserved weekly slot.** The slot this used to reserve goes to slot A (the resource post) per
+  ticket #4066. Feature a brand only when a post already features their product.
 - **Otherwise reactive only:** quote or reshare the brand's own education content with credit when
   they post something real. Not a standing content type to draft from scratch daily.
 - **Explicitly NOT daily @-tagging.** Repeated daily @-tags of the same brand read as spam to the
   platforms and to the brand's own social team, and conflict with the Instagram/TikTok
   editorial-only posture in `docs/ads-policy.md` §Organic social.
+- **Tag only from the verified registry**, never a guessed handle — every existing tagging-safety
+  rule stands unchanged.
 - **X gets the most latitude** for direct @mentions; Instagram/TikTok/LinkedIn stay conservative
   per their addenda.
 - Draft-only like every other post, and counts toward the ≤6 run cap and the platform's daily
-  quota. The point is reciprocal notice from the brand's social team (links, reshares, traffic),
-  not volume.
+  quota when it does run.
 
 ## Step 4 — Two gates, both mandatory
 
@@ -823,6 +845,25 @@ curl -s -X POST "$BASE_URL/api/team/social-post" \
   -d '{"op":"draft","platform":"x","postType":"manual","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
+**`tweetText` is customer copy only — never an internal image or generation brief (ticket #4372).**
+The value in `tweetText` publishes verbatim onto the live caption. An internal note — an archetype
+name, a negatives list, a scene/generation brief, or a fragment like `No product, no text` — must
+NEVER appear in it. Run 406 (2026-08-19) had two IG drafts (id62, id63) REVISEd by the publish gate
+for exactly this: a trailing `VISUAL DESCRIPTION: ...` block that was an internal generation note, not
+reader-facing prose. **Pre-write self-check, every draft:** grep the caption for `VISUAL DESCRIPTION`,
+`negatives`, `archetype`, `brief`, `No product`, and similar fragments, and strip anything that is a
+note to the generator rather than words for the reader before you send the draft.
+
+**Every image-bearing caption carries a VISUAL DESCRIPTION block (ticket #4067), and it is genuine
+reader-facing accessibility prose.** This is standing, not an option: every Instagram post, and every
+X or TikTok post that carries media, includes it. Write a real description of the image for a reader
+who cannot see it — the person, the setting, what is happening in frame — as ordinary sentences,
+placed BEFORE the engagement close, not hidden in alt-text. It is accessibility work, additional on-charter crawlable
+text, and one caption element an AI guide writes well and consistently. It is NOT the internal scene
+brief: no meta-notes, no `No product, no text`, no negatives list — those are the fragments the
+self-check above strips. If you cannot describe the final image in plain reader-facing prose, the
+block is not ready.
+
 One `event` per draft (`eventType:'step'`, `phase:'draft'`):
 
 ```bash
@@ -961,6 +1002,13 @@ had, so the replacement is not optional. Read instead:
    campaign rules, logging any that would not pass the gate as written now. On a run where the owner
    said nothing and nothing was removed, this is the only way the loop still learns anything. Never
    report a silent week as a good week.
+5. **Slate-mix self-check, computed not asserted (ticket #4066).** Of the last 7 published Instagram
+   posts, count and report three numbers: how many were product-forward, how many were carousels, and
+   how many were slot A (the product-free resource post). Compute them from real rows, do not assert
+   them. Two consecutive weeks over the 50% product-forward ceiling (`instagram-campaigns.md` §4a)
+   files a suggestion (`team:'social'`, kind `instructions`) against this playbook. A standing target,
+   checked within two weeks of this rule landing: at least one product-free resource post AND at least
+   one carousel have published.
 
 One `decision` event (`phase:'retro'`). When **two or more** pieces of feedback share a theme,
 file a suggestion (`team:'social'`, kind `instructions`) proposing the concrete change to your own

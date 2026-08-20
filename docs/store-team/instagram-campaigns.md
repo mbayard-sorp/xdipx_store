@@ -55,6 +55,7 @@ start and drafts against them.
 | Unboxing with Emma | What is actually in the box, in order, one surprise. |
 | Things I Learned Reading the Manual | A short list of specifics nobody reads the manual for. |
 | Ask Emma | A reader question restated plainly, then answered. |
+| Customer Question | A REAL inbound question opens the caption, then Emma answers with authority about the reader's experience. Distinct from Ask Emma: this one is sourced from an actual inbound (support ticket, DM, or search query), never invented. See the provenance rule below. |
 | Brand Crush | One maker, why their engineering is interesting. Tag the verified handle only (§8). |
 | This Week at xdipx | Site news: a new aisle, a drop, a Notebook piece worth reading. |
 | Trend React | A reaction to an adopted trend brief. Never chases a trend we have no view on. |
@@ -65,6 +66,22 @@ start and drafts against them.
 **Rotation rule:** never two consecutive posts from the same pillar, and never two consecutive posts
 in the same format. A campaign that can only be told one way is too narrow; widen the subject or
 shorten the campaign.
+
+**Customer Question provenance (mandatory).** A Customer Question post cites where the question came
+from in the run summary — the support ticket id, the DM, or the search query. An invented question
+presented as a real one is fabricated proof, which the doctrine bans. The format fits xdipx precisely
+because the question shape lets Emma speak with authority about the *reader's* experience rather than
+her own, which is exactly what her no-lived-experience constraint requires; a fixed neutral frame (per
+the `cropSignature` / `lightSignature` locks in §3) gives visual continuity with no face.
+
+**Spec-checklist caption shape (available to Today's Pick and Brand Crush).** A caption may take the
+form: a customer question or a plain lead, then a short run of checkmark lines of material,
+compatibility, and safety fact, then hashtags. It converts catalog knowledge into authority without
+Emma ever claiming she tried anything. Draw the facts from the product's own enrichment metafields —
+`feature_bullets`, `sensation_dial`, and the material/care/compatibility fields already stored under
+the `xdipx` namespace — never from invented spec. It is the single most charter-compatible caption
+structure found in the 2026-08 teardown (`docs/store-team/competitor-social-teardown-2026-08.md`
+§3.6-3.7); MAP and sale-gate rules (§4b) still bind, so no price or discount enters the checklist.
 
 ## 3. Visual scheme
 
