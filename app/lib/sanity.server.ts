@@ -249,7 +249,40 @@ export async function getEditor(preview = false): Promise<Editor | null> {
       const client = getClient(false, preview)
       if (!client) return null
       const raw = await client.fetch<Partial<Editor> | null>(EDITOR_GROQ)
-      if (!raw?.name) return null
+      if (!raw?.name) {
+        // The canonical Emma likeness and persona live in the singleton.editor
+        // document. When it is absent (or present with no name) every consumer
+        // downstream — getEditorPhotoUrl and the storefront emmaPhotoUrl
+        // resolver — silently renders an empty slot, which is exactly how a
+        // missing production singleton went unnoticed (#4346, split from #4344).
+        // Make the miss loud so an absent canonical likeness surfaces in
+        // monitoring instead of a silent null.
+        const detail = raw
+          ? 'singleton.editor exists but has no name'
+          : 'singleton.editor document is missing'
+        console.error(
+          `[sanity] getEditor: canonical Emma likeness unavailable — ${detail} (preview=${preview}). Downstream photo and persona resolvers will render empty.`,
+        )
+        // Report to Sentry too. Imported lazily and fire-and-forget, matching
+        // app/lib/kv.server.ts, so @sentry/node never enters the static module
+        // graph of this widely-imported file.
+        void (async () => {
+          try {
+            const { Sentry } = await import('~/lib/sentry.server')
+            Sentry.captureException(
+              new Error('singleton.editor absent — canonical Emma likeness unavailable'),
+              {
+                level: 'error',
+                tags: { subsystem: 'sanity', doc: 'singleton.editor' },
+                extra: { preview, documentReturned: Boolean(raw) },
+              },
+            )
+          } catch {
+            // Best-effort — the console.error above is the primary signal.
+          }
+        })()
+        return null
+      }
       return {
         name:       raw.name,
         role:       raw.role ?? 'Editor',
