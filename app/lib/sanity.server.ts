@@ -135,8 +135,42 @@ const apiVersion = '2024-10-01'
  */
 export type SanityPerspective = 'raw' | 'published' | 'drafts' | 'previewDrafts'
 
+// One-time process-level warning latch. A tokenless client on this private
+// dataset returns empty for every read, which two agents mis-read as
+// "the document does not exist" (#4344/#4709). We still build the client, but
+// we make the auth gap LOUD once so a silent null is never again mistaken for
+// an absent document. Mirrors the getEditor miss signal (#4346), one tier up.
+let warnedNoSanityToken = false
+
 export function getClient(withToken = false, preview = false, perspective?: SanityPerspective) {
   if (!projectId) return null
+  const token = process.env['SANITY_API_TOKEN']
+  if (!token && !warnedNoSanityToken) {
+    warnedNoSanityToken = true
+    // The dataset requires auth for reads, so an unauthenticated client will
+    // resolve EVERY read to null/empty. That is an environment gap (the runtime
+    // is missing SANITY_API_TOKEN), not an absent document — do not read it as
+    // "the singleton/cast is missing." See #4709 root cause.
+    console.error(
+      `[sanity] getClient: SANITY_API_TOKEN is missing while SANITY_PROJECT_ID is set (${projectId}/${dataset}). ` +
+        `The dataset requires auth for reads, so every read will come back EMPTY. ` +
+        `This is an auth gap in this environment, not an absent document.`,
+    )
+    // Report to Sentry too — lazy + fire-and-forget so @sentry/node never
+    // enters the static module graph of this widely-imported file (matches the
+    // getEditor miss branch and app/lib/kv.server.ts).
+    void (async () => {
+      try {
+        const { Sentry } = await import('~/lib/sentry.server')
+        Sentry.captureException(
+          new Error('SANITY_API_TOKEN missing — Sanity reads will resolve empty on a private dataset'),
+          { level: 'error', tags: { subsystem: 'sanity', gap: 'api-token' }, extra: { projectId, dataset } },
+        )
+      } catch {
+        // Best-effort — the console.error above is the primary signal.
+      }
+    })()
+  }
   // Always include the API token — the dataset requires auth for reads.
   // Use CDN for normal reads (fast), bypass CDN for writes + preview (fresh).
   // Verified against this apiVersion (2024-10-01) before the rename: 'drafts'
@@ -144,7 +178,7 @@ export function getClient(withToken = false, preview = false, perspective?: Sani
   const requested = perspective ?? (preview ? 'drafts' : 'published')
   const resolvedPerspective = requested === 'previewDrafts' ? 'drafts' : requested
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client = createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env['SANITY_API_TOKEN'], perspective: resolvedPerspective } as any)
+  const client = createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token, perspective: resolvedPerspective } as any)
   // Read path only (every write/raw-snapshot caller passes withToken=true):
   // rewrite bare asset->url strings to CDN-transformed URLs so raw multi-MB
   // originals never reach a loader. See optimizeSanityImageUrls.
