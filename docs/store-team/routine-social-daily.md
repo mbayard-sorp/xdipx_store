@@ -595,7 +595,9 @@ what produced a feed of interchangeable frames and the owner's *"Variety is key 
 2026-08-19: the picture was always the last thing written, so it always reverted to the safest
 option. Pass it today's product handle, the real Shopify photo URL, the product's real dimensions,
 and the campaign beat. If it declares degraded-to-zero because no approved cast member exists,
-that verdict stands and you do not work around it.
+that verdict stands and you do not work around it. Before accepting such a verdict, confirm the
+roster was read with `SANITY_API_TOKEN` and not an empty token: on 2026-08-19 an unauthenticated
+count reported zero when seven existed.
 
 **A cast member in a scene is MANDATORY on every Instagram product post (owner ruling 2026-08-19,
 spec §3.7).** The lead image is a person somewhere real, with the product. A product alone, however
@@ -619,11 +621,17 @@ curl -s -X POST "$BASE_URL/api/team/social-image" \
 consecutive product posts, no cast member on more than 2 of any 5. State both choices and their
 last-used dates in the retro decision event.
 
-**If there is no approved cast member, you cannot draft an Instagram product post.** As of
-2026-08-19 Sanity held zero `castMember` docs with a `referencePhoto`, which is exactly why row 59
-shipped as a packshot and was rejected. Declare Instagram product drafting degraded-to-zero, say so
-in the summary, and pivot volume to X, LinkedIn, and non-product Instagram posts. **Never fall back
-to a product-only frame to fill the slot.**
+**The roster is seven, verified 2026-08-21**: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, all
+`active`, all `approvedForUse`, all with a `referencePhoto`. Rotate across them. This step
+previously said Sanity held **zero** cast docs and that you therefore could not draft; that was a
+GROQ count run with an empty Sanity token, and anonymous reads of this dataset return only one of
+the seven. Check with `SANITY_API_TOKEN` on the `published` perspective, the client
+`getApprovedCastMembers()` uses.
+
+**If the roster is ever genuinely empty, you cannot draft an Instagram product post.** Declare
+Instagram product drafting degraded-to-zero, say so in the summary, and pivot volume to X, LinkedIn,
+and non-product Instagram posts. **Never fall back to a product-only frame to fill the slot.** That
+is what produced row 59.
 
 ### X carries a cast member. Owner direction 2026-08-19.
 
@@ -639,14 +647,19 @@ stops.
   than generated.
 - **Same two-stage cast composite as Instagram** (`--archetype cast --presenter-image <approved
   castMember referencePhoto> --ref-image <real product photo> --extra-ref <same> --scale <cue>`).
-  **Roster reality, corrected 2026-08-19:** this bullet previously claimed six approved members
-  (Diego, Jade, Marcus, Maya, Priya, Sofia). That was never true. Sanity held **zero** `castMember`
-  docs and zero docs with a `referencePhoto`, verified by GROQ count; the six exist only as specs in
-  `scripts/generate-cast-candidates.ts`, which uploads nothing until the owner confirms each face.
-  **Emma was seeded on 2026-08-19 and is currently the only approved cast member.** Rotate as soon
-  as there is more than one face; until then every post carries Emma, the section 3.8 two-of-five
-  cast rule is unsatisfiable, and the run says so rather than pretending it passed. Unblocking this
-  is owner blocker id3.
+  **Roster, verified 2026-08-21.** Sanity holds **seven** approved cast members, all `active`,
+  all `approvedForUse`, all carrying a `referencePhoto`: **Diego, Emma, Jade, Marcus, Maya, Priya,
+  Sofia**. Rotate across them; §3.8's two-of-five cast rule is satisfiable and binds normally.
+
+  This bullet twice carried the opposite claim, and both were wrong. It first said six members
+  existed, which was then "corrected" on 2026-08-19 to say **zero** existed and only Emma was
+  approved. The zero came from a GROQ count run with an **empty Sanity token**: anonymous access to
+  this dataset returns only one of the seven documents, and that partial read was reported as the
+  whole truth. Five of the six were last updated 2026-08-17, so they already existed when the
+  correction claimed they did not. **A count is only as true as the credential it ran under.** Verify
+  with `SANITY_API_TOKEN` (the token production itself uses) on the `published` perspective, which is
+  exactly what `getApprovedCastMembers()` runs, and never conclude "none exist" from an
+  unauthenticated read.
 - **The imagery fence does not move with the caption register.** X captions run 6-7 against
   Instagram's 4-5 because X's organic policy is more permissive. The picture standard is unchanged.
   The charter settled it in the harder direction already (imagery stays a visual 6-7 even on owned
