@@ -127,11 +127,22 @@ const apiVersion = '2024-10-01'
 
 // ─── Client ───────────────────────────────────────────────────────────────
 
-export function getClient(withToken = false, preview = false, perspective?: 'raw' | 'published' | 'previewDrafts') {
+/**
+ * Sanity perspectives. `drafts` replaced `previewDrafts`, which the client now
+ * warns about on every call and which Sanity says it will remove in a future
+ * API version. `previewDrafts` is still accepted here and normalized, so an
+ * out-of-repo or dynamic caller cannot break on the rename.
+ */
+export type SanityPerspective = 'raw' | 'published' | 'drafts' | 'previewDrafts'
+
+export function getClient(withToken = false, preview = false, perspective?: SanityPerspective) {
   if (!projectId) return null
   // Always include the API token — the dataset requires auth for reads.
   // Use CDN for normal reads (fast), bypass CDN for writes + preview (fresh).
-  const resolvedPerspective = perspective ?? (preview ? 'previewDrafts' : 'published')
+  // Verified against this apiVersion (2024-10-01) before the rename: 'drafts'
+  // and 'previewDrafts' return identical results, so no version bump is needed.
+  const requested = perspective ?? (preview ? 'drafts' : 'published')
+  const resolvedPerspective = requested === 'previewDrafts' ? 'drafts' : requested
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client = createClient({ projectId, dataset, apiVersion, useCdn: !withToken && !preview, token: process.env['SANITY_API_TOKEN'], perspective: resolvedPerspective } as any)
   // Read path only (every write/raw-snapshot caller passes withToken=true):
