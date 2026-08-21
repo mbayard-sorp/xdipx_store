@@ -413,11 +413,21 @@ passes provenance. Never reach for the catalog image. See `routine-social-daily.
 not covered by the cast mandate and may run cast-free art per the archetypes in §3.2a. The mandate
 is about product posts, because that is where a lonely packshot reads as a catalogue.
 
-**Sequencing, and this is the part that decides whether anything ships.** This rule is only
-satisfiable when approved `castMember` documents exist in Sanity with a `referencePhoto`. As of
-2026-08-19 there were **zero**. Until at least one exists, an honest run declares Instagram product
-drafting degraded-to-zero and says so, exactly as Step 2b requires. **It does not fall back to a
-packshot to fill the slot.** That fallback is what produced row 59.
+**The roster, and how to check it without getting it wrong.** This rule needs approved
+`castMember` documents in Sanity carrying a `referencePhoto`. As of **2026-08-21 there are seven**:
+Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, all `active` and `approvedForUse`. The rule is
+satisfiable today and §3.8's rotation windows bind normally.
+
+This paragraph previously stated there were **zero**, which was false and stalled Instagram product
+drafting on a blocker that did not exist. That count was run with an **empty Sanity token**;
+anonymous access to this dataset returns only one of the seven docs, and the partial read was
+reported as the whole truth. **Check the roster with `SANITY_API_TOKEN` on the `published`
+perspective**, the same client `getApprovedCastMembers()` uses, and never conclude "none exist" from
+an unauthenticated read.
+
+If the roster is ever genuinely empty, an honest run declares Instagram product drafting
+degraded-to-zero and says so, exactly as Step 2b requires. **It does not fall back to a packshot to
+fill the slot.** That fallback is what produced row 59.
 
 ### 3.8 Scene and location variety, and how it is kept honest
 
