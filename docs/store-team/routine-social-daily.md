@@ -587,6 +587,36 @@ so every one was a guaranteed gate BLOCK. `POST /api/team/social-post {op:'draft
 fail-closed shape as the voice-gate check above — so treat X exactly like Instagram and TikTok in
 this step: generate or reuse an asset before you draft, never after.
 
+**Read the cast roster with THIS query. Do not improvise one.**
+
+```bash
+# The ONLY correct roster read. Field is approvedForUse, NOT approved.
+npx tsx -e "import('./app/lib/sanity.server').then(async m => {
+  const cast = await m.getApprovedCastMembers()
+  console.log(cast.length, cast.map(c => c.slug).join(', '))
+})"
+```
+
+Or the equivalent GROQ, with `SANITY_API_TOKEN` and the `published` perspective:
+`*[_type == "castMember" && active == true && approvedForUse == true]`.
+
+**Two traps, both of which have already cost a run.**
+
+1. **The field is `approvedForUse`, not `approved`.** `studio/schemas/castMember.js` has a *preview*
+   block that aliases `approved: 'approvedForUse'` for the Studio card. That alias is not a document
+   field. Querying `approved` returns `null` for every doc and reads as "nobody is approved". Run 432
+   on 2026-08-21 did exactly this, reported "every Sanity castMember doc, Emma included, is
+   approved:null", and wrote zero drafts at a cost of about $21.
+2. **An unauthenticated read returns a partial roster, not an empty one.** Anonymous access to this
+   dataset returns only one of the seven docs. On 2026-08-19 a count run with an empty token reported
+   **zero** approved members, which was then written into three binding documents and filed as an
+   owner blocker. There were seven the whole time.
+
+**So: a roster read that returns zero or one is a suspected instrument failure, not a finding.**
+Before declaring Instagram or X degraded-to-zero for want of a cast member, re-read with the command
+above and say in the run summary which query and which credential you used. Never cite an owner
+blocker as proof the roster is empty; blockers can be filed in error, and this one was.
+
 **Step 5.0, invoke `social-art-director` FIRST, before any image is generated.** It chooses the
 location and the cast member, enforces the §3.8 variety windows against the last 8 product posts,
 holds cast continuity across the campaign, and hands back the scene brief with its negatives and
