@@ -31,6 +31,7 @@ import {
   fileBlocker,
   listOpenBlockers,
   listRecentlyCleared,
+  titleClaimsConfirmed,
   verifyBlockers,
 } from '~/lib/owner-blockers.server'
 
@@ -62,7 +63,19 @@ export async function action({ request }: ActionFunctionArgs) {
     // blocker with nothing backing it is a guess, and a list of guesses is what
     // made the previous hand-written one unreadable. Warn loudly rather than
     // reject, so a genuinely obvious blocker still lands.
+    //
+    // EXCEPT a CONFIRMED-titled row (#4702): it asserts a measured fact, so it
+    // must name the credential/app/token/path the check ran with, or a
+    // credential-scoped absence gets filed as a fact about the world. That one
+    // is rejected, not merely warned. (fileBlocker enforces the same for direct
+    // callers; this returns a clean 400 instead of a 500 for HTTP clients.)
     if (!str(b['evidence'])) {
+      if (titleClaimsConfirmed(title)) {
+        return new Response(
+          'Bad Request: a CONFIRMED-titled blocker requires an evidence field naming the credential, app, token, or network path the check ran with',
+          { status: 400 },
+        )
+      }
       console.warn(`[api:blocker] filed without evidence: ${dedupeKey}`)
     }
     const category = str(b['category'], 24)
