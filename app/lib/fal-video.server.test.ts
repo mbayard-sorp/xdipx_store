@@ -7,6 +7,7 @@ import {
   classifyAudioPath,
   compositeProductClauses,
   PRODUCT_SCALE_RATIO_ANCHOR,
+  PRODUCT_SCALE_RATIO_ANCHOR_LARGE,
   SCENE_FRAME_MIN_WIDTH,
   SCENE_FRAME_MIN_HEIGHT,
 } from './fal-video.server'
@@ -41,6 +42,35 @@ describe('compositeProductClauses (scale-anchor clause)', () => {
     // carton clause belongs only to Atlas, which has no plate pre-pass.
     expect(compositeProductClauses('atlas')).toContain('Do not show any')
     expect(compositeProductClauses('fal')).not.toContain('Do not show any')
+  })
+
+  // Ticket #4648: a genuinely large product (wand, larger toy) is legitimately
+  // wider than one third a face and comparable to a hand, so the fixed default
+  // cap under-sizes it. A 'large' size-class hint relaxes the anchor.
+  it("relaxes the anchor for a 'large' product on both paths", () => {
+    for (const path of ['fal', 'atlas'] as const) {
+      const large = compositeProductClauses(path, 'large')
+      // The relaxed anchor is used and the small-product cap is dropped.
+      expect(large).toContain(PRODUCT_SCALE_RATIO_ANCHOR_LARGE)
+      expect(large).not.toContain(PRODUCT_SCALE_RATIO_ANCHOR)
+      expect(large).not.toContain('one third the width')
+      // Still anchored to in-frame references and still true-to-life size.
+      expect(large).toContain("the presenter's face")
+      expect(large).toContain('true real-world size')
+    }
+  })
+
+  it("keeps the relaxed anchor presenter-neutral, same as the default", () => {
+    expect(PRODUCT_SCALE_RATIO_ANCHOR_LARGE).not.toMatch(/\b(her|hers|she|his|him|he)\b/i)
+  })
+
+  it("'small', 'medium', and an omitted size class keep the default anchor unchanged", () => {
+    // The prior behavior for every caller that does not know the size class.
+    const base = compositeProductClauses('fal')
+    expect(compositeProductClauses('fal', 'small')).toBe(base)
+    expect(compositeProductClauses('fal', 'medium')).toBe(base)
+    expect(compositeProductClauses('fal', undefined)).toBe(base)
+    expect(compositeProductClauses('atlas', 'small')).toBe(compositeProductClauses('atlas'))
   })
 })
 
