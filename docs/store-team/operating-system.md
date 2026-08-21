@@ -55,12 +55,12 @@ All times UTC. Vercel crons are verified against `vercel.json`; cloud routines a
 | every 10 min | `/cron/release-engine` | Vercel cron | Discovers agent PRs, classifies protected paths, checks gates, squash-merges, polls the deploy, smokes it, reverts on failure, escalates | LIVE (PR #351; `release_engine_enabled` turned ON by the owner 2026-07-28) |
 | 04:40 | `/cron/indexnow-push` | Vercel cron | Pushes changed and stale URLs to IndexNow | LIVE |
 | 12:30 | `/cron/seo-daily` | Vercel cron | Computes index deltas from `gsc_index_daily`, pushes recrawl batches, files tickets on anomalies, writes the digest blob | LIVE |
-| 03:30 | R-QA, pass 1 | Cloud routine, `qa-reviewer` | Reviews stranded `in_review` rows first, then every `pr_open` ticket; verifies or bounces. Added 2026-08-05 so the 20:00 dev pass's PRs stop waiting 19 hours | LIVE (trigger `trig_019GjVP9hGBU1gmXRBYtYURm`, `30 3,15 * * *` UTC, prompt `rqa-daily-0002`) |
+| 03:30 | R-QA, pass 1 | Cloud routine, `qa-reviewer` | Reviews stranded `in_review` rows first, then every `pr_open` ticket; verifies or bounces. Added 2026-08-05 so the 20:00 dev pass's PRs stop waiting 19 hours | LIVE (trigger `trig_019GjVP9hGBU1gmXRBYtYURm`, `30 3,11,16,21 * * *` UTC since 2026-08-21, prompt `rqa-daily-0004`) |
 | 13:00 | `/cron/owner-digest` | Vercel cron | The one owner email per day: a Needs Mike list up top, then shipped, homepage now, SEO deltas, tickets, ticket-loop health, escalations | LIVE (route + five sections, PR #352; Needs Mike + Ticket loop sections added 2026-08-05, see §The ticket-loop janitor) |
-| 14:00 | R-DEV, dev pass 1 | Cloud routine, `rr7-engineer` | Claims up to 5 `kind:'code'` tickets (raised from 3 on 2026-08-05), one branch and one PR each. Playbook: [`routine-dev-daily.md`](./routine-dev-daily.md) | LIVE (trigger `trig_01MEQYsg5sHPbM4v39FqssAD`, `0 14,20 * * *` UTC, prompt `rdev-daily-0003`) |
-| 15:30 | R-QA, pass 2 | Cloud routine, `qa-reviewer` | Same as pass 1, 90 minutes after the 14:00 dev pass. Playbook: [`routine-qa-daily.md`](./routine-qa-daily.md) | LIVE (same trigger, `30 3,15 * * *` UTC) |
+| 10:00, 15:00 | R-DEV, fresh-work passes | Cloud routine, `rr7-engineer` | Claims up to 5 `kind:'code'` tickets per pass, one branch and one PR each. Three passes daily since 2026-08-21 (owner yes on the urgency cadence). Playbook: [`routine-dev-daily.md`](./routine-dev-daily.md) | LIVE (trigger `trig_01MEQYsg5sHPbM4v39FqssAD`, `0 10,15,20 * * *` UTC, prompt `rdev-daily-0004`) |
+| 11:30, 16:30, 21:30 | R-QA, passes 2-4 | Cloud routine, `qa-reviewer` | Same as pass 1, 90 minutes after each R-DEV pass. Playbook: [`routine-qa-daily.md`](./routine-qa-daily.md) | LIVE (same trigger, `30 3,11,16,21 * * *` UTC) |
 | 17:00 (target) | Routine A, daily merchandise | Cloud routine, `homepage-orchestrator` | Picks the featured product, refreshes Emma copy and imagery, publishes content to Sanity within the budget and kill switch | LIVE, **but the trigger fires at 10:00, not 17:00** |
-| 20:00 | R-DEV, dev pass 2 | Cloud routine, `rr7-engineer` | Second attempt pass. Claims bounced tickets first | LIVE (same trigger as pass 1: `trig_01MEQYsg5sHPbM4v39FqssAD`, cron `0 14,20 * * *`) |
+| 20:00 | R-DEV, bounce pass | Cloud routine, `rr7-engineer` | Third pass; claims bounced tickets first | LIVE (same trigger: `trig_01MEQYsg5sHPbM4v39FqssAD`, cron `0 10,15,20 * * *`) |
 | Mon 12:00 | Weekly strategy retro | Cloud routine, `store-strategist` | Cross-team retro, weekly brief, ticket metrics, routine coverage audit | LIVE |
 
 **Routine A timing, stated honestly.** The design for this operating system assumes Routine A runs
@@ -469,8 +469,9 @@ could not land same-day. Verified instance: PR #477 opened 20:25 UTC on 2026-08-
 required `check` job, and could not be looked at until 15:30 UTC the next day. This was a scheduling
 gap, not a gate doing its job.
 
-Fixed 2026-08-05: R-QA now runs twice daily, `30 3,15 * * *` UTC on the same trigger, so a 20:00
-PR is reviewed at 03:30. The reissued prompt (`rqa-daily-0002`) also closed the other silent gap in
+Fixed 2026-08-05 (two passes, `30 3,15 * * *`), raised to four passes `30 3,11,16,21 * * *` on
+2026-08-21 with R-DEV at three, so every dev pass is reviewed within 90 minutes. The 2026-08-05
+reissued prompt also closed the other silent gap in
 this lane: it lists `in_review` alongside `pr_open` and resumes crashed reviews first, because
 until then nothing anywhere would ever touch a row a dead QA session left in `in_review`.
 
