@@ -51,7 +51,7 @@ All times UTC. Vercel crons are verified against `vercel.json`; cloud routines a
 | every 15 min | `/cron/log-monitor` | Vercel cron | Reads production errors, opens a GitHub issue, and (planned) files a `kind:'code'` ticket deduped on the error fingerprint | LIVE (cron + ticket filing, PR #349) |
 | every 30 min | `/cron/homepage-healthcheck` | Vercel cron | Fetches `/` and `/discover`, asserts 200 + LCP image + valid JSON-LD, rolls the Sanity homepage back to last-good on failure | LIVE |
 | every 30 min | render-truth assertion (inside the same cron) | Vercel cron | Asserts the *published* slate actually rendered: hero handle, every rail title, tile headlines, couples heading; hard-fails when fallback markers render where team content is published | LIVE (PR #349; verified in production 2026-07-28, 9 assertions passing, 0 fallbacks) |
-| every 6 h | `/cron/checkout-probe` | Vercel cron | Walks the money path and alerts on failure. Checkout is a protected path, so anything it files always escalates | LIVE |
+| every 6 h | `/cron/checkout-probe` | Vercel cron | Walks the money path and alerts on failure. Since 2026-08-19 checkout code is no longer a protected path, so a fix it files is an ordinary code ticket; the probe's own source stays protected, because a broken probe would report a broken money path as healthy | LIVE |
 | every 10 min | `/cron/release-engine` | Vercel cron | Discovers agent PRs, classifies protected paths, checks gates, squash-merges, polls the deploy, smokes it, reverts on failure, escalates | LIVE (PR #351; `release_engine_enabled` turned ON by the owner 2026-07-28) |
 | 04:40 | `/cron/indexnow-push` | Vercel cron | Pushes changed and stale URLs to IndexNow | LIVE |
 | 12:30 | `/cron/seo-daily` | Vercel cron | Computes index deltas from `gsc_index_daily`, pushes recrawl batches, files tickets on anomalies, writes the digest blob | LIVE |
@@ -178,7 +178,8 @@ mode.
 | **CI** | `npm run typecheck`, `npm test`, `npm run build` all pass. The required status check on `main` is the `check` job in `.github/workflows/ci.yml` | GitHub Actions | LIVE |
 | **Agent allowlist** | Every changed file on an `agents/suggestion-*` branch is inside `agent-editor`'s allowlist. Turns a prose rule into an enforced check | GitHub Actions | LIVE (`.github/workflows/agent-allowlist.yml`, mirrored by `AGENT_EDITOR_ALLOWLIST_RE` in release-engine.server.ts) |
 | **QA verdict** | A human-grade review of the diff plus CI status plus the rendered preview, with evidence. Required for `kind:'code'`; docs PRs need the allowlist check instead | `qa-reviewer`, R-QA routine | LIVE (R-QA, `trig_019GjVP9hGBU1gmXRBYtYURm`, since 2026-07-28) |
-| **Protected-path classifier** | No changed file touches checkout or payment, cart, `db/migrations` or `db/schema.ts`, auth or session, team valves or spend controls (`team.server.ts`, `team-keys.ts`), `.github/`, `vercel.json`, `.env*`, `package.json`, or the release engine's own files. Runs on the changed-file list from the GitHub API, never on ticket or PR text | Release engine | LIVE (`PROTECTED_GLOBS` + `classifyChangedFiles`, app/lib/github.server.ts) |
+| **Protected-path classifier** | **Cost-only since 2026-08-19.** No changed file touches the cost gate (`team.server.ts`, `team-keys.ts`, `homepage-team*.ts`, `settings.server.ts`), the enforcement core (`github.server.ts`, `release-engine.server.ts`, `migration-classify.server.ts`, `.github/`), secrets (`.env*`), the checkout probe, the deploy-critical build steps (`scripts/apply-additive-migrations.ts`, `scripts/build-vercel.mjs`), or `db/migrations/**`. Runs on the changed-file list from the GitHub API, never on ticket or PR text | Release engine | LIVE (`PROTECTED_GLOBS` + `classifyChangedFiles`, app/lib/github.server.ts) |
+| **Migration content refinement** | A migration-only PR clears the classifier when every statement in every newly added `.sql` file matches the additive allowlist the build-time apply step uses. Anything else, including a modified or renamed migration and any file it cannot read, stays protected | Release engine | LIVE (`refineMigrationProtection`, app/lib/github.server.ts, on `classifyFile` from migration-classify.server.ts) |
 | **Render-truth** | The published slate demonstrably rendered on the live page. Replaces "HTTP 200 and the hero renders", which is what let a three-day breakage go unseen | Healthcheck cron + Routine A step 7 | LIVE (PR #349; 9 assertions passing in production 2026-07-28, and see the 30-minute row above, which already says LIVE) |
 | **Theme** | During a theme week the hero, at least one rail, and at least one tile demonstrably belong to the active theme, and the orchestrator states the mapping in a run event. Failure means REVISE before publish, not a note afterwards | Routine A, `design-critic` | PLANNED, and honestly blocked: `design-critic` cannot obtain a screenshot in a scheduled run and correctly abstains. The capture pipeline was cut by the owner 2026-07-30, so this gate only runs when the owner invokes it interactively |
 | **Freshness** | The designated slots actually changed. An unchanged slate needs a stated reason; two identical consecutive days files a ticket | Routine A + a KV fingerprint check | LIVE (the sameness detector files `sameness:<slot>` tickets from the healthcheck). Was effectively muted on four slots until 2026-07-30, because an open ticket held the undated dedupe key and the detector could not re-file |
@@ -188,6 +189,30 @@ mode.
 The classifier deserves one extra sentence. It reads the changed-file list from the GitHub API, so
 no wording inside a ticket or PR description can talk it into reclassifying a diff, and the glob
 list covers the classifier's own file and the CI workflows, so no agent PR can widen it.
+
+**Why the list is short (owner direction 2026-08-19, round 2).** It used to encode "anything that
+looks scary": checkout and cart code, auth and session, `db/schema.ts`, `server/cron*.ts`,
+`vercel.json`, `package.json`. That cost ~15% of merged commits in owner escalations, dominated by
+loop machinery rather than by anything the owner wanted a say in. The owner's surface is cost, so
+the list is now only what an agent could use to **spend money** or to **disarm the gate it is
+passing through**: valves and budgets, the enforcement core, secrets, the money-path probe, the
+deploy-critical build steps, and migrations. Everything dropped is still covered by CI, the QA
+verdict, and post-deploy smoke with automatic revert — a bug there is the team's to catch, not the
+owner's to pre-approve. The one trade accepted knowingly is `package.json` / `package-lock.json`: a
+dependency change no longer stops for the owner. `.github/**` stays protected, so the workflow that
+installs those dependencies cannot itself be quietly rewritten.
+
+Migrations are the one entry that is refined by **content** rather than by filename.
+`refineMigrationProtection` reads the added `.sql` files at the PR head sha and runs them through
+the same classifier the build-time apply step uses (`migration-classify.server.ts`). If every
+statement is additive (`ADD COLUMN IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF
+NOT EXISTS`), the PR rides the ordinary lane, because the build will apply exactly those statements
+unattended anyway and a merge changes nothing about that. Every other case fails closed and
+escalates: a modified or renamed migration (it has likely already run in production), a non-`.sql`
+file, more than six migration files in one PR, an unreadable file, or a single statement outside the
+allowlist. The two decisions share one module on purpose: the engine must never merge a migration
+the build step would refuse to apply, or the merged-but-unapplied outage class (079/080, 2026-08)
+comes back.
 
 ---
 
@@ -256,8 +281,12 @@ and an owner ask must land on the blocker list or the 13:00 digest, never only i
 - **Protected-path merges, as a read-and-click.** The engine prepares, labels, and emails these and
   never merges one. Since 2026-08-19 agents author these diffs (R-DEV Step 2, QA protected
   checklist), so the owner's job here is reading a pre-verified diff and clicking merge, not
-  writing code. The DB class (migrations/schema) keeps the old owner-authored path until the
-  migration dry-run CI job has run clean for two weeks.
+  writing code. The list itself is now cost-only (§4), so this inbox is valves, the enforcement
+  core, secrets, the money-path probe, the deploy-critical build steps, and non-additive
+  migrations. A provably additive migration no longer lands here at all: it clears on content,
+  because the build-time apply step would run those exact statements unattended regardless of who
+  clicked merge. `db/schema.ts` is no longer protected; the SQL that actually changes the database
+  still is.
 - **Brand, legal, and likeness judgment.** Cast approvals, charter changes ("codify"), anything
   with legal exposure.
 - **The five escalations in §5**, when they land. That is the intended inbox volume: rare.
@@ -350,9 +379,14 @@ owner-attended session and merged by the owner. Since 2026-08-19 (owner directio
 protected-path diffs like any other ticket, under the extra rules in Step 2 (a "Protected-path
 diff" PR-body section, never widening agent permissions or weakening a gate) and the QA
 protected-path checklist. The merge is still the owner's, always: the engine classifies from the
-changed-file list and escalates, unconditionally. The DB class (`db/migrations/**`,
-`db/schema.ts`) keeps the old blocked path until the migration dry-run CI job has run clean for
-two weeks, because CI cannot execute SQL today and a green check proves nothing about a migration.
+changed-file list and escalates, unconditionally.
+
+**Superseded 2026-08-21 for the DB class.** That clause used to read "keeps the old blocked path
+until the migration dry-run CI job has run clean for two weeks, because CI cannot execute SQL
+today". The dry-run job (PR #791) does execute the SQL now, against postgres:16, and the merge
+question is settled by content rather than by soak time: `refineMigrationProtection` clears only
+migrations the production build step would apply unattended anyway, and fails closed on everything
+else (§4). A migration whose SQL is not provably additive still escalates exactly as before.
 
 This has a consequence worth stating plainly, because it looks like a paradox and gets rediscovered
 every few weeks: **the changes that would reduce the owner's merge load are themselves almost all

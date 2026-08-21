@@ -198,9 +198,15 @@ in the verdict rather than a bare PASS/FAIL. Only if the route itself is unreach
 fall back to `unverified: no cloud-reachable route` and say so. Sub-checks (2) and (3) run over
 xdipx.com endpoints and stay verifiable.
 
-**Protected-path PRs get an extra checklist (added 2026-08-19).** Since owner direction 2026-08-19,
-R-DEV authors protected-path diffs (except the DB carve-out) instead of blocking them; the engine
-still never merges these, it escalates them to the owner. Your `verified` verdict is what makes the
+**Protected-path PRs get an extra checklist (added 2026-08-19, narrowed 2026-08-21).** Since owner
+direction 2026-08-19, R-DEV authors protected-path diffs instead of blocking them; the engine still
+never merges these, it escalates them to the owner. The list itself is cost-only now, so this
+checklist applies to a smaller set than it did: valves and budgets, the enforcement core
+(`github.server.ts`, `release-engine.server.ts`, `migration-classify.server.ts`, `.github/**`),
+secrets, the checkout probe, the deploy-critical build scripts, and non-additive migrations.
+Checkout and cart code, auth/session, `db/schema.ts`, `vercel.json`, and `package.json` are
+ordinary code PRs now: review them as such, and do not bounce one for missing a protected-path
+section it no longer needs. Your `verified` verdict is what makes the
 owner's merge a one-click read instead of a re-derivation, so it carries more weight here, not
 less. In addition to the normal checks, require ALL of:
 
@@ -210,10 +216,17 @@ less. In addition to the normal checks, require ALL of:
    agent write path to `pipeline_settings`, no valve default changes, no transition-map loosening,
    no money-valve semantics changes. If it does any of these, bounce it and say which line; that
    class is owner-decided, not agent-authored.
-3. For auth/session diffs: the body states the specific invariant preserved (e.g. "admin session
-   cookie scope unchanged") and you confirmed it against the diff.
-4. For migration diffs (only after the DB carve-out lifts): dry-run evidence against a scratch
-   Postgres is present in the body or CI.
+3. For auth/session diffs: these are no longer protected, but the invariant question is still the
+   right one to ask in an ordinary review. State in your note what you checked (e.g. "admin session
+   cookie scope unchanged").
+4. **For migration diffs, check the classifier's own verdict before anything else.** A
+   migration-only PR whose SQL is entirely additive is NOT escalated: it merges on the ordinary
+   lane once `migration-dry-run` is green, so your `verified` verdict is the last human read it
+   gets. Confirm the `migration-dry-run` check passed (not just `check`), and read the SQL yourself
+   for the things "additive" does not cover: a new NOT NULL column with no default on a populated
+   table, an index that will lock, a column name that collides. A migration that escalates instead
+   (anything with a DROP, RENAME, ALTER TYPE, DML, or a modification to an already-merged migration
+   file) goes through the full checklist above and ends at the owner.
 
 A protected PR you verify still ends at the owner: the engine labels it `needs-owner` and emails
 once. Say in your verdict note that the checklist passed, so the owner's email reads as

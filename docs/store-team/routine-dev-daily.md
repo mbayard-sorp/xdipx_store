@@ -150,11 +150,22 @@ three extra requirements:
 3. Transition the ticket to `pr_open` as normal. QA reviews it against the protected-path
    checklist in `routine-qa-daily.md`; the engine escalates it to the owner for merge.
 
-**Carve-out, DB class:** tickets whose diff touches `db/migrations/**` or `db/schema.ts` still go
-to `blocked` exactly as before, because CI cannot execute SQL today (the check job never opens a
-database connection), so a green check proves nothing about a migration. This carve-out lifts once
-the migration dry-run CI job (PR opened 2026-08-19) has been merged and running clean for two
-weeks; whoever lifts it updates this paragraph in the same PR.
+**DB class, lifted 2026-08-21.** This used to say migration and schema tickets still go to
+`blocked`, because CI could not execute SQL. It can now: the `migration-dry-run` job in
+`.github/workflows/ci.yml` runs every additive-classified migration in the PR against a throwaway
+postgres:16, and `db/schema.ts` is no longer a protected path at all. So author these like any
+other ticket. Two things to know while doing it:
+
+- **A migration PR may auto-merge.** `refineMigrationProtection` clears a migration-only PR when
+  every statement in every newly added `.sql` file is additive (`ADD COLUMN IF NOT EXISTS`,
+  `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`) AND the `migration-dry-run` check is
+  green. That is deliberate: the production build applies exactly those statements unattended
+  anyway. Write the migration expecting it to ship without an owner reading it.
+- **Everything else about migrations still escalates**, with no way to argue it down: a `DROP`, a
+  `RENAME`, an `ALTER TYPE`, any DML, an `ALTER TABLE` without `IF NOT EXISTS`, a *modified* or
+  *renamed* existing migration file (it has probably already run in production), a non-`.sql` file
+  under `db/migrations/`, or more than six migration files in one PR. Never edit a migration that
+  has already merged; add a new one.
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \

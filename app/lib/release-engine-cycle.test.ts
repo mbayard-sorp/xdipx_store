@@ -208,7 +208,7 @@ describe('daily cap decoupling', () => {
       ({
         ok: true, status: 200,
         data: n === 11
-          ? [{ filename: 'db/schema.ts' }]
+          ? [{ filename: 'app/lib/team.server.ts' }]
           : [{ filename: 'app/lib/storefront-home.server.ts' }],
       }) as never)
     vi.mocked(getChecksForRef).mockResolvedValue({
@@ -275,6 +275,115 @@ describe('daily cap decoupling', () => {
     const res = await runReleaseEngineCycle()
     expect(res.phase).toBe('merged')
     expect(vi.mocked(squashMergePullRequest)).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 1b. Migration PRs: cleared by content, or not at all
+// ---------------------------------------------------------------------------
+
+/**
+ * End-to-end through the real classifier and the real refinement, with only the
+ * network mocked. The point is that the merge decision and the build-time apply
+ * decision come from the same rules: a migration the build step would apply
+ * unattended no longer waits on the owner, and one it would refuse still does.
+ */
+describe('migration PRs are cleared by content, not by filename', () => {
+  // The refinement's content read goes through the module's own githubRequest,
+  // which the module-level mock does not intercept (an internal call keeps the
+  // original binding). So this stubs the layer below it: fetch itself.
+  const fetchMock = vi.fn()
+
+  const GREEN_CHECKS = [
+    { name: 'check', status: 'completed', conclusion: 'success' },
+    { name: 'migration-dry-run', status: 'completed', conclusion: 'success' },
+  ]
+
+  /** Set up one migration PR whose body the contents endpoint answers with. */
+  const migrationCycle = async (contents: Response, checks: unknown[] = GREEN_CHECKS) => {
+    h.state.kvGet = (k) => (k.startsWith('release-engine:merges:') ? 0 : cappedKv(k))
+    vi.stubEnv('GITHUB_TOKEN', 'test-token')
+    vi.stubEnv('GITHUB_OWNER', 'test-owner')
+    vi.stubEnv('GITHUB_REPO', 'test-repo')
+    fetchMock.mockReset()
+    fetchMock.mockResolvedValue(contents)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const migration_pr = pr(20, 'ticket/77')
+    vi.mocked(listOpenPullRequests).mockResolvedValue({ ok: true, status: 200, data: [migration_pr] } as never)
+    vi.mocked(getPullRequest).mockResolvedValue({ ok: true, status: 200, data: migration_pr } as never)
+    vi.mocked(listPullRequestFiles).mockResolvedValue({
+      ok: true, status: 200, data: [{ filename: 'db/migrations/081_add_column.sql', status: 'added' }],
+    } as never)
+    vi.mocked(getChecksForRef).mockResolvedValue({ ok: true, status: 200, data: { checks } } as never)
+    vi.mocked(squashMergePullRequest).mockResolvedValue({ ok: true, status: 200, data: { sha: 'deadbeef' } } as never)
+    h.state.selects = [
+      [{ suggestionId: 77, ref: 'https://github.com/o/r/pull/20' }],
+      [{ id: 77, status: 'verified', kind: 'code', attemptCount: 0 }],
+    ]
+
+    return runReleaseEngineCycle()
+  }
+
+  const sqlResponse = (sql: string) =>
+    new Response(
+      JSON.stringify({ type: 'file', encoding: 'base64', content: Buffer.from(sql, 'utf8').toString('base64') }),
+      { status: 200 },
+    )
+
+  it('merges an additive migration instead of escalating it', async () => {
+    const res = await migrationCycle(
+      sqlResponse('ALTER TABLE tickets ADD COLUMN IF NOT EXISTS shipped_at timestamptz;'),
+    )
+
+    expect(res.decisions.find((d) => d.prNumber === 20)?.action).toBe('merge')
+    expect(vi.mocked(squashMergePullRequest)).toHaveBeenCalledTimes(1)
+    // Read at the head sha, never at a branch ref that could move under it.
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('ref=sha-20')
+  })
+
+  it('still escalates a migration with a destructive statement in it', async () => {
+    const res = await migrationCycle(sqlResponse('DROP TABLE tickets;'))
+
+    expect(res.decisions.find((d) => d.prNumber === 20)?.action).toBe('escalate-protected')
+    expect(vi.mocked(squashMergePullRequest)).not.toHaveBeenCalled()
+    expect(vi.mocked(addLabels)).toHaveBeenCalledWith(20, [NEEDS_OWNER_LABEL], 'release-engine')
+  })
+
+  it('still escalates when the migration body cannot be read', async () => {
+    const res = await migrationCycle(new Response('Not Found', { status: 404 }))
+
+    expect(res.decisions.find((d) => d.prNumber === 20)?.action).toBe('escalate-protected')
+    expect(vi.mocked(squashMergePullRequest)).not.toHaveBeenCalled()
+  })
+
+  // `check` compiles the app and executes no SQL, so it cannot stand in for the
+  // dry-run. Without this the shape-additive-but-broken migration (bad type,
+  // missing table) would auto-merge on a green typecheck.
+  it('does not clear an additive migration while the real-Postgres dry-run is red', async () => {
+    const res = await migrationCycle(
+      sqlResponse('ALTER TABLE tickets ADD COLUMN IF NOT EXISTS shipped_at timestamptz;'),
+      [
+        { name: 'check', status: 'completed', conclusion: 'success' },
+        { name: 'migration-dry-run', status: 'completed', conclusion: 'failure' },
+      ],
+    )
+
+    expect(res.decisions.find((d) => d.prNumber === 20)?.action).toBe('escalate-protected')
+    expect(vi.mocked(squashMergePullRequest)).not.toHaveBeenCalled()
+  })
+
+  it('does not clear an additive migration while the dry-run is still pending', async () => {
+    const res = await migrationCycle(
+      sqlResponse('ALTER TABLE tickets ADD COLUMN IF NOT EXISTS shipped_at timestamptz;'),
+      [
+        { name: 'check', status: 'completed', conclusion: 'success' },
+        { name: 'migration-dry-run', status: 'in_progress', conclusion: null },
+      ],
+    )
+
+    expect(res.decisions.find((d) => d.prNumber === 20)?.action).toBe('escalate-protected')
+    expect(vi.mocked(squashMergePullRequest)).not.toHaveBeenCalled()
   })
 })
 

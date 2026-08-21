@@ -102,15 +102,23 @@ jobs:
   # writes, see the script for both).
   #
   # Deliberately NOT part of the `check` job: `check` is the release engine's
-  # REQUIRED_CHECK gate (app/lib/release-engine.server.ts), and every PR that
-  # touches db/migrations/** is already a protected path
-  # (PROTECTED_GLOBS in app/lib/github.server.ts) that stops for the owner
-  # regardless of CI. Folding this in would only slow down every non-migration
-  # PR for a check that can never change their merge eligibility. It still
-  # needs to be a real, visible check on the PR though, which is what a
-  # separate job gives us: it always runs and reports (skipping its real work
-  # when the PR does not touch migrations), so a migration PR shows a genuine
-  # pass/fail rather than nothing.
+  # REQUIRED_CHECK gate (app/lib/release-engine.server.ts) and runs on every
+  # PR, while this job has real work to do only on the few that touch
+  # db/migrations/**. Folding it in would slow every unrelated merge down for
+  # a check with nothing to check. It still needs to be a real, visible check
+  # on the PR, which is what a separate job gives us: it always runs and
+  # reports (skipping its real work when the PR does not touch migrations), so
+  # a migration PR shows a genuine pass/fail rather than nothing.
+  #
+  # This job IS load-bearing as of 2026-08-21. It used to be advisory, because
+  # every db/migrations/** PR stopped for the owner regardless of CI. It no
+  # longer does: refineMigrationProtection (app/lib/github.server.ts) clears a
+  # migration PR whose statements are all additive, and the release engine
+  # requires THIS job to be green before it will honour that clearance
+  # (MIGRATION_DRY_RUN_CHECK in release-engine.server.ts). `check` proves the
+  # app compiles and executes no SQL; this job is the only thing that proves
+  # the migration actually runs. Renaming the job without updating that
+  # constant turns the clearance off (fail-closed), not on.
   migration-dry-run:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
