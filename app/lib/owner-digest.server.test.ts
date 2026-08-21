@@ -60,6 +60,7 @@ import {
   renderOpsWatchSection,
   renderOwnerQueueSection,
   OWNER_DECISION_KINDS,
+  STALE_OWNER_ROW_KINDS,
   renderNeedsMikeSection,
   renderShippedSection,
   renderTicketLoopSection,
@@ -301,6 +302,18 @@ describe('OWNER_DECISION_KINDS (#4356)', () => {
       expect(OWNER_DECISION_KINDS).not.toContain(k)
     }
     expect(OWNER_DECISION_KINDS).toContain('program')
+  })
+})
+
+describe('STALE_OWNER_ROW_KINDS (#4453)', () => {
+  it('excludes kinds an agent lane can close, so the Needs Mike list stays owner-only', () => {
+    // Same fix as #4356 for OWNER_DECISION_KINDS, on the Needs Mike / stale-owner
+    // surface: campaign/promo gained an agent close edge (PR #789), so they no
+    // longer belong here. Only program, which has no automated executor, remains.
+    for (const k of ['campaign', 'promo']) {
+      expect(STALE_OWNER_ROW_KINDS).not.toContain(k)
+    }
+    expect(STALE_OWNER_ROW_KINDS).toContain('program')
   })
 })
 
