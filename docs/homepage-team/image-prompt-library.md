@@ -725,18 +725,23 @@ are the empty-state fallback, never a layer on top of a photo.
 **Rejects:** multiple products in one square; props competing with the product; any tint outside
 the ground lock.
 
-## Panel large — art zone (42% column, deck large row): abstract composition from a product
+## Panel large — art zone (full-width 2:1 top strip, deck large row): abstract composition from a product
 
-**`--image-size` is mandatory on every deck generation.** The CLI defaults to `landscape_16_9`,
-and a 16:9 source dropped into a portrait art zone under `object-cover` loses most of its width, so
-a brief composed for a tall slot comes back cropped to nothing with no error anywhere. Pass
-`--image-size portrait_4_3` for this surface.
+**`--image-size landscape_16_9` for this surface (also the generator default).** The art zone is
+now a full-width top strip at a fixed 2:1 landscape aspect (see below), so a landscape source fills
+it and a portrait one comes back cropped to nothing with no error anywhere. `landscape_16_9` (1.78)
+is the nearest token the generator supports to the box's 2:1 (2.0) — no closer landscape size exists
+in its enum (`square_hd`, `portrait_4_3`, `portrait_16_9`, `landscape_4_3`, `landscape_16_9`) — and
+under `object-cover` it trims only a little off the top and bottom. Do NOT pass `portrait_4_3` here
+(that was the pre-#721 spec): a portrait source in a wide 2:1 box loses most of its height.
 
-There is no wide image slot on this panel. `PanelLarge.tsx` renders exactly one image, into the art
-zone: 42% of the panel's fluid width against a fixed 240px height, so the aspect swings with the
-viewport (≈0.89 at 375px, ≈0.55 at 768px, ≈0.77 at 1024px, ≈1.03 at 1320px), all center-cropped.
-`portrait_4_3` sits near the middle of that range. Compose vertically and keep everything that
-carries the idea inside the central half of the frame width.
+`PanelLarge.tsx` renders exactly one image, into the art zone: the full card width at a fixed 2:1
+aspect (`aspect-[2/1] w-full`) at every breakpoint (ticket #352 / #3529 / PR #721; doctrine 8.4,
+fixed aspect ratios on all media frames). The old side-by-side split — a 42% art column against a
+fixed 240px height whose aspect swung roughly 0.55 to 1.03 across 375/768/1024/1320 — is gone, so a
+single 2:1 brief now composes for the one crop the surface actually renders. Compose HORIZONTALLY
+and keep everything that carries the idea inside the central height band of the frame, since
+`object-cover` trims the top and bottom edges of a 16:9 source in the slightly wider 2:1 box.
 
 **The art zone always bleeds to the card edge. Never an inset plate inside the rectangle**
 (owner direction 2026-07-30).
@@ -757,13 +762,13 @@ has no backdrop at all, so the boundary reads as a crop.
   rather than a ground behind a subject, and a dark product anchors it.
 
 > Abstract editorial art photograph, bright and high-key, shot like a luxury campaign, confident and
-> tasteful, non-explicit. TALL VERTICAL PORTRAIT COMPOSITION THAT FILLS THE ENTIRE FRAME EDGE TO EDGE
-> WITH NO EMPTY BACKGROUND ANYWHERE. {A hard-edged geometric collage of overlapping flat colour
-> fields, broad blocks and diagonal bands of {coral-soft | plum-soft | paper}, each band running off
-> the edges of the frame | An extreme close crop of the {product} so close it reads as pure
-> sculptural form, its curves swelling across the whole frame}. {The {product}, ENORMOUS AND CROPPED
-> BY THE FRAME EDGES, running the full height of the composition; keep its shape, colour and finish
-> exactly as the reference image, every surface completely blank and unprinted}. {Optional: one
+> tasteful, non-explicit. WIDE HORIZONTAL 2:1 LANDSCAPE COMPOSITION THAT FILLS THE ENTIRE FRAME EDGE
+> TO EDGE WITH NO EMPTY BACKGROUND ANYWHERE. {A hard-edged geometric collage of overlapping flat
+> colour fields, broad blocks and diagonal bands of {coral-soft | plum-soft | paper}, each band
+> running off the edges of the frame | An extreme close crop of the {product} so close it reads as
+> pure sculptural form, its curves swelling across the whole frame}. {The {product}, ENORMOUS AND
+> CROPPED BY THE FRAME EDGES, running the full width of the composition; keep its shape, colour and
+> finish exactly as the reference image, every surface completely blank and unprinted}. {Optional: one
 > length of sage-green SATIN FABRIC RIBBON, clearly cloth with visible folds and a soft sheen,
 > sweeping across the frame as a single curved line and running off both edges}. Flat graphic light,
 > crisp edges, no vignette, no gradient, no colour wash, no seamless studio backdrop, no visible
@@ -772,7 +777,10 @@ has no backdrop at all, so the boundary reads as a crop.
 Negative tail, on top of the mandatory list: `no empty background, no small object in a large empty
 frame, no drop shadow on a seamless backdrop`
 
-**Keepers:** Black Tie Affair Mini Wand (`tie-affair-mini-wand`, bare-product ref `99256B.jpg`) as a
+**Keepers:** (both predate the PR #721 2:1 change, so their portrait `880x1184` aspect is no longer
+the target — only the composition technique they show, ground-match plus abstract collage over
+packshot, carries forward; recompose horizontally for the 2:1 box.) Black Tie Affair Mini Wand
+(`tie-affair-mini-wand`, bare-product ref `99256B.jpg`) as a
 matte black form laid on a diagonal across flat lilac and cream collage fields, filling the frame →
 `image-373cf25f931b54317a762fdc64e6a4b4009f4b13-880x1184-jpg` (`lg-discover`, ink ground: the
 first brief in four that held on an ink card).
