@@ -18,7 +18,12 @@
  *     requirement) and are otherwise never consulted. A protected PR is
  *     labelled, emailed once, and skipped forever. See PROTECTED_GLOBS in
  *     github.server.ts, which protects this file and .github/** too, so no
- *     agent PR can widen the gate it is passing through.
+ *     agent PR can widen the gate it is passing through. That list is
+ *     cost-only as of 2026-08-19: it stops what could spend the owner's money
+ *     or disarm this engine, not everything that looks risky. The one
+ *     content-aware exception is migrations, where refineMigrationProtection
+ *     clears a PR whose SQL is provably additive using the same classifier the
+ *     build-time apply step runs, and fails closed on anything else.
  *  3. CI. `check` must not be failing, ever, for any PR, including reverts.
  *  4. Ticket. A code PR needs a QA-`verified` ticket. Docs-only agent-editor
  *     PRs need only the allowlist check, which is the carve-out the drift audit
@@ -59,6 +64,7 @@ import {
   normalizeChangedPath,
   openPullRequest,
   recyclePullRequest,
+  refineMigrationProtection,
   rerunFailedJobs,
   squashMergePullRequest,
   type ProtectedClassification,
@@ -117,6 +123,15 @@ export const REVERT_BRANCH_PREFIX = 'revert/pr-'
 
 /** The required CI check, from .github/workflows/ci.yml (job id `check`). */
 export const REQUIRED_CHECK = 'check'
+
+/**
+ * The real-Postgres migration dry-run, from .github/workflows/ci.yml (job id
+ * `migration-dry-run`). Required only to CLEAR a migration PR's protected
+ * status (see gatherFacts), never to merge an ordinary PR: the job reports on
+ * every PR and skips its real work when no migration changed, so requiring it
+ * everywhere would gate every merge on a job that had nothing to check.
+ */
+export const MIGRATION_DRY_RUN_CHECK = 'migration-dry-run'
 
 /**
  * The allowlist check, from .github/workflows/agent-allowlist.yml. GitHub names
@@ -1543,7 +1558,6 @@ async function gatherFacts(summary: PullRequestSummary): Promise<PullRequestFact
     console.warn(`${LOG} cannot read changed files for PR #${pr.number}, skipping: ${files.error}`)
     return null
   }
-  const classification = classifyChangedFiles(files.data)
   const changedPaths = files.data.flatMap((f) =>
     f.previousFilename ? [f.filename, f.previousFilename] : [f.filename],
   )
@@ -1555,6 +1569,27 @@ async function gatherFacts(summary: PullRequestSummary): Promise<PullRequestFact
   }
   const checks: Record<string, string | null> = {}
   for (const c of checksRes.data.checks) checks[c.name] = c.status === 'completed' ? c.conclusion : null
+
+  // A migration-only PR whose SQL is provably additive rides the ordinary lane
+  // instead of waiting on the owner, because the build-time apply step will run
+  // exactly those statements unattended anyway. Everything else, including any
+  // read failure inside the refinement, stays protected.
+  //
+  // Checks are read FIRST because clearing one also requires the real-Postgres
+  // dry-run to be green. `check` (REQUIRED_CHECK) proves the app compiles; it
+  // executes no SQL, so on its own it would let a migration that is additive by
+  // shape but broken in execution (a bad type, a missing table) auto-merge.
+  // MIGRATION_DRY_RUN_CHECK is the job that actually runs the file against
+  // postgres:16. It reports on every PR, so a missing or pending result here is
+  // an unfinished CI run, not an absent gate, and holds the PR for the owner.
+  const raw = classifyChangedFiles(files.data)
+  const refinement = checks[MIGRATION_DRY_RUN_CHECK] === 'success'
+    ? await refineMigrationProtection(raw, { files: files.data, ref: pr.headSha, context: 'release-engine' })
+    : { classification: raw, refined: false, reason: `${MIGRATION_DRY_RUN_CHECK} is not green` }
+  if (refinement.refined) {
+    console.log(`${LOG} PR #${pr.number}: migration protection cleared by content: ${refinement.reason}`)
+  }
+  const classification = refinement.classification
 
   let ticket: TicketFacts | null = null
   try {

@@ -262,19 +262,23 @@ describe('checkState', () => {
 // ---------------------------------------------------------------------------
 
 describe('protected classification routing', () => {
+  // Cost-only as of 2026-08-19: what stops here is what could spend the
+  // owner's money or disarm this engine. Checkout, cart, auth, session,
+  // db/schema.ts, vercel.json, and package.json deliberately no longer stop;
+  // they are covered by CI, the QA verdict, and post-deploy smoke with revert.
   const protectedCases: Array<[string, string]> = [
-    ['app/lib/emma-cart.server.ts', 'cart'],
-    ['app/routes/_layout.checkout-extras.tsx', 'checkout route'],
-    ['db/migrations/072_thing.sql', 'migration'],
-    ['db/schema.ts', 'schema'],
-    ['app/lib/session.server.ts', 'session'],
     ['app/lib/team.server.ts', 'team valves'],
     ['app/lib/team-keys.ts', 'team keys'],
+    ['app/lib/homepage-team.server.ts', 'homepage valves'],
+    ['app/lib/settings.server.ts', 'the audited valve write path'],
+    ['db/migrations/072_thing.sql', 'migration'],
     ['.github/workflows/ci.yml', 'CI config'],
-    ['vercel.json', 'deploy config'],
-    ['package.json', 'dependencies'],
+    ['.env.production', 'secrets'],
+    ['app/lib/checkout-probe.server.ts', 'the money-path smoke check'],
+    ['scripts/apply-additive-migrations.ts', 'the build-time apply step'],
     ['app/lib/release-engine.server.ts', 'the engine itself'],
     ['app/lib/github.server.ts', 'the classifier itself'],
+    ['app/lib/migration-classify.server.ts', 'the shared SQL classifier'],
   ]
 
   for (const [file, label] of protectedCases) {
@@ -286,11 +290,39 @@ describe('protected classification routing', () => {
     })
   }
 
+  // The other half of the cost-only narrowing: these used to escalate and now
+  // must not, or the narrowing did not actually happen. They still have to pass
+  // every other gate, which is why the fixture is a green, verified PR.
+  const nowMerging: Array<[string, string]> = [
+    ['app/lib/emma-cart.server.ts', 'cart'],
+    ['app/routes/_layout.checkout-extras.tsx', 'checkout route'],
+    ['db/schema.ts', 'the Drizzle schema'],
+    ['app/lib/session.server.ts', 'session'],
+    ['app/lib/neon-auth.server.ts', 'auth'],
+    ['server/cron.ts', 'cron'],
+    ['vercel.json', 'deploy config'],
+    ['package.json', 'dependencies'],
+  ]
+
+  for (const [file, label] of nowMerging) {
+    it(`no longer escalates ${label}, which the owner handed back to the team`, () => {
+      const d = evaluatePullRequest(
+        facts({
+          changedPaths: [file],
+          classification: classifyChangedFiles([file]),
+          checks: { check: 'success' },
+          ticket: verifiedTicket,
+        }),
+      )
+      expect(d.action).toBe('merge')
+    })
+  }
+
   it('escalates even when CI is green, the ticket is verified, and the diff is one file', () => {
     const d = evaluatePullRequest(
       facts({
-        changedPaths: ['db/schema.ts'],
-        classification: classifyChangedFiles(['db/schema.ts']),
+        changedPaths: ['app/lib/team.server.ts'],
+        classification: classifyChangedFiles(['app/lib/team.server.ts']),
         checks: { check: 'success', allowlist: 'success' },
         ticket: verifiedTicket,
       }),
@@ -315,8 +347,8 @@ describe('protected classification routing', () => {
       facts({
         headRef: 'revert/pr-77',
         ticket: null,
-        changedPaths: ['app/lib/emma-cart.server.ts'],
-        classification: classifyChangedFiles(['app/lib/emma-cart.server.ts']),
+        changedPaths: ['app/lib/settings.server.ts'],
+        classification: classifyChangedFiles(['app/lib/settings.server.ts']),
       }),
     )
     expect(d.action).toBe('escalate-protected')
@@ -348,8 +380,8 @@ describe('protected classification routing', () => {
     // And a protected file list stays protected no matter what the ticket says.
     const lying = evaluatePullRequest(
       facts({
-        changedPaths: ['db/schema.ts'],
-        classification: classifyChangedFiles(['db/schema.ts']),
+        changedPaths: ['app/lib/team.server.ts'],
+        classification: classifyChangedFiles(['app/lib/team.server.ts']),
         ticket: { id: 41, status: 'verified', kind: 'process', attemptCount: 0 },
       }),
     )
@@ -412,7 +444,7 @@ describe('evaluatePullRequest: gates', () => {
 
   it('leaves a drafted protected PR to the owner rather than undrafting it', () => {
     const d = evaluatePullRequest(
-      facts({ draft: true, headRef: DOCS_BRANCH, changedPaths: ['db/schema.ts'] }),
+      facts({ draft: true, headRef: DOCS_BRANCH, changedPaths: ['app/lib/team.server.ts'] }),
     )
     expect(d.action).toBe('escalate-protected')
   })
@@ -582,7 +614,7 @@ describe('evaluatePullRequest: missing and no-verdict checks', () => {
   // the one gate that has no override.
   it('still escalates a protected path ahead of any re-trigger', () => {
     const d = evaluatePullRequest(
-      facts({ changedPaths: ['db/schema.ts'], checks: {}, ageMs: OLD }),
+      facts({ changedPaths: ['app/lib/team.server.ts'], checks: {}, ageMs: OLD }),
     )
     expect(d.action).toBe('escalate-protected')
     expect(d.code).toBe('protected')
@@ -866,8 +898,8 @@ describe('conditional undraft on owner-attended lanes', () => {
   it('still lets protected classification and the needs-owner label win', () => {
     const protectedDraft = evaluatePullRequest({
       ...eligible(),
-      changedPaths: ['db/schema.ts'],
-      classification: classifyChangedFiles(['db/schema.ts']),
+      changedPaths: ['app/lib/team.server.ts'],
+      classification: classifyChangedFiles(['app/lib/team.server.ts']),
     })
     expect(protectedDraft.action).toBe('escalate-protected')
 

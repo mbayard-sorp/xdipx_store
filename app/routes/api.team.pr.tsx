@@ -21,6 +21,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
 import { QA_AGE_BYPASS_HEADER, qaAgeBypassToken } from '~/lib/qa-preview.server'
+import { MIGRATION_DRY_RUN_CHECK } from '~/lib/release-engine.server'
 import {
   classifyChangedFiles,
   findPreviewUrl,
@@ -28,6 +29,7 @@ import {
   getPullRequest,
   isGithubConfigured,
   listPullRequestFiles,
+  refineMigrationProtection,
   sanitizePreviewPath,
 } from '~/lib/github.server'
 
@@ -170,7 +172,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { pr, files, checks, preview } = res
   if (!files.ok) return json({ ok: false, error: files.error }, 502)
 
-  const classification = classifyChangedFiles(files.data)
+  // The same two steps the release engine runs, under the same precondition, so
+  // QA reading this endpoint sees the verdict the engine will actually act on
+  // rather than the raw one. A migration-only PR whose SQL is provably additive
+  // comes back unprotected, but only once the real-Postgres dry-run is green;
+  // `migrationRefinement.reason` says why, either way.
+  const dryRunGreen =
+    checks.ok && checks.data.checks.some((c) => c.name === MIGRATION_DRY_RUN_CHECK && c.conclusion === 'success')
+  const raw = classifyChangedFiles(files.data)
+  const refinement = dryRunGreen
+    ? await refineMigrationProtection(raw, { files: files.data, ref: pr.headSha, context: CONTEXT })
+    : { classification: raw, refined: false, reason: `${MIGRATION_DRY_RUN_CHECK} is not green` }
+  const classification = refinement.classification
 
   return json({
     ok: true,
@@ -208,6 +221,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Computed from the changed-file list above and nothing else. PR title,
     // body, and ticket text are never inputs to this verdict.
     protectedPaths: classification,
+    migrationRefinement: { refined: refinement.refined, reason: refinement.reason },
   })
 }
 

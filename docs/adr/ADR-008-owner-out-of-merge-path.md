@@ -44,11 +44,19 @@ already merged days ago, because they were merged by hand *before* QA ever touch
 does not check `pr_open`/`in_review`. The bus's model of reality is wrong for exactly the PRs the owner
 merged himself, which is the majority case today.
 
-Protected paths (checkout, cart, `db/migrations/**`, `db/schema.ts`, auth/session,
-`app/lib/team.server.ts`, `app/lib/release-engine.server.ts`, `app/lib/github.server.ts`, `.github/**`,
-`vercel.json`, `package.json`, spend/valve files) are enforced by `classifyChangedFiles` in
-`app/lib/github.server.ts` against `PROTECTED_GLOBS`, checked first and unconditionally in
-`evaluatePullRequest`. Nothing in this ADR touches that list or that ordering.
+Protected paths are enforced by `classifyChangedFiles` in `app/lib/github.server.ts` against
+`PROTECTED_GLOBS`, checked first and unconditionally in `evaluatePullRequest`. Nothing in this ADR
+touches that list or that ordering.
+
+> **Updated 2026-08-21.** When this ADR was written the list read: checkout, cart,
+> `db/migrations/**`, `db/schema.ts`, auth/session, `app/lib/team.server.ts`,
+> `app/lib/release-engine.server.ts`, `app/lib/github.server.ts`, `.github/**`, `vercel.json`,
+> `package.json`, spend/valve files. It is cost-only now (owner direction 2026-08-19): the cost
+> gate, the enforcement core, secrets, the checkout probe, the deploy-critical build steps, and
+> `db/migrations/**` refined by content. Checkout and cart code, auth/session, `db/schema.ts`,
+> `vercel.json`, and `package.json` no longer stop for the owner. See §4 of
+> `docs/store-team/operating-system.md`. The ordering this ADR relies on is unchanged: the
+> classifier still runs first and still overrides everything.
 
 ## Decision
 
@@ -317,4 +325,5 @@ attended decision with the tradeoff stated, not a throughput tweak.
 frequency and consume the two-rollback circuit breaker faster. A burst of merges against a flaky
 smoke check would trip the breaker and disable the engine, which is the opposite of the goal.
 
-**Widening `PROTECTED_GLOBS`, in either direction.** Nothing here needs it.
+**Widening `PROTECTED_GLOBS`, in either direction.** Nothing here needs it. (The list was in fact
+narrowed on 2026-08-19, by separate owner direction, not by anything in this ADR.)

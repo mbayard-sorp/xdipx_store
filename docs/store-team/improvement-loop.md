@@ -202,10 +202,13 @@ Escalation means an email to **mike@xdipx.com** (`sendOwnerEmail`, `app/lib/owne
 The loop is only worth having if it stays quiet, so escalate when, and only when, one of these five
 things is true:
 
-1. **A protected-path PR exists.** The classifier found checkout or payment, cart, `db/migrations`
-   or `db/schema.ts`, auth or session, team valves or spend controls, `.github/`, `vercel.json`,
-   `.env*`, `package.json`, or the release engine's own files in the diff. The engine labels the PR
-   `needs-owner`, emails once (deduped per PR), and never merges it. Only the owner merges those.
+1. **A protected-path PR exists.** The classifier found team valves or spend controls, the
+   enforcement core (`github.server.ts`, `release-engine.server.ts`, `migration-classify.server.ts`,
+   `.github/`), `.env*`, the checkout probe, the deploy-critical build scripts, or a `db/migrations`
+   file whose SQL is not provably additive. The engine labels the PR `needs-owner`, emails once
+   (deduped per PR), and never merges it. Only the owner merges those. The list is cost-only as of
+   2026-08-19: checkout and cart code, auth and session, `db/schema.ts`, `vercel.json`, and
+   `package.json` came off it. See §4 of `operating-system.md`.
 2. **A ticket reaches its third failed attempt.** The row goes to `blocked` and the email carries
    the ticket, its PRs, and the last three `last_error` values. This is the release engine's job for
    every bouncer, not just its own: it bounces on merge/deploy/smoke failure and blocks inline, and

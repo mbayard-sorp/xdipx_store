@@ -21,6 +21,8 @@
  *     Callers decide what is fatal; nothing here throws on an HTTP error.
  */
 
+import { classifyFile } from '~/lib/migration-classify.server'
+
 const API_BASE = 'https://api.github.com'
 const TIMEOUT_MS = 20_000
 /** GitHub caps `pulls/{n}/files` at 3000 entries; 100 per page, 30 pages max. */
@@ -749,79 +751,83 @@ export async function createRevertBranch(
  * Paths an autonomous merge must never touch. A PR matching any of these stops
  * and emails the owner; only the owner merges it.
  *
- * Two properties this list depends on:
- *  1. It is applied ONLY to the changed-file list returned by the GitHub API.
- *     Ticket text, PR title, and PR body are untrusted input and are never
- *     consulted, so prompt injection cannot reclassify a PR.
- *  2. It protects the machinery that enforces it: this file, the release
- *     engine, and .github/** are themselves protected, so no agent PR can
- *     widen the gate it is passing through.
+ * COST-ONLY (owner direction 2026-08-19, round 2). The owner's standing
+ * decision surface is money, brand/legal judgment, and valve flips. Everything
+ * else is the team's, with urgency. This list used to encode "anything scary",
+ * which cost ~15% of merged commits in owner escalations, dominated by loop
+ * machinery rather than by anything the owner actually wanted a say in. What
+ * survives is only what an agent could use to spend the owner's money or to
+ * dismantle the gate it is passing through:
  *
- * The first group is the policy list from the design doc, verbatim. The second
- * group closes holes that list has against this repo's actual filenames (for
- * example `app/lib/cart.server.ts` is the cart cookie helper and is not matched
- * by `app/lib/emma-cart.server.ts`). Widenings only ever add owner emails, they
- * never allow more automation.
+ *   1. The cost gate itself: valve definitions, budget ceilings, and the
+ *      audited write path to them.
+ *   2. The enforcement core: this file, the release engine, the shared SQL
+ *      classifier, and .github/**. An agent PR must not be able to widen the
+ *      gate it is being judged by, so the gate protects its own machinery.
+ *   3. Secrets.
+ *   4. The checkout probe, which is the smoke check that catches a broken
+ *      money path after a deploy. The checkout and cart code it exercises is
+ *      NOT protected any more; the probe that proves it still works is.
+ *   5. Deploy-critical build steps, which decide what runs during a deploy.
+ *   6. db/migrations/**, refined by content: see refineMigrationProtection
+ *      below. A provably additive migration rides the ordinary lane; anything
+ *      else stops for the owner.
+ *
+ * Deliberately dropped, and what that means:
+ *   - checkout/cart route and lib code, auth and session, server/cron*.ts,
+ *     db/schema.ts: broken code here is a bug, and bugs are the team's to
+ *     catch (CI, QA verdict, post-deploy smoke, automatic revert). None of
+ *     them are the owner's money decision.
+ *   - vercel.json, package.json, package-lock.json: config and dependency
+ *     changes. This is the one drop that trades away a supply-chain stop, and
+ *     it is deliberate: it was measured as almost none of the escalation cost
+ *     and the owner asked for cost-only. CI still runs on every dependency
+ *     change, and .github/** is still protected, so the workflow that installs
+ *     those dependencies cannot itself be quietly rewritten.
+ *
+ * The classifier is applied ONLY to the changed-file list returned by the
+ * GitHub API. Ticket text, PR title, and PR body are untrusted input and are
+ * never consulted, so prompt injection cannot reclassify a PR. Narrowing this
+ * list allows more automation, which is the point, and is exactly why the
+ * enforcement-core group above is not negotiable.
  */
 export const PROTECTED_GLOBS: readonly string[] = [
-  // --- policy list ---
-  '**/checkout*',
-  'app/lib/emma-cart.server.ts',
-  'app/components/store/CartDrawer.tsx',
-  'app/lib/checkout-probe*',
-  'db/migrations/**',
-  'db/schema.ts',
-  'app/lib/*auth*',
-  'app/lib/*session*',
+  // --- 1. cost gate: valves, budget ceilings, and the audited write path ---
   'app/lib/team.server.ts',
   'app/lib/team-keys.ts',
-  '.github/**',
-  'vercel.json',
-  '.env*',
-  'package.json',
-  'app/lib/release-engine.server.ts',
-  'app/lib/github.server.ts',
-
-  // --- widenings (same intent, this repo's real filenames) ---
-  // Any file whose name mentions checkout or cart, at any depth: catches
-  // app/routes/admin.checkout-upsells.tsx, app/routes/api.cart.tsx,
-  // app/lib/cart.server.ts, and future money-path files nobody remembers to add.
-  // (This comment used to cite app/routes/_layout.checkout-extras.tsx, which
-  // does not exist in the repo. The glob was always fine; the example was not.)
-  '**/*checkout*',
-  '**/*cart*',
-  // Valve and spend definitions beyond the two named files.
   'app/lib/homepage-team.server.ts',
   'app/lib/homepage-team-keys.ts',
-  // The audited write path for every pipeline_settings key, including the
-  // release engine's own enable flag. A change here can weaken or bypass the
-  // attribution trail on the store's entire safety boundary, so it needs the
-  // owner's eyes even though the file itself is small.
+  // Every pipeline_settings write goes through here, including the release
+  // engine's own enable flag. A change can weaken or bypass the attribution
+  // trail on the store's whole spend boundary.
   'app/lib/settings.server.ts',
-  // The cron auth block lives here; a change to it is a change to who can
-  // trigger every scheduled job.
-  //
-  // The glob covers the siblings too, because the entry was previously an exact
-  // filename while the handlers it authorises live in server/cron.<job>.ts. That
-  // meant server/cron.pricing-batch-recompute.ts and every other scheduled
-  // handler was unprotected, which contradicts the reason this line exists: the
-  // auth block only decides who may *call* a job, and the job itself is where
-  // the money and the writes are. A single `*` never crosses a directory
-  // boundary, so this stays scoped to server/.
-  'server/cron*.ts',
-  // Lockfile is the other half of package.json for supply chain.
-  'package-lock.json',
-  '**/package.json',
-  '**/package-lock.json',
+
+  // --- 2. enforcement core: the machinery that decides what merges ---
+  'app/lib/github.server.ts',
+  'app/lib/release-engine.server.ts',
+  // The shared SQL classifier. Both the build-time auto-apply step and
+  // refineMigrationProtection read it, so a change here moves what may merge
+  // AND what may run against production, from one file.
+  'app/lib/migration-classify.server.ts',
+  '.github/**',
+
+  // --- 3. secrets ---
+  '.env*',
   // Nested env files, not just repo root.
   '**/.env*',
-  // Deploy-critical build steps. apply-additive-migrations.ts runs against
-  // the production database on every prod build (see the --build gate in the
-  // file itself); build-vercel.mjs decides what code that build ships. Either
-  // one is a way to change what happens during a deploy without going through
-  // the paths already protected above.
+
+  // --- 4. the money-path smoke check ---
+  'app/lib/checkout-probe*',
+
+  // --- 5. deploy-critical build steps ---
+  // apply-additive-migrations.ts runs against the production database on every
+  // prod build (see the --build gate in the file itself); build-vercel.mjs
+  // decides what code that build ships.
   'scripts/apply-additive-migrations.ts',
   'scripts/build-vercel.mjs',
+
+  // --- 6. migrations, refined by content (refineMigrationProtection) ---
+  'db/migrations/**',
 ]
 
 const RE_SPECIALS = /[.+?^${}()|[\]\\]/g
@@ -959,5 +965,124 @@ export function classifyChangedFiles(files: readonly ChangedFileInput[] | null |
     files: matches.map((m) => m.file),
     globs,
     matches,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Content-aware refinement for migration PRs
+// ---------------------------------------------------------------------------
+
+/** The one glob refineMigrationProtection is allowed to clear. */
+const MIGRATION_GLOB = 'db/migrations/**'
+
+/** Above this many migration files in one PR, stop for the owner rather than
+ *  issuing an unbounded number of content reads. A legitimate migration PR is
+ *  one or two files; a dozen is a shape nobody has reviewed. */
+const MAX_REFINABLE_MIGRATIONS = 6
+
+/**
+ * Read one file's decoded text at a ref. Used only by the migration refinement,
+ * which must see the SQL that will actually be applied rather than a diff.
+ *
+ * The contents endpoint returns base64 for a normal file and `encoding: 'none'`
+ * with an empty body above 1MB. Anything that is not decodable base64 text is
+ * an error, never an empty string: "could not read it" and "it is empty" must
+ * not collapse into the same value on a path where empty reads as safe.
+ */
+export async function getFileContentAtRef(
+  path: string,
+  ref: string,
+  context = 'github',
+): Promise<GithubResult<string>> {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
+  const res = await githubRequest<{ content?: unknown; encoding?: unknown; type?: unknown }>(
+    `/repos/{owner}/{repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
+    { context },
+  )
+  if (!res.ok) return res
+  if (res.data.type !== 'file') return err(res.status, `${path} is not a file (type=${String(res.data.type)})`)
+  if (res.data.encoding !== 'base64' || typeof res.data.content !== 'string') {
+    return err(res.status, `${path}: unusable encoding ${String(res.data.encoding)} (file too large?)`)
+  }
+  try {
+    return { ok: true, status: res.status, data: Buffer.from(res.data.content, 'base64').toString('utf8') }
+  } catch (e) {
+    return err(res.status, `${path}: base64 decode failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+export interface MigrationRefinement {
+  /** The classification to act on: the input unchanged, or a cleared copy. */
+  classification: ProtectedClassification
+  /** True only when a protected classification was cleared. */
+  refined: boolean
+  /** Why it was or was not cleared. Always populated, for the run log. */
+  reason: string
+}
+
+/**
+ * Clear a migration-only PR whose SQL is provably additive.
+ *
+ * A migration PR used to be an unconditional owner stop, which meant every
+ * `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` waited on a human. The build-time
+ * auto-apply step (PR #790) already decides, per statement, what is additive
+ * enough to run against production unattended. This applies the SAME decision,
+ * from the SAME module, to the merge question. The two MUST agree: the engine
+ * may only merge a migration the build step will actually apply, or the
+ * merged-but-unapplied outage class (079/080, 2026-08) comes back.
+ *
+ * Fail-closed at every step. It only ever turns protected into unprotected
+ * when all of these hold, and returns the input untouched otherwise:
+ *   - the PR is protected on `db/migrations/**` and nothing else, so a PR that
+ *     also touches a valve or the release engine is unaffected;
+ *   - no unresolved changed-file entry (that surfaces as its own glob above);
+ *   - every protected file is a NEWLY ADDED `.sql` file. A modified, renamed,
+ *     or deleted migration is the dangerous case (it has likely already been
+ *     applied in production) and always stops;
+ *   - the file's content reads cleanly at the PR head sha. An unreadable file
+ *     is a stop, never a skip;
+ *   - every statement in every file matches the additive allowlist.
+ *
+ * Content is read at `ref`, which must be the PR HEAD SHA, not a branch name:
+ * a branch could advance between this read and the merge.
+ */
+export async function refineMigrationProtection(
+  classification: ProtectedClassification,
+  input: { files: readonly ChangedFile[]; ref: string; context?: string },
+): Promise<MigrationRefinement> {
+  const context = input.context ?? 'github'
+  const keep = (reason: string): MigrationRefinement => ({ classification, refined: false, reason })
+
+  if (!classification.protected) return keep('not protected, nothing to refine')
+  if (classification.globs.some((g) => g !== MIGRATION_GLOB)) {
+    return keep(`protected on more than migrations (${classification.globs.join(', ')})`)
+  }
+  if (classification.files.length > MAX_REFINABLE_MIGRATIONS) {
+    return keep(`${classification.files.length} migration files, over the ${MAX_REFINABLE_MIGRATIONS} refinable limit`)
+  }
+
+  const byPath = new Map<string, ChangedFile>()
+  for (const f of input.files) byPath.set(normalizeChangedPath(f.filename), f)
+
+  for (const path of classification.files) {
+    const entry = byPath.get(path)
+    // A protected path with no changed-file entry means the two lists came
+    // from different reads. Do not guess.
+    if (!entry) return keep(`no changed-file entry for ${path}`)
+    if (entry.status !== 'added') return keep(`${path} is '${entry.status}', only a newly added migration can clear`)
+    if (entry.previousFilename) return keep(`${path} was renamed from ${entry.previousFilename}`)
+    if (!path.toLowerCase().endsWith('.sql')) return keep(`${path} is not a .sql file`)
+
+    const body = await getFileContentAtRef(path, input.ref, context)
+    if (!body.ok) return keep(`could not read ${path}: ${body.error}`)
+
+    const verdict = classifyFile(body.data)
+    if (verdict.verdict !== 'auto') return keep(`${path} is not additive: ${verdict.reason ?? 'unclassified statement'}`)
+  }
+
+  return {
+    classification: { protected: false, fileCount: classification.fileCount, files: [], globs: [], matches: [] },
+    refined: true,
+    reason: `every statement in ${classification.files.join(', ')} is additive and auto-applies at build time`,
   }
 }
