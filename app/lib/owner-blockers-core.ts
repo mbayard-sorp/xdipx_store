@@ -64,6 +64,17 @@ export interface BlockerInput {
  *   null  -> cannot tell right now (probe errored, arg malformed, DB hiccup).
  *            Never clears a row on null: silently closing a real blocker is
  *            strictly worse than leaving a stale one open.
+ *
+ * Vocabulary-wide invariant (#4702): `false` is reserved for an AUTHORITATIVE
+ * "still blocked" — the probe asked the right source with the right credential
+ * and got a real negative. A "could not ask" (the source raised, a credential
+ * is missing, a scoped-to-caller read came back success-shaped-empty) MUST be
+ * `null`, never `false`. Collapsing those two is exactly what turned a healthy
+ * integration into a P1 owner blocker on 2026-08-21 ("CONFIRMED: zero Shopify
+ * webhooks registered" when all six existed, asked through the wrong app). The
+ * runner boundary in owner-blockers.server.ts enforces the throw->null half of
+ * this so no probe can leak a could-not-ask as a false; each runner owns the
+ * success-shaped-empty half for its own source.
  */
 export type ProbeVerdict = boolean | null
 
@@ -98,6 +109,22 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
 
 export function isProbe(name: unknown): name is string {
   return typeof name === 'string' && Object.hasOwn(PROBE_DESCRIPTIONS, name)
+}
+
+/**
+ * Does this title assert a measured fact ("CONFIRMED: ...")? Such a blocker
+ * claims something was checked and found true, so it MUST name the credential,
+ * app, token, or network path the check ran with — otherwise a credential-
+ * scoped absence (a success-shaped-empty read through the wrong app/token) gets
+ * filed as a fact about the world. That is the exact P1 this guard exists to
+ * stop (#4702): on 2026-08-21 "CONFIRMED: zero Shopify webhooks registered" was
+ * filed and independently repeated when all six existed, because the query ran
+ * through a different app than the one that owns them. Word-boundary, case-
+ * insensitive, so "confirmed", "CONFIRMED:", "(confirmed)" all match but
+ * "unconfirmed" does not.
+ */
+export function titleClaimsConfirmed(title: string): boolean {
+  return /\bconfirmed\b/i.test(title)
 }
 
 /** What clears this row, in words. Null probe means only a human can close it. */

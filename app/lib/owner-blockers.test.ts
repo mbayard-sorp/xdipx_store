@@ -15,6 +15,7 @@ import {
   isIdent,
   isProbe,
   renderBlockerEmail,
+  titleClaimsConfirmed,
   type OwnerBlocker,
 } from '~/lib/owner-blockers-core'
 
@@ -65,6 +66,21 @@ describe('isIdent', () => {
     ]) {
       expect(isIdent(bad), bad).toBe(false)
     }
+  })
+})
+
+describe('titleClaimsConfirmed (#4702)', () => {
+  it('matches a title that asserts a measured fact', () => {
+    expect(titleClaimsConfirmed('CONFIRMED: zero Shopify webhooks registered')).toBe(true)
+    expect(titleClaimsConfirmed('zero webhooks (confirmed)')).toBe(true)
+    expect(titleClaimsConfirmed('Confirmed no rows in table')).toBe(true)
+  })
+
+  it('does not match a title that only contains the substring', () => {
+    // "unconfirmed" is the opposite claim and must not trip the evidence guard.
+    expect(titleClaimsConfirmed('unconfirmed suspicion about webhooks')).toBe(false)
+    expect(titleClaimsConfirmed('needs owner to flip a valve')).toBe(false)
+    expect(titleClaimsConfirmed('')).toBe(false)
   })
 })
 

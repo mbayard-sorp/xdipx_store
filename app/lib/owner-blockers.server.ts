@@ -41,6 +41,7 @@ import {
   isIdent,
   isProbe,
   renderBlockerEmail,
+  titleClaimsConfirmed,
   type BlockerInput,
   type OwnerBlocker,
   type ProbeVerdict,
@@ -172,14 +173,44 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
 }
 
 /**
+ * Vocabulary-wide "could not ask -> null, never false" guarantee (#4702).
+ *
+ * A thrown error is always a could-not-ask (the DB was unreachable, a fetch
+ * raised, an arg blew up), so the runner boundary maps it to `null` here rather
+ * than trusting every caller to remember. `false` is thereby reserved for an
+ * authoritative "still blocked" that a runner returned deliberately. verifyBlockers
+ * keeps its own try/catch as belt-and-suspenders, but this makes the invariant a
+ * property of the vocabulary itself: `PROBES[x].run(...)` can never reject or
+ * surface a thrown error as a `false`. (The other half — a scoped read that
+ * *succeeds* but comes back empty — cannot be caught generically; each runner
+ * owns it for its own source, e.g. webhookRegistered returning null on missing
+ * creds / missing nodes.)
+ */
+export function guardedRun(
+  name: string,
+  run: (arg: string) => Promise<ProbeVerdict>,
+): (arg: string) => Promise<ProbeVerdict> {
+  return async (arg: string) => {
+    try {
+      return await run(arg)
+    } catch (err) {
+      console.warn(`[owner-blockers] probe ${name}(${arg}) could not ask:`, String(err).slice(0, 200))
+      return null
+    }
+  }
+}
+
+/**
  * The executable probes: core's phrasing paired with the runner here. Built by
  * walking PROBE_DESCRIPTIONS so a probe can never be described to the owner
- * without something able to check it, or vice versa.
+ * without something able to check it, or vice versa. Every runner is wrapped in
+ * guardedRun so a thrown error is reported as `null` (could not ask), never as a
+ * `false` (still blocked).
  */
 export const PROBES: Record<string, ProbeDef> = Object.fromEntries(
   Object.entries(PROBE_DESCRIPTIONS)
     .filter(([name]) => Object.hasOwn(RUNNERS, name))
-    .map(([name, describe]) => [name, { describe, run: RUNNERS[name]! }]),
+    .map(([name, describe]) => [name, { describe, run: guardedRun(name, RUNNERS[name]!) }]),
 )
 
 /* ── Writing ───────────────────────────────────────────────────────────────── */
@@ -214,6 +245,18 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
   if (!dedupeKey) throw new Error('fileBlocker: dedupeKey required')
   if (!title) throw new Error('fileBlocker: title required')
 
+  // A CONFIRMED-titled blocker asserts a measured fact, so it MUST name the
+  // credential/app/token/path the check ran with in its evidence — otherwise a
+  // credential-scoped absence gets filed as a fact about the world (#4702). The
+  // authoritative guard lives here so every caller is covered (the HTTP route
+  // AND blocker-scout's direct calls), and it throws before any DB write.
+  const evidence = clamp(input.evidence, 4000)
+  if (titleClaimsConfirmed(title) && !evidence) {
+    throw new Error(
+      'fileBlocker: a CONFIRMED-titled blocker requires a non-empty evidence field naming the credential, app, token, or network path the check ran with',
+    )
+  }
+
   const category = (BLOCKER_CATEGORIES as readonly string[]).includes(input.category ?? '')
     ? input.category! : 'other'
   const source = (BLOCKER_SOURCES as readonly string[]).includes(input.source ?? '')
@@ -236,7 +279,7 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
     ) VALUES (
       ${dedupeKey}, ${title}, ${clamp(input.detail, 4000)}, ${clamp(input.unblocks, 2000)},
       ${clamp(input.whereToGo, 1000)}, ${category}, ${priority},
-      ${source}, ${clamp(input.sourceRef, 500)}, ${clamp(input.evidence, 4000)},
+      ${source}, ${clamp(input.sourceRef, 500)}, ${evidence},
       ${probe}, ${clamp(input.verifyArg, 200)}
     )
     ON CONFLICT (dedupe_key) DO UPDATE SET
