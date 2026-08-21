@@ -854,15 +854,20 @@ reader-facing prose. **Pre-write self-check, every draft:** grep the caption for
 `negatives`, `archetype`, `brief`, `No product`, and similar fragments, and strip anything that is a
 note to the generator rather than words for the reader before you send the draft.
 
-**Every image-bearing caption carries a VISUAL DESCRIPTION block (ticket #4067), and it is genuine
-reader-facing accessibility prose.** This is standing, not an option: every Instagram post, and every
-X or TikTok post that carries media, includes it. Write a real description of the image for a reader
-who cannot see it — the person, the setting, what is happening in frame — as ordinary sentences,
-placed BEFORE the engagement close, not hidden in alt-text. It is accessibility work, additional on-charter crawlable
-text, and one caption element an AI guide writes well and consistently. It is NOT the internal scene
-brief: no meta-notes, no `No product, no text`, no negatives list — those are the fragments the
-self-check above strips. If you cannot describe the final image in plain reader-facing prose, the
-block is not ready.
+**Every image-bearing caption carries a reader-facing accessibility description (ticket #4067),
+woven into the caption as natural prose — never a labeled `VISUAL DESCRIPTION:` block (ticket
+#4501).** This is standing, not an option: every Instagram post, and every X or TikTok post that
+carries media, includes it. Write a real description of the image for a reader who cannot see it —
+the person, the setting, what is happening in frame — as ordinary sentences folded into the caption
+before the engagement close, not hidden in alt-text and not under a literal label. **Do NOT prefix it
+with `VISUAL DESCRIPTION:` or any similar heading.** `social-publish-gate` reads that literal label
+in `tweetText` as a leaked internal production artifact and REVISEs the draft every time it appears
+(five drafts lost this way through 2026-08-20: ids 62, 63, 66, 67, 68), and the customer-copy
+self-check above strips it. The accessibility work is required; the label is banned — the
+description reads as one more sentence of the caption, in Emma's voice, not as a tagged production
+note. It is still NOT the internal scene brief: no meta-notes, no `No product, no text`, no
+negatives list — those are the fragments the self-check above strips. If you cannot describe the
+final image in plain reader-facing prose, it is not ready.
 
 One `event` per draft (`eventType:'step'`, `phase:'draft'`):
 
