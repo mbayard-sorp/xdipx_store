@@ -172,3 +172,16 @@ describe('BLOCKER_CATEGORIES', () => {
     }
   })
 })
+
+describe('webhook_registered probe (phrasing)', () => {
+  // Regression guard for the 2026-08-21 false positive: a P1 blocker read
+  // "CONFIRMED: zero Shopify webhooks registered" because the check ran through
+  // a different Shopify app than the one owning the subscriptions. Shopify
+  // scopes webhookSubscriptions to the querying app. The runner lives in
+  // owner-blockers-webhook-probe.test.ts (it needs the server module).
+  it('is a known probe and reads as a sentence to the owner', () => {
+    expect(isProbe('webhook_registered')).toBe(true)
+    expect(describeProbe('webhook_registered', 'all')).toContain('every expected Shopify webhook topic')
+    expect(describeProbe('webhook_registered', 'ORDERS_CREATE')).toContain('ORDERS_CREATE')
+  })
+})
