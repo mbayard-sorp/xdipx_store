@@ -65,6 +65,41 @@ definition under `<mining>`. Two rules that matter most:
   the row with a `table_exists` probe against what 068 creates, so the database decides rather
   than the memory of a conversation from nine days ago.
 
+## Before you file "X is not configured": check the instrument first
+
+**A P1 was filed on 2026-08-21 reading "CONFIRMED: zero Shopify webhooks registered in production."
+All six were registered and had been for months.** The check had been run through a different
+Shopify app than the one that owns the subscriptions, and **Shopify scopes `webhookSubscriptions`
+to the querying app**, so an app can only ever see its own. R-DEV filed it and QA repeated it, so
+three sign-offs agreed on a measurement artifact.
+
+It was not a harmless mistake. The remedy on the row was "register them via the Shopify Admin UI",
+and the UI issues a **different HMAC secret** than `verifyShopifyWebhook` (`server/webhooks.ts`)
+checks against. Acting on it would have added six subscriptions whose every delivery 401s while the
+working ones kept running: a non-problem converted into a real outage that is very hard to diagnose.
+
+**The rule, which generalizes past Shopify.** An absence you observed through a credential, an app,
+a token, or a network path is evidence about *that path*, not about the world. Before filing an
+"it is not configured" blocker:
+
+1. **Name the credential you asked with**, in the evidence field. If you cannot name it, you cannot
+   file the row.
+2. **Ask whether that credential could see the thing even if it existed.** Scoped-to-caller APIs are
+   common: Shopify webhooks, app-owned resources, per-app tokens.
+3. **Prefer the repo's own checker over a hand-rolled query.** For webhooks that is
+   `npx tsx scripts/check-shopify-webhooks.ts`, which uses `SHOPIFY_ADMIN_ACCESS_TOKEN` (the
+   custom-app token paired with `SHOPIFY_WEBHOOK_SECRET`) and exits **2 for "cannot tell"**, which is
+   deliberately not the same as **1 for "missing"**.
+4. **Never write "CONFIRMED" into a title** unless you ran the canonical check with the right
+   credential and can quote its output.
+5. **Attach the `webhook_registered` probe** (`verifyProbe: 'webhook_registered'`, `verifyArg` a
+   topic or `all`) so the row re-checks itself with the correct credential and auto-clears. A probe
+   that returns `null` means "cannot tell" and leaves the row open; it never reports a failed
+   lookup as a missing thing.
+
+**"I could not ask" and "it is not there" are different answers.** Collapsing them is what made this
+a P1.
+
 ## Step 4 — File
 
 `POST /api/team/blocker {op:'file', ...}`. Field-by-field guidance is in the agent definition.

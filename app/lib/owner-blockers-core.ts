@@ -88,6 +88,12 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
     const [team, runType, days] = a.split('|')
     return `${team}/${runType} ran in the last ${days ?? 7} days`
   },
+  /* Arg is a Shopify webhook topic (e.g. ORDERS_CREATE), or `all` for the full
+   * expected set. See the runner for why this probe exists at all. */
+  webhook_registered: a =>
+    a === 'all'
+      ? 'every expected Shopify webhook topic is registered'
+      : `Shopify webhook ${a} is registered`,
 }
 
 export function isProbe(name: unknown): name is string {

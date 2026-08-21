@@ -105,6 +105,62 @@ export interface ProbeDef {
   run: (arg: string) => Promise<ProbeVerdict>
 }
 
+/**
+ * Is a Shopify webhook topic registered? Arg is a topic (`ORDERS_CREATE`) or
+ * `all` for the whole expected set.
+ *
+ * This probe exists because of a specific, repeatable wrong answer. On
+ * 2026-08-21 a P1 blocker read "CONFIRMED: zero Shopify webhooks registered in
+ * production", independently repeated by R-DEV and by QA. All six existed.
+ * **Shopify scopes `webhookSubscriptions` to the app making the query**, so an
+ * app only ever sees its own; the zero came from asking through a different app
+ * than the one that owns them.
+ *
+ * That made the blocker actively dangerous: its remedy was to register via the
+ * Admin UI, which issues a different HMAC secret than `verifyShopifyWebhook`
+ * checks, so following it would have added six subscriptions that 401 forever
+ * while the working ones kept running.
+ *
+ * So this runner always uses `SHOPIFY_ADMIN_ACCESS_TOKEN`, the custom-app token
+ * paired with `SHOPIFY_WEBHOOK_SECRET`. Missing credentials return `null`
+ * (cannot tell), never `false`. "I could not ask" and "it is not there" are
+ * different answers, and collapsing them is exactly how this became a P1.
+ */
+async function webhookRegistered(arg: string): Promise<ProbeVerdict> {
+  const domain = (process.env['SHOPIFY_STORE_DOMAIN'] ?? '').trim().replace(/\\n$/, '')
+  const token = (process.env['SHOPIFY_ADMIN_ACCESS_TOKEN'] ?? '').trim()
+  if (!domain || !token) return null
+
+  let topics: string[]
+  try {
+    const res = await fetch(`https://${domain}/admin/api/2024-10/graphql.json`, {
+      method: 'POST',
+      headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: '{ webhookSubscriptions(first: 100) { nodes { topic } } }' }),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as { data?: { webhookSubscriptions?: { nodes?: Array<{ topic?: string }> } } }
+    const nodes = body.data?.webhookSubscriptions?.nodes
+    if (!nodes) return null
+    topics = nodes.map(n => String(n.topic ?? ''))
+  } catch {
+    return null
+  }
+
+  if (arg === 'all') return EXPECTED_WEBHOOK_TOPICS.every(t => topics.includes(t))
+  return topics.includes(arg)
+}
+
+/** Mirrors EXPECTED_WEBHOOKS in scripts/check-shopify-webhooks.ts. */
+const EXPECTED_WEBHOOK_TOPICS: readonly string[] = [
+  'ORDERS_CREATE',
+  'ORDERS_FULFILLED',
+  'PRODUCTS_CREATE',
+  'PRODUCTS_UPDATE',
+  'INVENTORY_LEVELS_UPDATE',
+  'RETURNS_UPDATE',
+]
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -112,6 +168,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   setting_false: a => settingIs(a, 'false'),
   rows_exist:    rowsExist,
   routine_ran:   routineRan,
+  webhook_registered: webhookRegistered,
 }
 
 /**
