@@ -278,6 +278,23 @@ describe('the gate runs at publish time', () => {
     expect(calls.needsChanges).toHaveLength(1)
   })
 
+  it('never ships a row carrying an unresolved BLOCK verdict, even if it somehow sits at approved (ticket #3895, incident id49)', async () => {
+    // reviewStatus:'approved' on a row whose CURRENT feedback stamp reads BLOCK
+    // should not exist by construction — reviewSocialPost refuses to write it —
+    // but the tick is the last line of defense if that ever slips, and the
+    // account-safety requirement is that a BLOCK can never ship, full stop.
+    const blocked =
+      '[publish-gate BLOCK by social-publish-gate on 2026-08-16, product: none]\n' +
+      'Explicit imagery: rendered vulva and anatomical detail past the ads-policy ceiling.'
+    const { repo, calls } = fakeRepo([post({ reviewStatus: 'approved', feedback: blocked })])
+    const publish = vi.fn()
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    expect(publish).not.toHaveBeenCalled()
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'no_gate_verdict' }])
+    expect(calls.needsChanges).toHaveLength(1)
+    expect(calls.posted).toHaveLength(0)
+  })
+
   it('takes the product handle from the gate stamp, so the stock check actually runs', async () => {
     // The gap this closes: nothing in production ever supplied productHandleFor,
     // so the publish-time stock re-check silently no-opped on every row.

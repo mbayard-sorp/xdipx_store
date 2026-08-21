@@ -117,13 +117,13 @@ export async function action({ request }: ActionFunctionArgs) {
       return { ok: false, error: 'Feedback is required when requesting changes' }
     }
     const user = await getAdminUser(request)
-    const ok = await reviewSocialPost(postId, {
+    const result = await reviewSocialPost(postId, {
       reviewStatus: decision as 'approved' | 'needs_changes' | 'rejected',
       feedback: feedback || undefined,
       editedText: editedText || undefined,
       reviewedBy: user?.name || user?.email || 'admin',
     })
-    return ok ? { ok: true } : { ok: false, error: 'Post not found or already posted' }
+    return result.ok ? { ok: true } : { ok: false, error: result.error }
   }
 
   // ── Live-post feedback (owner-only). The 'review' intent above deliberately
@@ -170,14 +170,16 @@ export async function action({ request }: ActionFunctionArgs) {
     const user = await getAdminUser(request)
     const reviewedBy = user?.name || user?.email || 'admin'
     let updated = 0
+    let blocked = 0
     for (const id of ids) {
-      const ok = await reviewSocialPost(id, {
+      const result = await reviewSocialPost(id, {
         reviewStatus: decision as 'approved' | 'rejected',
         reviewedBy,
       })
-      if (ok) updated++
+      if (result.ok) updated++
+      else if (result.reason === 'gate_block') blocked++
     }
-    return { ok: true, intent: 'review-batch', updated, requested: ids.length }
+    return { ok: true, intent: 'review-batch', updated, blocked, requested: ids.length }
   }
 
   if (intent === 'set-frequency') {

@@ -33,7 +33,7 @@ export function ReviewQueue({ posts }: { posts: SocialPostRow[] }) {
   const [status, setStatus] = useState<string>('all')
   const [day, setDay] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const batch = useFetcher<{ ok: boolean; error?: string; updated?: number; requested?: number }>()
+  const batch = useFetcher<{ ok: boolean; error?: string; updated?: number; blocked?: number; requested?: number }>()
 
   const filtered = posts.filter(p =>
     (platform === 'all' || p.platform === platform) &&
@@ -180,6 +180,12 @@ export function ReviewQueue({ posts }: { posts: SocialPostRow[] }) {
       {batch.data?.ok && batch.data.updated != null && (
         <p className="text-xs text-green-600 px-1">
           Reviewed {batch.data.updated} draft{batch.data.updated === 1 ? '' : 's'}.
+        </p>
+      )}
+      {batch.data?.ok && !!batch.data.blocked && (
+        <p className="text-xs text-red-500 px-1">
+          {batch.data.blocked} carried an unresolved gate BLOCK and were not approved. A gate
+          BLOCK has no manual override — start a fresh draft for those instead.
         </p>
       )}
     </div>
