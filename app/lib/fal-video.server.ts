@@ -540,6 +540,26 @@ export const PRODUCT_SCALE_RATIO_ANCHOR =
   'than their hand.'
 
 /**
+ * Relaxed anchor for a genuinely large product (ticket #4648, flagged in the
+ * PR #817 body). The default anchor caps the product at one third the face width
+ * and smaller than the hand, which is right for a palm-sized toy or a lube
+ * bottle but under-sizes a real large item — a wand, a larger toy — which is
+ * legitimately as wide as a face and longer than a hand in real life. This
+ * clause keeps the two in-frame references (face, hand) so the model still has
+ * something to measure against, but sets the large-product proportion instead of
+ * the small-product cap. Presenter-neutral, same as the default anchor.
+ */
+export const PRODUCT_SCALE_RATIO_ANCHOR_LARGE =
+  'Anchor the product size to what is visible in the frame: this is a larger ' +
+  "product, so it may be about as wide as the presenter's face and as long as, or " +
+  'longer than, their hand, sitting in the hand in the proportion a wand or larger ' +
+  'item of its kind really has. Keep it at true real-world size: do not shrink it ' +
+  'to a palm-sized object, and do not enlarge it to fill the frame.'
+
+/** Physical size class of the composited product, hinting how to scale it. */
+export type ProductSizeClass = 'small' | 'medium' | 'large'
+
+/**
  * The full clause suffix appended to a composite prompt whenever a real product
  * is composited into the scene. Shared by both compose paths so the scale rules
  * cannot drift between them, and exported so a unit test can assert the
@@ -547,9 +567,15 @@ export const PRODUCT_SCALE_RATIO_ANCHOR =
  * real-world-size cue and the ratio anchor; only the Atlas one-stage path also
  * carries ATLAS_NO_CARTON_CLAUSE, because the fal two-stage path already strips
  * the carton in its stage-1 plate.
+ *
+ * `sizeClass` relaxes the ratio anchor for a genuinely large product (ticket
+ * #4648): `'large'` swaps in PRODUCT_SCALE_RATIO_ANCHOR_LARGE; `'small'`,
+ * `'medium'`, and the default (undefined) keep the standard cap, so callers that
+ * do not know the size class get exactly the prior behavior.
  */
-export function compositeProductClauses(path: 'fal' | 'atlas'): string {
-  const scale = `${PRODUCT_SCALE_CUE} ${PRODUCT_SCALE_RATIO_ANCHOR}`
+export function compositeProductClauses(path: 'fal' | 'atlas', sizeClass?: ProductSizeClass): string {
+  const anchor = sizeClass === 'large' ? PRODUCT_SCALE_RATIO_ANCHOR_LARGE : PRODUCT_SCALE_RATIO_ANCHOR
+  const scale = `${PRODUCT_SCALE_CUE} ${anchor}`
   return path === 'atlas' ? `${scale} ${ATLAS_NO_CARTON_CLAUSE}` : scale
 }
 
@@ -587,6 +613,14 @@ export interface ComposeSceneFrameOpts {
   count?: number
   /** Frame ratio. Defaults to '9:16' (this function's original video-frame use); '4:5' for a feed/carousel still. */
   aspectRatio?: keyof typeof SCENE_FRAME_SIZES
+  /**
+   * Physical size class of the composited product (ticket #4648). `'large'`
+   * relaxes the scale anchor for a genuinely large item (wand, larger toy) that
+   * the default one-third-face cap would under-size. Omit (or 'small'/'medium')
+   * for the standard anchor — the prior behavior. Ignored on talking-head or
+   * no-presenter frames, which composite no product.
+   */
+  productSizeClass?: ProductSizeClass
 }
 
 export interface SceneFrameResult {
@@ -715,7 +749,7 @@ async function composeSceneFrameAtlas(opts: ComposeSceneFrameOpts): Promise<Scen
   // carton clause — same conditions as the fal path's `needsPlate`.
   const hasProduct = !!opts.productImageUrl && opts.productImageUrl !== opts.presenterImageUrl
   const framePrompt = hasProduct
-    ? `${opts.prompt} ${compositeProductClauses('atlas')}`
+    ? `${opts.prompt} ${compositeProductClauses('atlas', opts.productSizeClass)}`
     : opts.prompt
 
   const refImageUrls = [
@@ -781,7 +815,7 @@ async function composeSceneFrameFal(opts: ComposeSceneFrameOpts): Promise<SceneF
   // Anchor the composited product to real-world scale (ticket #2761). Applied
   // only to a genuine presenter+product composite (needsPlate): a talking-head
   // frame has no product, and the no-presenter base has no hand to scale against.
-  const framePrompt = needsPlate ? `${opts.prompt} ${compositeProductClauses('fal')}` : opts.prompt
+  const framePrompt = needsPlate ? `${opts.prompt} ${compositeProductClauses('fal', opts.productSizeClass)}` : opts.prompt
 
   const imageUrls = [
     opts.presenterImageUrl,
