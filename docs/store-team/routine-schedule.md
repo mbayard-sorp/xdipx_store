@@ -67,6 +67,15 @@ the Claude app is open) never ran reliably — **the owner should delete that de
 routine can't double-fire (the gate's run cap would otherwise let a second run write a second
 post). Content runs still no-op at the gate until `content_team_enabled` is flipped on (see the
 enablement runbook appendix in `docs/store-team/routine-content-daily.md`).
+**Environment split (2026-08-21).** Two cloud environments exist. `Default`
+(`env_01K8MdKyYEhdnUumUSe7GUqP`, Trusted egress, holds the secrets) runs every dev, QA, publishing,
+and merchandising routine. `xdipx-research` (`env_01AEWTQWbCiKTexzz9YuHvWF`, FULL internet egress,
+team token only, no other secrets) runs the five research lanes: routines 11, 12, 16, 17, and 20.
+Rationale: research routines must open arbitrary web pages to cite them honestly (run-418 found 18
+of 18 source domains blocked under Trusted), while the code-writing lanes process untrusted ticket
+text and must never combine broad egress with secret access. Keep new routines on this split: reads
+the open web = research env; writes code or holds credentials = Default.
+
 Trigger IDs, for reference when editing or deleting a routine:
 
 | # | Name | Trigger ID |
