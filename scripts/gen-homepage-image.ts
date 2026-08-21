@@ -17,11 +17,13 @@
  *     [--images-so-far 3] [--dry-run]
  *
  * --image-size picks the generated aspect. It matters more than it looks: the
- * generator defaults to `landscape_16_9`, and a 16:9 source dropped into a
- * portrait art zone under `object-cover` loses most of its width, so a brief
- * composed for a tall slot silently came back cropped to nothing. Pass the
- * aspect the surface actually renders — `portrait_4_3` for the panel deck's
- * 42% art column, `square_hd` for square tiles and the small-row chips.
+ * generator defaults to `landscape_16_9`, and a source whose aspect fights the
+ * art zone under `object-cover` gets cropped to nothing with no error anywhere.
+ * Pass the aspect the surface actually renders — `landscape_16_9` for the panel
+ * deck's full-width 2:1 art strip (PR #721; nearest supported token to 2:1, and
+ * the default so no override is needed), `square_hd` for square tiles and the
+ * small-row chips. The deck's art zone was a 42% portrait column before #721;
+ * `portrait_4_3` there now loses most of its height.
  *
  * --doc-id targets a document other than the homepage singleton (the panel
  * deck 'singleton.panelDeck', a 'categoryPage-*' or 'dropPage-*' doc). The
