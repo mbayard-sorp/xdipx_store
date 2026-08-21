@@ -49,7 +49,9 @@ const TOTAL_BUDGET_MS = Number(process.env['IVR_V2_TOTAL_BUDGET_MS'] ?? 16_000)
 export interface VoiceReply {
   ssml: string
   prompts?: { kind: 'say-and-listen' | 'gather-digits' | 'hangup' } | undefined
-  outboundSms?: { body: string } | undefined
+  // No outboundSms: the Vercel adapter sends the checkout/PDP link itself. The
+  // engine never returned a text for the bridge to send, and this field was read
+  // by nothing here, so it only ever made the dead-plumbing look alive (#4299).
   hangup?: boolean | undefined
 }
 
