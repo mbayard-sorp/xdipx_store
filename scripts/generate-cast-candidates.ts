@@ -70,6 +70,14 @@ const CAST: CastSpec[] = [
     look: 'a handsome Latino man in his late 20s with dark swept-back hair, light stubble, and a polished, flirty grin',
     vibe: 'polished, flirtatious, magnetic',
   },
+  // Added 2026-08-21 (owner direction): a cast member over 50 so midlife
+  // Notebook topics can be cast honestly instead of borrowing a 30s face.
+  {
+    slug: 'vivian',
+    name: 'Vivian',
+    look: 'a radiant woman in her mid 50s with shoulder-length silver-streaked hair, gentle laugh lines, and a warm, assured smile',
+    vibe: 'grounded, candid, unshockable, the friend who has seen it all and says the quiet part kindly',
+  },
 ]
 
 function buildPrompt(spec: CastSpec): string {
