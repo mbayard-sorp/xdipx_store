@@ -93,7 +93,13 @@ export async function getTokenWriteFailureCount(): Promise<number> {
 export interface TokenLogEntry {
   feature:              string   // 'enrichment' | 'emma-chat' | 'sms' | 'ivr' | 'copy-gen' | 'reviews' | 'seo-research' | 'log-monitor' | 'video-prompt' | 'rail-gen' | 'discovery-rank' | 'contextual-tagline' | ...
   model:                string
-  source:               'batch' | 'sync' | 'agent-sdk'
+  /** 'batch' | 'sync' are API-key billed. Max-subscription callers use one of
+   *  MAX_SUBSCRIPTION_SOURCES and cost zero. Typed as string because the union
+   *  was never enforced at runtime: /api/homepage-team/spend cast to it, so
+   *  real rows already carry 'anthropic-max', 'max-subscription',
+   *  'cloud-routine' and one 'social-drafts'. Narrow types that lie are worse
+   *  than wide types that do not. */
+  source:               string
   inputTokens:          number
   outputTokens:         number
   cacheCreationTokens?: number
