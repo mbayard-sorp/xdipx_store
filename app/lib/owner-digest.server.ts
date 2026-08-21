@@ -338,6 +338,23 @@ const OWNER_DECISION_CANDIDATE_KINDS: readonly string[] = [
 export const OWNER_DECISION_KINDS: readonly string[] =
   OWNER_DECISION_CANDIDATE_KINDS.filter(k => !RUN_CLOSE_KINDS.includes(k))
 
+/**
+ * The kinds `gatherStaleOwnerRows` puts on the Needs Mike list once a row has
+ * sat `approved` past three days. Derived the same way as `OWNER_DECISION_KINDS`
+ * (#4356) so it tracks the transition map instead of drifting from it: the
+ * candidate set is the owner-desk task kinds this surface has always covered
+ * (`promo`/`campaign`/`program`), minus any that gained an agent close edge in
+ * `RUN_CLOSE_KINDS`. Since PR #789 (merged 2026-08-20) added `campaign`/`promo`
+ * there, `program` is currently the only one left. Listing an agent-closeable
+ * kind here misrepresented it as owner work and inflated the queue (#4453, the
+ * same over-listing #4356 fixed for the decision queue, on a different surface).
+ */
+const STALE_OWNER_ROW_CANDIDATE_KINDS: readonly string[] = [
+  'promo', 'campaign', 'program',
+]
+export const STALE_OWNER_ROW_KINDS: readonly string[] =
+  STALE_OWNER_ROW_CANDIDATE_KINDS.filter(k => !RUN_CLOSE_KINDS.includes(k))
+
 /** Rows older than this are called out: nothing here should age quietly. */
 const STALE_QUEUE_DAYS = 7
 
@@ -1054,19 +1071,26 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
 }
 
 /**
- * Approved promo/campaign/program rows older than 3 days. These kinds have no
- * automated executor: an approved row here is a task on the owner's desk, and
- * three days is long enough that it belongs on the Needs Mike list rather
- * than only in the decision-queue table further down.
+ * Owner-only approved rows older than 3 days (`STALE_OWNER_ROW_KINDS`). These
+ * are the owner-desk task kinds with no agent close edge: an approved row here
+ * is a task on the owner's desk, and three days is long enough that it belongs
+ * on the Needs Mike list rather than only in the decision-queue table further
+ * down. Kinds an entry-agent run drains (`RUN_CLOSE_KINDS`, now including
+ * `campaign`/`promo` per PR #789) are excluded. Surfacing them here
+ * misrepresented drained-by-a-routine work as owner work (#4453).
  */
 async function gatherStaleOwnerRows(): Promise<StaleOwnerRow[]> {
+  // Empty derived set (every candidate gained an agent close edge) means there
+  // is nothing owner-only to list; guard against `kind IN ()` invalid SQL.
+  if (STALE_OWNER_ROW_KINDS.length === 0) return []
   try {
+    const kinds = sql.join(STALE_OWNER_ROW_KINDS.map(k => sql`${k}`), sql`, `)
     const res = await db.execute(sql`
       SELECT id, kind, suggestion,
              EXTRACT(epoch FROM now() - created_at)::float8 / 86400 AS age_days
         FROM homepage_team_suggestions
        WHERE status = 'approved'
-         AND kind IN ('promo', 'campaign', 'program')
+         AND kind IN (${kinds})
          AND created_at < now() - interval '3 days'
        ORDER BY created_at ASC LIMIT 10`)
     return (res.rows ?? []).map(r => {
