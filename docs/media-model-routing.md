@@ -49,7 +49,7 @@ edit endpoint (see the routing table).
 (merged rabbit ears, a fabricated three-button control panel). Good scenes, wrong product. It
 is the compositor, never the plate.
 
-## Two rules that came out of the run
+## Three rules that came out of the run
 
 **Never composite straight from a Shopify packshot.** Packshots routinely include the retail
 carton. A one-shot composite puts the BOX in the presenter's hand with the manufacturer's brand
@@ -60,6 +60,14 @@ Stage 1 exists solely to remove that failure class, and it removed it completely
 `referencePhoto` is a deep-V cleavage shot, and the compositor faithfully carried that neckline
 into scenes briefed as "elevated loungewear". Wardrobe register is fixed by re-shooting the
 `castMember.referencePhoto`, not by fighting it in the scene prompt.
+
+**Anchor product scale to a ratio between two things visible in frame.** A packshot carries no
+scale reference, so "render at true real-world size" alone (`PRODUCT_SCALE_CUE`) left a palm-sized
+product rendering at roughly twice life size in the 2026-08-17 run. The fix is a ratio the model
+can measure inside the frame: the product is no wider than one third the presenter's face and
+clearly smaller than their hand (`PRODUCT_SCALE_RATIO_ANCHOR`). It lives in the composite prompt
+itself, emitted by `compositeProductClauses()` on both the fal two-stage and Atlas one-stage paths
+so no script has to remember it, and it is phrased presenter-neutral (cast can be any gender).
 
 ## Open
 

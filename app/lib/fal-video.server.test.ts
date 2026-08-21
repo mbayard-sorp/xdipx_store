@@ -5,12 +5,45 @@ import {
   isVideoModelId,
   assertSceneFrameContract,
   classifyAudioPath,
+  compositeProductClauses,
+  PRODUCT_SCALE_RATIO_ANCHOR,
   SCENE_FRAME_MIN_WIDTH,
   SCENE_FRAME_MIN_HEIGHT,
 } from './fal-video.server'
 
 // Ticket #3991: Grok Imagine video tier + the 9:16 full-resolution scene-frame
 // contract its image-to-video submit depends on.
+// Ticket #4536 (split from #3997): the ratio-anchored scale clause must be
+// emitted on every composited-product frame, on both compose paths, so a
+// packshot with no scale cue can no longer render the product oversized.
+describe('compositeProductClauses (scale-anchor clause)', () => {
+  it('emits the face-fraction + hand ratio anchor on both paths', () => {
+    expect(compositeProductClauses('fal')).toContain(PRODUCT_SCALE_RATIO_ANCHOR)
+    expect(compositeProductClauses('atlas')).toContain(PRODUCT_SCALE_RATIO_ANCHOR)
+  })
+
+  it('anchors to two things visible in frame: one third of the face, smaller than the hand', () => {
+    expect(PRODUCT_SCALE_RATIO_ANCHOR).toContain('one third the width')
+    expect(PRODUCT_SCALE_RATIO_ANCHOR).toContain('smaller than their hand')
+  })
+
+  it('keeps the clause presenter-neutral (cast can be any gender)', () => {
+    expect(PRODUCT_SCALE_RATIO_ANCHOR).not.toMatch(/\b(her|hers|she|his|him|he)\b/i)
+  })
+
+  it('keeps the general real-world-size cue alongside the ratio anchor', () => {
+    expect(compositeProductClauses('fal')).toContain('true real-world size')
+    expect(compositeProductClauses('atlas')).toContain('true real-world size')
+  })
+
+  it('carries the no-carton clause only on the Atlas one-stage path', () => {
+    // The fal two-stage path strips the carton in its stage-1 plate, so the
+    // carton clause belongs only to Atlas, which has no plate pre-pass.
+    expect(compositeProductClauses('atlas')).toContain('Do not show any')
+    expect(compositeProductClauses('fal')).not.toContain('Do not show any')
+  })
+})
+
 describe('VIDEO_MODELS.grok', () => {
   it('registers the grok tier with the bake-off rate and unconstrained durations', () => {
     const spec = VIDEO_MODELS.grok
