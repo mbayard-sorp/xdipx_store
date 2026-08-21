@@ -2857,12 +2857,13 @@ export async function getProductVariantGids(shopifyProductId: string): Promise<s
  */
 export async function getProductByInventoryItemId(
   inventoryItemId: string,
-): Promise<{ handle: string; title: string; imageUrl?: string; price?: number } | null> {
+): Promise<{ handle: string; title: string; sku?: string; imageUrl?: string; price?: number } | null> {
   const gid = inventoryItemId.startsWith('gid://')
     ? inventoryItemId
     : `gid://shopify/InventoryItem/${inventoryItemId}`
   const data = await adminGraphQL<{
     inventoryItem: {
+      sku: string | null
       variant: {
         price: string | null
         product: { handle: string; title: string; featuredImage: { url: string } | null } | null
@@ -2871,6 +2872,7 @@ export async function getProductByInventoryItemId(
   }>(
     `query ProductByInventoryItem($id: ID!) {
       inventoryItem(id: $id) {
+        sku
         variant {
           price
           product { handle title featuredImage { url } }
@@ -2883,10 +2885,13 @@ export async function getProductByInventoryItemId(
   const product = data.inventoryItem?.variant?.product
   if (!product?.handle) return null
 
-  const result: { handle: string; title: string; imageUrl?: string; price?: number } = {
+  const result: { handle: string; title: string; sku?: string; imageUrl?: string; price?: number } = {
     handle: product.handle,
     title:  product.title,
   }
+  // SKU keys the pricing_audit_log lookups the restock -> social gate needs
+  // (#4361). InventoryItem.sku is the variant SKU for this inventory item.
+  if (data.inventoryItem?.sku) result.sku = data.inventoryItem.sku
   if (product.featuredImage?.url) result.imageUrl = product.featuredImage.url
   const price = data.inventoryItem?.variant?.price ? parseFloat(data.inventoryItem.variant.price) : NaN
   if (Number.isFinite(price)) result.price = price
