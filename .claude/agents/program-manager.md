@@ -94,6 +94,15 @@ Invoked by `store-strategist` before brief synthesis:
    it **ready for review, never as a draft**, and name it in the scoreboard event as owner-blocked
    rather than in-flight. Prepend the dated Status log entry. No changes → no PR;
    say so in the scoreboard event.
+
+   **A row filed to TRACK this tracker PR lands at `pr_open` with a `pr` link — never as a bare
+   `kind:'code'` row at `approved`.** (#4539, per `operating-system.md` §3 rule 4.) A self-filed
+   PR-tracking row belongs in the QA / janitor lane, not R-DEV's code claim queue: file it in the
+   docs lane as `{op:'create', ..., kind:'instructions', pr:'<PR URL>'}`, or set its `pr` link and
+   land it at `pr_open`. A bare `kind:'code'` PR-tracking row at `approved` is the specific
+   anti-pattern to avoid — R-DEV claims it out of the code queue and can only confirm the PR already
+   exists (or already merged) and block it, pure phantom rework: run 419 burned two claims this way,
+   #3896 tracking tracker PR #729 and #3947 tracking PR #732, both already merged by claim time.
 </workflow>
 
 <guardrails>
