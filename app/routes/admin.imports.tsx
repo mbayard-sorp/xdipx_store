@@ -9,6 +9,11 @@ import {
 import type { ImportCandidateRow, ImportMonitorRunRow } from '~/lib/import-monitor.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { setPipelineSetting } from '~/lib/pricing-webhook.server'
+import {
+  getCachedEnrichmentCoverage,
+  refreshEnrichmentCoverage,
+} from '~/lib/enrichment-coverage.server'
+import type { EnrichmentCoverage } from '~/lib/enrichment-coverage.server'
 
 export const meta: MetaFunction = () => [{ title: 'Import Monitor — xdipx Admin' }]
 
@@ -37,6 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     enrichBatchCapRaw,
     productManagerEnabledRaw,
     productManagerMaxActionsRaw,
+    enrichmentCoverage,
   ] = await Promise.all([
     getImportCandidatesByStatus(['pending']),
     getImportCandidatesByStatus(['watching']),
@@ -55,6 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getPipelineSetting('import_enrich_batch_cap'),
     getPipelineSetting('product_manager_enabled'),
     getPipelineSetting('product_manager_max_actions_per_run'),
+    getCachedEnrichmentCoverage(),
   ])
 
   const runDays = (runDaysRaw ?? '0,1,2,3,4,5,6')
@@ -76,6 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     watching,
     imported,
     recentRuns,
+    enrichmentCoverage,
     settings: {
       runDays,
       enabled,
@@ -163,6 +171,18 @@ export async function action({ request }: ActionFunctionArgs) {
     const next = current === 'true' ? 'false' : 'true'
     await setPipelineSetting(key, next)
     return { ok: true, saved: key }
+  }
+
+  if (intent === 'refresh-enrichment-coverage') {
+    try {
+      const coverage = await refreshEnrichmentCoverage()
+      return { ok: true, saved: 'enrichment-coverage', coverage }
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Coverage refresh failed',
+      }
+    }
   }
 
   return { ok: false, error: `Unknown intent: ${intent}` }
@@ -1145,6 +1165,119 @@ function LifecycleSection({
 }
 
 // ---------------------------------------------------------------------------
+// Enrichment coverage
+// ---------------------------------------------------------------------------
+
+function pctBarColor(pct: number): string {
+  if (pct >= 90) return 'bg-green-500'
+  if (pct >= 60) return 'bg-yellow-500'
+  return 'bg-coral'
+}
+
+/**
+ * Per-field metafield/tag coverage across the live catalog (ticket #3891).
+ * Distinct from the imported-lifecycle counts above: those say whether the
+ * enrich step ran, this says whether each editorial field actually landed on
+ * the live products. The walk is heavy, so the loader reads a cached snapshot
+ * and the Refresh button recomputes it from Shopify.
+ */
+function CoveragePanel({ coverage }: { coverage: EnrichmentCoverage | null }) {
+  const fetcher = useFetcher<{ ok: boolean; coverage?: EnrichmentCoverage; error?: string }>()
+  const isRefreshing = fetcher.state !== 'idle'
+  // Prefer a just-refreshed snapshot over the loader's cached one.
+  const data: EnrichmentCoverage | null = fetcher.data?.coverage ?? coverage
+
+  return (
+    <section className="bg-white rounded-2xl border border-line overflow-hidden">
+      <div className="px-5 py-4 border-b border-line flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2
+            className="text-base font-semibold text-ink"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            Enrichment Coverage
+          </h2>
+          <p className="text-xs text-muted mt-0.5">
+            {data
+              ? `${data.totalProducts} live products · updated ${fmtDate(data.builtAt)}`
+              : 'Not computed yet — refresh to scan the live catalog.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={isRefreshing}
+          onClick={() =>
+            fetcher.submit({ intent: 'refresh-enrichment-coverage' }, { method: 'post' })
+          }
+          className="text-xs font-semibold px-4 py-2 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5 self-start"
+        >
+          {isRefreshing ? (
+            <>
+              <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+              Scanning...
+            </>
+          ) : (
+            'Refresh'
+          )}
+        </button>
+      </div>
+
+      {fetcher.data?.ok === false && (
+        <p className="text-xs text-red-500 px-5 py-3">{fetcher.data.error}</p>
+      )}
+
+      {!data ? (
+        <p className="text-sm text-muted px-5 py-8 text-center">
+          No coverage snapshot yet.
+        </p>
+      ) : data.totalProducts === 0 ? (
+        <p className="text-sm text-muted px-5 py-8 text-center">
+          No live products found in the catalog scan.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[420px]">
+            <thead>
+              <tr className="border-b border-line text-left">
+                <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Field</th>
+                <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide w-1/2">Coverage</th>
+                <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide text-right">Count</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {data.fields.map(f => (
+                <tr key={f.key} className="hover:bg-cream/50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-ink text-xs">{f.label}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-2 rounded-full bg-cream overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${pctBarColor(f.pct)}`}
+                          style={{ width: `${f.pct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-semibold text-ink tabular-nums w-9 text-right">
+                        {f.pct}%
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted text-right tabular-nums">
+                    {f.covered}/{f.total}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -1195,6 +1328,9 @@ export default function AdminImportsPage() {
       {/* Settings */}
       <SettingsPanel settings={data.settings} />
       <Phase2SettingsPanel settings={data.settings} />
+
+      {/* Per-field enrichment coverage across the live catalog */}
+      <CoveragePanel coverage={data.enrichmentCoverage} />
 
       {/* Pending candidates */}
       <section className="bg-white rounded-2xl border border-line overflow-hidden">
