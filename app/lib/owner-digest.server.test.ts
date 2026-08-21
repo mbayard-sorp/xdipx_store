@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 
-// ageOutStaleSuggestions() runs raw SQL, so we mock the db client and assert the
-// query it emits. `db.execute` is captured through a hoisted mock so vi.mock (which
-// vitest lifts above the imports) can wire it before owner-digest.server loads.
+// Several gatherers (countStaleUndecidedOwnerAsks, etc.) run raw SQL, so we mock
+// the db client and assert the query they emit. `db.execute` is captured through a
+// hoisted mock so vi.mock (which vitest lifts above the imports) can wire it before
+// owner-digest.server loads.
 const executeMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
 
@@ -28,8 +29,11 @@ vi.mock('~/lib/team.server', () => ({
   gate: vi.fn(),
   getValve: vi.fn(async () => false),
   TEAM_IDS: [],
+  // The owner-decision queue derives its kinds by excluding these (PR #789 put
+  // campaign/promo here alongside process/strategy, leaving program owner-only).
+  RUN_CLOSE_KINDS: ['process', 'strategy', 'campaign', 'promo'],
 }))
-vi.mock('~/lib/team-keys', () => ({ VALVE_KEYS: {} }))
+vi.mock('~/lib/team-keys', () => ({ VALVE_KEYS: {}, VIDEO_EXTRA_KEYS: { frameReview: 'video_frame_review' } }))
 vi.mock('~/lib/tracker.server', () => ({
   getTrackers: () => [],
   latestOwnerAsks: () => null,
@@ -49,12 +53,14 @@ vi.mock('~/lib/homepage-payload.server', () => ({
 
 import {
   MAX_TICKET_ATTEMPTS,
-  ageOutStaleSuggestions,
+  countStaleUndecidedOwnerAsks,
   parseRenderTruth,
   renderEscalationsSection,
   renderHomepageNowSection,
   renderOpsWatchSection,
   renderOwnerQueueSection,
+  OWNER_DECISION_KINDS,
+  STALE_OWNER_ROW_KINDS,
   renderNeedsMikeSection,
   renderShippedSection,
   renderTicketLoopSection,
@@ -288,6 +294,29 @@ describe('renderTicketsSection', () => {
   })
 })
 
+describe('OWNER_DECISION_KINDS (#4356)', () => {
+  it('excludes every kind an agent lane can close (RUN_CLOSE_KINDS)', () => {
+    // The decision queue is owner-only work. process/strategy/campaign/promo all
+    // have an agent close edge now (PR #789), so only program remains.
+    for (const k of ['process', 'strategy', 'campaign', 'promo']) {
+      expect(OWNER_DECISION_KINDS).not.toContain(k)
+    }
+    expect(OWNER_DECISION_KINDS).toContain('program')
+  })
+})
+
+describe('STALE_OWNER_ROW_KINDS (#4453)', () => {
+  it('excludes kinds an agent lane can close, so the Needs Mike list stays owner-only', () => {
+    // Same fix as #4356 for OWNER_DECISION_KINDS, on the Needs Mike / stale-owner
+    // surface: campaign/promo gained an agent close edge (PR #789), so they no
+    // longer belong here. Only program, which has no automated executor, remains.
+    for (const k of ['campaign', 'promo']) {
+      expect(STALE_OWNER_ROW_KINDS).not.toContain(k)
+    }
+    expect(STALE_OWNER_ROW_KINDS).toContain('program')
+  })
+})
+
 describe('renderOwnerQueueSection', () => {
   const row = (over: Partial<OwnerQueueRow> = {}): OwnerQueueRow => ({
     id: 52, kind: 'process', team: 'strategy', targetTeam: 'homepage',
@@ -296,7 +325,7 @@ describe('renderOwnerQueueSection', () => {
   })
 
   it('says plainly when nothing needs a decision', () => {
-    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: 0 })
+    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, staleUndecided: 0 })
     expect(html).toContain('Nothing waiting on a decision')
   })
 
@@ -306,7 +335,7 @@ describe('renderOwnerQueueSection', () => {
     const html = renderOwnerQueueSection({
       rows: [row({ id: 52 }), row({ id: 53 }), row({ id: 54 })],
       totalCount: 3,
-      agedOut: 0,
+      staleUndecided: 0,
     })
     expect(html).toContain('#52')
     expect(html).toContain('#53')
@@ -315,7 +344,7 @@ describe('renderOwnerQueueSection', () => {
   })
 
   it('flags rows older than a week and marks auto-approved ones', () => {
-    const html = renderOwnerQueueSection({ rows: [row({ ageDays: 9 })], totalCount: 1, agedOut: 0 })
+    const html = renderOwnerQueueSection({ rows: [row({ ageDays: 9 })], totalCount: 1, staleUndecided: 0 })
     expect(html).toContain('1 older than 7 days')
     expect(html).toContain('9d')
     expect(html).toContain('(auto)')
@@ -323,33 +352,38 @@ describe('renderOwnerQueueSection', () => {
 
   it('shows the routing when a row was filed at another team', () => {
     const html = renderOwnerQueueSection({
-      rows: [row({ team: 'strategy', targetTeam: 'homepage' })], totalCount: 1, agedOut: 0,
+      rows: [row({ team: 'strategy', targetTeam: 'homepage' })], totalCount: 1, staleUndecided: 0,
     })
     expect(html).toContain('strategy&rarr;homepage')
   })
 
   it('reports the overflow rather than silently truncating', () => {
-    const html = renderOwnerQueueSection({ rows: [row()], totalCount: 31, agedOut: 0 })
+    const html = renderOwnerQueueSection({ rows: [row()], totalCount: 31, staleUndecided: 0 })
     expect(html).toContain('and 30 more')
   })
 
-  it('reports what the ager closed on its own', () => {
-    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: 4 })
-    expect(html).toContain('4 stale rows aged out')
-  })
-
-  it('says the ager was skipped on a forced send, rather than reporting zero', () => {
-    // null and 0 mean different things: "did not run" versus "ran, found
-    // nothing". A forced test send must not read as a clean nightly sweep.
-    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: null })
-    expect(html).toContain('the stale-row ager did not run')
-    expect(html).not.toContain('aged out automatically')
-  })
-
-  it('stays silent when the ager ran and closed nothing', () => {
-    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, agedOut: 0 })
+  it('escalates stale undecided asks WITHOUT dismissing them (#4356)', () => {
+    // The old behaviour silently auto-dismissed these. An owner ask must never
+    // exit undecided: the digest surfaces the count and reaps nothing.
+    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, staleUndecided: 4 })
+    expect(html).toContain('4 process/strategy asks')
+    expect(html).toContain('past 21 days')
+    expect(html).toContain('Nothing was auto-dismissed')
     expect(html).not.toContain('aged out')
-    expect(html).not.toContain('did not run')
+  })
+
+  it('stays silent on a forced send (count not computed), reporting no escalation', () => {
+    // null means "not computed this run" (a forced test send), distinct from a
+    // real zero. Either way there is no escalation line and no dismissal claim.
+    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, staleUndecided: null })
+    expect(html).not.toContain('past 21 days')
+    expect(html).not.toContain('auto-dismissed')
+  })
+
+  it('stays silent when nothing is stale', () => {
+    const html = renderOwnerQueueSection({ rows: [], totalCount: 0, staleUndecided: 0 })
+    expect(html).not.toContain('past 21 days')
+    expect(html).not.toContain('auto-dismissed')
   })
 })
 
@@ -451,41 +485,39 @@ describe('renderEscalationsSection', () => {
   })
 })
 
-describe('ageOutStaleSuggestions', () => {
+describe('countStaleUndecidedOwnerAsks (#4356)', () => {
   // No DB harness in this suite, so we render the emitted SQL and assert its
-  // shape. That is exactly what the ticket #879 DONE-WHEN turns on: the window
-  // must key off created_at, not updated_at.
+  // shape. The #4356 change: this must COUNT, never dismiss — an owner ask must
+  // not exit undecided as a side effect of rendering the email.
   function emittedSql(): string {
     const passed = executeMock.mock.calls[0]?.[0]
     return new PgDialect().sqlToQuery(passed).sql
   }
 
-  it('ages a row out on created_at, so a fresh updated_at cannot save it', async () => {
+  it('reads a count and never writes — no UPDATE/dismiss (#4356)', async () => {
     executeMock.mockReset()
-    executeMock.mockResolvedValue({ rows: [{ id: 41 }, { id: 42 }] })
+    executeMock.mockResolvedValue({ rows: [{ n: 3 }] })
 
-    const closed = await ageOutStaleSuggestions()
-    expect(closed).toBe(2)
+    const n = await countStaleUndecidedOwnerAsks()
+    expect(n).toBe(3)
 
     const query = emittedSql()
-    // The stale clock is created_at (the age a human perceives), not updated_at
-    // (bumped by claims/bounces/lease-expiry/dedupe — the bug being fixed). A row
-    // whose updated_at is fresh but whose created_at is > 21 days is still matched
-    // because the predicate never looks at updated_at in the WHERE.
-    expect(query).toMatch(/created_at\s*<\s*now\(\)\s*-\s*interval\s*'21 days'/)
-    expect(query).not.toMatch(/updated_at\s*<\s*now\(\)\s*-\s*interval/)
+    // The core of the fix: this is a read. Nothing is dismissed.
+    expect(query).toMatch(/select\s+count/i)
+    expect(query).not.toMatch(/update\s+homepage_team_suggestions/i)
+    expect(query).not.toMatch(/set\s+status\s*=\s*'dismissed'/i)
   })
 
-  it('no longer exempts rows routed at a team, but keeps the defect exemption', async () => {
+  it('keeps the created_at clock and the kind/priority scope from #879', async () => {
     executeMock.mockReset()
-    executeMock.mockResolvedValue({ rows: [] })
-    await ageOutStaleSuggestions()
+    executeMock.mockResolvedValue({ rows: [{ n: 0 }] })
+    await countStaleUndecidedOwnerAsks()
 
     const query = emittedSql()
-    // target_team restriction dropped: a cross-team row can now age out.
-    expect(query).not.toMatch(/target_team/)
-    // Customer-facing-defect exemption preserved via kind + priority: a defect is
-    // filed as `code` (not process/strategy) and/or P0-P2 (priority < 3).
+    // created_at, not updated_at (bumped by claims/bounces/lease-expiry/dedupe).
+    expect(query).toMatch(/created_at\s*<\s*now\(\)\s*-\s*interval\s*'21 days'/)
+    expect(query).not.toMatch(/updated_at\s*<\s*now\(\)\s*-\s*interval/)
+    // Defect exemption preserved via kind + priority (a defect is `code` and/or P0-P2).
     expect(query).toMatch(/kind\s+in\s*\(\s*'process',\s*'strategy'\s*\)/i)
     expect(query).toMatch(/priority\s*>=\s*3/)
     expect(query).toMatch(/status\s*=\s*'approved'/)
@@ -494,7 +526,7 @@ describe('ageOutStaleSuggestions', () => {
   it('returns 0 when the query fails rather than throwing', async () => {
     executeMock.mockReset()
     executeMock.mockRejectedValue(new Error('db down'))
-    await expect(ageOutStaleSuggestions()).resolves.toBe(0)
+    await expect(countStaleUndecidedOwnerAsks()).resolves.toBe(0)
   })
 })
 
@@ -716,6 +748,21 @@ describe('renderNeedsMikeSection', () => {
     expect(html).toContain('Ad campaign #12')
     expect(html).toContain('approved 30d ago and never launched')
     expect(html).toContain('/admin/ad-studio')
+  })
+
+  it('lists video frames parked for the owner pick as owner-only work (#4356)', () => {
+    const html = renderNeedsMikeSection({
+      ...emptyFacts,
+      parkedVideoFrames: { count: 3, oldestDays: 4 },
+    })
+    expect(html).toContain('3 video frames are awaiting your pick')
+    expect(html).toContain('oldest 4d')
+    expect(html).toContain('/admin/video-studio')
+  })
+
+  it('says nothing about video frames when the valve is off (null) or the queue is empty', () => {
+    expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: null })).not.toContain('video-studio')
+    expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: { count: 0, oldestDays: null } })).not.toContain('video-studio')
   })
 })
 

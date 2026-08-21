@@ -232,7 +232,10 @@ its payload server-side, so a relay error still cannot write something the API i
    **not merged by the release engine either**: the `pm/` prefix is not engine-eligible and the
    allowlist does not cover `docs/store-team/trackers/`, so the PR waits for the owner — this part
    is `git`/`gh`, not a team-API call, so `program-manager` still does it directly; see
-   `program-manager.md` step 6) when rows changed, and hands you a
+   `program-manager.md` step 6 — and any row filed to TRACK that tracker PR lands at `pr_open` with a
+   `pr` link, never as a bare `kind:'code'` row at `approved`, per `operating-system.md` §3 rule 4:
+   a bare code-at-approved PR-tracking row is claimed by R-DEV as phantom rework, #4539) when rows
+   changed, and hands you a
    **Program Status** section (overall RAG + top risks + owner asks per program) to include
    verbatim in the brief. It also verifies **routine coverage**, and the scope is *derived from
    `routine-schedule.md`, never enumerated here*:

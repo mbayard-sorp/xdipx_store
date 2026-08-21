@@ -674,6 +674,57 @@ async function handleInventoryUpdate(level: ShopifyInventoryLevel): Promise<void
   const { triggerBackInStock } = await import('../app/lib/klaviyo.server.js')
   await triggerBackInStock(product)
   console.log(`[webhook:inventory-update] back-in-stock fired for ${product.handle} (available ${level.available})`)
+
+  // Restock -> social event trigger (#4361). Same crossing that fires Klaviyo
+  // above also files ONE social-actionable row. A true sold-out -> in-stock
+  // crossing is the rarest, highest-intent signal we have, so unlike the
+  // new-product trigger it needs no volume cap; the dedupeKey `restock:<handle>`
+  // keeps a flapping SKU from re-filing while one row is still open. Filed as
+  // `process` (never `campaign`) because RUN_CLOSE_KINDS is ['process','strategy']
+  // and a campaign row cannot be closed by a run (#4360). This block is purely
+  // additive and runs AFTER Klaviyo, so the email behaviour is unchanged; a
+  // throw here is caught and acked by runWebhookWork.
+  const sku = product.sku
+  let pricingRationales: (string | null)[] = []
+  if (sku) {
+    const { db } = await import('../app/lib/db.server.js')
+    const { pricingAuditLog } = await import('../db/schema.js')
+    const { and, eq, gte } = await import('drizzle-orm')
+    const rows = await db
+      .select({ rationale: pricingAuditLog.rationale })
+      .from(pricingAuditLog)
+      .where(and(
+        eq(pricingAuditLog.sku, sku),
+        gte(pricingAuditLog.occurredAt, new Date(Date.now() - PRICING_RATIONALE_LOOKBACK_MS)),
+      ))
+      .limit(50)
+    pricingRationales = rows.map(r => r.rationale)
+  }
+
+  const { restockPostExcludeReason } = await import('../app/lib/new-product-social-filter.js')
+  const excludeReason = restockPostExcludeReason({ pricingRationales })
+  if (excludeReason) {
+    console.log(`[webhook:inventory-update] restock social suggestion skipped for ${product.handle}: ${excludeReason}`)
+    return
+  }
+
+  const { createSuggestion } = await import('../app/lib/team.server.js')
+  await createSuggestion({
+    team:      'social',
+    kind:      'process',
+    category:  'social-automation',
+    dedupeKey: `restock:${product.handle}`,
+    suggestion:
+      `Back in stock after a genuine sell-out: "${product.title}" ` +
+      `(handle: ${product.handle}). A sold-out -> in-stock crossing is the ` +
+      `rarest, highest-intent signal we have, so it earns a post. Draft one per ` +
+      `routine-social-daily.md; the usual gates apply, including Instagram ` +
+      `category eligibility and stock. CAPTION CONSTRAINT: frame the restock as ` +
+      `mechanism or quality ("why this one keeps selling out"), never as scarcity ` +
+      `or urgency. "Back in stock" as urgency bait is a sale-signal register the ` +
+      `charter and social-publish-gate refuse.`,
+  })
+  console.log(`[webhook:inventory-update] filed restock social suggestion for ${product.handle}`)
 }
 
 // ─── Returns: tracking + auto-refund ──────────────────────────────────────
