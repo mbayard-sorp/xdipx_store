@@ -5,12 +5,17 @@ tickets off the improvement bus and turns each one into **one branch and one PR*
 never pushes to `main`, never touches a protected path. The release engine merges what passes the
 gates; see `docs/store-team/operating-system.md`.
 
-Runs on the **Max subscription**. Cadence: twice daily, `0 14 * * *` and `0 20 * * *` UTC. The
-14:00 pass is the fresh-work pass; the 20:00 pass exists to give a bounced ticket a same-day second
-attempt.
+Runs on the **Max subscription**. Cadence: **three passes daily, `0 10,15,20 * * *` UTC** (10:00,
+15:00, 20:00), raised from two on 2026-08-21 (owner yes on the urgency cadence). The 10:00 and
+15:00 passes are fresh-work passes; the 20:00 pass still prefers bounced tickets for a same-day
+second attempt.
 
-Prompt history: the trigger (`trig_01MEQYsg5sHPbM4v39FqssAD`) was reissued 2026-08-05, current
-prompt uuid `rdev-daily-0003`. Three corrections, all recorded here so the playbook and the prompt
+Prompt history: the trigger (`trig_01MEQYsg5sHPbM4v39FqssAD`) was reissued 2026-08-05
+(`rdev-daily-0003`) and again 2026-08-21, current prompt uuid `rdev-daily-0004`: the cadence
+sentence was added and the HARD RULES protected-path sentence was rewritten to defer to Step 2 of
+this playbook (author, never merge), because the old prompt still ordered a blanket `blocked` and
+a scheduled run obeying a stale prompt over the playbook is the exact class that kept the social
+lane dark on 2026-08-19. Three corrections, all recorded here so the playbook and the prompt
 agree: the per-pass claim cap rose from 3 to 5 (the approved `code` backlog stood 56 deep against 6
 claims/day, which never drains); `leaseSeconds` rose from the scheduled prompt's old 1200 to the
 10800 this playbook documents, so the trigger now matches the three-hour lease below (20-minute

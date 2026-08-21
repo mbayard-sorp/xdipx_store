@@ -6,12 +6,13 @@ or a bounce back to `in_progress` with a concrete reason. **QA never merges, and
 cannot**: the transition map gives `qa-reviewer` no path to `applied`, so a verdict is a
 recommendation to the release engine, not a ship.
 
-Runs on the **Max subscription**. Cadence: **two passes daily, `30 3,15 * * *` UTC** (03:30 and
-15:30), changed 2026-08-05 on trigger `trig_019GjVP9hGBU1gmXRBYtYURm` (prompt uuid
-`rqa-daily-0002`). The 15:30 pass reviews the 14:00 dev pass's PRs within 90 minutes; the 03:30
-pass exists because a single 15:30 pass left every PR from the 20:00 dev pass waiting about 19
-hours for review, so pass two structurally could not land same-day (verified on PR #477,
-2026-08-03).
+Runs on the **Max subscription**. Cadence: **four passes daily, `30 3,11,16,21 * * *` UTC**
+(03:30, 11:30, 16:30, 21:30), raised from two on 2026-08-21 (owner yes on the urgency cadence) on
+trigger `trig_019GjVP9hGBU1gmXRBYtYURm`, current prompt uuid `rqa-daily-0004`. The 11:30, 16:30
+and 21:30 passes review each R-DEV pass (10:00, 15:00, 20:00) within 90 minutes; the 03:30 pass is
+the overnight sweep. History: a single 15:30 pass once left every PR from the 20:00 dev pass
+waiting about 19 hours for review (verified on PR #477, 2026-08-03), fixed to two passes
+2026-08-05, then to four.
 
 Mission brief: `docs/store-team/mission-brief.md`. The repo rules a diff must satisfy are in
 `CLAUDE.md`; visual work is additionally bound by `docs/design-doctrine.md` and copy by
