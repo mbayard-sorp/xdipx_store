@@ -184,6 +184,19 @@ Watch for the capability even when the tag is missing: a DONE WHEN that hinges o
 visual harness is disposed the same way and flagged for the tag, since filers are still learning to
 apply it.
 
+**External-state DONE WHEN clauses: verify before `pr_open`, do not defer to QA.** (#4596) When a
+ticket's DONE WHEN carries an explicit verification or confirmation clause about state outside the
+diff — a webhook subscription that must actually exist in production, a valve or `pipeline_settings`
+value that must be set, a third-party config that must be live — run that check yourself before you
+open the PR and state the result in the PR note. A green `typecheck`/`test`/`build` does not satisfy a
+DONE WHEN that asks whether an external subscription is registered: #4361 shipped correct,
+well-tested code whose feature was permanently inert because the `inventory_levels/update` webhook was
+never registered (a live query found zero subscriptions for any topic), and it cost a full QA bounce
+to catch a check the ticket had asked for up front, in bold, first. It is the same quiet-failure
+shape already documented for `orders/create` in `app/lib/purchase-capi.server.ts`. Treat an
+external-state confirmation clause as a required, reportable step of the ticket, not a code-diff side
+effect QA will discover.
+
 ## Step 3 — Implement (per ticket)
 
 Before step 1, run a cheap staleness guard: grep the ticket's named files, flags, and symbols
