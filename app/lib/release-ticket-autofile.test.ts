@@ -31,19 +31,36 @@ import {
   AUTOFILE_DEDUPE_PREFIX,
   autoFileTicketForPr,
   autofileDedupeKey,
+  bodyNamesPr,
   prNumberFromAutofileKey,
   prNumberFromLinkRef,
 } from '~/lib/release-ticket-autofile.server'
 
 const PR = { number: 494, title: 'docs: something', htmlUrl: 'https://github.com/o/r/pull/494', headRef: 'claude/foo' }
 
-/** Stub the prAlreadyTracked query (select → from → innerJoin → where → limit)
- *  to return one link row per ref. []' means the PR is not tracked. */
-function stubTrackingLinks(refs: string[]) {
-  const rows = refs.map((ref) => ({ ref }))
+/**
+ * Stub the module's bus reads. Two query shapes come off `db.select`:
+ *   - link queries (guard (b) prAlreadyTracked, and guard (c)'s link pass):
+ *     select → from → innerJoin → where → limit, returning `{ ref }` rows.
+ *   - the body query (guard (c)): select → from → where → limit, returning
+ *     `{ body }` rows.
+ * `from()` exposes both `.innerJoin` and `.where` so either query resolves.
+ */
+function stubDb({ links = [], bodies = [] }: { links?: string[]; bodies?: string[] } = {}) {
+  const linkRows = links.map((ref) => ({ ref }))
+  const bodyRows = bodies.map((body) => ({ body }))
   ;(db as unknown as Record<string, unknown>).select = () => ({
-    from: () => ({ innerJoin: () => ({ where: () => ({ limit: async () => rows }) }) }),
+    from: () => ({
+      innerJoin: () => ({ where: () => ({ limit: async () => linkRows }) }),
+      where: () => ({ limit: async () => bodyRows }),
+    }),
   })
+}
+
+/** Back-compat shim for the guard-(b) tests: links only, no body references.
+ *  `[]` means the PR is not tracked. */
+function stubTrackingLinks(refs: string[]) {
+  stubDb({ links: refs })
 }
 
 beforeEach(() => {
@@ -127,6 +144,25 @@ describe('autoFileTicketForPr', () => {
     expect(await autoFileTicketForPr(PR)).toEqual({ prNumber: 494, ticketId: 1234, created: true })
   })
 
+  // Ticket #4581 (c): a hand-filed tracker that names the PR by number in its
+  // body but is not yet linked (and sits at approved) is invisible to guard (b),
+  // which only counts linked refs on pr_open/in_review/verified/applied. Filing
+  // an autofile row for it produces the exact duplicate R-DEV had to claim and
+  // block (incident: #4292 vs hand-filed #4245 for PR #781). No write.
+  it('does not file when a non-terminal ticket references the PR by number in its body', async () => {
+    stubDb({ links: [], bodies: ['Approved fix. DONE WHEN: PR #494 merged and deployed.'] })
+    expect(await autoFileTicketForPr(PR)).toBeNull()
+    expect(fileTicketForOpenPr).not.toHaveBeenCalled()
+  })
+
+  // Exact-match guard for the body path: a body naming a different PR whose
+  // number shares a prefix (#4940) must not count as referencing PR 494.
+  it('still files when a body only names a different PR sharing a number prefix', async () => {
+    stubDb({ links: [], bodies: ['Tracking PR #4940, unrelated to this one.'] })
+    vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
+    expect(await autoFileTicketForPr(PR)).toEqual({ prNumber: 494, ticketId: 1234, created: true })
+  })
+
   // Ticket #3302 (a): the PR already merged, so a pr_open ticket for it is noise
   // (sweepOutOfBandMerges and its applied ticket own it). No write.
   it('does not file when the PR is already merged', async () => {
@@ -172,6 +208,26 @@ describe('autoFileTicketForPr', () => {
     await autoFileTicketForPr(PR)
     await autoFileTicketForPr(PR)
     expect(fileTicketForOpenPr).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('bodyNamesPr', () => {
+  it('matches a #N or /pull/N reference for the exact PR number', () => {
+    expect(bodyNamesPr('DONE WHEN: PR #494 merged', 494)).toBe(true)
+    expect(bodyNamesPr('see https://github.com/o/r/pull/494 for context', 494)).toBe(true)
+    expect(bodyNamesPr('touches #12 and #494 both', 494)).toBe(true)
+  })
+
+  it('does not match a different number, a prefix-sharing number, or bare digits', () => {
+    expect(bodyNamesPr('tracking #4940', 494)).toBe(false)
+    expect(bodyNamesPr('the value 494 appears with no ref token', 494)).toBe(false)
+    expect(bodyNamesPr('PR #495', 494)).toBe(false)
+  })
+
+  it('is false for empty or missing bodies', () => {
+    expect(bodyNamesPr(null, 494)).toBe(false)
+    expect(bodyNamesPr(undefined, 494)).toBe(false)
+    expect(bodyNamesPr('', 494)).toBe(false)
   })
 })
 

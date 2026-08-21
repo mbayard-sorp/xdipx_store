@@ -47,7 +47,7 @@
  * stops being work-in-progress.
  */
 
-import { and, eq, inArray, like, sql } from 'drizzle-orm'
+import { and, eq, inArray, like, or, sql } from 'drizzle-orm'
 
 import { db } from '~/lib/db.server'
 import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
@@ -146,6 +146,26 @@ async function fileTicketForPrUncoalesced(
     }
   } catch (err) {
     console.warn(`${LOG} tracked-ticket check failed for PR #${pr.number}; proceeding to file`, err)
+  }
+
+  // (c) A non-terminal ticket already names this PR by number, in its body or a
+  // pr-link, but is not yet in a status (or not yet linked) that guard (b) sees.
+  // This is the gap guard (b) misses: a hand-filed tracker sitting at `approved`
+  // whose DONE WHEN cites "PR #<n> merged" has no pr-link and is not in a
+  // TRACKED_SKIP_STATUS, so the link-only check never counts it and the autofiler
+  // files a duplicate the next dev pass has to claim and block (ticket #4581;
+  // incident: auto-filed #4292 duplicated hand-filed #4245 for PR #781). Same
+  // fail-toward-filing contract as (a)/(b): a lookup that cannot decide must not
+  // suppress the ticket.
+  try {
+    if (await prReferencedByLiveTicket(pr.number)) {
+      console.log(
+        `${LOG} not filing PR #${pr.number}: a non-terminal ticket (approved/in_progress/pr_open) already references it`,
+      )
+      return null
+    }
+  } catch (err) {
+    console.warn(`${LOG} referenced-ticket check failed for PR #${pr.number}; proceeding to file`, err)
   }
 
   // (a) The PR already merged. A pr_open ticket asking QA to gate an already
@@ -293,6 +313,78 @@ async function prAlreadyTracked(prNumber: number): Promise<boolean> {
   // The LIKE is end-anchored, but re-parse to be certain a ref for /pull/4940
   // is never counted as a match for PR 494.
   return rows.some((r) => prNumberFromLinkRef(r.ref) === prNumber)
+}
+
+/**
+ * Non-terminal statuses a hand-filed ticket sits in while it is still open work.
+ * Distinct from `TRACKED_SKIP_STATUSES`: this set covers the pre-QA statuses
+ * (`approved`, `in_progress`) a ticket occupies while it names its PR in prose
+ * but has not been linked yet, which is exactly the case guard (b) cannot see.
+ * `pr_open` overlaps both sets on purpose. `blocked`/`dismissed`/`in_review`/
+ * `verified`/`applied` are deliberately absent: a terminal or QA-owned row does
+ * not describe live, un-linked work that a fresh autofile would duplicate.
+ */
+const REFERENCED_SKIP_STATUSES: string[] = ['approved', 'in_progress', 'pr_open']
+
+/**
+ * True when a non-terminal ticket (`approved` / `in_progress` / `pr_open`)
+ * already names `prNumber`, in its body text or through a pr-kind link. This
+ * extends guard (b): that one only counts a *linked* PR ref on a
+ * `pr_open`/`in_review`/`verified`/`applied` row, so a hand-filed ticket that
+ * cites the PR by number in its DONE WHEN but has no link (and sits at
+ * `approved`) falls straight through it and the autofiler duplicates it
+ * (ticket #4581).
+ *
+ * The body test is a SQL LIKE prefilter on the two textual shapes a PR
+ * reference takes (`#<n>` or `/pull/<n>`), then a boundary-aware re-parse so
+ * `#781` is never found inside `#7810` — the same exact-match discipline the
+ * link check already applies.
+ */
+async function prReferencedByLiveTicket(prNumber: number): Promise<boolean> {
+  const bodyRows = await db
+    .select({ body: homepageTeamSuggestions.suggestion })
+    .from(homepageTeamSuggestions)
+    .where(and(
+      inArray(homepageTeamSuggestions.status, REFERENCED_SKIP_STATUSES),
+      or(
+        like(homepageTeamSuggestions.suggestion, `%#${prNumber}%`),
+        like(homepageTeamSuggestions.suggestion, `%/pull/${prNumber}%`),
+      ),
+    ))
+    .limit(50)
+  if (bodyRows.some((r) => bodyNamesPr(r.body, prNumber))) return true
+
+  // A linked ref on an approved/in_progress row: guard (b) only covers
+  // pr_open/in_review/verified/applied, so a link on the two pre-QA statuses
+  // needs its own pass.
+  const linkRows = await db
+    .select({ ref: suggestionLinks.ref })
+    .from(suggestionLinks)
+    .innerJoin(homepageTeamSuggestions, eq(suggestionLinks.suggestionId, homepageTeamSuggestions.id))
+    .where(
+      and(
+        eq(suggestionLinks.kind, 'pr'),
+        inArray(homepageTeamSuggestions.status, REFERENCED_SKIP_STATUSES),
+        sql`${suggestionLinks.ref} LIKE ${'%/pull/' + prNumber} OR ${suggestionLinks.ref} = ${'#' + prNumber}`,
+      ),
+    )
+    .limit(20)
+  return linkRows.some((r) => prNumberFromLinkRef(r.ref) === prNumber)
+}
+
+/**
+ * True when free-text `body` names PR `prNumber` as a `#<n>` or `/pull/<n>`
+ * token. Boundary-aware (`\b` after the digits) so `#781` is not matched inside
+ * `#7810`. Exported for direct unit testing of the body-match rule.
+ */
+export function bodyNamesPr(body: string | null | undefined, prNumber: number): boolean {
+  if (!body) return false
+  const re = /(?:\/pull\/|#)(\d{1,9})\b/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(body)) !== null) {
+    if (Number(m[1]) === prNumber) return true
+  }
+  return false
 }
 
 /**
