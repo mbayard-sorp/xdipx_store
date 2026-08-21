@@ -524,6 +524,36 @@ const ATLAS_NO_CARTON_CLAUSE =
   'letters, watermark, logo, or brand name on the product or anywhere in the frame.'
 
 /**
+ * Ratio-anchored scale clause (ticket #4536, split from #3997). PRODUCT_SCALE_CUE
+ * asks for "true real-world size" in the abstract, and the 2026-08-17 scene-frame
+ * run proved that insufficient: a packshot carries no scale reference, so an
+ * unanchored composite still rendered a palm-sized product at roughly twice life
+ * size. This clause anchors the product to a ratio between two things both
+ * present in the frame — the presenter's face and their hand — which the model
+ * can measure against, and it was the variant that also gave the truest colour of
+ * the three tested. Presenter-neutral on purpose: cast members can be any gender,
+ * so it never says "her"/"she".
+ */
+export const PRODUCT_SCALE_RATIO_ANCHOR =
+  'Anchor the product size to what is visible in the frame: the product is no ' +
+  "wider than one third the width of the presenter's face and clearly smaller " +
+  'than their hand.'
+
+/**
+ * The full clause suffix appended to a composite prompt whenever a real product
+ * is composited into the scene. Shared by both compose paths so the scale rules
+ * cannot drift between them, and exported so a unit test can assert the
+ * ratio-anchor clause is always present (ticket #4536). Both paths carry the
+ * real-world-size cue and the ratio anchor; only the Atlas one-stage path also
+ * carries ATLAS_NO_CARTON_CLAUSE, because the fal two-stage path already strips
+ * the carton in its stage-1 plate.
+ */
+export function compositeProductClauses(path: 'fal' | 'atlas'): string {
+  const scale = `${PRODUCT_SCALE_CUE} ${PRODUCT_SCALE_RATIO_ANCHOR}`
+  return path === 'atlas' ? `${scale} ${ATLAS_NO_CARTON_CLAUSE}` : scale
+}
+
+/**
  * Stage-2 output dimensions per caller-requested ratio. FLUX.2 edit takes explicit
  * pixel dimensions rather than fal's `aspect_ratio` string, so the ratio resolves
  * here. Pinning exact pixels also avoids the under-ratio drift the old
@@ -685,7 +715,7 @@ async function composeSceneFrameAtlas(opts: ComposeSceneFrameOpts): Promise<Scen
   // carton clause — same conditions as the fal path's `needsPlate`.
   const hasProduct = !!opts.productImageUrl && opts.productImageUrl !== opts.presenterImageUrl
   const framePrompt = hasProduct
-    ? `${opts.prompt} ${PRODUCT_SCALE_CUE} ${ATLAS_NO_CARTON_CLAUSE}`
+    ? `${opts.prompt} ${compositeProductClauses('atlas')}`
     : opts.prompt
 
   const refImageUrls = [
@@ -751,7 +781,7 @@ async function composeSceneFrameFal(opts: ComposeSceneFrameOpts): Promise<SceneF
   // Anchor the composited product to real-world scale (ticket #2761). Applied
   // only to a genuine presenter+product composite (needsPlate): a talking-head
   // frame has no product, and the no-presenter base has no hand to scale against.
-  const framePrompt = needsPlate ? `${opts.prompt} ${PRODUCT_SCALE_CUE}` : opts.prompt
+  const framePrompt = needsPlate ? `${opts.prompt} ${compositeProductClauses('fal')}` : opts.prompt
 
   const imageUrls = [
     opts.presenterImageUrl,
