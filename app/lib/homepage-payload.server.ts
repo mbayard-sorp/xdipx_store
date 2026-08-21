@@ -108,23 +108,42 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
   )
 
   const [carouselResults, emmaRailResults, couplesResults] = await Promise.all([
+    // Each block additionally catches its own rejection, same as the couples
+    // strip below and for the identical reason: every homepage block resolves
+    // inside one Promise.all, so a single malformed block (a bad handle/tag/
+    // collection whose Shopify fetch rejects) used to reject the whole
+    // contentBlocks build, which the storefront then degrades to
+    // EMPTY_CONTENT_BLOCKS — blanking every team-published section on the page.
+    // PR #322 hardened only the couples leg; the carousel and emma-rail legs
+    // were left unprotected and reproduced the same three-day-outage signature
+    // (#4739). A bad carousel/rail must cost only its own strip's products.
     carouselBlocks.length > 0
       ? withTimeout(Promise.all(carouselBlocks.map(b => {
           const limit = b.productLimit ?? 8
           const source = b.source ?? 'tag'
-          if (source === 'collection' && b.collectionHandle) {
-            return getCollectionProducts(b.collectionHandle, limit)
+          const resolveProducts = (): Promise<Product[]> => {
+            if (source === 'collection' && b.collectionHandle) {
+              return getCollectionProducts(b.collectionHandle, limit)
+            }
+            if (source === 'manual' && b.productHandles?.length) {
+              return getProductsByHandles(normalizeProductHandles(b.productHandles))
+            }
+            return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
           }
-          if (source === 'manual' && b.productHandles?.length) {
-            return getProductsByHandles(normalizeProductHandles(b.productHandles))
-          }
-          return b.shopifyTag ? getProductsByTag(b.shopifyTag, limit) : Promise.resolve([] as Product[])
+          return resolveProducts().catch((err: unknown) => {
+            console.error('[homepage-payload] carousel rail resolve failed:', err)
+            return [] as Product[]
+          })
         })), BUILD_TIMEOUT_MS, [] as Product[][], 'carouselResults(payloadA)')
       : Promise.resolve([] as Product[][]),
     emmaRailBlocks.length > 0
       ? withTimeout(Promise.all(emmaRailBlocks.map(b =>
           b.productHandles?.length
             ? getProductsByHandles(normalizeProductHandles(b.productHandles))
+                .catch((err: unknown) => {
+                  console.error('[homepage-payload] emma rail resolve failed:', err)
+                  return [] as Product[]
+                })
             : Promise.resolve([] as Product[]),
         )), BUILD_TIMEOUT_MS, [] as Product[][], 'emmaRailResults(payloadA)')
       : Promise.resolve([] as Product[][]),

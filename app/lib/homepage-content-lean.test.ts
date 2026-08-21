@@ -212,6 +212,50 @@ describe('buildHomeContentBlocksLean', () => {
     expect(result.sections.map(s => s._type)).toContain('emmaCuratedRail')
   })
 
+  it('a rejecting emmaCuratedRail fetch costs only its own strip, never the whole payload (#4739)', async () => {
+    // Same failure mode as the couples regression above, but for the
+    // emmaCuratedRail leg. PR #322 hardened only couples; the rail leg stayed
+    // unprotected inside the shared Promise.all, so one rail whose Shopify fetch
+    // rejects blanked every team-published section on the live homepage — the
+    // exact render-truth outage this ticket fixes.
+    mockGetHomepageSections.mockResolvedValue(makeSections())
+    mockGetProductsByHandles.mockImplementation(async (handles: string[]) => {
+      if (handles.includes('lean-product-a')) throw new Error('shopify down')
+      return handles.map(makeFatProduct)
+    })
+
+    const result = await buildHomeContentBlocksLean()
+
+    // The whole team surface still renders — sections are NOT blanked.
+    expect(result.sections.length).toBeGreaterThan(0)
+    expect(result.sections.map(s => s._type)).toContain('emmaCuratedRail')
+    expect(result.sections.map(s => s._type)).toContain('playTogetherBanner')
+    // The bad rail costs only its own products.
+    expect(result.carouselProductMap['rail1']).toEqual([])
+    // Its neighbour (the couples strip) is untouched.
+    expect(result.carouselProductMap['couples1']?.length).toBeGreaterThan(0)
+  })
+
+  it('a rejecting productCarousel fetch costs only its own strip, never the whole payload (#4739)', async () => {
+    // productCarousel is filtered out of variant b, but its products are still
+    // resolved inside buildHomeContentBlocks (shared with variant A), in the
+    // same Promise.all — so a rejecting carousel fetch could blank the whole
+    // lean payload too, even though the carousel section itself never renders.
+    mockGetHomepageSections.mockResolvedValue(makeSections())
+    mockGetProductsByHandles.mockImplementation(async (handles: string[]) => {
+      if (handles.includes('legacy-product')) throw new Error('shopify down')
+      return handles.map(makeFatProduct)
+    })
+
+    const result = await buildHomeContentBlocksLean()
+
+    // The surviving variant-b sections still render.
+    expect(result.sections.length).toBeGreaterThan(0)
+    expect(result.sections.map(s => s._type)).toContain('emmaCuratedRail')
+    // The healthy rail resolved its own products despite the carousel's failure.
+    expect(result.carouselProductMap['rail1']?.length).toBeGreaterThan(0)
+  })
+
   it('tolerates bare-string productHandles on the couples band', async () => {
     // The array exists in the dataset in two shapes; a bare string used to
     // collapse to null in a GROQ object projection and throw downstream.
