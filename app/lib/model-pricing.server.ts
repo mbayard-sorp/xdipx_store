@@ -1,6 +1,7 @@
 // Rates are per 1M tokens, in USD, at SYNC (full) price.
 // Batch source = 50% of these. Cache write = 1.25x input. Cache read = 0.10x input.
-// agent-sdk calls are billed against the Max subscription, not the API key; cost = 0.
+// Calls billed against the Max subscription (not the API key) cost 0. There is
+// more than one label for that in the wild: see MAX_SUBSCRIPTION_SOURCES.
 
 type Rate = { input: number; output: number }
 
@@ -23,15 +24,38 @@ const RATES: Record<string, Rate> = {
 // model tightens a budget gate; undercounting silently loosens it (#96).
 const DEFAULT_RATE: Rate = { input: 15, output: 75 }
 
+/**
+ * Source labels that mean "billed to a Max subscription, not the API key".
+ *
+ * `api.homepage-team.spend.tsx` accepted its `source` field through a bare
+ * TypeScript `as` cast with no runtime validation, so callers wrote whatever
+ * string they used internally and it was stored verbatim. Cloud routines use
+ * these three; the repo's own SDK path uses 'agent-sdk'. They all mean the same
+ * thing and must all cost zero, or a budget gate throttles a team on money that
+ * was never spent.
+ */
+export const MAX_SUBSCRIPTION_SOURCES: ReadonlySet<string> = new Set([
+  'agent-sdk',
+  'anthropic-max',
+  'max-subscription',
+  'cloud-routine',
+])
+
 export function estimateCostUsd(args: {
   model: string
-  source: 'batch' | 'sync' | 'agent-sdk'
+  source: string
   inputTokens: number
   outputTokens: number
   cacheCreationTokens: number
   cacheReadTokens: number
 }): number {
-  if (args.source === 'agent-sdk') return 0 // billed against Max subscription, not the API key
+  // Every one of these means "a human's Max subscription paid for this, the API
+  // key did not". Only 'agent-sdk' was zero-rated before, so the others were
+  // priced at full Opus list rates and charged against team budget gates as if
+  // real money had moved. On 2026-08-21 a single 'anthropic-max' row booked
+  // $43.50 of phantom cost and closed the social team's daily gate on it; the
+  // team's actual spend that day was about four cents.
+  if (MAX_SUBSCRIPTION_SOURCES.has(args.source)) return 0
   const r = RATES[args.model] ?? DEFAULT_RATE
   const mult = args.source === 'batch' ? 0.5 : 1
   const perTok = (rate: number) => (rate * mult) / 1_000_000
