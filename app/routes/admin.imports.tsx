@@ -14,6 +14,7 @@ import {
   refreshEnrichmentCoverage,
 } from '~/lib/enrichment-coverage.server'
 import type { EnrichmentCoverage } from '~/lib/enrichment-coverage.server'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 export const meta: MetaFunction = () => [{ title: 'Import Monitor — xdipx Admin' }]
 
@@ -885,7 +886,7 @@ function CandidatesTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <ResponsiveTable>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-line text-left">
@@ -974,7 +975,7 @@ function CandidatesTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </ResponsiveTable>
   )
 }
 
@@ -1034,7 +1035,7 @@ function RecentRunsSection({ runs }: { runs: ImportMonitorRunRow[] }) {
           Recent Runs
         </h2>
       </div>
-      <div className="overflow-x-auto">
+      <ResponsiveTable>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left">
@@ -1063,7 +1064,7 @@ function RecentRunsSection({ runs }: { runs: ImportMonitorRunRow[] }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </ResponsiveTable>
     </section>
   )
 }
@@ -1117,7 +1118,7 @@ function LifecycleSection({
         (rows.length === 0 ? (
           <p className="text-sm text-muted px-5 py-8 text-center">No imported products yet.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <ResponsiveTable>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left">
@@ -1158,7 +1159,7 @@ function LifecycleSection({
                 })}
               </tbody>
             </table>
-          </div>
+          </ResponsiveTable>
         ))}
     </section>
   )
@@ -1238,7 +1239,7 @@ function CoveragePanel({ coverage }: { coverage: EnrichmentCoverage | null }) {
           No live products found in the catalog scan.
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <ResponsiveTable>
           <table className="w-full text-sm min-w-[420px]">
             <thead>
               <tr className="border-b border-line text-left">
@@ -1271,7 +1272,7 @@ function CoveragePanel({ coverage }: { coverage: EnrichmentCoverage | null }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </ResponsiveTable>
       )}
     </section>
   )
