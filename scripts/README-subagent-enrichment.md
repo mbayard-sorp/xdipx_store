@@ -4,6 +4,16 @@
 > Code subagent (Max subscription, zero Anthropic API spend), then push to
 > Shopify + Sanity via `scripts/backfill-product-enrichment.ts --from-file=...`.
 
+> **Unattended version:** since 2026-08-22 the same Max-billed generation also
+> runs as a daily cloud routine (R-ENRICH) against the live import→enrich→
+> publish pipeline, gated by `import_enrich_transport = 'subagent'` on
+> `/admin/imports`. That path claims/submits through `/api/team/enrich-queue`
+> and shares the cron's quality gate and retry/park bookkeeping — see
+> `docs/store-team/routine-enrich-daily.md`. This document covers the
+> *interactive* batch-file workflow, which remains the right tool for
+> calibration runs, hot-fixes, and hand-verified batches outside the import
+> pipeline.
+
 ## When to use this path vs. the API path
 
 | Path | Cost | Speed | Quality | Best for |

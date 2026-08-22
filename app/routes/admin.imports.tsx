@@ -41,6 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     maxPerDayRaw,
     enrichEnabledRaw,
     enrichBatchCapRaw,
+    enrichTransportRaw,
     productManagerEnabledRaw,
     productManagerMaxActionsRaw,
     enrichmentCoverage,
@@ -60,6 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getPipelineSetting('monitor_p2_max_auto_imports_per_day'),
     getPipelineSetting('import_enrich_enabled'),
     getPipelineSetting('import_enrich_batch_cap'),
+    getPipelineSetting('import_enrich_transport'),
     getPipelineSetting('product_manager_enabled'),
     getPipelineSetting('product_manager_max_actions_per_run'),
     getCachedEnrichmentCoverage(),
@@ -97,6 +99,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       maxPerDay:       Math.max(0, parseInt(maxPerDayRaw ?? '8', 10) || 0),
       enrichEnabled:   enrichEnabledRaw === 'true',
       enrichBatchCap:  parseInt(enrichBatchCapRaw ?? '10', 10) || 10,
+      enrichTransport: (enrichTransportRaw === 'subagent' ? 'subagent' : 'batch-api') as 'batch-api' | 'subagent',
       productManagerEnabled:      productManagerEnabledRaw === 'true',
       productManagerMaxActions:   parseInt(productManagerMaxActionsRaw ?? '20', 10) || 20,
     },
@@ -172,6 +175,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const next = current === 'true' ? 'false' : 'true'
     await setPipelineSetting(key, next)
     return { ok: true, saved: key }
+  }
+
+  if (intent === 'toggle-enrich-transport') {
+    const current = form.get('current') as string
+    const next = current === 'subagent' ? 'batch-api' : 'subagent'
+    await setPipelineSetting('import_enrich_transport', next)
+    return { ok: true, saved: 'import_enrich_transport' }
   }
 
   if (intent === 'refresh-enrichment-coverage') {
@@ -507,6 +517,7 @@ function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] })
   const numberFetcher = useFetcher<{ ok: boolean; saved?: string }>()
   const carriedFetcher = useFetcher<{ ok: boolean }>()
   const enrichFetcher = useFetcher<{ ok: boolean }>()
+  const transportFetcher = useFetcher<{ ok: boolean }>()
   const productManagerFetcher = useFetcher<{ ok: boolean }>()
 
   const [markupPct, setMarkupPct] = useState(String(settings.minMarkupPct))
@@ -525,6 +536,11 @@ function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] })
     enrichFetcher.state !== 'idle' && enrichFetcher.formData?.get('current') != null
       ? enrichFetcher.formData.get('current') !== 'true'
       : settings.enrichEnabled
+
+  const optimisticTransport: 'batch-api' | 'subagent' =
+    transportFetcher.state !== 'idle' && transportFetcher.formData?.get('current') != null
+      ? (transportFetcher.formData.get('current') === 'subagent' ? 'batch-api' : 'subagent')
+      : settings.enrichTransport
 
   const optimisticProductManagerEnabled: boolean =
     productManagerFetcher.state !== 'idle' && productManagerFetcher.formData?.get('current') != null
@@ -545,6 +561,13 @@ function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] })
   function toggleEnrich() {
     enrichFetcher.submit(
       { intent: 'toggle-p2-setting', key: 'import_enrich_enabled', current: String(optimisticEnrichEnabled) },
+      { method: 'post' },
+    )
+  }
+
+  function toggleTransport() {
+    transportFetcher.submit(
+      { intent: 'toggle-enrich-transport', current: optimisticTransport },
       { method: 'post' },
     )
   }
@@ -697,6 +720,25 @@ function Phase2SettingsPanel({ settings }: { settings: LoaderData['settings'] })
                 optimisticEnrichEnabled ? 'translate-x-6' : 'translate-x-1'
               }`}
             />
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-ink">Enrichment transport</p>
+            <p className="text-xs text-muted">
+              batch-api: the 30-min cron submits Anthropic Batch API jobs (metered API-key spend, 50% off).
+              subagent: the daily R-ENRICH Claude routine generates content on the Max subscription (zero API spend);
+              the cron keeps publishing. Same quality gate, retry/park, and publish chain either way.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleTransport}
+            className="text-xs font-semibold px-3 py-1.5 bg-cream border border-line rounded-lg hover:border-coral/50 shrink-0"
+            aria-label={`Switch enrichment transport to ${optimisticTransport === 'subagent' ? 'batch-api' : 'subagent'}`}
+          >
+            {optimisticTransport === 'subagent' ? 'Max subagent' : 'Batch API'}
           </button>
         </div>
 

@@ -3,10 +3,14 @@ import {
   decideEnrichFailure,
   isBatchClaimStuck,
   classifySubmitBlocker,
+  explainQualityGateFailure,
+  isSubagentLease,
+  SUBAGENT_LEASE_PREFIX,
   ENRICH_MAX_ATTEMPTS,
   STUCK_BATCH_MAX_HOURS,
   type EnrichFunnelSnapshot,
 } from './import-enrich.server'
+import type { ProductWrites } from './emma-orchestrator.server'
 
 // These pure helpers back the stuck-batch recovery guard in
 // collectEnrichmentBatch: a single un-retrievable or never-ending Anthropic
@@ -135,5 +139,94 @@ describe('classifySubmitBlocker', () => {
   it('prioritises a live upstream backlog over parked leftovers', () => {
     const b = classifySubmitBlocker({ ...empty, pending: 3, parked: 5 }, 'no_unenriched')
     expect(b.kind).toBe('upstream_backlog')
+  })
+
+  it('is a quiet subagent_transport when the Max routine owns generation', () => {
+    // Under import_enrich_transport='subagent' the tick never submits — that
+    // is the design working, not a jam, even with rows awaiting claim.
+    const b = classifySubmitBlocker({ ...empty, importedUnenriched: 9, parked: 2 }, 'subagent_transport')
+    expect(b.kind).toBe('subagent_transport')
+    expect(b.alertable).toBe(false)
+    expect(b.detail).toContain('9')
+  })
+})
+
+// ─── Subagent (Max) transport helpers ───────────────────────────────────────
+
+describe('isSubagentLease', () => {
+  it('recognises subagent lease ids and rejects Anthropic batch ids', () => {
+    expect(isSubagentLease(`${SUBAGENT_LEASE_PREFIX}run-2026-08-22`)).toBe(true)
+    expect(isSubagentLease('msgbatch_01AbCdEf')).toBe(false)
+    expect(isSubagentLease(null)).toBe(false)
+    expect(isSubagentLease(undefined)).toBe(false)
+    expect(isSubagentLease('')).toBe(false)
+  })
+})
+
+// The subagent transport must apply the exact same acceptance rules as the
+// batch collect path; explainQualityGateFailure is that shared predicate with
+// a named reason for the generating routine.
+describe('explainQualityGateFailure', () => {
+  const good: ProductWrites = {
+    productTypeDial:    'vibrator',
+    tagline:            'A quiet little rumble for slow evenings',
+    seoMetaDescription: 'x'.repeat(120),
+    descriptionHtml:    '<p>Emma’s take on this quiet, travel-ready bullet vibrator.</p>',
+    moodTags:           ['Playful'],
+    audienceTags:       ['Me'],
+    mattersTags:        ['Quiet'],
+    sensationDialV2: {
+      items: [
+        { label: 'Intensity',         value: 5 },
+        { label: 'Quietness',         value: 3 },
+        { label: 'Body',              value: 4 },
+        { label: 'Battery',           value: 3 },
+        { label: 'Beginner-friendly', value: 2 },
+      ],
+    },
+  }
+
+  it('passes a complete payload', () => {
+    expect(explainQualityGateFailure(good)).toBeNull()
+  })
+
+  it('names the missing description', () => {
+    expect(explainQualityGateFailure({ ...good, descriptionHtml: '  ' })).toContain('descriptionHtml')
+  })
+
+  it('names a short seoMetaDescription', () => {
+    expect(explainQualityGateFailure({ ...good, seoMetaDescription: 'too short' })).toContain('seoMetaDescription')
+  })
+
+  it('names an unknown productTypeDial', () => {
+    expect(explainQualityGateFailure({ ...good, productTypeDial: 'gizmo' as ProductWrites['productTypeDial'] })).toContain('productTypeDial')
+  })
+
+  it('names empty discovery tags — the invisibility failure mode', () => {
+    expect(explainQualityGateFailure({ ...good, moodTags: [] })).toContain('moodTags')
+    expect(explainQualityGateFailure({ ...good, audienceTags: [] })).toContain('audienceTags')
+    expect(explainQualityGateFailure({ ...good, mattersTags: [] })).toContain('mattersTags')
+  })
+
+  it('rejects a clustered sensation dial with the spread diagnostics', () => {
+    const clustered: ProductWrites = {
+      ...good,
+      sensationDialV2: {
+        items: [
+          { label: 'Intensity', value: 5 },
+          { label: 'Quietness', value: 5 },
+          { label: 'Body',      value: 4 },
+          { label: 'Battery',   value: 4 },
+          { label: 'Beginner',  value: 5 },
+        ],
+      },
+    }
+    const reason = explainQualityGateFailure(clustered)
+    expect(reason).toContain('sensation dial spread')
+  })
+
+  it('rejects a missing dial (fewer than 5 values)', () => {
+    const reason = explainQualityGateFailure({ ...good, sensationDialV2: { items: [] } })
+    expect(reason).toContain('sensation dial spread')
   })
 })
