@@ -16,11 +16,13 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouteLoaderData } from 'react-router'
 import { useDiscovery } from '~/stores/discovery'
 import { getQuickReplies } from '~/lib/discovery-emma'
 import { Bubble, FilterActionCard, QuickReplyRow, TypingDots } from './EmmaChatPanel.bubbles'
 import { EmmaChatInput } from './EmmaChatPanel.input'
 import type { FilterChipItem } from './EmmaChatPanel.bubbles'
+import type { EmmaPersona } from '~/types/cms'
 
 /* ─── Public types ──────────────────────────────────────────────────────── */
 
@@ -70,6 +72,14 @@ function formatTimeGap(ms: number): string {
 export function EmmaChatPanel(_props: EmmaChatPanelProps) {
   const { state, toggleMood, toggleAudience, toggleMatters, setBudget } = useDiscovery()
 
+  // Sanity-backed persona override (avatar + display name), same source the
+  // static EmmaSidekick reads from. Falls back to /emma.png and "Emma".
+  const layoutData = useRouteLoaderData('routes/_layout') as { emmaPersona?: EmmaPersona | null } | undefined
+  const emmaPersona = layoutData?.emmaPersona ?? null
+  const avatarSrc = emmaPersona?.avatarUrl ?? '/emma.png'
+  const avatarAlt = emmaPersona?.avatarAlt || emmaPersona?.displayName || 'Emma'
+  const displayName = emmaPersona?.displayName || 'Emma'
+
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [inputValue, setInputValue] = useState('')
@@ -105,7 +115,15 @@ export function EmmaChatPanel(_props: EmmaChatPanelProps) {
     esRef.current = es
 
     es.addEventListener('token', (e: MessageEvent) => {
-      const token = (e as MessageEvent<string>).data
+      // Server sends `{ text: string }` per the admin stream contract.
+      let token = ''
+      try {
+        const parsed = JSON.parse((e as MessageEvent<string>).data)
+        token = typeof parsed?.text === 'string' ? parsed.text : ''
+      } catch {
+        return
+      }
+      if (!token) return
       setMessages(prev => {
         const id = inFlightIdRef.current
         if (!id) return prev
@@ -274,7 +292,10 @@ export function EmmaChatPanel(_props: EmmaChatPanelProps) {
     if (gap < FIVE_MINUTES_MS) return null
     return (
       <div className="flex justify-center py-1" aria-hidden="true">
-        <span className="text-muted text-[11px]" style={{ fontFamily: 'var(--font-body)' }}>
+        <span
+          className="text-ink-4 uppercase"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.18em' }}
+        >
           {formatTimeGap(gap)}
         </span>
       </div>
@@ -287,8 +308,7 @@ export function EmmaChatPanel(_props: EmmaChatPanelProps) {
       role="log"
       aria-live="polite"
       aria-label="Chat with Emma"
-      className="flex flex-col gap-3 px-5 py-4 flex-1 overflow-y-auto"
-      style={{ maxHeight: 'calc(100vh - 220px)' }}
+      className="flex flex-col gap-3 px-5 py-4 flex-1 min-h-0 overflow-y-auto"
     >
       {isEmpty ? (
         <EmptyState quickReplies={quickReplies} onSelect={handleSubmit} />
@@ -338,27 +358,53 @@ export function EmmaChatPanel(_props: EmmaChatPanelProps) {
     </div>
   )
 
+  // Header — mirrors EmmaSidekick §07: 52px avatar with green status dot,
+  // Newsreader italic name, mono uppercase role kicker.
   const header = (
-    <div className="flex items-center gap-3 px-5 py-3 border-b border-line flex-none" style={{ height: 56 }}>
-      <img
-        src="/emma.png"
-        alt="Emma"
-        width={44}
-        height={44}
-        className="rounded-full object-cover flex-none"
-        style={{ width: 44, height: 44 }}
-      />
-      <div className="flex items-center gap-2">
-        <span
-          className="font-bold text-ink text-base"
-          style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic' }}
-        >
-          Emma
-        </span>
-        <span
-          className="w-1.5 h-1.5 rounded-full bg-sage flex-none"
-          aria-hidden="true"
+    <div className="flex items-center gap-3.5 px-6 pt-6 pb-4 border-b border-line flex-none">
+      <div className="relative flex-none">
+        <img
+          src={avatarSrc}
+          alt={avatarAlt}
+          width={104}
+          height={104}
+          className="rounded-full object-cover block"
+          style={{ width: 52, height: 52, boxShadow: '0 4px 12px rgba(26,20,24,.12)' }}
         />
+        <span
+          aria-hidden="true"
+          className="absolute right-0 bottom-0 rounded-full"
+          style={{
+            width: 11,
+            height: 11,
+            background: '#4caf50',
+            border: '2px solid var(--color-paper)',
+          }}
+        />
+      </div>
+      <div>
+        <p
+          className="text-ink leading-none"
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontStyle: 'italic',
+            fontSize: '22px',
+            letterSpacing: '-0.01em',
+          }}
+        >
+          {displayName}
+        </p>
+        <p
+          className="text-ink-3 mt-1"
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Your guide · online
+        </p>
       </div>
     </div>
   )
@@ -374,19 +420,21 @@ export function EmmaChatPanel(_props: EmmaChatPanelProps) {
 
   /* ── Desktop panel ──────────────────────────────────────────────────── */
 
+  // Desktop panel — Style Guide §10: 340px column, sticky 24px top, paper
+  // surface with line-2 hairline border. No drop shadow (the rest of the
+  // page is flat-paper too; shadow would feel un-systemic).
   const desktopPanel = (
     <aside
       className="hidden md:flex flex-col"
       style={{
         position: 'sticky',
         top: 24,
-        width: 320,
+        width: 340,
         flexShrink: 0,
         alignSelf: 'flex-start',
         background: 'var(--color-paper)',
-        borderRadius: 28,
-        border: '1px solid var(--color-line)',
-        boxShadow: '0 8px 24px -12px rgba(21,18,17,0.12)',
+        borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--color-line-2)',
         overflow: 'hidden',
         maxHeight: 'calc(100vh - 48px)',
       }}
@@ -395,8 +443,8 @@ export function EmmaChatPanel(_props: EmmaChatPanelProps) {
       {thread}
       {input}
       {errorMsg && (
-        <p className="px-5 pb-2 text-[11px] text-muted/60" style={{ fontFamily: 'var(--font-body)' }}>
-          Debug: {errorMsg}
+        <p className="px-6 pb-2 text-[11px] text-ink-4" style={{ fontFamily: 'var(--font-mono)' }}>
+          {errorMsg}
         </p>
       )}
     </aside>
@@ -412,24 +460,28 @@ export function EmmaChatPanel(_props: EmmaChatPanelProps) {
       <button
         type="button"
         onClick={() => setMobileOpen(true)}
-        className="w-full flex items-center gap-3 bg-coral text-paper rounded-full px-4 py-3 shadow-lg"
+        className="w-full flex items-center gap-3 bg-paper border border-line-2 rounded-full px-3 py-2"
+        style={{ boxShadow: '0 6px 18px -10px rgba(26,20,24,.18)' }}
       >
         <img
-          src="/emma.png"
-          alt="Emma"
+          src={avatarSrc}
+          alt={avatarAlt}
           width={32}
           height={32}
-          className="rounded-full object-cover flex-none border-2 border-paper/40"
+          className="rounded-full object-cover flex-none"
           style={{ width: 32, height: 32 }}
         />
         <p
-          className="text-sm font-semibold truncate text-left flex-1"
+          className="text-[13px] text-ink-2 truncate text-left flex-1"
           style={{ fontFamily: 'var(--font-body)' }}
         >
           {latestEmmaLine.length > 60 ? latestEmmaLine.slice(0, 57) + '…' : latestEmmaLine}
         </p>
-        <span className="text-paper/80 text-sm flex-none" style={{ fontFamily: 'var(--font-display)' }}>
-          Reply ♥
+        <span
+          className="text-ink-3 flex-none uppercase"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.14em' }}
+        >
+          Reply
         </span>
       </button>
     </div>
@@ -467,7 +519,7 @@ export function EmmaChatPanel(_props: EmmaChatPanelProps) {
           role="log"
           aria-live="polite"
           aria-label="Chat with Emma"
-          className="flex flex-col gap-3 px-5 py-4 flex-1 overflow-y-auto"
+          className="flex flex-col gap-3 px-5 py-4 flex-1 min-h-0 overflow-y-auto"
         >
           {isEmpty ? (
             <EmptyState quickReplies={quickReplies} onSelect={(r) => { handleSubmit(r) }} />
@@ -529,35 +581,37 @@ interface EmptyStateProps {
 
 function EmptyState({ quickReplies, onSelect }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center gap-4 py-8 text-center">
-      <img
-        src="/emma.png"
-        alt="Emma"
-        width={64}
-        height={64}
-        className="rounded-full object-cover"
-        style={{ width: 64, height: 64 }}
-      />
+    <div className="flex flex-col gap-4 py-4">
+      {/* Emma opener — Newsreader italic 19px to match the sidekick one-liner. */}
       <p
-        className="text-[15px] text-ink/70 italic leading-snug max-w-[220px]"
-        style={{ fontFamily: 'var(--font-display)' }}
+        className="text-ink-2 leading-[1.4]"
+        style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: '19px' }}
       >
-        Hi — I&apos;m Emma. Want me to help you find something good?
+        Hey. Tell me what you&apos;re after and I&apos;ll pull a few things.
       </p>
+
       {quickReplies.length > 0 && (
-        <div className="flex flex-wrap justify-center gap-2">
-          {quickReplies.map(r => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => onSelect(r)}
-              className="bg-paper border border-line text-ink rounded-full px-3 py-1.5 text-[13px] font-semibold hover:bg-cream-2 transition-colors"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
+        <>
+          <p
+            className="text-ink-3 uppercase"
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.18em' }}
+          >
+            Start with
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {quickReplies.map(r => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => onSelect(r)}
+                className="inline-flex items-center rounded-full border bg-paper text-ink border-line-2 px-3 py-1.5 text-[13px] hover:border-ink/60 transition-colors"
+                style={{ fontFamily: 'var(--font-body)' }}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )
@@ -573,7 +627,7 @@ function TypingDotsInline() {
       {[0, 1, 2].map(i => (
         <span
           key={i}
-          className="w-1.5 h-1.5 bg-ink/40 rounded-full animate-pulse"
+          className="w-1.5 h-1.5 bg-ink-3 rounded-full animate-pulse"
           style={{ animationDelay: `${i * 0.4}s` }}
         />
       ))}

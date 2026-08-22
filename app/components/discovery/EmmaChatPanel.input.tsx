@@ -45,7 +45,7 @@ export function EmmaChatInput({ value, onChange, onSubmit, disabled = false }: E
   return (
     <form
       onSubmit={handleSubmit}
-      className="sticky bottom-0 bg-paper border-t border-line px-4 py-3 flex items-center gap-3"
+      className="flex-none bg-paper border-t border-line px-5 py-4 flex items-center gap-2"
     >
       <input
         ref={inputRef}
@@ -53,13 +53,13 @@ export function EmmaChatInput({ value, onChange, onSubmit, disabled = false }: E
         value={value}
         onChange={e => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Tell Emma what you're after…"
+        placeholder="Tell Emma what you're after"
         disabled={disabled}
         autoComplete="off"
         className={[
-          'flex-1 bg-cream-2 rounded-full px-4 py-2.5 text-[14px] text-ink',
-          'placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-coral/30',
-          'border border-transparent focus:border-coral/30 transition-all',
+          'flex-1 bg-paper-3 rounded-full px-4 py-2.5 text-[14px] text-ink',
+          'placeholder:text-ink-4 focus:outline-none focus:ring-2 focus:ring-ink/20',
+          'border border-transparent transition-all',
           disabled ? 'opacity-50 cursor-not-allowed' : '',
         ].join(' ')}
         style={{ fontFamily: 'var(--font-body)' }}
@@ -69,15 +69,15 @@ export function EmmaChatInput({ value, onChange, onSubmit, disabled = false }: E
         disabled={!canSubmit}
         aria-label="Send message"
         className={[
-          'flex-none w-9 h-9 rounded-full flex items-center justify-center',
-          'text-[14px] font-semibold transition-colors',
+          'flex-none h-9 px-4 rounded-full inline-flex items-center justify-center text-[13px]',
+          'transition-colors',
           canSubmit
-            ? 'bg-coral text-paper hover:bg-coral-2 active:bg-coral-deep'
-            : 'bg-coral/30 text-paper/60 cursor-not-allowed',
+            ? 'bg-ink text-paper hover:bg-plum-2'
+            : 'bg-paper-3 text-ink-4 cursor-not-allowed border border-line-2',
         ].join(' ')}
         style={{ fontFamily: 'var(--font-body)' }}
       >
-        ♥
+        Send
       </button>
     </form>
   )
