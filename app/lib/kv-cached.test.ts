@@ -3,14 +3,28 @@
 // serve the full TTL, and call sites that do not pass the parameter must be
 // completely unaffected, including for empty values.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cached } from './kv.server'
+import { cached, invalidateCache } from './kv.server'
 
 let now = 1_000_000
 beforeEach(() => {
+  // Hermetic isolation. cached() has two persistent layers: an L1 read cache on
+  // globalThis and an L2 KV store. When real KV creds are present (any worktree
+  // with .env), cached() writes these tests' fixed keys (test:cached:N) into the
+  // shared Upstash store, and because Date.now() is frozen below, a later run
+  // inside the KV TTL window reads those stale entries and never re-invokes fn —
+  // which is exactly why this file was repeatedly mislabeled a "flaky test" and
+  // routed around rather than fixed. Force the in-memory fallback so nothing
+  // leaves the process, and clear the L1 cache so re-runs in the same worker
+  // (watch mode) start clean too.
+  vi.stubEnv('KV_DISABLE', '1')
+  invalidateCache('test:cached:')
   now = 1_000_000
   vi.spyOn(Date, 'now').mockImplementation(() => now)
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+})
 
 const uniq = (() => {
   let i = 0
