@@ -63,3 +63,6 @@ scripts/.tmp-media/
 test-results/
 playwright-report/
 .design-snapshots/
+
+# Ephemeral runtime/session artifacts (batch sidecars, sweep scratch)
+tmp/
