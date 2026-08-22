@@ -165,6 +165,30 @@ the row text and its links are the only carriers, so the conventions are the con
    signal can exist, the row says so, and QA treats a PR whose own comments or title state a
    still-pending owner-only precondition as a mandatory bounce regardless of CI or protected-path
    status.
+6. **Tag protected DB-migration / cron epics `[owner-migration]`, and depend-link their siblings.**
+   (#4690) A `code` row whose DONE WHEN's core touches `db/schema.ts`, `db/migrations/**`,
+   `server/cron*.ts`, or `vercel.json` is entirely protected-path — CI cannot dry-run the SQL and the
+   cron / `vercel.json` changes are owner-attended — so it has no shippable non-protected slice and can
+   only reach `blocked` in R-DEV's `kind:'code'` queue. Tag it `[owner-migration]` at the head of its
+   suggestion text so R-DEV disposes of it on first read instead of spending a claim, exactly as rule 3
+   handles `[owner-env]` / `[needs-visual-harness]`, and route it to the owner-attended lane. When a
+   dependent sibling needs the migration's table or column first (a detector querying a table the
+   migration creates), also set the rule-2 `Depends-on: #<lead>` link so the sibling enters the bus
+   already blocked on its lead instead of being claimed and re-blocked. Concrete instance: R-DEV run
+   431 claimed #625 (a `conversation_quality_daily` rollup: new `db/schema.ts` table + `db/migrations/**`
+   + `server/cron*.ts` + `vercel.json`) and #626 (a `/cron/conversation-health` detector depending on
+   #625's table), both entirely protected-path with no shippable slice, and burned a claim each reaching
+   a block. The same honest limit in rule 3 applies: the claim filter cannot see the tag today (that is
+   the `team.server.ts` change bus row #3768 puts to the owner), so the tag saves the implementation
+   effort, not the claim, until #3768 is decided.
+7. **An empty Sanity read is never, by itself, evidence a document does not exist.** (#4710) The Sanity
+   dataset is private and requires auth for reads; an unauthenticated or wrong-perspective GROQ returns
+   empty even when the document is published. On 2026-08-19/20 two independent surfaces (owner blocker 3
+   and ticket #4344) confidently asserted docs did not exist that were published and approved the whole
+   time, which zeroed Instagram product drafting on a false premise. So any "does-not-exist" claim about
+   Sanity content must state how the read was authenticated (token or MCP) and which perspective it used,
+   and a draft-inclusive raw read must be attempted before the claim is filed. A bare empty-result
+   observation is not filable as an absence.
 
 ---
 
@@ -244,7 +268,7 @@ Every one of these is a `pipeline_settings` row. Agents may never write `pipelin
 | Switch | Effect when off | Where to flip it |
 |---|---|---|
 | `release_engine_enabled` | No agent PR is merged by anything but the owner. Exactly today's world. Default **false** | `/admin/homepage-team`, strategy tab |
-| `release_engine_max_merges_per_day` | Hard ceiling on merges per day (seeded at 6), independent of the switch | same |
+| `release_engine_max_merges_per_day` | Hard ceiling on merges per day, independent of the switch. Live value is **50** (owner-confirmed in the admin UI 2026-08-21); the code seeds **6** only as a fallback default when the row is absent. At 50 the cap sits above the engine's physical drain ceiling (~48/day, see §10), so it does not bind — the effective limits are the drain rate and the two-rollback circuit breaker | same |
 | `suggestion_apply_enabled` | `agent-editor` opens no PRs at all | `/admin/homepage-team` |
 | `{team}_team_auto_approve_suggestions` | Off: that team's suggestions land in `proposed` and wait for the owner's triage click. **On for all five active teams since 2026-07-29** (owner decision; the four non-homepage valves were actually flipped 2026-07-18 and the docs lagged, which is why valve writes now land in `settings_audit_log` with an actor) | that team's tab |
 | `{team}_team_enabled` | That team's routines no-op at the gate | that team's tab |
@@ -413,9 +437,11 @@ both raise deploy frequency and burn the two-rollbacks-per-day circuit breaker
 (`ROLLBACK_CIRCUIT_LIMIT`) faster, which turns the engine off entirely.
 
 **What this means for the queue.** `agent-editor` opens its apply PRs in a burst, up to the 15-PR cap
-in its playbook, typically within a few minutes of each other. The engine drains them at 2 per hour
-against a daily cap of 12. **A burst of 8 PRs appearing at once and taking four hours to clear is the
-system working correctly.** Same-day landing is not a property the docs lane has ever had, and the
+in its playbook, typically within a few minutes of each other. The engine drains them at 2 per hour,
+which caps out around 48/day — below the live `release_engine_max_merges_per_day` value of 50, so the
+drain rate is the real ceiling and the merge cap does not bind (the cap was 12 when this section was
+first measured; the seeded default is 6). **A burst of 8 PRs appearing at once and taking four hours
+to clear is the system working correctly.** Same-day landing is not a property the docs lane has ever had, and the
 apply cap and the drain rate were set independently of each other.
 
 ### Three ways a PR can be stuck, and how loud each one is
