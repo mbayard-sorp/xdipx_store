@@ -120,3 +120,8 @@ every part of the breast except the nipple; pubic mound and a little hair in tin
 a man bare except the penis; two cast members together, touching, anticipation and curiosity on
 their faces; daylight as the default light, the door open. Write briefs in those plain words,
 stating which of these the frame uses; "sexy" on its own is not a brief.
+
+**Never put a quoted phrase in a generation prompt.** A brief that says the face reads "no way" or
+"told you" gets those words rendered onto the frame (slate preview 2026-08-22, two faces with the
+words on them). Describe the expression in plain words (shocked, eyebrows up, mouth open; a knowing
+half smile) and keep every double-quoted string out of the prompt text.

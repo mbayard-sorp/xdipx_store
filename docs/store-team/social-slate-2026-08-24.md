@@ -4,11 +4,11 @@
 
 Sources: `docs/emma-voice.md` v5.5 social addendum ("Name the fact. Imply the act. Never gesture." and "Daylight, door open") and `docs/store-team/instagram-campaigns.md` §3.2a (owner's explicit ceiling), §3.9, §5a, §7a. Numbers: Frederick et al. 2018 (95% vs 65%), We-Vibe 2025 (87% vs 3.5%, 62% would gift), Lovehoney 2026 (65% stress relief, 60% sleep); all in `social-research-2026-08-22.md`.
 
-Handles, all in stock 2026-08-22: `satisfyer-pro-2`, `zola-rechargeable-silicone-mini-wand`, `womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator`, `renegade-emperor-vibrating-ring`, `classique-rechargeable-wand-massager`, `jo-h2o-cooling-water-based-lubricant`, `femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink`.
+Handles, all in stock 2026-08-22: `womanizer-next-sage` (Satisfyer is not in the catalog), `zola-rechargeable-silicone-mini-wand`, `womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator`, `renegade-emperor-vibrating-ring`, `classique-rechargeable-wand-massager`, `jo-h2o-cooling-water-based-lubricant`, `femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink`.
 
 ---
 
-## 1. Mon 08-24, The Gap. Satisfyer Pro 2 (carousel)
+## 1. Mon 08-24, The Gap. Womanizer Next, sage (carousel)
 
 **HOOK:** the orgasm gap is real, and it has a number: 95 to 65.
 
@@ -17,24 +17,24 @@ the orgasm gap is real, and it has a number: 95 to 65.
 
 in the largest us survey on this, 95% of straight men said they usually or always orgasm during sex. 65% of straight women said the same. thirty points. it isn't effort and it isn't chemistry. most sex is built around penetration, and most women orgasm from the clitoris, which penetration mostly misses.
 
-the satisfyer pro 2 is built around that fact. it seals a soft silicone ring over the clitoris and pulses air, suction and release, instead of pushing vibration into the skin. that is the mechanism that closes the orgasm gap for a lot of women who never got there with a partner or a bullet.
+the womanizer next is built around that fact. it seals a soft silicone ring over the clitoris and pulses air, suction and release, instead of pushing vibration into the skin. that is the mechanism that closes the orgasm gap for a lot of women who never got there with a partner or a bullet.
 
 save this for the next time someone says women are just harder to please. they aren't. they're under-served.
 
 which number surprised you more, the 95 or the 65?
 
-#sexualwellness #orgasmgap #clitoralstimulation #airpulsation #bodysafe #satisfyer
+#sexualwellness #orgasmgap #clitoralstimulation #airpulsation #bodysafe #womanizer
 
 **SLIDES (5):**
 1. "is it just me? no. it has a name and a number."
 2. "the orgasm gap: 95% of straight men usually or always orgasm during sex. 65% of straight women do."
 3. "the difference isn't effort. most sex is built around penetration, and most women orgasm from the clitoris, which penetration mostly misses."
-4. "satisfyer pro 2: air pulsation over the clitoris instead of vibration into it. built around the thing that actually closes the gap." (product, held)
+4. "womanizer next: air pulsation over the clitoris instead of vibration into it. built around the thing that actually closes the gap." (product, held)
 5. "save this for the next time someone says women are harder to please. they're under-served."
 
-**ALT TEXT:** Jade and Maya side by side on a sunlit kitchen counter in the morning, Jade in an open white shirt and a black thong, Maya in a grey bralette and high-cut briefs, Maya holding the Satisfyer Pro 2 up between them while Jade reads the number off her phone with raised eyebrows.
+**ALT TEXT:** Jade and Maya side by side on a sunlit kitchen counter in the morning, Jade in an open white shirt and a black thong, Maya in a grey bralette and high-cut briefs, Maya holding the Womanizer Next up between them while Jade reads the number off her phone with raised eyebrows.
 
-**IMAGE BRIEF (lead):** Subject: the orgasm gap as a conversation between two women who just learned the number. Jade and Maya, kitchen, late-morning window light, door to the garden open behind them. Wardrobe, explicit: Jade in an oversized white men's shirt unbuttoned to the navel, breasts visible to the edge of the areola with the shirt edge covering the nipples, black thong, bare legs and buttocks where she leans on the counter; Maya in a grey cotton bralette and high-cut black briefs, pubic mound visible above the waistband. Product: Satisfyer Pro 2 in Maya's raised hand at chest height, the real product against the packshot. Faces: Jade reading her phone with "no way" on her face, Maya looking at Jade with a half-smile that says "told you". Feeling in the half second before reading: recognition and a laugh, "wait, is that us?". Negatives: no nipples, no labia, no text in image, no night, no housewares tableau.
+**IMAGE BRIEF (lead):** Subject: the orgasm gap as a conversation between two women who just learned the number. Jade and Maya, kitchen, late-morning window light, door to the garden open behind them. Wardrobe, explicit: Jade in an oversized white men's shirt unbuttoned to the navel, breasts visible to the edge of the areola with the shirt edge covering the nipples, black thong, bare legs and buttocks where she leans on the counter; Maya in a grey cotton bralette and high-cut black briefs, pubic mound visible above the waistband. Product: Womanizer Next (sage) in Maya's raised hand at chest height, the real product against the packshot. Faces: Jade reading her phone with "no way" on her face, Maya looking at Jade with a half-smile that says "told you". Feeling in the half second before reading: recognition and a laugh, "wait, is that us?". Negatives: no nipples, no labia, no text in image, no night, no housewares tableau.
 
 **WHY SHE CARES:** the number makes a private frustration structural (95 vs 65, Frederick 2018) and hands her permission to expect more, with the product named as the mechanism, not a mood.
 
@@ -157,7 +157,7 @@ did you know about the silicone-on-silicone rule, or is this news?
 
 **ALT TEXT:** Maya kneeling on a sunlit bed in a bralette and thong, holding the JO H2O bottle in one hand and the pink FemmeFunn bullet in the other with a clear bead of lube stretched between her fingertips and the bullet.
 
-**IMAGE BRIEF:** Subject: the lube pairing that keeps a toy alive, shown with the lube and the toy. Maya alone, bedroom, noon, curtains open. Wardrobe, explicit: white bralette (nipples covered) and white thong, bare buttocks visible as she kneels sideways on the bed. Product: JO H2O Cooling bottle in her left hand, FemmeFunn Ultra Bullet (real product, pink) in her right, a clear bead of lube on the bullet and stretched between her thumb and forefinger. Face: looking at the lube bead with a small "huh" of interest. Feeling before reading: "oh, I didn't know that, and I want to try the cooling one." Negatives: no nipples, no labia, no fluid near genitalia, no night, no housewares, no text in image.
+**IMAGE BRIEF:** Subject: the lube pairing that keeps a toy alive, shown with the lube and the toy. Maya alone, bedroom, noon, curtains open. Wardrobe, explicit: opaque white cotton bralette (never sheer; the first render went sheer and failed the ceiling) and white thong, bare buttocks visible as she kneels sideways on the bed. Product: JO H2O Cooling bottle in her left hand, FemmeFunn Ultra Bullet (real product, pink) in her right, a clear bead of lube on the bullet and stretched between her thumb and forefinger. Face: looking at the lube bead with a small "huh" of interest. Feeling before reading: "oh, I didn't know that, and I want to try the cooling one." Negatives: no nipples, no labia, no fluid near genitalia, no night, no housewares, no text in image.
 
 **WHY SHE CARES:** it protects a purchase she already made, and the cooling variant gives her a reason to buy the lube instead of just knowing the rule.
 
