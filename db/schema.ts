@@ -1436,11 +1436,58 @@ export interface VideoWordTiming {
   end: number
 }
 
+/**
+ * One scene of a multi-scene video job (Phase 3, 20-60s videos). `continuity`
+ * decides where the clip stage sources the scene's opening frame from:
+ * 'own-frame' composes a fresh scene-frame candidate set (same gate as a
+ * single-scene job); 'last-frame' animates from the PREVIOUS scene's final
+ * frame instead, so motion reads as one continuous shot across the cut.
+ * Defaults (applied by video-pipeline.server.ts's validateScenes): scene 0 is
+ * 'own-frame' (nothing precedes it), every later scene is 'last-frame'.
+ */
+export interface VideoSceneSpec {
+  slug: string
+  framePrompt: string
+  motionPrompt: string
+  durationSeconds: number
+  continuity?: 'last-frame' | 'own-frame'
+}
+
+/**
+ * Per-scene pipeline progress, parallel-indexed with video_jobs.scenes_json.
+ *   pending                -> not started
+ *   awaiting_frame_approval -> own-frame scene: candidates composed, parked
+ *                              for the owner's pick (video_frame_review valve)
+ *   frame                  -> own-frame scene: frame approved, clip not yet
+ *                              submitted
+ *   clip                   -> clip render submitted to the provider, polling
+ *   done                   -> clipAssetId set, this scene's clip is finished
+ * lastFrameUrl is populated once the clip finishes IF the next scene needs it
+ * ('last-frame' continuity) — RunPod's worker returns it directly; fal
+ * providers get it via video-assembly's extractLastFrame.
+ */
+export interface VideoSceneState {
+  frameAssetId?: number
+  clipAssetId?: number
+  lastFrameUrl?: string
+  status: 'pending' | 'frame' | 'awaiting_frame_approval' | 'clip' | 'done'
+}
+
 /** Per-scene script beat, plus per-platform captions, produced by video-producer. */
 export interface VideoScriptJson {
   hook?: string
   beats?: { line: string; direction?: string; tone?: string }[]
   cta?: string
+  /**
+   * Multi-scene job (Phase 3, 20-60s videos): 2-8 scenes rendered as separate
+   * clips and concatenated into one longer video. Validated + normalized at
+   * enqueue (video-pipeline.server.ts's validateScenes) into video_jobs'
+   * dedicated scenes_json column, which the pipeline stages read from — this
+   * field is the raw agent-authored input, kept for the record. Absent or a
+   * single entry means the existing single-clip MVP path (byte-for-byte
+   * unchanged).
+   */
+  scenes?: VideoSceneSpec[]
   /** Narration text for silent tiers (Kling): TTS'd in the active IVR voice and muxed at the lipsync stage. Ignored on native-audio tiers. */
   voiceover?: string
   /** Spoken on-camera line for the avatar tier (OmniHuman): TTS'd first, then performed. Distinct from voiceover, which stays the silent-tier narration field. */
@@ -1485,6 +1532,11 @@ export const videoJobs = pgTable('video_jobs', {
   status:            varchar('status', { length: 24 }).notNull().default('queued'),  // queued|running|awaiting_provider|awaiting_frame_approval|applying|done|failed
   providerRequestIds: jsonb('provider_request_ids').$type<Record<string, { requestId: string; statusUrl: string; responseUrl: string }>>().notNull().default({}),
   sceneFrameAssetId: integer('scene_frame_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
+  // Multi-scene jobs (Phase 3, migration 083). Both null for every existing
+  // row and every single-scene job — the poller branches on scenesJson's
+  // presence/length, so the single-clip MVP path never sees these.
+  scenesJson:        jsonb('scenes_json').$type<VideoSceneSpec[]>(),
+  sceneStateJson:    jsonb('scene_state_json').$type<VideoSceneState[]>(),
   finalAssetId:      integer('final_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
   posterAssetId:     integer('poster_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
   costUsd:           decimal('cost_usd', { precision: 10, scale: 5 }).notNull().default('0'),
