@@ -1,0 +1,11 @@
+# Points ComfyUI at the RunPod network volume. Copied to /opt/ComfyUI/extra_model_paths.yaml
+# by the Dockerfile; ComfyUI loads it automatically at startup.
+# Keys follow ComfyUI/extra_model_paths.yaml.example (verified at v0.33.1).
+runpod_volume:
+  base_path: /runpod-volume/models/
+  is_default: true
+  diffusion_models: diffusion_models/
+  text_encoders: text_encoders/
+  vae: vae/
+  loras: loras/
+  clip_vision: clip_vision/

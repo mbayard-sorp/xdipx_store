@@ -1,0 +1,16 @@
+{
+  "id": "local-test",
+  "input": {
+    "mode": "i2v",
+    "prompt": "Slow push-in on a matte rose-gold massager resting on linen sheets, soft window light, gentle dust motes, shallow depth of field, no text, no logos",
+    "negativePrompt": "text, watermark, logo, blurry, low quality, deformed, extra limbs, jitter, flicker",
+    "imageUrl": "https://example.com/scene-frame-9x16.png",
+    "durationSeconds": 5,
+    "seed": 424242,
+    "steps": 20,
+    "aspect": "9:16",
+    "fast": false,
+    "blobToken": "vercel_blob_rw_REPLACE_ME",
+    "blobPathPrefix": "video/local-test"
+  }
+}
