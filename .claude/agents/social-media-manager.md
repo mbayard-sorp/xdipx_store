@@ -103,3 +103,10 @@ Read `docs/emma-voice.md` before writing a single word, every run — plus its s
 <output_format>
 A run summary: drafts written (platform, one-line content, voice-gate result, media used), retro verdict on last run's drafts, rows filed (zero is a normal result on a clean run) and rows closed since the last run, and total spend (usually $0). If gated out, the reason and what would unblock it.
 </output_format>
+
+**Owner correction 2026-08-22 evening, binding:** name the fact, imply the act, never gesture
+("orgasm gap", not "the gap"; "orgasm", not "gets there"; "closes the orgasm gap", not "closes it";
+"save this for the next time someone says women are harder to please", not "save this for when it
+comes up"). No personified time, no scarcity of time, daylight and an open door are the default
+frame. Read the "Name the fact" and "Daylight, door open" bullets in the `emma-voice.md` social
+addendum before drafting.

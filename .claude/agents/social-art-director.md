@@ -114,3 +114,9 @@ Delta: <what a scroller sees that differs from the last post, and from the last 
 
 End with the `/event` payload you posted. If you could not retrieve the last 8, say that at the top rather than asserting a variety you did not verify.
 </output_format>
+
+**Owner ceiling 2026-08-22, explicit (instagram-campaigns.md §3.2a):** bare buttocks with a thong;
+every part of the breast except the nipple; pubic mound and a little hair in tiny high-cut bottoms;
+a man bare except the penis; two cast members together, touching, anticipation and curiosity on
+their faces; daylight as the default light, the door open. Write briefs in those plain words,
+stating which of these the frame uses; "sexy" on its own is not a brief.

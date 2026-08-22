@@ -176,10 +176,30 @@ that together produced the failure the owner named three times: boring frames. I
 **specification rather than a list of bans**, because "be sexier" is not executable and a brief that
 cannot be executed produces the timid frame every time.
 
+**The owner's explicit ceiling, 2026-08-22 (verbatim, and it supersedes the wardrobe line below
+where they differ):** *"What we can show (and others on Instagram are showing): bare butt cheeks
+(usually with a thong). All parts of breasts, except the actual nipples. Vaginas: all parts except
+the labia lips. Tiny high cut bottoms is allowed. You can show the pubic mound and a little pubic
+hair is allowed. Penis: not shown, but all other parts of a man are fine. I want to see sexy images
+in our posts. Combine cast members together in posts. Create anticipation. Don't always make it at
+night. Sex toys are ALWAYS available for someone to use for pleasure. The door doesn't have to stay
+closed, and we don't have to hide in the dark to use sex toys. That is a core message of the brand.
+I want to see images that emote sexuality and curiosity because it fits what we are selling. Be
+explicit in your descriptions."*
+
+So, stated as a brief can use it: a thong with bare buttocks; a breast bare to the edge of the
+areola with the nipple covered by a hand, a strap, an arm, a sheet edge, or the crop; sideboob and
+underboob; tiny high-cut bottoms or a string tie with the pubic mound and a little hair visible
+above the line; a man bare except his groin; two cast members touching, holding, undressing each
+other, reading anticipation and curiosity on their faces. Daylight is the default light. Briefs
+state exactly which of these the frame uses, in plain words. A brief that says "sexy" and stops has
+said nothing.
+
 **Licensed at the ceiling:**
 
-- **Wardrobe and skin.** Lingerie as the visible garment. Bare back, stomach, legs, shoulders,
-  cleavage. Fabric is opaque.
+- **Wardrobe and skin.** Per the owner's list above. Lingerie, a thong, tiny high-cut bottoms, an
+  open shirt, or nothing above the waist with the nipple covered. Bare back, stomach, legs,
+  shoulders, cleavage, buttocks. Fabric is opaque where it covers the nipple or the labia.
 - **Beds and posture.** On or in a bed. Arched, prone, tangled in sheets, gripping fabric. Aftermath
   and anticipation are both licensed: the quiet after, the reach toward, the unopened box.
 - **Product against a body.** The product may touch or rest on skin: collarbone, sternum, stomach,
@@ -194,7 +214,8 @@ cannot be executed produces the timid frame every time.
 
 **The ceiling stops here, and these do not move:**
 
-- Genitalia or nipples visible or outlined, sheer fabric included.
+- Nipples visible or outlined, sheer fabric included. Labia visible or outlined. A penis, in any
+  state, visible or outlined.
 - Hands on genitals, over or under clothing.
 - A depicted or discernible sex act.
 - Fluid on or near genitalia.
@@ -855,10 +876,10 @@ roughly 9x the saves of a single image and single images are losing reach year o
 | Day | Lane | The question it plants | Shape | Product |
 |---|---|---|---|---|
 | Mon | **The Gap** | "Is it just me?" The numbers that say it is not. | Carousel, text-led, one ceiling-adjacent frame | Optional, named |
-| Tue | **Tonight** | "What if tonight ran long?" Anticipation, product on skin. | Single still at the ceiling, cast member | Yes |
+| Tue | **Any Hour** | "Why wait for bedtime?" Anticipation in daylight, product on skin, the door open. | Single still at the ceiling, cast member | Yes |
 | Wed | **WTF Is…** | "How does that even work?" Mechanism as curiosity. | Carousel, 5-6 slides, last slide is why she cares | Yes |
 | Thu | **Say It** | "What would you want them to know?" Partner and couples. | Reel or still, two cast members, Send This To | Yes, couples-coded |
-| Fri | **Weekend In** | "What are you doing with the door closed?" | Single still at the ceiling | Yes |
+| Fri | **Lights On** | "Who said this happens in the dark?" Two cast members, daylight, curiosity on both faces. | Single still at the ceiling, two cast | Yes |
 | Sat | **Nightstand** | "What is actually in the drawer?" Care, lube, storage, pairing. | Still or carousel, product and its companion in frame (§3.9) | Yes, the care or lube product |
 | Sun | **Ask Emma** | "Can I ask you something?" The embarrassed question, answered warmly and hot. | Text-on-image still or Story poll, confession shape | Optional |
 
@@ -868,22 +889,27 @@ roughly 9x the saves of a single image and single images are losing reach year o
 | Date | Lane | Subject | Product in frame |
 |---|---|---|---|
 | 08-24 Mon | The Gap | 95 vs 65, and the one habit that closes it | Air-pulsation toy, named |
-| 08-25 Tue | Tonight | "Everything on the nightstand has a job" | Mini wand on a collarbone |
+| 08-25 Tue | Any Hour | The lipstick-sized wand that lives in your bag, a Tuesday at 2pm | Mini wand against an inner thigh, daylight |
 | 08-26 Wed | WTF Is… | WTF is air pulsation (why it is not a vibrator) | Air-pulsation toy |
 | 08-27 Thu | Say It | Send this to the one who keeps asking what you want | Couples ring or wand, two cast |
-| 08-28 Fri | Weekend In | The long weekend, the locked door, the unopened box | Wand, bed, sheets |
+| 08-28 Fri | Lights On | Saturday, 11am, curtains open, two of them and one wand | Wand, two cast, bed in daylight |
 | 08-29 Sat | Nightstand | Silicone on silicone: the pairing that ruins a toy, and the one that does not | Water-based lube beside the toy |
 | 08-30 Sun | Ask Emma | "Is it weird that I want it more than he does?" | None |
 | 08-31 Mon | The Gap | Couples who talk finish every time: 87% vs 3.5% | Optional |
-| 09-01 Tue | Tonight | "Built for the nights you don't want to be quick" | Rabbit or wand, thigh |
+| 09-01 Tue | Any Hour | A rabbit on a lunch break, why slow is a choice and not a schedule | Rabbit, thigh, kitchen daylight |
 | 09-02 Wed | WTF Is… | WTF is a rumbly motor (and why buzzy ones numb you out) | Wand |
 | 09-03 Thu | Say It | Year-five gift guide: the one you open together | Gift handed between two cast |
-| 09-04 Fri | Weekend In | Stress relief nobody puts on the self-care list | Bullet, bath edge, skin |
+| 09-04 Fri | Lights On | Stress relief nobody puts on the self-care list, at noon | Bullet, bath edge, skin, window light |
 | 09-05 Sat | Nightstand | Wash before, wash after, and the cleaner that makes it a ten-second job | Toy cleaner and the toy, held |
 | 09-06 Sun | Ask Emma | "How do I bring it up without making it weird?" | None |
 
 Drafted captions, alt text, hashtags, and image briefs for the first week live in
 `docs/store-team/social-slate-2026-08-24.md`; the routine drafts from them rather than from scratch.
+
+**Daylight and an open door are the default frame** (owner direction 2026-08-22): night is one
+option, never the rule, and no caption personifies time or trades on its scarcity. **Name the
+fact, imply the act, never gesture:** "orgasm gap" is written out, "gets there" is not
+(`emma-voice.md` social addendum).
 
 The lanes persist past this slate; the subjects rotate with the campaign calendar. A lane that
 underperforms for three weeks on saves and comments is swapped, and the swap is filed, not improvised.

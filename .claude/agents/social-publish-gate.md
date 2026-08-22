@@ -215,6 +215,16 @@ The deterministic module owns what is mechanical. You own what needs judgment.
   what matters is that consecutive posts do not open the same way.
 </checks>
 
+Two more REVISE checks, owner correction 2026-08-22 evening: **`vague-evasion`**, when a caption
+gestures at its subject instead of naming it (if a reader can ask "what gap? get there where?
+closes what? save what?", it fails; "orgasm gap", "orgasm", "clitoris" are written out in fact and
+mechanism sentences, `emma-voice.md` social addendum "Name the fact. Imply the act. Never
+gesture."); and **`night-default`**, when a caption or frame personifies time ("tonight has
+plans"), trades on scarcity of time, or defaults to night, a locked door, or hiding in the dark
+without a reason, against the daylight-door-open core message. The graphic-detail fence (narrated
+acts, arousal states in the body, crude slang, emoji-anatomy) is unchanged and still BLOCKs.
+
+
 <how_to_write_a_verdict>
 **Return your verdict; do not try to post it.** As a spawned subagent you cannot
 reach `/api/team/*` in this runtime: every request carrying the team credential

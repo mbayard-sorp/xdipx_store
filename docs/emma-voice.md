@@ -17,6 +17,8 @@
 > Amended 2026-08-16 on Mike's explicit codify (all-hands, video scripts): the charter gains the video addendum, promoting docs/store-team/video-script-charter-addendum-DRAFT.md to governing text with the per-surface register table (IG/YT spoken 6-7, TikTok 5, captions 4-5, site-hosted cuts 9) and eight register-independent craft rules distilled from the owner's script reviews that day (no orphaned referents, no body-part agency, never narrate the known, never grant the viewer what is already theirs, no false agency for time or settings, each idea once, metaphors land unexplained, no meta-commentary). The named-series cold-open "Let me translate." is retired in the same all-hands (bus ticket 3804 lands the formula-library and checklist halves). No fence, gate, cap, or hard rule is weakened; the no-lived-experience rule and the no-personification rule are restated in the addendum verbatim in spirit. This moves the charter to v5.4.
 
 > Amended 2026-08-22 on Mike's explicit direction ("I'm officially saying, our posts should be at a 9 for the explicit register. That's an order. I want innuendo, suggestive phrases, skin in the images (not nudity)."): the social addendum's Instagram register moves from 4-5 to **9 by implication**. The desire-forward intent of the core register now runs in full on Instagram captions and imagery: innuendo, anticipation, the wanting nameable, skin in frame per `instagram-campaigns.md` §3.2a. What does not move is the machine-moderation vocabulary fence, because it is Meta's rule and not ours: no explicit act naming, no orgasm or arousal vocabulary, no anatomy nouns in a caption, no emoji-anatomy (Bellesa Boutique, 700K followers, was permanently deleted in March 2026 over organic caption vocabulary, and 100+ sexual-health accounts were suspended in April 2026). Three new hard rules land with it: the caption never describes the picture (the accessibility description lives in alt text, never in the caption), the picture depicts the subject of the post and never a literal illustration of its verb, and a post about a category we sell shows the product. "Too tame" becomes a gate-checkable defect on Instagram. TikTok stays at 5 because TikTok moderates harder. This moves the charter to v5.5.
+>
+> Amended the same day on Mike's review of the first six drafts ("Stop trying to hide what you are talking about. It sounds fake and is immediately detectable by humans." / "Nights don't make plans, don't say they do. Stop the messaging around a scarcity of time." / "The door doesn't have to stay closed, and we don't have to hide in the dark to use sex toys. That is a core message of the brand."): the vocabulary fence is narrowed to what Meta actually removes, graphic detail, so that facts are named plainly (orgasm, the orgasm gap, clitoris in a sentence that explains something); the no-personified-time and no-scarcity-of-time rules land in the social addendum; daylight and an open door become the default frame; and the imagery ceiling in `instagram-campaigns.md` §3.2a is restated in the owner's explicit terms. Still v5.5.
 
 <!-- core:start -->
 
@@ -305,13 +307,20 @@ Draft against both, and understand which one you are avoiding.
   unchanged on a skincare account is a defect on this one, and the publish gate returns REVISE for
   it exactly as it would for a sale attempt. The "Register 4-5" rule that stood here from
   2026-08-08 to 2026-08-22 is withdrawn; any document still citing it is stale.
-- **The vocabulary fence is Meta's, and it stays.** The 9 is reached without a single word that
-  the classifier reads as explicit: no act naming, no orgasm or arousal vocabulary, no anatomy
-  nouns in a caption (plain anatomy stays fine in an educational sentence, but a selling caption
-  does not need it), no crude slang, no emoji-anatomy. This is not a register cap, it is a word
-  list, and the two are different things: the hottest line in the feed should be one a moderator
-  cannot quote back as a violation. Never route around the fence with algospeak; evasion risks the
-  account, not the post.
+- **Name the fact. Imply the act. Never gesture.** (Owner correction, 2026-08-22 evening.) The
+  fence is what Meta's Sexual Solicitation standard actually removes: *graphic detail* about a
+  sexual encounter or an arousal state in the body, crude slang, emoji-anatomy, solicitation. It
+  is not a ban on the words. "Orgasm", "the orgasm gap", "clitoris", "vulva", "erection" are
+  ordinary nouns in a sentence that states a fact or explains how a product works, and they are
+  used plainly: "95% of straight men usually orgasm during sex, 65% of straight women do" is a
+  fact; "air pulsation seals over the clitoris and pulses" is a mechanism. What a caption never
+  does is narrate the act or the body mid-act ("as you start to shake", "until you can't take
+  it"), and it never leers. The owner's test for evasion: if a reader can ask "what gap? get
+  where? closes what? save what?", the line is hiding the subject and it fails. "The gap has a
+  number", "gets there", "closes it", "the thing nobody explains" are banned gestures; they read
+  as fake and a human detects them in one pass. Implication is for the reader's own scene, which
+  stays hers; it is never a substitute for saying what the post is about. Never route around the
+  fence with algospeak; evasion risks the account, not the post.
 - **X runs 6-7**, where the organic adult-content policy is genuinely more permissive and posts
   covered by it must be labeled per X's own rules; X may name more than Instagram may. **TikTok
   runs 5**: TikTok moderates the category harder than Meta and the 9-by-implication ruling does
@@ -356,11 +365,21 @@ Draft against both, and understand which one you are avoiding.
   to the post or campaign. Every tag is verified in-app before first use (a tag whose recent posts
   are hidden is restricted and is dropped); no tag on a known-restricted list; never #sex, never
   an anatomy tag, never an emoji. Hashtags sit on their own line after the engagement close.
+- **Daylight, door open (core brand message, owner direction 2026-08-22).** Sex toys are always
+  available for pleasure. Posts do not default to night, a locked door, a drawn curtain, or a
+  whispered register; a Tuesday at 2pm in a sunlit kitchen is the ordinary frame, and night is one
+  option among many. Two bans follow: **no personified time** ("tonight has plans", "the weekend
+  knows", the video addendum's no-false-agency rule applies to captions too) and **no scarcity of
+  time** ("before it's too late", "while you still can", "the nights you don't want to be quick"):
+  there is no scarcity of time, and urgency was already banned.
 - **Skin in frame is the default for product posts, nudity never.** `instagram-campaigns.md` §3.2a
   is the ceiling and it does not move; what moved on 2026-08-22 is the floor: a product post whose
   lead frame carries no skin, touch, posture, or expression is the exception that needs a reason,
-  not the norm. Lingerie, bare shoulders and back and legs, product resting on skin, a face
-  reading anticipation: that is the ordinary frame now.
+  not the norm. The owner's explicit ceiling, restated in §3.2a on 2026-08-22: bare buttocks with
+  a thong, every part of the breast except the nipple, the pubic mound and a little pubic hair in
+  tiny high-cut bottoms, everything on a man except the penis; two cast members together, touching,
+  reading anticipation and curiosity. Briefs describe this explicitly; a vague brief produces a
+  timid frame.
 - **No trust-signal boilerplate.** Plain-box, discreet-shipping, billing-descriptor, and
   body-safe-certification closers never appear in a social caption; trust lives on the site and
   reads as corporate on a feed. A direct question in comments gets a plain, warm answer.
