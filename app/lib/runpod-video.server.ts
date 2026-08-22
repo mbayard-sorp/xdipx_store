@@ -63,6 +63,29 @@ export interface RunpodVideoInput {
   mode: 'i2v' | 't2v'
   /** Blob path prefix the worker uploads its outputs under, e.g. `video/{jobId}`. */
   blobPathPrefix: string
+  /**
+   * Use the lightx2v 4-step LoRA path instead of the full 20-step Wan 2.2
+   * pipeline. Measured live on the 1cnxz75c71177q endpoint 2026-08-22: the
+   * 20-step path exceeds the 900s execution timeout on a 4090 (VRAM swapping
+   * between the two 14B experts) and only finishes on an L40S/48GB card. The
+   * fast path completed in 219669ms with a valid 720x1280 5.06s clip. Since
+   * the fleet is 4090-heavy while L40S stock is low, fast defaults to true
+   * here (see resolveFast below) so a submit doesn't time out by default.
+   */
+  fast?: boolean
+}
+
+/**
+ * Resolves the `fast` flag: explicit per-call value wins, otherwise default
+ * TRUE unless RUNPOD_VIDEO_FAST is explicitly "0" or "false". The 20-step
+ * path does not finish inside the timeout on 24GB cards, so opting OUT of
+ * the fast path must be deliberate.
+ */
+function resolveFast(explicit: boolean | undefined): boolean {
+  if (explicit != null) return explicit
+  const raw = process.env['RUNPOD_VIDEO_FAST']?.trim().toLowerCase()
+  if (raw === '0' || raw === 'false') return false
+  return true
 }
 
 export async function submitRunpodVideo(input: RunpodVideoInput): Promise<QueueHandle> {
@@ -82,6 +105,7 @@ export async function submitRunpodVideo(input: RunpodVideoInput): Promise<QueueH
       ...(input.steps != null ? { steps: input.steps } : {}),
       mode: input.mode,
       aspect: '9:16' as const,
+      fast: resolveFast(input.fast),
       blobToken: requireBlobToken(),
       blobPathPrefix: input.blobPathPrefix,
     },
