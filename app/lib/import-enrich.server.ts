@@ -44,6 +44,8 @@ import {
   collectFullEnrichmentBatch,
   checkDialSpread,
   type BatchFullEnrichmentInput,
+  type ProductBrief,
+  type SharedEnrichmentContext,
 } from '~/lib/batch-enrichment.server'
 import {
   activateShopifyProduct,
@@ -98,6 +100,43 @@ const STALL_AGE_HOURS = 6
 
 async function isEnrichEnabled(): Promise<boolean> {
   return (await getPipelineSetting('import_enrich_enabled')) === 'true'
+}
+
+/**
+ * Which transport generates enrichment content.
+ *
+ *   'batch-api' (default) — the cron tick submits Anthropic Message Batches
+ *                           against the API key (metered spend, 50% batch
+ *                           discount).
+ *   'subagent'            — the daily R-ENRICH Claude cloud routine claims
+ *                           candidates via /api/team/enrich-queue and generates
+ *                           ProductWrites with the emma-product-enricher
+ *                           subagent on the Max subscription (zero API spend).
+ *                           The cron tick stops submitting batches but keeps
+ *                           collecting any legacy in-flight ones, recovering
+ *                           expired subagent leases, and publishing.
+ *
+ * Everything downstream of generation — quality gate, retry/park, Shopify +
+ * Sanity writes, publish — is shared by both transports.
+ */
+export type EnrichTransport = 'batch-api' | 'subagent'
+
+export async function getEnrichTransport(): Promise<EnrichTransport> {
+  const raw = await getPipelineSetting('import_enrich_transport')
+  return raw === 'subagent' ? 'subagent' : 'batch-api'
+}
+
+/**
+ * enrich_batch_id prefix marking a candidate claimed by the subagent (Max)
+ * transport rather than an Anthropic Message Batch. Reusing the same column
+ * keeps every in-flight predicate (submit exclusion, funnel snapshot, admin
+ * lifecycle badge) working unchanged for both transports; the prefix is what
+ * tells collectEnrichmentBatch not to ask Anthropic about it.
+ */
+export const SUBAGENT_LEASE_PREFIX = 'subagent:'
+
+export function isSubagentLease(batchId: string | null | undefined): boolean {
+  return typeof batchId === 'string' && batchId.startsWith(SUBAGENT_LEASE_PREFIX)
 }
 
 async function getBatchCap(): Promise<number> {
@@ -282,15 +321,26 @@ export async function applyFullEnrichmentWrites(numericProductId: string, writes
  * Ask Emma filter.
  */
 function passesQualityGate(writes: ProductWrites): boolean {
-  if (!writes.descriptionHtml?.trim())     return false
-  if (!writes.tagline?.trim())             return false
-  if (!writes.seoMetaDescription || writes.seoMetaDescription.length < 100) return false
-  if (!writes.productTypeDial || !(PRODUCT_TYPE_DIALS as readonly string[]).includes(writes.productTypeDial)) return false
-  if (!writes.moodTags?.length)            return false
-  if (!writes.audienceTags?.length)        return false
-  if (!writes.mattersTags?.length)         return false
-  if (!checkDialSpread(writes.sensationDialV2?.items).ok) return false
-  return true
+  return explainQualityGateFailure(writes) === null
+}
+
+/**
+ * Same predicate as passesQualityGate, but names the first failing check.
+ * Null means the payload passes. Exported so the subagent transport can hand
+ * the generating routine an actionable rejection reason (and so the gate is
+ * unit-testable) without duplicating the rules.
+ */
+export function explainQualityGateFailure(writes: ProductWrites): string | null {
+  if (!writes.descriptionHtml?.trim())     return 'descriptionHtml is empty'
+  if (!writes.tagline?.trim())             return 'tagline is empty'
+  if (!writes.seoMetaDescription || writes.seoMetaDescription.length < 100) return 'seoMetaDescription missing or under 100 chars'
+  if (!writes.productTypeDial || !(PRODUCT_TYPE_DIALS as readonly string[]).includes(writes.productTypeDial)) return 'productTypeDial missing or not a known type'
+  if (!writes.moodTags?.length)            return 'moodTags empty'
+  if (!writes.audienceTags?.length)        return 'audienceTags empty'
+  if (!writes.mattersTags?.length)         return 'mattersTags empty'
+  const spread = checkDialSpread(writes.sensationDialV2?.items)
+  if (!spread.ok) return `sensation dial spread violated (values [${spread.values.join(', ')}]: ${spread.distinct} distinct, ${spread.fives} fives, ${spread.ones} ones; need >=5 values, >=3 distinct, <=1 five, <=1 one)`
+  return null
 }
 
 /** Bounded retry cap: after this many failed enrichment attempts, a candidate
@@ -549,6 +599,7 @@ export type SubmitBlockerKind =
   | 'upstream_backlog'
   | 'all_parked'
   | 'no_briefs'
+  | 'subagent_transport'
 
 export interface SubmitBlocker {
   kind:      SubmitBlockerKind
@@ -575,6 +626,19 @@ export function classifySubmitBlocker(
   snap: EnrichFunnelSnapshot,
   submitReason: string | undefined,
 ): SubmitBlocker {
+  if (submitReason === 'subagent_transport') {
+    // Generation is delegated to the daily R-ENRICH routine (Max transport):
+    // a tick that submits no Anthropic batch is the design working, never an
+    // alert. Jam visibility on this transport comes from the stall watchdog
+    // (unclaimed rows past the age threshold — covers a routine that stopped
+    // running) plus the routine's own funnel report, which surfaces parked and
+    // upstream-pending rows every run.
+    return {
+      kind:      'subagent_transport',
+      alertable: false,
+      detail:    `Enrichment transport is 'subagent': the daily R-ENRICH routine generates content on the Max subscription and the cron submits no Anthropic batches. Funnel: ${snap.importedUnenriched} awaiting claim, ${snap.inFlight} leased/in flight, ${snap.parked} parked.`,
+    }
+  }
   if (submitReason === 'no_briefs') {
     return {
       kind:      'no_briefs',
@@ -731,6 +795,29 @@ export async function collectEnrichmentBatch(): Promise<{ enriched: number; fail
   const now = new Date()
 
   for (const [batchId, candidates] of byBatch) {
+    // Subagent (Max transport) leases are not Anthropic batches: there is
+    // nothing to retrieve. The R-ENRICH routine completes them itself via
+    // /api/team/enrich-queue. All this collector does for them is age out
+    // leases whose routine died (same STUCK_BATCH_MAX_HOURS window as a dead
+    // batch), routing those candidates through the normal retry/park path so
+    // they can be re-claimed — otherwise a crashed run would freeze its rows
+    // in flight forever and, with the transport later flipped back to
+    // batch-api, block every future submit behind stillPending > 0.
+    if (isSubagentLease(batchId)) {
+      const stuck: typeof candidates = []
+      const live:  typeof candidates = []
+      for (const c of candidates) (isBatchClaimStuck(c.claimedAt, now) ? stuck : live).push(c)
+      for (const candidate of stuck) {
+        await applyEnrichFailure(candidate, `subagent lease ${batchId} expired past ${STUCK_BATCH_MAX_HOURS}h`)
+        recoveredTotal++
+      }
+      stillPending += live.length
+      if (stuck.length) {
+        console.warn(`[import-enrich] subagent lease ${batchId} expired; aged out ${stuck.length} candidate(s) for re-claim, ${live.length} still leased`)
+      }
+      continue
+    }
+
     // Recovery guard: isolate each batch. A single un-retrievable batch id
     // (Anthropic 404 after batch/result expiry, an invalid id, or a transient
     // API error) makes retrieve() throw. Before this guard that throw
@@ -968,9 +1055,16 @@ export async function runImportEnrichTick(opts: { source?: 'cron' | 'manual' } =
   // collect.stillPending IS the in-flight signal: only submit a new batch once
   // every previously-submitted batch has been collected, so we never stack
   // concurrent Anthropic batches for the same source.
-  const submit = collect.stillPending === 0
-    ? await submitEnrichmentBatch(await getBatchCap(), { deadline })
-    : { submitted: 0, batchIds: [], reason: 'batch_in_flight' }
+  //
+  // Under the 'subagent' transport the cron never submits: generation belongs
+  // to the daily R-ENRICH routine (Max subscription, zero API spend). Collect
+  // and publish above still ran — they drain legacy in-flight batches, recover
+  // expired subagent leases, and flip enriched drafts live between routine runs.
+  const transport = await getEnrichTransport()
+  const submit =
+    transport === 'subagent'    ? { submitted: 0, batchIds: [] as string[], reason: 'subagent_transport' } :
+    collect.stillPending === 0  ? await submitEnrichmentBatch(await getBatchCap(), { deadline })
+                                : { submitted: 0, batchIds: [] as string[], reason: 'batch_in_flight' }
 
   // A tick that submits nothing is where the pipeline used to go silent: the
   // stall detector only ever sees importedUnenriched rows, so an empty-input or
@@ -989,4 +1083,180 @@ export async function runImportEnrichTick(opts: { source?: 'cron' | 'manual' } =
   }
 
   return { ok: true, stall, collect, publish, submit }
+}
+
+// ─── Subagent (Max) transport: claim / complete / release ────────────────────
+//
+// The generation half of the enrich lifecycle when import_enrich_transport is
+// 'subagent'. The daily R-ENRICH Claude cloud routine (billed to the Max
+// subscription) calls these via /api/team/enrich-queue:
+//
+//   claim    — lease unenriched imported drafts (enrich_batch_id =
+//              'subagent:<leaseId>') and hand back the same briefs + shared
+//              editorial context the batch path embeds in its prompts.
+//   complete — accept a generated ProductWrites payload, run the SAME quality
+//              gate as the batch path, and on pass run the SAME
+//              applyFullEnrichmentWrites + enriched_at stamp. A gate or apply
+//              failure goes through the SAME decideEnrichFailure retry/park.
+//   release  — the routine reports a product it could not generate for;
+//              routed through retry/park like a batch failure.
+//
+// Publishing stays with the 30-minute cron tick (publishEnrichedProducts), so
+// enriched drafts go live on the existing cadence regardless of transport.
+
+export interface SubagentClaim {
+  candidateId: number
+  productId:   string
+  sku?:        string
+  brief:       ProductBrief
+}
+
+export interface SubagentClaimResult {
+  leaseId:       string
+  claims:        SubagentClaim[]
+  /** Candidates that matched but produced no gatherable brief; left unclaimed
+   *  (same behaviour as the batch submit path). */
+  skippedNoBrief: number
+  sharedContext: SharedEnrichmentContext
+}
+
+/**
+ * Lease up to `cap` unenriched imported drafts to a subagent run. Uses the
+ * exact selection predicate as submitEnrichmentBatch, so the two transports
+ * can never double-generate: a row claimed by either is invisible to the other.
+ * Each candidate is stamped immediately after its brief gathers, so a timeout
+ * mid-loop never orphans gathered work.
+ */
+export async function claimEnrichmentForSubagent(
+  cap: number,
+  leaseId: string,
+): Promise<SubagentClaimResult> {
+  const lease = `${SUBAGENT_LEASE_PREFIX}${leaseId}`
+  const rows = await db
+    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: dealHistory.sku })
+    .from(importCandidates)
+    .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
+    .where(and(
+      eq(importCandidates.status, 'imported'),
+      isNull(importCandidates.enrichedAt),
+      isNull(importCandidates.enrichBatchId),
+      isNull(importCandidates.enrichFailedAt),
+    ))
+    .orderBy(asc(importCandidates.id))
+    .limit(cap)
+
+  const sharedContext = await loadSharedEnrichmentContext()
+  const claims: SubagentClaim[] = []
+  let skippedNoBrief = 0
+
+  for (const r of rows) {
+    if (!r.productId) continue
+    const brief = await gatherProductBrief(r.productId)
+    if (!brief) {
+      console.warn(`[import-enrich] subagent claim: no brief for product ${r.productId} (candidate ${r.id}) — skipping`)
+      skippedNoBrief++
+      continue
+    }
+    // Pairings are deal-cycle artifacts — suppressed at import time on both
+    // transports (see submitEnrichmentBatch).
+    brief.pairingCandidates = []
+    await db.update(importCandidates)
+      .set({ enrichBatchId: lease, updatedAt: new Date() })
+      .where(eq(importCandidates.id, r.id))
+    const claim: SubagentClaim = { candidateId: r.id, productId: r.productId, brief }
+    if (r.sku) claim.sku = r.sku
+    claims.push(claim)
+  }
+
+  if (claims.length) {
+    console.log(`[import-enrich] subagent lease ${lease}: claimed ${claims.length} candidate(s)`)
+  }
+  return { leaseId, claims, skippedNoBrief, sharedContext }
+}
+
+export type SubagentCompleteResult =
+  | { ok: true;  result: 'enriched' }
+  | { ok: false; result: 'requeued' | 'parked'; reason: string }
+  | { ok: false; result: 'not_claimable'; reason: string }
+
+/** Load one candidate row eligible for subagent complete/release: imported,
+ *  not yet enriched or parked, currently under a subagent lease. */
+async function getSubagentClaimedCandidate(candidateId: number): Promise<
+  { id: number; productId: string; enrichAttempts: number } | { error: string }
+> {
+  const rows = await db
+    .select({
+      id:             importCandidates.id,
+      batchId:        importCandidates.enrichBatchId,
+      enrichedAt:     importCandidates.enrichedAt,
+      enrichFailedAt: importCandidates.enrichFailedAt,
+      status:         importCandidates.status,
+      enrichAttempts: importCandidates.enrichAttempts,
+      productId:      dealHistory.shopifyProductId,
+    })
+    .from(importCandidates)
+    .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
+    .where(eq(importCandidates.id, candidateId))
+    .limit(1)
+  const row = rows[0]
+  if (!row)                          return { error: `candidate ${candidateId} not found` }
+  if (row.status !== 'imported')     return { error: `candidate ${candidateId} status is '${row.status}', not 'imported'` }
+  if (row.enrichedAt)                return { error: `candidate ${candidateId} already enriched` }
+  if (row.enrichFailedAt)            return { error: `candidate ${candidateId} is parked` }
+  if (!isSubagentLease(row.batchId)) return { error: `candidate ${candidateId} is not under a subagent lease (enrich_batch_id=${row.batchId ?? 'null'})` }
+  if (!row.productId)                return { error: `candidate ${candidateId} has no linked Shopify product` }
+  return { id: row.id, productId: row.productId, enrichAttempts: row.enrichAttempts }
+}
+
+/**
+ * Accept a subagent-generated ProductWrites payload for one leased candidate.
+ * Identical downstream semantics to the batch collect path: quality gate →
+ * applyFullEnrichmentWrites → enriched_at on pass; decideEnrichFailure
+ * retry/park on any failure.
+ */
+export async function completeSubagentEnrichment(
+  candidateId: number,
+  writes: ProductWrites,
+): Promise<SubagentCompleteResult> {
+  const candidate = await getSubagentClaimedCandidate(candidateId)
+  if ('error' in candidate) return { ok: false, result: 'not_claimable', reason: candidate.error }
+
+  const gateFailure = explainQualityGateFailure(writes)
+  if (gateFailure === null) {
+    try {
+      await applyFullEnrichmentWrites(candidate.productId, writes)
+      await db.update(importCandidates)
+        .set({ enrichedAt: new Date(), updatedAt: new Date() })
+        .where(eq(importCandidates.id, candidate.id))
+      return { ok: true, result: 'enriched' }
+    } catch (err) {
+      const reason = `apply failed (subagent): ${err instanceof Error ? err.message : String(err)}`
+      const disp = decideEnrichFailure(candidate.enrichAttempts)
+      await applyEnrichFailure(candidate, reason)
+      return { ok: false, result: disp.action === 'retry' ? 'requeued' : 'parked', reason }
+    }
+  }
+
+  const reason = `quality gate failed (subagent): ${gateFailure}`
+  const disp = decideEnrichFailure(candidate.enrichAttempts)
+  await applyEnrichFailure(candidate, reason)
+  return { ok: false, result: disp.action === 'retry' ? 'requeued' : 'parked', reason }
+}
+
+/**
+ * The routine reports a leased candidate it could not generate content for
+ * (subagent errored, returned unparseable JSON past its own retries, etc.).
+ * Routed through the same retry/park path as a batch failure so the attempt
+ * cap holds across transports.
+ */
+export async function releaseSubagentClaim(
+  candidateId: number,
+  reason: string,
+): Promise<SubagentCompleteResult> {
+  const candidate = await getSubagentClaimedCandidate(candidateId)
+  if ('error' in candidate) return { ok: false, result: 'not_claimable', reason: candidate.error }
+  const detail = `subagent generation failed: ${reason}`
+  const disp = decideEnrichFailure(candidate.enrichAttempts)
+  await applyEnrichFailure(candidate, detail)
+  return { ok: false, result: disp.action === 'retry' ? 'requeued' : 'parked', reason: detail }
 }

@@ -1,6 +1,6 @@
 ---
 name: emma-product-enricher
-description: Generates the full ProductWrites JSON payload for one xdipx product — title rewrite, tagline, SEO meta, Emma's take, sensation dial, mood/audience/matters tags, IVR fields, FAQs, and pairing blurbs — all in a single Sonnet session. Use when enriching products via the `--from-file` path of `scripts/backfill-product-enrichment.ts` so editorial work runs on the Max subscription instead of the Anthropic API key. Returns a single JSON object the caller writes to a batch file.
+description: Generates the full ProductWrites JSON payload for one xdipx product — title rewrite, tagline, SEO meta, Emma's take, sensation dial, mood/audience/matters tags, IVR fields, FAQs, and pairing blurbs — all in a single Sonnet session. Dispatched per product by the daily R-ENRICH routine (docs/store-team/routine-enrich-daily.md, submitting via /api/team/enrich-queue) and by the interactive `--from-file` path of `scripts/backfill-product-enrichment.ts` — both run editorial work on the Max subscription instead of the Anthropic API key. Returns a single JSON object the caller submits or writes to a batch file.
 tools: Read, Grep, Glob
 model: sonnet
 color: coral
