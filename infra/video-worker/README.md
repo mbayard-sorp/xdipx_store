@@ -6,8 +6,12 @@ Serverless endpoint that runs Wan 2.2 14B (Apache 2.0 open weights) inside a hea
 ComfyUI, encodes an H.264 mp4 at 720x1280 / 16 fps, extracts the last frame, and
 uploads both to Vercel Blob.
 
-Nothing in this directory is wired into the app yet. The app-side provider
-(`app/lib/runpod-video.server.ts`, Phase 2) will call `/run` and poll `/status`.
+The app-side provider (`app/lib/runpod-video.server.ts`, Phase 2) is wired in and calls
+`/run` and polls `/status` against the live endpoint below.
+
+Live deployment (2026-08-22): endpoint `1cnxz75c71177q`, network volume `q167g3em77`
+(`xdipx-wan22-models`, 100 GB, US-IL-1), image
+`ghcr.io/mbayard-sorp/xdipx-video-worker:latest` (public).
 
 ## Contents
 
@@ -31,7 +35,11 @@ negativePrompt    string   optional
 imageUrl          string   required for mode i2v; public URL of a 9:16 scene frame
 durationSeconds   int      5..15
 seed              int      optional (random if absent)
-steps             int      optional, default 20 (4 when fast=true)
+steps             int      optional, default 20 (4 when fast=true). fast defaults to
+                            true on the app side (app/lib/runpod-video.server.ts)
+                            because the 20-step path does not finish inside the
+                            execution timeout on the 24 GB cards this endpoint
+                            actually schedules onto (see Cold start and cost below)
 mode              "i2v" | "t2v"
 aspect            "9:16"   only value accepted in Phase 1
 fast              bool     optional, use lightx2v 4-step LoRAs (must be on the volume)
@@ -93,14 +101,25 @@ MODELS_ROOT=/workspace/models WITH_LIGHTX2V=1 bash bootstrap-models.sh
 
 RunPod console > Serverless > New Endpoint:
 
-- Container image: `ghcr.io/<github-org>/xdipx-video-worker:0.1.0`
+- Container image: `ghcr.io/mbayard-sorp/xdipx-video-worker:latest` (public). Live
+  endpoint `1cnxz75c71177q` runs this tag.
 - Container disk: 20 GB (ComfyUI output/input scratch, no models)
-- GPU: 48 GB class first (L40S / 6000 Ada), 24 GB (RTX 4090) as second choice.
-  TODO(unverified): whether the 14B fp8 two-expert pipeline at 720x1280 x 241 frames fits
-  a 24 GB card without offload has not been measured; start with 48 GB.
+- GPU: 48 GB class (L40S / 6000 Ada) first choice, 24 GB (RTX 4090) as second choice.
+  MEASURED 2026-08-22: the full 20-step 14B two-expert pipeline at 720x1280 x 241 frames
+  does NOT finish inside the execution timeout on a 24 GB card (VRAM swapping between the
+  two experts); it needs an L40S/48 GB card to complete. The live endpoint's pool is
+  currently RTX 4090-heavy (L40S stock is LOW in US-IL-1), which is why the app-side
+  provider defaults every job to `fast: true` (lightx2v 4-step LoRAs) rather than the
+  full 20-step path.
+- `minCudaVersion`: 12.9. The image's torch build is `cu129`; scheduling onto a host with
+  an older driver fails the job with CUDA error 804 (forward compatibility not supported),
+  not a slow render, so this must be set on the endpoint.
 - Workers: min 0, max 3, Flex (scale to zero)
-- Idle timeout: 60 s. Execution timeout: 1800 s (default is 600 s, too short for 15 s clips at 20 steps)
-- Network volume: the one from step 2
+- Idle timeout: 60 s. Execution timeout: 1800000 ms / 1800 s (30 min; default is 600 s,
+  too short even for the fast path's ~220 s render plus cold start headroom, and far too
+  short for a 20-step render).
+- Network volume: the one from step 2. Live volume `q167g3em77` (`xdipx-wan22-models`,
+  100 GB, US-IL-1).
 - Env vars: none required. Optional: `RENDER_TIMEOUT_S`, `COMFY_BOOT_TIMEOUT_S`,
   `BLOB_API_URL` (see handler.py TODO), `WAN_FAST_DEFAULT` is NOT a thing; pass `fast` per job.
 
@@ -135,17 +154,24 @@ TEST_LOCAL=/app/test_input.json python /app/handler.py
 
 ## Cold start and cost
 
-- Flex rate (RunPod pricing page via search, 2026-08): L40S / 6000 Ada ~$1.75/hr
-  (~$0.00049/s), RTX 4090 ~$1.10/hr (~$0.00031/s). Billing is per second of execution.
+Measured live against endpoint `1cnxz75c71177q` (2026-08-22). The pool currently lands
+jobs on RTX 4090 because L40S stock is LOW in US-IL-1.
+
+- Flex rate: RTX 4090 $1.10/hr (~$0.00031/s), the rate actually billed today. L40S / 6000
+  Ada list is ~$1.75/hr (~$0.00049/s) when available.
+- Per clip, MEASURED: Wan 2.2 14B i2v, 720x1280, 5 s, 20 steps, no LoRA, on a 4090
+  EXCEEDED the 900 s execution timeout (this test ran before the 30 min timeout above was
+  set; VRAM swapping between the two 14B experts is the bottleneck, so raising the timeout
+  alone would not make a 24 GB card viable at 20 steps). The same job with `fast: true`
+  (lightx2v 4-step LoRAs, already on the volume) COMPLETED with executionTime 219669 ms
+  (~3.7 min) and a valid h264 720x1280 16 fps 5.06 s output. At the 4090 rate that is about
+  $0.067 per 5 s clip. This is why `app/lib/runpod-video.server.ts` defaults every submit
+  to `fast: true`; a 20-step submit needs the endpoint to land on an L40S/48 GB worker to
+  finish inside the timeout, which is not guaranteed while L40S stock stays low.
 - Cold start: image pull (once per host) plus ComfyUI boot plus first model load from the
-  network volume (~29 GB of fp8 diffusion weights + 6.7 GB encoder). Expect 2 to 4 minutes
-  on the first job per worker; warm workers skip all of it.
-  TODO(unverified): measure on the real endpoint and record here.
-- Per clip: TODO(unverified) render time for 720x1280 at 20 steps has not been measured.
-  Rough order of magnitude from the Comfy-Org template's RTX 4090D notes (71 to 536 s at
-  640x640): a 5 s clip at 20 steps is probably 3 to 6 minutes on an L40S ($0.10 to $0.20),
-  and under a minute with `fast=true`. A 15 s clip scales roughly linearly. Record real
-  numbers after the first batch.
+  network volume (~29 GB of fp8 diffusion weights + 6.7 GB encoder) adds to the first job's
+  executionTime on a fresh worker; warm workers skip it. Not separately isolated in the
+  219669 ms measurement above, so treat that number as cold-start-inclusive.
 
 ## Kill switch
 
