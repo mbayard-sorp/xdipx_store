@@ -8,6 +8,7 @@ import { cached, invalidateCache, kvDel } from '~/lib/kv.server'
 import { normalizeTagList } from '~/lib/tag-normalize'
 import { normalizeProductHandles, type ProductHandleEntry } from '~/lib/product-handles'
 import { optimizeSanityImageUrls, sanityImageUrl } from '~/lib/sanity-image'
+import { planFaqAnswerPatch } from '~/lib/ipx-faq-remediation'
 
 /**
  * Sanity arrays of objects require a unique `_key` per item. Generated from
@@ -1208,6 +1209,36 @@ export async function getProductFaqs(handle: string): Promise<ProductFaq[]> {
     console.error('[sanity] getProductFaqs error:', err)
     return []
   }
+}
+
+/**
+ * Ticket #4871: surgically correct one productPage FAQ answer by _key, matching
+ * the current stored answer exactly (drift guard) and leaving every sibling
+ * field and FAQ entry — and their _keys — byte-for-byte untouched. Extends the
+ * IP-code remediation (scripts/fix-ipx-shower-claims.ts) to the Sanity
+ * productFaqs surface, which the Shopify-metafield fixer never wrote, so a PDP
+ * can no longer contradict its own corrected copy. Idempotent: a re-run after
+ * the answer is already fixed returns 'already' rather than erroring.
+ */
+export async function patchProductFaqAnswer(
+  handle: string,
+  oldAnswer: string,
+  newAnswer: string,
+): Promise<'no_client' | 'no_doc' | 'not_found' | 'already' | 'patched'> {
+  const writeClient = getClient(true, false, 'raw')
+  if (!writeClient) return 'no_client'
+  const doc = await writeClient.fetch<{ _id: string; productFaqs?: Array<{ _key?: string; answer?: string }> } | null>(
+    `*[_type == "productPage" && shopifyHandle == $handle] | order(_id asc)[0]{ _id, productFaqs[]{ _key, answer } }`,
+    { handle },
+  )
+  if (!doc?._id) return 'no_doc'
+  const plan = planFaqAnswerPatch(doc.productFaqs ?? [], oldAnswer, newAnswer)
+  if (plan.status !== 'patch') return plan.status
+  await writeClient
+    .patch(doc._id)
+    .set({ [`productFaqs[_key=="${plan.key}"].answer`]: newAnswer })
+    .commit()
+  return 'patched'
 }
 
 // ─── Collection Page (PLP SEO overrides) ─────────────────────────────────────
