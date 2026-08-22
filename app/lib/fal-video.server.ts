@@ -17,6 +17,7 @@
 import sharp from 'sharp'
 import { recordFalBlock, readFalRequestId } from '~/lib/fal.server'
 import { atlasConfigured, atlasGenerate } from '~/lib/atlas.server'
+import { estimateRunpodRatePerSecondUsd } from '~/lib/model-pricing.server'
 
 const FAL_QUEUE_ENDPOINT = 'https://queue.fal.run'
 const FAL_SYNC_ENDPOINT = 'https://fal.run'
@@ -36,13 +37,28 @@ export function falVideoConfigured(): boolean {
 // fal reprices. costKey must have a matching entry in model-pricing VIDEO_RATES.
 // ---------------------------------------------------------------------------
 
-export type VideoModelId = 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'grok' | 'omnihuman' | 'sync-lipsync'
+export type VideoModelId =
+  | 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'grok' | 'omnihuman' | 'sync-lipsync'
+  | 'wan22-i2v' | 'wan22-t2v'
 
 export interface VideoModelSpec {
-  /** fal queue endpoint path. */
+  /**
+   * fal queue endpoint path. Required by the interface for every fal-provider
+   * model; a `provider: 'runpod'` spec does not route through fal at all and
+   * carries a documentation-only placeholder here (submitVideoRequest refuses
+   * to call it — see the provider guard below).
+   */
   falModel: string
   label: string
   tier: 'premium' | 'premium-fast' | 'standard' | 'avatar' | 'lipsync'
+  /**
+   * Which backend renders this model. Undefined/omitted means 'fal' (the
+   * default and every model until wan22): submitVideoRequest/getVideoRequestStatus/
+   * getVideoRequestResult in this file. 'runpod' means the video-pipeline clip
+   * stage routes through runpod-video.server.ts instead — this file's queue
+   * client is never called for that tier.
+   */
+  provider?: 'fal' | 'runpod'
   /** Cost key understood by model-pricing VIDEO_RATES. */
   costKey: string
   ratePerSecondUsd: number
@@ -168,6 +184,34 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     nativeAudio: false,
     lipsync: { baseClip: 'kling25-pro' },
     allowedDurations: [5, 10],
+  },
+  // RunPod Serverless, self-hosted GPU (infra/video-worker/), Phase 2. Wan 2.2
+  // 14B is a silent model like Kling: no native audio, no invented dialogue,
+  // so it takes the exact same lipsync path as kling25-pro/seedance2 (voiceover
+  // overdub when scriptJson carries one, otherwise native-silent — see
+  // classifyAudioPath). ratePerSecondUsd is an ESTIMATE derived from the rented
+  // GPU's $/GPU-second (model-pricing estimateRunpodRatePerSecondUsd); the real
+  // number comes from RunPod's measured executionTime per job and replaces this
+  // in api_token_log and the job row once a clip completes.
+  'wan22-i2v': {
+    falModel: 'runpod/wan2.2-14b-i2v', // documentation only — provider:'runpod' means this is never dereferenced
+    label: 'Wan 2.2 14B Image-to-Video (RunPod)',
+    tier: 'standard',
+    provider: 'runpod',
+    costKey: 'runpod/wan22',
+    ratePerSecondUsd: estimateRunpodRatePerSecondUsd(),
+    nativeAudio: false,
+    allowedDurations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  },
+  'wan22-t2v': {
+    falModel: 'runpod/wan2.2-14b-t2v', // documentation only — provider:'runpod' means this is never dereferenced
+    label: 'Wan 2.2 14B Text-to-Video (RunPod)',
+    tier: 'standard',
+    provider: 'runpod',
+    costKey: 'runpod/wan22',
+    ratePerSecondUsd: estimateRunpodRatePerSecondUsd(),
+    nativeAudio: false,
+    allowedDurations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   },
 }
 
@@ -346,12 +390,22 @@ function buildInput(model: VideoModelId, input: VideoRequestInput): Record<strin
         audio_url: input.audioUrl,
         sync_mode: 'cut_off',
       }
+    case 'wan22-i2v':
+    case 'wan22-t2v':
+      // These never reach buildInput/submitVideoRequest — the clip stage
+      // branches on spec.provider === 'runpod' before it gets here and calls
+      // runpod-video.server.ts instead. The guard in submitVideoRequest below
+      // throws first, so this case exists only for switch exhaustiveness.
+      throw new Error(`${model} routes through RunPod, not the fal queue`)
   }
 }
 
 export async function submitVideoRequest(model: VideoModelId, input: VideoRequestInput): Promise<QueueHandle> {
   const key = requireKey()
   const spec = VIDEO_MODELS[model]
+  if (spec.provider === 'runpod') {
+    throw new Error(`${model} is a RunPod-provider model; call runpod-video.server.ts's submitRunpodVideo instead`)
+  }
   if (spec.lipsync) {
     // Output length = the shorter input track; duration validation happened
     // when the base clip was submitted.

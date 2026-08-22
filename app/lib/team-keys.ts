@@ -180,6 +180,14 @@ export const VIDEO_EXTRA_KEYS = {
   // 1.5s logo + CTA outro appended in assembly. Read via getPipelineSetting
   // (=== 'true', defaults OFF) like frame_review — a render toggle, not budget.
   endcardEnabled: 'video_endcard_enabled',
+  // The model tier enqueueVideoJob/enqueueVideoJobSet fall back to when the
+  // caller omits modelTier. Plain pipeline_settings key (not a 'video_team_%'
+  // one, so it does NOT ride getTeamConfig's LIKE query) — read directly via
+  // getPipelineSetting like frame_review/endcardEnabled. No migration seeds
+  // this row; absence is the expected steady state and falls back to
+  // VIDEO_DEFAULT_MODEL_TIER_DEFAULT below. An owner (or agent) can set it at
+  // any time via the pipeline_settings table with no schema change.
+  defaultModelTier: 'video_default_model_tier',
 } as const
 
 /** Default per-video ceiling when the key is unset (cents; migration seeds 600). */
@@ -187,6 +195,14 @@ export const VIDEO_MAX_COST_CENTS_DEFAULT = 600
 
 /** Default enqueue-set expansion cap when the key is unset (migration seeds 4). */
 export const VIDEO_MAX_VARIANTS_PER_SET_DEFAULT = 4
+
+/**
+ * Default modelTier when video_default_model_tier is unset AND the caller
+ * omits modelTier. kling25-pro: the cheapest fully-silent standard tier
+ * already in production use, so a misconfigured/absent default never
+ * accidentally selects an expensive or unvalidated tier.
+ */
+export const VIDEO_DEFAULT_MODEL_TIER_DEFAULT = 'kling25-pro'
 
 /**
  * Delivery-tone vocabulary for video speech (spec §5 Phase 3). Optional and

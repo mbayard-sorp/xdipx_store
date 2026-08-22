@@ -36,6 +36,18 @@ function requireToken(): string {
   return token
 }
 
+/**
+ * The same read-write token this file uses, for a caller that hands Blob
+ * write access to something outside this process — e.g. the RunPod video
+ * worker, which uploads its own mp4 straight to Blob rather than round-
+ * tripping bytes through us. Same BLOB_READ_WRITE_TOKEN / XDIPX_READ_WRITE_TOKEN
+ * fallback as everywhere else in this file; do not re-read the env vars
+ * directly elsewhere, reuse this.
+ */
+export function requireBlobToken(): string {
+  return requireToken()
+}
+
 /** Upload a buffer; returns the public URL. Adds a random suffix to avoid collisions on retry. */
 export async function blobPut(pathname: string, data: Buffer, opts: { contentType: string }): Promise<{ url: string }> {
   const token = requireToken()

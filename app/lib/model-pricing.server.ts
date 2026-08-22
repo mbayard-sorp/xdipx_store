@@ -118,6 +118,50 @@ export function estimateImageCostUsd(model: string, count: number): number {
 // fal-video.server.ts.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// RunPod Serverless GPU pricing (Wan 2.2 14B, `wan22-i2v` / `wan22-t2v`).
+// RunPod bills per GPU-SECOND actually consumed, not per second of finished
+// video, so this is a different pricing model than the fal per-output-second
+// rates above. Rather than one hardcoded number, this is TWO numbers:
+//   - RUNPOD_GPU_USD_PER_SEC:      the rented GPU's $/GPU-second (env,
+//     default 0.0012, roughly L40S class list pricing as of 2026-08).
+//   - RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND: an ASSUMED render-time
+//     multiplier (40 GPU-seconds of render per second of finished clip) used
+//     ONLY for the pre-flight estimate, until real render telemetry exists.
+// estimateRunpodRatePerSecondUsd() multiplies these into a $/clip-second
+// figure that slots into VIDEO_RATES exactly like a fal rate, so
+// estimateVideoCostUsd/estimateJobCostUsd need no special-casing.
+// computeRunpodActualCostUsd() is the REAL number: RunPod's /status response
+// carries executionTime in milliseconds, actually GPU-seconds billed, and
+// replaces the estimate once the job completes (video-pipeline clip stage).
+// ---------------------------------------------------------------------------
+
+const RUNPOD_GPU_USD_PER_SEC_DEFAULT = 0.0012
+const RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND = 40
+
+function runpodGpuRatePerSecondUsd(): number {
+  const raw = process.env['RUNPOD_GPU_USD_PER_SEC']
+  const n = raw != null && raw.trim() !== '' ? Number(raw) : NaN
+  return Number.isFinite(n) && n > 0 ? n : RUNPOD_GPU_USD_PER_SEC_DEFAULT
+}
+
+/** ESTIMATE-only $/clip-second for the wan22 tiers. See block comment above. */
+export function estimateRunpodRatePerSecondUsd(): number {
+  return runpodGpuRatePerSecondUsd() * RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND
+}
+
+/**
+ * ACTUAL USD cost of one completed RunPod job from its measured executionTime
+ * (ms, from the /status response). This is the real number the estimate above
+ * only approximates; the clip stage uses this to replace the estimate on the
+ * job row and in api_token_log once a wan22 job completes. Never negative.
+ */
+export function computeRunpodActualCostUsd(executionMs: number): number {
+  const seconds = Math.max(0, executionMs) / 1000
+  const cost = runpodGpuRatePerSecondUsd() * seconds
+  return Math.round(cost * 1e5) / 1e5
+}
+
 const VIDEO_RATES: Record<string, number> = {
   'fal/veo3.1':       0.40, // native audio, 1080p
   'fal/veo3.1-fast':  0.15, // native audio
@@ -126,6 +170,10 @@ const VIDEO_RATES: Record<string, number> = {
   'fal/grok-imagine-1.5': 0.14, // native audio, pinned to 720p (480p $0.08, 1080p $0.25)
   'fal/omnihuman-1.5': 0.16, // audio-driven avatar performance (image + audio -> talking video)
   'fal/sync-lipsync': 0.05, // lipsync billed ~$3/min of output video
+  // RunPod Wan 2.2 14B (both i2v and t2v share one rented-GPU rate) — ESTIMATE
+  // only, see estimateRunpodRatePerSecondUsd() above. Actual spend is metered
+  // per job via computeRunpodActualCostUsd() and replaces this in api_token_log.
+  'runpod/wan22':     estimateRunpodRatePerSecondUsd(),
   'elevenlabs/tts':   0.003, // voiceover, ~$0.20/min of speech at Creator-plan credit rates
   'elevenlabs/music': 0.008, // music bed, ~$0.48/min — APPROXIMATE Creator-plan credit conversion
 }

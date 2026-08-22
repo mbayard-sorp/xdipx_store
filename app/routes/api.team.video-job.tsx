@@ -26,6 +26,7 @@ import {
   VIDEO_FORMULAS,
   VIDEO_MAX_COST_CENTS_DEFAULT,
   VIDEO_MAX_VARIANTS_PER_SET_DEFAULT,
+  VIDEO_DEFAULT_MODEL_TIER_DEFAULT,
   VIDEO_TONES,
   SCENE_KIT,
   VIDEO_EXTRA_KEYS,
@@ -110,10 +111,27 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
   }
 }
 
+/**
+ * Fills in modelTier from the video_default_model_tier pipeline setting
+ * (mirrors video-pipeline.server.ts's getDefaultModelTier) when the caller
+ * omits it, so validateEnqueueCommon's isVideoModelId check always has a
+ * value to validate. Mutates nothing the caller passed; only adds the key
+ * when absent.
+ */
+async function withDefaultModelTier(b: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (typeof b['modelTier'] === 'string' && b['modelTier']) return b
+  const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.defaultModelTier).catch(() => null)
+  const modelTier = isVideoModelId(v) ? v : VIDEO_DEFAULT_MODEL_TIER_DEFAULT
+  return { ...b, modelTier }
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
-  const b = (await request.json().catch(() => ({}))) as Record<string, unknown>
+  const rawBody = (await request.json().catch(() => ({}))) as Record<string, unknown>
+  const b = (rawBody['op'] === 'enqueue' || rawBody['op'] === 'enqueue-set')
+    ? await withDefaultModelTier(rawBody)
+    : rawBody
 
   try {
     if (b['op'] === 'enqueue') {
