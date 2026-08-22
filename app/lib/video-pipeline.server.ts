@@ -43,8 +43,9 @@ import {
   type QueueHandle,
 } from '~/lib/fal-video.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
-import { estimateVideoCostUsd, estimateImageCostUsd } from '~/lib/model-pricing.server'
+import { estimateVideoCostUsd, estimateImageCostUsd, computeRunpodActualCostUsd } from '~/lib/model-pricing.server'
 import { logVideoCost, logImageCost } from '~/lib/token-log.server'
+import { submitRunpodVideo, getRunpodStatus, getRunpodResult } from '~/lib/runpod-video.server'
 import { getEditorPhotoUrl, getApprovedCastMembers } from '~/lib/sanity.server'
 import { getProductByHandle } from '~/lib/shopify.server'
 import { getTeamConfig } from '~/lib/team.server'
@@ -52,6 +53,7 @@ import {
   VIDEO_EXTRA_KEYS,
   VIDEO_MAX_COST_CENTS_DEFAULT,
   VIDEO_MAX_VARIANTS_PER_SET_DEFAULT,
+  VIDEO_DEFAULT_MODEL_TIER_DEFAULT,
   ENDCARD_CTA_WHITELIST,
   TONE_EXPRESSION,
   isVideoTone,
@@ -88,7 +90,8 @@ export interface EnqueueVideoJobArgs {
   presenter: string
   /** Script beats + per-platform captions + framePrompt/motionPrompt. */
   scriptJson: VideoScriptJson
-  modelTier: VideoModelId
+  /** Omit to fall back to the video_default_model_tier pipeline setting (getDefaultModelTier). */
+  modelTier?: VideoModelId
   durationSeconds: number
   targetPlatforms: string[]
   aiDisclosure?: boolean
@@ -102,6 +105,20 @@ export interface EnqueueVideoJobArgs {
 async function getMaxCostCents(): Promise<number> {
   const cfg = await getTeamConfig('video').catch(() => null)
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT
+}
+
+/**
+ * Model tier enqueueVideoJob/enqueueVideoJobSet fall back to when the caller
+ * omits modelTier. Reads the same way getMaxCostCents' sibling frameReviewEnabled/
+ * endcardEnabled do (plain getPipelineSetting call, not getTeamConfig — this is
+ * NOT a 'video_team_%' key). No migration seeds `video_default_model_tier`, so
+ * an unset or invalid stored value (typo, retired tier id) falls back to
+ * VIDEO_DEFAULT_MODEL_TIER_DEFAULT rather than throwing — a bad setting write
+ * can never brick every video enqueue.
+ */
+async function getDefaultModelTier(): Promise<VideoModelId> {
+  const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.defaultModelTier).catch(() => null)
+  return isVideoModelId(v) ? v : (VIDEO_DEFAULT_MODEL_TIER_DEFAULT as VideoModelId)
 }
 
 /**
@@ -141,8 +158,9 @@ export function estimateJobCostUsd(
 }
 
 export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobId: string; estCostUsd: number }> {
-  if (!isVideoModelId(args.modelTier)) throw new Error(`Unknown model tier: ${args.modelTier}`)
-  const spec = VIDEO_MODELS[args.modelTier]
+  const modelTier = args.modelTier ?? await getDefaultModelTier()
+  if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
+  const spec = VIDEO_MODELS[modelTier]
   const script = args.scriptJson
   const reuseFrame = typeof script.reuseFrameAssetId === 'number'
   let speechSeconds = 0
@@ -166,19 +184,19 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
     if (!line) throw new Error('scriptJson.presenterLine is required for the lipsync tier')
     if (args.presenter === 'none') throw new Error('lipsync tier requires a presenter (emma or friend:{slug})')
     if (!spec.allowedDurations.includes(args.durationSeconds)) {
-      throw new Error(`${args.modelTier} does not support ${args.durationSeconds}s (allowed: ${spec.allowedDurations.join(', ')})`)
+      throw new Error(`${modelTier} does not support ${args.durationSeconds}s (allowed: ${spec.allowedDurations.join(', ')})`)
     }
     const speech = estimateAvatarSpeechSeconds(line)
     if (speech > args.durationSeconds) {
       throw new Error(`presenterLine estimates ${speech}s of speech but the clip is ${args.durationSeconds}s. Trim the line or lengthen the clip.`)
     }
   } else if (!spec.allowedDurations.includes(args.durationSeconds)) {
-    throw new Error(`${args.modelTier} does not support ${args.durationSeconds}s (allowed: ${spec.allowedDurations.join(', ')})`)
+    throw new Error(`${modelTier} does not support ${args.durationSeconds}s (allowed: ${spec.allowedDurations.join(', ')})`)
   }
 
   // Hard per-video ceiling: refuse over-budget jobs BEFORE any spend, so a
   // model-tier misconfig cannot drain the daily budget one loop at a time.
-  const estCostUsd = estimateJobCostUsd(args.modelTier, args.durationSeconds, {
+  const estCostUsd = estimateJobCostUsd(modelTier, args.durationSeconds, {
     ...(spec.audioDriven ? { speechSeconds } : {}),
     reuseFrame,
   })
@@ -196,7 +214,7 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
     presenter: args.presenter,
     scriptJson: args.scriptJson,
     aiDisclosure: args.aiDisclosure ?? true,
-    modelTier: args.modelTier,
+    modelTier,
     targetPlatforms: args.targetPlatforms,
     runId: args.runId ?? null,
     variantGroupId: args.variantGroupId ?? null,
@@ -204,7 +222,7 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
   })
 
   await kvDel(KV_KEYS.videoPollerIdle)
-  console.log(`[video-pipeline] enqueued job ${jobId} product=${args.productHandle} formula=${args.formula} tier=${args.modelTier}`)
+  console.log(`[video-pipeline] enqueued job ${jobId} product=${args.productHandle} formula=${args.formula} tier=${modelTier}`)
   return { jobId, estCostUsd }
 }
 
@@ -217,7 +235,8 @@ export interface EnqueueVideoJobSetArgs {
   /** Base presenter; the presenters axis overrides per variant. */
   presenter: string
   baseScriptJson: VideoScriptJson
-  modelTier: VideoModelId
+  /** Omit to fall back to the video_default_model_tier pipeline setting (getDefaultModelTier). */
+  modelTier?: VideoModelId
   durationSeconds: number
   targetPlatforms: string[]
   aiDisclosure?: boolean
@@ -242,8 +261,9 @@ export interface EnqueueVideoJobSetResult {
  * still apply inside each enqueueVideoJob call.
  */
 export async function enqueueVideoJobSet(args: EnqueueVideoJobSetArgs): Promise<EnqueueVideoJobSetResult> {
-  if (!isVideoModelId(args.modelTier)) throw new Error(`Unknown model tier: ${args.modelTier}`)
-  const spec = VIDEO_MODELS[args.modelTier]
+  const modelTier = args.modelTier ?? await getDefaultModelTier()
+  if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
+  const spec = VIDEO_MODELS[modelTier]
 
   const variants = expandVariantSet({
     baseScriptJson: args.baseScriptJson,
@@ -271,7 +291,7 @@ export async function enqueueVideoJobSet(args: EnqueueVideoJobSetArgs): Promise<
       reuseFrame = (await findReusableSceneFrame(v.scriptJson.sceneSlug, presenter).catch(() => null)) != null
     }
     const speechSource = typeof v.scriptJson.presenterLine === 'string' ? v.scriptJson.presenterLine : ''
-    const est = estimateJobCostUsd(args.modelTier, args.durationSeconds, {
+    const est = estimateJobCostUsd(modelTier, args.durationSeconds, {
       ...(spec.audioDriven ? { speechSeconds: estimateAvatarSpeechSeconds(speechSource) } : {}),
       reuseFrame,
     })
@@ -294,7 +314,7 @@ export async function enqueueVideoJobSet(args: EnqueueVideoJobSetArgs): Promise<
       formula: args.formula,
       presenter: v.presenter ?? args.presenter,
       scriptJson: v.scriptJson,
-      modelTier: args.modelTier,
+      modelTier,
       durationSeconds: args.durationSeconds,
       targetPlatforms: args.targetPlatforms,
       ...(typeof args.aiDisclosure === 'boolean' ? { aiDisclosure: args.aiDisclosure } : {}),
@@ -616,6 +636,33 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
       assertSceneFrameContract(width, height)
     }
 
+    // RunPod provider (Phase 2, Wan 2.2 14B): the worker uploads its own mp4
+    // straight to Blob, so there is nothing to download/re-upload here, and
+    // its /run + /status protocol is different enough from fal's queue that
+    // it gets its own submit + poll branches rather than reusing
+    // submitVideoRequest/getVideoRequestStatus. Mode is always i2v: the scene
+    // frame is approved before the pipeline ever reaches the clip stage
+    // (FRAME_APPROVED_STAGES), so there is always an image to hand the worker.
+    // No submit-time api_token_log entry for a runpod clip — the ESTIMATE
+    // never lands there at all, only the ACTUAL metered cost does, once the
+    // job completes in the poll branch below. job.costUsd still accrues the
+    // estimate now so the per-video ceiling stays enforced while in flight.
+    if (clipSpec.provider === 'runpod') {
+      const handle = await submitRunpodVideo({
+        prompt: motionPrompt,
+        imageUrl: frame.blobUrl,
+        durationSeconds,
+        mode: 'i2v',
+        blobPathPrefix: `video/${job.jobId}`,
+      })
+      await touch(job, {
+        status: 'awaiting_provider',
+        providerRequestIds: { ...handles, clip: handle },
+        costUsd: String(Number(job.costUsd) + clipCost),
+      })
+      return 'progressed'
+    }
+
     const handle = await submitVideoRequest(clipModelId, {
       prompt: motionPrompt,
       imageUrl: frame.blobUrl,
@@ -640,7 +687,59 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
     return 'progressed'
   }
 
-  // Poll.
+  // Poll — RunPod provider. Same clip/lipsync model resolution the submit
+  // branch used, recomputed here since it is scoped inside the `if
+  // (!existing)` block above.
+  const pollClipModelId = spec.lipsync ? spec.lipsync.baseClip : job.modelTier as VideoModelId
+  const pollClipSpec = VIDEO_MODELS[pollClipModelId]
+  if (pollClipSpec.provider === 'runpod') {
+    const { status } = await getRunpodStatus(existing as QueueHandle)
+    if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
+      await touch(job, {}) // heartbeat so ordering stays fair
+      return 'waiting'
+    }
+    if (status === 'FAILED') throw new Error('runpod video generation failed')
+
+    const result = await getRunpodResult(existing as QueueHandle)
+    // Worker already wrote the mp4 to Blob under blobPathPrefix — no
+    // download/re-upload, just record the URL it returned.
+    const actualCost = computeRunpodActualCostUsd(result.executionMs)
+    // Replace the submit-time ESTIMATE with the metered ACTUAL on the job
+    // row. durationSeconds is recomputed the same deterministic way the
+    // estimate was (scriptJson.durationSeconds, or the spec's first allowed
+    // duration), so the subtraction exactly reverses what submit added.
+    const pollScript = job.scriptJson
+    const pollDurationSeconds = typeof pollScript['durationSeconds'] === 'number'
+      ? pollScript['durationSeconds'] as number
+      : spec.allowedDurations[0]!
+    const estimatedClipCost = estimateVideoCostUsd(pollClipSpec.costKey, pollDurationSeconds)
+    await db.insert(mediaAssets).values({
+      kind: 'video',
+      purpose: 'clip',
+      blobUrl: result.videoUrl,
+      contentType: 'video/mp4',
+      sourceModel: pollClipSpec.costKey,
+      costUsd: String(actualCost),
+      videoJobId: job.id,
+    })
+    void logVideoCost({
+      feature: 'video-clip',
+      model: pollClipSpec.costKey,
+      seconds: pollDurationSeconds,
+      caller: 'video-pipeline',
+      sku: job.productHandle,
+      refId: job.jobId,
+      actualCostUsd: actualCost,
+    })
+    await touch(job, {
+      stage: 'lipsync',
+      status: 'queued',
+      costUsd: String(Number(job.costUsd) - estimatedClipCost + actualCost),
+    })
+    return 'progressed'
+  }
+
+  // Poll — fal provider.
   const { status } = await getVideoRequestStatus(existing as QueueHandle)
   if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
     await touch(job, {}) // heartbeat so ordering stays fair

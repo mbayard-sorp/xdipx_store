@@ -63,9 +63,22 @@ vi.mock('~/lib/video-postpass.server', () => ({
   runPostPass: vi.fn(),
   buildEndCard: vi.fn(),
 }))
+const runpodSubmitMock = vi.hoisted(() => vi.fn())
+const runpodStatusMock = vi.hoisted(() => vi.fn())
+const runpodResultMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/runpod-video.server', () => ({
+  submitRunpodVideo: runpodSubmitMock,
+  getRunpodStatus: runpodStatusMock,
+  getRunpodResult: runpodResultMock,
+  runpodVideoConfigured: vi.fn(() => true),
+  cancelRunpod: vi.fn(),
+}))
 
-import { enqueueVideoJobSet, estimateJobCostUsd } from '~/lib/video-pipeline.server'
+import { enqueueVideoJobSet, estimateJobCostUsd, advanceInflightVideoJobs } from '~/lib/video-pipeline.server'
 import { estimateAvatarSpeechSeconds } from '~/lib/avatar-script'
+import { logVideoCost } from '~/lib/token-log.server'
+import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
+import { computeRunpodActualCostUsd, estimateVideoCostUsd } from '~/lib/model-pricing.server'
 
 const baseArgs = {
   productHandle: 'satin-wand',
@@ -150,5 +163,130 @@ describe('estimateJobCostUsd — Grok Imagine tier (ticket #3991)', () => {
 
   it('adds the frame cost when a frame must be composed', () => {
     expect(estimateJobCostUsd('grok', 8, { reuseFrame: false })).toBeGreaterThan(1.12)
+  })
+})
+
+// RunPod provider branch in the clip stage (video-provider Phase 2, Wan 2.2
+// 14B). Fal's own clip path is untouched (byte-for-byte); these tests only
+// exercise the new `spec.provider === 'runpod'` fork.
+describe('advanceClip — RunPod provider (wan22-i2v)', () => {
+  const baseJobRow = {
+    id: 7,
+    jobId: 'job-wan22',
+    productHandle: 'satin-wand',
+    shopifyProductGid: null,
+    formula: 'myth-busting',
+    presenter: 'none',
+    scriptJson: { motionPrompt: 'slow push toward the product', durationSeconds: 8 },
+    aiDisclosure: true,
+    modelTier: 'wan22-i2v',
+    targetPlatforms: ['instagram'],
+    stage: 'clip',
+    status: 'queued',
+    providerRequestIds: {} as Record<string, { requestId: string; statusUrl: string; responseUrl: string }>,
+    sceneFrameAssetId: 55,
+    finalAssetId: null,
+    posterAssetId: null,
+    costUsd: '0',
+    metricsJson: null,
+    variantGroupId: null,
+    variantAxes: null,
+    error: null,
+    team: 'video',
+    runId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    completedAt: null,
+  }
+
+  it('submits with mode i2v and the frame URL, and accrues the ESTIMATE without logging it (no api_token_log row at submit)', async () => {
+    state.selectResults = [
+      [baseJobRow],                                          // advanceInflightVideoJobs' job-rows query
+      [{ id: 55, blobUrl: 'https://blob.test/frame.jpg' }],   // scene-frame asset lookup
+    ]
+    runpodSubmitMock.mockResolvedValue({
+      requestId: 'rp-1',
+      statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1',
+      responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1',
+    })
+
+    const result = await advanceInflightVideoJobs()
+
+    expect(result.failed).toBe(0)
+    expect(result.advanced).toBe(1)
+    expect(runpodSubmitMock).toHaveBeenCalledWith({
+      prompt: 'slow push toward the product',
+      imageUrl: 'https://blob.test/frame.jpg',
+      durationSeconds: 8,
+      mode: 'i2v',
+      blobPathPrefix: 'video/job-wan22',
+    })
+    // Estimate accrues to the job row (ceiling enforcement) but never lands in
+    // api_token_log — only the ACTUAL cost does, once the job completes.
+    expect(logVideoCost).not.toHaveBeenCalled()
+    // Never touches the fal queue client's blob round-trip.
+    expect(blobPut).not.toHaveBeenCalled()
+    expect(blobFetchToBuffer).not.toHaveBeenCalled()
+  })
+
+  it('on COMPLETED, records the mediaAssets clip row with blobUrl = the worker videoUrl (no download/re-upload), and replaces the estimate with the actual cost', async () => {
+    const awaitingRow = {
+      ...baseJobRow,
+      status: 'awaiting_provider',
+      costUsd: String(estimateVideoCostUsd('runpod/wan22', 8)), // what submit accrued
+      providerRequestIds: {
+        clip: { requestId: 'rp-1', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1' },
+      },
+    }
+    state.selectResults = [[awaitingRow]] // only the job-rows query; no frame lookup on poll
+    runpodStatusMock.mockResolvedValue({ status: 'COMPLETED' })
+    runpodResultMock.mockResolvedValue({
+      videoUrl: 'https://blob.vercel-storage.com/video/job-wan22/clip.mp4',
+      renderSeconds: 300,
+      executionMs: 300000,
+    })
+
+    const result = await advanceInflightVideoJobs()
+
+    expect(result.failed).toBe(0)
+    expect(result.advanced).toBe(1)
+    expect(blobPut).not.toHaveBeenCalled()
+    expect(blobFetchToBuffer).not.toHaveBeenCalled()
+
+    const clipInsert = state.inserts.find(r => r['purpose'] === 'clip')
+    expect(clipInsert).toMatchObject({
+      kind: 'video',
+      purpose: 'clip',
+      blobUrl: 'https://blob.vercel-storage.com/video/job-wan22/clip.mp4',
+      contentType: 'video/mp4',
+      sourceModel: 'runpod/wan22',
+    })
+    const actualCost = computeRunpodActualCostUsd(300000)
+    expect(clipInsert?.['costUsd']).toBe(String(actualCost))
+    expect(logVideoCost).toHaveBeenCalledWith(expect.objectContaining({
+      feature: 'video-clip',
+      model: 'runpod/wan22',
+      seconds: 8,
+      actualCostUsd: actualCost,
+    }))
+  })
+
+  it('waits (does not insert or log) while the runpod job is still in progress', async () => {
+    const awaitingRow = {
+      ...baseJobRow,
+      status: 'awaiting_provider',
+      providerRequestIds: {
+        clip: { requestId: 'rp-1', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1' },
+      },
+    }
+    state.selectResults = [[awaitingRow]]
+    runpodStatusMock.mockResolvedValue({ status: 'IN_PROGRESS' })
+
+    const result = await advanceInflightVideoJobs()
+
+    expect(result.failed).toBe(0)
+    expect(runpodResultMock).not.toHaveBeenCalled()
+    expect(state.inserts).toHaveLength(0)
+    expect(logVideoCost).not.toHaveBeenCalled()
   })
 })

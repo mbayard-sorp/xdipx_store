@@ -368,18 +368,26 @@ export interface VideoCostEntry {
   sku?:       string
   /** Correlation id (video_jobs.job_id or an ad batch id) -> api_token_log.ref_id. */
   refId?:     string
+  /**
+   * A REAL metered cost that replaces the per-second estimate, e.g. RunPod's
+   * computeRunpodActualCostUsd(executionMs) once a job completes. Omit for
+   * every provider that only ever has an estimate (fal): estimateVideoCostUsd
+   * still runs in that case exactly as before.
+   */
+  actualCostUsd?: number
 }
 
 /**
  * Log video-generation spend into api_token_log so it shows on /admin/usage
  * alongside token and image costs. Priced per second of output from VIDEO_RATES
- * (estimateVideoCostUsd). BEST-EFFORT: never throws into the caller.
+ * (estimateVideoCostUsd), unless the caller passes a metered actualCostUsd.
+ * BEST-EFFORT: never throws into the caller.
  */
 export async function logVideoCost(entry: VideoCostEntry): Promise<void> {
   try {
     if (!entry.seconds || entry.seconds <= 0) return
     const { estimateVideoCostUsd } = await import('./model-pricing.server')
-    const cost = estimateVideoCostUsd(entry.model, entry.seconds)
+    const cost = entry.actualCostUsd ?? estimateVideoCostUsd(entry.model, entry.seconds)
     await insertTokenRow({
       feature:             entry.feature,
       model:               entry.model,
