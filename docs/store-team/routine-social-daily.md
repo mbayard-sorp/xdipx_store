@@ -395,6 +395,17 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   the resource post is the specific failure this rule exists to stop. If slot A cannot be produced
   this run, the run posts fewer times and says so in the summary with the reason; it never backfills
   the slot with an extra product post.
+- **Slot-A-first is a hard precondition, and product-forward NEW drafts are capped per run (#4770).**
+  Make the two rules above enforceable, not aspirational. (i) A run may not write any product-forward
+  Instagram draft — a new product post OR a product rework — until slot A for the day exists, either
+  drafted this run or already published earlier today. Confirm today's slot A before drafting any
+  product post; if none exists, draft slot A first. (ii) Once slot A exists, cap the product-forward
+  NEW Instagram drafts this run at `floor(remainder / 2)`, where `remainder` is the posts still to
+  fill toward `social_freq_instagram` after slot A is accounted for. A run that cannot ship slot A
+  therefore posts fewer product posts rather than backfilling. The §4a "at most half a day's set is
+  product-forward" ceiling is the daily-set ceiling; this is the per-run mechanic that keeps a run
+  from drifting past it. Drift this reinforces: the last 7 published IG posts ran ~86% product-forward
+  with no true slot-A resource post (second measurement over the ceiling, repeating 2026-08-17).
 - **Volume climbs a rung at a time, on 7 clean days** (§4 of the campaign doc). Name the rung and
   the clean-day count in the run summary. Never step the quota up yourself to compensate for an
   automated step-down.
