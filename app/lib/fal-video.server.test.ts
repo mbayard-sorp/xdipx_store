@@ -154,6 +154,46 @@ describe('classifyAudioPath', () => {
   })
 })
 
+// RunPod provider, Phase 2 (Wan 2.2 14B): the clip stage in video-pipeline
+// routes these through runpod-video.server.ts instead of this file's fal
+// queue client, keyed off `provider`.
+describe('VIDEO_MODELS wan22 (RunPod provider)', () => {
+  it('registers both wan22 tiers with provider runpod and no native audio', () => {
+    for (const id of ['wan22-i2v', 'wan22-t2v'] as const) {
+      const spec = VIDEO_MODELS[id]
+      expect(spec.provider).toBe('runpod')
+      expect(spec.costKey).toBe('runpod/wan22')
+      expect(spec.nativeAudio).toBe(false)
+      expect(spec.inventsDialogue).toBeUndefined()
+      expect(spec.audioDriven).toBeUndefined()
+      expect(spec.lipsync).toBeUndefined()
+      expect(spec.allowedDurations).toEqual([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+      expect(spec.ratePerSecondUsd).toBeGreaterThan(0)
+    }
+  })
+
+  it('are recognized video model ids', () => {
+    expect(isVideoModelId('wan22-i2v')).toBe(true)
+    expect(isVideoModelId('wan22-t2v')).toBe(true)
+  })
+
+  it('take the same silent-tier lipsync path as kling25-pro (no invented dialogue to strip)', () => {
+    expect(classifyAudioPath(VIDEO_MODELS['wan22-i2v'], true)).toBe('overdubbed')
+    expect(classifyAudioPath(VIDEO_MODELS['wan22-i2v'], false)).toBe('native-silent')
+    expect(classifyAudioPath(VIDEO_MODELS['wan22-t2v'], true)).toBe('overdubbed')
+    expect(classifyAudioPath(VIDEO_MODELS['wan22-t2v'], false)).toBe('native-silent')
+  })
+})
+
+describe('every non-runpod model keeps provider fal-implicit (undefined)', () => {
+  it('never sets provider on a fal-queue tier', () => {
+    for (const [id, spec] of Object.entries(VIDEO_MODELS)) {
+      if (id === 'wan22-i2v' || id === 'wan22-t2v') continue
+      expect(spec.provider).toBeUndefined()
+    }
+  })
+})
+
 describe('assertSceneFrameContract', () => {
   it('accepts the composed full-resolution 9:16 frame and larger', () => {
     expect(() => assertSceneFrameContract(1080, 1920)).not.toThrow() // composed target
