@@ -19,9 +19,7 @@ in the largest us survey on this, 95% of straight men said they usually or alway
 
 the womanizer next is built around that fact. it seals a soft silicone ring over the clitoris and pulses air, suction and release, instead of pushing vibration into the skin. that is the mechanism that closes the orgasm gap for a lot of women who never got there with a partner or a bullet.
 
-save this for the next time someone says women are just harder to please. they aren't. they're under-served.
-
-which number surprised you more, the 95 or the 65?
+save this for the next time someone says women are just harder to please. they aren't, they're under-served. then tell me which number surprised you more, the 95 or the 65?
 
 #sexualwellness #orgasmgap #clitoralstimulation #airpulsation #bodysafe #womanizer
 
