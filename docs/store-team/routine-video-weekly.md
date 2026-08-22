@@ -5,9 +5,11 @@ publishes a fresh brief. Review-first: this routine SCRIPTS and ENQUEUES; the du
 `video_jobs` pipeline renders; the owner reviews everything in `/admin/video-studio`.
 
 Money model: reasoning bills to the Max subscription (cost ~0); every enqueued job is metered
-fal.ai spend logged to `api_token_log` under `video-*` features, gated by `video_team_daily_cents`
-and the hard per-video ceiling `video_team_max_cost_cents`. The scene-frame stage costs cents and
-is owner-gated (`video_frame_review`, default on) before the dollar clip spend.
+spend (RunPod by default, fal.ai on tiers that still route there) logged to `api_token_log` under
+`video-*` features, gated by `video_team_daily_cents` and the hard per-video ceiling
+`video_team_max_cost_cents`; multi-scene jobs sum cost across scenes against that ceiling. The
+scene-frame stage costs cents and is owner-gated (`video_frame_review`, default on) before the
+dollar clip spend.
 
 ## Step 0 — Start
 
@@ -36,7 +38,9 @@ curl -s "$BASE_URL/api/team/gate?team=video&excludeRun=$RUN_ID" -H "x-team-secre
    an enabled week -> build the slate yourself by the charter rubric and note that in the retro.
 4. Calendar: `GET /api/team/calendar` for the active theme/promo window (MAP-safe framing).
 5. Config: `POST /api/team/video-job {"op":"config"}` -> valves, model tiers with rates and
-   allowed durations (b-roll tier Kling; the avatar tier, OmniHuman, is the premium
+   allowed durations (default b-roll tier `wan22-i2v`, resolved automatically when `modelTier`
+   is omitted, via `video_default_model_tier`; fal tiers `kling25-pro`/`veo31`/`seedance2`/`grok`
+   available for explicit use; the avatar tier, OmniHuman, is the premium
    presenter path with duration derived from speech, not listed), the formula whitelist
    (including the four named series: ten-second-fix, the-one-thing, translate-the-feeling,
    brand-tentpole, each with its fixed verbal cold-open per the charter), approved cast members,
@@ -88,18 +92,25 @@ device-on-body depiction, judge wardrobe by the most revealing frame.
 curl -s -X POST "$BASE_URL/api/team/video-job" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"enqueue","productHandle":"...","formula":"myth-busting","presenter":"emma",
-       "modelTier":"kling25-pro","durationSeconds":10,
+       "durationSeconds":10,
        "targetPlatforms":["instagram","youtube","tiktok"],
        "scriptJson":{...},"runId":'$RUN_ID'}'
 # -> {"jobId":"...","estCostUsd":0.82} | 403 {"error":"gated",...}
 ```
+
+Omit `modelTier` to use the default `wan22-i2v` tier (resolved via `video_default_model_tier`);
+pass an explicit `modelTier` (`kling25-pro`, `veo31`, `seedance2`, `grok`, `omnihuman`) only when a
+script needs that tier specifically. For a multi-scene job, `scriptJson.scenes` replaces the
+single frame/motion/duration shape (see the charter) and the top-level `durationSeconds` is
+ignored; `op:'enqueue-set'` does not compose with `scenes`.
 
 Volume comes from the Video Plan (launch default: 3/week, 1 premium presenter + 2 standard
 b-roll). Avatar-tier (OmniHuman) jobs omit `durationSeconds`; the pipeline derives it from the
 `presenterLine` speech length (35s speech cap; the per-video cost ceiling is unchanged). A
 `gated` response or a per-video-ceiling refusal is a valid outcome; report it, never shrink
 quality to squeeze under, never split a concept across jobs to dodge the ceiling (the automatic
-sentence-boundary split inside one avatar job is pipeline mechanics, not a ceiling dodge).
+sentence-boundary split inside one avatar job is pipeline mechanics, not a ceiling dodge; a
+multi-scene job's summed scene cost against the ceiling is likewise not a dodge).
 
 The pipeline takes it from here: `/cron/video-job-poller` advances stages every 2 minutes; frames
 park for the owner while `video_frame_review` is on; finished videos wait in `/admin/video-studio`
