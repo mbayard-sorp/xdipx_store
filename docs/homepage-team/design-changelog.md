@@ -9,6 +9,12 @@ homepage routines append here as their last content/design step:
 - **Routine B — Design Cycle** (`routine-design-cycle.md`) appends an entry when a design/shell PR
   ships (or is opened for the release engine).
 
+Each entry is owned by the run that shipped the change: that run opens its own changelog PR and writes
+the Evidence line from its own run data (run id, Sanity revs, asset IDs, render probe), because no
+later agent can reconstruct evidence it never held. The changelog PR is therefore filed as
+`kind:'instructions'` (docs lane), never `kind:'code'` — see #4758 and the two routines' "Append the
+design changelog" steps.
+
 ## Entry format
 
 One dated entry per change, **appended at the bottom of the file, directly above the end-of-file

@@ -200,6 +200,15 @@ Watch for the capability even when the tag is missing: a DONE WHEN that hinges o
 visual harness is disposed the same way and flagged for the tag, since filers are still learning to
 apply it.
 
+**A `kind:'code'` row whose only deliverable is a `docs/**/*.md` append is miscategorized — rekind it,
+do not claim it.** (#4758) The homepage design-changelog append is the recurring case: the entry
+format mandates an Evidence line (run id / Sanity revs / asset IDs / render probe) that only the run
+which shipped the change holds, so R-DEV cannot honestly write it and can only block the row (#4114 run
+375, #4660 run 430; run 424 retro found 4 of 5 claimed code tickets were non-code tracking rows).
+Instead of claiming it, rekind it to the docs lane with `{"op":"rekind","id":<id>,"kind":"instructions",
+"actor":"agent:rr7-engineer","note":"docs-only append; belongs on the agent-editor/docs lane, not the
+code queue"}` so it never enters the blocked pile.
+
 **External-state DONE WHEN clauses: verify before `pr_open`, do not defer to QA.** (#4596) When a
 ticket's DONE WHEN carries an explicit verification or confirmation clause about state outside the
 diff — a webhook subscription that must actually exist in production, a valve or `pipeline_settings`

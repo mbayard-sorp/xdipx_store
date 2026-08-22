@@ -276,6 +276,15 @@ end-of-file append marker (after the most recent existing entry), and rebase ont
 same shell PR or, when the cycle produced only content-label work, a small docs append; either way the
 changelog is on the agent-editor allowlist and gates nothing.
 
+**When the changelog append is its own PR (not riding a shell PR), the run that made the change opens
+it and files its ticket as `kind:'instructions'`, never `kind:'code'`.** (#4758) Only this run holds
+the Evidence data the entry format requires (the PR number and the signal or directive that drove the
+change), so write the Evidence line from your own run data. Per ADR-008 step 3 / filing convention 4,
+file the tracking ticket as `kind:'instructions'` with `category:'docs'`, landed at `pr_open` with the
+`pr` link — never a bare `kind:'code'` row, which drops into R-DEV's claim queue where R-DEV can only
+block it (#4114, #4660). The PR still merges through the release engine once QA verifies; only the lane
+changes.
+
 ## Hard rules for this routine
 
 - **Never merge your own work.** Always a PR; the release engine merges it after CI, QA verification,
