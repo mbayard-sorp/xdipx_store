@@ -35,7 +35,7 @@ RUN cd ${COMFY_DIR} \
  && pip install -r /tmp/req.txt
 
 # runpod 1.12.0 is the latest on PyPI as of 2026-08-10 (verified 2026-08-22).
-RUN pip install runpod==1.12.0 requests==2.32.4
+RUN pip install runpod==1.12.0
 
 COPY extra_model_paths.yaml ${COMFY_DIR}/extra_model_paths.yaml
 COPY workflows /app/workflows
