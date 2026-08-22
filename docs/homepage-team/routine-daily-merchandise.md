@@ -1054,6 +1054,16 @@ PR's entry on the same line and produced real git conflicts between semantically
 naturally instead of colliding. A run that shipped a visible change without a changelog entry is
 incomplete. This is a docs append on the agent-editor allowlist; it carries no code.
 
+**The run that made the change opens this PR itself, and files its ticket as `kind:'instructions'`,
+never `kind:'code'`.** (#4758) Only the run that shipped the change holds the data the entry format
+requires (its own run id, the Sanity revisions, asset IDs, and the sameness-diff surfaces from Step
+2c), so write the Evidence line from your own run data in the same run. Per ADR-008 step 3 / filing
+convention 4, file the PR's own tracking ticket as `kind:'instructions'` with `category:'docs'` and
+land it at `pr_open` with the `pr` link — never as a bare `kind:'code'` row. A changelog append filed
+as `kind:'code'` drops into R-DEV's claim queue, where R-DEV cannot honestly write an Evidence line it
+never held and can only block it (#4114, #4660). The PR still merges through the release engine once
+QA verifies; only the lane changes.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/homepage-team/run" \
   -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \
