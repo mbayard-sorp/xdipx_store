@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
-import { ga4PurchaseFailures, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
+import { ga4PurchaseOutbox, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
 import { eq, sql } from 'drizzle-orm'
 
 /**
@@ -141,9 +141,9 @@ async function sendGa4Purchase_(order: ShopifyOrder): Promise<void> {
     const gaResult = await sendGa4Purchase(gaEvent)
     if (!gaResult.ok && !gaResult.skipped) {
       const { db } = await import('../app/lib/db.server.js')
-      await db.insert(ga4PurchaseFailures)
+      await db.insert(ga4PurchaseOutbox)
         .values({ orderId: String(order.id), payload: gaEvent, attempts: 1, lastError: gaResult.error ?? 'unknown' })
-        .onConflictDoNothing({ target: ga4PurchaseFailures.orderId })
+        .onConflictDoNothing({ target: ga4PurchaseOutbox.orderId })
       console.error('[webhook:order-created] GA4 purchase failed, queued for retry:', gaResult.error)
     }
   } catch (err) {

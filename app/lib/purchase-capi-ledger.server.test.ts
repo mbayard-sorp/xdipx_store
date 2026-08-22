@@ -24,7 +24,7 @@ const db = {
 
 vi.mock('./db.server', () => ({ db: new Proxy({}, { get: (_t, k) => (db as never)[k] }) }))
 vi.mock('../../db/schema', () => ({
-  metaCapiFailures: { orderId: 'order_id', resolvedAt: 'resolved_at' },
+  metaCapiOutbox: { orderId: 'order_id', resolvedAt: 'resolved_at' },
 }))
 vi.mock('./meta-capi.server', () => ({ sendCapiEvent: (...a: unknown[]) => sendCapiEvent(...a) }))
 vi.mock('./shopify.server', () => ({ adminGraphQL: (...a: unknown[]) => adminGraphQL(...a) }))
@@ -48,7 +48,7 @@ describe('sendPurchaseWithLedger', () => {
   it('sends even when the ledger insert throws', async () => {
     // The exact production shape this guards: migration 041 unapplied, so the
     // table does not exist. Bookkeeping must never cost a conversion.
-    insertValues.mockImplementation(() => { throw new Error('relation "meta_capi_failures" does not exist') })
+    insertValues.mockImplementation(() => { throw new Error('relation "meta_capi_outbox" does not exist') })
 
     const res = await sendPurchaseWithLedger(ORDER)
 
