@@ -906,6 +906,17 @@ roughly 9x the saves of a single image and single images are losing reach year o
 Drafted captions, alt text, hashtags, and image briefs for the first week live in
 `docs/store-team/social-slate-2026-08-24.md`; the routine drafts from them rather than from scratch.
 
+**What the owner approved on the first rendered set (2026-08-22), so the team leans toward it:**
+the partner-sharing frame is the one to make more of: *"A partner sharing a toy with their partner!
+YES"* (Sofia handing Marcus the ring on a sunlit sofa). Two cast members, one product passing
+between them, both faces in on it. The small honest detail earns the look: the little bit of hair
+below the navel in the balcony frame was called out as the thing that makes you look; briefs keep
+one such detail per frame. And product scale is a defect the owner sees first: the Womanizer Next
+rendered far too large and the bullet far too small. Every product in frame, including a second
+product, gets a reference photo passed and a stated length in the prompt (`scaleCueFromLengthInches`),
+and the spec-length lookup returned nothing for all six products, so the length comes from the
+manufacturer page until `xdipx.specifications` is populated.
+
 **Daylight and an open door are the default frame** (owner direction 2026-08-22): night is one
 option, never the rule, and no caption personifies time or trades on its scarcity. **Name the
 fact, imply the act, never gesture:** "orgasm gap" is written out, "gets there" is not
