@@ -266,9 +266,30 @@ export const CAPTION_LEXICON: {
  */
 const CAPTION_LEXICON_PLATFORMS: readonly GatePlatform[] = ['instagram']
 
-/** Normalise for shingle comparison: lowercase, strip punctuation, collapse space. */
+/** Normalise for shingle comparison: strip URLs, lowercase, strip punctuation,
+ * collapse space.
+ *
+ * URLs are removed BEFORE punctuation is collapsed. The repetition check is
+ * meant to compare prose, but the punctuation pass turns `= & : /` into spaces,
+ * so a tracking link like `https://xdipx.com/p?utm_source=x&utm_medium=social&
+ * utm_campaign=aug` tokenizes to `utm source x utm medium social utm campaign` —
+ * an eight-word run that is byte-identical on every post carrying the standard
+ * UTMs and collides with any prior post using the same source/medium. That
+ * false-positived genuinely different X prose (run 438) and pushed drafters to
+ * hand-vary utm_medium per post just to dodge the check, degrading GA4
+ * attribution consistency. Stripping URLs keeps the comparison on prose only. */
 function normalizeForShingles(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  return s
+    // Whole URLs (scheme present), including their query strings.
+    .replace(/https?:\/\/\S+/gi, ' ')
+    // Scheme-less links that still carry a `?key=value` query string, so a link
+    // written without http(s):// is handled too. Requires a `=` after the `?`,
+    // so prose questions ("really?") are never touched.
+    .replace(/\S*\?[^\s?]*=\S*/g, ' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** Every n-word window of a caption. */

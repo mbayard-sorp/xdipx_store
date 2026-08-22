@@ -179,6 +179,32 @@ describe('repetition across the live feed', () => {
     expect(shingles('too short', REPETITION_SHINGLE).size).toBe(0)
     expect(findRepeatedRun('too short', ['too short'])).toBeNull()
   })
+
+  it('does not collide two posts on their shared UTM tracking link', async () => {
+    // Both carry the same standard utm_source/utm_medium/utm_campaign but the
+    // prose is genuinely different, so neither is recycling. Before URLs were
+    // stripped, the shared `?utm_...` link tokenized to an identical eight-word
+    // shingle and 422-blocked both (run 438).
+    const link = 'https://xdipx.com/products/wand?utm_source=x&utm_medium=social&utm_campaign=aug'
+    const prior = `the quiet confidence of a wand that just knows what it is doing ${link}`
+    const r = await runDeterministicPublishChecks({
+      platform: 'x',
+      caption: `a slow build is its own kind of luxury, and this one earns it ${link}`,
+      mediaUrls: GOOD_MEDIA,
+      recentCaptions: [prior],
+    })
+    expect(checks(r)).not.toContain('repetition')
+  })
+
+  it('strips the UTM link but still catches recycled prose around it', () => {
+    // The eight-word prose run must still be caught even when both captions
+    // also carry the same tracking link — stripping URLs must not blind the
+    // check to real repetition.
+    const link = 'https://xdipx.com/p?utm_source=x&utm_medium=social&utm_campaign=aug'
+    const a = `the nightstand drawer says a lot about a person ${link}`
+    const b = `honestly the nightstand drawer says a lot about a person too ${link}`
+    expect(findRepeatedRun(a, [b])).not.toBeNull()
+  })
 })
 
 describe('result shape', () => {
