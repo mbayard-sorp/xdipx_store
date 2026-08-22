@@ -25,6 +25,8 @@ import {
   adminGraphQL,
   getPairingCandidates,
 } from '~/lib/shopify.server'
+import { fetchAllNalpacFeeds } from '~/lib/nalpac-feeds.server'
+import { cleanDescription } from '~/lib/feed-processor.server'
 import { getDialRegistry, getDialTaxonomy } from '~/lib/dial-registry.server'
 import { getAskEmmaVocabulary } from '~/lib/ask-emma-vocab.server'
 import type { ProductBrief, SharedEnrichmentContext } from '~/lib/batch-enrichment.server'
@@ -229,9 +231,34 @@ export async function gatherProductBrief(numericProductId: string): Promise<Prod
     subCategories:    categories,
   }).catch(() => [])
 
-  const rawDescription =
+  let rawDescription =
     snap.aggregatedDescription
     ?? (snap.body_html ?? '').replace(/<[^>]+>/g, ' ').slice(0, 2000)
+
+  // #4887: some imported products have no Shopify description at all (no
+  // aggregated variant custom.original_description, no product-level one, and
+  // no body_html), while the Nalpac feed row for the same SKU still carries a
+  // real Product Description. Enriching from a bare title produced
+  // wrong-identity products (a lip serum written up as a stroker, a thrusting
+  // stroker as a sex machine), so fall back to the feed row before shipping a
+  // thin brief. cleanDescription() is mandatory on any feed text (the CSV
+  // encodes apostrophes as "ft." and opening quotes as "in.").
+  if (!rawDescription.trim() && sku) {
+    try {
+      const { snapshots } = await fetchAllNalpacFeeds()
+      const feedDesc = snapshots.get(sku)?.raw.mainRow?.['Product Description'] ?? ''
+      if (feedDesc.trim()) {
+        rawDescription = cleanDescription(feedDesc).slice(0, 2000)
+        console.warn(`[enricher-brief] product ${numericProductId} (sku ${sku}): Shopify description empty, used Nalpac feed row fallback`)
+      }
+    } catch (err) {
+      console.warn(`[enricher-brief] product ${numericProductId} (sku ${sku}): feed-description fallback lookup failed:`, err instanceof Error ? err.message : err)
+    }
+  }
+
+  if (!rawDescription.trim()) {
+    console.warn(`[enricher-brief] product ${numericProductId} (sku ${sku ?? 'n/a'}): empty rawDescription after Shopify + feed fallback, enrichment will be thin`)
+  }
 
   const brief: ProductBrief = {
     shopifyProductId:   numericProductId,
