@@ -343,12 +343,12 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             pass
 
     workdir = tempfile.mkdtemp(prefix="xdipx-")
+    image_name = None
     try:
         p = validate(job.get("input") or {})
         progress("booting ComfyUI")
         ensure_comfy()
 
-        image_name = None
         if p["mode"] == "i2v":
             progress("downloading scene frame")
             image_name = download_scene_frame(p["image_url"])
