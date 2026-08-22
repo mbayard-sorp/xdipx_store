@@ -199,6 +199,29 @@ property, never all of them; the packshot is the third resort, never the second.
 > candles, no mugs, no cups, no notebooks, no fruit, no other objects, not clinical, not a
 > lightbox, not dark, not moody, no garbled or illegible label text.
 
+**Keepers:**
+
+- Squishy Silicone WINX Hippity Hoppity Vibrator (`winx-hippity-hoppity-squishy-silicone-vibrator`),
+  `wellness-basics` category (no accent prop), sincere staging (not the archetype E surreal
+  option). **Ref-image note:** this product's primary Shopify photo (`93186A.jpg`) is a
+  box-plus-device composite carrying heavy printed packaging copy ("WINX", "Hippity Hoppity", "10
+  VIBRATION FUNCTIONS...") — the exact box-bundled-photo failure class documented in the We-Vibe
+  Sync Go / Chorus Pro / Lovense entries below. The device itself carries no printed brand mark
+  (just a molded heart-shaped button), so per the Tantus Bullet precedent, checked the product's
+  other Shopify images first and used the second photo (`93186B.jpg`, clean unpackaged front view,
+  no box in frame) as the `--ref-image` instead. Zero garble risk this way since no text ever
+  entered the reference. One round, 2 candidates via Atlas `seedream-4.5-edit` (Atlas primary was
+  configured and used, not the fal Kontext fallback): candidate 1 (product upright, three-quarter
+  turn, bunny ears and pastel-swirl marbling crisp and faithful to reference, heart button
+  undistorted, crisp warm shadow, generous negative space to one side) picked over candidate 2
+  (product rendered tipped/leaning at an off-balance angle, contradicting the "standing upright"
+  ask, heart-button shape slightly less crisp) →
+  `image-28b748e052789c8f1a57f8573357bde2aecfc01e-2304x1728-jpg` (post:
+  `what-are-the-different-types-of-vibrators`). **Precedent:** for any product whose only/primary
+  photo bundles retail packaging but whose device body itself is unbranded/textless, check the
+  product's other Shopify images for a clean unpackaged shot before generating — avoids the
+  packaging-garble failure class entirely rather than fighting it with negative prompts.
+
 ### §0-H human scaffold
 
 (no ref-image unless Emma appears — then `--ref-image` = the canonical Emma photo, Sanity
