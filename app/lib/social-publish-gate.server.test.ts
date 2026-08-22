@@ -410,3 +410,56 @@ describe('removal-tier caption lexicon', () => {
     expect(checks(r)).not.toContain('caption-lexicon')
   })
 })
+
+// Owner direction 2026-08-22: the accessibility description of the image was
+// getting written INTO the caption because social_posts had no alt_text
+// column and the Instagram publisher never sent one. This check catches the
+// symptom directly rather than only the missing column.
+describe('caption describes its own image', () => {
+  it('blocks the real row-80 sentence', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'that is jade in the photo, sleeves pushed up at a sunny bathroom sink',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).toContain('caption-describes-image')
+    expect(r.blocked).toBe(true)
+    const finding = r.findings.find(f => f.check === 'caption-describes-image')
+    expect(finding?.severity).toBe('block')
+    expect(finding?.detail).toMatch(/altText/)
+  })
+
+  it('does not fire on a clean caption', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: CLEAN,
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).not.toContain('caption-describes-image')
+  })
+
+  it('catches "pictured" and "so you can see how" variants', async () => {
+    const r1 = await runDeterministicPublishChecks({
+      caption: 'the grip texture, pictured up close, is the whole point',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r1)).toContain('caption-describes-image')
+
+    const r2 = await runDeterministicPublishChecks({
+      caption: 'so you can see how the seam sits flush against the base',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r2)).toContain('caption-describes-image')
+  })
+
+  it('fires on X too, not only Instagram', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'that is jade in the photo, sleeves pushed up',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'x',
+    })
+    expect(checks(r)).toContain('caption-describes-image')
+  })
+})

@@ -177,6 +177,25 @@ const LIVED_EXPERIENCE_RE =
   /\bI\s+(tried|tested|used|owned|own|bought|felt|wore)\b|\bmy\s+(favou?rite|go-to)\s+toy\b/i
 
 /**
+ * Patterns that read as the caption narrating its own picture (owner direction
+ * 2026-08-22, root-caused from social_posts row 80: "that is jade in the
+ * photo, sleeves pushed up at a sunny bathroom sink"). Before migration 083,
+ * `social_posts` had no `alt_text` column and the Instagram publisher had
+ * nowhere to send an accessibility description, so it was being written into
+ * the caption instead. The fix for the column is additive; this is the fix
+ * for the symptom that keeps recurring even after a column exists, because a
+ * drafter can still write the description into the caption by habit.
+ */
+const CAPTION_DESCRIBES_IMAGE_PATTERNS: RegExp[] = [
+  /\b(in|of) (the|this|that) (photo|picture|image|frame|shot)\b/i,
+  /\bthat is (one of our cast|[a-z]+) (in|holding|at|standing|sitting|rinsing|washing)\b/i,
+  /^\s*visual description/im,
+  /\bso you can see (just )?how\b/i,
+  /\bpictured\b/i,
+  /\bin the (photo|pic)\b/i,
+]
+
+/**
  * Vocabulary that the rented, machine-moderated platforms REMOVE accounts over,
  * not merely age-gate (ticket #4062).
  *
@@ -455,6 +474,28 @@ export async function runDeterministicPublishChecks(
           `blocks anyway.`,
       })
     }
+  }
+
+  // ── Caption describes its own image ───────────────────────────────────────
+  //
+  // Severity is `block` (not `hold`), matching every other fixable-by-redraft
+  // caption defect in this module (sale-cta, caption-lexicon, repetition):
+  // `applyPublishGateVerdict` turns any `block` finding on a PASS into
+  // `needs_changes`/REVISE and sends the drafter the findings to act on, which
+  // is exactly the outcome wanted here. `hold` is reserved for genuine account
+  // risk that needs the owner, which this is not, the fix is a redraft that
+  // moves the description into altText, a thing this module's caller cannot do
+  // safely on its own. `warn` would record it and publish anyway, defeating
+  // the point. This module has only these three severities (see the header);
+  // there is no fourth "revise" severity to reach for.
+  if (CAPTION_DESCRIBES_IMAGE_PATTERNS.some(re => re.test(caption))) {
+    findings.push({
+      check: 'caption-describes-image',
+      severity: 'block',
+      detail:
+        'Caption describes its own image; the accessibility description belongs in altText ' +
+        '(charter social addendum, 2026-08-22)',
+    })
   }
 
   // ── Repetition across the live feed ───────────────────────────────────────

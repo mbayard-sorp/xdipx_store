@@ -238,6 +238,12 @@ export const instagramPublisher: SocialPublisher = {
     if (!token || !igId) return { ok: false, reason: 'not_configured' }
 
     const caption = input.caption.slice(0, CAPTION_MAX)
+    // Accessibility description (migration 083). Verified 2026-08-22 against
+    // developers.facebook.com/docs/instagram-platform/instagram-graph-api/
+    // reference/ig-user/media: `alt_text` is "Alternative text, up to 1000
+    // character, for an image. Only supported on a single image or image media
+    // in a carousel." Capped here to that limit.
+    const altText = input.altText?.trim().slice(0, 1000) || undefined
 
     // Product tag (#3744): resolve the gate stamp's handle to a taggable
     // catalog product. Feed photos and carousels only; Reels are out of
@@ -277,7 +283,14 @@ export const instagramPublisher: SocialPublisher = {
       for (const [index, url] of urls.entries()) {
         const item = await createContainerWithOptionalTag(
           igId,
-          { image_url: url, is_carousel_item: 'true' },
+          {
+            image_url: url,
+            is_carousel_item: 'true',
+            // Alt text on the first slide only (mirrors the product tag's
+            // "rides the first slide" convention above); IG renders one
+            // accessibility description for the whole carousel post.
+            ...(index === 0 && altText ? { alt_text: altText } : {}),
+          },
           index === 0 ? tagParams : null,
           token,
         )
@@ -304,7 +317,7 @@ export const instagramPublisher: SocialPublisher = {
     // Single image or Reels: one container, one poll, one publish.
     const params: Record<string, string> =
       input.media.kind === 'image'
-        ? { image_url: input.media.imageUrl, caption }
+        ? { image_url: input.media.imageUrl, caption, ...(altText ? { alt_text: altText } : {}) }
         : {
             media_type: 'REELS',
             video_url: input.media.videoUrl,

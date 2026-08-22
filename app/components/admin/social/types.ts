@@ -20,6 +20,16 @@ export interface SocialPostRow {
   /** Video pipeline linkage (065): set when this draft is a fanned-out video. */
   videoJobId: number | null
   posterUrl: string | null
+  /** Durable product linkage (080). Optional so older fixtures/tests compile. */
+  shopifyProductId?: string | null
+  /** Per-row engagement numbers (079), merged field-level like video_jobs. */
+  metricsJson?: Record<string, number> | null
+  /** Accessibility description + generation brief (083). */
+  altText?: string | null
+  imageBrief?: string | null
+  subject?: string | null
+  /** When status='posted'. Optional so older fixtures/tests compile. */
+  postedAt?: string | Date | null
 }
 
 /** True when the draft's media is a video (fanned out from the video pipeline). */

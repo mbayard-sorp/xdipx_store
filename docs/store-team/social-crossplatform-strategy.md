@@ -20,7 +20,7 @@ not just Instagram. A campaign is one story told at two temperatures:
 
 | | Instagram (and TikTok) | X |
 |---|---|---|
-| Register | 4-5, Emma off the clock, editorial | 6-7, desire-adjacent, still never crude |
+| Register | 9 by implication since 2026-08-22 (emma-voice.md social addendum), Emma off the clock, vocabulary fence intact | 6-7, desire-adjacent, still never crude |
 | Role in the funnel | Attention and trust. The publication people follow | Conversion and conversation. The channel that drives clicks |
 | Product links | Never in caption. post → profile → `/social` → site | PDP links with channel UTMs, encouraged |
 | Sale attempts | Never (Meta Restricted Goods) | Allowed: price, discount framing, promo codes, within MAP rules |
@@ -45,7 +45,7 @@ Two consequences worth stating rather than inferring:
   exactly where the product-in-hand sits. Reuse a pool frame on X only when it genuinely survives a
   16:9 crop with the product still legible; otherwise generate the X frame at 1600x900
   (`--platform x`).
-- **The imagery fence does NOT move with the register.** Caption register goes 4-5 on Instagram to
+- **The imagery fence does NOT move with the register.** Since 2026-08-22 the Instagram caption runs at 9 by implication, and X at 6-7 with more vocabulary licensed; the line below predates that ruling. Caption register goes 4-5 on Instagram to
   6-7 on X because X's organic adult-content policy is more permissive. The *pictures* do not follow.
   The charter's own clause is conditional: posts covered by that policy "must be labeled per X's own
   rules", and `postTweet` (`app/lib/twitter.server.ts:95`) has no sensitive-media parameter, so this
@@ -159,7 +159,7 @@ gate cannot see is advisory.
   back to a product-only image, a packshot, or a typography plate. Say which in the run summary.
   The no-zero-days baseline is channel-scoped.
 - **The imagery fence does not widen with X's hotter caption register.** X captions run 6-7 against
-  Instagram's 4-5 because X's organic policy is more permissive. The picture standard is unchanged,
+  Instagram's register (4-5 until 2026-08-22, now 9 by implication) because X's organic policy is more permissive. The picture standard is unchanged,
   and the reason is mechanical rather than taste: the charter's permission is conditional on posts
   being labeled per X's own rules, and `postTweet` (`app/lib/twitter.server.ts`) accepts only text
   and media ids with no sensitive-media flag. We cannot label, so we must not post anything that

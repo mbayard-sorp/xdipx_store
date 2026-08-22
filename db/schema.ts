@@ -194,6 +194,15 @@ export const socialPosts = pgTable('social_posts', {
   // that goes out of stock after approval still blocks the post, independent
   // of the pre-publish gate's own caller-supplied productHandle snapshot.
   shopifyProductId: varchar('shopify_product_id', { length: 60 }),
+  // Accessibility description + generation brief (migration 083, owner direction
+  // 2026-08-22). altText is what the Instagram publisher sends as alt_text on the
+  // media container; it must never leak into the caption (tweetText). imageBrief
+  // and subject are the durable "what is this image supposed to depict" record
+  // that regeneration/rework reads instead of reverse-engineering it from the
+  // caption text.
+  altText:          text('alt_text'),
+  imageBrief:       text('image_brief'),
+  subject:          text('subject'),
 })
 
 export const adminRoles = pgTable('admin_roles', {

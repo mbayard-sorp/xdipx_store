@@ -60,7 +60,10 @@ start and drafts against them.
 | This Week at xdipx | Site news: a new aisle, a drop, a Notebook piece worth reading. |
 | Trend React | A reaction to an adopted trend brief. Never chases a trend we have no view on. |
 | Inspo Carousel | Multi-slide affirming or educational message over a metaphor hook. Built for saves. |
-| Field Notes | Advice slides, no product in frame at all. Toy advice or plain sex advice, the thing a reader would otherwise search for. The resource format (§4a). |
+| Field Notes | Advice slides. Toy advice or plain sex advice, the thing a reader would otherwise search for. The resource format (§4a). Since 2026-08-22: when the advice is about a category we sell, the product is in frame (§3.9); product-free only when the subject has no product in it. |
+| WTF Is… | A one-question mechanism carousel ("WTF is air pulsation?"): slide 1 the question, slide 2 the science, the last slide why she will care tonight. The 2026 carousel format with the highest save rate, and a mechanism post that still carries heat. |
+| Send This To | A caption written to be forwarded: to the partner who keeps asking what she wants, to the friend who overthinks the lube aisle. The engagement close is the forward itself. |
+| Let Me Guess | A list of three habits the reader recognises, the third one the drawer. Recognition is the hook, the product is the punchline she already owns or wants. |
 | Today's Pick | One in-stock product, presented by a cast member. Editorial, never an offer: see §4b for what may and may not be said about its price. |
 
 **Rotation rule:** never two consecutive posts from the same pillar, and never two consecutive posts
@@ -209,9 +212,13 @@ all ceiling has no ceiling. Contrast is what stops a thumb, the charged frame la
 restrained one, and fourteen maximally charged tiles read as a porn account to a human and to a
 reviewer alike, which is the reading that gets an account actioned rather than a post.
 
-Per 7 posts: **roughly 2 at the ceiling, 3 mid, 2 educational.** Same aggregate charge, sharper
-peaks, and one bad classifier day costs a post instead of the channel. Do not round every frame up.
-Decide which two are the ceiling frames when the campaign's key art is planned (§3.4), not on the day.
+Per 7 posts: **roughly 3 at the ceiling, 3 mid, 1 educational** (re-based 2026-08-22 on the owner's
+register-9 order; it was 2 / 3 / 2). Same principle, hotter floor: the peaks stay sharper than the
+rest, and one bad classifier day costs a post instead of the channel. Do not round every frame up
+to the ceiling, and do not round any product frame down to a packshot-in-a-room: since 2026-08-22
+the **mid** frame carries skin, touch, posture, or expression by default (§3.2a licenses all four at
+zero policy cost), and the educational frame is the only one that may be quiet. Decide which three
+are the ceiling frames when the campaign's key art is planned (§3.4), not on the day.
 
 **These ratios are per rolling 7 posts, not per campaign** (re-based 2026-08-16, owner direction to
 raise volume). They were written when a campaign was 13 or 14 posts because one post a day made
@@ -219,7 +226,7 @@ those the same number. At 3 or 4 posts a day a 13-day campaign is 39 to 56 posts
 "4 of 14 per campaign" silently stops meaning anything. So read every proportion in this document as
 a **rolling window over the most recent posts**, never as a per-campaign total:
 
-- **Charge:** roughly 2 ceiling, 3 mid, 2 educational per rolling 7.
+- **Charge:** roughly 3 ceiling, 3 mid, 1 educational per rolling 7.
 - **Cast:** at most 4 cast frames per rolling 14, and never more than one cast frame in a single
   day. Still never three or more faces in one campaign; that one is about identity, not frequency,
   and it does not re-base.
@@ -230,25 +237,31 @@ inherits the reference photo's neckline when you leave it unsaid, so an unstated
 accidental one rather than a chosen one. At least one approved cast reference has a deep V, and the
 2026-08-13 bralette was not asked for by the brief that produced it.
 
-**"Desire-forward" means the picture here, not the caption.** Owner direction 2026-08-16 asked for
-posts that are *"desire forward and product highlighting"*, and that phrase carries a specific
-meaning in `docs/emma-voice.md`: the intensity-9 register the store runs on owned channels. It does
-not travel to this platform, and the split is not squeamishness, it is which half of a post each
-rule governs.
+**"Desire-forward" means the picture and the caption, since 2026-08-22.** Owner direction
+2026-08-16 asked for posts that are *"desire forward and product highlighting"*; on 2026-08-22 the
+owner closed the loophole that had kept the caption at 4-5 while the picture ran at the ceiling:
+*"I'm officially saying, our posts should be at a 9 for the explicit register. That's an order. I
+want innuendo, suggestive phrases, skin in the images (not nudity)."* The social addendum in
+`docs/emma-voice.md` now runs Instagram at **9 by implication**, and the split that remains is not
+picture-versus-caption, it is intent-versus-vocabulary.
 
 - **Imagery: yes, and we are under-using the licence we already have.** Everything in §3.2a is
   available: a bed, a body, product against skin, lubricant texture, two people touching, arousal on
   a face, implied use. The ceiling frames are the desire-forward ones, they are 2 of every 7 by
   §3.2b, and they are chosen when the key art is planned rather than discovered on the day. A set
   with no ceiling frame in it has quietly ignored this section.
-- **Caption: stays at register 4-5.** `docs/ads-policy.md` §Organic social and Step 4b question 2
-  both bar describing what a product does to a body, and the social addendum sets the register.
-  Platform policy outranks the charter on a rented surface, so this one cannot be traded for reach.
-  A register-9 line under a ceiling frame is what turns a compliant post into a removed one.
+- **Caption: register 9 by implication.** The caption wants the reader and says so; it fires the
+  fantasy and steps back; it authors the evening and leaves the ending hers. It reaches the 9
+  through innuendo, double meaning, anticipation, and the unsaid, because Meta's classifier reads
+  words and not intent. What stays out is a word list, not a register: no act naming, no orgasm or
+  arousal vocabulary, no anatomy nouns, no emoji-anatomy, no use narration (`docs/ads-policy.md`
+  §Organic social, Step 4b question 2). Bellesa Boutique lost a 700K-follower account in March 2026
+  over caption vocabulary; the hottest line in our feed is one a moderator cannot quote as a
+  violation. A caption that could run unchanged on a skincare account is a REVISE.
 
-The practical version: **let the image carry the desire and let the caption carry the reason.** That
-combination is fully licensed, it is what the owner asked for, and it is not what the account has
-been shipping.
+The practical version: **the image carries the desire, the caption names the wanting, and neither
+one names the act.** That combination is fully licensed, it is what the owner has now asked for
+three times, and until 2026-08-22 it was not what the account was shipping.
 
 **Honest note on what this costs.** Lingerie plus a pleasure product in one frame is a stronger
 signal to Meta's classifier than either alone. That is a real increase in account exposure, taken
@@ -429,6 +442,45 @@ If the roster is ever genuinely empty, an honest run declares Instagram product 
 degraded-to-zero and says so, exactly as Step 2b requires. **It does not fall back to a packshot to
 fill the slot.** That fallback is what produced row 59.
 
+### 3.9 The picture depicts the subject, never the verb (owner direction 2026-08-22)
+
+Owner direction, verbatim: *"Why are we posting a picture of Jade washing her hands when it's a post
+about washing your sex-toys? Like, who's going to care that she's washing her hands when it's a post
+about sex toy cleaning? We have sex toy cleaning products."* And: *"Think about why are they looking
+at what we are selling? Why should they care? What is the sensation we want them to feel when they
+view it?"*
+
+Row 80 (2026-08-22) is the reference failure. The caption was a toy-care guide, the slate put it in
+the product-free resource slot, the art director received the slot and the location bank but never
+the subject, and the location bank's "bathroom and shower-adjacent" met the caption's verb "wash" in
+a literal hand-washing frame with no toy and no cleaner in it. Every rule was followed. The post was
+meaningless. These rules exist so that cannot happen again:
+
+- **The brief carries the subject and the feeling, always.** `social-art-director` receives, for
+  every post, the post's subject in one line, the product(s) that belong to that subject, and the
+  sensation the post is selling (anticipation, recognition, permission, relief, curiosity). A brief
+  with a slot and a location and no subject is incomplete and is sent back.
+- **Depict the subject, never a literal illustration of the verb.** A cleaning post shows the toy
+  and the cleaner, held by a cast member in a scene that makes owning both desirable (the toy drying
+  on a folded towel beside the bottle on a nightstand at morning light; a cast member in a robe with
+  the bottle in one hand and the toy in the other, mid-sentence). It never shows a person washing
+  their hands, a sink, a bar of soap, or "a dish of water". A lube post shows the bottle and the
+  skin. A mechanism post shows the toy against the body it is for. If the obvious frame is the verb
+  acted out by a person with nothing we sell in frame, it is the wrong frame.
+- **A post about a category we sell shows the product.** Slot A is a resource post, not a
+  product-free post. When the advice is about cleaning, storage, lube, materials, or first toys, the
+  relevant in-stock product is in frame and may be named. Product-free frames are for subjects with
+  no product in them. The stock gate (Step 2.6) and the Instagram-eligibility filter (§4b) apply to
+  the product exactly as they would in slot C.
+- **The image answers "why should she care" before "what is happening".** The test for a brief:
+  name the feeling a woman scrolling past should have in the half second before she reads a word.
+  If the honest answer is "she learns that someone is washing their hands", the brief failed.
+- **Owner feedback on a rejected post binds the rework, clause by clause.** Row 74 was rejected
+  with *"Show a cast member cleaning a toy with one of our toy cleaning products"*; the rework
+  satisfied "cast member" and dropped "toy" and "cleaning product". A rework that satisfies part of
+  the feedback is not a rework. `social-publish-gate` reads the original row's `feedback` and
+  REVISEs any rework that leaves a clause of it unmet.
+
 ### 3.8 Scene and location variety, and how it is kept honest
 
 Owner direction, verbatim: *"Variety is key here. Put them on a beach, or camping, doing some fun
@@ -520,7 +572,7 @@ A through D.
 
 | Slot | Lane | Formats | Product in frame |
 |---|---|---|---|
-| **A** | **Resource.** The advice post, and the reason a non-buyer follows us. | Field Notes, Ask Emma, Inspo Carousel | **No** |
+| **A** | **Resource.** The advice post, and the reason a non-buyer follows us. | Field Notes, Ask Emma, Inspo Carousel, WTF Is… | **Yes when the advice is about a category we sell** (§3.9); no only when the subject has no product in it |
 | **B** | **Campaign.** The active campaign's next beat, on its pillar and format rotation. | any campaign format | Usually |
 | **C** | **Today's Pick.** One in-stock product presented by a cast member (§4b). | Today's Pick | Yes |
 | **D** | **What's new.** A Notebook promo when one is queued, else Brand Crush, This Week at xdipx, or Trend React. | those four | No |
@@ -707,9 +759,9 @@ not hand-close rows to make the number go down.
 mismatches make sharing one row wrong: the homepage turns over weekly on a Monday changeover while an
 Instagram arc wants 11 to 14 days; a homepage theme must resolve to a hero SKU while an arc like "The
 Orgasm Gap, Closed" has no single hero and should not be forced to find one; and the homepage runs the
-desire-forward register at 9 while Instagram runs at 4-5 with no sale attempt at all. Tying them
-together would either water down the homepage or push homepage-register copy into a caption, which is
-exactly what gets a post pulled. Where the windows overlap, the two channels reinforce each other
+desire-forward register at 9 in full vocabulary while Instagram runs at 9 by implication with no
+sale attempt at all (since 2026-08-22). Tying them together would either water down the homepage or
+push homepage vocabulary into a caption, which is exactly what gets a post pulled. Where the windows overlap, the two channels reinforce each other
 through the coordination note below, never by sharing a row.
 
 Working titles. Every caption still goes through the voice gate; a name here is a subject, not copy.
@@ -778,6 +830,63 @@ calendar status is the homepage Monday changeover, and a non-Monday row never ge
 activate/close pass in §4 is pure date arithmetic with no editorial judgment in it, so the social
 routine runs it every day, unconditionally. That redundancy is the fix: even if a Monday run is
 skipped, the next daily social run closes the stale row.
+
+## 5a. The message, and the two-week slate (owner direction 2026-08-22)
+
+Owner direction, verbatim: *"Dig into the psyches of our potential customers (who are mostly female)
+and find a message that drives curiosity and a desire to learn more."* And: *"Come up with a post
+schedule that aligns with a message or a strategy."*
+
+**The message: "What you haven't asked for yet."** Every post plants one question the reader has not
+asked out loud, about her own evening, her own body, or the person next to her, and the product is
+the answer one tap away. It is built on what the research says moves this buyer (sources in
+`docs/store-team/social-research-2026-08-22.md`): the orgasm gap is real and not her fault (95% vs
+65%, Frederick 2018); couples who talk about it finish every time at 87% against 3.5% for couples
+who do not (We-Vibe 2025); toys in partnered sex raise satisfaction and 62% of partners have gifted
+or would gift one; stress, sleep, and exhaustion are the three named barriers; 65% have sex for
+stress relief and 60% for sleep (Lovehoney 2026); and the thing stopping the first purchase is
+embarrassment, which discretion dissolves. Curiosity is the lever on every one of those, and
+permission is the tone: she is allowed to want more, and she is allowed to ask.
+
+**The weekly rhythm.** Seven lanes, one per weekday, each a recurring question. Carousels carry
+roughly 9x the saves of a single image and single images are losing reach year on year (Metricool,
+2026), so three of the seven are carousels and at least one a week is a Reel.
+
+| Day | Lane | The question it plants | Shape | Product |
+|---|---|---|---|---|
+| Mon | **The Gap** | "Is it just me?" The numbers that say it is not. | Carousel, text-led, one ceiling-adjacent frame | Optional, named |
+| Tue | **Tonight** | "What if tonight ran long?" Anticipation, product on skin. | Single still at the ceiling, cast member | Yes |
+| Wed | **WTF Is…** | "How does that even work?" Mechanism as curiosity. | Carousel, 5-6 slides, last slide is why she cares | Yes |
+| Thu | **Say It** | "What would you want them to know?" Partner and couples. | Reel or still, two cast members, Send This To | Yes, couples-coded |
+| Fri | **Weekend In** | "What are you doing with the door closed?" | Single still at the ceiling | Yes |
+| Sat | **Nightstand** | "What is actually in the drawer?" Care, lube, storage, pairing. | Still or carousel, product and its companion in frame (§3.9) | Yes, the care or lube product |
+| Sun | **Ask Emma** | "Can I ask you something?" The embarrassed question, answered warmly and hot. | Text-on-image still or Story poll, confession shape | Optional |
+
+**The first slate, 2026-08-24 through 2026-09-06**, riding the Vibrator Field Guide tail into
+"Talk Yourself Into It" (§5). Working subjects; every caption still goes through the gate.
+
+| Date | Lane | Subject | Product in frame |
+|---|---|---|---|
+| 08-24 Mon | The Gap | 95 vs 65, and the one habit that closes it | Air-pulsation toy, named |
+| 08-25 Tue | Tonight | "Everything on the nightstand has a job" | Mini wand on a collarbone |
+| 08-26 Wed | WTF Is… | WTF is air pulsation (why it is not a vibrator) | Air-pulsation toy |
+| 08-27 Thu | Say It | Send this to the one who keeps asking what you want | Couples ring or wand, two cast |
+| 08-28 Fri | Weekend In | The long weekend, the locked door, the unopened box | Wand, bed, sheets |
+| 08-29 Sat | Nightstand | Silicone on silicone: the pairing that ruins a toy, and the one that does not | Water-based lube beside the toy |
+| 08-30 Sun | Ask Emma | "Is it weird that I want it more than he does?" | None |
+| 08-31 Mon | The Gap | Couples who talk finish every time: 87% vs 3.5% | Optional |
+| 09-01 Tue | Tonight | "Built for the nights you don't want to be quick" | Rabbit or wand, thigh |
+| 09-02 Wed | WTF Is… | WTF is a rumbly motor (and why buzzy ones numb you out) | Wand |
+| 09-03 Thu | Say It | Year-five gift guide: the one you open together | Gift handed between two cast |
+| 09-04 Fri | Weekend In | Stress relief nobody puts on the self-care list | Bullet, bath edge, skin |
+| 09-05 Sat | Nightstand | Wash before, wash after, and the cleaner that makes it a ten-second job | Toy cleaner and the toy, held |
+| 09-06 Sun | Ask Emma | "How do I bring it up without making it weird?" | None |
+
+Drafted captions, alt text, hashtags, and image briefs for the first week live in
+`docs/store-team/social-slate-2026-08-24.md`; the routine drafts from them rather than from scratch.
+
+The lanes persist past this slate; the subjects rotate with the campaign calendar. A lane that
+underperforms for three weeks on saves and comments is swapped, and the swap is filed, not improvised.
 
 ## 6. What a campaign does NOT license
 
@@ -864,6 +973,18 @@ Recorded so no run pretends otherwise, and so the gap is visible rather than qui
   insights, so "which posts worked" is unanswerable. `video_jobs.metrics_json` plus its owner
   self-report merge is the existing precedent to mirror. Adding the column is a migration, so it is a
   protected path and an owner merge.
+
+## 7a. Hashtags
+
+Five to eight per post, on their own line after the engagement close. Two broad category tags
+(#sexualwellness, #sexualhealth, #intimacy, #selfcare), three niche tags on the post's subject
+(#bodysafe, #wandmassager, #airpulsation, #lube, #couplesintimacy, #toycare), and one or two specific
+to the post or campaign. Hashtag following was removed from Instagram in December 2024, so tags are a
+search keyword signal and not a reach play; the first caption line and the bio carry more weight.
+Verify every tag in-app before first use: a tag whose recent posts are hidden is restricted and is
+dropped. Never #sex, never an anatomy tag, never an emoji, never a tag from a known-restricted list
+(#woman, #women, #dating, #goddess, #curvy, #kissing, #adultsonly are all on 2026 lists), and never a
+coded or reclaimed tag to route around a block.
 
 ## 8. Brand tagging
 
