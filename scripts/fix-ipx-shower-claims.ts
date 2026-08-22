@@ -18,13 +18,22 @@
  * live value; if the text has drifted since this was written, that product
  * is skipped and reported rather than silently mismatched.
  *
+ * Ticket #4871 extends this to the Sanity productPage.productFaqs surface, which
+ * the original fixer never touched: three FAQ answers contradicted their own
+ * corrected Shopify copy on the same live PDP (and one falsely claimed IPX6
+ * submersion). The FAQ corrections are applied the same way — an exact-match
+ * check against the current live answer, skipped and reported on drift — and a
+ * post-run audit sweeps all 24 fixer handles for any remaining FAQ answer that
+ * grants shower/bath use with no restriction clause (DONE WHEN (c)).
+ *
  * Usage:
- *   npx tsx scripts/fix-ipx-shower-claims.ts             # dry run
- *   npx tsx scripts/fix-ipx-shower-claims.ts --apply     # writes to Shopify (+ Sanity mirror)
+ *   npx tsx scripts/fix-ipx-shower-claims.ts             # dry run (Shopify + FAQ + audit)
+ *   npx tsx scripts/fix-ipx-shower-claims.ts --apply     # writes to Shopify (+ Sanity mirror) and Sanity FAQs
  */
 import './_load-env'
 import { adminGraphQL, shopifyAdmin, updateProductDescriptionHtml, updateProductMetafield } from '~/lib/shopify.server'
-import { upsertProductPage } from '~/lib/sanity.server'
+import { upsertProductPage, getProductFaqs, patchProductFaqAnswer } from '~/lib/sanity.server'
+import { FAQ_ANSWER_CORRECTIONS, faqGrantsUnrestrictedWater } from '~/lib/ipx-faq-remediation'
 
 const APPLY = process.argv.includes('--apply')
 
@@ -380,4 +389,49 @@ for (const [handle, repls] of byHandle) {
 }
 
 console.log(`\n${APPLY ? 'applied' : '[dry-run] would apply'} to ${appliedProducts} product(s), ${totalFieldChanges} field replacement(s) matched, ${notFoundCount} not found (drift)`)
+
+// ── Ticket #4871: Sanity productPage.productFaqs remediation ────────────────
+// The Shopify metafields above and the PDP FAQs are different surfaces; a fix
+// to the metafields alone left three SKUs contradicting themselves on the same
+// live page. Correct each stale FAQ answer with the same exact-match drift
+// guard used above.
+console.log(`\n── FAQ answer corrections (Sanity productPage.productFaqs) ──`)
+let faqPatched = 0
+let faqAlready = 0
+let faqDrift = 0
+for (const c of FAQ_ANSWER_CORRECTIONS) {
+  if (!APPLY) {
+    const faqs = await getProductFaqs(c.handle)
+    const hasOld = faqs.some(f => f.answer === c.oldAnswer)
+    const hasNew = faqs.some(f => f.answer === c.newAnswer)
+    console.log(`  [${c.handle}] (${c.ipCode}) ${hasNew ? 'already corrected' : hasOld ? 'would correct' : 'OLD ANSWER NOT FOUND (drift)'}`)
+    if (!hasNew && !hasOld) faqDrift++
+    if (!hasNew && hasOld) console.log(`    -> ${c.newAnswer}`)
+    continue
+  }
+  const result = await patchProductFaqAnswer(c.handle, c.oldAnswer, c.newAnswer)
+  console.log(`  [${c.handle}] (${c.ipCode}) ${result}`)
+  if (result === 'patched') faqPatched++
+  else if (result === 'already') faqAlready++
+  else faqDrift++
+}
+console.log(`  ${APPLY ? `patched ${faqPatched}, already ${faqAlready}` : '[dry-run]'}, ${faqDrift} drift`)
+
+// ── Ticket #4871 (c): audit all fixer handles for unrestricted water FAQs ────
+// A re-run over the 24 fixer handles must return zero FAQ answers that grant
+// shower/bath use with no restriction clause. Read-only.
+const auditHandles = [...new Set(REPLACEMENTS.map(r => r.handle))]
+console.log(`\n── FAQ audit over ${auditHandles.length} fixer handles ──`)
+let offenders = 0
+for (const handle of auditHandles) {
+  const faqs = await getProductFaqs(handle)
+  for (const f of faqs) {
+    if (faqGrantsUnrestrictedWater(f.answer)) {
+      offenders++
+      console.log(`  OFFENDER [${handle}] Q: ${f.question}\n    A: ${f.answer}`)
+    }
+  }
+}
+console.log(`  ${offenders} unrestricted shower/bath FAQ answer(s) remaining across ${auditHandles.length} handles`)
+
 process.exit(0)
