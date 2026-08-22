@@ -410,7 +410,7 @@ export async function submitEnrichmentBatch(
   opts: { deadline?: number } = {},
 ): Promise<{ submitted: number; batchIds: string[]; reason?: string }> {
   const rows = await db
-    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId })
+    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, enrichAttempts: importCandidates.enrichAttempts })
     .from(importCandidates)
     .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
     .where(and(
@@ -422,7 +422,7 @@ export async function submitEnrichmentBatch(
     .orderBy(asc(importCandidates.id))
     .limit(cap)
 
-  const valid = rows.filter((r): r is { id: number; productId: string } => Boolean(r.productId))
+  const valid = rows.filter((r): r is { id: number; productId: string; enrichAttempts: number } => Boolean(r.productId))
   if (valid.length === 0) return { submitted: 0, batchIds: [], reason: 'no_unenriched' }
 
   // Load the shared enrichment context once; it is reused across every chunk.
@@ -450,7 +450,16 @@ export async function submitEnrichmentBatch(
     for (const r of chunk) {
       const brief = await gatherProductBrief(r.productId)
       if (!brief) {
-        console.warn(`[import-enrich] no brief for product ${r.productId} (candidate ${r.id}) -- skipping`)
+        // A row that yields no brief (e.g. its Shopify product was deleted after
+        // import) must not be silently skipped: LIMIT-cap ORDER BY id ASC keeps
+        // re-selecting the same permanently-unbriefable window and starves every
+        // younger candidate forever. Route it through the shared retry/park path
+        // so a transient snapshot failure gets its bounded retry and a dead
+        // product parks after ENRICH_MAX_ATTEMPTS, freeing the window. (#4881)
+        await applyEnrichFailure(
+          { id: r.id, productId: r.productId, enrichAttempts: r.enrichAttempts },
+          'gatherProductBrief returned null (no brief; product likely deleted)',
+        )
         continue
       }
       // Pairings are a deal-cycle artifact, curated against the freshest catalog
@@ -1114,7 +1123,8 @@ export interface SubagentClaim {
 export interface SubagentClaimResult {
   leaseId:       string
   claims:        SubagentClaim[]
-  /** Candidates that matched but produced no gatherable brief; left unclaimed
+  /** Candidates that matched but produced no gatherable brief; not claimed this
+   *  pass and routed through the retry/park path so they cannot jam the window
    *  (same behaviour as the batch submit path). */
   skippedNoBrief: number
   sharedContext: SharedEnrichmentContext
@@ -1133,7 +1143,7 @@ export async function claimEnrichmentForSubagent(
 ): Promise<SubagentClaimResult> {
   const lease = `${SUBAGENT_LEASE_PREFIX}${leaseId}`
   const rows = await db
-    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: dealHistory.sku })
+    .select({ id: importCandidates.id, productId: dealHistory.shopifyProductId, sku: dealHistory.sku, enrichAttempts: importCandidates.enrichAttempts })
     .from(importCandidates)
     .innerJoin(dealHistory, eq(importCandidates.dealHistoryId, dealHistory.id))
     .where(and(
@@ -1153,7 +1163,14 @@ export async function claimEnrichmentForSubagent(
     if (!r.productId) continue
     const brief = await gatherProductBrief(r.productId)
     if (!brief) {
-      console.warn(`[import-enrich] subagent claim: no brief for product ${r.productId} (candidate ${r.id}) — skipping`)
+      // Same starvation fix as submitEnrichmentBatch (#4881): park/retry the
+      // unbriefable row instead of leaving it to jam the identical selection
+      // window on every future claim. Still counted in skippedNoBrief so the
+      // routine's observability is unchanged.
+      await applyEnrichFailure(
+        { id: r.id, productId: r.productId, enrichAttempts: r.enrichAttempts },
+        'gatherProductBrief returned null (no brief; product likely deleted)',
+      )
       skippedNoBrief++
       continue
     }
