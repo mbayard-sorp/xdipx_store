@@ -13,6 +13,16 @@
  *   { op: 'config' } -> valves, model tiers/rates, formulas, tones, approved
  *                       cast, platform frequencies
  *
+ * Multi-scene jobs (Phase 3, 20-60s videos): op:'enqueue' accepts
+ * scriptJson.scenes, an array of 2-8
+ *   { slug, framePrompt, motionPrompt, durationSeconds, continuity? }
+ * entries ('continuity' is 'own-frame' | 'last-frame'; defaults to
+ * 'own-frame' for scenes[0] and 'last-frame' for every scene after it).
+ * durationSeconds on the top-level body is IGNORED when scenes is present —
+ * enqueueVideoJob sums the per-scene durations itself (video-pipeline.server.ts's
+ * validateScenes enforces the 90s multi-scene ceiling and per-scene duration
+ * validity; not re-duplicated here). enqueue-set does not support scenes.
+ *
  * Unlike social-post drafting (free), op:'enqueue'/'enqueue-set' SPEND REAL
  * MONEY on fal, so they check the video team's kill switch AND budget gate
  * before inserting. Publishing stays owner-gated: a finished job only ever
@@ -31,7 +41,7 @@ import {
   SCENE_KIT,
   VIDEO_EXTRA_KEYS,
 } from '~/lib/team-keys'
-import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame } from '~/lib/video-pipeline.server'
+import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame, isMultiSceneScript } from '~/lib/video-pipeline.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
@@ -77,6 +87,14 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
   if (!script || typeof script !== 'object' || Array.isArray(script)) {
     return new Response(`Bad Request: ${scriptField} object required (framePrompt, motionPrompt, captions)`, { status: 400 })
   }
+  // Multi-scene (op:'enqueue' only — enqueue-set does not support scenes; a
+  // baseScriptJson.scenes array is left untouched and validated the normal
+  // single-scene way, same as any other unrecognized scriptJson field).
+  const multiScene = scriptField === 'scriptJson' && isMultiSceneScript(script as VideoScriptJson)
+  if (spec.audioDriven && multiScene) {
+    return new Response('Bad Request: multi-scene jobs are not supported on the avatar tier', { status: 400 })
+  }
+
   if (spec.audioDriven || spec.lipsync) {
     // Talking tiers: the spoken line and an on-camera presenter are required.
     // (enqueue-set may carry the line via the {{hook}} token — the pipeline
@@ -88,10 +106,12 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
     if (presenter === 'none') {
       return new Response(`Bad Request: ${spec.lipsync ? 'lipsync' : 'avatar'} tier requires a presenter (emma or friend:{slug})`, { status: 400 })
     }
-    if (spec.lipsync && typeof b['durationSeconds'] !== 'number') {
+    // durationSeconds is per-scene for a multi-scene lipsync job (validated by
+    // enqueueVideoJob's validateScenes) — the top-level field is not required.
+    if (spec.lipsync && !multiScene && typeof b['durationSeconds'] !== 'number') {
       return new Response('Bad Request: durationSeconds required for the lipsync tier', { status: 400 })
     }
-  } else if (typeof b['durationSeconds'] !== 'number') {
+  } else if (!multiScene && typeof b['durationSeconds'] !== 'number') {
     return new Response('Bad Request: durationSeconds required', { status: 400 })
   }
   const platforms = Array.isArray(b['targetPlatforms'])
@@ -146,6 +166,12 @@ export async function action({ request }: ActionFunctionArgs) {
         return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
       }
 
+      // Multi-scene: enqueueVideoJob sums the per-scene durations itself and
+      // ignores this field; a placeholder of 0 is fine (never persisted as-is).
+      const durationSeconds = v.spec.audioDriven || isMultiSceneScript(v.script)
+        ? 0
+        : b['durationSeconds'] as number
+
       const result = await enqueueVideoJob({
         productHandle: v.productHandle,
         ...(typeof b['shopifyProductGid'] === 'string' ? { shopifyProductGid: b['shopifyProductGid'] } : {}),
@@ -153,7 +179,7 @@ export async function action({ request }: ActionFunctionArgs) {
         presenter: v.presenter,
         scriptJson: v.script,
         modelTier: v.modelTier,
-        durationSeconds: v.spec.audioDriven ? 0 : b['durationSeconds'] as number,
+        durationSeconds,
         targetPlatforms: v.platforms,
         ...(typeof b['aiDisclosure'] === 'boolean' ? { aiDisclosure: b['aiDisclosure'] } : {}),
         ...(typeof b['runId'] === 'number' ? { runId: b['runId'] } : {}),
@@ -238,6 +264,9 @@ export async function action({ request }: ActionFunctionArgs) {
         costUsd: r.job.costUsd,
         sceneFrameAssetId: r.job.sceneFrameAssetId,
         sceneSlug: typeof r.job.scriptJson?.sceneSlug === 'string' ? r.job.scriptJson.sceneSlug : null,
+        // Multi-scene jobs only (Phase 3): the scene list + per-scene progress.
+        scenes: r.job.scenesJson,
+        sceneState: r.job.sceneStateJson,
         variantGroupId: r.job.variantGroupId,
         variantAxes: r.job.variantAxes,
         error: r.job.error,

@@ -28,6 +28,10 @@ vi.mock('~/lib/video-pipeline.server', () => ({
   listVideoJobs: vi.fn().mockResolvedValue([]),
   estimateJobCostUsd: vi.fn().mockReturnValue(1),
   findReusableSceneFrame: vi.fn().mockResolvedValue(null),
+  // Real (not mocked) semantics: 2+ scenes = multi-scene. None of THIS file's
+  // fixtures carry scriptJson.scenes, so this always returns false here — the
+  // multi-scene contract is covered separately in video-multi-scene.test.ts.
+  isMultiSceneScript: (script: { scenes?: unknown[] }) => Array.isArray(script?.scenes) && script.scenes.length >= 2,
 }))
 vi.mock('~/lib/sanity.server', () => ({ getApprovedCastMembers: vi.fn().mockResolvedValue([]) }))
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))

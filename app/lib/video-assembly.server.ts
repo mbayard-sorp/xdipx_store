@@ -232,6 +232,37 @@ export async function renderAspectMaster(video: Buffer, aspect: AspectMaster): P
 export const ASPECT_MASTER_SIZES = ASPECT_DIMENSIONS
 
 /**
+ * Extract the FINAL frame from a clip, for multi-scene 'last-frame' scene
+ * continuity (Phase 3, video-pipeline.server.ts): the next scene's
+ * image-to-video input is the previous scene's last frame rather than a
+ * freshly composed one, so motion reads as one continuous shot across the
+ * cut. RunPod's worker returns lastFrameUrl directly in its result, so this
+ * helper is only needed for fal providers, which hand back just the finished
+ * mp4. Seeks near (not exactly) the end — `-sseof -0.1` — because seeking to
+ * the reported duration can land past the last decodable frame on some fal
+ * encodes and produce a black/empty still.
+ */
+export async function extractLastFrame(video: Buffer): Promise<Buffer> {
+  const input = tmp('lastframe-in.mp4')
+  const output = tmp('lastframe.jpg')
+  try {
+    writeFileSync(input, video)
+    execFileSync(ffmpegPath!, [
+      '-y',
+      '-sseof', '-0.1',
+      '-i', input,
+      '-update', '1',
+      '-frames:v', '1',
+      '-q:v', '3',
+      output,
+    ], { timeout: 30_000 })
+    return readFileSync(output)
+  } finally {
+    cleanup([input, output])
+  }
+}
+
+/**
  * Concat clips into one 1080x1920 9:16 H.264/AAC video, re-encoding and
  * normalizing (clips from different fal models never share codec/fps/res).
  * Fast-follow surface for multi-clip formulas; the MVP pipeline is single-clip.

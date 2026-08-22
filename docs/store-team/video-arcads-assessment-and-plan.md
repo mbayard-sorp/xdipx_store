@@ -179,6 +179,64 @@ and a lipsync-tier video passes the frame gate and post pass end to end.
 DONE WHEN: the owner can go from product pick to a queued variant set in under two minutes
 without touching the API, and nothing about the gate chain changed.
 
+### Phase 5 — Multi-scene jobs (20-60s videos)
+
+Shipped (branch `agents/video-multi-scene`, migration 083). A job may now describe 2-8 scenes,
+each rendered as its own clip and concatenated into one longer video, instead of always one scene
+frame + one clip. Single-scene jobs are untouched — the poller only takes the multi-scene branch
+when `scriptJson.scenes` has 2+ entries.
+
+**Payload.** `op:'enqueue'` on `POST /api/team/video-job` accepts `scriptJson.scenes`:
+
+```ts
+scenes: Array<{
+  slug: string             // scene-kit style label, shown in Video Studio
+  framePrompt: string      // only used for 'own-frame' scenes
+  motionPrompt: string
+  durationSeconds: number  // must be one of the rendering model's allowedDurations
+  continuity?: 'own-frame' | 'last-frame'  // default: scene 0 own-frame, every later scene last-frame
+}>
+```
+
+Validated at enqueue (`video-pipeline.server.ts`'s `validateScenes`): 2-8 scenes, each duration in
+the rendering model's `allowedDurations` (the lipsync compound tier's BASE CLIP model, same
+resolution `advanceClip` already used), total duration <= 90s, `scenes[0]` cannot be `last-frame`
+(nothing precedes it). The top-level `durationSeconds` field is ignored once `scenes` is present —
+the real total is the scene-duration sum. The avatar tier (OmniHuman) is not supported for
+multi-scene: it has no per-scene motion-prompt concept at all (duration derives from one spoken
+line). `enqueue-set` does not support scenes.
+
+**Continuity.** `'own-frame'` scenes go through the normal scene-frame gate (composed, and — with
+`video_frame_review` ON — parked for the owner's pick) exactly like a single-scene job. `'last-frame'`
+scenes skip frame composition entirely: the clip stage animates the PREVIOUS scene's rendered clip's
+final frame instead, so motion reads as one continuous shot across the cut. RunPod's worker returns
+that last frame directly in its result; fal providers get it via a new `extractLastFrame` ffmpeg
+helper in `video-assembly.server.ts`.
+
+**Approval.** `approveSceneFrame` takes an optional `sceneIndex` — for a multi-scene job it approves
+ONLY that scene; the poller composes the next pending own-frame scene's candidates on its own, and
+advances to the clip stage once every own-frame scene has a pick. `/admin/video-studio` shows a
+per-scene frame picker (`MultiSceneFramePicker`) instead of the single flat grid when a job has
+scenes. Per-scene frame candidates are correlated by parsing the scene index out of the blob path
+(`video/<jobId>/scene-<idx>-frame-<i>.jpg`) rather than a new media_assets column.
+
+**Cost.** Sum over scenes of (frame cost for own-frame scenes only, skipped on scene 0 when the job
+reuses an existing approved frame + clip cost at that scene's duration); the per-video ceiling check
+uses that sum, same as every other tier.
+
+**Render + assembly.** The clip stage renders scenes strictly in order, one scene per poller tick
+(same submit-or-poll discipline as everywhere else in the pipeline). Once every scene's clip is
+recorded, the clip stage concatenates all of them (`concatAndNormalize`, already existed as a
+fast-follow surface) into ONE new `'clip'`-purpose `media_assets` row — the newest such row — and
+hands off to `stage: 'lipsync'` exactly like a single-scene job. Because `advanceLipsync` /
+`advanceLipsyncPerform` / `advanceAssembly` / `advancePoster` already resolve "the clip" as the
+newest `'clip'`-purpose asset, none of those four stages needed a multi-scene branch of their own —
+multi-scene jobs converge back onto the byte-for-byte single-clip path from the lipsync stage on.
+
+DONE WHEN: a 3-scene job (own-frame, last-frame, last-frame) enqueues under the 90s ceiling, parks
+once per own-frame scene for approval, renders scenes in order using the right frame source each
+time, and produces one finished video whose duration is the sum of its scenes.
+
 ### Explicitly not building
 
 - Speech-to-speech, 35-language localization (defer; no current market need).
