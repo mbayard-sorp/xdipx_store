@@ -24,7 +24,7 @@
  */
 import { eq, inArray } from 'drizzle-orm'
 import { db } from './db.server'
-import { metaCapiFailures } from '../../db/schema'
+import { metaCapiOutbox } from '../../db/schema'
 import { sendCapiEvent, type CapiEvent } from './meta-capi.server'
 
 /** Meta rejects events older than this, so reconciliation cannot help beyond it. */
@@ -104,7 +104,7 @@ export interface PurchaseSendResult {
 }
 
 /**
- * Send one Purchase, recording the attempt in `meta_capi_failures` first.
+ * Send one Purchase, recording the attempt in `meta_capi_outbox` first.
  *
  * The table name reads as a failure log because that is all it used to hold.
  * It is now the outbox: a row appears when a send is attempted and gets
@@ -127,7 +127,7 @@ export async function sendPurchaseWithLedger(order: PurchaseOrder): Promise<Purc
   const event = buildPurchaseEvent(order)
 
   try {
-    await db.insert(metaCapiFailures)
+    await db.insert(metaCapiOutbox)
       .values({
         orderId:   order.id,
         eventId:   event.event_id,
@@ -135,7 +135,7 @@ export async function sendPurchaseWithLedger(order: PurchaseOrder): Promise<Purc
         attempts:  0,
         lastError: null,
       })
-      .onConflictDoNothing({ target: metaCapiFailures.orderId })
+      .onConflictDoNothing({ target: metaCapiOutbox.orderId })
   } catch (err) {
     console.error('[purchase-capi] ledger insert failed, sending anyway', order.id, err)
   }
@@ -144,13 +144,13 @@ export async function sendPurchaseWithLedger(order: PurchaseOrder): Promise<Purc
 
   try {
     if (result.ok) {
-      await db.update(metaCapiFailures)
+      await db.update(metaCapiOutbox)
         .set({ resolvedAt: new Date(), lastError: null })
-        .where(eq(metaCapiFailures.orderId, order.id))
+        .where(eq(metaCapiOutbox.orderId, order.id))
     } else {
-      await db.update(metaCapiFailures)
+      await db.update(metaCapiOutbox)
         .set({ lastError: result.error ?? result.skipped ?? 'unknown' })
-        .where(eq(metaCapiFailures.orderId, order.id))
+        .where(eq(metaCapiOutbox.orderId, order.id))
     }
   } catch (err) {
     console.error('[purchase-capi] ledger update failed', order.id, err)
@@ -321,9 +321,9 @@ export async function reconcilePurchases(
   let resolved = new Set<string>()
   try {
     const rows = await db
-      .select({ orderId: metaCapiFailures.orderId, resolvedAt: metaCapiFailures.resolvedAt })
-      .from(metaCapiFailures)
-      .where(inArray(metaCapiFailures.orderId, ids))
+      .select({ orderId: metaCapiOutbox.orderId, resolvedAt: metaCapiOutbox.resolvedAt })
+      .from(metaCapiOutbox)
+      .where(inArray(metaCapiOutbox.orderId, ids))
     resolved = new Set(rows.filter(r => r.resolvedAt != null).map(r => r.orderId))
   } catch (err) {
     // A ledger read failure must not cause a send storm. Bail rather than

@@ -6,8 +6,8 @@
  * from the /cron/log-monitor handler (every 15 min) and checks four signals
  * that the server-side conversion path is broken:
  *
- *   1. unresolved `meta_capi_failures` rows older than STALE_MINUTES;
- *   2. the same for `ga4_purchase_failures`;
+ *   1. unresolved `meta_capi_outbox` rows older than STALE_MINUTES;
+ *   2. the same for `ga4_purchase_outbox`;
  *   3. a recent-order gap: Shopify reports paid orders in the last window, but
  *      one or more of them left no `order_line_items` row, which the webhook
  *      writes on every processed order. Absence of that row means the webhook
@@ -34,7 +34,7 @@ import { and, inArray, isNull, lt } from 'drizzle-orm'
 
 import { db } from './db.server'
 import { kvGet, kvSet } from './kv.server'
-import { ga4PurchaseFailures, metaCapiFailures, orderLineItems } from '../../db/schema'
+import { ga4PurchaseOutbox, metaCapiOutbox, orderLineItems } from '../../db/schema'
 
 /** Recent-order window for the ground-truth scan (check 3), minutes. */
 const RECENT_WINDOW_MINUTES = 60
@@ -73,9 +73,9 @@ export interface PurchaseWatchInputs {
   recentPaidOrders: number | null
   /** Ids of recent paid orders with no `order_line_items` row (the gap set). */
   gapOrderIds: string[]
-  /** Unresolved, stale `meta_capi_failures` order ids. */
+  /** Unresolved, stale `meta_capi_outbox` order ids. */
   staleCapiOrderIds: string[]
-  /** Unresolved, stale `ga4_purchase_failures` order ids. */
+  /** Unresolved, stale `ga4_purchase_outbox` order ids. */
   staleGa4OrderIds: string[]
   /** True when the fallback-stub marker appeared in recent logs. */
   stubMarkerSeen: boolean
@@ -249,18 +249,18 @@ export async function runPurchaseWatcher(now: number = Date.now()): Promise<Purc
   const [prior, recentIds, staleCapiRows, staleGa4Rows] = await Promise.all([
     loadState(),
     fetchRecentPaidOrderIds(now),
-    db.select({ id: metaCapiFailures.orderId })
-      .from(metaCapiFailures)
-      .where(and(isNull(metaCapiFailures.resolvedAt), lt(metaCapiFailures.createdAt, staleBefore)))
+    db.select({ id: metaCapiOutbox.orderId })
+      .from(metaCapiOutbox)
+      .where(and(isNull(metaCapiOutbox.resolvedAt), lt(metaCapiOutbox.createdAt, staleBefore)))
       .catch((err): Array<{ id: string }> => {
-        console.warn('[purchase-watcher] meta_capi_failures query failed:', String(err).slice(0, 200))
+        console.warn('[purchase-watcher] meta_capi_outbox query failed:', String(err).slice(0, 200))
         return []
       }),
-    db.select({ id: ga4PurchaseFailures.orderId })
-      .from(ga4PurchaseFailures)
-      .where(and(isNull(ga4PurchaseFailures.resolvedAt), lt(ga4PurchaseFailures.createdAt, staleBefore)))
+    db.select({ id: ga4PurchaseOutbox.orderId })
+      .from(ga4PurchaseOutbox)
+      .where(and(isNull(ga4PurchaseOutbox.resolvedAt), lt(ga4PurchaseOutbox.createdAt, staleBefore)))
       .catch((err): Array<{ id: string }> => {
-        console.warn('[purchase-watcher] ga4_purchase_failures query failed:', String(err).slice(0, 200))
+        console.warn('[purchase-watcher] ga4_purchase_outbox query failed:', String(err).slice(0, 200))
         return []
       }),
   ])

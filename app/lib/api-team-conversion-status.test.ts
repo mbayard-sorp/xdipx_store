@@ -1,6 +1,6 @@
 /**
  * Guard tests for GET /api/team/conversion-status, the QA-gate substitute for
- * a direct psql count on meta_capi_failures / ga4_purchase_failures (routine
+ * a direct psql count on meta_capi_outbox / ga4_purchase_outbox (routine
  * QA's egress is restricted to xdipx.com, so it cannot reach DATABASE_URL
  * directly). db.server and team.server are mocked at import time.
  */
@@ -8,8 +8,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = {
-  // Queued in call order: first call is metaCapiFailures, second is
-  // ga4PurchaseFailures (Promise.all preserves array order regardless of
+  // Queued in call order: first call is metaCapiOutbox, second is
+  // ga4PurchaseOutbox (Promise.all preserves array order regardless of
   // resolution order).
   selectResults: [] as Array<Array<Record<string, unknown>>>,
 }

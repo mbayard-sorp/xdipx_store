@@ -19,12 +19,12 @@ async function drainMetaCapiFailures(): Promise<number> {
   const MAX_ATTEMPTS = 5
   try {
     const { db } = await import('../app/lib/db.server.js')
-    const { metaCapiFailures } = await import('../db/schema.js')
+    const { metaCapiOutbox } = await import('../db/schema.js')
     const { sendCapiEvent } = await import('../app/lib/meta-capi.server.js')
     const { and, eq, isNull, lt } = await import('drizzle-orm')
 
-    const rows = await db.select().from(metaCapiFailures)
-      .where(and(isNull(metaCapiFailures.resolvedAt), lt(metaCapiFailures.attempts, MAX_ATTEMPTS)))
+    const rows = await db.select().from(metaCapiOutbox)
+      .where(and(isNull(metaCapiOutbox.resolvedAt), lt(metaCapiOutbox.attempts, MAX_ATTEMPTS)))
       .limit(100)
 
     let resolved = 0
@@ -32,21 +32,21 @@ async function drainMetaCapiFailures(): Promise<number> {
       // PII-free path matches the original webhook send.
       const result = await sendCapiEvent(row.payload as Parameters<typeof sendCapiEvent>[0], { consentGranted: false })
       if (result.ok) {
-        await db.update(metaCapiFailures)
+        await db.update(metaCapiOutbox)
           .set({ resolvedAt: new Date(), attempts: row.attempts + 1 })
-          .where(eq(metaCapiFailures.id, row.id))
+          .where(eq(metaCapiOutbox.id, row.id))
         resolved++
       } else if (result.skipped) {
         // Missing credentials is an environment problem, not a bad payload.
         // Burning an attempt would exhaust the retry budget on rows that were
         // never actually sent, so record the reason and leave attempts alone.
-        await db.update(metaCapiFailures)
+        await db.update(metaCapiOutbox)
           .set({ lastError: result.skipped })
-          .where(eq(metaCapiFailures.id, row.id))
+          .where(eq(metaCapiOutbox.id, row.id))
       } else {
-        await db.update(metaCapiFailures)
+        await db.update(metaCapiOutbox)
           .set({ attempts: row.attempts + 1, lastError: result.error ?? 'unknown' })
-          .where(eq(metaCapiFailures.id, row.id))
+          .where(eq(metaCapiOutbox.id, row.id))
       }
     }
     return resolved
@@ -65,26 +65,26 @@ async function drainGa4Failures(): Promise<number> {
   const MAX_ATTEMPTS = 5
   try {
     const { db } = await import('../app/lib/db.server.js')
-    const { ga4PurchaseFailures } = await import('../db/schema.js')
+    const { ga4PurchaseOutbox } = await import('../db/schema.js')
     const { sendGa4Purchase } = await import('../app/lib/ga4-mp.server.js')
     const { and, eq, isNull, lt } = await import('drizzle-orm')
 
-    const rows = await db.select().from(ga4PurchaseFailures)
-      .where(and(isNull(ga4PurchaseFailures.resolvedAt), lt(ga4PurchaseFailures.attempts, MAX_ATTEMPTS)))
+    const rows = await db.select().from(ga4PurchaseOutbox)
+      .where(and(isNull(ga4PurchaseOutbox.resolvedAt), lt(ga4PurchaseOutbox.attempts, MAX_ATTEMPTS)))
       .limit(100)
 
     let resolved = 0
     for (const row of rows) {
       const result = await sendGa4Purchase(row.payload as Parameters<typeof sendGa4Purchase>[0])
       if (result.ok) {
-        await db.update(ga4PurchaseFailures)
+        await db.update(ga4PurchaseOutbox)
           .set({ resolvedAt: new Date(), attempts: row.attempts + 1 })
-          .where(eq(ga4PurchaseFailures.id, row.id))
+          .where(eq(ga4PurchaseOutbox.id, row.id))
         resolved++
       } else {
-        await db.update(ga4PurchaseFailures)
+        await db.update(ga4PurchaseOutbox)
           .set({ attempts: row.attempts + 1, lastError: result.error ?? result.skipped ?? 'unknown' })
-          .where(eq(ga4PurchaseFailures.id, row.id))
+          .where(eq(ga4PurchaseOutbox.id, row.id))
       }
     }
     return resolved
@@ -540,7 +540,7 @@ export function createCronRoutes() {
     //
     // Order is deliberate. The watcher observes delivery health from
     // order_line_items (did the webhook handler run at all), then the reconciler
-    // heals CAPI delivery via meta_capi_failures. They read different tables, so
+    // heals CAPI delivery via meta_capi_outbox. They read different tables, so
     // healing cannot mask the alarm, which is the failure mode that let the
     // Purchase outage run for two months.
 

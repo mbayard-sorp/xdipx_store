@@ -1121,13 +1121,16 @@ export const apiTokenLog = pgTable('api_token_log', {
 }))
 
 /**
- * Durable retry queue for Meta Conversions API (CAPI) Purchase events.
- * Purchase is the revenue-critical conversion signal; a failed CAPI POST must
- * not be silently dropped. The order-created webhook inserts on failure and the
- * profit-summary cron drains unresolved rows (bounded attempts). One row per
- * order (unique order_id) keeps drains and webhook retries idempotent.
+ * Durable write-before-send outbox for Meta Conversions API (CAPI) Purchase
+ * events (renamed from meta_capi_failures, suggestion #592). Purchase is the
+ * revenue-critical conversion signal; a CAPI POST must not be silently dropped.
+ * purchase-capi.server.ts inserts a row BEFORE every send and stamps resolved_at
+ * when it lands, so an unresolved row means "in flight or failed", not "failed" —
+ * which is why "failures" misled and this is now an outbox. The profit-summary
+ * cron drains unresolved rows (bounded attempts). One row per order (unique
+ * order_id) keeps drains and webhook retries idempotent.
  */
-export const metaCapiFailures = pgTable('meta_capi_failures', {
+export const metaCapiOutbox = pgTable('meta_capi_outbox', {
   id:         serial('id').primaryKey(),
   orderId:    varchar('order_id', { length: 64 }).notNull().unique(),
   eventId:    varchar('event_id', { length: 128 }).notNull(),
@@ -1140,9 +1143,10 @@ export const metaCapiFailures = pgTable('meta_capi_failures', {
   unresolvedIdx: index('idx_meta_capi_failures_unresolved').on(t.createdAt),
 }))
 
-// Migration 067: GA4 Measurement Protocol purchase-send failure queue, drained
-// by the profit-summary cron. Mirrors meta_capi_failures.
-export const ga4PurchaseFailures = pgTable('ga4_purchase_failures', {
+// GA4 Measurement Protocol purchase-send outbox (renamed from
+// ga4_purchase_failures, suggestion #592), drained by the profit-summary cron.
+// Mirrors meta_capi_outbox.
+export const ga4PurchaseOutbox = pgTable('ga4_purchase_outbox', {
   id:         serial('id').primaryKey(),
   orderId:    varchar('order_id', { length: 64 }).notNull().unique(),
   payload:    jsonb('payload').notNull(),

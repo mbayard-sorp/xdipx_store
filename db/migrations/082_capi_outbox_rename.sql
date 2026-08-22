@@ -1,0 +1,25 @@
+-- 082_capi_outbox_rename.sql
+-- Rename the two purchase-send queues to reflect their real role (suggestion #592).
+-- Both are write-before-send outboxes now: purchase-capi.server.ts inserts a row
+-- BEFORE every Meta CAPI send and stamps resolved_at when it lands, so an
+-- unresolved row means "in flight or failed", not "failed". The old "failures"
+-- name misled anyone writing a health check into reading every unresolved row as
+-- a failure. db/schema.ts and every code reference are renamed to match in the
+-- same PR.
+--
+-- NON-ADDITIVE. `ALTER TABLE ... RENAME` is classified 'manual' by
+-- app/lib/migration-classify.server.ts, so it is NOT applied by the unattended
+-- additive-migration build step (scripts/apply-additive-migrations.ts) and the
+-- release engine escalates this PR to the owner rather than auto-merging it.
+-- Apply via scripts/apply-migrations.ts in coordination with the deploy of this
+-- PR's code (see the PR body's Protected-path diff section for the required
+-- sequence: apply the rename, then let the code deploy).
+--
+-- IF EXISTS makes each statement a no-op if the rename has already landed, so a
+-- re-run does not error. Renaming a table keeps its indexes and unique
+-- constraints attached (they retain their old idx_*_failures_* / uq_*_failures_*
+-- names, which are labels only and keep working); Drizzle's ON CONFLICT targets
+-- the order_id column, not the constraint name, so idempotent upserts are
+-- unaffected.
+ALTER TABLE IF EXISTS meta_capi_failures RENAME TO meta_capi_outbox;
+ALTER TABLE IF EXISTS ga4_purchase_failures RENAME TO ga4_purchase_outbox;
