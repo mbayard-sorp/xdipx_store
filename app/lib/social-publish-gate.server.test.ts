@@ -18,6 +18,7 @@ const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
 const GOOD_MEDIA = [`${CDN}/social-rosales-cast-maya-20260812-1.jpg`]
 const inStock = async () => true
 const outOfStock = async () => false
+const notMember = async () => false
 
 /** A caption with nothing wrong with it. */
 const CLEAN = 'ok, a detail about silicone nobody mentions: not all of it is the same grade.'
@@ -42,16 +43,56 @@ describe('imagery provenance', () => {
   it('blocks a bare Nalpac packshot, which is what the pending drafts carry', async () => {
     const r = await runDeterministicPublishChecks(
       { caption: CLEAN, mediaUrls: [`${CDN}/77292A.jpg?v=1775408527`] },
+      { isLibraryMember: notMember },
     )
     expect(checks(r)).toContain('image-provenance')
     expect(r.blocked).toBe(true)
   })
 
   it('blocks a carousel where only one slide is a packshot', async () => {
-    const r = await runDeterministicPublishChecks({
-      caption: CLEAN,
-      mediaUrls: [...GOOD_MEDIA, `${CDN}/96177A.jpg`],
-    })
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: [...GOOD_MEDIA, `${CDN}/96177A.jpg`] },
+      { isLibraryMember: notMember },
+    )
+    expect(r.blocked).toBe(true)
+  })
+
+  // Library membership burn-in (#4937): prefix OR membership passes.
+  it('passes a prefix-named url without consulting the library', async () => {
+    let asked = 0
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA },
+      { isLibraryMember: async () => { asked++; return false } },
+    )
+    expect(checks(r)).not.toContain('image-provenance')
+    expect(asked).toBe(0)
+  })
+
+  it('passes a non-prefix url that is a library member (an owner upload)', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: [`${CDN}/owner-shot-0822.jpg?v=1`] },
+      { isLibraryMember: async (u) => u.includes('owner-shot-0822') },
+    )
+    expect(checks(r)).not.toContain('image-provenance')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('blocks a non-prefix url that is not a library member, naming both tests', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: [`${CDN}/owner-shot-0822.jpg`] },
+      { isLibraryMember: notMember },
+    )
+    const f = r.findings.find(x => x.check === 'image-provenance')
+    expect(f?.detail).toContain('library')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('fails closed when the membership lookup throws', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: [`${CDN}/owner-shot-0822.jpg`] },
+      { isLibraryMember: async () => { throw new Error('neon down') } },
+    )
+    expect(checks(r)).toContain('image-provenance')
     expect(r.blocked).toBe(true)
   })
 
