@@ -188,7 +188,7 @@ const LIVED_EXPERIENCE_RE =
 /**
  * Patterns that read as the caption narrating its own picture (owner direction
  * 2026-08-22, root-caused from social_posts row 80: "that is jade in the
- * photo, sleeves pushed up at a sunny bathroom sink"). Before migration 084,
+ * photo, sleeves pushed up at a sunny bathroom sink"). Before migration 085,
  * `social_posts` had no `alt_text` column and the Instagram publisher had
  * nowhere to send an accessibility description, so it was being written into
  * the caption instead. The fix for the column is additive; this is the fix

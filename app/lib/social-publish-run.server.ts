@@ -89,8 +89,8 @@ async function publishViaRegistry(post: PostRow) {
     // stamp as burn-in fallback (#4913), for adapters that can tag it on the
     // post (#3744). Additive only; adapters without tagging ignore it.
     productTagHandle: await resolvePostProductHandle(post),
-    // Accessibility description (migration 084). Additive only; adapters
-    // without alt-text support ignore it.
+    // Accessibility description (social_posts.alt_text, migration 085). Additive
+    // only; adapters without alt-text support ignore it.
     altText: post.altText ?? null,
   })
   if (out.ok && out.note) console.warn(`[social-publish] post ${post.id}: ${out.note}`)

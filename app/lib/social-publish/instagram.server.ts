@@ -26,6 +26,12 @@ import type { SocialPublisher, PublishInput, PublishResult } from './types'
 const DEFAULT_API_VERSION = 'v23.0'
 /** IG caption ceiling. Drafts are far shorter; this is a guard, not a feature. */
 const CAPTION_MAX = 2200
+/**
+ * IG accessibility-caption (alt_text) ceiling. The Graph API rejects alt_text
+ * over 1000 characters, so a long brief is truncated rather than failing the
+ * whole publish over an additive field.
+ */
+const ALT_TEXT_MAX = 1000
 /** Container ingest polling. Images finish immediately; Reels take longer. */
 const POLL_INTERVAL_MS = 3_000
 const POLL_TIMEOUT_MS = 120_000
@@ -238,12 +244,14 @@ export const instagramPublisher: SocialPublisher = {
     if (!token || !igId) return { ok: false, reason: 'not_configured' }
 
     const caption = input.caption.slice(0, CAPTION_MAX)
-    // Accessibility description (migration 084). Verified 2026-08-22 against
-    // developers.facebook.com/docs/instagram-platform/instagram-graph-api/
-    // reference/ig-user/media: `alt_text` is "Alternative text, up to 1000
-    // character, for an image. Only supported on a single image or image media
-    // in a carousel." Capped here to that limit.
-    const altText = input.altText?.trim().slice(0, 1000) || undefined
+    // Accessibility description (social_posts.alt_text, migration 085).
+    // Verified 2026-08-22 against developers.facebook.com/docs/instagram-platform/
+    // instagram-graph-api/reference/ig-user/media: `alt_text` is "Alternative
+    // text, up to 1000 character, for an image. Only supported on a single
+    // image or image media in a carousel." Capped here to that limit. Reels
+    // have no alt_text field, so it is simply not attached there. Additive:
+    // an absent value publishes exactly as before.
+    const altText = input.altText?.trim().slice(0, ALT_TEXT_MAX) || undefined
 
     // Product tag (#3744): resolve the gate stamp's handle to a taggable
     // catalog product. Feed photos and carousels only; Reels are out of
