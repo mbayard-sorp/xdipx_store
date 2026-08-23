@@ -30,7 +30,7 @@ import {
   listAdCampaigns, decideAdCampaign, SUGGESTION_LIST_MAX, getSocialFrequencies,
   type TeamConfig, type GateResult, type TicketStatus,
 } from '~/lib/team.server'
-import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, type TeamId, type SocialPlatform } from '~/lib/team-keys'
+import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, X_METRICS_MAX_READS_MONTH_KEY, X_METRICS_MAX_READS_MONTH_DEFAULT, type TeamId, type SocialPlatform } from '~/lib/team-keys'
 import {
   NO_EXECUTOR_KINDS, classifyTeamTablesError, facetTotal, fmtAge, sumFacetCount, truncationNote,
   type TicketFacetRow,
@@ -64,6 +64,8 @@ const SOCIAL_EXTRA_KEYS = {
   instagramPublishMaxPerDay: 'instagram_publish_max_per_day',
   xPublishMaxPerDay: 'x_publish_max_per_day',
   xPublishMaxSpendUsdMonth: 'x_publish_max_spend_usd_month',
+  // Monthly ceiling on X metrics reads by /cron/social-metrics-sweep (#4916).
+  xMetricsMaxReadsMonth: X_METRICS_MAX_READS_MONTH_KEY,
 } as const
 
 /** Display names for the per-platform drafting-quota fields (ticket #3676). */
@@ -171,6 +173,7 @@ interface LoaderData {
   campaigns: CampaignRow[]
   autopost: boolean
   socialTrendScout: boolean
+  socialMetricsSweep: boolean
   suggestionApply: boolean
   contentAutopublish: boolean
   seoCuration: boolean
@@ -183,6 +186,7 @@ interface LoaderData {
   xAutopublish: boolean
   xPublishMaxPerDay: number
   xPublishMaxSpendUsdMonth: number
+  xMetricsMaxReadsMonth: number
   /**
    * Per-platform drafting quota (social_freq_* keys, posts/day, 0 = off).
    * Ticket #3676: this is the knob that sizes the daily slate, and until it
@@ -204,9 +208,10 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
+  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
+    getValve(VALVE_KEYS.socialMetricsSweep).catch(() => false),
     getValve(VALVE_KEYS.suggestionApply).catch(() => false),
     getValve(VALVE_KEYS.contentAutopublish).catch(() => false),
     getValve(VALVE_KEYS.seoCuration).catch(() => false),
@@ -235,6 +240,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
       .where(inArray(pipelineSettings.key, [
         SOCIAL_EXTRA_KEYS.xPublishMaxPerDay,
         SOCIAL_EXTRA_KEYS.xPublishMaxSpendUsdMonth,
+        SOCIAL_EXTRA_KEYS.xMetricsMaxReadsMonth,
       ]))
       .catch(() => [] as Array<{ key: string; value: string }>),
     // Release-engine settings: read directly, same reason as frame review.
@@ -264,6 +270,12 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const xPublishMaxSpendUsdMonth = Number.isFinite(xSpendParsed) && xSpendParsed >= 0
     ? xSpendParsed
     : X_PUBLISH_MAX_SPEND_USD_MONTH_DEFAULT
+  // Metrics read cap: a count, parsed like the per-day caps (zero preserved).
+  const xReadsRaw = xPublishRows.find(r => r.key === SOCIAL_EXTRA_KEYS.xMetricsMaxReadsMonth)?.value
+  const xReadsParsed = xReadsRaw == null ? NaN : parseInt(xReadsRaw, 10)
+  const xMetricsMaxReadsMonth = Number.isFinite(xReadsParsed) && xReadsParsed >= 0
+    ? xReadsParsed
+    : X_METRICS_MAX_READS_MONTH_DEFAULT
   const releaseEngine = releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.enabled)?.value === 'true'
   const releaseEngineMaxMerges =
     Number(releaseEngineRow.find(r => r.key === RELEASE_ENGINE_KEYS.maxMergesPerDay)?.value ?? 6) || 6
@@ -403,10 +415,10 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   return {
     team, config, migrated, loadError, gateResult, runs, selectedRun, suggestions, needsYou, needsYouTotal,
     filteredOpenTotal, ticketLinks, filter,
-    kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout,
+    kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
     videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
-    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, socialFrequencies,
+    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges,
   }
 }
@@ -544,10 +556,10 @@ export default function AgentTeamsPage() {
     team, config, migrated, loadError, gateResult, runs, selectedRun,
     suggestions, needsYou, needsYouTotal, filteredOpenTotal,
     ticketLinks, filter, kindOptions, assigneeOptions, teamOptions, statusCounts,
-    briefs, campaigns, autopost, socialTrendScout, suggestionApply, contentAutopublish,
+    briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish,
     seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
-    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, socialFrequencies,
+    xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
@@ -686,6 +698,12 @@ export default function AgentTeamsPage() {
               settingKey={VALVE_KEYS.socialTrendScout}
               on={socialTrendScout}
             />
+            <ValveRow
+              label={`Social metrics sweep is ${socialMetricsSweep ? 'ON' : 'OFF'}`}
+              detail="When ON, /cron/social-metrics-sweep runs every six hours and refreshes likes, comments, reach, saves, and impressions on posted Instagram and X rows from the last 30 days, plus one Instagram follower reading per sweep. Read-only: it never posts or edits. Instagram reads are free. X BILLS PER METRICS READ (about $0.005 a tweet), so the monthly read ceiling below is a real spend control; when it is reached the sweep skips X until the month rolls over and Instagram keeps running."
+              settingKey={VALVE_KEYS.socialMetricsSweep}
+              on={socialMetricsSweep}
+            />
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
               {SOCIAL_PLATFORMS.map(p => (
                 <SettingField
@@ -717,6 +735,11 @@ export default function AgentTeamsPage() {
                 label="X spend ceiling / month ($)"
                 settingKey={SOCIAL_EXTRA_KEYS.xPublishMaxSpendUsdMonth}
                 value={xPublishMaxSpendUsdMonth}
+              />
+              <SettingField
+                label="X metrics reads / month (sweep cap)"
+                settingKey={SOCIAL_EXTRA_KEYS.xMetricsMaxReadsMonth}
+                value={xMetricsMaxReadsMonth}
               />
             </div>
             <p className="text-[11px] text-ink-4">
