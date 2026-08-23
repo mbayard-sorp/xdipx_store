@@ -155,7 +155,10 @@ def validate(inp: dict[str, Any]) -> dict[str, Any]:
     prefix = (inp.get("blobPathPrefix") or "").strip().strip("/")
     if not prefix:
         raise ValueError("blobPathPrefix is required")
-    fast = bool(inp.get("fast", False))
+    # Default to the 4-step lightx2v path: the 20-step path does not finish inside
+    # the timeout on 24GB cards (measured 2026-08-22). Send fast: false to opt out.
+    fast = inp.get("fast")
+    fast = True if fast is None else bool(fast)
     steps = inp.get("steps")
     steps = int(steps) if steps else (FAST_STEPS if fast else DEFAULT_STEPS)
     if not 1 <= steps <= 60:
