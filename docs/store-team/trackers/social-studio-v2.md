@@ -14,9 +14,11 @@ Overall: AMBER (not started)
 | p4-schedule | scheduled_at cutover, PDT picker, calendar drag, auto-expire, permalink capture | 4 | rr7-engineer via R-DEV | approved (ticket #4912) | AMBER | `eligibleWhere` compares against `now()`; `markPosted` writes `permalink` | 2026-08-22 | live publish path |
 | p5-gate-columns | gate writers/readers on gate_status; feedback regex removed | 5 | rr7-engineer via R-DEV | approved (ticket #4913) | AMBER | no `BLOCK_STAMP_REGEX` reference in `team.server.ts` | 2026-08-22 | |
 | p6a-analytics | analytics route reads metrics_json + follower history, CSV | 6 | rr7-engineer via R-DEV | approved (ticket #4914) | AMBER | `app/routes/admin.socials.analytics.tsx` exists | 2026-08-22 | |
-| p6b-metrics-cron | /cron/social-metrics-sweep + spend valve | 6 | owner lane | approved (ticket #4916) | AMBER | `vercel.json` has the cron; valve key in `team-keys.ts` | 2026-08-22 | owner merges |
+| p6b-metrics-cron | /cron/social-metrics-sweep + spend valve | 6 | owner lane | pr_open (ticket #4916, PR #861) | AMBER | `vercel.json` has the cron; valve key in `team-keys.ts` | 2026-08-22 | owner merges; permalink backfill and follower_history table wait on 084 |
 | p7-design | design-critic pass at 375px + desktop against plan §4 | 7 | design-critic | approved (ticket #4915) | AMBER | a design-critic verdict event on the Studio routes | 2026-08-22 | |
 
 ## Status log
 
 ### 2026-08-22 (all-hands). Opened. Plan, ADR and tickets filed: #4908 (P0), #4909 (P1), #4910 (P2), #4911 (P3), #4912 (P4), #4913 (P5), #4914 (P6a), #4916 (P6b, owner lane), #4915 (P7). Docs PR #860.
+
+### 2026-08-22 (later). Phase 6b drafted in session: PR #861 (cron route, valve, read cap, admin controls, 10 tests). Ships inert; owner merges and flips.
