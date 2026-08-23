@@ -162,6 +162,23 @@ const EXPECTED_WEBHOOK_TOPICS: readonly string[] = [
   'RETURNS_UPDATE',
 ]
 
+/**
+ * Is any RunPod pod (the hourly-billed Pods product) currently RUNNING? A
+ * forgotten bootstrap pod costs $0.74/hr with nothing to show for it. The
+ * incident that motivated this probe left one running 18.7h (~$14) on
+ * 2026-08-22/23. Arg is unused. `null` on any API error (missing/scoped key,
+ * non-2xx): "could not ask" must never collapse into "all clear".
+ */
+async function runpodNoPods(): Promise<ProbeVerdict> {
+  try {
+    const { listRunningRunpodPods } = await import('~/lib/runpod-pods.server')
+    const running = await listRunningRunpodPods()
+    return running.length === 0
+  } catch {
+    return null
+  }
+}
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -170,6 +187,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   rows_exist:    rowsExist,
   routine_ran:   routineRan,
   webhook_registered: webhookRegistered,
+  runpod_no_pods: runpodNoPods,
 }
 
 /**

@@ -105,6 +105,9 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
     a === 'all'
       ? 'every expected Shopify webhook topic is registered'
       : `Shopify webhook ${a} is registered`,
+  /* Arg is unused. Clears itself the moment no RunPod pod (the hourly-billed
+   * machine product, not the scale-to-zero Serverless endpoint) is RUNNING. */
+  runpod_no_pods: () => 'no RunPod pod is left running',
 }
 
 export function isProbe(name: unknown): name is string {
