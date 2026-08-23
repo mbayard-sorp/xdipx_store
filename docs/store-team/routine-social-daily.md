@@ -172,6 +172,14 @@ by hand. `approved` on its own is no longer a licence to publish. If you see a r
 `no_gate_verdict`, that is a row nothing adversarial read, and the fix is to gate it, never to
 approve it again.
 
+Where that verdict lives (Phase 5 of Social Studio v2, #4913): the gate's verdict is recorded in the
+`gate_status`, `gate_checked_at`, and `gate_findings` columns on `social_posts`, and those columns
+are what the publish job and the Studio read. The `[publish-gate ...]` stamp in `feedback` is still
+written for one burn-in cycle and is read only when `gate_status` is null; a row publishes when
+`gate_status = 'pass'`, or when the column is null and the legacy stamp says PASS. If you read
+`feedback` on a row, treat it as the owner's note plus that stamp, and take the verdict from the
+column when one is set.
+
 That sentence is about the **scheduled job**, which is what "unattended" means, and it is unchanged.
 The owner's **Post-now** click in `/admin/socials` is a different path and no longer requires the
 stamp (owner direction 2026-08-23): the stamp is written by an agent on its own run and the Studio
@@ -442,6 +450,17 @@ a question opener (the question the reader already has), a myth-to-retire opener
 misconception, then correct it), and a scene-first opener (start inside the moment, then land the
 point).
 
+**Rotate the sensation descriptor across wand and vibrator posts, across ALL platforms (ticket
+#4868).** No two consecutive wand or vibrator posts — counted across Instagram, X, and every other
+platform together, never per-platform — may reuse the same core sensation descriptor. "Deep,
+spread-out rumble" and its close variants became a house tic (run 446 drafts 81 and 82, echoing live
+posts 47 and 78), the exact fresh-language failure the charter warns about; the voice gate and both
+product publish-gates flagged it independently. Before drafting a wand or vibrator post, read the
+last wand/vibrator post on any platform and pick a different descriptor from a rotating bank —
+rumble, low-frequency, full-hand, broad-contact — never the one the previous post used. The same
+freshness rule binds the required per-toy pairing-fact restatement: word it fresh for each post,
+never copy the pairing sentence forward from the prior post.
+
 **The X companion beat (crossplatform strategy §1).** For each Instagram slate post featuring a
 product, draft an X companion when the X quota allows: same campaign subject, register 6-7 per the
 social addendum, PDP link with channel UTMs, and a fresh sentence, never the IG caption reheated.
@@ -678,10 +697,46 @@ GROQ count run with an empty Sanity token, and anonymous reads of this dataset r
 the seven. Check with `SANITY_API_TOKEN` on the `published` perspective, the client
 `getApprovedCastMembers()` uses.
 
+**A locked campaign pins the cast; do not rotate inside it (ticket #4701).** "Rotate across them"
+above is the default only for posts that are NOT inside a cast-locked campaign. When an active
+Instagram campaign locks a `castSlate` in `instagram-campaigns.md` §5 (The Vibrator Field Guide
+locks `priya` with a pinned, versioned `referencePhoto` URL), the imagery step reads that locked
+slate first and uses that exact cast member and `referencePhotoUrl` for every post in the campaign —
+it does not free-rotate the roster, because cast continuity across a campaign is the whole point
+(§3.2, and §5 "decided once, before the run, and never re-decided mid-campaign"). Hand
+`social-art-director` the campaign-locked cast and its pinned reference, not a fresh rotation pick.
+Run 423 generated both IG posts (72, 73) with Emma while the active campaign locked `priya`, and
+`social-publish-gate` REVISEd both for cast-identity mismatch; reading the campaign lock before
+choosing a face is what prevents that. `priya` is one of the seven `approvedForUse` members, so the
+lock and the roster agree — the lock is a continuity choice, not a roster exception.
+
 **If the roster is ever genuinely empty, you cannot draft an Instagram product post.** Declare
 Instagram product drafting degraded-to-zero, say so in the summary, and pivot volume to X, LinkedIn,
 and non-product Instagram posts. **Never fall back to a product-only frame to fill the slot.** That
 is what produced row 59.
+
+**Pre-write image QA — three checks before any cast composite is offered (ticket #4892).** Run 456
+had all five captions PASS the voice gate yet four of five failed the publish gate on the image
+alone. These are pre-write gates: a candidate that fails one is rejected or regenerated before the
+draft is written, not discovered at Step 6.5.
+
+1. **High-zoom wordmark check.** For any product whose real packshot carries a printed wordmark on
+   the body (e.g. the Le Wand handle logo), zoom the product region of every cast-composite candidate
+   and compare it to the packshot. A garbled or illegible baked wordmark is an automatic
+   publish-gate BLOCK (id83 blocked, recurring against id72). Reject the candidate, or add a stronger
+   no-text negative and regenerate, before drafting.
+2. **§3.8 variety is judged on the wall-plus-light-plus-pose signature, not the stated
+   micro-location.** The Field Guide locks the coral-plaster wall, the upper-right diagonal light
+   beam, the bralette, and the lean-against-wall pose (`instagram-campaigns.md` §5), so cast
+   composites read as the SAME location even when the brief says dressing-corner, entryway, or
+   sunroom (id85 REVISEd against approved 81, posted 47, and draft 75). Vary pose, framing, and
+   secondary cues, and check the candidate against the actual last-8 posted-plus-drafted frames, not
+   the location label. This is the standing tension between "lock the look" (§3) and "vary the
+   location" (§3.8) for cast composites; resolve it on the visible signature, not the label.
+3. **The design-doctrine §4.1 tableware/glassware ban binds social metaphors.** A product-free
+   metaphor built on drinking glasses fails the interest floor as housewares (id86 REVISEd). A
+   product-free metaphor must carry a narrative property — P1 (a personal trace) or P2 (an
+   interrupted state) — never tableware or glassware standing in for the idea.
 
 ### X carries a cast member. Owner direction 2026-08-19.
 

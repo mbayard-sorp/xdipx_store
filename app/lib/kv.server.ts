@@ -416,6 +416,10 @@ export const KV_KEYS = {
   // denominator and follower trend is derivable. No TTL: written with a plain
   // kvSet so Upstash keeps it indefinitely (unlike the caches above).
   socialFollowerHistory:       'social:ig:follower_history',
+  // X metrics reads consumed this UTC month by /cron/social-metrics-sweep
+  // (ticket #4916), compared against x_metrics_max_reads_month. Plain counter,
+  // no TTL; the month in the key is what rolls it over.
+  xMetricsReads:               (month: string) => `social:x:metrics_reads:${month}`,
 } as const
 
 // ─── Vault Filter Tabs helpers ────────────────────────────────────────────

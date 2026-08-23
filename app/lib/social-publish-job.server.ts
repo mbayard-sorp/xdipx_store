@@ -25,14 +25,17 @@
  *    which killed six webhook handlers for months. The caller must AWAIT this.
  */
 
-import { and, desc, eq, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
-import { parseGateStamp } from './social-publish-approve.server'
+import { effectiveGateStatus, preserveGateStamp } from './social-publish-approve.server'
 import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
 import { checkLinkedProductStock } from './social-publish/stock-guard.server'
+import { resolvePostProductHandle } from './social-publish/product-handle.server'
 import { estimateXPostCostUsd, estimateXSpendUsd } from './social-publish/x-limits'
+import { permalinkFor } from './social-permalink.server'
+import { formatLaSlot } from './social-schedule'
 
 /**
  * Per-tick ceiling. A code constant, not a valve: there is no reason for the
@@ -82,6 +85,8 @@ export interface PublishTickResult {
   platform?: PublishPlatform
   /** Month-to-date estimated spend, when this platform meters spend. */
   spendUsd?: number
+  /** Unapproved rows whose slot passed more than a day ago, flagged this tick. */
+  expired?: number
 }
 
 /**
@@ -103,6 +108,11 @@ export type PublishPlatform = 'instagram' | 'x'
  */
 export interface PublishRepo {
   sweepAbandoned: () => Promise<number>
+  /**
+   * Flag unapproved rows whose slot is more than a day gone (Phase 4). Optional
+   * so the fake repos that predate it keep working; the live repo supplies it.
+   */
+  expireStale?: () => Promise<number>
   countPublishedToday: () => Promise<number>
   listEligible: (limit: number) => Promise<PostRow[]>
   recentCaptions: (limit: number) => Promise<string[]>
@@ -150,14 +160,20 @@ export interface PublishTickDeps {
   /**
    * Resolves the featured product handle for a post, when it has one.
    *
-   * Defaults to reading the gate stamp the pre-publish gate wrote into
-   * `feedback`. That default matters more than it looks: the handle is what
-   * turns the deterministic stock check on, `social_posts` has no column for
-   * one, and while this was merely optional nothing supplied it in production
-   * — so the publish-time stock re-check, the entire reason the gate runs here
-   * rather than only at draft time, silently did nothing on every row.
+   * Defaults to the row's product linkage (`shopify_product_id`, resolved to
+   * a handle through `productHandleById`), falling back to the handle the
+   * gate stamped into `feedback` while that column is null (Phase 5, #4913).
+   * That default matters more than it looks: the handle is what turns the
+   * deterministic stock check on, and while this was merely optional nothing
+   * supplied it in production, so the publish-time stock re-check silently
+   * did nothing on every row.
    */
   productHandleFor?: (post: PostRow) => Promise<string | null>
+  /**
+   * Resolves `shopify_product_id` to a handle. Defaults to the Shopify Admin
+   * lookup; a test injects a stub so no network call is made.
+   */
+  productHandleById?: (shopifyProductId: string) => Promise<string | null>
   now?: () => Date
   /** Defaults to the live database. */
   repo?: PublishRepo
@@ -192,25 +208,42 @@ export interface PublishTickDeps {
  * that factory at module load, so a `const` declared after it would still be in
  * the temporal dead zone and throw on import.
  */
-const sharedRepoWrites: Pick<PublishRepo, 'markPosted' | 'markNeedsChanges' | 'markFailed'> = {
-  markPosted: async (postId, externalPostId, at) => {
-    await db.update(socialPosts)
-      .set({ status: 'posted', externalPostId, postedAt: at })
-      .where(eq(socialPosts.id, postId))
-  },
+const sharedRepoWrites: Pick<PublishRepo, 'markNeedsChanges' | 'markFailed'> = {
   markNeedsChanges: async (postId, feedback) => {
     await db.update(socialPosts)
       // Back to the review queue rather than published. This is the one place
       // the owner still sees a post before it is public, and it only happens
       // when something is actually wrong.
-      .set({ status: 'draft', reviewStatus: 'needs_changes', feedback })
+      .set({ status: 'draft', reviewStatus: 'needs_changes', feedback, updatedAt: new Date() })
       .where(eq(socialPosts.id, postId))
   },
   markFailed: async (postId, detail, terminal) => {
     await db.update(socialPosts)
-      .set({ status: terminal ? 'failed' : 'draft', errorMessage: detail })
+      .set({ status: terminal ? 'failed' : 'draft', errorMessage: detail, updatedAt: new Date() })
       .where(eq(socialPosts.id, postId))
   },
+}
+
+/**
+ * Flip a row to posted, capturing its live URL (ADR-013 decision 10).
+ *
+ * The permalink is resolved HERE, inside the database implementation, and not
+ * in the tick loop: the loop's contract with `PublishRepo.markPosted` stays
+ * `(postId, externalPostId, at)`, so every fake repo in the tests is untouched
+ * and the tick never learns that Instagram needs a second GET to know its own
+ * URL. `permalinkFor` never throws and returns null on failure; the status
+ * write is never conditional on it, and the metrics sweep backfills the gaps.
+ */
+export async function markPostedWithPermalink(
+  platform: PublishPlatform,
+  postId: number,
+  externalPostId: string,
+  at: Date,
+): Promise<void> {
+  const permalink = await permalinkFor(platform, externalPostId)
+  await db.update(socialPosts)
+    .set({ status: 'posted', externalPostId, postedAt: at, permalink, updatedAt: at })
+    .where(eq(socialPosts.id, postId))
 }
 
 /**
@@ -229,40 +262,114 @@ const sharedRepoWrites: Pick<PublishRepo, 'markPosted' | 'markNeedsChanges' | 'm
  * come, on this platform, and nothing else), and it was also where a row could
  * be silently stranded. A test can render this to SQL without a database.
  */
+/** The COALESCE the predicate and the ordering share (ADR-013 decision 9). */
+const effectiveSlotSql = sql`coalesce(${socialPosts.scheduledAt}, ${socialPosts.scheduledFor}::timestamptz)`
+
 export function eligibleWhere(platform: PublishPlatform) {
   return and(
     eq(socialPosts.platform, platform),
     eq(socialPosts.status, 'draft'),
     eq(socialPosts.reviewStatus, 'approved'),
-    // `<=` today, not `=`: a post whose day was missed because the valve was
+    // `<=` now, not `=`: a post whose slot was missed because the valve was
     // off still goes out, instead of being silently skipped forever.
     //
-    // NULL counts as due, and that is a fix rather than a nicety. Not every
-    // path that creates a draft sets a date: rows written outside the scheduled
-    // drafting routine land with `scheduled_for` NULL, and a NULL never
+    // Due-ness reads `COALESCE(scheduled_at, scheduled_for::timestamptz)`
+    // (ADR-013 decision 9). `scheduled_at` is the Phase 4 slot, an instant the
+    // owner picked on the LA wall clock and stored in UTC. `scheduled_for` is
+    // the legacy date-only column; a row carrying only `'2026-08-23'` casts to
+    // midnight UTC of that day, which is 17:00 PDT on the 22nd. That is
+    // accepted on purpose: it is never LATER than the old `<= current_date`
+    // test (which also made the row due from the UTC day boundary), so no
+    // legacy row becomes less eligible than it was, and no backfill UPDATE is
+    // needed in a migration file.
+    //
+    // NULL (both columns) counts as due, and that is a fix rather than a
+    // nicety. Not every path that creates a draft sets a slot: rows written
+    // outside the scheduled drafting routine land undated, and a NULL never
     // satisfies `<=`, so an APPROVED row could be permanently invisible to the
     // only thing that publishes it. That is the same silent-skip this `<=` was
     // written to prevent, reached by a different door. It had already caught
     // one live row (#53, gate-approved 2026-08-16, still unpublished). An
     // undated approved row means "ship this when there is room", so treat it
     // that way.
-    or(isNull(socialPosts.scheduledFor), lte(socialPosts.scheduledFor, sql`current_date`)),
+    or(
+      and(isNull(socialPosts.scheduledAt), isNull(socialPosts.scheduledFor)),
+      sql`${effectiveSlotSql} <= now()`,
+    ),
   )
+}
+
+/** How long an unapproved row may sit past its slot before it is flagged. */
+export const EXPIRE_AFTER_MS = 24 * 60 * 60 * 1000
+
+/** The marker an expired row's feedback starts with. Checked so a row is flagged once, not every tick. */
+export const EXPIRED_PREFIX = '[expired]'
+
+/**
+ * The feedback an expired row carries: the marker, the slot it missed on the
+ * LA wall clock, then whatever the row already said. Pure, so it is testable
+ * without the database write around it. The prior text is kept whole, so a
+ * gate stamp inside it still parses (`parseGateStamp` matches at any line
+ * start) for the burn-in readers (#4913).
+ */
+export function expiredFeedback(scheduledAt: Date, prior: string | null): string {
+  const line = `${EXPIRED_PREFIX} Slot ${formatLaSlot(scheduledAt)} passed without approval; reschedule or re-draft.`
+  return prior?.trim() ? `${line}\n${prior}` : line
+}
+
+/**
+ * Flag draft rows that were never approved and whose slot is more than
+ * EXPIRE_AFTER_MS gone (Phase 4 auto-expire).
+ *
+ * Why flag and not delete or publish: the slot was a plan, and a plan nobody
+ * signed off on is not a post. The row goes to `needs_changes` so it leaves
+ * the gate's queue (the gate only verdicts draft/pending_review) and shows up
+ * in the Studio as something to reschedule or re-draft. Approved rows are not
+ * touched: an approved row past its slot is simply due, and the tick publishes
+ * it. Rows with only the legacy `scheduled_for` are not expired either, since
+ * a date-only row never had a slot to miss.
+ */
+export async function expireStaleUnapproved(
+  platform: PublishPlatform,
+  now: Date = new Date(),
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - EXPIRE_AFTER_MS)
+  const stale = await db
+    .select({ id: socialPosts.id, scheduledAt: socialPosts.scheduledAt, feedback: socialPosts.feedback })
+    .from(socialPosts)
+    .where(and(
+      eq(socialPosts.platform, platform),
+      eq(socialPosts.status, 'draft'),
+      inArray(socialPosts.reviewStatus, ['pending_review', 'needs_changes']),
+      isNotNull(socialPosts.scheduledAt),
+      lt(socialPosts.scheduledAt, cutoff),
+      or(isNull(socialPosts.feedback), sql`${socialPosts.feedback} not like ${EXPIRED_PREFIX + '%'}`),
+    ))
+  let n = 0
+  for (const row of stale) {
+    if (!row.scheduledAt) continue
+    await db.update(socialPosts)
+      .set({ reviewStatus: 'needs_changes', feedback: expiredFeedback(row.scheduledAt, row.feedback), updatedAt: now })
+      .where(eq(socialPosts.id, row.id))
+    n++
+  }
+  return n
 }
 
 export function makeDbPublishRepo(platform: PublishPlatform): PublishRepo {
   return {
     sweepAbandoned: () => sweepAbandonedPublishing(platform),
+    expireStale: () => expireStaleUnapproved(platform),
     countPublishedToday: () => countPublishedToday(platform),
     claim: claimForPublish,
     listEligible: async (limit) => db
       .select()
       .from(socialPosts)
       .where(eligibleWhere(platform))
-      // NULLs sort last under Postgres ASC, which is the order we want: a row
-      // someone dated for a specific day keeps its claim on the day's room, and
-      // undated rows fill what is left. The daily cap still binds either way.
-      .orderBy(socialPosts.scheduledFor, socialPosts.id)
+      // Earliest effective slot first, NULLS LAST: a row someone scheduled
+      // keeps its claim on the day's room, and undated rows fill what is
+      // left. The daily cap still binds either way.
+      .orderBy(sql`${effectiveSlotSql} asc nulls last`, socialPosts.id)
       .limit(limit),
     recentCaptions: async (limit) => {
       const rows = await db
@@ -273,7 +380,7 @@ export function makeDbPublishRepo(platform: PublishPlatform): PublishRepo {
         .limit(limit)
       return rows.map(r => (r.e?.trim() || r.t))
     },
-    markPosted: sharedRepoWrites.markPosted,
+    markPosted: (postId, externalPostId, at) => markPostedWithPermalink(platform, postId, externalPostId, at),
     markNeedsChanges: sharedRepoWrites.markNeedsChanges,
     markFailed: sharedRepoWrites.markFailed,
   }
@@ -405,6 +512,13 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
 
   const swept = await repo.sweepAbandoned()
 
+  // Flag unapproved rows whose slot is a day gone (Phase 4). Runs before the
+  // eligibility read on purpose, though it can never touch an approved row:
+  // the Studio should show the missed slot on the same tick that would have
+  // published it, not an hour later.
+  const expired = repo.expireStale ? await repo.expireStale() : undefined
+  const expiredField = expired !== undefined ? { expired } : {}
+
   // Look at what is already live before adding to it (ticket #2741).
   //
   // Order matters and is the whole point of putting this here: a removal found
@@ -418,13 +532,13 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
   // in the same tick.
   const watch = await (deps.removalWatch ?? (() => runRemovalWatch()))()
   if (watch?.valveTurnedOff) {
-    return { skipped: 'removal_pattern', swept, attempts: [], publishedToday: 0, watch }
+    return { skipped: 'removal_pattern', swept, ...expiredField, attempts: [], publishedToday: 0, watch }
   }
 
   const publishedToday = await repo.countPublishedToday()
   const maxPerDay = await deps.maxPerDay()
   if (publishedToday >= maxPerDay) {
-    return { skipped: 'daily_cap', swept, attempts: [], publishedToday, platform }
+    return { skipped: 'daily_cap', swept, ...expiredField, attempts: [], publishedToday, platform }
   }
 
   // Month-to-date spend, read once per tick. Both halves are optional and are
@@ -435,7 +549,7 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     spendUsd = await deps.monthSpendUsd()
     maxSpendUsd = await deps.maxSpendUsd()
     if (spendUsd >= maxSpendUsd) {
-      return { skipped: 'spend_cap', swept, attempts: [], publishedToday, platform, spendUsd }
+      return { skipped: 'spend_cap', swept, ...expiredField, attempts: [], publishedToday, platform, spendUsd }
     }
   }
 
@@ -485,9 +599,14 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     // and the loop moves on to the next candidate.
     const stock = await checkLinkedProductStock(post.shopifyProductId, deps.checkStockByProductId)
     if (!stock.ok) {
+      // preserveGateStamp keeps the legacy stamp behind the note for burn-in
+      // readers; the columns are untouched and remain the verdict of record.
       await repo.markNeedsChanges(
         post.id,
-        `[stock-guard] ${stock.detail} Swap the product or re-draft before this can publish.`,
+        preserveGateStamp(
+          post.feedback,
+          `[stock-guard] ${stock.detail} Swap the product or re-draft before this can publish.`,
+        ) ?? '',
       )
       attempts.push({ postId: post.id, outcome: 'out_of_stock', ...(stock.detail ? { detail: stock.detail } : {}) })
       continue
@@ -498,14 +617,19 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     // Refuse anything the pre-publish gate never looked at.
     //
     // `review_status='approved'` has two possible authors: the gate, which
-    // stamps its verdict into `feedback`, and the owner's click in the Social
-    // Studio, which does not. Under autopublish he is not clicking, so an
-    // approved row with no stamp is either a leftover from before this shipped
-    // or something that reached the column another way. Either is a row nothing
-    // adversarial has read, and publishing it unattended is the one thing this
-    // whole chain exists to prevent. It goes back to the queue instead.
-    const stamp = parseGateStamp(post.feedback)
-    if (!stamp || stamp.verdict !== 'PASS') {
+    // writes its verdict into `gate_status` (and, for burn-in, the stamp in
+    // `feedback`), and the owner's click in the Social Studio, which does
+    // not. Under autopublish he is not clicking, so an approved row with no
+    // verdict is either a leftover from before this shipped or something that
+    // reached the column another way. Either is a row nothing adversarial has
+    // read, and publishing it unattended is the one thing this whole chain
+    // exists to prevent. It goes back to the queue instead.
+    //
+    // Rule (Phase 5, #4913): publishable when gate_status = 'pass', or when
+    // gate_status IS NULL and the legacy stamp parses to PASS. The column
+    // wins, so a stale PASS stamp under a 'block' column never ships.
+    // TODO(#4913 burn-in): the stamp half of `effectiveGateStatus` goes next cycle.
+    if (effectiveGateStatus(post) !== 'pass') {
       await repo.markNeedsChanges(
         post.id,
         'Approved without a publish-gate PASS, so nothing independent has reviewed it. ' +
@@ -523,10 +647,11 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
 
     // The deterministic gate runs HERE, not only at gate time. Time passes
     // between approval and the scheduled slot, and stock is the thing that
-    // moves in it. The handle comes from the stamp unless a caller overrides.
+    // moves in it. The handle comes from the row's product linkage (stamp
+    // fallback during burn-in) unless a caller overrides.
     const productHandle = deps.productHandleFor
       ? await deps.productHandleFor(post)
-      : stamp.productHandle
+      : await resolvePostProductHandle(post, deps.productHandleById)
     const gate = await runDeterministicPublishChecks({
       caption,
       mediaUrls: post.mediaUrls ?? [],
@@ -537,7 +662,7 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
 
     if (gate.blocked || gate.held) {
       const summary = gate.findings.map(f => `[${f.check}] ${f.detail}`).join(' ')
-      await repo.markNeedsChanges(post.id, summary)
+      await repo.markNeedsChanges(post.id, preserveGateStamp(post.feedback, summary) ?? summary)
       attempts.push({ postId: post.id, outcome: 'blocked_by_gate', findings: gate.findings })
       continue
     }
@@ -573,5 +698,6 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     watch,
     platform,
     ...(spendUsd !== undefined ? { spendUsd: spendUsd + spentThisTick } : {}),
+    ...expiredField,
   }
 }

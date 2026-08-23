@@ -56,6 +56,7 @@ import {
   type GateFinding,
   type GatePlatform,
 } from './social-publish-gate.server'
+import { findingToStored, type GateStatusValue, type StoredGateFinding } from './social-gate-status'
 
 /**
  * Platforms this gate may verdict.
@@ -118,6 +119,13 @@ export interface PublishGateVerdictInput {
   featuresProduct: boolean
   /** The featured product's Shopify handle. Required when `featuresProduct`. */
   productHandle?: string | undefined
+  /**
+   * The findings the verdict carried, if the gate itemised them. Optional and
+   * lenient on shape: `{check, verdict, note}` is the stored form, and the
+   * deterministic gate's `{check, severity, detail}` is accepted too. Stored
+   * in `gate_findings` (Phase 5, #4913) beside the deterministic findings.
+   */
+  findings?: StoredGateFinding[] | undefined
 }
 
 export type PublishGateParse =
@@ -219,7 +227,55 @@ export function parsePublishGateVerdict(raw: unknown): PublishGateParse {
     featuresProduct,
   }
   if (featuresProduct) parsed.productHandle = handle
+  if (g['findings'] !== undefined) {
+    if (!Array.isArray(g['findings'])) {
+      return { ok: false, status: 400, error: 'Bad Request: gate.findings, when present, must be an array' }
+    }
+    parsed.findings = normaliseAgentFindings(g['findings'])
+  }
   return { ok: true, verdict: parsed }
+}
+
+/**
+ * Map whatever shape the agent itemised its findings in onto the stored
+ * `{check, verdict, note}` form. Entries with no usable `check` are dropped
+ * rather than 400ing the verdict: the findings are an annotation, and the
+ * verdict plus notes are the contract.
+ */
+export function normaliseAgentFindings(raw: unknown[]): StoredGateFinding[] {
+  const out: StoredGateFinding[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const f = item as Record<string, unknown>
+    const check = typeof f['check'] === 'string' ? f['check'].trim() : ''
+    if (!check) continue
+    const rawVerdict =
+      typeof f['verdict'] === 'string' ? f['verdict']
+      : typeof f['severity'] === 'string' ? f['severity']
+      : 'pass'
+    const v = rawVerdict.toLowerCase()
+    const verdict =
+      v === 'block' ? 'block'
+      : v === 'hold' || v === 'hold-for-owner' ? 'hold'
+      : v === 'revise' || v === 'warn' ? 'revise'
+      : 'pass'
+    const note =
+      typeof f['note'] === 'string' ? f['note'].trim()
+      : typeof f['detail'] === 'string' ? f['detail'].trim()
+      : ''
+    out.push(note ? { check, verdict, note } : { check, verdict })
+  }
+  return out
+}
+
+/** The `gate_status` column value a verdict lands as (Phase 5, #4913). */
+export function gateStatusForVerdict(verdict: PublishGateVerdict): GateStatusValue {
+  switch (verdict) {
+    case 'PASS': return 'pass'
+    case 'REVISE': return 'revise'
+    case 'BLOCK': return 'block'
+    case 'HOLD': return 'hold'
+  }
 }
 
 // ── The gate stamp ──────────────────────────────────────────────────────────
@@ -231,8 +287,9 @@ export function parsePublishGateVerdict(raw: unknown): PublishGateParse {
  * opens with a line he can read at a glance and the gate's own notes follow it
  * unchanged.
  */
-const STAMP_RE =
-  /^\[publish-gate (PASS|REVISE|BLOCK|HOLD) by ([^\]]+?) on (\d{4}-\d{2}-\d{2}), product: ([a-z0-9._-]+|none)\]/
+// Shared with the review card (client-safe); see app/lib/gate-stamp.ts.
+import { STAMP_RE, splitGateStamp } from './gate-stamp'
+export { splitGateStamp }
 
 export interface GateStamp {
   verdict: PublishGateVerdict
@@ -257,7 +314,13 @@ export function formatGateStamp(
   return `[publish-gate ${input.verdict} by ${input.reviewer} on ${day}, product: ${product}]\n${input.notes}`
 }
 
-/** Recover a stamp from a `feedback` value. Returns null when there is none. */
+/**
+ * Recover a stamp from a `feedback` value. Returns null when there is none.
+ *
+ * The header matches at any line start, not only the first character, because
+ * the burn-in writers (`preserveGateStamp`, the `[expired]` prefix) keep the
+ * stamp block inside a field that now opens with something else.
+ */
 export function parseGateStamp(feedback: string | null | undefined): GateStamp | null {
   if (!feedback) return null
   const m = STAMP_RE.exec(feedback)
@@ -269,6 +332,52 @@ export function parseGateStamp(feedback: string | null | undefined): GateStamp |
     day: day ?? '',
     productHandle: product === 'none' ? null : (product ?? null),
   }
+}
+
+/**
+ * Split a `feedback` value into the stamp block (header line plus the gate's
+ * notes paragraph, up to the first blank line) and everything else.
+ */
+
+/**
+ * Burn-in helper (Phase 5, #4913). A writer that replaces `feedback` routes
+ * its new text through this so a gate stamp a legacy reader still depends on
+ * is carried along after it. `gate_status` is the verdict of record; the
+ * stamp is kept only until the fallback readers go.
+ *
+ * TODO(#4913 burn-in): remove once no reader falls back to the stamp.
+ */
+export function preserveGateStamp(
+  existing: string | null | undefined,
+  next: string | null | undefined,
+): string | null {
+  const { stamp } = splitGateStamp(existing)
+  const body = (next ?? '').trim()
+  if (!stamp) return body || null
+  if (body.includes(stamp)) return body
+  return body ? `${body}\n\n${stamp}` : stamp
+}
+
+/**
+ * The verdict a reader acts on: the column when it is set, else what the
+ * legacy stamp says. Null when neither exists. The column always wins, so a
+ * stale PASS stamp under a `block` column never publishes.
+ *
+ * TODO(#4913 burn-in): collapse to `post.gateStatus` once the stamp fallback
+ * is retired.
+ */
+export function effectiveGateStatus(
+  post: { gateStatus?: string | null; feedback?: string | null },
+): GateStatusValue | null {
+  const col = post.gateStatus
+  if (col === 'pass' || col === 'revise' || col === 'block' || col === 'hold') return col
+  const stamp = parseGateStamp(post.feedback)
+  return stamp ? gateStatusForVerdict(stamp.verdict) : null
+}
+
+/** A row the unattended publisher may ship: `gate_status = 'pass'`, or (legacy, column null) a PASS stamp. */
+export function hasGatePass(post: { gateStatus?: string | null; feedback?: string | null }): boolean {
+  return effectiveGateStatus(post) === 'pass'
 }
 
 // ── Applying a verdict ──────────────────────────────────────────────────────
@@ -300,12 +409,19 @@ export interface ApproveRepo {
    * would block that by design.
    */
   recentCaptions: (limit: number, platform: GatePlatform) => Promise<string[]>
-  write: (id: number, patch: {
-    reviewStatus: ReviewStatus
-    feedback: string
-    reviewedBy: string
-    reviewedAt: Date
-  }) => Promise<void>
+  write: (id: number, patch: ApprovePatch) => Promise<void>
+}
+
+/** Everything a verdict writes. The stamp in `feedback` is dual-written for burn-in (#4913). */
+export interface ApprovePatch {
+  reviewStatus: ReviewStatus
+  feedback: string
+  reviewedBy: string
+  reviewedAt: Date
+  gateStatus: GateStatusValue
+  gateCheckedAt: Date
+  gateFindings: StoredGateFinding[]
+  updatedAt: Date
 }
 
 export type PostRow = typeof socialPosts.$inferSelect
@@ -381,8 +497,25 @@ export async function applyPublishGateVerdict(
     }
   }
 
-  const write = (reviewStatus: ReviewStatus, feedback: string) =>
-    repo.write(id, { reviewStatus, feedback, reviewedBy: input.reviewer.slice(0, 60), reviewedAt: now })
+  // Dual write (Phase 5, #4913): the columns are the verdict of record, and
+  // the stamp in `feedback` stays for one cycle so an old reader cannot break.
+  const write = (
+    reviewStatus: ReviewStatus,
+    feedback: string,
+    gateStatus: GateStatusValue,
+    findings: StoredGateFinding[],
+  ) =>
+    repo.write(id, {
+      reviewStatus,
+      feedback,
+      reviewedBy: input.reviewer.slice(0, 60),
+      reviewedAt: now,
+      gateStatus,
+      gateCheckedAt: now,
+      gateFindings: findings,
+      updatedAt: now,
+    })
+  const agentFindings = input.findings ?? []
 
   // A non-PASS needs no verification: it is not going anywhere. Recording it is
   // the whole job, and REVISE/BLOCK carry the reason the drafter has to act on.
@@ -391,7 +524,12 @@ export async function applyPublishGateVerdict(
       input.verdict === 'BLOCK' ? 'rejected'
       : input.verdict === 'REVISE' ? 'needs_changes'
       : 'pending_review'   // HOLD: left where the owner will see it
-    await write(reviewStatus, formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now))
+    await write(
+      reviewStatus,
+      formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now),
+      gateStatusForVerdict(input.verdict),
+      agentFindings,
+    )
     return { ok: true, reviewStatus }
   }
 
@@ -428,6 +566,8 @@ export async function applyPublishGateVerdict(
         },
         now,
       ),
+      'revise',
+      [...agentFindings, ...gate.findings.map(findingToStored)],
     )
     return {
       ok: false,
@@ -437,7 +577,12 @@ export async function applyPublishGateVerdict(
     }
   }
 
-  await write('approved', formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now))
+  await write(
+    'approved',
+    formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now),
+    'pass',
+    [...agentFindings, ...gate.findings.map(findingToStored)],
+  )
   return { ok: true, reviewStatus: 'approved' }
 }
 
@@ -533,6 +678,11 @@ export interface ReworkPatch {
   feedback: null
   reviewedBy: null
   reviewedAt: null
+  /** Cleared with the stamp (#4913): a reworked row has no verdict until the gate looks again. */
+  gateStatus: null
+  gateCheckedAt: null
+  gateFindings: null
+  updatedAt: Date
   mediaUrls?: string[]
   tweetText?: string
 }
@@ -556,6 +706,7 @@ export type ReworkResult =
 
 export interface ReworkDeps {
   repo?: ReworkRepo
+  now?: () => Date
 }
 
 /**
@@ -598,9 +749,95 @@ export async function reworkSocialPost(
     feedback: null,
     reviewedBy: null,
     reviewedAt: null,
+    gateStatus: null,
+    gateCheckedAt: null,
+    gateFindings: null,
+    updatedAt: deps.now?.() ?? new Date(),
     ...(input.mediaUrls !== undefined ? { mediaUrls: input.mediaUrls } : {}),
     ...(input.tweetText !== undefined ? { tweetText: input.tweetText } : {}),
   }
   await repo.write(id, patch)
+  return { ok: true, reviewStatus: 'pending_review' }
+}
+
+// ── Revert to draft (Social Studio v2, Phase 3, ADR-013 decision 4) ─────────
+
+/**
+ * Remove the gate stamp (header line plus the gate's own notes paragraph) from
+ * a `feedback` value, keeping anything written after a blank line, which is
+ * where owner notes and the manual-publish / stock-guard appendices land.
+ * Returns null when nothing but the stamp was there.
+ */
+export function stripGateStamp(feedback: string | null | undefined): string | null {
+  return splitGateStamp(feedback).rest
+}
+
+export interface RevertPatch {
+  status: 'draft'
+  reviewStatus: 'pending_review'
+  feedback: string | null
+  reviewedBy: null
+  reviewedAt: null
+  gateStatus: null
+  gateCheckedAt: null
+  gateFindings: null
+  updatedAt: Date
+}
+
+export interface RevertRepo {
+  load: (id: number) => Promise<PostRow | null>
+  write: (id: number, patch: RevertPatch) => Promise<void>
+}
+
+export const dbRevertRepo: RevertRepo = {
+  load: dbApproveRepo.load,
+  write: async (id, patch) => {
+    await db.update(socialPosts).set(patch).where(eq(socialPosts.id, id))
+  },
+}
+
+export type RevertResult =
+  | { ok: true; reviewStatus: 'pending_review' }
+  | { ok: false; status: 404 | 409; error: string }
+
+/**
+ * Pull an approved (or bounced, or still-pending) draft back to a clean
+ * `draft`/`pending_review` so the owner can edit it and the gate looks again.
+ *
+ * The stamp is ALWAYS burned: review fields, gate columns and the stamped
+ * `feedback` header are cleared unconditionally, because "I did not really
+ * change anything" cannot be proven and a stale PASS on edited content is
+ * incident #3640 through a different door. Owner notes after the stamp are
+ * kept. `rejected` (gate BLOCK) and `posted` rows are refused: a BLOCK has no
+ * manual override anywhere in this codebase, and history is not relabelled.
+ */
+export async function revertSocialPostToDraft(
+  id: number,
+  deps: { repo?: RevertRepo; now?: () => Date } = {},
+): Promise<RevertResult> {
+  const repo = deps.repo ?? dbRevertRepo
+  const post = await repo.load(id)
+  if (!post) return { ok: false, status: 404, error: `No social post ${id}` }
+  if (post.status === 'posted' || post.status === 'deleted') {
+    return { ok: false, status: 409, error: `Post ${id} is ${post.status}; a published row is history, not a draft.` }
+  }
+  if (post.reviewStatus === 'rejected') {
+    return {
+      ok: false,
+      status: 409,
+      error: `Post ${id} is rejected. A gate BLOCK has no manual override; start a fresh draft instead.`,
+    }
+  }
+  await repo.write(id, {
+    status: 'draft',
+    reviewStatus: 'pending_review',
+    feedback: stripGateStamp(post.feedback),
+    reviewedBy: null,
+    reviewedAt: null,
+    gateStatus: null,
+    gateCheckedAt: null,
+    gateFindings: null,
+    updatedAt: deps.now?.() ?? new Date(),
+  })
   return { ok: true, reviewStatus: 'pending_review' }
 }

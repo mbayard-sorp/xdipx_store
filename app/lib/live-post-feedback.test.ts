@@ -69,6 +69,12 @@ describe('formatLiveFeedback / parseLiveFeedback', () => {
     })
   })
 
+  it('cuts a gate stamp carried behind the verdict out of the note (burn-in, #4913)', () => {
+    const stamp = '[publish-gate PASS by social-publish-gate on 2026-08-20, product: dame-aer]\nClean frame.'
+    const stored = `${formatLiveFeedback('off', 'too salesy')}\n\n${stamp}`
+    expect(parseLiveFeedback(stored)).toEqual({ verdict: 'off', note: 'too salesy' })
+  })
+
   it('keeps the note readable as plain text for anyone reading the column raw', () => {
     // The retro quotes feedback verbatim to the owner, so the stored form has
     // to stay human-legible rather than becoming an encoding.

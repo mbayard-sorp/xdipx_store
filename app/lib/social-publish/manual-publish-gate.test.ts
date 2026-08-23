@@ -152,6 +152,29 @@ describe('decideManualPublish', () => {
     expect(decision.ok).toBe(true)
   })
 
+  it('hands the row-resolved product handle to the checks, column linkage ahead of the stamp (#4913)', async () => {
+    // The route resolves the handle through resolvePostProductHandle; this
+    // pins the seam: whatever it resolves is what the stock check runs on.
+    const { resolvePostProductHandle } = await import('./product-handle.server')
+    const stamped = '[publish-gate PASS by g on 2026-08-20, product: stale-handle]\nok.'
+    const fromColumn = await resolvePostProductHandle(
+      { shopifyProductId: 'gid://shopify/Product/1', feedback: stamped },
+      async () => 'fresh-handle',
+    )
+    const fromStamp = await resolvePostProductHandle(
+      { shopifyProductId: null, feedback: stamped },
+      async () => { throw new Error('must not be called') },
+    )
+    expect(fromColumn).toBe('fresh-handle')
+    expect(fromStamp).toBe('stale-handle')
+
+    const runChecks = clean()
+    await decideManualPublish(
+      { ...POST, platform: 'x', productHandle: fromColumn }, valveAlwaysOn, { runChecks },
+    )
+    expect(runChecks).toHaveBeenCalledWith(expect.objectContaining({ productHandle: 'fresh-handle' }))
+  })
+
   it('maps media kind to the governing valve key', () => {
     expect(manualPublishValveKey(false)).toBe(VALVE_KEYS.instagramAutopublish)
     expect(manualPublishValveKey(true)).toBe(VALVE_KEYS.videoAutopublish)

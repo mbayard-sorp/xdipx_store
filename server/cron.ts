@@ -643,6 +643,29 @@ export function createCronRoutes() {
     }
   })
 
+  /**
+   * GET|POST /cron/social-metrics-sweep
+   * Schedule: every 6 hours. Refreshes metrics_json on posted Instagram and X
+   * rows from the last 30 days and appends an IG follower reading (Social
+   * Studio v2 Phase 6b, ticket #4916).
+   *
+   * SHIPS INERT: social_metrics_sweep_enabled defaults off and is read every
+   * tick. X bills per metrics read, so the valve and x_metrics_max_reads_month
+   * are owner-only spend controls. Read-only against both platforms.
+   * Awaited before responding, same reason as social-publish.
+   */
+  cronRoute('/social-metrics-sweep', async (_req, res) => {
+    try {
+      const { runSocialMetricsSweep } =
+        await import('../app/lib/social-metrics-sweep.server.js')
+      const result = await runSocialMetricsSweep()
+      res.json({ ok: true, result })
+    } catch (err) {
+      console.error('[cron/social-metrics-sweep] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
   cronRoute('/import-monitor', async (_req, res) => {
     try {
       const { getPipelineSetting } = await import('../app/lib/feed-processor.server.js')
