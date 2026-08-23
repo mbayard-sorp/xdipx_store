@@ -41,7 +41,7 @@ export function CastPicker({
                     on ? 'border-plum bg-plum-soft text-plum-2' : 'border-line bg-paper text-ink-3 hover:border-ink-4'
                   }`}
                 >
-                  <img src={m.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover bg-paper-3" loading="lazy" />
+                  <img src={avatarUrl(m.photoUrl)} alt="" className="w-8 h-8 rounded-full object-cover bg-paper-3" loading="lazy" />
                   <span className="font-medium">{m.name}</span>
                   {on && <CheckIcon size={14} />}
                 </button>
@@ -52,4 +52,11 @@ export function CastPicker({
       )}
     </fieldset>
   )
+}
+
+/** A 96px square crop for the chip; the roster carries 1600px masters. */
+function avatarUrl(url: string): string {
+  if (!url.includes('cdn.sanity.io')) return url
+  const base = url.split('?')[0] ?? url
+  return `${base}?w=96&h=96&fit=crop&auto=format&q=70`
 }

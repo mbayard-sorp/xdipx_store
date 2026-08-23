@@ -116,7 +116,7 @@ export function CalendarGrid({ days, todayLa, posts, caps, capsByDay, pendingId,
   return (
     <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0" data-dragging={dragId != null ? 'true' : undefined}>
       <div
-        className="min-w-[980px] rounded-2xl border border-line bg-paper overflow-hidden"
+        className="min-w-[840px] rounded-2xl border border-line bg-paper overflow-hidden"
         role="grid"
         aria-label="Week grid, Los Angeles time"
         aria-rowcount={HOURS.length + 3}

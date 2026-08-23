@@ -9,6 +9,7 @@ import {
   type SocialPostRow,
 } from './types'
 import { X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
+import { splitGateStamp } from '~/lib/gate-stamp'
 
 /** Image or muted-preview video, same box either way. */
 export interface MediaRef { url: string; video: boolean; poster: string | null }
@@ -58,7 +59,11 @@ function MediaBox({ media, className }: { media: MediaRef; className: string }) 
 export function PostPreviewCard({ post }: { post: SocialPostRow }) {
   const fetcher = useFetcher<{ ok: boolean; error?: string }>()
   const [caption, setCaption] = useState(post.editedText ?? post.tweetText)
-  const [feedback, setFeedback] = useState(post.feedback ?? '')
+  // The owner edits only their own note. The gate's stamp paragraph is
+  // machine-written and shown read-only below; it must never round-trip
+  // through the textarea (a stray edit would burn the stamp, #4913).
+  const gateStamp = splitGateStamp(post.feedback)
+  const [feedback, setFeedback] = useState(gateStamp.rest ?? '')
   const [feedbackError, setFeedbackError] = useState(false)
 
   const isSubmitting = fetcher.state !== 'idle'
@@ -170,6 +175,11 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
             />
             {feedbackError && (
               <p className="text-xs text-red-500 mt-1">Feedback is required when requesting changes.</p>
+            )}
+            {gateStamp.stamp && (
+              <p className="mt-1 font-mono text-[11px] leading-snug text-ink-3 break-words" title="Written by the publish gate; kept with your note">
+                {gateStamp.stamp}
+              </p>
             )}
           </div>
 

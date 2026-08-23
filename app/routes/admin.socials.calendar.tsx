@@ -118,7 +118,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .orderBy(socialPosts.scheduledAt, socialPosts.scheduledFor)
       .limit(500),
     db.select(COLS).from(socialPosts)
-      .where(and(eq(socialPosts.status, 'draft'), isNull(socialPosts.scheduledAt), isNull(socialPosts.scheduledFor)))
+      // Rejected drafts are not schedulable (no override, a fresh draft is the
+      // way back), so they stay out of the rail.
+      .where(and(eq(socialPosts.status, 'draft'), ne(socialPosts.reviewStatus, 'rejected'), isNull(socialPosts.scheduledAt), isNull(socialPosts.scheduledFor)))
       .orderBy(desc(socialPosts.createdAt))
       .limit(50),
     loadCaps(),
