@@ -793,7 +793,7 @@ function PostRow({ post, stockByProduct, selected, linkTo }: {
         </div>
         <p className="text-sm text-ink truncate">{captionFirstLine || '(empty caption)'}</p>
         <div className="flex items-center gap-2 text-[11px] text-ink-4 font-mono">
-          <span>#{post.id}</span>
+          <span className="rounded border border-line bg-paper-2 px-1.5 py-px font-semibold text-ink tabular-nums">#{post.id}</span>
           {post.scheduledFor && <span>{post.scheduledFor}</span>}
           {post.shopifyProductId && <ProductStockChip inStock={stockByProduct[post.shopifyProductId]} />}
         </div>
@@ -1228,11 +1228,7 @@ function MediaSlab({ post, genStartedAt, busy }: { post: SocialPostRow; genStart
           <img src={urls[0]} alt={post.altText ?? ''} className="w-full max-h-[420px] object-contain" />
         )
       ) : (
-        <div className="flex gap-1 overflow-x-auto p-1">
-          {urls.map((u, i) => (
-            <img key={i} src={u} alt={post.altText ?? ''} className="h-56 w-auto shrink-0 rounded object-cover" />
-          ))}
-        </div>
+        <SlideFlipper key={post.id} urls={urls} alt={post.altText ?? ''} />
       )}
       {generating && (
         <div className="absolute inset-0 bg-ink/70 flex flex-col items-center justify-center gap-2 text-white text-sm">
@@ -1241,6 +1237,49 @@ function MediaSlab({ post, genStartedAt, busy }: { post: SocialPostRow; genStart
           <ElapsedTimer startedAt={genStartedAt} />
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Carousel viewer: one slide at a time with prev/next, a slide counter, and a
+ * thumbnail strip, the way the post reads on Instagram. Keyed by post id in the
+ * caller so the index resets when the selection changes.
+ */
+function SlideFlipper({ urls, alt }: { urls: string[]; alt: string }) {
+  const [index, setIndex] = useState(0)
+  const i = Math.min(index, urls.length - 1)
+  const go = (n: number) => setIndex((n + urls.length) % urls.length)
+  return (
+    <div
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'ArrowLeft') go(i - 1); if (e.key === 'ArrowRight') go(i + 1) }}
+      className="outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
+      aria-label={`Carousel, slide ${i + 1} of ${urls.length}`}
+    >
+      <div className="relative">
+        <img src={urls[i]} alt={alt} className="w-full max-h-[420px] object-contain" />
+        <button type="button" onClick={() => go(i - 1)} aria-label="Previous slide"
+          className="absolute left-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-paper/90 border border-line text-ink text-lg leading-none shadow-sm hover:bg-paper active:scale-95 transition-all">
+          ‹
+        </button>
+        <button type="button" onClick={() => go(i + 1)} aria-label="Next slide"
+          className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-paper/90 border border-line text-ink text-lg leading-none shadow-sm hover:bg-paper active:scale-95 transition-all">
+          ›
+        </button>
+        <span className="absolute bottom-2 right-2 rounded-full bg-ink/75 text-white text-[11px] font-mono tabular-nums px-2 py-0.5">
+          {i + 1} / {urls.length}
+        </span>
+      </div>
+      <div className="flex gap-1 overflow-x-auto p-1 border-t border-line bg-paper-2">
+        {urls.map((u, n) => (
+          <button key={n} type="button" onClick={() => setIndex(n)} aria-label={`Go to slide ${n + 1}`}
+            className={`relative h-14 w-11 shrink-0 rounded overflow-hidden border-2 transition-colors ${n === i ? 'border-plum' : 'border-transparent hover:border-ink-4'}`}>
+            <img src={u} alt="" className="h-full w-full object-cover" />
+            <span className="absolute bottom-0 left-0 bg-ink/70 text-white text-[9px] font-mono px-1">{n + 1}</span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
