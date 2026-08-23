@@ -434,6 +434,8 @@ talking about these products*, not as a catalogue. That premise is the test to a
 is technically compliant but feels wrong: would this read as a person with a life, or as a product
 listing with a human decoration attached?
 
+**When the model will not hold the product, use the packshot on a card (owner catch 2026-08-22).** Four plate renders of the Womanizer Classic 2 in a row invented a white body, then a stylus tip, with the packshot passed as reference and the defect named in the prompt; negations do not hold on the current provider. The fallback for a product slide is the real Shopify packshot composited onto a brand card (kicker, one line, XDIPX, slide counter) by `scripts/generate-slate-carousel-slides.ts` kind `packshot`. It is generated social art under a `social-` filename, so provenance passes, and it is the one representation that cannot drift. Reach for it after the second failed plate, not the fifth.
+
 **Solo product shot: licensed, as slide 2, and it must still be generated art.** A product-only
 frame may run as the second slide of a carousel when it is genuinely useful (showing scale, finish,
 controls, or what is in the box). It may **never** be the lead. And there is a hard mechanical

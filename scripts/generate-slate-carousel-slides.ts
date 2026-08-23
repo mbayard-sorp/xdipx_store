@@ -21,7 +21,9 @@ function fontData(rel: string): string {
 
 interface Slide { kind: 'text'; kicker?: string; text: string; tone: 'coral' | 'plum' | 'paper' }
 interface ProductSlide { kind: 'product'; prompt: string }
-interface Post { id: number; handle: string; leadUrl: string; mood: string; slides: (Slide | ProductSlide)[] }
+/** The real packshot on a brand card: the one product representation that cannot drift. */
+interface PackshotSlide { kind: 'packshot'; kicker: string; text: string; imageIndex?: number }
+interface Post { id: number; handle: string; leadUrl: string; mood: string; slides: (Slide | ProductSlide | PackshotSlide)[] }
 
 const POSTS: Post[] = [
   { id: 88, handle: 'womanizer-next-sage', mood: 'gap-carousel',
@@ -38,7 +40,7 @@ const POSTS: Post[] = [
     slides: [
       { kind: 'text', tone: 'coral', text: 'it’s not a vibrator. nothing buzzes, and it never touches your clitoris.' },
       { kind: 'text', tone: 'paper', kicker: 'how it works', text: 'a soft silicone ring seals over the clitoris and pulses air pressure inside it: suction, release, suction, release, many times a second.' },
-      { kind: 'product', prompt: 'Product macro of the exact device in the reference photo: a MATTE BLACK Womanizer Classic 2 air-pulsation stimulator, a smooth black teardrop-shaped curved body about 6 inches long with a small round black silicone nozzle (a soft ring with a hollow opening) low on the front face and two small flush buttons on the side. It is entirely black, no white, no rose gold, no metal trim. Resting on a warm coral-soft plaster surface in bright window daylight, nozzle angled toward the camera, soft diagonal shadow, shallow depth of field, packaging-free, photoreal editorial still life, no text, no logos, 4:5 portrait.' },
+      { kind: 'packshot', kicker: 'womanizer classic 2', text: 'the nozzle seals over the clitoris. nothing else touches you.', imageIndex: 1 },
       { kind: 'text', tone: 'plum', kicker: 'womanizer classic 2', text: 'the one that made air pulsation click for people who tried a bullet and shrugged.' },
       { kind: 'text', tone: 'paper', kicker: 'first reaction', text: '“wait, that’s it?” then a very different noise about ninety seconds later.' },
       { kind: 'text', tone: 'coral', text: 'save this for the next time your group chat argues about which toy to buy first.' },
@@ -66,6 +68,26 @@ function slideHtml(s: Slide, n: number, total: number): string {
   .rule{width:120px;height:6px;background:${t.accent};border-radius:3px;margin-bottom:40px}
   </style></head><body><div class="wrap">
     <div>${s.kicker ? `<div class="kicker">${s.kicker}</div>` : '<div class="rule"></div>'}</div>
+    <div class="text">${s.text}</div>
+    <div class="foot"><span class="brand">XDIPX</span><span>${n} / ${total}</span></div>
+  </div></body></html>`
+}
+
+function packshotHtml(s: PackshotSlide, imgData: string, n: number, total: number): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  @font-face{font-family:'Newsreader';src:url(${fontData('newsreader/files/newsreader-latin-wght-normal.woff2')}) format('woff2');font-weight:200 800}
+  @font-face{font-family:'DM Sans';src:url(${fontData('dm-sans/files/dm-sans-latin-wght-normal.woff2')}) format('woff2');font-weight:100 900}
+  html,body{margin:0;width:1080px;height:1350px;background:#FFFFFF;color:#1A1418}
+  .wrap{box-sizing:border-box;width:1080px;height:1350px;padding:100px 96px;display:flex;flex-direction:column;justify-content:space-between}
+  .kicker{font-family:'DM Sans';font-weight:600;font-size:28px;letter-spacing:.18em;text-transform:uppercase;color:#7A2BB8}
+  .shot{flex:1;display:flex;align-items:center;justify-content:center;margin:40px 0}
+  .shot img{max-height:680px;max-width:760px;object-fit:contain}
+  .text{font-family:'Newsreader';font-weight:450;font-size:64px;line-height:1.14;letter-spacing:-.01em}
+  .foot{display:flex;justify-content:space-between;align-items:flex-end;font-family:'DM Sans';font-size:26px;color:#6B5F68;margin-top:48px}
+  .brand{font-weight:700;letter-spacing:.12em;color:#1A1418}
+  </style></head><body><div class="wrap">
+    <div class="kicker">${s.kicker}</div>
+    <div class="shot"><img src="${imgData}"></div>
     <div class="text">${s.text}</div>
     <div class="foot"><span class="brand">XDIPX</span><span>${n} / ${total}</span></div>
   </div></body></html>`
@@ -109,6 +131,17 @@ async function main() {
         writeFileSync(join(out, `${post.id}-${n}.jpg`), buf)
         if (!dry) urls.push(await uploadMoodImageToShopifyFiles(Buffer.from(buf), filename))
         console.log(`post ${post.id} slide ${n}/${total} text card`)
+      } else if (s.kind === 'packshot') {
+        const src = product?.images?.[s.imageIndex ?? 0]?.url ?? product?.images?.[0]?.url
+        if (!src) throw new Error(`post ${post.id}: no packshot for ${post.handle}`)
+        const pbuf = Buffer.from(await (await fetch(src)).arrayBuffer())
+        const imgData = `data:image/jpeg;base64,${pbuf.toString('base64')}`
+        await page.setContent(packshotHtml(s, imgData, n, total), { waitUntil: 'load' })
+        await page.evaluate(() => (document as any).fonts.ready)
+        const buf = await page.screenshot({ type: 'jpeg', quality: 92 })
+        writeFileSync(join(out, `${post.id}-${n}.jpg`), buf)
+        if (!dry) urls.push(await uploadMoodImageToShopifyFiles(Buffer.from(buf), filename))
+        console.log(`post ${post.id} slide ${n}/${total} packshot card`)
       } else {
         if (dry) { console.log(`post ${post.id} slide ${n}/${total} product (dry, skipped)`); continue }
         const r = await generateAndUploadSocialImage({
