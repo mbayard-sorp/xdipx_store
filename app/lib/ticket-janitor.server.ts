@@ -55,7 +55,7 @@
  * remainder.
  */
 
-import { and, eq, isNull, notInArray, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { suggestionLinks } from '../../db/schema'
 import {
@@ -1003,8 +1003,91 @@ export interface ReconcileResult {
   /** Distinct PRs actually read from GitHub. */
   checked: number
   updated: Array<{ linkId: number; ref: string; from: string | null; to: string }>
+  /** New 'pr' links added for a just-closed link whose ticket has an open
+   *  replacement PR on its own `ticket/<id>` branch (the agents/->ticket/
+   *  re-file pattern). */
+  adopted: Array<{ suggestionId: number; number: number; ref: string }>
   /** True when GitHub was unconfigured and nothing was attempted. */
   skipped: boolean
+}
+
+/**
+ * Pure decision for `adoptReplacementPrLinks`: of the links just marked closed
+ * unmerged, which have a live replacement PR on their own `ticket/<suggestionId>`
+ * branch worth linking. A pick is made only when the open PR on that branch is a
+ * DIFFERENT PR from the closed one and the ticket does not already link it.
+ * Deduped within one pass. No I/O, so it is unit-tested directly.
+ */
+export function pickReplacementAdoptions(
+  closed: ReadonlyArray<{ suggestionId: number; closedNumber: number }>,
+  openTicketPrs: ReadonlyArray<{ number: number; headRef: string; htmlUrl: string }>,
+  existingPrNumbersBySuggestion: ReadonlyMap<number, ReadonlySet<number>>,
+): Array<{ suggestionId: number; number: number; ref: string }> {
+  const byBranch = new Map<string, { number: number; htmlUrl: string }>()
+  for (const pr of openTicketPrs) {
+    // First open PR wins for a branch; a branch maps to one ticket by convention.
+    if (!byBranch.has(pr.headRef)) byBranch.set(pr.headRef, { number: pr.number, htmlUrl: pr.htmlUrl })
+  }
+  const out: Array<{ suggestionId: number; number: number; ref: string }> = []
+  const seen = new Set<string>()
+  for (const { suggestionId, closedNumber } of closed) {
+    const pr = byBranch.get(`ticket/${suggestionId}`)
+    if (!pr || pr.number === closedNumber) continue
+    if (existingPrNumbersBySuggestion.get(suggestionId)?.has(pr.number)) continue
+    const key = `${suggestionId}:${pr.number}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ suggestionId, number: pr.number, ref: pr.htmlUrl })
+  }
+  return out
+}
+
+/**
+ * When an autofiled ticket's PR is closed unmerged and the same work re-lands on
+ * the ticket's own `ticket/<id>` branch (the agents/->ticket/ re-file that dodges
+ * the agent-allowlist check: PR #844 -> #848 on branch `ticket/4878`, 2026-08-22),
+ * the stored link is left pointing at the dead PR and QA has to rediscover the
+ * live one, risking a false "PR closed, ticket stuck" bounce (#4890). This adopts
+ * the OPEN replacement: for each just-closed link whose ticket has an open PR on
+ * branch `ticket/<suggestionId>`, add a fresh 'open' pr link to it. Only open
+ * replacements are adopted -- the sanctioned `listOpenPullRequests` helper cannot
+ * see a merged/closed replacement by branch, and a merged replacement's ticket
+ * STATUS is already reconciled by the out-of-band sweep's cited-PR fallback.
+ * Writes only the link table, never a ticket status, preserving this module's
+ * documented write boundary.
+ */
+async function adoptReplacementPrLinks(
+  closed: Array<{ suggestionId: number; closedNumber: number }>,
+): Promise<ReconcileResult['adopted']> {
+  if (closed.length === 0) return []
+  const open = await listOpenPullRequests({ headPrefixes: ['ticket/'], context: 'ticket-janitor' })
+  if (!open.ok) return []
+
+  // Existing pr-link numbers per affected ticket, so a replay never double-links.
+  const suggestionIds = [...new Set(closed.map(c => c.suggestionId))]
+  const existing = await db
+    .select({ suggestionId: suggestionLinks.suggestionId, ref: suggestionLinks.ref })
+    .from(suggestionLinks)
+    .where(and(eq(suggestionLinks.kind, 'pr'), inArray(suggestionLinks.suggestionId, suggestionIds)))
+  const existingBySugg = new Map<number, Set<number>>()
+  for (const row of existing) {
+    const n = parsePrNumber(row.ref)
+    if (n === null) continue
+    const set = existingBySugg.get(row.suggestionId) ?? new Set<number>()
+    set.add(n)
+    existingBySugg.set(row.suggestionId, set)
+  }
+
+  const picks = pickReplacementAdoptions(closed, open.data, existingBySugg)
+  for (const pick of picks) {
+    await db.insert(suggestionLinks).values({
+      suggestionId: pick.suggestionId,
+      kind: 'pr',
+      ref: pick.ref,
+      state: 'open',
+    })
+  }
+  return picks
 }
 
 /**
@@ -1020,11 +1103,16 @@ export interface ReconcileResult {
 export async function reconcilePrLinkStates(
   opts: { maxChecks?: number } = {},
 ): Promise<ReconcileResult> {
-  if (!isGithubConfigured()) return { checked: 0, updated: [], skipped: true }
+  if (!isGithubConfigured()) return { checked: 0, updated: [], adopted: [], skipped: true }
   const maxChecks = opts.maxChecks ?? MAX_GITHUB_READS
 
   const links = await db
-    .select({ id: suggestionLinks.id, ref: suggestionLinks.ref, state: suggestionLinks.state })
+    .select({
+      id: suggestionLinks.id,
+      ref: suggestionLinks.ref,
+      state: suggestionLinks.state,
+      suggestionId: suggestionLinks.suggestionId,
+    })
     .from(suggestionLinks)
     .where(and(
       eq(suggestionLinks.kind, 'pr'),
@@ -1034,6 +1122,7 @@ export async function reconcilePrLinkStates(
 
   const byNumber = new Map<number, { merged: boolean; state: string } | null>()
   const updated: ReconcileResult['updated'] = []
+  const closed: Array<{ suggestionId: number; closedNumber: number }> = []
 
   for (const link of links) {
     const num = parsePrNumber(link.ref)
@@ -1052,9 +1141,12 @@ export async function reconcilePrLinkStates(
       .set({ state: next, updatedAt: new Date() })
       .where(eq(suggestionLinks.id, link.id))
     updated.push({ linkId: link.id, ref: link.ref, from: link.state, to: next })
+    if (next === 'closed') closed.push({ suggestionId: link.suggestionId, closedNumber: num })
   }
 
-  return { checked: byNumber.size, updated, skipped: false }
+  const adopted = await adoptReplacementPrLinks(closed)
+
+  return { checked: byNumber.size, updated, adopted, skipped: false }
 }
 
 /* ── Weekly blocked-ticket digest (#2863) ──────────────────────────────────── */

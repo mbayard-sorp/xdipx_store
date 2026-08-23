@@ -129,6 +129,10 @@
     {
       "path": "/cron/social-publish",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/cron/social-metrics-sweep",
+      "schedule": "20 */6 * * *"
     }
   ]
 }

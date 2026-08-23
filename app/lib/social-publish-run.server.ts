@@ -74,7 +74,7 @@ export function mediaForPost(post: PostRow):
 /** The publish closure both platforms share, routed through the registry. */
 async function publishViaRegistry(post: PostRow) {
   const { getPublisher } = await import('./social-publish/registry.server')
-  const { parseGateStamp } = await import('./social-publish-approve.server')
+  const { resolvePostProductHandle } = await import('./social-publish/product-handle.server')
   const publisher = getPublisher(post.platform)
   if (!publisher) return { ok: false as const, detail: `No publisher for ${post.platform}` }
 
@@ -85,9 +85,10 @@ async function publishViaRegistry(post: PostRow) {
     postId: post.id,
     media: media.media,
     caption: post.editedText?.trim() || post.tweetText,
-    // The featured product from the gate stamp, for adapters that can tag it
-    // on the post (#3744). Additive only; adapters without tagging ignore it.
-    productTagHandle: parseGateStamp(post.feedback)?.productHandle ?? null,
+    // The featured product, from the row's product linkage with the gate
+    // stamp as burn-in fallback (#4913), for adapters that can tag it on the
+    // post (#3744). Additive only; adapters without tagging ignore it.
+    productTagHandle: await resolvePostProductHandle(post),
     // Accessibility description (migration 084). Additive only; adapters
     // without alt-text support ignore it.
     altText: post.altText ?? null,

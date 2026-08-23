@@ -30,6 +30,7 @@
 
 import { generateImage } from './generate-image.server'
 import { uploadMoodImageToShopifyFiles } from './shopify.server'
+import { tryIngestSocialAsset } from './social-asset-library.server'
 
 /**
  * Filename prefixes that mark an asset as generated social art.
@@ -399,6 +400,8 @@ export interface GenerateCastCompositeOpts {
    */
   aspectRatio?: '4:5' | '16:9'
   caller?: string
+  /** Cast member slug(s) in the frame, recorded on the library row (#4937). */
+  castSlugs?: string[]
 }
 
 export interface GenerateCastCompositeResult {
@@ -417,6 +420,13 @@ export interface GenerateCastCompositeResult {
   requestIds: (string | undefined)[]
   /** fal request id of the stage-1 plate call, when a plate was built. */
   plateRequestId?: string
+  /**
+   * `social_media_assets` id per surviving candidate, index-aligned with
+   * `urls` (#4937). Every candidate gets a row, including the ones the caller
+   * discards; that is the point, the owner wants to see the losers. null when
+   * the library write failed (non-fatal: the image still shipped).
+   */
+  assetIds?: (number | null)[]
 }
 
 export async function generateCastComposite(
@@ -446,6 +456,9 @@ export async function generateCastComposite(
   const urls: string[] = []
   const filenames: string[] = []
   const requestIds: (string | undefined)[] = []
+  const assetIds: (number | null)[] = []
+  const generationBatchId = crypto.randomUUID()
+  const scaledPrompt = withProductScale(opts.prompt, opts.scale)
   for (const [i, falUrl] of frame.urls.entries()) {
     const filename = buildSocialAssetFilename({
       handle: opts.handle,
@@ -461,11 +474,33 @@ export async function generateCastComposite(
       const res = await fetch(falUrl)
       if (!res.ok) continue
       const buffer = Buffer.from(await res.arrayBuffer())
-      urls.push(await uploadMoodImageToShopifyFiles(buffer, filename))
+      const url = await uploadMoodImageToShopifyFiles(buffer, filename)
+      urls.push(url)
       filenames.push(filename)
       // Keep aligned with the surviving urls/filenames (a fetch or upload
       // failure above skips both this filename and its request id).
       requestIds.push(frame.requestIds[i])
+      // Library dual-write (#4937): the buffer is already in hand, so no
+      // re-fetch. Non-fatal; the Shopify url is what the gate checks, so the
+      // row indexes under it and carries the Sanity asset id alongside.
+      const asset = await tryIngestSocialAsset({
+        buffer,
+        filename,
+        contentType: 'image/jpeg',
+        url,
+        aspect: opts.aspectRatio ?? '4:5',
+        source: 'generated',
+        provider: 'fal',
+        model: frame.costKey,
+        prompt: scaledPrompt,
+        archetype: 'cast',
+        productHandle: opts.handle,
+        generationBatchId,
+        isPicked: false,
+        createdBy: opts.caller ?? 'social-media-manager',
+        ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
+      })
+      assetIds.push(asset?.id ?? null)
     } catch (err) {
       console.error(`[social-media] cast candidate rehost failed (billed, dropped): ${filename}`, err)
     }
@@ -476,6 +511,7 @@ export async function generateCastComposite(
     filenames,
     costs,
     requestIds,
+    assetIds,
     ...(frame.plateRequestId ? { plateRequestId: frame.plateRequestId } : {}),
   }
 }
@@ -529,6 +565,8 @@ export interface GenerateSocialImageResult {
   filename: string
   provider: 'atlas' | 'fal' | 'imagen' | 'none'
   model: string
+  /** `social_media_assets` id when the library write succeeded (#4937). */
+  assetId?: number | null
 }
 
 /**
@@ -577,7 +615,24 @@ export async function generateAndUploadSocialImage(
   // `url: null` with a real provider tells the caller "billed but unshipped".
   try {
     const url = await uploadMoodImageToShopifyFiles(buffer, filename)
-    return { url, filename, provider: result.provider, model: result.model }
+    // Library dual-write (#4937), non-fatal, buffer already in hand.
+    const asset = await tryIngestSocialAsset({
+      buffer,
+      filename,
+      contentType: 'image/jpeg',
+      url,
+      aspect: opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
+      source: 'generated',
+      provider: result.provider,
+      model: result.model,
+      prompt: opts.prompt,
+      archetype: opts.archetype,
+      productHandle: opts.handle,
+      generationBatchId: crypto.randomUUID(),
+      isPicked: false,
+      createdBy: opts.caller ?? 'social-media-manager',
+    })
+    return { url, filename, provider: result.provider, model: result.model, assetId: asset?.id ?? null }
   } catch (err) {
     console.error(`[social-media] rehost failed (generation billed, no asset): ${filename}`, err)
     return { url: null, filename, provider: result.provider, model: result.model }

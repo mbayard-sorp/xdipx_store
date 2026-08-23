@@ -138,6 +138,13 @@ export async function action({ request }: ActionFunctionArgs) {
       imageBrief:   typeof b['imageBrief'] === 'string' && b['imageBrief'].length > 0 ? b['imageBrief'] : undefined,
       subject:      typeof b['subject'] === 'string' && b['subject'].length > 0 ? b['subject'] : undefined,
     })
+    // Library pick (#4937): the agent chooses one of the generated candidates
+    // client-side, so the pick is recorded here, by url, when the draft row
+    // is minted. Non-fatal and skipped on a dedupe (the row already exists).
+    if (!deduped && mediaUrls?.length) {
+      const { tryMarkPickedByUrls } = await import('~/lib/social-asset-library.server')
+      await tryMarkPickedByUrls(mediaUrls, id)
+    }
     return Response.json({ id, deduped })
   }
 

@@ -340,6 +340,17 @@ export const SOCIAL_FREQ_DEFAULTS: Record<SocialPlatform, number> = {
 export const SOCIAL_REVIEW_STATUSES = ['pending_review', 'approved', 'needs_changes', 'rejected'] as const
 export type SocialReviewStatus = (typeof SOCIAL_REVIEW_STATUSES)[number]
 
+/**
+ * Monthly ceiling on X metrics reads by /cron/social-metrics-sweep (Social
+ * Studio v2 Phase 6b, ticket #4916). One read = one tweet id looked up, about
+ * $0.005 on X's pay-per-use tier. 1500 is roughly $7.50 a month and covers 24
+ * rows every six hours with headroom. Zero keeps the valve on and pauses X
+ * reads; Instagram insights are free and unaffected. Owner-only, like every
+ * spend control; editable on the Social tab of /admin/homepage-team.
+ */
+export const X_METRICS_MAX_READS_MONTH_KEY = 'x_metrics_max_reads_month'
+export const X_METRICS_MAX_READS_MONTH_DEFAULT = 1500
+
 export const VALVE_KEYS = {
   socialAutopost:     'social_team_autopost',
   suggestionApply:    'suggestion_apply_enabled',
@@ -380,6 +391,12 @@ export const VALVE_KEYS = {
   // X bills per post since February 2026, so this valve is paired with
   // `x_publish_max_spend_usd_month` rather than standing alone.
   xAutopublish:       'x_autopublish_enabled',
+  // Social metrics sweep (Social Studio v2 Phase 6b, ticket #4916): gates the
+  // six-hourly /cron/social-metrics-sweep that refreshes metrics_json on
+  // recent posted rows. Its own valve because X bills per metrics read, so
+  // this is a spend control paired with `x_metrics_max_reads_month`. Default
+  // OFF; `getValve` treats the missing row as off so it ships inert.
+  socialMetricsSweep: 'social_metrics_sweep_enabled',
   chatEnabled:        'chat_enabled',
   smsAgentEnabled:    'sms_agent_enabled',
 } as const

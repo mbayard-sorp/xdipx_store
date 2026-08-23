@@ -98,6 +98,43 @@ describe('wouldClearGateBlock (pure)', () => {
     expect(wouldClearGateBlock(null)).toBe(false)
     expect(wouldClearGateBlock(undefined)).toBe(false)
   })
+  it('is true on gate_status = block whatever the stamp says (#4913, column wins)', () => {
+    expect(wouldClearGateBlock(PASS_STAMP, 'block')).toBe(true)
+    expect(wouldClearGateBlock(null, 'block')).toBe(true)
+    expect(wouldClearGateBlock(PASS_STAMP, 'pass')).toBe(false)
+  })
+})
+
+describe('reviewSocialPost keeps the gate verdict across an owner approve (#4913 burn-in)', () => {
+  it('preserves the PASS stamp behind the owner note and leaves the gate columns alone', async () => {
+    h.state.selects.push([{ feedback: PASS_STAMP, status: 'draft', gateStatus: 'pass', editedText: null }])
+    h.state.updateResults.push([{ id: 52 }])
+    const result = await reviewSocialPost(52, { reviewStatus: 'approved', feedback: 'ship it', reviewedBy: 'mike' })
+    expect(result).toEqual({ ok: true })
+    const set = h.state.updateSets[0] as Record<string, unknown>
+    expect(String(set['feedback']).startsWith('ship it')).toBe(true)
+    expect(String(set['feedback'])).toContain(PASS_STAMP)
+    expect(set).not.toHaveProperty('gateStatus')
+  })
+
+  it('burns the stamp and the gate columns when the owner also edits the caption', async () => {
+    h.state.selects.push([{ feedback: PASS_STAMP, status: 'draft', gateStatus: 'pass', editedText: null }])
+    h.state.updateResults.push([{ id: 53 }])
+    const result = await reviewSocialPost(53, { reviewStatus: 'approved', editedText: 'a different line', reviewedBy: 'mike' })
+    expect(result).toEqual({ ok: true })
+    const set = h.state.updateSets[0] as Record<string, unknown>
+    expect(set['gateStatus']).toBeNull()
+    expect(set['gateFindings']).toBeNull()
+    expect(set['feedback']).toBeNull()
+  })
+
+  it('refuses to approve on gate_status = block even with no stamp', async () => {
+    h.state.selects.push([{ feedback: null, status: 'draft', gateStatus: 'block', editedText: null }])
+    const result = await reviewSocialPost(54, { reviewStatus: 'approved', reviewedBy: 'mike' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('gate_block')
+    expect(h.state.updateCalls).toBe(0)
+  })
 })
 
 describe('reviewSocialPost gate-BLOCK hard stop (#3895)', () => {

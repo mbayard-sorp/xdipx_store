@@ -72,6 +72,7 @@ import {
   describeSupersededEvidence,
   extractCitedPrNumbers,
   parsePrNumber,
+  pickReplacementAdoptions,
   renderBlockedDigestEmail,
   runBlockedTicketDigest,
   weekBucketKey,
@@ -102,6 +103,71 @@ function row(overrides: Partial<JanitorTicketRow>): JanitorTicketRow {
     ...overrides,
   }
 }
+
+describe('pickReplacementAdoptions', () => {
+  const pr = (number: number, headRef: string) => ({
+    number,
+    headRef,
+    htmlUrl: `https://github.com/mbayard-sorp/xdipx_store/pull/${number}`,
+  })
+
+  it('adopts the open ticket/<id> PR when a closed link is replaced (the #844->#848 case)', () => {
+    // Ticket 4878's autofiled link pointed at PR 844 (agents/ branch), now closed;
+    // the work re-landed on branch ticket/4878 as PR 848.
+    const picks = pickReplacementAdoptions(
+      [{ suggestionId: 4878, closedNumber: 844 }],
+      [pr(848, 'ticket/4878'), pr(999, 'ticket/1234')],
+      new Map(),
+    )
+    expect(picks).toEqual([
+      { suggestionId: 4878, number: 848, ref: 'https://github.com/mbayard-sorp/xdipx_store/pull/848' },
+    ])
+  })
+
+  it('does not adopt when no open PR sits on the ticket branch', () => {
+    expect(
+      pickReplacementAdoptions([{ suggestionId: 4878, closedNumber: 844 }], [pr(848, 'ticket/9999')], new Map()),
+    ).toEqual([])
+  })
+
+  it('never re-links a PR the ticket already links', () => {
+    expect(
+      pickReplacementAdoptions(
+        [{ suggestionId: 4878, closedNumber: 844 }],
+        [pr(848, 'ticket/4878')],
+        new Map([[4878, new Set([848])]]),
+      ),
+    ).toEqual([])
+  })
+
+  it('skips a branch PR that is the same number as the closed link', () => {
+    // Defensive: a link marked closed whose own PR is still the ticket-branch PR
+    // must not be re-adopted as its own replacement.
+    expect(
+      pickReplacementAdoptions([{ suggestionId: 848, closedNumber: 848 }], [pr(848, 'ticket/848')], new Map()),
+    ).toEqual([])
+  })
+
+  it('requires an exact branch match (ticket/48 does not satisfy ticket/4878)', () => {
+    expect(
+      pickReplacementAdoptions([{ suggestionId: 4878, closedNumber: 844 }], [pr(848, 'ticket/48')], new Map()),
+    ).toEqual([])
+  })
+
+  it('dedupes within one pass and picks the first open PR per branch', () => {
+    const picks = pickReplacementAdoptions(
+      [
+        { suggestionId: 4878, closedNumber: 844 },
+        { suggestionId: 4878, closedNumber: 844 },
+      ],
+      [pr(848, 'ticket/4878'), pr(870, 'ticket/4878')],
+      new Map(),
+    )
+    expect(picks).toEqual([
+      { suggestionId: 4878, number: 848, ref: 'https://github.com/mbayard-sorp/xdipx_store/pull/848' },
+    ])
+  })
+})
 
 describe('classifySlaBreaches', () => {
   it('flags pr_open only past 24h, measured on updatedAt', () => {

@@ -27,6 +27,15 @@ export function isLivePostVerdict(v: unknown): v is LivePostVerdict {
 /** `[live:worked] note` — greppable, parseable, and readable as plain text. */
 const LIVE_FEEDBACK_RE = /^\[live:(worked|off|pull)\]\s*([\s\S]*)$/
 
+/**
+ * A gate stamp block carried behind the live verdict for burn-in (#4913,
+ * `preserveGateStamp`). Cut from the note so the Studio shows the owner's
+ * words, not the gate's. Kept as a plain regex here because this module is
+ * client-safe and must not import the `.server` parser.
+ * TODO(#4913 burn-in): remove with the stamp.
+ */
+const TRAILING_STAMP_RE = /\n\n\[publish-gate (?:PASS|REVISE|BLOCK|HOLD) by [\s\S]*$/
+
 export function formatLiveFeedback(verdict: LivePostVerdict, note: string): string {
   const body = note.trim()
   return body ? `[live:${verdict}] ${body}` : `[live:${verdict}]`
@@ -43,5 +52,5 @@ export function parseLiveFeedback(
   if (!feedback) return null
   const m = LIVE_FEEDBACK_RE.exec(feedback.trim())
   if (!m) return null
-  return { verdict: m[1] as LivePostVerdict, note: (m[2] ?? '').trim() }
+  return { verdict: m[1] as LivePostVerdict, note: (m[2] ?? '').replace(TRAILING_STAMP_RE, '').trim() }
 }

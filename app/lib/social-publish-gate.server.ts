@@ -27,6 +27,15 @@
  * Everything here FAILS CLOSED. A check that cannot complete returns a finding
  * rather than silently passing, because "the stock API was down" is not a
  * reason to publish a post about an out-of-stock product.
+ *
+ * Provenance burn-in (Social Studio v2 Phase 2, #4937, ADR-013 decision 5).
+ * `image-provenance` currently passes a url on EITHER test: the legacy
+ * filename-prefix check (`isGeneratedSocialAsset`) OR membership in the
+ * `social_media_assets` library (`isLibraryMember`). The prefix check is
+ * removed in a later cycle once the library holds a full cycle of rows for
+ * every generator and the owner upload path; after that, membership alone
+ * decides and a pasted external url that happens to start with `social-`
+ * can no longer pass. A membership lookup that throws counts as not a member.
  */
 
 import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset } from './social-media.server'
@@ -358,6 +367,8 @@ export async function runDeterministicPublishChecks(
   input: DeterministicGateInput,
   deps?: {
     getAvailability?: (handle: string) => Promise<boolean | null>
+    /** Library membership (#4937). Defaults to the real lookup; a throw is not-a-member. */
+    isLibraryMember?: (url: string) => Promise<boolean>
   },
 ): Promise<DeterministicGateResult> {
   const findings: GateFinding[] = []
@@ -370,15 +381,35 @@ export async function runDeterministicPublishChecks(
   // post, but every draft the social team writes is built around a generated
   // asset, and a post that silently loses its image is a content change nothing
   // reviewed. Owner decision 2026-08-16.
+  //
+  // Burn-in dual check (#4937, see the file header): a url passes on the
+  // legacy prefix OR on library membership. The membership lookup is only
+  // made for urls the prefix check refuses, so a prefix-named post costs no
+  // database read. A lookup that throws is treated as not-a-member.
   const media = input.mediaUrls ?? []
+  const memberOf = deps?.isLibraryMember ?? (async (url: string) => {
+    const { isLibraryMember } = await import('./social-asset-library.server')
+    return isLibraryMember(url)
+  })
+  const offenders: string[] = []
   if (!allMediaAreGeneratedSocialAssets(media)) {
-    const offenders = media.filter(u => !isGeneratedSocialAsset(u))
+    for (const u of media.filter(u => !isGeneratedSocialAsset(u))) {
+      let member = false
+      try {
+        member = await memberOf(u)
+      } catch (err) {
+        console.error(`[social-publish-gate] library membership lookup failed, treating as not a member: ${u}`, err)
+      }
+      if (!member) offenders.push(u)
+    }
+  }
+  if (media.length === 0 || offenders.length > 0) {
     findings.push({
       check: 'image-provenance',
       severity: 'block',
       detail: media.length === 0
         ? `Post has no media. A ${platform === 'x' ? 'published X' : 'published Instagram'} post cannot go out without it.`
-        : `Not generated social art: ${offenders.slice(0, 3).join(', ')}. Packshot-only stills are retired.`,
+        : `Not generated social art (neither a generated-asset filename nor a social image library row): ${offenders.slice(0, 3).join(', ')}. Packshot-only stills are retired.`,
     })
   }
 

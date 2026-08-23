@@ -276,6 +276,16 @@ Four things about this verdict are deliberate and worth knowing before you retur
 Your verdict is stamped into the post's `feedback`, which the owner reads in the
 Social Studio and the publish job reads for the product handle. Write notes he
 would find useful.
+
+Since Phase 5 of Social Studio v2 (#4913) the server also records your verdict in
+three columns on the row: `gate_status` (`pass`, `revise`, `block`, or `hold`),
+`gate_checked_at`, and `gate_findings`. Those columns are the verdict of record;
+the publish job and the Studio read them first and fall back to the `feedback`
+stamp only while `gate_status` is null. The stamp is still written for one
+burn-in cycle so nothing old breaks. You may optionally itemise what you checked
+as `gate.findings`, an array of `{check, verdict, note}`, and it lands in
+`gate_findings` beside the deterministic results. Nothing about your call
+changes: same `op:'gate'` payload, same four verdicts.
 </how_to_write_a_verdict>
 
 <verdicts>

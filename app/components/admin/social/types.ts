@@ -10,6 +10,7 @@ export interface SocialPostRow {
   mediaUrls: string[] | null
   status: string
   errorMessage: string | null
+  postedAt?: string | Date | null
   createdAt: string | Date | null
   createdBy: string | null
   reviewStatus: string
@@ -30,8 +31,14 @@ export interface SocialPostRow {
   altText?: string | null
   imageBrief?: string | null
   subject?: string | null
-  /** When status='posted'. Optional so older fixtures/tests compile. */
-  postedAt?: string | Date | null
+  /** Social Studio v2 columns (084); optional so older callers still type-check. */
+  scheduledAt?: string | Date | null
+  permalink?: string | null
+  gateStatus?: string | null
+  gateCheckedAt?: string | Date | null
+  gateFindings?: { check: string; verdict: string; note?: string }[] | null
+  castSlugs?: string[] | null
+  updatedAt?: string | Date | null
 }
 
 /** True when the draft's media is a video (fanned out from the video pipeline). */
@@ -69,4 +76,24 @@ export function captionOverPlatformLimit(platform: string, caption: string): boo
   if (platform === 'x') return weightedTweetLength(caption) > X_CAPTION_MAX
   if (platform === 'linkedin') return caption.length > LINKEDIN_CAPTION_MAX
   return false
+}
+
+/** The account every live post belongs to. `x.com/xdipx` only worked via a redirect. */
+export const X_HANDLE = 'hello_xdipx'
+export const INSTAGRAM_HANDLE = 'hello_xdipx'
+
+/**
+ * Link to the live post, or null when there is nothing to link to.
+ *
+ * X can be built from the id. Instagram stores a media id, and a media id is
+ * not a URL: the permalink is a second Graph API GET that Phase 4 persists in
+ * a `permalink` column. Until then an Instagram row links to the profile so
+ * the owner lands one tap away rather than on a dead link.
+ */
+export function livePostUrl(post: Pick<SocialPostRow, 'platform' | 'externalPostId'> & { status?: string; permalink?: string | null }): string | null {
+  if ((post.status && post.status !== 'posted') || !post.externalPostId) return null
+  if (post.permalink) return post.permalink
+  if (post.platform === 'x') return `https://x.com/${X_HANDLE}/status/${post.externalPostId}`
+  if (post.platform === 'instagram') return `https://www.instagram.com/${INSTAGRAM_HANDLE}/`
+  return null
 }

@@ -194,16 +194,102 @@ export const socialPosts = pgTable('social_posts', {
   // that goes out of stock after approval still blocks the post, independent
   // of the pre-publish gate's own caller-supplied productHandle snapshot.
   shopifyProductId: varchar('shopify_product_id', { length: 60 }),
-  // Accessibility description + generation brief (migration 084, owner direction
-  // 2026-08-22). altText is what the Instagram publisher sends as alt_text on the
-  // media container; it must never leak into the caption (tweetText). imageBrief
-  // and subject are the durable "what is this image supposed to depict" record
-  // that regeneration/rework reads instead of reverse-engineering it from the
-  // caption text.
+  // Accessibility description + generation brief (migration 085, owner direction
+  // 2026-08-22; renumbered from 084 to 085 to avoid colliding with the Social
+  // Studio v2 migration below). altText is what the Instagram publisher sends
+  // as alt_text on the media container; it must never leak into the caption
+  // (tweetText). imageBrief and subject are the durable "what is this image
+  // supposed to depict" record that regeneration/rework reads instead of
+  // reverse-engineering it from the caption text.
   altText:          text('alt_text'),
   imageBrief:       text('image_brief'),
   subject:          text('subject'),
+  // Social Studio v2 (migration 084, ADR-013). All nullable, all additive.
+  // scheduledAt supersedes scheduledFor (date-only): owner input is a PDT
+  // wall-clock time, stored UTC; legacy rows read through COALESCE.
+  scheduledAt:     timestamp('scheduled_at', { withTimezone: true }),
+  // Live post URL, written at publish, backfilled by the metrics sweep.
+  permalink:       text('permalink'),
+  // Gate verdict in its own columns (pass|revise|block|hold); the tagged
+  // stamp inside `feedback` is dual-written until Phase 5 cuts readers over.
+  gateStatus:      varchar('gate_status', { length: 12 }),
+  gateCheckedAt:   timestamp('gate_checked_at', { withTimezone: true }),
+  gateFindings:    jsonb('gate_findings').$type<{ check: string; verdict: string; note?: string }[]>(),
+  // Approved cast members appearing in this post (Sanity castMember slugs).
+  castSlugs:       jsonb('cast_slugs').$type<string[]>(),
+  updatedAt:       timestamp('updated_at', { withTimezone: true }),
 })
+
+/**
+ * The social image library index (migration 084). Binaries are Sanity image
+ * assets; this row is everything the Studio needs to search, filter, tag and
+ * reuse them, and it is what the image-provenance gate check consults.
+ * `source`: generated | upload | video_poster. `isPicked`: the candidate the
+ * agent chose for the post in `postId` (losers keep is_picked=false and stay
+ * browsable, which is the whole point of the library).
+ */
+export const socialMediaAssets = pgTable('social_media_assets', {
+  id:                serial('id').primaryKey(),
+  sanityAssetId:     varchar('sanity_asset_id', { length: 120 }),
+  url:               text('url').notNull(),
+  width:             integer('width'),
+  height:            integer('height'),
+  aspect:            varchar('aspect', { length: 12 }),
+  mimeType:          varchar('mime_type', { length: 40 }),
+  bytes:             integer('bytes'),
+  source:            varchar('source', { length: 20 }).notNull().default('generated'),
+  provider:          varchar('provider', { length: 40 }),
+  model:             varchar('model', { length: 120 }),
+  prompt:            text('prompt'),
+  negativePrompt:    text('negative_prompt'),
+  archetype:         varchar('archetype', { length: 40 }),
+  productHandle:     varchar('product_handle', { length: 255 }),
+  shopifyProductId:  varchar('shopify_product_id', { length: 60 }),
+  castSlugs:         jsonb('cast_slugs').$type<string[]>(),
+  tags:              jsonb('tags').$type<string[]>(),
+  generationBatchId: varchar('generation_batch_id', { length: 80 }),
+  isPicked:          boolean('is_picked').notNull().default(false),
+  postId:            integer('post_id'),
+  createdBy:         varchar('created_by', { length: 60 }).notNull().default('system'),
+  createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:         timestamp('updated_at', { withTimezone: true }),
+}, t => ({
+  createdIdx: index('idx_social_media_assets_created').on(t.createdAt),
+  productIdx: index('idx_social_media_assets_product').on(t.productHandle),
+  batchIdx:   index('idx_social_media_assets_batch').on(t.generationBatchId),
+  postIdx:    index('idx_social_media_assets_post').on(t.postId),
+  urlIdx:     index('idx_social_media_assets_url').on(t.url),
+}))
+
+/**
+ * Ordered slides of a carousel draft (migration 084). `social_posts.media_urls`
+ * stays the publish-time snapshot derived from these rows, so the publish job
+ * and the platform adapters never read this table. `url` is denormalised from
+ * the asset so a slide survives an asset row being absent (owner paste, legacy).
+ */
+export const socialPostSlides = pgTable('social_post_slides', {
+  id:        serial('id').primaryKey(),
+  postId:    integer('post_id').notNull(),
+  position:  integer('position').notNull().default(0),
+  assetId:   integer('asset_id'),
+  url:       text('url').notNull(),
+  altText:   varchar('alt_text', { length: 1000 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  postIdx: index('idx_social_post_slides_post').on(t.postId, t.position),
+}))
+
+/** Account follower readings appended by the metrics sweep (migration 084). */
+export const socialFollowerHistory = pgTable('social_follower_history', {
+  id:         serial('id').primaryKey(),
+  platform:   varchar('platform', { length: 20 }).notNull(),
+  capturedAt: timestamp('captured_at', { withTimezone: true }).notNull().defaultNow(),
+  followers:  integer('followers'),
+  follows:    integer('follows'),
+  mediaCount: integer('media_count'),
+}, t => ({
+  platformIdx: index('idx_social_follower_history_platform').on(t.platform, t.capturedAt),
+}))
 
 export const adminRoles = pgTable('admin_roles', {
   id:              serial('id').primaryKey(),
