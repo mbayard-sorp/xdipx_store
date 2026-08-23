@@ -4,7 +4,7 @@
  *
  * Every review and posting intent from the old single-route Social Studio
  * lives here unchanged: review, review-live, review-batch, reschedule,
- * post-approved-draft, post-media, delete-tweet, retry-tweet. New here:
+ * post-approved-draft, post-media, delete-post, retry-post. New here:
  * `revert-to-draft` (approved back to pending, stamp burned, ADR-013
  * decision 4). `set-frequency` moved to /settings, `generate-tweet` and
  * `post-tweet` (the legacy X quick post) to /compose/new.
@@ -21,9 +21,12 @@ import { useMemo, useState } from 'react'
 import { db } from '~/lib/db.server'
 import { socialPosts } from '../../db/schema'
 import { eq, desc } from 'drizzle-orm'
-import { deleteAndLogTweet, retryFailedPost, postApprovedDraft } from '~/lib/twitter.server'
+import { postApprovedDraft } from '~/lib/twitter.server'
+import { retryFailedSocialPost, deleteSocialPost } from '~/lib/social-post-ops.server'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
 import { reviewSocialPost, rescheduleSocialPost, recordLivePostFeedback, getValve } from '~/lib/team.server'
+import { laWallClockToUtc } from '~/lib/social-schedule'
+import { permalinkFor } from '~/lib/social-permalink.server'
 import { isLivePostVerdict, parseLiveFeedback } from '~/lib/live-post-feedback'
 import { SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
 import { ReviewQueue } from '~/components/admin/social/ReviewQueue'
@@ -162,7 +165,15 @@ export async function action({ request }: ActionFunctionArgs) {
     const day = (form.get('scheduledFor') as string | null) ?? ''
     if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
     if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: 'Bad date' }
-    await rescheduleSocialPost(postId, day || null)
+    // Phase 4 (#4939): an optional LA wall-clock time alongside the date sets
+    // a precise `scheduled_at`; the date keeps being written for legacy readers.
+    const time = (form.get('time') as string | null) ?? ''
+    if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { ok: false, error: 'Bad time' }
+    await rescheduleSocialPost(
+      postId,
+      day || null,
+      day && time ? { scheduledAt: laWallClockToUtc(day, time) } : {},
+    )
     return { ok: true }
   }
 
@@ -274,24 +285,36 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
     await db.update(socialPosts)
-      .set({ status: 'posted', externalPostId: result.externalPostId, postedAt: new Date() })
+      .set({
+        status: 'posted',
+        externalPostId: result.externalPostId,
+        postedAt: new Date(),
+        permalink: await permalinkFor(post.platform, result.externalPostId),
+        updatedAt: new Date(),
+      })
       .where(eq(socialPosts.id, postId))
     await recordManualPublish(postId, post.feedback, await ownerLabel(request))
     return { ok: true }
   }
 
-  if (intent === 'delete-tweet') {
+  // Delete and retry are platform-aware (ticket #4908 / #4935): a retry re-runs
+  // the publish the row earned, with the owner's edited text and every slide;
+  // a delete works on drafts, failed rows, X posts (deleted on X first) and
+  // Instagram posts (row only, the API cannot delete media).
+  if (intent === 'delete-post') {
     const postId = parseInt(form.get('postId') as string)
-    const externalPostId = form.get('externalPostId') as string
-    const result = await deleteAndLogTweet(postId, externalPostId)
-    return { ok: result.ok, intent: 'delete-tweet', error: result.error }
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    const result = await deleteSocialPost(postId)
+    return { ok: result.ok, intent: 'delete-post', note: result.note, error: result.error }
   }
 
-  if (intent === 'retry-tweet') {
+  if (intent === 'retry-post') {
     const postId = parseInt(form.get('postId') as string)
-    const result = await retryFailedPost(postId)
-    return { ok: result.ok, intent: 'retry-tweet', tweetId: result.tweetId, error: result.error }
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    const result = await retryFailedSocialPost(postId)
+    return { ok: result.ok, intent: 'retry-post', tweetId: result.externalPostId, error: result.error }
   }
+
 
   return { ok: false, error: 'Unknown intent' }
 }
@@ -681,15 +704,23 @@ function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
                           <ExternalIcon size={12} /> View
                         </a>
                       )}
-                      {post.status === 'posted' && post.externalPostId && post.platform === 'x' && (
+                      {canDeletePost(post) && (
                         deleteConfirmId === post.id ? (
                           <span className="inline-flex items-center gap-2">
                             <deleteFetcher.Form method="post">
-                              <input type="hidden" name="intent" value="delete-tweet" />
+                              <input type="hidden" name="intent" value="delete-post" />
                               <input type="hidden" name="postId" value={post.id} />
-                              <input type="hidden" name="externalPostId" value={post.externalPostId} />
-                              <button type="submit" className="text-xs text-red-700 hover:underline min-h-9" onClick={() => setDeleteConfirmId(null)}>
-                                Confirm delete on X
+                              <button
+                                type="submit"
+                                className="text-xs text-red-700 hover:underline min-h-9"
+                                onClick={() => setDeleteConfirmId(null)}
+                                title={post.status === 'posted' && post.platform === 'instagram'
+                                  ? 'Removes the row here only. Instagram has no delete API; remove the post in the app.'
+                                  : post.status === 'posted' ? 'Deletes the post on X, then removes the row' : 'Removes this draft from the Studio'}
+                              >
+                                {post.status === 'posted'
+                                  ? (post.platform === 'instagram' ? 'Confirm remove (still live on Instagram)' : 'Confirm delete on X')
+                                  : 'Confirm delete'}
                               </button>
                             </deleteFetcher.Form>
                             <button type="button" onClick={() => setDeleteConfirmId(null)} className="text-xs text-ink-4 hover:underline min-h-9">
@@ -698,13 +729,13 @@ function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
                           </span>
                         ) : (
                           <button type="button" onClick={() => setDeleteConfirmId(post.id)} className="text-xs text-ink-3 hover:text-red-700 min-h-9">
-                            Delete
+                            {post.status === 'posted' && post.platform === 'instagram' ? 'Remove' : 'Delete'}
                           </button>
                         )
                       )}
                       {post.status === 'failed' && (
                         <retryFetcher.Form method="post">
-                          <input type="hidden" name="intent" value="retry-tweet" />
+                          <input type="hidden" name="intent" value="retry-post" />
                           <input type="hidden" name="postId" value={post.id} />
                           <button type="submit" disabled={retryFetcher.state !== 'idle'} className="text-xs text-[#4F6150] hover:underline disabled:opacity-50 min-h-9">
                             Retry
@@ -716,6 +747,9 @@ function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
                       )}
                     </div>
                     {deleteFetcher.data?.ok === false && <p className="text-xs text-red-700 mt-1">{deleteFetcher.data.error}</p>}
+                    {deleteFetcher.data?.ok === true && (deleteFetcher.data as { note?: string }).note && (
+                      <p role="status" className="text-xs text-amber-800 mt-1">{(deleteFetcher.data as { note?: string }).note}</p>
+                    )}
                     {retryFetcher.data?.ok === false && <p className="text-xs text-red-700 mt-1">{retryFetcher.data.error}</p>}
                   </td>
                 </tr>
@@ -726,4 +760,16 @@ function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
       </ResponsiveTable>
     </section>
   )
+}
+
+/**
+ * Which rows the owner can delete from the history list. Drafts and failed
+ * rows always; live X posts (deleted on X first); live Instagram posts as a
+ * row-only removal. `publishing` belongs to a tick and `deleted` is done.
+ */
+function canDeletePost(post: Pick<SocialPostRow, 'status' | 'platform' | 'externalPostId'>): boolean {
+  if (post.status === 'draft' || post.status === 'failed') return true
+  if (post.status !== 'posted') return false
+  if (post.platform === 'x') return !!post.externalPostId
+  return post.platform === 'instagram'
 }

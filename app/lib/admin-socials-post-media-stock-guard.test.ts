@@ -52,8 +52,10 @@ vi.mock('~/lib/social-publish-approve.server', () => ({
 vi.mock('~/lib/claude.server', () => ({ generateTweetCopy: vi.fn() }))
 vi.mock('~/lib/shopify.server', () => ({ getDealByShopifyId: vi.fn(async () => null) }))
 vi.mock('~/lib/twitter.server', () => ({
-  postManualTweet: vi.fn(), deleteAndLogTweet: vi.fn(),
-  retryFailedPost: vi.fn(), postApprovedDraft: vi.fn(),
+  postManualTweet: vi.fn(), postApprovedDraft: vi.fn(),
+}))
+vi.mock('~/lib/social-post-ops.server', () => ({
+  retryFailedSocialPost: vi.fn(), deleteSocialPost: vi.fn(),
 }))
 vi.mock('~/lib/team.server', () => ({
   getSocialFrequencies: vi.fn(async () => ({})),
