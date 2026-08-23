@@ -12,7 +12,7 @@
  *   /admin/socials/compose/new     Composer, owner-composed draft
  *   /admin/socials/compose/:id     Composer on an existing row
  *   /admin/socials/library         Image library (+ /:assetId drawer)
- *   /admin/socials/analytics       Stub until Phase 6a
+ *   /admin/socials/analytics       Range/platform analytics, CSV export
  *   /admin/socials/calendar        Week grid, drag reschedule, PDT sheet
  *   /admin/socials/settings        FrequencyPanel + frequency intents
  *
