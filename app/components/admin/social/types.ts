@@ -1,3 +1,5 @@
+import { weightedTweetLength, X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
+
 /** Client-safe row shape for social drafts rendered by the Social Studio. */
 export interface SocialPostRow {
   id: number
@@ -34,4 +36,27 @@ export const PLATFORM_LABELS: Record<string, string> = {
   facebook: 'Facebook',
   youtube: 'YouTube',
   linkedin: 'LinkedIn',
+}
+
+/** LinkedIn's post ceiling. Plain characters, no link weighting. */
+export const LINKEDIN_CAPTION_MAX = 3000
+
+/**
+ * Caption length the way the platform itself counts it.
+ *
+ * X bills every link at the fixed t.co width, so a caption carrying two PDP
+ * URLs runs ~500 raw characters and still fits inside 280. Counting raw
+ * `.length` in the review UI disabled Approve on drafts the publish gate had
+ * already passed and X would have accepted, which stalled the whole X queue.
+ * Same helper the gate and the publisher use, so the three agree.
+ */
+export function platformCaptionLength(platform: string, caption: string): number {
+  return platform === 'x' ? weightedTweetLength(caption) : caption.length
+}
+
+/** Would this platform reject the caption for length? Drives the Approve gate. */
+export function captionOverPlatformLimit(platform: string, caption: string): boolean {
+  if (platform === 'x') return weightedTweetLength(caption) > X_CAPTION_MAX
+  if (platform === 'linkedin') return caption.length > LINKEDIN_CAPTION_MAX
+  return false
 }
