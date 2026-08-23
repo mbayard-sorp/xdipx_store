@@ -15,9 +15,12 @@
  *
  * Multi-scene jobs (Phase 3, 20-60s videos): op:'enqueue' accepts
  * scriptJson.scenes, an array of 2-8
- *   { slug, framePrompt, motionPrompt, durationSeconds, continuity? }
+ *   { slug, framePrompt?, motionPrompt, durationSeconds, continuity? }
  * entries ('continuity' is 'own-frame' | 'last-frame'; defaults to
  * 'own-frame' for scenes[0] and 'last-frame' for every scene after it).
+ * framePrompt is required for own-frame scenes (it composes the scene_frame
+ * candidates) and optional for last-frame scenes, which never use it: their
+ * opening frame comes from the previous scene's rendered clip.
  * durationSeconds on the top-level body is IGNORED when scenes is present —
  * enqueueVideoJob sums the per-scene durations itself (video-pipeline.server.ts's
  * validateScenes enforces the 90s multi-scene ceiling and per-scene duration

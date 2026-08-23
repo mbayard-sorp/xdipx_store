@@ -21,10 +21,17 @@ const state = {
 
 vi.mock('~/lib/db.server', () => {
   const selectChain = () => {
-    const chain: Record<string, unknown> = {}
+    // Thenable itself (not just `.limit()`) so a query that terminates at
+    // `.where()` with no `.limit()`, e.g. listVideoJobs's media_assets
+    // lookup, resolves against the same state.selectResults queue as every
+    // other query in this mock.
+    const chain: Record<string, unknown> = {
+      then: (resolve: (v: unknown[]) => void, reject?: (e: unknown) => void) =>
+        Promise.resolve(state.selectResults.shift() ?? []).then(resolve, reject),
+    }
     chain['where'] = () => chain
     chain['orderBy'] = () => chain
-    chain['limit'] = () => Promise.resolve(state.selectResults.shift() ?? [])
+    chain['limit'] = () => chain
     return chain
   }
   return {
@@ -84,7 +91,7 @@ vi.mock('~/lib/runpod-video.server', () => ({
   cancelRunpod: vi.fn(),
 }))
 
-import { enqueueVideoJob, advanceInflightVideoJobs } from '~/lib/video-pipeline.server'
+import { enqueueVideoJob, advanceInflightVideoJobs, listVideoJobs } from '~/lib/video-pipeline.server'
 import { estimateVideoCostUsd, estimateImageCostUsd } from '~/lib/model-pricing.server'
 import { SCENE_FRAME_COST_KEY, SCENE_PLATE_COST_KEY } from '~/lib/fal-video.server'
 
@@ -157,6 +164,24 @@ describe('enqueueVideoJob — multi-scene validation', () => {
       ...baseEnqueueArgs,
       scriptJson: { scenes: [scene({ continuity: 'last-frame' }), scene()] },
     })).rejects.toThrow(/scenes\[0\]/)
+  })
+
+  it('rejects a missing framePrompt on an own-frame scene', async () => {
+    await expect(enqueueVideoJob({
+      ...baseEnqueueArgs,
+      scriptJson: { scenes: [scene({ framePrompt: undefined, continuity: 'own-frame' }), scene()] },
+    })).rejects.toThrow(/scenes\[0\]\.framePrompt is required for own-frame scenes/)
+  })
+
+  it('allows a missing framePrompt on a last-frame scene (never used there, its opening frame comes from the previous scene\'s clip)', async () => {
+    await enqueueVideoJob({
+      ...baseEnqueueArgs,
+      scriptJson: { scenes: [scene(), scene({ framePrompt: undefined, continuity: 'last-frame' })] },
+    })
+    expect(state.inserts).toHaveLength(1)
+    const stored = state.inserts[0]!['scenesJson'] as { framePrompt?: string; continuity: string }[]
+    expect(stored[1]!.continuity).toBe('last-frame')
+    expect(stored[1]!.framePrompt).toBeUndefined()
   })
 
   it('rejects the avatar tier for a multi-scene job (no per-scene motion prompt concept)', async () => {
@@ -372,5 +397,68 @@ describe('advanceClip — multi-scene concat (hands off to the unmodified lipsyn
     expect(concatMock).toHaveBeenCalledWith([buf0, buf1])
     const clipInsert = state.inserts.find(r => r['purpose'] === 'clip' && r['blobUrl'] === 'https://blob.test/clip-concat.mp4')
     expect(clipInsert).toBeTruthy()
+  })
+})
+
+// ─── listVideoJobs: scene-frame candidate grouping (Video Studio picker) ────
+
+describe('listVideoJobs — scene frame candidate grouping', () => {
+  it('groups scene_frame candidates by scene index even though blobPut adds a random suffix before the extension (real production shape: video_jobs id 5, parked scene 0)', async () => {
+    // Exact production shape from the ticket: 3 scenes, scene 0 own-frame,
+    // parked at scene_frame/awaiting_frame_approval with only frameAssetId 20
+    // recorded on scene_state_json. The other two candidates (21, 22) are
+    // only discoverable through media_assets, which is what listVideoJobs's
+    // grouping has to surface for MultiSceneFramePicker to render anything.
+    const job = {
+      ...multiSceneJobRow,
+      id: 5,
+      stage: 'scene_frame',
+      status: 'awaiting_frame_approval',
+      sceneFrameAssetId: null,
+      scenesJson: [
+        scene({ slug: 'scene-0', continuity: 'own-frame' }),
+        scene({ slug: 'scene-1', continuity: 'last-frame' }),
+        scene({ slug: 'scene-2', continuity: 'last-frame' }),
+      ],
+      sceneStateJson: [
+        { status: 'awaiting_frame_approval', frameAssetId: 20 },
+        { status: 'pending' },
+        { status: 'pending' },
+      ],
+    }
+    // blobPut always writes with addRandomSuffix: true, so the real blob
+    // pathname carries a random segment between the frame index and the
+    // extension, never the bare `scene-0-frame-0.jpg` the naming convention
+    // comment implies.
+    state.selectResults = [
+      [job],
+      [
+        { id: 20, blobUrl: 'https://blob.test/video/job-5/scene-0-frame-0-aBcDeFgH12345678.jpg', purpose: 'scene_frame', videoJobId: 5 },
+        { id: 21, blobUrl: 'https://blob.test/video/job-5/scene-0-frame-1-qRsTuVwX87654321.jpg', purpose: 'scene_frame', videoJobId: 5 },
+        { id: 22, blobUrl: 'https://blob.test/video/job-5/scene-0-frame-2-zZyYxXwW11223344.jpg', purpose: 'scene_frame', videoJobId: 5 },
+      ],
+    ]
+
+    const [row] = await listVideoJobs(40)
+
+    expect(row?.sceneFrames?.[0]).toHaveLength(3)
+    expect(row?.sceneFrames?.[0]?.map(f => f.id).sort()).toEqual([20, 21, 22])
+  })
+
+  it('still groups candidates when blobPut writes the bare filename with no random suffix', async () => {
+    const job = {
+      ...multiSceneJobRow,
+      id: 5,
+      scenesJson: [scene({ slug: 'scene-0', continuity: 'own-frame' }), scene({ slug: 'scene-1', continuity: 'last-frame' })],
+      sceneStateJson: [{ status: 'awaiting_frame_approval', frameAssetId: 20 }, { status: 'pending' }],
+    }
+    state.selectResults = [
+      [job],
+      [{ id: 20, blobUrl: 'https://blob.test/video/job-5/scene-0-frame-0.jpg', purpose: 'scene_frame', videoJobId: 5 }],
+    ]
+
+    const [row] = await listVideoJobs(40)
+
+    expect(row?.sceneFrames?.[0]?.map(f => f.id)).toEqual([20])
   })
 })

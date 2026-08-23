@@ -191,7 +191,7 @@ when `scriptJson.scenes` has 2+ entries.
 ```ts
 scenes: Array<{
   slug: string             // scene-kit style label, shown in Video Studio
-  framePrompt: string      // only used for 'own-frame' scenes
+  framePrompt?: string     // required for 'own-frame' scenes, optional (unused) for 'last-frame' scenes
   motionPrompt: string
   durationSeconds: number  // must be one of the rendering model's allowedDurations
   continuity?: 'own-frame' | 'last-frame'  // default: scene 0 own-frame, every later scene last-frame
