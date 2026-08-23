@@ -124,7 +124,6 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
   const normalized = raw.map((scene, i): VideoSceneSpec => {
     if (!scene || typeof scene !== 'object') throw new Error(`scenes[${i}] must be an object`)
     if (typeof scene.slug !== 'string' || !scene.slug.trim()) throw new Error(`scenes[${i}].slug is required`)
-    if (typeof scene.framePrompt !== 'string' || !scene.framePrompt.trim()) throw new Error(`scenes[${i}].framePrompt is required`)
     if (typeof scene.motionPrompt !== 'string' || !scene.motionPrompt.trim()) throw new Error(`scenes[${i}].motionPrompt is required`)
     if (typeof scene.durationSeconds !== 'number' || !clipSpec.allowedDurations.includes(scene.durationSeconds)) {
       throw new Error(`scenes[${i}].durationSeconds must be one of ${clipSpec.allowedDurations.join(', ')} for ${clipModelId ?? 'this tier'}`)
@@ -136,8 +135,20 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
     if (i === 0 && continuity === 'last-frame') {
       throw new Error('scenes[0] cannot use last-frame continuity (no prior scene to source it from)')
     }
+    // framePrompt only feeds the scene_frame composition, which last-frame
+    // scenes skip entirely (their opening frame comes from the previous
+    // scene's rendered clip). Required for own-frame scenes only.
+    if (continuity === 'own-frame' && (typeof scene.framePrompt !== 'string' || !scene.framePrompt.trim())) {
+      throw new Error(`scenes[${i}].framePrompt is required for own-frame scenes`)
+    }
     total += scene.durationSeconds
-    return { slug: scene.slug, framePrompt: scene.framePrompt, motionPrompt: scene.motionPrompt, durationSeconds: scene.durationSeconds, continuity }
+    return {
+      slug: scene.slug,
+      motionPrompt: scene.motionPrompt,
+      durationSeconds: scene.durationSeconds,
+      continuity,
+      ...(scene.framePrompt ? { framePrompt: scene.framePrompt } : {}),
+    }
   })
   if (total > MULTI_SCENE_TOTAL_MAX_SECONDS) {
     throw new Error(`Total scene duration ${total}s exceeds the ${MULTI_SCENE_TOTAL_MAX_SECONDS}s multi-scene ceiling`)
@@ -740,6 +751,10 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
   }
 
   const scene = scenes[idx]!
+  // idx only ever lands on an own-frame scene (see findIndex above), which
+  // validateScenes guarantees carries a framePrompt. This is a belt-and-
+  // braces check, not an expected runtime path.
+  if (!scene.framePrompt) throw new Error(`scenes[${idx}].framePrompt is required for own-frame scenes`)
   const talkingHead = job.scriptJson['talkingHead'] === true
   const presenterUrl = await resolvePresenterPhotoUrl(job.presenter)
   if (talkingHead && !presenterUrl) throw new Error('talkingHead requires a presenter (emma or friend:{slug})')
@@ -1900,7 +1915,14 @@ export interface VideoJobWithAssets {
   posterUrl: string | null
 }
 
-const SCENE_FRAME_BLOB_RE = /\/scene-(\d+)-frame-\d+\.jpg$/
+// blobPut always writes with addRandomSuffix: true, so the path Vercel Blob
+// actually returns is `scene-<idx>-frame-<i>-<randomSuffix>.jpg`, not the bare
+// `scene-<idx>-frame-<i>.jpg` advanceSceneFrameMultiScene passes in. The
+// random-suffix segment must stay optional in the regex or every real
+// production asset silently fails to match and a parked job's frame picker
+// renders with zero candidates (ticket: multi-scene approve UI shows nothing
+// to click).
+const SCENE_FRAME_BLOB_RE = /\/scene-(\d+)-frame-\d+(?:-[^/]+)?\.jpg$/
 
 export async function listVideoJobs(limit = 40): Promise<VideoJobWithAssets[]> {
   const jobs = await db.select().from(videoJobs).orderBy(desc(videoJobs.createdAt)).limit(limit)

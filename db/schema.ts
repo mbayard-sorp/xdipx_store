@@ -1542,7 +1542,8 @@ export interface VideoWordTiming {
  */
 export interface VideoSceneSpec {
   slug: string
-  framePrompt: string
+  /** Required for own-frame scenes (composes the scene_frame candidates); unused and optional for last-frame scenes, whose opening frame comes from the previous scene's rendered clip. */
+  framePrompt?: string
   motionPrompt: string
   durationSeconds: number
   continuity?: 'last-frame' | 'own-frame'
