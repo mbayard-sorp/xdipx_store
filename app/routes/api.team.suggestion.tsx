@@ -109,6 +109,33 @@ function parseLinks(v: unknown): TicketLinkInput[] | undefined {
   return out.length ? out : undefined
 }
 
+/**
+ * Links from the canonical `links` array, plus a coerced top-level `pr`
+ * shorthand (#5054). ADR-008 step 3's prose ("plus a `pr` link pointing at the
+ * PR URL") reads as `pr: '<url>'`, but only `links:[{kind,ref,state}]` is
+ * validated and stored, so a filing that followed the prose had its PR link
+ * silently dropped — and a code PR with no `pr` link and no `#<id>` in its
+ * title never resolves to a ticket, so the release engine leaves it drafted
+ * forever (the exact draft-invisibility failure of #4144, reached through a
+ * different door). Coerce the shorthand into a real link rather than dropping
+ * the one field that decides mergeability. `links:[...]` remains canonical.
+ */
+function parseLinksWithPr(b: Record<string, unknown>): TicketLinkInput[] | undefined {
+  const links = parseLinks(b['links']) ?? []
+  const pr = b['pr']
+  if (typeof pr === 'string' && pr.trim()) {
+    const ref = pr.trim()
+    if (!links.some(l => l.kind === 'pr' && l.ref === ref)) {
+      links.push({ kind: 'pr', ref, state: 'open' })
+      console.warn(
+        "[api:suggestion] coerced a top-level `pr` key into a links[] entry; " +
+          "prefer links:[{kind:'pr',ref:'<url>',state:'open'}]",
+      )
+    }
+  }
+  return links.length ? links : undefined
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
@@ -139,7 +166,8 @@ export async function action({ request }: ActionFunctionArgs) {
       dedupeKey:     typeof b['dedupeKey'] === 'string' && b['dedupeKey'] ? b['dedupeKey'].slice(0, 64) : undefined,
       dueAt:         parseDate(b['dueAt']),
       // #1686: links persist with the filing instead of being silently dropped.
-      links:         parseLinks(b['links']),
+      // #5054: also coerce a top-level `pr` shorthand into a link.
+      links:         parseLinksWithPr(b),
       // #3406: record and resolve the supersession the filing declares.
       supersedesId:  typeof b['supersedesId'] === 'number' && Number.isInteger(b['supersedesId']) && b['supersedesId'] > 0
                        ? b['supersedesId'] : undefined,
@@ -224,7 +252,9 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const suggestion = await transitionSuggestion(b['id'], b['to'] as TicketStatus, b['actor'], {
       note:      typeof b['note'] === 'string' ? b['note'] : undefined,
-      links:     parseLinks(b['links']),
+      // #5054: coerce a top-level `pr` shorthand here too — a transition to
+      // pr_open is the other place agents attach the mergeability-deciding link.
+      links:     parseLinksWithPr(b),
       lastError: typeof b['lastError'] === 'string' ? b['lastError'] : undefined,
     })
     return Response.json({ ok: true, suggestion })
