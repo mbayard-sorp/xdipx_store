@@ -26,9 +26,16 @@
  * Idempotent: a file whose bare url already has a row is skipped, so re-runs
  * only add what is missing.
  *
+ * Homepage imagery (`--source homepage`, or `all`) is the second source: the
+ * homepage team's generated art already lives in Sanity under
+ * `homepage-{blockKey}[-{run}]-{epoch}.png` (homepage-media.server.ts), so the
+ * row points at the existing Sanity asset (no re-upload) under its Sanity CDN
+ * url, tagged `homepage` plus the block key. Provider is inferred by date the
+ * same way; archetype and product stay null (these are not product shots).
+ *
  * Usage:
- *   npx tsx scripts/backfill-social-library.ts --dry-run
- *   npx tsx scripts/backfill-social-library.ts [--limit N]
+ *   npx tsx scripts/backfill-social-library.ts --dry-run [--source social|homepage|all]
+ *   npx tsx scripts/backfill-social-library.ts [--limit N] [--source social|homepage|all]
  */
 
 import 'dotenv/config'
@@ -43,6 +50,8 @@ import { SOCIAL_ARCHETYPES, socialAssetAspect, type SocialArchetype } from '../a
 const DRY_RUN = process.argv.includes('--dry-run')
 const limitArg = process.argv.indexOf('--limit')
 const LIMIT = limitArg >= 0 ? Number(process.argv[limitArg + 1]) : Infinity
+const sourceArg = process.argv.indexOf('--source')
+const SOURCE = (sourceArg >= 0 ? process.argv[sourceArg + 1] : 'social') as 'social' | 'homepage' | 'all'
 
 /** Atlas became the primary still-image provider on this date (PR #692). */
 const ATLAS_CUTOVER = new Date('2026-08-16T00:00:00Z')
@@ -152,7 +161,90 @@ async function loadPostsByUrl(): Promise<Map<string, number>> {
   return map
 }
 
+interface SanityAssetRow {
+  _id: string
+  originalFilename: string | null
+  url: string
+  size: number | null
+  mimeType: string | null
+  _createdAt: string
+  w: number | null
+  h: number | null
+}
+
+/** homepage-{blockKey}[-{run}]-{epoch}.png -> block key and optional run token. */
+function parseHomepageName(name: string): { blockKey?: string; run?: string } {
+  const stem = name.replace(/\.[a-z0-9]+$/i, '')
+  const m = /^homepage-([A-Za-z0-9]+)(?:-(.+?))?-(\d{10,})$/.exec(stem)
+  if (!m) return {}
+  return { blockKey: m[1], ...(m[2] ? { run: m[2] } : {}) }
+}
+
+async function backfillHomepage(): Promise<{ done: number; skipped: number; failed: number }> {
+  const { getClient } = await import('../app/lib/sanity.server')
+  const client = getClient(true)
+  if (!client) throw new Error('Sanity not configured')
+  const assets = await client.fetch<SanityAssetRow[]>(
+    `*[_type == "sanity.imageAsset" && originalFilename match "homepage-*"]{
+      _id, originalFilename, url, size, mimeType, _createdAt,
+      "w": metadata.dimensions.width, "h": metadata.dimensions.height
+    } | order(_createdAt asc)`,
+  )
+  console.log(`Sanity: ${assets.length} homepage-* image assets`)
+  let done = 0, skipped = 0, failed = 0
+  for (const a of assets) {
+    if (done >= LIMIT) break
+    const name = a.originalFilename ?? basename(a.url)
+    const bare = stripUrlQuery(a.url)
+    if (await isLibraryMember(bare)) { skipped++; continue }
+    const createdAt = new Date(a._createdAt)
+    const { provider, model } = inferProvider(undefined, createdAt)
+    const { blockKey, run } = parseHomepageName(name)
+    const tags = ['backfill', 'provider-inferred', 'homepage']
+    if (blockKey) tags.push(blockKey)
+    if (run) tags.push(run)
+    tags.push(a._createdAt.slice(0, 7))
+    const summary = `${name} -> ${provider}${blockKey ? ' ' + blockKey : ''}`
+    if (DRY_RUN) { console.log('[dry] ' + summary); done++; continue }
+    try {
+      const row = await ingestSocialAsset(
+        {
+          sourceUrl: a.url,
+          filename: name,
+          ...(a.mimeType ? { contentType: a.mimeType } : {}),
+          url: a.url,
+          ...(a.w && a.h ? { width: a.w, height: a.h } : {}),
+          ...(a.size ? { bytes: a.size } : {}),
+          source: 'generated',
+          provider,
+          ...(model ? { model } : {}),
+          tags,
+          createdBy: 'backfill',
+        },
+        {
+          // The binary is already in Sanity: point the row at it rather than
+          // uploading a second copy. Dimensions and size come from the asset
+          // document, so the buffer is never needed.
+          uploadToSanity: async () => ({ assetId: a._id, url: a.url }),
+          fetchBuffer: async () => Buffer.alloc(0),
+        },
+      )
+      done++
+      console.log(`[ok ${row.id}] ${summary}`)
+    } catch (err) {
+      failed++
+      console.error(`[fail] ${name}:`, err instanceof Error ? err.message : err)
+    }
+  }
+  return { done, skipped, failed }
+}
+
 async function main() {
+  if (SOURCE === 'homepage' || SOURCE === 'all') {
+    const r = await backfillHomepage()
+    console.log(`homepage: ${DRY_RUN ? 'would ingest' : 'ingested'} ${r.done}, skipped ${r.skipped} already indexed, failed ${r.failed}\n`)
+    if (SOURCE === 'homepage') return
+  }
   const [social, ig, legacy] = await Promise.all([
     listFiles('filename:social-*'),
     listFiles('filename:ig-*'),
