@@ -1,87 +1,155 @@
-// Regression test for ticket #3674 / incident #3640: the manual Post-now path
-// in /admin/socials (`post-media`) bypassed the publish-gate stamp and gated
-// every surface on the VIDEO valve, so an approved-by-hand Instagram still
-// (post #49) reached Instagram without the gate ever seeing it, and the
-// Instagram kill switch governed nothing on the manual path. These pin the two
-// refusals `decideManualPublish` now enforces, exactly as the scheduled job
-// does.
+// What the manual Post-now path refuses, and what it deliberately no longer
+// refuses.
+//
+// Ticket #3674 / incident #3640: Post-now once bypassed the publish gate
+// entirely and gated every surface on the VIDEO valve, so an approved-by-hand
+// Instagram still (post #49) reached Instagram without the gate ever seeing it
+// and the Instagram kill switch governed nothing here.
+//
+// The publish-gate PASS stamp requirement that fixed it is lifted for the
+// owner's click by owner direction (2026-08-23): the stamp is written by an
+// agent on its own run, the Studio cannot summon one, so the button could never
+// fire. The deterministic checks — facts, not judgment — took its place. These
+// pin both halves: a hard fact still refuses, an absent or negative agent
+// verdict no longer does.
 import { describe, expect, it, vi } from 'vitest'
 import { decideManualPublish, manualPublishValveKey } from './manual-publish-gate.server'
-import { formatGateStamp } from '../social-publish-approve.server'
+import type { DeterministicGateInput, DeterministicGateResult } from '../social-publish-gate.server'
 import { VALVE_KEYS } from '../team-keys'
 
-const PASS_STAMP = formatGateStamp(
-  { verdict: 'PASS', reviewer: 'social-publish-gate', notes: 'clean', productHandle: 'lace-set' },
-  new Date('2026-08-16T00:00:00Z'),
-)
+/** A stand-in check runner, so these tests never touch Shopify. */
+function checksReturning(result: Partial<DeterministicGateResult>) {
+  return vi.fn(async (_input: DeterministicGateInput): Promise<DeterministicGateResult> => ({
+    findings: [], blocked: false, held: false, ...result,
+  }))
+}
 
-// An always-on valve reader. Used where the valve is not what is under test, so
-// a failure can only come from the stamp check.
+const clean = () => checksReturning({})
+
+const blockedOnStock = () => checksReturning({
+  blocked: true,
+  findings: [{ check: 'stock-out', severity: 'block', detail: '"lace-set" is out of stock.' }],
+})
+
+const POST = {
+  isVideo: false,
+  caption: 'a caption',
+  mediaUrls: ['https://cdn.shopify.com/s/files/1/social-thing.jpg'],
+}
+
+// An always-on valve reader. Used where the valve is not what is under test.
 const valveAlwaysOn = vi.fn(async () => true)
 
 describe('decideManualPublish', () => {
-  it('refuses an approved row with no gate stamp, before reading any valve', async () => {
-    const getValve = vi.fn(async () => true)
-    // Empty feedback is exactly post #49: reviewed_by=Mike, feedback empty.
-    const decision = await decideManualPublish({ feedback: '', isVideo: false }, getValve)
-
-    expect(decision.ok).toBe(false)
-    expect(decision).toMatchObject({ ok: false })
-    if (!decision.ok) expect(decision.error).toMatch(/no publish-gate PASS/i)
-    // The stamp gate must run first: owner approval must never buy a valve read
-    // that could pass. If the valve were consulted at all here, an armed valve
-    // would publish an ungated row.
-    expect(getValve).not.toHaveBeenCalled()
+  it('publishes a row with no gate stamp at all — the owner click is the approval', async () => {
+    // Exactly post #49's shape: reviewed_by=Mike, no gate stamp anywhere. The
+    // old guard refused this; by owner direction it now publishes, because the
+    // deterministic checks are clean and the owner is looking at it.
+    const runChecks = clean()
+    const decision = await decideManualPublish(
+      { ...POST, platform: 'x' }, valveAlwaysOn, { runChecks },
+    )
+    expect(decision.ok).toBe(true)
+    expect(runChecks).toHaveBeenCalledOnce()
   })
 
-  it('refuses a non-PASS stamp (REVISE / BLOCK / HOLD)', async () => {
-    for (const verdict of ['REVISE', 'BLOCK', 'HOLD'] as const) {
-      const stamp = formatGateStamp(
-        { verdict, reviewer: 'social-publish-gate', notes: 'no', productHandle: null },
-        new Date('2026-08-16T00:00:00Z'),
+  it('publishes over a REVISE or BLOCK agent verdict', async () => {
+    // The agent verdict is a judgment. The owner may substitute his own; that
+    // is the whole point of the change. Nothing about the verdict reaches this
+    // decision any more, so there is no stamp to pass in.
+    for (const platform of ['x', 'instagram'] as const) {
+      const decision = await decideManualPublish(
+        { ...POST, platform }, valveAlwaysOn, { runChecks: clean() },
       )
-      const getValve = vi.fn(async () => true)
-      const decision = await decideManualPublish({ feedback: stamp, isVideo: false }, getValve)
-      expect(decision.ok).toBe(false)
-      expect(getValve).not.toHaveBeenCalled()
+      expect(decision.ok).toBe(true)
     }
   })
 
-  it('refuses an Instagram still when instagram_autopublish_enabled is false', async () => {
-    const reads: string[] = []
-    const getValve = vi.fn(async (key: string) => {
-      reads.push(key)
-      return false // Instagram kill switch OFF (its default)
-    })
-    const decision = await decideManualPublish({ feedback: PASS_STAMP, isVideo: false }, getValve)
+  it('still refuses a hard fact, and names it', async () => {
+    const getValve = vi.fn(async () => true)
+    const decision = await decideManualPublish(
+      { ...POST, platform: 'x' }, getValve, { runChecks: blockedOnStock() },
+    )
 
     expect(decision.ok).toBe(false)
     if (!decision.ok) {
-      expect(decision.stub).toBe(true)
-      expect(decision.error).toMatch(/Instagram autopublish valve is OFF/)
+      expect(decision.error).toMatch(/out of stock/)
+      expect(decision.findings?.some(f => f.check === 'stock-out')).toBe(true)
     }
-    // The bug that let post #49 ship: a still must be gated on the Instagram
-    // switch, not the video valve.
-    expect(reads).toEqual([VALVE_KEYS.instagramAutopublish])
-    expect(reads).not.toContain(VALVE_KEYS.videoAutopublish)
+    // The checks must run before any valve read: no valve state may buy a
+    // publish past a hard fact.
+    expect(getValve).not.toHaveBeenCalled()
   })
 
-  it('allows an Instagram still with a PASS stamp when the Instagram valve is on', async () => {
-    const decision = await decideManualPublish({ feedback: PASS_STAMP, isVideo: false }, valveAlwaysOn)
-    expect(decision).toEqual({ ok: true })
+  it('runs the checks against the post the owner is actually publishing', async () => {
+    const runChecks = clean()
+    await decideManualPublish(
+      { ...POST, platform: 'x', caption: 'the real caption', productHandle: 'lace-set' },
+      valveAlwaysOn,
+      { runChecks },
+    )
+    expect(runChecks).toHaveBeenCalledWith(expect.objectContaining({
+      caption: 'the real caption',
+      mediaUrls: POST.mediaUrls,
+      platform: 'x',
+      productHandle: 'lace-set',
+    }))
   })
 
-  it('gates a video on the video valve, not the Instagram switch', async () => {
+  it('does not enforce repetition on this path', async () => {
+    // Repetition needs recentCaptions and is a judgment call ("you said
+    // something similar last week"), which is the half the owner is overriding.
+    // Not passing them is what keeps the check inert, so pin it.
+    const runChecks = clean()
+    await decideManualPublish({ ...POST, platform: 'x' }, valveAlwaysOn, { runChecks })
+    expect(runChecks.mock.calls[0]?.[0].recentCaptions).toBeUndefined()
+  })
+
+  it('a held finding publishes — the owner is the one being held for', async () => {
+    const runChecks = checksReturning({
+      held: true,
+      findings: [{ check: 'sale-cta', severity: 'hold', detail: 'worth a look' }],
+    })
+    const decision = await decideManualPublish(
+      { ...POST, platform: 'x' }, valveAlwaysOn, { runChecks },
+    )
+    expect(decision.ok).toBe(true)
+    if (decision.ok) expect(decision.findings).toHaveLength(1)
+  })
+
+  it('publishes an Instagram still with instagram_autopublish_enabled OFF', async () => {
+    // Owner direction 2026-08-23, "make Instagram match X". The valve governs
+    // UNATTENDED posting — the hourly cron — and an owner clicking a button is
+    // the opposite of unattended. It must not be read at all here.
+    const getValve = vi.fn(async () => false)
+    const decision = await decideManualPublish(POST, getValve, { runChecks: clean() })
+
+    expect(decision.ok).toBe(true)
+    expect(getValve).not.toHaveBeenCalled()
+  })
+
+  it('gates an Instagram video on the video valve — that one is the frame review', async () => {
     const reads: string[] = []
     const getValve = vi.fn(async (key: string) => {
       reads.push(key)
       return false
     })
-    const decision = await decideManualPublish({ feedback: PASS_STAMP, isVideo: true }, getValve)
+    const decision = await decideManualPublish(
+      { ...POST, isVideo: true }, getValve, { runChecks: clean() },
+    )
 
     expect(decision.ok).toBe(false)
     if (!decision.ok) expect(decision.error).toMatch(/Video autopublish valve is OFF/)
+    // Never the Instagram switch, which no longer governs anything on this path.
     expect(reads).toEqual([VALVE_KEYS.videoAutopublish])
+    expect(reads).not.toContain(VALVE_KEYS.instagramAutopublish)
+  })
+
+  it('publishes an Instagram video when the video valve is on', async () => {
+    const decision = await decideManualPublish(
+      { ...POST, isVideo: true }, valveAlwaysOn, { runChecks: clean() },
+    )
+    expect(decision.ok).toBe(true)
   })
 
   it('maps media kind to the governing valve key', () => {
@@ -89,33 +157,26 @@ describe('decideManualPublish', () => {
     expect(manualPublishValveKey(true)).toBe(VALVE_KEYS.videoAutopublish)
   })
 
-  // Ticket #3739: X Post-now used to check only status/review_status — the
-  // same bypass that put post #49 on Instagram. The stamp refusal now applies
-  // to X with the same shape; the valve stays not-required for owner clicks.
-  it('refuses an X row with no gate stamp, with the same refusal shape as IG', async () => {
-    const getValve = vi.fn(async () => true)
-    const decision = await decideManualPublish({ feedback: '', isVideo: false, platform: 'x' }, getValve)
-
-    expect(decision.ok).toBe(false)
-    if (!decision.ok) expect(decision.error).toMatch(/no publish-gate PASS/i)
-    expect(getValve).not.toHaveBeenCalled()
-  })
-
-  it('refuses a non-PASS stamp on X', async () => {
-    const stamp = formatGateStamp(
-      { verdict: 'BLOCK', reviewer: 'social-publish-gate', notes: 'no', productHandle: null },
-      new Date('2026-08-16T00:00:00Z'),
+  it('skips the checks for a platform the gate does not cover', async () => {
+    // LinkedIn judged as Instagram refused with the wrong platform's rule
+    // ("a published Instagram post cannot go out without media") on a row that
+    // has no publisher at all. The registry refuses it honestly a step later.
+    const runChecks = clean()
+    const decision = await decideManualPublish(
+      { ...POST, platform: 'linkedin', mediaUrls: [] }, valveAlwaysOn, { runChecks },
     )
-    const decision = await decideManualPublish({ feedback: stamp, isVideo: false, platform: 'x' }, valveAlwaysOn)
-    expect(decision.ok).toBe(false)
+    expect(decision.ok).toBe(true)
+    expect(runChecks).not.toHaveBeenCalled()
   })
 
-  it('allows a PASS-stamped X row without reading any valve', async () => {
+  it('never reads a valve on X — an OFF x_autopublish_enabled is not an owner block', async () => {
     // The owner's click is the human approval; x_autopublish_enabled governs
-    // only the scheduled tick. An OFF valve must not block an owner click.
+    // only the scheduled tick.
     const getValve = vi.fn(async () => false)
-    const decision = await decideManualPublish({ feedback: PASS_STAMP, isVideo: false, platform: 'x' }, getValve)
-    expect(decision).toEqual({ ok: true })
+    const decision = await decideManualPublish(
+      { ...POST, platform: 'x' }, getValve, { runChecks: clean() },
+    )
+    expect(decision.ok).toBe(true)
     expect(getValve).not.toHaveBeenCalled()
   })
 })

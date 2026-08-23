@@ -238,7 +238,7 @@ export const instagramPublisher: SocialPublisher = {
     if (!token || !igId) return { ok: false, reason: 'not_configured' }
 
     const caption = input.caption.slice(0, CAPTION_MAX)
-    // Accessibility description (migration 083). Verified 2026-08-22 against
+    // Accessibility description (migration 084). Verified 2026-08-22 against
     // developers.facebook.com/docs/instagram-platform/instagram-graph-api/
     // reference/ig-user/media: `alt_text` is "Alternative text, up to 1000
     // character, for an image. Only supported on a single image or image media

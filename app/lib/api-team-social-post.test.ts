@@ -151,7 +151,7 @@ describe('draft op — shopifyProductId pass-through', () => {
 // Migration 083 (owner direction 2026-08-22): altText/imageBrief/subject pass
 // through draft and rework so the accessibility description has somewhere to
 // live other than the caption.
-describe('draft op, altText/imageBrief/subject pass-through (migration 083)', () => {
+describe('draft op, altText/imageBrief/subject pass-through (migration 084)', () => {
   it('threads altText/imageBrief/subject to createDraftSocialPost', async () => {
     const res = await post({
       op: 'draft', platform: 'instagram', tweetText: 'A fresh line about the wand', voiceGate,
@@ -211,7 +211,7 @@ describe('rework op — wiring (#4351)', () => {
     expect((await res.json()).error).toMatch(/needs_changes/)
   })
 
-  it('passes altText/imageBrief/subject through to parseReworkInput (migration 083)', async () => {
+  it('passes altText/imageBrief/subject through to parseReworkInput (migration 084)', async () => {
     reworkParseMock.mockReturnValue({ ok: true, input: { mediaUrls: ['https://cdn/reworked.jpg'], altText: 'a', imageBrief: 'b', subject: 'c' } })
     reworkMock.mockResolvedValue({ ok: true, reviewStatus: 'pending_review' })
     const res = await post({

@@ -75,7 +75,7 @@ export const EMMA_VOICE_SUPPORT = `${EMMA_VOICE_CORE}\n\n${SUPPORT_ADDENDUM}`
 /** CORE + the video addendum (reel/short scripts and their captions; codified 2026-08-16). */
 export const EMMA_VOICE_VIDEO = `${EMMA_VOICE_CORE}\n\n${VIDEO_ADDENDUM}`
 
-/** CORE + the social addendum (Instagram/TikTok/X organic posts; migration 083). */
+/** CORE + the social addendum (Instagram/TikTok/X organic posts; migration 084). */
 export const EMMA_VOICE_SOCIAL = `${EMMA_VOICE_CORE}\n\n${SOCIAL_ADDENDUM}`
 
 /** The full charter text, unsliced, for callers that want everything (e.g. an eval judge). */

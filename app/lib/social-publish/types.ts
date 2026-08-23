@@ -37,7 +37,7 @@ export interface PublishInput {
    */
   productTagHandle?: string | null
   /**
-   * Accessibility description of the image (migration 083, owner direction
+   * Accessibility description of the image (migration 084, owner direction
    * 2026-08-22). Sent as the platform's alt_text parameter, never folded into
    * the caption, that was the defect this field fixes: with nowhere to put
    * it, the accessibility description was being written into the caption

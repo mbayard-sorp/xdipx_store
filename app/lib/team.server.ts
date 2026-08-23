@@ -2242,7 +2242,7 @@ export interface DraftSocialPostInput {
   // reads this fresh on every publish attempt. Optional — a post with no
   // featured product (education, inspiration) leaves it unset.
   shopifyProductId?: string | undefined
-  // Accessibility + regeneration fields (migration 083, owner direction
+  // Accessibility + regeneration fields (migration 084, owner direction
   // 2026-08-22). altText is the accessibility description sent to the platform
   // as alt_text on the image container, it must never be the caption itself.
   // imageBrief/subject are the durable "what is this image supposed to depict"

@@ -49,7 +49,6 @@ import {
   createOwnerReworkRow,
   ownerApprovePost,
 } from './social-admin-rework.server'
-import { decideManualPublish } from './social-publish/manual-publish-gate.server'
 import { parseGateStamp } from './social-publish-approve.server'
 
 const BASE_ROW = {
@@ -176,15 +175,14 @@ describe('buildOwnerApprovalStamp', () => {
     expect(stamp).toContain('earlier note from the gate')
   })
 
-  // Locks in the finding documented in the module: neither decideManualPublish
-  // nor postApprovedDraft restrict the stamp's reviewer to 'social-publish-gate',
-  // so a stamp reviewed by 'owner-studio' is already recognised as a valid PASS.
-  // No recogniser change was needed; this test is the proof.
-  it('is accepted by decideManualPublish exactly like a social-publish-gate stamp', async () => {
+  // Since #858 the owner's Post-now click no longer reads the stamp at all
+  // (decideManualPublish takes caption/mediaUrls, not feedback). What the
+  // stamp still governs is the hourly publisher, which demotes an approved row
+  // without a PASS stamp; parseGateStamp is what it reads, and it accepts the
+  // owner-studio reviewer exactly like social-publish-gate.
+  it('reads back as a PASS for the hourly publisher', () => {
     const stamp = buildOwnerApprovalStamp({ productHandle: 'rosales' }, now)
-    const getValve = vi.fn(async () => true)
-    const decision = await decideManualPublish({ feedback: stamp, isVideo: false }, getValve)
-    expect(decision.ok).toBe(true)
+    expect(parseGateStamp(stamp)?.verdict).toBe('PASS')
   })
 })
 

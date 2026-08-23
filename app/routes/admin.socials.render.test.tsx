@@ -1,6 +1,6 @@
 /**
  * Render contract for /admin/socials (Social Studio). The live preview cannot
- * run until migration 083 exists in the database, so this test renders the
+ * run until migration 084 exists in the database, so this test renders the
  * route component against a fixed loader payload through React Router's
  * static data router and asserts the workspace shape the owner asked for:
  * a queue row, a detail pane with the caption and alt text, the parsed gate

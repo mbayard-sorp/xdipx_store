@@ -94,6 +94,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       frames: r.frames,
       finalUrl: r.finalUrl,
       posterUrl: r.posterUrl,
+      // Multi-scene jobs only (Phase 3, 20-60s videos): null/undefined for
+      // every single-scene job, which keeps the existing UI branch untouched.
+      scenes: r.job.scenesJson,
+      sceneState: r.job.sceneStateJson,
+      sceneFrames: r.sceneFrames,
     })),
     active: hasActiveVideoJobs(rows),
     models,
@@ -145,7 +150,11 @@ export async function action({ request }: ActionFunctionArgs) {
       case 'approve-frame': {
         const frameAssetId = Number(form.get('frameAssetId'))
         if (!Number.isFinite(frameAssetId)) return Response.json({ error: 'Missing frameAssetId' }, { status: 400 })
-        await approveSceneFrame(jobRowId, frameAssetId)
+        // Multi-scene jobs post a sceneIndex so only that scene's frame is
+        // approved (MultiSceneFramePicker below); absent for single-scene jobs.
+        const sceneIndexRaw = form.get('sceneIndex')
+        const sceneIndex = sceneIndexRaw != null && sceneIndexRaw !== '' ? Number(sceneIndexRaw) : undefined
+        await approveSceneFrame(jobRowId, frameAssetId, sceneIndex)
         return Response.json({ ok: true })
       }
       case 'retry-frames': {
@@ -386,38 +395,44 @@ export default function VideoStudioPage() {
           {parked.map(job => (
             <div key={job.id} className="rounded-[22px] border border-line bg-paper-2 p-4">
               <JobHeader job={job} />
-              <Form method="post" className="mt-3">
-                <input type="hidden" name="intent" value="approve-frame" />
-                <input type="hidden" name="jobRowId" value={job.id} />
-                <div className="grid grid-cols-3 gap-2">
-                  {job.frames.map(f => (
-                    <button
-                      key={f.id}
-                      type="submit"
-                      name="frameAssetId"
-                      value={f.id}
-                      disabled={busy}
-                      className="group overflow-hidden rounded-lg border-2 border-line transition hover:border-coral disabled:opacity-50"
-                    >
-                      <img src={f.blobUrl} alt="Candidate frame" className="aspect-[9/16] w-full object-cover" />
-                      <span className="block py-1 text-center text-xs text-ink-3 group-hover:text-coral">Use this frame</span>
-                    </button>
-                  ))}
-                </div>
-              </Form>
-              <div className="mt-3 flex flex-col gap-3 md:flex-row">
-                <Form method="post" className="flex flex-1 gap-2">
-                  <input type="hidden" name="intent" value="retry-frames" />
+              {job.scenes ? (
+                <MultiSceneFramePicker job={job} busy={busy} />
+              ) : (
+                <Form method="post" className="mt-3">
+                  <input type="hidden" name="intent" value="approve-frame" />
                   <input type="hidden" name="jobRowId" value={job.id} />
-                  <input
-                    name="feedback"
-                    placeholder="What should change? (regenerates 3 frames, ~$0.12)"
-                    className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
-                  />
-                  <button type="submit" disabled={busy} className="rounded-full bg-ink px-4 py-2 text-sm text-paper disabled:opacity-40">
-                    Retry frames
-                  </button>
+                  <div className="grid grid-cols-3 gap-2">
+                    {job.frames.map(f => (
+                      <button
+                        key={f.id}
+                        type="submit"
+                        name="frameAssetId"
+                        value={f.id}
+                        disabled={busy}
+                        className="group overflow-hidden rounded-lg border-2 border-line transition hover:border-coral disabled:opacity-50"
+                      >
+                        <img src={f.blobUrl} alt="Candidate frame" className="aspect-[9/16] w-full object-cover" />
+                        <span className="block py-1 text-center text-xs text-ink-3 group-hover:text-coral">Use this frame</span>
+                      </button>
+                    ))}
+                  </div>
                 </Form>
+              )}
+              <div className="mt-3 flex flex-col gap-3 md:flex-row">
+                {!job.scenes && (
+                  <Form method="post" className="flex flex-1 gap-2">
+                    <input type="hidden" name="intent" value="retry-frames" />
+                    <input type="hidden" name="jobRowId" value={job.id} />
+                    <input
+                      name="feedback"
+                      placeholder="What should change? (regenerates 3 frames, ~$0.12)"
+                      className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+                    />
+                    <button type="submit" disabled={busy} className="rounded-full bg-ink px-4 py-2 text-sm text-paper disabled:opacity-40">
+                      Retry frames
+                    </button>
+                  </Form>
+                )}
                 <RejectForm jobRowId={job.id} busy={busy} />
               </div>
             </div>
@@ -433,6 +448,7 @@ export default function VideoStudioPage() {
             <div key={job.id} className="flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-line bg-paper-2 px-4 py-3">
               <JobHeader job={job} compact />
               <span className="text-xs text-ink-3">
+                {job.scenes && `scene ${Math.min(sceneDoneCount(job.sceneState) + 1, job.scenes.length)}/${job.scenes.length} · `}
                 {job.stage} · {job.status.replace(/_/g, ' ')} · ${Number(job.costUsd).toFixed(2)} so far
               </span>
             </div>
@@ -527,6 +543,11 @@ function Stat({ label, value, accent }: { label: string; value: number; accent: 
   )
 }
 
+/** Count of scenes with a finished clip (VideoSceneState.status === 'done'). */
+function sceneDoneCount(sceneState: Row['sceneState']): number {
+  return (sceneState ?? []).filter(s => s.status === 'done').length
+}
+
 function JobHeader({ job, compact }: { job: Row; compact?: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -536,7 +557,58 @@ function JobHeader({ job, compact }: { job: Row; compact?: boolean }) {
       <Chip>{job.modelTier}</Chip>
       {job.aiDisclosure && <Chip>AI-labeled</Chip>}
       {job.variantAxes?.sceneSlug && <Chip>{job.variantAxes.sceneSlug}</Chip>}
+      {job.scenes && <Chip>{sceneDoneCount(job.sceneState)}/{job.scenes.length} scenes</Chip>}
       {!compact && job.hook && <p className="w-full text-sm text-ink-3">"{job.hook}"</p>}
+    </div>
+  )
+}
+
+/**
+ * Multi-scene frame approval (Phase 3): finds the next own-frame scene parked
+ * at 'awaiting_frame_approval' and shows its candidates. Approving posts
+ * sceneIndex so approveSceneFrame only clears that one scene — the job stays
+ * (or returns to) 'awaiting_frame_approval' until every own-frame scene has a
+ * pick, then the poller advances it to the clip stage on its own.
+ */
+function MultiSceneFramePicker({ job, busy }: { job: Row; busy: boolean }) {
+  const scenes = job.scenes ?? []
+  const state = job.sceneState ?? []
+  const sceneFrames = job.sceneFrames ?? {}
+  const pendingIdx = scenes.findIndex((s, i) => s.continuity !== 'last-frame' && state[i]?.status === 'awaiting_frame_approval')
+
+  if (pendingIdx === -1) {
+    return <p className="mt-3 text-sm text-ink-3">Waiting on the next scene's frame candidates…</p>
+  }
+
+  const candidates = sceneFrames[pendingIdx] ?? []
+  const doneCount = sceneDoneCount(state)
+
+  return (
+    <div className="mt-3">
+      <p className="mb-2 text-xs text-ink-4">
+        Scene {pendingIdx + 1} of {scenes.length} · {scenes[pendingIdx]?.slug} · {doneCount} scene{doneCount === 1 ? '' : 's'} already approved
+      </p>
+      <Form method="post">
+        <input type="hidden" name="intent" value="approve-frame" />
+        <input type="hidden" name="jobRowId" value={job.id} />
+        <input type="hidden" name="sceneIndex" value={pendingIdx} />
+        <div className="grid grid-cols-3 gap-2">
+          {candidates.map(f => (
+            <button
+              key={f.id}
+              type="submit"
+              name="frameAssetId"
+              value={f.id}
+              disabled={busy}
+              className="group overflow-hidden rounded-lg border-2 border-line transition hover:border-coral disabled:opacity-50"
+            >
+              <img src={f.blobUrl} alt={`Scene ${pendingIdx + 1} candidate`} className="aspect-[9/16] w-full object-cover" />
+              <span className="block py-1 text-center text-xs text-ink-3 group-hover:text-coral">Use this frame</span>
+            </button>
+          ))}
+          {!candidates.length && <p className="col-span-3 text-xs text-ink-4">Candidates still rendering — refresh in a moment.</p>}
+        </div>
+      </Form>
     </div>
   )
 }

@@ -88,7 +88,7 @@ async function publishViaRegistry(post: PostRow) {
     // The featured product from the gate stamp, for adapters that can tag it
     // on the post (#3744). Additive only; adapters without tagging ignore it.
     productTagHandle: parseGateStamp(post.feedback)?.productHandle ?? null,
-    // Accessibility description (migration 083). Additive only; adapters
+    // Accessibility description (migration 084). Additive only; adapters
     // without alt-text support ignore it.
     altText: post.altText ?? null,
   })

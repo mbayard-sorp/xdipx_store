@@ -54,7 +54,7 @@ function gatePlatformOf(post: PostRow): GatePlatform {
 /**
  * Assemble the regeneration prompt. Pure and exported so the composition rule
  * is unit-tested directly: imageBrief wins when present (it is the durable
- * "what does this image depict" record, migration 083); otherwise subject,
+ * "what does this image depict" record, migration 084); otherwise subject,
  * then the caption's first line, stand in. The owner's feedback and the
  * standing imagery rules are always appended, never replaced.
  */

@@ -79,7 +79,7 @@ import {
  */
 export const GATE_PLATFORMS: readonly GatePlatform[] = ['instagram', 'x']
 
-function isGatePlatform(platform: string): platform is GatePlatform {
+export function isGatePlatform(platform: string): platform is GatePlatform {
   return (GATE_PLATFORMS as readonly string[]).includes(platform)
 }
 
@@ -468,9 +468,9 @@ export interface ReworkInput {
   /** Accessibility description of the (possibly regenerated) image (migration
    *  083). Optional, only present when the rework touched imagery. */
   altText?: string
-  /** Durable "what does this image depict" brief (migration 083). */
+  /** Durable "what does this image depict" brief (migration 084). */
   imageBrief?: string
-  /** Durable subject line for the post (migration 083). */
+  /** Durable subject line for the post (migration 084). */
   subject?: string
 }
 
@@ -528,7 +528,7 @@ export function parseReworkInput(raw: unknown): ReworkParse {
     }
   }
 
-  // Accessibility + brief fields (migration 083). Optional and do not count
+  // Accessibility + brief fields (migration 084). Optional and do not count
   // toward the "must change something" requirement above: they ride along
   // with a mediaUrls/tweetText rework rather than standing alone.
   let altText: string | undefined
