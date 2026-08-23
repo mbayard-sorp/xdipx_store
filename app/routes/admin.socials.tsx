@@ -26,7 +26,8 @@ import { dealHistory, socialPosts } from '../../db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { generateTweetCopy } from '~/lib/claude.server'
 import { getDealByShopifyId } from '~/lib/shopify.server'
-import { postManualTweet, deleteAndLogTweet, retryFailedPost, postApprovedDraft } from '~/lib/twitter.server'
+import { postManualTweet, postApprovedDraft } from '~/lib/twitter.server'
+import { retryFailedSocialPost, deleteSocialPost } from '~/lib/social-post-ops.server'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
 import { getSocialFrequencies, reviewSocialPost, rescheduleSocialPost, recordLivePostFeedback, getValve, VALVE_KEYS } from '~/lib/team.server'
 // Pure encoding, imported from the non-server module: the component below
@@ -40,7 +41,7 @@ import { ReviewQueue } from '~/components/admin/social/ReviewQueue'
 import { parseBatchPostIds } from '~/components/admin/social/review-batch'
 import { FrequencyPanel } from '~/components/admin/social/FrequencyPanel'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
-import { isVideoPost, type SocialPostRow } from '~/components/admin/social/types'
+import { isVideoPost, livePostUrl, type SocialPostRow } from '~/components/admin/social/types'
 import type { PublishMedia } from '~/lib/social-publish/types'
 import { decideManualPublish } from '~/lib/social-publish/manual-publish-gate.server'
 import { checkLinkedProductStock } from '~/lib/social-publish/stock-guard.server'
@@ -404,18 +405,22 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: result.ok, intent: 'post-tweet', tweetId: result.tweetId, error: result.error }
   }
 
-  if (intent === 'delete-tweet') {
+  // Delete and retry are platform-aware (ticket #4908): a retry re-runs the
+  // publish the row earned, with the owner's edited text and every slide; a
+  // delete works on drafts, failed rows, X posts (deleted on X first) and
+  // Instagram posts (row only, the API cannot delete media).
+  if (intent === 'delete-post') {
     const postId = parseInt(form.get('postId') as string)
-    const externalPostId = form.get('externalPostId') as string
-
-    const result = await deleteAndLogTweet(postId, externalPostId)
-    return { ok: result.ok, intent: 'delete-tweet', error: result.error }
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    const result = await deleteSocialPost(postId)
+    return { ok: result.ok, intent: 'delete-post', note: result.note, error: result.error }
   }
 
-  if (intent === 'retry-tweet') {
+  if (intent === 'retry-post') {
     const postId = parseInt(form.get('postId') as string)
-    const result = await retryFailedPost(postId)
-    return { ok: result.ok, intent: 'retry-tweet', tweetId: result.tweetId, error: result.error }
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    const result = await retryFailedSocialPost(postId)
+    return { ok: result.ok, intent: 'retry-post', tweetId: result.externalPostId, error: result.error }
   }
 
   return { ok: false, error: 'Unknown intent' }
@@ -548,7 +553,14 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
           <span className="absolute inset-0 flex items-center justify-center text-white text-lg drop-shadow">▶</span>
         </div>
       ) : (
-        <img src={media} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
+        <div className="relative shrink-0">
+          <img src={media} alt="" className="w-14 h-14 rounded-lg object-cover" />
+          {(post.mediaUrls?.length ?? 0) > 1 && (
+            <span className="absolute -bottom-1 -right-1 rounded-full bg-ink px-1.5 font-mono text-[10px] text-white" title={`${post.mediaUrls!.length} slides`}>
+              {post.mediaUrls!.length}
+            </span>
+          )}
+        </div>
       ))}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
@@ -874,8 +886,19 @@ function HistoryTab({ posts }: { posts: SocialPostRow[] }) {
     )
   }
 
+  const notice = deleteFetcher.data?.intent === 'delete-post'
+    ? (deleteFetcher.data.ok ? (deleteFetcher.data as { note?: string }).note ?? null : deleteFetcher.data.error ?? null)
+    : retryFetcher.data?.intent === 'retry-post' && !retryFetcher.data.ok
+      ? retryFetcher.data.error ?? null
+      : null
+
   return (
     <section className="bg-white rounded-2xl p-4 md:p-6 shadow-sm">
+      {notice && (
+        <p role="status" className={`mb-3 rounded-xl border px-3 py-2 text-xs ${deleteFetcher.data?.ok || retryFetcher.data?.ok ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-red-200 bg-red-50 text-red-700'}`}>
+          {notice}
+        </p>
+      )}
       <div className="space-y-3">
         {posts.map((post) => (
           <div
@@ -930,51 +953,58 @@ function HistoryTab({ posts }: { posts: SocialPostRow[] }) {
               <StatusBadge status={post.status} />
               <ReviewBadge status={post.reviewStatus} />
 
-              {post.status === 'posted' && post.externalPostId && (
-                <>
+              {(() => {
+                const url = livePostUrl(post)
+                return url ? (
                   <a
-                    href={`https://x.com/xdipx/status/${post.externalPostId}`}
+                    href={url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-sage hover:underline"
+                    title={post.platform === 'instagram' ? 'Opens the profile; the per-post permalink lands with Phase 4' : 'Open the live post'}
                   >
                     View
                   </a>
-                  {deleteConfirmId === post.id ? (
-                    <div className="flex items-center gap-1">
-                      <deleteFetcher.Form method="post">
-                        <input type="hidden" name="intent" value="delete-tweet" />
-                        <input type="hidden" name="postId" value={post.id} />
-                        <input type="hidden" name="externalPostId" value={post.externalPostId} />
-                        <button
-                          type="submit"
-                          className="text-xs text-red-600 hover:underline"
-                          onClick={() => setDeleteConfirmId(null)}
-                        >
-                          Confirm
-                        </button>
-                      </deleteFetcher.Form>
+                ) : null
+              })()}
+
+              {canDeletePost(post) && (
+                deleteConfirmId === post.id ? (
+                  <div className="flex items-center gap-1">
+                    <deleteFetcher.Form method="post">
+                      <input type="hidden" name="intent" value="delete-post" />
+                      <input type="hidden" name="postId" value={post.id} />
                       <button
+                        type="submit"
+                        className="text-xs text-red-600 hover:underline"
                         onClick={() => setDeleteConfirmId(null)}
-                        className="text-xs text-ink/40 hover:underline"
+                        title={post.status === 'posted' && post.platform === 'instagram'
+                          ? 'Removes the row here only. Instagram has no delete API; remove the post in the app.'
+                          : post.status === 'posted' ? 'Deletes the post on X, then removes the row' : 'Removes this draft from the Studio'}
                       >
-                        Cancel
+                        {post.status === 'posted' && post.platform === 'instagram' ? 'Confirm remove' : 'Confirm delete'}
                       </button>
-                    </div>
-                  ) : (
+                    </deleteFetcher.Form>
                     <button
-                      onClick={() => setDeleteConfirmId(post.id)}
-                      className="text-xs text-red-400 hover:text-red-600"
+                      onClick={() => setDeleteConfirmId(null)}
+                      className="text-xs text-ink/40 hover:underline"
                     >
-                      Delete
+                      Cancel
                     </button>
-                  )}
-                </>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirmId(post.id)}
+                    className="text-xs text-red-400 hover:text-red-600"
+                  >
+                    {post.status === 'posted' && post.platform === 'instagram' ? 'Remove' : 'Delete'}
+                  </button>
+                )
               )}
 
               {post.status === 'failed' && (
                 <retryFetcher.Form method="post">
-                  <input type="hidden" name="intent" value="retry-tweet" />
+                  <input type="hidden" name="intent" value="retry-post" />
                   <input type="hidden" name="postId" value={post.id} />
                   <button
                     type="submit"
@@ -991,6 +1021,18 @@ function HistoryTab({ posts }: { posts: SocialPostRow[] }) {
       </div>
     </section>
   )
+}
+
+/**
+ * Which rows the owner can delete from the history list. Drafts and failed
+ * rows always; live X posts (deleted on X first); live Instagram posts as a
+ * row-only removal. `publishing` belongs to a tick and `deleted` is done.
+ */
+function canDeletePost(post: Pick<SocialPostRow, 'status' | 'platform' | 'externalPostId'>): boolean {
+  if (post.status === 'draft' || post.status === 'failed') return true
+  if (post.status !== 'posted') return false
+  if (post.platform === 'x') return !!post.externalPostId
+  return post.platform === 'instagram'
 }
 
 function StatusBadge({ status }: { status: string }) {

@@ -60,3 +60,23 @@ export function captionOverPlatformLimit(platform: string, caption: string): boo
   if (platform === 'linkedin') return caption.length > LINKEDIN_CAPTION_MAX
   return false
 }
+
+/** The account every live post belongs to. `x.com/xdipx` only worked via a redirect. */
+export const X_HANDLE = 'hello_xdipx'
+export const INSTAGRAM_HANDLE = 'hello_xdipx'
+
+/**
+ * Link to the live post, or null when there is nothing to link to.
+ *
+ * X can be built from the id. Instagram stores a media id, and a media id is
+ * not a URL: the permalink is a second Graph API GET that Phase 4 persists in
+ * a `permalink` column. Until then an Instagram row links to the profile so
+ * the owner lands one tap away rather than on a dead link.
+ */
+export function livePostUrl(post: Pick<SocialPostRow, 'platform' | 'externalPostId' | 'status'> & { permalink?: string | null }): string | null {
+  if (post.status !== 'posted' || !post.externalPostId) return null
+  if (post.permalink) return post.permalink
+  if (post.platform === 'x') return `https://x.com/${X_HANDLE}/status/${post.externalPostId}`
+  if (post.platform === 'instagram') return `https://www.instagram.com/${INSTAGRAM_HANDLE}/`
+  return null
+}
