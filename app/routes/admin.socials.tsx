@@ -42,6 +42,7 @@ import type { PublishMedia } from '~/lib/social-publish/types'
 import { decideManualPublish } from '~/lib/social-publish/manual-publish-gate.server'
 import { checkLinkedProductStock } from '~/lib/social-publish/stock-guard.server'
 import { parseGateStamp } from '~/lib/social-publish-approve.server'
+import { weightedTweetLength, X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
 
 export const meta: MetaFunction = () => [{ title: 'Social Studio — xdipx Admin' }]
 
@@ -575,8 +576,10 @@ function ComposeTab({ data }: { data: ReturnType<typeof useLoaderData<typeof loa
     setTweetText(generateData.copy.mainTweet)
   }
 
-  const charCount = tweetText.length
-  const charColor = charCount > 280 ? 'text-red-500' : charCount > 240 ? 'text-amber-500' : 'text-ink/40'
+  // Weighted the way X counts: every link costs a flat 23 characters, so a
+  // caption with a PDP URL is far shorter to X than `.length` suggests.
+  const charCount = weightedTweetLength(tweetText)
+  const charColor = charCount > X_CAPTION_MAX ? 'text-red-500' : charCount > 240 ? 'text-amber-500' : 'text-ink/40'
 
   const discountPct = liveDeal?.msrp && liveDeal?.dealPrice
     ? Math.round(100 - (parseFloat(liveDeal.dealPrice) / parseFloat(liveDeal.msrp)) * 100)
@@ -642,8 +645,11 @@ function ComposeTab({ data }: { data: ReturnType<typeof useLoaderData<typeof loa
               className="w-full rounded-xl border border-line p-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-sage/30 resize-none"
             />
             <div className="flex items-center justify-between mt-1">
-              <span className={`text-xs font-medium ${charColor}`}>
-                {charCount}/280
+              <span
+                className={`text-xs font-medium ${charColor}`}
+                title="Links count as 23 characters each, the way X counts them"
+              >
+                {charCount}/{X_CAPTION_MAX}
               </span>
               {generateData?.copy?.threadReply && (
                 <span className="text-xs text-sage">
@@ -681,7 +687,7 @@ function ComposeTab({ data }: { data: ReturnType<typeof useLoaderData<typeof loa
             )}
             <button
               type="submit"
-              disabled={postFetcher.state !== 'idle' || !tweetText.trim() || charCount > 280}
+              disabled={postFetcher.state !== 'idle' || !tweetText.trim() || charCount > X_CAPTION_MAX}
               className="px-6 py-2.5 bg-coral text-white rounded-full text-sm font-semibold font-display shadow-sm hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {postFetcher.state !== 'idle' ? 'Posting...' : 'Post to X'}

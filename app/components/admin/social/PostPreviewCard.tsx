@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { useFetcher } from 'react-router'
-import { PLATFORM_LABELS, isVideoPost, type SocialPostRow } from './types'
+import {
+  PLATFORM_LABELS,
+  LINKEDIN_CAPTION_MAX,
+  isVideoPost,
+  platformCaptionLength,
+  captionOverPlatformLimit,
+  type SocialPostRow,
+} from './types'
+import { X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
 
 /** Image or muted-preview video, same box either way. */
 interface MediaRef { url: string; video: boolean; poster: string | null }
@@ -39,6 +47,11 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
     ? { url: mediaUrl, video: isVideoPost(post), poster: post.posterUrl ?? null }
     : null
   const edited = caption.trim() !== post.tweetText.trim()
+
+  // Counted the way the platform counts: on X every link costs a flat 23
+  // characters, so a two-link caption is far shorter to X than `.length` says.
+  const captionLength = platformCaptionLength(post.platform, caption)
+  const overLimit = captionOverPlatformLimit(post.platform, caption)
 
   function submit(decision: 'approved' | 'needs_changes' | 'rejected') {
     if (decision === 'needs_changes' && !feedback.trim()) {
@@ -113,15 +126,18 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
             />
             <div className="flex items-center justify-between mt-1">
               {post.platform === 'x' ? (
-                <span className={`text-xs font-medium ${caption.length > 280 ? 'text-red-500' : 'text-ink-4'}`}>
-                  {caption.length}/280
+                <span
+                  className={`text-xs font-medium ${overLimit ? 'text-red-500' : 'text-ink-4'}`}
+                  title="Links count as 23 characters each, the way X counts them"
+                >
+                  {captionLength}/{X_CAPTION_MAX}
                 </span>
               ) : post.platform === 'linkedin' ? (
-                <span className={`text-xs font-medium ${caption.length > 3000 ? 'text-red-500' : 'text-ink-4'}`}>
-                  {caption.length}/3000
+                <span className={`text-xs font-medium ${overLimit ? 'text-red-500' : 'text-ink-4'}`}>
+                  {captionLength}/{LINKEDIN_CAPTION_MAX}
                 </span>
               ) : (
-                <span className="text-xs text-ink-4">{caption.length} chars</span>
+                <span className="text-xs text-ink-4">{captionLength} chars</span>
               )}
               {edited && <span className="text-xs text-plum font-medium">Edited — saved with your decision</span>}
             </div>
@@ -146,7 +162,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => submit('approved')}
-              disabled={isSubmitting || (post.platform === 'x' && caption.length > 280) || (post.platform === 'linkedin' && caption.length > 3000)}
+              disabled={isSubmitting || overLimit}
               className="px-4 py-2 bg-coral text-white rounded-full text-sm font-semibold hover:bg-coral-2 transition-colors disabled:opacity-50"
             >
               {isSubmitting ? 'Saving…' : 'Approve'}
