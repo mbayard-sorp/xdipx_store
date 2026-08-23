@@ -97,6 +97,15 @@ describe('expiredFeedback', () => {
     expect(text).toContain('Gate: REVISE, packshot too dark.')
   })
 
+  it('keeps a gate stamp inside the prior text parseable (burn-in, #4913)', async () => {
+    const { parseGateStamp } = await import('./social-publish-approve.server')
+    const hold = '[publish-gate HOLD by social-publish-gate on 2026-08-12, product: dame-aer]\nNovel situation.'
+    const text = expiredFeedback(new Date('2026-08-23T16:00:00Z'), hold)
+    expect(text.startsWith(EXPIRED_PREFIX)).toBe(true)
+    expect(parseGateStamp(text)?.verdict).toBe('HOLD')
+    expect(parseGateStamp(text)?.productHandle).toBe('dame-aer')
+  })
+
   it('labels PST in winter and stands alone when there was no prior feedback', () => {
     expect(expiredFeedback(new Date('2026-01-15T17:00:00Z'), null)).toBe(
       `${EXPIRED_PREFIX} Slot Thu Jan 15, 9:00 AM PST passed without approval; reschedule or re-draft.`,

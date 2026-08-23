@@ -45,9 +45,22 @@ vi.mock('~/lib/social-publish/manual-publish-gate.server', () => ({
   decideManualPublish: decideManualPublishMock,
   manualPublishValveKey: vi.fn(),
 }))
-vi.mock('~/lib/social-publish-approve.server', () => ({
-  parseGateStamp: vi.fn(() => null),
-  revertSocialPostToDraft: vi.fn(),
+vi.mock('~/lib/social-publish-approve.server', async () => {
+  // The pure burn-in helpers (#4913) are real so the stamp-preservation
+  // assertion below tests the actual string behaviour; only the DB-touching
+  // export is stubbed.
+  const actual = await vi.importActual<typeof import('~/lib/social-publish-approve.server')>(
+    '~/lib/social-publish-approve.server',
+  )
+  return {
+    parseGateStamp: actual.parseGateStamp,
+    preserveGateStamp: actual.preserveGateStamp,
+    effectiveGateStatus: actual.effectiveGateStatus,
+    revertSocialPostToDraft: vi.fn(),
+  }
+})
+vi.mock('~/lib/social-publish/product-handle.server', () => ({
+  resolvePostProductHandle: vi.fn(async () => null),
 }))
 vi.mock('~/lib/claude.server', () => ({ generateTweetCopy: vi.fn() }))
 vi.mock('~/lib/shopify.server', () => ({ getDealByShopifyId: vi.fn(async () => null) }))
@@ -119,6 +132,21 @@ describe('post-media intent — stock guard', () => {
       reviewStatus: 'needs_changes',
     })
     expect((updateCalls[0]?.values as { feedback: string }).feedback).toContain('[stock-guard]')
+  })
+
+  it('keeps a PASS stamp behind the stock-guard note instead of destroying it (burn-in, #4913)', async () => {
+    const stamp = '[publish-gate PASS by social-publish-gate on 2026-08-20, product: dame-aer]\nClean frame.'
+    selectResult.rows = [{ ...basePost, feedback: stamp, shopifyProductId: 'gid://shopify/Product/999' }]
+    checkStockMock.mockResolvedValue({ ok: false, detail: 'Linked product gid://shopify/Product/999 is out of stock.' })
+
+    await action({
+      request: postForm({ intent: 'post-media', postId: '7' }),
+      params: {}, context: {},
+    } as never)
+
+    const fb = (updateCalls[0]?.values as { feedback: string }).feedback
+    expect(fb.startsWith('[stock-guard]')).toBe(true)
+    expect(fb).toContain(stamp)
   })
 
   it('fails closed when the linked product cannot be verified', async () => {

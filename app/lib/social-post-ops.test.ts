@@ -118,6 +118,16 @@ describe('retryFailedSocialPost', () => {
     expect(updates[0]!.values).toMatchObject({ status: 'draft', reviewStatus: 'needs_changes' })
   })
 
+  it('keeps the gate stamp behind the stock-guard note (burn-in, #4913)', async () => {
+    const stamp = '[publish-gate PASS by social-publish-gate on 2026-08-20, product: dame-aer]\nClean frame, cast present.'
+    const { deps, updates } = harness(row({ shopifyProductId: 'gid://1', feedback: stamp }))
+    deps.checkStock = async () => ({ ok: false, detail: 'Sold out.' })
+    await retryFailedSocialPost(7, deps)
+    const fb = updates[0]!.values['feedback'] as string
+    expect(fb.startsWith('[stock-guard] Sold out.')).toBe(true)
+    expect(fb).toContain(stamp)
+  })
+
   it('records the publisher failure detail and stays failed', async () => {
     const { deps, updates } = harness(row(), { ok: false, reason: 'error', detail: '402 credits' })
     const r = await retryFailedSocialPost(7, deps)

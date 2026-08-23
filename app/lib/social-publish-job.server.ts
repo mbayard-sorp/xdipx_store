@@ -29,9 +29,10 @@ import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
-import { parseGateStamp } from './social-publish-approve.server'
+import { effectiveGateStatus, preserveGateStamp } from './social-publish-approve.server'
 import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
 import { checkLinkedProductStock } from './social-publish/stock-guard.server'
+import { resolvePostProductHandle } from './social-publish/product-handle.server'
 import { estimateXPostCostUsd, estimateXSpendUsd } from './social-publish/x-limits'
 import { permalinkFor } from './social-permalink.server'
 import { formatLaSlot } from './social-schedule'
@@ -159,14 +160,20 @@ export interface PublishTickDeps {
   /**
    * Resolves the featured product handle for a post, when it has one.
    *
-   * Defaults to reading the gate stamp the pre-publish gate wrote into
-   * `feedback`. That default matters more than it looks: the handle is what
-   * turns the deterministic stock check on, `social_posts` has no column for
-   * one, and while this was merely optional nothing supplied it in production
-   * — so the publish-time stock re-check, the entire reason the gate runs here
-   * rather than only at draft time, silently did nothing on every row.
+   * Defaults to the row's product linkage (`shopify_product_id`, resolved to
+   * a handle through `productHandleById`), falling back to the handle the
+   * gate stamped into `feedback` while that column is null (Phase 5, #4913).
+   * That default matters more than it looks: the handle is what turns the
+   * deterministic stock check on, and while this was merely optional nothing
+   * supplied it in production, so the publish-time stock re-check silently
+   * did nothing on every row.
    */
   productHandleFor?: (post: PostRow) => Promise<string | null>
+  /**
+   * Resolves `shopify_product_id` to a handle. Defaults to the Shopify Admin
+   * lookup; a test injects a stub so no network call is made.
+   */
+  productHandleById?: (shopifyProductId: string) => Promise<string | null>
   now?: () => Date
   /** Defaults to the live database. */
   repo?: PublishRepo
@@ -301,7 +308,9 @@ export const EXPIRED_PREFIX = '[expired]'
 /**
  * The feedback an expired row carries: the marker, the slot it missed on the
  * LA wall clock, then whatever the row already said. Pure, so it is testable
- * without the database write around it.
+ * without the database write around it. The prior text is kept whole, so a
+ * gate stamp inside it still parses (`parseGateStamp` matches at any line
+ * start) for the burn-in readers (#4913).
  */
 export function expiredFeedback(scheduledAt: Date, prior: string | null): string {
   const line = `${EXPIRED_PREFIX} Slot ${formatLaSlot(scheduledAt)} passed without approval; reschedule or re-draft.`
@@ -590,9 +599,14 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     // and the loop moves on to the next candidate.
     const stock = await checkLinkedProductStock(post.shopifyProductId, deps.checkStockByProductId)
     if (!stock.ok) {
+      // preserveGateStamp keeps the legacy stamp behind the note for burn-in
+      // readers; the columns are untouched and remain the verdict of record.
       await repo.markNeedsChanges(
         post.id,
-        `[stock-guard] ${stock.detail} Swap the product or re-draft before this can publish.`,
+        preserveGateStamp(
+          post.feedback,
+          `[stock-guard] ${stock.detail} Swap the product or re-draft before this can publish.`,
+        ) ?? '',
       )
       attempts.push({ postId: post.id, outcome: 'out_of_stock', ...(stock.detail ? { detail: stock.detail } : {}) })
       continue
@@ -603,14 +617,19 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     // Refuse anything the pre-publish gate never looked at.
     //
     // `review_status='approved'` has two possible authors: the gate, which
-    // stamps its verdict into `feedback`, and the owner's click in the Social
-    // Studio, which does not. Under autopublish he is not clicking, so an
-    // approved row with no stamp is either a leftover from before this shipped
-    // or something that reached the column another way. Either is a row nothing
-    // adversarial has read, and publishing it unattended is the one thing this
-    // whole chain exists to prevent. It goes back to the queue instead.
-    const stamp = parseGateStamp(post.feedback)
-    if (!stamp || stamp.verdict !== 'PASS') {
+    // writes its verdict into `gate_status` (and, for burn-in, the stamp in
+    // `feedback`), and the owner's click in the Social Studio, which does
+    // not. Under autopublish he is not clicking, so an approved row with no
+    // verdict is either a leftover from before this shipped or something that
+    // reached the column another way. Either is a row nothing adversarial has
+    // read, and publishing it unattended is the one thing this whole chain
+    // exists to prevent. It goes back to the queue instead.
+    //
+    // Rule (Phase 5, #4913): publishable when gate_status = 'pass', or when
+    // gate_status IS NULL and the legacy stamp parses to PASS. The column
+    // wins, so a stale PASS stamp under a 'block' column never ships.
+    // TODO(#4913 burn-in): the stamp half of `effectiveGateStatus` goes next cycle.
+    if (effectiveGateStatus(post) !== 'pass') {
       await repo.markNeedsChanges(
         post.id,
         'Approved without a publish-gate PASS, so nothing independent has reviewed it. ' +
@@ -628,10 +647,11 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
 
     // The deterministic gate runs HERE, not only at gate time. Time passes
     // between approval and the scheduled slot, and stock is the thing that
-    // moves in it. The handle comes from the stamp unless a caller overrides.
+    // moves in it. The handle comes from the row's product linkage (stamp
+    // fallback during burn-in) unless a caller overrides.
     const productHandle = deps.productHandleFor
       ? await deps.productHandleFor(post)
-      : stamp.productHandle
+      : await resolvePostProductHandle(post, deps.productHandleById)
     const gate = await runDeterministicPublishChecks({
       caption,
       mediaUrls: post.mediaUrls ?? [],
@@ -642,7 +662,7 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
 
     if (gate.blocked || gate.held) {
       const summary = gate.findings.map(f => `[${f.check}] ${f.detail}`).join(' ')
-      await repo.markNeedsChanges(post.id, summary)
+      await repo.markNeedsChanges(post.id, preserveGateStamp(post.feedback, summary) ?? summary)
       attempts.push({ postId: post.id, outcome: 'blocked_by_gate', findings: gate.findings })
       continue
     }

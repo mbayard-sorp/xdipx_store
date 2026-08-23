@@ -172,6 +172,14 @@ by hand. `approved` on its own is no longer a licence to publish. If you see a r
 `no_gate_verdict`, that is a row nothing adversarial read, and the fix is to gate it, never to
 approve it again.
 
+Where that verdict lives (Phase 5 of Social Studio v2, #4913): the gate's verdict is recorded in the
+`gate_status`, `gate_checked_at`, and `gate_findings` columns on `social_posts`, and those columns
+are what the publish job and the Studio read. The `[publish-gate ...]` stamp in `feedback` is still
+written for one burn-in cycle and is read only when `gate_status` is null; a row publishes when
+`gate_status = 'pass'`, or when the column is null and the legacy stamp says PASS. If you read
+`feedback` on a row, treat it as the owner's note plus that stamp, and take the verdict from the
+column when one is set.
+
 That sentence is about the **scheduled job**, which is what "unattended" means, and it is unchanged.
 The owner's **Post-now** click in `/admin/socials` is a different path and no longer requires the
 stamp (owner direction 2026-08-23): the stamp is written by an agent on its own run and the Studio
