@@ -6,6 +6,7 @@ import { generateTweetCopy } from './claude.server'
 import { getDealByShopifyId } from './shopify.server'
 import { categoryToLegacyString } from '~/types'
 import { eq } from 'drizzle-orm'
+import { xPermalink } from './social-publish/x-limits'
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -324,6 +325,7 @@ export async function postDealTweet(
       platform: 'x',
       postType: 'auto_deal',
       externalPostId: tweet.id,
+      permalink: xPermalink(tweet.id),
       dealHistoryId: deal.dealHistoryId,
       tweetText: copy.mainTweet,
       mediaUrls: uploadedMediaUrls.length ? uploadedMediaUrls : null,
@@ -341,6 +343,7 @@ export async function postDealTweet(
           platform: 'x',
           postType: 'thread_reply',
           externalPostId: reply.id,
+          permalink: xPermalink(reply.id),
           parentPostId: undefined, // Will use externalPostId linkage
           dealHistoryId: deal.dealHistoryId,
           tweetText: copy.threadReply,
@@ -400,6 +403,7 @@ export async function postManualTweet(
       platform: 'x',
       postType: 'manual',
       externalPostId: tweet.id,
+      permalink: xPermalink(tweet.id),
       dealHistoryId: dealHistoryId ?? null,
       tweetText: text,
       mediaUrls: uploadedMediaUrls.length ? uploadedMediaUrls : null,
@@ -454,6 +458,7 @@ export async function postApprovedDraft(postId: number): Promise<SocialPostResul
       .update(socialPosts)
       .set({
         externalPostId: tweet.id,
+        permalink: xPermalink(tweet.id),
         mediaIds: mediaIds ?? null,
         status: 'posted',
         postedAt: new Date(),
@@ -511,6 +516,7 @@ export async function retryFailedPost(
       .update(socialPosts)
       .set({
         externalPostId: tweet.id,
+        permalink: xPermalink(tweet.id),
         status: 'posted',
         postedAt: new Date(),
         errorMessage: null,

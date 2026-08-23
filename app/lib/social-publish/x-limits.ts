@@ -10,6 +10,20 @@
 /** X's post ceiling for a standard (non-Premium) account. */
 export const X_CAPTION_MAX = 280
 
+/**
+ * The store's X account, without the `@`. Defined once, here, so a permalink
+ * can never be built against the wrong handle (Phase 0 fixed exactly that).
+ */
+export const X_HANDLE = 'hello_xdipx'
+
+/**
+ * The public URL of one of our posts on X. Pure: an X permalink is a function
+ * of handle and post id, so no API call is needed to know it.
+ */
+export function xPermalink(externalPostId: string): string {
+  return `https://x.com/${X_HANDLE}/status/${externalPostId}`
+}
+
 /** X accepts at most 4 images on one post. */
 export const X_MEDIA_MAX = 4
 

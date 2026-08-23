@@ -29,6 +29,8 @@ import { getDealByShopifyId } from '~/lib/shopify.server'
 import { postManualTweet, deleteAndLogTweet, retryFailedPost, postApprovedDraft } from '~/lib/twitter.server'
 import { requireAdmin, getAdminUser } from '~/lib/session.server'
 import { getSocialFrequencies, reviewSocialPost, rescheduleSocialPost, recordLivePostFeedback, getValve, VALVE_KEYS } from '~/lib/team.server'
+import { laWallClockToUtc } from '~/lib/social-schedule'
+import { permalinkFor } from '~/lib/social-permalink.server'
 // Pure encoding, imported from the non-server module: the component below
 // renders a stored verdict, and a component that reaches into a .server module
 // pulls the whole thing into the client build.
@@ -236,9 +238,17 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'reschedule') {
     const postId = parseInt(form.get('postId') as string)
     const day = (form.get('scheduledFor') as string | null) ?? ''
+    // Phase 4 (#4939): an optional LA wall-clock time alongside the date sets
+    // a precise `scheduled_at`; the date keeps being written for legacy readers.
+    const time = (form.get('time') as string | null) ?? ''
     if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
     if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: 'Bad date' }
-    await rescheduleSocialPost(postId, day || null)
+    if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { ok: false, error: 'Bad time' }
+    await rescheduleSocialPost(
+      postId,
+      day || null,
+      day && time ? { scheduledAt: laWallClockToUtc(day, time) } : {},
+    )
     return { ok: true }
   }
 
@@ -357,8 +367,17 @@ export async function action({ request }: ActionFunctionArgs) {
           : result.detail ?? 'Publish failed',
       }
     }
+    // Same write as the scheduled job's markPosted: status, id, time, and the
+    // live URL (Phase 4). Permalink resolution never throws and may be null.
+    const postedAt = new Date()
     await db.update(socialPosts)
-      .set({ status: 'posted', externalPostId: result.externalPostId, postedAt: new Date() })
+      .set({
+        status: 'posted',
+        externalPostId: result.externalPostId,
+        postedAt,
+        permalink: await permalinkFor(post.platform, result.externalPostId),
+        updatedAt: postedAt,
+      })
       .where(eq(socialPosts.id, postId))
     await recordManualPublish(postId, post.feedback, await ownerLabel(request))
     return { ok: true }

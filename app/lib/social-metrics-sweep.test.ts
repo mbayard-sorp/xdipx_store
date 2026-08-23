@@ -141,3 +141,58 @@ describe('runSocialMetricsSweep', () => {
     expect(result.instagram?.checked).toBe(3)
   })
 })
+
+// ── Phase 4: permalink backfill and the follower history table (#4939) ──────
+
+describe('permalink backfill', () => {
+  it('runs per platform after the metrics pass and reports what it filled', async () => {
+    const backfillPermalink = vi.fn(async (p: 'instagram' | 'x') => (p === 'instagram' ? 2 : 5))
+    const { deps } = baseDeps({ backfillPermalink })
+    const result = await runSocialMetricsSweep(deps)
+    expect(backfillPermalink).toHaveBeenCalledWith('instagram')
+    expect(backfillPermalink).toHaveBeenCalledWith('x')
+    expect(result.instagram?.permalinksBackfilled).toBe(2)
+    expect(result.x?.permalinksBackfilled).toBe(5)
+  })
+
+  it('still backfills X under the read cap (permalinks are arithmetic, not reads), never fails a block, and is a no-op behind injected repos', async () => {
+    const backfillPermalink = vi.fn(async (p: 'instagram' | 'x') => {
+      if (p === 'instagram') throw new Error('graph down')
+      return 1
+    })
+    const { deps } = baseDeps({ backfillPermalink, xMaxReadsMonth: async () => 0 })
+    const result = await runSocialMetricsSweep(deps)
+    expect(result.instagram).toEqual({ checked: 3, errors: 0 })
+    expect(result.x?.skipped).toBe('read_cap_reached')
+    expect(result.x?.permalinksBackfilled).toBe(1)
+
+    // No dep injected and the repos are doubles: nothing reaches a database.
+    const plain = await runSocialMetricsSweep(baseDeps().deps)
+    expect(plain.instagram).not.toHaveProperty('permalinksBackfilled')
+    expect(plain.x).not.toHaveProperty('permalinksBackfilled')
+  })
+})
+
+describe('follower history table', () => {
+  it('appends the account reading with the sweep timestamp, and tolerates a failed append', async () => {
+    const appendFollowerHistory = vi.fn(async () => {})
+    const { deps } = baseDeps({
+      appendFollowerHistory,
+      captureAccount: vi.fn(async () => ({ account: { followersCount: 120, followsCount: 7 } })),
+    })
+    const result = await runSocialMetricsSweep(deps)
+    expect(appendFollowerHistory).toHaveBeenCalledWith({
+      platform: 'instagram', capturedAt: NOW, followers: 120, follows: 7, mediaCount: null,
+    })
+    expect(result.account).toEqual({ account: { followersCount: 120, followsCount: 7 } })
+
+    const failing = baseDeps({ appendFollowerHistory: vi.fn(async () => { throw new Error('neon down') }) })
+    const r2 = await runSocialMetricsSweep(failing.deps)
+    expect(r2.account).toEqual({ account: { followersCount: 120 } })
+
+    // No reading, no row.
+    const none = vi.fn(async () => {})
+    await runSocialMetricsSweep(baseDeps({ appendFollowerHistory: none, captureAccount: vi.fn(async () => ({ error: 'no token' })) }).deps)
+    expect(none).not.toHaveBeenCalled()
+  })
+})
