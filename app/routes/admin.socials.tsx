@@ -5,15 +5,15 @@
  * Routes, not tabs. This file owns the workspace bar and an <Outlet/>; every
  * screen is a child route with its own loader and action:
  *
- *   /admin/socials                 -> redirects to /queue (calendar becomes
- *                                     the default once Phase 4 lands it)
+ *   /admin/socials                 -> redirects to /calendar (Phase 4,
+ *                                     #4939, the default screen)
  *   /admin/socials/queue           Review + Approved + History, all review
  *                                  and posting intents (admin.socials.queue)
  *   /admin/socials/compose/new     Composer, owner-composed draft
  *   /admin/socials/compose/:id     Composer on an existing row
  *   /admin/socials/library         Image library (+ /:assetId drawer)
  *   /admin/socials/analytics       Stub until Phase 6a
- *   /admin/socials/calendar        Stub until Phase 4
+ *   /admin/socials/calendar        Week grid, drag reschedule, PDT sheet
  *   /admin/socials/settings        FrequencyPanel + frequency intents
  *
  * Old deep links (`/admin/socials?tab=Review|Approved|Compose|History|
