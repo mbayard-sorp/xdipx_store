@@ -112,6 +112,52 @@ describe('op:create forwards links and supersedesId (#1686, #3406)', () => {
   })
 })
 
+describe('op:create/transition coerce a top-level `pr` shorthand (#5054)', () => {
+  it('coerces a top-level pr string on create into a pr-kind links entry', async () => {
+    mocks.createSuggestionDetailed.mockResolvedValueOnce({ id: 5052, deduped: false })
+    await post({
+      op: 'create', team: 'content', category: 'bug', kind: 'code',
+      suggestion: 'x', pr: 'https://github.com/o/r/pull/879',
+    })
+    const input = mocks.createSuggestionDetailed.mock.calls[0]![0] as Record<string, unknown>
+    expect(input['links']).toEqual([
+      { kind: 'pr', ref: 'https://github.com/o/r/pull/879', state: 'open' },
+    ])
+  })
+
+  it('does not duplicate when both pr shorthand and an equal links entry are sent', async () => {
+    await post({
+      op: 'create', team: 'content', category: 'bug', kind: 'code', suggestion: 'x',
+      pr: 'https://github.com/o/r/pull/879',
+      links: [{ kind: 'pr', ref: 'https://github.com/o/r/pull/879', state: 'open' }],
+    })
+    const input = mocks.createSuggestionDetailed.mock.calls[0]![0] as Record<string, unknown>
+    expect(input['links']).toEqual([
+      { kind: 'pr', ref: 'https://github.com/o/r/pull/879', state: 'open' },
+    ])
+  })
+
+  it('coerces a top-level pr string on transition too', async () => {
+    await post({
+      op: 'transition', id: 5052, to: 'pr_open', actor: 'agent:content-writer',
+      pr: 'https://github.com/o/r/pull/879',
+    })
+    const args = mocks.transitionSuggestion.mock.calls[0]!
+    expect((args[3] as Record<string, unknown>)['links']).toEqual([
+      { kind: 'pr', ref: 'https://github.com/o/r/pull/879', state: 'open' },
+    ])
+  })
+
+  it('ignores a non-string pr key (no link fabricated)', async () => {
+    await post({
+      op: 'create', team: 'content', category: 'bug', kind: 'code', suggestion: 'x',
+      pr: { url: 'nope' },
+    })
+    const input = mocks.createSuggestionDetailed.mock.calls[0]![0] as Record<string, unknown>
+    expect(input['links']).toBeUndefined()
+  })
+})
+
 describe('op:list returns total (#2071)', () => {
   it('returns suggestions and the untruncated total for the same filter', async () => {
     mocks.listSuggestions.mockResolvedValueOnce([{ id: 12 }])
