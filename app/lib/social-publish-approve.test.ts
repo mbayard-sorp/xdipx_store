@@ -14,9 +14,15 @@ import {
   PASS_NOTES_MIN,
   parseReworkInput,
   reworkSocialPost,
+  preserveGateStamp,
+  splitGateStamp,
+  effectiveGateStatus,
+  hasGatePass,
+  gateStatusForVerdict,
+  normaliseAgentFindings,
+  type ApprovePatch,
   type ApproveRepo,
   type PostRow,
-  type ReviewStatus,
   type ReworkRepo,
   type ReworkPatch,
 } from './social-publish-approve.server'
@@ -151,12 +157,12 @@ function row(over: Partial<PostRow> = {}): PostRow {
 }
 
 function fakeRepo(post: PostRow | null, recent: string[] = []) {
-  const writes: Array<{ reviewStatus: ReviewStatus; feedback: string }> = []
+  const writes: ApprovePatch[] = []
   const captionScopes: string[] = []
   const repo: ApproveRepo = {
     load: async () => post,
     recentCaptions: async (_limit, platform) => { captionScopes.push(platform); return recent },
-    write: async (_id, patch) => { writes.push({ reviewStatus: patch.reviewStatus, feedback: patch.feedback }) },
+    write: async (_id, patch) => { writes.push(patch) },
   }
   return { repo, writes, captionScopes }
 }
@@ -176,6 +182,62 @@ describe('applyPublishGateVerdict', () => {
     expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
     expect(writes[0]?.reviewStatus).toBe('approved')
     expect(parseGateStamp(writes[0]?.feedback)?.verdict).toBe('PASS')
+  })
+
+  // ── Phase 5 (#4913): the verdict lands in the columns, the stamp is dual-written ──
+
+  it('writes gate_status, gate_checked_at and gate_findings on a PASS, alongside the stamp', async () => {
+    const { repo, writes } = fakeRepo(row())
+    const now = new Date('2026-08-23T10:00:00Z')
+    const r = await applyPublishGateVerdict(7, verdict(), { repo, now: () => now, ...inStock })
+    expect(r.ok).toBe(true)
+    const w = writes[0]!
+    expect(w.gateStatus).toBe('pass')
+    expect(w.gateCheckedAt).toEqual(now)
+    expect(w.updatedAt).toEqual(now)
+    expect(Array.isArray(w.gateFindings)).toBe(true)
+    // Dual write: the stamp is still there for the burn-in readers.
+    expect(parseGateStamp(w.feedback)?.verdict).toBe('PASS')
+  })
+
+  it('maps REVISE, BLOCK and HOLD onto the column', async () => {
+    for (const [v, col, status] of [
+      ['REVISE', 'revise', 'needs_changes'],
+      ['BLOCK', 'block', 'rejected'],
+      ['HOLD-FOR-OWNER', 'hold', 'pending_review'],
+    ] as const) {
+      const { repo, writes } = fakeRepo(row())
+      await applyPublishGateVerdict(7, verdict({ verdict: v, notes: 'something to fix' }), { repo, ...inStock })
+      expect(writes[0]?.gateStatus).toBe(col)
+      expect(writes[0]?.reviewStatus).toBe(status)
+      expect(writes[0]?.gateCheckedAt).toBeInstanceOf(Date)
+    }
+  })
+
+  it('stores the findings the agent itemised, in the stored shape', async () => {
+    const { repo, writes } = fakeRepo(row())
+    const v = verdict({
+      findings: [
+        { check: 'register', verdict: 'pass', note: 'intensity 4, within the Instagram band' },
+        { check: 'imagery-ceiling', severity: 'warn', detail: 'close, but under' },
+        { nonsense: true },
+      ],
+    })
+    await applyPublishGateVerdict(7, v, { repo, ...inStock })
+    expect(writes[0]?.gateFindings).toEqual(expect.arrayContaining([
+      { check: 'register', verdict: 'pass', note: 'intensity 4, within the Instagram band' },
+      { check: 'imagery-ceiling', verdict: 'revise', note: 'close, but under' },
+    ]))
+    expect(writes[0]?.gateFindings.some(f => f.check === 'nonsense')).toBe(false)
+  })
+
+  it('records the deterministic findings as revise on the column when they refuse a PASS', async () => {
+    const { repo, writes } = fakeRepo(row({ mediaUrls: [`${CDN}/packshot.jpg`] }))
+    const r = await applyPublishGateVerdict(7, verdict(), { repo, ...inStock })
+    expect(r.ok).toBe(false)
+    expect(writes[0]?.gateStatus).toBe('revise')
+    expect(writes[0]?.gateFindings.length).toBeGreaterThan(0)
+    expect(writes[0]?.gateFindings.every(f => typeof f.check === 'string' && typeof f.verdict === 'string')).toBe(true)
   })
 
   it('refuses a PASS the deterministic checks block, and does not approve', async () => {
@@ -407,6 +469,12 @@ describe('reworkSocialPost (#4351)', () => {
     expect(patch.feedback).toBeNull()
     expect(patch.reviewedBy).toBeNull()
     expect(patch.reviewedAt).toBeNull()
+    // And so are the gate columns (#4913): a reworked row has no verdict until
+    // the gate looks again, so a later hand approval cannot ride a stale pass.
+    expect(patch.gateStatus).toBeNull()
+    expect(patch.gateCheckedAt).toBeNull()
+    expect(patch.gateFindings).toBeNull()
+    expect(patch.updatedAt).toBeInstanceOf(Date)
     // An imagery-only rework must NOT touch the caption (that is the #4069 trap).
     expect(patch.tweetText).toBeUndefined()
   })
@@ -450,5 +518,81 @@ describe('reworkSocialPost (#4351)', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.status).toBe(409)
     expect(writes).toHaveLength(0)
+  })
+})
+
+// ── Phase 5 burn-in helpers (#4913) ──────────────────────────────────────────
+
+const PASS = formatGateStamp(
+  { verdict: 'PASS', reviewer: 'social-publish-gate', notes: 'Looked at the frame and the feed.', productHandle: 'dame-aer' },
+  new Date('2026-08-20T00:00:00Z'),
+)
+
+describe('preserveGateStamp / splitGateStamp', () => {
+  it('carries the stamp block behind a replacing note, and the stamp still parses', () => {
+    const out = preserveGateStamp(PASS, '[stock-guard] Linked product is out of stock.')
+    expect(out?.startsWith('[stock-guard]')).toBe(true)
+    expect(parseGateStamp(out)?.verdict).toBe('PASS')
+    expect(parseGateStamp(out)?.productHandle).toBe('dame-aer')
+  })
+
+  it('is a plain overwrite when there was no stamp', () => {
+    expect(preserveGateStamp('owner note', 'new note')).toBe('new note')
+    expect(preserveGateStamp(null, null)).toBeNull()
+    expect(preserveGateStamp(PASS, null)).toBe(PASS)
+  })
+
+  it('does not duplicate a stamp the new text already carries', () => {
+    expect(preserveGateStamp(PASS, PASS)).toBe(PASS)
+  })
+
+  it('splits a stamp that sits behind an expiry prefix, keeping the rest', () => {
+    const field = `[expired] Slot passed.\n${PASS}\n\nowner said: hold for Friday`
+    const { stamp, rest } = splitGateStamp(field)
+    expect(stamp).toBe(PASS)
+    expect(rest).toBe('[expired] Slot passed.\n\nowner said: hold for Friday')
+  })
+})
+
+describe('effectiveGateStatus / hasGatePass (column wins, stamp is fallback)', () => {
+  it('reads the column when it is set', () => {
+    expect(effectiveGateStatus({ gateStatus: 'pass', feedback: null })).toBe('pass')
+    expect(hasGatePass({ gateStatus: 'pass', feedback: null })).toBe(true)
+  })
+  it('falls back to the stamp only when the column is null', () => {
+    expect(effectiveGateStatus({ gateStatus: null, feedback: PASS })).toBe('pass')
+    expect(hasGatePass({ gateStatus: null, feedback: PASS })).toBe(true)
+  })
+  it('a block column beats a stale PASS stamp', () => {
+    expect(effectiveGateStatus({ gateStatus: 'block', feedback: PASS })).toBe('block')
+    expect(hasGatePass({ gateStatus: 'block', feedback: PASS })).toBe(false)
+  })
+  it('is null with neither', () => {
+    expect(effectiveGateStatus({ gateStatus: null, feedback: 'just a note' })).toBeNull()
+  })
+  it('maps every verdict', () => {
+    expect(gateStatusForVerdict('PASS')).toBe('pass')
+    expect(gateStatusForVerdict('REVISE')).toBe('revise')
+    expect(gateStatusForVerdict('BLOCK')).toBe('block')
+    expect(gateStatusForVerdict('HOLD')).toBe('hold')
+  })
+})
+
+describe('normaliseAgentFindings', () => {
+  it('accepts both the stored and the deterministic shapes and drops junk', () => {
+    expect(normaliseAgentFindings([
+      { check: 'a', verdict: 'BLOCK', note: 'x' },
+      { check: 'b', severity: 'hold', detail: 'y' },
+      { check: 'c' },
+      { verdict: 'pass' },
+      'nope',
+    ])).toEqual([
+      { check: 'a', verdict: 'block', note: 'x' },
+      { check: 'b', verdict: 'hold', note: 'y' },
+      { check: 'c', verdict: 'pass' },
+    ])
+  })
+  it('400s a non-array findings field', () => {
+    expect(parsePublishGateVerdict(pass({ findings: 'x' })).ok).toBe(false)
   })
 })

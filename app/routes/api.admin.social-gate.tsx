@@ -28,7 +28,8 @@ import { db } from '~/lib/db.server'
 import { socialPosts, socialPostSlides } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { runDeterministicPublishChecks } from '~/lib/social-publish-gate.server'
-import { dbApproveRepo, isGatePlatform, parseGateStamp, GATE_PLATFORMS } from '~/lib/social-publish-approve.server'
+import { dbApproveRepo, isGatePlatform, GATE_PLATFORMS } from '~/lib/social-publish-approve.server'
+import { resolvePostProductHandle } from '~/lib/social-publish/product-handle.server'
 import { deriveGateStatus, findingToStored, type StoredGateFinding } from '~/lib/social-gate-status'
 import { apiError } from '~/lib/api-error.server'
 
@@ -53,8 +54,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const productHandle =
       (typeof b['productHandle'] === 'string' && b['productHandle'].trim()) ||
-      parseGateStamp(post.feedback)?.productHandle ||
-      null
+      (await resolvePostProductHandle(post))
 
     const slides = await db
       .select({ altText: socialPostSlides.altText })

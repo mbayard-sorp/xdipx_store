@@ -321,6 +321,78 @@ describe('the gate runs at publish time', () => {
     expect(calls.posted).toEqual([1])
   })
 
+  // ── Phase 5 (#4913): gate_status is the verdict of record, the stamp is burn-in fallback ──
+
+  it('publishes on gate_status = pass with no stamp at all', async () => {
+    const { repo, calls } = fakeRepo([post({ feedback: null, gateStatus: 'pass', gateCheckedAt: new Date('2026-08-12') })])
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+    expect(calls.posted).toEqual([1])
+  })
+
+  it('still publishes a legacy row: column null, stamp says PASS (burn-in)', async () => {
+    const { repo, calls } = fakeRepo([post({ feedback: PASS_STAMP, gateStatus: null })])
+    await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(calls.posted).toEqual([1])
+  })
+
+  it('does NOT publish when the column says block, even under a stale PASS stamp (column wins)', async () => {
+    const { repo, calls } = fakeRepo([post({ feedback: PASS_STAMP, gateStatus: 'block' })])
+    const publish = vi.fn()
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+    expect(publish).not.toHaveBeenCalled()
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'no_gate_verdict' }])
+    expect(calls.needsChanges).toHaveLength(1)
+  })
+
+  it('refuses revise and hold columns too', async () => {
+    for (const gateStatus of ['revise', 'hold'] as const) {
+      const { repo } = fakeRepo([post({ feedback: PASS_STAMP, gateStatus })])
+      const publish = vi.fn()
+      await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
+      expect(publish).not.toHaveBeenCalled()
+    }
+  })
+
+  it('takes the product handle from shopify_product_id ahead of the stamp', async () => {
+    const stamped =
+      '[publish-gate PASS by social-publish-gate on 2026-08-12, product: stale-handle]\nChecked stock and the frame.'
+    const { repo } = fakeRepo([post({ feedback: stamped, gateStatus: 'pass', shopifyProductId: 'gid://shopify/Product/42' })])
+    const seen: string[] = []
+    await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      checkStockByProductId: async () => true,
+      productHandleById: async (id) => (id === 'gid://shopify/Product/42' ? 'fresh-handle' : null),
+      gateDeps: { getAvailability: async (h) => { seen.push(h); return true } },
+    })
+    expect(seen).toEqual(['fresh-handle'])
+  })
+
+  it('falls back to the stamp handle when the linkage cannot be resolved', async () => {
+    const stamped =
+      '[publish-gate PASS by social-publish-gate on 2026-08-12, product: stamp-handle]\nChecked stock and the frame.'
+    const { repo } = fakeRepo([post({ feedback: stamped, gateStatus: 'pass', shopifyProductId: 'gid://shopify/Product/42' })])
+    const seen: string[] = []
+    await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      checkStockByProductId: async () => true,
+      productHandleById: async () => null,
+      gateDeps: { getAvailability: async (h) => { seen.push(h); return true } },
+    })
+    expect(seen).toEqual(['stamp-handle'])
+  })
+
+  it('keeps the PASS stamp behind the stock-guard note when it bounces a row (burn-in)', async () => {
+    const { repo, calls } = fakeRepo([post({ feedback: PASS_STAMP, gateStatus: 'pass', shopifyProductId: 'gid://shopify/Product/9' })])
+    await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      checkStockByProductId: async () => false,
+    })
+    const fb = calls.needsChanges[0]?.feedback ?? ''
+    expect(fb.startsWith('[stock-guard]')).toBe(true)
+    expect(fb).toContain('[publish-gate PASS by social-publish-gate')
+  })
+
   it('carries a publish note into the tick report, so an untagged-with-reason publish is visible in the run event (ticket #3744)', async () => {
     // The exact drop this ticket bounced on: an IG post that published but
     // untagged (product not approved for tagging) returns { ok, note } from the

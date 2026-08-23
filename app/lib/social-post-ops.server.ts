@@ -36,6 +36,7 @@ import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import type { PublishMedia, SocialPublisher } from './social-publish/types'
 import { checkLinkedProductStock } from './social-publish/stock-guard.server'
+import { preserveGateStamp } from './social-publish-approve.server'
 
 type SocialPostRow = typeof socialPosts.$inferSelect
 
@@ -118,7 +119,11 @@ export async function retryFailedSocialPost(
     await deps.update(postId, {
       status: 'draft',
       reviewStatus: 'needs_changes',
-      feedback: `[stock-guard] ${stock.detail ?? 'Linked product is not in stock.'} Swap the product or re-draft before this can publish.`,
+      // The legacy stamp rides behind the note for burn-in readers (#4913).
+      feedback: preserveGateStamp(
+        post.feedback,
+        `[stock-guard] ${stock.detail ?? 'Linked product is not in stock.'} Swap the product or re-draft before this can publish.`,
+      ),
     })
     return { ok: false, error: `${stock.detail ?? 'Linked product is not in stock.'} Moved to Needs Changes.` }
   }

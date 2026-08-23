@@ -26,7 +26,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, type SQ
 import { db } from '~/lib/db.server'
 import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
 import { formatLiveFeedback, type LivePostVerdict } from '~/lib/live-post-feedback'
-import { parseGateStamp } from '~/lib/social-publish-approve.server'
+import { parseGateStamp, preserveGateStamp, stripGateStamp } from '~/lib/social-publish-approve.server'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
 import { cached, invalidateCache, kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
 import {
@@ -2361,17 +2361,26 @@ export type ReviewSocialPostResult =
  * an atomic WHERE guard so the refusal below does not depend on winning a
  * read-then-write race. Plain JS string, bound as a query parameter by the
  * `sql` tag below rather than interpolated into the query text. */
-const BLOCK_STAMP_REGEX = '^\\[publish-gate BLOCK by '
+// TODO(#4913 burn-in): drop the stamp regex once `gate_status` alone guards this.
+// Matches at any line start, since burn-in writers may carry the stamp behind a note.
+const BLOCK_STAMP_REGEX = '(^|\\n)\\[publish-gate BLOCK by '
 
 /**
  * Would approving a row right now silently clear an unresolved
  * social-publish-gate BLOCK? Pure and exported so the one predicate this
  * account-safety rule turns on is a direct unit test rather than something
  * only provable by reading `reviewSocialPost` or standing up a DB fixture.
- * `feedback` is the row's CURRENT stored value — a BLOCK verdict stamps
- * exactly this shape (`applyPublishGateVerdict`), and nothing else does.
+ * `gate_status` is the verdict of record (Phase 5, #4913); `feedback` is the
+ * row's CURRENT stored value and is read only as the legacy fallback, since a
+ * BLOCK verdict stamps exactly this shape (`applyPublishGateVerdict`) and
+ * nothing else does.
  */
-export function wouldClearGateBlock(feedback: string | null | undefined): boolean {
+export function wouldClearGateBlock(
+  feedback: string | null | undefined,
+  gateStatus?: string | null,
+): boolean {
+  if (gateStatus === 'block') return true
+  // TODO(#4913 burn-in): remove the stamp fallback.
   return parseGateStamp(feedback)?.verdict === 'BLOCK'
 }
 
@@ -2402,26 +2411,48 @@ export function wouldClearGateBlock(feedback: string | null | undefined): boolea
  * inherits the same "never overridable" guarantee every BLOCK gets here.
  */
 export async function reviewSocialPost(id: number, input: ReviewSocialPostInput): Promise<ReviewSocialPostResult> {
+  // What the approval writes on top of the review fields. An owner approve
+  // keeps the gate's verdict (columns untouched, legacy stamp preserved behind
+  // his note for burn-in, #4913) UNLESS he also changed the caption: an edit
+  // invalidates the verdict, so the gate columns and the stamp are burned and
+  // the publish job will refuse the row until the gate looks again. That is
+  // ADR-013 decision 4 applied to the queue's review intent.
+  let feedback: string | null = input.feedback ?? null
+  let burnGate = false
+
   if (input.reviewStatus === 'approved') {
     const [current] = await db
-      .select({ feedback: socialPosts.feedback, status: socialPosts.status })
+      .select({
+        feedback: socialPosts.feedback,
+        status: socialPosts.status,
+        gateStatus: socialPosts.gateStatus,
+        editedText: socialPosts.editedText,
+      })
       .from(socialPosts)
       .where(eq(socialPosts.id, id))
       .limit(1)
     if (!current || current.status === 'posted') {
       return { ok: false, reason: 'not_found', error: 'Post not found or already posted' }
     }
-    if (wouldClearGateBlock(current.feedback)) {
+    if (wouldClearGateBlock(current.feedback, current.gateStatus)) {
       const stamp = parseGateStamp(current.feedback)
+      const who = stamp ? `${stamp.reviewer}, ${stamp.day}` : 'gate_status = block'
       return {
         ok: false,
         reason: 'gate_block',
         error:
-          `This draft carries an unresolved publish-gate BLOCK (${stamp?.reviewer}, ${stamp?.day}) ` +
+          `This draft carries an unresolved publish-gate BLOCK (${who}) ` +
           'and cannot be approved. A gate BLOCK has no manual override. The way forward is a ' +
           `fresh draft (POST /api/team/social-post {op:"draft", ..., "reworkedFrom":${id}}) that ` +
           'the gate verdicts on its own merits.',
       }
+    }
+    const edited = input.editedText !== undefined && input.editedText !== (current.editedText ?? undefined)
+    if (edited) {
+      burnGate = true
+      feedback = input.feedback ?? stripGateStamp(current.feedback)
+    } else {
+      feedback = preserveGateStamp(current.feedback, input.feedback)
     }
   }
 
@@ -2429,19 +2460,25 @@ export async function reviewSocialPost(id: number, input: ReviewSocialPostInput)
     .update(socialPosts)
     .set({
       reviewStatus: input.reviewStatus,
-      feedback:     input.feedback ?? null,
+      feedback,
       editedText:   input.editedText ?? null,
       reviewedBy:   input.reviewedBy,
       reviewedAt:   new Date(),
+      updatedAt:    new Date(),
+      ...(burnGate ? { gateStatus: null, gateCheckedAt: null, gateFindings: null } : {}),
     })
     .where(and(
       eq(socialPosts.id, id),
       ne(socialPosts.status, 'posted'),
       // Second, atomic layer: even if the read above raced a concurrent
-      // write, a row whose CURRENT feedback carries a stamped BLOCK verdict
-      // never transitions to approved through this WHERE clause.
+      // write, a row whose CURRENT gate_status is 'block' (or whose feedback
+      // carries a stamped BLOCK, burn-in) never transitions to approved
+      // through this WHERE clause.
       input.reviewStatus === 'approved'
-        ? or(isNull(socialPosts.feedback), sql`NOT (${socialPosts.feedback} ~ ${BLOCK_STAMP_REGEX})`)
+        ? and(
+            or(isNull(socialPosts.gateStatus), ne(socialPosts.gateStatus, 'block')),
+            or(isNull(socialPosts.feedback), sql`NOT (${socialPosts.feedback} ~ ${BLOCK_STAMP_REGEX})`),
+          )
         : sql`true`,
     ))
     .returning({ id: socialPosts.id })
@@ -2487,12 +2524,21 @@ export async function recordLivePostFeedback(
   id: number,
   input: LivePostFeedbackInput,
 ): Promise<boolean> {
+  // Read first so the legacy gate stamp rides behind the live verdict for the
+  // burn-in readers that still take the product handle from it (#4913).
+  const [current] = await db
+    .select({ feedback: socialPosts.feedback })
+    .from(socialPosts)
+    .where(and(eq(socialPosts.id, id), eq(socialPosts.status, 'posted')))
+    .limit(1)
+  if (!current) return false
   const result = await db
     .update(socialPosts)
     .set({
-      feedback:   formatLiveFeedback(input.verdict, input.note ?? ''),
+      feedback:   preserveGateStamp(current.feedback, formatLiveFeedback(input.verdict, input.note ?? '')),
       reviewedBy: input.reviewedBy,
       reviewedAt: new Date(),
+      updatedAt:  new Date(),
     })
     .where(and(eq(socialPosts.id, id), eq(socialPosts.status, 'posted')))
     .returning({ id: socialPosts.id })

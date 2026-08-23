@@ -40,7 +40,8 @@ import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import type { PublishMedia } from '~/lib/social-publish/types'
 import { decideManualPublish } from '~/lib/social-publish/manual-publish-gate.server'
 import { checkLinkedProductStock } from '~/lib/social-publish/stock-guard.server'
-import { parseGateStamp, revertSocialPostToDraft } from '~/lib/social-publish-approve.server'
+import { effectiveGateStatus, preserveGateStamp, revertSocialPostToDraft } from '~/lib/social-publish-approve.server'
+import { resolvePostProductHandle } from '~/lib/social-publish/product-handle.server'
 import { formatLaWallClock } from '~/lib/social-schedule-ui'
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -66,13 +67,19 @@ async function ownerLabel(request: Request): Promise<string> {
  * whether one existed is still worth knowing afterwards: `feedback` is the
  * channel the social team reads verbatim on its next run, so a post the owner
  * shipped over a REVISE is exactly the signal that should reach the drafters.
- * Appended, never prepended, because `parseGateStamp` is anchored at the start
- * of the field and other readers still parse it.
+ * Appended, never prepended, so the legacy stamp block (burn-in, #4913) stays
+ * intact for the readers that still parse it.
  */
-async function recordManualPublish(postId: number, feedback: string | null, by: string): Promise<void> {
-  const stamp = parseGateStamp(feedback)
-  if (stamp?.verdict === 'PASS') return
-  const had = stamp ? `over a gate ${stamp.verdict}` : 'with no gate verdict on the row'
+async function recordManualPublish(
+  postId: number,
+  post: { feedback: string | null; gateStatus?: string | null },
+  by: string,
+): Promise<void> {
+  const feedback = post.feedback
+  // Column first, stamp fallback (TODO(#4913 burn-in) inside effectiveGateStatus).
+  const verdict = effectiveGateStatus(post)
+  if (verdict === 'pass') return
+  const had = verdict ? `over a gate ${verdict.toUpperCase()}` : 'with no gate verdict on the row'
   const note =
     `\n\n[manual-publish by ${by} on ${new Date().toISOString().slice(0, 10)}] ` +
     `Published from Post-now ${had}. The deterministic publish checks passed; ` +
@@ -200,7 +207,12 @@ export async function action({ request }: ActionFunctionArgs) {
       await db.update(socialPosts)
         .set({
           reviewStatus: 'needs_changes',
-          feedback: `[stock-guard] ${draftStock.detail} Swap the product or re-draft before this can publish.`,
+          // Stamp preserved behind the note for burn-in readers (#4913).
+          feedback: preserveGateStamp(
+            draft.feedback,
+            `[stock-guard] ${draftStock.detail} Swap the product or re-draft before this can publish.`,
+          ),
+          updatedAt: new Date(),
         })
         .where(eq(socialPosts.id, postId))
       return { ok: false, error: `${draftStock.detail} Moved to Needs Changes.` }
@@ -211,13 +223,13 @@ export async function action({ request }: ActionFunctionArgs) {
         platform: 'x',
         caption: draft.editedText?.trim() || draft.tweetText,
         mediaUrls: draft.mediaUrls,
-        productHandle: parseGateStamp(draft.feedback)?.productHandle ?? null,
+        productHandle: await resolvePostProductHandle(draft),
       },
       getValve,
     )
     if (!gate.ok) return { ok: false, error: gate.error }
     const result = await postApprovedDraft(postId)
-    if (result.ok) await recordManualPublish(postId, draft.feedback, await ownerLabel(request))
+    if (result.ok) await recordManualPublish(postId, draft, await ownerLabel(request))
     return { ok: result.ok, intent: 'post-approved-draft', tweetId: result.tweetId, error: result.error }
   }
 
@@ -241,18 +253,26 @@ export async function action({ request }: ActionFunctionArgs) {
         .set({
           status: 'draft',
           reviewStatus: 'needs_changes',
-          feedback: `[stock-guard] ${stock.detail} Swap the product or re-draft before this can publish.`,
+          // Stamp preserved behind the note for burn-in readers (#4913).
+          feedback: preserveGateStamp(
+            post.feedback,
+            `[stock-guard] ${stock.detail} Swap the product or re-draft before this can publish.`,
+          ),
+          updatedAt: new Date(),
         })
         .where(eq(socialPosts.id, postId))
       return { ok: false, error: `${stock.detail} Moved to Needs Changes.` }
     }
     const isVideo = post.videoJobId != null || !!mediaUrl.split('?')[0]?.endsWith('.mp4')
+    // Product linkage first, legacy stamp as burn-in fallback (#4913). Resolved
+    // once and shared by the manual checks and the publisher's catalog tag.
+    const productHandle = await resolvePostProductHandle(post)
     const gate = await decideManualPublish(
       {
         isVideo,
         caption: post.editedText?.trim() || post.tweetText,
         mediaUrls: post.mediaUrls,
-        productHandle: parseGateStamp(post.feedback)?.productHandle ?? null,
+        productHandle,
       },
       getValve,
     )
@@ -273,7 +293,7 @@ export async function action({ request }: ActionFunctionArgs) {
       postId,
       media,
       caption: post.editedText?.trim() || post.tweetText,
-      productTagHandle: parseGateStamp(post.feedback)?.productHandle ?? null,
+      productTagHandle: productHandle,
     })
     if (!result.ok) {
       return {
@@ -293,7 +313,7 @@ export async function action({ request }: ActionFunctionArgs) {
         updatedAt: new Date(),
       })
       .where(eq(socialPosts.id, postId))
-    await recordManualPublish(postId, post.feedback, await ownerLabel(request))
+    await recordManualPublish(postId, post, await ownerLabel(request))
     return { ok: true }
   }
 
@@ -555,9 +575,13 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
   )
 }
 
-/** Client-side read of the legacy stamp header so the pill shows it before Phase 5 cuts readers over. */
+/**
+ * Client-side read of the legacy stamp header, used only when `gate_status`
+ * is null (the column wins, see `effectiveGateStatus`).
+ * TODO(#4913 burn-in): remove with the stamp; the pill then reads the column alone.
+ */
 function parseGateStampClient(feedback: string | null): string | null {
-  const m = /^\[publish-gate (PASS|REVISE|BLOCK|HOLD) /.exec(feedback ?? '')
+  const m = /^\[publish-gate (PASS|REVISE|BLOCK|HOLD) /m.exec(feedback ?? '')
   return m ? (m[1] as string).toLowerCase() : null
 }
 
