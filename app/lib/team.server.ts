@@ -2242,6 +2242,14 @@ export interface DraftSocialPostInput {
   // reads this fresh on every publish attempt. Optional — a post with no
   // featured product (education, inspiration) leaves it unset.
   shopifyProductId?: string | undefined
+  // Accessibility + regeneration fields (migration 084, owner direction
+  // 2026-08-22). altText is the accessibility description sent to the platform
+  // as alt_text on the image container, it must never be the caption itself.
+  // imageBrief/subject are the durable "what is this image supposed to depict"
+  // record admin rework reads instead of reverse-engineering it from the caption.
+  altText?: string | undefined
+  imageBrief?: string | undefined
+  subject?: string | undefined
 }
 
 /** Review states a still-open draft can sit in before the gate or the owner
@@ -2315,6 +2323,9 @@ export async function createDraftSocialPost(
       videoJobId:    p.videoJobId ?? null,
       posterUrl:     p.posterUrl ?? null,
       shopifyProductId: p.shopifyProductId ?? null,
+      altText:       p.altText ?? null,
+      imageBrief:    p.imageBrief ?? null,
+      subject:       p.subject ?? null,
     })
     .returning({ id: socialPosts.id })
   return { id: row!.id, deduped: false }

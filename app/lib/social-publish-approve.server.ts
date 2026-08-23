@@ -610,6 +610,13 @@ export interface ReworkInput {
   mediaUrls?: string[]
   /** Rewritten caption for a copy REVISE. When present, non-empty. */
   tweetText?: string
+  /** Accessibility description of the (possibly regenerated) image (migration
+   *  083). Optional, only present when the rework touched imagery. */
+  altText?: string
+  /** Durable "what does this image depict" brief (migration 084). */
+  imageBrief?: string
+  /** Durable subject line for the post (migration 084). */
+  subject?: string
 }
 
 export type ReworkParse =
@@ -666,9 +673,37 @@ export function parseReworkInput(raw: unknown): ReworkParse {
     }
   }
 
+  // Accessibility + brief fields (migration 084). Optional and do not count
+  // toward the "must change something" requirement above: they ride along
+  // with a mediaUrls/tweetText rework rather than standing alone.
+  let altText: string | undefined
+  if (r['altText'] !== undefined) {
+    if (typeof r['altText'] !== 'string' || r['altText'].trim() === '') {
+      return { ok: false, status: 400, error: 'Bad Request: rework.altText, when present, must be a non-empty string' }
+    }
+    altText = r['altText']
+  }
+  let imageBrief: string | undefined
+  if (r['imageBrief'] !== undefined) {
+    if (typeof r['imageBrief'] !== 'string' || r['imageBrief'].trim() === '') {
+      return { ok: false, status: 400, error: 'Bad Request: rework.imageBrief, when present, must be a non-empty string' }
+    }
+    imageBrief = r['imageBrief']
+  }
+  let subject: string | undefined
+  if (r['subject'] !== undefined) {
+    if (typeof r['subject'] !== 'string' || r['subject'].trim() === '') {
+      return { ok: false, status: 400, error: 'Bad Request: rework.subject, when present, must be a non-empty string' }
+    }
+    subject = r['subject']
+  }
+
   const input: ReworkInput = {}
   if (mediaUrls !== undefined) input.mediaUrls = mediaUrls
   if (tweetText !== undefined) input.tweetText = tweetText
+  if (altText !== undefined) input.altText = altText
+  if (imageBrief !== undefined) input.imageBrief = imageBrief
+  if (subject !== undefined) input.subject = subject
   return { ok: true, input }
 }
 
@@ -685,6 +720,9 @@ export interface ReworkPatch {
   updatedAt: Date
   mediaUrls?: string[]
   tweetText?: string
+  altText?: string
+  imageBrief?: string
+  subject?: string
 }
 
 export interface ReworkRepo {
@@ -755,6 +793,9 @@ export async function reworkSocialPost(
     updatedAt: deps.now?.() ?? new Date(),
     ...(input.mediaUrls !== undefined ? { mediaUrls: input.mediaUrls } : {}),
     ...(input.tweetText !== undefined ? { tweetText: input.tweetText } : {}),
+    ...(input.altText !== undefined ? { altText: input.altText } : {}),
+    ...(input.imageBrief !== undefined ? { imageBrief: input.imageBrief } : {}),
+    ...(input.subject !== undefined ? { subject: input.subject } : {}),
   }
   await repo.write(id, patch)
   return { ok: true, reviewStatus: 'pending_review' }

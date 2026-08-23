@@ -142,7 +142,7 @@ a six-line verdict in the weekly brief, one yes/no per line, where **yes is the 
 1. Every platform ran the active campaign spine.
 2. X companion beats shipped for the week's Instagram product posts.
 3. Toy posts carried their lube pairing.
-4. Every caption stayed inside its platform register cap (4-5 IG/TikTok, 6-7 X).
+4. Every caption hit its platform register (Instagram 9 by implication with the vocabulary fence intact, owner order 2026-08-22; TikTok 5; X 6-7). On Instagram, too tame is a defect, not a safe default.
 5. The campaign runway is at least 4 weeks.
 6. Every maker engagement (like/reply/reshare) was flagged to `offsite-scout`. A week with no maker
    engagement is a yes, said plainly.

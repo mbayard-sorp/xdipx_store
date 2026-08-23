@@ -2,23 +2,30 @@
  * POST /api/team/social-post — DRAFT-ONLY social post writes.
  *
  *   { op: 'draft', platform, postType?, tweetText, mediaUrls?, dealHistoryId?,
- *     scheduledFor?, reworkedFrom?, shopifyProductId?,
+ *     scheduledFor?, reworkedFrom?, shopifyProductId?, altText?, imageBrief?,
+ *     subject?,
  *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id, deduped }
  *     `deduped:true` means a still-open (pending_review/needs_changes) row for
  *     the same platform, caption, and campaign day already existed and `id`
  *     is THAT row, not a new one (ticket #4069 — see createDraftSocialPost).
  *     shopifyProductId (migration 080, ticket #2212) is the durable product
  *     link the publish-time stock guard reads; optional, set only when the
- *     post features a specific product.
+ *     post features a specific product. altText/imageBrief/subject (migration
+ *     083, owner direction 2026-08-22) are the accessibility description and
+ *     the durable "what does this image depict" record; altText is what the
+ *     Instagram publisher sends as alt_text and must never be folded into the
+ *     caption.
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
  *   { op: 'config' } -> { frequencies, autopostValve }
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
  *     productHandle? } } -> { ok, reviewStatus } | 422 { findings }
- *   { op: 'rework', id, mediaUrls?, tweetText? } -> { ok, reviewStatus } | 404 | 409
+ *   { op: 'rework', id, mediaUrls?, tweetText?, altText?, imageBrief?, subject? }
+ *     -> { ok, reviewStatus } | 404 | 409
  *     Refile a row the gate bounced to needs_changes (ticket #4351): update the
  *     corrected imagery/copy in place and reset it to pending_review so the gate
- *     re-judges it. At least one of mediaUrls/tweetText is required. Only a
- *     needs_changes row is a target, so #4069's duplicate-draft guard is intact.
+ *     re-judges it. At least one of mediaUrls/tweetText is required; altText/
+ *     imageBrief/subject ride along optionally. Only a needs_changes row is a
+ *     target, so #4069's duplicate-draft guard is intact.
  *   { op: 'engagement' } -> { report: [{ postId, externalPostId, metrics?, error? }],
  *                             account: { account?: { followersCount, ... }, error? } }
  *     Live Instagram insights (reach/likes/comments/saves) for the most
@@ -127,6 +134,9 @@ export async function action({ request }: ActionFunctionArgs) {
         typeof b['shopifyProductId'] === 'string' && b['shopifyProductId'].length > 0 && b['shopifyProductId'].length <= 60
           ? b['shopifyProductId']
           : undefined,
+      altText:      typeof b['altText'] === 'string' && b['altText'].length > 0 ? b['altText'] : undefined,
+      imageBrief:   typeof b['imageBrief'] === 'string' && b['imageBrief'].length > 0 ? b['imageBrief'] : undefined,
+      subject:      typeof b['subject'] === 'string' && b['subject'].length > 0 ? b['subject'] : undefined,
     })
     // Library pick (#4937): the agent chooses one of the generated candidates
     // client-side, so the pick is recorded here, by url, when the draft row
@@ -184,7 +194,13 @@ export async function action({ request }: ActionFunctionArgs) {
     if (typeof b['id'] !== 'number' || !Number.isFinite(b['id'])) {
       return new Response('Bad Request: id required', { status: 400 })
     }
-    const parsed = parseReworkInput({ mediaUrls: b['mediaUrls'], tweetText: b['tweetText'] })
+    const parsed = parseReworkInput({
+      mediaUrls: b['mediaUrls'],
+      tweetText: b['tweetText'],
+      altText: b['altText'],
+      imageBrief: b['imageBrief'],
+      subject: b['subject'],
+    })
     if (!parsed.ok) return new Response(parsed.error, { status: parsed.status })
 
     const result = await reworkSocialPost(b['id'], parsed.input)

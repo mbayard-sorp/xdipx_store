@@ -23,8 +23,14 @@ export interface SocialPostRow {
   /** Video pipeline linkage (065): set when this draft is a fanned-out video. */
   videoJobId: number | null
   posterUrl: string | null
-  /** Durable product linkage (080). */
+  /** Durable product linkage (080). Optional so older fixtures/tests compile. */
   shopifyProductId?: string | null
+  /** Per-row engagement numbers (079), merged field-level like video_jobs. */
+  metricsJson?: Record<string, number> | null
+  /** Accessibility description + generation brief (084). */
+  altText?: string | null
+  imageBrief?: string | null
+  subject?: string | null
   /** Social Studio v2 columns (084); optional so older callers still type-check. */
   scheduledAt?: string | Date | null
   permalink?: string | null
