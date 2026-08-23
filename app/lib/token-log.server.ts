@@ -24,6 +24,23 @@ type ApiTokenLogInsert = InferInsertModel<typeof import('../../db/schema').apiTo
 /** One short pause before the single reattempt of a failed row write. */
 const WRITE_RETRY_DELAY_MS = 250
 
+/**
+ * Width of api_token_log.sku (db/schema.ts: varchar('sku', { length: 32 })).
+ * Image/video callers pass Shopify product HANDLES as sku, and handles
+ * routinely exceed 32 chars (e.g. `sliquid-naturals-satin-personal-moisturizer`
+ * is 42), so an unclamped value throws `value too long for type character
+ * varying(32)` and the best-effort wrapper swallows the whole write — losing
+ * both the ledger row and the budget-gate counter bump (#5051). Clamp instead,
+ * matching the existing slice-to-column-width pattern used for model/caller/ref
+ * in logGenerationBlock. A truncated sku is a lossy label, never lost spend.
+ */
+const SKU_MAX_LEN = 32
+
+/** Clamp a nullable sku to the api_token_log.sku column width. */
+function clampSku(sku: string | null | undefined): string | null {
+  return sku ? sku.slice(0, SKU_MAX_LEN) : null
+}
+
 /** KV key for the per-UTC-day count of writes that failed even after retry. */
 function tokenWriteFailureKey(utcDate: string): string {
   return `token-log:write-failures:${utcDate}`
@@ -39,11 +56,15 @@ function tokenWriteFailureKey(utcDate: string): string {
 async function insertTokenRow(values: ApiTokenLogInsert): Promise<void> {
   const { db } = await import('./db.server')
   const { apiTokenLog } = await import('../../db/schema')
+  // Clamp sku to its column width here, the single choke point for every cost
+  // logger, so a long product handle can never overflow varchar(32) and throw
+  // the whole write away (#5051).
+  const safe: ApiTokenLogInsert = { ...values, sku: clampSku(values.sku) }
   try {
-    await db.insert(apiTokenLog).values(values)
+    await db.insert(apiTokenLog).values(safe)
   } catch {
     await new Promise(resolve => setTimeout(resolve, WRITE_RETRY_DELAY_MS))
-    await db.insert(apiTokenLog).values(values)
+    await db.insert(apiTokenLog).values(safe)
   }
 }
 
@@ -159,6 +180,10 @@ export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
       cacheCreationTokens: cacheCreation,
       cacheReadTokens:     cacheRead,
     })
+    // Bump the budget-gate counters before and independently of the ledger
+    // insert, so a row-write failure below cannot also drop this spend from the
+    // gate (#5051). Both are best-effort.
+    await bumpTeamSpendCounters(entry.feature, cost)
     await insertTokenRow({
       feature:             entry.feature,
       model:               entry.model,
@@ -174,7 +199,6 @@ export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
       requestCount:        entry.requestCount        ?? 1,
       estCostUsd:          String(cost),
     })
-    await bumpTeamSpendCounters(entry.feature, cost)
   } catch (err) {
     console.error('[token-log] best-effort write failed (ignored):', err)
     await recordTokenWriteFailure()
@@ -220,6 +244,11 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
     if (!entry.count || entry.count <= 0) return
     const { estimateImageCostUsd } = await import('./model-pricing.server')
     const cost = estimateImageCostUsd(entry.model, entry.count)
+    // Bump the budget-gate counters BEFORE and independently of the ledger
+    // insert. The KV counter and the Neon row fail independently, so a
+    // row-write failure below must never also drop this spend from the gate the
+    // store relies on to cap runaway spend (#5051). Both are best-effort.
+    await bumpTeamSpendCounters(entry.feature, cost, entry.count)
     await insertTokenRow({
       feature:             entry.feature,
       model:               entry.model,
@@ -237,7 +266,6 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
       requestCount:        entry.count,
       estCostUsd:          String(cost),
     })
-    await bumpTeamSpendCounters(entry.feature, cost, entry.count)
   } catch (err) {
     console.error('[token-log] best-effort image-cost write failed (ignored):', err)
     await recordTokenWriteFailure()
@@ -300,7 +328,7 @@ export async function logGenerationBlock(entry: GenerationBlockEntry): Promise<v
       source:              'sync',
       batchId:             null,
       productId:           entry.productId ?? null,
-      sku:                 entry.sku       ?? null,
+      sku:                 clampSku(entry.sku),
       caller:              (entry.ofFeature ? `${entry.ofFeature}:${entry.caller ?? '-'}` : entry.caller ?? null)?.slice(0, 96) ?? null,
       refId:               encodeBlockRef({
         reason:  entry.reason as never,
@@ -388,6 +416,10 @@ export async function logVideoCost(entry: VideoCostEntry): Promise<void> {
     if (!entry.seconds || entry.seconds <= 0) return
     const { estimateVideoCostUsd } = await import('./model-pricing.server')
     const cost = entry.actualCostUsd ?? estimateVideoCostUsd(entry.model, entry.seconds)
+    // Bump the budget-gate counters before and independently of the ledger
+    // insert, so a row-write failure below cannot also drop this spend from the
+    // gate (#5051). Both are best-effort.
+    await bumpTeamSpendCounters(entry.feature, cost)
     await insertTokenRow({
       feature:             entry.feature,
       model:               entry.model,
@@ -404,7 +436,6 @@ export async function logVideoCost(entry: VideoCostEntry): Promise<void> {
       requestCount:        1,
       estCostUsd:          String(cost),
     })
-    await bumpTeamSpendCounters(entry.feature, cost)
   } catch (err) {
     console.error('[token-log] best-effort video-cost write failed (ignored):', err)
     await recordTokenWriteFailure()
