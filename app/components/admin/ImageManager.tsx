@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { AdminProductImage } from '~/lib/shopify.server'
 import type { Deal } from '~/types'
+import { ConfirmDeletePopover } from '~/components/admin/media/ConfirmDeletePopover'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,32 +42,6 @@ const STYLES = [
 
 let _tempIdCounter = 0
 function tempId() { return `tmp-${++_tempIdCounter}-${Date.now()}` }
-
-// ─── Confirm Delete Popover ───────────────────────────────────────────────────
-
-function ConfirmDeletePopover({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
-  return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 rounded-xl backdrop-blur-sm">
-      <div className="bg-white rounded-xl p-3 shadow-xl text-center w-40">
-        <p className="text-xs font-semibold text-ink mb-2">Remove image?</p>
-        <div className="flex gap-2">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-1 text-xs rounded-lg border border-cream-2 text-ink/60 hover:bg-cream-2 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="flex-1 py-1 text-xs rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition-colors"
-          >
-            Remove
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ─── Image Tile ───────────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ export interface SocialPostRow {
   mediaUrls: string[] | null
   status: string
   errorMessage: string | null
+  postedAt?: string | Date | null
   createdAt: string | Date | null
   createdBy: string | null
   reviewStatus: string
@@ -22,6 +23,16 @@ export interface SocialPostRow {
   /** Video pipeline linkage (065): set when this draft is a fanned-out video. */
   videoJobId: number | null
   posterUrl: string | null
+  /** Durable product linkage (080). */
+  shopifyProductId?: string | null
+  /** Social Studio v2 columns (084); optional so older callers still type-check. */
+  scheduledAt?: string | Date | null
+  permalink?: string | null
+  gateStatus?: string | null
+  gateCheckedAt?: string | Date | null
+  gateFindings?: { check: string; verdict: string; note?: string }[] | null
+  castSlugs?: string[] | null
+  updatedAt?: string | Date | null
 }
 
 /** True when the draft's media is a video (fanned out from the video pipeline). */
@@ -73,8 +84,8 @@ export const INSTAGRAM_HANDLE = 'hello_xdipx'
  * a `permalink` column. Until then an Instagram row links to the profile so
  * the owner lands one tap away rather than on a dead link.
  */
-export function livePostUrl(post: Pick<SocialPostRow, 'platform' | 'externalPostId' | 'status'> & { permalink?: string | null }): string | null {
-  if (post.status !== 'posted' || !post.externalPostId) return null
+export function livePostUrl(post: Pick<SocialPostRow, 'platform' | 'externalPostId'> & { status?: string; permalink?: string | null }): string | null {
+  if ((post.status && post.status !== 'posted') || !post.externalPostId) return null
   if (post.permalink) return post.permalink
   if (post.platform === 'x') return `https://x.com/${X_HANDLE}/status/${post.externalPostId}`
   if (post.platform === 'instagram') return `https://www.instagram.com/${INSTAGRAM_HANDLE}/`

@@ -11,7 +11,27 @@ import {
 import { X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
 
 /** Image or muted-preview video, same box either way. */
-interface MediaRef { url: string; video: boolean; poster: string | null }
+export interface MediaRef { url: string; video: boolean; poster: string | null }
+
+/** Build the mock's media list from a row: every slide, in order. */
+export function mediaRefsOf(post: Pick<SocialPostRow, 'mediaUrls' | 'videoJobId' | 'posterUrl'>): MediaRef[] {
+  const urls = post.mediaUrls ?? []
+  return urls.map((url, i) => ({
+    url,
+    video: i === 0 ? isVideoPost(post) : !!url.split('?')[0]?.endsWith('.mp4'),
+    poster: i === 0 ? (post.posterUrl ?? null) : null,
+  }))
+}
+
+/** "1/4" slide counter over a carousel mock. */
+function SlideCount({ media }: { media: MediaRef[] }) {
+  if (media.length < 2) return null
+  return (
+    <span className="absolute top-2 right-2 font-mono text-[10px] leading-none px-1.5 py-1 rounded-full bg-ink/70 text-white tabular-nums">
+      1/{media.length}
+    </span>
+  )
+}
 
 function MediaBox({ media, className }: { media: MediaRef; className: string }) {
   if (!media.video) return <img src={media.url} alt="" className={className} />
@@ -42,11 +62,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
   const [feedbackError, setFeedbackError] = useState(false)
 
   const isSubmitting = fetcher.state !== 'idle'
-  // Every slide, not just the first: a carousel draft is reviewed as the
-  // carousel the publisher will ship, and a 3-slide post whose third slide is
-  // wrong must be visible as wrong here (ticket #4908).
-  const video = isVideoPost(post)
-  const media: MediaRef[] = (post.mediaUrls ?? []).map(url => ({ url, video, poster: post.posterUrl ?? null }))
+  const media = mediaRefsOf(post)
   const edited = caption.trim() !== post.tweetText.trim()
 
   // Counted the way the platform counts: on X every link costs a flat 23
@@ -84,7 +100,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
   }
 
   return (
-    <div className="rounded-2xl border border-line bg-white p-4 md:p-5 space-y-4">
+    <div className="rounded-2xl border border-line bg-white p-4 md:p-5 space-y-4" data-post-id={post.id}>
       {/* Header */}
       <div className="flex items-center gap-2 flex-wrap">
         <PlatformChip platform={post.platform} />
@@ -109,10 +125,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
       <div className="flex flex-col md:flex-row gap-4 md:gap-6">
         {/* Platform-native mock */}
         <div className="shrink-0">
-          {post.platform === 'instagram' && <InstagramMock media={media} caption={caption} />}
-          {(post.platform === 'tiktok' || post.platform === 'youtube') && <TikTokMock media={media} caption={caption} youtube={post.platform === 'youtube'} />}
-          {(post.platform === 'x' || post.platform === 'facebook') && <XMock media={media} caption={caption} />}
-          {post.platform === 'linkedin' && <LinkedInMock media={media} caption={caption} />}
+          <PlatformMock platform={post.platform} media={media} caption={caption} />
         </div>
 
         {/* Review controls */}
@@ -163,6 +176,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => submit('approved')}
+              data-review="approved"
               disabled={isSubmitting || overLimit}
               className="px-4 py-2 bg-coral text-white rounded-full text-sm font-semibold hover:bg-coral-2 transition-colors disabled:opacity-50"
             >
@@ -170,6 +184,7 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
             </button>
             <button
               onClick={() => submit('needs_changes')}
+              data-review="needs_changes"
               disabled={isSubmitting}
               className="px-4 py-2 bg-paper-2 text-ink rounded-full text-sm font-medium border border-line hover:border-amber-400 hover:text-amber-700 transition-colors disabled:opacity-50"
             >
@@ -218,30 +233,32 @@ function MissingMedia({ label }: { label: string }) {
   )
 }
 
-function InstagramMock({ media, caption }: { media: MediaRef[]; caption: string }) {
-  const [active, setActive] = useState(0)
-  const current = media[Math.min(active, Math.max(media.length - 1, 0))] ?? null
+/** Pick the mock for a platform. Exported so the Composer renders the same feed preview. */
+export function PlatformMock({ platform, media, caption }: { platform: string; media: MediaRef[]; caption: string }) {
+  if (platform === 'instagram') return <InstagramMock media={media} caption={caption} />
+  if (platform === 'tiktok' || platform === 'youtube') return <TikTokMock media={media} caption={caption} youtube={platform === 'youtube'} />
+  if (platform === 'linkedin') return <LinkedInMock media={media} caption={caption} />
+  return <XMock media={media} caption={caption} />
+}
+
+export function InstagramMock({ media, caption }: { media: MediaRef[]; caption: string }) {
+  const lead = media[0] ?? null
   return (
     <div className="w-[240px] rounded-xl border border-line overflow-hidden bg-white">
       <div className="flex items-center gap-2 px-3 py-2">
         <span className="w-6 h-6 rounded-full bg-coral-soft flex items-center justify-center text-[10px] font-bold text-coral">x</span>
-        <span className="text-xs font-semibold text-ink">xdipx</span>
+        <span className="text-xs font-semibold text-ink">hello_xdipx</span>
       </div>
-      <div className={`relative ${current?.video ? 'aspect-[9/16] bg-paper-3' : 'aspect-square bg-paper-3'}`}>
-        {current ? (
-          <MediaBox media={current} className="w-full h-full object-cover" />
+      <div className={`relative ${lead?.video ? 'aspect-[9/16] bg-paper-3' : 'aspect-[4/5] bg-paper-3'}`}>
+        {lead ? (
+          <MediaBox media={lead} className="w-full h-full object-cover" />
         ) : (
-          <MissingMedia label="Square 1:1 image needed" />
+          <MissingMedia label="4:5 image needed" />
         )}
-        {media.length > 1 && (
-          <span className="absolute top-2 right-2 rounded-full bg-ink/70 px-2 py-0.5 font-mono text-[10px] text-white">
-            {active + 1}/{media.length}
-          </span>
-        )}
+        <SlideCount media={media} />
       </div>
-      {media.length > 1 && <SlideStrip media={media} active={active} onSelect={setActive} />}
       <p className="px-3 py-2 text-xs text-ink leading-snug">
-        <span className="font-semibold">xdipx</span>{' '}
+        <span className="font-semibold">hello_xdipx</span>{' '}
         {caption.length > 125 ? `${caption.slice(0, 125)}… ` : caption}
         {caption.length > 125 && <span className="text-ink-4">more</span>}
       </p>
@@ -249,8 +266,8 @@ function InstagramMock({ media, caption }: { media: MediaRef[]; caption: string 
   )
 }
 
-function TikTokMock({ media: mediaList, caption, youtube }: { media: MediaRef[]; caption: string; youtube?: boolean }) {
-  const media = mediaList[0] ?? null
+export function TikTokMock({ media: all, caption, youtube }: { media: MediaRef[]; caption: string; youtube?: boolean }) {
+  const media = all[0] ?? null
   return (
     <div className="w-[180px]">
       {youtube && (
@@ -281,15 +298,12 @@ function TikTokMock({ media: mediaList, caption, youtube }: { media: MediaRef[];
           {caption.length > 90 ? `${caption.slice(0, 90)}…` : caption}
         </p>
       )}
-      {mediaList.length > 1 && (
-        <p className="mt-1 font-mono text-[10px] text-ink-4">+{mediaList.length - 1} more slide{mediaList.length > 2 ? 's' : ''} (first shown)</p>
-      )}
     </div>
   )
 }
 
-function LinkedInMock({ media: mediaList, caption }: { media: MediaRef[]; caption: string }) {
-  const media = mediaList[0] ?? null
+export function LinkedInMock({ media: all, caption }: { media: MediaRef[]; caption: string }) {
+  const media = all[0] ?? null
   // LinkedIn's feed truncates around 210 chars behind "…see more".
   const truncated = caption.length > 210
   return (
@@ -314,70 +328,32 @@ function LinkedInMock({ media: mediaList, caption }: { media: MediaRef[]; captio
   )
 }
 
-function XMock({ media, caption }: { media: MediaRef[]; caption: string }) {
-  // X shows up to four images in a grid; anything past four is dropped by the
-  // publisher, so it is shown here as dropped rather than hidden.
-  const shown = media.slice(0, 4)
-  const dropped = media.length - shown.length
+export function XMock({ media: all, caption }: { media: MediaRef[]; caption: string }) {
+  const media = all[0] ?? null
+  const extra = all.slice(1, 4)
   return (
     <div className="w-[260px] rounded-xl border border-line bg-white p-3">
       <div className="flex items-center gap-2">
         <span className="w-8 h-8 rounded-full bg-ink flex items-center justify-center text-xs font-bold text-white">x</span>
         <div className="leading-tight">
           <p className="text-xs font-bold text-ink">xdipx</p>
-          <p className="text-[10px] text-ink-4">@xdipx</p>
+          <p className="text-[10px] text-ink-4">@hello_xdipx</p>
         </div>
       </div>
       <p className="mt-2 text-sm text-ink whitespace-pre-wrap break-words leading-snug">{caption}</p>
-      {shown.length === 1 && shown[0] && (
+      {media && (
         <div className="mt-2 rounded-lg overflow-hidden border border-line">
-          <MediaBox media={shown[0]} className={shown[0].video ? 'w-full max-h-[280px] object-cover' : 'w-full max-h-[160px] object-cover'} />
-        </div>
-      )}
-      {shown.length > 1 && (
-        <div className={`mt-2 grid gap-0.5 rounded-lg overflow-hidden border border-line ${shown.length === 2 ? 'grid-cols-2' : 'grid-cols-2 grid-rows-2'}`}>
-          {shown.map((m, i) => (
-            <div key={m.url + i} className={`aspect-square ${shown.length === 3 && i === 0 ? 'row-span-2 aspect-auto' : ''}`}>
-              <MediaBox media={m} className="w-full h-full object-cover" />
+          <div className="relative">
+            <MediaBox media={media} className={media.video ? 'w-full max-h-[280px] object-cover' : 'w-full aspect-[16/9] object-cover'} />
+            <SlideCount media={all} />
+          </div>
+          {extra.length > 0 && (
+            <div className="grid grid-cols-3 gap-px bg-line">
+              {extra.map(m => <img key={m.url} src={m.url} alt="" className="w-full aspect-[16/9] object-cover bg-paper-3" />)}
             </div>
-          ))}
+          )}
         </div>
       )}
-      {dropped > 0 && (
-        <p className="mt-1 font-mono text-[10px] text-red-500">+{dropped} more than X allows; the publisher posts the first 4.</p>
-      )}
-    </div>
-  )
-}
-
-/** Thumbnail strip under a carousel mock. Keyboard: arrow keys move the selection. */
-function SlideStrip({ media, active, onSelect }: { media: MediaRef[]; active: number; onSelect: (i: number) => void }) {
-  return (
-    <div
-      role="tablist"
-      aria-label="Slides"
-      className="flex gap-1 overflow-x-auto px-2 py-1.5 bg-paper-2"
-      onKeyDown={e => {
-        if (e.key === 'ArrowRight') { e.preventDefault(); onSelect(Math.min(active + 1, media.length - 1)) }
-        if (e.key === 'ArrowLeft') { e.preventDefault(); onSelect(Math.max(active - 1, 0)) }
-      }}
-    >
-      {media.map((m, i) => (
-        <button
-          key={m.url + i}
-          type="button"
-          role="tab"
-          aria-selected={i === active}
-          aria-label={`Slide ${i + 1} of ${media.length}`}
-          onClick={() => onSelect(i)}
-          className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-md border-2 ${i === active ? 'border-coral' : 'border-transparent'}`}
-        >
-          {m.video
-            ? <img src={m.poster ?? undefined} alt="" className="h-full w-full object-cover bg-ink" />
-            : <img src={m.url} alt="" className="h-full w-full object-cover" />}
-          <span className="absolute bottom-0 right-0 rounded-tl bg-ink/70 px-1 font-mono text-[9px] text-white">{i + 1}</span>
-        </button>
-      ))}
     </div>
   )
 }
