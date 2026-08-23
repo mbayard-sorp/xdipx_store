@@ -49,7 +49,9 @@ support-analyst agent definition) for as long as daily voice volume stays under 
 - **Voice:** every turn since the previous run: `sms_turns` where `channel='voice'`, plus
   `call_log` and the call transcripts.
 - **SMS:** `sms_turns`.
-- **Web chat:** `emma_chat_turns`.
+- **Web chat:** `sms_turns` where `channel='web'` (v2 pipeline, `WEB_PIPELINE_VERSION=v2` in prod).
+  The old `emma_chat_turns` table is the retired v1 path, dead since 2026-05-09; reading it reports
+  zero web-chat conversations forever, even in weeks with real web-chat traffic (ticket #4873).
 
 Record how many conversations you sampled per channel in a `step` event; a thin or empty day is a
 valid, reported outcome.
