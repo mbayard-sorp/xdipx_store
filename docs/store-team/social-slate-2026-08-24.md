@@ -21,7 +21,7 @@ the womanizer next is built around that fact. it seals a soft silicone ring over
 
 save this for the next time someone says women are just harder to please. they aren't, they're under-served. then tell me which number surprised you more, the 95 or the 65?
 
-#sexualwellness #orgasmgap #clitoralstimulation #airpulsation #bodysafe #womanizer
+#sexualwellness #orgasmgap #pleasureproducts #airpulsation #bodysafe #womanizer
 
 **SLIDES (5):**
 1. "is it just me? no. it has a name and a number."
@@ -74,7 +74,7 @@ it's the toy that made the category click for people who tried a bullet, felt a 
 
 ask me anything about how it works. i'll answer straight.
 
-#sexualwellness #airpulsation #clitoralstimulation #womanizer #bodysafe #sexeducation
+#sexualwellness #airpulsation #pleasureproducts #womanizer #bodysafe #sexeducation
 
 **SLIDES (6):**
 1. "wtf is air pulsation?"
