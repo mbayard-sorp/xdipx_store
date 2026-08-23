@@ -859,7 +859,9 @@ Recorded so no run pretends otherwise, and so the gap is visible rather than qui
 - **`approved` alone is not a licence to publish.** The publish job refuses any row without a gate
   PASS stamp in its `feedback`, including one the owner approved by hand. A row reported as
   `no_gate_verdict` is a row nothing adversarial has read; it goes back through the gate, never
-  around it.
+  around it. This governs the scheduled job. The owner's own Post-now click stopped requiring the
+  stamp on 2026-08-23 by his direction, keeping only the deterministic checks; that is his path, not
+  yours, and it changes nothing about what you must do before a row reaches him.
 - **No engagement is captured.** `social_posts` has no metrics column and nothing reads Instagram
   insights, so "which posts worked" is unanswerable. `video_jobs.metrics_json` plus its owner
   self-report merge is the existing precedent to mirror. Adding the column is a migration, so it is a
