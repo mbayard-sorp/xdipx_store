@@ -201,6 +201,35 @@ property, never all of them; the packshot is the third resort, never the second.
 
 **Keepers:**
 
+- Dual-Stimulation Womanizer Blend Rabbit Vibrator Vibrant Blue
+  (`womanizer-blend-vibrant-blue`), `comparisons` category, sincere staging, single product only
+  (no second-product accent prop — see note below), post
+  `rabbit-vs-dual-stimulation-vibrator` (content-writer run 466). **Ref-image note:** this
+  product's only Shopify photo (`90891A...jpg`) is a box-plus-device composite carrying heavy
+  printed packaging copy ("Womanizer", "Simply orgasmic", "Dual stimulation", "8 Intensity
+  levels", "Blend") next to the standalone device — the box-bundled-photo failure class. The
+  device itself carries no printed text, so per the WINX precedent, cropped the reference
+  (`sharp .extract()`) down to the clean unpackaged device on white before passing it as
+  `--ref-image`, rather than fighting the label with negative prompts. **No-second-product note:**
+  the category motif table defaults `comparisons` to a second product as an accent prop, but this
+  post's own thesis is that the Blend's rabbit-like silhouette does dual stimulation via a
+  Pleasure Air outer arm rather than a vibrating pad — the single product's geometry already
+  carries the comparison the article is making, and the caller's staging brief asked for one
+  subject with its two-arm geometry legible and generous negative space for a headline, so the
+  second-product prop was dropped as a reasoned deviation (shared-rules license: caller briefs
+  shape the setting, not the archetype). Two rounds via Atlas `seedream-4.5-edit` (Atlas primary,
+  landscape_4_3): round 1 (2 candidates) failed the vision gate on background — a warm-to-cool
+  directional gradient with near-black corners, moody rather than bright/bold, banned gradient
+  ground. Round 2 (1 candidate, prompt hardened with explicit "flat, pure white, no gradient, no
+  vignette, no dim corners, evenly lit throughout" language) passed: mostly clean white/paper
+  field, soft warm daylight only in the corners (read as the brief's own "soft directional
+  daylight," not a designed brand gradient), product shape/color/button faithful to reference,
+  crisp legible two-arm silhouette, generous negative space for the headline →
+  `image-abe662d861a63fa9dbc02f334ed9e94c451baeab-2304x1728-jpg`. **Precedent:** the corrected
+  prompt's explicit "flat," "no gradient," "no vignette," "evenly lit throughout" language is the
+  fix for the directional-daylight-reads-as-moody-gradient failure mode; use it verbatim on any
+  future §0-P retry that fails on background mood.
+
 - Squishy Silicone WINX Hippity Hoppity Vibrator (`winx-hippity-hoppity-squishy-silicone-vibrator`),
   `wellness-basics` category (no accent prop), sincere staging (not the archetype E surreal
   option). **Ref-image note:** this product's primary Shopify photo (`93186A.jpg`) is a
