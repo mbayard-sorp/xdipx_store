@@ -150,6 +150,15 @@ three extra requirements:
 3. Transition the ticket to `pr_open` as normal. QA reviews it against the protected-path
    checklist in `routine-qa-daily.md`; the engine escalates it to the owner for merge.
 
+**Self-check before `create_pull_request` (#4945).** Right before you open the PR, if the branch's
+changed-file list matches any protected glob above, confirm the drafted body literally opens with a
+heading containing "Protected-path diff" — a cheap grep of your own body text against the changed-file
+list. Both protected-path PRs in the 2026-08-23 03:30 QA pass (#865, #866, Social Studio v2 Phases 2
+and 4) bounced solely because the body skipped this section, 2 for 2, with otherwise-clean code
+(typecheck/tests/build all green). The section is mechanical to satisfy for a stacked-migration PR
+(name the file, state the additive/auto classification, note no `PROTECTED_GLOBS`/valve/transition-map
+touch), so catching it at authoring time saves a full QA round trip.
+
 **DB class, lifted 2026-08-21.** This used to say migration and schema tickets still go to
 `blocked`, because CI could not execute SQL. It can now: the `migration-dry-run` job in
 `.github/workflows/ci.yml` runs every additive-classified migration in the PR against a throwaway
