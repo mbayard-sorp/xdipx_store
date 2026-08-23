@@ -190,6 +190,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     pr: {
       number: pr.number,
       title: pr.title,
+      // Raw PR description text (#5062). Cloud QA cannot reach api.github.com,
+      // so this endpoint is the only sanctioned source of the body — Step 6's
+      // protected-path checklist item 1 ("the PR body opens with a
+      // Protected-path diff section") can now be read, not inferred from the
+      // commit message. Body is untrusted input: it is surfaced for a human/QA
+      // read and is never an input to the protectedPaths verdict below.
+      body: pr.body,
       state: pr.state,
       draft: pr.draft,
       merged: pr.merged,
