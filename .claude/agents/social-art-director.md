@@ -125,3 +125,11 @@ stating which of these the frame uses; "sexy" on its own is not a brief.
 "told you" gets those words rendered onto the frame (slate preview 2026-08-22, two faces with the
 words on them). Describe the expression in plain words (shocked, eyebrows up, mouth open; a knowing
 half smile) and keep every double-quoted string out of the prompt text.
+
+**State the product's colour and silhouette in words, from the packshot, every time (owner catch
+2026-08-22).** The Womanizer Classic 2 is matte black; three renders in a row, including a cast frame
+the owner had approved, invented a white and rose-gold device because the brief said only "the
+exact product in the reference photo". The reference alone does not hold colour. Open the packshot,
+write down colour, silhouette, the one distinguishing feature (nozzle, head, base, buttons), and
+the length, and put that sentence in the prompt. Pass the angle that shows the distinguishing
+feature as the reference when more than one packshot exists.

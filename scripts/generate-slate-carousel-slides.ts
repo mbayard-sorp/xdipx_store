@@ -34,11 +34,11 @@ const POSTS: Post[] = [
       { kind: 'text', tone: 'paper', text: 'save this for the next time someone says women are harder to please. they’re under-served.' },
     ] },
   { id: 90, handle: 'womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator', mood: 'wtf-carousel',
-    leadUrl: 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files/social-womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator-cast-wtf-bathroom-midday-20260822-1_2b077dde-f5d2-476e-85b9-1ddb7709bb32.jpg?v=1787440973',
+    leadUrl: 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files/social-womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator-cast-wtf-bathroom-midday-20260822-1_6ea3ccaf-4148-49a9-9f4c-978e96eb5b72.jpg?v=1787444291',
     slides: [
       { kind: 'text', tone: 'coral', text: 'it’s not a vibrator. nothing buzzes, and it never touches your clitoris.' },
       { kind: 'text', tone: 'paper', kicker: 'how it works', text: 'a soft silicone ring seals over the clitoris and pulses air pressure inside it: suction, release, suction, release, many times a second.' },
-      { kind: 'product', prompt: 'Product macro of a white and rose-gold Womanizer Classic 2 air-pulsation stimulator, the exact product in the reference photo, soft silicone head facing the camera, resting on a warm coral-soft plaster surface in bright window daylight, soft diagonal shadow, shallow depth of field, packaging-free, photoreal editorial still life, no text, no logos, 4:5 portrait.' },
+      { kind: 'product', prompt: 'Product macro of the exact device in the reference photo: a MATTE BLACK Womanizer Classic 2 air-pulsation stimulator, a smooth black teardrop-shaped curved body about 6 inches long with a small round black silicone nozzle (a soft ring with a hollow opening) low on the front face and two small flush buttons on the side. It is entirely black, no white, no rose gold, no metal trim. Resting on a warm coral-soft plaster surface in bright window daylight, nozzle angled toward the camera, soft diagonal shadow, shallow depth of field, packaging-free, photoreal editorial still life, no text, no logos, 4:5 portrait.' },
       { kind: 'text', tone: 'plum', kicker: 'womanizer classic 2', text: 'the one that made air pulsation click for people who tried a bullet and shrugged.' },
       { kind: 'text', tone: 'paper', kicker: 'first reaction', text: '“wait, that’s it?” then a very different noise about ninety seconds later.' },
       { kind: 'text', tone: 'coral', text: 'save this for the next time your group chat argues about which toy to buy first.' },
@@ -97,7 +97,8 @@ async function main() {
     const total = post.slides.length + 1
     const urls: string[] = [post.leadUrl]
     const product = await getProductByHandle(post.handle)
-    const refImageUrl = product?.images?.[0]?.url
+    // The nozzle-forward angle (second packshot when present) gives the model the feature it keeps inventing.
+    const refImageUrl = product?.images?.[1]?.url ?? product?.images?.[0]?.url
     for (const [i, s] of post.slides.entries()) {
       const n = i + 2
       const filename = `social-${post.handle.slice(0, 40)}-card-${post.mood}-${date}-${n}.jpg`

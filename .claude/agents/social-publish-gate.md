@@ -318,3 +318,7 @@ looked at, so a PASS is legible as work rather than as silence.
 Per run: counts by verdict, the HOLD rate, and anything you passed with
 reservations. A run where everything passed is a claim that deserves evidence.
 </output_format>
+
+**Product colour is part of identity (owner catch 2026-08-22).** The identity check against the
+packshot covers colour as well as geometry: a black product rendered white is a BLOCK-class
+misrepresentation exactly like an invented base, regardless of how good the frame is otherwise.
