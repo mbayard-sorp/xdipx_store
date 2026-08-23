@@ -62,3 +62,22 @@ workers cap (3) is the hard ceiling, the app-side daily video budget gate is the
 Agents do none of the above. They may read this page, file tickets against the worker
 code, and (Phase 2) enqueue jobs through the normal `video_jobs` path under the video
 team's budget gate.
+
+## Stray pod watch
+
+The bootstrap step above (owner step 2) uses a RunPod Pod, the hourly-billed machine
+product, not the Serverless endpoint this file otherwise describes. Serverless scales to
+zero and is billed per job, correct and no action needed. A Pod keeps billing at its
+hourly rate (about $0.74/hr for the class used here) until it is stopped or terminated,
+whether or not anyone is using it.
+
+`/cron/runpod-pod-watch` (`app/lib/runpod-pods.server.ts`) runs hourly, lists every pod in
+`RUNNING` state via `GET https://api.runpod.io/v2/pods`, and files a single owner blocker
+(dedupe key `runpod:stray-pod`, probe `runpod_no_pods`) naming each running pod, its hours
+running, and its hourly rate when any are found. The row clears itself once the pod is
+stopped or terminated. This exists because a bootstrap pod was left running 18.7 hours on
+2026-08-22/23, costing about $14, before anyone noticed.
+
+`RUNPOD_API_KEY` in Vercel must keep the `api.runpod.io/graphql` (management) permission
+for this check to work; a Serverless-scoped key reports "could not ask" (a `null` probe
+verdict, never a false all-clear) rather than a real answer.

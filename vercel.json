@@ -133,6 +133,10 @@
     {
       "path": "/cron/social-metrics-sweep",
       "schedule": "20 */6 * * *"
+    },
+    {
+      "path": "/cron/runpod-pod-watch",
+      "schedule": "17 * * * *"
     }
   ]
 }

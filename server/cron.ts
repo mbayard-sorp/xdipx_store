@@ -1229,5 +1229,55 @@ export function createCronRoutes() {
     }
   })
 
+  /**
+   * GET|POST /cron/runpod-pod-watch
+   * Schedule: hourly. RunPod GPU work runs two ways: Serverless (endpoint
+   * 1cnxz75c71177q, scale-to-zero, billed per job, correct and not this route's
+   * concern) and Pods (hourly-billed standalone machines used only for
+   * one-time model bootstraps). A pod left running is a silent leak at
+   * $0.74/hr; one ran 18.7h on 2026-08-22/23 for ~$14 before anyone noticed.
+   * This lists RUNNING pods and files one deduped owner blocker if any exist,
+   * naming every running pod, its hours-running, and its hourly rate. The
+   * `runpod_no_pods` probe auto-clears the row on the next verify pass once
+   * the pod is stopped. No LLM: one HTTPS call per hour.
+   */
+  cronRoute('/runpod-pod-watch', async (_req, res) => {
+    try {
+      const { listRunningRunpodPods } = await import('../app/lib/runpod-pods.server.js')
+      const running = await listRunningRunpodPods()
+
+      if (running.length === 0) {
+        res.json({ ok: true, running: 0 })
+        return
+      }
+
+      const { fileBlocker } = await import('../app/lib/owner-blockers.server.js')
+      const worst = running.reduce((a, b) => (b.hoursRunning > a.hoursRunning ? b : a), running[0]!)
+      const totalPerHour = running.reduce((sum, p) => sum + p.costPerHour, 0)
+
+      await fileBlocker({
+        dedupeKey: 'runpod:stray-pod',
+        title: `RunPod pod ${worst.name} has been running ${worst.hoursRunning.toFixed(1)}h ($${worst.costPerHour.toFixed(2)}/hr): stop or terminate it`,
+        detail: running
+          .map(p => `${p.name} (${p.id}): ${p.hoursRunning.toFixed(1)}h running, $${p.costPerHour.toFixed(2)}/hr`)
+          .join('\n'),
+        unblocks: `Stops the $${totalPerHour.toFixed(2)}/hr leak across ${running.length} running pod${running.length === 1 ? '' : 's'}.`,
+        whereToGo: 'RunPod console > Pods',
+        category: 'console',
+        priority: 1,
+        source: 'sweep',
+        sourceRef: 'cron:runpod-pod-watch',
+        verifyProbe: 'runpod_no_pods',
+        verifyArg: '',
+      })
+
+      console.warn(`[cron:runpod-pod-watch] ${running.length} pod(s) RUNNING, blocker filed`)
+      res.json({ ok: true, running: running.length, pods: running })
+    } catch (err) {
+      console.error('[cron:runpod-pod-watch]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   return router
 }

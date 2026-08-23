@@ -235,6 +235,7 @@ db/
 |---|---|---|
 | `/cron/discontinued-sweep` | 11:45 PM | Fetch Nalpac CSV, archive products the feed now marks discontinued |
 | `/cron/profit-summary` | 12:05 AM | Write daily_profit_summary to Neon |
+| `/cron/runpod-pod-watch` | hourly, :17 | List RUNNING RunPod pods; file an owner blocker if any are left running |
 
 Cron routes protected by `x-cron-secret` header matching `CRON_SECRET` env var.
 
