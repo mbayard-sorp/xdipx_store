@@ -2499,11 +2499,26 @@ export async function recordLivePostFeedback(
   return result.length > 0
 }
 
-/** Move a draft's proposed calendar slot. */
-export async function rescheduleSocialPost(id: number, scheduledFor: string | null): Promise<void> {
+/**
+ * Move a draft's proposed calendar slot.
+ *
+ * `scheduledFor` (the date) is always written so legacy readers keep working.
+ * `scheduledAt` is the Phase 4 instant (ADR-013 decision 9): pass a Date to
+ * set a precise slot, or leave it out to clear one so the row falls back to
+ * the date-only rule. A date of null clears both.
+ */
+export async function rescheduleSocialPost(
+  id: number,
+  scheduledFor: string | null,
+  opts: { scheduledAt?: Date } = {},
+): Promise<void> {
   await db
     .update(socialPosts)
-    .set({ scheduledFor })
+    .set({
+      scheduledFor,
+      scheduledAt: scheduledFor ? (opts.scheduledAt ?? null) : null,
+      updatedAt: new Date(),
+    })
     .where(eq(socialPosts.id, id))
 }
 

@@ -20,9 +20,10 @@
  * parse, and merge paths are the ones the routine already exercises; this file
  * only supplies the window repo, the valve, and the read budget.
  */
-import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm'
 import { db } from './db.server'
-import { socialPosts } from '../../db/schema'
+import { socialPosts, socialFollowerHistory } from '../../db/schema'
+import { permalinkFor } from './social-permalink.server'
 import {
   captureInstagramEngagement,
   captureXEngagement,
@@ -48,6 +49,8 @@ export type SweepPlatform = 'instagram' | 'x'
 export interface SweepPlatformResult {
   checked: number
   errors: number
+  /** Rows whose missing `permalink` this sweep filled in (Phase 4). */
+  permalinksBackfilled?: number
   /** Present when the platform was not swept at all. */
   skipped?: 'read_cap_reached' | 'threw'
   detail?: string
@@ -72,7 +75,75 @@ export interface SocialMetricsSweepDeps {
   captureInstagram?: typeof captureInstagramEngagement
   captureX?: typeof captureXEngagement
   captureAccount?: typeof captureInstagramAccount
+  /**
+   * Permalink backfill (Phase 4, ADR-013 decision 10). Lists the swept rows
+   * still missing a `permalink`, resolves each, and persists what resolved.
+   * Returns how many were filled, or undefined when it did not run. Defaults
+   * to the live database plus `permalinkFor` for a platform whose repo was
+   * not injected, and to a no-op for one that was (see the note in the
+   * sweep body); optional so the pre-Phase-4 test doubles stay valid.
+   */
+  backfillPermalink?: (platform: SweepPlatform) => Promise<number | undefined>
+  /**
+   * Appends the follower reading to `social_follower_history` (migration 084)
+   * alongside the KV history the capture already writes. Best-effort.
+   */
+  appendFollowerHistory?: (reading: FollowerHistoryRow) => Promise<void>
   now?: () => Date
+}
+
+export interface FollowerHistoryRow {
+  platform: 'instagram'
+  capturedAt: Date
+  followers: number | null
+  follows: number | null
+  mediaCount: number | null
+}
+
+/** The swept rows still missing a live URL, oldest first so history fills in order. */
+async function rowsMissingPermalink(platform: SweepPlatform, limit: number, now: () => Date) {
+  const since = new Date(now().getTime() - SWEEP_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+  return db
+    .select({ id: socialPosts.id, externalPostId: socialPosts.externalPostId })
+    .from(socialPosts)
+    .where(and(
+      eq(socialPosts.platform, platform),
+      eq(socialPosts.status, 'posted'),
+      isNotNull(socialPosts.externalPostId),
+      isNull(socialPosts.permalink),
+      gte(socialPosts.postedAt, since),
+    ))
+    .orderBy(socialPosts.postedAt)
+    .limit(limit)
+}
+
+/**
+ * Fill in `permalink` on swept rows that lack one. X costs nothing (the URL is
+ * arithmetic); Instagram costs one extra GET per missing row, and only for
+ * rows missing it, so a row is fetched once ever. A null resolution leaves the
+ * row alone for the next sweep.
+ */
+export async function backfillPermalinks(
+  platform: SweepPlatform,
+  deps: { limit?: number; now?: () => Date; resolve?: typeof permalinkFor } = {},
+): Promise<number> {
+  const now = deps.now ?? (() => new Date())
+  const resolve = deps.resolve ?? permalinkFor
+  const rows = await rowsMissingPermalink(platform, deps.limit ?? SWEEP_SAMPLE, now)
+  let filled = 0
+  for (const row of rows) {
+    const permalink = await resolve(platform, row.externalPostId)
+    if (!permalink) continue
+    await db.update(socialPosts)
+      .set({ permalink, updatedAt: now() })
+      .where(and(eq(socialPosts.id, row.id), isNull(socialPosts.permalink)))
+    filled++
+  }
+  return filled
+}
+
+async function dbAppendFollowerHistory(reading: FollowerHistoryRow): Promise<void> {
+  await db.insert(socialFollowerHistory).values(reading)
 }
 
 /** `YYYY-MM` in UTC, the bucket the X read counter lives in. */
@@ -163,8 +234,30 @@ export async function runSocialMetricsSweep(
     ?? (() => numericSetting(X_METRICS_MAX_READS_MONTH_KEY, X_METRICS_MAX_READS_MONTH_DEFAULT))
   const xReadsThisMonth = deps.xReadsThisMonth ?? kvReadsThisMonth
   const recordXReads = deps.recordXReads ?? kvRecordReads
+  // The Phase 4 writes default to the live database only when the caller left
+  // the matching read path live too. A caller that injected a repo or an
+  // account capture owns the data layer, and a default that still reached
+  // Neon behind an injected double would be a test touching production.
+  const backfillPermalink = deps.backfillPermalink ?? ((platform: SweepPlatform) => {
+    const injected = platform === 'instagram' ? deps.instagramRepo : deps.xRepo
+    return injected ? Promise.resolve(undefined) : backfillPermalinks(platform, { now })
+  })
+  const appendFollowerHistory = deps.appendFollowerHistory
+    ?? (deps.captureAccount ? async () => {} : dbAppendFollowerHistory)
 
   const result: SocialMetricsSweepResult = { ranAt }
+
+  // Permalink backfill is best-effort and never fails a platform block: the
+  // numbers are the job, the URL is a convenience.
+  const backfill = async (platform: SweepPlatform, block: SweepPlatformResult | undefined) => {
+    if (!block || block.skipped === 'threw') return
+    try {
+      const n = await backfillPermalink(platform)
+      if (n !== undefined) block.permalinksBackfilled = n
+    } catch (err) {
+      console.warn(`[social-metrics-sweep] ${platform} permalink backfill failed:`, err instanceof Error ? err.message : err)
+    }
+  }
 
   // Instagram: insights are free, so the only bound is the sample.
   try {
@@ -173,6 +266,7 @@ export async function runSocialMetricsSweep(
   } catch (err) {
     result.instagram = { checked: 0, errors: 0, skipped: 'threw', detail: (err as Error).message }
   }
+  await backfill('instagram', result.instagram)
 
   // X: metered. Reads left this month bound the sample; zero left means skip.
   const month = monthKey(now())
@@ -206,12 +300,31 @@ export async function runSocialMetricsSweep(
       }
     }
   }
+  // X permalinks are arithmetic, not reads, so the cap does not apply; only
+  // a thrown X block skips it, and then only because the block itself is gone.
+  await backfill('x', result.x)
 
   // Follower reading: free, best-effort, isolated by contract.
   try {
     result.account = await captureAccount()
   } catch (err) {
     result.account = { error: (err as Error).message }
+  }
+  // The same reading, appended to the table the Studio's analytics view reads
+  // (migration 084). The KV history the capture writes stays as it was.
+  if (result.account.account) {
+    const a = result.account.account
+    try {
+      await appendFollowerHistory({
+        platform: 'instagram',
+        capturedAt: now(),
+        followers: a.followersCount ?? null,
+        follows: a.followsCount ?? null,
+        mediaCount: a.mediaCount ?? null,
+      })
+    } catch (err) {
+      console.warn('[social-metrics-sweep] follower history append failed:', err instanceof Error ? err.message : err)
+    }
   }
 
   return result

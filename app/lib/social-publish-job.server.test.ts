@@ -608,10 +608,17 @@ describe('eligibleWhere', () => {
 
   it('treats an undated approved row as due', () => {
     const { sql } = render('instagram')
-    expect(sql).toContain('is null')
-    expect(sql).toContain('current_date')
+    // Undated means BOTH columns null, not either.
+    expect(sql).toMatch(/"scheduled_at" is null and .*"scheduled_for" is null/)
     // Undated OR due, not undated AND due.
     expect(sql.toLowerCase()).toContain(' or ')
+  })
+
+  it('reads due-ness as COALESCE(scheduled_at, scheduled_for::timestamptz) <= now() (Phase 4)', () => {
+    const { sql } = render('instagram')
+    expect(sql).toContain('coalesce("social_posts"."scheduled_at", "social_posts"."scheduled_for"::timestamptz) <= now()')
+    // The date-only comparison is gone; a slot at 09:00 PDT is not due at 00:00 UTC.
+    expect(sql).not.toContain('current_date')
   })
 
   it('still requires an approved draft on the tick\'s own platform', () => {
