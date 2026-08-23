@@ -36,7 +36,7 @@ const POSTS: Post[] = [
       { kind: 'text', tone: 'paper', text: 'save this for the next time someone says women are harder to please. they’re under-served.' },
     ] },
   { id: 90, handle: 'womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator', mood: 'wtf-carousel',
-    leadUrl: 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files/social-womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator-cast-wtf-bathroom-midday-20260822-1_6ea3ccaf-4148-49a9-9f4c-978e96eb5b72.jpg?v=1787444291',
+    leadUrl: 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files/social-womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator-cast-wtf-bathroom-midday-20260822-1_72c9df4e-b755-4f21-99fa-ce91d68d6467.jpg?v=1787444673',
     slides: [
       { kind: 'text', tone: 'coral', text: 'it’s not a vibrator. nothing buzzes, and it never touches your clitoris.' },
       { kind: 'text', tone: 'paper', kicker: 'how it works', text: 'a soft silicone ring seals over the clitoris and pulses air pressure inside it: suction, release, suction, release, many times a second.' },
