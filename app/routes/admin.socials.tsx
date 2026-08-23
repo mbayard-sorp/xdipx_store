@@ -9,6 +9,9 @@
  * Post-now on an approved draft) always work. Unattended publishing runs on the
  * hourly /cron/social-publish tick and is gated per platform by
  * instagram_autopublish_enabled and x_autopublish_enabled, both default off.
+ * Those two govern the UNATTENDED tick only. The owner's Post-now click here
+ * publishes a still on either platform regardless (owner direction 2026-08-23);
+ * video alone still reads video_autopublish_enabled, which is his frame review.
  *
  * The old X_AUTO_POST_ENABLED env var was retired 2026-08-16. It never gated
  * anything: it was read once, here, to render a status pill, while the copy
@@ -97,6 +100,39 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 const FREQ_ALLOWED_KEYS = SOCIAL_PLATFORMS.map(p => socialFreqKey(p))
+
+/** How the reviewer stamp names whoever is clicking. */
+async function ownerLabel(request: Request): Promise<string> {
+  const user = await getAdminUser(request)
+  return user?.name || user?.email || 'admin'
+}
+
+/**
+ * Record an owner Post-now that shipped without a publish-gate PASS.
+ *
+ * The stamp is no longer required to publish (owner direction 2026-08-23), but
+ * whether one existed is still worth knowing afterwards: `feedback` is the
+ * channel the social team reads verbatim on its next run, so a post the owner
+ * shipped over a REVISE is exactly the signal that should reach the drafters.
+ * Appended, never prepended, because `parseGateStamp` is anchored at the start
+ * of the field and other readers still parse it.
+ */
+async function recordManualPublish(
+  postId: number,
+  feedback: string | null,
+  by: string,
+): Promise<void> {
+  const stamp = parseGateStamp(feedback)
+  if (stamp?.verdict === 'PASS') return
+  const had = stamp ? `over a gate ${stamp.verdict}` : 'with no gate verdict on the row'
+  const note =
+    `\n\n[manual-publish by ${by} on ${new Date().toISOString().slice(0, 10)}] ` +
+    `Published from Post-now ${had}. The deterministic publish checks passed; ` +
+    `the agent verdict was the owner's call.`
+  await db.update(socialPosts)
+    .set({ feedback: `${feedback ?? ''}${note}`.trim() })
+    .where(eq(socialPosts.id, postId))
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)
@@ -210,20 +246,38 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'post-approved-draft') {
     const postId = parseInt(form.get('postId') as string)
     if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
-    // The same stamp refusal the media path below enforces (ticket #3739).
-    // Until this, X Post-now checked only status/review_status, which is
-    // exactly the bypass that put post #49 on Instagram (incident #3640): an
-    // owner click on a row nothing adversarial had read. The gate skips the
-    // valve read for X; the click is the approval, the stamp is the review.
-    const [draft] = await db.select({ feedback: socialPosts.feedback })
-      .from(socialPosts).where(eq(socialPosts.id, postId)).limit(1)
+    const [draft] = await db.select().from(socialPosts).where(eq(socialPosts.id, postId)).limit(1)
     if (!draft) return { ok: false, error: 'Post not found' }
+    // The durable stock guard the media path already ran, now on X too
+    // (ticket #2212). It reads shopify_product_id, which is set at draft time
+    // and survives whether or not a gate stamp exists — and since the owner's
+    // click no longer requires a stamp, the stamp's product handle can no
+    // longer be relied on to carry the stock check.
+    const draftStock = await checkLinkedProductStock(draft.shopifyProductId)
+    if (!draftStock.ok) {
+      await db.update(socialPosts)
+        .set({
+          reviewStatus: 'needs_changes',
+          feedback: `[stock-guard] ${draftStock.detail} Swap the product or re-draft before this can publish.`,
+        })
+        .where(eq(socialPosts.id, postId))
+      return { ok: false, error: `${draftStock.detail} Moved to Needs Changes.` }
+    }
+    // The owner's click is the approval. What still refuses is a fact the
+    // caption does not show him — see manual-publish-gate.server.ts.
     const gate = await decideManualPublish(
-      { feedback: draft.feedback, isVideo: false, platform: 'x' },
+      {
+        isVideo: false,
+        platform: 'x',
+        caption: draft.editedText?.trim() || draft.tweetText,
+        mediaUrls: draft.mediaUrls,
+        productHandle: parseGateStamp(draft.feedback)?.productHandle ?? null,
+      },
       getValve,
     )
     if (!gate.ok) return { ok: false, error: gate.error }
     const result = await postApprovedDraft(postId)
+    if (result.ok) await recordManualPublish(postId, draft.feedback, await ownerLabel(request))
     return { ok: result.ok, intent: 'post-approved-draft', tweetId: result.tweetId, error: result.error }
   }
 
@@ -263,7 +317,15 @@ export async function action({ request }: ActionFunctionArgs) {
     // licence to publish), and the surface's autopublish valve must be on — the
     // Instagram kill switch for stills, the video team's valve for video. See
     // manual-publish-gate.server.ts (ticket #3674, incident #3640).
-    const gate = await decideManualPublish({ feedback: post.feedback, isVideo }, getValve)
+    const gate = await decideManualPublish(
+      {
+        isVideo,
+        caption: post.editedText?.trim() || post.tweetText,
+        mediaUrls: post.mediaUrls,
+        productHandle: parseGateStamp(post.feedback)?.productHandle ?? null,
+      },
+      getValve,
+    )
     if (!gate.ok) {
       return gate.stub ? { ok: false, stub: true, error: gate.error } : { ok: false, error: gate.error }
     }
@@ -298,6 +360,7 @@ export async function action({ request }: ActionFunctionArgs) {
     await db.update(socialPosts)
       .set({ status: 'posted', externalPostId: result.externalPostId, postedAt: new Date() })
       .where(eq(socialPosts.id, postId))
+    await recordManualPublish(postId, post.feedback, await ownerLabel(request))
     return { ok: true }
   }
 

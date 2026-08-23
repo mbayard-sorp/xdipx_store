@@ -172,6 +172,15 @@ by hand. `approved` on its own is no longer a licence to publish. If you see a r
 `no_gate_verdict`, that is a row nothing adversarial read, and the fix is to gate it, never to
 approve it again.
 
+That sentence is about the **scheduled job**, which is what "unattended" means, and it is unchanged.
+The owner's **Post-now** click in `/admin/socials` is a different path and no longer requires the
+stamp (owner direction 2026-08-23): the stamp is written by an agent on its own run and the Studio
+cannot summon one, so requiring it left a button that could never fire. His click is the human
+approval; the deterministic checks still refuse a hard fact (stock, media provenance, X length,
+Instagram's removal-tier lexicon), and the publish is recorded in `feedback` when it shipped without
+a PASS, so you will see it on your next run. None of this is a lane for you. You still gate every row
+you draft, and you still never write `approved` yourself.
+
 **What never changes with the posture.** The voice gate, the platform-policy gate, the stock gate,
 and the campaign rules all still bind. Removing the owner's approval click removes a human check; it
 does not remove a single machine one, and no gate may be relaxed to make autopublish easier to ship.

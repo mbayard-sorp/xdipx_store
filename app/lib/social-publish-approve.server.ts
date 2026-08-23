@@ -79,7 +79,7 @@ import {
  */
 export const GATE_PLATFORMS: readonly GatePlatform[] = ['instagram', 'x']
 
-function isGatePlatform(platform: string): platform is GatePlatform {
+export function isGatePlatform(platform: string): platform is GatePlatform {
   return (GATE_PLATFORMS as readonly string[]).includes(platform)
 }
 

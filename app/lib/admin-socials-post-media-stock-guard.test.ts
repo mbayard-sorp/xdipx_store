@@ -166,3 +166,66 @@ describe('post-media intent — stock guard', () => {
     expect(decideManualPublishMock).toHaveBeenCalled()
   })
 })
+
+// X Post-now had no stock guard at all: it selected only `feedback` and leaned
+// on the gate stamp's product handle. Once the owner's click stopped requiring
+// a stamp (owner direction 2026-08-23), that handle stopped being reliably
+// present, so the durable shopify_product_id guard the media path already ran
+// now runs here too.
+describe('post-approved-draft intent — stock guard', () => {
+  const xPost = { ...basePost, platform: 'x', tweetText: 'a tweet' }
+
+  it('refuses an out-of-stock linked product before reaching the publish decision', async () => {
+    selectResult.rows = [{ ...xPost, shopifyProductId: 'gid://shopify/Product/999' }]
+    checkStockMock.mockResolvedValue({ ok: false, detail: 'Linked product gid://shopify/Product/999 is out of stock.' })
+
+    const res = await action({
+      request: postForm({ intent: 'post-approved-draft', postId: '7' }),
+      params: {}, context: {},
+    } as never) as { ok: boolean; error?: string }
+
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/out of stock/)
+    expect(decideManualPublishMock).not.toHaveBeenCalled()
+    expect(updateCalls).toHaveLength(1)
+    expect(updateCalls[0]?.values).toMatchObject({ reviewStatus: 'needs_changes' })
+  })
+
+  it('passes an in-stock row through to the publish decision', async () => {
+    selectResult.rows = [{ ...xPost, shopifyProductId: 'gid://shopify/Product/1' }]
+    checkStockMock.mockResolvedValue({ ok: true })
+    // Short-circuit right after the guard, same as the media cases above.
+    decideManualPublishMock.mockResolvedValue({ ok: false, error: 'refused downstream' })
+
+    const res = await action({
+      request: postForm({ intent: 'post-approved-draft', postId: '7' }),
+      params: {}, context: {},
+    } as never) as { ok: boolean; error?: string }
+
+    expect(checkStockMock).toHaveBeenCalledWith('gid://shopify/Product/1')
+    expect(res.error).toBe('refused downstream')
+    expect(updateCalls).toHaveLength(0)
+  })
+
+  it('sends the caption and media it is actually about to publish to the decision', async () => {
+    selectResult.rows = [{ ...xPost, shopifyProductId: null, editedText: '  the edited caption  ' }]
+    checkStockMock.mockResolvedValue({ ok: true })
+    decideManualPublishMock.mockResolvedValue({ ok: false, error: 'refused downstream' })
+
+    await action({
+      request: postForm({ intent: 'post-approved-draft', postId: '7' }),
+      params: {}, context: {},
+    } as never)
+
+    // The owner's edit wins over the original text, trimmed — the same string
+    // the publisher sends to X.
+    expect(decideManualPublishMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platform: 'x',
+        caption: 'the edited caption',
+        mediaUrls: xPost.mediaUrls,
+      }),
+      expect.anything(),
+    )
+  })
+})
