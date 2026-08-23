@@ -21,7 +21,7 @@ vi.mock('~/lib/social-publish/stock-guard.server', () => ({ checkLinkedProductSt
 vi.mock('~/lib/social-publish-approve.server', () => ({ parseGateStamp: () => null }))
 vi.mock('~/lib/social-admin-rework.server', () => ({ regenerateSocialImage: vi.fn(), reworkCaption: vi.fn(), createOwnerReworkRow: vi.fn(), ownerApprovePost: vi.fn() }))
 
-import AdminSocialsPage from './admin.socials'
+import AdminSocialsPage from '~/routes/admin.socials'
 
 const row80 = {
   id: 80, platform: 'instagram', postType: 'manual', status: 'posted', reviewStatus: 'approved',
