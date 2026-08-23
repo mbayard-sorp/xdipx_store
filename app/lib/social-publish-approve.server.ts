@@ -287,8 +287,9 @@ export function gateStatusForVerdict(verdict: PublishGateVerdict): GateStatusVal
  * opens with a line he can read at a glance and the gate's own notes follow it
  * unchanged.
  */
-const STAMP_RE =
-  /^\[publish-gate (PASS|REVISE|BLOCK|HOLD) by ([^\]]+?) on (\d{4}-\d{2}-\d{2}), product: ([a-z0-9._-]+|none)\]/m
+// Shared with the review card (client-safe); see app/lib/gate-stamp.ts.
+import { STAMP_RE, splitGateStamp } from './gate-stamp'
+export { splitGateStamp }
 
 export interface GateStamp {
   verdict: PublishGateVerdict
@@ -337,19 +338,6 @@ export function parseGateStamp(feedback: string | null | undefined): GateStamp |
  * Split a `feedback` value into the stamp block (header line plus the gate's
  * notes paragraph, up to the first blank line) and everything else.
  */
-export function splitGateStamp(
-  feedback: string | null | undefined,
-): { stamp: string | null; rest: string | null } {
-  if (!feedback) return { stamp: null, rest: null }
-  const m = STAMP_RE.exec(feedback)
-  if (!m) return { stamp: null, rest: feedback }
-  const start = m.index
-  const blank = feedback.indexOf('\n\n', start)
-  const end = blank === -1 ? feedback.length : blank
-  const stamp = feedback.slice(start, end).trim()
-  const rest = `${feedback.slice(0, start).trim()}\n\n${feedback.slice(end).trim()}`.trim()
-  return { stamp: stamp || null, rest: rest.length > 0 ? rest : null }
-}
 
 /**
  * Burn-in helper (Phase 5, #4913). A writer that replaces `feedback` routes

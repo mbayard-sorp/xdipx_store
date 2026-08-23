@@ -405,8 +405,8 @@ export default function SocialsQueue() {
         <span className="flex-1" />
         <Link
           to="/admin/socials/compose/new"
-          className="inline-flex items-center gap-1.5 min-h-11 px-4 rounded-full bg-coral text-white text-sm font-semibold hover:bg-coral-2"
-          title="New post (n)"
+          className="inline-flex items-center gap-1.5 min-h-11 px-4 rounded-full border border-line bg-paper text-ink text-sm font-semibold hover:border-ink-4"
+          title="New post (n). Approve is the primary action on this screen"
         >
           <PlusIcon size={14} /> New post
         </Link>
