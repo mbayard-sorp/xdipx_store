@@ -264,3 +264,79 @@ describe('instagramPublisher product tags (ticket #3744)', () => {
     expect(calls.some(c => c.path.endsWith('/available_catalog_product_search'))).toBe(false)
   })
 })
+
+/**
+ * Alt text (accessibility description) on the media container, migration 085 /
+ * ticket #5042. It rides the image and carousel-item containers; Reels have no
+ * alt_text field. Same fake-Graph convention.
+ */
+describe('instagramPublisher alt text (ticket #5042)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('sends alt_text on a single image container', async () => {
+    const calls = installFakeGraph()
+    const result = await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'image', imageUrl: 'a.jpg' },
+      caption: 'a still',
+      altText: 'A matte silicone wand resting on a linen bedspread in warm light.',
+    })
+    expect(result).toEqual({ ok: true, externalPostId: 'published-1' })
+    const create = calls.find(c => c.params['image_url'] === 'a.jpg')
+    expect(create?.params['alt_text']).toBe(
+      'A matte silicone wand resting on a linen bedspread in warm light.',
+    )
+  })
+
+  it('sends alt_text on every carousel item container', async () => {
+    const calls = installFakeGraph()
+    await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'carousel', imageUrls: ['a.jpg', 'b.jpg'] },
+      caption: 'two slides',
+      altText: 'Two angles of the same wand.',
+    })
+    const items = calls.filter(c => c.params['is_carousel_item'] === 'true')
+    expect(items).toHaveLength(2)
+    expect(items.every(c => c.params['alt_text'] === 'Two angles of the same wand.')).toBe(true)
+  })
+
+  it('omits alt_text when none is supplied (unchanged behavior)', async () => {
+    const calls = installFakeGraph()
+    await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'image', imageUrl: 'a.jpg' },
+      caption: 'a still',
+    })
+    const create = calls.find(c => c.params['image_url'] === 'a.jpg')
+    expect(create?.params['alt_text']).toBeUndefined()
+  })
+
+  it('does not attach alt_text to a Reels video container', async () => {
+    const calls = installFakeGraph()
+    await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'video', videoUrl: 'a.mp4' },
+      caption: 'a reel',
+      altText: 'Should not ride a Reels container.',
+    })
+    const create = calls.find(c => c.params['media_type'] === 'REELS')
+    expect(create?.params['alt_text']).toBeUndefined()
+  })
+
+  it('truncates alt_text to the 1000-char Graph API ceiling', async () => {
+    const calls = installFakeGraph()
+    await instagramPublisher.publish({
+      postId: 1,
+      media: { kind: 'image', imageUrl: 'a.jpg' },
+      caption: 'a still',
+      altText: 'x'.repeat(1500),
+    })
+    const create = calls.find(c => c.params['image_url'] === 'a.jpg')
+    expect(create?.params['alt_text']).toHaveLength(1000)
+  })
+})

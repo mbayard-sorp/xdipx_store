@@ -47,6 +47,9 @@ function row(over: Partial<NonNullable<Row>> = {}): NonNullable<Row> {
     gateFindings: null,
     castSlugs: null,
     updatedAt: null,
+    altText: null,
+    imageBrief: null,
+    subject: null,
     ...over,
   }
 }

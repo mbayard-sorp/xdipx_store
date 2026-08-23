@@ -186,6 +186,22 @@ const LIVED_EXPERIENCE_RE =
   /\bI\s+(tried|tested|used|owned|own|bought|felt|wore)\b|\bmy\s+(favou?rite|go-to)\s+toy\b/i
 
 /**
+ * A caption that narrates the picture instead of selling the feeling (owner
+ * direction 2026-08-22, ticket #5042). The caption should make a reader want
+ * the product; the accessibility description of what the image literally shows
+ * belongs in alt_text (social_posts.alt_text, migration 085), never in the
+ * caption. This is the exact failure the owner named: captions like "that is
+ * jade in the photo, sleeves pushed up at a sunny bathroom sink" were describing
+ * the scene because alt_text had nowhere to live. A match is a `warn` (which
+ * normalises to a REVISE, not a block): the remedy is a caption rewrite plus
+ * moving the description into alt_text, and a heuristic that hard-blocked would
+ * over-reject. The patterns are explicit references to the image medium itself,
+ * which a selling caption essentially never makes.
+ */
+const CAPTION_DESCRIBES_IMAGE_RE =
+  /\b(?:in|from)\s+(?:the|this|that)\s+(?:photo|photograph|picture|pic|image|frame|shot|snap)\b|\b(?:pictured|photographed)\b|\bthe\s+(?:photo|photograph|picture|image|shot)\s+(?:shows|captures|is\s+of)\b/i
+
+/**
  * Vocabulary that the rented, machine-moderated platforms REMOVE accounts over,
  * not merely age-gate (ticket #4062).
  *
@@ -461,6 +477,17 @@ export async function runDeterministicPublishChecks(
       check: 'lived-experience',
       severity: 'block',
       detail: 'Caption claims lived experience. Emma is an AI guide and has none.',
+    })
+  }
+  if (CAPTION_DESCRIBES_IMAGE_RE.test(caption)) {
+    findings.push({
+      check: 'caption-describes-image',
+      severity: 'warn',
+      detail:
+        'Caption narrates the picture (it refers to the photo/image itself). The caption should ' +
+        'sell the feeling and let the image speak; put the accessibility description of what the ' +
+        'image shows in alt_text (social_posts.alt_text), not in the caption. Rewrite the caption ' +
+        'and move the scene description to alt text.',
     })
   }
 

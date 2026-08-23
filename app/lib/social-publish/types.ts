@@ -36,6 +36,13 @@ export interface PublishInput {
    * changes what passes the gate.
    */
   productTagHandle?: string | null
+  /**
+   * Accessibility description of the media (social_posts.alt_text, migration
+   * 085). Sent as the container's `alt_text` by adapters that support it
+   * (Instagram only today). Always additive: an adapter without alt-text
+   * support ignores it, and a missing value publishes exactly as before.
+   */
+  altText?: string | null
 }
 
 export interface SocialPublisher {

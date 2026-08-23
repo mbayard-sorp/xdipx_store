@@ -208,6 +208,15 @@ export const socialPosts = pgTable('social_posts', {
   // Approved cast members appearing in this post (Sanity castMember slugs).
   castSlugs:       jsonb('cast_slugs').$type<string[]>(),
   updatedAt:       timestamp('updated_at', { withTimezone: true }),
+  // Accessibility description + generation brief (migration 085, owner
+  // direction 2026-08-22, ticket #5042). altText is what the Instagram
+  // publisher sends as alt_text on the media container; it must never leak
+  // into the caption (tweetText). imageBrief and subject are the durable
+  // "what is this image supposed to depict" record that regeneration/rework
+  // reads instead of reverse-engineering it from the caption text.
+  altText:         text('alt_text'),
+  imageBrief:      text('image_brief'),
+  subject:         text('subject'),
 })
 
 /**

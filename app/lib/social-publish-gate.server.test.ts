@@ -189,6 +189,41 @@ describe('banned vocabulary', () => {
   })
 })
 
+describe('caption narrates the image (ticket #5042)', () => {
+  it('warns (REVISE, not block) on the owner-named scene-narration caption', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'that is jade in the photo, sleeves pushed up at a sunny bathroom sink',
+      mediaUrls: GOOD_MEDIA,
+    })
+    expect(checks(r)).toContain('caption-describes-image')
+    const finding = r.findings.find(f => f.check === 'caption-describes-image')
+    expect(finding?.severity).toBe('warn')
+    // A warn is a REVISE, never a hard block or an owner hold.
+    expect(r.blocked).toBe(false)
+    expect(r.held).toBe(false)
+    expect(finding?.detail).toMatch(/alt_text|alt text/i)
+  })
+
+  it('catches other explicit references to the picture medium', async () => {
+    for (const caption of [
+      'pictured here: the whole ritual, start to finish',
+      'the photo shows exactly how small it really is',
+      'from this shot you can tell it is travel-sized',
+    ]) {
+      const r = await runDeterministicPublishChecks({ caption, mediaUrls: GOOD_MEDIA })
+      expect(checks(r)).toContain('caption-describes-image')
+    }
+  })
+
+  it('leaves a selling caption that never names the image alone', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'the quiet one you reach for on the nights you want to take your time',
+      mediaUrls: GOOD_MEDIA,
+    })
+    expect(checks(r)).not.toContain('caption-describes-image')
+  })
+})
+
 describe('repetition across the live feed', () => {
   it('blocks an eight-word run recycled from an earlier post', async () => {
     const prior = 'the nightstand drawer says a lot about a person, honestly'

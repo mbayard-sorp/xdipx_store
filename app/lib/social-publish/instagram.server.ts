@@ -26,6 +26,12 @@ import type { SocialPublisher, PublishInput, PublishResult } from './types'
 const DEFAULT_API_VERSION = 'v23.0'
 /** IG caption ceiling. Drafts are far shorter; this is a guard, not a feature. */
 const CAPTION_MAX = 2200
+/**
+ * IG accessibility-caption (alt_text) ceiling. The Graph API rejects alt_text
+ * over 1000 characters, so a long brief is truncated rather than failing the
+ * whole publish over an additive field.
+ */
+const ALT_TEXT_MAX = 1000
 /** Container ingest polling. Images finish immediately; Reels take longer. */
 const POLL_INTERVAL_MS = 3_000
 const POLL_TIMEOUT_MS = 120_000
@@ -238,6 +244,11 @@ export const instagramPublisher: SocialPublisher = {
     if (!token || !igId) return { ok: false, reason: 'not_configured' }
 
     const caption = input.caption.slice(0, CAPTION_MAX)
+    // Accessibility description (social_posts.alt_text, migration 085). Sent on
+    // image and carousel-item containers; Reels have no alt_text field, so it is
+    // simply not attached there. Additive: an absent value publishes as before.
+    const altText = input.altText?.trim() ? input.altText.trim().slice(0, ALT_TEXT_MAX) : ''
+    const altParam: Record<string, string> = altText ? { alt_text: altText } : {}
 
     // Product tag (#3744): resolve the gate stamp's handle to a taggable
     // catalog product. Feed photos and carousels only; Reels are out of
@@ -277,7 +288,7 @@ export const instagramPublisher: SocialPublisher = {
       for (const [index, url] of urls.entries()) {
         const item = await createContainerWithOptionalTag(
           igId,
-          { image_url: url, is_carousel_item: 'true' },
+          { image_url: url, is_carousel_item: 'true', ...altParam },
           index === 0 ? tagParams : null,
           token,
         )
@@ -304,7 +315,7 @@ export const instagramPublisher: SocialPublisher = {
     // Single image or Reels: one container, one poll, one publish.
     const params: Record<string, string> =
       input.media.kind === 'image'
-        ? { image_url: input.media.imageUrl, caption }
+        ? { image_url: input.media.imageUrl, caption, ...altParam }
         : {
             media_type: 'REELS',
             video_url: input.media.videoUrl,
