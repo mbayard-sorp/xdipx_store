@@ -40,6 +40,9 @@ function row(over: Partial<NonNullable<Row>> = {}): NonNullable<Row> {
     posterUrl: null,
     metricsJson: null,
     shopifyProductId: null,
+    altText: null,
+    imageBrief: null,
+    subject: null,
     scheduledAt: null,
     permalink: null,
     gateStatus: null,
@@ -47,9 +50,6 @@ function row(over: Partial<NonNullable<Row>> = {}): NonNullable<Row> {
     gateFindings: null,
     castSlugs: null,
     updatedAt: null,
-    altText: null,
-    imageBrief: null,
-    subject: null,
     ...over,
   }
 }

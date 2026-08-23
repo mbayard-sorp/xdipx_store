@@ -186,20 +186,23 @@ const LIVED_EXPERIENCE_RE =
   /\bI\s+(tried|tested|used|owned|own|bought|felt|wore)\b|\bmy\s+(favou?rite|go-to)\s+toy\b/i
 
 /**
- * A caption that narrates the picture instead of selling the feeling (owner
- * direction 2026-08-22, ticket #5042). The caption should make a reader want
- * the product; the accessibility description of what the image literally shows
- * belongs in alt_text (social_posts.alt_text, migration 085), never in the
- * caption. This is the exact failure the owner named: captions like "that is
- * jade in the photo, sleeves pushed up at a sunny bathroom sink" were describing
- * the scene because alt_text had nowhere to live. A match is a `warn` (which
- * normalises to a REVISE, not a block): the remedy is a caption rewrite plus
- * moving the description into alt_text, and a heuristic that hard-blocked would
- * over-reject. The patterns are explicit references to the image medium itself,
- * which a selling caption essentially never makes.
+ * Patterns that read as the caption narrating its own picture (owner direction
+ * 2026-08-22, root-caused from social_posts row 80: "that is jade in the
+ * photo, sleeves pushed up at a sunny bathroom sink"). Before migration 085,
+ * `social_posts` had no `alt_text` column and the Instagram publisher had
+ * nowhere to send an accessibility description, so it was being written into
+ * the caption instead. The fix for the column is additive; this is the fix
+ * for the symptom that keeps recurring even after a column exists, because a
+ * drafter can still write the description into the caption by habit.
  */
-const CAPTION_DESCRIBES_IMAGE_RE =
-  /\b(?:in|from)\s+(?:the|this|that)\s+(?:photo|photograph|picture|pic|image|frame|shot|snap)\b|\b(?:pictured|photographed)\b|\bthe\s+(?:photo|photograph|picture|image|shot)\s+(?:shows|captures|is\s+of)\b/i
+const CAPTION_DESCRIBES_IMAGE_PATTERNS: RegExp[] = [
+  /\b(in|of) (the|this|that) (photo|picture|image|frame|shot)\b/i,
+  /\bthat is (one of our cast|[a-z]+) (in|holding|at|standing|sitting|rinsing|washing)\b/i,
+  /^\s*visual description/im,
+  /\bso you can see (just )?how\b/i,
+  /\bpictured\b/i,
+  /\bin the (photo|pic)\b/i,
+]
 
 /**
  * Vocabulary that the rented, machine-moderated platforms REMOVE accounts over,
@@ -479,17 +482,6 @@ export async function runDeterministicPublishChecks(
       detail: 'Caption claims lived experience. Emma is an AI guide and has none.',
     })
   }
-  if (CAPTION_DESCRIBES_IMAGE_RE.test(caption)) {
-    findings.push({
-      check: 'caption-describes-image',
-      severity: 'warn',
-      detail:
-        'Caption narrates the picture (it refers to the photo/image itself). The caption should ' +
-        'sell the feeling and let the image speak; put the accessibility description of what the ' +
-        'image shows in alt_text (social_posts.alt_text), not in the caption. Rewrite the caption ' +
-        'and move the scene description to alt text.',
-    })
-  }
 
   // ── Caption: removal-tier lexicon (Instagram/TikTok only) ─────────────────
   //
@@ -513,6 +505,28 @@ export async function runDeterministicPublishChecks(
           `blocks anyway.`,
       })
     }
+  }
+
+  // ── Caption describes its own image ───────────────────────────────────────
+  //
+  // Severity is `block` (not `hold`), matching every other fixable-by-redraft
+  // caption defect in this module (sale-cta, caption-lexicon, repetition):
+  // `applyPublishGateVerdict` turns any `block` finding on a PASS into
+  // `needs_changes`/REVISE and sends the drafter the findings to act on, which
+  // is exactly the outcome wanted here. `hold` is reserved for genuine account
+  // risk that needs the owner, which this is not, the fix is a redraft that
+  // moves the description into altText, a thing this module's caller cannot do
+  // safely on its own. `warn` would record it and publish anyway, defeating
+  // the point. This module has only these three severities (see the header);
+  // there is no fourth "revise" severity to reach for.
+  if (CAPTION_DESCRIBES_IMAGE_PATTERNS.some(re => re.test(caption))) {
+    findings.push({
+      check: 'caption-describes-image',
+      severity: 'block',
+      detail:
+        'Caption describes its own image; the accessibility description belongs in altText ' +
+        '(charter social addendum, 2026-08-22)',
+    })
   }
 
   // ── Repetition across the live feed ───────────────────────────────────────

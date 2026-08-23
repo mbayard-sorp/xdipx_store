@@ -38,9 +38,12 @@ export interface PublishInput {
   productTagHandle?: string | null
   /**
    * Accessibility description of the media (social_posts.alt_text, migration
-   * 085). Sent as the container's `alt_text` by adapters that support it
-   * (Instagram only today). Always additive: an adapter without alt-text
-   * support ignores it, and a missing value publishes exactly as before.
+   * 085, owner direction 2026-08-22). Sent as the container's `alt_text` by
+   * adapters that support it (Instagram only today), never folded into the
+   * caption, that was the defect this field fixes: with nowhere to put it,
+   * the accessibility description was being written into the caption text
+   * itself. Always additive: an adapter without alt-text support ignores it,
+   * and a missing value publishes exactly as before.
    */
   altText?: string | null
 }

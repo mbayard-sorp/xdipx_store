@@ -189,41 +189,6 @@ describe('banned vocabulary', () => {
   })
 })
 
-describe('caption narrates the image (ticket #5042)', () => {
-  it('warns (REVISE, not block) on the owner-named scene-narration caption', async () => {
-    const r = await runDeterministicPublishChecks({
-      caption: 'that is jade in the photo, sleeves pushed up at a sunny bathroom sink',
-      mediaUrls: GOOD_MEDIA,
-    })
-    expect(checks(r)).toContain('caption-describes-image')
-    const finding = r.findings.find(f => f.check === 'caption-describes-image')
-    expect(finding?.severity).toBe('warn')
-    // A warn is a REVISE, never a hard block or an owner hold.
-    expect(r.blocked).toBe(false)
-    expect(r.held).toBe(false)
-    expect(finding?.detail).toMatch(/alt_text|alt text/i)
-  })
-
-  it('catches other explicit references to the picture medium', async () => {
-    for (const caption of [
-      'pictured here: the whole ritual, start to finish',
-      'the photo shows exactly how small it really is',
-      'from this shot you can tell it is travel-sized',
-    ]) {
-      const r = await runDeterministicPublishChecks({ caption, mediaUrls: GOOD_MEDIA })
-      expect(checks(r)).toContain('caption-describes-image')
-    }
-  })
-
-  it('leaves a selling caption that never names the image alone', async () => {
-    const r = await runDeterministicPublishChecks({
-      caption: 'the quiet one you reach for on the nights you want to take your time',
-      mediaUrls: GOOD_MEDIA,
-    })
-    expect(checks(r)).not.toContain('caption-describes-image')
-  })
-})
-
 describe('repetition across the live feed', () => {
   it('blocks an eight-word run recycled from an earlier post', async () => {
     const prior = 'the nightstand drawer says a lot about a person, honestly'
@@ -484,5 +449,58 @@ describe('removal-tier caption lexicon', () => {
       platform: 'instagram',
     })
     expect(checks(r)).not.toContain('caption-lexicon')
+  })
+})
+
+// Owner direction 2026-08-22: the accessibility description of the image was
+// getting written INTO the caption because social_posts had no alt_text
+// column and the Instagram publisher never sent one. This check catches the
+// symptom directly rather than only the missing column.
+describe('caption describes its own image', () => {
+  it('blocks the real row-80 sentence', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'that is jade in the photo, sleeves pushed up at a sunny bathroom sink',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).toContain('caption-describes-image')
+    expect(r.blocked).toBe(true)
+    const finding = r.findings.find(f => f.check === 'caption-describes-image')
+    expect(finding?.severity).toBe('block')
+    expect(finding?.detail).toMatch(/altText/)
+  })
+
+  it('does not fire on a clean caption', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: CLEAN,
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).not.toContain('caption-describes-image')
+  })
+
+  it('catches "pictured" and "so you can see how" variants', async () => {
+    const r1 = await runDeterministicPublishChecks({
+      caption: 'the grip texture, pictured up close, is the whole point',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r1)).toContain('caption-describes-image')
+
+    const r2 = await runDeterministicPublishChecks({
+      caption: 'so you can see how the seam sits flush against the base',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r2)).toContain('caption-describes-image')
+  })
+
+  it('fires on X too, not only Instagram', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'that is jade in the photo, sleeves pushed up',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'x',
+    })
+    expect(checks(r)).toContain('caption-describes-image')
   })
 })

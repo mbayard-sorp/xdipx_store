@@ -317,6 +317,17 @@ redraft, and write it with `"reworkedFrom": <original id>`. Reworks count toward
 the platform's daily quota. Feedback you can't act on (e.g. it asks for a capability you don't
 have) → say so honestly in the run summary, never silently drop it.
 
+**Owner direction 2026-08-22: feedback binds the rework clause by clause** (`instagram-campaigns.md`
+§3.9, last bullet). Split the `feedback` into its clauses before you redraft, satisfy every one of
+them, and state in the run summary which clause maps to which change in the rework (caption, image,
+`altText`, `subject`). Row 74 was rejected with "show a cast member cleaning a toy with one of our
+toy cleaning products"; the rework delivered the cast member and dropped the toy and the cleaner,
+and that is not a rework. `social-publish-gate` reads the source row's `feedback` via `op:'list'`
+and returns REVISE (`owner-feedback-unmet`) for any rework that leaves a clause unmet, so a partial
+rework is a draft that cannot publish. When the feedback asks for a different image, the rework goes
+back through Step 5 with the feedback quoted in the brief, and `op:'rework'` carries the new
+`mediaUrls`, `altText`, and `imageBrief`.
+
 ## Step 2.6 — Stock gate (never feature an out-of-stock product)
 
 Owner direction 2026-08-09, after a live post featuring an out-of-stock product had to be deleted.
@@ -351,6 +362,18 @@ an approved product only, and an unapproved one is a publish-time block, not a w
 Until tagging exists, commerce on Instagram runs post to profile to link in bio to `/social` to PDP.
 
 ## Step 3 — Draft (reworks included)
+
+**Owner direction 2026-08-22, binding at run start:** "I'm officially saying, our posts should be at
+a 9 for the explicit register. That's an order. I want innuendo, suggestive phrases, skin in the
+images (not nudity)." Instagram captions now run at **9 by implication** per the social addendum in
+`docs/emma-voice.md` (v5.5) and `instagram-campaigns.md` §3.2b: the wanting is nameable, the heat
+arrives through innuendo, anticipation, and the unsaid, and the vocabulary fence is unchanged (no act
+naming, no orgasm or arousal words, no anatomy nouns, no emoji-anatomy). "Too tame" is now a REVISE
+at Step 6.5: a caption that could run unchanged on a skincare account is a defect here. Three
+companion rules land with it and are enforced in Steps 2.5, 5, and 6: the caption never describes
+the picture (the description goes in `altText`), the picture depicts the subject and never the verb
+(§3.9), and a post about a category we sell shows the product, slot A included (§4a). Hashtags are
+5 to 8 per §7a. Any earlier "register 4-5" language for Instagram in this file or elsewhere is stale.
 
 **THE QUOTA IS PER DAY, NOT PER RUN. Count today's rows before you draft anything.** The social
 routine fires **twice daily** (14:00 and 22:00 UTC, `routine-schedule.md` routine 6). Two runs each
@@ -668,6 +691,21 @@ that verdict stands and you do not work around it. Before accepting such a verdi
 roster was read with `SANITY_API_TOKEN` and not an empty token: on 2026-08-19 an unauthenticated
 count reported zero when seven existed.
 
+**The brief carries subject, product(s), and feeling, always (owner direction 2026-08-22,
+`instagram-campaigns.md` §3.9).** Alongside the handle, photo, dimensions, and beat, pass
+`social-art-director` the post's subject in one line, the product(s) that belong to that subject,
+and the sensation the post is selling (anticipation, recognition, permission, relief, curiosity). A
+brief with a slot and a location and no subject is incomplete and comes back. The picture depicts
+the subject, never a literal illustration of the caption's verb: row 80 put a hand-washing frame on
+a toy-care post because the art director got the slot and the location bank and never the subject.
+**Slot A is product-in-frame when the subject is a category we sell** (cleaning, storage, lube,
+materials, first toys): the relevant in-stock product is held or placed by a cast member, and the
+stock gate (Step 2.6) and the Instagram-eligibility filter (§4b) apply to it as they would in slot
+C. Product-free frames are for subjects with no product in them, and "no product" is a choice the
+brief justifies, never a default a slot inherits. The returned brief is written to the draft as
+`imageBrief`, and the subject line as `subject` (Step 6). Charge ratio per rolling 7 is now 3 ceiling
+/ 3 mid / 1 educational (§3.2b); the mid frame carries skin, touch, posture, or expression by default.
+
 **A cast member in a scene is MANDATORY on every Instagram product post (owner ruling 2026-08-19,
 spec §3.7).** The lead image is a person somewhere real, with the product. A product alone, however
 beautifully styled, is not a publishable lead frame. Emma is a cast member and is in the rotation.
@@ -765,8 +803,10 @@ stops.
   with `SANITY_API_TOKEN` (the token production itself uses) on the `published` perspective, which is
   exactly what `getApprovedCastMembers()` runs, and never conclude "none exist" from an
   unauthenticated read.
-- **The imagery fence does not move with the caption register.** X captions run 6-7 against
-  Instagram's 4-5 because X's organic policy is more permissive. The picture standard is unchanged.
+- **The imagery fence does not move with the caption register.** X captions run 6-7 per the social
+  addendum; Instagram runs 9 by implication since the 2026-08-22 owner ruling (`docs/emma-voice.md`
+  v5.5), reached through innuendo rather than vocabulary because X's organic policy is more
+  permissive about words than Meta's. The picture standard is unchanged on both.
   The charter settled it in the harder direction already (imagery stays a visual 6-7 even on owned
   channels where copy runs at 9), `docs/ads-policy.md` §Creative binds "paid AND organic" and names
   X, and `social-publish-gate.md` states that everything about the image binds identically across
@@ -950,7 +990,7 @@ and writes no row.
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **X drafts carry `mediaUrls` too — never omit it.** The server 400s a `platform:'x'` draft with an
@@ -970,22 +1010,32 @@ NEVER appear in it. Run 406 (2026-08-19) had two IG drafts (id62, id63) REVISEd 
 for exactly this: a trailing `VISUAL DESCRIPTION: ...` block that was an internal generation note, not
 reader-facing prose. **Pre-write self-check, every draft:** grep the caption for `VISUAL DESCRIPTION`,
 `negatives`, `archetype`, `brief`, `No product`, and similar fragments, and strip anything that is a
-note to the generator rather than words for the reader before you send the draft.
+note to the generator rather than words for the reader before you send the draft. **Second check,
+`caption-describes-image` (owner direction 2026-08-22):** grep the caption for "in the photo",
+"that is <name> in" / "that is <name> holding", "so you can see", "pictured", "visual description",
+and any sentence that narrates the setting or what a cast member is doing in frame. Those sentences
+move to `altText` or are cut; they never ship in `tweetText`. The deterministic gate
+(`social-publish-gate.server.ts`) now fires on these patterns and `social-publish-gate` returns
+REVISE for any survivor, so a caption that fails this check is a draft that cannot publish.
 
-**Every image-bearing caption carries a reader-facing accessibility description (ticket #4067),
-woven into the caption as natural prose — never a labeled `VISUAL DESCRIPTION:` block (ticket
-#4501).** This is standing, not an option: every Instagram post, and every X or TikTok post that
-carries media, includes it. Write a real description of the image for a reader who cannot see it —
-the person, the setting, what is happening in frame — as ordinary sentences folded into the caption
-before the engagement close, not hidden in alt-text and not under a literal label. **Do NOT prefix it
-with `VISUAL DESCRIPTION:` or any similar heading.** `social-publish-gate` reads that literal label
-in `tweetText` as a leaked internal production artifact and REVISEs the draft every time it appears
-(five drafts lost this way through 2026-08-20: ids 62, 63, 66, 67, 68), and the customer-copy
-self-check above strips it. The accessibility work is required; the label is banned — the
-description reads as one more sentence of the caption, in Emma's voice, not as a tagged production
-note. It is still NOT the internal scene brief: no meta-notes, no `No product, no text`, no
-negatives list — those are the fragments the self-check above strips. If you cannot describe the
-final image in plain reader-facing prose, it is not ready.
+**Every image-bearing post carries an accessibility description, and it goes in `altText`, never in
+`tweetText` (ticket #4067, re-homed by owner direction 2026-08-22).** This is standing, not an
+option: every Instagram post, and every X or TikTok post that carries media, includes a real
+description of the image for a reader who cannot see it, the person, the setting, what is happening
+in frame, written as plain prose in Emma's voice. It lives in the `altText` field of the draft (and
+of an `op:'rework'`), which the publisher sends as Instagram's `alt_text` parameter. **It never goes
+in the caption.** The earlier rule that folded the description into the caption as "one more
+sentence" is withdrawn: the owner's 2026-08-22 direction ("can we also please not add phrases that
+describe the scene?") and the charter's social addendum (`docs/emma-voice.md`, "The caption never
+describes the picture") make a caption that narrates its own image a defect. The reader is looking
+at the picture; telling her what she is looking at wastes the one line she reads and kills the
+charge the picture built. A labeled `VISUAL DESCRIPTION:` block is still banned everywhere (ticket
+#4501); the description is not a production note, so no negatives, no archetype, no `No product, no
+text`. If you cannot describe the final image in plain prose for `altText`, the post is not ready.
+
+Alongside `altText`, the draft carries `subject` (the post's subject in one line) and `imageBrief`
+(the brief `social-art-director` returned, with subject, product(s), and the feeling being sold per
+`instagram-campaigns.md` §3.9). All three are accepted by `op:'draft'` and `op:'rework'`.
 
 One `event` per draft (`eventType:'step'`, `phase:'draft'`):
 
@@ -1001,7 +1051,7 @@ Note the field is `summary`, not `message` — this is `POST /api/team/event`, n
 
 Step 4a asked whether the words are right. This asks whether the **finished post** should reach a
 public, rented, loseable account. They are different questions and a draft can sail through one
-while failing the other: a flawless register-4 Emma line is exactly the caption that gets a post
+while failing the other: a flawless register-9 Emma line is exactly the caption that gets a post
 pulled for the image beside it.
 
 **Instagram and X both, and X is the one this step used to miss.** The gate covers exactly the two

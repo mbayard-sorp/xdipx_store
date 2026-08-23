@@ -267,8 +267,9 @@ describe('instagramPublisher product tags (ticket #3744)', () => {
 
 /**
  * Alt text (accessibility description) on the media container, migration 085 /
- * ticket #5042. It rides the image and carousel-item containers; Reels have no
- * alt_text field. Same fake-Graph convention.
+ * ticket #5042. It rides a single image container, or the first carousel-item
+ * container only (mirrors the product tag's "first slide only" convention);
+ * Reels have no alt_text field. Same fake-Graph convention.
  */
 describe('instagramPublisher alt text (ticket #5042)', () => {
   afterEach(() => {
@@ -292,7 +293,7 @@ describe('instagramPublisher alt text (ticket #5042)', () => {
     )
   })
 
-  it('sends alt_text on every carousel item container', async () => {
+  it('rides the alt_text on the first carousel slide only', async () => {
     const calls = installFakeGraph()
     await instagramPublisher.publish({
       postId: 1,
@@ -302,7 +303,8 @@ describe('instagramPublisher alt text (ticket #5042)', () => {
     })
     const items = calls.filter(c => c.params['is_carousel_item'] === 'true')
     expect(items).toHaveLength(2)
-    expect(items.every(c => c.params['alt_text'] === 'Two angles of the same wand.')).toBe(true)
+    expect(items[0]?.params['alt_text']).toBe('Two angles of the same wand.')
+    expect(items[1]?.params['alt_text']).toBeUndefined()
   })
 
   it('omits alt_text when none is supplied (unchanged behavior)', async () => {

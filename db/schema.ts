@@ -194,6 +194,16 @@ export const socialPosts = pgTable('social_posts', {
   // that goes out of stock after approval still blocks the post, independent
   // of the pre-publish gate's own caller-supplied productHandle snapshot.
   shopifyProductId: varchar('shopify_product_id', { length: 60 }),
+  // Accessibility description + generation brief (migration 085, owner direction
+  // 2026-08-22; renumbered from 084 to 085 to avoid colliding with the Social
+  // Studio v2 migration below). altText is what the Instagram publisher sends
+  // as alt_text on the media container; it must never leak into the caption
+  // (tweetText). imageBrief and subject are the durable "what is this image
+  // supposed to depict" record that regeneration/rework reads instead of
+  // reverse-engineering it from the caption text.
+  altText:          text('alt_text'),
+  imageBrief:       text('image_brief'),
+  subject:          text('subject'),
   // Social Studio v2 (migration 084, ADR-013). All nullable, all additive.
   // scheduledAt supersedes scheduledFor (date-only): owner input is a PDT
   // wall-clock time, stored UTC; legacy rows read through COALESCE.
@@ -208,15 +218,6 @@ export const socialPosts = pgTable('social_posts', {
   // Approved cast members appearing in this post (Sanity castMember slugs).
   castSlugs:       jsonb('cast_slugs').$type<string[]>(),
   updatedAt:       timestamp('updated_at', { withTimezone: true }),
-  // Accessibility description + generation brief (migration 085, owner
-  // direction 2026-08-22, ticket #5042). altText is what the Instagram
-  // publisher sends as alt_text on the media container; it must never leak
-  // into the caption (tweetText). imageBrief and subject are the durable
-  // "what is this image supposed to depict" record that regeneration/rework
-  // reads instead of reverse-engineering it from the caption text.
-  altText:         text('alt_text'),
-  imageBrief:      text('image_brief'),
-  subject:         text('subject'),
 })
 
 /**
@@ -1626,7 +1627,7 @@ export const videoJobs = pgTable('video_jobs', {
   status:            varchar('status', { length: 24 }).notNull().default('queued'),  // queued|running|awaiting_provider|awaiting_frame_approval|applying|done|failed
   providerRequestIds: jsonb('provider_request_ids').$type<Record<string, { requestId: string; statusUrl: string; responseUrl: string }>>().notNull().default({}),
   sceneFrameAssetId: integer('scene_frame_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
-  // Multi-scene jobs (Phase 3, migration 083). Both null for every existing
+  // Multi-scene jobs (Phase 3, migration 084). Both null for every existing
   // row and every single-scene job — the poller branches on scenesJson's
   // presence/length, so the single-clip MVP path never sees these.
   scenesJson:        jsonb('scenes_json').$type<VideoSceneSpec[]>(),
