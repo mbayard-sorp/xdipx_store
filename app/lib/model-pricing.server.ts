@@ -124,10 +124,13 @@ export function estimateImageCostUsd(model: string, count: number): number {
 // video, so this is a different pricing model than the fal per-output-second
 // rates above. Rather than one hardcoded number, this is TWO numbers:
 //   - RUNPOD_GPU_USD_PER_SEC:      the rented GPU's $/GPU-second (env,
-//     default 0.0012, roughly L40S class list pricing as of 2026-08).
+//     default 0.00031, measured against the live 1cnxz75c71177q endpoint
+//     2026-08-22: RTX 4090 serverless flex at $1.10/hr, the class the
+//     endpoint's workers actually land on since L40S stock is low).
 //   - RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND: an ASSUMED render-time
-//     multiplier (40 GPU-seconds of render per second of finished clip) used
-//     ONLY for the pre-flight estimate, until real render telemetry exists.
+//     multiplier (45 GPU-seconds of render per second of finished clip,
+//     from a measured fast-path run: 219669ms executionTime / 5.06s clip)
+//     used ONLY for the pre-flight estimate, until per-job telemetry exists.
 // estimateRunpodRatePerSecondUsd() multiplies these into a $/clip-second
 // figure that slots into VIDEO_RATES exactly like a fal rate, so
 // estimateVideoCostUsd/estimateJobCostUsd need no special-casing.
@@ -136,8 +139,8 @@ export function estimateImageCostUsd(model: string, count: number): number {
 // replaces the estimate once the job completes (video-pipeline clip stage).
 // ---------------------------------------------------------------------------
 
-const RUNPOD_GPU_USD_PER_SEC_DEFAULT = 0.0012
-const RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND = 40
+const RUNPOD_GPU_USD_PER_SEC_DEFAULT = 0.00031
+const RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND = 45
 
 function runpodGpuRatePerSecondUsd(): number {
   const raw = process.env['RUNPOD_GPU_USD_PER_SEC']

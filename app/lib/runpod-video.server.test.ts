@@ -114,6 +114,54 @@ describe('submitRunpodVideo', () => {
     expect(body?.['input']).toMatchObject({ negativePrompt: 'blurry', seed: 42, steps: 30 })
   })
 
+  it('defaults fast to true (20-step path exceeds the 900s timeout on a 4090)', async () => {
+    stubEnv()
+    let body: Record<string, unknown> | undefined
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ id: 'j1', status: 'IN_QUEUE' }), { status: 200 })
+    }))
+    await submitRunpodVideo({
+      prompt: 'p', imageUrl: 'https://x/y.jpg', durationSeconds: 5, mode: 'i2v', blobPathPrefix: 'video/j1',
+    })
+    expect(body?.['input']).toMatchObject({ fast: true })
+  })
+
+  it('turns fast off when RUNPOD_VIDEO_FAST is "0" or "false"', async () => {
+    stubEnv()
+    vi.stubEnv('RUNPOD_VIDEO_FAST', '0')
+    let body: Record<string, unknown> | undefined
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ id: 'j1', status: 'IN_QUEUE' }), { status: 200 })
+    }))
+    await submitRunpodVideo({
+      prompt: 'p', imageUrl: 'https://x/y.jpg', durationSeconds: 5, mode: 'i2v', blobPathPrefix: 'video/j1',
+    })
+    expect(body?.['input']).toMatchObject({ fast: false })
+
+    vi.stubEnv('RUNPOD_VIDEO_FAST', 'false')
+    await submitRunpodVideo({
+      prompt: 'p', imageUrl: 'https://x/y.jpg', durationSeconds: 5, mode: 'i2v', blobPathPrefix: 'video/j2',
+    })
+    expect(body?.['input']).toMatchObject({ fast: false })
+  })
+
+  it('an explicit fast value overrides the env default', async () => {
+    stubEnv()
+    vi.stubEnv('RUNPOD_VIDEO_FAST', '0')
+    let body: Record<string, unknown> | undefined
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ id: 'j1', status: 'IN_QUEUE' }), { status: 200 })
+    }))
+    await submitRunpodVideo({
+      prompt: 'p', imageUrl: 'https://x/y.jpg', durationSeconds: 5, mode: 'i2v', blobPathPrefix: 'video/j1',
+      fast: true,
+    })
+    expect(body?.['input']).toMatchObject({ fast: true })
+  })
+
   it('rejects i2v mode without an imageUrl before hitting the network', async () => {
     stubEnv()
     const fetchMock = vi.fn()
