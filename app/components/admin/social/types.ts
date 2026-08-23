@@ -10,6 +10,7 @@ export interface SocialPostRow {
   mediaUrls: string[] | null
   status: string
   errorMessage: string | null
+  postedAt?: string | Date | null
   createdAt: string | Date | null
   createdBy: string | null
   reviewStatus: string
@@ -22,6 +23,26 @@ export interface SocialPostRow {
   /** Video pipeline linkage (065): set when this draft is a fanned-out video. */
   videoJobId: number | null
   posterUrl: string | null
+  /** Durable product linkage (080). */
+  shopifyProductId?: string | null
+  /** Social Studio v2 columns (084); optional so older callers still type-check. */
+  scheduledAt?: string | Date | null
+  permalink?: string | null
+  gateStatus?: string | null
+  gateCheckedAt?: string | Date | null
+  gateFindings?: { check: string; verdict: string; note?: string }[] | null
+  castSlugs?: string[] | null
+  updatedAt?: string | Date | null
+}
+
+/** The live X account. The old hardcoded `xdipx` handle only worked via redirect. */
+export const X_HANDLE = 'hello_xdipx'
+
+/** Link to the live post: the stored permalink first, else X by id. Instagram stores a media id only. */
+export function livePostUrl(post: Pick<SocialPostRow, 'platform' | 'externalPostId' | 'permalink'>): string | null {
+  if (post.permalink) return post.permalink
+  if (post.platform === 'x' && post.externalPostId) return `https://x.com/${X_HANDLE}/status/${post.externalPostId}`
+  return null
 }
 
 /** True when the draft's media is a video (fanned out from the video pipeline). */

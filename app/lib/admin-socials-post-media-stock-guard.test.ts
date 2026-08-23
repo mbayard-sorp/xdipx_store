@@ -1,6 +1,7 @@
 /**
  * Publish-time stock guard on the manual Post-now path (ticket #2212,
- * admin.socials.tsx `post-media` intent). No network calls: db and the stock
+ * admin.socials.queue.tsx `post-media` intent; moved from admin.socials.tsx
+ * in the Social Studio v2 route split). No network calls: db and the stock
  * lookup are both mocked.
  *
  * Lives in app/lib rather than next to the route: anything in app/routes is
@@ -46,6 +47,7 @@ vi.mock('~/lib/social-publish/manual-publish-gate.server', () => ({
 }))
 vi.mock('~/lib/social-publish-approve.server', () => ({
   parseGateStamp: vi.fn(() => null),
+  revertSocialPostToDraft: vi.fn(),
 }))
 vi.mock('~/lib/claude.server', () => ({ generateTweetCopy: vi.fn() }))
 vi.mock('~/lib/shopify.server', () => ({ getDealByShopifyId: vi.fn(async () => null) }))
@@ -63,11 +65,11 @@ vi.mock('~/lib/team.server', () => ({
 }))
 vi.mock('~/lib/pricing-webhook.server', () => ({ setPipelineSetting: vi.fn() }))
 
-import { action } from '~/routes/admin.socials'
+import { action } from '~/routes/admin.socials.queue'
 
 function postForm(fields: Record<string, string>): Request {
   const body = new URLSearchParams(fields)
-  return new Request('http://localhost/admin/socials', {
+  return new Request('http://localhost/admin/socials/queue', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
