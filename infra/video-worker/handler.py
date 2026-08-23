@@ -248,10 +248,44 @@ def submit(wf: dict[str, Any]) -> str:
     return body["prompt_id"]
 
 
+class ComfyDied(RuntimeError):
+    """ComfyUI stopped answering mid-render (typically the host OOM killer)."""
+
+
+def free_models() -> None:
+    """Ask ComfyUI to drop every staged model. Without this a warm worker keeps
+    ~20 GB of Wan weights resident in system RAM between jobs, and the next
+    job's load pushes a 31 GB host into the OOM killer (seen live 2026-08-22)."""
+    try:
+        requests.post(f"{COMFY_URL}/free", json={"unload_models": True, "free_memory": True}, timeout=30)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def render(wf: dict[str, Any], on_tick) -> dict[str, Any]:
+    """Submit + wait, rebooting ComfyUI and resubmitting once if it dies."""
+    global _comfy_proc
+    for attempt in (1, 2):
+        try:
+            return wait_for(submit(wf), on_tick)
+        except ComfyDied as exc:
+            if attempt == 2:
+                raise
+            log(f"ComfyUI died mid-render ({exc}); rebooting and retrying once")
+            if _comfy_proc is not None and _comfy_proc.poll() is None:
+                _comfy_proc.kill()
+            _comfy_proc = None
+            ensure_comfy()
+    raise RuntimeError("unreachable")
+
+
 def wait_for(prompt_id: str, on_tick) -> dict[str, Any]:
     started = time.time()
     while time.time() - started < RENDER_TIMEOUT_S:
-        r = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=30)
+        try:
+            r = requests.get(f"{COMFY_URL}/history/{prompt_id}", timeout=30)
+        except requests.ConnectionError as exc:
+            raise ComfyDied(str(exc)[:200]) from exc
         entry = r.json().get(prompt_id) if r.status_code == 200 else None
         if entry:
             status = entry.get("status") or {}
@@ -355,8 +389,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
         wf = build_workflow(p, image_name)
         progress(f"rendering {p['mode']} {p['seconds']}s ({p['frames']} frames, {p['steps']} steps, seed {p['seed']})")
-        prompt_id = submit(wf)
-        entry = wait_for(prompt_id, lambda s: progress(f"rendering... {s}s"))
+        entry = render(wf, lambda s: progress(f"rendering... {s}s"))
         src = find_output_video(entry, wf["15"]["inputs"]["filename_prefix"])
 
         progress("encoding mp4 + last frame")
@@ -380,6 +413,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         log(f"FAILED: {exc}")
         return {"error": f"{type(exc).__name__}: {exc}"}
     finally:
+        free_models()
         shutil.rmtree(workdir, ignore_errors=True)
         if image_name:
             try:
