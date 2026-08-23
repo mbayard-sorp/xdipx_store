@@ -604,3 +604,89 @@ export async function reworkSocialPost(
   await repo.write(id, patch)
   return { ok: true, reviewStatus: 'pending_review' }
 }
+
+// ── Revert to draft (Social Studio v2, Phase 3, ADR-013 decision 4) ─────────
+
+/**
+ * Remove the gate stamp (header line plus the gate's own notes paragraph) from
+ * a `feedback` value, keeping anything written after a blank line, which is
+ * where owner notes and the manual-publish / stock-guard appendices land.
+ * Returns null when nothing but the stamp was there.
+ */
+export function stripGateStamp(feedback: string | null | undefined): string | null {
+  if (!feedback) return null
+  if (!parseGateStamp(feedback)) return feedback
+  const idx = feedback.indexOf('\n\n')
+  const rest = idx === -1 ? '' : feedback.slice(idx + 2).trim()
+  return rest.length > 0 ? rest : null
+}
+
+export interface RevertPatch {
+  status: 'draft'
+  reviewStatus: 'pending_review'
+  feedback: string | null
+  reviewedBy: null
+  reviewedAt: null
+  gateStatus: null
+  gateCheckedAt: null
+  gateFindings: null
+  updatedAt: Date
+}
+
+export interface RevertRepo {
+  load: (id: number) => Promise<PostRow | null>
+  write: (id: number, patch: RevertPatch) => Promise<void>
+}
+
+export const dbRevertRepo: RevertRepo = {
+  load: dbApproveRepo.load,
+  write: async (id, patch) => {
+    await db.update(socialPosts).set(patch).where(eq(socialPosts.id, id))
+  },
+}
+
+export type RevertResult =
+  | { ok: true; reviewStatus: 'pending_review' }
+  | { ok: false; status: 404 | 409; error: string }
+
+/**
+ * Pull an approved (or bounced, or still-pending) draft back to a clean
+ * `draft`/`pending_review` so the owner can edit it and the gate looks again.
+ *
+ * The stamp is ALWAYS burned: review fields, gate columns and the stamped
+ * `feedback` header are cleared unconditionally, because "I did not really
+ * change anything" cannot be proven and a stale PASS on edited content is
+ * incident #3640 through a different door. Owner notes after the stamp are
+ * kept. `rejected` (gate BLOCK) and `posted` rows are refused: a BLOCK has no
+ * manual override anywhere in this codebase, and history is not relabelled.
+ */
+export async function revertSocialPostToDraft(
+  id: number,
+  deps: { repo?: RevertRepo; now?: () => Date } = {},
+): Promise<RevertResult> {
+  const repo = deps.repo ?? dbRevertRepo
+  const post = await repo.load(id)
+  if (!post) return { ok: false, status: 404, error: `No social post ${id}` }
+  if (post.status === 'posted' || post.status === 'deleted') {
+    return { ok: false, status: 409, error: `Post ${id} is ${post.status}; a published row is history, not a draft.` }
+  }
+  if (post.reviewStatus === 'rejected') {
+    return {
+      ok: false,
+      status: 409,
+      error: `Post ${id} is rejected. A gate BLOCK has no manual override; start a fresh draft instead.`,
+    }
+  }
+  await repo.write(id, {
+    status: 'draft',
+    reviewStatus: 'pending_review',
+    feedback: stripGateStamp(post.feedback),
+    reviewedBy: null,
+    reviewedAt: null,
+    gateStatus: null,
+    gateCheckedAt: null,
+    gateFindings: null,
+    updatedAt: deps.now?.() ?? new Date(),
+  })
+  return { ok: true, reviewStatus: 'pending_review' }
+}
