@@ -9,6 +9,9 @@
  * Post-now on an approved draft) always work. Unattended publishing runs on the
  * hourly /cron/social-publish tick and is gated per platform by
  * instagram_autopublish_enabled and x_autopublish_enabled, both default off.
+ * Those two govern the UNATTENDED tick only. The owner's Post-now click here
+ * publishes a still on either platform regardless (owner direction 2026-08-23);
+ * video alone still reads video_autopublish_enabled, which is his frame review.
  *
  * The old X_AUTO_POST_ENABLED env var was retired 2026-08-16. It never gated
  * anything: it was read once, here, to render a status pill, while the copy

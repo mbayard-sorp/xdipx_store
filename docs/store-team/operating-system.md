@@ -278,8 +278,8 @@ Every one of these is a `pipeline_settings` row. Agents may never write `pipelin
 | `product_manager_enabled` | Import candidates are not actioned | `/admin/imports` |
 | `import_enrich_enabled` | Imported products never go draft to live | `/admin/imports` |
 | `seo_curation_enabled`, `trend_scout_enabled` | Those weekly routines exit before starting a run | content tab |
-| `instagram_autopublish_enabled` | Instagram drafts are never posted live. **Owner-gated** | social tab |
-| `x_autopublish_enabled` | X drafts are never posted live. **Money valve, owner-gated** (X bills per post; paired with `x_publish_max_spend_usd_month`) | social tab |
+| `instagram_autopublish_enabled` | The hourly job never posts Instagram drafts. **Owner-gated.** Governs UNATTENDED posting only: the owner's Post-now click in `/admin/socials` publishes a still regardless (owner direction 2026-08-23) | social tab |
+| `x_autopublish_enabled` | The hourly job never posts X drafts. **Money valve, owner-gated** (X bills per post; paired with `x_publish_max_spend_usd_month`). Same scope: Post-now does not read it | social tab |
 | `video_frame_review` | Video frames require owner review. **Money valve, owner-gated** | `/admin/video-studio` |
 | `import_enrich_enabled` (also listed above) | Imported products never go draft to live. **Money valve, owner-gated**. This replaced the retired `deal_status: approved` metafield row that used to sit here: daily deals were retired and `deal_status` was removed catalog-wide on 2026-08-03 (see `CLAUDE.md`, Shopify Metafields), so product publishing is the gate now | `/admin/imports` |
 

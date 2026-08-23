@@ -117,31 +117,18 @@ describe('decideManualPublish', () => {
     if (decision.ok) expect(decision.findings).toHaveLength(1)
   })
 
-  it('refuses an Instagram still when instagram_autopublish_enabled is false', async () => {
-    const reads: string[] = []
-    const getValve = vi.fn(async (key: string) => {
-      reads.push(key)
-      return false // Instagram kill switch OFF (its default)
-    })
+  it('publishes an Instagram still with instagram_autopublish_enabled OFF', async () => {
+    // Owner direction 2026-08-23, "make Instagram match X". The valve governs
+    // UNATTENDED posting — the hourly cron — and an owner clicking a button is
+    // the opposite of unattended. It must not be read at all here.
+    const getValve = vi.fn(async () => false)
     const decision = await decideManualPublish(POST, getValve, { runChecks: clean() })
 
-    expect(decision.ok).toBe(false)
-    if (!decision.ok) {
-      expect(decision.stub).toBe(true)
-      expect(decision.error).toMatch(/Instagram autopublish valve is OFF/)
-    }
-    // The bug that let post #49 ship: a still must be gated on the Instagram
-    // switch, not the video valve.
-    expect(reads).toEqual([VALVE_KEYS.instagramAutopublish])
-    expect(reads).not.toContain(VALVE_KEYS.videoAutopublish)
-  })
-
-  it('allows an Instagram still when the Instagram valve is on', async () => {
-    const decision = await decideManualPublish(POST, valveAlwaysOn, { runChecks: clean() })
     expect(decision.ok).toBe(true)
+    expect(getValve).not.toHaveBeenCalled()
   })
 
-  it('gates a video on the video valve, not the Instagram switch', async () => {
+  it('gates an Instagram video on the video valve — that one is the frame review', async () => {
     const reads: string[] = []
     const getValve = vi.fn(async (key: string) => {
       reads.push(key)
@@ -153,7 +140,16 @@ describe('decideManualPublish', () => {
 
     expect(decision.ok).toBe(false)
     if (!decision.ok) expect(decision.error).toMatch(/Video autopublish valve is OFF/)
+    // Never the Instagram switch, which no longer governs anything on this path.
     expect(reads).toEqual([VALVE_KEYS.videoAutopublish])
+    expect(reads).not.toContain(VALVE_KEYS.instagramAutopublish)
+  })
+
+  it('publishes an Instagram video when the video valve is on', async () => {
+    const decision = await decideManualPublish(
+      { ...POST, isVideo: true }, valveAlwaysOn, { runChecks: clean() },
+    )
+    expect(decision.ok).toBe(true)
   })
 
   it('maps media kind to the governing valve key', () => {

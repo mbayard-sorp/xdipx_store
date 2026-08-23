@@ -853,9 +853,11 @@ Recorded so no run pretends otherwise, and so the gap is visible rather than qui
   only writer of `approved` and runs at Step 6.5 of the social routine; the publish job
   (`/cron/social-publish`, hourly) with its publish-time stock re-check, image-provenance check,
   daily cap, and its own kill switch; and the owner's feedback path on a **posted** row. What decides
-  whether posts actually go out is now one valve, `instagram_autopublish_enabled`, on the Social tab
+  whether posts go out *unattended* is one valve, `instagram_autopublish_enabled`, on the Social tab
   of `/admin/homepage-team`. Read it, never assume it: a run that reports posts as published when the
-  valve is off is worse than one that reports nothing.
+  valve is off is worse than one that reports nothing. It is not the whole story of what is live,
+  though, and do not report it as such: since 2026-08-23 the owner's own Post-now click publishes a
+  still with the valve off, so a post can be live that your run never published.
 - **`approved` alone is not a licence to publish.** The publish job refuses any row without a gate
   PASS stamp in its `feedback`, including one the owner approved by hand. A row reported as
   `no_gate_verdict` is a row nothing adversarial has read; it goes back through the gate, never

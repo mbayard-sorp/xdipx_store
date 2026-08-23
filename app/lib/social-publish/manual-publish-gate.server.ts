@@ -33,6 +33,21 @@
  * unattended publishing has no owner looking at it, which was always the
  * actual difference.
  *
+ * No autopublish valve gates a still any more either (owner direction
+ * 2026-08-23, "make Instagram match X"). `instagram_autopublish_enabled` reads
+ * as what its name says: it governs UNATTENDED posting, which is the hourly
+ * cron, and an owner clicking a button in the Studio is the opposite of
+ * unattended. X had already codified exactly that distinction; Instagram was
+ * inconsistent with it, so an owner click on a still refused with "the valve is
+ * OFF, post it by hand" while the identical click on X published. The cron
+ * still reads the valve on every tick, so the kill switch keeps doing the only
+ * job a kill switch has.
+ *
+ * Video is the one exception, and it is not an oversight. `video_autopublish_
+ * enabled` is not a posting-cadence valve like the other two: it is the release
+ * of the owner's frame review, which CLAUDE.md keeps on his desk alongside the
+ * money valves. An Instagram video therefore still reads it.
+ *
  * Kept pure (both the valve reader and the check runner are injected) so the
  * refusals are unit-tested rather than proven only by reading the route.
  */
@@ -108,21 +123,24 @@ export async function decideManualPublish(
     }
   }
 
-  // 2. X stops here. No valve is required for an owner click.
+  // 2. X stops here, as it always has: the owner's click is the approval.
   if (platform === 'x') return { ok: true, findings: checks.findings }
 
-  // 3. The autopublish valve that governs the SURFACE must be on. Video keeps
-  //    the video team's valve; a still on Instagram is governed by the
-  //    Instagram kill switch, not the video valve. The pre-#3674 handler gated
-  //    stills on the video valve, so the Instagram switch governed nothing here.
-  const valveOn = await getValve(manualPublishValveKey(input.isVideo))
+  // 3. So does an Instagram still, now. See the valve note above.
+  if (!input.isVideo) return { ok: true, findings: checks.findings }
+
+  // 4. Video alone still reads its valve, because that valve is the owner's
+  //    frame review rather than a posting-cadence switch. The pre-#3674 handler
+  //    gated STILLS on this valve too, so the Instagram switch governed nothing
+  //    on this path; that bug is not what is being restored here.
+  const valveOn = await getValve(manualPublishValveKey(true))
   if (!valveOn) {
     return {
       ok: false,
       stub: true,
-      error: input.isVideo
-        ? 'Video autopublish valve is OFF (Homepage Team > Video tab). Copy the caption and download the media to post manually.'
-        : 'Instagram autopublish valve is OFF (Social Studio > Settings tab). Copy the caption and download the media to post manually.',
+      error:
+        'Video autopublish valve is OFF (Homepage Team > Video tab). That valve is your frame ' +
+        'review, not a posting switch. Approve the frames or flip it, or download the video to post by hand.',
     }
   }
 

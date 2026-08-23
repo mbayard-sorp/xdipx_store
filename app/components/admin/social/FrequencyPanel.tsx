@@ -54,12 +54,12 @@ export function FrequencyPanel({ frequencies, igAutopublish, xAutopublish }: {
         <ValveStatus
           label="instagram_autopublish_enabled"
           on={igAutopublish}
-          note="Approved Instagram drafts publish hourly. Flip on the Agent Teams page."
+          note="Approved Instagram drafts publish hourly. Off only stops the hourly job — your Post-now click still publishes. Flip on the Agent Teams page."
         />
         <ValveStatus
           label="x_autopublish_enabled"
           on={xAutopublish}
-          note="Approved X drafts publish hourly, capped by x_publish_max_per_day and a monthly spend ceiling. X bills per post."
+          note="Approved X drafts publish hourly, capped by x_publish_max_per_day and a monthly spend ceiling. X bills per post. Off only stops the hourly job — your Post-now click still publishes."
         />
       </section>
     </div>
