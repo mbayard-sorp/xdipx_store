@@ -216,6 +216,30 @@ callback secret (`TEAM_TOKEN` / `HOMEPAGE_TEAM_TOKEN`) in its secret store, GA4 
 def lists it, and (ads only) the read/insights Meta Ads MCP tools named in
 `.claude/agents/ads-manager.md`. All routines no-op at the gate until migration 052 is applied.
 
+### Every trigger MUST carry a git source
+
+A trigger's `session_context.sources` must list the repo:
+
+```json
+"sources": [{ "git_repository": { "url": "https://github.com/mbayard-sorp/xdipx_store" } }]
+```
+
+This is not a convenience. With a source the session boots at `cwd=/home/user/xdipx_store` and the
+repo's `.claude/settings.json` loads as project settings, which is what pre-approves the routine's
+own API calls. Without it the run logs `No sources configured`, starts at `cwd=/home/user`, and the
+agent has to `git clone` by hand into a directory that is not its project root, so **the allowlist
+never applies** and the permission classifier decides every call unaided.
+
+That is not hypothetical. R-ENRICH (routine 24) was created without a source and its scheduled fires
+on 2026-08-23 and 2026-08-24 were both blocked at `POST /api/team/run`, so it never started a run and
+enriched nothing while 136 products sat pending. R-DEV ran the same command shape the same day with a
+source attached and was allowed. The source was added to R-ENRICH's trigger 2026-08-24 19:02.
+
+Two habits follow. Check `sources` on every trigger you create, and have playbooks call
+`scripts/team-api.sh` instead of hand-rolling `curl -H "x-team-secret: ..."`, so the command carries
+no secret and does not depend on the allowlist resolving. A routine that dies this way leaves **no
+run row at all**, so it is invisible to any check that reads the runs table.
+
 ## Connector permissions
 
 A cloud routine approves MCP connector calls from the trigger record, not from this repo. Each entry
