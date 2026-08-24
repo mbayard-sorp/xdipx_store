@@ -427,6 +427,8 @@ export interface VaultDeal {
   mapPrice?: number
   /** xdipx.map_restricted — true suppresses advertised-discount framing (MAP = MSRP) */
   mapRestricted?: boolean
+  /** xdipx.nalpac_sku — used as a g:mpn fallback in the GMC feed when no GTIN/barcode exists */
+  nalpacSku?: string | null
   // mm-google-shopping metafields
   gmcCategory?:  string | null
   gmcAgeGroup?:  string | null
