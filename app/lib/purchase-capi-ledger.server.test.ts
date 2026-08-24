@@ -9,6 +9,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const sendCapiEvent = vi.fn()
 const adminGraphQL = vi.fn()
+const kvIncrBy = vi.fn()
+const kvGet = vi.fn()
 
 // Chainable drizzle stubs. Each terminal call resolves, and the whole query
 // builder is replaceable per test so we can make the ledger throw on demand.
@@ -28,8 +30,17 @@ vi.mock('../../db/schema', () => ({
 }))
 vi.mock('./meta-capi.server', () => ({ sendCapiEvent: (...a: unknown[]) => sendCapiEvent(...a) }))
 vi.mock('./shopify.server', () => ({ adminGraphQL: (...a: unknown[]) => adminGraphQL(...a) }))
+vi.mock('./kv.server', () => ({
+  kvIncrBy: (...a: unknown[]) => kvIncrBy(...a),
+  kvGet: (...a: unknown[]) => kvGet(...a),
+}))
 
-import { sendPurchaseWithLedger, reconcilePurchases, type PurchaseOrder } from './purchase-capi.server'
+import {
+  sendPurchaseWithLedger,
+  reconcilePurchases,
+  getPurchaseCapiWriteFailureCount,
+  type PurchaseOrder,
+} from './purchase-capi.server'
 
 const ORDER: PurchaseOrder = {
   id: '123', totalPrice: 10, currency: 'USD', productIds: ['9'], numItems: 1,
@@ -42,6 +53,8 @@ beforeEach(() => {
   updateWhere.mockResolvedValue(undefined)
   selectWhere.mockResolvedValue([])
   sendCapiEvent.mockResolvedValue({ ok: true })
+  kvIncrBy.mockResolvedValue(1)
+  kvGet.mockResolvedValue(0)
 })
 
 describe('sendPurchaseWithLedger', () => {
@@ -60,6 +73,28 @@ describe('sendPurchaseWithLedger', () => {
     updateWhere.mockRejectedValue(new Error('connection reset'))
     const res = await sendPurchaseWithLedger(ORDER)
     expect(res.ok).toBe(true)
+  })
+
+  it('durably records a ledger-write failure so the outage is not just a swallowed console.error', async () => {
+    // The production shape from #5061: migration 082's rename was unapplied, so
+    // meta_capi_outbox did not exist and every ledger insert threw. Before this
+    // counter the only signal was a console.error that hid the outage for ~2
+    // days. A failed insert must now bump the per-UTC-day KV counter the owner
+    // digest reads.
+    insertValues.mockImplementation(() => { throw new Error('relation "meta_capi_outbox" does not exist') })
+
+    const res = await sendPurchaseWithLedger(ORDER)
+
+    expect(res.ok).toBe(true) // bookkeeping never costs a conversion
+    expect(kvIncrBy).toHaveBeenCalledWith(
+      expect.stringMatching(/^purchase-capi:write-failures:\d{4}-\d{2}-\d{2}$/),
+      1,
+    )
+  })
+
+  it('does not record a failure when the ledger writes cleanly', async () => {
+    await sendPurchaseWithLedger(ORDER)
+    expect(kvIncrBy).not.toHaveBeenCalled()
   })
 
   it('writes the ledger row BEFORE calling Meta', async () => {
@@ -105,6 +140,20 @@ describe('sendPurchaseWithLedger', () => {
     const res = await sendPurchaseWithLedger(ORDER)
     expect(res.ok).toBe(false)
     expect(res.skipped).toContain('META_PIXEL_ID')
+  })
+})
+
+describe('getPurchaseCapiWriteFailureCount', () => {
+  it('sums the current and previous UTC-day buckets', async () => {
+    kvGet.mockResolvedValueOnce(4).mockResolvedValueOnce(3)
+    expect(await getPurchaseCapiWriteFailureCount()).toBe(7)
+  })
+
+  it('reads zero when KV is cold and never throws', async () => {
+    kvGet.mockResolvedValue(null)
+    expect(await getPurchaseCapiWriteFailureCount()).toBe(0)
+    kvGet.mockRejectedValue(new Error('kv down'))
+    expect(await getPurchaseCapiWriteFailureCount()).toBe(0)
   })
 })
 

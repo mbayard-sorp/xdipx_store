@@ -395,6 +395,7 @@ describe('renderOpsWatchSection', () => {
     strandedVerified: 0,
     agentRetired: [],
     tokenWriteFailures: 0,
+    purchaseCapiWriteFailures: 0,
   }
 
   it('warns that a social backlog stops the team drafting', () => {
@@ -429,6 +430,16 @@ describe('renderOpsWatchSection', () => {
     expect(renderOpsWatchSection({ ...base, tokenWriteFailures: 3 }))
       .toContain('3 api_token_log writes failed even after retry')
     expect(renderOpsWatchSection(base)).not.toContain('api_token_log')
+  })
+
+  it('reports Purchase CAPI ledger write failures only when nonzero', () => {
+    const html = renderOpsWatchSection({ ...base, purchaseCapiWriteFailures: 5 })
+    expect(html).toContain('5 Purchase (Meta CAPI) ledger writes failed')
+    expect(html).toContain('Conversion tracking is undercounting')
+    // Singular grammar and the healthy (zero) case.
+    expect(renderOpsWatchSection({ ...base, purchaseCapiWriteFailures: 1 }))
+      .toContain('1 Purchase (Meta CAPI) ledger write failed')
+    expect(renderOpsWatchSection(base)).not.toContain('Meta CAPI')
   })
 
   it('lists what an agent retired, so the new power stays reviewable', () => {

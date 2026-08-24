@@ -469,6 +469,14 @@ export interface OpsWatchFacts {
    * rows and nothing else would have said so.
    */
   tokenWriteFailures: number
+  /**
+   * Purchase (Meta CAPI) ledger writes that failed over the trailing ~24-48h.
+   * Nonzero means the conversion outbox is not being written, so Purchase
+   * conversion tracking undercounts and nothing else would have said so: this is
+   * the signal that was missing when migration 082's unapplied rename left
+   * meta_capi_outbox absent for ~2 days (#5061/#5092).
+   */
+  purchaseCapiWriteFailures: number
 }
 
 /**
@@ -509,6 +517,14 @@ export function renderOpsWatchSection(f: OpsWatchFacts): string {
   // recover, so the owner knows usage/spend figures undercount by this much.
   if (f.tokenWriteFailures > 0) {
     parts.push(`<p style="margin:0 0 4px;color:${WARN};">${f.tokenWriteFailures} api_token_log write${f.tokenWriteFailures === 1 ? '' : 's'} failed even after retry in the last 24h &mdash; spend tracking undercounts by that many rows.</p>`)
+  }
+
+  // Only shown when nonzero: the Purchase conversion outbox is not being written,
+  // so Meta CAPI conversion tracking is undercounting. This is the line that was
+  // missing when migration 082's unapplied rename left meta_capi_outbox absent
+  // for ~2 days (#5061/#5092).
+  if (f.purchaseCapiWriteFailures > 0) {
+    parts.push(`<p style="margin:0 0 4px;color:${BAD};"><strong>${f.purchaseCapiWriteFailures} Purchase (Meta CAPI) ledger write${f.purchaseCapiWriteFailures === 1 ? '' : 's'} failed in the last 24h.</strong> Conversion tracking is undercounting; check that meta_capi_outbox exists and the DB is healthy.</p>`)
   }
 
   return parts.join('')
@@ -976,6 +992,7 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
     strandedVerified: 0,
     agentRetired: [],
     tokenWriteFailures: 0,
+    purchaseCapiWriteFailures: 0,
   }
 
   // Social review backlog. The social team stops drafting entirely once this
@@ -1065,6 +1082,16 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
     out.tokenWriteFailures = await getTokenWriteFailureCount()
   } catch (err) {
     console.warn('[owner-digest] token-log write-failure count failed:', String(err).slice(0, 200))
+  }
+
+  // Silent conversion-tracking gaps: Purchase (Meta CAPI) ledger writes that
+  // failed. Read from KV (independent of the Neon table that was failing), the
+  // same pattern as the token-log gap above.
+  try {
+    const { getPurchaseCapiWriteFailureCount } = await import('~/lib/purchase-capi.server')
+    out.purchaseCapiWriteFailures = await getPurchaseCapiWriteFailureCount()
+  } catch (err) {
+    console.warn('[owner-digest] purchase-capi write-failure count failed:', String(err).slice(0, 200))
   }
 
   return out
