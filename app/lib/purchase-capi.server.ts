@@ -93,6 +93,66 @@ export function isWithinMetaEventWindow(order: PurchaseOrder, nowMs: number = Da
   return nowMs - order.createdAtMs < META_MAX_EVENT_AGE_MS
 }
 
+// ─── Durable failure surfacing ─────────────────────────────────────────────────
+
+/** KV key for the per-UTC-day count of Purchase (Meta CAPI) ledger writes that failed. */
+function ledgerWriteFailureKey(utcDate: string): string {
+  return `purchase-capi:write-failures:${utcDate}`
+}
+
+/**
+ * Record one Purchase ledger write that failed. The ledger insert/update is
+ * best-effort so it never unwinds a conversion send, but a *persistent* failure
+ * (a missing/renamed table, or repeated Neon errors) must not stay a swallowed
+ * console.error: it bumps a per-UTC-day KV counter the owner digest reads, so the
+ * gap shows up within hours instead of hiding in logs for days.
+ *
+ * Kept in KV (independent of the Neon table that just failed) and mirrors
+ * token-log.server.ts's recordTokenWriteFailure. This is exactly the signal that
+ * was missing when migration 082's unapplied rename left meta_capi_outbox absent
+ * and every Purchase ledger write failed for ~2 days with the only loud symptom
+ * being the /api/team/conversion-status 500 (#5061/#5092). A one-off transient
+ * blip bumps the counter by 1; a real outage bumps it once per order, so the
+ * magnitude tells the two apart without a per-call retry.
+ *
+ * BEST-EFFORT: kvIncrBy degrades to the in-memory fallback and never throws, and
+ * the whole body is guarded so recording a miss cannot itself unwind the caller.
+ */
+async function recordLedgerWriteFailure(): Promise<void> {
+  try {
+    const { kvIncrBy } = await import('./kv.server')
+    const day = new Date().toISOString().slice(0, 10)
+    // One small integer per UTC day. kvIncrBy is atomic but sets no expiry; the
+    // digest reads today's and yesterday's buckets, and older buckets are stale
+    // but harmless.
+    await kvIncrBy(ledgerWriteFailureKey(day), 1)
+  } catch (err) {
+    console.error('[purchase-capi] failed to record ledger write-failure counter (ignored):', err)
+  }
+}
+
+/**
+ * Count of Purchase ledger writes that failed over the trailing ~24-48h (current
+ * and previous UTC-day buckets summed), read from KV by the owner digest. Zero
+ * when healthy or when KV is cold. BEST-EFFORT: never throws.
+ */
+export async function getPurchaseCapiWriteFailureCount(): Promise<number> {
+  try {
+    const { kvGet } = await import('./kv.server')
+    const now = new Date()
+    const today = now.toISOString().slice(0, 10)
+    const prev = new Date(now.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10)
+    const [a, b] = await Promise.all([
+      kvGet<number>(ledgerWriteFailureKey(today)),
+      kvGet<number>(ledgerWriteFailureKey(prev)),
+    ])
+    return (Number(a) || 0) + (Number(b) || 0)
+  } catch (err) {
+    console.error('[purchase-capi] failed to read ledger write-failure counter (ignored):', err)
+    return 0
+  }
+}
+
 // ─── Ledger-backed send ───────────────────────────────────────────────────────
 
 export interface PurchaseSendResult {
@@ -138,6 +198,7 @@ export async function sendPurchaseWithLedger(order: PurchaseOrder): Promise<Purc
       .onConflictDoNothing({ target: metaCapiOutbox.orderId })
   } catch (err) {
     console.error('[purchase-capi] ledger insert failed, sending anyway', order.id, err)
+    await recordLedgerWriteFailure()
   }
 
   const result = await sendCapiEvent(event, { consentGranted: false })
@@ -154,6 +215,7 @@ export async function sendPurchaseWithLedger(order: PurchaseOrder): Promise<Purc
     }
   } catch (err) {
     console.error('[purchase-capi] ledger update failed', order.id, err)
+    await recordLedgerWriteFailure()
   }
 
   if (result.ok) return { ok: true, orderId: order.id }
