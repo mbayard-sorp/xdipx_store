@@ -91,9 +91,11 @@ function toEntry(d: VaultDeal): string {
   const dialVal = opt(d.gmcLabel0) || opt(d.productTypeDial)
   const productType = dialVal ? (DIAL_TO_PRODUCT_TYPE[dialVal] ?? xmlEscape(dialVal)) : ''
 
-  // Identifiers
+  // Identifiers. mpnRaw prefers an explicit mm-google-shopping.mpn override,
+  // falling back to the Nalpac SKU -- most items with no manufacturer GTIN
+  // still have a real SKU, which GMC accepts as brand+MPN.
   const gtinRaw = opt(d.barcode)
-  const mpnRaw  = opt(d.gmcMpn)
+  const mpnRaw  = opt(d.gmcMpn) || opt(d.nalpacSku)
 
   // GMC sale_price semantics: g:price = original/regular price (strikethrough),
   // g:sale_price = current deal price. Only emit sale_price when we have a
@@ -177,16 +179,20 @@ function toEntry(d: VaultDeal): string {
   lines.push(`      <g:item_group_id>${xmlEscape(d.handle)}</g:item_group_id>`)
   if (gtinRaw) {
     lines.push(`      <g:gtin>${xmlEscape(gtinRaw)}</g:gtin>`)
-    lines.push(`      <g:identifier_exists>true</g:identifier_exists>`)
-  } else {
-    lines.push(`      <g:identifier_exists>false</g:identifier_exists>`)
   }
   if (mpnRaw) {
     lines.push(`      <g:mpn>${xmlEscape(mpnRaw)}</g:mpn>`)
   }
+  // identifier_exists is "false" only when NEITHER a GTIN NOR a brand+MPN
+  // pair exists -- brand is always emitted above, so GTIN or MPN alone is
+  // enough to declare identifiers present.
+  lines.push(`      <g:identifier_exists>${gtinRaw || mpnRaw ? 'true' : 'false'}</g:identifier_exists>`)
   if (colorVal)    lines.push(`      <g:color>${xmlEscape(colorVal)}</g:color>`)
   if (materialVal) lines.push(`      <g:material>${xmlEscape(materialVal)}</g:material>`)
-  if (sizeVal)     lines.push(`      <g:size>${xmlEscape(sizeVal)}</g:size>`)
+  if (sizeVal) {
+    lines.push(`      <g:size>${xmlEscape(sizeVal)}</g:size>`)
+    lines.push(`      <g:size_system>US</g:size_system>`)
+  }
   if (label0) lines.push(`      <g:custom_label_0>${xmlEscape(label0)}</g:custom_label_0>`)
   if (label1) lines.push(`      <g:custom_label_1>${xmlEscape(label1)}</g:custom_label_1>`)
   if (label2) lines.push(`      <g:custom_label_2>${xmlEscape(label2)}</g:custom_label_2>`)
@@ -246,8 +252,15 @@ function toLeanEntry(p: FeedCatalogProduct): string {
     mapAllowsAdvertisedDiscount(p.mapPrice, p.mapRestricted, regular)
 
   const gtin = opt(p.barcode)
+  // mpn: explicit override first, falling back to the Nalpac SKU -- see
+  // toEntry() above for why this matters for items with no manufacturer GTIN.
+  const mpn = opt(p.gmcMpn) || opt(p.nalpacSku)
   const googleProductCategory = opt(p.gmcCategory) || gmcProductCategory(opt(p.productTypeDial) || null)
   const productType = p.productTypeDial ? (DIAL_TO_PRODUCT_TYPE[p.productTypeDial] ?? xmlEscape(p.productTypeDial)) : ''
+
+  const colorVal    = opt(p.gmcColor)    || parseSpecValue(p.specifications, 'color')    || ''
+  const materialVal = opt(p.gmcMaterial) || parseSpecValue(p.specifications, 'material') || ''
+  const sizeVal     = opt(p.gmcSize)     || parseSpecValue(p.specifications, 'size')     || ''
 
   const lines: string[] = []
   lines.push(`    <item>`)
@@ -278,9 +291,18 @@ function toLeanEntry(p: FeedCatalogProduct): string {
   lines.push(`      <g:item_group_id>${xmlEscape(p.handle)}</g:item_group_id>`)
   if (gtin) {
     lines.push(`      <g:gtin>${xmlEscape(gtin)}</g:gtin>`)
-    lines.push(`      <g:identifier_exists>true</g:identifier_exists>`)
-  } else {
-    lines.push(`      <g:identifier_exists>false</g:identifier_exists>`)
+  }
+  if (mpn) {
+    lines.push(`      <g:mpn>${xmlEscape(mpn)}</g:mpn>`)
+  }
+  // See toEntry() above: GTIN or brand+MPN alone is enough to declare
+  // identifiers present -- brand is always emitted above.
+  lines.push(`      <g:identifier_exists>${gtin || mpn ? 'true' : 'false'}</g:identifier_exists>`)
+  if (colorVal)    lines.push(`      <g:color>${xmlEscape(colorVal)}</g:color>`)
+  if (materialVal) lines.push(`      <g:material>${xmlEscape(materialVal)}</g:material>`)
+  if (sizeVal) {
+    lines.push(`      <g:size>${xmlEscape(sizeVal)}</g:size>`)
+    lines.push(`      <g:size_system>US</g:size_system>`)
   }
   // Shipping on every item (ticket #3425): a missing block defaults to the
   // Merchant Center account setting, and an absent-or-0.00 feed while
@@ -331,9 +353,10 @@ export async function loader() {
   // layer (no Map/Set/Date). If the payload ever exceeds the KV value limit,
   // kvSet degrades to the in-memory L1 with a warn, so the route still serves;
   // the CDN s-maxage below absorbs most traffic either way.
-  // v2: real shipping blocks + price-free descriptions (ticket #3425); the
-  // key bump serves the new shape immediately instead of after KV TTL.
-  const body = await cached('feed:xml:v2', 900, buildFeedXml)
+  // v3: lean entries now carry mpn/color/material/size and identifier_exists
+  // correctly reflects brand+MPN, not just GTIN; the key bump serves the new
+  // shape immediately instead of after KV TTL.
+  const body = await cached('feed:xml:v3', 900, buildFeedXml)
 
   return new Response(body, {
     headers: {

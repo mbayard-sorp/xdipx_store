@@ -1729,6 +1729,7 @@ const GMC_FEED_METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "specifications" }
     { namespace: "xdipx", key: "product_type_dial" }
     { namespace: "xdipx", key: "deal_score" }
+    { namespace: "xdipx", key: "nalpac_sku" }
     { namespace: "mm-google-shopping", key: "google_product_category" }
     { namespace: "mm-google-shopping", key: "age_group" }
     { namespace: "mm-google-shopping", key: "gender" }
@@ -1833,6 +1834,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
   const productTypeDial = parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial')
   const dealScoreRaw   = parseMetafieldByNsKey(mf, 'xdipx', 'deal_score')
   const dealScoreNum   = dealScoreRaw ? parseFloat(dealScoreRaw) : null
+  const nalpacSku      = parseMetafieldByNsKey(mf, 'xdipx', 'nalpac_sku')
 
   // mm-google-shopping namespace
   const gmcCategory = parseMetafieldByNsKey(mf, 'mm-google-shopping', 'google_product_category')
@@ -1877,6 +1879,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     ...(originalPrice   != null ? { originalPrice }   : {}),
     ...(mapPriceNum !== null && !isNaN(mapPriceNum) ? { mapPrice: mapPriceNum } : {}),
     ...(mapRestricted ? { mapRestricted } : {}),
+    ...(nalpacSku != null ? { nalpacSku } : {}),
     ...(gmcCategory  != null ? { gmcCategory }  : {}),
     ...(gmcAgeGroup  != null ? { gmcAgeGroup }  : {}),
     ...(gmcGender    != null ? { gmcGender }    : {}),
@@ -1944,6 +1947,15 @@ export interface FeedCatalogProduct {
   mapRestricted:   boolean
   productTypeDial: string | null
   gmcCategory:     string | null
+  /** xdipx.nalpac_sku — g:mpn fallback when no barcode/GTIN exists. */
+  nalpacSku:       string | null
+  /** xdipx.specifications — JSON array of "Label: Value" strings. */
+  specifications:  string[]
+  /** mm-google-shopping.mpn — explicit override, preferred over nalpacSku. */
+  gmcMpn:          string | null
+  gmcColor:        string | null
+  gmcMaterial:     string | null
+  gmcSize:         string | null
 }
 
 export async function getFeedCatalogProducts(): Promise<FeedCatalogProduct[]> {
@@ -1991,7 +2003,13 @@ export async function getFeedCatalogProducts(): Promise<FeedCatalogProduct[]> {
                 { namespace: "xdipx", key: "map_restricted" }
                 { namespace: "xdipx", key: "product_type_dial" }
                 { namespace: "xdipx", key: "seo_meta_description" }
+                { namespace: "xdipx", key: "nalpac_sku" }
+                { namespace: "xdipx", key: "specifications" }
                 { namespace: "mm-google-shopping", key: "google_product_category" }
+                { namespace: "mm-google-shopping", key: "mpn" }
+                { namespace: "mm-google-shopping", key: "color" }
+                { namespace: "mm-google-shopping", key: "material" }
+                { namespace: "mm-google-shopping", key: "size" }
               ]) {
                 namespace key value
               }
@@ -2010,6 +2028,7 @@ export async function getFeedCatalogProducts(): Promise<FeedCatalogProduct[]> {
       const originalPrice    = originalPriceRaw ? parseFloat(originalPriceRaw) : NaN
       const mapPrice         = mapPriceRaw ? parseFloat(mapPriceRaw) : NaN
       const seoDesc          = parseMetafieldByNsKey(mf, 'xdipx', 'seo_meta_description')
+      const specifications   = parseMetafieldJSON<string[]>(mf, 'specifications', [])
       out.push({
         id:               node.id,
         handle:           node.handle,
@@ -2026,6 +2045,12 @@ export async function getFeedCatalogProducts(): Promise<FeedCatalogProduct[]> {
         mapRestricted:    parseMetafieldByNsKey(mf, 'xdipx', 'map_restricted') === 'true',
         productTypeDial:  parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial'),
         gmcCategory:      parseMetafieldByNsKey(mf, 'mm-google-shopping', 'google_product_category'),
+        nalpacSku:        parseMetafieldByNsKey(mf, 'xdipx', 'nalpac_sku'),
+        specifications,
+        gmcMpn:           parseMetafieldByNsKey(mf, 'mm-google-shopping', 'mpn'),
+        gmcColor:         parseMetafieldByNsKey(mf, 'mm-google-shopping', 'color'),
+        gmcMaterial:      parseMetafieldByNsKey(mf, 'mm-google-shopping', 'material'),
+        gmcSize:          parseMetafieldByNsKey(mf, 'mm-google-shopping', 'size'),
       })
     }
 
