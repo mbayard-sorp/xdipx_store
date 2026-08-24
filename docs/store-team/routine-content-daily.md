@@ -541,7 +541,7 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"create","team":"content","targetTeam":"social","kind":"campaign","priority":2,
+  -d '{"op":"create","team":"content","targetTeam":"social","kind":"campaign","category":"other","priority":2,
        "dedupeKey":"notebook-promo:<slug>",
        "suggestion":"NOTEBOOK POST LIVE, ready for an Instagram draft. TITLE / URL / CATEGORY / the two or three teachable claims that cleared the accuracy gate / embedded product handles with their verified stock state / IG-ELIGIBILITY: <eligible | generic-angle: the transferable topic that can be named | route-to-X>"}'
 ```
