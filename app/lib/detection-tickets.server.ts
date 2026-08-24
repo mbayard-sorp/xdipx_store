@@ -29,6 +29,7 @@
  * Server-only.
  */
 import { createSuggestion } from '~/lib/team.server'
+import type { DedupeScope } from '~/lib/dedupe-key'
 import type { TeamId } from '~/lib/team.server'
 import { db } from '~/lib/db.server'
 import { suggestionLinks } from '../../db/schema'
@@ -104,6 +105,13 @@ export interface DetectionTicketInput {
   detector: string
   /** Stable identity for the recurring signal. Build it with makeDedupeKey. */
   dedupeKey: string
+  /**
+   * `daily` when each day's occurrence is its own incident (a render break
+   * on one day's slate is not the same event as the same section breaking a
+   * week later). Defaults to `recurring`, which strips date stamps so a
+   * condition that trips every morning reuses one ticket.
+   */
+  dedupeScope?: DedupeScope | undefined
   /** 1 (highest) .. 5. Use priorityFromSeverity for P0/P1/P2 detectors. */
   priority: number
   /** The ticket body, written for whoever claims it. */
@@ -134,6 +142,7 @@ export async function fileDetectionTicket(input: DetectionTicketInput): Promise<
       cxRisk: input.priority <= 2 ? 'high' : 'low',
       priority: input.priority,
       dedupeKey: input.dedupeKey,
+      dedupeScope: input.dedupeScope,
     })
     if (!id) {
       // Deduped against a live ticket carrying the same key. Nothing to link.

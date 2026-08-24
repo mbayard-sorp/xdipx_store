@@ -27,6 +27,7 @@
 
 import { sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
+import { canonicalDedupeKey, findNearDuplicate } from '~/lib/dedupe-key'
 
 /* Types, probe phrasing, and the email renderer are pure and live in
  * owner-blockers-core so /admin/blockers can use them without pulling the Neon
@@ -243,6 +244,13 @@ export interface FileBlockerResult {
   id: number
   created: boolean
   reopened: boolean
+  /**
+   * An OPEN blocker whose key looks like the same condition in different
+   * words. Advisory: the row was still filed. Reported so blocker-scout and
+   * the owner digest can say "this may already be row #N" instead of the
+   * owner discovering the pair by reading two near-identical lines.
+   */
+  nearDuplicateOf?: { id: number; key: string; score: number }
 }
 
 /**
@@ -258,7 +266,12 @@ export interface FileBlockerResult {
  * back, which is a real event worth surfacing rather than silently ignoring.
  */
 export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResult> {
-  const dedupeKey = clamp(input.dedupeKey, 80)
+  // Canonicalized, not just clamped: blockers 20 and 21 on 2026-08-24 were one
+  // condition (migration 082 unapplied) filed twice because two agents wrote
+  // the key with different word order. Canonicalization collapses cosmetic
+  // differences; genuinely different wording is caught by the near-duplicate
+  // warning below, which reports rather than merges.
+  const dedupeKey = canonicalDedupeKey(clamp(input.dedupeKey, 160) ?? '', { maxLength: 80 })
   const title = clamp(input.title, 200)
   if (!dedupeKey) throw new Error('fileBlocker: dedupeKey required')
   if (!title) throw new Error('fileBlocker: title required')
@@ -320,10 +333,47 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
     RETURNING id, (xmax = 0) AS created`)
 
   const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+  const id = Number(row?.['id'] ?? 0)
+  const created = row?.['created'] === true
+  const near = created ? await nearDuplicateBlocker(id, dedupeKey) : undefined
   return {
-    id: Number(row?.['id'] ?? 0),
-    created: row?.['created'] === true,
+    id,
+    created,
     reopened: priorStatus === 'cleared',
+    ...(near ? { nearDuplicateOf: near } : {}),
+  }
+}
+
+/**
+ * Look for an open blocker describing the same condition in different words.
+ *
+ * Only runs on a genuinely new row (an exact-key re-observation is already
+ * handled by the upsert). Never throws and never merges: filing a blocker is
+ * how the owner finds out something is stuck, and a fuzzy guess must not be
+ * able to swallow that.
+ */
+async function nearDuplicateBlocker(
+  id: number,
+  dedupeKey: string,
+): Promise<{ id: number; key: string; score: number } | undefined> {
+  try {
+    const res = await db.execute(sql`
+      SELECT id, dedupe_key FROM owner_blockers
+      WHERE status = 'open' AND id <> ${id} LIMIT 200`)
+    const rows = (res.rows ?? []).map(r => ({
+      id: Number((r as Record<string, unknown>)['id'] ?? 0),
+      dedupeKey: String((r as Record<string, unknown>)['dedupe_key'] ?? '') || null,
+    }))
+    const hit = findNearDuplicate(dedupeKey, rows)
+    if (!hit) return undefined
+    console.warn(
+      `[blockers] #${id} ('${dedupeKey}') looks like a duplicate of #${hit.candidate.id} `
+      + `('${hit.key}', ${Math.round(hit.score * 100)}% key overlap)`,
+    )
+    return { id: hit.candidate.id, key: hit.key, score: hit.score }
+  } catch (err) {
+    console.warn(`[blockers] near-duplicate check for #${id} failed:`, String(err).slice(0, 200))
+    return undefined
   }
 }
 

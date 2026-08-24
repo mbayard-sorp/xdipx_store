@@ -1010,6 +1010,10 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
         kind:      'campaign',
         category:  'social-automation',
         dedupeKey: `new-products:enrich:${day}`,
+        // One campaign per day of new arrivals is the point here, so the date
+        // is identity, not noise. Without this the key canonicalizes to
+        // `new-products-enrich` and every day after the first is swallowed.
+        dedupeScope: 'daily' as const,
         suggestion:
           `${wentLive.length} product(s) went live on the storefront via the enrich-to-publish ` +
           `chain (owner direction 2026-08-16: posts about new products we now have on the site):\n` +
