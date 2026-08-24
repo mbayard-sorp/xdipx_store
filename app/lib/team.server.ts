@@ -28,6 +28,12 @@ import { contentSlotForDate, type ContentSlot } from '~/lib/content-slot'
 import { formatLiveFeedback, type LivePostVerdict } from '~/lib/live-post-feedback'
 import { parseGateStamp, preserveGateStamp, stripGateStamp } from '~/lib/social-publish-approve.server'
 import { TEAM_KEYS } from '~/lib/homepage-team-keys'
+import {
+  canonicalDedupeKey,
+  findNearDuplicate,
+  hadDateStamp,
+  type DedupeScope,
+} from '~/lib/dedupe-key'
 import { cached, invalidateCache, kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
 import {
   teamKeys,
@@ -696,6 +702,15 @@ export interface SuggestionInput {
    * conversation on one ticket instead of flooding the queue.
    */
   dedupeKey?: string | undefined
+  /**
+   * Whether `dedupeKey` names an ongoing condition (`recurring`, the default)
+   * or one day's occurrence (`daily`). A recurring key has its date stamps
+   * stripped during canonicalization, because a key carrying today's date can
+   * never dedupe against itself tomorrow — that is how one 500 became a fresh
+   * ticket every morning. Pass `daily` only when a new row per day is the
+   * point, as in the new-products enrichment campaign.
+   */
+  dedupeScope?: DedupeScope | undefined
   /** Soft deadline for the ticket, ISO string or Date (070). */
   dueAt?: string | Date | undefined
   /**
@@ -762,6 +777,19 @@ export async function createSuggestionDetailed(
   const suggestionText = nk.original === null
     ? s.suggestion
     : `[unknown kind '${nk.original.slice(0, 64)}' coerced to process] ${s.suggestion}`
+  // Canonicalize before the insert AND before the collision lookup below, so
+  // two filers who wrote the same signal in different casing, separators, or
+  // with a date stamp land on one row instead of several. Raw keys are never
+  // stored: a mix of raw and canonical rows would dedupe against neither.
+  const dedupeKey = s.dedupeKey
+    ? canonicalDedupeKey(s.dedupeKey, { scope: s.dedupeScope ?? 'recurring' }) || null
+    : null
+  if (s.dedupeKey && dedupeKey && s.dedupeScope !== 'daily' && hadDateStamp(s.dedupeKey)) {
+    console.warn(
+      `[team] dedupeKey '${s.dedupeKey}' carried a date stamp; canonicalized to '${dedupeKey}'. ` +
+      'Pass dedupeScope:"daily" if a row per day is intended.',
+    )
+  }
   const [row] = await db
     .insert(homepageTeamSuggestions)
     .values({
@@ -777,7 +805,7 @@ export async function createSuggestionDetailed(
       decidedBy:     autoApprove ? 'auto' : null,
       decidedAt:     autoApprove ? new Date() : null,
       priority:      s.priority ?? 3,
-      dedupeKey:     s.dedupeKey ?? null,
+      dedupeKey,
       dueAt:         s.dueAt == null ? null : new Date(s.dueAt),
       // #3406: previously silently dropped, so no supersession was ever
       // recorded in data and superseded rows sat approved forever.
@@ -787,15 +815,23 @@ export async function createSuggestionDetailed(
     // swallows a repeat filing instead of throwing inside a cron handler.
     .onConflictDoNothing()
     .returning({ id: homepageTeamSuggestions.id })
-  if (row?.id) return finishCreate(s, row.id, false)
-  if (!s.dedupeKey) return { id: 0, deduped: false }
+  if (row?.id) {
+    // A genuinely new row. Exact matching already said "no duplicate", so ask
+    // the softer question: did someone file this same signal under different
+    // words? Advisory only — it records a note naming the suspect and never
+    // merges, because a fuzzy match is sometimes wrong and a wrongly-merged
+    // ticket is a defect that silently stops being tracked.
+    if (dedupeKey) await noteNearDuplicate(row.id, dedupeKey)
+    return finishCreate(s, row.id, false)
+  }
+  if (!dedupeKey) return { id: 0, deduped: false }
   // The insert was absorbed by uq_team_sugg_dedupe_key: find the live ticket
   // that owns the key so the caller can point at the open conversation.
   const [live] = await db
     .select({ id: homepageTeamSuggestions.id, status: homepageTeamSuggestions.status })
     .from(homepageTeamSuggestions)
     .where(and(
-      eq(homepageTeamSuggestions.dedupeKey, s.dedupeKey),
+      eq(homepageTeamSuggestions.dedupeKey, dedupeKey),
       sql`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`,
     ))
     .limit(1)
@@ -825,6 +861,45 @@ export async function createSuggestionDetailed(
  * resolves — the caller declared the old row replaced by whichever row now
  * tracks the signal.
  */
+/**
+ * Attach a "possible duplicate of #N" note when a newly-filed ticket's key is
+ * near-identical to a live one's.
+ *
+ * Canonicalization only merges keys that differ cosmetically. It cannot merge
+ * `conversion-status-500-regression` with `qa:conversion-status-500-...`,
+ * because nothing in the strings says they are the same defect — a human (or
+ * the apply pass's hygiene step) has to make that call. So this leaves a
+ * pointer instead of acting: worst case it is a wrong guess costing one line
+ * of ticket text, where a wrong auto-merge costs a tracked defect.
+ *
+ * Never throws. Filing a ticket must not fail because a bookkeeping note
+ * could not be written.
+ */
+async function noteNearDuplicate(id: number, dedupeKey: string): Promise<void> {
+  try {
+    const liveRows = await db
+      .select({ id: homepageTeamSuggestions.id, dedupeKey: homepageTeamSuggestions.dedupeKey })
+      .from(homepageTeamSuggestions)
+      .where(and(
+        ne(homepageTeamSuggestions.id, id),
+        sql`${homepageTeamSuggestions.dedupeKey} IS NOT NULL`,
+        sql`${homepageTeamSuggestions.status} NOT IN ('applied', 'dismissed')`,
+      ))
+      .limit(500)
+
+    const hit = findNearDuplicate(dedupeKey, liveRows)
+    if (!hit) return
+
+    const pct = Math.round(hit.score * 100)
+    await addTicketLinks(id, [{
+      kind: 'note',
+      ref: `possible duplicate of #${hit.candidate.id} (key '${hit.key}', ${pct}% key overlap) — confirm before merging`,
+    }])
+  } catch (err) {
+    console.warn(`[team] create #${id}: near-duplicate check failed:`, String(err).slice(0, 200))
+  }
+}
+
 async function finishCreate(
   s: SuggestionInput,
   id: number,

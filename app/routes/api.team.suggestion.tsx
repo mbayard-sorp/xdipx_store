@@ -163,7 +163,12 @@ export async function action({ request }: ActionFunctionArgs) {
       estSavingsUsd: typeof b['estSavingsUsd'] === 'number' ? b['estSavingsUsd'] : 0,
       cxRisk,
       priority,
-      dedupeKey:     typeof b['dedupeKey'] === 'string' && b['dedupeKey'] ? b['dedupeKey'].slice(0, 64) : undefined,
+      dedupeKey:     typeof b['dedupeKey'] === 'string' && b['dedupeKey'] ? b['dedupeKey'].slice(0, 128) : undefined,
+      // Canonicalization (date stripping, slugging, the 64-char cap) happens
+      // in createSuggestionDetailed so every filer gets it, not only the ones
+      // that remembered to call makeDedupeKey. Slice generously here so a
+      // longer raw key still canonicalizes rather than being truncated blind.
+      dedupeScope:   b['dedupeScope'] === 'daily' ? 'daily' : undefined,
       dueAt:         parseDate(b['dueAt']),
       // #1686: links persist with the filing instead of being silently dropped.
       // #5054: also coerce a top-level `pr` shorthand into a link.

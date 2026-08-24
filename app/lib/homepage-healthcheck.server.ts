@@ -775,8 +775,11 @@ async function fileRenderTruthTickets(
       await fileDetectionTicket({
         detector: 'render-truth',
         // Dated: a render break on a specific day's slate is a distinct
-        // incident from the same section breaking a week later.
+        // incident from the same section breaking a week later. The scope
+        // declares that, so canonicalization keeps the date instead of
+        // stripping it as a recurring-signal mistake.
         dedupeKey: makeDedupeKey('render', section, day),
+        dedupeScope: 'daily',
         priority: 1,
         category: 'agents',
         suggestion:
