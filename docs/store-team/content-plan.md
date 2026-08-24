@@ -40,24 +40,24 @@ queue without bypassing it.
 
 Slugs and titles are answer-shaped to match how people phrase questions to an LLM. Collection handles are representative of the 24 live collections and must be validated against the live list before linking. No prices in any body copy.
 
-**Standing rule (added 2026-08-03).** Validate every section-3 collection handle against the live collection list before linking; `couples` and `vibrators` are verified 200. `/collections/remote` (referenced in rows 6, 22, 25, and 27) returned 404 as of 2026-07-17; verify the handle before linking rather than assuming it still resolves.
+**Standing rule (added 2026-08-03, restated 2026-08-23).** Validate every collection handle against the live collection list (`https://xdipx.com/sitemaps/collections.xml`) before linking; a handle that 404s is never shipped. This binds **both** the daily writer at link time **and** the `seo-curator` when it writes a brief's `internalLinks` value — a dead handle carried in a queued `seoContentBrief` propagates the 404 into a published post exactly as a dead handle in this table does. Handles renamed since launch, all corrected in the table below and verified 200 on 2026-08-23: `air-pulse-suction` → **`suction-air-pulse`**; `remote` → **`app-controlled`**; `rabbits` → **`rabbits-dual-action`**; `wellness` → **`kegel-exercisers`**. Re-verify before assuming any handle still resolves; collection handles change without notice.
 
 | # | Slug | Working title | Category | Target query | Embed (handles / types) | Internal links |
 |---|---|---|---|---|---|---|
-| 1 | how-to-choose-your-first-sex-toy | How Do You Choose Your First Sex Toy? | guides | "what sex toy should I buy first" | beginner bullet, small air-pulse, glass | /collections/vibrators, /collections/air-pulse-suction |
-| 2 | how-does-a-clitoral-suction-toy-work | How Does a Clitoral Suction Toy Work? | guides | "how do air pulse toys work" | 2-3 air-pulse | /collections/air-pulse-suction |
-| 3 | air-pulse-vs-clitoral-vibrator | Air Pulse vs Clitoral Vibrator: Which Is Right for You? | comparisons | "air pulse vs vibrator" | 1 air-pulse, 1 finger-clit | /collections/air-pulse-suction, /collections/vibrators |
+| 1 | how-to-choose-your-first-sex-toy | How Do You Choose Your First Sex Toy? | guides | "what sex toy should I buy first" | beginner bullet, small air-pulse, glass | /collections/vibrators, /collections/suction-air-pulse |
+| 2 | how-does-a-clitoral-suction-toy-work | How Does a Clitoral Suction Toy Work? | guides | "how do air pulse toys work" | 2-3 air-pulse | /collections/suction-air-pulse |
+| 3 | air-pulse-vs-clitoral-vibrator | Air Pulse vs Clitoral Vibrator: Which Is Right for You? | comparisons | "air pulse vs vibrator" | 1 air-pulse, 1 finger-clit | /collections/suction-air-pulse, /collections/vibrators |
 | 4 | how-do-you-use-a-wand-massager | How Do You Use a Wand Massager? | guides | "how to use a wand vibrator" | 2 wands | /collections/wands |
 | 5 | how-do-you-clean-a-sex-toy | How Do You Clean a Sex Toy? | care | "how to clean a sex toy" | toy cleaner, 1 silicone toy | /collections/lubricants, /collections/wands |
-| 6 | what-does-a-couples-vibrator-do | What Does a Couples Vibrator Do? | guides | "best vibrator to use with a partner" | wearable, remote | /collections/couples, /collections/remote |
+| 6 | what-does-a-couples-vibrator-do | What Does a Couples Vibrator Do? | guides | "best vibrator to use with a partner" | wearable, remote | /collections/couples, /collections/app-controlled |
 | 7 | is-silicone-body-safe | Is Silicone Body-Safe? What to Look For | wellness-basics | "is silicone body safe" | 2 medical-grade silicone | /collections/vibrators, /collections/dildos |
 | 8 | wand-vs-bullet-vibrator | Wand vs Bullet Vibrator: How to Pick | comparisons | "wand or bullet vibrator" | 1 wand, 1 bullet | /collections/wands, /collections/bullets-eggs |
-| 9 | what-is-a-rabbit-vibrator | What Is a Rabbit Vibrator, and Who Is It For? | guides | "what does a rabbit vibrator do" | 2 rabbits | /collections/rabbits |
+| 9 | what-is-a-rabbit-vibrator | What Is a Rabbit Vibrator, and Who Is It For? | guides | "what does a rabbit vibrator do" | 2 rabbits | /collections/rabbits-dual-action |
 | 10 | how-do-you-store-sex-toys-discreetly | How Do You Store Sex Toys Discreetly? | care | "how to store sex toys" | storage pouch, cleaner | /collections/lubricants |
 | 11 | how-do-you-start-prostate-play | How Do You Start Prostate Play Safely? | guides | "how to use a prostate massager" | 2 prostate, lube | /collections/prostate-toys, /collections/lubricants |
 | 12 | silicone-vs-water-based-lube | Silicone vs Water-Based Lube: Which Should You Use? | comparisons | "silicone or water based lube" | 1 water, 1 silicone | /collections/lubricants |
 | 13 | which-lube-should-i-use | Which Lube Should You Use, and When? | guides | "which lube is best" | water, silicone, hybrid | /collections/lubricants |
-| 14 | do-kegel-exercisers-work | Do Kegel Exercisers Actually Work? | wellness-basics | "do kegel balls work" | 1 kegel set | /collections/wellness |
+| 14 | do-kegel-exercisers-work | Do Kegel Exercisers Actually Work? | wellness-basics | "do kegel balls work" | 1 kegel set | /collections/kegel-exercisers |
 | 15 | how-do-you-choose-a-g-spot-vibrator | How Do You Choose a G-Spot Vibrator? | guides | "best toy for g-spot" | 2 g-spot | /collections/vibrators |
 | 16 | butt-plug-vs-anal-beads | Butt Plug vs Anal Beads: What's the Difference? | comparisons | "butt plug vs anal beads" | 1 plug, 1 beads | /collections/anal |
 | 17 | how-do-you-start-anal-play | How Do You Start Anal Play as a Beginner? | guides | "how to start anal play safely" | small plug, anal lube | /collections/anal, /collections/lubricants |
@@ -65,14 +65,14 @@ Slugs and titles are answer-shaped to match how people phrase questions to an LL
 | 19 | what-does-a-cock-ring-do | What Does a Cock Ring Do? | guides | "how does a cock ring work" | 2 cock-rings | /collections/cock-rings |
 | 20 | glass-vs-silicone-toys | Glass vs Silicone Toys: How Do They Compare? | comparisons | "glass or silicone dildo" | 1 glass, 1 silicone | /collections/dildos |
 | 21 | what-is-a-bullet-vibrator-good-for | What Is a Bullet Vibrator Good For? | guides | "what is a bullet vibrator" | 2 bullets | /collections/bullets-eggs |
-| 22 | how-do-app-controlled-vibrators-work | How Do App-Controlled Vibrators Work? | guides | "how do remote app vibrators work" | 2 remote | /collections/remote |
+| 22 | how-do-app-controlled-vibrators-work | How Do App-Controlled Vibrators Work? | guides | "how do remote app vibrators work" | 2 remote | /collections/app-controlled |
 | 23 | how-do-you-care-for-silicone-toys | How Do You Care for Silicone Toys? | care | "silicone toy care and lube compatibility" | 1 silicone toy, water lube | /collections/lubricants, /collections/vibrators |
 | 24 | how-do-you-choose-a-stroker | How Do You Choose a Stroker? | guides | "what is a male masturbator" | 2 strokers | /collections/strokers |
-| 25 | remote-vs-app-controlled-toys | Remote vs App-Controlled: Which Long-Distance Toy? | comparisons | "remote or app controlled toy" | 1 remote, 1 app | /collections/remote, /collections/couples |
+| 25 | remote-vs-app-controlled-toys | Remote vs App-Controlled: Which Long-Distance Toy? | comparisons | "remote or app controlled toy" | 1 remote, 1 app | /collections/app-controlled, /collections/couples |
 | 26 | what-is-a-body-safe-material | Which Sex Toy Materials Are Body-Safe? | wellness-basics | "safe sex toy materials" | silicone, glass, steel | /collections/dildos, /collections/vibrators |
-| 27 | how-do-you-shop-for-couples-long-distance | How Do Long-Distance Couples Shop for Toys? | guides | "best long distance toy for couples" | 2 remote/app | /collections/remote, /collections/couples |
+| 27 | how-do-you-shop-for-couples-long-distance | How Do Long-Distance Couples Shop for Toys? | guides | "best long distance toy for couples" | 2 remote/app | /collections/app-controlled, /collections/couples |
 | 28 | how-do-you-start-with-restraints | How Do You Start With Restraints and Bondage? | guides | "how to start bondage safely" | soft restraint, blindfold | /collections/restraints |
-| 29 | rabbit-vs-dual-stimulation-vibrator | Rabbit vs Dual-Stimulation: What's the Difference? | comparisons | "rabbit vs dual stimulation vibrator" | 1 rabbit, 1 dual | /collections/rabbits, /collections/vibrators |
+| 29 | rabbit-vs-dual-stimulation-vibrator | Rabbit vs Dual-Stimulation: What's the Difference? | comparisons | "rabbit vs dual stimulation vibrator" | 1 rabbit, 1 dual | /collections/rabbits-dual-action, /collections/vibrators |
 | 30 | what-is-a-good-first-toy-gift | What Makes a Good First Sex Toy Gift? | guides | "sex toy gift ideas for a partner" | bullet, air-pulse, lube | /collections/vibrators, /collections/lubricants |
 
 Backlog composition: 16 guides, 8 comparisons, 4 care, 2 wellness-basics. Reorder freely to serve the theme week; keep the guide majority intact.
