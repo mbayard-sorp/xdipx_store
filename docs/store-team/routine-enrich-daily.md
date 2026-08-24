@@ -13,8 +13,25 @@ site's Anthropic-keyed endpoints. The batch-API path (`/cron/import-enrich` subm
 and owns generation whenever the transport valve is `batch-api`; the two transports can never
 double-generate because both claim through the same `enrich_batch_id` column.
 
-Auth on every `/api/team/*` call: header `x-team-secret: $TEAM_TOKEN` (falls back to
-`$HOMEPAGE_TEAM_TOKEN`, then `$CRON_SECRET`). `BASE_URL` = deployed origin.
+Auth on every `/api/team/*` call goes through **`scripts/team-api.sh`**, never hand-rolled curl:
+
+```bash
+bash scripts/team-api.sh POST team/run '{"op":"start","team":"product","runType":"enrich"}'
+bash scripts/team-api.sh GET  team/gate 'team=product&excludeRun=42'
+```
+
+It resolves the token itself (`$TEAM_TOKEN`, then `$HOMEPAGE_TEAM_TOKEN`, then `$CRON_SECRET`),
+keeps it off the command line and off disk, prints the response body, and exits non-zero on a
+transport error (2 = no token, 3 = bad usage, 4 = HTTP >= 400 with the body still printed, because
+the API answers a refusal like `over_run_cap` with a non-2xx and you need the reason to skip
+honestly).
+
+**Use the script, not curl.** On 2026-08-24 this routine's fire had no git source attached, so the
+session started in `/home/user` instead of the repo, the repo's `.claude/settings.json` allowlist
+never loaded, and the permission classifier blocked the hand-rolled
+`curl -H "x-team-secret: ..."` three times. The run never started and nothing was enriched, two days
+running. The script is one fixed, allowlisted command shape with no secret in it, so it does not
+depend on that resolution going the right way.
 
 Voice: the `emma-product-enricher` agent def is binding on output (it reads `docs/emma-voice.md`
 first, charter core + "Product enrichment and SEO" addendum). This playbook never restates voice
@@ -23,15 +40,13 @@ rules; the charter wins.
 ## Step 0: Start
 
 ```bash
-curl -s -X POST "$BASE_URL/api/team/run" \
-  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"start","team":"product","runType":"enrich"}'   # → $RUN_ID
+bash scripts/team-api.sh POST team/run '{"op":"start","team":"product","runType":"enrich"}'   # → $RUN_ID
 ```
 
 ## Step 1: Gate
 
 ```bash
-curl -s "$BASE_URL/api/team/gate?team=product&excludeRun=$RUN_ID" -H "x-team-secret: $TEAM_TOKEN"
+bash scripts/team-api.sh GET team/gate "team=product&excludeRun=$RUN_ID"
 ```
 
 If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","finished":true,"summary":"gate refused: <reason>"}}`
@@ -48,9 +63,7 @@ valve.
 ## Step 2: Claim
 
 ```bash
-curl -s -X POST "$BASE_URL/api/team/enrich-queue" \
-  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"claim","leaseId":"run-'$RUN_ID'"}'
+bash scripts/team-api.sh POST team/enrich-queue '{"op":"claim","leaseId":"run-'$RUN_ID'"}'
 ```
 
 Response: `claims: [{candidateId, productId, sku?, brief}]`, `skippedNoBrief`, and `sharedContext`
@@ -77,10 +90,11 @@ the second failure parks the product for manual review.
 ## Step 4: Submit
 
 ```bash
-curl -s -X POST "$BASE_URL/api/team/enrich-queue" \
-  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"complete","candidateId":<id>,"writes":<ProductWrites JSON>}'
+bash scripts/team-api.sh POST team/enrich-queue '{"op":"complete","candidateId":<id>,"writes":<ProductWrites JSON>}'
 ```
+
+A `writes` payload is large and quote-heavy, so build it in a file and pass it with
+`bash scripts/team-api.sh POST team/enrich-queue "$(cat payload.json)"` rather than inlining it.
 
 - `{ok:true, result:'enriched'}` — done; the cron's publish step flips the draft live within 30 min.
 - `{ok:false, result:'requeued', reason}` — the server gate rejected it and the candidate can be
@@ -118,10 +132,12 @@ Log spend (`POST /api/homepage-team/spend {"kind":"tokens","source":"agent-sdk",
 report token counts honestly), then finish:
 
 ```bash
-curl -s -X POST "$BASE_URL/api/team/run" \
-  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"update","id":'$RUN_ID',"update":{"finished":true,"status":"succeeded","summary":"<N enriched, N requeued, N parked, funnel>"}}'
+bash scripts/team-api.sh POST team/run '{"op":"update","id":'$RUN_ID',"update":{"finished":true,"status":"succeeded","summary":"<N enriched, N requeued, N parked, funnel>"}}'
 ```
+
+`finished:true` is required, not decorative: `updateRun` only stamps `finished_at` when the update
+carries it, and a run left without one reads as never-completed in every duration and liveness
+report.
 
 ## What this routine never does
 

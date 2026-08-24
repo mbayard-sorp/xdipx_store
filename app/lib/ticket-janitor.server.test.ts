@@ -380,7 +380,7 @@ describe('ROUTINE_CADENCES', () => {
       'content|seo-curation',
       'content|trend-scout',
       'homepage|merchandise',
-      'null|pricing',
+      'product|enrich',
       'product|product',
       'social|research',
       'social|social',
@@ -391,18 +391,33 @@ describe('ROUTINE_CADENCES', () => {
       'strategy|offsite',
       'strategy|qa',
       'strategy|strategy',
+      'support|support',
     ].sort())
     for (const c of ROUTINE_CADENCES) {
       expect(c.routine.length).toBeGreaterThan(0)
       expect(c.runType.length).toBeGreaterThan(0)
-      expect(['twice-daily', 'daily', 'twice-weekly', 'weekly']).toContain(c.kind)
+      expect(['four-times-daily', 'thrice-daily', 'twice-daily', 'daily', 'twice-weekly', 'weekly'])
+        .toContain(c.kind)
       expect(c.maxGapHours).toBeGreaterThan(0)
       expect(c.schedule.length).toBeGreaterThan(0)
     }
-    // The one no-team lane is the pricing sweep; everything else has a team.
-    expect(ROUTINE_CADENCES.filter(c => c.team === null).map(c => c.runType)).toEqual(['pricing'])
-    // The two twice-daily lanes are dev and qa.
-    expect(ROUTINE_CADENCES.filter(c => c.kind === 'twice-daily').map(c => c.runType).sort()).toEqual(['dev', 'qa'])
+    // Every lane names a team. The pricing sweep used to be the one exception
+    // and was removed 2026-08-24: it has no team gate and has never written a
+    // run row of any runType, so its entry could only ever false-flag.
+    expect(ROUTINE_CADENCES.filter(c => c.team === null)).toEqual([])
+    expect(ROUTINE_CADENCES.some(c => c.runType === 'pricing')).toBe(false)
+    // R-DEV runs three passes, R-QA four (both since 2026-08-21).
+    expect(ROUTINE_CADENCES.find(c => c.runType === 'dev')?.kind).toBe('thrice-daily')
+    expect(ROUTINE_CADENCES.find(c => c.runType === 'qa')?.kind).toBe('four-times-daily')
+    // R-ENRICH (routine 24) and the daily support review (routine 21) are
+    // watched. Both were unwatched until 2026-08-24, which is why R-ENRICH
+    // could fail outright two days running without anything noticing.
+    const enrich = ROUTINE_CADENCES.find(c => c.runType === 'enrich')
+    expect(enrich?.team).toBe('product')
+    expect(enrich?.kind).toBe('daily')
+    const support = ROUTINE_CADENCES.find(c => c.runType === 'support')
+    expect(support?.team).toBe('support')
+    expect(support?.kind).toBe('daily')
     // Routine 20 (Weekly social trend scout) has a liveness watch now that its
     // trigger is enabled: team social, runType matching what its playbook writes.
     const scout = ROUTINE_CADENCES.find(c => c.runType === 'social-trend-scout')
@@ -436,12 +451,16 @@ describe('ROUTINE_CADENCES', () => {
 
   it('sizes each gap against the lane\'s real cron, not its nominal kind', () => {
     const byType = new Map(ROUTINE_CADENCES.map(c => [`${c.team}|${c.runType}`, c]))
-    // R-DEV fires 14:00 and 20:00 UTC, so its longest interval is the 18h
-    // overnight gap, not the 12h a symmetric twice-daily would have. The 13:00
-    // digest runs 17h after the 20:00 pass; a 14h gap would flag it daily.
-    expect(byType.get('strategy|dev')?.maxGapHours).toBe(20)
-    // R-QA's passes (03:30 and 15:30) are symmetric, so 12h plus 2h grace holds.
-    expect(byType.get('strategy|qa')?.maxGapHours).toBe(14)
+    // R-DEV fires 10:00, 15:00 and 20:00 UTC, so its longest interval is the
+    // 14h overnight gap (20:00 to the next 10:00), not the 5h daytime ones.
+    // Was 20 while the table still described a retired 14:00/20:00 pair, which
+    // made a lost single pass invisible for most of a day.
+    expect(byType.get('strategy|dev')?.maxGapHours).toBe(16)
+    // R-QA fires 03:30, 11:30, 16:30 and 21:30; longest interval is 21:30 to
+    // the next 03:30, 6h, plus the 2h daily grace.
+    expect(byType.get('strategy|qa')?.maxGapHours).toBe(8)
+    expect(byType.get('product|enrich')?.maxGapHours).toBe(26)
+    expect(byType.get('support|support')?.maxGapHours).toBe(26)
     expect(byType.get('content|content')?.maxGapHours).toBe(26)
     expect(byType.get('strategy|strategy')?.maxGapHours).toBe(194)
     expect(byType.get('strategy|apply')?.maxGapHours).toBe(122)
@@ -450,19 +469,26 @@ describe('ROUTINE_CADENCES', () => {
 
 describe('checkRoutineLiveness', () => {
   it('flags a routine whose last run is past cadence plus grace, and not one inside it', () => {
+    // dev is past its 16h bar, qa is inside its 8h one.
     const flags = checkRoutineLiveness([
       { team: 'strategy', runType: 'dev', startedAt: hoursAgo(21) },
-      { team: 'strategy', runType: 'qa', startedAt: hoursAgo(13) },
-    ], NOW, ROUTINE_CADENCES.filter(c => c.kind === 'twice-daily'))
+      { team: 'strategy', runType: 'qa', startedAt: hoursAgo(4) },
+    ], NOW, ROUTINE_CADENCES.filter(c => c.runType === 'dev' || c.runType === 'qa'))
     expect(flags.map(f => f.runType)).toEqual(['dev'])
     expect(flags[0]!.hoursSince).toBe(21)
   })
 
-  it('does not flag R-DEV across its 18h overnight gap (20:00 to the next 14:00)', () => {
-    const flags = checkRoutineLiveness([
-      { team: 'strategy', runType: 'dev', startedAt: hoursAgo(18) },
-    ], NOW, ROUTINE_CADENCES.filter(c => c.runType === 'dev'))
-    expect(flags).toEqual([])
+  it('does not flag R-DEV inside its 14h overnight gap, but does past it', () => {
+    const devOnly = ROUTINE_CADENCES.filter(c => c.runType === 'dev')
+    // 20:00 to the next 10:00 is 14h; with grace the bar is 16h.
+    expect(checkRoutineLiveness(
+      [{ team: 'strategy', runType: 'dev', startedAt: hoursAgo(14) }], NOW, devOnly)).toEqual([])
+    // 18h of silence means a pass was actually missed. Under the retired
+    // 14:00/20:00 table this was the expected overnight quiet and went
+    // unflagged, which is how the lost 20:00 pass on 2026-08-24 stayed
+    // invisible. Three passes a day makes 18h a real gap.
+    expect(checkRoutineLiveness(
+      [{ team: 'strategy', runType: 'dev', startedAt: hoursAgo(18) }], NOW, devOnly)).toHaveLength(1)
   })
 
   it('flags a routine with no run row at all as never-run', () => {
@@ -483,14 +509,29 @@ describe('checkRoutineLiveness', () => {
     expect(fresh).toEqual([])
   })
 
-  it('matches the no-team pricing lane on runType alone', () => {
-    const pricingOnly = ROUTINE_CADENCES.filter(c => c.runType === 'pricing')
-    const alive = checkRoutineLiveness(
-      [{ team: 'ops', runType: 'pricing', startedAt: hoursAgo(3) }], NOW, pricingOnly)
-    expect(alive).toEqual([])
-    const dead = checkRoutineLiveness(
-      [{ team: 'ops', runType: 'pricing', startedAt: hoursAgo(30) }], NOW, pricingOnly)
-    expect(dead).toHaveLength(1)
+  it('matches a no-team lane on runType alone', () => {
+    // No production cadence uses team:null today, but the matching rule is
+    // still part of the contract, so it is exercised with a synthetic lane
+    // rather than by keeping a permanently-false-flagging real one.
+    const noTeam = [{
+      routine: 'Synthetic no-team lane', team: null, runType: 'pricing',
+      kind: 'daily' as const, schedule: '14:37 daily', maxGapHours: 26,
+    }]
+    expect(checkRoutineLiveness(
+      [{ team: 'ops', runType: 'pricing', startedAt: hoursAgo(3) }], NOW, noTeam)).toEqual([])
+    expect(checkRoutineLiveness(
+      [{ team: 'ops', runType: 'pricing', startedAt: hoursAgo(30) }], NOW, noTeam)).toHaveLength(1)
+  })
+
+  it('flags R-ENRICH after a day of silence (the 2026-08-23/24 outage shape)', () => {
+    // R-ENRICH failed before writing any run row on both days, so the runs
+    // table showed its last row as 08-22. With no cadence entry nothing looked.
+    const enrichOnly = ROUTINE_CADENCES.filter(c => c.runType === 'enrich')
+    expect(enrichOnly).toHaveLength(1)
+    expect(checkRoutineLiveness(
+      [{ team: 'product', runType: 'enrich', startedAt: hoursAgo(30) }], NOW, enrichOnly)).toHaveLength(1)
+    expect(checkRoutineLiveness(
+      [{ team: 'product', runType: 'enrich', startedAt: hoursAgo(12) }], NOW, enrichOnly)).toEqual([])
   })
 
   it('uses the newest run row when several exist', () => {

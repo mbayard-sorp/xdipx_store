@@ -486,13 +486,20 @@ export function classifyConflictedPrs(candidates: readonly ConflictCandidate[]):
 
 /* ── Routine liveness ──────────────────────────────────────────────────────── */
 
-export type CadenceKind = 'twice-daily' | 'daily' | 'twice-weekly' | 'weekly'
+export type CadenceKind =
+  | 'four-times-daily'
+  | 'thrice-daily'
+  | 'twice-daily'
+  | 'daily'
+  | 'twice-weekly'
+  | 'weekly'
 
 export interface RoutineCadence {
   routine: string
   /**
-   * Team the run row is written under, or null for lanes with no team gate
-   * (the pricing sweep); a null team matches on runType alone.
+   * Team the run row is written under, or null to match on runType alone.
+   * No entry uses null today: the one lane that did (the pricing sweep) never
+   * wrote a run row, so it could only ever false-flag. See the NOTE below.
    */
   team: string | null
   runType: string
@@ -503,14 +510,20 @@ export interface RoutineCadence {
   maxGapHours: number
 }
 
-const TWICE_DAILY_GAP = 12 + 2
 /**
- * R-DEV's two passes are NOT evenly spaced: 14:00 and 20:00 UTC give a 6h
- * afternoon interval and an 18h overnight one (20:00 to the next 14:00). The
- * symmetric twice-daily gap of 14h would false-flag it in every 13:00 digest,
- * which runs 17h after the previous 20:00 pass. 18h plus the 2h daily grace.
+ * R-DEV's passes are NOT evenly spaced: 10:00, 15:00 and 20:00 UTC give two 5h
+ * daytime intervals and a 14h overnight one (20:00 to the next 10:00). The
+ * symmetric twice-daily gap would false-flag it in the early digests. 14h plus
+ * the 2h daily grace.
+ *
+ * Corrected 2026-08-24 (was 18+2, describing the retired 14:00/20:00 pair).
  */
-const RDEV_GAP = 18 + 2
+const RDEV_GAP = 14 + 2
+/**
+ * R-QA runs 03:30, 11:30, 16:30 and 21:30 UTC. Longest interval is 21:30 to the
+ * next 03:30, 6h, plus the 2h daily grace.
+ */
+const RQA_GAP = 6 + 2
 const DAILY_GAP = 24 + 2
 const WEEKLY_GAP = 168 + 26
 /** Mon and Thu: the longest interval is Thu to Mon, 96h, plus weekly grace. */
@@ -526,13 +539,25 @@ const TWICE_WEEKLY_GAP = 96 + 26
  * liveness rides the manual bucket and is approximate by construction.
  */
 export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
-  { routine: 'R-DEV daily dev', team: 'strategy', runType: 'dev', kind: 'twice-daily', schedule: '14:00 and 20:00 daily', maxGapHours: RDEV_GAP },
-  { routine: 'R-QA daily QA gate', team: 'strategy', runType: 'qa', kind: 'twice-daily', schedule: '03:30 and 15:30 daily', maxGapHours: TWICE_DAILY_GAP },
+  { routine: 'R-DEV daily dev', team: 'strategy', runType: 'dev', kind: 'thrice-daily', schedule: '10:00, 15:00 and 20:00 daily', maxGapHours: RDEV_GAP },
+  { routine: 'R-QA daily QA gate', team: 'strategy', runType: 'qa', kind: 'four-times-daily', schedule: '03:30, 11:30, 16:30 and 21:30 daily', maxGapHours: RQA_GAP },
   { routine: 'Daily content writer', team: 'content', runType: 'content', kind: 'daily', schedule: '15:00 daily', maxGapHours: DAILY_GAP },
   { routine: 'Daily merchandiser (Routine A)', team: 'homepage', runType: 'merchandise', kind: 'daily', schedule: '10:00 daily', maxGapHours: DAILY_GAP },
   { routine: 'Daily social drafts', team: 'social', runType: 'social', kind: 'daily', schedule: '14:00 daily', maxGapHours: DAILY_GAP },
   { routine: 'Daily product manager', team: 'product', runType: 'product', kind: 'daily', schedule: '09:00 daily', maxGapHours: DAILY_GAP },
-  { routine: 'Daily pricing sweep', team: null, runType: 'pricing', kind: 'daily', schedule: '14:37 daily (no team gate)', maxGapHours: DAILY_GAP },
+  // R-ENRICH (routine 24). Added 2026-08-24: it had no entry, so its total
+  // failure on 08-23 and 08-24 (permission classifier blocked the run-start
+  // call, leaving no run row at all) was invisible to every liveness check
+  // while 136 products sat unenriched.
+  { routine: 'Daily product enricher (R-ENRICH)', team: 'product', runType: 'enrich', kind: 'daily', schedule: '12:00 daily', maxGapHours: DAILY_GAP },
+  // Support review (routine 21). routine-schedule.md says outright that a
+  // missing run here is a fault, not expected-missing, but nothing watched it.
+  { routine: 'Daily support review', team: 'support', runType: 'support', kind: 'daily', schedule: '16:30 daily', maxGapHours: DAILY_GAP },
+  // NOTE: the daily pricing sweep is deliberately absent. It runs without a
+  // team gate and has never written a run row of any runType, so an entry for
+  // it flagged on every single sweep from the day it was added. A permanent
+  // false positive is worse than no check: it teaches everyone to skim past
+  // this list. Re-add it only once the routine actually opens a run row.
   { routine: 'Weekly strategy', team: 'strategy', runType: 'strategy', kind: 'weekly', schedule: 'Mon 12:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Apply pass (agent-editor)', team: 'strategy', runType: 'apply', kind: 'twice-weekly', schedule: 'Mon and Thu 22:00', maxGapHours: TWICE_WEEKLY_GAP },
   { routine: 'Cost review', team: 'strategy', runType: 'cost-review', kind: 'weekly', schedule: 'Mon 21:00', maxGapHours: WEEKLY_GAP },
