@@ -264,12 +264,43 @@ function rowToRule(row: typeof discoveryRules.$inferSelect): DiscoveryRule {
 }
 
 // ---------------------------------------------------------------------------
+// Out-of-stock gate for public featured slots
+// ---------------------------------------------------------------------------
+
+/**
+ * Hard, always-on stock gate for the home/discover candidate pools. A product
+ * whose Shopify `totalInventory` is tracked and <= 0 can never be selected into
+ * a hero/rail/featured slot, mirroring the social draft-time check (#2211): a
+ * public slot never surfaces a product that is not currently in stock. This is
+ * independent of the CURATOR-tunable `discovery_inventory_min` floor — that
+ * floor is an editorial "hide anything below N" lever a curator may leave at 0,
+ * but zero-stock in a shopfront slot is never intended and never a judgement
+ * call, so it is enforced unconditionally.
+ *
+ * Untracked inventory (`totalInventory === null`) always passes: Shopify is not
+ * tracking stock for it, so absence of a count is not evidence of zero stock.
+ */
+const OUT_OF_STOCK_FLOOR = 0
+
+/**
+ * Thin-stock observability threshold. Survivors at or below this (but still in
+ * stock, i.e. > 0) are kept but logged once per build so a merchandiser can see
+ * a featured product is about to sell out. Not a drop threshold.
+ */
+const THIN_STOCK_WARN_THRESHOLD = 5
+
+/** Cap the number of handles named in a single thin-stock warn line. */
+const THIN_STOCK_WARN_MAX_HANDLES = 20
+
+// ---------------------------------------------------------------------------
 // Pure: applyRules
 // ---------------------------------------------------------------------------
 
 /**
- * Filter `products` against the active exclusion rules and the global
- * inventory floor. Pure and synchronous — takes all inputs as arguments.
+ * Filter `products` against the active exclusion rules, the global inventory
+ * floor, and the always-on out-of-stock gate. Takes all inputs as arguments so
+ * it stays trivially testable; the only side effect is a single aggregated
+ * `console.warn` naming thin-stock survivors (observability, not control flow).
  *
  * Drop logic (product is excluded if ANY of the following match):
  *   - exclude_product:      handle matches rule_value exactly
@@ -278,17 +309,18 @@ function rowToRule(row: typeof discoveryRules.$inferSelect): DiscoveryRule {
  *   - exclude_keyword:      rule_value is a case-insensitive substring of title
  *   - exclude_price_min:    price < numeric(rule_value)
  *   - exclude_price_max:    price > numeric(rule_value)
+ *   - out of stock:         totalInventory !== null AND totalInventory <= 0
+ *                           (always on, mirrors the social in-stock gate #2211)
  *   - inventoryMin > 0 AND totalInventory !== null AND totalInventory < inventoryMin
  *
- * Untracked inventory (totalInventory === null) always passes the floor filter.
+ * Untracked inventory (totalInventory === null) always passes both stock
+ * checks: Shopify is not tracking the count, so it is not evidence of zero.
  */
 export function applyRules(
   products: DiscoveryProduct[],
   rules: DiscoveryRule[],
   inventoryMin: number,
 ): DiscoveryProduct[] {
-  if (rules.length === 0 && inventoryMin === 0) return products
-
   // Pre-index rules by type for O(1) lookups within the product loop.
   const excludeHandles = new Set<string>()
   const excludeTypes: Array<{ value: string; category: Category | null }> = []
@@ -324,7 +356,9 @@ export function applyRules(
     }
   }
 
-  return products.filter(p => {
+  const thinStockHandles: string[] = []
+
+  const kept = products.filter(p => {
     // --- handle exclusion ---
     if (excludeHandles.has(p.handle)) return false
 
@@ -357,13 +391,38 @@ export function applyRules(
       if (p.price > ceiling) return false
     }
 
+    // --- out-of-stock gate (always on; mirrors the social in-stock check #2211) ---
+    // A tracked count at or below zero never reaches a public featured slot,
+    // regardless of the curator-tunable inventoryMin floor below. Untracked
+    // (null) passes: no count is not the same as a zero count.
+    if (p.totalInventory !== null && p.totalInventory <= OUT_OF_STOCK_FLOOR) {
+      return false
+    }
+
     // --- inventory floor (only when Shopify is tracking stock for this product) ---
     if (inventoryMin > 0 && p.totalInventory !== null && p.totalInventory < inventoryMin) {
       return false
     }
 
+    // In stock but thin — kept, flagged for the merchandiser below.
+    if (p.totalInventory !== null && p.totalInventory <= THIN_STOCK_WARN_THRESHOLD) {
+      thinStockHandles.push(p.handle)
+    }
+
     return true
   })
+
+  if (thinStockHandles.length > 0) {
+    const shown = thinStockHandles.slice(0, THIN_STOCK_WARN_MAX_HANDLES)
+    const more = thinStockHandles.length - shown.length
+    console.warn(
+      `[discovery-rules] ${thinStockHandles.length} thin-stock product(s) still eligible for featured slots ` +
+        `(totalInventory <= ${THIN_STOCK_WARN_THRESHOLD}): ${shown.join(', ')}` +
+        (more > 0 ? ` (+${more} more)` : ''),
+    )
+  }
+
+  return kept
 }
 
 // ---------------------------------------------------------------------------

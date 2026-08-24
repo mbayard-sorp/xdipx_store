@@ -223,6 +223,48 @@ describe('applyRules — inventoryMin', () => {
 })
 
 // ---------------------------------------------------------------------------
+// applyRules — always-on out-of-stock gate (#2211 parity, ticket #5230)
+// ---------------------------------------------------------------------------
+
+describe('applyRules — out-of-stock gate', () => {
+  it('drops a tracked zero-stock product even when inventoryMin is 0', () => {
+    const oos = makeProduct({ handle: 'oos-1', category: 'Pleasure', totalInventory: 0 })
+    const result = applyRules([oos, ...catalog], [], 0)
+    expect(result.find(p => p.handle === 'oos-1')).toBeUndefined()
+  })
+
+  it('drops a negative-inventory product (oversold) when inventoryMin is 0', () => {
+    const oversold = makeProduct({ handle: 'oversold-1', category: 'Pleasure', totalInventory: -3 })
+    const result = applyRules([oversold, ...catalog], [], 0)
+    expect(result.find(p => p.handle === 'oversold-1')).toBeUndefined()
+  })
+
+  it('keeps untracked inventory (null) — a missing count is not a zero count', () => {
+    const untracked = makeProduct({ handle: 'untracked-1', category: 'Pleasure', totalInventory: null })
+    const result = applyRules([untracked, ...catalog], [], 0)
+    expect(result.find(p => p.handle === 'untracked-1')).toBeDefined()
+  })
+
+  it('keeps a product with exactly one unit in stock', () => {
+    const lastOne = makeProduct({ handle: 'last-one', category: 'Pleasure', totalInventory: 1 })
+    const result = applyRules([lastOne, ...catalog], [], 0)
+    expect(result.find(p => p.handle === 'last-one')).toBeDefined()
+  })
+
+  it('applies alongside exclusion rules without disabling them', () => {
+    const oos = makeProduct({ handle: 'oos-2', category: 'Pleasure', totalInventory: 0 })
+    const rules: DiscoveryRule[] = [
+      makeRule({ ruleType: 'exclude_product', ruleValue: 'vibe-1' }),
+    ]
+    const result = applyRules([oos, ...catalog], rules, 0)
+    expect(result.find(p => p.handle === 'oos-2')).toBeUndefined()
+    expect(result.find(p => p.handle === 'vibe-1')).toBeUndefined()
+    // A healthy product is untouched by either gate.
+    expect(result.find(p => p.handle === 'vibe-2')).toBeDefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // fillFallbacks
 // ---------------------------------------------------------------------------
 
