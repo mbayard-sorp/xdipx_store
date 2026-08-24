@@ -175,6 +175,15 @@ other ticket. Two things to know while doing it:
   *renamed* existing migration file (it has probably already run in production), a non-`.sql` file
   under `db/migrations/`, or more than six migration files in one PR. Never edit a migration that
   has already merged; add a new one.
+- **Number the new migration against current `origin/main`, not your branch's merge-base (#5018).**
+  Right before you open or re-push a PR that adds a file under `db/migrations/**`, `git fetch origin
+  main` and name the file one past the **highest migration number on current `origin/main`**, not the
+  highest number that existed when the branch was cut. A long-lived branch that named its file against
+  an old high-water mark collides when a faster branch lands the same number first: PRs #864 then #856
+  both claimed `084` and both added an `alt_text` column to `social_posts`, the exact
+  `migration-dry-run` collision `ci-flake-register.md` recorded twice in one day. If `main` has
+  advanced past your file's number since the PR opened, rebase and renumber before the next QA pass
+  reviews it, rather than leaving the collision for QA or the owner to discover as a bounce.
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
@@ -209,14 +218,28 @@ Watch for the capability even when the tag is missing: a DONE WHEN that hinges o
 visual harness is disposed the same way and flagged for the tag, since filers are still learning to
 apply it.
 
-**A `kind:'code'` row whose only deliverable is a `docs/**/*.md` append is miscategorized — rekind it,
-do not claim it.** (#4758) The homepage design-changelog append is the recurring case: the entry
-format mandates an Evidence line (run id / Sanity revs / asset IDs / render probe) that only the run
-which shipped the change holds, so R-DEV cannot honestly write it and can only block the row (#4114 run
-375, #4660 run 430; run 424 retro found 4 of 5 claimed code tickets were non-code tracking rows).
-Instead of claiming it, rekind it to the docs lane with `{"op":"rekind","id":<id>,"kind":"instructions",
-"actor":"agent:rr7-engineer","note":"docs-only append; belongs on the agent-editor/docs lane, not the
-code queue"}` so it never enters the blocked pile.
+**A `kind:'code'` row whose only deliverable is a `docs/**/*.md` append is miscategorized — do not
+claim it; if you already have, block it to the docs lane.** (#4758, corrected #5043) The homepage
+design-changelog append is the recurring case: the entry format mandates an Evidence line (run id /
+Sanity revs / asset IDs / render probe) that only the run which shipped the change holds, so R-DEV
+cannot honestly write it and can only block the row (#4114 run 375, #4660 run 430; run 424 retro found
+4 of 5 claimed code tickets were non-code tracking rows). **R-DEV cannot rekind it, so do not try.**
+`rekindSuggestion()` in `app/lib/team.server.ts` allows only `REKIND_ACTORS = ['owner',
+'agent:agent-editor']` and only `REKIND_FROM_KINDS = ['process']`, so a `rekind` from
+`agent:rr7-engineer` on a `code` row is rejected on both guards — and over `/api/team/suggestion` the
+403 comes back as an empty body, so it reads as a silent no-op while the row stays `code/in_progress`
+(this happened on #4922). Do this instead:
+
+- **At selection (Step 1), do not claim a docs-only-append `code` row.** Leave it `approved` for the
+  owner or `agent-editor` to re-file onto the docs lane; the run that shipped the change should have
+  filed the changelog append as `kind:'instructions'` (the agent-editor/docs lane) in the first place.
+- **If you have already claimed one, transition it to `blocked` naming the docs lane** — the only
+  executable terminal state you hold:
+  ```bash
+  -d '{"op":"transition","id":<id>,"to":"blocked","actor":"agent:rr7-engineer",
+       "note":"docs-only append; only owner/agent-editor may rekind and only from process — re-file as kind:instructions on the agent-editor/docs lane"}'
+  ```
+  Blocking escalates a P3 docs chore to the owner pile, which is why not claiming it is preferred.
 
 **External-state DONE WHEN clauses: verify before `pr_open`, do not defer to QA.** (#4596) When a
 ticket's DONE WHEN carries an explicit verification or confirmation clause about state outside the
