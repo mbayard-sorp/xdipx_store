@@ -251,6 +251,29 @@ property, never all of them; the packshot is the third resort, never the second.
   product's other Shopify images for a clean unpackaged shot before generating — avoids the
   packaging-garble failure class entirely rather than fighting it with negative prompts.
 
+- Magic Wand Rechargeable Intimate Massager (`magic-wand-rechargeable-hv-270-massager`), `guides`
+  category, sincere staging, no accent prop, post `how-do-you-choose-a-cordless-wand-vibrator`
+  (content run 2026-08-24). **Ref-image note:** the product's first Shopify photo is a
+  box-plus-device composite carrying heavy printed packaging copy ("magicwand RECHARGEABLE",
+  "MULTI-FUNCTION CORDLESS POWER") — used the product's third photo (`53907C.jpg`, clean
+  unpackaged three-quarter device shot, no box in frame) as `--ref-image` instead, per the WINX
+  precedent above. The device's own small molded/printed "magicwand RECHARGEABLE" logo carried
+  through faithfully from the reference — that is real product branding replicated correctly, not
+  invented/garbled text, so it is not a vision-gate reject. Two rounds via Atlas
+  `seedream-4.5-edit` (Atlas primary, landscape_4_3, ref-image path): round 1 (2 candidates) failed
+  the vision gate on background — a saturated, full-intensity coral field (not the pale coral-soft
+  `#FFE6DD` tint the ground lock requires), the exact failure already logged against the Magic
+  Wand Original HV-260 hero below. Round 2 (2 candidates, prompt hardened with explicit "flat pale
+  coral-soft (#FFE6DD)," "uniform pastel tone," "no saturated or deep coral color anywhere," "no
+  color gradient, no two-tone color blend" language) passed: uniform pale coral-soft field, soft
+  even daylight falloff, product resting at a confident diagonal with no cord/plug/charging base
+  anywhere in frame (staging the article's cordless thesis directly), shape/buttons/logo faithful
+  to reference → `image-3346e3ea27d70a2d7a30745861800311021deab2-2304x1728-jpg`. **Precedent:**
+  the corrected prompt's explicit "flat pale {accent}-soft (#hex)," "uniform pastel tone," "no
+  saturated/deep color," "no gradient/two-tone blend" language is the fix for the
+  saturated-color-instead-of-soft-tint failure mode on this same Magic Wand product line; use it
+  verbatim on any future §0-P retry that fails on background saturation.
+
 ### §0-H human scaffold
 
 (no ref-image unless Emma appears — then `--ref-image` = the canonical Emma photo, Sanity
