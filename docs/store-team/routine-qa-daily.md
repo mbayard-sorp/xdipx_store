@@ -198,6 +198,17 @@ in the verdict rather than a bare PASS/FAIL. Only if the route itself is unreach
 fall back to `unverified: no cloud-reachable route` and say so. Sub-checks (2) and (3) run over
 xdipx.com endpoints and stay verifiable.
 
+**When this sub-check would file a ticket for the route itself (a 500 / non-200), do not mint a fresh
+`code` row each pass.** The `/api/team/conversion-status` 500 traces to an owner-only infra cause
+(migration 082, the capi/ga4 outbox rename, merged but not applied in prod), already tracked on the
+owner blocker list; R-DEV cannot apply an infra migration, so a `code` ticket only burns a claim it
+must block, and three of them landed across two runs (#5061, #5099, #5146) on three different
+dedupeKeys so the bus never deduped. Before filing: (a) `GET /api/team/blocker` and, if an open
+migration/outbox blocker exists, **do not file** — record `unverified: conversion-status 500,
+tracked on owner blocker #<n>` and move on; (b) only if no such blocker is open, file a single row
+under the **stable** `dedupeKey:"conversion-status-500"` (so repeat detections collapse to one row)
+and as `kind:"instructions"` (ops/infra), never `kind:"code"`.
+
 **Protected-path PRs get an extra checklist (added 2026-08-19, narrowed 2026-08-21).** Since owner
 direction 2026-08-19, R-DEV authors protected-path diffs instead of blocking them; the engine still
 never merges these, it escalates them to the owner. The list itself is cost-only now, so this
