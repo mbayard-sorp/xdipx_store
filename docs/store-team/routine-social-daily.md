@@ -484,6 +484,15 @@ rumble, low-frequency, full-hand, broad-contact — never the one the previous p
 freshness rule binds the required per-toy pairing-fact restatement: word it fresh for each post,
 never copy the pairing sentence forward from the prior post.
 
+Reading the prior post relies on memory and keeps failing: the tic recurred a third time on run 491
+(X id98 shipped "deep, broad rumble", a synonym-swap of the banned "deep, spread-out rumble", caught
+by the publish gate not the drafter; same failure as run 446). So **run a mechanical pre-write grep**
+on every wand or vibrator caption before `op:'draft'`, against this explicit banned-phrase list, and
+regenerate the descriptor on any hit: `spread-out rumble`, `broad rumble`, `deep, spread-out rumble`,
+`deep, broad rumble`, and close variants (any `<adjective>, <adjective> rumble` pairing that restates
+the spread-out/broad idea). Draw the replacement from the rotation bank above (low-frequency,
+full-hand, broad-contact), never a synonym of the banned phrase.
+
 **The X companion beat (crossplatform strategy §1).** For each Instagram slate post featuring a
 product, draft an X companion when the X quota allows: same campaign subject, register 6-7 per the
 social addendum, PDP link with channel UTMs, and a fresh sentence, never the IG caption reheated.
@@ -759,10 +768,15 @@ alone. These are pre-write gates: a candidate that fails one is rejected or rege
 draft is written, not discovered at Step 6.5.
 
 1. **High-zoom wordmark check.** For any product whose real packshot carries a printed wordmark on
-   the body (e.g. the Le Wand handle logo), zoom the product region of every cast-composite candidate
-   and compare it to the packshot. A garbled or illegible baked wordmark is an automatic
-   publish-gate BLOCK (id83 blocked, recurring against id72). Reject the candidate, or add a stronger
-   no-text negative and regenerate, before drafting.
+   the body (e.g. the Le Wand handle logo), **download the candidate and crop-and-zoom the specific
+   wordmark region to at least 4x** — do not eyeball the full-resolution frame, which is what keeps
+   passing garbled wordmarks the publish gate then catches at 6x (id95 Le Wand Classique passed a
+   full-frame eyeball QA yet the gate BLOCKed its garbled neck glyph; same failure as id72/id83).
+   Compare the zoomed crop directly to the packshot. A garbled or illegible baked wordmark is an
+   automatic publish-gate BLOCK. Reject the candidate, or add a stronger no-text negative and
+   regenerate, before drafting. **When the wordmark garbles across every candidate in a run,** do not
+   ship it to the publish gate to fail: either add a stronger blank-surface negative (state the
+   neck/body is smooth with no printed text) or prefer a clean-bodied product for that cast composite.
 2. **§3.8 variety is judged on the wall-plus-light-plus-pose signature, not the stated
    micro-location.** The Field Guide locks the coral-plaster wall, the upper-right diagonal light
    beam, the bralette, and the lean-against-wall pose (`instagram-campaigns.md` §5), so cast
@@ -1016,7 +1030,11 @@ note to the generator rather than words for the reader before you send the draft
 and any sentence that narrates the setting or what a cast member is doing in frame. Those sentences
 move to `altText` or are cut; they never ship in `tweetText`. The deterministic gate
 (`social-publish-gate.server.ts`) now fires on these patterns and `social-publish-gate` returns
-REVISE for any survivor, so a caption that fails this check is a draft that cannot publish.
+REVISE for any survivor, so a caption that fails this check is a draft that cannot publish. **Third
+check, sensation-descriptor tic (Step 3):** for any wand or vibrator caption, grep it against the
+banned-phrase list in Step 3 (`spread-out rumble`, `broad rumble`, `deep, spread-out rumble`, `deep,
+broad rumble`, and close variants) and rewrite the descriptor from the rotation bank on any hit, so
+the tic is caught at draft time rather than at the publish gate.
 
 **Every image-bearing post carries an accessibility description, and it goes in `altText`, never in
 `tweetText` (ticket #4067, re-homed by owner direction 2026-08-22).** This is standing, not an
