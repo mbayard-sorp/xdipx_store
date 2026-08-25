@@ -31,6 +31,7 @@ import { X_DEFAULT_MAX_PER_DAY } from '~/lib/social-publish-run.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { laWallClockToUtc, utcToLaParts, formatLaSlot } from '~/lib/social-schedule'
 import { laZoneAbbrev } from '~/lib/social-schedule-ui'
+import { effectiveGateStatus } from '~/lib/social-publish-approve.server'
 import { weekOf, addDays, capsByDay, slotOf, cellFor, shortDayLabel } from '~/lib/social-calendar'
 import { CalendarGrid, CapIndicator } from '~/components/admin/social/CalendarGrid'
 import { PostChip } from '~/components/admin/social/PostChip'
@@ -77,6 +78,10 @@ const COLS = {
   scheduledFor: socialPosts.scheduledFor,
   postedAt: socialPosts.postedAt,
   createdAt: socialPosts.createdAt,
+  gateStatus: socialPosts.gateStatus,
+  feedback: socialPosts.feedback,
+  externalPostId: socialPosts.externalPostId,
+  errorMessage: socialPosts.errorMessage,
 }
 
 function serialize(row: { [K in keyof typeof COLS]: unknown }): CalendarPost {
@@ -95,6 +100,12 @@ function serialize(row: { [K in keyof typeof COLS]: unknown }): CalendarPost {
     scheduledFor: (row.scheduledFor as string | null) ?? null,
     postedAt: iso(row.postedAt),
     createdAt: iso(row.createdAt),
+    gateStatus: effectiveGateStatus({
+      gateStatus: row.gateStatus as string | null,
+      feedback: row.feedback as string | null,
+    }),
+    externalPostId: (row.externalPostId as string | null) ?? null,
+    errorMessage: (row.errorMessage as string | null) ?? null,
   }
 }
 

@@ -1,9 +1,14 @@
 /**
- * /admin/socials/compose/:id — the Composer on an existing row. Owner edits
- * are allowed on pending_review, needs_changes and approved rows; every save
- * runs the revert-to-draft reset first (ADR-013 decision 4), so an approved
- * row that is edited goes back to pending with its stamp burned. Rejected
- * (gate BLOCK) and posted rows open read-only with the reason.
+ * /admin/socials/compose/:id: the Composer on an existing row. Owner edits
+ * are allowed on pending_review, needs_changes, approved AND failed rows
+ * (ticket #5417); every save runs the revert-to-draft reset first (ADR-013
+ * decision 4), so any of those goes back to pending with its stamp burned.
+ * `locked` mirrors `revertSocialPostToDraft` exactly (social-publish-approve.
+ * server.ts): it refuses ONLY `posted`, `deleted`, and a gate-BLOCK
+ * (`reviewStatus === 'rejected'`) row, and a failed publish is none of those,
+ * so a failed Instagram/X post can have its image swapped in the library
+ * picker and be retried. Posted rows open read-only with the reason; history
+ * is not edited.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { useLoaderData, Link } from 'react-router'
@@ -32,19 +37,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     resolvePickedProduct(post.row.shopifyProductId),
     slidesFromAssetsParam(url),
   ])
-  const locked = post.row.status !== 'draft' || post.row.reviewStatus === 'rejected'
+  const locked = post.row.status === 'posted' || post.row.status === 'deleted' || post.row.reviewStatus === 'rejected'
   return {
     id,
     locked,
     lockReason: post.row.status === 'posted'
       ? 'This post is published. History is not edited; draft a new one.'
-      : post.row.status === 'failed'
-        ? 'This post failed to publish. Retry it from History, or draft a new one.'
-        : post.row.reviewStatus === 'rejected'
-          ? 'This post carries a gate BLOCK, which has no override. Start a fresh draft.'
-          : post.row.status === 'deleted'
-            ? 'This post was deleted on the platform.'
-            : null,
+      : post.row.reviewStatus === 'rejected'
+        ? 'This post carries a gate BLOCK, which has no override. Start a fresh draft.'
+        : post.row.status === 'deleted'
+          ? 'This post was deleted on the platform.'
+          : null,
     row: post.row,
     initial: initialFromPost(post, product, extraSlides),
     roster,
