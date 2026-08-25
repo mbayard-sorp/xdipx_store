@@ -29,7 +29,7 @@
  */
 
 import { generateImage } from './generate-image.server'
-import { uploadMoodImageToShopifyFiles } from './shopify.server'
+import { uploadMoodImageToShopifyFilesWithId } from './shopify.server'
 import { tryIngestSocialAsset } from './social-asset-library.server'
 
 /**
@@ -474,7 +474,7 @@ export async function generateCastComposite(
       const res = await fetch(falUrl)
       if (!res.ok) continue
       const buffer = Buffer.from(await res.arrayBuffer())
-      const url = await uploadMoodImageToShopifyFiles(buffer, filename)
+      const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
       urls.push(url)
       filenames.push(filename)
       // Keep aligned with the surviving urls/filenames (a fetch or upload
@@ -483,11 +483,13 @@ export async function generateCastComposite(
       // Library dual-write (#4937): the buffer is already in hand, so no
       // re-fetch. Non-fatal; the Shopify url is what the gate checks, so the
       // row indexes under it and carries the Sanity asset id alongside.
+      // `shopifyFileId` (#5426) makes a future purge deterministic.
       const asset = await tryIngestSocialAsset({
         buffer,
         filename,
         contentType: 'image/jpeg',
         url,
+        shopifyFileId: fileId,
         aspect: opts.aspectRatio ?? '4:5',
         source: 'generated',
         provider: 'fal',
@@ -614,13 +616,15 @@ export async function generateAndUploadSocialImage(
   // could post the spend row, leaving billed generations uncounted (#887).
   // `url: null` with a real provider tells the caller "billed but unshipped".
   try {
-    const url = await uploadMoodImageToShopifyFiles(buffer, filename)
+    const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
     // Library dual-write (#4937), non-fatal, buffer already in hand.
+    // `shopifyFileId` (#5426) makes a future purge deterministic.
     const asset = await tryIngestSocialAsset({
       buffer,
       filename,
       contentType: 'image/jpeg',
       url,
+      shopifyFileId: fileId,
       aspect: opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
       source: 'generated',
       provider: result.provider,

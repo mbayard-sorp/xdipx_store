@@ -253,12 +253,25 @@ export const socialMediaAssets = pgTable('social_media_assets', {
   createdBy:         varchar('created_by', { length: 60 }).notNull().default('system'),
   createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:         timestamp('updated_at', { withTimezone: true }),
+  // Archive lifecycle (migration 085, ticket #5426). archivedAt = NULL means
+  // "in the active library"; the library grid and the Composer picker both
+  // default their query to archivedAt IS NULL. Rows are NEVER deleted (the
+  // publish gate's provenance check reads by row existence), so purgedAt
+  // exists only for a future purge job (#5427, not built here) to record
+  // that a binary is gone while the row and its provenance survive.
+  archivedAt:        timestamp('archived_at', { withTimezone: true }),
+  archivedBy:        varchar('archived_by', { length: 60 }),
+  purgedAt:          timestamp('purged_at', { withTimezone: true }),
+  // The Shopify Files GID for `url`, when rehosted there. Populated going
+  // forward (uploadMoodImageToShopifyFilesWithId); historic rows stay null.
+  shopifyFileId:     varchar('shopify_file_id', { length: 120 }),
 }, t => ({
-  createdIdx: index('idx_social_media_assets_created').on(t.createdAt),
-  productIdx: index('idx_social_media_assets_product').on(t.productHandle),
-  batchIdx:   index('idx_social_media_assets_batch').on(t.generationBatchId),
-  postIdx:    index('idx_social_media_assets_post').on(t.postId),
-  urlIdx:     index('idx_social_media_assets_url').on(t.url),
+  createdIdx:  index('idx_social_media_assets_created').on(t.createdAt),
+  productIdx:  index('idx_social_media_assets_product').on(t.productHandle),
+  batchIdx:    index('idx_social_media_assets_batch').on(t.generationBatchId),
+  postIdx:     index('idx_social_media_assets_post').on(t.postId),
+  urlIdx:      index('idx_social_media_assets_url').on(t.url),
+  archivedIdx: index('idx_social_media_assets_archived_at').on(t.archivedAt),
 }))
 
 /**
