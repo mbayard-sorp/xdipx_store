@@ -84,14 +84,44 @@ export function distinctiveTokens(name: string): string[] {
 }
 
 /**
+ * The generic (non-distinctive) words of a name, used to corroborate a single
+ * SHORT distinctive token. These are the category/size/material words
+ * distinctiveTokens() strips ("wand", "mini", "rechargeable") — weak on their
+ * own, but enough to confirm a short brand/model token is really this product.
+ */
+function corroboratingTokens(name: string): string[] {
+  const norm = normalize(name)
+  const distinctive = new Set(distinctiveTokens(norm))
+  return norm.split(' ').filter((t) => t.length >= 3 && !distinctive.has(t))
+}
+
+/** How long a single distinctive token must be to stand on its own. */
+const SINGLE_TOKEN_STANDALONE_MIN = 6
+
+/**
  * A product is "named" in the hero copy when either:
  *   - it has >= 2 distinctive tokens and ALL of them appear in the copy, or
- *   - it has a single distinctive token that is long (>= 6 chars) and present.
- * Both require whole-word token presence, which keeps precision high.
+ *   - it has a single distinctive token that is long (>= 6 chars) and present, or
+ *   - it has a single SHORT distinctive token (3-5 chars: "micro", "halo",
+ *     "orb") that is present AND corroborated by at least one other word from
+ *     the product's own name also appearing in the copy.
+ * All paths require whole-word token presence, which keeps precision high.
+ *
+ * The short-token corroboration path (ticket #5397) fixes a false negative that
+ * no hero copy could clear: a title like "Le Wand Mini Micro Rechargeable Wand
+ * Vibrator" reduces to the single distinctive token "micro" (5 chars), so the
+ * old length-6 bar made it permanently unpassable however faithfully the hero
+ * depicted it. Requiring corroboration rather than lowering the bar keeps a bare
+ * incidental short token ("a micro detail") from matching.
  */
-function isNamedIn(dt: string[], copyTokens: Set<string>): boolean {
+function isNamedIn(dt: string[], copyTokens: Set<string>, corroborating: string[] = []): boolean {
   if (dt.length === 0) return false
-  if (dt.length === 1) return dt[0]!.length >= 6 && copyTokens.has(dt[0]!)
+  if (dt.length === 1) {
+    const tok = dt[0]!
+    if (!copyTokens.has(tok)) return false
+    if (tok.length >= SINGLE_TOKEN_STANDALONE_MIN) return true
+    return corroborating.some((t) => copyTokens.has(t))
+  }
   return dt.every((t) => copyTokens.has(t))
 }
 
@@ -110,7 +140,11 @@ export function findHeroEmbedMismatches(
   posts: AuditBlogPost[],
   catalog: CatalogProduct[],
 ): HeroEmbedMismatch[] {
-  const productsWithTokens = catalog.map((p) => ({ p, dt: distinctiveTokens(productName(p)) }))
+  const productsWithTokens = catalog.map((p) => ({
+    p,
+    dt: distinctiveTokens(productName(p)),
+    ct: corroboratingTokens(productName(p)),
+  }))
   const results: HeroEmbedMismatch[] = []
 
   for (const post of posts) {
@@ -125,9 +159,9 @@ export function findHeroEmbedMismatches(
       .filter(({ p }) => embedSet.has(p.handle.toLowerCase()))
       .map(({ dt }) => new Set(dt))
 
-    for (const { p, dt } of productsWithTokens) {
+    for (const { p, dt, ct } of productsWithTokens) {
       if (embedSet.has(p.handle.toLowerCase())) continue
-      if (!isNamedIn(dt, copyTokens)) continue
+      if (!isNamedIn(dt, copyTokens, ct)) continue
       // Skip if this candidate is indistinguishable from an embedded sibling.
       const subsetOfEmbedded = embeddedTokenSets.some(
         (emb) => dt.length > 0 && dt.every((t) => emb.has(t)),
@@ -163,5 +197,7 @@ export function heroNamesAnyProduct(post: AuditBlogPost, catalog: CatalogProduct
   const copy = normalize([post.heroImageAlt ?? '', post.imagePrompt ?? ''].join(' '))
   if (!copy) return false
   const copyTokens = new Set(copy.split(' ').filter(Boolean))
-  return catalog.some((p) => isNamedIn(distinctiveTokens(productName(p)), copyTokens))
+  return catalog.some((p) =>
+    isNamedIn(distinctiveTokens(productName(p)), copyTokens, corroboratingTokens(productName(p))),
+  )
 }
