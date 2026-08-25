@@ -159,3 +159,70 @@ describe('heroNamesAnyProduct', () => {
     expect(heroNamesAnyProduct(post, CATALOG)).toBe(false)
   })
 })
+
+// ticket #5397: a product whose distinctive tokens reduce to a single SHORT
+// token (3-5 chars) — "Le Wand Mini Micro Rechargeable Wand Vibrator" -> ["micro"]
+// — used to be permanently unpassable, because isNamedIn required a lone
+// distinctive token to be >= 6 chars. The fix accepts a short single token when
+// corroborated by another word from the product's own name, rather than lowering
+// the length bar (which would have flagged bare incidental short tokens).
+describe('single short distinctive token (#5397)', () => {
+  const LEWAND: CatalogProduct[] = [
+    { handle: 'le-wand-mini-micro-wand', title: 'Le Wand Mini Micro Rechargeable Wand Vibrator' },
+    ...CATALOG,
+  ]
+
+  it('distinctive tokens reduce to a single 5-char token', () => {
+    expect(distinctiveTokens('Le Wand Mini Micro Rechargeable Wand Vibrator')).toEqual(['micro'])
+  })
+
+  it('heroNamesAnyProduct is true when a hero faithfully depicts the micro wand', () => {
+    const post: AuditBlogPost = {
+      slug: 'le-wand-mini-micro-wand',
+      heroImageAlt: 'the Le Wand Micro resting in soft coral daylight on white',
+      imagePrompt: null,
+      embedHandles: ['le-wand-mini-micro-wand'],
+    }
+    expect(heroNamesAnyProduct(post, LEWAND)).toBe(true)
+  })
+
+  it('a faithful micro-wand hero does not trip a mismatch on its own embed', () => {
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'le-wand-mini-micro-wand',
+        heroImageAlt: 'the Le Wand Micro resting in soft coral daylight on white',
+        imagePrompt: null,
+        embedHandles: ['le-wand-mini-micro-wand'],
+      },
+    ]
+    expect(findHeroEmbedMismatches(posts, LEWAND)).toHaveLength(0)
+  })
+
+  it('flags the micro wand when named off-embed (corroborated short token)', () => {
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'p',
+        heroImageAlt: 'the Le Wand Micro wand resting on white',
+        imagePrompt: null,
+        embedHandles: ['magic-wand-mini'],
+      },
+    ]
+    const hits = findHeroEmbedMismatches(posts, LEWAND)
+    expect(hits.map((h) => h.matchedHandle)).toContain('le-wand-mini-micro-wand')
+  })
+
+  it('does NOT match a bare, uncorroborated short token (precision guard)', () => {
+    // "micro" appears incidentally with no other word from the product's name,
+    // so it must not be read as naming the micro wand.
+    const post: AuditBlogPost = {
+      slug: 'p',
+      heroImageAlt: 'a micro detail of dew on a coral petal in morning light',
+      imagePrompt: null,
+      embedHandles: [],
+    }
+    expect(heroNamesAnyProduct(post, LEWAND)).toBe(false)
+    expect(findHeroEmbedMismatches([{ ...post, embedHandles: ['magic-wand-mini'] }], LEWAND)).toEqual(
+      [],
+    )
+  })
+})
