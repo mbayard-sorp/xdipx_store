@@ -389,7 +389,10 @@ describe('renderOwnerQueueSection', () => {
 
 describe('renderOpsWatchSection', () => {
   const base: OpsWatchFacts = {
-    socialDrafts: { count: 0, oldestDays: null },
+    socialDrafts: {
+      awaitingReview: { count: 0, oldestDays: null },
+      awaitingRework: { count: 0, oldestDays: null },
+    },
     pricingBatchRows: 4900,
     enrichmentAgeHours: 6,
     strandedVerified: 0,
@@ -399,10 +402,36 @@ describe('renderOpsWatchSection', () => {
   }
 
   it('warns that a social backlog stops the team drafting', () => {
-    const html = renderOpsWatchSection({ ...base, socialDrafts: { count: 18, oldestDays: 15 } })
-    expect(html).toContain('18 social drafts awaiting review')
+    const html = renderOpsWatchSection({
+      ...base,
+      socialDrafts: { awaitingReview: { count: 18, oldestDays: 15 }, awaitingRework: { count: 0, oldestDays: null } },
+    })
+    expect(html).toContain('18 social drafts awaiting your review')
     expect(html).toContain('oldest 15 days')
     expect(html).toContain('stops drafting')
+  })
+
+  it('reports feedback awaiting rework separately from drafts awaiting review (#5415)', () => {
+    // The owner's own feedback must never read as work he owes: the two
+    // counters are rendered as distinct lines, not summed.
+    const html = renderOpsWatchSection({
+      ...base,
+      socialDrafts: {
+        awaitingReview: { count: 2, oldestDays: 1 },
+        awaitingRework: { count: 5, oldestDays: 3 },
+      },
+    })
+    expect(html).toContain('2 social drafts awaiting your review')
+    expect(html).toContain('5 drafts with your feedback awaiting rework')
+    expect(html).not.toMatch(/7 (social )?drafts/)
+  })
+
+  it('stays quiet about rework when nothing is waiting on it', () => {
+    const html = renderOpsWatchSection({
+      ...base,
+      socialDrafts: { awaitingReview: { count: 0, oldestDays: null }, awaitingRework: { count: 0, oldestDays: null } },
+    })
+    expect(html).not.toContain('awaiting rework')
   })
 
   it('calls a missing pricing recompute a failure, not silence', () => {

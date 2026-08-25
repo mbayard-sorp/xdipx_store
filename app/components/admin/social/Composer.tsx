@@ -61,7 +61,16 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
   const picker = useFetcher<LibraryPickerData>()
 
   const [platform, setPlatform] = useState<string>(initial.platform)
-  const [captions, setCaptions] = useState<Record<string, string>>({ [initial.platform]: initial.caption })
+  // Ticket #5418(b): this used to be a per-platform record with a "N platform
+  // variants" counter, but `submitSave` only ever sent the active platform's
+  // text and the row stores one `tweetText` for its one `platform`. Writing
+  // an Instagram caption, tabbing to X, writing that, then saving kept only
+  // the X one, with nothing telling the owner that was about to happen.
+  // Persisting real per-platform variants needs a schema change (a post row
+  // has one platform), which is a protected-path migration this PR is not
+  // taking on, so the affordance is removed instead: one caption, shared
+  // across every platform tab, so there is nothing left to silently lose.
+  const [caption, setCaption] = useState<string>(initial.caption)
   const [slides, dispatch] = useReducer(slidesReducer, initial.slides)
   const [product, setProduct] = useState<PickedProduct | null>(initial.product)
   const [castSlugs, setCastSlugs] = useState<string[]>(initial.castSlugs)
@@ -71,7 +80,6 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [regen, setRegen] = useState<{ slide: ComposerSlide | null } | null>(null)
 
-  const caption = captions[platform] ?? ''
   const captionLength = platformCaptionLength(platform, caption)
   const overLimit = captionOverPlatformLimit(platform, caption) || (platform === 'instagram' && caption.length > IG_SOFT_MAX)
   const limit = platform === 'x' ? X_CAPTION_MAX : platform === 'linkedin' ? LINKEDIN_CAPTION_MAX : IG_SOFT_MAX
@@ -163,10 +171,7 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
                 role="tab"
                 type="button"
                 aria-selected={platform === p}
-                onClick={() => {
-                  setCaptions(c => (c[p] === undefined ? { ...c, [p]: caption } : c))
-                  setPlatform(p)
-                }}
+                onClick={() => setPlatform(p)}
                 className={`min-h-11 px-3 -mb-px border-b-2 text-sm font-medium ${platform === p ? 'border-coral text-ink' : 'border-transparent text-ink-3 hover:text-ink'}`}
               >
                 {PLATFORM_LABELS[p]}
@@ -177,7 +182,7 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
             <span className="sr-only">Caption for {PLATFORM_LABELS[platform]}</span>
             <textarea
               value={caption}
-              onChange={e => setCaptions(c => ({ ...c, [platform]: e.target.value }))}
+              onChange={e => setCaption(e.target.value)}
               rows={platform === 'x' ? 6 : 12}
               placeholder={platform === 'x' ? 'Write the post. Links count 23 each.' : 'Write the caption.'}
               className="w-full rounded-xl border border-line bg-paper p-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-coral/30 resize-y"
@@ -187,7 +192,10 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
             <span className={`font-mono text-xs tabular-nums ${overLimit ? 'text-red-700' : captionLength > limit * 0.9 ? 'text-amber-800' : 'text-ink-4'}`} title={platform === 'x' ? 'Links count as 23 characters each, the way X counts them' : undefined}>
               {captionLength}/{limit}
             </span>
-            <span className="font-mono text-[11px] text-ink-4">{Object.keys(captions).length > 1 ? `${Object.keys(captions).length} platform variants` : 'one variant'}</span>
+            {/* Ticket #5418(b): switching platform tabs edits this same
+                caption, it is not a saved variant per platform (the row has
+                one platform), so nothing here implies otherwise. */}
+            <span className="font-mono text-[11px] text-ink-4">saves as {PLATFORM_LABELS[platform]}</span>
           </div>
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-wide text-ink-3">Note for the team</span>

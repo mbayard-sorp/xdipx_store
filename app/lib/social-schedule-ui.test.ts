@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { laWallClockToUtcIso, utcIsoToLaWallClock, laZoneAbbrev, formatLaWallClock } from './social-schedule-ui'
+import {
+  laWallClockToUtcIso, utcIsoToLaWallClock, laZoneAbbrev, formatLaWallClock,
+  nextReworkPassUtc, formatNextReworkPass, formatWaitingAge,
+} from './social-schedule-ui'
 
 describe('laWallClockToUtcIso', () => {
   it('converts a summer (PDT, UTC-7) wall clock', () => {
@@ -43,5 +46,41 @@ describe('labels', () => {
   it('formats a slot with its zone', () => {
     expect(formatLaWallClock('2026-08-25T16:30:00.000Z')).toMatch(/Aug 25.*9:30 AM PDT$/)
     expect(formatLaWallClock(null)).toBeNull()
+  })
+})
+
+describe('nextReworkPassUtc / formatNextReworkPass (#5415)', () => {
+  it('picks the same-day 14:00 pass when before it', () => {
+    expect(nextReworkPassUtc(new Date('2026-08-25T10:00:00Z')).toISOString()).toBe('2026-08-25T14:00:00.000Z')
+  })
+  it('picks the same-day 22:00 pass when between the two', () => {
+    expect(nextReworkPassUtc(new Date('2026-08-25T15:00:00Z')).toISOString()).toBe('2026-08-25T22:00:00.000Z')
+  })
+  it('rolls to tomorrow 14:00 once both today passes are behind', () => {
+    expect(nextReworkPassUtc(new Date('2026-08-25T23:00:00Z')).toISOString()).toBe('2026-08-26T14:00:00.000Z')
+  })
+  it('rolls over a month boundary', () => {
+    expect(nextReworkPassUtc(new Date('2026-08-31T23:00:00Z')).toISOString()).toBe('2026-09-01T14:00:00.000Z')
+  })
+  it('formats the wait as an hour count', () => {
+    expect(formatNextReworkPass(new Date('2026-08-25T10:00:00Z'))).toBe('next pass in 4h')
+    expect(formatNextReworkPass(new Date('2026-08-25T13:45:00Z'))).toBe('next pass in under an hour')
+  })
+})
+
+describe('formatWaitingAge', () => {
+  const NOW = new Date('2026-08-25T12:00:00Z')
+  it('is null for absent or unparseable input', () => {
+    expect(formatWaitingAge(null, NOW)).toBeNull()
+    expect(formatWaitingAge('not a date', NOW)).toBeNull()
+  })
+  it('rounds sub-hour waits to <1h', () => {
+    expect(formatWaitingAge('2026-08-25T11:45:00Z', NOW)).toBe('<1h')
+  })
+  it('rounds hour-scale waits', () => {
+    expect(formatWaitingAge('2026-08-25T09:00:00Z', NOW)).toBe('3h')
+  })
+  it('rounds day-scale waits', () => {
+    expect(formatWaitingAge('2026-08-22T12:00:00Z', NOW)).toBe('3d')
   })
 })
