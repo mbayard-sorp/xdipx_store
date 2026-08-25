@@ -53,6 +53,7 @@ vi.mock('~/lib/team.server', () => ({
 }))
 
 import { action, RUN_LIST_MAX } from '~/routes/api.team.run'
+import { updateRun } from '~/lib/team.server'
 
 function post(body: Record<string, unknown>): Promise<Response> {
   const request = new Request('http://localhost/api/team/run', {
@@ -68,6 +69,7 @@ beforeEach(() => {
   state.wheres = []
   state.orderBys = []
   state.limits = []
+  vi.clearAllMocks()
 })
 
 describe('op:get', () => {
@@ -153,5 +155,27 @@ describe('unchanged behavior', () => {
     const res = await post({ op: 'start', team: 'strategy', runType: 'dev' })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ id: 1 })
+  })
+})
+
+describe('op:start phase stamp (#5431b)', () => {
+  it('stamps a default currentPhase so the row is never created with phase NULL', async () => {
+    await post({ op: 'start', team: 'social', runType: 'social' })
+    expect(updateRun).toHaveBeenCalledWith(1, { currentPhase: 'run-start' })
+  })
+
+  it('honors a caller-supplied phase instead of the default', async () => {
+    await post({ op: 'start', team: 'social', runType: 'social', phase: 'gate-check' })
+    expect(updateRun).toHaveBeenCalledWith(1, { currentPhase: 'gate-check' })
+  })
+
+  it('stamps currentAgent too when the caller supplies one', async () => {
+    await post({ op: 'start', team: 'social', runType: 'social', phase: 'gate-check', agent: 'social-media-manager' })
+    expect(updateRun).toHaveBeenCalledWith(1, { currentPhase: 'gate-check', currentAgent: 'social-media-manager' })
+  })
+
+  it('falls back to the default phase on an oversized or non-string phase', async () => {
+    await post({ op: 'start', team: 'social', runType: 'social', phase: 'x'.repeat(49) })
+    expect(updateRun).toHaveBeenCalledWith(1, { currentPhase: 'run-start' })
   })
 })

@@ -2882,7 +2882,7 @@ export async function getProductVariantGids(shopifyProductId: string): Promise<s
  */
 export async function getProductByInventoryItemId(
   inventoryItemId: string,
-): Promise<{ handle: string; title: string; sku?: string; imageUrl?: string; price?: number } | null> {
+): Promise<{ handle: string; title: string; sku?: string; imageUrl?: string; price?: number; dealScore?: number } | null> {
   const gid = inventoryItemId.startsWith('gid://')
     ? inventoryItemId
     : `gid://shopify/InventoryItem/${inventoryItemId}`
@@ -2891,7 +2891,12 @@ export async function getProductByInventoryItemId(
       sku: string | null
       variant: {
         price: string | null
-        product: { handle: string; title: string; featuredImage: { url: string } | null } | null
+        product: {
+          handle: string
+          title: string
+          featuredImage: { url: string } | null
+          dealScoreMf: { value: string } | null
+        } | null
       } | null
     } | null
   }>(
@@ -2900,7 +2905,12 @@ export async function getProductByInventoryItemId(
         sku
         variant {
           price
-          product { handle title featuredImage { url } }
+          product {
+            handle
+            title
+            featuredImage { url }
+            dealScoreMf: metafield(namespace: "xdipx", key: "deal_score") { value }
+          }
         }
       }
     }`,
@@ -2910,7 +2920,7 @@ export async function getProductByInventoryItemId(
   const product = data.inventoryItem?.variant?.product
   if (!product?.handle) return null
 
-  const result: { handle: string; title: string; sku?: string; imageUrl?: string; price?: number } = {
+  const result: { handle: string; title: string; sku?: string; imageUrl?: string; price?: number; dealScore?: number } = {
     handle: product.handle,
     title:  product.title,
   }
@@ -2920,6 +2930,10 @@ export async function getProductByInventoryItemId(
   if (product.featuredImage?.url) result.imageUrl = product.featuredImage.url
   const price = data.inventoryItem?.variant?.price ? parseFloat(data.inventoryItem.variant.price) : NaN
   if (Number.isFinite(price)) result.price = price
+  // #5430: the restock digest lists a deal score per line so the social
+  // routine can pick from it without opening Shopify.
+  const dealScore = product.dealScoreMf?.value ? parseFloat(product.dealScoreMf.value) : NaN
+  if (Number.isFinite(dealScore)) result.dealScore = dealScore
   return result
 }
 

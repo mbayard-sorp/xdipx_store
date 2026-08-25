@@ -43,6 +43,20 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!isTeamId(team)) return new Response('Bad Request: unknown team', { status: 400 })
     const runType = typeof b['runType'] === 'string' && b['runType'].length <= 24 ? b['runType'] : team
     const id = await startRun(team, runType)
+    // #5431(b): stamp a phase marker before returning the id, so a run that
+    // dies before its first `op:'update'` still names where it stopped
+    // instead of expiring with current_phase NULL. Evidence: runs 423/338/
+    // 251/200/140 each auto-expired with BOTH current_phase and current_agent
+    // NULL -- ~25h of wall clock producing no trace of what the run was doing.
+    // A caller MAY name its own opening phase (e.g. "gate-check"); absent
+    // that, default to a generic marker so the column is never blank.
+    const phase = typeof b['phase'] === 'string' && b['phase'].length > 0 && b['phase'].length <= 48
+      ? b['phase']
+      : 'run-start'
+    const agent = typeof b['agent'] === 'string' && b['agent'].length > 0 && b['agent'].length <= 48
+      ? b['agent']
+      : undefined
+    await updateRun(id, { currentPhase: phase, ...(agent ? { currentAgent: agent } : {}) })
     return Response.json({ id })
   }
 

@@ -107,6 +107,8 @@ export interface LogMonitorRunResult {
   issuesOpened:  string[]
   /** Improvement-bus ticket ids filed for P0/P1 groups (0 = deduped/failed). */
   ticketsFiled:  number[]
+  /** #5431(b): auto-expired team runs folded into this window's groups. */
+  expiredRuns:   number
 }
 
 /**
@@ -340,6 +342,70 @@ async function classifyLogs(logs: LogLine[]): Promise<LogMonitorReport> {
 }
 
 /**
+ * #5431(b): an auto-expired team run (team.server.ts `expireStaleRuns`) is a
+ * DB row -- `homepage_team_runs.status='failed', error='auto-expired: ...'`
+ * -- not a console line, so no amount of tuning `SIGNAL_LINE_PATTERNS` could
+ * ever make it visible to `fetchRecentLogs`/`classifyLogs`. It was a silent
+ * error row by construction. This reads the table directly instead, so an
+ * expired run rides the same classify -> issue -> ticket pipeline as a real
+ * log-derived signal.
+ *
+ * Evidence (2026-08): runs 423 (8,110s), 338 (18,864s), 251 (20,500s), 200
+ * (21,975s), 140 (20,963s) each auto-expired with BOTH current_phase and
+ * current_agent NULL -- ~25h of wall clock with no trace of what died where.
+ * The companion fix (api.team.run.tsx `op:'start'`) stamps a phase marker
+ * immediately at run creation, so this function's `phase` field should never
+ * again read NULL for a run started after that fix ships; it is read from the
+ * row as-is (not defaulted here) so a NULL phase on an OLD run, or a genuine
+ * gap, still surfaces rather than being silently papered over.
+ *
+ * Window is deliberately wider than `windowMinutes`: the expiry sweep runs
+ * opportunistically (throttled to once/5min inside `gate()`), not on a fixed
+ * clock tied to this cron's own 15-min cadence, so a strict window can miss a
+ * row that expired between two log-monitor runs. Safe to widen because
+ * `fileTicketsForGroups` dedupes by (hashed) title, and the title embeds the
+ * run id, so re-seeing the same expired run in an overlapping window is a
+ * no-op, not a duplicate ticket.
+ */
+export async function fetchExpiredRunGroups(windowMinutes: number): Promise<LogGroup[]> {
+  const { db } = await import('~/lib/db.server')
+  const { homepageTeamRuns } = await import('../../db/schema')
+  const { and, eq, gte, like } = await import('drizzle-orm')
+
+  const since = new Date(Date.now() - (windowMinutes + 15) * 60_000)
+  const rows = await db
+    .select({
+      id:           homepageTeamRuns.id,
+      team:         homepageTeamRuns.team,
+      runType:      homepageTeamRuns.runType,
+      currentPhase: homepageTeamRuns.currentPhase,
+      currentAgent: homepageTeamRuns.currentAgent,
+      startedAt:    homepageTeamRuns.startedAt,
+      error:        homepageTeamRuns.error,
+    })
+    .from(homepageTeamRuns)
+    .where(and(
+      eq(homepageTeamRuns.status, 'failed'),
+      like(homepageTeamRuns.error, 'auto-expired:%'),
+      gte(homepageTeamRuns.finishedAt, since),
+    ))
+
+  return rows.map((r): LogGroup => ({
+    priority:    'P1',
+    title:       `Team run auto-expired: ${r.team} run #${r.id} (phase: ${r.currentPhase ?? 'unknown'})`,
+    occurrences: 1,
+    firstSeen:   r.startedAt.toISOString(),
+    owner:       'rr7-engineer',
+    excerpt:
+      `team=${r.team} runType=${r.runType ?? 'unknown'} phase=${r.currentPhase ?? 'NULL'} ` +
+      `agent=${r.currentAgent ?? 'NULL'} error=${r.error ?? ''}`,
+    likelyCause: r.currentPhase
+      ? `Run died during phase "${r.currentPhase}" without a further update and was auto-expired after the idle timeout.`
+      : `Run auto-expired with no phase ever recorded -- died before any step reported progress (pre-#5431 run, or the phase-stamp fix did not reach this run's start call).`,
+  }))
+}
+
+/**
  * Open a GitHub issue for each P0 group, deduping against open issues that
  * already share the title. Uses the GitHub REST API directly (no Octokit dep)
  * since we only need two endpoints: search + create.
@@ -463,7 +529,21 @@ export async function runLogMonitor(
 ): Promise<LogMonitorRunResult> {
   const logs   = await fetchRecentLogs({ windowMinutes })
   const report = await classifyLogs(logs)
-  const issues = await openIssuesForP0(report.groups, windowMinutes)
+
+  // #5431(b): fold auto-expired team runs into this window's groups so they
+  // ride the same classify -> issue -> ticket pipeline as a log-derived
+  // signal, instead of sitting as a silent `failed` row nothing ever surfaces.
+  // Never allowed to break the detector: a Neon hiccup here still lets the
+  // log-derived groups through.
+  let expiredRunGroups: LogGroup[] = []
+  try {
+    expiredRunGroups = await fetchExpiredRunGroups(windowMinutes)
+  } catch (err) {
+    console.error('[log-monitor] expired-run query failed (ignored):', err)
+  }
+  const groups = [...report.groups, ...expiredRunGroups]
+
+  const issues = await openIssuesForP0(groups, windowMinutes)
   const issuesOpened = issues.map((i) => i.url)
 
   // Ticket filing must never be able to break the detector, so it is wrapped
@@ -471,7 +551,7 @@ export async function runLogMonitor(
   // fail on a cold bundle).
   let ticketsFiled: number[] = []
   try {
-    ticketsFiled = await fileTicketsForGroups(report.groups, issues, windowMinutes)
+    ticketsFiled = await fileTicketsForGroups(groups, issues, windowMinutes)
   } catch (err) {
     console.error('[log-monitor] ticket filing failed (ignored):', err)
   }
@@ -495,11 +575,12 @@ export async function runLogMonitor(
   return {
     windowMinutes,
     logCount:    logs.length,
-    p0:          report.groups.filter((g) => g.priority === 'P0').length,
-    p1:          report.groups.filter((g) => g.priority === 'P1').length,
-    p2:          report.groups.filter((g) => g.priority === 'P2').length,
+    p0:          groups.filter((g) => g.priority === 'P0').length,
+    p1:          groups.filter((g) => g.priority === 'P1').length,
+    p2:          groups.filter((g) => g.priority === 'P2').length,
     suppressed:  report.suppressedNoiseCount,
     issuesOpened,
     ticketsFiled,
+    expiredRuns: expiredRunGroups.length,
   }
 }
