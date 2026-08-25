@@ -4051,16 +4051,25 @@ export async function uploadThumbnailToProduct(
   return mediaId
 }
 
+export interface ShopifyFileUpload {
+  url: string
+  /** The Shopify Files GID (`gid://shopify/GenericFile/…` or MediaImage), for
+   *  a future deterministic purge. Null only if Shopify's response omitted it,
+   *  which should not happen in practice. */
+  fileId: string | null
+}
+
 /**
  * Upload a JPEG buffer to Shopify Files (not attached to any product) and
- * return its public CDN URL. Used by the bulk-import orchestrator's mood-image
- * tool: the resulting URL is written to the product's xdipx.mood_image_url
- * metafield so the PDP hero can render it as a full-bleed background.
+ * return its public CDN URL plus the Shopify Files GID. Used by the
+ * bulk-import orchestrator's mood-image tool: the resulting URL is written to
+ * the product's xdipx.mood_image_url metafield so the PDP hero can render it
+ * as a full-bleed background.
  */
-export async function uploadMoodImageToShopifyFiles(
+export async function uploadMoodImageToShopifyFilesWithId(
   imageBuffer: Buffer,
   filename: string,
-): Promise<string> {
+): Promise<ShopifyFileUpload> {
   const staged = await adminGraphQL<{
     stagedUploadsCreate: {
       stagedTargets: StagedTarget[]
@@ -4134,10 +4143,10 @@ export async function uploadMoodImageToShopifyFiles(
   const file = created.fileCreate.files[0] as
     | { id: string; url?: string; image?: { url?: string } }
     | undefined
+  const fileId = file?.id ?? null
   const url = file?.url ?? file?.image?.url
   if (!url) {
     // The file was created but has not yet been processed. Poll once briefly.
-    const fileId = file?.id
     if (!fileId) throw new Error('Shopify fileCreate returned no file id')
     for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 500))
@@ -4152,10 +4161,25 @@ export async function uploadMoodImageToShopifyFiles(
         }
       `, { id: fileId })
       const u = polled.node?.url ?? polled.node?.image?.url
-      if (u) return u
+      if (u) return { url: u, fileId }
     }
     throw new Error('Shopify fileCreate: no URL after polling')
   }
+  return { url, fileId }
+}
+
+/**
+ * Backward-compatible wrapper: same upload, url-only return. Existing callers
+ * that only need the CDN url (and do not care about the Shopify Files GID)
+ * keep compiling unchanged. New callers that want `shopify_file_id` for a
+ * future deterministic purge (ticket #5426) should call
+ * `uploadMoodImageToShopifyFilesWithId` instead.
+ */
+export async function uploadMoodImageToShopifyFiles(
+  imageBuffer: Buffer,
+  filename: string,
+): Promise<string> {
+  const { url } = await uploadMoodImageToShopifyFilesWithId(imageBuffer, filename)
   return url
 }
 

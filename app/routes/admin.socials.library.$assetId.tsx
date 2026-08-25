@@ -5,17 +5,19 @@
  * posts, and "Edit prompt, regenerate" through /api/admin/social-image.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
-import { Link, useLoaderData, useNavigate, useSearchParams } from 'react-router'
+import { Link, useFetcher, useLoaderData, useNavigate, useSearchParams } from 'react-router'
 import { useState } from 'react'
-import { requireAdmin } from '~/lib/session.server'
-import { addAssetTags, getAssetUsage, getLibraryAsset, removeAssetTag } from '~/lib/social-studio.server'
+import { getAdminUser, requireAdmin } from '~/lib/session.server'
+import {
+  addAssetTags, archiveAssets, getAssetUsage, getLibraryAsset, removeAssetTag, unarchiveAssets,
+} from '~/lib/social-studio.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { TagChipInput } from '~/components/admin/social/TagChipInput'
 import { RegenerateModal } from '~/components/admin/social/RegenerateModal'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
 import { StatusPill, studioStatusOf } from '~/components/admin/social/StatusPill'
 import { aspectClassOf } from '~/components/admin/social/LibraryGrid'
-import { CloseIcon, ExternalIcon, RefreshIcon, PlusIcon } from '~/components/admin/social/icons'
+import { ArchiveIcon, CloseIcon, ExternalIcon, RefreshIcon, PlusIcon, UndoIcon } from '~/components/admin/social/icons'
 import { formatLaWallClock } from '~/lib/social-schedule-ui'
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -49,6 +51,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const ok = await removeAssetTag(id, String(form.get('tag') ?? ''))
     return ok ? { ok: true } : { ok: false, error: 'Tag not found' }
   }
+  if (intent === 'archive') {
+    const admin = await getAdminUser(request)
+    const result = await archiveAssets([id], admin?.email || 'owner')
+    if (result.archived.length === 0) {
+      return { ok: false, error: result.refused[0]?.reason ?? 'Could not archive' }
+    }
+    return { ok: true, intent: 'archive', warning: result.warnings[0]?.warning ?? null }
+  }
+  if (intent === 'unarchive') {
+    const n = await unarchiveAssets([id])
+    return n > 0 ? { ok: true, intent: 'unarchive' } : { ok: false, error: 'Asset not found' }
+  }
   return { ok: false, error: 'Unknown intent' }
 }
 
@@ -59,6 +73,8 @@ export default function LibraryAssetDrawer() {
   const [regen, setRegen] = useState(false)
   const back = `/admin/socials/library?${params.toString()}`
   const close = () => navigate(back)
+  const archiveFetcher = useFetcher<{ ok: boolean; error?: string; intent?: 'archive' | 'unarchive'; warning?: string | null }>()
+  const isArchived = !!asset.archivedAt
 
   return (
     <div className="fixed inset-0 z-30 flex justify-end" role="dialog" aria-modal="true" aria-labelledby="asset-title">
@@ -86,7 +102,27 @@ export default function LibraryAssetDrawer() {
             <button type="button" onClick={() => setRegen(true)} className="inline-flex items-center gap-1 min-h-11 px-4 rounded-full bg-coral text-white text-sm font-semibold hover:bg-coral-2">
               <RefreshIcon size={14} /> Edit prompt, regenerate
             </button>
+            <archiveFetcher.Form method="post">
+              <input type="hidden" name="intent" value={isArchived ? 'unarchive' : 'archive'} />
+              <button
+                type="submit"
+                disabled={archiveFetcher.state !== 'idle'}
+                className="inline-flex items-center gap-1 min-h-11 px-3 rounded-full border border-line bg-paper text-sm font-medium text-ink hover:border-ink-4 disabled:opacity-50"
+              >
+                {isArchived ? <UndoIcon size={14} /> : <ArchiveIcon size={14} />}
+                {isArchived ? 'Unarchive' : 'Archive'}
+              </button>
+            </archiveFetcher.Form>
           </div>
+          {isArchived && (
+            <p className="text-xs text-ink-3">
+              Archived{asset.archivedBy ? ` by ${asset.archivedBy}` : ''}. Hidden from the library grid and the Composer picker.
+            </p>
+          )}
+          {archiveFetcher.data?.ok === false && <p className="text-xs text-red-700">{archiveFetcher.data.error}</p>}
+          {archiveFetcher.data?.ok && archiveFetcher.data.intent === 'archive' && archiveFetcher.data.warning && (
+            <p className="text-xs text-ink-3">{archiveFetcher.data.warning}</p>
+          )}
 
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <dt className="text-ink-4">source</dt><dd className="font-mono text-ink">{asset.source}{asset.provider ? ` / ${asset.provider}` : ''}</dd>

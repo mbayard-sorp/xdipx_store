@@ -44,6 +44,10 @@ function fakeRow(row: SocialMediaAssetInsert, id = 7): SocialMediaAssetRow {
     createdBy: row.createdBy ?? 'system',
     createdAt: new Date('2026-08-22T00:00:00Z'),
     updatedAt: null,
+    archivedAt: null,
+    archivedBy: null,
+    purgedAt: null,
+    shopifyFileId: row.shopifyFileId ?? null,
   }
 }
 

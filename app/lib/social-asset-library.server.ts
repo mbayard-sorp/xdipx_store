@@ -48,6 +48,13 @@ export interface IngestSocialAssetInput {
    * the Sanity CDN url.
    */
   url?: string
+  /**
+   * The Shopify Files GID for `url`, when the candidate was rehosted there
+   * (migration 085, ticket #5426). Populates `shopify_file_id` so a future
+   * purge can delete the exact Shopify file instead of guessing by filename.
+   * Omit for a bare Sanity-only ingest (no Shopify rehost).
+   */
+  shopifyFileId?: string | null
   width?: number
   height?: number
   aspect?: string
@@ -183,6 +190,7 @@ export async function ingestSocialAsset(
   const row: SocialMediaAssetInsert = {
     sanityAssetId: sanity.assetId,
     url: input.url ?? sanity.url,
+    ...(input.shopifyFileId ? { shopifyFileId: input.shopifyFileId } : {}),
     source: input.source,
     isPicked: input.isPicked ?? false,
     createdBy: input.createdBy ?? 'system',

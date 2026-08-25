@@ -16,13 +16,13 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { Form, Link, Outlet, useFetcher, useLoaderData, useNavigate, useSearchParams } from 'react-router'
 import { useMemo, useRef, useState } from 'react'
-import { requireAdmin } from '~/lib/session.server'
+import { getAdminUser, requireAdmin } from '~/lib/session.server'
 import {
-  addAssetTags, listLibraryAssets, parseLibraryFilters, removeAssetTag,
+  addAssetTags, archiveAssets, listLibraryAssets, parseLibraryFilters, removeAssetTag, unarchiveAssets,
 } from '~/lib/social-studio.server'
 import { LibraryGrid, LIBRARY_PAGE, type LibraryAsset } from '~/components/admin/social/LibraryGrid'
 import { useStudioShortcuts } from '~/components/admin/social/use-shortcuts'
-import { CloseIcon, PlusIcon, SearchIcon, TagIcon, UploadIcon } from '~/components/admin/social/icons'
+import { ArchiveIcon, CloseIcon, PlusIcon, SearchIcon, TagIcon, UndoIcon, UploadIcon } from '~/components/admin/social/icons'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
@@ -55,6 +55,22 @@ export async function action({ request }: ActionFunctionArgs) {
     const ok = await removeAssetTag(id, String(form.get('tag') ?? ''))
     return ok ? { ok: true, intent: 'tag-remove' } : { ok: false, error: 'Asset or tag not found' }
   }
+  if (intent === 'archive') {
+    const ids = String(form.get('assetIds') ?? '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 0)
+    if (ids.length === 0) return { ok: false, error: 'No assets selected' }
+    const admin = await getAdminUser(request)
+    const result = await archiveAssets(ids, admin?.email || 'owner')
+    if (result.archived.length === 0) {
+      return { ok: false, intent: 'archive', error: result.refused.map(r => r.reason).join('; ') || 'Nothing archived' }
+    }
+    return { ok: true, intent: 'archive', archived: result.archived.length, refused: result.refused, warnings: result.warnings }
+  }
+  if (intent === 'unarchive') {
+    const ids = String(form.get('assetIds') ?? '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 0)
+    if (ids.length === 0) return { ok: false, error: 'No assets selected' }
+    const n = await unarchiveAssets(ids)
+    return n > 0 ? { ok: true, intent: 'unarchive', unarchived: n } : { ok: false, error: 'Asset not found' }
+  }
   return { ok: false, error: 'Unknown intent' }
 }
 
@@ -68,6 +84,15 @@ export default function SocialsLibrary() {
   const [tagDraft, setTagDraft] = useState('')
   const tagFetcher = useFetcher<{ ok: boolean; error?: string; updated?: number }>()
   const upload = useFetcher<{ ok?: boolean; error?: string; id?: number; url?: string }>()
+  const archiveFetcher = useFetcher<{
+    ok: boolean
+    error?: string
+    intent?: 'archive' | 'unarchive'
+    archived?: number
+    unarchived?: number
+    refused?: Array<{ id: number; reason: string }>
+    warnings?: Array<{ id: number; warning: string }>
+  }>()
   const searchRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -97,6 +122,7 @@ export default function SocialsLibrary() {
     filters.archetype && { key: 'archetype', label: `archetype: ${filters.archetype}` },
     filters.source && { key: 'source', label: SOURCE_LABELS[filters.source] ?? filters.source },
     filters.picked != null && { key: 'picked', label: filters.picked ? 'picked' : 'not picked' },
+    filters.archived && { key: 'archived', label: 'Archived' },
   ].filter(Boolean) as Array<{ key: string; label: string }>
 
   return (
@@ -116,7 +142,7 @@ export default function SocialsLibrary() {
               className="w-full min-h-11 rounded-xl border border-line bg-paper pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-coral/30"
             />
           </div>
-          {['tag', 'product', 'cast', 'archetype', 'source', 'picked'].map(k => (
+          {['tag', 'product', 'cast', 'archetype', 'source', 'picked', 'archived'].map(k => (
             params.get(k) ? <input key={k} type="hidden" name={k} value={params.get(k) ?? ''} /> : null
           ))}
           <button type="submit" className="min-h-11 px-4 rounded-full border border-line bg-paper text-sm font-medium text-ink hover:border-ink-4">Search</button>
@@ -148,6 +174,14 @@ export default function SocialsLibrary() {
           <FilterSelect label="Archetype" value={filters.archetype} options={facets.archetypes} onChange={v => setFilter('archetype', v)} />
           <FilterSelect label="Source" value={filters.source} options={facets.sources} labels={SOURCE_LABELS} onChange={v => setFilter('source', v)} />
           <FilterSelect label="Picked" value={filters.picked == null ? null : filters.picked ? '1' : '0'} options={['1', '0']} labels={{ '1': 'Picked', '0': 'Not picked' }} onChange={v => setFilter('picked', v)} />
+          <button
+            type="button"
+            onClick={() => setFilter('archived', filters.archived ? null : '1')}
+            aria-pressed={filters.archived}
+            className={`shrink-0 inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-xs font-mono ${filters.archived ? 'border-coral bg-coral-soft text-ink' : 'border-line bg-paper text-ink-3 hover:border-ink-4'}`}
+          >
+            <ArchiveIcon size={10} /> Archived
+          </button>
           {facets.tags.slice(0, 12).map(t => (
             <button
               key={t}
@@ -242,8 +276,31 @@ export default function SocialsLibrary() {
               <TagIcon size={14} /> Tag
             </button>
           </tagFetcher.Form>
+          <archiveFetcher.Form method="post">
+            <input type="hidden" name="intent" value={filters.archived ? 'unarchive' : 'archive'} />
+            <input type="hidden" name="assetIds" value={ids} />
+            <button
+              type="submit"
+              disabled={archiveFetcher.state !== 'idle'}
+              className="inline-flex items-center gap-1 min-h-11 px-3 rounded-full border border-line bg-paper text-sm font-medium text-ink hover:border-ink-4 disabled:opacity-50"
+            >
+              {filters.archived ? <UndoIcon size={14} /> : <ArchiveIcon size={14} />}
+              {filters.archived ? 'Unarchive' : 'Archive'}
+            </button>
+          </archiveFetcher.Form>
           <button type="button" onClick={() => setSelected(new Set())} className="min-h-11 px-3 text-sm text-ink-3 hover:text-ink">Clear</button>
           {tagFetcher.data?.ok === false && <p className="w-full text-xs text-red-700">{tagFetcher.data.error}</p>}
+          {archiveFetcher.data?.ok === false && <p className="w-full text-xs text-red-700">{archiveFetcher.data.error}</p>}
+          {archiveFetcher.data?.ok && archiveFetcher.data.intent === 'archive' && (
+            <p className="w-full text-xs text-ink-3">
+              Archived {archiveFetcher.data.archived}.
+              {archiveFetcher.data.refused && archiveFetcher.data.refused.length > 0 && ` ${archiveFetcher.data.refused.length} refused: ${archiveFetcher.data.refused.map(r => r.reason).join(' ')}`}
+              {archiveFetcher.data.warnings && archiveFetcher.data.warnings.length > 0 && ` ${archiveFetcher.data.warnings.map(w => w.warning).join(' ')}`}
+            </p>
+          )}
+          {archiveFetcher.data?.ok && archiveFetcher.data.intent === 'unarchive' && (
+            <p className="w-full text-xs text-ink-3">Unarchived {archiveFetcher.data.unarchived}.</p>
+          )}
         </div>
       )}
 

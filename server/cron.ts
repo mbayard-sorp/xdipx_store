@@ -666,6 +666,28 @@ export function createCronRoutes() {
     }
   })
 
+  /**
+   * GET|POST /cron/social-asset-auto-archive
+   * Schedule: daily. Archives unpicked social_media_assets rows past a
+   * tunable age threshold (default 60 days, `social_library_auto_archive_days`
+   * pipeline_setting) so the library grid and Composer picker stay
+   * browsable at ~110 new images/day (ticket #5426). Reversible: sets
+   * archivedAt only, never deletes a row. Refuses per-asset when a usage
+   * guard blocks it (see `assessArchiveEligibility`); a refusal here is
+   * silent-safe, the row just stays in the active library for a future tick.
+   */
+  cronRoute('/social-asset-auto-archive', async (_req, res) => {
+    try {
+      const { runSocialAssetAutoArchiveSweep } =
+        await import('../app/lib/social-studio.server.js')
+      const result = await runSocialAssetAutoArchiveSweep()
+      res.json({ ok: true, result })
+    } catch (err) {
+      console.error('[cron/social-asset-auto-archive] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
   cronRoute('/import-monitor', async (_req, res) => {
     try {
       const { getPipelineSetting } = await import('../app/lib/feed-processor.server.js')

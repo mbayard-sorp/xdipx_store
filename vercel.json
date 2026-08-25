@@ -137,6 +137,10 @@
     {
       "path": "/cron/runpod-pod-watch",
       "schedule": "17 * * * *"
+    },
+    {
+      "path": "/cron/social-asset-auto-archive",
+      "schedule": "50 3 * * *"
     }
   ]
 }

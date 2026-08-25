@@ -13,7 +13,7 @@
  */
 import { db } from '~/lib/db.server'
 import { socialPosts, socialMediaAssets, socialPostSlides } from '../../db/schema'
-import { and, desc, eq, ilike, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm'
 import { SOCIAL_PLATFORMS } from '~/lib/team-keys'
 import { revertSocialPostToDraft } from '~/lib/social-publish-approve.server'
 import { laWallClockToUtcIso } from '~/lib/social-schedule-ui'
@@ -254,6 +254,17 @@ export interface LibraryFilters {
   picked: boolean | null
   /** Asset id to page before (newest first). */
   before: number | null
+  /**
+   * false (the default, `?archived` absent or `0`) shows only the active
+   * library: `archived_at IS NULL`. true (`?archived=1`) shows only archived
+   * assets, reachable via the "Archived" filter chip. This is the whole
+   * point of ticket #5426: an archived asset must disappear from BOTH the
+   * library grid and the Composer picker (both read through
+   * `listLibraryAssets`/this parser, see `admin.socials.library.tsx` and
+   * `libraryPickerUrl` in `LibraryPickerModal.tsx`), so getting this default
+   * right here is what makes archiving do anything at all.
+   */
+  archived: boolean
 }
 
 export function parseLibraryFilters(url: URL): LibraryFilters {
@@ -269,6 +280,7 @@ export function parseLibraryFilters(url: URL): LibraryFilters {
     source: p.get('source')?.trim() || null,
     picked: pickedRaw === '1' ? true : pickedRaw === '0' ? false : null,
     before: Number.isInteger(before) && before > 0 ? before : null,
+    archived: p.get('archived') === '1',
   }
 }
 
@@ -295,6 +307,10 @@ export async function listLibraryAssets(f: LibraryFilters): Promise<LibraryPage>
   if (f.source) conds.push(eq(socialMediaAssets.source, f.source))
   if (f.picked != null) conds.push(eq(socialMediaAssets.isPicked, f.picked))
   if (f.before) conds.push(lt(socialMediaAssets.id, f.before))
+  // Always applied, not conditional on a truthy value: the default
+  // (archived=false) must actively exclude archived rows, which is the
+  // entire point of the archive feature (#5426).
+  conds.push(f.archived ? isNotNull(socialMediaAssets.archivedAt) : isNull(socialMediaAssets.archivedAt))
 
   const rows = await db
     .select()
@@ -362,6 +378,173 @@ export async function getAssetUsage(asset: AssetRow): Promise<AssetUsage[]> {
   for (const r of viaSlides) { if (!seen.has(r.postId)) { seen.add(r.postId); out.push({ ...r, via: 'slide' }) } }
   for (const r of viaMedia) { if (!seen.has(r.postId)) { seen.add(r.postId); out.push({ ...r, via: 'media_urls' }) } }
   return out.sort((a, b) => b.postId - a.postId)
+}
+
+// ── Archive lifecycle (ticket #5426, reversible half only) ─────────────────
+//
+// Archiving only ever sets `archivedAt`/`archivedBy`. There is no delete
+// path anywhere in this module: the publish gate's provenance check
+// (`isLibraryMember`, social-asset-library.server.ts) reads by row
+// existence, so a deleted row would fail provenance retroactively on a post
+// that already passed the gate. The irreversible purge is ticket #5427,
+// deliberately not built here.
+
+/**
+ * Post states (raw `social_posts.status` / `review_status`) that make an
+ * asset's current usage "still live": the post is or may still be published
+ * with this asset, so archiving now would pull it out from under an active
+ * draft, review queue entry, approval or schedule. `publishing` is the
+ * in-flight moment itself; `pending_review` and `approved` cover a `draft`
+ * status row on its way to going out (an approved row may or may not be
+ * scheduled yet — both still need the asset). `posted` is deliberately NOT
+ * blocking: once live, the platform has already fetched and hosts its own
+ * copy at container-create time, so the library's copy stops being
+ * load-bearing for that post (still warned about, for provenance/reuse).
+ */
+const ARCHIVE_BLOCKING_REVIEW_STATUSES = new Set(['pending_review', 'approved'])
+
+export interface ArchiveEligibility {
+  eligible: boolean
+  /** Set when `eligible` is false: names the blocking post, per the ticket. */
+  reason: string | null
+  /** Set when `eligible` is true but a `posted` usage exists. */
+  warning: string | null
+}
+
+/**
+ * Pure predicate, no DB access: unit-testable directly on a list of usage
+ * rows (see `getAssetUsage`). Refuses archiving when any usage is a post
+ * that is draft/pending_review/approved/scheduled/publishing; the refusal
+ * names the blocking post id and platform. Allows, with a warning, when the
+ * only usage is a `posted` row.
+ */
+export function assessArchiveEligibility(usage: readonly AssetUsage[]): ArchiveEligibility {
+  const blocker = usage.find(u =>
+    u.status === 'publishing' ||
+    (u.status !== 'posted' && u.status !== 'failed' && u.status !== 'deleted' &&
+      ARCHIVE_BLOCKING_REVIEW_STATUSES.has(u.reviewStatus)),
+  )
+  if (blocker) {
+    const stateLabel = blocker.status === 'publishing'
+      ? 'publishing'
+      : blocker.reviewStatus === 'approved' ? 'approved (may be scheduled)' : 'pending review'
+    return {
+      eligible: false,
+      reason: `Post #${blocker.postId} (${blocker.platform}) is ${stateLabel}. Archive is refused while any post using this asset is draft, pending review, approved, scheduled or publishing.`,
+      warning: null,
+    }
+  }
+  const posted = usage.find(u => u.status === 'posted')
+  return {
+    eligible: true,
+    reason: null,
+    warning: posted
+      ? `Used by post #${posted.postId} (${posted.platform}), already posted. The platform fetched and hosts its own copy at publish time, so archiving the library copy does not affect the live post.`
+      : null,
+  }
+}
+
+export interface ArchiveOutcome {
+  archived: number[]
+  refused: Array<{ id: number; reason: string }>
+  warnings: Array<{ id: number; warning: string }>
+}
+
+/**
+ * Archive each id whose current usage passes `assessArchiveEligibility`.
+ * Never deletes a row; sets `archivedAt`/`archivedBy` only. Ids that do not
+ * resolve to a row are reported in `refused` too, so a caller iterating the
+ * result never silently drops one.
+ */
+export async function archiveAssets(ids: readonly number[], by: string): Promise<ArchiveOutcome> {
+  const uniqueIds = [...new Set(ids)].filter(n => Number.isInteger(n) && n > 0)
+  const out: ArchiveOutcome = { archived: [], refused: [], warnings: [] }
+  if (uniqueIds.length === 0) return out
+  const assets = await getLibraryAssetsByIds(uniqueIds)
+  const found = new Set(assets.map(a => a.id))
+  for (const id of uniqueIds) {
+    if (!found.has(id)) out.refused.push({ id, reason: 'Asset not found' })
+  }
+  for (const asset of assets) {
+    const usage = await getAssetUsage(asset)
+    const verdict = assessArchiveEligibility(usage)
+    if (!verdict.eligible) {
+      out.refused.push({ id: asset.id, reason: verdict.reason! })
+      continue
+    }
+    if (verdict.warning) out.warnings.push({ id: asset.id, warning: verdict.warning })
+    await db.update(socialMediaAssets)
+      .set({ archivedAt: new Date(), archivedBy: by.slice(0, 60), updatedAt: new Date() })
+      .where(eq(socialMediaAssets.id, asset.id))
+    out.archived.push(asset.id)
+  }
+  return out
+}
+
+/** Reversal: clears `archivedAt`/`archivedBy`. No eligibility check needed. */
+export async function unarchiveAssets(ids: readonly number[]): Promise<number> {
+  const uniqueIds = [...new Set(ids)].filter(n => Number.isInteger(n) && n > 0)
+  if (uniqueIds.length === 0) return 0
+  const rows = await db.update(socialMediaAssets)
+    .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+    .where(inArray(socialMediaAssets.id, uniqueIds))
+    .returning({ id: socialMediaAssets.id })
+  return rows.length
+}
+
+// ── Auto-archive sweep (ticket #5426(f)) ────────────────────────────────────
+//
+// At ~110 new library images/day and an 82% orphan rate, manual curation
+// alone will not keep the grid browsable. This sweep archives unpicked
+// candidates the team never acted on, past a tunable age threshold. It only
+// READS `social_library_auto_archive_days` via `getPipelineSetting`
+// (feed-processor.server.ts, not a protected path); nothing here writes to
+// `pipeline_settings` or touches `team.server.ts` / `team-keys.ts` /
+// `settings.server.ts`.
+
+const AUTO_ARCHIVE_SETTING_KEY = 'social_library_auto_archive_days'
+/** Conservative default: 60 days of browsability for an unpicked candidate
+ *  before the sweep archives it. Tunable on `/admin/homepage-team`-style
+ *  settings surfaces once one exposes this key; until then, edit the row
+ *  directly. */
+const AUTO_ARCHIVE_DEFAULT_DAYS = 60
+/** One sweep tick never touches more than this many rows. */
+const AUTO_ARCHIVE_BATCH_LIMIT = 500
+
+export async function autoArchiveThresholdDays(): Promise<number> {
+  const { getPipelineSetting } = await import('~/lib/feed-processor.server')
+  const raw = await getPipelineSetting(AUTO_ARCHIVE_SETTING_KEY)
+  const n = raw != null ? parseInt(raw, 10) : NaN
+  return Number.isFinite(n) && n > 0 ? n : AUTO_ARCHIVE_DEFAULT_DAYS
+}
+
+export interface AutoArchiveSweepResult extends ArchiveOutcome {
+  thresholdDays: number
+  candidateCount: number
+}
+
+/**
+ * Archive every unpicked, not-yet-archived asset older than the threshold.
+ * Runs through the same `archiveAssets` usage guard as a manual archive: an
+ * unpicked row can still carry a legacy `media_urls` attachment without
+ * `is_picked` ever having been set, so the defensive check still applies.
+ */
+export async function runSocialAssetAutoArchiveSweep(): Promise<AutoArchiveSweepResult> {
+  const thresholdDays = await autoArchiveThresholdDays()
+  const cutoff = new Date(Date.now() - thresholdDays * 24 * 60 * 60 * 1000)
+  const rows = await db
+    .select({ id: socialMediaAssets.id })
+    .from(socialMediaAssets)
+    .where(and(
+      eq(socialMediaAssets.isPicked, false),
+      isNull(socialMediaAssets.archivedAt),
+      lt(socialMediaAssets.createdAt, cutoff),
+    ))
+    .limit(AUTO_ARCHIVE_BATCH_LIMIT)
+  const ids = rows.map(r => r.id)
+  if (ids.length === 0) return { thresholdDays, candidateCount: 0, archived: [], refused: [], warnings: [] }
+  const outcome = await archiveAssets(ids, 'auto')
+  return { thresholdDays, candidateCount: ids.length, ...outcome }
 }
 
 const TAG_RE = /^[a-z0-9][a-z0-9 _-]{0,39}$/
