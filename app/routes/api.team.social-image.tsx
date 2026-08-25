@@ -87,6 +87,15 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!gateResult.ok) {
       return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
     }
+    // Ticket #5429 fix 4: a positive social image cap no longer flips
+    // gate().ok to false (it lets the rest of the run proceed instead), so
+    // this generation call site has to check the cap itself rather than
+    // trusting `ok` alone, or a cap-exceeded call would generate and bill
+    // anyway. scripts/gen-social-image.ts already does this independently
+    // (its own step 2); this route did not until now.
+    if (gateResult.maxImagesPerDay > 0 && gateResult.imagesToday >= gateResult.maxImagesPerDay) {
+      return Response.json({ error: 'gated', reason: 'over_image_cap', gate: gateResult }, { status: 403 })
+    }
 
     if (op === 'cast') {
       const presenterImageUrl = str(b['presenterImageUrl'])

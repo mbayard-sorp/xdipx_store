@@ -183,6 +183,32 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
             )}
           </div>
 
+          {/* Ticket #5425: a stale REVISE/BLOCK on this row is a downgraded FACT
+              failure the owner may be about to override, not only a soft
+              opinion (see social-publish-approve.server.ts §"agent asserts,
+              server verifies"). Surface it right above the buttons, not only
+              in the small mono line under the feedback box, so approving it
+              is an informed override rather than a blind click. */}
+          {(post.gateStatus === 'revise' || post.gateStatus === 'block') && (
+            <div
+              className={`rounded-xl border p-3 text-sm ${
+                post.gateStatus === 'block'
+                  ? 'border-red-300 bg-red-50 text-red-800'
+                  : 'border-amber-300 bg-amber-50 text-amber-800'
+              }`}
+              data-gate-warning={post.gateStatus}
+            >
+              <p className="font-semibold uppercase text-[11px] tracking-wide">
+                {post.gateStatus === 'block'
+                  ? 'Gate BLOCK — cannot be approved'
+                  : 'Gate flagged this for changes before you approve'}
+              </p>
+              <p className="mt-1 text-sm whitespace-pre-wrap">
+                {gateStamp.stamp || 'The gate left no notes; see feedback below.'}
+              </p>
+            </div>
+          )}
+
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => submit('approved')}

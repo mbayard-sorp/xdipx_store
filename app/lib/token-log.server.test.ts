@@ -44,6 +44,12 @@ vi.mock('~/lib/team-keys', () => ({
   imageTeamFromFeature: () => 'content',
   teamSpendKvKey: (team: string) => `SPEND:${team}`,
   teamImagesKvKey: (team: string) => `IMAGES:${team}`,
+  // Ticket #5429: bumpTeamSpendCounters reads this to skip the IMAGE counter
+  // (never the spend counter) for an owner-initiated preview/regenerate.
+  // Neither test here passes a `caller`, so this is never matched, but it
+  // still has to exist for the destructure in bumpTeamSpendCounters to
+  // succeed against vitest's mock.
+  OWNER_IMAGE_CALLERS: ['owner-slate-preview', 'owner-studio'],
 }))
 
 vi.mock('~/lib/kv.server', () => ({

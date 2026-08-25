@@ -47,6 +47,7 @@ import {
   SOCIAL_EXTRA_KEYS,
   SOCIAL_MAX_IMAGES_DEFAULT,
   TEAM_IMAGE_FEATURES,
+  OWNER_IMAGE_CALLERS,
   extraSpendFeaturesForTeam,
   VIDEO_EXTRA_KEYS,
   VIDEO_MAX_COST_CENTS_DEFAULT,
@@ -339,21 +340,52 @@ export async function getTodayRunCount(team: TeamId, excludeRunId?: number): Pro
 /**
  * Count of images `team` generated today, summed over that team's image
  * feature labels (TEAM_IMAGE_FEATURES: homepage-images, notebook-images/
- * content-images, social-images). Was hardcoded to the homepage feature, which
- * made every other team's cap decorative (tickets #3678/#3390/#581). Rows land
- * in api_token_log at GENERATION time, so rejected-then-never-uploaded
- * candidates still count (ticket #887). Returns 0 for a team with no image
- * features configured.
+ * content-images, social-images/social-drafts). Was hardcoded to the homepage
+ * feature, which made every other team's cap decorative (tickets #3678/#3390/
+ * #581). Rows land in api_token_log at GENERATION time, so
+ * rejected-then-never-uploaded candidates still count (ticket #887). Returns 0
+ * for a team with no image features configured.
+ *
+ * Ticket #5429 added three more corrections on top of the feature list above:
+ *
+ *  1. `input_tokens = 0 AND output_tokens = 0` — a feature can be SHARED
+ *     between image rows and plain token rows ('social-drafts' carries both
+ *     the drafting routine's Claude turns and its atlas/seedream image
+ *     calls). `logImageCost` always writes a zero-token row and
+ *     `logApiTokens` never does for a real model call, so this is the
+ *     structural signature of "this row is actually an image", independent of
+ *     which feature label it landed under. Verified against production: this
+ *     plus the feature list above sums to exactly 34 for social since
+ *     2026-08-22, matching the real generation count cited in #5429.
+ *
+ *  2. `caller NOT IN OWNER_IMAGE_CALLERS` — an owner-initiated Studio
+ *     regenerate is real spend (still counted in getTodaySpendCents) but not
+ *     the scheduled agent's own generation; it must not shrink the agent's
+ *     daily allowance the way it did in run 475 (4 of the 13 images that
+ *     tripped the cap carried caller='owner-slate-preview').
+ *
+ *  3. An explicit UTC-midnight boundary rather than the bare `current_date`
+ *     this used to compare against. `current_date` resolves in whatever
+ *     TimeZone the Postgres session happens to be running under, and the KV
+ *     cache key above (`utcDay()`) is always UTC; if those two ever disagree,
+ *     a reseed after UTC midnight can silently inherit the wrong day's count
+ *     into a fresh KV key. Pinning the boundary explicitly removes that
+ *     dependence entirely rather than relying on a session setting staying
+ *     what it is today.
  */
 export async function getTodayImageCount(team: TeamId = 'homepage'): Promise<number> {
   const features = TEAM_IMAGE_FEATURES[team]
   if (!features?.length) return 0
-  return counterRead(teamImagesKvKey(team, utcDay()), async () => {
+  const day = utcDay()
+  return counterRead(teamImagesKvKey(team, day), async () => {
+    const dayStartIso = `${day}T00:00:00Z`
     const res = await db.execute(
       sql`SELECT COALESCE(SUM(request_count), 0)::int AS n
           FROM api_token_log
-          WHERE ts >= current_date
-            AND feature IN (${sql.join(features.map(f => sql`${f}`), sql`, `)})`,
+          WHERE ts >= ${dayStartIso}::timestamptz
+            AND feature IN (${sql.join(features.map(f => sql`${f}`), sql`, `)})
+            AND input_tokens = 0 AND output_tokens = 0
+            AND (caller IS NULL OR caller NOT IN (${sql.join(OWNER_IMAGE_CALLERS.map(c => sql`${c}`), sql`, `)}))`,
     )
     return Number((res.rows?.[0] as { n?: number } | undefined)?.n ?? 0)
   })
@@ -537,9 +569,41 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
   // whole run here.
   const imageCapEnforced =
     cfg.maxImagesPerDay != null && (team === 'homepage' || maxImagesPerDay > 0)
-  if (imageCapEnforced && imagesToday >= maxImagesPerDay)
+  const overImageCap = imageCapEnforced && imagesToday >= maxImagesPerDay
+  if (imageCapRefusesRun(team, overImageCap))
     return { ...base, ok: false, reason: 'over_image_cap' }
   return { ...base, ok: true }
+}
+
+/**
+ * Ticket #5429 fix 4: does an exceeded image cap refuse team's WHOLE run?
+ *
+ * Before this fix, YES for every capped team — contradicting the comment
+ * above `gate()`'s image-cap block (whose "rather than refusing the whole run
+ * here" was only ever true for the cap-of-0 case). Run 475 (2026-08-24 05:12
+ * UTC) lost its entire evening pass — drafting, rework, the Step 6.5 gate
+ * sweep, Step 7b triage — to imagesToday=13 > maxImagesPerDay=12, none of
+ * which spends an image.
+ *
+ * Scoped to `social` only, the team this was diagnosed against. Homepage's
+ * byte-for-byte historical behavior is untouched (still refuses the run on
+ * ANY configured cap, including 0), and content is deliberately left as-is
+ * too rather than re-litigated here. Money is unaffected either way: `gate()`
+ * still refuses the whole run on `remainingCents <= 0` before this predicate
+ * ever runs, and that check is untouched.
+ *
+ * Enforcement of the SPEND moves entirely to the generation call sites, which
+ * already read (or, this PR, now read) `imagesToday`/`maxImagesPerDay` off
+ * the gate response independent of `ok`: scripts/gen-social-image.ts step 2
+ * already did; app/routes/api.team.social-image.tsx and
+ * app/routes/api.admin.social-image.tsx previously relied on `ok` alone and
+ * now check the numbers explicitly too (same PR).
+ *
+ * Exported (pure) so this is a direct unit test rather than something only
+ * provable by standing up a fully-mocked `gate()` call.
+ */
+export function imageCapRefusesRun(team: TeamId, overImageCap: boolean): boolean {
+  return overImageCap && team !== 'social'
 }
 
 // ── Run + event recorders (back the dashboard) ──────────────────────────────
@@ -2503,8 +2567,24 @@ export async function reviewSocialPost(id: number, input: ReviewSocialPostInput)
   // invalidates the verdict, so the gate columns and the stamp are burned and
   // the publish job will refuse the row until the gate looks again. That is
   // ADR-013 decision 4 applied to the queue's review intent.
+  const now = new Date()
   let feedback: string | null = input.feedback ?? null
-  let burnGate = false
+  // Ticket #5425: an owner approve is attended adversarial review, the same
+  // reasoning already codified for manual Post-now in
+  // `social-publish/manual-publish-gate.server.ts` (owner direction
+  // 2026-08-23). A row that reaches `approved` here with no PASS of its own
+  // used to fall into a "no_gate_verdict" trap at the next hourly tick: the
+  // publisher refused it and wrote it BACK to needs_changes with feedback
+  // that reads like the post itself was defective, when the only thing
+  // missing was a stamped verdict the Studio click never produced. Stamping
+  // gate_status='owner' here closes that gap. It is deliberately a distinct
+  // value from the agent's 'pass' — `isTickEligible` in
+  // social-publish-job.server.ts treats both as publishable, but nothing may
+  // ever confuse 'owner' with an agent PASS, and this write path never
+  // overwrites an existing 'pass'. It does NOT bypass the deterministic FACT
+  // checks (stock, media provenance, caption ceiling, vocabulary): those run
+  // again unconditionally at publish time regardless of gate_status.
+  let gateStampWrite: { gateStatus?: string | null; gateCheckedAt?: Date | null; gateFindings?: null } = {}
 
   if (input.reviewStatus === 'approved') {
     const [current] = await db
@@ -2535,10 +2615,18 @@ export async function reviewSocialPost(id: number, input: ReviewSocialPostInput)
     }
     const edited = input.editedText !== undefined && input.editedText !== (current.editedText ?? undefined)
     if (edited) {
-      burnGate = true
       feedback = input.feedback ?? stripGateStamp(current.feedback)
+      // The edit invalidates whatever verdict was there (agent or owner), and
+      // the owner is approving the edited text right now, so the row lands on
+      // 'owner' rather than null: it is still attended, just not by the agent.
+      gateStampWrite = { gateStatus: 'owner', gateCheckedAt: now, gateFindings: null }
     } else {
       feedback = preserveGateStamp(current.feedback, input.feedback)
+      // Never overwrite an existing agent PASS. Anything else (revise, hold,
+      // block already refused above, or null) becomes an owner verdict.
+      if (current.gateStatus !== 'pass') {
+        gateStampWrite = { gateStatus: 'owner', gateCheckedAt: now }
+      }
     }
   }
 
@@ -2549,9 +2637,9 @@ export async function reviewSocialPost(id: number, input: ReviewSocialPostInput)
       feedback,
       editedText:   input.editedText ?? null,
       reviewedBy:   input.reviewedBy,
-      reviewedAt:   new Date(),
-      updatedAt:    new Date(),
-      ...(burnGate ? { gateStatus: null, gateCheckedAt: null, gateFindings: null } : {}),
+      reviewedAt:   now,
+      updatedAt:    now,
+      ...gateStampWrite,
     })
     .where(and(
       eq(socialPosts.id, id),

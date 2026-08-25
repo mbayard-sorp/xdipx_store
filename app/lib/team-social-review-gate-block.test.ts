@@ -117,13 +117,14 @@ describe('reviewSocialPost keeps the gate verdict across an owner approve (#4913
     expect(set).not.toHaveProperty('gateStatus')
   })
 
-  it('burns the stamp and the gate columns when the owner also edits the caption', async () => {
+  it('burns the stale PASS stamp when the owner also edits the caption, and lands on gate_status=owner (ticket #5425, not null: an edited approve is still an attended review)', async () => {
     h.state.selects.push([{ feedback: PASS_STAMP, status: 'draft', gateStatus: 'pass', editedText: null }])
     h.state.updateResults.push([{ id: 53 }])
     const result = await reviewSocialPost(53, { reviewStatus: 'approved', editedText: 'a different line', reviewedBy: 'mike' })
     expect(result).toEqual({ ok: true })
     const set = h.state.updateSets[0] as Record<string, unknown>
-    expect(set['gateStatus']).toBeNull()
+    expect(set['gateStatus']).toBe('owner')
+    expect(set['gateCheckedAt']).toBeInstanceOf(Date)
     expect(set['gateFindings']).toBeNull()
     expect(set['feedback']).toBeNull()
   })
@@ -134,6 +135,48 @@ describe('reviewSocialPost keeps the gate verdict across an owner approve (#4913
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toBe('gate_block')
     expect(h.state.updateCalls).toBe(0)
+  })
+})
+
+describe('reviewSocialPost stamps gate_status=owner on approve (ticket #5425)', () => {
+  it('stamps owner when the row was never gated (no verdict at all)', async () => {
+    h.state.selects.push([{ feedback: null, status: 'draft', gateStatus: null, editedText: null }])
+    h.state.updateResults.push([{ id: 96 }])
+    const result = await reviewSocialPost(96, { reviewStatus: 'approved', reviewedBy: 'mike' })
+    expect(result).toEqual({ ok: true })
+    const set = h.state.updateSets[0] as Record<string, unknown>
+    expect(set['gateStatus']).toBe('owner')
+    expect(set['gateCheckedAt']).toBeInstanceOf(Date)
+    expect(set).not.toHaveProperty('gateFindings') // untouched: no burn, only a fresh stamp
+  })
+
+  it('stamps owner over a stale REVISE (rows 96/99: approved with gate_status=revise, the exact defect this ticket closes)', async () => {
+    h.state.selects.push([{ feedback: REVISE_STAMP, status: 'draft', gateStatus: 'revise', editedText: null }])
+    h.state.updateResults.push([{ id: 99 }])
+    const result = await reviewSocialPost(99, { reviewStatus: 'approved', reviewedBy: 'mike' })
+    expect(result).toEqual({ ok: true })
+    const set = h.state.updateSets[0] as Record<string, unknown>
+    expect(set['gateStatus']).toBe('owner')
+  })
+
+  it('stamps owner over a stale HOLD', async () => {
+    const hold = '[publish-gate HOLD by social-publish-gate on 2026-08-16, product: none]\nNovel situation.'
+    h.state.selects.push([{ feedback: hold, status: 'draft', gateStatus: 'hold', editedText: null }])
+    h.state.updateResults.push([{ id: 97 }])
+    const result = await reviewSocialPost(97, { reviewStatus: 'approved', reviewedBy: 'mike' })
+    expect(result).toEqual({ ok: true })
+    const set = h.state.updateSets[0] as Record<string, unknown>
+    expect(set['gateStatus']).toBe('owner')
+  })
+
+  it('never overwrites an existing agent PASS with owner', async () => {
+    h.state.selects.push([{ feedback: PASS_STAMP, status: 'draft', gateStatus: 'pass', editedText: null }])
+    h.state.updateResults.push([{ id: 50 }])
+    const result = await reviewSocialPost(50, { reviewStatus: 'approved', reviewedBy: 'mike' })
+    expect(result).toEqual({ ok: true })
+    const set = h.state.updateSets[0] as Record<string, unknown>
+    expect(set).not.toHaveProperty('gateStatus')
+    expect(set).not.toHaveProperty('gateCheckedAt')
   })
 })
 

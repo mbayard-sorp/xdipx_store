@@ -56,13 +56,37 @@ export function extraSpendFeaturesForTeam(team: TeamId): string[] {
  * Image-generation feature labels counted toward each team's daily image cap.
  * Only teams with a configured maxImagesPerDay appear here. The homepage label
  * is the original hardcoded one; content counts the Notebook labels; social
- * counts 'social-images' (ticket #3678 — never 'homepage-images').
+ * counts 'social-images' (ticket #3678 — never 'homepage-images') plus
+ * 'social-drafts' (ticket #5429): the daily drafting routine's own atlas/
+ * seedream calls are logged under the same feature label as its token spend
+ * ('social-drafts', see docs/store-team/README.md and the social-media-manager
+ * agent def), which this list omitted entirely, so 34 real generations since
+ * 2026-08-22 counted as zero toward the cap. Because that feature is SHARED
+ * with plain token rows, a feature match alone is not enough to know a row is
+ * an image — team.server.ts's getTodayImageCount additionally requires
+ * `input_tokens = 0 AND output_tokens = 0`, the structural signature every
+ * `logImageCost` row carries and no real token-log row does.
  */
 export const TEAM_IMAGE_FEATURES: Readonly<Partial<Record<TeamId, readonly string[]>>> = {
   homepage: ['homepage-images'],
   content:  ['notebook-images', 'content-images'],
-  social:   ['social-images'],
+  social:   ['social-images', 'social-drafts'],
 }
+
+/**
+ * Caller values an owner-initiated image generation writes, never the
+ * scheduled drafting routine. Ticket #5429: 4 of the 13 images that tripped
+ * run 475's image cap carried `caller='owner-slate-preview'` (the pre-rebuild
+ * Social Studio preview flow); `'owner-studio'` (`api.admin.social-image.tsx`,
+ * the Library "Edit prompt, regenerate" flow that replaced it) is its current
+ * successor and would reproduce the identical bug under a new name if left
+ * out here. These calls still bill the social team's DOLLAR budget like any
+ * other spend (`getTodaySpendCents` is untouched) — only the per-day IMAGE
+ * COUNT the routine's own cap compares against excludes them, because an
+ * unrelated owner click in the admin UI must never be the reason a scheduled
+ * run refuses itself.
+ */
+export const OWNER_IMAGE_CALLERS: readonly string[] = ['owner-slate-preview', 'owner-studio']
 
 /** Which team's image counter a feature label bumps (null = none). */
 export function imageTeamFromFeature(feature: string): TeamId | null {

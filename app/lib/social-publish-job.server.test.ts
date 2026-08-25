@@ -257,8 +257,13 @@ describe('the gate runs at publish time', () => {
     // only accepts draft/pending_review, so an instruction to run op:'gate' on this
     // exact row always 409s. The remedy has to point at the rework path instead
     // (a new draft carrying reworkedFrom:<id>, which lands at pending_review and
-    // gets gated there), and it has to distinguish the two real causes so the
-    // owner reading the feedback column in Social Studio understands what happened.
+    // gets gated there).
+    //
+    // Ticket #5425 changed what the SECOND cause is: an owner approving by
+    // hand in Social Studio no longer lands here at all (it stamps
+    // gate_status='owner' and IS tick-eligible), so this branch is now the
+    // genuinely anomalous case — approved through neither the gate nor a
+    // Studio review click.
     const { repo, calls } = fakeRepo([post({ feedback: null })])
     const publish = vi.fn()
     await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
@@ -266,7 +271,7 @@ describe('the gate runs at publish time', () => {
     expect(message).not.toMatch(/op:\s*['"]gate['"]/)
     expect(message).toContain('reworkedFrom')
     expect(message).toMatch(/pre-gate leftover/i)
-    expect(message).toMatch(/hand|owner approved it/i)
+    expect(message).toMatch(/Social Studio review click/i)
   })
 
   it('refuses a row whose gate stamp is not a PASS', async () => {
@@ -352,6 +357,44 @@ describe('the gate runs at publish time', () => {
       await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
       expect(publish).not.toHaveBeenCalled()
     }
+  })
+
+  // ── Ticket #5425: gate_status = 'owner' is tick-eligible like 'pass' ──
+
+  it('publishes on gate_status = owner with no stamp at all (an owner Studio approve)', async () => {
+    const { repo, calls } = fakeRepo([post({ feedback: null, gateStatus: 'owner', gateCheckedAt: new Date('2026-08-25') })])
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+    expect(calls.posted).toEqual([1])
+  })
+
+  it('publishes on gate_status = owner even under a stale BLOCK stamp in feedback (column wins)', async () => {
+    // The exact fallthrough the fix has to close: effectiveGateStatus must
+    // recognize 'owner' as a column-wins literal, same as 'pass'/'revise'/
+    // 'block'/'hold', or a row like this falls through to the legacy stamp
+    // parser and a stale BLOCK reads as a live one, or worse, an owner
+    // approval reads as though nothing verdicted it at all.
+    const staleBlock =
+      '[publish-gate BLOCK by social-publish-gate on 2026-08-10, product: none]\n' +
+      'Explicit imagery, past the ads-policy ceiling.'
+    const { repo, calls } = fakeRepo([post({ feedback: staleBlock, gateStatus: 'owner' })])
+    const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
+    expect(calls.posted).toEqual([1])
+  })
+
+  it('an owner verdict does not exempt the row from the deterministic gate re-run at publish time', async () => {
+    // 'owner' is a JUDGMENT substitute, not a bypass of the FACT checks: an
+    // out-of-stock product still bounces the row even when gate_status='owner'.
+    const { repo, calls } = fakeRepo([post({ feedback: null, gateStatus: 'owner' })])
+    const publish = vi.fn()
+    await tick({
+      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      productHandleFor: async () => 'gone-oos',
+      gateDeps: { getAvailability: async () => false },
+    })
+    expect(publish).not.toHaveBeenCalled()
+    expect(calls.needsChanges[0]?.feedback).toContain('stock-out')
   })
 
   it('takes the product handle from shopify_product_id ahead of the stamp', async () => {

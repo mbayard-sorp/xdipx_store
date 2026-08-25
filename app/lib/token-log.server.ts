@@ -139,10 +139,21 @@ export interface TokenLogEntry {
  * exists: a missing counter means no gate has seeded today's value yet, and
  * the seeding SUM will include the row this bump belongs to. BEST-EFFORT —
  * a lost bump undercounts for at most one re-seed window (15 min).
+ *
+ * `caller` (ticket #5429): an owner-initiated preview/regenerate still bumps
+ * the DOLLAR counter (it is real spend) but never the IMAGE counter, mirroring
+ * `getTodayImageCount`'s SQL exclusion so the two stay in agreement between
+ * reseed windows instead of only converging once every 15 minutes.
  */
-async function bumpTeamSpendCounters(feature: string, costUsd: number, imageCount?: number): Promise<void> {
+async function bumpTeamSpendCounters(
+  feature: string,
+  costUsd: number,
+  imageCount?: number,
+  caller?: string | null,
+): Promise<void> {
   try {
-    const { teamFromFeature, imageTeamFromFeature, teamSpendKvKey, teamImagesKvKey } = await import('./team-keys')
+    const { teamFromFeature, imageTeamFromFeature, teamSpendKvKey, teamImagesKvKey, OWNER_IMAGE_CALLERS } =
+      await import('./team-keys')
     const { kvGet, kvIncrBy } = await import('./kv.server')
     const day = new Date().toISOString().slice(0, 10)
     // teamFromFeature includes FEATURE_TEAM_OVERRIDES, so 'notebook-images'
@@ -158,7 +169,8 @@ async function bumpTeamSpendCounters(feature: string, costUsd: number, imageCoun
     // Image counter is per team (was hardcoded to 'homepage-images', which
     // made every other team's image cap decorative — #3678/#3390).
     const imageTeam = imageTeamFromFeature(feature)
-    if (imageTeam && imageCount && imageCount > 0) {
+    const isOwnerCaller = !!caller && (OWNER_IMAGE_CALLERS as readonly string[]).includes(caller)
+    if (imageTeam && imageCount && imageCount > 0 && !isOwnerCaller) {
       const key = teamImagesKvKey(imageTeam, day)
       if ((await kvGet<number>(key)) != null) await kvIncrBy(key, imageCount)
     }
@@ -248,7 +260,7 @@ export async function logImageCost(entry: ImageCostEntry): Promise<void> {
     // insert. The KV counter and the Neon row fail independently, so a
     // row-write failure below must never also drop this spend from the gate the
     // store relies on to cap runaway spend (#5051). Both are best-effort.
-    await bumpTeamSpendCounters(entry.feature, cost, entry.count)
+    await bumpTeamSpendCounters(entry.feature, cost, entry.count, entry.caller)
     await insertTokenRow({
       feature:             entry.feature,
       model:               entry.model,
