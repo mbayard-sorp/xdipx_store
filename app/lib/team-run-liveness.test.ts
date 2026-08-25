@@ -77,8 +77,15 @@ describe('runIdleTimeoutMin', () => {
     // Content p95 quiet stretch is 45.6 min with a 155.6 max; anything short
     // re-creates the run-106 false-reap bug. Do not lower these without data.
     expect(runIdleTimeoutMin('content')).toBe(240)
-    expect(runIdleTimeoutMin('strategy')).toBe(240)
     expect(runIdleTimeoutMin('homepage')).toBe(240)
+  })
+
+  it('gives strategy a 120-minute threshold, ~1.2x its 102.5 min measured max', () => {
+    // Ticket #5252: three strategy runs auto-expired at 240 in one 7d window
+    // (390/414/420), each holding the lock ~148 min past death and skipping a
+    // real QA/apply sibling at only ~92 min idle. 120 is above the 102.5 min
+    // healthy max, so a slow run is safe while a dead one unblocks ~2h sooner.
+    expect(runIdleTimeoutMin('strategy')).toBe(120)
   })
 })
 
@@ -86,16 +93,17 @@ describe('expireStaleRuns', () => {
   it('sweeps override teams on their own cutoff and everything else on the default', async () => {
     await expireStaleRuns()
 
-    expect(state.updates.length).toBe(2)
-    const [dflt, social] = state.updates
+    expect(state.updates.length).toBe(3)
+    const [dflt, social, strategy] = state.updates
 
-    // Default sweep: 240-minute cutoff, excludes the override teams so a
-    // social zombie is never given the long leash.
+    // Default sweep: 240-minute cutoff, excludes every override team so a
+    // fast-team zombie is never given the long leash.
     expect(dflt!.vals['status']).toBe('failed')
     expect(String(dflt!.vals['error'])).toContain('240 minutes')
     const dfltSql = new PgDialect().sqlToQuery(dflt!.where as SQL)
     expect(dfltSql.sql.toLowerCase()).toContain('not in')
     expect(dfltSql.params).toContain('social')
+    expect(dfltSql.params).toContain('strategy')
     expect(cutoffAgeMinutes(dflt!.where)).toBeGreaterThanOrEqual(239)
     expect(cutoffAgeMinutes(dflt!.where)).toBeLessThanOrEqual(241)
 
@@ -105,6 +113,13 @@ describe('expireStaleRuns', () => {
     expect(new PgDialect().sqlToQuery(social!.where as SQL).params).toContain('social')
     expect(cutoffAgeMinutes(social!.where)).toBeGreaterThanOrEqual(59)
     expect(cutoffAgeMinutes(social!.where)).toBeLessThanOrEqual(61)
+
+    // Strategy sweep: 120-minute cutoff scoped to the strategy team only
+    // (ticket #5252). Reaps a dead strategy run ~2h sooner than the default.
+    expect(String(strategy!.vals['error'])).toContain('120 minutes')
+    expect(new PgDialect().sqlToQuery(strategy!.where as SQL).params).toContain('strategy')
+    expect(cutoffAgeMinutes(strategy!.where)).toBeGreaterThanOrEqual(119)
+    expect(cutoffAgeMinutes(strategy!.where)).toBeLessThanOrEqual(121)
   })
 })
 
