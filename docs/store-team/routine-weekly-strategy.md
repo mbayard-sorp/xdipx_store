@@ -24,11 +24,6 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 # → { "id": 42 }   → $RUN_ID
 ```
 
-If this POST returns a transport/connection error (not a clean HTTP 4xx), do not blind-retry:
-reconcile first per `routine-schedule.md` §Run-start reconciliation (list `status:"running"` and
-adopt an existing `strategy` row from the last few minutes rather than filing a duplicate that burns
-a run-cap slot).
-
 ## Step 1 — Gate (abort if not ok)
 
 ```bash

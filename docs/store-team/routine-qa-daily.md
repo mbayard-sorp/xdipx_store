@@ -20,10 +20,7 @@ Mission brief: `docs/store-team/mission-brief.md`. The repo rules a diff must sa
 
 ## Step 0 — Gate + start
 
-1. `POST /api/team/run {"op":"start","team":"strategy","runType":"qa"}` → `$RUN_ID`. If this POST
-   returns a transport/connection error (not a clean HTTP 4xx), do not blind-retry: reconcile first
-   per `routine-schedule.md` §Run-start reconciliation (list `status:"running"` and adopt an existing
-   `qa` row from the last few minutes rather than filing a duplicate that burns a run-cap slot).
+1. `POST /api/team/run {"op":"start","team":"strategy","runType":"qa"}` → `$RUN_ID`.
 2. `GET /api/team/gate?team=strategy&excludeRun=$RUN_ID`. On `ok:false` → post a skipped event,
    finish the run honestly, exit cleanly.
 
