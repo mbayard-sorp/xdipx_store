@@ -16,13 +16,19 @@ const voiceGateMock = vi.hoisted(() => vi.fn())
 const reworkParseMock = vi.hoisted(() => vi.fn())
 const reworkMock = vi.hoisted(() => vi.fn())
 
+const getValveMock = vi.hoisted(() => vi.fn().mockResolvedValue(false))
+
 vi.mock('~/lib/team.server', () => ({
   assertTeamAuth: vi.fn(),
   createDraftSocialPost: createDraftMock,
   listSocialPosts: vi.fn().mockResolvedValue([]),
   getSocialFrequencies: vi.fn().mockResolvedValue({}),
-  getValve: vi.fn().mockResolvedValue(false),
-  VALVE_KEYS: { socialAutopost: 'social_autopost' },
+  getValve: getValveMock,
+  VALVE_KEYS: {
+    socialAutopost: 'social_team_autopost',
+    instagramAutopublish: 'instagram_autopublish_enabled',
+    xAutopublish: 'x_autopublish_enabled',
+  },
 }))
 vi.mock('~/lib/team-keys', () => ({
   SOCIAL_PLATFORMS: ['x', 'instagram', 'tiktok', 'facebook', 'youtube', 'linkedin'],
@@ -175,6 +181,37 @@ describe('draft op, altText/imageBrief/subject pass-through (migration 084)', ()
       imageBrief: undefined,
       subject: undefined,
     }))
+  })
+})
+
+// Ticket #5413: op:'config' used to return only autopostValve
+// (social_team_autopost), which gates nothing on the publish path. A routine
+// reading it reports posting posture backwards. platformValves must carry the
+// real per-platform valves the hourly publish tick reads, even when they
+// disagree with social_team_autopost.
+describe('config op — platformValves tracks the real publish-gating valves (#5413)', () => {
+  it('reports instagram/x platformValves independently of autopostValve', async () => {
+    getValveMock.mockImplementation(async (key: string) => {
+      if (key === 'social_team_autopost') return false
+      if (key === 'instagram_autopublish_enabled') return true
+      if (key === 'x_autopublish_enabled') return false
+      throw new Error(`unexpected valve key ${key}`)
+    })
+    const res = await post({ op: 'config' })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.autopostValve).toBe(false)
+    expect(body.platformValves).toEqual({ instagram: true, x: false })
+    // The regression: platformValves must NOT just mirror autopostValve.
+    expect(body.platformValves.instagram).not.toBe(body.autopostValve)
+  })
+
+  it('keeps autopostValve in the response for back-compat', async () => {
+    getValveMock.mockResolvedValue(true)
+    const res = await post({ op: 'config' })
+    const body = await res.json()
+    expect(body).toHaveProperty('autopostValve', true)
+    expect(body).toHaveProperty('frequencies')
   })
 })
 
