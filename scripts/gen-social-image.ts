@@ -30,12 +30,17 @@
  *
  * Sequence:
  *   1. Gate re-check — GET /api/team/gate?team=social. Refuses (exit 0) when
- *      the team is disabled, out of budget, or over the image cap (the gate
- *      enforces `social_team_max_images` server-side since ticket #3678).
+ *      the team is disabled or out of budget. Ticket #5429: an exceeded image
+ *      cap no longer flips this gate's `ok` to false for social (a positive
+ *      cap used to refuse the routine's ENTIRE run, not just image generation
+ *      — run 475, 2026-08-24), so step 2 below is now the only thing that
+ *      enforces the image cap; this step alone would no longer catch it.
  *   2. Image cap. Uses the gate's own maxImagesPerDay/imagesToday (counted
- *      against feature 'social-images'); falls back to SOCIAL_MAX_IMAGES_DEFAULT
+ *      against feature 'social-images'/'social-drafts', owner-initiated
+ *      previews excluded — #5429); falls back to SOCIAL_MAX_IMAGES_DEFAULT
  *      only when talking to an older server that omits the field. The DOLLAR
- *      cap is enforced either way: the gate sums spend on 'social-%' features.
+ *      cap is enforced by step 1: the gate sums spend on 'social-%' features
+ *      and that check is untouched.
  *   3. --dry-run prints the resolved plan and exits without generating.
  *   4. Generate + rehost to Shopify Files.
  *   5. POST the spend row once — this script is its single owner. Spend posts

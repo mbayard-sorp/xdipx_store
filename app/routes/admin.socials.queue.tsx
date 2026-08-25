@@ -79,7 +79,13 @@ async function recordManualPublish(
   // Column first, stamp fallback (TODO(#4913 burn-in) inside effectiveGateStatus).
   const verdict = effectiveGateStatus(post)
   if (verdict === 'pass') return
-  const had = verdict ? `over a gate ${verdict.toUpperCase()}` : 'with no gate verdict on the row'
+  // 'owner' (ticket #5425) is an earlier Studio approve, not a gate verdict to
+  // override, so it reads differently from a REVISE/BLOCK/HOLD being shipped
+  // over.
+  const had =
+    verdict === 'owner' ? 'after an earlier owner approval in Social Studio, with no agent verdict on the row'
+    : verdict ? `over a gate ${verdict.toUpperCase()}`
+    : 'with no gate verdict on the row'
   const note =
     `\n\n[manual-publish by ${by} on ${new Date().toISOString().slice(0, 10)}] ` +
     `Published from Post-now ${had}. The deterministic publish checks passed; ` +

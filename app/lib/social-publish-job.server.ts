@@ -29,7 +29,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
-import { effectiveGateStatus, preserveGateStamp } from './social-publish-approve.server'
+import { isTickEligible, preserveGateStamp } from './social-publish-approve.server'
 import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
 import { checkLinkedProductStock } from './social-publish/stock-guard.server'
 import { resolvePostProductHandle } from './social-publish/product-handle.server'
@@ -614,32 +614,37 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
 
     const caption = post.editedText?.trim() || post.tweetText
 
-    // Refuse anything the pre-publish gate never looked at.
+    // Refuse anything neither the pre-publish gate nor the owner ever looked
+    // at.
     //
     // `review_status='approved'` has two possible authors: the gate, which
     // writes its verdict into `gate_status` (and, for burn-in, the stamp in
-    // `feedback`), and the owner's click in the Social Studio, which does
-    // not. Under autopublish he is not clicking, so an approved row with no
-    // verdict is either a leftover from before this shipped or something that
-    // reached the column another way. Either is a row nothing adversarial has
-    // read, and publishing it unattended is the one thing this whole chain
-    // exists to prevent. It goes back to the queue instead.
+    // `feedback`), and the owner's click in the Social Studio, which (ticket
+    // #5425) now stamps `gate_status='owner'` when the row did not already
+    // carry an agent PASS. Both are attended review — the gate's is an
+    // agent's judgment, the owner's is his own, and either is enough for the
+    // unattended publisher to act on. An approved row carrying NEITHER is
+    // either a leftover from before this shipped or something that reached
+    // the column another way, and that is the row this refusal still exists
+    // to catch: nothing adversarial has read it, and shipping it unattended
+    // is the one thing this whole chain exists to prevent.
     //
-    // Rule (Phase 5, #4913): publishable when gate_status = 'pass', or when
-    // gate_status IS NULL and the legacy stamp parses to PASS. The column
-    // wins, so a stale PASS stamp under a 'block' column never ships.
-    // TODO(#4913 burn-in): the stamp half of `effectiveGateStatus` goes next cycle.
-    if (effectiveGateStatus(post) !== 'pass') {
+    // Rule (Phase 5, #4913; extended #5425): publishable when
+    // `isTickEligible` says pass-or-owner. The column wins over the legacy
+    // stamp, so a stale PASS stamp under a 'block' column never ships.
+    // TODO(#4913 burn-in): the stamp half of `isTickEligible` goes next cycle.
+    if (!isTickEligible(post)) {
       await repo.markNeedsChanges(
         post.id,
-        'Approved without a publish-gate PASS, so nothing independent has reviewed it. ' +
-        'Either it is a pre-gate leftover (approved before social-publish-gate covered this ' +
-        'platform) or the owner approved it by hand in Social Studio, which does not stamp a ' +
-        'gate verdict. This row is now needs_changes, and the gate only verdicts draft/' +
-        'pending_review, so re-gating it in place is not possible. The way out is a rework ' +
-        'draft carrying reworkedFrom:' + post.id + ' (POST /api/team/social-post {op:"draft", ' +
-        '..., "reworkedFrom":' + post.id + '}); that lands at pending_review by default and ' +
-        'gets gated there on the next run (routine-social-daily.md Step 2.5).',
+        'Approved without a publish-gate PASS or an owner approval verdict, so nothing ' +
+        'independent has reviewed it. Either it is a pre-gate leftover (approved before ' +
+        'social-publish-gate covered this platform, or before ticket #5425) or it reached ' +
+        '`approved` through a path other than the Social Studio review click or the gate. ' +
+        'This row is now needs_changes, and the gate only verdicts draft/pending_review, so ' +
+        're-gating it in place is not possible. The way out is a rework draft carrying ' +
+        'reworkedFrom:' + post.id + ' (POST /api/team/social-post {op:"draft", ..., ' +
+        '"reworkedFrom":' + post.id + '}); that lands at pending_review by default and gets ' +
+        'gated there on the next run (routine-social-daily.md Step 2.5).',
       )
       attempts.push({ postId: post.id, outcome: 'no_gate_verdict' })
       continue

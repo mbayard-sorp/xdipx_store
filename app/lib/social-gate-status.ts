@@ -9,7 +9,19 @@
  * agent issues the PASS on its next run.
  */
 
-export type GateStatusValue = 'pass' | 'revise' | 'block' | 'hold'
+/**
+ * `owner` (ticket #5425) is written only by `reviewSocialPost` (an owner
+ * approve in Social Studio, `app/lib/team.server.ts`) and never by the gate
+ * itself. It means "no agent verdict, an owner attended-reviewed this row",
+ * which is a distinct fact from an agent PASS on purpose: the deterministic
+ * FACT checks still bind on every row regardless of which of the two it
+ * carries (see `runDeterministicPublishChecks`, run unconditionally at
+ * publish time), but a future reader must never be able to treat 'owner' as
+ * equivalent to an agent's judgment. Use `isTickEligible` (in
+ * `social-publish-job.server.ts`) to test "may the unattended publisher ship
+ * this", not a direct `=== 'pass'` check, where both are meant to qualify.
+ */
+export type GateStatusValue = 'pass' | 'revise' | 'block' | 'hold' | 'owner'
 
 export interface StoredGateFinding {
   check: string

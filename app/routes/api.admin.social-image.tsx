@@ -81,6 +81,19 @@ export async function action({ request }: ActionFunctionArgs) {
         gate: gateResult,
       }, { status: 403 })
     }
+    // Ticket #5429 fix 4: gate('social') no longer flips `ok` to false for a
+    // positive-and-exceeded image cap (so a scheduled run can still finish
+    // its rework/gate/triage steps); this owner-triggered generation route
+    // relied on `ok` alone for the cap, so it needs its own explicit check
+    // now or an owner click past the cap would generate and bill unblocked.
+    if (gateResult.maxImagesPerDay > 0 && gateResult.imagesToday >= gateResult.maxImagesPerDay) {
+      return Response.json({
+        error: 'gated',
+        reason: 'over_image_cap',
+        message: `The social team hit its image cap for today (${gateResult.imagesToday}/${gateResult.maxImagesPerDay}).`,
+        gate: gateResult,
+      }, { status: 403 })
+    }
 
     if (mode === 'cast') {
       const castSlug = str(b['castSlug'])

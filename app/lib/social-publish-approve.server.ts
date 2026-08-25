@@ -363,6 +363,11 @@ export function preserveGateStamp(
  * legacy stamp says. Null when neither exists. The column always wins, so a
  * stale PASS stamp under a `block` column never publishes.
  *
+ * 'owner' (ticket #5425) is a fifth column value, written only by an owner
+ * approve in Social Studio (`reviewSocialPost`), never by the gate. It is
+ * recognized here as a column value like the other four; it has no stamp
+ * form, because `formatGateStamp` only ever encodes an agent verdict.
+ *
  * TODO(#4913 burn-in): collapse to `post.gateStatus` once the stamp fallback
  * is retired.
  */
@@ -370,14 +375,31 @@ export function effectiveGateStatus(
   post: { gateStatus?: string | null; feedback?: string | null },
 ): GateStatusValue | null {
   const col = post.gateStatus
-  if (col === 'pass' || col === 'revise' || col === 'block' || col === 'hold') return col
+  if (col === 'pass' || col === 'revise' || col === 'block' || col === 'hold' || col === 'owner') return col
   const stamp = parseGateStamp(post.feedback)
   return stamp ? gateStatusForVerdict(stamp.verdict) : null
 }
 
-/** A row the unattended publisher may ship: `gate_status = 'pass'`, or (legacy, column null) a PASS stamp. */
+/** A row the unattended publisher may ship on the agent's own say-so: `gate_status = 'pass'`, or (legacy, column null) a PASS stamp. Does NOT include an owner verdict; see `isTickEligible` for the predicate the hourly tick actually uses. */
 export function hasGatePass(post: { gateStatus?: string | null; feedback?: string | null }): boolean {
   return effectiveGateStatus(post) === 'pass'
+}
+
+/**
+ * May the hourly tick (`social-publish-job.server.ts`) publish this row?
+ * `pass` (an agent verdict) or `owner` (an owner approve, ticket #5425) both
+ * qualify; nothing else does. Deliberately not folded into `hasGatePass`,
+ * which stays a strict "the agent verdicted this PASS" test — a caller that
+ * needs to distinguish an agent's judgment from an owner's override (the
+ * whole point of adding 'owner' as its own value) must not be able to
+ * confuse the two behind one name. Named "tick eligible" rather than "may
+ * publish" because it says nothing about the deterministic FACT checks,
+ * which the tick re-runs separately and unconditionally, regardless of which
+ * of these two values got a row this far.
+ */
+export function isTickEligible(post: { gateStatus?: string | null; feedback?: string | null }): boolean {
+  const status = effectiveGateStatus(post)
+  return status === 'pass' || status === 'owner'
 }
 
 // ── Applying a verdict ──────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import {
   splitGateStamp,
   effectiveGateStatus,
   hasGatePass,
+  isTickEligible,
   gateStatusForVerdict,
   normaliseAgentFindings,
   type ApprovePatch,
@@ -575,6 +576,45 @@ describe('effectiveGateStatus / hasGatePass (column wins, stamp is fallback)', (
     expect(gateStatusForVerdict('REVISE')).toBe('revise')
     expect(gateStatusForVerdict('BLOCK')).toBe('block')
     expect(gateStatusForVerdict('HOLD')).toBe('hold')
+  })
+
+  // ── Ticket #5425: gate_status = 'owner' (an owner Studio approve) ──
+
+  it('reads owner as a column-wins literal, same as pass/revise/block/hold', () => {
+    expect(effectiveGateStatus({ gateStatus: 'owner', feedback: null })).toBe('owner')
+  })
+
+  it('an owner column beats a stale PASS or BLOCK stamp (column always wins)', () => {
+    expect(effectiveGateStatus({ gateStatus: 'owner', feedback: PASS })).toBe('owner')
+    const staleBlock = formatGateStamp({ verdict: 'BLOCK', reviewer: 'social-publish-gate', notes: 'old' }, new Date('2026-08-10'))
+    expect(effectiveGateStatus({ gateStatus: 'owner', feedback: staleBlock })).toBe('owner')
+  })
+
+  it('hasGatePass never returns true for owner: it means "an agent verdicted PASS", nothing else', () => {
+    expect(hasGatePass({ gateStatus: 'owner', feedback: null })).toBe(false)
+    expect(hasGatePass({ gateStatus: 'owner', feedback: PASS })).toBe(false)
+  })
+})
+
+describe('isTickEligible (the hourly publisher\'s predicate: pass or owner, ticket #5425)', () => {
+  it.each([
+    ['pass',   true],
+    ['owner',  true],
+    ['revise', false],
+    ['block',  false],
+    ['hold',   false],
+    [null,     false],
+  ] as const)('gate_status=%s -> %s', (gateStatus, expected) => {
+    expect(isTickEligible({ gateStatus, feedback: null })).toBe(expected)
+  })
+
+  it('a null column with a legacy PASS stamp is still eligible (burn-in fallback)', () => {
+    expect(isTickEligible({ gateStatus: null, feedback: PASS })).toBe(true)
+  })
+
+  it('an owner column beats a stale BLOCK stamp underneath it', () => {
+    const staleBlock = formatGateStamp({ verdict: 'BLOCK', reviewer: 'social-publish-gate', notes: 'old' }, new Date('2026-08-10'))
+    expect(isTickEligible({ gateStatus: 'owner', feedback: staleBlock })).toBe(true)
   })
 })
 
