@@ -124,10 +124,21 @@ export function assertTeamAuth(request: Request): void {
  * (isRunInProgress filters on activity, so the unblock does not even wait for
  * the reaper sweep). Teams with measured long quiet stretches keep the 240
  * default; add a team here only with runtime data to back the number.
+ *
+ * strategy 120 (ticket #5252): three strategy runs went silent and were
+ * auto-expired at the 240 default in one 7d window -- 390(qa), 414(dev),
+ * 420(qa) -- and each held the strategy concurrency lock long enough to skip a
+ * real sibling while only ~92 min idle: 391(apply) skipped on 390, 417(qa) on
+ * 414, 421(qa)+422(apply) on 420. A dead run stalled QA and Apply (the
+ * release-engine feed) for ~148 min past the point it was provably dead.
+ * strategy's healthy max quiet stretch is 102.5 min (see line above), so 120
+ * is ~1.2x measured max: safely above a healthy-but-slow run, while a silent
+ * one unblocks the gate ~2 hours sooner than the 240 default did.
  */
 const RUN_IDLE_TIMEOUT_MIN_DEFAULT = 240
 const RUN_IDLE_TIMEOUT_MIN_BY_TEAM: Partial<Record<TeamId, number>> = {
   social: 60,
+  strategy: 120,
 }
 
 /** Idle minutes after which a silent run of this team is presumed dead. */
