@@ -1,9 +1,18 @@
 # Routine — Weekly Business Research (adult-business-researcher)
 
 The playbook for the weekly adult-business research step. Entry agent: `adult-business-researcher`.
-Output: **up to 3 pending `researchBrief` docs** in Sanity, consumed by the daily social routine's
-LinkedIn drafting step (see `docs/store-team/routine-social-daily.md`). This routine writes no
-posts, publishes nothing, and generates no images. RESEARCH-ONLY.
+Output: **up to 3 pending `researchBrief` docs** in Sanity, consumed by `store-strategist`'s weekly
+brief (see `docs/store-team/routine-weekly-strategy.md`). This routine writes no posts, publishes
+nothing, and generates no images. RESEARCH-ONLY.
+
+**Retargeted off LinkedIn 2026-08-25 (ticket #5432). The research is not the problem; keep it.**
+LinkedIn has no publisher and has never published a post, so the three briefs this routine had
+produced (ids 37, 38, 69) sat `pending` against a `social_freq_linkedin` of 1/day, approved research
+with nowhere to go. `targetPlatform` below now points pending briefs at `store-strategist`'s weekly
+brief instead of the dead social step, so the work keeps flowing rather than aging in Sanity.
+LinkedIn drafting is off pending a publisher; the lane reopens on one config flip the day a
+publisher exists, and this retarget is a routing fix, not a cancellation of LinkedIn or of the
+research itself.
 
 Runs on the **Max subscription** under the **social** team's gate and budget. Cadence: weekly,
 **Thursday 16:00 UTC** (after the daily 14:00 social run; `social_team_max_runs` must be ≥2 for
@@ -17,7 +26,7 @@ _type:         'researchBrief'
 topic:         string
 suggestedAngle: text        // one-sentence thesis for the post; not final copy
 whyItMatters:  text          // who the reader is and why they'd care
-targetPlatform: 'linkedin'   // open for reuse by other channels later
+targetPlatform: 'strategy'   // retargeted 2026-08-25, ticket #5432 (was 'linkedin', dead lane)
 claims: [{
   claim:       text
   sourceUrl:   url
@@ -69,7 +78,7 @@ under a professional lens.
 
 Per topic: 2-4 claims, each with `sourceUrl`, `sourceName`, `retrievedAt` (today), and an honest
 `confidence` flag; a one-sentence `suggestedAngle`; a `whyItMatters` reader note. Status `pending`,
-`targetPlatform:'linkedin'`, `createdBy` = run id, `createIfNotExists`. Max 3 briefs, hard cap.
+`targetPlatform:'strategy'`, `createdBy` = run id, `createIfNotExists`. Max 3 briefs, hard cap.
 
 ## Step 5 — Finish
 

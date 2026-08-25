@@ -160,6 +160,16 @@ publishing platform and they move independently, so "the valve" below means the 
 platform you are talking about. Report them separately in the run summary; a single "autopost is on"
 hid the fact that X's valve was on and shipping nothing.
 
+**Read `platformValves.instagram` and `platformValves.x` off that same config response as the
+authoritative per-platform posture (ticket #5413).** `autopostValve` (backed by the
+`social_team_autopost` valve) gates nothing on the publish path: the hourly tick reads
+`instagram_autopublish_enabled` and `x_autopublish_enabled` directly, never `social_team_autopost`.
+Run 500 on 2026-08-25 reported "instagram_autopublish OFF" reading the wrong field, when the
+platform valve had in fact been on since 2026-08-24 22:44. `platformValves` is a new field on the
+`op:'config'` response landing with ticket #5413 in this same PR batch; once it is live,
+`autopostValve` / `social_team_autopost` must never be used to decide posture, only
+`platformValves.instagram` and `platformValves.x`.
+
 - **Valve OFF:** drafts land `pending_review`, the gate still runs at Step 6.5, and approved posts
   wait for the owner's click in `/admin/socials`. Say plainly in the run summary that posts are
   waiting on him, and how many.
@@ -311,11 +321,48 @@ curl -s -X POST "$BASE_URL/api/team/social-post" \
   -d '{"op":"list","reviewStatus":"needs_changes"}'
 ```
 
-For each `needs_changes` draft that has no rework yet (no newer row with `reworkedFrom` = its id):
-read the owner's `feedback` verbatim, redraft addressing exactly what it asks, voice-gate the
-redraft, and write it with `"reworkedFrom": <original id>`. Reworks count toward the run cap and
-the platform's daily quota. Feedback you can't act on (e.g. it asks for a capability you don't
-have) → say so honestly in the run summary, never silently drop it.
+**The rework filter is a timestamp comparison, not an existence check (ticket #5420).** A row
+qualifies for rework when it has **no child at all**, OR when its `reviewed_at` is **later than**
+its newest child's `created_at` (the owner has spoken again since the last attempt). Compare
+`social_posts.reviewed_at` on the source row against the `created_at` of its newest row carrying
+`reworkedFrom` = the source id. The old rule tested only existence ("has a rework ever been
+written"), so a row that had been reworked once was excluded forever, even from a later, different
+piece of feedback: rows 70 and 76 both carried a 2026-08-23 note against children created
+2026-08-22 and were permanently unreachable; 94 and 77 died the same way. State this as timestamp
+vs timestamp so it cannot regress to an existence test.
+
+One dependency to hold onto until it lands: a rework currently nulls the source row's `feedback`
+(`app/lib/social-publish-approve.server.ts:787`, tracked separately as code ticket #5415). Until
+that ships, do not make the timestamp comparison depend on the feedback text still being present on
+the source row; compare `reviewed_at`/`created_at` only, and read the feedback while it is still
+there (immediately, this pass) rather than assuming it survives to a later check.
+
+For each qualifying `needs_changes` draft: read the owner's `feedback` verbatim, redraft addressing
+exactly what it asks, voice-gate the redraft, and write it with `"reworkedFrom": <original id>`.
+Feedback you can't act on (e.g. it asks for a capability you don't have) → say so honestly in the
+run summary, never silently drop it.
+
+**Rework has its own allowance, separate from the new-draft quota (ticket #5421).**
+`rework_allowance(platform) = social_freq_<platform>`, an equal budget dedicated to reworking
+`needs_changes` rows, stated here so it is auditable rather than implicit. Outstanding owner
+feedback is worked **before** new drafting, up to the rework allowance for that platform.
+Consuming rework allowance does **not** reduce `today_remaining(platform)` for new drafts (Step 3);
+it draws down its own count instead:
+
+```
+rework_remaining(platform) = rework_allowance(platform)
+                           - reworks already written for that platform today
+```
+
+To stop this from doubling total daily volume, a **combined per-platform ceiling** binds both
+pools together: reworks + new drafts for a platform together never exceed
+`2 x social_freq_<platform>` in a day. If the combined ceiling binds, **rework wins and new
+drafting yields** for that platform this run.
+
+Cost note: drafting already outruns publishing by roughly 4x (13 posts published against 106 rows
+ever drafted, as of 2026-08-25), so this change must not raise total volume. It reallocates within
+the existing ceiling to fix a real starvation case: `social_freq_x` = 2/day with six X rows waiting
+on rework, which a shared allowance could never clear while also drafting anything new.
 
 **Owner direction 2026-08-22: feedback binds the rework clause by clause** (`instagram-campaigns.md`
 §3.9, last bullet). Split the `feedback` into its clauses before you redraft, satisfy every one of
@@ -382,9 +429,13 @@ the account actioned. So the first thing Step 3 does is arithmetic:
 
 ```
 today_remaining(platform) = social_freq_<platform>
-                          - rows already written for that platform today (any review_status)
-                          - reworks you wrote for it this run
+                          - new rows already written for that platform today (any review_status)
 ```
+
+**Reworks are not part of this formula (ticket #5421).** They draw down their own
+`rework_allowance(platform)`, defined in Step 2.5, and do not subtract from `today_remaining`. The
+two pools are joined only by the combined per-platform ceiling in Step 2.5
+(`2 x social_freq_<platform>` a day, rework-first if it binds).
 
 Use the Step 2 item 7 list, filtered to today's date, to get that count. **If the remainder is 0,
 draft nothing for that platform and say so in the run summary.** A run that honestly drafts zero
@@ -402,8 +453,8 @@ at a multi-post slate plus X it would cap a run below its own quota. The cap is 
 a server limit, so it is on you to respect it and to say in the summary when you hit it.
 
 Draft counts come from the Step 2 config — up to `social_freq_<platform>` new posts per platform,
-minus any reworks already written for that platform today, and minus everything already drafted
-today per the arithmetic above. Platform-appropriate, **editorial-first**
+minus everything already drafted today per the arithmetic above. (Reworks run against their own
+allowance, Step 2.5, and do not reduce this count.) Platform-appropriate, **editorial-first**
 (not product-first: on Instagram and TikTok a post that reads as an offer is removable under Meta's
 Restricted Goods standard regardless of how clean the image is), fresh language every time. X drafts
 fit 280 chars **and require media, same as Instagram and TikTok** (Step 5) — an X draft is never text
@@ -890,8 +941,31 @@ included. The owner licenses a solo product shot as slide 2 (§3.7); produce it 
 catalog packshot in as slide 2 does not "add a detail shot", it kills the post. Instagram carousels
 accept 2 to 10 slides.
 
-Ask `media-manager` first for an existing Shopify Files / Sanity asset (reuse-first). When nothing
-fits, **generate one with `scripts/gen-social-image.ts`**, re-checking the gate before each run. The
+**Reuse-first checks the team's own asset library before it checks `media-manager` (ticket #5433).**
+`social_media_assets` is the team's own index and currently holds 269 unattached assets, all
+on-scheme and provenance-passing, that reuse-first never looked at because it only asked
+`media-manager` for "an existing Shopify Files / Sanity asset." Query `social_media_assets` for a
+reusable candidate first. This does not move generation later: it slots into the existing pre-draft
+position, before any caption is written, exactly where reuse-first has always lived, because a
+caption written against an undecided image is a caption written blind.
+
+**Mandatory filter, all of it, or do not reuse and generate instead.** A reused asset must still
+satisfy the freshness rules in `docs/store-team/instagram-campaigns.md` §3.8: filter candidates on
+cast slug (never the same face two days running), ground colour (the 4-beat ground cycle),
+archetype (the 7-beat archetype spine), and recency, and **exclude any asset already attached to a
+posted row**. Skipping this filter produces a visibly repetitive grid, a customer-facing quality
+regression, not a savings worth having. Record which asset the run reused and why it was eligible
+(which filter checks it passed) in the draft's event summary, the same way a generated asset's
+brief is recorded.
+
+**Honest sizing.** This is worth roughly $2-3/month in avoided generation, which is small: total
+metered image spend runs about $0.161/day, 0.8% of the $20/day budget. Do not oversell it as a cost
+fix. Its real value is run-time relief on days the image cap binds, and fewer generation round
+trips, not spend avoided.
+
+When `social_media_assets` has no eligible candidate, ask `media-manager` next for an existing
+Shopify Files / Sanity asset (the second reuse path). When nothing fits either path, **generate one
+with `scripts/gen-social-image.ts`**, re-checking the gate before each run. The
 script now delegates generation and the rehost to `POST /api/team/social-image` so the privileged
 Shopify Admin call runs server-side (ticket #4133); the sandbox needs no Admin token. The rehost is
 mandatory and unchanged: generator URLs expire (Atlas output in ~14 days, fal in 24h) and Instagram
@@ -1090,10 +1164,40 @@ load-bearing. The gate is adversarial by design and explicitly must not read you
 why the post is compliant, because that reasoning is the thing under test. Handing it your context
 turns an independent check into a second opinion from yourself.
 
-**Also sweep any gate-eligible draft still waiting, not only the ones you wrote this run.** X rows
-predating this step's widening (ids 52, 54 and 55 as of 2026-08-17) are sitting at `pending_review`
-with nothing that will ever pick them up otherwise. Gate them the same way, oldest first, and drop
-any whose `scheduled_for` has passed far enough that the copy is stale rather than approving it late.
+**Also sweep any gate-eligible draft still waiting, not only the ones you wrote this run (ticket
+#5419).** A post drafted outside a scheduled routine run can never be caught by "gate the ones you
+wrote this run", so it can never publish. Rows 102-107, minted from an interactive session on
+2026-08-25 at 15:54-16:07 UTC, after run 500 had already finished at 14:16, sat at `pending_review`
+with `gate_status` null and no scheduled pass ever looking at them; X rows predating this step's
+widening (ids 52, 54 and 55 as of 2026-08-17) died the same way. So, **after** gating this run's own
+drafts, list ungated pending_review drafts on the gate platforms and gate those too:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/social-post" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"list","status":"draft","reviewStatus":"pending_review"}'
+```
+
+filtered to `gate_status` null and `platform` in `instagram`/`x`, regardless of which run created
+the row. Gate them oldest first, drop any whose `scheduled_for` has passed far enough that the copy
+is stale rather than approving it late, and **cap the sweep at 5 rows per run.** The cap exists
+because this sweep is a backstop, not a queue-drain: an unbounded sweep could take a large backlog
+of never-gated rows and push all of it at a live, rented, loseable account inside one run, which is
+exactly the risk the gate exists to prevent. Five a run clears a normal backlog in a few days while
+keeping each run's blast radius small.
+
+**This adds reach, not leniency.** Every swept row still gets a fresh `social-publish-gate`
+subagent with no shared context (below), the verdict is still relayed verbatim, and a BLOCK still
+terminates the row exactly as it does for a row drafted this run. Nothing about the gate itself
+changes; only which rows reach it does.
+
+One number to carry so this sweep is not mistaken for a calibration problem: an earlier ticket
+(#5428, dismissed) claimed the gate had produced zero PASSes across 106 rows. That was a
+measurement error, sourced from reading `gate_status` when PASS verdicts were, at the time, written
+into `social_posts.feedback` as `[publish-gate PASS by social-publish-gate on ...]`. The real
+numbers: 11 PASS / 6 BLOCK, a 65% pass rate, and 9 of those 11 PASSes went live. Rows that
+**reached** the gate published at 53% (9/17); rows that never reached it published at 7.9% (7/89).
+The gate that runs works; the problem this sweep fixes is coverage, not the gate's judgment.
 
 **Also sweep fanned-out video rows (ticket #3733).** List Instagram `pending_review` drafts
 (`{op:'list', status:'draft', reviewStatus:'pending_review'}`) and gate any row carrying a
@@ -1236,10 +1340,15 @@ so consume them there rather than treating them as someone else's mail:
   `applied` with a note saying it aged past the what's-new window without a slot (that is the
   system deciding, which is the point; it is not a failure). Do this for up to 5 aged rows per run
   so the queue converges instead of growing at the detectors' filing rate.
-- Until the `RUN_CLOSE_KINDS` change (PR opened 2026-08-19) is merged by the owner, the `applied`
-  transition on a `campaign`/`promo` row returns 409. On a 409, leave a `note` op on the row with
-  the draft id and move on; do not treat the 409 as an error. Once the PR merges, the closes work
-  and this paragraph can be deleted.
+- **`campaign` and `promo` rows can be closed to `applied` by a run.** PR #789 (the
+  `RUN_CLOSE_KINDS` change) merged 2026-08-20 and added `campaign`/`promo` to the set a run may
+  transition (`app/lib/team.server.ts:1515`: `RUN_CLOSE_KINDS = ['process', 'strategy', 'campaign',
+  'promo']`), verified against `main` on 2026-08-25. The `applied` transition works as the rest of
+  this step describes; there is no 409 to route around. This paragraph used to tell you to expect
+  one and stayed that way for five days after the merge that made it wrong: a runtime-loaded doc
+  going stale behind a shipped fix is a recurring failure class here, so treat any "pending PR"
+  caveat left in this file as suspect once its stated merge date has passed, and check the code
+  before routing around a gate that may no longer exist.
 
 `instructions` and `code` rows still have their own executors (agent-editor, R-DEV) and are never
 yours to end. Note them instead.
