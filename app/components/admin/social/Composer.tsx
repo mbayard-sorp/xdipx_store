@@ -19,6 +19,7 @@ import { useStudioShortcuts } from './use-shortcuts'
 import { LINKEDIN_CAPTION_MAX, PLATFORM_LABELS, platformCaptionLength, captionOverPlatformLimit } from './types'
 import { X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
 import { laZoneAbbrev } from '~/lib/social-schedule-ui'
+import { applyOwnerFeedback } from './apply-owner-feedback'
 import { ClockIcon, UndoIcon } from './icons'
 import type { StoredGateFinding } from '~/lib/social-gate-status'
 
@@ -34,6 +35,11 @@ export interface ComposerInitial {
   scheduledDate: string
   scheduledTime: string
   feedback: string
+  /** Ticket #5414: carried through so "Apply my feedback now" can file a
+      reworked row that keeps the durable "what does this image depict"
+      record, instead of dropping it. */
+  imageBrief: string | null
+  subject: string | null
   status: string
   reviewStatus: string
   gateStatus: string | null
@@ -79,6 +85,13 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
   const [feedback, setFeedback] = useState(initial.feedback)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [regen, setRegen] = useState<{ slide: ComposerSlide | null } | null>(null)
+  // Ticket #5414: "Apply my feedback now" in the inspector, beside the gate
+  // panel. Own state (not a fetcher) because it chains rework-caption,
+  // optionally regenerate-image, then create-rework-row and needs to await
+  // each step's JSON before firing the next.
+  const [applying, setApplying] = useState(false)
+  const [applyResult, setApplyResult] = useState<{ ok: boolean; id?: number; error?: string } | null>(null)
+  const [alsoRegenerateImage, setAlsoRegenerateImage] = useState(false)
 
   const captionLength = platformCaptionLength(platform, caption)
   const overLimit = captionOverPlatformLimit(platform, caption) || (platform === 'instagram' && caption.length > IG_SOFT_MAX)
@@ -118,6 +131,30 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
       },
       { method: 'post' },
     )
+  }
+
+  // Ticket #5414: judges the saved row, same as GateVerdictPanel's "Run gate"
+  // (dirty disables it, save the draft first) — the rework functions load the
+  // post from the DB by id, not from what's in this form.
+  const canApplyFeedback = postId != null && !dirty && !applying && feedback.trim().length > 0
+
+  async function applyFeedbackNow() {
+    if (postId == null || !feedback.trim()) return
+    setApplying(true)
+    setApplyResult(null)
+    try {
+      const result = await applyOwnerFeedback({
+        postId,
+        feedback: feedback.trim(),
+        alsoRegenerateImage,
+        mediaUrls: slides.map(s => s.url),
+        imageBrief: initial.imageBrief,
+        subject: initial.subject,
+      })
+      setApplyResult(result)
+    } finally {
+      setApplying(false)
+    }
   }
 
   function openPicker() {
@@ -274,6 +311,57 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
             gateFindings={initial.gateFindings}
             dirty={dirty}
           />
+
+          {/* Ticket #5414: the instant path for the "Note for the team" box
+              above, instead of waiting for the drafting routine's next
+              14:00/22:00 UTC pass. Files a fresh pending_review row
+              (reworkedFrom this one); never approves or publishes it. */}
+          <section aria-label="Apply feedback now" className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-3">Apply my feedback now</h3>
+            <label className="inline-flex items-center gap-2 text-xs text-ink-3">
+              <input
+                type="checkbox"
+                checked={alsoRegenerateImage}
+                onChange={e => setAlsoRegenerateImage(e.target.checked)}
+                disabled={applying}
+                className="w-4 h-4 rounded border-line text-coral focus:ring-coral/30"
+              />
+              Also regenerate the image (bills the social team's image budget)
+            </label>
+            <button
+              type="button"
+              onClick={applyFeedbackNow}
+              disabled={!canApplyFeedback}
+              title={
+                postId == null
+                  ? 'Save the draft first'
+                  : dirty
+                    ? 'Save your edits first; the rework reads the saved row'
+                    : !feedback.trim()
+                      ? 'Write a note for the team above first'
+                      : undefined
+              }
+              className="min-h-11 w-full px-4 rounded-full bg-plum-soft text-plum text-sm font-semibold hover:bg-plum-soft/70 disabled:opacity-50"
+            >
+              {applying ? 'Applying' : 'Apply my feedback now ♥'}
+            </button>
+            {postId == null && <p className="text-xs text-ink-3">Save the draft to rework it from your note.</p>}
+            {dirty && postId != null && (
+              <p className="text-xs text-amber-800">Unsaved edits. Save, then apply so it reworks what you see.</p>
+            )}
+            {applyResult?.ok === false && (
+              <p className="text-xs text-red-700">{applyResult.error ?? 'Could not apply your feedback.'}</p>
+            )}
+            {applyResult?.ok && applyResult.id != null && (
+              <p className="text-xs text-[#4F6150]">
+                Applied. Reworked as{' '}
+                <Link to={`/admin/socials/compose/${applyResult.id}`} className="font-semibold hover:underline">
+                  #{applyResult.id}
+                </Link>
+                , waiting on you in the queue.
+              </p>
+            )}
+          </section>
         </aside>
       </div>
 
