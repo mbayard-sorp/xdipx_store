@@ -143,6 +143,34 @@ Still outstanding: smoke-test by firing Weekly Strategy manually (`fire_trigger`
 after. The weekly strategy routine's coverage check now derives its scope from the routine table in this
 file (see `routine-weekly-strategy.md` step 4), so a routine added here is watched automatically.
 
+### Run-start reconciliation
+
+Because every run row — succeeded, skipped, or duplicate — burns a run-cap slot (see above), a
+duplicate `start` call is not free: it costs a slot and files a spurious sibling that then skips
+`run_in_progress`. This happens even without operator error, because `POST /api/team/run` can return
+a **transport/connection error** (curl `Connection reset by peer` / `SSL_ERROR_SYSCALL`, a dropped
+socket) to the client *after* the server has already created the run row. A blind retry then files a
+second row. Named strikes in one 7-day window: run 470 ("Duplicate run created by a client-side
+output glitch") → 471 skipped `run_in_progress`; run 404 ("Accidental duplicate start call during
+R-QA session setup").
+
+**The rule, at every routine's run-start block:** if the `op:'start'` POST returns a
+**transport/connection error** (not a clean HTTP 4xx), do **not** blind-retry the start. First
+reconcile:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/run" -H "x-team-secret: $TEAM_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"op":"list","team":"<team>","status":"running","sinceDays":1}'
+```
+
+If a `running` row for this `runType` already exists from the last few minutes, **adopt its `id`** as
+`$RUN_ID` instead of starting again; only start a fresh run when no such row exists. A clean HTTP 4xx
+is a real rejection and is handled normally (fix the request); this reconciliation is only for the
+ambiguous transport failure where the row may or may not have been created. (A more robust
+alternative — making `startRun` idempotent per team+runType within a short window — edits the
+protected `app/lib/team.server.ts`; this docs rule is the lower-risk lever and applies today.)
+
 ## Common prompt skeleton
 
 Every prompt below follows the same shape: work in the xdipx_store repo; read the binding mission

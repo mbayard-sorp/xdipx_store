@@ -43,6 +43,11 @@ rules; the charter wins.
 bash scripts/team-api.sh POST team/run '{"op":"start","team":"product","runType":"enrich"}'   # → $RUN_ID
 ```
 
+If this POST returns a transport/connection error (not a clean HTTP 4xx), do not blind-retry:
+reconcile first per `routine-schedule.md` §Run-start reconciliation (list `status:"running"` and
+adopt an existing `enrich` row from the last few minutes rather than filing a duplicate that burns a
+run-cap slot).
+
 ## Step 1: Gate
 
 ```bash

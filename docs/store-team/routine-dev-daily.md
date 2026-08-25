@@ -30,7 +30,10 @@ em-dashes, additive-only Sanity schema).
 
 ## Step 0 — Gate + start
 
-1. `POST /api/team/run {"op":"start","team":"strategy","runType":"dev"}` → `$RUN_ID`.
+1. `POST /api/team/run {"op":"start","team":"strategy","runType":"dev"}` → `$RUN_ID`. If this POST
+   returns a transport/connection error (not a clean HTTP 4xx), do not blind-retry: reconcile first
+   per `routine-schedule.md` §Run-start reconciliation (list `status:"running"` and adopt an existing
+   `dev` row from the last few minutes rather than filing a duplicate that burns a run-cap slot).
 2. `GET /api/team/gate?team=strategy&excludeRun=$RUN_ID`. On `ok:false` → post a skipped event,
    finish the run honestly, exit cleanly. Do not work around a closed gate.
 
