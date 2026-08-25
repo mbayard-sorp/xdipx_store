@@ -53,6 +53,7 @@ export function blankInitial(platform = 'instagram', slides: ComposerSlide[] = [
   return {
     platform, caption: '', slides, product: null, castSlugs: [],
     scheduledDate: '', scheduledTime: '', feedback: '',
+    imageBrief: null, subject: null,
     status: 'draft', reviewStatus: 'pending_review',
     gateStatus: null, gateCheckedAt: null, gateFindings: null, createdBy: null, updatedAt: null,
   }
@@ -76,6 +77,8 @@ export function initialFromPost(post: ComposerPost, product: PickedProduct | nul
     scheduledDate: wall?.date ?? row.scheduledFor ?? '',
     scheduledTime: wall?.time ?? '',
     feedback: row.feedback ?? '',
+    imageBrief: row.imageBrief ?? null,
+    subject: row.subject ?? null,
     status: row.status,
     reviewStatus: row.reviewStatus,
     gateStatus: row.gateStatus ?? null,

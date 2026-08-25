@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useFetcher, useBlocker, Link } from 'react-router'
+import { useFetcher, useBlocker, useRevalidator, Link } from 'react-router'
 import {
   PLATFORM_LABELS,
   LINKEDIN_CAPTION_MAX,
@@ -11,6 +11,7 @@ import {
 import { X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
 import { splitGateStamp, STAMP_RE } from '~/lib/gate-stamp'
 import { formatWaitingAge, formatNextReworkPass } from '~/lib/social-schedule-ui'
+import { applyOwnerFeedback } from './apply-owner-feedback'
 import { PenIcon } from './icons'
 
 /**
@@ -84,6 +85,7 @@ export function PostPreviewCard({
   const fetcher = useFetcher<{ ok: boolean; error?: string }>()
   const postFetcher = useFetcher<{ ok: boolean; error?: string; stub?: boolean }>()
   const saveFetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const revalidator = useRevalidator()
   const [caption, setCaption] = useState(post.editedText ?? post.tweetText)
   // The owner edits only their own note. The gate's stamp paragraph is
   // machine-written and shown read-only below; it must never round-trip
@@ -92,11 +94,19 @@ export function PostPreviewCard({
   const [feedback, setFeedback] = useState(gateStamp.rest ?? '')
   const [feedbackError, setFeedbackError] = useState(false)
   const [confirmReject, setConfirmReject] = useState(false)
+  // Ticket #5414: "Apply my feedback now" reworks the caption (and,
+  // optionally, the image) from the feedback box above right now, instead of
+  // waiting for the drafting routine's next 14:00/22:00 UTC pass. Its own
+  // busy/result state, not a fetcher, because it chains multiple requests
+  // (see apply-owner-feedback.ts) and needs to await each step's JSON.
+  const [applying, setApplying] = useState(false)
+  const [applyResult, setApplyResult] = useState<{ ok: boolean; id?: number; error?: string } | null>(null)
+  const [alsoRegenerateImage, setAlsoRegenerateImage] = useState(false)
 
   const isSubmitting = fetcher.state !== 'idle'
   const posting = postFetcher.state !== 'idle'
   const saving = saveFetcher.state !== 'idle'
-  const busy = isSubmitting || posting || saving
+  const busy = isSubmitting || posting || saving || applying
   const media = mediaRefsOf(post)
   const edited = caption.trim() !== post.tweetText.trim()
 
@@ -162,6 +172,33 @@ export function PostPreviewCard({
       { intent: post.platform === 'x' ? 'post-approved-draft' : 'post-media', postId: String(post.id) },
       { method: 'post' },
     )
+  }
+
+  async function applyFeedbackNow() {
+    if (!feedback.trim()) {
+      setFeedbackError(true)
+      return
+    }
+    setFeedbackError(false)
+    setApplying(true)
+    setApplyResult(null)
+    try {
+      const result = await applyOwnerFeedback({
+        postId: post.id,
+        feedback: feedback.trim(),
+        alsoRegenerateImage,
+        mediaUrls: post.mediaUrls ?? [],
+        imageBrief: post.imageBrief ?? null,
+        subject: post.subject ?? null,
+      })
+      setApplyResult(result)
+      // Not a fetcher submission (this chains several requests), so nothing
+      // revalidates the loader on its own; do it explicitly so the source
+      // row's "Reworked as #id" link and the queue both pick up the new row.
+      if (result.ok) revalidator.revalidate()
+    } finally {
+      setApplying(false)
+    }
   }
 
   if (postFetcher.data?.ok) {
@@ -317,6 +354,19 @@ export function PostPreviewCard({
                 {gateStamp.stamp}
               </p>
             )}
+            {/* Ticket #5414: the instant path beside "Send back for changes"
+                below. Owner feedback used to only reach the pipeline through
+                the drafting routine's next 14:00/22:00 UTC pass. */}
+            <label className="mt-2 inline-flex items-center gap-2 text-xs text-ink-3">
+              <input
+                type="checkbox"
+                checked={alsoRegenerateImage}
+                onChange={e => setAlsoRegenerateImage(e.target.checked)}
+                disabled={busy}
+                className="w-4 h-4 rounded border-line text-coral focus:ring-coral/30"
+              />
+              Also regenerate the image from this feedback (bills the social team's image budget)
+            </label>
           </div>
 
           {/* Ticket #5425: a stale REVISE/BLOCK on this row is a downgraded FACT
@@ -386,6 +436,19 @@ export function PostPreviewCard({
             >
               Send back for changes
             </button>
+            {/* Ticket #5414: acts on the feedback box above right now instead
+                of waiting for the drafting routine's next pass. Files a fresh
+                pending_review row (reworkedFrom this one); never approves or
+                publishes it. */}
+            <button
+              type="button"
+              onClick={applyFeedbackNow}
+              disabled={busy}
+              title="Rework this draft from your feedback now, without waiting for the team's next run"
+              className="px-4 py-2 bg-plum-soft text-plum rounded-full text-sm font-semibold hover:bg-plum-soft/70 transition-colors disabled:opacity-50"
+            >
+              {applying ? 'Applying' : 'Apply my feedback now ♥'}
+            </button>
             {confirmReject ? (
               <span className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-red-200 bg-red-50">
                 <span className="text-xs text-red-700">Terminal. Cannot be reworked or reconsidered.</span>
@@ -427,6 +490,18 @@ export function PostPreviewCard({
           )}
           {postFetcher.data?.ok === false && (
             <p className="text-xs text-red-500">{postFetcher.data.error ?? 'Something went wrong.'}</p>
+          )}
+          {applyResult?.ok === false && (
+            <p className="text-xs text-red-500">{applyResult.error ?? 'Could not apply your feedback.'}</p>
+          )}
+          {applyResult?.ok && applyResult.id != null && (
+            <p className="text-xs text-[#4F6150]">
+              Applied. Reworked as{' '}
+              <Link to={`/admin/socials/compose/${applyResult.id}`} className="font-semibold hover:underline">
+                #{applyResult.id}
+              </Link>
+              , waiting on you in the queue.
+            </p>
           )}
         </div>
       </div>
