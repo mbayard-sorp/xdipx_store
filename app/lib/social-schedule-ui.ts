@@ -39,3 +39,46 @@ export function formatLaWallClock(iso: string | Date | null | undefined): string
   if (Number.isNaN(at.getTime())) return null
   return formatLaSlot(at)
 }
+
+/**
+ * The two daily UTC times the drafting routine's rework pass runs (ticket
+ * #5415: "I respond with revisions, but I don't know when the revisions are
+ * happening"). A `needs_changes` row is picked up at whichever of these comes
+ * next, not on some indeterminate schedule.
+ */
+export const REWORK_PASS_UTC_HOURS = [14, 22] as const
+
+/** The next 14:00 or 22:00 UTC at or after `now`. */
+export function nextReworkPassUtc(now: Date = new Date()): Date {
+  for (const h of REWORK_PASS_UTC_HOURS) {
+    const candidate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), h, 0, 0, 0))
+    if (candidate.getTime() > now.getTime()) return candidate
+  }
+  // Both passes today have already run; the first pass tomorrow.
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+  return new Date(Date.UTC(
+    tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(),
+    REWORK_PASS_UTC_HOURS[0], 0, 0, 0,
+  ))
+}
+
+/** "next pass in 3h" style label for a rework-pass instant, relative to `now`. */
+export function formatNextReworkPass(now: Date = new Date()): string {
+  const next = nextReworkPassUtc(now)
+  const hours = (next.getTime() - now.getTime()) / 3_600_000
+  const label = hours < 1 ? 'under an hour' : `${Math.round(hours)}h`
+  return `next pass in ${label}`
+}
+
+/** "3h", "2d" waiting age for a timestamp, coarse on purpose. Null when unparseable. */
+export function formatWaitingAge(from: string | Date | null | undefined, now: Date = new Date()): string | null {
+  if (!from) return null
+  const at = from instanceof Date ? from : new Date(from)
+  if (Number.isNaN(at.getTime())) return null
+  const ms = now.getTime() - at.getTime()
+  if (ms < 0) return null
+  const hours = ms / 3_600_000
+  if (hours < 1) return '<1h'
+  if (hours < 24) return `${Math.round(hours)}h`
+  return `${Math.round(hours / 24)}d`
+}

@@ -729,10 +729,42 @@ export function parseReworkInput(raw: unknown): ReworkParse {
   return { ok: true, input }
 }
 
+/**
+ * Ticket #5415: preserve a bounced row's `feedback` as readable, resolved
+ * history instead of nulling it. Nulling destroyed the instruction the
+ * moment it was satisfied, which is exactly the text the owner just wrote and
+ * the gate's own `owner-feedback-unmet` check (`.claude/agents/
+ * social-publish-gate.md`) reads back off the row through `reworkedFrom`.
+ *
+ * The stamp header (`[publish-gate REVISE by ... ]`) is stripped from the
+ * preserved copy before it is prefixed, because `STAMP_RE` matches at any
+ * line start (the burn-in fallback readers depend on that) and `gate_status`
+ * is cleared by this same write, so a surviving header would let a stale
+ * REVISE stamp resurrect itself as the row's live verdict the next time
+ * something falls back to parsing `feedback`. Only the notes paragraph, the
+ * actual instruction, carries forward.
+ */
+export function markFeedbackAddressed(
+  feedback: string | null | undefined,
+  now: Date,
+): string | null {
+  const trimmed = (feedback ?? '').trim()
+  if (!trimmed) return null
+  const day = now.toISOString().slice(0, 10)
+  const { stamp, rest } = splitGateStamp(trimmed)
+  if (!stamp) {
+    // No recognizable machine-stamp shape; the whole text is the note.
+    return `[addressed by rework on ${day}] ${trimmed}`
+  }
+  const notes = stamp.replace(STAMP_RE, '').trim() || stamp
+  const historic = `[addressed by rework on ${day}] ${notes}`
+  return rest ? `${historic}\n\n${rest}` : historic
+}
+
 export interface ReworkPatch {
   status: 'draft'
   reviewStatus: 'pending_review'
-  feedback: null
+  feedback: string | null
   reviewedBy: null
   reviewedAt: null
   /** Cleared with the stamp (#4913): a reworked row has no verdict until the gate looks again. */
@@ -803,16 +835,21 @@ export async function reworkSocialPost(
     }
   }
 
+  const now = deps.now?.() ?? new Date()
   const patch: ReworkPatch = {
     status: 'draft',
     reviewStatus: 'pending_review',
-    feedback: null,
+    // Ticket #5415: this used to null `feedback` the moment a REVISE was
+    // satisfied, destroying the instruction the owner just read and the one
+    // the gate's own `owner-feedback-unmet` check reads back off the row.
+    // Preserved as addressed history instead, see `markFeedbackAddressed`.
+    feedback: markFeedbackAddressed(post.feedback, now),
     reviewedBy: null,
     reviewedAt: null,
     gateStatus: null,
     gateCheckedAt: null,
     gateFindings: null,
-    updatedAt: deps.now?.() ?? new Date(),
+    updatedAt: now,
     ...(input.mediaUrls !== undefined ? { mediaUrls: input.mediaUrls } : {}),
     ...(input.tweetText !== undefined ? { tweetText: input.tweetText } : {}),
     ...(input.altText !== undefined ? { altText: input.altText } : {}),

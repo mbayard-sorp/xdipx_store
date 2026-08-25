@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useFetcher } from 'react-router'
+import { useEffect, useState } from 'react'
+import { useFetcher, useBlocker, Link } from 'react-router'
 import {
   PLATFORM_LABELS,
   LINKEDIN_CAPTION_MAX,
@@ -9,7 +9,24 @@ import {
   type SocialPostRow,
 } from './types'
 import { X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
-import { splitGateStamp } from '~/lib/gate-stamp'
+import { splitGateStamp, STAMP_RE } from '~/lib/gate-stamp'
+import { formatWaitingAge, formatNextReworkPass } from '~/lib/social-schedule-ui'
+import { PenIcon } from './icons'
+
+/**
+ * Client-safe gate-BLOCK read (ticket #5412c). Checks the `gate_status`
+ * column first, falling through to the legacy stamp only when it is null
+ * (same precedence as `effectiveGateStatus`, which is server-only and cannot
+ * be imported here). Deliberately keys off the BLOCK case specifically
+ * rather than "status is not pass": a future `gate_status` value that is
+ * neither ("owner", ticket #5425 in flight) must never be treated as a
+ * block just because it also is not an agent PASS.
+ */
+export function isGateBlocked(post: Pick<SocialPostRow, 'gateStatus' | 'feedback'>): boolean {
+  if (post.gateStatus) return post.gateStatus === 'block'
+  const m = STAMP_RE.exec(post.feedback ?? '')
+  return m?.[1] === 'BLOCK'
+}
 
 /** Image or muted-preview video, same box either way. */
 export interface MediaRef { url: string; video: boolean; poster: string | null }
@@ -56,8 +73,17 @@ function MediaBox({ media, className }: { media: MediaRef; className: string }) 
  * Feedback is sent back to the social team verbatim on its next run; caption
  * edits are saved as editedText and diffed by the team as silent feedback.
  */
-export function PostPreviewCard({ post }: { post: SocialPostRow }) {
+export function PostPreviewCard({
+  post,
+  reworkedInto,
+}: {
+  post: SocialPostRow
+  /** Ticket #5415: ids of rows that reworked THIS one, the parent->child direction. */
+  reworkedInto?: number[] | undefined
+}) {
   const fetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const postFetcher = useFetcher<{ ok: boolean; error?: string; stub?: boolean }>()
+  const saveFetcher = useFetcher<{ ok: boolean; error?: string }>()
   const [caption, setCaption] = useState(post.editedText ?? post.tweetText)
   // The owner edits only their own note. The gate's stamp paragraph is
   // machine-written and shown read-only below; it must never round-trip
@@ -65,15 +91,44 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
   const gateStamp = splitGateStamp(post.feedback)
   const [feedback, setFeedback] = useState(gateStamp.rest ?? '')
   const [feedbackError, setFeedbackError] = useState(false)
+  const [confirmReject, setConfirmReject] = useState(false)
 
   const isSubmitting = fetcher.state !== 'idle'
+  const posting = postFetcher.state !== 'idle'
+  const saving = saveFetcher.state !== 'idle'
+  const busy = isSubmitting || posting || saving
   const media = mediaRefsOf(post)
   const edited = caption.trim() !== post.tweetText.trim()
+
+  // Ticket #5418(a): a save-caption action distinct from the review decision
+  // needs its own "did the caption actually change" baseline, against the
+  // saved value (editedText when present) rather than always the original
+  // tweetText. A successful save revalidates the loader, which refreshes
+  // `post.editedText` and so `savedCaption`, clearing this back to false; it
+  // must go dirty again on the next real edit, so it is not latched by
+  // `saveFetcher.data` staying truthy after that first save.
+  const savedCaption = (post.editedText ?? post.tweetText).trim()
+  const captionDirty = caption.trim() !== savedCaption
+  const blocker = useBlocker(captionDirty)
+
+  // Hard navigation (reload, tab close) is not something useBlocker can stop;
+  // this is the browser-native half of the same unsaved-changes guard.
+  useEffect(() => {
+    if (!captionDirty) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [captionDirty])
 
   // Counted the way the platform counts: on X every link costs a flat 23
   // characters, so a two-link caption is far shorter to X than `.length` says.
   const captionLength = platformCaptionLength(post.platform, caption)
   const overLimit = captionOverPlatformLimit(post.platform, caption)
+  const gateBlocked = isGateBlocked(post)
+  const needsMedia = post.platform !== 'x' && media.length === 0
+  const canPostNow = !gateBlocked && !needsMedia && !overLimit
+  const waitingSince = post.reviewStatus === 'needs_changes' ? formatWaitingAge(post.reviewedAt) : null
+  const nextPass = post.reviewStatus === 'needs_changes' ? formatNextReworkPass() : null
 
   function submit(decision: 'approved' | 'needs_changes' | 'rejected') {
     if (decision === 'needs_changes' && !feedback.trim()) {
@@ -93,13 +148,37 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
     )
   }
 
+  function saveCaption() {
+    if (!caption.trim() || caption.trim() === savedCaption) return
+    saveFetcher.submit(
+      { intent: 'save-caption', postId: String(post.id), caption: caption.trim() },
+      { method: 'post' },
+    )
+  }
+
+  function postNow() {
+    if (!canPostNow) return
+    postFetcher.submit(
+      { intent: post.platform === 'x' ? 'post-approved-draft' : 'post-media', postId: String(post.id) },
+      { method: 'post' },
+    )
+  }
+
+  if (postFetcher.data?.ok) {
+    return (
+      <div className="rounded-2xl border border-line bg-paper-2 p-4 text-sm text-ink-3">
+        {PLATFORM_LABELS[post.platform] ?? post.platform} draft #{post.id}: <span className="font-semibold text-ink">posted</span>
+      </div>
+    )
+  }
+
   if (fetcher.data?.ok) {
     const decided = (fetcher.formData?.get('decision') as string | null) ?? 'reviewed'
     return (
       <div className="rounded-2xl border border-line bg-paper-2 p-4 text-sm text-ink-3">
         {PLATFORM_LABELS[post.platform] ?? post.platform} draft #{post.id}:{' '}
         <span className="font-semibold text-ink">{decided.replace('_', ' ')}</span>
-        {decided === 'needs_changes' && ' — the team will rework it next run.'}
+        {decided === 'needs_changes' && '. The team will rework it next run.'}
       </div>
     )
   }
@@ -116,13 +195,34 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
           </span>
         )}
         {post.reworkedFrom && (
-          <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-plum-soft text-plum">
+          <Link
+            to={`/admin/socials/compose/${post.reworkedFrom}`}
+            className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-plum-soft text-plum hover:underline"
+          >
             Rework of #{post.reworkedFrom}
-          </span>
+          </Link>
         )}
+        {(reworkedInto ?? []).map(childId => (
+          <Link
+            key={childId}
+            to={`/admin/socials/compose/${childId}`}
+            className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-sage/20 text-sage hover:underline"
+          >
+            Reworked as #{childId}
+          </Link>
+        ))}
         {post.reviewStatus === 'needs_changes' && (
           <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
             Changes requested
+          </span>
+        )}
+        {/* Ticket #5415(a): "I respond with revisions, but I don't know when
+            the revisions are happening." How long the owner's own feedback
+            has been waiting, and when the drafting routine's next rework
+            pass runs (14:00 / 22:00 UTC). */}
+        {post.reviewStatus === 'needs_changes' && (waitingSince || nextPass) && (
+          <span className="text-[11px] text-ink-4 font-mono">
+            {waitingSince && `waiting ${waitingSince}`}{waitingSince && nextPass ? ', ' : ''}{nextPass}
           </span>
         )}
       </div>
@@ -158,8 +258,44 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
               ) : (
                 <span className="text-xs text-ink-4">{captionLength} chars</span>
               )}
-              {edited && <span className="text-xs text-plum font-medium">Edited — saved with your decision</span>}
+              {edited && <span className="text-xs text-plum font-medium">Edited. Saved with your decision.</span>}
             </div>
+            {/* Ticket #5418(a): the caption textarea used to be reachable
+                only through Approve/Request changes/Reject; a caption typed
+                and then navigated away from was gone. Save persists
+                editedText alone, with no review decision attached. */}
+            {captionDirty && (
+              <div className="mt-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={saveCaption}
+                  disabled={saving}
+                  className="text-xs font-semibold text-ink hover:underline disabled:opacity-50"
+                >
+                  {saving ? 'Saving' : 'Save caption'}
+                </button>
+                <span className="font-mono text-[11px] text-ink-4">unsaved</span>
+              </div>
+            )}
+            {saveFetcher.data?.ok === false && (
+              <p className="text-xs text-red-500 mt-1">{saveFetcher.data.error}</p>
+            )}
+            {saveFetcher.data?.ok && !captionDirty && (
+              <p className="text-xs text-[#4F6150] mt-1">Caption saved.</p>
+            )}
+            {blocker.state === 'blocked' && (
+              <div role="alertdialog" className="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+                <p>This caption has unsaved changes.</p>
+                <div className="mt-1.5 flex items-center gap-3">
+                  <button type="button" onClick={() => blocker.proceed?.()} className="font-semibold hover:underline">
+                    Leave without saving
+                  </button>
+                  <button type="button" onClick={() => blocker.reset?.()} className="hover:underline">
+                    Keep editing
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -213,29 +349,84 @@ export function PostPreviewCard({ post }: { post: SocialPostRow }) {
             <button
               onClick={() => submit('approved')}
               data-review="approved"
-              disabled={isSubmitting || overLimit}
+              disabled={busy || overLimit}
               className="px-4 py-2 bg-coral text-white rounded-full text-sm font-semibold hover:bg-coral-2 transition-colors disabled:opacity-50"
             >
-              {isSubmitting ? 'Saving…' : 'Approve'}
+              {isSubmitting ? 'Saving' : 'Approve'}
             </button>
+            {/* Ticket #5412(c): Post now beside Approve, so a click performs
+                the approval and publishes in one step. Disabled with a
+                visible reason on a gate BLOCK (never overridable, ticket
+                #3895) or on a media-less non-X draft. */}
+            <button
+              type="button"
+              onClick={postNow}
+              disabled={busy || !canPostNow}
+              title={
+                gateBlocked
+                  ? 'Gate BLOCK: this draft cannot be published. Clone it to a fresh draft instead (History tab once rejected).'
+                  : needsMedia ? 'This draft has no image or video yet'
+                  : overLimit ? `Caption is over the ${PLATFORM_LABELS[post.platform] ?? post.platform} limit`
+                  : undefined
+              }
+              className="px-4 py-2 bg-ink text-white rounded-full text-sm font-semibold hover:bg-ink-2 transition-colors disabled:opacity-50"
+            >
+              {posting ? 'Posting' : 'Post now'}
+            </button>
+            {/* Ticket #5416(a): "Send back for changes" is the primary
+                revision action (it already existed as the needs_changes
+                decision, just not the prominent one). Reject is kept for
+                "this should never run" and is terminal: a confirm names that
+                plainly before it fires. */}
             <button
               onClick={() => submit('needs_changes')}
               data-review="needs_changes"
-              disabled={isSubmitting}
-              className="px-4 py-2 bg-paper-2 text-ink rounded-full text-sm font-medium border border-line hover:border-amber-400 hover:text-amber-700 transition-colors disabled:opacity-50"
+              disabled={busy}
+              className="px-4 py-2 bg-amber-50 text-amber-800 rounded-full text-sm font-semibold border border-amber-300 hover:bg-amber-100 transition-colors disabled:opacity-50"
             >
-              Request changes
+              Send back for changes
             </button>
-            <button
-              onClick={() => submit('rejected')}
-              disabled={isSubmitting}
-              className="px-4 py-2 bg-paper-2 text-ink-3 rounded-full text-sm font-medium border border-line hover:border-red-300 hover:text-red-600 transition-colors disabled:opacity-50"
+            {confirmReject ? (
+              <span className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-red-200 bg-red-50">
+                <span className="text-xs text-red-700">Terminal. Cannot be reworked or reconsidered.</span>
+                <button
+                  onClick={() => submit('rejected')}
+                  disabled={busy}
+                  className="text-xs font-semibold text-red-700 hover:underline disabled:opacity-50"
+                >
+                  Confirm reject
+                </button>
+                <button type="button" onClick={() => setConfirmReject(false)} className="text-xs text-ink-4 hover:underline">
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmReject(true)}
+                disabled={busy}
+                className="px-4 py-2 bg-paper-2 text-ink-3 rounded-full text-sm font-medium border border-line hover:border-red-300 hover:text-red-600 transition-colors disabled:opacity-50"
+              >
+                Reject
+              </button>
+            )}
+            {/* Ticket #5417(b): the Composer has controls this card does not
+                (media, product link, schedule); before this, fixing any of
+                those on a pending/needs-changes draft meant approving it
+                first or hand-typing the URL. */}
+            <Link
+              to={`/admin/socials/compose/${post.id}`}
+              className="inline-flex items-center gap-1 px-3 py-2 text-ink-3 rounded-full text-sm font-medium hover:text-ink"
+              title="Open in the Composer for media, product, or schedule changes"
             >
-              Reject
-            </button>
+              <PenIcon size={14} /> Edit
+            </Link>
           </div>
           {fetcher.data?.ok === false && (
             <p className="text-xs text-red-500">{fetcher.data.error ?? 'Something went wrong.'}</p>
+          )}
+          {postFetcher.data?.ok === false && (
+            <p className="text-xs text-red-500">{postFetcher.data.error ?? 'Something went wrong.'}</p>
           )}
         </div>
       </div>

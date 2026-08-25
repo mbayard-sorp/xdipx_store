@@ -14,6 +14,7 @@ import {
   PASS_NOTES_MIN,
   parseReworkInput,
   reworkSocialPost,
+  markFeedbackAddressed,
   preserveGateStamp,
   splitGateStamp,
   effectiveGateStatus,
@@ -466,8 +467,12 @@ describe('reworkSocialPost (#4351)', () => {
     expect(patch.status).toBe('draft')
     expect(patch.reviewStatus).toBe('pending_review')
     expect(patch.mediaUrls).toEqual([`${CDN}/reworked-lead.jpg`])
-    // The stale gate stamp is cleared so the row re-enters the queue clean.
-    expect(patch.feedback).toBeNull()
+    // Ticket #5415: the instruction is preserved as addressed history, not
+    // nulled, and the machine stamp header cannot resurrect as a live verdict.
+    expect(patch.feedback).not.toBeNull()
+    expect(patch.feedback).toContain('set-dressing mug')
+    expect(patch.feedback).toMatch(/^\[addressed by rework on \d{4}-\d{2}-\d{2}\]/)
+    expect(patch.feedback).not.toMatch(/^\[publish-gate/m)
     expect(patch.reviewedBy).toBeNull()
     expect(patch.reviewedAt).toBeNull()
     // And so are the gate columns (#4913): a reworked row has no verdict until
@@ -519,6 +524,46 @@ describe('reworkSocialPost (#4351)', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.status).toBe(409)
     expect(writes).toHaveLength(0)
+  })
+})
+
+describe('markFeedbackAddressed (#5415)', () => {
+  const NOW = new Date('2026-08-25T12:00:00Z')
+
+  it('returns null for empty or absent feedback', () => {
+    expect(markFeedbackAddressed(null, NOW)).toBeNull()
+    expect(markFeedbackAddressed('', NOW)).toBeNull()
+    expect(markFeedbackAddressed('   ', NOW)).toBeNull()
+  })
+
+  it('strips a real gate-stamp header but keeps its notes, prefixed as addressed', () => {
+    const stamped = formatGateStamp(
+      { verdict: 'REVISE', reviewer: 'social-publish-gate', notes: 'Drop the toy, add the cleaner.', productHandle: 'lace-set' },
+      new Date('2026-08-20T00:00:00Z'),
+    )
+    const out = markFeedbackAddressed(stamped, NOW)
+    expect(out).not.toBeNull()
+    expect(out).toContain('Drop the toy, add the cleaner.')
+    expect(out).toMatch(/^\[addressed by rework on 2026-08-25\]/)
+    // The machine header must not survive: a later fallback reader (STAMP_RE
+    // matches at any line start) must never re-parse this as a live verdict.
+    expect(out).not.toMatch(/^\[publish-gate/m)
+  })
+
+  it('carries an owner note that rode behind the stamp forward untouched', () => {
+    const stamped = formatGateStamp(
+      { verdict: 'REVISE', reviewer: 'social-publish-gate', notes: 'Too tame for the register.', productHandle: null },
+      new Date('2026-08-20T00:00:00Z'),
+    )
+    const withOwnerNote = `${stamped}\n\nOwner: also swap the backdrop.`
+    const out = markFeedbackAddressed(withOwnerNote, NOW)
+    expect(out).toContain('Owner: also swap the backdrop.')
+    expect(out).toContain('Too tame for the register.')
+  })
+
+  it('preserves free-text feedback that carries no recognizable stamp shape at all', () => {
+    const out = markFeedbackAddressed('Re-run with a cast member and a vibrator in their hand', NOW)
+    expect(out).toBe('[addressed by rework on 2026-08-25] Re-run with a cast member and a vibrator in their hand')
   })
 })
 

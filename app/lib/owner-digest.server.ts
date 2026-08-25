@@ -453,8 +453,19 @@ async function gatherAdCampaignQueue(): Promise<AdCampaignQueueRow[]> {
 /* ── Section 7: Ops watchdogs ──────────────────────────────────────────────── */
 
 export interface OpsWatchFacts {
-  /** Draft social posts awaiting review, and how old the oldest one is. */
-  socialDrafts: { count: number; oldestDays: number | null }
+  /**
+   * Draft social posts waiting on the owner, split by which side of the
+   * conversation owes the next move (ticket #5415). `awaitingReview` is
+   * `pending_review`: the owner has not looked yet. `awaitingRework` is
+   * `needs_changes`: the owner already gave feedback and the drafting
+   * routine owes the rework. Counting them together (the pre-#5415 shape)
+   * made the owner's own feedback increment a number that read as work HE
+   * owed.
+   */
+  socialDrafts: {
+    awaitingReview: { count: number; oldestDays: number | null }
+    awaitingRework: { count: number; oldestDays: number | null }
+  }
   /** Whether yesterday got a scheduled pricing recompute at all. */
   pricingBatchRows: number
   /** Hours since the newest enrichment row, or null when unknown. */
@@ -488,12 +499,20 @@ export interface OpsWatchFacts {
 export function renderOpsWatchSection(f: OpsWatchFacts): string {
   const parts: string[] = []
 
-  if (f.socialDrafts.count > 0) {
-    const old = f.socialDrafts.oldestDays ?? 0
+  const { awaitingReview, awaitingRework } = f.socialDrafts
+  if (awaitingReview.count > 0) {
+    const old = awaitingReview.oldestDays ?? 0
     const color = old >= 3 ? WARN : MUTED
-    parts.push(`<p style="margin:0 0 4px;color:${color};">${f.socialDrafts.count} social draft${f.socialDrafts.count === 1 ? '' : 's'} awaiting review${old > 0 ? `, oldest ${old} day${old === 1 ? '' : 's'}` : ''} &middot; /admin/socials${old >= 3 ? ' &mdash; the social team stops drafting while this backs up' : ''}</p>`)
+    parts.push(`<p style="margin:0 0 4px;color:${color};">${awaitingReview.count} social draft${awaitingReview.count === 1 ? '' : 's'} awaiting your review${old > 0 ? `, oldest ${old} day${old === 1 ? '' : 's'}` : ''} &middot; /admin/socials${old >= 3 ? ' &mdash; the social team stops drafting while this backs up' : ''}</p>`)
   } else {
-    parts.push(`<p style="margin:0 0 4px;color:${MUTED};">No social drafts waiting.</p>`)
+    parts.push(`<p style="margin:0 0 4px;color:${MUTED};">No social drafts awaiting your review.</p>`)
+  }
+  // Distinct from the line above on purpose (ticket #5415): this is the
+  // owner's OWN feedback waiting on the drafting routine's next rework pass,
+  // not more work he owes.
+  if (awaitingRework.count > 0) {
+    const old = awaitingRework.oldestDays ?? 0
+    parts.push(`<p style="margin:0 0 4px;color:${MUTED};">${awaitingRework.count} draft${awaitingRework.count === 1 ? '' : 's'} with your feedback awaiting rework${old > 0 ? `, oldest ${old} day${old === 1 ? '' : 's'}` : ''} &middot; /admin/socials</p>`)
   }
 
   parts.push(f.pricingBatchRows > 0
@@ -986,7 +1005,10 @@ async function gatherOwnerQueue(staleUndecided: number | null): Promise<OwnerQue
 
 async function gatherOpsWatch(): Promise<OpsWatchFacts> {
   const out: OpsWatchFacts = {
-    socialDrafts: { count: 0, oldestDays: null },
+    socialDrafts: {
+      awaitingReview: { count: 0, oldestDays: null },
+      awaitingRework: { count: 0, oldestDays: null },
+    },
     pricingBatchRows: 0,
     enrichmentAgeHours: null,
     strandedVerified: 0,
@@ -995,19 +1017,29 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
     purchaseCapiWriteFailures: 0,
   }
 
-  // Social review backlog. The social team stops drafting entirely once this
-  // builds up, so a silent backlog reads as a silent team.
+  // Social review backlog, split by which side owes the next move (#5415).
+  // The social team stops drafting entirely once this builds up, so a silent
+  // backlog reads as a silent team.
   try {
     const res = await db.execute(sql`
-      SELECT COUNT(*)::int AS n,
-             EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 86400 AS oldest_days
+      SELECT
+        COUNT(*) FILTER (WHERE review_status = 'pending_review')::int AS pending_n,
+        EXTRACT(epoch FROM now() - MIN(created_at) FILTER (WHERE review_status = 'pending_review'))::float8 / 86400 AS pending_oldest_days,
+        COUNT(*) FILTER (WHERE review_status = 'needs_changes')::int AS needs_n,
+        EXTRACT(epoch FROM now() - MIN(reviewed_at) FILTER (WHERE review_status = 'needs_changes'))::float8 / 86400 AS needs_oldest_days
         FROM social_posts
        WHERE status = 'draft' AND review_status IN ('pending_review', 'needs_changes')`)
     const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
     if (row) {
       out.socialDrafts = {
-        count: Number(row['n'] ?? 0),
-        oldestDays: row['oldest_days'] == null ? null : Math.round(Number(row['oldest_days'])),
+        awaitingReview: {
+          count: Number(row['pending_n'] ?? 0),
+          oldestDays: row['pending_oldest_days'] == null ? null : Math.round(Number(row['pending_oldest_days'])),
+        },
+        awaitingRework: {
+          count: Number(row['needs_n'] ?? 0),
+          oldestDays: row['needs_oldest_days'] == null ? null : Math.round(Number(row['needs_oldest_days'])),
+        },
       }
     }
   } catch (err) {

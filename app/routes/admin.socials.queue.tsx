@@ -41,6 +41,7 @@ import type { PublishMedia } from '~/lib/social-publish/types'
 import { decideManualPublish } from '~/lib/social-publish/manual-publish-gate.server'
 import { checkLinkedProductStock } from '~/lib/social-publish/stock-guard.server'
 import { effectiveGateStatus, preserveGateStamp, revertSocialPostToDraft } from '~/lib/social-publish-approve.server'
+import { cloneRejectedSocialPost } from '~/lib/social-publish-clone.server'
 import { resolvePostProductHandle } from '~/lib/social-publish/product-handle.server'
 import { formatLaWallClock } from '~/lib/social-schedule-ui'
 
@@ -93,6 +94,37 @@ async function recordManualPublish(
   await db.update(socialPosts)
     .set({ feedback: `${feedback ?? ''}${note}`.trim() })
     .where(eq(socialPosts.id, postId))
+}
+
+/**
+ * Ticket #5412: review states Post-now may publish from. Approved is here
+ * unchanged; pending_review and needs_changes are new, because the click now
+ * performs the approval instead of requiring it first.
+ */
+const POST_NOW_ELIGIBLE_REVIEW_STATUSES: readonly string[] = ['pending_review', 'needs_changes', 'approved']
+
+/**
+ * The owner's Post-now click performing its own approval (ticket #5412b).
+ *
+ * Routes through `reviewSocialPost`, the one write path that already refuses
+ * to approve a row carrying an unresolved gate BLOCK (`reason:'gate_block'`),
+ * so that hard stop is inherited here rather than re-implemented, and
+ * "gate BLOCK has no manual override" stays true on this path too. The
+ * current feedback/editedText are passed back verbatim so the write is a
+ * pure review-status transition: nothing about the row's content changes,
+ * so no gate stamp is burned and no edit is recorded.
+ */
+async function approveForPostNow(
+  post: { id: number; feedback: string | null; editedText: string | null },
+  by: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await reviewSocialPost(post.id, {
+    reviewStatus: 'approved',
+    reviewedBy: by,
+    feedback: post.feedback ?? undefined,
+    editedText: post.editedText ?? undefined,
+  })
+  return result.ok ? { ok: true } : { ok: false, error: result.error }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -200,12 +232,69 @@ export async function action({ request }: ActionFunctionArgs) {
     return result.ok ? { ok: true, intent: 'revert-to-draft' } : { ok: false, error: result.error }
   }
 
+  // ── Save caption without a review decision (ticket #5418a). The review
+  // card's textarea used to be reachable only through Approve/Request
+  // changes/Reject, so a better caption typed and then navigated away from
+  // was gone. This persists `editedText` alone, on any not-yet-posted draft,
+  // leaving review_status, feedback, and the gate columns untouched.
+  if (intent === 'save-caption') {
+    const postId = parseInt(form.get('postId') as string)
+    const caption = ((form.get('caption') as string | null) ?? '').trim()
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    if (!caption) return { ok: false, error: 'Caption cannot be empty' }
+    const [current] = await db
+      .select({ status: socialPosts.status, tweetText: socialPosts.tweetText })
+      .from(socialPosts)
+      .where(eq(socialPosts.id, postId))
+      .limit(1)
+    if (!current || current.status === 'posted') {
+      return { ok: false, error: 'Post not found or already posted' }
+    }
+    await db.update(socialPosts)
+      .set({
+        editedText: caption === current.tweetText.trim() ? null : caption,
+        updatedAt: new Date(),
+      })
+      .where(eq(socialPosts.id, postId))
+    return { ok: true, intent: 'save-caption' }
+  }
+
+  // ── Clone a rejected/gate-BLOCKed row into a fresh draft (ticket #5416b).
+  // The sanctioned escape from a terminal rejection: mints a NEW pending_review
+  // row (gate_status null, judged on its own merits) carrying the dead row's
+  // content forward with reworkedFrom pointing at it. Never re-verdicts the
+  // dead row and never lets the clone inherit an approved state.
+  if (intent === 'clone-to-new-draft') {
+    const postId = parseInt(form.get('postId') as string)
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    const result = await cloneRejectedSocialPost(postId, { by: await ownerLabel(request) })
+    return result.ok
+      ? { ok: true, intent: 'clone-to-new-draft', id: result.id }
+      : { ok: false, error: result.error }
+  }
+
   // ── Live posting: explicit owner clicks only ─────────────────────────────
+  //
+  // Ticket #5412: Post-now is reachable from a pending_review or
+  // needs_changes draft too, not only an already-approved one. The click
+  // PERFORMS the approval (via reviewSocialPost) rather than requiring it
+  // first, which inherits the gate-BLOCK hard stop for free: reviewSocialPost
+  // refuses a `gate_status='block'` row with `reason:'gate_block'`, and that
+  // refusal is returned as-is, before anything is published. An already-
+  // approved row round-trips its own feedback/editedText unchanged (no gate
+  // burn, since nothing about the content changed).
   if (intent === 'post-approved-draft') {
     const postId = parseInt(form.get('postId') as string)
     if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
     const [draft] = await db.select().from(socialPosts).where(eq(socialPosts.id, postId)).limit(1)
     if (!draft) return { ok: false, error: 'Post not found' }
+    if (draft.status !== 'draft' || !POST_NOW_ELIGIBLE_REVIEW_STATUSES.includes(draft.reviewStatus)) {
+      return { ok: false, error: 'Post must be a pending, needs-changes, or approved draft' }
+    }
+    if (draft.reviewStatus !== 'approved') {
+      const approve = await approveForPostNow(draft, await ownerLabel(request))
+      if (!approve.ok) return { ok: false, error: approve.error }
+    }
     // The durable stock guard the media path already ran, now on X too
     // (ticket #2212). It reads shopify_product_id, set at draft time.
     const draftStock = await checkLinkedProductStock(draft.shopifyProductId)
@@ -223,9 +312,13 @@ export async function action({ request }: ActionFunctionArgs) {
         .where(eq(socialPosts.id, postId))
       return { ok: false, error: `${draftStock.detail} Moved to Needs Changes.` }
     }
+    // Ticket #5412(e): the X path used to hardcode isVideo:false, so a
+    // video-bearing X draft (the video pipeline fans out to X too) was judged
+    // by still-image rules instead of its own.
+    const isVideo = draft.videoJobId != null || !!draft.mediaUrls?.[0]?.split('?')[0]?.endsWith('.mp4')
     const gate = await decideManualPublish(
       {
-        isVideo: false,
+        isVideo,
         platform: 'x',
         caption: draft.editedText?.trim() || draft.tweetText,
         mediaUrls: draft.mediaUrls,
@@ -245,8 +338,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const postId = parseInt(form.get('postId') as string)
     if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
     const [post] = await db.select().from(socialPosts).where(eq(socialPosts.id, postId)).limit(1)
-    if (!post || post.status !== 'draft' || post.reviewStatus !== 'approved') {
-      return { ok: false, error: 'Post must be an approved draft' }
+    if (!post || post.status !== 'draft' || !POST_NOW_ELIGIBLE_REVIEW_STATUSES.includes(post.reviewStatus)) {
+      return { ok: false, error: 'Post must be a pending, needs-changes, or approved draft' }
+    }
+    if (post.reviewStatus !== 'approved') {
+      const approve = await approveForPostNow(post, await ownerLabel(request))
+      if (!approve.ok) return { ok: false, error: approve.error }
     }
     const mediaUrls = post.mediaUrls ?? []
     const mediaUrl = mediaUrls[0]
@@ -370,6 +467,21 @@ export default function SocialsQueue() {
 
   const counts: Record<View, number> = { review: pending.length, approved: approved.length, history: history.length }
 
+  // Ticket #5415: the "Rework of #N" chip on a child row was already a
+  // one-way pointer; the parent showed nothing. Built once off the full
+  // loaded set (not just the visible tab) so a rejected parent in History
+  // links forward to whatever reworked it, wherever that landed.
+  const childrenByParent = useMemo(() => {
+    const map = new Map<number, number[]>()
+    for (const p of posts) {
+      if (p.reworkedFrom == null) continue
+      const arr = map.get(p.reworkedFrom) ?? []
+      arr.push(p.id)
+      map.set(p.reworkedFrom, arr)
+    }
+    return map
+  }, [posts])
+
   // j/k move a focus ring over the pending cards; a/r click that card's own
   // Approve / Request-changes button, so the keyboard path and the click path
   // are the same submit.
@@ -423,14 +535,14 @@ export default function SocialsQueue() {
           {focusedId && (
             <style>{`[data-post-id="${focusedId}"]{box-shadow:0 0 0 2px var(--color-coral)}`}</style>
           )}
-          <ReviewQueue posts={pending} />
+          <ReviewQueue posts={pending} childrenByParent={childrenByParent} />
           <p className="mt-3 text-[11px] text-ink-4 hidden md:block">
             Keys: <span className="font-mono">j</span>/<span className="font-mono">k</span> move, <span className="font-mono">a</span> approve, <span className="font-mono">r</span> request changes, <span className="font-mono">n</span> new post.
           </p>
         </div>
       )}
       {view === 'approved' && <ApprovedList posts={approved} />}
-      {view === 'history' && <HistoryTable posts={history} />}
+      {view === 'history' && <HistoryTable posts={history} childrenByParent={childrenByParent} />}
     </div>
   )
 }
@@ -518,20 +630,22 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
           </fetcher.Form>
         ) : (
           <>
-            {media && (
-              <fetcher.Form method="post">
-                <input type="hidden" name="intent" value="post-media" />
-                <input type="hidden" name="postId" value={post.id} />
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="min-h-11 px-4 bg-coral text-white rounded-full text-sm font-semibold hover:bg-coral-2 transition-colors disabled:opacity-50"
-                  title="Publishes via the platform API once keys are set; until then this reports the manual path."
-                >
-                  {isSubmitting ? 'Trying' : 'Post now'}
-                </button>
-              </fetcher.Form>
-            )}
+            {/* Ticket #5412(d): this used to render nothing at all for a
+                media-less approved draft, which read as "there is no way to
+                publish this" rather than "add media first". Always render the
+                button; disable it with a reason instead of hiding it. */}
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="post-media" />
+              <input type="hidden" name="postId" value={post.id} />
+              <button
+                type="submit"
+                disabled={isSubmitting || !media}
+                className="min-h-11 px-4 bg-coral text-white rounded-full text-sm font-semibold hover:bg-coral-2 transition-colors disabled:opacity-50"
+                title={!media ? 'This draft has no image or video yet' : 'Publishes via the platform API once keys are set; until then this reports the manual path.'}
+              >
+                {isSubmitting ? 'Trying' : 'Post now'}
+              </button>
+            </fetcher.Form>
             <button
               type="button"
               onClick={copyCaption}
@@ -649,9 +763,10 @@ function LiveFeedbackForm({ postId, hasFeedback }: { postId: number; hasFeedback
 
 // ── History view ─────────────────────────────────────────────────────────────
 
-function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
+function HistoryTable({ posts, childrenByParent }: { posts: SocialPostRow[]; childrenByParent: Map<number, number[]> }) {
   const deleteFetcher = useFetcher<{ ok: boolean; error?: string }>()
   const retryFetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const cloneFetcher = useFetcher<{ ok: boolean; error?: string; id?: number }>()
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
 
   if (posts.length === 0) {
@@ -688,9 +803,22 @@ function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
                         <img src={post.mediaUrls[0]} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0 bg-paper-3" loading="lazy" />
                       )}
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
+                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                           <PlatformChip platform={post.platform} />
                           <span className="font-mono text-[11px] text-ink-4">#{post.id}</span>
+                          {/* Ticket #5415: the rework relationship used to be
+                              one-directional (only the child named its
+                              parent). Both directions now link. */}
+                          {post.reworkedFrom != null && (
+                            <Link to={`/admin/socials/compose/${post.reworkedFrom}`} className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-plum-soft text-plum hover:underline">
+                              Rework of #{post.reworkedFrom}
+                            </Link>
+                          )}
+                          {(childrenByParent.get(post.id) ?? []).map(childId => (
+                            <Link key={childId} to={`/admin/socials/compose/${childId}`} className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-sage/20 text-sage hover:underline">
+                              Reworked as #{childId}
+                            </Link>
+                          ))}
                         </div>
                         <p className="text-ink break-words whitespace-pre-wrap">
                           {post.tweetText.length > 160 ? `${post.tweetText.slice(0, 160)}...` : post.tweetText}
@@ -734,6 +862,18 @@ function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
                           <ExternalIcon size={12} /> View
                         </a>
                       )}
+                      {/* Ticket #5417(b): only ApprovedRow had an Edit link
+                          before; fixing a caption or a media pick on any
+                          draft (not just an approved one) needed hand-typing
+                          the compose URL. The Composer itself opens read-only
+                          with a reason on posted/failed/rejected rows. */}
+                      <Link
+                        to={`/admin/socials/compose/${post.id}`}
+                        className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink hover:underline min-h-9"
+                        title="Open in the Composer"
+                      >
+                        <PenIcon size={12} /> Edit
+                      </Link>
                       {canDeletePost(post) && (
                         deleteConfirmId === post.id ? (
                           <span className="inline-flex items-center gap-2">
@@ -772,8 +912,32 @@ function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
                           </button>
                         </retryFetcher.Form>
                       )}
+                      {/* Ticket #5416(b): rejection (including a gate BLOCK)
+                          is terminal by design, no code path re-verdicts a
+                          rejected row, but the owner also uses Reject to mean
+                          "this needs real changes". Clone is the sanctioned
+                          escape: a fresh pending_review row, gate_status
+                          null, judged on its own merits, never the dead row
+                          itself. */}
                       {post.status === 'draft' && post.reviewStatus === 'rejected' && (
-                        <span className="text-[11px] text-ink-4">no override; start a fresh draft</span>
+                        cloneFetcher.data?.ok && cloneFetcher.formData?.get('postId') === String(post.id) ? (
+                          <span className="text-[11px] text-[#4F6150]">
+                            Cloned as #{cloneFetcher.data.id}
+                          </span>
+                        ) : (
+                          <cloneFetcher.Form method="post">
+                            <input type="hidden" name="intent" value="clone-to-new-draft" />
+                            <input type="hidden" name="postId" value={post.id} />
+                            <button
+                              type="submit"
+                              disabled={cloneFetcher.state !== 'idle'}
+                              className="text-xs text-ink-3 hover:text-ink hover:underline disabled:opacity-50 min-h-9"
+                              title="No override; this row stays rejected. Mints a new draft carrying its content and lineage forward, gated normally."
+                            >
+                              {cloneFetcher.state !== 'idle' ? 'Cloning' : 'Clone to new draft'}
+                            </button>
+                          </cloneFetcher.Form>
+                        )
                       )}
                     </div>
                     {deleteFetcher.data?.ok === false && <p className="text-xs text-red-700 mt-1">{deleteFetcher.data.error}</p>}
@@ -781,6 +945,9 @@ function HistoryTable({ posts }: { posts: SocialPostRow[] }) {
                       <p role="status" className="text-xs text-amber-800 mt-1">{(deleteFetcher.data as { note?: string }).note}</p>
                     )}
                     {retryFetcher.data?.ok === false && <p className="text-xs text-red-700 mt-1">{retryFetcher.data.error}</p>}
+                    {cloneFetcher.data?.ok === false && cloneFetcher.formData?.get('postId') === String(post.id) && (
+                      <p className="text-xs text-red-700 mt-1">{cloneFetcher.data.error}</p>
+                    )}
                   </td>
                 </tr>
               )

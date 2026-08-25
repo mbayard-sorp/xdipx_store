@@ -28,7 +28,14 @@ function dayLabel(day: string | null): string {
  * (the 'review' intent) is untouched; batch uses a separate 'review-batch'
  * intent that loops the same reviewSocialPost writer.
  */
-export function ReviewQueue({ posts }: { posts: SocialPostRow[] }) {
+export function ReviewQueue({
+  posts,
+  childrenByParent,
+}: {
+  posts: SocialPostRow[]
+  /** Ticket #5415: id -> ids of rows that reworked it, for the parent->child link. */
+  childrenByParent?: Map<number, number[]>
+}) {
   const [platform, setPlatform] = useState<string>('all')
   const [status, setStatus] = useState<string>('all')
   const [day, setDay] = useState<string | null>(null)
@@ -132,7 +139,7 @@ export function ReviewQueue({ posts }: { posts: SocialPostRow[] }) {
                       className="mt-4 w-4 h-4 shrink-0 rounded border-line text-coral focus:ring-coral/30"
                     />
                     <div className="flex-1 min-w-0">
-                      <PostPreviewCard post={post} />
+                      <PostPreviewCard post={post} reworkedInto={childrenByParent?.get(post.id)} />
                     </div>
                   </div>
                 ))}
