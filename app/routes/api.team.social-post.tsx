@@ -16,7 +16,12 @@
  *     Instagram publisher sends as alt_text and must never be folded into the
  *     caption.
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
- *   { op: 'config' } -> { frequencies, autopostValve }
+ *   { op: 'config' } -> { frequencies, autopostValve, platformValves: { instagram, x } }
+ *     autopostValve (social_team_autopost) gates nothing on the publish path;
+ *     it is kept for back-compat only. platformValves carries the real
+ *     per-platform gates the hourly publish tick reads
+ *     (instagram_autopublish_enabled, x_autopublish_enabled) so a caller
+ *     reads true posting posture instead of the unused valve (ticket #5413).
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
  *     productHandle? } } -> { ok, reviewStatus } | 422 { findings }
  *   { op: 'rework', id, mediaUrls?, tweetText?, altText?, imageBrief?, subject? }
@@ -228,11 +233,23 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (b['op'] === 'config') {
-    const [frequencies, autopostValve] = await Promise.all([
+    // `autopostValve` (social_team_autopost) gates nothing on the publish
+    // path and is kept only for back-compat. The real per-platform gates the
+    // hourly /cron/social-publish tick reads are instagram_autopublish_enabled
+    // and x_autopublish_enabled (ticket #5413 — a routine reading only
+    // autopostValve reports posting posture backwards). platformValves
+    // surfaces the true current value of those two valves alongside it.
+    const [frequencies, autopostValve, instagramAutopublish, xAutopublish] = await Promise.all([
       getSocialFrequencies(),
       getValve(VALVE_KEYS.socialAutopost),
+      getValve(VALVE_KEYS.instagramAutopublish),
+      getValve(VALVE_KEYS.xAutopublish),
     ])
-    return Response.json({ frequencies, autopostValve })
+    return Response.json({
+      frequencies,
+      autopostValve,
+      platformValves: { instagram: instagramAutopublish, x: xAutopublish },
+    })
   }
 
   return new Response('Bad Request', { status: 400 })
