@@ -339,6 +339,38 @@ faithful to reference 2.
 **Keepers:** (append `cast slug + product handle + gesture → placed asset URL` lines here; a
 no-product hero MUST log its reason in its entry)
 
+- `cast: jade` + Le Wand Mini Micro Rechargeable Wand Vibrator (`le-wand-mini-micro-wand`),
+  "Stress Killed My Sex Drive. What Actually Helps?" (`real-talk`, † health-adjacent, content run
+  502). Gesture per the "Is this normal? / Is it just me?" row: product held up in one hand at eye
+  level, head tilted toward it, brow raised, free hand palm-up in the lap asking the room.
+  **Casting:** brief-suggested `jade` (`emotionTags` include `reflective`, closest available match
+  to "depleted and quietly worried"); `vivian` excluded under no-repeat-within-5 (named cast on the
+  2026-08-18 `what-helps-when-menopause-changes-sex` human hero). No better `emotionTags` match
+  found among the remaining unused roster (`maya`, `sofia`, `priya`, `marcus`, `diego` all skew
+  playful/confident/amused, none reflective/tired). **† health-adjacent constraints applied:** no
+  levity license, no scale exaggeration, sincere realistic staging only, explicit "no comic
+  register, no punchline expression, no oversized prop" negative added to the standard scaffold
+  negatives. **Camera distance stated explicitly** ("waist-up framing, room on both sides of the
+  subject") per the Emma guide-mode precedent above, applied here too since the cast reference
+  photo is also a tight portrait crop that needs room made for the co-primary product. One round, 2
+  candidates via `composeSceneFrame` (Atlas `seedream-4.5-edit` under the fal-routed composite
+  path, `landscape_4_3`). Candidate 1: clean paper/warm-neutral bedroom, ground-lock compliant,
+  faithful product identity and scale, correct gesture, sincere worried-tired expression, natural
+  hands/face → picked. Candidate 2 rejected: background rendered as a saturated full-intensity
+  coral wall (not the pale coral-soft `#FFE6DD` tint the ground lock requires) — the same
+  saturated-color-instead-of-soft-tint failure already logged against the Magic Wand HV-270 entry
+  above → `image-bc6e292fc38c6315f907e24ca799250d34fa0f9c-1200x900-png`. **Checker note (bug, not a
+  content issue):** `scripts/check-hero-embed-match.ts`'s `heroNamesAnyProduct` heuristic
+  (`app/lib/blog-hero-embed-audit.ts`) cannot pass for this exact product regardless of copy
+  wording — the catalog title "Le Wand Mini Micro Rechargeable Wand Vibrator" strips to a single
+  distinctive token, `"micro"` (5 characters), one character short of the single-token 6-character
+  threshold the matcher requires, and no combination of alt/prompt text changes the product's own
+  token set. Verified directly against `distinctiveTokens()`/`heroNamesAnyProduct()`. This blocks
+  `check-hero-embed-match.ts` from exiting 0 for this post even with a fully compliant, correctly
+  product-matched hero in place; flagging as a code-level fix (lower the single-token threshold to
+  5, or special-case short brand/model tokens) rather than something the imagery or copy can work
+  around.
+
 **Rejects:** `cast: none (roster gap, documented exception)` + Wicked Simply Timeless Water-Based
 Personal Lubricant & Moisturizer 4oz (`wicked-simply-timeless-jelle`), "How Does Menopause Change
 Sex, and What Helps?" (real-talk, † health-adjacent, content run 379). **Casting decision:** all
