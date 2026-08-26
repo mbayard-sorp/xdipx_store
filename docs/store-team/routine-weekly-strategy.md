@@ -74,6 +74,25 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
   `getReviewStats` in `app/lib/reviews.server.ts`). Report invites-sent and reviews-landed in the
   brief; **if orders shipped this week but invites-sent is 0 for 7 straight days, file a
   suggestion** (the invite webhook or the review-reminders cron has silently broken).
+- **Research briefs (`adult-business-researcher`).** The research lane was retargeted from
+  `targetPlatform:'linkedin'` to `'strategy'` by #5432 (PR #905), so its output now lands here, not in
+  the dead LinkedIn queue. Query the pending strategy briefs:
+
+  ```groq
+  *[_type == "researchBrief" && targetPlatform == "strategy" && status == "pending"] | order(createdAt asc)
+  ```
+
+  (published perspective). Fold each brief's `claims` into this week's brief, carrying every claim's
+  `sourceUrl`, `sourceName`, `retrievedAt`, and `confidence` verbatim — each claim already ships all
+  four. **Marking a brief consumed:** store-strategist has no Sanity write tool, so you cannot flip
+  the doc's `status` to `used`. Instead list each consumed brief's `_id` in this week's brief under a
+  `Research briefs consumed` line; the next run reads the previous brief in this same Step 2 and skips
+  any `_id` already listed there, so a brief is folded once and not re-read. Report the outcome in
+  Step 5 (below): **at least one brief consumed, with its headline claim, or explicitly "no pending
+  strategy research briefs" when the query returns none.** Why this matters now: the 2026-08-20 brief
+  (ad-platform policy, not consumer demand, is the structural distribution constraint on this
+  category — 4 claims, 4 sources read in full) bears directly on the open Google Ads decision and is
+  currently unread by anyone.
 
 ## Step 3 — Retro on last week's brief
 
