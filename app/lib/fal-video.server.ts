@@ -39,7 +39,7 @@ export function falVideoConfigured(): boolean {
 
 export type VideoModelId =
   | 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'grok' | 'omnihuman' | 'sync-lipsync'
-  | 'wan22-i2v' | 'wan22-t2v'
+  | 'wan22-i2v' | 'wan22-t2v' | 'wan22-s2v'
 
 export interface VideoModelSpec {
   /**
@@ -93,12 +93,20 @@ export interface VideoModelSpec {
   lipsync?: { baseClip: VideoModelId }
   /** Durations the model accepts, seconds. Empty for audio-driven models. */
   allowedDurations: number[]
+  /**
+   * Legacy fal video tier (owner direction 2026-08-26: fal is images only,
+   * all video renders on the owned RunPod worker). Kept registered so
+   * in-flight and historical jobs still resolve; never a default, and the
+   * video-producer charter refuses selecting one for new work.
+   */
+  legacy?: true
 }
 
 export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   'veo31': {
     falModel: 'fal-ai/veo3.1/image-to-video',
     label: 'Veo 3.1 (native audio)',
+    legacy: true,
     tier: 'premium',
     costKey: 'fal/veo3.1',
     ratePerSecondUsd: 0.40,
@@ -109,6 +117,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   'veo31-fast': {
     falModel: 'fal-ai/veo3.1/fast/image-to-video',
     label: 'Veo 3.1 Fast (native audio)',
+    legacy: true,
     tier: 'premium-fast',
     costKey: 'fal/veo3.1-fast',
     ratePerSecondUsd: 0.15,
@@ -119,6 +128,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   'kling25-pro': {
     falModel: 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video',
     label: 'Kling 2.5 Turbo Pro',
+    legacy: true,
     tier: 'standard',
     costKey: 'fal/kling-2.5-pro',
     ratePerSecondUsd: 0.07,
@@ -128,6 +138,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   'seedance2': {
     falModel: 'bytedance/seedance-2.0/image-to-video',
     label: 'Seedance 2.0 (audio included)',
+    legacy: true,
     tier: 'standard',
     costKey: 'fal/seedance-2.0',
     ratePerSecondUsd: 0.31,
@@ -148,6 +159,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   'grok': {
     falModel: 'xai/grok-imagine-video/v1.5/image-to-video',
     label: 'Grok Imagine 1.5 (native audio)',
+    legacy: true,
     tier: 'standard',
     costKey: 'fal/grok-imagine-1.5',
     ratePerSecondUsd: 0.14, // pinned to 720p (480p $0.08, 720p $0.14, 1080p $0.25)
@@ -162,6 +174,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   'omnihuman': {
     falModel: 'fal-ai/bytedance/omnihuman/v1.5',
     label: 'OmniHuman 1.5 (audio-driven avatar)',
+    legacy: true,
     tier: 'avatar',
     costKey: 'fal/omnihuman-1.5',
     ratePerSecondUsd: 0.16,
@@ -178,6 +191,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   'sync-lipsync': {
     falModel: 'fal-ai/sync-lipsync',
     label: 'Kling 2.5 Pro + Sync lipsync (talking standard tier)',
+    legacy: true,
     tier: 'lipsync',
     costKey: 'fal/sync-lipsync',
     ratePerSecondUsd: 0.05,
@@ -212,6 +226,24 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     ratePerSecondUsd: estimateRunpodRatePerSecondUsd(),
     nativeAudio: false,
     allowedDurations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  },
+  // Own-worker audio-driven talking tier (tickets #5713/#5714, owner direction
+  // 2026-08-26: fal is images only, all video + lipsync on the RunPod worker).
+  // Audio-first like omnihuman: ElevenLabs speech track + one approved
+  // identity frame -> performed clip, duration derived from the audio. The
+  // checkpoint behind mode 's2v' is the bake-off's pick (Wan2.2-S2V vs
+  // InfiniteTalk vs LongCat-Video-Avatar, docs/store-team/video-worker-runpod.md);
+  // this entry is inert until the worker image with that mode is live.
+  'wan22-s2v': {
+    falModel: 'runpod/wan2.2-s2v-14b', // documentation only — provider:'runpod' means this is never dereferenced
+    label: 'Wan 2.2 S2V (RunPod, audio-driven talking)',
+    tier: 'avatar',
+    provider: 'runpod',
+    costKey: 'runpod/wan22-s2v',
+    ratePerSecondUsd: estimateRunpodRatePerSecondUsd(),
+    nativeAudio: true,
+    audioDriven: true,
+    allowedDurations: [],
   },
 }
 
@@ -392,6 +424,7 @@ function buildInput(model: VideoModelId, input: VideoRequestInput): Record<strin
       }
     case 'wan22-i2v':
     case 'wan22-t2v':
+    case 'wan22-s2v':
       // These never reach buildInput/submitVideoRequest — the clip stage
       // branches on spec.provider === 'runpod' before it gets here and calls
       // runpod-video.server.ts instead. The guard in submitVideoRequest below
