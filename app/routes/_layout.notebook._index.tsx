@@ -4,6 +4,7 @@ import { getBlogPosts, getBlogCategories, getBlogHomepage, getNotebookSettings, 
 import { BlogPostCard } from '~/components/blog/BlogPostCard'
 import { CategoryChip } from '~/components/blog/CategoryChip'
 import { NotebookSubscribe } from '~/components/blog/NotebookSubscribe'
+import { PreferredSourceLink } from '~/components/blog/PreferredSourceLink'
 import { SeriesRail } from '~/components/blog/SeriesRail'
 import { SanityImage } from '~/components/common/SanityImage'
 import { Reveal } from '~/components/motion/Reveal'
@@ -153,6 +154,7 @@ export default function NotebookIndex() {
         <p className="text-ink-3 text-sm md:text-base mt-4 max-w-xl mx-auto leading-[1.55]">
           {blogHomepage?.subtext ?? "Things worth knowing. Things worth trying. Things Emma dug up so you don't have to."}
         </p>
+        <PreferredSourceLink className="kicker hover:text-coral transition-colors inline-block mt-4" />
       </div>
 
       {/* Featured lockup — image is the index LCP, static, never animated */}
