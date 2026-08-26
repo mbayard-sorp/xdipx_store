@@ -94,6 +94,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       frames: r.frames,
       finalUrl: r.finalUrl,
       posterUrl: r.posterUrl,
+      // RunPod off-confirmation (ticket #5717): stamped by the poster stage;
+      // re-probed by the hourly pod-watch until confirmed.
+      runpodIdleConfirmedAt: r.job.runpodIdleConfirmedAt,
+      runpodIdleCouldNotAsk: (r.job.runpodIdleProbeJson?.couldNotAsk?.length ?? 0) > 0,
       // Multi-scene jobs only (Phase 3, 20-60s videos): null/undefined for
       // every single-scene job, which keeps the existing UI branch untouched.
       scenes: r.job.scenesJson,
@@ -617,10 +621,30 @@ function MultiSceneFramePicker({ job, busy }: { job: Row; busy: boolean }) {
   )
 }
 
+function GpuBadge({ job }: { job: Row }) {
+  // Only meaningful for jobs that rendered on the owned worker; a fal-only
+  // job never probes. Three honest states, never conflated (ticket #5717).
+  if (job.runpodIdleConfirmedAt) {
+    return (
+      <p className="mt-1 text-[11px] text-[#4F6150]">
+        GPU confirmed off {new Date(job.runpodIdleConfirmedAt).toLocaleTimeString()}
+      </p>
+    )
+  }
+  if (job.runpodIdleCouldNotAsk) {
+    return <p className="mt-1 text-[11px] text-amber-800">GPU status unknown, RunPod could not be asked; the hourly watch re-probes</p>
+  }
+  if (job.modelTier.startsWith('wan22')) {
+    return <p className="mt-1 text-[11px] text-ink-3">GPU idle check pending (hourly watch re-probes until confirmed)</p>
+  }
+  return null
+}
+
 function ReadyCard({ job, busy }: { job: Row; busy: boolean }) {
   return (
     <div className="rounded-[22px] border border-line bg-paper-2 p-4">
       <JobHeader job={job} />
+      <GpuBadge job={job} />
       <div className="mt-3 flex flex-col gap-4 md:flex-row">
         <div className="w-full md:w-56">
           {job.finalUrl && (

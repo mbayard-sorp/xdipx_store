@@ -180,6 +180,25 @@ async function runpodNoPods(): Promise<ProbeVerdict> {
   }
 }
 
+/**
+ * Has the video render ENDPOINT scaled to zero active workers with an empty
+ * queue? The pods probe above cannot see the serverless endpoint at all, so
+ * without this the render fleet has a permanent false all-clear. `null` when
+ * the API is unreachable OR RUNPOD_VIDEO_ENDPOINT_ID is unset: the unset-env
+ * case is a "succeeded but empty" read guardedRun cannot catch, and it must
+ * never read as idle.
+ */
+async function runpodEndpointIdle(): Promise<ProbeVerdict> {
+  try {
+    if (!process.env['RUNPOD_VIDEO_ENDPOINT_ID']) return null
+    const { getRunpodEndpointHealth } = await import('~/lib/runpod-endpoint.server')
+    const health = await getRunpodEndpointHealth()
+    return health.workers.active === 0 && health.jobs.inQueue === 0 && health.jobs.inProgress === 0
+  } catch {
+    return null
+  }
+}
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -189,6 +208,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   routine_ran:   routineRan,
   webhook_registered: webhookRegistered,
   runpod_no_pods: runpodNoPods,
+  runpod_endpoint_idle: runpodEndpointIdle,
 }
 
 /**
