@@ -366,13 +366,35 @@ async function classifyLogs(logs: LogLine[]): Promise<LogMonitorReport> {
  * `fileTicketsForGroups` dedupes by (hashed) title, and the title embeds the
  * run id, so re-seeing the same expired run in an overlapping window is a
  * no-op, not a duplicate ticket.
+ *
+ * #5632: an auto-expired run is not necessarily dead. A long, quiet-but-alive
+ * run -- a content `podcast-reviewer` doing one long WebFetch + Sanity write
+ * with no interim `op:'update'` heartbeat -- can go silent past the 240-min
+ * idle reaper, get marked `failed`, and then complete successfully minutes
+ * later. Run #517 did exactly this: auto-expired ~14:14, then succeeded 14:51
+ * with a full podcast brief written, yet log-monitor had already paged a false
+ * P1 at 14:15. So hold off until a run has stayed auto-expired for
+ * `RECOVERY_GRACE_MIN`: a run that recovers within the grace flips to
+ * `status != 'failed'` (dropping out of this failed-only query on its own),
+ * while a genuinely dead run still surfaces one grace window later -- these are
+ * post-hoc diagnostic tickets, not real-time pages, so the delay is cheap. The
+ * SQL lower bound widens by the same grace so a row that ages past the cutoff
+ * is still inside the window; at the 15-min cron cadence consecutive
+ * `[since, graceCutoff]` bands overlap, and title dedupe keeps that a no-op.
+ * `nowMs` is injectable for deterministic tests (repo convention, e.g.
+ * `attribution.server.ts` `buildFbc`).
  */
-export async function fetchExpiredRunGroups(windowMinutes: number): Promise<LogGroup[]> {
+export async function fetchExpiredRunGroups(
+  windowMinutes: number,
+  nowMs: number = Date.now(),
+): Promise<LogGroup[]> {
   const { db } = await import('~/lib/db.server')
   const { homepageTeamRuns } = await import('../../db/schema')
   const { and, eq, gte, like } = await import('drizzle-orm')
 
-  const since = new Date(Date.now() - (windowMinutes + 15) * 60_000)
+  const RECOVERY_GRACE_MIN = 60
+  const graceCutoffMs = nowMs - RECOVERY_GRACE_MIN * 60_000
+  const since = new Date(nowMs - (windowMinutes + 15 + RECOVERY_GRACE_MIN) * 60_000)
   const rows = await db
     .select({
       id:           homepageTeamRuns.id,
@@ -381,6 +403,7 @@ export async function fetchExpiredRunGroups(windowMinutes: number): Promise<LogG
       currentPhase: homepageTeamRuns.currentPhase,
       currentAgent: homepageTeamRuns.currentAgent,
       startedAt:    homepageTeamRuns.startedAt,
+      finishedAt:   homepageTeamRuns.finishedAt,
       error:        homepageTeamRuns.error,
     })
     .from(homepageTeamRuns)
@@ -390,7 +413,11 @@ export async function fetchExpiredRunGroups(windowMinutes: number): Promise<LogG
       gte(homepageTeamRuns.finishedAt, since),
     ))
 
-  return rows.map((r): LogGroup => ({
+  return rows
+    // Skip runs auto-expired within the grace window: they may still be a slow
+    // but alive run that will recover before it is genuinely dead (#5632).
+    .filter((r) => r.finishedAt != null && r.finishedAt.getTime() <= graceCutoffMs)
+    .map((r): LogGroup => ({
     priority:    'P1',
     title:       `Team run auto-expired: ${r.team} run #${r.id} (phase: ${r.currentPhase ?? 'unknown'})`,
     occurrences: 1,
