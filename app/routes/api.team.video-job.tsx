@@ -45,6 +45,7 @@ import {
   VIDEO_EXTRA_KEYS,
 } from '~/lib/team-keys'
 import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame, isMultiSceneScript } from '~/lib/video-pipeline.server'
+import { assertEpisodeMatchesScript, linkEpisodeToJob } from '~/lib/video-episodes.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
@@ -161,6 +162,22 @@ export async function action({ request }: ActionFunctionArgs) {
       const v = validateEnqueueCommon(b, 'scriptJson')
       if (v instanceof Response) return v
 
+      // Serialized-program guard (ticket #5712): an enqueue carrying an
+      // episodeId must reference an owner-APPROVED episode whose spoken text
+      // is byte-identical to the payload's. assertEpisodeMatchesScript throws
+      // a ready-made Response (403 unapproved, 409 mismatch naming BOTH
+      // strings) which we pass straight through. This is what moves the money
+      // gate from the frame pick to the script read.
+      const episodeId = typeof b['episodeId'] === 'number' ? b['episodeId'] : undefined
+      if (episodeId !== undefined) {
+        try {
+          await assertEpisodeMatchesScript(episodeId, v.script)
+        } catch (err) {
+          if (err instanceof Response) return err
+          throw err
+        }
+      }
+
       // Money gate: kill switch + daily budget + run cap. Enqueue ops are the
       // ONLY team ops that spend, so they are the ones that gate.
       const excludeRun = typeof b['runId'] === 'number' ? b['runId'] : undefined
@@ -186,7 +203,14 @@ export async function action({ request }: ActionFunctionArgs) {
         targetPlatforms: v.platforms,
         ...(typeof b['aiDisclosure'] === 'boolean' ? { aiDisclosure: b['aiDisclosure'] } : {}),
         ...(typeof b['runId'] === 'number' ? { runId: b['runId'] } : {}),
+        ...(episodeId !== undefined ? { episodeId } : {}),
       })
+      if (episodeId !== undefined) {
+        // Link the episode to its job (sets videoJobId + production_status
+        // 'rendering'); failure to link must not orphan the paid-for job.
+        await linkEpisodeToJob(episodeId, result.jobId).catch(err =>
+          console.error(`[team-video-job] episode ${episodeId} link failed for job ${result.jobId}:`, err))
+      }
       return Response.json(result)
     }
 

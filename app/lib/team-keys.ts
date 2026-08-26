@@ -310,6 +310,24 @@ const SCENE_KIT_NOTE =
   'No product ever appears in a talking-head frame; product visuals are b-roll cutaways or post-composited stills. ' +
   'The identity source is Emma\'s canonical photo, resolved fresh from the Sanity editor singleton by the pipeline; scene frames are per-scene compositions from it, owner-approved once, then reused.'
 
+/**
+ * Hook patterns for serialized video episodes (ticket #5712). A CONTROLLED
+ * vocabulary because free-text hooks cannot be GROUP BY'd, and grouping hooks
+ * is the single most useful thing learn mode does. The episode API validates
+ * hook_pattern against this list exactly like formula against VIDEO_FORMULAS.
+ */
+export const HOOK_PATTERNS = [
+  'question',
+  'contradiction',
+  'confession',
+  'demonstration',
+  'callback',
+  'list-promise',
+  'cold-open-line',
+  'reaction',
+] as const
+export type HookPattern = (typeof HOOK_PATTERNS)[number]
+
 export const SCENE_KIT: SceneKitScene[] = [
   { slug: 'couch-cozy',             label: 'Couch Cozy',             status: 'core',    note: SCENE_KIT_NOTE },
   { slug: 'vanity-bright',          label: 'Vanity Bright',          status: 'core',    note: SCENE_KIT_NOTE },
@@ -421,6 +439,12 @@ export const VALVE_KEYS = {
   // this is a spend control paired with `x_metrics_max_reads_month`. Default
   // OFF; `getValve` treats the missing row as off so it ships inert.
   socialMetricsSweep: 'social_metrics_sweep_enabled',
+  // Serialized video program (all-hands 2026-08-26): arms the 2x-weekly render
+  // routine that claims owner-APPROVED episodes and spends real RunPod money.
+  // Ships OFF with no migration seed: getValve treats the missing row as off,
+  // and the owner's first flip on the Video tab creates the row. The writers
+  // room (zero spend) is NOT gated by this; only the render lane is.
+  videoProgram:       'video_program_enabled',
   chatEnabled:        'chat_enabled',
   smsAgentEnabled:    'sms_agent_enabled',
 } as const
