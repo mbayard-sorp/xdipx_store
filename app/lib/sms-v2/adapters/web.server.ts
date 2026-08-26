@@ -23,7 +23,7 @@ import { getOrCreateWebConversation, applyWebStateWrites } from '../web-conversa
 import { classifyIntent } from '../intent-classifier.server'
 import { buildWebEmmaContext } from '../web-context-builder.server'
 import { findRecentCrossChannelActivity } from '../cross-channel.server'
-import { pickEffectiveStage, dispatchStage } from '../stage-dispatch.server'
+import { pickEffectiveStage, dispatchStage, guardStagePreconditions } from '../stage-dispatch.server'
 import { logWebStageResponse } from '../web-turn-logger.server'
 import { loadConversationHistory } from '../conversation-history.server'
 import { generateConversationSummary } from '../summary.server'
@@ -315,7 +315,16 @@ export async function processWebMessageV2(
   }
 
   // --- Step 4: Stage dispatch ---
-  const effectiveStage = pickEffectiveStage(conversation.stage, intentResult, conversation.currentPitchHandle)
+  // Resolve the intent-driven stage, then enforce the precondition guards
+  // (#5656): UPSELL requires a product selected this session, POST_CHECKOUT
+  // requires a completed checkout this session. Either failing drops to
+  // DISCOVERY so a stale handle or misclassified message can never fire an
+  // upsell or a post-checkout script off state that isn't there.
+  const effectiveStage = guardStagePreconditions(
+    pickEffectiveStage(conversation.stage, intentResult, conversation.currentPitchHandle),
+    conversation,
+    conversation.stage,
+  )
   const stageRespPromise = dispatchStage(effectiveStage, ctx, intentResult, customerText)
 
   let stageResp: StageResponse

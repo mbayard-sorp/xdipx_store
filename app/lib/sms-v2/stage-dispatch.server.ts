@@ -116,6 +116,52 @@ export function pickEffectiveStage(
   return currentStage
 }
 
+/**
+ * Precondition guard for stages that must not be entered without the state that
+ * defines them (#5656). Runs AFTER pickEffectiveStage, at the dispatch boundary,
+ * for every channel (web/voice/sms). It is the machine-level enforcement of two
+ * invariants the transition table alone does not encode:
+ *
+ *   - UPSELL requires a product selected THIS session (currentPitchHandle). An
+ *     upsell pitch with no pitched product is either a stale-handle leak or an
+ *     intent misclassification; there is nothing to pair against, so drop to
+ *     DISCOVERY and let the customer name what they want.
+ *   - POST_CHECKOUT requires a completed checkout THIS session (lastQuoteUrl).
+ *     The only legitimate way into POST_CHECKOUT is executeCheckoutStage, which
+ *     always writes lastQuoteUrl alongside the transition; a POST_CHECKOUT with
+ *     no quote is stale state, so drop to DISCOVERY rather than running the
+ *     post-purchase script over a checkout that never happened.
+ *
+ * On 2026-08-25 (web, turns 1606-1621) a plain discovery message routed to an
+ * UPSELL pitch off a leftover handle and the machine then sat in POST_CHECKOUT
+ * with no checkout. The root cause (a session handle surviving RECONNECT) is
+ * fixed in web-conversation.server.ts; this guard is the belt to that
+ * suspenders, so a future misclassification or stale row can never again
+ * transition to UPSELL or POST_CHECKOUT with the preconditions absent.
+ *
+ * Pure and side-effect-free. `currentStage` is passed only for the console
+ * signal so an actual redirect is greppable in production logs.
+ */
+export function guardStagePreconditions(
+  stage: Stage,
+  conv: { currentPitchHandle?: string | null; lastQuoteUrl?: string | null },
+  currentStage?: Stage,
+): Stage {
+  if (stage === 'UPSELL' && !conv.currentPitchHandle) {
+    console.warn(
+      `[sms-v2/stage-dispatch] UPSELL blocked — no product selected this session, falling back to DISCOVERY (from=${currentStage ?? '?'})`,
+    )
+    return 'DISCOVERY'
+  }
+  if (stage === 'POST_CHECKOUT' && !conv.lastQuoteUrl) {
+    console.warn(
+      `[sms-v2/stage-dispatch] POST_CHECKOUT blocked — no completed checkout this session, falling back to DISCOVERY (from=${currentStage ?? '?'})`,
+    )
+    return 'DISCOVERY'
+  }
+  return stage
+}
+
 // ---------------------------------------------------------------------------
 // 2. Stage handler registry
 // ---------------------------------------------------------------------------

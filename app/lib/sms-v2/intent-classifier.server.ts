@@ -135,6 +135,35 @@ const REGEX_BANK: RegexEntry[] = [
     stages: ['UPSELL'],
   },
 
+  // ─── Discovery desire / audience disclosure (#5656) ────────────────────────
+  // Plain answers that describe what the customer is trying to achieve or who
+  // they are shopping for are DISCOVERY, not a pairing ask and not off-topic.
+  // On 2026-08-25 (web, turns 1606-1621) Haiku tagged "I want to give her an
+  // amazing orgasm" as ASK_UPSELL (0.72) — which jumped the machine to an
+  // UPSELL pitch off a stale handle — and "the two of us" (a direct answer to
+  // Emma's solo-or-together question) as OFF_TOPIC (0.85). These regexes catch
+  // the two shapes deterministically, before Haiku, and route to NAME_ITEM: in
+  // DISCOVERY that keeps the stage and feeds the raw text to the slot extractor
+  // (NAME_ITEM is no special path there), and it is never ASK_UPSELL/OFF_TOPIC.
+  // Buy/accept/decline phrases sit earlier in this bank, so a real "buy it for
+  // her" still wins COMMIT_PICK before reaching here.
+  //
+  // A: "I want/like/trying to <verb> ... her/him/them/us/my <partner>" — a goal
+  // stated about pleasing a partner (or oneself), not a named product. The
+  // negative lookahead after "to" keeps support/research phrasings out ("I want
+  // to make sure it's safe for her", "I want to cancel her order") so those
+  // still reach the RESEARCH heuristic / Haiku for their proper intent.
+  {
+    re: /\bi(?:\s+(?:want|wanna|need|hope|would\s+like)|'?d\s+like|'?m\s+(?:trying|hoping|looking|wanting))\s+to\s+(?!(?:make\s+sure|know|check|confirm|ask|understand|find\s+out|see\s+if|be\s+sure|return|cancel|track|change|update)\b).*?\b(?:her|him|them|us|my\s+(?:wife|husband|girlfriend|boyfriend|partner|gf|bf|hubby|man|woman|lady|guy|other\s+half))\b/i,
+    intent: 'NAME_ITEM',
+  },
+  // B: a short "solo or together / who it's for" answer — "the two of us",
+  // "both of us", "me and my wife", "her and I", "just me", "for us".
+  {
+    re: /^\s*(?:it'?s\s+|for\s+)?(?:just\s+)?(?:the\s+)?(?:both\s+of\s+us|(?:the\s+)?two\s+of\s+us|us\s+two|me\s+and\s+(?:my\s+\w+|her|him|them)|(?:my\s+\w+|her|him|them)\s+and\s+(?:i|me)|just\s+(?:me|us|her|him|them)|for\s+us)\s*[!.?]*\s*$/i,
+    intent: 'NAME_ITEM',
+  },
+
   // ─── ASK_UPSELL (#3909) — "what pairs with this / what else do I need" ───
   // The customer explicitly asks to be pointed at add-ons for the current
   // pitch. High-precision: only phrasings that unambiguously request a pairing,
@@ -222,12 +251,12 @@ Intent definitions:
 - COMMIT_PICK: ready to buy / add to cart
 - UPSELL_ACCEPT: accepting an add-on product offer
 - UPSELL_DECLINE: declining an add-on product offer
-- ASK_UPSELL: proactively asking what pairs with / goes with the current product, what else they need, or what to add (a request for an add-on suggestion, not a specific named product)
-- NAME_ITEM: asking about a specific product or category
+- ASK_UPSELL: proactively asking what pairs with / goes with the current product, what else they need, or what to add (a request for an add-on suggestion, not a specific named product). This fires ONLY when the customer explicitly asks for a pairing or add-on for a product already being discussed. A statement of what they are trying to achieve or the feeling they want ("I want to give her an amazing orgasm", "I want us to feel closer") is NOT ASK_UPSELL — it is NAME_ITEM (they are describing what they are shopping for).
+- NAME_ITEM: asking about a specific product or category, OR describing what they are shopping for, the outcome they want, or who it is for (a partner, themselves, a couple)
 - SUPPORT: order status, returns, account, shipping question
 - OBJECTION: concern about price, shipping time, compatibility, safety
 - RESEARCH: product question without buy intent (compatibility, specs, ingredients)
-- OFF_TOPIC: unrelated to the brand or products
+- OFF_TOPIC: unrelated to shopping for intimacy products. A short answer naming who the product is for or the occasion — "the two of us", "both of us", "just me", "for my wife" (often a direct answer to a solo-or-together question) — is ON-topic DISCOVERY, classify it NAME_ITEM, never OFF_TOPIC.
 
 Respond with ONLY the JSON object, no explanation.`
 
