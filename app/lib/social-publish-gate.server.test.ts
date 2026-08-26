@@ -375,18 +375,26 @@ describe('platform divergence', () => {
   })
 })
 
-// ── Removal-tier caption lexicon (ticket #4062) ──────────────────────────────
+// ── Removal-tier caption lexicon (ticket #4062, narrowed by ticket #5482) ────
 //
 // The gate blocked banned emoji and nothing else lexical, while the vocabulary
-// that actually gets accounts in this category REMOVED — explicit anatomy and
-// graphic acts, the class that suspended @bellesaco for the word "clitoris" —
-// passed straight through on Instagram. This check closes that gap, and only on
-// the rented, machine-moderated surfaces: X policy permits the vocabulary and
-// the owned channels are where plain anatomy belongs.
+// that actually gets accounts in this category REMOVED, crude slang and
+// graphic acts, passed straight through on Instagram. This check closes that
+// gap, and only on the rented, machine-moderated surfaces: X policy permits
+// the vocabulary and the owned channels are where plain anatomy belongs.
+//
+// ticket #5482 narrowed this further: clinical anatomy nouns ("clitoris",
+// "vulva", "vagina", "labia", "penis", "anus") are no longer blocking. They
+// were anchored to the @bellesaco suspension, but the charter
+// (docs/emma-voice.md, Instagram section, owner correction 2026-08-22
+// evening) says plainly that removal was never a word ban: these are ordinary
+// nouns in a fact or mechanism sentence. Crude slang, act-naming, arousal
+// states, and the owner-held borderline-acts tier are unaffected and still
+// block.
 describe('removal-tier caption lexicon', () => {
-  it('blocks a removal-tier word in an Instagram caption', async () => {
+  it('blocks a crude-slang word in an Instagram caption (tier: crude-slang)', async () => {
     const r = await runDeterministicPublishChecks({
-      caption: 'the anatomy nobody explains: your clitoris has more nerve endings than you think',
+      caption: 'stop overthinking it and just go grab the pussy pump already',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
     })
@@ -394,11 +402,12 @@ describe('removal-tier caption lexicon', () => {
     expect(r.blocked).toBe(true)
   })
 
-  it('lets the identical caption through on X, whose policy permits it', async () => {
+  it('lets the identical crude-slang caption through on X, whose policy permits it', async () => {
     // DONE WHEN #2: the same text that blocks on Instagram must pass untouched
-    // on X. Blocking it there gags the account for no safety gain.
+    // on X. Blocking it there gags the account for no safety gain. The lexicon
+    // does not run on X at all (CAPTION_LEXICON_PLATFORMS is instagram-only).
     const r = await runDeterministicPublishChecks({
-      caption: 'the anatomy nobody explains: your clitoris has more nerve endings than you think',
+      caption: 'stop overthinking it and just go grab the pussy pump already',
       mediaUrls: GOOD_MEDIA,
       platform: 'x',
     })
@@ -422,7 +431,7 @@ describe('removal-tier caption lexicon', () => {
       caption: CLEAN,
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
-      altText: 'a wand held against a vulva',
+      altText: 'a wand held against her pussy',
     })
     expect(checks(r)).toContain('caption-lexicon')
     expect(r.blocked).toBe(true)
@@ -449,6 +458,109 @@ describe('removal-tier caption lexicon', () => {
       platform: 'instagram',
     })
     expect(checks(r)).not.toContain('caption-lexicon')
+  })
+})
+
+// ── Clinical-anatomy narrowing (ticket #5482, owner-approved 2026-08-25) ─────
+//
+// docs/emma-voice.md (Instagram section, owner correction 2026-08-22 evening,
+// lines 310-323): "'Orgasm', 'the orgasm gap', 'clitoris', 'vulva', 'erection'
+// are ordinary nouns in a sentence that states a fact or explains how a
+// product works... 'air pulsation seals over the clitoris and pulses' is a
+// mechanism." The gate must not refuse the charter's own worked example.
+describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
+  it('passes the charter\'s own mechanism example verbatim (docs/emma-voice.md line 316)', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'air pulsation seals over the clitoris and pulses',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).not.toContain('caption-lexicon')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('passes the real caption fragment from social_posts row 107, the live incident', async () => {
+    // 2026-08-25: the owner clicked Post now on row 107 and the gate refused
+    // this exact mechanism sentence. Textbook fact framing, not act narration.
+    const r = await runDeterministicPublishChecks({
+      caption: 'the vibrating part rests against the clitoris during sex, so both of you feel it',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).not.toContain('caption-lexicon')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('tier 1 (clinical-anatomy) passes: "vagina" no longer blocks', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'the toy is designed to rest just inside the vagina during use',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).not.toContain('caption-lexicon')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('tier 2 (crude-slang) still blocks: "dick"', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'this one is built for a dick of pretty much any size',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).toContain('caption-lexicon')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('tier 3 (act-naming) still blocks: "blowjob"', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'the sleeve is textured to mimic a blowjob',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).toContain('caption-lexicon')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('tier 4 (arousal-states) still blocks: "throbbing"', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'the pulses build until everything feels throbbing',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).toContain('caption-lexicon')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('tier 5 (borderline-acts) still blocks: "masturbation", owner direction 2026-08-25', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'this is a straightforward masturbation aid, nothing fancier than that',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).toContain('caption-lexicon')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('a tier-1 term does not launder a tier-2 term in the same caption', async () => {
+    // Mixing an allowed clinical noun with a still-banned crude term must still
+    // block on the crude term. The presence of the allowed word is not a pass.
+    const r = await runDeterministicPublishChecks({
+      caption: 'it rests against the clitoris, but honestly just call it what it is, a pussy toy',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'instagram',
+    })
+    expect(checks(r)).toContain('caption-lexicon')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('X is unaffected either way: the lexicon never runs there', async () => {
+    const r = await runDeterministicPublishChecks({
+      caption: 'the vibrating part rests against the clitoris during sex, so both of you feel it',
+      mediaUrls: GOOD_MEDIA,
+      platform: 'x',
+    })
+    expect(checks(r)).not.toContain('caption-lexicon')
+    expect(r.blocked).toBe(false)
   })
 })
 

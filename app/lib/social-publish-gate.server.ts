@@ -206,7 +206,7 @@ const CAPTION_DESCRIBES_IMAGE_PATTERNS: RegExp[] = [
 
 /**
  * Vocabulary that the rented, machine-moderated platforms REMOVE accounts over,
- * not merely age-gate (ticket #4062).
+ * not merely age-gate (ticket #4062, narrowed by ticket #5482).
  *
  * Meta's Adult Sexual Solicitation standard
  * (transparency.meta.com/policies/community-standards/sexual-solicitation, last
@@ -214,64 +214,143 @@ const CAPTION_DESCRIBES_IMAGE_PATTERNS: RegExp[] = [
  * Genitals, States of sexual arousal, and Sexual Encounters — in the PROHIBITED
  * tier, whose remedy is removal. Merely discussing sexual practices in clinical
  * or mechanism terms sits in the RESTRICTED tier (an 18+ age gate), which is not
- * an account risk and is deliberately NOT listed here. The line this constant
- * draws is exactly that tier boundary: explicit anatomy and acts block; the
- * mechanism-and-health vocabulary the drafter should rewrite toward
- * ("stimulation", "pleasure", "sensation", "arousal", "climax", "pelvic floor")
- * passes untouched. This is why the remedy is a redraft, never a coded spelling:
- * docs/ads-policy.md line 100 forbids character substitution and reclaimed
- * hashtags, and Instagram's teen-account search block now extends to misspelled
- * variants, so leetspeak buys nothing and costs discoverability.
+ * an account risk and is deliberately NOT listed here. The mechanism-and-health
+ * vocabulary the drafter should rewrite toward ("stimulation", "pleasure",
+ * "sensation", "arousal", "climax", "pelvic floor") passes untouched. This is
+ * why the remedy is a redraft, never a coded spelling: docs/ads-policy.md line
+ * 100 forbids character substitution and reclaimed hashtags, and Instagram's
+ * teen-account search block now extends to misspelled variants, so leetspeak
+ * buys nothing and costs discoverability.
  *
- * Anchored to documented removals: @bellesaco (~700K) was suspended 2026-03-28
- * for the clinical word "clitoris" in ORGANIC content and the appeal was upheld,
- * so clinical genital anatomy is in the PROHIBITED tier on these surfaces even
- * though it is plain health language on the owned channels.
+ * ticket #5482 (owner-approved 2026-08-25): the original list put every
+ * clinical genital noun ("clitoris", "vulva", "vagina", "labia", "penis",
+ * "anus") in the same PROHIBITED bucket as crude slang and graphic acts,
+ * anchored to the @bellesaco suspension for the word "clitoris" in ORGANIC
+ * content. `docs/emma-voice.md` (Instagram section, owner correction
+ * 2026-08-22 evening, lines 310-323) says that removal is not evidence of a
+ * word ban: "Orgasm", "the orgasm gap", "clitoris", "vulva", "erection" are
+ * ordinary nouns in a sentence that states a fact or explains how a product
+ * works, and "air pulsation seals over the clitoris and pulses" is the
+ * charter's own worked example of a mechanism sentence that must pass. The
+ * code was refusing the charter's own example. The audit trail agrees: the
+ * only two Instagram rows ever removed by this gate (23 and 80) contain zero
+ * lexicon terms between them (row 80 is about washing silicone), so the
+ * clinical-noun block has never once caught a real removal, only mechanism
+ * copy the charter wants published. The tier split below follows the
+ * precedent already set for "arousal" a few lines up: the clinical umbrella
+ * word is deliberately absent from the blocking list so mechanism copy is not
+ * blocked, while the graphic forms stay listed.
  *
- * This is the single, reviewable place to tune the list: one exported constant,
- * each entry tagged with its Meta policy category, edited here rather than
- * scattered through prompts.
+ * Five named, data-driven tiers. Moving a term between tiers is a one-line
+ * edit to which array it lives in, never a change to the scan logic below.
  */
-export const CAPTION_LEXICON: {
+type LexiconCategory = 'genitals' | 'sexual-encounters' | 'states-of-arousal'
+
+interface LexiconTerm {
   /** Human-readable label used in the finding detail. */
   label: string
   /** Word-boundaried so "document" never trips "cum" and "peacock" never trips "cock". */
   re: RegExp
   /** Which of Meta's three PROHIBITED-tier categories this belongs to. */
-  category: 'genitals' | 'sexual-encounters' | 'states-of-arousal'
-}[] = [
-  // ── Genitals (PROHIBITED). Clinical nouns included: the Bellesa removal was
-  //    the clinical word "clitoris", so these are an account risk here even
-  //    though they are plain health language on email/SMS/storefront/Notebook.
+  category: LexiconCategory
+}
+
+type LexiconTierName =
+  | 'clinical-anatomy'
+  | 'crude-slang'
+  | 'act-naming'
+  | 'arousal-states'
+  | 'borderline-acts'
+
+interface LexiconTier {
+  name: LexiconTierName
+  /** Whether a hit in this tier produces a `caption-lexicon` block finding. */
+  blocks: boolean
+  terms: readonly LexiconTerm[]
+}
+
+// Tier 1: clinical anatomy. NOT blocking (ticket #5482). These are ordinary
+// nouns in a mechanism-or-fact sentence per the charter quote above, and the
+// audit found no removal ever traced to one of them. Removed from the
+// blocking lexicon entirely rather than downgraded to `hold`: a `hold` would
+// still stall unattended publishing on every mechanism caption that names a
+// body part, which does not satisfy the owner's goal of zero manual editing,
+// and the charter disclaims the noun ban outright rather than making it
+// owner-reviewable. The JUDGMENT layer (the independent `social-publish-gate`
+// reviewer agent, which reads register on every post) stays responsible for
+// catching graphic act narration on these words, as distinct from the plain
+// vocabulary this scripted check used to refuse.
+const CLINICAL_ANATOMY: readonly LexiconTerm[] = [
   { label: 'clitoris', re: /\bclit(oris|oral|s)?\b/i, category: 'genitals' },
   { label: 'vulva', re: /\bvulvas?\b/i, category: 'genitals' },
   { label: 'vagina', re: /\bvaginas?\b|\bvaginal\b/i, category: 'genitals' },
   { label: 'labia', re: /\blabias?\b/i, category: 'genitals' },
   { label: 'penis', re: /\bpenis(es)?\b/i, category: 'genitals' },
   { label: 'anus', re: /\banus\b|\banal\b/i, category: 'genitals' },
-  // Explicit slang for genitals — higher moderation risk than the clinical nouns.
+]
+
+// Tier 2: crude slang for genitals. Stays blocked; the charter bans crude
+// slang outright regardless of framing.
+const CRUDE_SLANG: readonly LexiconTerm[] = [
   { label: 'cock', re: /\bcocks?\b/i, category: 'genitals' },
   { label: 'dick', re: /\bdicks?\b/i, category: 'genitals' },
   { label: 'pussy', re: /\bpuss(y|ies)\b/i, category: 'genitals' },
   { label: 'cunt', re: /\bcunts?\b/i, category: 'genitals' },
-  // ── Sexual Encounters (PROHIBITED). Graphic act vocabulary; the mechanism
-  //    rewrite ("external stimulation", "internal", "solo") passes instead.
-  { label: 'penetration', re: /\bpenetrat(e|es|ed|ing|ion|ive)\b/i, category: 'sexual-encounters' },
-  { label: 'masturbation', re: /\bmasturbat(e|es|ed|ing|ion|ory)\b/i, category: 'sexual-encounters' },
-  { label: 'ejaculation', re: /\bejaculat(e|es|ed|ing|ion)\b/i, category: 'sexual-encounters' },
-  { label: 'cum', re: /\bcum(ming|s)?\b/i, category: 'sexual-encounters' },
-  { label: 'squirt', re: /\bsquirt(s|ed|ing)?\b/i, category: 'sexual-encounters' },
+]
+
+// Tier 3: naming the act. Stays blocked; the charter's Instagram rule is the
+// act is implied, never named. The mechanism rewrite ("external stimulation",
+// "internal", "solo") is the intended remedy, not a coded spelling.
+const ACT_NAMING: readonly LexiconTerm[] = [
   { label: 'blowjob', re: /\bblow\s?jobs?\b/i, category: 'sexual-encounters' },
   { label: 'handjob', re: /\bhand\s?jobs?\b/i, category: 'sexual-encounters' },
   { label: 'cunnilingus', re: /\bcunnilingus\b/i, category: 'sexual-encounters' },
   { label: 'fellatio', re: /\bfellatio\b/i, category: 'sexual-encounters' },
-  { label: 'intercourse', re: /\bintercourse\b/i, category: 'sexual-encounters' },
-  // ── States of sexual arousal (PROHIBITED, graphic only). The clinical umbrella
-  //    word "arousal" is RESTRICTED, not removal, and is intentionally absent so
-  //    mechanism copy is not blocked; only the graphic forms are listed.
+  { label: 'cum', re: /\bcum(ming|s)?\b/i, category: 'sexual-encounters' },
+  { label: 'squirt', re: /\bsquirt(s|ed|ing)?\b/i, category: 'sexual-encounters' },
+  { label: 'ejaculation', re: /\bejaculat(e|es|ed|ing|ion)\b/i, category: 'sexual-encounters' },
+]
+
+// Tier 4: states of sexual arousal, graphic only. Stays blocked. The clinical
+// umbrella word "arousal" is RESTRICTED, not removal, and is intentionally
+// absent so mechanism copy is not blocked; only the graphic forms are listed.
+const AROUSAL_STATES: readonly LexiconTerm[] = [
   { label: 'horny', re: /\bhorny\b/i, category: 'states-of-arousal' },
   { label: 'throbbing', re: /\bthrobbing\b/i, category: 'states-of-arousal' },
 ]
+
+// Tier 5: borderline. These name acts, not anatomy, so ticket #5482 does not
+// move them: the ticket narrows the clinical-anatomy noun ban only. Owner
+// explicit direction 2026-08-25: keep these blocked. Recorded here, in their
+// own named tier, so a future reader does not mistake the omission from tier
+// 1 for an oversight; moving one of these to non-blocking later is a one-line
+// change of which array it lives in.
+const BORDERLINE_ACTS: readonly LexiconTerm[] = [
+  { label: 'intercourse', re: /\bintercourse\b/i, category: 'sexual-encounters' },
+  { label: 'masturbation', re: /\bmasturbat(e|es|ed|ing|ion|ory)\b/i, category: 'sexual-encounters' },
+  { label: 'penetration', re: /\bpenetrat(e|es|ed|ing|ion|ive)\b/i, category: 'sexual-encounters' },
+]
+
+const CAPTION_LEXICON_TIERS: readonly LexiconTier[] = [
+  { name: 'clinical-anatomy', blocks: false, terms: CLINICAL_ANATOMY },
+  { name: 'crude-slang', blocks: true, terms: CRUDE_SLANG },
+  { name: 'act-naming', blocks: true, terms: ACT_NAMING },
+  { name: 'arousal-states', blocks: true, terms: AROUSAL_STATES },
+  { name: 'borderline-acts', blocks: true, terms: BORDERLINE_ACTS },
+]
+
+/**
+ * Flattened, tier-tagged view of every term across all five tiers, including
+ * the non-blocking clinical-anatomy tier. This is the single, reviewable
+ * place to tune the list: edit which tier array a term lives in, not the scan
+ * logic. The scan below only acts on entries where `blocks` is true.
+ */
+export const CAPTION_LEXICON: readonly (LexiconTerm & {
+  tier: LexiconTierName
+  blocks: boolean
+})[] = CAPTION_LEXICON_TIERS.flatMap(tier =>
+  tier.terms.map(term => ({ ...term, tier: tier.name, blocks: tier.blocks })),
+)
 
 /**
  * Platforms whose automated moderation removes accounts over the vocabulary in
@@ -485,14 +564,26 @@ export async function runDeterministicPublishChecks(
 
   // ── Caption: removal-tier lexicon (Instagram/TikTok only) ─────────────────
   //
-  // Meta and TikTok REMOVE accounts over explicit anatomy and graphic acts, so
-  // this scans everything moderation reads — the caption, any on-image text the
-  // drafter supplied, and the alt text — and blocks the draft. The remedy is a
+  // Meta and TikTok REMOVE accounts over crude slang and graphic acts, so this
+  // scans everything moderation reads, the caption, any on-image text the
+  // drafter supplied, and the alt text, and blocks the draft. The remedy is a
   // rewrite in mechanism-and-health framing, never a coded spelling. X and the
   // owned channels are out of scope; see CAPTION_LEXICON_PLATFORMS.
+  //
+  // CONSEQUENCE (ticket #5482): only tiers where `blocks` is true are scanned
+  // here, which as of this ticket excludes clinical-anatomy. That tier's terms
+  // ("clitoris", "vulva", "vagina", "labia", "penis", "anus") no longer produce
+  // any finding, block or hold, on this path. The hourly unattended autopublish
+  // tick refuses on `gate.blocked || gate.held`
+  // (social-publish-job.server.ts), while manual owner publish passes a `held`
+  // finding through (social-publish/manual-publish-gate.server.ts). Because
+  // this tier is not even a `hold`, a caption containing a clinical anatomy
+  // noun can now ship on the unattended hourly tick with no owner click at
+  // all. That is the approved intent (owner goal: zero manual editing for
+  // mechanism copy the charter already allows), not an oversight.
   if (CAPTION_LEXICON_PLATFORMS.includes(platform)) {
     const lexiconText = [caption, input.onImageText ?? '', input.altText ?? ''].join('\n')
-    const hits = CAPTION_LEXICON.filter(t => t.re.test(lexiconText))
+    const hits = CAPTION_LEXICON.filter(t => t.blocks && t.re.test(lexiconText))
     if (hits.length) {
       findings.push({
         check: 'caption-lexicon',
