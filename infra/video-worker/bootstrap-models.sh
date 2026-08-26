@@ -9,6 +9,7 @@
 # Usage:
 #   MODELS_ROOT=/runpod-volume/models bash bootstrap-models.sh            # core set (~36 GB)
 #   WITH_LIGHTX2V=1 bash bootstrap-models.sh                              # also the 4-step LoRAs (+~5 GB)
+#   WITH_S2V=1 bash bootstrap-models.sh                                   # also the audio-driven talking set (+~15 GB)
 #   SKIP_T2V=1 bash bootstrap-models.sh                                   # i2v only (-~28 GB)
 set -euo pipefail
 
@@ -65,4 +66,15 @@ echo
 echo "Done. Contents of ${MODELS_ROOT}:"
 du -sh "${MODELS_ROOT}"/* 2>/dev/null || true
 echo
+
+# Audio-driven talking set (tickets #5713/#5714): the Wan 2.2 S2V checkpoint
+# plus the wav2vec2 audio encoder. The umt5 text encoder and wan_2.1 VAE above
+# are shared. Volume math: ~65 GB used of 100 before this; the fp8 checkpoint
+# (14.3 GB) + encoder (~0.6 GB) fit with ~20 GB to spare.
+if [ "${WITH_S2V:-0}" = "1" ]; then
+  mkdir -p "${MODELS_ROOT}/audio_encoders"
+  fetch diffusion_models wan2.2_s2v_14B_fp8_scaled.safetensors             # 14.3 GB
+  fetch audio_encoders   wav2vec2_large_english_fp16.safetensors           # ~0.6 GB
+fi
+
 echo "ComfyUI reads this tree through extra_model_paths.yaml (base_path: ${MODELS_ROOT})."
