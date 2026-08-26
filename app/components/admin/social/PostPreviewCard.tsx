@@ -12,6 +12,7 @@ import { X_CAPTION_MAX } from '~/lib/social-publish/x-limits'
 import { splitGateStamp, STAMP_RE } from '~/lib/gate-stamp'
 import { formatWaitingAge, formatNextReworkPass } from '~/lib/social-schedule-ui'
 import { applyOwnerFeedback } from './apply-owner-feedback'
+import { refusalNoticesFor, type Refusal } from './refusal-notice'
 import { PenIcon } from './icons'
 
 /**
@@ -102,6 +103,16 @@ export function PostPreviewCard({
   const [applying, setApplying] = useState(false)
   const [applyResult, setApplyResult] = useState<{ ok: boolean; id?: number; error?: string } | null>(null)
   const [alsoRegenerateImage, setAlsoRegenerateImage] = useState(false)
+  // Ticket #5476: a refused owner action (a Post-now the deterministic gate
+  // refused, a failed review, a failed rework) is shown as a prominent banner
+  // beside the buttons instead of a 12px line at the card bottom. Each banner
+  // survives until the owner dismisses it; a fresh attempt clears the flag so
+  // the next refusal is never pre-hidden.
+  const [dismissedRefusals, setDismissedRefusals] = useState<{ post: boolean; review: boolean; apply: boolean }>({
+    post: false,
+    review: false,
+    apply: false,
+  })
 
   const isSubmitting = fetcher.state !== 'idle'
   const posting = postFetcher.state !== 'idle'
@@ -146,6 +157,7 @@ export function PostPreviewCard({
       return
     }
     setFeedbackError(false)
+    setDismissedRefusals(d => ({ ...d, review: false }))
     fetcher.submit(
       {
         intent: 'review',
@@ -168,6 +180,7 @@ export function PostPreviewCard({
 
   function postNow() {
     if (!canPostNow) return
+    setDismissedRefusals(d => ({ ...d, post: false }))
     postFetcher.submit(
       { intent: post.platform === 'x' ? 'post-approved-draft' : 'post-media', postId: String(post.id) },
       { method: 'post' },
@@ -182,6 +195,7 @@ export function PostPreviewCard({
     setFeedbackError(false)
     setApplying(true)
     setApplyResult(null)
+    setDismissedRefusals(d => ({ ...d, apply: false }))
     try {
       const result = await applyOwnerFeedback({
         postId: post.id,
@@ -485,15 +499,22 @@ export function PostPreviewCard({
               <PenIcon size={14} /> Edit
             </Link>
           </div>
-          {fetcher.data?.ok === false && (
-            <p className="text-xs text-red-500">{fetcher.data.error ?? 'Something went wrong.'}</p>
-          )}
-          {postFetcher.data?.ok === false && (
-            <p className="text-xs text-red-500">{postFetcher.data.error ?? 'Something went wrong.'}</p>
-          )}
-          {applyResult?.ok === false && (
-            <p className="text-xs text-red-500">{applyResult.error ?? 'Could not apply your feedback.'}</p>
-          )}
+          {/* Ticket #5476: refusals, plainly named and impossible to miss,
+              beside the buttons that produced them. Order puts the refused
+              action first; each survives until the owner dismisses it. */}
+          {refusalNoticesFor({
+            postId: post.id,
+            post: postFetcher.data,
+            review: fetcher.data,
+            apply: applyResult,
+            dismissed: dismissedRefusals,
+          }).map(refusal => (
+            <RefusalBanner
+              key={refusal.source}
+              refusal={refusal}
+              onDismiss={() => setDismissedRefusals(d => ({ ...d, [refusal.source]: true }))}
+            />
+          ))}
           {applyResult?.ok && applyResult.id != null && (
             <p className="text-xs text-[#4F6150]">
               Applied. Reworked as{' '}
@@ -505,6 +526,39 @@ export function PostPreviewCard({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Ticket #5476: a refused owner action, rendered so it cannot read as "nothing
+ * happened". Mirrors the gate-warning box above the buttons (same red border /
+ * ground / ink) so a refusal and a gate flag look like one family. The heading
+ * names the outcome plainly; the body is the server's reason verbatim (which,
+ * for a lexicon refusal, already carries the offending term and the remedy);
+ * the optional action is the one-click way to fix it; and it stays until the
+ * owner dismisses it.
+ */
+function RefusalBanner({ refusal, onDismiss }: { refusal: Refusal; onDismiss: () => void }) {
+  return (
+    <div role="alert" data-refusal={refusal.source} className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-semibold uppercase text-[11px] tracking-wide">{refusal.heading}</p>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="shrink-0 -mt-0.5 text-lg leading-none text-red-700 hover:text-red-900"
+        >
+          ×
+        </button>
+      </div>
+      <p className="mt-1 whitespace-pre-wrap">{refusal.message}</p>
+      {refusal.action && (
+        <Link to={refusal.action.to} className="mt-2 inline-block font-semibold hover:underline">
+          {refusal.action.label}
+        </Link>
+      )}
     </div>
   )
 }
