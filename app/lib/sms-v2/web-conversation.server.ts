@@ -135,16 +135,39 @@ export async function getOrCreateWebConversation(
   let updates: Partial<typeof webConversations.$inferInsert> = { lastActiveAt: now }
   let stage = row.stage as Stage
 
-  // 24h session rotation: new UUID + reset to RECONNECT
+  // 24h session rotation: new UUID + reset to RECONNECT + clear session-scoped
+  // shopping state.
+  //
+  // Everything that describes *this shopping trip* is cleared: it is scoped to a
+  // session (this sessionId's current visit), not to the browser cookie forever.
+  // This mirrors the SMS rotation in conversation.server.ts, which already
+  // clears these columns; the web rotation previously left them intact, so a
+  // currentPitchHandle from a prior visit survived the RECONNECT. On 2026-08-25
+  // (web, turns 1606-1621) a leftover prowler-prostate handle let a plain
+  // discovery message ("I want to give her an amazing orgasm") route to an
+  // UPSELL pitch before any product had been selected this session, and seeded
+  // an anal-glide pitch to a man shopping for his wife (#5656). The
+  // currentPitchHandle guard in pickEffectiveStage is only trustworthy when the
+  // handle is genuinely session-scoped — clearing it here is what makes
+  // "product selected this session" mean what it says on web.
   if (row.lastActiveAt < twentyFourHoursAgo) {
     updates = {
       ...updates,
       conversationId: crypto.randomUUID(),
       stage: 'RECONNECT',
       stageSetAt: now,
+      // Session-scoped shopping state — cleared so the new visit starts clean.
+      // Identity columns (customerGid, customerFirstName, customerDefaultZip)
+      // are deliberately NOT touched: those belong to the person, not the trip.
+      currentPitchHandle: null,
+      currentUpsellHandle: null,
+      discoveredSlots: {},
+      discoveryState: null,
+      pitchedHandlesLog: null,
+      pendingPdpUrl: null,
     }
     stage = 'RECONNECT'
-    console.info(`[web-conversation] 24h rotation for sessionId=${sessionId} new stage=RECONNECT`)
+    console.info(`[web-conversation] 24h rotation for sessionId=${sessionId} new stage=RECONNECT sessionStateCleared=true`)
   }
   // 6h stage TTL: reset to DISCOVERY if intent doesn't match expected for stage
   else if (newIntent && shouldResetStage(stage, row.stageSetAt, newIntent)) {

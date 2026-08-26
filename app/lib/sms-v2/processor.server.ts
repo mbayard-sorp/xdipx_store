@@ -24,7 +24,7 @@ import { getOrCreateConversation, applyStateWrites } from './conversation.server
 import { classifyIntent } from './intent-classifier.server'
 import { withTurnLogging, withTurnLoggingForStageResponse } from './turn-logger.server'
 import { subscribeToSms } from './klaviyo.server'
-import { pickEffectiveStage, dispatchStage } from './stage-dispatch.server'
+import { pickEffectiveStage, dispatchStage, guardStagePreconditions } from './stage-dispatch.server'
 import { buildEmmaContextWithCrossChannel } from './cross-channel.server'
 import { loadConversationHistory } from './conversation-history.server'
 import { generateConversationSummary } from './summary.server'
@@ -187,7 +187,13 @@ async function runV2Turn(
   // intent-driven pre-transitions), then try to dispatch to a v2 handler.
   // Stages without a handler (GREETING, CONSENT_GATE, RECONNECT, SUPPORT, etc.)
   // return null here and fall through to v1.
-  const effectiveStage = pickEffectiveStage(conversation.stage as Stage, intentResult, conversation.currentPitchHandle)
+  // Enforce the precondition guards (#5656) on the shared machine: UPSELL needs
+  // a product selected this session, POST_CHECKOUT needs a completed checkout.
+  const effectiveStage = guardStagePreconditions(
+    pickEffectiveStage(conversation.stage as Stage, intentResult, conversation.currentPitchHandle),
+    conversation,
+    conversation.stage as Stage,
+  )
   const stageLabel = conversation.stage as string
 
   let result: Awaited<ReturnType<typeof processSmsMessage>>
