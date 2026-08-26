@@ -41,6 +41,26 @@ authoritative for Step 3. Never compute the weekday yourself. The gate enforces 
 Wed podcast review) plus writer-retry headroom, never a second post; migration 068 versions the
 budget, 075 the cap).
 
+**Concurrency reconciliation (before any drafting). The gate does not protect you here.** The gate
+call above passes `excludeRun=$RUN_ID`, which excludes your own run — and that is exactly what hides a
+sibling execution running under the *same* run id, so the gate can return `runsToday:0 ok:true` while
+a second execution is mid-flight against your row. Content run 502 (2026-08-25) had two executions
+interleave topic/draft/gate/publish events on run 502 and write the same Sanity doc id; it converged
+safely by luck, not design, and two sessions drafting into one doc id can clobber gated text with
+ungated text between the gate PASS and `publish_documents`. So before drafting, list running content
+runs and stop if one you did not create is already in flight:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/run" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"list","team":"content","status":"running"}'
+```
+
+If any returned run is `status:'running'` with an `id` other than your `$RUN_ID`, another content run
+holds the lane: exit cleanly (`{"op":"update","id":$RUN_ID,"update":{"status":"skipped","finished":true,"summary":"concurrent content run <id> in flight"}}`)
+rather than drafting a second post over the first. `excludeRun` in the Step 1 gate does not catch
+this, because a session sharing your run id is not a separate run to exclude.
+
 ## Step 2: Load doctrine + context (data only)
 
 1. `docs/emma-voice.md` core + **blog addendum** (mandatory, before any words). Either missing →
