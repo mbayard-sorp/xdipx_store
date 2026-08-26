@@ -82,6 +82,20 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json(result)
     }
 
+    if (b['op'] === 'learn') {
+      // The room's weekly reading (ticket #5718): measured episodes flattened
+      // plus rollups, medians only, every group carrying its n and an
+      // underpowered flag below the signal floor. The honest limits are in
+      // video-learn.server.ts's module doc and bind the room too.
+      const { listEpisodePerformance, rollupByDimension } = await import('~/lib/video-learn.server')
+      const rows = await listEpisodePerformance({ ...(typeof b['limit'] === 'number' ? { limit: b['limit'] } : {}) })
+      const dims = ['formula', 'hookPattern', 'castSlug', 'productHandle', 'placementRole', 'arcPosition'] as const
+      return Response.json({
+        episodes: rows,
+        rollups: Object.fromEntries(dims.map(d => [d, rollupByDimension(rows, d)])),
+      })
+    }
+
     if (b['op'] === 'episode-claim') {
       // The render lane's arm switch. Ships OFF (missing row reads OFF); the
       // owner flips it on the Video tab of /admin/homepage-team.
