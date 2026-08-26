@@ -130,10 +130,13 @@ export async function action({ request }: ActionFunctionArgs) {
       const done = rows.filter(r => r.job.variantGroupId === variantGroupId && r.job.stage === 'done' && r.job.status === 'done')
       if (!done.length) return Response.json({ error: 'No finished jobs in this set' }, { status: 400 })
       const postIds: number[] = []
+      const skipped: { platform: string; reason: string }[] = []
       for (const r of done) {
-        postIds.push(...await fanOutVideoToSocialDrafts(r.job.id, reviewer))
+        const result = await fanOutVideoToSocialDrafts(r.job.id, reviewer)
+        postIds.push(...result.created.map(c => c.id))
+        skipped.push(...result.skipped)
       }
-      return Response.json({ ok: true, approved: done.length, postIds })
+      return Response.json({ ok: true, approved: done.length, postIds, skipped })
     } catch (err) {
       console.error('[video-studio] approve-all-set', err)
       return Response.json({ error: err instanceof Error ? err.message : 'Set approval failed' }, { status: 500 })
@@ -189,7 +192,8 @@ export async function action({ request }: ActionFunctionArgs) {
       case 'approve': {
         const graduation = String(form.get('graduation') ?? 'none') // none | media | hero
         const reviewer = user?.email ?? 'owner'
-        const postIds = await fanOutVideoToSocialDrafts(jobRowId, reviewer)
+        const fanout = await fanOutVideoToSocialDrafts(jobRowId, reviewer)
+        const postIds = fanout.created.map(c => c.id)
 
         let shopify: string | null = null
         if (graduation === 'media' || graduation === 'hero') {
@@ -233,7 +237,7 @@ export async function action({ request }: ActionFunctionArgs) {
             shopify = 'hero_video metafield set (card autoplay + PDP)'
           }
         }
-        return Response.json({ ok: true, postIds, shopify })
+        return Response.json({ ok: true, postIds, skipped: fanout.skipped, shopify })
       }
       default:
         return Response.json({ error: `Unknown intent ${intent}` }, { status: 400 })
