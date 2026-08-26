@@ -766,6 +766,21 @@ brief justifies, never a default a slot inherits. The returned brief is written 
 `imageBrief`, and the subject line as `subject` (Step 6). Charge ratio per rolling 7 is now 3 ceiling
 / 3 mid / 1 educational (§3.2b); the mid frame carries skin, touch, posture, or expression by default.
 
+**Never generate a real brand's wordmark (hard pre-generation rule, ticket #5493).** Do not ask the
+image model to render a real brand's wordmark, logo lockup, or label copy on a product. These are
+real third-party brands (System JO, Le Wand, every SKU we carry), and a fabricated or garbled label
+misrepresents another company's packaging, which is a trademark and truthfulness problem, not only an
+art defect. **A legible-but-wrong label is worse than no label.** Two routes are permitted, and only
+these two: (a) composite the real packshot, or its label region, over the generated scene — the
+`cast` op's two-stage path already does this (stage 1 strips packaging, stage 2 composites the real
+plate); or (b) frame and light the product so no wordmark is legible at any zoom (angle the label
+away, occlude it, shallow depth of field, or hold the product label-side away). State this constraint
+in the brief `social-art-director` returns, as a standing negative, so it reaches the prompt and not
+only the review. This is the same no-text-in-pixels rule the homepage lane and
+`instagram-campaigns.md` §3.6 already carry, extended to product labels, which is where it is now
+failing. It removes the cause; it does not soften the backstop — the high-zoom wordmark check below
+and the publish gate still BLOCK any garbled wordmark that reaches them.
+
 **A cast member in a scene is MANDATORY on every Instagram product post (owner ruling 2026-08-19,
 spec §3.7).** The lead image is a person somewhere real, with the product. A product alone, however
 beautifully styled, is not a publishable lead frame. Emma is a cast member and is in the rotation.
@@ -1108,7 +1123,17 @@ REVISE for any survivor, so a caption that fails this check is a draft that cann
 check, sensation-descriptor tic (Step 3):** for any wand or vibrator caption, grep it against the
 banned-phrase list in Step 3 (`spread-out rumble`, `broad rumble`, `deep, spread-out rumble`, `deep,
 broad rumble`, and close variants) and rewrite the descriptor from the rotation bank on any hit, so
-the tic is caught at draft time rather than at the publish gate.
+the tic is caught at draft time rather than at the publish gate. **Fourth check, hedge words (ticket
+#5390):** grep every caption for conditional hedges (`might`, `maybe`, `if`, `unless`, `could`,
+`perhaps`) and rewrite any hedge in the hook as a confident assertion. id99 shipped `might be` in the
+hook past the voice gate and the publish gate caught it; catching it here saves a publish-gate cycle.
+**Fifth check, hook opener (ticket #5390):** the hook opens with active wanting or anticipation, never
+a spec or a label. `Wand Week's headliner: <product>` (id98) and a bare IPX-spec opener (id100) both
+drew publish-gate too-tame REVISEs the voice gate missed; open on what she will feel, not on what the
+product is. **Sixth check, sourced claim (ticket #5390):** any research or statistic in a caption
+carries a named source and a number at draft time, or it is cut. id101 drew a voice-gate REVISE for
+an unsourced `the research says`; cite it (e.g. `We-Vibe 2025, 87%`) or convert it to a
+non-statistical observation.
 
 **Every image-bearing post carries an accessibility description, and it goes in `altText`, never in
 `tweetText` (ticket #4067, re-homed by owner direction 2026-08-22).** This is standing, not an

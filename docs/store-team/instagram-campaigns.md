@@ -395,6 +395,13 @@ direction that does not reach the binding document has not landed.
 - Stage 1 of the composite still strips packaging, so a manufacturer carton never reaches a
   presenter's hand. That was never about the hand rule; it is the no-text-in-pixels rule, and it
   still binds.
+- **Never ask the image model to render a real brand's wordmark, logo lockup, or label copy on the
+  product body (ticket #5493).** The no-text-in-pixels rule above is about packaging; this extends it
+  to the printed label on the product itself (the JO bottle, the Le Wand neck). A baked wordmark
+  garbles into a plausible-but-wrong mark (CULBUN for COOLING) that misrepresents a real third-party
+  brand, so a legible-but-wrong label is worse than no label. Two routes only: composite the real
+  packshot or its label region, or frame and light so no wordmark is legible at any zoom. The drafting
+  rule and its two permitted routes live in `routine-social-daily.md` Step 5.
 
 **Four bullets were removed from this list on 2026-08-19 (ticket #4206 follow-up).** They read "no
 simulated or implied use", "the product is not on or against a body", and "no fluid or lubricant
