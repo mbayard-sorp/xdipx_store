@@ -794,7 +794,7 @@ export const dbReworkRepo: ReworkRepo = {
 
 export type ReworkResult =
   | { ok: true; reviewStatus: 'pending_review' }
-  | { ok: false; status: 404 | 409; error: string }
+  | { ok: false; status: 400 | 404 | 409; error: string }
 
 export interface ReworkDeps {
   repo?: ReworkRepo
@@ -832,6 +832,27 @@ export async function reworkSocialPost(
         `Post ${id} is ${post.status}/${post.reviewStatus}, not */needs_changes. Rework refiles a row the ` +
         'pre-publish gate sent back for changes; a rejected, approved, posted, or already-pending row is ' +
         'not a rework target.',
+    }
+  }
+
+  // Fail-closed alt-text requirement (ticket #5486), mirroring the draft op in
+  // api.team.social-post.tsx. Judge the EFFECTIVE row after this rework: a
+  // media-bearing Instagram/X row must carry non-empty alt text, or the
+  // pre-publish gate is guaranteed to REVISE it a run later. Rework can change
+  // media and alt text but not platform, so a rework that adds/keeps media
+  // without supplying alt text (and none already on the row) is refused rather
+  // than written back to pending_review as a guaranteed-REVISE row.
+  if (post.platform === 'instagram' || post.platform === 'x') {
+    const effectiveMedia = input.mediaUrls ?? post.mediaUrls ?? []
+    const effectiveAlt = (input.altText ?? post.altText ?? '').trim()
+    if (effectiveMedia.length > 0 && effectiveAlt === '') {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          `Rework refused: a media-bearing ${post.platform} post requires a non-empty altText ` +
+          `(hard rule since 2026-08-22). Supply rework.altText, or the pre-publish gate REVISEs it a run later.`,
+      }
     }
   }
 

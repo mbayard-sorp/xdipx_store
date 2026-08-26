@@ -1103,8 +1103,17 @@ empty or missing `mediaUrls` array (ticket #4131), the same fail-closed shape as
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"x","postType":"manual","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"x","postType":"manual","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"altText":"<plain description of the image>","scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
+
+**`altText` is fail-closed too, for any media-bearing Instagram or X draft (ticket #5486), the same
+shape as the `voiceGate` and X-media checks.** `POST /api/team/social-post {op:'draft'}` and
+`{op:'rework'}` both return 400 and write no row when the platform is `instagram` or `x`, `mediaUrls`
+is non-empty, and `altText` is missing or blank. Alt text has been a hard rule since 2026-08-22 and
+the publish gate REVISEs a media-bearing IG/X post without it, so a media-bearing draft born with no
+alt text was a guaranteed-REVISE row that only surfaced a run later (run 511: rows 104/105/106). For
+a rework the check reads the effective row, so supply `altText` whenever the rework adds or keeps
+media and the row does not already carry one.
 
 **`tweetText` is customer copy only — never an internal image or generation brief (ticket #4372).**
 The value in `tweetText` publishes verbatim onto the live caption. An internal note — an archetype
