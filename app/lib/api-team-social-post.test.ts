@@ -80,10 +80,11 @@ describe('draft op — X media preflight', () => {
     expect(createDraftMock).not.toHaveBeenCalled()
   })
 
-  it('accepts an X draft that carries a media URL', async () => {
+  it('accepts an X draft that carries a media URL and alt text', async () => {
     const res = await post({
       op: 'draft', platform: 'x', tweetText: 'A fresh line', voiceGate,
       mediaUrls: ['https://cdn.shopify.com/files/social-x-scene-20260818.jpg'],
+      altText: 'The wand resting on a folded towel in morning light.',
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ id: 42, deduped: false })
@@ -107,6 +108,52 @@ describe('draft op — X media preflight', () => {
   })
 })
 
+// Ticket #5486: a media-bearing Instagram or X draft born with no alt text is a
+// guaranteed-REVISE row (alt text is a hard rule since 2026-08-22 and the
+// publish gate REVISEs it), so refuse it at write time, the same fail-closed
+// shape as the voiceGate and X-media checks.
+describe('draft op — alt-text preflight (#5486)', () => {
+  const igMedia = ['https://cdn.shopify.com/files/ig-scene.jpg']
+
+  it('rejects a media-bearing Instagram draft with no altText', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'IG caption', voiceGate, mediaUrls: igMedia })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/altText/)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a media-bearing Instagram draft with a blank/whitespace altText', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'IG caption', voiceGate, mediaUrls: igMedia, altText: '   ' })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a media-bearing X draft with no altText (after the X-media check passes)', async () => {
+    const res = await post({ op: 'draft', platform: 'x', tweetText: 'X caption', voiceGate, mediaUrls: ['https://cdn.shopify.com/files/x-scene.jpg'] })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/altText/)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts a media-bearing Instagram draft that carries altText', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'IG caption', voiceGate, mediaUrls: igMedia, altText: 'A cast member holds the toy in warm light.' })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+
+  it('leaves a media-less Instagram draft alone (no image, no alt-text requirement)', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'text-only IG', voiceGate })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+
+  it('does not require alt text on other platforms (LinkedIn media with no altText passes)', async () => {
+    const res = await post({ op: 'draft', platform: 'linkedin', tweetText: 'LI post', voiceGate, mediaUrls: ['https://cdn.shopify.com/files/li-scene.jpg'] })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+})
+
 // Ticket #4069: the route surfaces whatever createDraftSocialPost decides —
 // a fresh row or the existing open duplicate — verbatim, so a caller can tell
 // the two apart instead of always seeing a bare `{ id }`.
@@ -116,6 +163,7 @@ describe('draft op — idempotency surfacing (#4069)', () => {
     const res = await post({
       op: 'draft', platform: 'instagram', tweetText: 'starting a little series', voiceGate,
       mediaUrls: ['https://cdn.shopify.com/files/ig-scene.jpg'], scheduledFor: '2026-08-16',
+      altText: 'A cast member holding the toy against a warm wall.',
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ id: 46, deduped: true })

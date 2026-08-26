@@ -458,7 +458,7 @@ function fakeReworkRepo(post: PostRow | null) {
 describe('reworkSocialPost (#4351)', () => {
   it('returns a needs_changes row to draft/pending_review with the new imagery', async () => {
     const { repo, writes } = fakeReworkRepo(
-      row({ reviewStatus: 'needs_changes', feedback: '[publish-gate REVISE ...] set-dressing mug', reviewedBy: 'social-publish-gate', reviewedAt: new Date('2026-08-19') }),
+      row({ reviewStatus: 'needs_changes', altText: 'a cast member holding the toy in warm light', feedback: '[publish-gate REVISE ...] set-dressing mug', reviewedBy: 'social-publish-gate', reviewedAt: new Date('2026-08-19') }),
     )
     const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/reworked-lead.jpg`] }, { repo })
     expect(r).toEqual({ ok: true, reviewStatus: 'pending_review' })
@@ -486,10 +486,46 @@ describe('reworkSocialPost (#4351)', () => {
   })
 
   it('updates the caption on a copy rework', async () => {
-    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes' }))
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: 'existing alt text on the bounced row' }))
     const r = await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
     expect(r.ok).toBe(true)
     expect(writes[0]!.patch.tweetText).toBe('a cleaner line')
+  })
+
+  // Ticket #5486: a rework must not write a media-bearing Instagram/X row back
+  // to pending_review with no alt text — that is a guaranteed-REVISE row. The
+  // check reads the EFFECTIVE row (rework input falling back to the stored row).
+  it('400s a media-bearing IG rework that leaves alt text blank (row had none, rework supplies none)', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: null }))
+    const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/reworked-lead.jpg`] }, { repo })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(400)
+    expect(writes).toHaveLength(0)
+  })
+
+  it('accepts the same rework once it supplies altText', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: null }))
+    const r = await reworkSocialPost(
+      7,
+      { mediaUrls: [`${CDN}/reworked-lead.jpg`], altText: 'the toy on a folded towel, morning light' },
+      { repo },
+    )
+    expect(r.ok).toBe(true)
+    expect(writes[0]!.patch.altText).toBe('the toy on a folded towel, morning light')
+  })
+
+  it('accepts a copy-only rework when the row already carries alt text', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: 'stored alt text' }))
+    const r = await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    expect(r.ok).toBe(true)
+    expect(writes).toHaveLength(1)
+  })
+
+  it('does not require alt text on a media-less row (education post, no image)', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', mediaUrls: [], altText: null }))
+    const r = await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    expect(r.ok).toBe(true)
+    expect(writes).toHaveLength(1)
   })
 
   it('404s on a post that does not exist', async () => {

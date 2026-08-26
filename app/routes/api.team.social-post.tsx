@@ -122,6 +122,23 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 },
       )
     }
+    // Fail-closed alt-text requirement (ticket #5486), the same shape as the
+    // voiceGate and X-media checks above. Alt text has been a hard rule for
+    // media-bearing Instagram/X posts since 2026-08-22, and the pre-publish
+    // gate REVISEs a media-bearing IG/X row that lacks it. A media-bearing
+    // draft born without alt text is a guaranteed-REVISE row that only surfaces
+    // a run later at the gate (run 511: rows 104/105/106), so refuse it at
+    // write time rather than mint it. Non-media and non-IG/X drafts are
+    // untouched: education posts legitimately carry no image, and only IG/X are
+    // gate-scanned for alt text.
+    if ((b['platform'] === 'instagram' || b['platform'] === 'x') &&
+        mediaUrls && mediaUrls.length > 0 &&
+        (typeof b['altText'] !== 'string' || b['altText'].trim() === '')) {
+      return new Response(
+        'Bad Request: a media-bearing Instagram or X draft requires a non-empty altText (hard rule since 2026-08-22; the pre-publish gate REVISEs a media-bearing IG/X post with no alt text)',
+        { status: 400 },
+      )
+    }
     // Idempotency guard (#4069): a same-platform, same-caption row still open
     // for the same campaign day comes back as `deduped:true` with the
     // existing id rather than a new sibling row — see createDraftSocialPost.
