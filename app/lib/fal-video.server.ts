@@ -95,6 +95,15 @@ export interface VideoModelSpec {
   /** Durations the model accepts, seconds. Empty for audio-driven models. */
   allowedDurations: number[]
   /**
+   * For a `provider: 'runpod'` spec, the worker generation mode this tier
+   * submits. Explicit data rather than an inference (ticket #5934): the first
+   * cut derived it as `audioDriven ? 's2v' : 'i2v'`, which silently checked
+   * wan22-t2v against mode 'i2v' and would have let it through on a worker
+   * that implements i2v but not t2v. Carried over from the parallel
+   * implementation in PR #954, which got this right.
+   */
+  workerMode?: RunpodWorkerMode
+  /**
    * Legacy fal video tier (owner direction 2026-08-26: fal is images only,
    * all video renders on the owned RunPod worker). Kept registered so
    * in-flight and historical jobs still resolve; never a default, and the
@@ -209,6 +218,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   // number comes from RunPod's measured executionTime per job and replaces this
   // in api_token_log and the job row once a clip completes.
   'wan22-i2v': {
+    workerMode: 'i2v',
     falModel: 'runpod/wan2.2-14b-i2v', // documentation only — provider:'runpod' means this is never dereferenced
     label: 'Wan 2.2 14B Image-to-Video (RunPod)',
     tier: 'standard',
@@ -219,6 +229,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     allowedDurations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   },
   'wan22-t2v': {
+    workerMode: 't2v',
     falModel: 'runpod/wan2.2-14b-t2v', // documentation only — provider:'runpod' means this is never dereferenced
     label: 'Wan 2.2 14B Text-to-Video (RunPod)',
     tier: 'standard',
@@ -236,6 +247,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   // InfiniteTalk vs LongCat-Video-Avatar, docs/store-team/video-worker-runpod.md);
   // this entry is inert until the worker image with that mode is live.
   'wan22-s2v': {
+    workerMode: 's2v',
     falModel: 'runpod/wan2.2-s2v-14b', // documentation only — provider:'runpod' means this is never dereferenced
     label: 'Wan 2.2 S2V (RunPod, audio-driven talking)',
     tier: 'avatar',
@@ -278,8 +290,8 @@ export function tierIneligibility(id: VideoModelId): TierIneligibility | null {
         'all video and all talking render on the owned RunPod worker). Use a wan22 tier.',
     }
   }
-  if (spec.provider === 'runpod') {
-    const mode: RunpodWorkerMode = spec.audioDriven ? 's2v' : 'i2v'
+  if (spec.provider === 'runpod' && spec.workerMode) {
+    const mode = spec.workerMode
     if (!runpodWorkerSupportsMode(mode)) {
       return {
         code: 'worker_mode_unavailable',

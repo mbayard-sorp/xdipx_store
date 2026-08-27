@@ -72,6 +72,32 @@ describe('tierIneligibility', () => {
   })
 })
 
+describe('required worker mode is declared, not inferred (ticket #5934)', () => {
+  it('checks each runpod tier against the mode it actually submits', () => {
+    // The first cut derived this as `audioDriven ? 's2v' : 'i2v'`, so wan22-t2v
+    // was checked against 'i2v'. Harmless while both are deployed, wrong the
+    // moment they are not — and "the app assumed a worker capability" is the
+    // exact bug this whole rule exists to prevent.
+    expect(VIDEO_MODELS['wan22-i2v'].workerMode).toBe('i2v')
+    expect(VIDEO_MODELS['wan22-t2v'].workerMode).toBe('t2v')
+    expect(VIDEO_MODELS['wan22-s2v'].workerMode).toBe('s2v')
+  })
+
+  it('refuses wan22-t2v when the worker implements i2v but not t2v', () => {
+    vi.stubEnv('RUNPOD_WORKER_MODES', 'i2v')
+    expect(tierIneligibility('wan22-i2v')).toBeNull()
+    const why = tierIneligibility('wan22-t2v')
+    expect(why?.code).toBe('worker_mode_unavailable')
+    expect(why?.message).toMatch(/t2v/)
+  })
+
+  it('every runpod tier declares a mode, so none can skip the check', () => {
+    const runpod = (Object.keys(VIDEO_MODELS) as VideoModelId[]).filter(id => VIDEO_MODELS[id].provider === 'runpod')
+    expect(runpod.length).toBeGreaterThan(0)
+    for (const id of runpod) expect(VIDEO_MODELS[id].workerMode).toBeTruthy()
+  })
+})
+
 describe('eligibleVideoModelIds', () => {
   it('is exactly the two live wan22 tiers today', () => {
     expect(eligibleVideoModelIds()).toEqual(['wan22-i2v', 'wan22-t2v'])
