@@ -127,7 +127,11 @@ export default function ScriptReader() {
   const decided = fetcher.data?.ok ? fetcher.data.decision : null
   const err = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null
   const overCeiling = ep.estCostUsd != null && Number(ep.estCostUsd) * 100 > maxCostCents
-  const decidable = ep.productionStatus === 'pending_approval' || ep.productionStatus === 'needs_changes'
+  // 'failed' is decidable too (ticket #5726): a render that died at the
+  // provider is the owner's to retry, hand back to the room, or drop. Approve
+  // on a failed row is a RETAKE and spends again, so it says so on the button.
+  const failed = ep.productionStatus === 'failed'
+  const decidable = ep.productionStatus === 'pending_approval' || ep.productionStatus === 'needs_changes' || failed
 
   return (
     <div className="space-y-4">
@@ -158,7 +162,7 @@ export default function ScriptReader() {
                   title={overCeiling ? 'Over the per-video ceiling; the enqueue would refuse it anyway' : undefined}
                   className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper disabled:opacity-40"
                 >
-                  Approve
+                  {failed ? 'Render again' : 'Approve'}
                 </button>
               </fetcher.Form>
               <button type="button" onClick={() => setChangesOpen(v => !v)} className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink hover:border-coral">
@@ -176,6 +180,13 @@ export default function ScriptReader() {
             <span className="text-xs text-ink-4">status: {ep.productionStatus}</span>
           )}
         </div>
+        {failed && !decided && (
+          <div className="mx-auto mt-2 max-w-4xl rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+            This episode&rsquo;s render failed. &ldquo;Render again&rdquo; re-arms it for the next render run and
+            spends again; &ldquo;Changes&rdquo; sends it back to the writers room instead. The failure reason is
+            the newest entry in the revision notes below.
+          </div>
+        )}
         {changesOpen && !decided && (
           <fetcher.Form method="post" className="mx-auto mt-2 max-w-4xl space-y-2" onSubmit={() => setChangesOpen(false)}>
             <input type="hidden" name="decision" value="needs_changes" />

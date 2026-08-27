@@ -122,11 +122,21 @@ export function estimateImageCostUsd(model: string, count: number): number {
 // RunPod Serverless GPU pricing (Wan 2.2 14B, `wan22-i2v` / `wan22-t2v`).
 // RunPod bills per GPU-SECOND actually consumed, not per second of finished
 // video, so this is a different pricing model than the fal per-output-second
-// rates above. Rather than one hardcoded number, this is TWO numbers:
+// rates above. Rather than one hardcoded number, this is THREE numbers:
 //   - RUNPOD_GPU_USD_PER_SEC:      the rented GPU's $/GPU-second (env,
-//     default 0.00031, measured against the live 1cnxz75c71177q endpoint
-//     2026-08-22: RTX 4090 serverless flex at $1.10/hr, the class the
-//     endpoint's workers actually land on since L40S stock is low).
+//     default 0.00053). A job lands on whichever pool the endpoint has stock
+//     in and the /status response does NOT name the GPU it ran on, so this
+//     defaults to the MORE EXPENSIVE pool the endpoint is allowed to schedule
+//     (ADA_48_PRO / L40S 48GB at ~$1.90/hr) rather than the cheaper ADA_24
+//     (RTX 4090 at $1.10/hr = 0.00031). Same "never lowball" discipline as
+//     DEFAULT_VIDEO_RATE below: an over-estimate closes the budget gate early,
+//     an under-estimate spends money nobody counted.
+//   - RUNPOD_FEE_MULTIPLIER:       RunPod's invoice is gpuAmount PLUS a
+//     platform feeAmount plus container disk, and only gpuAmount is derivable
+//     from executionTime. Measured on the live 1cnxz75c71177q endpoint over
+//     2026-08-22..24: gpu $1.0551, fee $0.5133, disk $0.0039 -> fee+disk run
+//     48.6% of gpu. Default 1.5 (env-overridable) so the recorded cost tracks
+//     the invoice instead of the GPU line alone.
 //   - RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND: an ASSUMED render-time
 //     multiplier (45 GPU-seconds of render per second of finished clip,
 //     from a measured fast-path run: 219669ms executionTime / 5.06s clip)
@@ -137,31 +147,55 @@ export function estimateImageCostUsd(model: string, count: number): number {
 // computeRunpodActualCostUsd() is the REAL number: RunPod's /status response
 // carries executionTime in milliseconds, actually GPU-seconds billed, and
 // replaces the estimate once the job completes (video-pipeline clip stage).
+// It is also what a FAILED job's burn is recorded with: a render that times
+// out or crashes consumed GPU-seconds all the same, and before ticket #5726
+// those seconds were logged nowhere and counted against no budget.
 // ---------------------------------------------------------------------------
 
-const RUNPOD_GPU_USD_PER_SEC_DEFAULT = 0.00031
+const RUNPOD_GPU_USD_PER_SEC_DEFAULT = 0.00053
+const RUNPOD_FEE_MULTIPLIER_DEFAULT = 1.5
 const RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND = 45
 
-function runpodGpuRatePerSecondUsd(): number {
-  const raw = process.env['RUNPOD_GPU_USD_PER_SEC']
+function envNumber(key: string, fallback: number): number {
+  const raw = process.env[key]
   const n = raw != null && raw.trim() !== '' ? Number(raw) : NaN
-  return Number.isFinite(n) && n > 0 ? n : RUNPOD_GPU_USD_PER_SEC_DEFAULT
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+function runpodGpuRatePerSecondUsd(): number {
+  return envNumber('RUNPOD_GPU_USD_PER_SEC', RUNPOD_GPU_USD_PER_SEC_DEFAULT)
+}
+
+/**
+ * Platform fee + container disk as a multiple of the GPU line. Never below 1:
+ * a multiplier under 1 would silently discount real spend, so a bad env value
+ * falls back to the default rather than being honored.
+ */
+function runpodFeeMultiplier(): number {
+  const m = envNumber('RUNPOD_FEE_MULTIPLIER', RUNPOD_FEE_MULTIPLIER_DEFAULT)
+  return m < 1 ? RUNPOD_FEE_MULTIPLIER_DEFAULT : m
+}
+
+/** All-in $/GPU-second: the GPU line plus RunPod's fee and disk. */
+export function runpodAllInRatePerSecondUsd(): number {
+  return runpodGpuRatePerSecondUsd() * runpodFeeMultiplier()
 }
 
 /** ESTIMATE-only $/clip-second for the wan22 tiers. See block comment above. */
 export function estimateRunpodRatePerSecondUsd(): number {
-  return runpodGpuRatePerSecondUsd() * RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND
+  return runpodAllInRatePerSecondUsd() * RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND
 }
 
 /**
- * ACTUAL USD cost of one completed RunPod job from its measured executionTime
- * (ms, from the /status response). This is the real number the estimate above
- * only approximates; the clip stage uses this to replace the estimate on the
- * job row and in api_token_log once a wan22 job completes. Never negative.
+ * ACTUAL USD cost of one RunPod job from its measured executionTime (ms, from
+ * the /status response), inclusive of RunPod's platform fee and disk. This is
+ * the real number the estimate above only approximates; the clip stage uses it
+ * to replace the estimate on the job row and in api_token_log once a wan22 job
+ * completes, and to record the burn of one that failed. Never negative.
  */
 export function computeRunpodActualCostUsd(executionMs: number): number {
   const seconds = Math.max(0, executionMs) / 1000
-  const cost = runpodGpuRatePerSecondUsd() * seconds
+  const cost = runpodAllInRatePerSecondUsd() * seconds
   return Math.round(cost * 1e5) / 1e5
 }
 

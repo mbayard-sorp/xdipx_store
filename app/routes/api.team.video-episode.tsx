@@ -29,6 +29,13 @@
  *     'rendering' so a duplicate claim cannot double-render. Gated by
  *     video_program_enabled (ships OFF; a missing row reads OFF).
  *
+ *   { op: 'episode-release', episodeId, reason }
+ *     -> { released, episodeId, reason }  (409 when the row is not a
+ *        releasable claim)
+ *     Render lane only, the other half of episode-claim: hands a claimed
+ *     episode back to 'approved' when the run refuses to render it. Without
+ *     it a refusal strands the row in 'rendering' permanently.
+ *
  * There is DELIBERATELY no 'episode-decide' op here. Deciding an episode is
  * the owner's money gate, agents hold this token, and agents never approve
  * spend: the decide path lives in the /admin/video-studio action behind the
@@ -40,6 +47,7 @@ import {
   proposeEpisodes,
   listEpisodes,
   claimNextEpisode,
+  releaseEpisodeClaim,
   type ProposeEpisodeInput,
 } from '~/lib/video-episodes.server'
 import { apiError } from '~/lib/api-error.server'
@@ -94,6 +102,28 @@ export async function action({ request }: ActionFunctionArgs) {
         episodes: rows,
         rollups: Object.fromEntries(dims.map(d => [d, rollupByDimension(rows, d)])),
       })
+    }
+
+    if (b['op'] === 'episode-release') {
+      // The other half of episode-claim (ticket #5726). A render run that
+      // claims and then refuses — closed gate, per-video ceiling, spoken-text
+      // mismatch — MUST call this, or the row stays 'rendering' forever:
+      // unclaimable (only 'approved' is claimable) and undecidable
+      // (decideEpisode refuses anything past pending/needs_changes/approved).
+      //
+      // This is not an agent approving spend, which is why it may live on the
+      // team-token API while episode-decide deliberately may not: it restores
+      // the approval the OWNER already gave, and refuses any row that reached
+      // a provider (those are markEpisodeRenderFailed's, off the job).
+      const episodeId = typeof b['episodeId'] === 'number' ? b['episodeId'] : NaN
+      if (!Number.isFinite(episodeId)) {
+        return new Response('Bad Request: episodeId required', { status: 400 })
+      }
+      const reason = typeof b['reason'] === 'string' && b['reason'].trim()
+        ? b['reason'].trim()
+        : 'no reason given'
+      const released = await releaseEpisodeClaim(episodeId, reason)
+      return Response.json({ released, episodeId, reason }, { status: released ? 200 : 409 })
     }
 
     if (b['op'] === 'episode-claim') {
