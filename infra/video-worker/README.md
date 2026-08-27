@@ -42,6 +42,21 @@ blobPathPrefix    string   e.g. "video/<jobId>"; files land at <prefix>/clip.mp4
 Output: `{ videoUrl, lastFrameUrl, width: 720, height: 1280, fps: 16, durationSeconds, seed, renderSeconds }`
 or `{ error: "<message>" }`.
 
+## Finish pass (ticket #5719)
+
+`finish: true` on any mode runs a finish stage before upload: real
+motion-compensated interpolation to 30 fps (ffmpeg minterpolate mci, never
+frame duplication) then a lanczos upscale to 1080x1920 with light unsharp.
+This closes most of the visible quality gap against professional creators:
+without it the app's ffmpeg naively stretches 720p16 to 1080p30 downstream.
+The response reports `finishSeconds` separately from `renderSeconds` so the
+metered cost stays attributable. Default OFF; the app arms it per job once
+`video_finish_pass_enabled` is on and an A/B pair has been eyeballed (the
+bake-off session renders that pair and records the numbers in
+`docs/store-team/video-worker-runpod.md`). Upgrade path if minterpolate is
+too slow or smeary on this content: model-based RIFE + RealESRGAN behind a
+`WITH_FINISH=1` bootstrap, same input contract.
+
 ## Mode s2v (audio-driven talking, tickets #5713/#5714)
 
 `mode: "s2v"` takes `imageUrl` (the approved identity frame) plus `audioUrl`

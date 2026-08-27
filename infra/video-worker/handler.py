@@ -14,6 +14,8 @@ Job input (matches what app/lib/video-pipeline.server.ts will send):
     "mode": "i2v" | "t2v" | "s2v",
     "aspect": "9:16",              # only 9:16 is supported in Phase 1
     "fast": bool | null,           # use the lightx2v 4-step LoRAs (must be on the volume)
+    "finish": bool | null,         # finish pass (ticket #5719): motion-interpolate to 30 fps
+                                   # and upscale to 1080x1920 before upload; default false
     "blobToken": str,              # Vercel Blob read-write token
     "blobPathPrefix": str          # e.g. "video/<jobId>"
   }
@@ -184,6 +186,7 @@ def validate(inp: dict[str, Any]) -> dict[str, Any]:
     if not prefix:
         raise ValueError("blobPathPrefix is required")
     fast = bool(inp.get("fast", False))
+    finish = bool(inp.get("finish", False))
     steps = inp.get("steps")
     steps = int(steps) if steps else (FAST_STEPS if fast else DEFAULT_STEPS)
     if not 1 <= steps <= 60:
@@ -201,6 +204,7 @@ def validate(inp: dict[str, Any]) -> dict[str, Any]:
         "steps": steps,
         "seed": seed,
         "fast": fast,
+        "finish": finish,
         "blob_token": inp["blobToken"],
         "blob_prefix": prefix,
     }
@@ -414,6 +418,34 @@ def postprocess(src: str, workdir: str, keep_audio: bool = False) -> tuple[str, 
     return mp4, png
 
 
+FINISH_FPS = 30
+FINISH_WIDTH, FINISH_HEIGHT = 1080, 1920
+
+
+def finish_pass(mp4: str, workdir: str) -> str:
+    """
+    Finish quality (ticket #5719): REAL motion-compensated interpolation to
+    30 fps (ffmpeg minterpolate mci/aobmc, not frame duplication) followed by
+    a lanczos upscale to 1080x1920 with a light unsharp. Zero new models on
+    the volume; ffmpeg is already in the image. If the bake-off finds
+    minterpolate too slow or too smeary on this content, the upgrade path is
+    model-based RIFE + RealESRGAN behind a WITH_FINISH bootstrap; the input
+    contract (finish: true) stays identical either way.
+
+    Interpolation FIRST, upscale second: interpolating at 720p costs a
+    quarter of the motion search of doing it at 1080p.
+    """
+    out = os.path.join(workdir, "clip-finished.mp4")
+    run(["ffmpeg", "-y", "-loglevel", "error", "-i", mp4,
+         "-vf",
+         f"minterpolate=fps={FINISH_FPS}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,"
+         f"scale={FINISH_WIDTH}:{FINISH_HEIGHT}:flags=lanczos,unsharp=5:5:0.4:5:5:0.0",
+         "-c:a", "copy",
+         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+         "-pix_fmt", "yuv420p", "-movflags", "+faststart", out])
+    return out
+
+
 def blob_put(token: str, pathname: str, path: str, content_type: str) -> str:
     with open(path, "rb") as f:
         data = f.read()
@@ -485,6 +517,13 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         # s2v keeps its performed speech track; the silent tiers stay silent.
         mp4, png = postprocess(src, workdir, keep_audio=(p["mode"] == "s2v"))
 
+        finish_seconds = 0.0
+        if p["finish"]:
+            progress("finish pass: interpolating to 30 fps + upscaling to 1080p")
+            tf = time.time()
+            mp4 = finish_pass(mp4, workdir)
+            finish_seconds = round(time.time() - tf, 1)
+
         progress("uploading to Vercel Blob")
         video_url = blob_put(p["blob_token"], f"{p['blob_prefix']}/clip.mp4", mp4, "video/mp4")
         frame_url = blob_put(p["blob_token"], f"{p['blob_prefix']}/last-frame.png", png, "image/png")
@@ -492,12 +531,14 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         return {
             "videoUrl": video_url,
             "lastFrameUrl": frame_url,
-            "width": WIDTH,
-            "height": HEIGHT,
-            "fps": FPS,
+            "width": FINISH_WIDTH if p["finish"] else WIDTH,
+            "height": FINISH_HEIGHT if p["finish"] else HEIGHT,
+            "fps": FINISH_FPS if p["finish"] else FPS,
             "durationSeconds": p["seconds"],
             "seed": p["seed"],
             "renderSeconds": round(time.time() - t0, 1),
+            # Split so metered cost stays attributable (generate vs finish).
+            "finishSeconds": finish_seconds,
         }
     except Exception as exc:  # noqa: BLE001
         log(f"FAILED: {exc}")
