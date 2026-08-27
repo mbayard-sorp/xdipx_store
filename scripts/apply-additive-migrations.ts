@@ -241,6 +241,7 @@ export async function runDryRunMode(client: QueryClient, files: MigrationFile[])
   await ensureLedgerTable(client)
   const applied = await getAppliedFilenames(client)
   const results: FileResult[] = []
+  const deferred: { file: MigrationFile; statements: string[] }[] = []
 
   for (const f of files) {
     if (applied.has(f.filename)) {
@@ -279,7 +280,30 @@ export async function runDryRunMode(client: QueryClient, files: MigrationFile[])
       results.push({ file: f.filename, verdict: 'auto', statementCount: statements.length })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      // Replay-order artifact, dry-run only: prod applied these files in true
+      // chronological order, but the scratch replay is lexicographic, so an
+      // OLD auto file can index a table an even older-numbered-but-later
+      // manual file creates (0002 indexes order_line_items, created by 009).
+      // Every additive statement is IF NOT EXISTS, so deferring and retrying
+      // once after the full pass is safe and order-insensitive. A file that
+      // still fails on the retry fails the run exactly as before.
+      if (/does not exist/i.test(message)) {
+        console.warn(`[apply-additive-migrations] dry-run: ${f.filename} deferred (${message.slice(0, 160)}); retrying after the full pass`)
+        deferred.push({ file: f, statements })
+        continue
+      }
       return { results, failedFile: f.filename, failedError: message }
+    }
+  }
+
+  for (const d of deferred) {
+    try {
+      await executeFile(client, d.statements)
+      console.log(`[apply-additive-migrations] dry-run applied ${d.file.filename} on retry (${d.statements.length} statement(s))`)
+      results.push({ file: d.file.filename, verdict: 'auto', statementCount: d.statements.length })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { results, failedFile: d.file.filename, failedError: message }
     }
   }
 
