@@ -12,6 +12,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const state = {
   selectResults: [] as unknown[][],
   inserts: [] as Array<Record<string, unknown>>,
+  /** Every db.update(...).set(...) payload, so a test can assert WHY a job failed. */
+  updates: [] as Array<Record<string, unknown>>,
 }
 
 vi.mock('~/lib/db.server', () => {
@@ -33,7 +35,12 @@ vi.mock('~/lib/db.server', () => {
           return p
         },
       }),
-      update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
+      update: () => ({
+        set: (v: Record<string, unknown>) => {
+          state.updates.push(v)
+          return { where: () => Promise.resolve() }
+        },
+      }),
     },
   }
 })
@@ -109,6 +116,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   state.selectResults = []
   state.inserts = []
+  state.updates = []
   configMock.mockResolvedValue({
     team: 'video', enabled: true, dailyCents: 2000, maxRunsPerDay: 1,
     autoApproveSuggestions: false, maxCostCents: 600, maxVariantsPerSet: 4,
@@ -392,6 +400,45 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
       refId: 'job-wan22#clip#cancelled',
       actualCostUsd: computeRunpodActualCostUsd(42_000),
     }))
+  })
+
+  /**
+   * The frame stage's per-video ceiling guard (ticket #5941). It was the one
+   * spending stage with no getMaxCostCents check, so frame cost could cross
+   * the ceiling and strand the job: the cost still accrues, and the clip stage
+   * then refuses a job already paid for in frames.
+   *
+   * Asserted on the guard's own message rather than on the whole stage
+   * succeeding — composing a frame needs Sanity/Shopify/Atlas, which this
+   * harness does not stand up, and a test that passed only because the stage
+   * failed later would prove nothing.
+   */
+  const frameJob = (costUsd: string) => ({
+    ...baseJobRow,
+    stage: 'scene_frame',
+    status: 'queued',
+    sceneFrameAssetId: null,
+    costUsd,
+    scriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', durationSeconds: 8 },
+  })
+
+  it('refuses to compose candidates that would carry the job past the ceiling', async () => {
+    state.selectResults = [[frameJob('5.99')]] // ceiling is $6.00 in this fixture
+    const result = await advanceInflightVideoJobs()
+
+    expect(result.failed).toBe(1)
+    expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).toMatch(/per-video ceiling/)
+    // Refused BEFORE the spend: no candidate assets inserted.
+    expect(state.inserts.filter(r => r['purpose'] === 'scene_frame')).toHaveLength(0)
+  })
+
+  it('does not refuse on cost when there is headroom left', async () => {
+    state.selectResults = [[frameJob('0')]]
+    await advanceInflightVideoJobs()
+
+    // It may still fail further down this harness (no Sanity/Shopify stubs),
+    // but it must not be the ceiling that stopped it.
+    expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).not.toMatch(/per-video ceiling/)
   })
 
   it('waits (does not insert or log) while the runpod job is still in progress', async () => {

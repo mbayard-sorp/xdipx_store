@@ -733,6 +733,38 @@ async function advanceJob(job: VideoJobRow): Promise<AdvanceOutcome> {
   }
 }
 
+/**
+ * Refuse to compose frame candidates that would carry the job past its
+ * per-video ceiling (ticket #5941). Called BEFORE the presenter/product
+ * lookups so a job over its ceiling does no work at all.
+ *
+ * Every other spending stage checks getMaxCostCents before it spends — the
+ * enqueue, the clip stage, the multi-scene pre-first-scene check, the avatar
+ * stage. The frame stage did not, which made it the one place money could
+ * cross the ceiling. The failure shape is worse than a plain overspend: frame
+ * cost still accrues to job.costUsd, so a few owner-driven retrySceneFrames
+ * passes push the accrued total over, and then the CLIP stage refuses — a job
+ * paid for in frames that can never produce a video.
+ *
+ * Checked against the cost the composition is ABOUT to add (the candidates
+ * plus the optional product plate), so the refusal lands before the spend.
+ */
+async function assertFrameCostFitsCeiling(job: VideoJobRow): Promise<void> {
+  const maxCents = await getMaxCostCents()
+  // WORST CASE: candidates plus the product plate. Whether a plate is actually
+  // composed is not known until the product image resolves, and a refusal
+  // threshold should err toward refusing early, never toward letting a spend
+  // through — same never-lowball discipline as DEFAULT_VIDEO_RATE.
+  const frameCost = estimateImageCostUsd(SCENE_FRAME_COST_KEY, SCENE_FRAME_CANDIDATES)
+    + estimateImageCostUsd(SCENE_PLATE_COST_KEY, 1)
+  if ((Number(job.costUsd) + frameCost) * 100 > maxCents) {
+    throw new Error(
+      `Accrued $${Number(job.costUsd).toFixed(2)} + frame cost up to $${frameCost.toFixed(2)} would exceed the ` +
+      `per-video ceiling ($${(maxCents / 100).toFixed(2)}, video_team_max_cost_cents); refusing before the frames spend`,
+    )
+  }
+}
+
 // ─── Stage: scene_frame ──────────────────────────────────────────────────────
 
 async function resolvePresenterPhotoUrl(presenter: string): Promise<string | null> {
@@ -869,6 +901,10 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
 
   const framePrompt = typeof script['framePrompt'] === 'string' ? script['framePrompt'] as string : null
   if (!framePrompt) throw new Error('scriptJson.framePrompt is required for the scene_frame stage')
+
+  // Ceiling check before ANY of the work (ticket #5941): the frame stage was
+  // the one spending stage with no getMaxCostCents check.
+  await assertFrameCostFitsCeiling(job)
 
   const presenterUrl = await resolvePresenterPhotoUrl(job.presenter)
   // Talking-head frames NEVER include the product (product visuals live in
@@ -1031,6 +1067,10 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
   // braces check, not an expected runtime path.
   if (!scene.framePrompt) throw new Error(`scenes[${idx}].framePrompt is required for own-frame scenes`)
   const talkingHead = job.scriptJson['talkingHead'] === true
+  // Ceiling check before ANY of the work (ticket #5941): the frame stage was
+  // the one spending stage with no getMaxCostCents check.
+  await assertFrameCostFitsCeiling(job)
+
   const presenterUrl = await resolvePresenterPhotoUrl(job.presenter)
   if (talkingHead && !presenterUrl) throw new Error('talkingHead requires a presenter (emma or friend:{slug})')
   const productUrl = talkingHead ? null : await resolveProductImageUrl(job.productHandle)
