@@ -434,11 +434,14 @@ function buildInput(model: VideoModelId, input: VideoRequestInput): Record<strin
 }
 
 export async function submitVideoRequest(model: VideoModelId, input: VideoRequestInput): Promise<QueueHandle> {
-  const key = requireKey()
   const spec = VIDEO_MODELS[model]
+  // Provider guard BEFORE the key requirement: a RunPod-tier call must be
+  // refused for being mis-routed, not for a missing fal credential (which is
+  // legitimately absent on runpod-only deployments and in CI).
   if (spec.provider === 'runpod') {
     throw new Error(`${model} is a RunPod-provider model; call runpod-video.server.ts's submitRunpodVideo instead`)
   }
+  const key = requireKey()
   if (spec.lipsync) {
     // Output length = the shorter input track; duration validation happened
     // when the base clip was submitted.
