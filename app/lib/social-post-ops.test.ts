@@ -50,6 +50,8 @@ function row(over: Partial<NonNullable<Row>> = {}): NonNullable<Row> {
     gateFindings: null,
     castSlugs: null,
     updatedAt: null,
+    episodeId: null,
+    mediaKind: null,
     ...over,
   }
 }
