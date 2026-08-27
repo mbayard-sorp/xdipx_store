@@ -100,6 +100,38 @@ Doing any of these without the others only moves the failure later and makes it 
 Steps 1-3 are all owner-only (GPU pod, registry credential, endpoint config), which is why
 this is a blocker-list item rather than something an agent can finish.
 
+## Spin-down: what is automatic, what is verified, what is cancelled
+
+Three different things, often confused:
+
+**Idling is not billed and needs no code.** The endpoint is Serverless Flex with
+`workers.min = 0`, a 5-second idle timeout, and FlashBoot. RunPod scales it to zero itself.
+The health endpoint reporting `idle: 3, ready: 3` is the FlashBoot cache, not billed compute:
+measured 2026-08-27, the endpoint had shown three idle workers for four days since the last
+job on 08-23 and billed nothing on 08-24 through 08-27. The only billed idle is the 5-second
+timeout after each job, about $0.004. There is nothing to spin down and no code should try.
+
+**That it went quiet is verified, per video.** `confirmRunpodIdle` (ticket #5717) probes both
+the endpoint and the pods list after the terminal stage and stamps `runpod_idle_confirmed_at`;
+`/cron/runpod-pod-watch` re-probes any completed job still unconfirmed past a 20-minute grace
+and files the `runpod:endpoint-workers-up` blocker if ACTIVE (billing) workers persist. Idle
+Flex slots are correctly not counted as active.
+
+**In-flight requests on an abandoned job ARE cancelled** (ticket #5728). This is the one that
+actually leaked. A submitted RunPod request outlives the row that submitted it: nothing reads
+the output of a terminal job, but the GPU renders and bills to completion or to the 1800s
+execution timeout, roughly $1.43 an orphan and more for a multi-part avatar job.
+`cancelInflightRunpodRequests` now runs on both abandonment paths, reading each request's
+executionTime BEFORE cancelling so the burn still reaches `api_token_log`:
+
+- the generic `advanceJob` failure handler, which also covers the avatar multi-part case where
+  one failed part used to abandon its siblings mid-render;
+- `rejectVideoJob`, the owner's Reject button. Prod job 4 ("Rejected by owner: cancelled
+  during step-4 test") took exactly that path and left its request running.
+
+Cancelling is safe only because the caller has already made the row terminal, so the work
+being stopped is work the app can no longer use. fal handles are deliberately left alone.
+
 ## Stray pod watch
 
 The bootstrap step above (owner step 2) uses a RunPod Pod, the hourly-billed machine
