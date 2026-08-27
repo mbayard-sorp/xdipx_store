@@ -1725,7 +1725,14 @@ export interface VideoEpisodePlacement {
 /** Append-only owner review note on an episode (never overwritten). */
 export interface VideoEpisodeReviewNote {
   at: string
-  decision: 'approved' | 'needs_changes' | 'rejected'
+  /**
+   * Owner decisions, plus the two machine-written entries the render lane
+   * appends (ticket #5726): 'released' when a claimed episode was handed back
+   * unrendered, 'render_failed' when its job died at the provider. Both are
+   * audit trail only; neither is an owner decision and neither can be written
+   * through decideEpisode.
+   */
+  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed'
   tags?: string[]
   note?: string
   by?: string

@@ -147,19 +147,27 @@ export async function submitRunpodVideo(input: RunpodVideoInput): Promise<QueueH
 
 export type RunpodQueueStatus = 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED'
 
-export async function getRunpodStatus(handle: QueueHandle): Promise<{ status: RunpodQueueStatus }> {
+/**
+ * Poll one job. `executionMs` is RunPod's measured executionTime and is
+ * returned for EVERY terminal status, not just COMPLETED: a job that times out
+ * or crashes still consumed (and was still billed for) those GPU-seconds, and
+ * the clip/avatar stages record that burn before failing the job so it reaches
+ * api_token_log and the budget gate (ticket #5726). 0 when RunPod reports none.
+ */
+export async function getRunpodStatus(handle: QueueHandle): Promise<{ status: RunpodQueueStatus; executionMs: number }> {
   const key = requireKey()
   const res = await fetch(handle.statusUrl, { headers: authHeaders(key) })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`runpod status error: ${res.status} ${text.slice(0, 400)}`)
   }
-  const json = await res.json() as { status?: string }
+  const json = await res.json() as { status?: string; executionTime?: number }
+  const executionMs = typeof json.executionTime === 'number' && json.executionTime > 0 ? json.executionTime : 0
   const status = json.status
-  if (status === 'IN_QUEUE' || status === 'IN_PROGRESS' || status === 'COMPLETED') return { status }
+  if (status === 'IN_QUEUE' || status === 'IN_PROGRESS' || status === 'COMPLETED') return { status, executionMs }
   // CANCELLED, TIMED_OUT, and anything unrecognized collapse to FAILED —
   // mirrors fal-video's getVideoRequestStatus.
-  return { status: 'FAILED' }
+  return { status: 'FAILED', executionMs }
 }
 
 export interface RunpodVideoResult {

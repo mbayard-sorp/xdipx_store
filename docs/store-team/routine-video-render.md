@@ -63,6 +63,24 @@ response or a per-video-ceiling refusal is a valid outcome: report it, never dow
 squeeze under, never split an episode across jobs (there is no cross-job concat; two jobs are two
 videos). One episode per run, maximum.
 
+**If you claimed an episode and are not going to enqueue it, hand the claim back.** Step 2 already
+stamped the row `rendering`, and only `approved` rows are claimable, so a refusal that just exits
+strands the episode permanently: unclaimable, undecidable, its number spent and its open loop
+never closing. Every abort after a successful claim ends with
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/video-episode" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"episode-release","episodeId":'$EPISODE_ID',"reason":"<gated|over_ceiling|script_mismatch|...>"}'
+```
+
+That includes the Step 3 spoken-text mismatch: file the blocker AND release, then exit. Releasing
+is not approving spend, it restores the approval the owner already gave. A run that dies before
+releasing is caught by the poller's stale-claim reaper after two hours, but that is a backstop,
+not your excuse. Once a job exists the release is refused with a 409 and the outcome belongs to
+the job: a render that dies at the provider moves the episode to `failed`, where the owner can
+retake it or send it back to the room from `/admin/video-studio`.
+
 The pipeline takes it from here: `/cron/video-job-poller` advances every 2 minutes; the one
 own-frame product beat parks for the owner while `video_frame_review` is on (reused standing-set
 frames skip the gate entirely); the finished cut waits in `/admin/video-studio`, where approval

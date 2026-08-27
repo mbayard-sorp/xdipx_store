@@ -12,7 +12,7 @@
  *   - the open-loop ledger      = opened loops no later episode closed
  */
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { videoEpisodes, videoSeries, videoJobs } from '../../db/schema'
 import type { VideoEpisodeReviewNote, VideoScriptJson } from '../../db/schema'
@@ -251,8 +251,18 @@ export async function decideEpisode(args: {
   const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, args.episodeId)).limit(1)
   const ep = rows[0]
   if (!ep) throw new Error(`episode ${args.episodeId} not found`)
-  if (!['pending_approval', 'needs_changes', 'approved'].includes(ep.productionStatus)) {
-    throw new Error(`episode ${args.episodeId} is ${ep.productionStatus}; only pending_approval/needs_changes/approved rows can be decided`)
+  // 'failed' and 'rendering' are decidable too (ticket #5726): a render that
+  // died is the owner's to retry (-> approved), hand back to the room
+  // (-> needs_changes), or drop (-> rejected), and without that this row would
+  // be a permanent dead end. A 'rendering' row is only decidable while NO job
+  // is attached — a claim that never enqueued. Once a job exists, re-approving
+  // would arm a second render of a video already being paid for.
+  const DECIDABLE_FROM = ['pending_approval', 'needs_changes', 'approved', 'failed', 'rendering']
+  if (!DECIDABLE_FROM.includes(ep.productionStatus)) {
+    throw new Error(`episode ${args.episodeId} is ${ep.productionStatus}; only ${DECIDABLE_FROM.join('/')} rows can be decided`)
+  }
+  if (ep.productionStatus === 'rendering' && ep.videoJobId != null) {
+    throw new Error(`episode ${args.episodeId} is rendering as job ${ep.videoJobId}; wait for that render to finish or fail before deciding it again`)
   }
   if (args.decision === 'needs_changes' && !(args.note && args.note.trim())) {
     throw new Error('needs_changes requires a note: a silent rejection teaches the writers room nothing')
@@ -268,6 +278,16 @@ export async function decideEpisode(args: {
   const statusMap = { approved: 'approved', needs_changes: 'needs_changes', rejected: 'rejected' } as const
   const plannedSlotAt = args.plannedSlotAt ? new Date(args.plannedSlotAt) : undefined
   if (plannedSlotAt && Number.isNaN(plannedSlotAt.getTime())) throw new Error('plannedSlotAt is not a valid date')
+  // Re-arming a failed render is a RETAKE, not a resume: retire the dead job
+  // onto prior_job_ids_json and clear the link, so claimNextEpisode hands the
+  // row over clean and linkEpisodeToJob has an empty slot to write the new job
+  // into. Without this the second retry trips the rendering-with-a-job guard
+  // above and the row is stuck again.
+  const retaking = args.decision === 'approved' && ep.videoJobId != null
+  const priorJobIds = retaking
+    ? [...(Array.isArray(ep.priorJobIdsJson) ? ep.priorJobIdsJson : []), ep.videoJobId!]
+    : null
+
   await db.update(videoEpisodes).set({
     productionStatus: statusMap[args.decision],
     reviewNotesJson: notes,
@@ -275,6 +295,7 @@ export async function decideEpisode(args: {
     ...(args.decision === 'approved' ? { approvedBy: args.decidedBy, approvedAt: new Date() } : {}),
     ...(args.decision === 'rejected' && args.note?.trim() ? { rejectReason: args.note.trim() } : {}),
     ...(plannedSlotAt ? { plannedSlotAt } : {}),
+    ...(retaking ? { videoJobId: null, priorJobIdsJson: priorJobIds, renderStartedAt: null } : {}),
   }).where(eq(videoEpisodes.id, args.episodeId))
 }
 
@@ -305,6 +326,97 @@ export async function claimNextEpisode(): Promise<VideoEpisodeRow | null> {
     .where(and(eq(videoEpisodes.id, target.id), inArray(videoEpisodes.productionStatus, ['approved'])))
     .returning()
   return updated[0] ?? null
+}
+
+/**
+ * How long a `rendering` episode may sit with no job attached before the
+ * reaper treats the claim as abandoned. Comfortably longer than a render
+ * routine's whole run, short enough that a crashed run does not cost the
+ * episode its next scheduled slot.
+ */
+export const STALE_CLAIM_MS = 2 * 60 * 60 * 1000
+
+/**
+ * Hand a claimed episode back, unrendered (ticket #5726).
+ *
+ * claimNextEpisode stamps 'rendering' BEFORE the render lane knows whether it
+ * can actually enqueue, and only `approved` rows are claimable — so a run that
+ * claims and then refuses (closed budget gate, per-video ceiling, spoken-text
+ * mismatch, an empty payload it will not invent around) used to strand the row
+ * in 'rendering' forever: unclaimable, undecidable, its episode number spent
+ * and its open loop never closing. This restores exactly the pre-claim state.
+ *
+ * Restoring `approved` is NOT an agent approving spend: the owner's approval
+ * is what the row already carries and is what this puts back. Refuses to touch
+ * a row that reached a provider (video_job_id set) — that one's outcome is the
+ * job's to report, via markEpisodeRenderFailed.
+ */
+export async function releaseEpisodeClaim(episodeId: number, reason: string): Promise<boolean> {
+  const note: VideoEpisodeReviewNote = {
+    at: new Date().toISOString(),
+    decision: 'released',
+    note: `claim released without rendering: ${reason}`.slice(0, 2000),
+    by: 'agent',
+  }
+  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, episodeId)).limit(1)
+  const ep = rows[0]
+  if (!ep || ep.productionStatus !== 'rendering' || ep.videoJobId != null) return false
+  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
+  const updated = await db.update(videoEpisodes)
+    .set({ productionStatus: 'approved', renderStartedAt: null, reviewNotesJson: notes, updatedAt: new Date() })
+    .where(and(eq(videoEpisodes.id, episodeId), eq(videoEpisodes.productionStatus, 'rendering')))
+    .returning({ id: videoEpisodes.id })
+  return updated.length > 0
+}
+
+/**
+ * The render did reach a provider and died there. 'failed' is a real stored
+ * status (videoStatusOf already renders it, turn: 'owner') and is deliberately
+ * NOT auto-returned to 'approved': a deterministic failure — a tier the worker
+ * image does not implement, a script the pipeline cannot build — would
+ * otherwise re-render and re-burn GPU every Monday and Thursday forever.
+ * Retrying is an owner click in /admin/video-studio, which is where a decision
+ * to spend again belongs.
+ */
+export async function markEpisodeRenderFailed(episodeId: number, error: string): Promise<boolean> {
+  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, episodeId)).limit(1)
+  const ep = rows[0]
+  if (!ep || !['rendering', 'approved'].includes(ep.productionStatus)) return false
+  const note: VideoEpisodeReviewNote = {
+    at: new Date().toISOString(),
+    decision: 'render_failed',
+    note: error.slice(0, 2000),
+    by: 'pipeline',
+  }
+  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
+  const updated = await db.update(videoEpisodes)
+    .set({ productionStatus: 'failed', reviewNotesJson: notes, updatedAt: new Date() })
+    .where(and(eq(videoEpisodes.id, episodeId), inArray(videoEpisodes.productionStatus, ['rendering', 'approved'])))
+    .returning({ id: videoEpisodes.id })
+  return updated.length > 0
+}
+
+/**
+ * Backstop for a run that died between claiming and enqueueing without ever
+ * calling releaseEpisodeClaim — the crashed-worker case releaseEpisodeClaim
+ * cannot cover, mirroring team.server's expireStaleRuns/expireStaleClaims.
+ * Only rows with NO job attached are reaped: a row whose job is genuinely
+ * still rendering keeps its status however long the render takes.
+ */
+export async function reapStaleEpisodeClaims(maxAgeMs: number = STALE_CLAIM_MS): Promise<number> {
+  const cutoff = new Date(Date.now() - maxAgeMs)
+  const reaped = await db.update(videoEpisodes)
+    .set({ productionStatus: 'approved', renderStartedAt: null, updatedAt: new Date() })
+    .where(and(
+      eq(videoEpisodes.productionStatus, 'rendering'),
+      isNull(videoEpisodes.videoJobId),
+      lte(videoEpisodes.renderStartedAt, cutoff),
+    ))
+    .returning({ id: videoEpisodes.id })
+  if (reaped.length) {
+    console.warn(`[video-episodes] reaped ${reaped.length} stale episode claim(s) back to approved: ${reaped.map(r => r.id).join(', ')}`)
+  }
+  return reaped.length
 }
 
 /**

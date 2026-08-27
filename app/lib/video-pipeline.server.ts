@@ -516,6 +516,46 @@ export async function enqueueVideoJobSet(args: EnqueueVideoJobSetArgs): Promise<
   return { variantGroupId, totalEstCostUsd: Math.round(totalEstCostUsd * 1e5) / 1e5, jobs }
 }
 
+/**
+ * Record the GPU-seconds a FAILED RunPod render already burned (ticket #5726).
+ *
+ * A job that times out or crashes was still billed for the time it ran, but
+ * only the COMPLETED branches used to call logVideoCost — so a failure spent
+ * real money that reached neither api_token_log nor the team budget gate, and
+ * the endpoint's own history is 4 failures in 10 jobs. Best-effort and never
+ * throws: this runs on the way to failing a job, and losing the accounting
+ * must not also lose the error that caused it.
+ *
+ * `seconds` is the clip duration that was ATTEMPTED (logVideoCost drops a row
+ * with no seconds); the money is carried by actualCostUsd either way.
+ */
+async function logRunpodBurn(args: {
+  costKey: string
+  executionMs: number
+  seconds: number
+  productHandle: string
+  refId: string
+  feature: 'video-clip' | 'video-avatar'
+}): Promise<void> {
+  if (!(args.executionMs > 0)) return
+  try {
+    const burnedUsd = computeRunpodActualCostUsd(args.executionMs)
+    if (!(burnedUsd > 0)) return
+    await logVideoCost({
+      feature: args.feature,
+      model: args.costKey,
+      seconds: Math.max(1, args.seconds),
+      caller: 'video-pipeline/failed',
+      sku: args.productHandle,
+      refId: args.refId,
+      actualCostUsd: burnedUsd,
+    })
+    console.warn(`[video-pipeline] recorded $${burnedUsd.toFixed(4)} burned by failed runpod render ${args.refId}`)
+  } catch (err) {
+    console.error(`[video-pipeline] failed-render burn accounting lost for ${args.refId}:`, err)
+  }
+}
+
 // ─── Advance loop (called by /cron/video-job-poller) ─────────────────────────
 
 export interface AdvanceVideoResult {
@@ -536,6 +576,17 @@ export async function advanceInflightVideoJobs(opts: { maxJobs?: number } = {}):
 
   const result: AdvanceVideoResult = { advanced: 0, done: 0, failed: 0, parked: 0 }
 
+  // Backstop for a render run that claimed an episode and died before it
+  // enqueued anything (ticket #5726). Runs on the idle path too — that is
+  // exactly when a stranded claim exists, since a stranded claim has no job to
+  // keep the poller busy. Best-effort: never block the advance pass.
+  try {
+    const { reapStaleEpisodeClaims } = await import('./video-episodes.server')
+    await reapStaleEpisodeClaims()
+  } catch (err) {
+    console.error('[video-pipeline] stale episode-claim reap failed:', err)
+  }
+
   if (rows.length === 0) {
     await kvSet(KV_KEYS.videoPollerIdle, Date.now(), POLLER_IDLE_TTL_SECONDS)
     return result
@@ -553,6 +604,20 @@ export async function advanceInflightVideoJobs(opts: { maxJobs?: number } = {}):
         .update(videoJobs)
         .set({ status: 'failed', stage: 'failed', error: String(err), updatedAt: new Date() })
         .where(eq(videoJobs.jobId, job.jobId))
+      // The episode this job was rendering has to come off 'rendering' with
+      // it (ticket #5726). Nothing else writes that transition, so before this
+      // a failed render left the row unclaimable AND undecidable: its episode
+      // number spent, its open loop never closing, and no owner-visible reason
+      // beyond the job's own red pill. Dynamic import: video-episodes.server
+      // imports dryRunEpisodeScript from this module.
+      if (job.episodeId != null) {
+        try {
+          const { markEpisodeRenderFailed } = await import('./video-episodes.server')
+          await markEpisodeRenderFailed(job.episodeId, `job ${job.jobId} failed: ${String(err)}`)
+        } catch (linkErr) {
+          console.error(`[video-pipeline] could not fail episode ${job.episodeId} alongside job ${job.jobId}:`, linkErr)
+        }
+      }
       result.failed++
     }
   }
@@ -1056,12 +1121,23 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
   const pollClipModelId = spec.lipsync ? spec.lipsync.baseClip : job.modelTier as VideoModelId
   const pollClipSpec = VIDEO_MODELS[pollClipModelId]
   if (pollClipSpec.provider === 'runpod') {
-    const { status } = await getRunpodStatus(existing as QueueHandle)
+    const { status, executionMs } = await getRunpodStatus(existing as QueueHandle)
     if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
       await touch(job, {}) // heartbeat so ordering stays fair
       return 'waiting'
     }
-    if (status === 'FAILED') throw new Error('runpod video generation failed')
+    if (status === 'FAILED') {
+      const failedScript = job.scriptJson
+      await logRunpodBurn({
+        costKey: pollClipSpec.costKey,
+        executionMs,
+        seconds: typeof failedScript['durationSeconds'] === 'number' ? failedScript['durationSeconds'] as number : spec.allowedDurations[0] ?? 5,
+        productHandle: job.productHandle,
+        refId: job.jobId,
+        feature: 'video-clip',
+      })
+      throw new Error('runpod video generation failed')
+    }
 
     const result = await getRunpodResult(existing as QueueHandle)
     // Worker already wrote the mp4 to Blob under blobPathPrefix — no
@@ -1258,12 +1334,22 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
   const needsLastFrame = idx + 1 < scenes.length && scenes[idx + 1]!.continuity === 'last-frame'
 
   if (clipSpec.provider === 'runpod') {
-    const { status } = await getRunpodStatus(existing as QueueHandle)
+    const { status, executionMs } = await getRunpodStatus(existing as QueueHandle)
     if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
       await touch(job, {}) // heartbeat so ordering stays fair
       return 'waiting'
     }
-    if (status === 'FAILED') throw new Error(`runpod video generation failed (scene ${idx})`)
+    if (status === 'FAILED') {
+      await logRunpodBurn({
+        costKey: clipSpec.costKey,
+        executionMs,
+        seconds: scene.durationSeconds,
+        productHandle: job.productHandle,
+        refId: `${job.jobId}#scene-${idx}`,
+        feature: 'video-clip',
+      })
+      throw new Error(`runpod video generation failed (scene ${idx})`)
+    }
 
     const result = await getRunpodResult(existing as QueueHandle)
     if (needsLastFrame && !result.lastFrameUrl) {
@@ -1506,8 +1592,23 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
 
   if (spec.provider === 'runpod') {
     for (const key of activeKeys) {
-      const { status } = await getRunpodStatus(handles[key] as QueueHandle)
-      if (status === 'FAILED') throw new Error(`runpod avatar render failed (${key})`)
+      const { status, executionMs } = await getRunpodStatus(handles[key] as QueueHandle)
+      if (status === 'FAILED') {
+        // One failed part fails the job, but every part that already ran was
+        // billed; record this one's burn on the way out (ticket #5726). The
+        // sibling parts' burns land when their own poll sees them terminal,
+        // or are lost — an accepted floor, not a silent zero.
+        const billedRaw = (handles as Record<string, unknown>)['avatar_billed_seconds']
+        await logRunpodBurn({
+          costKey: spec.costKey,
+          executionMs,
+          seconds: typeof billedRaw === 'number' && billedRaw > 0 ? billedRaw : 1,
+          productHandle: job.productHandle,
+          refId: `${job.jobId}#${key}`,
+          feature: 'video-avatar',
+        })
+        throw new Error(`runpod avatar render failed (${key})`)
+      }
       if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
         await touch(job, {}) // heartbeat so ordering stays fair
         return 'waiting'

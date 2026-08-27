@@ -209,13 +209,28 @@ describe('getRunpodStatus', () => {
   it.each(['IN_QUEUE', 'IN_PROGRESS', 'COMPLETED'] as const)('passes %s through unchanged', async (s) => {
     stubEnv()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: s }), { status: 200 })))
-    expect(await getRunpodStatus(HANDLE)).toEqual({ status: s })
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: s, executionMs: 0 })
   })
 
   it.each(['FAILED', 'CANCELLED', 'TIMED_OUT', 'SOMETHING_NEW'] as const)('collapses %s to FAILED', async (s) => {
     stubEnv()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: s }), { status: 200 })))
-    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'FAILED' })
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'FAILED', executionMs: 0 })
+  })
+
+  // Ticket #5726: a job that timed out or crashed still burned billable
+  // GPU-seconds, so executionTime has to survive the collapse to FAILED — it
+  // is the only input the failed-render burn accounting has.
+  it('carries executionTime through on a FAILED job', async () => {
+    stubEnv()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'TIMED_OUT', executionTime: 812_345 }), { status: 200 })))
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'FAILED', executionMs: 812_345 })
+  })
+
+  it('normalizes a missing or nonsense executionTime to 0', async () => {
+    stubEnv()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'FAILED', executionTime: -5 }), { status: 200 })))
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'FAILED', executionMs: 0 })
   })
 
   it('throws on a non-ok status response', async () => {

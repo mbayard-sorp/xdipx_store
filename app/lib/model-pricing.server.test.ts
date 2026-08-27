@@ -1,8 +1,15 @@
 // Unit tests for token/image cost estimation (ticket #96): Opus rates exist,
 // and the unknown-model fallback assumes the premium tier so spend estimates
 // never lowball a daily budget gate.
-import { describe, it, expect } from 'vitest'
-import { estimateCostUsd, estimateImageCostUsd, estimateVideoCostUsd } from './model-pricing.server'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import {
+  estimateCostUsd,
+  estimateImageCostUsd,
+  estimateVideoCostUsd,
+  computeRunpodActualCostUsd,
+  runpodAllInRatePerSecondUsd,
+  estimateRunpodRatePerSecondUsd,
+} from './model-pricing.server'
 
 const MTOK = 1_000_000
 
@@ -78,5 +85,59 @@ describe('estimateVideoCostUsd', () => {
   it('never goes negative and falls back to premium for unknown video models', () => {
     expect(estimateVideoCostUsd('fal/grok-imagine-1.5', -5)).toBe(0)
     expect(estimateVideoCostUsd('mystery/video', 1)).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * RunPod all-in pricing (ticket #5726). Recorded video spend used to be the
+ * GPU line alone at the CHEAPER pool's rate, and only for jobs that completed:
+ * measured 2026-08-22..24, api_token_log held $0.2654 against a $1.572
+ * invoice. Both halves of that gap are pinned here.
+ */
+describe('runpod pricing', () => {
+  afterEach(() => { vi.unstubAllEnvs() })
+
+  it('bills the platform fee on top of the GPU line, not the GPU line alone', () => {
+    vi.stubEnv('RUNPOD_GPU_USD_PER_SEC', '0.001')
+    vi.stubEnv('RUNPOD_FEE_MULTIPLIER', '1.5')
+    expect(runpodAllInRatePerSecondUsd()).toBeCloseTo(0.0015, 10)
+    // 100 GPU-seconds: $0.10 of GPU, $0.15 all-in.
+    expect(computeRunpodActualCostUsd(100_000)).toBeCloseTo(0.15, 5)
+  })
+
+  it('defaults to the more expensive pool the endpoint can schedule (never lowball)', () => {
+    // No env: ADA_48_PRO at ~0.00053/s times the 1.5 fee multiplier.
+    expect(runpodAllInRatePerSecondUsd()).toBeCloseTo(0.000795, 10)
+  })
+
+  it('refuses a fee multiplier below 1, which would discount real spend', () => {
+    vi.stubEnv('RUNPOD_GPU_USD_PER_SEC', '0.001')
+    vi.stubEnv('RUNPOD_FEE_MULTIPLIER', '0.4')
+    expect(runpodAllInRatePerSecondUsd()).toBeCloseTo(0.0015, 10)
+  })
+
+  it('ignores a nonsense GPU rate rather than honoring it', () => {
+    vi.stubEnv('RUNPOD_GPU_USD_PER_SEC', 'free')
+    expect(runpodAllInRatePerSecondUsd()).toBeCloseTo(0.000795, 10)
+    vi.stubEnv('RUNPOD_GPU_USD_PER_SEC', '-1')
+    expect(runpodAllInRatePerSecondUsd()).toBeCloseTo(0.000795, 10)
+  })
+
+  it('never goes negative on a nonsense executionTime', () => {
+    expect(computeRunpodActualCostUsd(-5000)).toBe(0)
+    expect(computeRunpodActualCostUsd(0)).toBe(0)
+  })
+
+  it('keeps the estimate and the actual on the SAME all-in rate', () => {
+    vi.stubEnv('RUNPOD_GPU_USD_PER_SEC', '0.001')
+    vi.stubEnv('RUNPOD_FEE_MULTIPLIER', '2')
+    // 45 GPU-seconds assumed per clip-second, so one clip-second's estimate
+    // must equal 45 GPU-seconds of measured actual. If these ever diverge the
+    // poll branch's estimate-reversal leaves a residue on the job row.
+    expect(estimateRunpodRatePerSecondUsd()).toBeCloseTo(computeRunpodActualCostUsd(45_000), 10)
+  })
+
+  it('prices a 60s episode inside the $6 per-video ceiling at the default rate', () => {
+    expect(estimateVideoCostUsd('runpod/wan22', 60)).toBeLessThan(6)
   })
 })
