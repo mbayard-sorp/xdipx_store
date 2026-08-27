@@ -25,15 +25,14 @@
  *     the production gate (there is no production to protect from a scratch
  *     DB) and never writes to the ledger table (the scratch DB is discarded
  *     after the job, so there is nothing to remember).
- *     KNOWN GAP as of 2026-08-20 (see docs/store-team/ci-flake-register.md):
- *     a scratch DB starts empty, and this mode does not execute
- *     'manual'-classified files, so any 'auto'-classified file that targets
- *     a table/column only a 'manual' file creates will fail dry-run even
- *     though it is fine against the real (already-populated) production DB.
- *     db/migrations/0002_fluffy_james_howlett.sql (indexes order_line_items,
- *     created by the 'manual' 009_copurchase.sql) hits this today, which
- *     means this job cannot pass as designed until that is resolved -- see
- *     the register and PR #791 for the options considered.
+ *     KNOWN GAP, RESOLVED 2026-08-26 (was: see docs/store-team/ci-flake-register.md):
+ *     a scratch DB starts empty, and this mode previously skipped
+ *     'manual'-classified files, so any 'auto'-classified file targeting a
+ *     table only a 'manual' file creates (0002 -> order_line_items from 009)
+ *     failed the dry-run on every migrations PR. Dry-run now executes manual
+ *     files as BEST-EFFORT SUBSTRATE (failures warn and continue; only an
+ *     auto-classified failure fails the job). Production (--build) behavior
+ *     is unchanged: manual files are still never executed there.
  *
  * Ledger: schema_migrations_applied (migration 081) records which files this
  * script has already run, so re-running it on every build only applies files
@@ -242,6 +241,7 @@ export async function runDryRunMode(client: QueryClient, files: MigrationFile[])
   await ensureLedgerTable(client)
   const applied = await getAppliedFilenames(client)
   const results: FileResult[] = []
+  const deferred: { file: MigrationFile; statements: string[] }[] = []
 
   for (const f of files) {
     if (applied.has(f.filename)) {
@@ -253,7 +253,23 @@ export async function runDryRunMode(client: QueryClient, files: MigrationFile[])
     const { verdict, statements, reason } = classifyFile(body)
 
     if (verdict === 'manual') {
-      console.warn(`[apply-additive-migrations] MANUAL: ${f.filename} is not additive-only (${reason}). requires owner: run scripts/apply-migrations.ts`)
+      // KNOWN GAP fix (ci-flake-register.md, PR #791 options): the scratch DB
+      // starts empty, so an auto-classified file that targets a table only a
+      // manual file creates (0002 -> order_line_items from 009) failed the
+      // dry-run forever, which meant this job could never pass on ANY
+      // migrations PR. In DRY-RUN ONLY, manual files are executed too, as
+      // BEST-EFFORT SUBSTRATE: a manual file that fails on the scratch DB is
+      // warned and skipped (some legitimately depend on prod state), and the
+      // job's contract is unchanged -- only an auto-classified failure fails
+      // the run, and production behavior (--build) is untouched: manual files
+      // are still never executed there.
+      try {
+        await executeFile(client, statements)
+        console.log(`[apply-additive-migrations] dry-run substrate: executed MANUAL ${f.filename} (${statements.length} statement(s)) on the scratch DB`)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.warn(`[apply-additive-migrations] dry-run substrate: MANUAL ${f.filename} did not apply on the scratch DB (${message.slice(0, 200)}); continuing`)
+      }
       results.push({ file: f.filename, verdict: 'manual', statementCount: statements.length, reason })
       continue
     }
@@ -264,7 +280,30 @@ export async function runDryRunMode(client: QueryClient, files: MigrationFile[])
       results.push({ file: f.filename, verdict: 'auto', statementCount: statements.length })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      // Replay-order artifact, dry-run only: prod applied these files in true
+      // chronological order, but the scratch replay is lexicographic, so an
+      // OLD auto file can index a table an even older-numbered-but-later
+      // manual file creates (0002 indexes order_line_items, created by 009).
+      // Every additive statement is IF NOT EXISTS, so deferring and retrying
+      // once after the full pass is safe and order-insensitive. A file that
+      // still fails on the retry fails the run exactly as before.
+      if (/does not exist/i.test(message)) {
+        console.warn(`[apply-additive-migrations] dry-run: ${f.filename} deferred (${message.slice(0, 160)}); retrying after the full pass`)
+        deferred.push({ file: f, statements })
+        continue
+      }
       return { results, failedFile: f.filename, failedError: message }
+    }
+  }
+
+  for (const d of deferred) {
+    try {
+      await executeFile(client, d.statements)
+      console.log(`[apply-additive-migrations] dry-run applied ${d.file.filename} on retry (${d.statements.length} statement(s))`)
+      results.push({ file: d.file.filename, verdict: 'auto', statementCount: d.statements.length })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { results, failedFile: d.file.filename, failedError: message }
     }
   }
 
