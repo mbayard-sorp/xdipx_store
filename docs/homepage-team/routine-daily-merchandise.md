@@ -397,6 +397,13 @@ The orchestrator (with `homepage-cro` as the pick gate) then scores the candidat
 - **`deal_score`:** from the feed-processor scoring, as a tiebreaker within brand-fit picks.
 - **Stock depth:** enough inventory to sell for the whole placement window; thin stock loses to a
   comparable pick with depth.
+- **Discontinued-type reject (ticket #5599).** Reject any hero or wired-rail candidate whose
+  discovery-index `productType == "Discontinued"`, **even when `totalInventory > 0`.** A discontinued
+  product can still hold sellable stock, so it clears the price floor, passes the byte-identity
+  freshness gate, and passes any inventory-based stock check, yet it is on its way out of the catalog
+  and must not lead a slot: `fun-factory-volita-vibrator-violet` (type `Discontinued`, inventory 84)
+  led Rail B across runs 479 and 495 on exactly this gap. Check `productType != "Discontinued"`
+  alongside the `>=$39` price floor and the stock-depth check for every hero and wired-rail handle.
 
 **MAP rule (imported from `merch-calendar`):** never feature a MAP=MSRP product on any
 discount-styled surface. MAP=MSRP products cannot advertise a discount at all; MAP<MSRP uses MAP as
