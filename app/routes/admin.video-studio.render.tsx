@@ -33,7 +33,7 @@ import {
   type VideoJobWithAssets,
   type VideoMetricsReport,
 } from '~/lib/video-pipeline.server'
-import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
+import { VIDEO_MODELS, isVideoModelId, tierIneligibility } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { VIDEO_METRIC_FIELDS, VIDEO_FORMULAS, VIDEO_TONES, SCENE_KIT, SOCIAL_PLATFORMS } from '~/lib/team-keys'
 import {
@@ -62,7 +62,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ])
   // VIDEO_MODELS is server-only (fal-video.server.ts) — serialize what the
   // Compose form needs across the loader boundary.
-  const models = Object.entries(VIDEO_MODELS).map(([id, spec]) => ({
+  const models = Object.entries(VIDEO_MODELS)
+    // Composer offers only tiers eligible for new work; registration is
+    // untouched so historical jobs still resolve their spec.
+    .filter(([id]) => tierIneligibility(id as keyof typeof VIDEO_MODELS) === null)
+    .map(([id, spec]) => ({
     id,
     label: spec.label,
     tier: spec.tier,
@@ -273,6 +277,8 @@ async function composeAction(form: FormData): Promise<Response> {
   const presenter = String(form.get('presenter') ?? 'none')
   const modelTier = String(form.get('modelTier') ?? '')
   if (!isVideoModelId(modelTier)) return Response.json({ error: 'Unknown model tier' }, { status: 400 })
+  const ineligible = tierIneligibility(modelTier)
+  if (ineligible) return Response.json({ error: ineligible }, { status: 400 })
   const spec = VIDEO_MODELS[modelTier]
 
   const hooks = String(form.get('hooks') ?? '')
@@ -730,7 +736,9 @@ type LoaderData = Awaited<ReturnType<typeof loader>>
 
 function ComposeSection({ models, cast, busy }: { models: LoaderData['models']; cast: LoaderData['cast']; busy: boolean }) {
   const [open, setOpen] = useState(false)
-  const [tierId, setTierId] = useState<string>('kling25-pro')
+  // Default to the first eligible tier (kling25-pro is a retired fal tier and no
+  // longer offered); models is already filtered to eligible tiers by the loader.
+  const [tierId, setTierId] = useState<string>(models[0]?.id ?? '')
   const tier = models.find(m => m.id === tierId)
   const talking = !!tier?.audioDriven || !!tier?.lipsync
   return (

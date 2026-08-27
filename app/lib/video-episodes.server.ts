@@ -18,8 +18,8 @@ import { videoEpisodes, videoSeries, videoJobs } from '../../db/schema'
 import type { VideoEpisodeReviewNote, VideoScriptJson } from '../../db/schema'
 import { HOOK_PATTERNS, VIDEO_FORMULAS } from './team-keys'
 import { ARC_POSITIONS, validatePlacements, scriptsSpeakIdentically, spokenTextOf } from './video-episodes'
-import { dryRunEpisodeScript } from './video-pipeline.server'
-import { isVideoModelId } from './fal-video.server'
+import { dryRunEpisodeScript, getMaxCostCents } from './video-pipeline.server'
+import { isVideoModelId, tierIneligibility } from './fal-video.server'
 import type { VideoModelId } from './fal-video.server'
 
 export type VideoEpisodeRow = typeof videoEpisodes.$inferSelect
@@ -93,6 +93,10 @@ export async function proposeEpisodes(args: {
   const series = await resolveSeries(args.seriesSlug, args.seriesTitle)
   const batchId = randomUUID()
 
+  // Per-video ceiling read once, so an over-ceiling episode is refused while
+  // refusing is still free — the same getMaxCostCents() the enqueue enforces.
+  const maxCostCents = await getMaxCostCents()
+
   // Validate every episode fully BEFORE writing any row: a batch is one owner
   // sitting, and a half-written batch is worse than a refused one.
   const prepared = args.episodes.map((e, i) => {
@@ -113,6 +117,10 @@ export async function proposeEpisodes(args: {
     let modelTier: VideoModelId | null = null
     if (e.modelTier != null) {
       if (!isVideoModelId(e.modelTier)) throw new Error(`${where}.modelTier is not a known tier`)
+      // Refuse a retired fal tier or an undeployed worker mode at propose time,
+      // while refusing is free, rather than letting it reach the render lane.
+      const ineligible = tierIneligibility(e.modelTier)
+      if (ineligible) throw new Error(`${where}.modelTier ${ineligible}`)
       modelTier = e.modelTier
     }
     let estCostUsd: number | null = null
@@ -121,6 +129,9 @@ export async function proposeEpisodes(args: {
       if (modelTier) {
         // Dry-run the exact validation the render runs, at propose time.
         estCostUsd = dryRunEpisodeScript(e.scriptJson, modelTier).estCostUsd
+        if (estCostUsd != null && estCostUsd * 100 > maxCostCents) {
+          throw new Error(`${where} est $${estCostUsd.toFixed(2)} exceeds the $${(maxCostCents / 100).toFixed(2)} per-video ceiling`)
+        }
       }
     }
     const plannedSlotAt = e.plannedSlotAt ? new Date(e.plannedSlotAt) : null

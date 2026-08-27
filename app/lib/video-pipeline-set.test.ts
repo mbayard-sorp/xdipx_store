@@ -75,7 +75,6 @@ vi.mock('~/lib/runpod-video.server', () => ({
 }))
 
 import { enqueueVideoJobSet, estimateJobCostUsd, advanceInflightVideoJobs } from '~/lib/video-pipeline.server'
-import { estimateAvatarSpeechSeconds } from '~/lib/avatar-script'
 import { logVideoCost } from '~/lib/token-log.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
 import { computeRunpodActualCostUsd, estimateVideoCostUsd } from '~/lib/model-pricing.server'
@@ -85,7 +84,7 @@ const baseArgs = {
   formula: 'myth-busting',
   presenter: 'none',
   baseScriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', voiceover: '{{hook}}' },
-  modelTier: 'kling25-pro' as const,
+  modelTier: 'wan22-i2v' as const,
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
   hooks: ['Hook one', 'Hook two', 'Hook three'],
@@ -110,7 +109,7 @@ describe('enqueueVideoJobSet', () => {
     expect(groupIds.size).toBe(1)
     expect([...groupIds][0]).toBe(result.variantGroupId)
     expect(state.inserts.map(r => (r['variantAxes'] as { hook: string }).hook)).toEqual(['Hook one', 'Hook two', 'Hook three'])
-    const perJob = estimateJobCostUsd('kling25-pro', 5, { reuseFrame: false })
+    const perJob = estimateJobCostUsd('wan22-i2v', 5, { reuseFrame: false })
     expect(result.totalEstCostUsd).toBeCloseTo(perJob * 3, 4)
   })
 
@@ -124,31 +123,30 @@ describe('enqueueVideoJobSet', () => {
   })
 
   it('rejects when the set estimate exceeds ceiling x cap, before any insert', async () => {
+    // A tiny per-video ceiling makes the set budget (ceiling x cap) smaller than
+    // any three-variant total, so the set-budget guard fires regardless of tier.
     configMock.mockResolvedValue({
       team: 'video', enabled: true, dailyCents: 2000, maxRunsPerDay: 1,
-      autoApproveSuggestions: false, maxCostCents: 30, maxVariantsPerSet: 4,
+      autoApproveSuggestions: false, maxCostCents: 5, maxVariantsPerSet: 4,
     })
     await expect(enqueueVideoJobSet(baseArgs)).rejects.toThrow(/set budget/i)
     expect(state.inserts).toHaveLength(0)
   })
 
   it('zeroes the frame cost for variants whose scene already has an approved frame', async () => {
-    const line = 'Short spoken line about {{hook}}.'
     // One findReusableSceneFrame lookup per variant (set estimate); the
-    // enqueue itself does not re-query in this path.
+    // enqueue itself does not re-query in this path. talkingHead:true triggers
+    // the sceneSlug reuse path on an eligible (wan22-i2v) tier.
     state.selectResults = [[{ frameId: 55 }], [{ frameId: 55 }]]
     const result = await enqueueVideoJobSet({
       ...baseArgs,
       presenter: 'emma',
-      modelTier: 'omnihuman',
-      durationSeconds: 0,
+      modelTier: 'wan22-i2v',
+      durationSeconds: 5,
       hooks: ['now', 'later'],
-      baseScriptJson: { presenterLine: line, talkingHead: true, sceneSlug: 'couch-cozy', framePrompt: 'C' },
+      baseScriptJson: { talkingHead: true, sceneSlug: 'couch-cozy', framePrompt: 'C', motionPrompt: 'hold' },
     })
-    const expected = ['now', 'later'].reduce((sum, hook) => {
-      const speech = estimateAvatarSpeechSeconds(line.split('{{hook}}').join(hook))
-      return sum + estimateJobCostUsd('omnihuman', 0, { speechSeconds: speech, reuseFrame: true })
-    }, 0)
+    const expected = 2 * estimateJobCostUsd('wan22-i2v', 5, { reuseFrame: true })
     expect(result.totalEstCostUsd).toBeCloseTo(expected, 4)
     expect(state.inserts).toHaveLength(2)
   })

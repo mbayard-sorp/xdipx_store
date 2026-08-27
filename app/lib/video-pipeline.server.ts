@@ -38,6 +38,7 @@ import { kvSet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import {
   VIDEO_MODELS,
   isVideoModelId,
+  tierIneligibility,
   composeSceneFrame,
   submitVideoRequest,
   getVideoRequestStatus,
@@ -262,7 +263,7 @@ export interface EnqueueVideoJobArgs {
   episodeId?: number
 }
 
-async function getMaxCostCents(): Promise<number> {
+export async function getMaxCostCents(): Promise<number> {
   const cfg = await getTeamConfig('video').catch(() => null)
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT
 }
@@ -320,6 +321,11 @@ export function estimateJobCostUsd(
 export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobId: string; estCostUsd: number }> {
   const modelTier = args.modelTier ?? await getDefaultModelTier()
   if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
+  // Eligibility backstop: refuse a retired fal tier or an undeployed worker
+  // mode, including one arriving from video_default_model_tier (getDefaultModelTier).
+  // Upstream callers gate earlier; this is the last line before spend.
+  const ineligible = tierIneligibility(modelTier)
+  if (ineligible) throw new Error(ineligible)
   const spec = VIDEO_MODELS[modelTier]
   const script = args.scriptJson
   const reuseFrame = typeof script.reuseFrameAssetId === 'number'
@@ -451,6 +457,8 @@ export interface EnqueueVideoJobSetResult {
 export async function enqueueVideoJobSet(args: EnqueueVideoJobSetArgs): Promise<EnqueueVideoJobSetResult> {
   const modelTier = args.modelTier ?? await getDefaultModelTier()
   if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
+  const ineligible = tierIneligibility(modelTier)
+  if (ineligible) throw new Error(ineligible)
   const spec = VIDEO_MODELS[modelTier]
 
   const variants = expandVariantSet({

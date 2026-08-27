@@ -24,6 +24,7 @@
  */
 
 import type { QueueHandle } from '~/lib/fal-video.server'
+import { resolveWorkerModes } from '~/lib/fal-video.server'
 import { requireBlobToken } from '~/lib/blob.server'
 
 const RUNPOD_API_BASE = 'https://api.runpod.ai/v2'
@@ -98,6 +99,16 @@ function resolveFast(explicit: boolean | undefined): boolean {
 export async function submitRunpodVideo(input: RunpodVideoInput): Promise<QueueHandle> {
   const key = requireKey()
   const endpointId = requireEndpointId()
+  // Capability guard: refuse a mode the DEPLOYED image does not implement
+  // BEFORE the HTTP call, so an undeployed mode (e.g. s2v while only i2v,t2v
+  // are live) costs a fast local throw instead of a cold GPU boot and a handler
+  // ValueError. The endpoint pins an immutable image sha, so RUNPOD_WORKER_MODES
+  // declares the running image's real capability. Upstream eligibility gates
+  // (tierIneligibility) should already have caught this; this is the backstop.
+  const workerModes = resolveWorkerModes()
+  if (!workerModes.has(input.mode)) {
+    throw new Error(`runpod worker mode '${input.mode}' is not deployed (RUNPOD_WORKER_MODES=${[...workerModes].join(',')})`)
+  }
   if ((input.mode === 'i2v' || input.mode === 's2v') && !input.imageUrl) {
     throw new Error(`runpod wan22 mode ${input.mode} requires imageUrl`)
   }

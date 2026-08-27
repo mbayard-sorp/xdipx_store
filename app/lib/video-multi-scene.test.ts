@@ -184,13 +184,16 @@ describe('enqueueVideoJob — multi-scene validation', () => {
     expect(stored[1]!.framePrompt).toBeUndefined()
   })
 
-  it('rejects the avatar tier for a multi-scene job (no per-scene motion prompt concept)', async () => {
+  it('refuses the avatar tier (omnihuman is now a retired fal tier; eligibility backstop fires first)', async () => {
+    // omnihuman was the only avatar tier reachable here; it is retired now, so
+    // the enqueueVideoJob eligibility backstop refuses it before the
+    // avatar-multi-scene guard is reached. No eligible tier is audio-driven.
     await expect(enqueueVideoJob({
       ...baseEnqueueArgs,
       modelTier: 'omnihuman',
       durationSeconds: 0,
       scriptJson: { scenes: [scene(), scene()] },
-    })).rejects.toThrow(/avatar tier/)
+    })).rejects.toThrow(/retired fal tier/)
   })
 
   it('defaults continuity: scene 0 own-frame, every later scene last-frame', async () => {

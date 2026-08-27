@@ -63,6 +63,35 @@ Agents do none of the above. They may read this page, file tickets against the w
 code, and (Phase 2) enqueue jobs through the normal `video_jobs` path under the video
 team's budget gate.
 
+## Deployed image vs this repo (worker capability)
+
+The endpoint pins an **immutable image sha**, so the handler in this repo and the handler
+actually running are different things. As of 2026-08-27 the endpoint runs `eb2a126`
+(2026-08-22), which implements modes **`i2v` and `t2v` only**. Mode `s2v` (audio-driven
+talking) landed in the repo on 2026-08-26 (#935) but **has never been deployed**, still
+carries `TODO(verify)` on its ComfyUI node names, and has no weights on the model volume.
+Selecting a tier whose mode the running image lacks would cold-boot a GPU only to
+`ValueError` in the handler.
+
+So the app declares the running image's real capability with the **`RUNPOD_WORKER_MODES`**
+Vercel env var (comma-separated; default `i2v,t2v` when unset). `tierIneligibility()`
+(`app/lib/fal-video.server.ts`) refuses any tier whose worker mode is not in that set at
+propose time, at the team API (before the money gate), in the studio composer, and inside
+`enqueueVideoJob`; `submitRunpodVideo` refuses an undeclared mode before the HTTP call as
+the last backstop. Registration in `VIDEO_MODELS` is untouched, so `/admin/usage` and
+in-flight jobs still resolve every historical tier.
+
+**Eligible tiers today are `wan22-i2v` and `wan22-t2v`. The program has no talking tier.**
+
+Enablement order to add the talking (`s2v`) tier, all owner-only (see owner blocker 45):
+
+1. Pick the checkpoint from the bake-off (Wan2.2-S2V vs InfiniteTalk vs
+   LongCat-Video-Avatar) and confirm the handler's ComfyUI node names (clear `TODO(verify)`).
+2. Download the chosen weights onto the model volume (`bootstrap-models.sh`).
+3. Build and deploy a new worker image implementing `s2v`, and update the endpoint to it.
+4. Add `s2v` to `RUNPOD_WORKER_MODES` in Vercel (e.g. `i2v,t2v,s2v`). Only then does
+   `wan22-s2v` become selectable; nothing in code needs to change.
+
 ## Stray pod watch
 
 The bootstrap step above (owner step 2) uses a RunPod Pod, the hourly-billed machine

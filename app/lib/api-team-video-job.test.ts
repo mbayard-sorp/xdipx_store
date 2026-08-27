@@ -57,7 +57,7 @@ const validSet = {
   productHandle: 'satin-wand',
   formula: 'myth-busting',
   presenter: 'none',
-  modelTier: 'kling25-pro',
+  modelTier: 'wan22-i2v',
   baseScriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', voiceover: '{{hook}} explained' },
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
@@ -84,7 +84,7 @@ describe('enqueue-set', () => {
     expect(enqueueSetMock).toHaveBeenCalledWith(expect.objectContaining({
       productHandle: 'satin-wand',
       formula: 'myth-busting',
-      modelTier: 'kling25-pro',
+      modelTier: 'wan22-i2v',
       durationSeconds: 5,
       hooks: ['Hook one', 'Hook two', 'Hook three'],
       targetPlatforms: ['instagram'],
@@ -159,7 +159,7 @@ describe('lipsync tier validation', () => {
 })
 
 describe('config', () => {
-  it('exposes tones, maxVariantsPerSet, and the sync-lipsync model', async () => {
+  it('exposes tones, maxVariantsPerSet, and only eligible tiers', async () => {
     const res = await post({ op: 'config' })
     expect(res.status).toBe(200)
     const json = await res.json() as Record<string, unknown>
@@ -167,7 +167,11 @@ describe('config', () => {
     expect(json['maxVariantsPerSet']).toBe(4)
     expect(json['endcardEnabled']).toBe(false)
     const models = json['models'] as Record<string, { lipsync: boolean }>
-    expect(models['sync-lipsync']).toBeTruthy()
-    expect(models['sync-lipsync']!.lipsync).toBe(true)
+    // Only eligible tiers are advertised (audit findings 3 & 4): the deployed
+    // RunPod i2v/t2v tiers, never a retired fal tier like sync-lipsync.
+    expect(models['wan22-i2v']).toBeTruthy()
+    expect(models['wan22-t2v']).toBeTruthy()
+    expect(models['sync-lipsync']).toBeUndefined()
+    expect(models['kling25-pro']).toBeUndefined()
   })
 })

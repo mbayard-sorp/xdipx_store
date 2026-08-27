@@ -47,7 +47,7 @@ import {
 import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame, isMultiSceneScript } from '~/lib/video-pipeline.server'
 import { assertEpisodeMatchesScript, linkEpisodeToJob } from '~/lib/video-episodes.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
-import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
+import { VIDEO_MODELS, isVideoModelId, tierIneligibility } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { db } from '~/lib/db.server'
 import { socialPosts } from '../../db/schema'
@@ -124,6 +124,12 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
   if (!platforms.length) {
     return new Response(`Bad Request: targetPlatforms must include at least one of ${SOCIAL_PLATFORMS.join('|')}`, { status: 400 })
   }
+  // Eligibility last, still BEFORE the money gate and any provider call (the
+  // gate runs in the op handler after this returns): refuse a retired fal tier
+  // or an undeployed worker mode. Registered-but-ineligible tiers still resolve
+  // for historical jobs; they just may not be selected for new work.
+  const ineligible = tierIneligibility(b['modelTier'])
+  if (ineligible) return new Response(`Bad Request: ${ineligible}`, { status: 400 })
   return {
     productHandle: b['productHandle'],
     formula: b['formula'],
@@ -315,7 +321,13 @@ export async function action({ request }: ActionFunctionArgs) {
         getPipelineSetting(VIDEO_EXTRA_KEYS.endcardEnabled).catch(() => null),
       ])
       const models = Object.fromEntries(
-        Object.entries(VIDEO_MODELS).map(([id, spec]) => {
+        // Advertise only tiers eligible for new work (retired fal tiers and
+        // undeployed worker modes are hidden from the writers room's tier menu).
+        // Registration is untouched, so /admin/usage and historical jobs still
+        // resolve every id.
+        Object.entries(VIDEO_MODELS)
+          .filter(([id]) => tierIneligibility(id as keyof typeof VIDEO_MODELS) === null)
+          .map(([id, spec]) => {
           // Avatar models derive duration from speech; example a 30s script.
           const exampleSeconds = spec.audioDriven ? 30 : (spec.allowedDurations.includes(8) ? 8 : spec.allowedDurations[0] ?? 5)
           return [id, {

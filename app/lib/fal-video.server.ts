@@ -100,7 +100,18 @@ export interface VideoModelSpec {
    * video-producer charter refuses selecting one for new work.
    */
   legacy?: true
+  /**
+   * For provider:'runpod' tiers, the RunPod worker MODE this tier needs the
+   * deployed image to implement. Eligibility (tierIneligibility) checks it
+   * against RUNPOD_WORKER_MODES: a tier whose mode the running image does not
+   * implement (e.g. s2v while only i2v,t2v are deployed) is refused for new
+   * work even though it stays registered so historical jobs resolve.
+   */
+  workerMode?: RunpodWorkerMode
 }
+
+/** RunPod worker capability: which generation modes the deployed image implements. */
+export type RunpodWorkerMode = 'i2v' | 't2v' | 's2v'
 
 export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   'veo31': {
@@ -212,6 +223,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     label: 'Wan 2.2 14B Image-to-Video (RunPod)',
     tier: 'standard',
     provider: 'runpod',
+    workerMode: 'i2v',
     costKey: 'runpod/wan22',
     ratePerSecondUsd: estimateRunpodRatePerSecondUsd(),
     nativeAudio: false,
@@ -222,6 +234,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     label: 'Wan 2.2 14B Text-to-Video (RunPod)',
     tier: 'standard',
     provider: 'runpod',
+    workerMode: 't2v',
     costKey: 'runpod/wan22',
     ratePerSecondUsd: estimateRunpodRatePerSecondUsd(),
     nativeAudio: false,
@@ -239,6 +252,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     label: 'Wan 2.2 S2V (RunPod, audio-driven talking)',
     tier: 'avatar',
     provider: 'runpod',
+    workerMode: 's2v',
     costKey: 'runpod/wan22-s2v',
     ratePerSecondUsd: estimateRunpodRatePerSecondUsd(),
     nativeAudio: true,
@@ -249,6 +263,64 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
 
 export function isVideoModelId(v: unknown): v is VideoModelId {
   return typeof v === 'string' && v in VIDEO_MODELS
+}
+
+// ---------------------------------------------------------------------------
+// Tier eligibility for NEW work (audit findings 3 & 4).
+//
+// Two independent facts make a registered tier unusable for a fresh render:
+//   1. legacy: the fal tiers are retired (owner direction 2026-08-26 — fal is
+//      images only, all video renders on the owned RunPod worker).
+//   2. worker capability: the endpoint pins an immutable image sha, so this
+//      repo's handler and the RUNNING handler are different things. The
+//      deployed image implements only the modes RUNPOD_WORKER_MODES declares
+//      (default i2v,t2v); a tier needing an undeployed mode (s2v) would cold-
+//      boot a GPU only to ValueError in the handler.
+//
+// Registration is deliberately NOT removed — /admin/usage and in-flight jobs
+// must still resolve historical specs — so eligibility is a SEPARATE gate from
+// membership (isVideoModelId), enforced at every point that selects a tier for
+// new work: propose, the team API, the studio composer, and enqueueVideoJob.
+// ---------------------------------------------------------------------------
+
+const RUNPOD_WORKER_MODES_DEFAULT: readonly RunpodWorkerMode[] = ['i2v', 't2v']
+
+/**
+ * The generation modes the DEPLOYED RunPod image implements, from
+ * RUNPOD_WORKER_MODES (comma-separated). Declares the running image's
+ * capability, not this repo's — the endpoint pins an immutable sha. Falls back
+ * to i2v,t2v (the eb2a126 image live since 2026-08-22) when unset or when the
+ * env names nothing valid, so a typo can never silently disable every mode.
+ */
+export function resolveWorkerModes(): Set<RunpodWorkerMode> {
+  const raw = process.env['RUNPOD_WORKER_MODES']?.trim()
+  const parsed = (raw && raw.length ? raw.split(',') : [])
+    .map(s => s.trim().toLowerCase())
+    .filter((m): m is RunpodWorkerMode => m === 'i2v' || m === 't2v' || m === 's2v')
+  return new Set(parsed.length ? parsed : RUNPOD_WORKER_MODES_DEFAULT)
+}
+
+/**
+ * Why a tier may NOT be selected for new work, or null when it is eligible.
+ * A registered-but-ineligible tier still resolves through VIDEO_MODELS for
+ * historical jobs; this gate only governs new selection.
+ */
+export function tierIneligibility(tier: VideoModelId): string | null {
+  const spec = VIDEO_MODELS[tier]
+  if (!spec) return `unknown tier ${tier}`
+  if (spec.legacy) return `${tier} is a retired fal tier; new video renders on the RunPod worker`
+  if (spec.provider === 'runpod' && spec.workerMode) {
+    const modes = resolveWorkerModes()
+    if (!modes.has(spec.workerMode)) {
+      return `${tier} needs worker mode '${spec.workerMode}', which the deployed RunPod image does not implement (RUNPOD_WORKER_MODES=${[...modes].join(',')})`
+    }
+  }
+  return null
+}
+
+/** Tiers selectable for new work today, in registration order. */
+export function eligibleVideoTiers(): VideoModelId[] {
+  return (Object.keys(VIDEO_MODELS) as VideoModelId[]).filter(t => tierIneligibility(t) === null)
 }
 
 /**
