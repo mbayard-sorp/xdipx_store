@@ -54,6 +54,7 @@ export function blankInitial(platform = 'instagram', slides: ComposerSlide[] = [
     platform, caption: '', slides, product: null, castSlugs: [],
     scheduledDate: '', scheduledTime: '', feedback: '',
     imageBrief: null, subject: null,
+    mediaKind: null, videoUrl: null, posterUrl: null,
     status: 'draft', reviewStatus: 'pending_review',
     gateStatus: null, gateCheckedAt: null, gateFindings: null, createdBy: null, updatedAt: null,
   }
@@ -79,6 +80,11 @@ export function initialFromPost(post: ComposerPost, product: PickedProduct | nul
     feedback: row.feedback ?? '',
     imageBrief: row.imageBrief ?? null,
     subject: row.subject ?? null,
+    // Ticket #5715: stored media_kind wins; videoJobId/.mp4 inference covers
+    // pre-086 rows. Video rows render the pipeline media read-only.
+    mediaKind: (row.mediaKind === 'video' || (row.mediaKind == null && (row.videoJobId != null || !!row.mediaUrls?.[0]?.split('?')[0]?.endsWith('.mp4')))) ? 'video' : null,
+    videoUrl: row.mediaUrls?.[0] ?? null,
+    posterUrl: row.posterUrl ?? null,
     status: row.status,
     reviewStatus: row.reviewStatus,
     gateStatus: row.gateStatus ?? null,

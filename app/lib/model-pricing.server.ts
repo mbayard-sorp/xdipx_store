@@ -177,6 +177,11 @@ const VIDEO_RATES: Record<string, number> = {
   // only, see estimateRunpodRatePerSecondUsd() above. Actual spend is metered
   // per job via computeRunpodActualCostUsd() and replaces this in api_token_log.
   'runpod/wan22':     estimateRunpodRatePerSecondUsd(),
+  // Audio-driven talking mode on the same worker (ticket #5714). ESTIMATE
+  // shares the wan22 $/clip-second derivation until the bake-off measures the
+  // real render multiplier; actuals replace it per job via
+  // computeRunpodActualCostUsd exactly like the i2v tier.
+  'runpod/wan22-s2v': estimateRunpodRatePerSecondUsd(),
   'elevenlabs/tts':   0.003, // voiceover, ~$0.20/min of speech at Creator-plan credit rates
   'elevenlabs/music': 0.008, // music bed, ~$0.48/min — APPROXIMATE Creator-plan credit conversion
 }

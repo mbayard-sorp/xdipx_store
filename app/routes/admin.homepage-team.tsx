@@ -179,6 +179,7 @@ interface LoaderData {
   seoCuration: boolean
   trendScout: boolean
   videoAutopublish: boolean
+  videoProgram: boolean
   videoFrameReview: boolean
   videoEndcard: boolean
   instagramAutopublish: boolean
@@ -208,7 +209,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
+  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.socialMetricsSweep).catch(() => false),
@@ -217,6 +218,9 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     getValve(VALVE_KEYS.seoCuration).catch(() => false),
     getValve(VALVE_KEYS.trendScout).catch(() => false),
     getValve(VALVE_KEYS.videoAutopublish).catch(() => false),
+    // Serialized-program render arm (ships OFF; missing row reads OFF). The
+    // writers room is not gated by this; only the render lane's episode-claim.
+    getValve(VALVE_KEYS.videoProgram).catch(() => false),
     // Frame review is not a VALVE_KEYS member (it defaults ON, unlike the
     // ship-OFF valves) — read it directly from pipeline_settings.
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.frameReview)).limit(1)
@@ -416,7 +420,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     team, config, migrated, loadError, gateResult, runs, selectedRun, suggestions, needsYou, needsYouTotal,
     filteredOpenTotal, ticketLinks, filter,
     kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep,
-    suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish,
+    suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram,
     videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges,
@@ -557,7 +561,7 @@ export default function AgentTeamsPage() {
     suggestions, needsYou, needsYouTotal, filteredOpenTotal,
     ticketLinks, filter, kindOptions, assigneeOptions, teamOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish,
-    seoCuration, trendScout, videoAutopublish, videoFrameReview, videoEndcard,
+    seoCuration, trendScout, videoAutopublish, videoProgram, videoFrameReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges,
@@ -791,6 +795,12 @@ export default function AgentTeamsPage() {
               detail="Even when ON, platform posting also requires per-platform publisher keys (all unset today; publishers are stubs). Keep OFF while videos are review-first."
               settingKey={VALVE_KEYS.videoAutopublish}
               on={videoAutopublish}
+            />
+            <ValveRow
+              label={`Video program render is ${videoProgram ? 'ON' : 'OFF'}`}
+              detail="Arms the 2x-weekly render routine for the serialized program: episode-claim hands out owner-APPROVED episodes and the enqueue spends real RunPod money on them. The writers room (zero spend) runs regardless. Ships OFF; flip after the first slate is approved."
+              settingKey={VALVE_KEYS.videoProgram}
+              on={videoProgram}
             />
             <ValveRow
               label={`End card is ${videoEndcard ? 'ON' : 'OFF'}`}

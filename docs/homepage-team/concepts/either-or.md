@@ -332,3 +332,78 @@ collection, and the module must **add PDP-bound links, not `/discover` links**.
 - `qa-reviewer` — CLS/375px/reduced-motion + the link-ratio count.
 - `media-manager` — **not needed for v1** (type + tint + SVG glyph). Only if a
   later cycle adds archetype-D card art.
+
+---
+
+## Build-readiness resolution — 2026-08-26 (Routine B, run 520)
+
+> Advances this concept from PROPOSAL toward BUILDABLE by resolving §6's open build
+> risk (the dead-tag / clean-binary axis question) against the **live** discovery
+> vocab. Source: self-capture of `xdipx.com/discover` on 2026-08-26 (our own site;
+> the rendered facet chips ARE the live vocab the finder filters on). Still a design
+> artifact: nothing here ships without the IA sign-off and additive `eitherOr` block
+> in §7-§8 and a reviewed `rr7-engineer` PR. This does not modify §1-§10; it settles
+> the axis question they left to build time.
+
+**The question §6 left open:** every axis pole must be a *live* vocab tag (dead-tag
+risk), and each axis needs an honest *two-pole split* — §6 warned mood "may be a
+spread, not a duality" and that v1 might drop to 3 questions before shipping a fake
+binary. Resolved below against the live facets.
+
+Live facets captured verbatim (grouped as the finder groups them):
+
+- **mood:** Sensual, Indulgent, Adventurous, Bold, Playful, Curious, Spontaneous,
+  Empowered, Comforting, Tender, Naughty, Energetic, Romantic, Surrendered, In
+  Charge, Slow and Intimate, Intimate
+- **audience:** Solo, Couples, Queer Friendly, Date Night, Gift, Long Distance, Self
+  Gift, Gay Couples, Gift Idea, First Time, Bachelorette, Non Binary, Sapphic,
+  Anniversary, Just Curious, Birthday, Housewarming
+- **matters:** Latex Free, Easy to Clean, Beginner Friendly, Soft Touch,
+  Rechargeable, Discreet, Hands Free, Waterproof, Travel Ready, Remote Controlled,
+  Plus Size Friendly, Whisper Quiet, Body Safe Silicone, Natural, Warming, Water
+  Based, Adjustable Fit, Breathable, Edible, App Controlled, Condom Safe, Durable,
+  Plus Size, Powerful, Reliable, Remote, Silicone Based, Strap on Compatible,
+  Vibrating
+
+**Resolution — v1 ships 3 clean binaries, Q4 dropped:**
+
+| Q | Axis | Pole A (tag) | Pole B (tag) | Verdict |
+|---|---|---|---|---|
+| Q1 | Pace ← mood | Slow and Intimate (support: Tender, Comforting, Sensual) | Bold (support: Energetic, Adventurous, Spontaneous) | CLEAN — both poles are live tags; mood carries a slow↔bold duality after all |
+| Q2 | Company ← audience | Solo | Couples | CLEAN — both live, unambiguous; the strongest binary |
+| Q3 | Control ← mood | Surrendered | In Charge | CLEAN — a genuine give/receive-control duality, both live tags |
+| Q4 | Territory ← matters | Beginner Friendly | (no honest opposite tag) | DROP for v1 — matters is a feature spread with no live opposite pole; forcing "Powerful"/"Adjustable Fit" as an anti-beginner pole is the fake binary §6 warned against |
+
+So §6's "v1 may ship as 3 questions" is now the confirmed plan: **Pace, Company,
+Control** — three clean two-pole splits, every pole a live tag. Q4 (Territory) is
+retired from v1; a future cycle may reintroduce a beginner axis only if a real
+opposite tag enters the matters vocab.
+
+Note the two mood axes (Q1 Pace, Q3 Control) draw from *disjoint* tag sets (slow/bold
+vs surrendered/in-charge), so they do not collide — §6's "each drawn from a distinct
+vocab dimension so they don't collide" holds even with two mood axes, because the tag
+sets are disjoint within mood.
+
+**The single residual pre-build gate (needs credentials this cloud routine lacks):**
+per-pole product-count ≥2 verification. Pole *existence* is confirmed above, but
+Either/Or's own §6 relax-if-<2-matches rule and mission §6's dead-pill rule both
+require each *pole* (and each realistic *combination* of poles) to match ≥2 live
+products before publish — that needs product counts, which come only from the
+credentialed dump. The next interactive/credentialed cycle runs exactly:
+
+```
+tsx scripts/dump-discovery-vocab.ts --csv --group mood
+tsx scripts/dump-discovery-vocab.ts --csv --group audience
+```
+
+Pass/fail: each of the six poles above (Slow and Intimate, Bold, Solo, Couples,
+Surrendered, In Charge) must show a product count ≥ 2. If a mood pole is thin, swap
+it for its listed support tag (Q1/Q3 carry support tags for exactly this); Q2 has no
+support tag, so Solo/Couples both stocking is a hard publish floor. This is the ONLY
+thing between this concept and an `rr7-engineer` build ticket.
+
+**Net effect on build-readiness:** Either/Or moves from "proposal, axes unverified"
+to "proposal, axes confirmed against live vocab, one credentialed count-check
+remaining." It is the most build-ready concept in `concepts/` and the recommended
+next-to-build when traffic returns, or as a cheap-and-certain Nº 07 renderer swap the
+moment the count-check passes.

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   VIDEO_MODELS,
   isVideoModelId,
+  submitVideoRequest,
   assertSceneFrameContract,
   classifyAudioPath,
   compositeProductClauses,
@@ -188,7 +189,7 @@ describe('VIDEO_MODELS wan22 (RunPod provider)', () => {
 describe('every non-runpod model keeps provider fal-implicit (undefined)', () => {
   it('never sets provider on a fal-queue tier', () => {
     for (const [id, spec] of Object.entries(VIDEO_MODELS)) {
-      if (id === 'wan22-i2v' || id === 'wan22-t2v') continue
+      if (id === 'wan22-i2v' || id === 'wan22-t2v' || id === 'wan22-s2v') continue
       expect(spec.provider).toBeUndefined()
     }
   })
@@ -221,5 +222,32 @@ describe('assertSceneFrameContract', () => {
     // 1069x1901 is ~1% under the composed 1080x1920, within both the resolution
     // floor and the 2% aspect tolerance.
     expect(() => assertSceneFrameContract(1069, 1901)).not.toThrow()
+  })
+})
+
+describe('VIDEO_MODELS.wan22-s2v (own-worker talking tier, ticket #5714)', () => {
+  it('is an audio-driven RunPod tier with derived duration', () => {
+    const spec = VIDEO_MODELS['wan22-s2v']
+    expect(spec.provider).toBe('runpod')
+    expect(spec.audioDriven).toBe(true)
+    expect(spec.nativeAudio).toBe(true)
+    expect(spec.allowedDurations).toEqual([])
+    expect(spec.costKey).toBe('runpod/wan22-s2v')
+    expect(spec.legacy).toBeUndefined()
+  })
+
+  it('never routes through the fal queue', async () => {
+    await expect(submitVideoRequest('wan22-s2v', {
+      prompt: '', imageUrl: 'https://example.com/f.jpg', durationSeconds: 10,
+    })).rejects.toThrow(/RunPod-provider/)
+  })
+})
+
+describe('legacy fal video tiers (owner direction 2026-08-26: fal is images only)', () => {
+  it('flags every fal video tier legacy and no runpod tier', () => {
+    const legacy = Object.entries(VIDEO_MODELS).filter(([, s]) => s.legacy).map(([id]) => id).sort()
+    expect(legacy).toEqual(['grok', 'kling25-pro', 'omnihuman', 'seedance2', 'sync-lipsync', 'veo31', 'veo31-fast'])
+    expect(VIDEO_MODELS['wan22-i2v'].legacy).toBeUndefined()
+    expect(VIDEO_MODELS['wan22-t2v'].legacy).toBeUndefined()
   })
 })

@@ -1268,8 +1268,62 @@ export function createCronRoutes() {
       const { listRunningRunpodPods } = await import('../app/lib/runpod-pods.server.js')
       const running = await listRunningRunpodPods()
 
+      // Second surface (ticket #5717): re-probe recently completed video jobs
+      // whose per-video idle confirmation is still open (the poster-stage
+      // probe ran into an API hiccup, or the endpoint genuinely had not
+      // scaled down yet), and escalate ONCE when the endpoint still has
+      // active workers past the grace window. The pods list above cannot see
+      // the serverless endpoint at all, so without this block a busy render
+      // fleet reads as "all clear" here forever.
+      let endpointEscalation: { staleJobs: number; activeWorkers: number } | null = null
+      try {
+        const IDLE_CONFIRM_GRACE_MS = 20 * 60 * 1000
+        const { db } = await import('../app/lib/db.server.js')
+        const { videoJobs } = await import('../db/schema.js')
+        const { and, eq, isNull, isNotNull, lt } = await import('drizzle-orm')
+        const { confirmRunpodIdle, jobUsedRunpod } = await import('../app/lib/video-pipeline.server.js')
+        const stale = await db.select().from(videoJobs).where(and(
+          eq(videoJobs.stage, 'done'),
+          isNull(videoJobs.runpodIdleConfirmedAt),
+          isNotNull(videoJobs.completedAt),
+          lt(videoJobs.completedAt, new Date(Date.now() - IDLE_CONFIRM_GRACE_MS)),
+        )).limit(20)
+        let activeWorkers = 0
+        let staleCount = 0
+        for (const job of stale) {
+          if (!jobUsedRunpod(job)) continue
+          staleCount++
+          const probe = await confirmRunpodIdle(job.id)
+          if (!probe.clear && probe.endpoint && probe.endpoint.workers.active > 0) {
+            activeWorkers = Math.max(activeWorkers, probe.endpoint.workers.active)
+          }
+        }
+        if (activeWorkers > 0) {
+          endpointEscalation = { staleJobs: staleCount, activeWorkers }
+          const { fileBlocker: fileEndpointBlocker } = await import('../app/lib/owner-blockers.server.js')
+          await fileEndpointBlocker({
+            dedupeKey: 'runpod:endpoint-workers-up',
+            title: `RunPod video endpoint still has ${activeWorkers} active worker(s) 20+ min after the last video finished`,
+            detail: `${staleCount} completed video job(s) past the 20-minute grace window without an idle confirmation, and the endpoint health read shows ${activeWorkers} active worker(s). Idle Flex slots bill nothing and are not counted; active workers are billing.`,
+            unblocks: 'Confirms the render GPU scaled to zero, so a finished video is not still billing.',
+            whereToGo: 'RunPod console > Serverless > xdipx-video',
+            category: 'console',
+            priority: 2,
+            source: 'sweep',
+            sourceRef: 'cron:runpod-pod-watch',
+            verifyProbe: 'runpod_endpoint_idle',
+            verifyArg: '',
+          })
+          console.warn(`[cron:runpod-pod-watch] endpoint still active for ${staleCount} unconfirmed job(s), blocker filed`)
+        }
+      } catch (err) {
+        // Never let the endpoint sweep break the pod sweep: the pod leak is
+        // the historically expensive failure and must keep filing.
+        console.warn('[cron:runpod-pod-watch] endpoint idle sweep failed:', err)
+      }
+
       if (running.length === 0) {
-        res.json({ ok: true, running: 0 })
+        res.json({ ok: true, running: 0, ...(endpointEscalation ? { endpointEscalation } : {}) })
         return
       }
 
