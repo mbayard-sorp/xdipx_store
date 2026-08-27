@@ -94,7 +94,10 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 3. Raise `video_team_max_runs` from 1 to 3 on the Video tab of `/admin/homepage-team` (two
    scheduled video runs on the busiest week plus skip/retry headroom; the cap counts run rows,
    skips included).
-4. Reissue the prompt on trigger `trig_01QBLBTi9sS7X7FjFXAvPfkw` (row 15, cron `0 17 * * 2`
-   unchanged) to point at THIS playbook with entry agent `series-showrunner`.
+4. DONE 2026-08-27. The prompt could not be reissued in place: `trig_01QBLBTi9sS7X7FjFXAvPfkw`
+   was created via `http_api`, and an agent may only update triggers it created itself. The
+   cutover instead created `trig_01AMt6ARtfgT44EvFy287ESn` (row 15, same cron `0 17 * * 2`, entry
+   agent `series-showrunner`, this playbook, git source attached, model `claude-opus-4-8`) and the
+   owner disabled the old trigger. First fire 2026-09-01.
 5. Approve the first slate in `/admin/video-studio`. The first slate also pitches the season-one
    wants and the relationship grid; approving it ratifies them into the bible.
