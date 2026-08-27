@@ -18,8 +18,8 @@ import { videoEpisodes, videoSeries, videoJobs } from '../../db/schema'
 import type { VideoEpisodeReviewNote, VideoScriptJson } from '../../db/schema'
 import { HOOK_PATTERNS, VIDEO_FORMULAS } from './team-keys'
 import { ARC_POSITIONS, validatePlacements, scriptsSpeakIdentically, spokenTextOf } from './video-episodes'
-import { dryRunEpisodeScript } from './video-pipeline.server'
-import { isVideoModelId } from './fal-video.server'
+import { dryRunEpisodeScript, getMaxCostCents } from './video-pipeline.server'
+import { isVideoModelId, tierIneligibility } from './fal-video.server'
 import type { VideoModelId } from './fal-video.server'
 
 export type VideoEpisodeRow = typeof videoEpisodes.$inferSelect
@@ -92,6 +92,10 @@ export async function proposeEpisodes(args: {
   if (args.episodes.length > PROPOSE_MAX_PER_CALL) throw new Error(`at most ${PROPOSE_MAX_PER_CALL} episodes per call`)
   const series = await resolveSeries(args.seriesSlug, args.seriesTitle)
   const batchId = randomUUID()
+  // Read the live ceiling once for the whole batch. A read failure must not
+  // block proposing (which spends nothing): null simply skips the check and
+  // leaves the enqueue as the enforcement point, exactly as before.
+  const maxCostCents = await getMaxCostCents().catch(() => null)
 
   // Validate every episode fully BEFORE writing any row: a batch is one owner
   // sitting, and a half-written batch is worse than a refused one.
@@ -113,6 +117,11 @@ export async function proposeEpisodes(args: {
     let modelTier: VideoModelId | null = null
     if (e.modelTier != null) {
       if (!isVideoModelId(e.modelTier)) throw new Error(`${where}.modelTier is not a known tier`)
+      // Refuse a retired or unrenderable tier HERE (ticket #5727), not eight
+      // days later at the enqueue. A batch is one owner sitting: an episode
+      // the render lane cannot possibly run must never occupy a slot in it.
+      const ineligible = tierIneligibility(e.modelTier)
+      if (ineligible) throw new Error(`${where}.modelTier ${ineligible.message}`)
       modelTier = e.modelTier
     }
     let estCostUsd: number | null = null
@@ -122,6 +131,15 @@ export async function proposeEpisodes(args: {
         // Dry-run the exact validation the render runs, at propose time.
         estCostUsd = dryRunEpisodeScript(e.scriptJson, modelTier).estCostUsd
       }
+    }
+    if (estCostUsd != null && maxCostCents != null && estCostUsd * 100 > maxCostCents) {
+      // The per-video ceiling was enforced only at enqueue, so an over-ceiling
+      // episode filed clean, the reader disabled Approve on it, and it sat in
+      // the batch as dead weight the room had no signal to stop producing.
+      throw new Error(
+        `${where} estimates $${estCostUsd.toFixed(2)}, over the $${(maxCostCents / 100).toFixed(2)} per-video ceiling ` +
+        '(video_team_max_cost_cents). Shorten the episode or drop a scene; the enqueue would refuse it anyway.',
+      )
     }
     const plannedSlotAt = e.plannedSlotAt ? new Date(e.plannedSlotAt) : null
     if (plannedSlotAt && Number.isNaN(plannedSlotAt.getTime())) throw new Error(`${where}.plannedSlotAt is not a valid date`)

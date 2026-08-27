@@ -83,11 +83,23 @@ vi.mock('~/lib/video-postpass.server', () => ({
 const runpodSubmitMock = vi.hoisted(() => vi.fn())
 const runpodStatusMock = vi.hoisted(() => vi.fn())
 const runpodResultMock = vi.hoisted(() => vi.fn())
+/**
+ * What the DEPLOYED worker image implements. Real semantics, not a permissive
+ * stub: tierIneligibility reads this, and a mock that said "every mode is
+ * available" would hide exactly the trap it exists for. Default matches the
+ * live endpoint (image eb2a126: i2v + t2v, no s2v); a test that needs the
+ * avatar tier widens it deliberately and says so.
+ */
+const workerModes = vi.hoisted(() => ({ value: ['i2v', 't2v'] as string[] }))
 vi.mock('~/lib/runpod-video.server', () => ({
   submitRunpodVideo: runpodSubmitMock,
   getRunpodStatus: runpodStatusMock,
   getRunpodResult: runpodResultMock,
   runpodVideoConfigured: vi.fn(() => true),
+  // Real semantics, not a stub: tierIneligibility reads these, and a mock that
+  // said "every mode is available" would hide exactly the trap they exist for.
+  runpodWorkerModes: () => workerModes.value,
+  runpodWorkerSupportsMode: (m: string) => workerModes.value.includes(m),
   cancelRunpod: vi.fn(),
 }))
 
@@ -185,9 +197,13 @@ describe('enqueueVideoJob — multi-scene validation', () => {
   })
 
   it('rejects the avatar tier for a multi-scene job (no per-scene motion prompt concept)', async () => {
+    // Widened so the job reaches the multi-scene check rather than being
+    // refused earlier for an unavailable worker mode — that refusal is real
+    // and covered separately, but it is not what this test is about.
+    workerModes.value = ['i2v', 't2v', 's2v']
     await expect(enqueueVideoJob({
       ...baseEnqueueArgs,
-      modelTier: 'omnihuman',
+      modelTier: 'wan22-s2v',
       durationSeconds: 0,
       scriptJson: { scenes: [scene(), scene()] },
     })).rejects.toThrow(/avatar tier/)

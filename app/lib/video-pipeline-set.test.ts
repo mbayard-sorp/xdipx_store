@@ -66,12 +66,25 @@ vi.mock('~/lib/video-postpass.server', () => ({
 const runpodSubmitMock = vi.hoisted(() => vi.fn())
 const runpodStatusMock = vi.hoisted(() => vi.fn())
 const runpodResultMock = vi.hoisted(() => vi.fn())
+const runpodCancelMock = vi.hoisted(() => vi.fn())
+/**
+ * What the DEPLOYED worker image implements. Real semantics, not a permissive
+ * stub: tierIneligibility reads this, and a mock that said "every mode is
+ * available" would hide exactly the trap it exists for. Default matches the
+ * live endpoint (image eb2a126: i2v + t2v, no s2v); a test that needs the
+ * avatar tier widens it deliberately and says so.
+ */
+const workerModes = vi.hoisted(() => ({ value: ['i2v', 't2v'] as string[] }))
 vi.mock('~/lib/runpod-video.server', () => ({
   submitRunpodVideo: runpodSubmitMock,
   getRunpodStatus: runpodStatusMock,
   getRunpodResult: runpodResultMock,
   runpodVideoConfigured: vi.fn(() => true),
-  cancelRunpod: vi.fn(),
+  // Real semantics, not a stub: tierIneligibility reads these, and a mock that
+  // said "every mode is available" would hide exactly the trap they exist for.
+  runpodWorkerModes: () => workerModes.value,
+  runpodWorkerSupportsMode: (m: string) => workerModes.value.includes(m),
+  cancelRunpod: runpodCancelMock,
 }))
 
 import { enqueueVideoJobSet, estimateJobCostUsd, advanceInflightVideoJobs } from '~/lib/video-pipeline.server'
@@ -79,13 +92,14 @@ import { estimateAvatarSpeechSeconds } from '~/lib/avatar-script'
 import { logVideoCost } from '~/lib/token-log.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
 import { computeRunpodActualCostUsd, estimateVideoCostUsd } from '~/lib/model-pricing.server'
+import { rejectVideoJob } from '~/lib/video-pipeline.server'
 
 const baseArgs = {
   productHandle: 'satin-wand',
   formula: 'myth-busting',
   presenter: 'none',
   baseScriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', voiceover: '{{hook}}' },
-  modelTier: 'kling25-pro' as const,
+  modelTier: 'wan22-i2v' as const,
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
   hooks: ['Hook one', 'Hook two', 'Hook three'],
@@ -110,7 +124,7 @@ describe('enqueueVideoJobSet', () => {
     expect(groupIds.size).toBe(1)
     expect([...groupIds][0]).toBe(result.variantGroupId)
     expect(state.inserts.map(r => (r['variantAxes'] as { hook: string }).hook)).toEqual(['Hook one', 'Hook two', 'Hook three'])
-    const perJob = estimateJobCostUsd('kling25-pro', 5, { reuseFrame: false })
+    const perJob = estimateJobCostUsd('wan22-i2v', 5, { reuseFrame: false })
     expect(result.totalEstCostUsd).toBeCloseTo(perJob * 3, 4)
   })
 
@@ -133,6 +147,11 @@ describe('enqueueVideoJobSet', () => {
   })
 
   it('zeroes the frame cost for variants whose scene already has an approved frame', async () => {
+    // The avatar path needs an avatar tier, and the only one left is the
+    // RunPod s2v tier — omnihuman is retired with the rest of fal video. Widen
+    // the worker's declared modes for this test only; the point under test is
+    // the frame-cost arithmetic, not tier eligibility.
+    workerModes.value = ['i2v', 't2v', 's2v']
     const line = 'Short spoken line about {{hook}}.'
     // One findReusableSceneFrame lookup per variant (set estimate); the
     // enqueue itself does not re-query in this path.
@@ -140,14 +159,14 @@ describe('enqueueVideoJobSet', () => {
     const result = await enqueueVideoJobSet({
       ...baseArgs,
       presenter: 'emma',
-      modelTier: 'omnihuman',
+      modelTier: 'wan22-s2v',
       durationSeconds: 0,
       hooks: ['now', 'later'],
       baseScriptJson: { presenterLine: line, talkingHead: true, sceneSlug: 'couch-cozy', framePrompt: 'C' },
     })
     const expected = ['now', 'later'].reduce((sum, hook) => {
       const speech = estimateAvatarSpeechSeconds(line.split('{{hook}}').join(hook))
-      return sum + estimateJobCostUsd('omnihuman', 0, { speechSeconds: speech, reuseFrame: true })
+      return sum + estimateJobCostUsd('wan22-s2v', 0, { speechSeconds: speech, reuseFrame: true })
     }, 0)
     expect(result.totalEstCostUsd).toBeCloseTo(expected, 4)
     expect(state.inserts).toHaveLength(2)
@@ -268,6 +287,110 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
       model: 'runpod/wan22',
       seconds: 8,
       actualCostUsd: actualCost,
+    }))
+  })
+
+  /**
+   * Orphan cancellation (ticket #5728). A RunPod request outlives the row that
+   * submitted it: nothing reads the output of a terminal job, but the GPU
+   * keeps billing to completion or to the 1800s execution timeout. cancelRunpod
+   * existed from the start and was called from nowhere.
+   */
+  it('cancels the in-flight runpod request when the job fails, and records what it burned', async () => {
+    const awaitingRow = {
+      ...baseJobRow,
+      status: 'awaiting_provider',
+      providerRequestIds: {
+        clip: { requestId: 'rp-1', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1' },
+      },
+    }
+    state.selectResults = [[awaitingRow]]
+    // COMPLETED, then a result the pipeline cannot use -> advanceJob throws.
+    runpodStatusMock.mockResolvedValue({ status: 'COMPLETED', executionMs: 210_000 })
+    runpodResultMock.mockRejectedValue(new Error('runpod result missing output.videoUrl'))
+
+    const result = await advanceInflightVideoJobs()
+
+    expect(result.failed).toBe(1)
+    expect(runpodCancelMock).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'rp-1' }))
+    expect(logVideoCost).toHaveBeenCalledWith(expect.objectContaining({
+      refId: 'job-wan22#clip#cancelled',
+      actualCostUsd: computeRunpodActualCostUsd(210_000),
+    }))
+  })
+
+  it('cancels every sibling part, which is the avatar multi-part leak', async () => {
+    const awaitingRow = {
+      ...baseJobRow,
+      status: 'awaiting_provider',
+      providerRequestIds: {
+        avatar_0: { requestId: 'rp-a', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-a', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-a' },
+        avatar_1: { requestId: 'rp-b', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-b', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-b' },
+        // Non-handle bookkeeping keys share this column and must be skipped.
+        avatar_billed_seconds: 30,
+        assembly_attempts: 2,
+      } as never,
+    }
+    state.selectResults = [[awaitingRow]]
+    runpodStatusMock.mockResolvedValue({ status: 'FAILED', executionMs: 5_000 })
+
+    await advanceInflightVideoJobs()
+
+    expect(runpodCancelMock).toHaveBeenCalledTimes(2)
+    expect(runpodCancelMock.mock.calls.map(c => (c[0] as { requestId: string }).requestId).sort()).toEqual(['rp-a', 'rp-b'])
+  })
+
+  it('leaves a fal handle alone (fal video is retired and its cancel semantics differ)', async () => {
+    const awaitingRow = {
+      ...baseJobRow,
+      status: 'awaiting_provider',
+      providerRequestIds: {
+        clip: { requestId: 'fal-1', statusUrl: 'https://queue.fal.run/some/model/requests/fal-1', responseUrl: 'https://queue.fal.run/some/model/requests/fal-1' },
+      },
+    }
+    state.selectResults = [[awaitingRow]]
+    runpodStatusMock.mockRejectedValue(new Error('boom'))
+
+    await advanceInflightVideoJobs()
+
+    expect(runpodCancelMock).not.toHaveBeenCalled()
+  })
+
+  it('a failing cancel never masks the error that led there', async () => {
+    const awaitingRow = {
+      ...baseJobRow,
+      status: 'awaiting_provider',
+      providerRequestIds: {
+        clip: { requestId: 'rp-1', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1' },
+      },
+    }
+    state.selectResults = [[awaitingRow]]
+    runpodStatusMock.mockResolvedValue({ status: 'FAILED', executionMs: 1_000 })
+    runpodCancelMock.mockRejectedValue(new Error('already terminal on runpod side'))
+
+    const result = await advanceInflightVideoJobs()
+
+    // Still a clean single failure, not a thrown poller pass.
+    expect(result.failed).toBe(1)
+  })
+
+  it('rejectVideoJob cancels what is still rendering (prod job 4 took exactly this path)', async () => {
+    const awaitingRow = {
+      ...baseJobRow,
+      status: 'awaiting_provider',
+      providerRequestIds: {
+        clip: { requestId: 'rp-9', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-9', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-9' },
+      },
+    }
+    state.selectResults = [[awaitingRow]]
+    runpodStatusMock.mockResolvedValue({ status: 'IN_PROGRESS', executionMs: 42_000 })
+
+    await rejectVideoJob(7, 'not the read I wanted')
+
+    expect(runpodCancelMock).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'rp-9' }))
+    expect(logVideoCost).toHaveBeenCalledWith(expect.objectContaining({
+      refId: 'job-wan22#clip#cancelled',
+      actualCostUsd: computeRunpodActualCostUsd(42_000),
     }))
   })
 

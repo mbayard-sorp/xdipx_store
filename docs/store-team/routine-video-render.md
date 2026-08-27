@@ -110,8 +110,12 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 
 1. Everything in the writers-room runbook first (bundle merged, episode API live, cap at 3,
    room trigger reissued), plus at least one approved episode in the ledger.
-2. The RunPod talking tier must be live for spoken-on-camera episodes (bake-off winner shipped);
-   until then the room writes voiceover-carried b-roll episodes and this routine renders those.
+2. The RunPod talking tier is NOT live: the deployed image (`eb2a126`) implements `i2v` and
+   `t2v` only, so `wan22-s2v` is refused at propose, at enqueue, and at submit, and the room
+   writes voiceover-carried b-roll episodes that this routine renders. The four steps to
+   change that, in order, are in `docs/store-team/video-worker-runpod.md`; the last one is
+   widening `RUNPOD_WORKER_MODES`. Eligible tiers today are `wan22-i2v` and `wan22-t2v`; every
+   fal video tier is retired (owner direction 2026-08-26) and refused for new work.
 3. Flip `video_program_enabled` on the Video tab of `/admin/homepage-team`.
 4. Create the trigger: cron `0 13 * * 1,4` (Mon and Thu 13:00 UTC), no connectors (repo +
    xdipx.com egress only), with the git source attached per the manifest's trigger rules, prompt
