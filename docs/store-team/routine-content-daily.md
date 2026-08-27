@@ -311,6 +311,34 @@ voice defect. Like the aphorism checker, it flags candidates and leaves the fina
 gate. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
 place (suggestions #1674, #2618).
 
+**Claim-scope pre-flight (mandatory, before Step 5):** before submitting to the gates, list every
+claim in the draft that carries any of the shapes below, and for each one state the bound the evidence
+actually supports, narrowing or cutting the claim to that bound **before** submit rather than after a
+REVISE:
+
+- a **universal quantifier** (`all`, `every`, `never`, `always`, `any`);
+- a **superlative** (`best`, `safest`, `strongest`, `the only`);
+- a **numeric generalisation** — a bounded spec or rating stated as unconditional, or a single figure
+  generalised to a population;
+- a **population comparative** (`more people ...`, `most couples ...`);
+- an **unbounded rating or spec** — an ingress rating, a material property, or a duration stated
+  without the condition that bounds it;
+- **two different objects sharing one coordinated noun phrase**, where a modifier parses onto a
+  category it does not belong to (e.g. "silicone and latex condoms" reading as the nonexistent
+  "silicone condoms").
+
+The accuracy gate (`sex-wellness-reviewer`) returned REVISE on first submit in four consecutive
+daily-writer runs (466, 485, 502, 523), and every one resolved the same way — by narrowing or
+deleting a claim written wider than its evidence: an IPX7 line stated as unconditional full submersion
+(466), a numeric overgeneralisation with an absolute outcome (485), an unattributed
+comparative-population clause (502), and a coordinated noun phrase parsing as a nonexistent category
+carrying a contested sub-claim (523). content-plan §6 makes first-submit gate pass rate a KPI and
+calls a falling rate a prompt problem to fix in instructions rather than hand-fix per post, which is
+why this is a standing pre-flight. **The fix is narrowing or deletion, never a hedge:** the blog
+addendum pins authority at max and bans hedging, so trading the claim's scope for `may` or `can` swaps
+an accuracy defect for a voice defect. Run 523 resolved its REVISE by deleting the contested sub-claim
+outright, and both gates confirmed that path.
+
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
 opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
