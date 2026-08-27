@@ -8,7 +8,7 @@
  * picked up by flatRoutes/typegen as a route module, tests included.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateMock = vi.hoisted(() => vi.fn())
 const enqueueMock = vi.hoisted(() => vi.fn())
@@ -57,7 +57,7 @@ const validSet = {
   productHandle: 'satin-wand',
   formula: 'myth-busting',
   presenter: 'none',
-  modelTier: 'kling25-pro',
+  modelTier: 'wan22-i2v',
   baseScriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', voiceover: '{{hook}} explained' },
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
@@ -84,7 +84,7 @@ describe('enqueue-set', () => {
     expect(enqueueSetMock).toHaveBeenCalledWith(expect.objectContaining({
       productHandle: 'satin-wand',
       formula: 'myth-busting',
-      modelTier: 'kling25-pro',
+      modelTier: 'wan22-i2v',
       durationSeconds: 5,
       hooks: ['Hook one', 'Hook two', 'Hook three'],
       targetPlatforms: ['instagram'],
@@ -112,14 +112,22 @@ describe('enqueue-set', () => {
   })
 })
 
-describe('lipsync tier validation', () => {
+describe('talking-tier validation', () => {
+  // sync-lipsync and omnihuman are retired with the rest of fal video (owner
+  // direction 2026-08-26), so the surviving talking tier is the RunPod s2v
+  // one. These tests widen the deployed worker's declared modes to reach the
+  // per-tier field validation; the refusal when they are NOT widened is its
+  // own test below, and is the live behavior today.
+  beforeEach(() => { vi.stubEnv('RUNPOD_WORKER_MODES', 'i2v,t2v,s2v') })
+  afterEach(() => { vi.unstubAllEnvs() })
+
   it('rejects enqueue without presenterLine', async () => {
     const res = await post({
       op: 'enqueue',
       productHandle: 'satin-wand',
       formula: 'the-one-thing',
       presenter: 'emma',
-      modelTier: 'sync-lipsync',
+      modelTier: 'wan22-s2v',
       scriptJson: { framePrompt: 'archetype C', motionPrompt: 'hold', talkingHead: true },
       durationSeconds: 5,
       targetPlatforms: ['instagram'],
@@ -134,7 +142,7 @@ describe('lipsync tier validation', () => {
       productHandle: 'satin-wand',
       formula: 'the-one-thing',
       presenter: 'none',
-      modelTier: 'sync-lipsync',
+      modelTier: 'wan22-s2v',
       scriptJson: { presenterLine: 'One thing matters.', framePrompt: 'C', motionPrompt: 'hold' },
       durationSeconds: 5,
       targetPlatforms: ['instagram'],
@@ -142,32 +150,64 @@ describe('lipsync tier validation', () => {
     expect(res.status).toBe(400)
     expect(await res.text()).toMatch(/presenter/)
   })
+})
 
-  it('rejects enqueue without durationSeconds (lipsync line must fit a fixed clip)', async () => {
+/**
+ * Tier eligibility (ticket #5727). Before this, an enqueue on a retired fal
+ * tier spent fal money, and one on wan22-s2v woke a RunPod worker whose image
+ * does not implement mode s2v, failed inside the handler, and billed for the
+ * boot. Both are now a 400 before the money gate and before any provider call.
+ */
+describe('tier eligibility', () => {
+  it('refuses a retired fal video tier', async () => {
+    const res = await post({ ...validSet, op: 'enqueue-set', modelTier: 'kling25-pro' })
+    expect(res.status).toBe(400)
+    const json = await res.json() as { error: string; detail: string }
+    expect(json.error).toBe('retired_provider')
+    expect(json.detail).toMatch(/fal is images only/)
+    expect(enqueueSetMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses a tier whose worker mode the deployed image does not implement', async () => {
     const res = await post({
       op: 'enqueue',
       productHandle: 'satin-wand',
       formula: 'the-one-thing',
       presenter: 'emma',
-      modelTier: 'sync-lipsync',
+      modelTier: 'wan22-s2v',
       scriptJson: { presenterLine: 'One thing matters.', framePrompt: 'C', motionPrompt: 'hold' },
       targetPlatforms: ['instagram'],
     })
     expect(res.status).toBe(400)
-    expect(await res.text()).toMatch(/durationSeconds/)
+    const json = await res.json() as { error: string; detail: string }
+    expect(json.error).toBe('worker_mode_unavailable')
+    expect(json.detail).toMatch(/s2v/)
+    expect(enqueueMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses BEFORE the money gate, so an ineligible tier never consumes budget', async () => {
+    await post({ ...validSet, op: 'enqueue-set', modelTier: 'veo31' })
+    expect(gateMock).not.toHaveBeenCalled()
   })
 })
 
 describe('config', () => {
-  it('exposes tones, maxVariantsPerSet, and the sync-lipsync model', async () => {
+  it('exposes tones and maxVariantsPerSet', async () => {
     const res = await post({ op: 'config' })
     expect(res.status).toBe(200)
     const json = await res.json() as Record<string, unknown>
     expect(json['tones']).toEqual(['warm', 'playful', 'direct', 'hushed'])
     expect(json['maxVariantsPerSet']).toBe(4)
     expect(json['endcardEnabled']).toBe(false)
-    const models = json['models'] as Record<string, { lipsync: boolean }>
-    expect(models['sync-lipsync']).toBeTruthy()
-    expect(models['sync-lipsync']!.lipsync).toBe(true)
+  })
+
+  // This op IS the writers room's tier menu, so it must not advertise a tier
+  // the room would then be refused for choosing (ticket #5727).
+  it('advertises only tiers that can actually be enqueued', async () => {
+    const res = await post({ op: 'config' })
+    const json = await res.json() as { models: Record<string, unknown> }
+    expect(Object.keys(json.models)).toEqual(['wan22-i2v', 'wan22-t2v'])
+    expect(json.models['sync-lipsync']).toBeUndefined()
+    expect(json.models['veo31']).toBeUndefined()
   })
 })

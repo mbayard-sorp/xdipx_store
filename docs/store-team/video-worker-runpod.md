@@ -63,6 +63,43 @@ Agents do none of the above. They may read this page, file tickets against the w
 code, and (Phase 2) enqueue jobs through the normal `video_jobs` path under the video
 team's budget gate.
 
+## What is DEPLOYED versus what is in this repo (ticket #5727)
+
+The endpoint pins an immutable sha tag, so the handler in this repo and the handler the
+workers run are two different things, and merging worker code changes nothing live.
+
+| | Deployed | In this repo |
+|---|---|---|
+| Image | `ghcr.io/mbayard-sorp/xdipx-video-worker:eb2a126` (2026-08-22) | `main` |
+| Modes | `i2v`, `t2v` | `i2v`, `t2v`, `s2v` (#935) |
+| Finish pass (#936) | absent | present, and **not wired app-side** (nothing sends `finish: true`), so it is inert either way |
+
+The app no longer assumes otherwise. `RUNPOD_WORKER_MODES` (`app/lib/runpod-video.server.ts`)
+declares what the deployed image implements and defaults to `i2v,t2v`; `tierIneligibility`
+refuses `wan22-s2v` while `s2v` is absent, at propose time, at the enqueue, and inside
+`submitRunpodVideo` before the HTTP call. Until then the program has **no talking tier at all**
+and the writers room writes voiceover-carried b-roll, exactly as the render playbook says.
+
+### Enabling the talking tier (owner, in this order)
+
+Doing any of these without the others only moves the failure later and makes it cost more.
+
+1. **Validate the graph.** `build_s2v_workflow` carries `TODO(verify)` on the node class and
+   input names (handler.py lines 76, 261, 338); they were never exercised against a live
+   ComfyUI. Run the bake-off (Wan2.2-S2V vs InfiniteTalk vs LongCat-Video-Avatar) and record
+   the result here. A wrong node name fails *after* the worker boots, so this is a real cost.
+2. **Load the weights.** Start a pod on network volume `q167g3em77` and run
+   `MODELS_ROOT=/workspace/models WITH_S2V=1 bash bootstrap-models.sh`
+   (wan2.2_s2v_14B_fp8_scaled + wav2vec2_large_english_fp16). **Terminate the pod** — a pod
+   left running cost about $14 on 2026-08-22, which is why the stray-pod watch below exists.
+3. **Build and push the image**, then repoint the endpoint at the new sha tag. Owner-only:
+   it needs `docker login ghcr.io` with a `write:packages` PAT.
+4. **Widen `RUNPOD_WORKER_MODES` to `i2v,t2v,s2v`** in Vercel production. This is the switch
+   that makes the app believe step 3 happened; flipping it early re-arms the exact trap.
+
+Steps 1-3 are all owner-only (GPU pod, registry credential, endpoint config), which is why
+this is a blocker-list item rather than something an agent can finish.
+
 ## Stray pod watch
 
 The bootstrap step above (owner step 2) uses a RunPod Pod, the hourly-billed machine

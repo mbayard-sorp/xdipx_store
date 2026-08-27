@@ -47,7 +47,7 @@ import {
 import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame, isMultiSceneScript } from '~/lib/video-pipeline.server'
 import { assertEpisodeMatchesScript, linkEpisodeToJob } from '~/lib/video-episodes.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
-import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
+import { VIDEO_MODELS, isVideoModelId, tierIneligibility } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { db } from '~/lib/db.server'
 import { socialPosts } from '../../db/schema'
@@ -85,6 +85,13 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
   }
   if (!isVideoModelId(b['modelTier'])) {
     return new Response(`Bad Request: modelTier must be one of ${Object.keys(VIDEO_MODELS).join('|')}`, { status: 400 })
+  }
+  // Retired provider / unavailable worker mode (ticket #5727). Refused here,
+  // before the money gate and before any provider call, so an ineligible tier
+  // costs a 400 rather than a cold GPU boot or a fal invoice.
+  const ineligible = tierIneligibility(b['modelTier'])
+  if (ineligible) {
+    return Response.json({ error: ineligible.code, detail: ineligible.message }, { status: 400 })
   }
   const spec = VIDEO_MODELS[b['modelTier']]
   const script = b[scriptField]
@@ -314,8 +321,12 @@ export async function action({ request }: ActionFunctionArgs) {
         getApprovedCastMembers(),
         getPipelineSetting(VIDEO_EXTRA_KEYS.endcardEnabled).catch(() => null),
       ])
+      // Only ELIGIBLE tiers are advertised (ticket #5727). This op is the
+      // writers room's tier menu; handing it all eleven was how a slate got
+      // written on a retired fal tier in the first place. Historical rows still
+      // resolve their spec through VIDEO_MODELS directly, not through here.
       const models = Object.fromEntries(
-        Object.entries(VIDEO_MODELS).map(([id, spec]) => {
+        Object.entries(VIDEO_MODELS).filter(([id]) => tierIneligibility(id as never) == null).map(([id, spec]) => {
           // Avatar models derive duration from speech; example a 30s script.
           const exampleSeconds = spec.audioDriven ? 30 : (spec.allowedDurations.includes(8) ? 8 : spec.allowedDurations[0] ?? 5)
           return [id, {

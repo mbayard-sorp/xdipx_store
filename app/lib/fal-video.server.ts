@@ -18,6 +18,7 @@ import sharp from 'sharp'
 import { recordFalBlock, readFalRequestId } from '~/lib/fal.server'
 import { atlasConfigured, atlasGenerate } from '~/lib/atlas.server'
 import { estimateRunpodRatePerSecondUsd } from '~/lib/model-pricing.server'
+import { runpodWorkerModes, runpodWorkerSupportsMode, type RunpodWorkerMode } from '~/lib/runpod-video.server'
 
 const FAL_QUEUE_ENDPOINT = 'https://queue.fal.run'
 const FAL_SYNC_ENDPOINT = 'https://fal.run'
@@ -245,6 +246,56 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     audioDriven: true,
     allowedDurations: [],
   },
+}
+
+/**
+ * Why a registered tier may not be selected for NEW work (ticket #5727).
+ *
+ * `legacy` and the s2v enablement note were documentation only: nothing read
+ * either one, the config op handed the writers room all eleven tiers as live
+ * options, and an episode filed on a fal tier or on s2v passed propose, passed
+ * the owner's approval, was claimed by the render lane, and only then failed —
+ * at the enqueue for a fal tier's price, or at a cold RunPod worker that does
+ * not implement mode s2v. This turns both into an enforced refusal at the
+ * earliest point that can refuse.
+ *
+ * Registration is deliberately NOT removed: in-flight jobs, historical rows,
+ * and /admin/usage all resolve costKey and specs through VIDEO_MODELS, and
+ * deleting an entry would break reading the past to stop writing the future.
+ */
+export interface TierIneligibility {
+  code: 'retired_provider' | 'worker_mode_unavailable'
+  message: string
+}
+
+export function tierIneligibility(id: VideoModelId): TierIneligibility | null {
+  const spec = VIDEO_MODELS[id]
+  if (spec.legacy) {
+    return {
+      code: 'retired_provider',
+      message:
+        `${id} renders video on fal, which is retired for video (owner direction 2026-08-26: fal is images only, ` +
+        'all video and all talking render on the owned RunPod worker). Use a wan22 tier.',
+    }
+  }
+  if (spec.provider === 'runpod') {
+    const mode: RunpodWorkerMode = spec.audioDriven ? 's2v' : 'i2v'
+    if (!runpodWorkerSupportsMode(mode)) {
+      return {
+        code: 'worker_mode_unavailable',
+        message:
+          `${id} needs RunPod worker mode '${mode}', which the deployed image does not implement ` +
+          `(it implements ${runpodWorkerModes().join(', ')}). Enqueueing it would boot a worker, fail inside the ` +
+          'handler, and bill for the boot. See docs/store-team/video-worker-runpod.md.',
+      }
+    }
+  }
+  return null
+}
+
+/** Tiers that may be selected for new work, cheapest-safe first. */
+export function eligibleVideoModelIds(): VideoModelId[] {
+  return (Object.keys(VIDEO_MODELS) as VideoModelId[]).filter(id => tierIneligibility(id) == null)
 }
 
 export function isVideoModelId(v: unknown): v is VideoModelId {

@@ -53,6 +53,7 @@ import {
   type VideoModelSpec,
   type AudioPath,
   type QueueHandle,
+  tierIneligibility,
 } from '~/lib/fal-video.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
 import { estimateVideoCostUsd, estimateImageCostUsd, computeRunpodActualCostUsd } from '~/lib/model-pricing.server'
@@ -262,7 +263,13 @@ export interface EnqueueVideoJobArgs {
   episodeId?: number
 }
 
-async function getMaxCostCents(): Promise<number> {
+/**
+ * The live per-video ceiling in cents. Exported (ticket #5727) so propose time
+ * can apply the SAME number the enqueue does — two ceilings read from two
+ * places is how an over-ceiling episode reached an owner batch that could
+ * never render it.
+ */
+export async function getMaxCostCents(): Promise<number> {
   const cfg = await getTeamConfig('video').catch(() => null)
   return cfg?.maxCostCents ?? VIDEO_MAX_COST_CENTS_DEFAULT
 }
@@ -320,6 +327,15 @@ export function estimateJobCostUsd(
 export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobId: string; estCostUsd: number }> {
   const modelTier = args.modelTier ?? await getDefaultModelTier()
   if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
+  // Backstop for the eligibility rule the callers already apply (ticket
+  // #5727). Every enqueue path funnels through here — the team API, the ad-hoc
+  // studio composer, regenerateVideoJob, and the variant-set expander — so a
+  // caller that forgets the check still cannot start a job on a retired
+  // provider or a worker mode the deployed image does not implement. Also
+  // covers the case the callers structurally CANNOT check: a modelTier that
+  // came from the video_default_model_tier setting rather than the request.
+  const ineligible = tierIneligibility(modelTier)
+  if (ineligible) throw new Error(ineligible.message)
   const spec = VIDEO_MODELS[modelTier]
   const script = args.scriptJson
   const reuseFrame = typeof script.reuseFrameAssetId === 'number'
