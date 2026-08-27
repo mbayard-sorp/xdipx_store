@@ -803,6 +803,24 @@ curl -s -X POST "$BASE_URL/api/team/social-image" \
 consecutive product posts, no cast member on more than 2 of any 5. State both choices and their
 last-used dates in the retro decision event.
 
+**Direct `POST /api/team/social-image` calls must set the aspect ratio explicitly (ticket #5640).**
+`scripts/gen-social-image.ts` sets 4:5 for you, but the scheduled cloud sandbox has no `node_modules`
+and must call the route directly — and a direct call does not inherit the CLI's default. Three rules
+for the direct path:
+
+- **A 4:5 Instagram still generated with `op:'generate'` MUST pass `imageSize:{"width":1080,"height":1350}`.**
+  `op:'generate'` with no `imageSize` falls through to the model's own aspect (it returned 16:9 for a
+  product-free IG still this run), and the resulting asset is written token-less, which reuse-first
+  then reads as a 4:5 asset — the exact #4205 mismatch. Cost when it fires: one wasted 16:9
+  generation plus a regen.
+- **A product-free IG frame uses `op:'generate'` with `archetype:'cast'` and `refImageUrl:<cast referencePhoto>`**
+  (plus `imageSize:{"width":1080,"height":1350}`). `op:'cast'` requires a `productImageUrl` (the route
+  400s without one), so it cannot produce a product-free frame; the product-free path is `op:'generate'`,
+  not `op:'cast'`.
+- **An X 16:9 frame uses `op:'cast'` with `aspectRatio:'16:9'`** (the op accepts only `4:5` or `16:9`
+  and defaults to `4:5`), matching the "Generate at 16:9 with `--platform x`" rule in the X subsection
+  below.
+
 **The roster is seven, verified 2026-08-21**: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, all
 `active`, all `approvedForUse`, all with a `referencePhoto`. Rotate across them. This step
 previously said Sanity held **zero** cast docs and that you therefore could not draft; that was a
