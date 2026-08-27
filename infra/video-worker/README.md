@@ -42,6 +42,25 @@ blobPathPrefix    string   e.g. "video/<jobId>"; files land at <prefix>/clip.mp4
 Output: `{ videoUrl, lastFrameUrl, width: 720, height: 1280, fps: 16, durationSeconds, seed, renderSeconds }`
 or `{ error: "<message>" }`.
 
+## Mode s2v (audio-driven talking, tickets #5713/#5714)
+
+`mode: "s2v"` takes `imageUrl` (the approved identity frame) plus `audioUrl`
+(the ElevenLabs speech track) and returns a performed talking clip whose
+duration derives from the audio (cap 60s per render; the app splits longer
+lines). The clip KEEPS its speech track (the silent modes stay `-an`).
+Checkpoints land on the volume via `WITH_S2V=1 bash bootstrap-models.sh`
+(wan2.2_s2v_14B_fp8_scaled + wav2vec2_large_english_fp16; umt5 and the VAE are
+shared with the base tiers). Generation runs 16 fps in 77-frame chunks per the
+native ComfyUI support.
+
+**Enablement gate:** the S2V graph in `build_s2v_workflow` carries
+TODO(verify) notes (node input names were not exercised against a live
+ComfyUI during the build). The bake-off session (Wan2.2-S2V vs InfiniteTalk
+vs LongCat-Video-Avatar, results recorded in
+`docs/store-team/video-worker-runpod.md`) validates or replaces the graph on
+the endpoint BEFORE any image tag is pushed. The endpoint pins an immutable
+sha tag, so merging this repo change alters nothing live by construction.
+
 Frame count is `durationSeconds * 16 + 1` rounded down to the nearest `4k+1` (Wan latent
 constraint): 5 s = 81 frames, 15 s = 241 frames.
 

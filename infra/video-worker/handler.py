@@ -6,11 +6,12 @@ Job input (matches what app/lib/video-pipeline.server.ts will send):
   {
     "prompt": str,
     "negativePrompt": str | null,
-    "imageUrl": str | null,        # scene frame, 9:16 portrait; required when mode == "i2v"
+    "imageUrl": str | null,        # scene frame, 9:16 portrait; required for modes "i2v" and "s2v"
+    "audioUrl": str | null,        # speech track (mp3/wav); required for mode "s2v"; duration derives from it
     "durationSeconds": int,        # 5..15
     "seed": int | null,
     "steps": int | null,           # default 20 (4 when fast == true)
-    "mode": "i2v" | "t2v",
+    "mode": "i2v" | "t2v" | "s2v",
     "aspect": "9:16",              # only 9:16 is supported in Phase 1
     "fast": bool | null,           # use the lightx2v 4-step LoRAs (must be on the volume)
     "blobToken": str,              # Vercel Blob read-write token
@@ -62,6 +63,25 @@ RENDER_TIMEOUT_S = int(os.environ.get("RENDER_TIMEOUT_S", "1500"))
 # base ever rejects the request, try BLOB_API_URL=https://blob.vercel-storage.com.
 BLOB_API_URL = os.environ.get("BLOB_API_URL", "https://vercel.com/api/blob")
 BLOB_API_VERSION = os.environ.get("BLOB_API_VERSION", "12")
+
+# ── Wan 2.2 S2V (audio-driven talking, tickets #5713/#5714) ──────────────────
+# Facts from the ComfyUI native S2V support (comfyui-wiki tutorial, verified
+# 2026-08-26): checkpoint wan2.2_s2v_14B_fp8_scaled.safetensors, audio encoder
+# wav2vec2_large_english_fp16.safetensors, umt5 text encoder + wan_2.1 VAE
+# shared with the base tiers, 16 fps, generation in 77-frame chunks (~4.8s)
+# with extend passes adding 77 frames each (chunks = ceil(audio_s * 16 / 77)).
+#
+# TODO(verify): the API-format node class/input names below (AudioEncoderLoader,
+# LoadAudio, WanSoundImageToVideo and its chunk wiring) were not exercised
+# against a live ComfyUI during this build; the bake-off session validates the
+# graph on the endpoint BEFORE any image tag is pushed, and the endpoint pins
+# an immutable tag, so merging this cannot change live behavior. If the
+# bake-off picks InfiniteTalk or LongCat-Video-Avatar instead, this graph is
+# replaced wholesale and the handler contract stays identical.
+S2V_MODEL = "wan2.2_s2v_14B_fp8_scaled.safetensors"
+S2V_AUDIO_ENCODER = "wav2vec2_large_english_fp16.safetensors"
+S2V_CHUNK_FRAMES = 77
+S2V_MAX_SECONDS = 60  # provisional per-render cap; the app splits longer lines
 
 LIGHTX2V_LORAS = {
     "i2v": (
@@ -134,10 +154,10 @@ def frames_for(seconds: int) -> int:
 
 def validate(inp: dict[str, Any]) -> dict[str, Any]:
     mode = inp.get("mode", "i2v")
-    if mode not in ("i2v", "t2v"):
-        raise ValueError(f"mode must be 'i2v' or 't2v', got {mode!r}")
+    if mode not in ("i2v", "t2v", "s2v"):
+        raise ValueError(f"mode must be 'i2v', 't2v' or 's2v', got {mode!r}")
     prompt = (inp.get("prompt") or "").strip()
-    if not prompt:
+    if not prompt and mode != "s2v":
         raise ValueError("prompt is required")
     if inp.get("aspect", "9:16") != "9:16":
         raise ValueError("only aspect '9:16' is supported in Phase 1")
@@ -145,11 +165,19 @@ def validate(inp: dict[str, Any]) -> dict[str, Any]:
         seconds = int(inp.get("durationSeconds", 5))
     except (TypeError, ValueError):
         raise ValueError("durationSeconds must be an integer")
-    if not MIN_SECONDS <= seconds <= MAX_SECONDS:
+    if mode == "s2v":
+        # Duration derives from the audio; the field is advisory here and the
+        # real length is probed after download (bounded by S2V_MAX_SECONDS).
+        if not 1 <= seconds <= S2V_MAX_SECONDS:
+            raise ValueError(f"durationSeconds must be 1..{S2V_MAX_SECONDS} for mode 's2v', got {seconds}")
+    elif not MIN_SECONDS <= seconds <= MAX_SECONDS:
         raise ValueError(f"durationSeconds must be {MIN_SECONDS}..{MAX_SECONDS}, got {seconds}")
     image_url = inp.get("imageUrl")
-    if mode == "i2v" and not image_url:
-        raise ValueError("imageUrl is required for mode 'i2v'")
+    if mode in ("i2v", "s2v") and not image_url:
+        raise ValueError(f"imageUrl is required for mode '{mode}'")
+    audio_url = inp.get("audioUrl")
+    if mode == "s2v" and not audio_url:
+        raise ValueError("audioUrl is required for mode 's2v' (the performed speech track)")
     if not inp.get("blobToken"):
         raise ValueError("blobToken is required")
     prefix = (inp.get("blobPathPrefix") or "").strip().strip("/")
@@ -167,6 +195,7 @@ def validate(inp: dict[str, Any]) -> dict[str, Any]:
         "prompt": prompt,
         "negative": (inp.get("negativePrompt") or "").strip(),
         "image_url": image_url,
+        "audio_url": audio_url,
         "seconds": seconds,
         "frames": frames_for(seconds),
         "steps": steps,
@@ -189,6 +218,87 @@ def download_scene_frame(url: str) -> str:
         for chunk in r.iter_content(1 << 16):
             f.write(chunk)
     return name
+
+
+def download_audio(url: str) -> str:
+    """Fetch the speech track into ComfyUI's input dir; returns the bare filename LoadAudio expects."""
+    ext = ".mp3" if ".mp3" in url.split("?")[0].lower() else ".wav"
+    name = f"speech-{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(COMFY_DIR, "input", name)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    r = requests.get(url, timeout=120, stream=True)
+    if r.status_code != 200:
+        raise RuntimeError(f"speech track download failed: HTTP {r.status_code} for {url[:120]}")
+    with open(dest, "wb") as f:
+        for chunk in r.iter_content(1 << 16):
+            f.write(chunk)
+    return name
+
+
+def probe_audio_seconds(path: str) -> float:
+    res = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+        capture_output=True, text=True,
+    )
+    try:
+        return float(res.stdout.strip())
+    except ValueError:
+        raise RuntimeError(f"could not probe audio duration: {res.stderr[-300:]}")
+
+
+def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audio_seconds: float) -> dict[str, Any]:
+    """
+    Programmatic API-format graph for Wan 2.2 S2V: one base generation of
+    S2V_CHUNK_FRAMES driven by the speech track and the identity frame.
+    Longer audio renders ceil(audio_s * FPS / 77) chunks via the model's
+    chunked generation (length = total frames; the node consumes the audio
+    embedding across chunks internally per the native support).
+
+    TODO(verify): validated on the endpoint during the bake-off before any
+    image push; see the S2V constant block's note. Node ids are fixed so a
+    future template swap edits by id exactly like build_workflow.
+    """
+    total_frames = min(frames_for(max(1, round(audio_seconds))), frames_for(S2V_MAX_SECONDS))
+    wf: dict[str, Any] = {
+        "1": {"class_type": "UNETLoader", "_meta": {"title": "s2v model"},
+              "inputs": {"unet_name": S2V_MODEL, "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "_meta": {"title": "umt5"},
+              "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan"}},
+        "4": {"class_type": "VAELoader", "_meta": {"title": "wan vae"},
+              "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
+        "5": {"class_type": "CLIPTextEncode", "_meta": {"title": "positive"},
+              "inputs": {"clip": ["3", 0], "text": p["prompt"] or "a person speaking naturally to camera"}},
+        "6": {"class_type": "CLIPTextEncode", "_meta": {"title": "negative"},
+              "inputs": {"clip": ["3", 0], "text": p["negative"]}},
+        "7": {"class_type": "LoadImage", "_meta": {"title": "identity frame"},
+              "inputs": {"image": image_name}},
+        "16": {"class_type": "LoadAudio", "_meta": {"title": "speech"},
+               "inputs": {"audio": audio_name}},
+        "17": {"class_type": "AudioEncoderLoader", "_meta": {"title": "wav2vec2"},
+               "inputs": {"audio_encoder_name": S2V_AUDIO_ENCODER}},
+        "8": {"class_type": "WanSoundImageToVideo", "_meta": {"title": "s2v"},
+              "inputs": {
+                  "positive": ["5", 0], "negative": ["6", 0], "vae": ["4", 0],
+                  "ref_image": ["7", 0],
+                  "audio": ["16", 0], "audio_encoder": ["17", 0],
+                  "width": WIDTH, "height": HEIGHT,
+                  "length": total_frames, "chunk_length": S2V_CHUNK_FRAMES,
+                  "batch_size": 1,
+              }},
+        "11": {"class_type": "KSampler", "_meta": {"title": "sample"},
+               "inputs": {"model": ["1", 0], "positive": ["8", 0], "negative": ["8", 1],
+                          "latent_image": ["8", 2], "seed": p["seed"],
+                          "steps": p["steps"], "cfg": 1.0 if p["fast"] else 6.0,
+                          "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+        "13": {"class_type": "VAEDecode", "_meta": {"title": "decode"},
+               "inputs": {"samples": ["11", 0], "vae": ["4", 0]}},
+        "15": {"class_type": "SaveVideo", "_meta": {"title": "save"},
+               "inputs": {"video": ["14", 0], "filename_prefix": f"video/xdipx-s2v-{p['seed']}-{uuid.uuid4().hex[:8]}",
+                          "format": "mp4", "codec": "h264"}},
+        "14": {"class_type": "CreateVideo", "_meta": {"title": "frames+audio -> video"},
+               "inputs": {"images": ["13", 0], "audio": ["16", 0], "fps": FPS}},
+    }
+    return wf
 
 
 def build_workflow(p: dict[str, Any], image_name: str | None) -> dict[str, Any]:
@@ -291,11 +401,12 @@ def run(cmd: list[str]) -> None:
         raise RuntimeError(f"{cmd[0]} failed: {res.stderr[-600:]}")
 
 
-def postprocess(src: str, workdir: str) -> tuple[str, str]:
+def postprocess(src: str, workdir: str, keep_audio: bool = False) -> tuple[str, str]:
     mp4 = os.path.join(workdir, "clip.mp4")
     png = os.path.join(workdir, "last-frame.png")
+    audio_args = ["-c:a", "aac", "-b:a", "128k"] if keep_audio else ["-an"]
     run(["ffmpeg", "-y", "-loglevel", "error", "-i", src,
-         "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+         *audio_args, "-c:v", "libx264", "-preset", "medium", "-crf", "18",
          "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-r", str(FPS), mp4])
     # -sseof -0.07 lands inside the final 16 fps frame; -update 1 writes a single image.
     run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.07", "-i", mp4,
@@ -343,24 +454,36 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             pass
 
     workdir = tempfile.mkdtemp(prefix="xdipx-")
+    image_name = None
+    audio_name = None
     try:
         p = validate(job.get("input") or {})
         progress("booting ComfyUI")
         ensure_comfy()
 
-        image_name = None
-        if p["mode"] == "i2v":
+        if p["mode"] in ("i2v", "s2v"):
             progress("downloading scene frame")
             image_name = download_scene_frame(p["image_url"])
 
-        wf = build_workflow(p, image_name)
+        if p["mode"] == "s2v":
+            progress("downloading speech track")
+            audio_name = download_audio(p["audio_url"])
+            audio_seconds = probe_audio_seconds(os.path.join(COMFY_DIR, "input", audio_name))
+            if audio_seconds > S2V_MAX_SECONDS:
+                raise ValueError(f"speech track is {audio_seconds:.1f}s, over the {S2V_MAX_SECONDS}s per-render cap; split upstream")
+            p["seconds"] = max(1, round(audio_seconds))
+            p["frames"] = frames_for(p["seconds"])
+            wf = build_s2v_workflow(p, image_name, audio_name, audio_seconds)
+        else:
+            wf = build_workflow(p, image_name)
         progress(f"rendering {p['mode']} {p['seconds']}s ({p['frames']} frames, {p['steps']} steps, seed {p['seed']})")
         prompt_id = submit(wf)
         entry = wait_for(prompt_id, lambda s: progress(f"rendering... {s}s"))
         src = find_output_video(entry, wf["15"]["inputs"]["filename_prefix"])
 
         progress("encoding mp4 + last frame")
-        mp4, png = postprocess(src, workdir)
+        # s2v keeps its performed speech track; the silent tiers stay silent.
+        mp4, png = postprocess(src, workdir, keep_audio=(p["mode"] == "s2v"))
 
         progress("uploading to Vercel Blob")
         video_url = blob_put(p["blob_token"], f"{p['blob_prefix']}/clip.mp4", mp4, "video/mp4")
@@ -381,11 +504,12 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"{type(exc).__name__}: {exc}"}
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
-        if image_name:
-            try:
-                os.remove(os.path.join(COMFY_DIR, "input", image_name))
-            except OSError:
-                pass
+        for name in (image_name, audio_name):
+            if name:
+                try:
+                    os.remove(os.path.join(COMFY_DIR, "input", name))
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":
