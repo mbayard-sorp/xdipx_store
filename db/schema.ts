@@ -218,6 +218,13 @@ export const socialPosts = pgTable('social_posts', {
   // Approved cast members appearing in this post (Sanity castMember slugs).
   castSlugs:       jsonb('cast_slugs').$type<string[]>(),
   updatedAt:       timestamp('updated_at', { withTimezone: true }),
+  // Serialized video program (migration 086). episodeId is the learn-mode
+  // attribution seam: post -> episode -> series/formula/hook/cast. mediaKind
+  // is the STORED media type ('image'|'video'|'none') that collapses the five
+  // duplicated `.mp4`-suffix inference predicates; readers fall back to
+  // inference for pre-086 rows, so it is nullable and never backfilled in SQL.
+  episodeId:       integer('episode_id'),
+  mediaKind:       varchar('media_kind', { length: 8 }),
 })
 
 /**
@@ -1560,6 +1567,13 @@ export interface VideoSceneSpec {
   motionPrompt: string
   durationSeconds: number
   continuity?: 'last-frame' | 'own-frame'
+  /**
+   * Explicit per-scene frame reuse (ticket #5714): adopt an already-approved
+   * same-presenter scene-frame asset instead of composing. Talking jobs only;
+   * verified against the approval history at the scene_frame stage. The
+   * slug-keyed automatic reuse needs no field — this is the override.
+   */
+  reuseFrameAssetId?: number
 }
 
 /**
@@ -1655,6 +1669,16 @@ export const videoJobs = pgTable('video_jobs', {
   error:             text('error'),
   team:              varchar('team', { length: 24 }).notNull().default('video'),
   runId:             integer('run_id').references(() => homepageTeamRuns.id, { onDelete: 'set null' }),
+  // Serialized video program (migration 086). episodeId back-references the
+  // video_episodes row this job renders (plain integer, no FK: the FK lives on
+  // video_episodes.video_job_id to avoid a circular pair). The runpod columns
+  // are the per-video off-confirmation (ticket #5717): probeJson is ALWAYS
+  // written by the terminal probe; confirmedAt only when both the serverless
+  // endpoint and the pods list read zero. A failed read is "could not ask",
+  // never a false all-clear.
+  episodeId:             integer('episode_id'),
+  runpodIdleConfirmedAt: timestamp('runpod_idle_confirmed_at', { withTimezone: true }),
+  runpodIdleProbeJson:   jsonb('runpod_idle_probe_json').$type<RunpodIdleProbe>(),
   createdAt:         timestamp('created_at').notNull().defaultNow(),
   updatedAt:         timestamp('updated_at').notNull().defaultNow(),
   completedAt:       timestamp('completed_at'),
@@ -1665,6 +1689,133 @@ export const videoJobs = pgTable('video_jobs', {
   // query is created in the SQL migration — Drizzle cannot express partial
   // indexes. `awaiting_frame_approval` is deliberately EXCLUDED from it so
   // parked jobs do not spin the poller.
+}))
+
+// ─── Serialized video program (migration 086, all-hands 2026-08-26) ──────────
+
+/**
+ * Result of the terminal RunPod idle probe (ticket #5717). `clear` is true
+ * ONLY when both surfaces were successfully read AND both are zero; a thrown
+ * read lands in `couldNotAsk` and is never conflated with clear:false.
+ */
+export interface RunpodIdleProbe {
+  checkedAt: string
+  endpoint: {
+    workers: { idle: number; initializing: number; ready: number; running: number; throttled: number; unhealthy: number; active: number }
+    jobs: { inQueue: number; inProgress: number }
+  } | null
+  pods: { id: string; name: string; hoursRunning: number; costPerHour: number }[] | null
+  clear: boolean
+  couldNotAsk: string[]
+}
+
+/**
+ * One product placement inside an episode. The role and mentionType
+ * vocabularies deliberately have NO 'owned' role and NO 'personal_experience'
+ * type: shoppers-not-owners (the charter's invented-testimonial ban) is
+ * enforced here by making the forbidden claim inexpressible, not by prose.
+ */
+export interface VideoEpisodePlacement {
+  handle: string
+  shopifyProductGid?: string
+  role: 'considered' | 'compared' | 'gifted' | 'rejected'
+  mentionType: 'spec_cited' | 'review_pattern' | 'price' | 'category'
+}
+
+/** Append-only owner review note on an episode (never overwritten). */
+export interface VideoEpisodeReviewNote {
+  at: string
+  decision: 'approved' | 'needs_changes' | 'rejected'
+  tags?: string[]
+  note?: string
+  by?: string
+}
+
+/**
+ * video_series — the show bible's database half: near-static identity rows
+ * (the bible's canon lives in docs/store-team/series-bible-the-group-chat.md).
+ * Deliberately holds NO continuity state: character beats and the open-loop
+ * ledger are DERIVED queries over video_episodes so they cannot drift.
+ */
+export const videoSeries = pgTable('video_series', {
+  id:        serial('id').primaryKey(),
+  slug:      varchar('slug', { length: 48 }).notNull(),
+  title:     varchar('title', { length: 120 }).notNull(),
+  premise:   text('premise'),
+  status:    varchar('status', { length: 12 }).notNull().default('active'), // active|paused|retired
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  slugIdx: uniqueIndex('uq_video_series_slug').on(t.slug),
+}))
+
+/**
+ * video_episodes — the unit of production for the serialized program. One row
+ * per intended video, created by the writers room at PROPOSE time, before any
+ * spend. The owner's decision on this row is the money gate: the enqueue
+ * guard (ticket #5712) requires production_status='approved' and refuses a
+ * payload whose spoken text differs byte-for-byte from script_json here.
+ *
+ * production_status: idea|drafting|pending_approval|approved|needs_changes|
+ * rejected|rendering|rendered|scheduled|posted|measured|shelved|failed.
+ * The pipeline writes only the rendering/rendered/failed boundary values;
+ * the owner-facing display label derives in app code (never stored).
+ */
+export const videoEpisodes = pgTable('video_episodes', {
+  id:                serial('id').primaryKey(),
+  episodeUid:        varchar('episode_uid', { length: 36 }).notNull(),
+  seriesId:          integer('series_id').notNull().references(() => videoSeries.id, { onDelete: 'restrict' }),
+  seasonNumber:      smallint('season_number').notNull().default(1),
+  episodeNumber:     integer('episode_number').notNull(),
+
+  concept:           text('concept'),
+  logline:           varchar('logline', { length: 240 }).notNull(),
+  formula:           varchar('formula', { length: 32 }).notNull(),
+  arcPosition:       varchar('arc_position', { length: 16 }).notNull().default('standalone'),
+  opensLoopKey:      varchar('opens_loop_key', { length: 48 }),
+  paysOffLoopKey:    varchar('pays_off_loop_key', { length: 48 }),
+  callbackToEpisode: integer('callback_to_episode'),
+  part2Hook:         text('part2_hook'),
+
+  storyboardJson:    jsonb('storyboard_json').$type<{ beat: string; shot: string; onScreen?: string; sceneSlug?: string; speaker?: string; note?: string }[]>(),
+  hookText:          varchar('hook_text', { length: 240 }),
+  hookPattern:       varchar('hook_pattern', { length: 32 }),
+  castSlugs:         jsonb('cast_slugs').$type<string[]>().notNull().default([]),
+  productPlacements: jsonb('product_placements').$type<VideoEpisodePlacement[]>().notNull().default([]),
+  scriptJson:        jsonb('script_json').$type<VideoScriptJson>(),
+  siteCutJson:       jsonb('site_cut_json').$type<{ title?: string; dek?: string; copy?: string }>(),
+  modelTier:         varchar('model_tier', { length: 16 }),
+  estCostUsd:        decimal('est_cost_usd', { precision: 10, scale: 5 }),
+  gateVerdictsJson:  jsonb('gate_verdicts_json').$type<{ doctor?: string; voice?: string }>(),
+
+  productionStatus:  varchar('production_status', { length: 16 }).notNull().default('idea'),
+  approvedBy:        varchar('approved_by', { length: 60 }),
+  approvedAt:        timestamp('approved_at', { withTimezone: true }),
+  batchId:           varchar('batch_id', { length: 36 }),
+  rejectReason:      text('reject_reason'),
+  reviewNotesJson:   jsonb('review_notes_json').$type<VideoEpisodeReviewNote[]>(),
+  isReserve:         boolean('is_reserve').notNull().default(false),
+
+  videoJobId:        integer('video_job_id').references(() => videoJobs.id, { onDelete: 'set null' }),
+  priorJobIdsJson:   jsonb('prior_job_ids_json').$type<number[]>(),
+  renderStartedAt:   timestamp('render_started_at', { withTimezone: true }),
+  renderedAt:        timestamp('rendered_at', { withTimezone: true }),
+  actualCostUsd:     decimal('actual_cost_usd', { precision: 10, scale: 5 }),
+
+  plannedSlotAt:     timestamp('planned_slot_at', { withTimezone: true }),
+  postedAt:          timestamp('posted_at', { withTimezone: true }),
+  measuredAt:        timestamp('measured_at', { withTimezone: true }),
+
+  createdBy:         varchar('created_by', { length: 60 }).notNull().default('agent'),
+  createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:         timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  uidIdx:    uniqueIndex('uq_video_episodes_uid').on(t.episodeUid),
+  numberIdx: uniqueIndex('uq_video_episodes_number').on(t.seriesId, t.seasonNumber, t.episodeNumber),
+  statusIdx: index('idx_video_episodes_status').on(t.productionStatus, t.plannedSlotAt),
+  batchIdx:  index('idx_video_episodes_batch').on(t.batchId),
+  jobIdx:    index('idx_video_episodes_job').on(t.videoJobId),
+  // GIN index on product_placements lives in the SQL migration (jsonb_path_ops).
 }))
 
 /**

@@ -37,6 +37,7 @@ import { socialPosts } from '../../db/schema'
 import type { PublishMedia, SocialPublisher } from './social-publish/types'
 import { checkLinkedProductStock } from './social-publish/stock-guard.server'
 import { preserveGateStamp } from './social-publish-approve.server'
+import { isVideoPost } from '~/components/admin/social/types'
 
 type SocialPostRow = typeof socialPosts.$inferSelect
 
@@ -83,8 +84,9 @@ async function resolveDeps(over: Partial<PostOpsDeps>): Promise<PostOpsDeps> {
   return deps
 }
 
-export function isVideoRow(post: Pick<SocialPostRow, 'videoJobId' | 'mediaUrls'>): boolean {
-  return post.videoJobId != null || !!post.mediaUrls?.[0]?.split('?')[0]?.endsWith('.mp4')
+export function isVideoRow(post: Pick<SocialPostRow, 'videoJobId' | 'mediaUrls'> & { mediaKind?: string | null }): boolean {
+  // One definition (ticket #5715): stored media_kind wins, inference falls back.
+  return isVideoPost(post)
 }
 
 /** The media shape the publish job builds from a row; shared by retry and Post now. */

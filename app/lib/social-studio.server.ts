@@ -68,6 +68,8 @@ export interface OwnerDraftInput {
   scheduledTime: string | null
   /** Owner note for the team, kept separate from the gate stamp. */
   feedback: string | null
+  /** 'video' when the row's media is pipeline-owned (ticket #5715); null otherwise. */
+  mediaKind: 'video' | null
 }
 
 export type OwnerDraftParse =
@@ -108,11 +110,20 @@ export function parseOwnerDraft(form: FormData): OwnerDraftParse {
     }
   }
   slides = slides.slice(0, 10)
-  if (platform === 'x' && slides.length === 0) {
-    return { ok: false, error: 'An X post needs at least one image; the publish gate blocks a media-less X post (owner decision 2026-08-16)' }
-  }
-  if (platform === 'instagram' && slides.length === 0) {
-    return { ok: false, error: 'An Instagram post needs at least one image' }
+  // Video rows (ticket #5715): the media is pipeline-owned. The Composer edits
+  // caption/schedule/product/cast only, carries mediaKind through a hidden
+  // field, and never submits slides for a video, so an mp4 can never
+  // round-trip into social_post_slides as if it were an image.
+  const mediaKind = String(form.get('mediaKind') ?? '') === 'video' ? 'video' : null
+  if (mediaKind === 'video') {
+    slides = []
+  } else {
+    if (platform === 'x' && slides.length === 0) {
+      return { ok: false, error: 'An X post needs at least one image; the publish gate blocks a media-less X post (owner decision 2026-08-16)' }
+    }
+    if (platform === 'instagram' && slides.length === 0) {
+      return { ok: false, error: 'An Instagram post needs at least one image' }
+    }
   }
 
   const shopifyProductIdRaw = String(form.get('shopifyProductId') ?? '').trim()
@@ -131,7 +142,7 @@ export function parseOwnerDraft(form: FormData): OwnerDraftParse {
 
   return {
     ok: true,
-    input: { platform, caption, slides, shopifyProductId, castSlugs, scheduledDate, scheduledTime, feedback },
+    input: { platform, caption, slides, shopifyProductId, castSlugs, scheduledDate, scheduledTime, feedback, mediaKind },
   }
 }
 
@@ -172,6 +183,9 @@ export async function createOwnerDraft(input: OwnerDraftInput): Promise<{ id: nu
       feedback: input.feedback,
       shopifyProductId: input.shopifyProductId,
       castSlugs: input.castSlugs,
+      // Owner-composed rows are images or text; 'video' only ever arrives via
+      // the pipeline's fan-out (ticket #5715).
+      mediaKind: input.slides.length ? 'image' : 'none',
       updatedAt: now,
       ...scheduleColumns(input),
     })
@@ -194,21 +208,36 @@ export type UpdateOwnerDraftResult =
 export async function updateOwnerDraft(id: number, input: OwnerDraftInput): Promise<UpdateOwnerDraftResult> {
   const reset = await revertSocialPostToDraft(id)
   if (!reset.ok) return { ok: false, error: reset.error }
+
+  // Video rows (ticket #5715): the media is pipeline-owned. Before this
+  // guard, saving a caption edit on a video row REWROTE mediaUrls from the
+  // slide payload, silently swapping the video out for whatever the slide
+  // strip held. The Composer edits words and schedule; never the bytes.
+  const [existing] = await db.select({ videoJobId: socialPosts.videoJobId, mediaUrls: socialPosts.mediaUrls, mediaKind: socialPosts.mediaKind })
+    .from(socialPosts).where(eq(socialPosts.id, id)).limit(1)
+  const isVideo = input.mediaKind === 'video'
+    || (existing ? (existing.mediaKind === 'video' || (existing.mediaKind == null && (existing.videoJobId != null || !!existing.mediaUrls?.[0]?.split('?')[0]?.endsWith('.mp4')))) : false)
+
   await db
     .update(socialPosts)
     .set({
-      platform: input.platform,
       tweetText: input.caption,
       editedText: null,
-      mediaUrls: input.slides.map(s => s.url),
       shopifyProductId: input.shopifyProductId,
       castSlugs: input.castSlugs,
       feedback: input.feedback,
       updatedAt: new Date(),
       ...scheduleColumns(input),
+      ...(isVideo
+        ? { mediaKind: 'video' }
+        : {
+            platform: input.platform,
+            mediaUrls: input.slides.map(s => s.url),
+            mediaKind: input.slides.length ? 'image' : 'none',
+          }),
     })
     .where(eq(socialPosts.id, id))
-  await replaceSlides(id, input.slides)
+  if (!isVideo) await replaceSlides(id, input.slides)
   return { ok: true, id }
 }
 

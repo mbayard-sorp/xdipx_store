@@ -24,6 +24,7 @@ import {
   type PostRow,
 } from './social-publish-job.server'
 import type { PublishMedia } from './social-publish/types'
+import { isVideoPost } from '~/components/admin/social/types'
 
 /** Fallback when `x_publish_max_per_day` is unset. Owner decision 2026-08-16. */
 export const X_DEFAULT_MAX_PER_DAY = 2
@@ -58,7 +59,7 @@ export function mediaForPost(post: PostRow):
   const first = urls[0]
   if (!first) return { ok: false, detail: 'Draft has no media URL' }
 
-  const isVideo = post.videoJobId != null || !!first.split('?')[0]?.endsWith('.mp4')
+  const isVideo = isVideoPost(post)
   if (isVideo) {
     return {
       ok: true,

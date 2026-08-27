@@ -40,6 +40,11 @@ export interface ComposerInitial {
       record, instead of dropping it. */
   imageBrief: string | null
   subject: string | null
+  /** Ticket #5715: 'video' rows render the pipeline-owned media read-only
+      (the Composer edits words and schedule, never the bytes). */
+  mediaKind: 'video' | null
+  videoUrl: string | null
+  posterUrl: string | null
   status: string
   reviewStatus: string
   gateStatus: string | null
@@ -77,6 +82,7 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
   // taking on, so the affordance is removed instead: one caption, shared
   // across every platform tab, so there is nothing left to silently lose.
   const [caption, setCaption] = useState<string>(initial.caption)
+  const isVideo = initial.mediaKind === 'video'
   const [slides, dispatch] = useReducer(slidesReducer, initial.slides)
   const [product, setProduct] = useState<PickedProduct | null>(initial.product)
   const [castSlugs, setCastSlugs] = useState<string[]>(initial.castSlugs)
@@ -98,8 +104,10 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
   const limit = platform === 'x' ? X_CAPTION_MAX : platform === 'linkedin' ? LINKEDIN_CAPTION_MAX : IG_SOFT_MAX
 
   const media: MediaRef[] = useMemo(
-    () => slides.map(s => ({ url: s.url, video: s.url.split('?')[0]?.endsWith('.mp4') ?? false, poster: null })),
-    [slides],
+    () => isVideo
+      ? [{ url: initial.videoUrl ?? '', video: true, poster: initial.posterUrl }]
+      : slides.map(s => ({ url: s.url, video: s.url.split('?')[0]?.endsWith('.mp4') ?? false, poster: null })),
+    [isVideo, initial.videoUrl, initial.posterUrl, slides],
   )
 
   const snapshot = JSON.stringify({ platform, caption, slides: serializeSlides(slides), product: product?.id ?? null, castSlugs, scheduledDate, scheduledTime, feedback })
@@ -111,7 +119,7 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
   const dirty = snapshot !== initialSnapshot
   const saving = save.state !== 'idle'
   const saveError = save.data && !save.data.ok ? save.data.error : null
-  const needsMedia = (platform === 'x' || platform === 'instagram') && slides.length === 0
+  const needsMedia = !isVideo && (platform === 'x' || platform === 'instagram') && slides.length === 0
   const canSave = !saving && caption.trim().length > 0 && !overLimit && !needsMedia
 
   function submitSave() {
@@ -121,7 +129,8 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
         intent: 'save',
         platform,
         caption,
-        slides: serializeSlides(slides),
+        mediaKind: isVideo ? 'video' : '',
+        slides: isVideo ? '[]' : serializeSlides(slides),
         shopifyProductId: product?.id ?? '',
         productHandle: product?.handle ?? '',
         castSlugs: castSlugs.join(','),
@@ -252,19 +261,37 @@ export function Composer({ postId, initial, roster, extra }: ComposerProps) {
           <div className="rounded-2xl border border-line bg-paper-2 p-3 flex justify-center overflow-x-auto">
             <PlatformMock platform={platform} media={media} caption={caption} />
           </div>
-          <SlideStrip
-            slides={slides}
-            dispatch={dispatch}
-            onAddFromLibrary={openPicker}
-            onRegenerate={slide => setRegen({ slide })}
-          />
-          <button
-            type="button"
-            onClick={() => setRegen({ slide: null })}
-            className="text-xs text-ink-3 hover:text-ink underline-offset-2 hover:underline min-h-11"
-          >
-            Generate a new image from a prompt
-          </button>
+          {isVideo ? (
+            <div className="rounded-2xl border border-line bg-paper p-3 space-y-2">
+              <video
+                src={initial.videoUrl ?? undefined}
+                poster={initial.posterUrl ?? undefined}
+                controls
+                playsInline
+                className="w-full max-h-[420px] rounded-xl bg-ink"
+              />
+              <p className="text-xs text-ink-3">
+                Video media is owned by the pipeline and read-only here. Edit the caption, schedule,
+                product, and cast; a retake happens in the Video Studio, never by swapping this file.
+              </p>
+            </div>
+          ) : (
+            <>
+              <SlideStrip
+                slides={slides}
+                dispatch={dispatch}
+                onAddFromLibrary={openPicker}
+                onRegenerate={slide => setRegen({ slide })}
+              />
+              <button
+                type="button"
+                onClick={() => setRegen({ slide: null })}
+                className="text-xs text-ink-3 hover:text-ink underline-offset-2 hover:underline min-h-11"
+              >
+                Generate a new image from a prompt
+              </button>
+            </>
+          )}
         </section>
 
         {/* Column 3: inspector */}
