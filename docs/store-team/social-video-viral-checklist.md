@@ -1,4 +1,4 @@
-# Social Video Viral Checklist (20 rules + 8 craft rules, PASS/FAIL)
+# Social Video Viral Checklist (38 rules, PASS/FAIL)
 
 > **Provenance note (read first):** the content strategist's original formula memo was lost; it
 > lived only in a session scratchpad and was never committed. This file is a **reconstruction**
@@ -7,9 +7,13 @@
 > same spirit as concrete, testable statements. Owner: please correct anything here that does not
 > match your memory of the original memo. Corrections replace rules in place; IDs are stable.
 
-Every script must PASS all 20 numbered rules **and** all eight craft rules (CR1-CR8) before enqueue.
-The video-producer self-checks at scripting time; the emma-empathy-reviewer voice gate verdicts each
-rule PASS/FAIL independently. Any FAIL is at minimum a REVISE.
+Every script must PASS all 20 numbered rules **and** the eight craft rules (CR1-CR8) before
+enqueue. Serialized episodes (a script carrying `seriesSlug` and `episodeNumber`) must
+additionally PASS the six serialization rules (SE1-SE6) and the four shopper rules (SH1-SH4)
+below, for 38 total. The writer self-checks at scripting time; `script-doctor` verdicts every rule
+adversarially for serialized episodes; the `emma-empathy-reviewer` voice gate verdicts each rule
+PASS/FAIL independently. Any FAIL is at minimum a REVISE. An SH FAIL is a BLOCK (it is the
+charter's invented-testimonial ban wearing a rule number).
 
 ## Hook (H1-H4): the first 2-3 seconds
 
@@ -98,3 +102,55 @@ minimum a REVISE.
 **Calibration benchmark for reviewers.** The Spectrum drawer script — "In the drawer by the bed,
 right where you left it. Tonight, and any night the wanting comes back." — rated 6.5/10 by the
 owner. Physically true, specific, understated is the direction.
+
+## Serialization and part-2 (SE1-SE6): serialized episodes only
+
+Added 2026-08-26 at the video-program all-hands (owner direction: character arcs on a viral
+formula, every episode leaves the viewer wanting a part 2). `script-doctor` holds BLOCK authority
+on this family.
+
+- **SE1.** The script carries `seriesSlug` and `episodeNumber` in scriptJson and matches an
+  `approved` row in the episode ledger. No ledger row, no render.
+- **SE2.** Exactly one loop is opened, named in the episode row, and it is a question about a
+  **person**, never a product. "Will she tell him" passes; "will she buy it" fails.
+- **SE3.** The part-2 hook is the final spoken or on-screen line, is recorded on the episode row,
+  and is answerable only by a later episode. A hook this episode already answers fails.
+- **SE4.** The episode closes at least one loop the ledger shows open, or is episode 1 of an arc.
+- **SE5.** Every third episode names an earlier episode that actually aired, spoken or on screen,
+  and the callback is legible to a viewer who missed that episode. (The enforceable form of A4;
+  A4 passes when SE5 passes.)
+- **SE6.** The payoff resolves before the door opens. An episode that leaves the viewer only
+  curious, and not also satisfied, fails.
+
+## Shopper not owner (SH1-SH4): serialized episodes only
+
+The charter bans a named recurring character presented as if they used the product. These rules
+make that mechanically checkable line by line. Any SH FAIL is a BLOCK.
+
+- **SH1.** Every product line uses a consideration verb: considering, comparing, asking about,
+  gifting, saving for, going back to look. Possession and experience verbs fail in every mouth,
+  including a friend's.
+- **SH2.** Any factual product line is a spec or an aggregated review pattern with the
+  aggregation **audible**: "the spec sheet says", "reviewers keep describing". A bare fact stated
+  as personal knowledge fails.
+- **SH3.** No line implies a character has used the product, is using it, or is reacting to it
+  operating. Wearables worn as designed are wardrobe, not use (P2 governs the frame; SH3 governs
+  the line that would imply it).
+- **SH4.** Desire attaches to the person and the situation, never to a claimed sensation. "I want
+  to know what she does with it" passes; "it feels incredible" fails in any mouth, voiceover
+  included.
+
+## Reconciliation clauses (serialized episodes)
+
+Read these before failing an episode against A1, A2, or A4; without them a literal reviewer fails
+every serialized script.
+
+- **A1 and the door.** A1 governs the episode's one idea. The door (SE2/SE3) is not a second
+  idea; it is an unanswered question about the same people. A door that introduces a new product,
+  category, or tip IS a second idea and fails A1.
+- **A2 and SE6.** The payoff still lands in the final third. The door comes after the payoff,
+  never instead of it.
+- **A4 and SE5.** A4 stays as the principle; SE5 is its enforceable form now that episode numbers
+  exist in the ledger.
+- **S2** (the spoken save-line) applies only to educational episodes, not to every serialized
+  episode.

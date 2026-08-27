@@ -472,3 +472,76 @@ added, no existing Sanity schema modified. The shipped fix is a resolver +
 render correctness change on one existing band inside the locked Nº01-Nº11
 shell; the Curiosity Echo concept stays a proposal pending IA review + additive
 schema before any build.
+
+## Delta — 2026-08-26 (Routine B design cycle, run 520)
+
+**Captures (real, this run; egress LIVE):** `lovehoney.com` and `dame.com` fetched
+successfully and are the only sites reported below. `spectrumboutique.com` returned
+HTTP 403 at the edge (blocked, deferred, not a judgment); `dameproducts.com`
+301-redirected to `dame.com` (followed, captured); `maude.com` 301-redirected off
+its own domain to a parked GoDaddy portal (stale registrar/DNS, not reachable). The
+standing 16-capture baseline is unchanged; these are deltas against it, no
+competitor copy quoted from memory. Five-site recon is not due (Wednesday cadence);
+this is Routine B's own step 0.5 lightweight delta.
+
+**Lovehoney (delta vs baseline):** even more discount-forward than the baseline
+recorded. Above the fold is a single "Up to 70% Off" clearance banner as the hero,
+then a "Hot Summer Pleasure Forecast" category strip, an 8-tile Shop-by-Category
+grid of sale items, and a stack of deal banners (Anal August, Fruit Toys, Couples
+Advent Savings). Zero guidance, zero personalization, no discovery instrument. This
+is our named anti-pattern at full strength: urgency theater + a discount wall +
+categorical browse with nobody helping. Nothing to adopt; it re-confirms the
+differentiator.
+
+**Dame (delta vs the 2026-07-29 delta):** dame.com now leads with a **clinical-proof**
+hero (Daily Desire Gummies, "Clinically studied. Actually proven.", "85% of women
+reported increased desire in 4 weeks") rather than a device. Spine: hero(proof) ->
+bestsellers grid -> press carousel -> brand story -> category spotlights -> medical
+& health board credentials -> podcast -> testimonials -> sibling brands -> blog ->
+email. Trust is carried entirely by things it can back: 10,000+ five-star reviews,
+3-year warranty, 60-day returns, press logos (WSJ, Fast Company), a named medical
+board. Guidance is billboarded as a named "Find Your Vibe" quiz.
+
+**What we do that neither does this week (the required differentiator):** neither
+leads with warm, plain, shame-free **guided self-discovery** as the organizing
+principle. Lovehoney organizes on discount pressure; Dame organizes on
+clinical/medical authority and a proof stack. Both are legitimacy engines we either
+reject (urgency) or cannot yet honestly fill (Dame's proof stack needs real
+reviews/press/warranty we do not have; doctrine §6 forbids fabricating it). The lane
+that is ours and empty in the field is discovery-as-the-hero.
+
+**Decision this delta forces (recon that changes nothing is wasted):** the field
+confirms the highest-leverage ambition lane is a discovery instrument as a
+first-class homepage beat, and the backlog already holds six unbuilt finder concepts.
+So this cycle's decision is **not another concept** but to advance the most
+build-ready one, Either / Or (`concepts/either-or.md`, Option A, an alternate
+renderer for the existing Nº 07 slot), from "proposal" toward "buildable" by
+resolving its single biggest open build risk (the dead-tag / clean-binary axis
+question) against the **live** discovery vocab captured this run from
+`xdipx.com/discover`. See the build-readiness resolution appended to `either-or.md`.
+
+**Adopted this cycle:** the Either/Or build-readiness resolution (three clean
+binaries confirmed against live vocab, Q4 dropped for v1, the one residual pre-build
+gate pinned with an exact command). Design capital, docs-only, shipping-disciplined
+(mission brief §9, traffic-gated).
+
+**Rejected/deferred this cycle (logged so ambition compounds):**
+- A 7th finder concept, **rejected** as redundant: six unbuilt finders already sit
+  in `concepts/`; idea-count is not the bottleneck, build-readiness is.
+- Any generated imagery or new-machinery build, **deferred**: still gated on
+  asset-generation spend and unmeasurable while sessions < 300/wk (GA4 dark, 6th
+  consecutive week per brief #7).
+- Dame's proof-stack spine (reviews/warranty/press/medical board), **rejected as
+  un-fillable now**: doctrine §6 forbids fabricated proof; this is backlog items 8
+  (reviews slot, real-data-only) and 17 (closing proof act), which wait on real
+  reviews, not on design.
+- Running the credentialed vocab dump for per-pole product counts, **deferred by
+  force**: `scripts/dump-discovery-vocab.ts` needs Shopify Admin creds a cloud
+  routine does not hold; pinned as the single remaining pre-build gate for the next
+  credentialed/interactive cycle.
+
+**IA fence respected:** no new section type, no new route, no `/discover` link added,
+no Sanity schema modified, no code changed. The only artifacts are docs: this delta,
+the `either-or.md` build-readiness resolution, and the changelog entry. Either/Or
+stays a proposal pending `homepage-ia` Nº 07-slot sign-off + the additive `eitherOr`
+block before any build.
