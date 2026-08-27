@@ -110,7 +110,7 @@ export async function action({ request }: ActionFunctionArgs) {
           gate: gateResult,
         }, { status: 403 })
       }
-      if (gateResult.maxImagesPerDay > 0 && gateResult.imagesToday >= gateResult.maxImagesPerDay) {
+      if ((gateResult.maxImagesPerDay ?? 0) > 0 && gateResult.imagesToday >= (gateResult.maxImagesPerDay ?? 0)) {
         return Response.json({
           ok: false,
           error: 'gated',

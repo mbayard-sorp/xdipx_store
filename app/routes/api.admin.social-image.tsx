@@ -86,7 +86,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // its rework/gate/triage steps); this owner-triggered generation route
     // relied on `ok` alone for the cap, so it needs its own explicit check
     // now or an owner click past the cap would generate and bill unblocked.
-    if (gateResult.maxImagesPerDay > 0 && gateResult.imagesToday >= gateResult.maxImagesPerDay) {
+    if ((gateResult.maxImagesPerDay ?? 0) > 0 && gateResult.imagesToday >= (gateResult.maxImagesPerDay ?? 0)) {
       return Response.json({
         error: 'gated',
         reason: 'over_image_cap',
