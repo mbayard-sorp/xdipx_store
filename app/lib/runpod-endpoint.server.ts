@@ -24,10 +24,25 @@ export interface RunpodEndpointWorkers {
   throttled: number
   unhealthy: number
   /**
-   * Everything that is not scaled away: initializing + ready + running +
-   * throttled + unhealthy. Idle Flex workers are warm slot reservations that
-   * bill nothing and are deliberately NOT counted active; they are still
-   * recorded in the probe json so the owner can see them.
+   * Workers that are actually consuming GPU: initializing + running +
+   * throttled + unhealthy.
+   *
+   * `ready` is excluded along with `idle` (ticket #5932). It used to be
+   * counted, which made this a permanent false alarm: RunPod reports the SAME
+   * warm FlashBoot slots under BOTH `idle` and `ready`, so excluding only
+   * `idle` excluded nothing. Measured on endpoint 1cnxz75c71177q, 2026-08-27:
+   * `idle 3 / ready 3 / running 0` for four straight days after the last job
+   * on 08-23, against $0 of RunPod billing on 08-24 through 08-27. Three
+   * "active" workers, zero dollars. That arithmetic is what kept owner blocker
+   * 25 open and stopped confirmRunpodIdle from ever stamping a wan22 job.
+   *
+   * This is correct for a FLEX endpoint at `workers.min = 0`, which is what
+   * the video endpoint is: a ready worker there is a warm cache reservation,
+   * not compute. If the endpoint is ever moved to Active workers or a nonzero
+   * min, those ARE billed while ready and this must count them again.
+   *
+   * Every raw count stays on the struct and in the probe json, so the owner
+   * can still see the warm slots.
    */
   active: number
 }
@@ -86,7 +101,7 @@ export async function getRunpodEndpointHealth(endpointId?: string): Promise<Runp
     unhealthy: n(w['unhealthy']),
     active: 0,
   }
-  workers.active = workers.initializing + workers.ready + workers.running + workers.throttled + workers.unhealthy
+  workers.active = workers.initializing + workers.running + workers.throttled + workers.unhealthy
 
   const j = json.jobs ?? {}
   return {
