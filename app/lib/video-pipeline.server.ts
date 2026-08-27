@@ -59,7 +59,7 @@ import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
 import { estimateVideoCostUsd, estimateImageCostUsd, computeRunpodActualCostUsd } from '~/lib/model-pricing.server'
 import { utcIsoToLaWallClock } from '~/lib/social-schedule-ui'
 import { logVideoCost, logImageCost } from '~/lib/token-log.server'
-import { submitRunpodVideo, getRunpodStatus, getRunpodResult } from '~/lib/runpod-video.server'
+import { submitRunpodVideo, getRunpodStatus, getRunpodResult, cancelRunpod } from '~/lib/runpod-video.server'
 import { getEditorPhotoUrl, getApprovedCastMembers } from '~/lib/sanity.server'
 import { getProductByHandle } from '~/lib/shopify.server'
 import { getTeamConfig } from '~/lib/team.server'
@@ -572,6 +572,74 @@ async function logRunpodBurn(args: {
   }
 }
 
+/** RunPod's queue host, used to tell a runpod handle from a fal one. */
+const RUNPOD_API_BASE_FOR_CANCEL = 'https://api.runpod.ai/v2'
+
+/**
+ * Cancel every RunPod request still in flight for a job that has stopped
+ * mattering, and record what it burned (ticket #5728).
+ *
+ * A RunPod request outlives the row that submitted it. Nothing consumes the
+ * result of a job that is already terminal, but the GPU keeps running and
+ * billing until the render finishes or the endpoint's 1800s execution timeout
+ * fires — up to ~$1.43 an orphan at the all-in rate, more for a multi-part
+ * avatar job where one failed part abandons its siblings mid-render. The
+ * client has had cancelRunpod() since the provider shipped; nothing called it.
+ *
+ * Safe precisely because the caller has already made the row terminal: the
+ * work being cancelled is work the app can no longer use, so this only ever
+ * stops spend on an output nobody will read. Best-effort throughout — a failed
+ * cancel must never mask the error that led here, and a cancel that succeeds
+ * must not be lost to a later accounting hiccup.
+ *
+ * fal handles are left alone: fal video is retired (ticket #5727), its queue
+ * has different cancel semantics, and no new job can reach it anyway.
+ */
+async function cancelInflightRunpodRequests(job: VideoJobRow, reason: string): Promise<number> {
+  const handles = (job.providerRequestIds ?? {}) as Record<string, unknown>
+  const runpodHandles = Object.entries(handles).filter((e): e is [string, QueueHandle] => {
+    const h = e[1] as Partial<QueueHandle> | null
+    // providerRequestIds also carries non-handle bookkeeping keys
+    // (assembly_attempts, avatar_billed_seconds), so shape-check rather than
+    // trusting every value to be a handle.
+    return !!h && typeof h === 'object'
+      && typeof h.requestId === 'string'
+      && typeof h.statusUrl === 'string'
+      && h.statusUrl.startsWith(`${RUNPOD_API_BASE_FOR_CANCEL}/`)
+  })
+  if (!runpodHandles.length) return 0
+
+  const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
+  const costKey = spec?.costKey ?? 'runpod/wan22'
+  let cancelled = 0
+  for (const [key, handle] of runpodHandles) {
+    // Read the burn BEFORE cancelling: a cancelled request still bills for the
+    // seconds it ran, and after the cancel RunPod may report it as CANCELLED
+    // with no executionTime at all.
+    let executionMs = 0
+    try {
+      executionMs = (await getRunpodStatus(handle)).executionMs
+    } catch { /* accounting is best-effort; the cancel below is the point */ }
+    try {
+      await cancelRunpod(handle)
+      cancelled++
+      console.warn(`[video-pipeline] cancelled orphaned runpod request ${handle.requestId} (${job.jobId}#${key}): ${reason}`)
+    } catch (err) {
+      // Already terminal on RunPod's side is the common case and is fine.
+      console.warn(`[video-pipeline] could not cancel runpod request ${handle.requestId} (${job.jobId}#${key}):`, err)
+    }
+    await logRunpodBurn({
+      costKey,
+      executionMs,
+      seconds: 1,
+      productHandle: job.productHandle,
+      refId: `${job.jobId}#${key}#cancelled`,
+      feature: spec?.audioDriven ? 'video-avatar' : 'video-clip',
+    })
+  }
+  return cancelled
+}
+
 // ─── Advance loop (called by /cron/video-job-poller) ─────────────────────────
 
 export interface AdvanceVideoResult {
@@ -620,6 +688,12 @@ export async function advanceInflightVideoJobs(opts: { maxJobs?: number } = {}):
         .update(videoJobs)
         .set({ status: 'failed', stage: 'failed', error: String(err), updatedAt: new Date() })
         .where(eq(videoJobs.jobId, job.jobId))
+      // The row is terminal now, but a submitted RunPod request is not: it
+      // keeps rendering and billing for an output nothing will ever read
+      // (ticket #5728). This is also what covers the avatar multi-part case,
+      // where one failed part throws while its siblings are mid-render.
+      await cancelInflightRunpodRequests(job, `job failed: ${String(err).slice(0, 200)}`)
+        .catch(cancelErr => console.error(`[video-pipeline] orphan cancel failed for ${job.jobId}:`, cancelErr))
       // The episode this job was rendering has to come off 'rendering' with
       // it (ticket #5726). Nothing else writes that transition, so before this
       // a failed render left the row unclaimable AND undecidable: its episode
@@ -2233,11 +2307,21 @@ export async function retrySceneFrames(jobRowId: number, feedback: string, scene
   await kvDel(KV_KEYS.videoPollerIdle)
 }
 
-/** Terminal owner rejection. */
+/**
+ * Terminal owner rejection. Also cancels anything still rendering for this job
+ * (ticket #5728): Reject used to flip the row and walk away, leaving a live
+ * RunPod request billing for a video the owner had just said no to. Prod job 4
+ * ("Rejected by owner: cancelled during step-4 test") took exactly that path.
+ */
 export async function rejectVideoJob(jobRowId: number, reason: string): Promise<void> {
+  const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
   await db.update(videoJobs)
     .set({ status: 'failed', stage: 'failed', error: `Rejected by owner: ${reason || 'no reason given'}`, updatedAt: new Date() })
     .where(eq(videoJobs.id, jobRowId))
+  if (job) {
+    await cancelInflightRunpodRequests(job, `rejected by owner: ${reason || 'no reason given'}`)
+      .catch(err => console.error(`[video-pipeline] orphan cancel failed for rejected job ${job.jobId}:`, err))
+  }
 }
 
 /** Re-run a finished/failed job as a NEW job with owner feedback appended. */
