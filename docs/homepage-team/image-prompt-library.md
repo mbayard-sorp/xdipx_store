@@ -371,6 +371,62 @@ no-product hero MUST log its reason in its entry)
   5, or special-case short brand/model tokens) rather than something the imagery or copy can work
   around.
 
+- `cast: marcus` + We-Vibe Chorus Adjustable Couples Vibrator with App Control
+  (`we-vibe-chorus-couples-vibrator`), "How Long Should It Take to Finish? What Premature
+  Ejaculation Actually Means" (`podcast-notes`, † health-adjacent, content run 538). Gesture per
+  the "Is this normal? / Is it just me?" row: product held up in one hand at eye level, head
+  tilted toward it, mid-question, free hand open palm-up at his side asking the room. **Casting:**
+  routine-briefed `marcus` (`emotionTags` relaxed/assured/warm/confident); checked against the
+  keeper log's only two prior named-cast entries (`vivian` on the 2026-08-18
+  `what-helps-when-menopause-changes-sex` attempt, `jade` on run 502's `le-wand-mini-micro-wand`
+  post) — neither is `marcus`, so no-repeat-within-5 is clear; `marcus` had not appeared in any
+  recorded human hero before this run. No `editorialPhoto` on `castMember.marcus` (only
+  `referencePhoto`, an open-collar shirt + necklace video-register crop per ticket #2751); composed
+  against `referencePhoto` with explicit prompt overrides ("fully clothed in a soft plain crew-neck
+  t-shirt," "no open collar shirt, no necklace") to strip the wardrobe. **† health-adjacent
+  constraints applied:** no levity license, no scale exaggeration, sincere realistic staging only,
+  explicit "no comic register, no punchline expression, no oversized prop" negatives added to the
+  standard scaffold negatives. **Camera distance stated explicitly** ("waist-up framing, generous
+  room on both sides of the subject") per the Emma guide-mode / jade precedent, since `marcus`'s
+  reference photo is also a tight portrait crop. Two rounds via `composeSceneFrame` (Atlas
+  `seedream-4.5-edit` one-stage composite, `landscape_4_3`, 2 candidates each).
+  - **Round 1 (2 candidates, REJECTED both):** product identity, gesture, hands, backdrop and
+    warm-light lock all held clean, but both candidates rendered a broad open-mouth smile with
+    visible teeth and delighted/amused eyebrows despite the prompt's explicit gesture-only framing
+    — reads as gleeful amusement, not the briefed "quiet, slightly embarrassed self-doubt," and
+    fails the †-topic no-comic-register rule outright (a laughing face holding this product on this
+    headline reads as a joke about a health topic). Same "model defaults to a pleasant/amused
+    expression despite the ask" failure mode already logged against the Wicked/Sliquid retries
+    above, just landing as a grin here instead of a close-mouth smile.
+  - **Round 2 (2 candidates, expression-only correction, everything else held identical — same
+    isolate-one-variable method as the Wicked-bottle rounds 8-11 above): explicit precise
+    expression language added ("eyebrows pinched together and slightly raised in worry, not
+    delight," "eyes narrowed and searching," "mouth fully closed... absolutely no visible teeth,"
+    "not smiling, not grinning, not laughing, not amused, not playful, not a joke," "self-conscious
+    wince") → both candidates cleared the gate.** Candidate 2 picked over candidate 1: candidate 1
+    held the product pressed close against his temple/hairline (partially overlapping his face,
+    reading closer to "phone held to the ear" than "held up at eye level"); candidate 2 held the
+    product out and up cleanly at eye level with full facial visibility, a furrowed sincere worried
+    expression, closed mouth, no teeth, natural five-fingered hands on both the product hand and the
+    free asking hand, waist-up framing with room on both sides →
+    `image-16e647c5827abce0d9f6cb81bbcf4ec2ae59f7b4-1200x900-png` (post:
+    `what-counts-as-premature-ejaculation`). **Precedent:** the isolate-the-expression-only retry
+    method (change nothing but the affect language, keep gesture/backdrop/framing prompt text
+    identical) fixed a full grin-to-sincere-worry correction in exactly one retry round here, same
+    as it did on the Wicked-bottle gaze-and-affect rounds — reuse this as the standing fix for any
+    future §0-H round that returns a wrong-register (too pleasant/amused) expression on a sincere or
+    † topic. **Alt-text token fix applied at upload, not generation:** `check-hero-embed-match.ts`'s
+    `heroNamesAnyProduct` requires all of this product's distinctive tokens (`chorus`, `adjustable`,
+    `control` — `couples`/`vibrator`/`app`/`with` are all generic/stripped) present verbatim in
+    `heroImageAlt` + `imagePrompt` combined; the generation prompt never named the product by brand
+    (described only as "the couples vibrator... a smooth deep plum silicone C-shaped wearable
+    device"), so `heroImageAlt` was written to carry all three tokens naturally ("...holding up the
+    We-Vibe Chorus, an adjustable couples vibrator with app control...") rather than regenerating —
+    same fix pattern as the Sliquid Naturals H2O precedent above; verified green via
+    `check-hero-embed-match.ts --slug what-counts-as-premature-ejaculation`. Spend: round 1 + round
+    2 via Atlas one-stage composite, well inside the 500-cents/day content-team budget (0 spend
+    logged before this run).
+
 **Rejects:** `cast: none (roster gap, documented exception)` + Wicked Simply Timeless Water-Based
 Personal Lubricant & Moisturizer 4oz (`wicked-simply-timeless-jelle`), "How Does Menopause Change
 Sex, and What Helps?" (real-talk, † health-adjacent, content run 379). **Casting decision:** all
