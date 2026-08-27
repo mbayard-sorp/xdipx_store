@@ -44,6 +44,43 @@ export function runpodVideoConfigured(): boolean {
   return !!process.env['RUNPOD_API_KEY']?.trim() && !!process.env['RUNPOD_VIDEO_ENDPOINT_ID']?.trim()
 }
 
+export type RunpodWorkerMode = 'i2v' | 't2v' | 's2v'
+
+/**
+ * Modes the DEPLOYED worker image implements (ticket #5727).
+ *
+ * The endpoint pins an immutable sha tag, so what the repo's handler.py can do
+ * and what the running workers can do are two different facts, and the app used
+ * to assume the first. As of 2026-08-27 the endpoint runs
+ * `ghcr.io/mbayard-sorp/xdipx-video-worker:eb2a126`, whose handler accepts
+ * `i2v` and `t2v` only — a submit with mode `s2v` boots a cold worker, is
+ * rejected with a ValueError, and bills for the boot. Hence the conservative
+ * default: modes the CURRENTLY DEPLOYED image is known to implement, not the
+ * modes this repo's source implements.
+ *
+ * Widen it with `RUNPOD_WORKER_MODES` (comma-separated) at the same moment the
+ * endpoint is repointed at a newer image and the matching weights are on the
+ * network volume, per the enablement runbook in
+ * docs/store-team/video-worker-runpod.md. Adding a mode here without doing both
+ * only moves the failure later and makes it cost more.
+ */
+const RUNPOD_WORKER_MODES_DEFAULT: readonly RunpodWorkerMode[] = ['i2v', 't2v']
+
+export function runpodWorkerModes(): RunpodWorkerMode[] {
+  const raw = process.env['RUNPOD_WORKER_MODES']?.trim()
+  if (!raw) return [...RUNPOD_WORKER_MODES_DEFAULT]
+  const parsed = raw.split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter((s): s is RunpodWorkerMode => s === 'i2v' || s === 't2v' || s === 's2v')
+  // An env var that parses to nothing is a typo, not an instruction to disable
+  // every mode: fall back rather than bricking the render lane.
+  return parsed.length ? parsed : [...RUNPOD_WORKER_MODES_DEFAULT]
+}
+
+export function runpodWorkerSupportsMode(mode: RunpodWorkerMode): boolean {
+  return runpodWorkerModes().includes(mode)
+}
+
 function authHeaders(key: string): Record<string, string> {
   return { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' }
 }
@@ -98,6 +135,17 @@ function resolveFast(explicit: boolean | undefined): boolean {
 export async function submitRunpodVideo(input: RunpodVideoInput): Promise<QueueHandle> {
   const key = requireKey()
   const endpointId = requireEndpointId()
+  // Refuse a mode the deployed image does not implement BEFORE the submit
+  // (ticket #5727). Sending it anyway wakes a cold worker, loses to a
+  // ValueError inside the handler, and bills for the boot — the most expensive
+  // possible way to discover a typo in a config.
+  if (!runpodWorkerSupportsMode(input.mode)) {
+    throw new Error(
+      `the deployed RunPod worker does not implement mode '${input.mode}' (it implements ${runpodWorkerModes().join(', ')}). ` +
+      'Deploy an image that does and load its weights onto the network volume, then widen RUNPOD_WORKER_MODES. ' +
+      'See docs/store-team/video-worker-runpod.md.',
+    )
+  }
   if ((input.mode === 'i2v' || input.mode === 's2v') && !input.imageUrl) {
     throw new Error(`runpod wan22 mode ${input.mode} requires imageUrl`)
   }

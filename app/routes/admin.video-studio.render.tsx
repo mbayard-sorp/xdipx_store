@@ -33,7 +33,7 @@ import {
   type VideoJobWithAssets,
   type VideoMetricsReport,
 } from '~/lib/video-pipeline.server'
-import { VIDEO_MODELS, isVideoModelId } from '~/lib/fal-video.server'
+import { VIDEO_MODELS, isVideoModelId, tierIneligibility } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { VIDEO_METRIC_FIELDS, VIDEO_FORMULAS, VIDEO_TONES, SCENE_KIT, SOCIAL_PLATFORMS } from '~/lib/team-keys'
 import {
@@ -62,7 +62,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ])
   // VIDEO_MODELS is server-only (fal-video.server.ts) — serialize what the
   // Compose form needs across the loader boundary.
-  const models = Object.entries(VIDEO_MODELS).map(([id, spec]) => ({
+  // Ineligible tiers are not offered in the ad-hoc composer either (ticket
+  // #5727): a retired fal tier or a worker mode the deployed image lacks is
+  // just as wrong when the owner picks it by hand as when an agent does.
+  const models = Object.entries(VIDEO_MODELS).filter(([id]) => tierIneligibility(id as never) == null).map(([id, spec]) => ({
     id,
     label: spec.label,
     tier: spec.tier,
@@ -273,6 +276,8 @@ async function composeAction(form: FormData): Promise<Response> {
   const presenter = String(form.get('presenter') ?? 'none')
   const modelTier = String(form.get('modelTier') ?? '')
   if (!isVideoModelId(modelTier)) return Response.json({ error: 'Unknown model tier' }, { status: 400 })
+  const tierBlocked = tierIneligibility(modelTier)
+  if (tierBlocked) return Response.json({ error: tierBlocked.message }, { status: 400 })
   const spec = VIDEO_MODELS[modelTier]
 
   const hooks = String(form.get('hooks') ?? '')

@@ -66,11 +66,23 @@ vi.mock('~/lib/video-postpass.server', () => ({
 const runpodSubmitMock = vi.hoisted(() => vi.fn())
 const runpodStatusMock = vi.hoisted(() => vi.fn())
 const runpodResultMock = vi.hoisted(() => vi.fn())
+/**
+ * What the DEPLOYED worker image implements. Real semantics, not a permissive
+ * stub: tierIneligibility reads this, and a mock that said "every mode is
+ * available" would hide exactly the trap it exists for. Default matches the
+ * live endpoint (image eb2a126: i2v + t2v, no s2v); a test that needs the
+ * avatar tier widens it deliberately and says so.
+ */
+const workerModes = vi.hoisted(() => ({ value: ['i2v', 't2v'] as string[] }))
 vi.mock('~/lib/runpod-video.server', () => ({
   submitRunpodVideo: runpodSubmitMock,
   getRunpodStatus: runpodStatusMock,
   getRunpodResult: runpodResultMock,
   runpodVideoConfigured: vi.fn(() => true),
+  // Real semantics, not a stub: tierIneligibility reads these, and a mock that
+  // said "every mode is available" would hide exactly the trap they exist for.
+  runpodWorkerModes: () => workerModes.value,
+  runpodWorkerSupportsMode: (m: string) => workerModes.value.includes(m),
   cancelRunpod: vi.fn(),
 }))
 
@@ -85,7 +97,7 @@ const baseArgs = {
   formula: 'myth-busting',
   presenter: 'none',
   baseScriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', voiceover: '{{hook}}' },
-  modelTier: 'kling25-pro' as const,
+  modelTier: 'wan22-i2v' as const,
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
   hooks: ['Hook one', 'Hook two', 'Hook three'],
@@ -110,7 +122,7 @@ describe('enqueueVideoJobSet', () => {
     expect(groupIds.size).toBe(1)
     expect([...groupIds][0]).toBe(result.variantGroupId)
     expect(state.inserts.map(r => (r['variantAxes'] as { hook: string }).hook)).toEqual(['Hook one', 'Hook two', 'Hook three'])
-    const perJob = estimateJobCostUsd('kling25-pro', 5, { reuseFrame: false })
+    const perJob = estimateJobCostUsd('wan22-i2v', 5, { reuseFrame: false })
     expect(result.totalEstCostUsd).toBeCloseTo(perJob * 3, 4)
   })
 
@@ -133,6 +145,11 @@ describe('enqueueVideoJobSet', () => {
   })
 
   it('zeroes the frame cost for variants whose scene already has an approved frame', async () => {
+    // The avatar path needs an avatar tier, and the only one left is the
+    // RunPod s2v tier — omnihuman is retired with the rest of fal video. Widen
+    // the worker's declared modes for this test only; the point under test is
+    // the frame-cost arithmetic, not tier eligibility.
+    workerModes.value = ['i2v', 't2v', 's2v']
     const line = 'Short spoken line about {{hook}}.'
     // One findReusableSceneFrame lookup per variant (set estimate); the
     // enqueue itself does not re-query in this path.
@@ -140,14 +157,14 @@ describe('enqueueVideoJobSet', () => {
     const result = await enqueueVideoJobSet({
       ...baseArgs,
       presenter: 'emma',
-      modelTier: 'omnihuman',
+      modelTier: 'wan22-s2v',
       durationSeconds: 0,
       hooks: ['now', 'later'],
       baseScriptJson: { presenterLine: line, talkingHead: true, sceneSlug: 'couch-cozy', framePrompt: 'C' },
     })
     const expected = ['now', 'later'].reduce((sum, hook) => {
       const speech = estimateAvatarSpeechSeconds(line.split('{{hook}}').join(hook))
-      return sum + estimateJobCostUsd('omnihuman', 0, { speechSeconds: speech, reuseFrame: true })
+      return sum + estimateJobCostUsd('wan22-s2v', 0, { speechSeconds: speech, reuseFrame: true })
     }, 0)
     expect(result.totalEstCostUsd).toBeCloseTo(expected, 4)
     expect(state.inserts).toHaveLength(2)
