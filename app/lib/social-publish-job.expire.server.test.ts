@@ -7,6 +7,7 @@ import {
   runSocialPublishTick,
   expiredFeedback,
   EXPIRED_PREFIX,
+  OVERDUE_AFTER_MS,
   type PublishRepo,
   type PostRow,
 } from './social-publish-job.server'
@@ -110,5 +111,70 @@ describe('expiredFeedback', () => {
     expect(expiredFeedback(new Date('2026-01-15T17:00:00Z'), null)).toBe(
       `${EXPIRED_PREFIX} Slot Thu Jan 15, 9:00 AM PST passed without approval; reschedule or re-draft.`,
     )
+  })
+})
+
+describe('expiredFeedback for a legacy date-only row', () => {
+  it('names the day the owner picked, not the day before it', () => {
+    // The regression this guards: `scheduled_for` casts to midnight UTC, which
+    // is 5pm PDT the PREVIOUS afternoon, so running it through formatLaSlot
+    // reported a slot one day early.
+    const text = expiredFeedback('2026-08-25', null)
+    expect(text).toBe(
+      `${EXPIRED_PREFIX} Slot Tue Aug 25 passed without approval; reschedule or re-draft.`,
+    )
+    expect(text).not.toContain('Aug 24')
+  })
+
+  it('keeps the prior feedback below it, same as the timed form', () => {
+    const text = expiredFeedback('2026-08-25', 'Gate: REVISE, packshot too dark.')
+    expect(text.startsWith(EXPIRED_PREFIX)).toBe(true)
+    expect(text).toContain('Gate: REVISE, packshot too dark.')
+  })
+
+  it('falls back to the raw value rather than printing Invalid Date', () => {
+    expect(expiredFeedback('not-a-date', null)).toContain('Slot not-a-date passed')
+  })
+})
+
+describe('overdue-approved reporting in the tick', () => {
+  it('reports the count alongside the expiry count', async () => {
+    const { repo } = fakeRepo([post()], {
+      expireStale: async () => 1,
+      reportOverdue: async () => 2,
+    })
+    const result = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(result.expired).toBe(1)
+    expect(result.overdue).toBe(2)
+  })
+
+  it('still reports it when the tick stops at the daily cap', async () => {
+    // The most important case: a cap that is always met is exactly why an
+    // approved row goes days without publishing, so suppressing the count on
+    // the skipped path would hide the condition at the moment it is true.
+    const { repo } = fakeRepo([post()], {
+      countPublishedToday: async () => 3,
+      reportOverdue: async () => 4,
+    })
+    const result = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(result.skipped).toBe('daily_cap')
+    expect(result.overdue).toBe(4)
+  })
+
+  it('leaves the result free of a count when the repo has no reporter (legacy fakes)', async () => {
+    const { repo } = fakeRepo([post()])
+    const result = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(result).not.toHaveProperty('overdue')
+  })
+
+  it('does not run when the valve is off', async () => {
+    const reportOverdue = vi.fn(async () => 1)
+    const { repo } = fakeRepo([post()], { reportOverdue })
+    await tick({ isEnabled: async () => false, maxPerDay: cap(3), publish: publishOk, repo })
+    expect(reportOverdue).not.toHaveBeenCalled()
+  })
+
+  it('waits longer than expiry does, so ordinary cap backlog is not an alarm', () => {
+    expect(OVERDUE_AFTER_MS).toBeGreaterThan(24 * 60 * 60 * 1000)
   })
 })

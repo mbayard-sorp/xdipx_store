@@ -636,6 +636,10 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
   const media = post.mediaUrls?.[0] ?? null
   const video = isVideoPost(post)
   const manual = isManualPublishPlatform(post.platform)
+  // Late by the same rule the tick uses (OVERDUE_AFTER_MS). A manual-platform
+  // row is not late, it is waiting on the owner, and the "posts by hand" chip
+  // already says so; stacking a second chip on it would read as a fault.
+  const overdue = !manual && approvedSlotIsOverdue(post)
   const isSubmitting = fetcher.state !== 'idle'
   const slot = formatLaWallClock(post.scheduledAt ?? null)
     ?? (post.scheduledFor ? new Date(`${post.scheduledFor}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : null)
@@ -670,6 +674,14 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
           <StatusPill status={studioStatusOf(post)} />
           <GatePill status={post.gateStatus ?? (parseGateStampClient(post.feedback))} />
           {slot && <span className="font-mono text-[11px] text-ink-3">{slot}</span>}
+          {overdue && (
+            <span
+              className="font-mono text-[11px] uppercase tracking-wide text-white bg-coral rounded-full px-2 py-0.5"
+              title="Approved and days past its slot, so the hourly publisher has been skipping or failing. Check the autopublish valve, the daily cap, and the spend ceiling."
+            >
+              overdue
+            </span>
+          )}
           {manual && (
             <span
               className="font-mono text-[11px] uppercase tracking-wide text-ink-3 border border-line rounded-full px-2 py-0.5"
@@ -1065,6 +1077,25 @@ function HistoryTable({ posts, childrenByParent }: { posts: SocialPostRow[]; chi
       </ResponsiveTable>
     </section>
   )
+}
+
+/**
+ * Is this approved draft late enough that the publisher should have shipped it?
+ *
+ * Mirrors `OVERDUE_AFTER_MS` and the publisher's `COALESCE(scheduled_at,
+ * scheduled_for)` slot, deliberately duplicated rather than imported: the
+ * source of both lives in a `.server.ts` that must not reach the client
+ * bundle. Being a chip, it is allowed to be approximate; the blocker filed by
+ * `reportOverdueApproved` is the authoritative one.
+ */
+const OVERDUE_DAYS = 3
+
+function approvedSlotIsOverdue(post: Pick<SocialPostRow, 'scheduledAt' | 'scheduledFor'>): boolean {
+  const raw = post.scheduledAt ?? (post.scheduledFor ? `${post.scheduledFor}T00:00:00Z` : null)
+  if (!raw) return false
+  const slot = new Date(raw)
+  if (Number.isNaN(slot.getTime())) return false
+  return Date.now() - slot.getTime() > OVERDUE_DAYS * 86_400_000
 }
 
 /**
