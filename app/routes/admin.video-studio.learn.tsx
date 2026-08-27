@@ -13,7 +13,7 @@ import { useLoaderData } from 'react-router'
 import type { LoaderFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
-import { listEpisodePerformance, rollupByDimension, MIN_EPISODES_FOR_SIGNAL, type LearnDimension } from '~/lib/video-learn.server'
+import type { LearnDimension } from '~/lib/video-learn.server'
 import { getValve, VALVE_KEYS } from '~/lib/team.server'
 
 const DIMENSIONS: { key: LearnDimension; label: string }[] = [
@@ -27,6 +27,9 @@ const DIMENSIONS: { key: LearnDimension; label: string }[] = [
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
+  // Server-only import stays inside the loader: the component references
+  // minSignal via loader data, so no server module reaches the client bundle.
+  const { listEpisodePerformance, rollupByDimension, MIN_EPISODES_FOR_SIGNAL } = await import('~/lib/video-learn.server')
   const [rows, sweepOn] = await Promise.all([
     listEpisodePerformance().catch(() => []),
     getValve(VALVE_KEYS.socialMetricsSweep).catch(() => false),
@@ -35,11 +38,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const rollups = measured.length >= MIN_EPISODES_FOR_SIGNAL
     ? DIMENSIONS.map(d => ({ ...d, rows: rollupByDimension(rows, d.key) }))
     : []
-  return { rows, measuredCount: measured.length, rollups, sweepOn }
+  return { rows, measuredCount: measured.length, rollups, sweepOn, minSignal: MIN_EPISODES_FOR_SIGNAL }
 }
 
 export default function Learn() {
-  const { rows, measuredCount, rollups, sweepOn } = useLoaderData<typeof loader>()
+  const { rows, measuredCount, rollups, sweepOn, minSignal } = useLoaderData<typeof loader>()
   return (
     <div className="space-y-4">
       {!sweepOn && (
@@ -109,8 +112,7 @@ export default function Learn() {
           {rollups.length === 0 ? (
             <p className="text-xs text-ink-3">
               {measuredCount} measured episode{measuredCount === 1 ? '' : 's'}. Rollups start at{' '}
-              {MIN_EPISODES_FOR_SIGNAL}; until then a grouped table would be reading noise as a
-              finding.
+              {minSignal}; until then a grouped table would be reading noise as a finding.
             </p>
           ) : (
             rollups.map(group => (
