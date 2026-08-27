@@ -709,7 +709,7 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   const frames = f.parkedVideoFrames
   if (frames && frames.count > 0) {
     const oldest = frames.oldestDays != null ? ` (oldest ${frames.oldestDays}d)` : ''
-    items.push(`${frames.count} video ${frames.count === 1 ? 'frame is' : 'frames are'} awaiting your pick${oldest}, only you can approve ${frames.count === 1 ? 'it' : 'them'}: <a href="https://xdipx.com/admin/video-studio" style="color:#c2410c;">/admin/video-studio</a>`)
+    items.push(`${frames.count} video ${frames.count === 1 ? 'frame is' : 'frames are'} awaiting your pick${oldest}, only you can approve ${frames.count === 1 ? 'it' : 'them'}: <a href="https://xdipx.com/admin/video-studio/render" style="color:#c2410c;">/admin/video-studio</a>`)
   }
   if (items.length === 0) {
     return `<p style="margin:0;color:${GOOD};">Nothing on this list today.</p>`
