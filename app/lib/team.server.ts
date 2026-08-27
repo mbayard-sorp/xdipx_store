@@ -517,7 +517,14 @@ export interface GateResult {
   maxRunsPerDay: number
   /** Real count for every team with a configured image cap; 0/0 otherwise. */
   imagesToday: number
-  maxImagesPerDay: number
+  /**
+   * Present only for a team that has a configured image cap (homepage,
+   * content, social). Omitted for teams where an image cap does not apply
+   * (video), so a missing field reads as "not applicable" rather than as a
+   * literal 0 meaning "zero images allowed". Enforcement is unaffected: the
+   * cap branches below guard on cfg.maxImagesPerDay directly.
+   */
+  maxImagesPerDay?: number
   /** Active strategy brief id, so routines know to fetch it (null = none yet). */
   activeBriefId: number | null
   /** Content-only: standalone valves the routine needs (absent for other teams). */
@@ -552,6 +559,10 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     team === 'content' ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(undefined),
   ])
   const remainingCents = Math.max(0, cfg.dailyCents - spentCents)
+  // Coalesced only for the enforcement comparisons below (byte-for-byte
+  // unchanged). The gate RESPONSE omits maxImagesPerDay entirely when the team
+  // has no cap configured, so callers never see an invented 0 (see the field's
+  // doc comment on GateResult).
   const maxImagesPerDay = cfg.maxImagesPerDay ?? 0
   const base = {
     team,
@@ -562,7 +573,7 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     runsToday,
     maxRunsPerDay: cfg.maxRunsPerDay,
     imagesToday,
-    maxImagesPerDay,
+    ...(cfg.maxImagesPerDay != null ? { maxImagesPerDay: cfg.maxImagesPerDay } : {}),
     activeBriefId: briefId,
     ...(autopublish !== undefined ? { valves: { autopublish } } : {}),
     ...(team === 'content' ? { contentSlot: contentSlotForDate(new Date()) } : {}),

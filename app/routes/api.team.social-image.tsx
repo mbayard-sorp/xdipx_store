@@ -93,7 +93,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // trusting `ok` alone, or a cap-exceeded call would generate and bill
     // anyway. scripts/gen-social-image.ts already does this independently
     // (its own step 2); this route did not until now.
-    if (gateResult.maxImagesPerDay > 0 && gateResult.imagesToday >= gateResult.maxImagesPerDay) {
+    if ((gateResult.maxImagesPerDay ?? 0) > 0 && gateResult.imagesToday >= (gateResult.maxImagesPerDay ?? 0)) {
       return Response.json({ error: 'gated', reason: 'over_image_cap', gate: gateResult }, { status: 403 })
     }
 
