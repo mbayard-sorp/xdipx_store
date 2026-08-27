@@ -28,7 +28,7 @@ import { logWebStageResponse } from '../web-turn-logger.server'
 import { loadConversationHistory } from '../conversation-history.server'
 import { generateConversationSummary } from '../summary.server'
 import type { ChatReply, ChatProductCard } from '~/lib/ai-agent/chat-types'
-import type { StageResponse, ProductRef, ProductContext } from '../types.server'
+import type { StageResponse, ProductRef, ProductContext, Intent, Stage } from '../types.server'
 import type { BudgetReservation } from '~/lib/emma-budget.server'
 import { getPreviewImagesByHandles } from '~/lib/sanity.server'
 
@@ -210,6 +210,42 @@ async function stageResponseToChatReply(
 }
 
 // ---------------------------------------------------------------------------
+// Fresh-start session reset (#5657)
+// ---------------------------------------------------------------------------
+
+/**
+ * True when this web turn is a "fresh start" that must drop the prior visit's
+ * session-scoped shopping state (currentPitchHandle, currentUpsellHandle,
+ * pitchedHandlesLog) before dispatch.
+ *
+ * The 24h rotation in getOrCreateWebConversation already clears this state when
+ * it fires (#5656). But a *within-window* fresh start does not trip the
+ * rotation, and on the web path a leftover handle then reads as a real
+ * this-session selection to guardStagePreconditions — the exact defect in web
+ * turns 1606-1621 (2026-08-25), where a stale prowler-prostate handle seeded an
+ * anal-glide upsell to a man shopping for his wife and the closer claimed the
+ * pairing "fits right with what you picked" when nothing had been picked.
+ *
+ * Two triggers, both named on the ticket:
+ *   - STOP_HELP_START: an explicit "stop / start / help / start over" — a
+ *     returning cookie beginning a new shopping intent (the literal turn-1606
+ *     signal). On SMS this keyword is carrier-compliance and short-circuits to
+ *     v1 upstream of dispatch; on web there is no carrier gate, so it reaches
+ *     here as a plain intent and must reset the shopping slate itself.
+ *   - RECONNECT: belt to the 24h rotation clear. RECONNECT is only set by that
+ *     rotation today (which clears alongside), so this is a redundant safety net
+ *     for any future path that lands a session at RECONNECT without clearing.
+ *
+ * Deliberately does NOT fire on the forward purchase flow (COMMIT_PICK,
+ * UPSELL_ACCEPT, etc.), which must keep the slate it is building.
+ *
+ * Pure so the rule is unit-testable without a database.
+ */
+export function isWebFreshStart(intent: Intent, stage: Stage): boolean {
+  return intent === 'STOP_HELP_START' || stage === 'RECONNECT'
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -265,6 +301,39 @@ export async function processWebMessageV2(
     conversation = await getOrCreateWebConversation(sessionId, customerGid, intentResult.intent)
   } catch {
     // Non-fatal — we already have a conversation from the first call.
+  }
+
+  // --- Step 2b: Fresh-start session reset (#5657) ---
+  // A returning cookie that starts a NEW shopping intent must not carry the
+  // prior visit's pitched product forward. Runs BEFORE the page-context seed
+  // below, so a customer who reconnects while viewing a PDP can still re-seed
+  // the handle for the product they are actually looking at this session. Only
+  // writes when something is set, so the common RECONNECT case (already cleared
+  // by the 24h rotation) is a no-op. See isWebFreshStart for the full rationale.
+  if (
+    isWebFreshStart(intentResult.intent, conversation.stage) &&
+    (conversation.currentPitchHandle ||
+      conversation.currentUpsellHandle ||
+      (conversation.pitchedHandlesLog?.length ?? 0) > 0)
+  ) {
+    try {
+      await applyWebStateWrites(sessionId, {
+        currentPitchHandle: null,
+        currentUpsellHandle: null,
+        pitchedHandlesLog: null,
+      })
+      conversation = {
+        ...conversation,
+        currentPitchHandle: null,
+        currentUpsellHandle: null,
+        pitchedHandlesLog: null,
+      }
+      console.info(
+        `[web-adapter] fresh-start reset (intent=${intentResult.intent} stage=${conversation.stage}) cleared session shopping state sessionId=${sessionId}`,
+      )
+    } catch (err) {
+      console.warn('[web-adapter] fresh-start session reset failed (non-fatal)', err)
+    }
   }
 
   // If page context provides a product handle and conversation has no pitch yet,
