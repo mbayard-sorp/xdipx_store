@@ -33,7 +33,7 @@
 import { randomUUID } from 'node:crypto'
 import { eq, and, inArray, desc, isNotNull, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { videoJobs, mediaAssets, socialPosts, videoEpisodes, type VideoScriptJson, type VideoSceneSpec, type VideoSceneState } from '../../db/schema'
+import { videoJobs, mediaAssets, socialPosts, videoEpisodes, type VideoScriptJson, type VideoSceneSpec, type VideoSceneState, type RunpodIdleProbe } from '../../db/schema'
 import { kvSet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import {
   VIDEO_MODELS,
@@ -1951,7 +1951,91 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
     completedAt: new Date(),
   })
   console.log(`[video-pipeline] job ${job.jobId} complete (${duration.toFixed(1)}s, $${Number(job.costUsd).toFixed(2)})`)
+
+  // RunPod off-confirmation (ticket #5717). Ordering is load-bearing: this
+  // sits AFTER the terminal write, in its own catch, so a RunPod API hiccup
+  // can never turn a finished, paid-for video into a failed row.
+  if (jobUsedRunpod(job)) {
+    try {
+      await confirmRunpodIdle(job.id)
+    } catch (err) {
+      console.warn(`[video-pipeline] job ${job.jobId} runpod idle probe failed:`, err)
+    }
+  }
   return 'done'
+}
+
+// ─── RunPod off-confirmation (ticket #5717) ─────────────────────────────────
+
+/**
+ * True when this job's render path touched the RunPod serverless endpoint:
+ * the job's own tier, a compound tier's base clip, or (per-scene tiers,
+ * later) any scene's tier. Derived, never stored — a stored flag would be a
+ * fourth writer on a row three things already write.
+ */
+export function jobUsedRunpod(job: Pick<VideoJobRow, 'modelTier' | 'scenesJson'>): boolean {
+  const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
+  if (!spec) return false
+  if (spec.provider === 'runpod') return true
+  const base = spec.lipsync ? VIDEO_MODELS[spec.lipsync.baseClip] : undefined
+  if (base?.provider === 'runpod') return true
+  return (job.scenesJson ?? []).some(sc => {
+    const t = (sc as { modelTier?: string }).modelTier
+    return typeof t === 'string' && VIDEO_MODELS[t as VideoModelId]?.provider === 'runpod'
+  })
+}
+
+/**
+ * Probe BOTH RunPod surfaces (the serverless endpoint's workers/queue AND the
+ * hourly-billed pods list) and stamp the result on the job row. The pods list
+ * alone is a permanent false all-clear for the render fleet: video renders on
+ * the endpoint, which that list never contains.
+ *
+ * Three outcomes, never conflated (the owner-blocker guardedRun discipline):
+ *   clear: true    both reads succeeded AND both are zero -> confirmedAt set
+ *   clear: false   a read succeeded and found work still up
+ *   couldNotAsk    a read threw; recorded by surface name, NEVER an all-clear
+ *
+ * Never throws: the caller sits AFTER the terminal stage write, and a RunPod
+ * API hiccup must never turn a finished, paid-for video into a failed row.
+ */
+export async function confirmRunpodIdle(jobRowId: number): Promise<RunpodIdleProbe> {
+  const probe: RunpodIdleProbe = {
+    checkedAt: new Date().toISOString(),
+    endpoint: null,
+    pods: null,
+    clear: false,
+    couldNotAsk: [],
+  }
+  try {
+    const { getRunpodEndpointHealth } = await import('./runpod-endpoint.server')
+    probe.endpoint = await getRunpodEndpointHealth()
+  } catch {
+    probe.couldNotAsk.push('endpoint')
+  }
+  try {
+    const { listRunningRunpodPods } = await import('./runpod-pods.server')
+    const pods = await listRunningRunpodPods()
+    probe.pods = pods.map(pd => ({ id: pd.id, name: pd.name, hoursRunning: pd.hoursRunning, costPerHour: pd.costPerHour }))
+  } catch {
+    probe.couldNotAsk.push('pods')
+  }
+  probe.clear = probe.couldNotAsk.length === 0
+    && probe.endpoint != null
+    && probe.endpoint.workers.active === 0
+    && probe.endpoint.jobs.inQueue === 0
+    && probe.endpoint.jobs.inProgress === 0
+    && (probe.pods?.length ?? 1) === 0
+
+  try {
+    await db.update(videoJobs).set({
+      runpodIdleProbeJson: probe,
+      ...(probe.clear ? { runpodIdleConfirmedAt: new Date() } : {}),
+    }).where(eq(videoJobs.id, jobRowId))
+  } catch (err) {
+    console.warn(`[video-pipeline] runpod idle probe write failed for job row ${jobRowId}:`, err)
+  }
+  return probe
 }
 
 // ─── Owner actions (Video Studio) ────────────────────────────────────────────
