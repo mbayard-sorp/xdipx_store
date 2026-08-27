@@ -43,6 +43,10 @@ export interface InstagramEngagementMetrics {
   likes?: number
   comments?: number
   saved?: number
+  /** Reels only (ticket #5718): free Graph API video metrics. */
+  plays?: number
+  avgWatchTimeMs?: number
+  totalWatchTimeMs?: number
 }
 
 /** X `public_metrics`, renamed to the vocabulary the retro reads (#3734). */
@@ -64,6 +68,14 @@ export type SocialEngagementMetrics = InstagramEngagementMetrics & XEngagementMe
 
 /** The four fields the ticket names: reach, likes, comments, saves. */
 const INSIGHTS_METRICS = 'reach,likes,comments,saved'
+/**
+ * Reels rows additionally pull the free video metrics (ticket #5718):
+ * plays, average watch time, and total watch time. avgWatchTime over runtime
+ * is the HOOK signal (scene 0) and nothing finer: insights are per-media with
+ * no retention curve, so per-scene attribution beyond the hook is invented.
+ * Learn-mode consumers correlate across many episodes, never per-episode.
+ */
+const INSIGHTS_METRICS_REELS = `${INSIGHTS_METRICS},plays,ig_reels_avg_watch_time,ig_reels_video_view_total_time`
 
 interface InsightEntry {
   name?: string
@@ -76,13 +88,14 @@ interface InsightEntry {
  */
 export async function fetchInstagramEngagement(
   mediaId: string,
+  opts: { reels?: boolean } = {},
 ): Promise<{ ok: true; metrics: InstagramEngagementMetrics } | { ok: false; detail: string }> {
   const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
   if (!token) return { ok: false, detail: 'Instagram keys are not configured' }
 
   const res = await igRequest(`/${mediaId}/insights`, {
     method: 'GET',
-    params: { metric: INSIGHTS_METRICS },
+    params: { metric: opts.reels ? INSIGHTS_METRICS_REELS : INSIGHTS_METRICS },
     token,
   })
   if (!res.ok) return { ok: false, detail: describeInstagramApiError(res.error) }
@@ -96,6 +109,9 @@ export async function fetchInstagramEngagement(
     else if (entry.name === 'likes') metrics.likes = value
     else if (entry.name === 'comments') metrics.comments = value
     else if (entry.name === 'saved') metrics.saved = value
+    else if (entry.name === 'plays') metrics.plays = value
+    else if (entry.name === 'ig_reels_avg_watch_time') metrics.avgWatchTimeMs = value
+    else if (entry.name === 'ig_reels_video_view_total_time') metrics.totalWatchTimeMs = value
   }
   return { ok: true, metrics }
 }
@@ -209,6 +225,12 @@ export interface EngagementCaptureRow {
   id: number
   externalPostId: string | null
   postedAt: Date | null
+  /** Ticket #5718: video rows pull the Reels metric set. */
+  mediaKind?: string | null
+  videoJobId?: number | null
+  mediaUrls?: string[] | null
+  /** Learn-mode join: first non-empty metrics on an episode row stamp measured_at. */
+  episodeId?: number | null
 }
 
 export interface EngagementCaptureRepo {
@@ -236,6 +258,10 @@ export function makeDbEngagementCaptureRepo(platform: 'instagram' | 'x'): Engage
           id: socialPosts.id,
           externalPostId: socialPosts.externalPostId,
           postedAt: socialPosts.postedAt,
+          mediaKind: socialPosts.mediaKind,
+          videoJobId: socialPosts.videoJobId,
+          mediaUrls: socialPosts.mediaUrls,
+          episodeId: socialPosts.episodeId,
         })
         .from(socialPosts)
         .where(and(
@@ -251,12 +277,26 @@ export function makeDbEngagementCaptureRepo(platform: 'instagram' | 'x'): Engage
         Object.entries(metrics).filter(([, v]) => v !== undefined),
       ) as Record<string, number>
       if (!Object.keys(submitted).length) return
-      const [row] = await db.select({ metricsJson: socialPosts.metricsJson })
+      const [row] = await db.select({ metricsJson: socialPosts.metricsJson, episodeId: socialPosts.episodeId })
         .from(socialPosts).where(eq(socialPosts.id, id)).limit(1)
       if (!row) return
       await db.update(socialPosts)
         .set({ metricsJson: { ...(row.metricsJson ?? {}), ...submitted } })
         .where(eq(socialPosts.id, id))
+      // Learn mode (ticket #5718): the first real numbers on an episode's post
+      // advance the episode to 'measured'. Never estimated, only fetched, and
+      // idempotent: a later sweep on an already-measured episode is a no-op.
+      if (row.episodeId != null) {
+        try {
+          const { videoEpisodes } = await import('../../db/schema')
+          const { and: andOp, eq: eqOp, isNull } = await import('drizzle-orm')
+          await db.update(videoEpisodes)
+            .set({ measuredAt: new Date(), productionStatus: 'measured', updatedAt: new Date() })
+            .where(andOp(eqOp(videoEpisodes.id, row.episodeId), isNull(videoEpisodes.measuredAt)))
+        } catch (err) {
+          console.warn(`[social-engagement] episode ${row.episodeId} measured stamp failed:`, err)
+        }
+      }
     },
   }
 }
@@ -283,7 +323,7 @@ export interface EngagementReportRow {
 
 export interface EngagementCaptureDeps {
   repo?: EngagementCaptureRepo
-  fetchEngagement?: (mediaId: string) => ReturnType<typeof fetchInstagramEngagement>
+  fetchEngagement?: (mediaId: string, opts?: { reels?: boolean }) => ReturnType<typeof fetchInstagramEngagement>
 }
 
 /**
@@ -302,7 +342,11 @@ export async function captureInstagramEngagement(
   const report: EngagementReportRow[] = []
   for (const row of rows) {
     if (!row.externalPostId) continue
-    const result = await fetchEngagement(row.externalPostId)
+    // Reels metric set for video rows (ticket #5718): stored media_kind wins,
+    // videoJobId/.mp4 inference falls back for pre-086 rows.
+    const reels = row.mediaKind === 'video'
+      || (row.mediaKind == null && (row.videoJobId != null || !!row.mediaUrls?.[0]?.split('?')[0]?.endsWith('.mp4')))
+    const result = await fetchEngagement(row.externalPostId, { reels })
     if (result.ok) {
       await repo.persistMetrics?.(row.id, result.metrics)
       report.push({ postId: row.id, externalPostId: row.externalPostId, metrics: result.metrics })

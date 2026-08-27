@@ -4,7 +4,7 @@
  * vocabulary. Horizontal scroll on mobile, never a page-wide sideways scroll.
  */
 import { NavLink } from 'react-router'
-import { InboxIcon, PenIcon, ImageIcon } from '../social/icons'
+import { InboxIcon, PenIcon, ImageIcon, ChartIcon } from '../social/icons'
 
 export interface VideoWorkspaceCounts {
   /** Episodes waiting on the owner's read (pending_approval). */
@@ -18,6 +18,7 @@ export function VideoWorkspaceBar({ counts }: { counts: VideoWorkspaceCounts }) 
     { to: '/admin/video-studio/board', label: 'Board', Icon: InboxIcon },
     { to: '/admin/video-studio/scripts', label: 'Scripts', Icon: PenIcon, count: counts.needsRead, accent: counts.needsRead > 0 },
     { to: '/admin/video-studio/render', label: 'Render', Icon: ImageIcon, count: counts.renderNeedsYou, accent: counts.renderNeedsYou > 0 },
+    { to: '/admin/video-studio/learn', label: 'Learn', Icon: ChartIcon },
   ]
   return (
     <nav aria-label="Video Studio sections" className="-mx-4 px-4 md:mx-0 md:px-0 overflow-x-auto">
