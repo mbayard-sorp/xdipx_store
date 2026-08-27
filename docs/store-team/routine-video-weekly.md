@@ -1,4 +1,12 @@
-# Routine — Weekly Video Producer
+# Routine — Weekly Video Producer (RETIRED 2026-08-26)
+
+> **RETIRED at the video-program all-hands.** This routine scripted AND enqueued in one run,
+> which meant the owner's first look at anything came after money was spent. It split in two:
+> `docs/store-team/routine-writers-room-weekly.md` (Tue, scripts and gates, zero spend, entry
+> agent `series-showrunner`) and `docs/store-team/routine-video-render.md` (Mon/Thu, renders one
+> owner-APPROVED episode, entry agent `video-producer`). If a scheduled fire lands here with the
+> old prompt, run the writers-room playbook; it gates and skips honestly until enablement. The
+> text below is kept as history only; do not follow it.
 
 Entry agent: `video-producer` (`.claude/agents/video-producer.md`). Weekly, after the strategy run
 publishes a fresh brief. Review-first: this routine SCRIPTS and ENQUEUES; the durable
