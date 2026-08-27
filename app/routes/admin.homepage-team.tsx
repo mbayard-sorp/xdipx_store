@@ -180,6 +180,7 @@ interface LoaderData {
   trendScout: boolean
   videoAutopublish: boolean
   videoProgram: boolean
+  videoDefaultModelTier: string | null
   videoFrameReview: boolean
   videoEndcard: boolean
   instagramAutopublish: boolean
@@ -209,7 +210,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
+  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.socialMetricsSweep).catch(() => false),
@@ -221,6 +222,14 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     // Serialized-program render arm (ships OFF; missing row reads OFF). The
     // writers room is not gated by this; only the render lane's episode-claim.
     getValve(VALVE_KEYS.videoProgram).catch(() => false),
+    // Default model tier is not a valve (it holds a tier id, not a boolean);
+    // read directly like frame review below. No row = the code fallback,
+    // which is still the legacy kling25-pro constant, so surfacing the raw
+    // state here is what lets the owner pin wan22-i2v per the fal-images-only
+    // provider policy (2026-08-26).
+    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.defaultModelTier)).limit(1)
+      .then(rows => rows[0]?.value ?? null)
+      .catch(() => null),
     // Frame review is not a VALVE_KEYS member (it defaults ON, unlike the
     // ship-OFF valves) — read it directly from pipeline_settings.
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.frameReview)).limit(1)
@@ -421,7 +430,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     filteredOpenTotal, ticketLinks, filter,
     kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram,
-    videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
+    videoDefaultModelTier, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges,
   }
@@ -561,7 +570,7 @@ export default function AgentTeamsPage() {
     suggestions, needsYou, needsYouTotal, filteredOpenTotal,
     ticketLinks, filter, kindOptions, assigneeOptions, teamOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish,
-    seoCuration, trendScout, videoAutopublish, videoProgram, videoFrameReview, videoEndcard,
+    seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges,
@@ -665,6 +674,32 @@ export default function AgentTeamsPage() {
             <>
               <SettingField label="Max cost / video (cents)" settingKey={VIDEO_EXTRA_KEYS.maxCostCents} value={config.maxCostCents ?? 600} asDollars />
               <SettingField label="Max variants / set" settingKey={VIDEO_EXTRA_KEYS.maxVariantsPerSet} value={config.maxVariantsPerSet ?? 4} />
+              {/* Which tier an enqueue with no explicit modelTier resolves to.
+                  Only the owned-worker tiers are offered: fal video tiers are
+                  legacy per the fal-images-only provider policy (2026-08-26),
+                  and the audio-driven tier cannot be a default (it requires a
+                  presenterLine every silent b-roll enqueue lacks). No row =
+                  the code fallback, still legacy kling25-pro. */}
+              <Form method="post" className="flex flex-col gap-1">
+                <label className="text-xs text-ink-4">Default model tier</label>
+                <input type="hidden" name="intent" value="save" />
+                <input type="hidden" name="key" value={VIDEO_EXTRA_KEYS.defaultModelTier} />
+                <div className="flex gap-2">
+                  <select
+                    name="value"
+                    defaultValue={videoDefaultModelTier ?? ''}
+                    className="w-full rounded-lg border border-line bg-paper-2 px-3 py-1.5 text-sm text-ink"
+                    aria-label="Default model tier"
+                  >
+                    <option value="" disabled>{videoDefaultModelTier ? '' : 'unset (falls back to legacy kling25-pro)'}</option>
+                    <option value="wan22-i2v">wan22-i2v (RunPod, recommended)</option>
+                    <option value="wan22-t2v">wan22-t2v (RunPod, text-to-video)</option>
+                  </select>
+                  <button className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:bg-paper-2">
+                    Save
+                  </button>
+                </div>
+              </Form>
             </>
           )}
         </div>
