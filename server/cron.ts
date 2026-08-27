@@ -94,6 +94,16 @@ async function drainGa4Failures(): Promise<number> {
   }
 }
 
+/**
+ * Poller lock TTL, seconds (ticket #5941). Must be >= the function's
+ * maxDuration in vercel.json (300s) so a lock can never expire while the
+ * invocation that holds it is still running, and > the cron interval so the
+ * next tick skips rather than doubling up. 295 leaves a small margin under
+ * maxDuration: the lambda is killed first, then the lock lapses, then the
+ * next tick retries.
+ */
+const POLLER_LOCK_TTL_SECONDS = 295
+
 export function createCronRoutes() {
   const router = Router()
 
@@ -914,7 +924,7 @@ export function createCronRoutes() {
       res.json({ ok: true, skipped: 'idle' })
       return
     }
-    const acquired = await kvSetNX('lock:enrichment-poller', String(Date.now()), 110)
+    const acquired = await kvSetNX('lock:enrichment-poller', String(Date.now()), POLLER_LOCK_TTL_SECONDS)
     if (!acquired) {
       res.json({ ok: true, skipped: 'locked' })
       return
@@ -936,8 +946,24 @@ export function createCronRoutes() {
    * Schedule: every 2 minutes. Advances every in-flight video_jobs row by one
    * stage pass (compose frames / submit fal / poll fal / assemble / poster).
    * Jobs parked at awaiting_frame_approval are outside the in-flight set and
-   * cost nothing here. Same idle-flag + lock discipline as the enrichment
-   * poller above.
+   * cost nothing here.
+   *
+   * LOCK TTL MUST OUTLIVE THE INVOCATION (ticket #5941). advanceJob dispatches
+   * on job.stage and marks no row busy, so this lock is the ONLY thing keeping
+   * two passes off the same job. At the old 110s against a 120s cron and a
+   * 300s maxDuration, any pass slower than 110s had its lock expire while it
+   * was still working: the next tick acquired it, re-selected the same
+   * in-flight rows (status unchanged) and re-ran the same stage concurrently.
+   * That is not theoretical — one assembly pass alone carries ffmpeg timeouts
+   * of 180s + 120s + 60s x3, and a pass may carry five jobs. A doubled
+   * scene_frame stage composes and PAYS FOR a second set of candidates; a
+   * doubled assembly re-runs the post pass (music generation is metered) and
+   * double-increments assembly_attempts, degrading the cut early.
+   *
+   * The invariant is lock TTL >= maxDuration > cron interval, which is what
+   * /cron/import-enrich above already does at 290s. While the lambda lives the
+   * lock is held; if it is killed at maxDuration the lock expires just after
+   * and the next tick retries, which is the correct outcome.
    */
   cronRoute('/video-job-poller', async (_req, res) => {
     const { kvGet, kvSetNX, kvDel, KV_KEYS } = await import('../app/lib/kv.server.js')
@@ -946,7 +972,7 @@ export function createCronRoutes() {
       res.json({ ok: true, skipped: 'idle' })
       return
     }
-    const acquired = await kvSetNX('lock:video-poller', String(Date.now()), 110)
+    const acquired = await kvSetNX('lock:video-poller', String(Date.now()), POLLER_LOCK_TTL_SECONDS)
     if (!acquired) {
       res.json({ ok: true, skipped: 'locked' })
       return
