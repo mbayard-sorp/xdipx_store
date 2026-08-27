@@ -432,6 +432,15 @@ export async function processWebMessageV2(
     // every turn (caught during voice Stage D testing; same omission here).
     if (writes.discoveryState      !== undefined) stateUpdate.discoveryState      = writes.discoveryState
     if (writes.discoveredSlots     !== undefined) stateUpdate.discoveredSlots     = writes.discoveredSlots
+    // Pitched-handles log persistence (#5658). The UPSELL handler appends the
+    // just-pitched accessory to writes.pitchedHandlesLog, and pickUpsellTemplate
+    // keys its closer rotation to pitchedHandlesLog.length so no two upsells in
+    // one session share a closer. Voice persists this (voice.server.ts ~L895);
+    // web dropped it here, so the log never grew and every web upsell re-rendered
+    // WEB_TEMPLATES[0] verbatim (the #3218 recurrence: web turns 1611 & 1619).
+    // Step 5b below only appends when the handler did NOT set it, so persisting
+    // the handler's own write here never double-appends.
+    if (writes.pitchedHandlesLog   !== undefined) stateUpdate.pitchedHandlesLog   = writes.pitchedHandlesLog
     if (pageContext?.handle        !== undefined) stateUpdate.pageHandle          = pageContext.handle
     if (pageContext?.route         !== undefined) stateUpdate.pageRoute           = pageContext.route
     await applyWebStateWrites(sessionId, stateUpdate)
