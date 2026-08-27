@@ -122,24 +122,39 @@ export function estimateImageCostUsd(model: string, count: number): number {
 // RunPod Serverless GPU pricing (Wan 2.2 14B, `wan22-i2v` / `wan22-t2v`).
 // RunPod bills per GPU-SECOND actually consumed, not per second of finished
 // video, so this is a different pricing model than the fal per-output-second
-// rates above. Rather than one hardcoded number, this is TWO numbers:
-//   - RUNPOD_GPU_USD_PER_SEC:      the rented GPU's $/GPU-second (env,
-//     default 0.00031, measured against the live 1cnxz75c71177q endpoint
-//     2026-08-22: RTX 4090 serverless flex at $1.10/hr, the class the
-//     endpoint's workers actually land on since L40S stock is low).
+// rates above. Rather than one hardcoded number, this is THREE numbers:
+//   - RUNPOD_GPU_USD_PER_SEC:      the rented GPU's raw $/GPU-second (env,
+//     default 0.00053). The /status response does NOT name which GPU ran, and
+//     the endpoint's workers land on whatever the schedulable pool offers, so
+//     the default assumes the DEARER pool (ADA_48_PRO / L40S 48GB serverless
+//     flex, ~$1.90/hr) rather than the cheaper ADA_24 (RTX 4090, ~$1.10/hr =
+//     the old 0.00031 default). Assuming the cheaper card silently LOWBALLED
+//     recorded cost, which loosens the per-video ceiling and the daily budget
+//     gate — the same failure direction as the missing Opus rates (#96).
+//   - RUNPOD_FEE_MULTIPLIER:       RunPod's platform fee + disk on top of raw
+//     GPU-seconds (env, default 1.5). The raw GPU-second rate is not the whole
+//     invoice; the account is billed a platform margin and container disk that
+//     the executionTime alone never reflects. Measured gap this closes:
+//     api_token_log held $0.2654 of runpod/wan22 for 2026-08-22..24 against a
+//     $1.572 RunPod invoice, so the ceiling and daily budget were being
+//     enforced against numbers several times low.
 //   - RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND: an ASSUMED render-time
 //     multiplier (45 GPU-seconds of render per second of finished clip,
 //     from a measured fast-path run: 219669ms executionTime / 5.06s clip)
 //     used ONLY for the pre-flight estimate, until per-job telemetry exists.
-// estimateRunpodRatePerSecondUsd() multiplies these into a $/clip-second
-// figure that slots into VIDEO_RATES exactly like a fal rate, so
-// estimateVideoCostUsd/estimateJobCostUsd need no special-casing.
-// computeRunpodActualCostUsd() is the REAL number: RunPod's /status response
-// carries executionTime in milliseconds, actually GPU-seconds billed, and
-// replaces the estimate once the job completes (video-pipeline clip stage).
+// The ESTIMATE (estimateRunpodRatePerSecondUsd) and the ACTUAL
+// (computeRunpodActualCostUsd) both build on ONE all-in $/GPU-second figure
+// (runpodAllInRatePerGpuSecondUsd = raw rate x fee multiplier), so the two can
+// never drift onto different rates — pinned by test. The estimate then scales
+// that all-in rate by the render multiplier to a $/clip-second figure that
+// slots into VIDEO_RATES exactly like a fal rate; the actual scales it by the
+// job's measured GPU-seconds. computeRunpodActualCostUsd() replaces the
+// estimate once the job completes (video-pipeline clip stage) and also meters
+// the GPU-seconds a FAILED render still burned.
 // ---------------------------------------------------------------------------
 
-const RUNPOD_GPU_USD_PER_SEC_DEFAULT = 0.00031
+const RUNPOD_GPU_USD_PER_SEC_DEFAULT = 0.00053 // ADA_48_PRO (L40S 48GB) serverless flex — the dearer schedulable pool
+const RUNPOD_FEE_MULTIPLIER_DEFAULT = 1.5      // platform fee + container disk over raw GPU-seconds
 const RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND = 45
 
 function runpodGpuRatePerSecondUsd(): number {
@@ -148,20 +163,40 @@ function runpodGpuRatePerSecondUsd(): number {
   return Number.isFinite(n) && n > 0 ? n : RUNPOD_GPU_USD_PER_SEC_DEFAULT
 }
 
-/** ESTIMATE-only $/clip-second for the wan22 tiers. See block comment above. */
-export function estimateRunpodRatePerSecondUsd(): number {
-  return runpodGpuRatePerSecondUsd() * RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND
+function runpodFeeMultiplier(): number {
+  const raw = process.env['RUNPOD_FEE_MULTIPLIER']
+  const n = raw != null && raw.trim() !== '' ? Number(raw) : NaN
+  return Number.isFinite(n) && n >= 1 ? n : RUNPOD_FEE_MULTIPLIER_DEFAULT
 }
 
 /**
- * ACTUAL USD cost of one completed RunPod job from its measured executionTime
- * (ms, from the /status response). This is the real number the estimate above
- * only approximates; the clip stage uses this to replace the estimate on the
- * job row and in api_token_log once a wan22 job completes. Never negative.
+ * The single all-in $/GPU-second both the estimate and the actual are built
+ * from: raw GPU rate x platform-fee multiplier. Keeping the two costers on one
+ * rate is the whole point — a preflight estimate and a post-hoc actual that
+ * assume different rates is exactly the drift that let recorded spend fall
+ * several times below the real invoice.
+ */
+export function runpodAllInRatePerGpuSecondUsd(): number {
+  return runpodGpuRatePerSecondUsd() * runpodFeeMultiplier()
+}
+
+/** ESTIMATE-only $/clip-second for the wan22 tiers. See block comment above. */
+export function estimateRunpodRatePerSecondUsd(): number {
+  return runpodAllInRatePerGpuSecondUsd() * RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND
+}
+
+/**
+ * ACTUAL USD cost of one RunPod job from its measured executionTime (ms, from
+ * the /status response, which is GPU-seconds billed). This is the real number
+ * the estimate above only approximates; the clip stage uses it to replace the
+ * estimate on the job row and in api_token_log once a wan22 job completes, and
+ * the failure sites use it to meter the GPU-seconds a FAILED render still
+ * burned. Includes the platform fee (shares runpodAllInRatePerGpuSecondUsd
+ * with the estimate). Never negative.
  */
 export function computeRunpodActualCostUsd(executionMs: number): number {
   const seconds = Math.max(0, executionMs) / 1000
-  const cost = runpodGpuRatePerSecondUsd() * seconds
+  const cost = runpodAllInRatePerGpuSecondUsd() * seconds
   return Math.round(cost * 1e5) / 1e5
 }
 

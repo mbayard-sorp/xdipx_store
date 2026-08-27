@@ -29,6 +29,14 @@
  *     'rendering' so a duplicate claim cannot double-render. Gated by
  *     video_program_enabled (ships OFF; a missing row reads OFF).
  *
+ *   { op: 'episode-release', episodeId }
+ *     -> { released: boolean }
+ *     The claim's inverse: a run that could not enqueue its claimed episode
+ *     hands it back to 'approved' so the row is reclaimable rather than
+ *     stranded at 'rendering'. Only a 'rendering' row moves (released:false
+ *     otherwise). Un-claiming is not spend approval, so this rides the team
+ *     token like the claim.
+ *
  * There is DELIBERATELY no 'episode-decide' op here. Deciding an episode is
  * the owner's money gate, agents hold this token, and agents never approve
  * spend: the decide path lives in the /admin/video-studio action behind the
@@ -40,6 +48,7 @@ import {
   proposeEpisodes,
   listEpisodes,
   claimNextEpisode,
+  releaseEpisodeClaim,
   type ProposeEpisodeInput,
 } from '~/lib/video-episodes.server'
 import { apiError } from '~/lib/api-error.server'
@@ -106,6 +115,21 @@ export async function action({ request }: ActionFunctionArgs) {
       const episode = await claimNextEpisode()
       if (!episode) return Response.json({ error: 'empty_episode_queue' }, { status: 404 })
       return Response.json({ episode })
+    }
+
+    if (b['op'] === 'episode-release') {
+      // A run hands a refused claim back: a 'rendering' row it claimed but
+      // could not enqueue returns to 'approved' so it is reclaimable rather
+      // than stranded. Un-claiming is not approving spend, so this is a
+      // team-token op like the claim it reverses. Idempotent: released:false
+      // means the row was not 'rendering' (already resolved or never claimed).
+      const raw = b['episodeId']
+      const episodeId = typeof raw === 'number' ? raw : Number(raw)
+      if (!Number.isFinite(episodeId) || episodeId <= 0) {
+        return new Response('Bad Request: episodeId required', { status: 400 })
+      }
+      const released = await releaseEpisodeClaim(episodeId)
+      return Response.json({ released })
     }
 
     return new Response('Bad Request', { status: 400 })

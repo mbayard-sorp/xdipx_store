@@ -425,7 +425,13 @@ export interface VideoCostEntry {
  */
 export async function logVideoCost(entry: VideoCostEntry): Promise<void> {
   try {
-    if (!entry.seconds || entry.seconds <= 0) return
+    // Normally seconds<=0 means "nothing generated, nothing to bill". But a
+    // FAILED RunPod render generates zero output-seconds while still burning
+    // (and being invoiced for) GPU-seconds, which the caller passes as an
+    // explicit actualCostUsd. Log that burn so the budget gate sees it; only
+    // skip when there is genuinely no cost to record.
+    const hasBurn = entry.actualCostUsd != null && entry.actualCostUsd > 0
+    if ((!entry.seconds || entry.seconds <= 0) && !hasBurn) return
     const { estimateVideoCostUsd } = await import('./model-pricing.server')
     const cost = entry.actualCostUsd ?? estimateVideoCostUsd(entry.model, entry.seconds)
     // Bump the budget-gate counters before and independently of the ledger

@@ -209,13 +209,31 @@ describe('getRunpodStatus', () => {
   it.each(['IN_QUEUE', 'IN_PROGRESS', 'COMPLETED'] as const)('passes %s through unchanged', async (s) => {
     stubEnv()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: s }), { status: 200 })))
-    expect(await getRunpodStatus(HANDLE)).toEqual({ status: s })
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: s, executionMs: 0 })
   })
 
   it.each(['FAILED', 'CANCELLED', 'TIMED_OUT', 'SOMETHING_NEW'] as const)('collapses %s to FAILED', async (s) => {
     stubEnv()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: s }), { status: 200 })))
-    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'FAILED' })
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'FAILED', executionMs: 0 })
+  })
+
+  it('carries executionTime through a FAILED/TIMED_OUT collapse (the burn is still invoiced)', async () => {
+    stubEnv()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'TIMED_OUT', executionTime: 187000 }), { status: 200 })))
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'FAILED', executionMs: 187000 })
+  })
+
+  it('carries executionTime through on a live status', async () => {
+    stubEnv()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'COMPLETED', executionTime: 214000 }), { status: 200 })))
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'COMPLETED', executionMs: 214000 })
+  })
+
+  it('reports executionMs 0 for a non-positive or missing executionTime', async () => {
+    stubEnv()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'FAILED', executionTime: 0 }), { status: 200 })))
+    expect(await getRunpodStatus(HANDLE)).toEqual({ status: 'FAILED', executionMs: 0 })
   })
 
   it('throws on a non-ok status response', async () => {

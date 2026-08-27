@@ -147,19 +147,24 @@ export async function submitRunpodVideo(input: RunpodVideoInput): Promise<QueueH
 
 export type RunpodQueueStatus = 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED'
 
-export async function getRunpodStatus(handle: QueueHandle): Promise<{ status: RunpodQueueStatus }> {
+export async function getRunpodStatus(handle: QueueHandle): Promise<{ status: RunpodQueueStatus; executionMs: number }> {
   const key = requireKey()
   const res = await fetch(handle.statusUrl, { headers: authHeaders(key) })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`runpod status error: ${res.status} ${text.slice(0, 400)}`)
   }
-  const json = await res.json() as { status?: string }
+  const json = await res.json() as { status?: string; executionTime?: number }
+  // executionTime is GPU-ms billed. A FAILED/TIMED_OUT job that ran for a
+  // while before dying still burned (and is still invoiced) that time, so
+  // carry it through the FAILED collapse below — the poll sites meter the burn
+  // to api_token_log before failing the job. 0 when the job never ran.
+  const executionMs = typeof json.executionTime === 'number' && json.executionTime > 0 ? json.executionTime : 0
   const status = json.status
-  if (status === 'IN_QUEUE' || status === 'IN_PROGRESS' || status === 'COMPLETED') return { status }
+  if (status === 'IN_QUEUE' || status === 'IN_PROGRESS' || status === 'COMPLETED') return { status, executionMs }
   // CANCELLED, TIMED_OUT, and anything unrecognized collapse to FAILED —
   // mirrors fal-video's getVideoRequestStatus.
-  return { status: 'FAILED' }
+  return { status: 'FAILED', executionMs }
 }
 
 export interface RunpodVideoResult {

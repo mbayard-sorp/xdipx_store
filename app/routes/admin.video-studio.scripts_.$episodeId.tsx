@@ -89,14 +89,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const form = await request.formData()
   const decision = String(form.get('decision') ?? '')
   const id = Number(params['episodeId'])
-  if (decision !== 'approved' && decision !== 'needs_changes' && decision !== 'rejected') {
+  // pre-render decisions plus the post-failure ones (retake/reroute/drop).
+  const DECISIONS = ['approved', 'needs_changes', 'rejected', 'retake', 'reroute', 'drop'] as const
+  if (!(DECISIONS as readonly string[]).includes(decision)) {
     return Response.json({ ok: false, error: 'Bad decision' }, { status: 400 })
   }
   try {
     const tags = String(form.get('tags') ?? '').split(',').map(t => t.trim()).filter(Boolean)
     await decideEpisode({
       episodeId: id,
-      decision,
+      decision: decision as (typeof DECISIONS)[number],
       decidedBy: user?.email ?? 'owner',
       ...(String(form.get('note') ?? '').trim() ? { note: String(form.get('note')).trim() } : {}),
       ...(tags.length ? { tags } : {}),
@@ -128,6 +130,7 @@ export default function ScriptReader() {
   const err = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null
   const overCeiling = ep.estCostUsd != null && Number(ep.estCostUsd) * 100 > maxCostCents
   const decidable = ep.productionStatus === 'pending_approval' || ep.productionStatus === 'needs_changes'
+  const failed = ep.productionStatus === 'failed'
 
   return (
     <div className="space-y-4">
@@ -145,7 +148,11 @@ export default function ScriptReader() {
           </div>
           {decided ? (
             <span className="text-sm font-semibold text-ink-3">
-              {decided === 'approved' ? 'Approved ✓' : decided === 'needs_changes' ? 'Sent back ↺' : 'Rejected ✕'}
+              {decided === 'approved' ? 'Approved ✓'
+                : decided === 'retake' ? 'Retake queued ↻'
+                : decided === 'needs_changes' || decided === 'reroute' ? 'Sent back ↺'
+                : decided === 'drop' ? 'Dropped ✕'
+                : 'Rejected ✕'}
               <button type="button" onClick={() => navigate('/admin/video-studio/scripts')} className="ml-3 underline">Back to slate</button>
             </span>
           ) : decidable ? (
@@ -172,13 +179,35 @@ export default function ScriptReader() {
                 </button>
               </fetcher.Form>
             </div>
+          ) : failed ? (
+            // The render failed. Retake re-arms it (retiring the dead job),
+            // Reroute sends it back to the room with notes, Drop removes it.
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-red-800">render failed</span>
+              <fetcher.Form method="post" onSubmit={e => { if (!confirm(`Retake ${ep.label}? It renders again from the top.`)) e.preventDefault() }}>
+                <input type="hidden" name="decision" value="retake" />
+                <button type="submit" disabled={busy} className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper disabled:opacity-40">
+                  Retake
+                </button>
+              </fetcher.Form>
+              <button type="button" onClick={() => setChangesOpen(v => !v)} className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink hover:border-coral">
+                Reroute to room
+              </button>
+              <fetcher.Form method="post" onSubmit={e => { if (!confirm(`Drop ${ep.label} from the reader?`)) e.preventDefault() }}>
+                <input type="hidden" name="decision" value="drop" />
+                <input type="hidden" name="note" value="dropped from the reader after a failed render" />
+                <button type="submit" disabled={busy} className="rounded-full border border-red-200 px-4 py-2 text-sm font-semibold text-red-800 hover:bg-red-50">
+                  Drop
+                </button>
+              </fetcher.Form>
+            </div>
           ) : (
             <span className="text-xs text-ink-4">status: {ep.productionStatus}</span>
           )}
         </div>
         {changesOpen && !decided && (
           <fetcher.Form method="post" className="mx-auto mt-2 max-w-4xl space-y-2" onSubmit={() => setChangesOpen(false)}>
-            <input type="hidden" name="decision" value="needs_changes" />
+            <input type="hidden" name="decision" value={failed ? 'reroute' : 'needs_changes'} />
             <input type="hidden" name="tags" value={tags.join(',')} />
             <div className="flex flex-wrap gap-1.5">
               {REVIEW_NOTE_TAGS.map(tag => {

@@ -1722,10 +1722,19 @@ export interface VideoEpisodePlacement {
   mentionType: 'spec_cited' | 'review_pattern' | 'price' | 'category'
 }
 
-/** Append-only owner review note on an episode (never overwritten). */
+/**
+ * Append-only owner review note on an episode (never overwritten).
+ *
+ * The first three decisions act on a pre-render row (pending_approval /
+ * needs_changes / approved). The last three act on a FAILED row from the
+ * script reader: `retake` re-approves it for another render (retiring the dead
+ * job into prior_job_ids_json), `reroute` sends it back to the writers room
+ * (needs_changes), `drop` removes it (rejected). Widening this union is
+ * type-only — review_notes_json is jsonb, so no migration.
+ */
 export interface VideoEpisodeReviewNote {
   at: string
-  decision: 'approved' | 'needs_changes' | 'rejected'
+  decision: 'approved' | 'needs_changes' | 'rejected' | 'retake' | 'reroute' | 'drop'
   tags?: string[]
   note?: string
   by?: string

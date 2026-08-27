@@ -240,9 +240,31 @@ export async function listEpisodes(opts: { seriesSlug?: string; status?: string;
  * REQUIRES a note (a silent rejection teaches the room nothing); notes append
  * to review_notes_json, never overwrite.
  */
+export type EpisodeDecision = VideoEpisodeReviewNote['decision']
+
+/**
+ * The three pre-render decisions and the source states they act on. A FAILED
+ * row is decided instead with retake/reroute/drop (see FAILED_DECISIONS).
+ */
+const PRE_RENDER_DECISIONS = new Set<EpisodeDecision>(['approved', 'needs_changes', 'rejected'])
+const PRE_RENDER_SOURCES = ['pending_approval', 'needs_changes', 'approved']
+/** Post-failure decisions and where each lands. retake re-approves (and retires the dead job). */
+const FAILED_DECISIONS = new Set<EpisodeDecision>(['retake', 'reroute', 'drop'])
+/** Decisions whose landing status is needs_changes require a note (a silent bounce teaches the room nothing). */
+const NOTE_REQUIRED = new Set<EpisodeDecision>(['needs_changes', 'reroute'])
+
+const DECISION_STATUS: Record<EpisodeDecision, 'approved' | 'needs_changes' | 'rejected'> = {
+  approved: 'approved',
+  needs_changes: 'needs_changes',
+  rejected: 'rejected',
+  retake: 'approved',
+  reroute: 'needs_changes',
+  drop: 'rejected',
+}
+
 export async function decideEpisode(args: {
   episodeId: number
-  decision: 'approved' | 'needs_changes' | 'rejected'
+  decision: EpisodeDecision
   decidedBy: string
   note?: string
   tags?: string[]
@@ -251,12 +273,24 @@ export async function decideEpisode(args: {
   const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, args.episodeId)).limit(1)
   const ep = rows[0]
   if (!ep) throw new Error(`episode ${args.episodeId} not found`)
-  if (!['pending_approval', 'needs_changes', 'approved'].includes(ep.productionStatus)) {
-    throw new Error(`episode ${args.episodeId} is ${ep.productionStatus}; only pending_approval/needs_changes/approved rows can be decided`)
+  const isFailedDecision = FAILED_DECISIONS.has(args.decision)
+  if (isFailedDecision) {
+    // retake/reroute/drop only ever act on a FAILED row. A rendering row with a
+    // live job stays undecidable so a second render cannot be armed under it.
+    if (ep.productionStatus !== 'failed') {
+      throw new Error(`episode ${args.episodeId} is ${ep.productionStatus}; retake/reroute/drop require a failed row`)
+    }
+  } else if (PRE_RENDER_DECISIONS.has(args.decision)) {
+    if (!PRE_RENDER_SOURCES.includes(ep.productionStatus)) {
+      throw new Error(`episode ${args.episodeId} is ${ep.productionStatus}; only pending_approval/needs_changes/approved rows can be decided`)
+    }
+  } else {
+    throw new Error(`unknown decision ${JSON.stringify(args.decision)}`)
   }
-  if (args.decision === 'needs_changes' && !(args.note && args.note.trim())) {
-    throw new Error('needs_changes requires a note: a silent rejection teaches the writers room nothing')
+  if (NOTE_REQUIRED.has(args.decision) && !(args.note && args.note.trim())) {
+    throw new Error(`${args.decision} requires a note: a silent bounce teaches the writers room nothing`)
   }
+  const landing = DECISION_STATUS[args.decision]
   const note: VideoEpisodeReviewNote = {
     at: new Date().toISOString(),
     decision: args.decision,
@@ -265,15 +299,20 @@ export async function decideEpisode(args: {
     by: args.decidedBy,
   }
   const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
-  const statusMap = { approved: 'approved', needs_changes: 'needs_changes', rejected: 'rejected' } as const
   const plannedSlotAt = args.plannedSlotAt ? new Date(args.plannedSlotAt) : undefined
   if (plannedSlotAt && Number.isNaN(plannedSlotAt.getTime())) throw new Error('plannedSlotAt is not a valid date')
+  // A retake retires the failed render's job into prior_job_ids_json and clears
+  // the live-job pointers, so the re-armed row renders fresh rather than
+  // resurfacing the dead job.
+  const retiring = args.decision === 'retake' && ep.videoJobId != null
+  const priorJobIds = retiring ? [...(ep.priorJobIdsJson ?? []), ep.videoJobId!] : null
   await db.update(videoEpisodes).set({
-    productionStatus: statusMap[args.decision],
+    productionStatus: landing,
     reviewNotesJson: notes,
     updatedAt: new Date(),
-    ...(args.decision === 'approved' ? { approvedBy: args.decidedBy, approvedAt: new Date() } : {}),
-    ...(args.decision === 'rejected' && args.note?.trim() ? { rejectReason: args.note.trim() } : {}),
+    ...(landing === 'approved' ? { approvedBy: args.decidedBy, approvedAt: new Date() } : {}),
+    ...(landing === 'rejected' && args.note?.trim() ? { rejectReason: args.note.trim() } : {}),
+    ...(retiring ? { priorJobIdsJson: priorJobIds, videoJobId: null, renderStartedAt: null } : {}),
     ...(plannedSlotAt ? { plannedSlotAt } : {}),
   }).where(eq(videoEpisodes.id, args.episodeId))
 }
@@ -305,6 +344,73 @@ export async function claimNextEpisode(): Promise<VideoEpisodeRow | null> {
     .where(and(eq(videoEpisodes.id, target.id), inArray(videoEpisodes.productionStatus, ['approved'])))
     .returning()
   return updated[0] ?? null
+}
+
+/** Hours a 'rendering' claim may sit before the poller reaps it as a crashed run. */
+export const STALE_EPISODE_CLAIM_HOURS = 2
+
+/** In-flight video_jobs statuses: a claim backed by one of these is NOT stale. */
+const INFLIGHT_JOB_STATUSES = ['queued', 'running', 'awaiting_provider', 'applying']
+
+/**
+ * Hand a claimed-but-unrendered episode back to 'approved'. A run that refuses
+ * its own claim (enqueue rejected, or the gate closed after the claim) calls
+ * this so the row is reclaimable rather than stranded at 'rendering' with its
+ * number spent and its open loop never closing. Only a 'rendering' row moves;
+ * returns whether one did.
+ */
+export async function releaseEpisodeClaim(episodeId: number): Promise<boolean> {
+  const updated = await db.update(videoEpisodes)
+    .set({ productionStatus: 'approved', renderStartedAt: null, updatedAt: new Date() })
+    .where(and(eq(videoEpisodes.id, episodeId), eq(videoEpisodes.productionStatus, 'rendering')))
+    .returning({ id: videoEpisodes.id })
+  return updated.length > 0
+}
+
+/**
+ * A dead render job takes its linked episode from 'rendering' to 'failed' —
+ * terminal by design and deliberately NOT auto-retried, so a deterministic
+ * failure cannot re-burn GPU every render window. The owner retakes, reroutes,
+ * or drops it from the script reader (decideEpisode). Only a 'rendering' row
+ * linked to this job moves; returns whether one did.
+ */
+export async function markEpisodeRenderFailed(jobRowId: number): Promise<boolean> {
+  const updated = await db.update(videoEpisodes)
+    .set({ productionStatus: 'failed', updatedAt: new Date() })
+    .where(and(eq(videoEpisodes.videoJobId, jobRowId), eq(videoEpisodes.productionStatus, 'rendering')))
+    .returning({ id: videoEpisodes.id })
+  return updated.length > 0
+}
+
+/**
+ * Backstop for a crashed run that claimed an episode but never resolved it:
+ * release 'rendering' rows whose render_started_at is older than
+ * STALE_EPISODE_CLAIM_HOURS back to 'approved'. A row whose linked job is still
+ * in-flight is LEFT alone — a live render is not stale, and reaping it would
+ * arm a second render under a job that may still complete. Returns the count
+ * released. Run from the video poller.
+ */
+export async function reapStaleEpisodeClaims(opts: { olderThanHours?: number } = {}): Promise<number> {
+  const hours = opts.olderThanHours ?? STALE_EPISODE_CLAIM_HOURS
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000)
+  const stale = await db.select({
+    id: videoEpisodes.id,
+    jobId: videoEpisodes.videoJobId,
+    jobStatus: videoJobs.status,
+  })
+    .from(videoEpisodes)
+    .leftJoin(videoJobs, eq(videoEpisodes.videoJobId, videoJobs.id))
+    .where(and(eq(videoEpisodes.productionStatus, 'rendering'), lte(videoEpisodes.renderStartedAt, cutoff)))
+  let released = 0
+  for (const row of stale) {
+    if (row.jobId != null && row.jobStatus != null && INFLIGHT_JOB_STATUSES.includes(row.jobStatus)) continue
+    const updated = await db.update(videoEpisodes)
+      .set({ productionStatus: 'approved', renderStartedAt: null, updatedAt: new Date() })
+      .where(and(eq(videoEpisodes.id, row.id), eq(videoEpisodes.productionStatus, 'rendering')))
+      .returning({ id: videoEpisodes.id })
+    if (updated.length > 0) released++
+  }
+  return released
 }
 
 /**

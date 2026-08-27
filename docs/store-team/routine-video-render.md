@@ -63,6 +63,24 @@ response or a per-video-ceiling refusal is a valid outcome: report it, never dow
 squeeze under, never split an episode across jobs (there is no cross-job concat; two jobs are two
 videos). One episode per run, maximum.
 
+**Release the claim on any non-enqueue exit.** Step 2 stamped the episode `rendering`. A claim you
+do not turn into a live job leaves it stranded there, its number spent and its open loop unable to
+close. So on ANY path that ends this run without a successful enqueue (a `gated`/ceiling refusal, a
+Step 3 spoken-text mismatch, or any error before the job row exists), hand the claim back before you
+exit:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/video-episode" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"episode-release","episodeId":'"$EPISODE_ID"'}'
+```
+
+`released:true` means the row returned to `approved` and the next window can reclaim it.
+`released:false` means it was no longer `rendering` (a job already linked, so leave it). A crashed
+run that never reaches this line is caught by the poller's 2h `reapStaleEpisodeClaims` backstop, and
+a job that starts and then dies takes its episode to `failed` for the owner to retake, reroute, or
+drop from the script reader. The explicit release is the clean path, not the backstop.
+
 The pipeline takes it from here: `/cron/video-job-poller` advances every 2 minutes; the one
 own-frame product beat parks for the owner while `video_frame_review` is on (reused standing-set
 frames skip the gate entirely); the finished cut waits in `/admin/video-studio`, where approval
