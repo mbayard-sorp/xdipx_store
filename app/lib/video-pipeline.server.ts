@@ -163,7 +163,7 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
  * duration (the lipsync stage performs the concatenated clip once, not per
  * scene) — mirrors estimateJobCostUsd's single-scene lipsync branch.
  */
-function estimateMultiSceneJobCostUsd(modelTier: VideoModelId, scenes: VideoSceneSpec[], opts: { reuseFrame?: boolean } = {}): number {
+export function estimateMultiSceneJobCostUsd(modelTier: VideoModelId, scenes: VideoSceneSpec[], opts: { reuseFrame?: boolean } = {}): number {
   const spec = VIDEO_MODELS[modelTier]
   const clipModelId = spec.lipsync ? spec.lipsync.baseClip : modelTier
   const clipSpec = VIDEO_MODELS[clipModelId]
@@ -185,6 +185,49 @@ function estimateMultiSceneJobCostUsd(modelTier: VideoModelId, scenes: VideoScen
 }
 
 type VideoJobRow = typeof videoJobs.$inferSelect
+
+/**
+ * Propose-time dry run for the episode API (ticket #5712): validate that a
+ * script COULD render on the given tier and return its authoritative cost
+ * estimate, without touching the database or spending anything. Runs the SAME
+ * validateScenes the enqueue runs, so an unrenderable script is refused before
+ * it ever reaches the owner's batch instead of failing on render day. Throws
+ * with a human-readable message on any defect.
+ */
+export function dryRunEpisodeScript(script: VideoScriptJson, modelTier: VideoModelId): { estCostUsd: number; totalDurationSeconds: number } {
+  const spec = VIDEO_MODELS[modelTier]
+  if (!spec) throw new Error(`Unknown modelTier ${modelTier}`)
+  if (isMultiSceneScript(script)) {
+    if (spec.audioDriven) throw new Error('multi-scene scripts are not supported on the avatar tier')
+    const scenes = validateScenes(script.scenes, spec)
+    const total = scenes.reduce((s, sc) => s + sc.durationSeconds, 0)
+    if (spec.lipsync) {
+      const line = typeof script.presenterLine === 'string' ? script.presenterLine.trim() : ''
+      if (!line) throw new Error('lipsync tier requires scriptJson.presenterLine')
+      const speech = estimateAvatarSpeechSeconds(line)
+      if (speech > total) throw new Error(`presenterLine estimates ${speech}s of speech but the scenes total ${total}s. Trim the line or lengthen the scenes.`)
+    }
+    return { estCostUsd: estimateMultiSceneJobCostUsd(modelTier, scenes), totalDurationSeconds: total }
+  }
+  if (spec.audioDriven) {
+    const line = typeof script.presenterLine === 'string' ? script.presenterLine.trim() : ''
+    if (!line) throw new Error('avatar tier requires scriptJson.presenterLine')
+    const speech = estimateAvatarSpeechSeconds(line)
+    if (speech > AVATAR_MAX_SPEECH_SECONDS) throw new Error(`presenterLine estimates ${speech}s, over the ${AVATAR_MAX_SPEECH_SECONDS}s avatar cap`)
+    return { estCostUsd: estimateJobCostUsd(modelTier, speech, { speechSeconds: speech }), totalDurationSeconds: speech }
+  }
+  const dur = typeof script['durationSeconds'] === 'number' ? script['durationSeconds'] as number : NaN
+  if (!spec.allowedDurations.includes(dur)) {
+    throw new Error(`single-scene script needs scriptJson.durationSeconds in [${spec.allowedDurations.join(', ')}] for ${modelTier}`)
+  }
+  if (spec.lipsync) {
+    const line = typeof script.presenterLine === 'string' ? script.presenterLine.trim() : ''
+    if (!line) throw new Error('lipsync tier requires scriptJson.presenterLine')
+    const speech = estimateAvatarSpeechSeconds(line)
+    if (speech > dur) throw new Error(`presenterLine estimates ${speech}s of speech but the clip is ${dur}s`)
+  }
+  return { estCostUsd: estimateJobCostUsd(modelTier, dur), totalDurationSeconds: dur }
+}
 
 // ─── Enqueue ─────────────────────────────────────────────────────────────────
 
@@ -208,6 +251,13 @@ export interface EnqueueVideoJobArgs {
   variantGroupId?: string
   /** Which axis values this sibling got (labels Video Studio's set view). */
   variantAxes?: VariantAxes
+  /**
+   * Serialized program (ticket #5712): the video_episodes row this job
+   * renders. The ROUTE enforces the approval + byte-identical-script guard
+   * (assertEpisodeMatchesScript) before calling this; here it is only stored
+   * on the row so learn-mode attribution and the Studio can join back.
+   */
+  episodeId?: number
 }
 
 async function getMaxCostCents(): Promise<number> {
@@ -352,6 +402,7 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
     runId: args.runId ?? null,
     variantGroupId: args.variantGroupId ?? null,
     variantAxes: args.variantAxes ?? null,
+    episodeId: args.episodeId ?? null,
     scenesJson: multiScene ? normalizedScenes : null,
     sceneStateJson: multiScene ? normalizedScenes!.map((): VideoSceneState => ({ status: 'pending' })) : null,
   })
