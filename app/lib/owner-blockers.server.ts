@@ -199,6 +199,23 @@ async function runpodEndpointIdle(): Promise<ProbeVerdict> {
   }
 }
 
+/**
+ * True when `platform` has no approved draft left days past its slot.
+ *
+ * Asks `findOverdueApproved`, the same read the blocker was filed from, so the
+ * probe cannot disagree with the condition it is verifying. An unrecognised
+ * platform is a could-not-ask rather than a clear: answering `true` for a typo
+ * would close a real blocker on the strength of a scope error, which is the
+ * exact failure the null-not-false rule above exists to prevent.
+ */
+async function socialNoOverdue(platform: string): Promise<ProbeVerdict> {
+  const { findOverdueApproved } = await import('./social-publish-job.server')
+  const { AUTO_PUBLISH_PLATFORMS } = await import('./team-keys')
+  if (!(AUTO_PUBLISH_PLATFORMS as readonly string[]).includes(platform)) return null
+  const overdue = await findOverdueApproved(platform as 'instagram' | 'x')
+  return overdue.length === 0
+}
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -209,6 +226,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   webhook_registered: webhookRegistered,
   runpod_no_pods: runpodNoPods,
   runpod_endpoint_idle: runpodEndpointIdle,
+  social_no_overdue: socialNoOverdue,
 }
 
 /**

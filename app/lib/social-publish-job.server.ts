@@ -25,7 +25,7 @@
  *    which killed six webhook handlers for months. The caller must AWAIT this.
  */
 
-import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
@@ -36,6 +36,8 @@ import { resolvePostProductHandle } from './social-publish/product-handle.server
 import { estimateXPostCostUsd, estimateXSpendUsd } from './social-publish/x-limits'
 import { permalinkFor } from './social-permalink.server'
 import { formatLaSlot } from './social-schedule'
+import { fileBlocker } from './owner-blockers.server'
+import type { AutoPublishPlatform } from './team-keys'
 
 /**
  * Per-tick ceiling. A code constant, not a valve: there is no reason for the
@@ -87,6 +89,8 @@ export interface PublishTickResult {
   spendUsd?: number
   /** Unapproved rows whose slot passed more than a day ago, flagged this tick. */
   expired?: number
+  /** Approved rows this platform should have published days ago and did not. */
+  overdue?: number
 }
 
 /**
@@ -96,7 +100,9 @@ export interface PublishTickResult {
  * return `not_configured`, and a tick that ran for them would do nothing except
  * churn rows through `publishing` and back.
  */
-export type PublishPlatform = 'instagram' | 'x'
+/** Derived, not restated, so this and `isManualPublishPlatform` cannot disagree
+ *  about which platforms the Studio may offer a real Post-now for. */
+export type PublishPlatform = AutoPublishPlatform
 
 /**
  * Every data access the tick performs, behind an interface.
@@ -113,6 +119,11 @@ export interface PublishRepo {
    * so the fake repos that predate it keep working; the live repo supplies it.
    */
   expireStale?: () => Promise<number>
+  /**
+   * Report approved rows this platform never shipped. Optional for the same
+   * reason as `expireStale`: the fakes that predate it keep working.
+   */
+  reportOverdue?: () => Promise<number>
   countPublishedToday: () => Promise<number>
   listEligible: (limit: number) => Promise<PostRow[]>
   recentCaptions: (limit: number) => Promise<string[]>
@@ -312,9 +323,31 @@ export const EXPIRED_PREFIX = '[expired]'
  * gate stamp inside it still parses (`parseGateStamp` matches at any line
  * start) for the burn-in readers (#4913).
  */
-export function expiredFeedback(scheduledAt: Date, prior: string | null): string {
-  const line = `${EXPIRED_PREFIX} Slot ${formatLaSlot(scheduledAt)} passed without approval; reschedule or re-draft.`
+export function expiredFeedback(slot: Date | string, prior: string | null): string {
+  // A `scheduled_at` row missed an instant the owner picked, so it is named on
+  // the LA wall clock. A legacy `scheduled_for` row only ever named a day, and
+  // running its midnight-UTC cast through formatLaSlot would report the day
+  // BEFORE the one the owner chose (midnight UTC is 5pm PDT the previous
+  // afternoon). Name the day it actually was.
+  const label = typeof slot === 'string' ? laDayLabel(slot) : formatLaSlot(slot)
+  const line = `${EXPIRED_PREFIX} Slot ${label} passed without approval; reschedule or re-draft.`
   return prior?.trim() ? `${line}\n${prior}` : line
+}
+
+/**
+ * `2026-08-25` -> `Tue Aug 25`. Read at midday UTC and formatted in UTC so the
+ * label is the calendar day the owner typed, never shifted by a zone.
+ *
+ * The comma `toLocaleDateString` puts after the weekday is dropped so this
+ * reads the same shape as `formatLaSlot`'s `Sun Aug 23, 9:00 AM PDT`, where
+ * the comma separates the day from the time rather than decorating the day.
+ */
+function laDayLabel(day: string): string {
+  const d = new Date(`${day}T12:00:00Z`)
+  if (Number.isNaN(d.getTime())) return day
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
+  }).replace(',', '')
 }
 
 /**
@@ -325,9 +358,24 @@ export function expiredFeedback(scheduledAt: Date, prior: string | null): string
  * signed off on is not a post. The row goes to `needs_changes` so it leaves
  * the gate's queue (the gate only verdicts draft/pending_review) and shows up
  * in the Studio as something to reschedule or re-draft. Approved rows are not
- * touched: an approved row past its slot is simply due, and the tick publishes
- * it. Rows with only the legacy `scheduled_for` are not expired either, since
- * a date-only row never had a slot to miss.
+ * touched here: an approved row past its slot is simply due, and the tick
+ * publishes it. When it does not, `reportOverdueApproved` below is what says
+ * so, because that is a stall rather than an abandoned plan.
+ *
+ * Due-ness reads the same `COALESCE(scheduled_at, scheduled_for::timestamptz)`
+ * that `eligibleWhere` publishes on, and that is the fix here rather than a
+ * tidy-up. This used to require a non-null `scheduled_at`, on the reasoning
+ * that "a date-only row never had a slot to miss" — but the publisher has
+ * always treated `scheduled_for` as a real slot, so the two halves of this
+ * file disagreed about what a slot was, and the half that let rows out was the
+ * one that never fired. In production every stale row was date-only, so the
+ * sweep had run hourly for weeks and flagged nothing: #89 sat needs_changes on
+ * an Instagram slot from 2026-08-25, on a platform this sweep runs for, and it
+ * was skipped for having no `scheduled_at`.
+ *
+ * A row with neither column stays out, and that one IS a genuine no-slot case:
+ * `eligibleWhere` reads it as "ship when there is room", so it has nothing to
+ * be late for.
  */
 export async function expireStaleUnapproved(
   platform: PublishPlatform,
@@ -335,31 +383,158 @@ export async function expireStaleUnapproved(
 ): Promise<number> {
   const cutoff = new Date(now.getTime() - EXPIRE_AFTER_MS)
   const stale = await db
-    .select({ id: socialPosts.id, scheduledAt: socialPosts.scheduledAt, feedback: socialPosts.feedback })
+    .select({
+      id: socialPosts.id,
+      scheduledAt: socialPosts.scheduledAt,
+      scheduledFor: socialPosts.scheduledFor,
+      feedback: socialPosts.feedback,
+    })
     .from(socialPosts)
     .where(and(
       eq(socialPosts.platform, platform),
       eq(socialPosts.status, 'draft'),
       inArray(socialPosts.reviewStatus, ['pending_review', 'needs_changes']),
-      isNotNull(socialPosts.scheduledAt),
-      lt(socialPosts.scheduledAt, cutoff),
+      sql`${effectiveSlotSql} < ${cutoff}`,
       or(isNull(socialPosts.feedback), sql`${socialPosts.feedback} not like ${EXPIRED_PREFIX + '%'}`),
     ))
   let n = 0
   for (const row of stale) {
-    if (!row.scheduledAt) continue
+    const slot = row.scheduledAt ?? row.scheduledFor
+    if (!slot) continue
     await db.update(socialPosts)
-      .set({ reviewStatus: 'needs_changes', feedback: expiredFeedback(row.scheduledAt, row.feedback), updatedAt: now })
+      .set({ reviewStatus: 'needs_changes', feedback: expiredFeedback(slot, row.feedback), updatedAt: now })
       .where(eq(socialPosts.id, row.id))
     n++
   }
   return n
 }
 
+/**
+ * How long an APPROVED row may sit past its slot before it is treated as a
+ * stall rather than a queue.
+ *
+ * Three days, not the one that expiry uses, because a backlog is not a stall.
+ * A platform capped at one post a day with four approved rows behind it makes
+ * the fourth row a day late by arithmetic, and alarming on that would train
+ * the owner to ignore the alarm. Three days of hourly ticks is long enough for
+ * ordinary cap backlog to drain and short enough to catch a channel that has
+ * genuinely stopped.
+ */
+export const OVERDUE_AFTER_MS = 3 * 24 * 60 * 60 * 1000
+
+export interface OverdueApproved {
+  id: number
+  /** Whole days the effective slot has been in the past. */
+  daysLate: number
+}
+
+/**
+ * Approved rows this platform should have published days ago, and did not.
+ *
+ * `expireStaleUnapproved` deliberately leaves approved rows alone, which was
+ * right and also left the loudest failure in the pipeline completely silent.
+ * An approved row IS eligible by `eligibleWhere`, so the tick would publish it
+ * the moment it ran; if it is still sitting here three days later, the tick
+ * has been skipping (valve off, daily cap, spend cap) or failing every hour
+ * and nobody has been told. The owner's LinkedIn rows showed the shape of it
+ * before they had a manual path out: #37 and #38 were approved for
+ * 2026-08-13 and were still approved a fortnight later.
+ *
+ * Read-only. Something being late is not a reason to change it, and the fix is
+ * always somewhere else (a valve, a cap, a publisher).
+ */
+export async function findOverdueApproved(
+  platform: PublishPlatform,
+  now: Date = new Date(),
+): Promise<OverdueApproved[]> {
+  const cutoff = new Date(now.getTime() - OVERDUE_AFTER_MS)
+  const rows = await db
+    .select({
+      id: socialPosts.id,
+      scheduledAt: socialPosts.scheduledAt,
+      scheduledFor: socialPosts.scheduledFor,
+    })
+    .from(socialPosts)
+    .where(and(
+      eq(socialPosts.platform, platform),
+      eq(socialPosts.status, 'draft'),
+      eq(socialPosts.reviewStatus, 'approved'),
+      sql`${effectiveSlotSql} < ${cutoff}`,
+    ))
+  return rows.map(r => {
+    const slot = r.scheduledAt ?? new Date(`${r.scheduledFor}T00:00:00Z`)
+    return { id: r.id, daysLate: Math.floor((now.getTime() - slot.getTime()) / 86_400_000) }
+  })
+}
+
+
+
+/**
+ * Say out loud that this platform has approved rows it never shipped.
+ *
+ * Filed to the owner blocker list rather than logged, because the list is
+ * where "something only the owner can clear" already goes, and every cause of
+ * a stall here is one of those: a valve he turned off, a cap he set, a spend
+ * ceiling he chose. `fileBlocker` is idempotent by `dedupeKey`, so an hourly
+ * tick re-observes one row instead of filing 24 a day, and the
+ * `social_no_overdue` probe clears it on its own the moment the backlog
+ * drains — no click needed if the fix worked.
+ *
+ * The same-tick precedent is `runRemovalWatch`, which files from inside this
+ * job for the same reason: the condition is only observable where the job runs.
+ *
+ * Returns the count so the tick can report it; never throws into the tick,
+ * since failing to file an advisory must not stop a publish.
+ */
+export interface OverdueReportDeps {
+  /** Injected so the filing decision is testable without a database. */
+  find?: (platform: PublishPlatform, now: Date) => Promise<OverdueApproved[]>
+  file?: (input: Parameters<typeof fileBlocker>[0]) => Promise<unknown>
+}
+
+export async function reportOverdueApproved(
+  platform: PublishPlatform,
+  now: Date = new Date(),
+  deps: OverdueReportDeps = {},
+): Promise<number> {
+  const find = deps.find ?? findOverdueApproved
+  const file = deps.file ?? fileBlocker
+  const overdue = await find(platform, now)
+  if (overdue.length === 0) return 0
+  const oldest = Math.max(...overdue.map(r => r.daysLate))
+  const ids = overdue.map(r => `#${r.id}`).join(', ')
+  try {
+    await file({
+      dedupeKey: `social-overdue-approved-${platform}`,
+      title: `${platform} has ${overdue.length} approved post(s) it never published, oldest ${oldest} days late`,
+      detail:
+        `${ids} are approved drafts whose slot passed more than ${OVERDUE_AFTER_MS / 86_400_000} days ago. ` +
+        'An approved row is eligible for the hourly tick, so the tick has been skipping or failing ' +
+        'every hour since. The usual causes, in the order worth checking: the autopublish valve is ' +
+        'off, the daily cap is already met by other posts, the month-to-date spend ceiling is hit, ' +
+        'or the publisher is erroring (the row would be `failed`, not `approved`, in that last case). ' +
+        'Nothing was changed. Late is not a reason to publish something, and the fix is a valve or a ' +
+        'cap, not this row.',
+      unblocks: `Unattended ${platform} publishing, which is queueing approved posts and shipping none.`,
+      whereToGo: '/admin/socials/queue?view=approved for the rows, then the Social tab of /admin/homepage-team for the valve and caps.',
+      category: 'valve',
+      priority: 2,
+      source: 'agent',
+      verifyProbe: 'social_no_overdue',
+      verifyArg: platform,
+    })
+  } catch {
+    // An advisory that could not be filed must never take the tick down with
+    // it; the count still reaches the caller and the run result.
+  }
+  return overdue.length
+}
+
 export function makeDbPublishRepo(platform: PublishPlatform): PublishRepo {
   return {
     sweepAbandoned: () => sweepAbandonedPublishing(platform),
     expireStale: () => expireStaleUnapproved(platform),
+    reportOverdue: () => reportOverdueApproved(platform),
     countPublishedToday: () => countPublishedToday(platform),
     claim: claimForPublish,
     listEligible: async (limit) => db
@@ -518,6 +693,12 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
   // published it, not an hour later.
   const expired = repo.expireStale ? await repo.expireStale() : undefined
   const expiredField = expired !== undefined ? { expired } : {}
+  // Reported on every path below, the skipped ones especially: a tick that
+  // stops at the daily cap or the spend ceiling is the likeliest reason an
+  // approved row went days without publishing, so that is exactly when the
+  // count needs to be visible rather than suppressed.
+  const overdue = repo.reportOverdue ? await repo.reportOverdue() : undefined
+  const overdueField = overdue !== undefined ? { overdue } : {}
 
   // Look at what is already live before adding to it (ticket #2741).
   //
@@ -532,13 +713,13 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
   // in the same tick.
   const watch = await (deps.removalWatch ?? (() => runRemovalWatch()))()
   if (watch?.valveTurnedOff) {
-    return { skipped: 'removal_pattern', swept, ...expiredField, attempts: [], publishedToday: 0, watch }
+    return { skipped: 'removal_pattern', swept, ...expiredField, ...overdueField, attempts: [], publishedToday: 0, watch }
   }
 
   const publishedToday = await repo.countPublishedToday()
   const maxPerDay = await deps.maxPerDay()
   if (publishedToday >= maxPerDay) {
-    return { skipped: 'daily_cap', swept, ...expiredField, attempts: [], publishedToday, platform }
+    return { skipped: 'daily_cap', swept, ...expiredField, ...overdueField, attempts: [], publishedToday, platform }
   }
 
   // Month-to-date spend, read once per tick. Both halves are optional and are
@@ -549,7 +730,7 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     spendUsd = await deps.monthSpendUsd()
     maxSpendUsd = await deps.maxSpendUsd()
     if (spendUsd >= maxSpendUsd) {
-      return { skipped: 'spend_cap', swept, ...expiredField, attempts: [], publishedToday, platform, spendUsd }
+      return { skipped: 'spend_cap', swept, ...expiredField, ...overdueField, attempts: [], publishedToday, platform, spendUsd }
     }
   }
 
@@ -704,5 +885,6 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     platform,
     ...(spendUsd !== undefined ? { spendUsd: spendUsd + spentThisTick } : {}),
     ...expiredField,
+    ...overdueField,
   }
 }

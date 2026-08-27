@@ -112,6 +112,11 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
    * zero active workers with an empty queue (idle Flex slots bill nothing and
    * do not count). The pods probe above cannot see the endpoint at all. */
   runpod_endpoint_idle: () => 'the RunPod video endpoint has scaled to zero active workers',
+  /* Arg is a platform (`instagram`, `x`). Clears itself once that platform has
+   * no approved draft left sitting past OVERDUE_AFTER_MS, whether the backlog
+   * drained because the owner reopened a valve or because the rows were
+   * rescheduled or withdrawn. */
+  social_no_overdue: a => `${a} has no approved post left waiting days past its slot`,
 }
 
 export function isProbe(name: unknown): name is string {

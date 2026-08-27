@@ -21,6 +21,10 @@
  * deterministic checks before writing 'approved' (see that function's header
  * in social-admin-rework.server.ts). Neither bypasses the publish gate.
  *
+ * `create-rework-row` does retire the source draft it reworked from, and
+ * reports that back as `retiredSource`. That is a queue-hygiene write, not a
+ * review decision on the new row: see `shouldRetireReworkSource`.
+ *
  * Money. Image generation bills the social team's daily budget the same way
  * the owner's other Social Studio regenerate path
  * (api.admin.social-image.tsx) does: `gate('social')` is checked here before
@@ -137,7 +141,7 @@ export async function action({ request }: ActionFunctionArgs) {
           scheduledFor: str(b['scheduledFor']) ?? null,
           actor,
         })
-        return Response.json({ ok: true, id: row.id })
+        return Response.json({ ok: true, id: row.id, retiredSource: row.retiredSource })
       } catch (err) {
         // createOwnerReworkRow throws (rather than returning ok:false) when the
         // source row is gone; that message is deterministic and safe to show.

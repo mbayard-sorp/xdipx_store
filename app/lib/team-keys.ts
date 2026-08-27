@@ -359,11 +359,34 @@ export const SCENE_KIT: SceneKitScene[] = [
 /**
  * Social platforms + per-platform posting frequency keys (posts/day, '0' =
  * platform off). Owner edits these on /admin/socials; the social routine reads
- * them via {op:'config'} to size each run's per-platform draft quota. Only x
- * has live plumbing; instagram/tiktok drafts are posted manually.
+ * them via {op:'config'} to size each run's per-platform draft quota.
  */
 export const SOCIAL_PLATFORMS = ['x', 'instagram', 'tiktok', 'facebook', 'youtube', 'linkedin'] as const
 export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number]
+
+/**
+ * The platforms this codebase can actually publish to. Everything else in
+ * SOCIAL_PLATFORMS is manual: the owner posts it by hand and records that here.
+ *
+ * These two are exactly what the hourly publish job runs for (it derives its
+ * `PublishPlatform` from this list) and what the Studio's Post-now can ship.
+ * `tiktok` and `youtube` do have registry adapters, but they are stubs that
+ * return `not_configured`, so a draft for one of them can no more leave the
+ * queue on its own than a LinkedIn draft can.
+ *
+ * Client-safe on purpose: the Approved tab has to know, before it renders a
+ * button, whether Post-now is a real action for this row or a dead end.
+ */
+export const AUTO_PUBLISH_PLATFORMS = ['instagram', 'x'] as const
+export type AutoPublishPlatform = (typeof AUTO_PUBLISH_PLATFORMS)[number]
+
+/**
+ * True when nothing in this codebase can ship a post for `platform`, so the
+ * only way it goes live is the owner posting it by hand.
+ */
+export function isManualPublishPlatform(platform: string): boolean {
+  return !(AUTO_PUBLISH_PLATFORMS as readonly string[]).includes(platform)
+}
 
 export function socialFreqKey(platform: SocialPlatform): string {
   return `social_freq_${platform}`

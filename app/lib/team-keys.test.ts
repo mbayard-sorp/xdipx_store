@@ -10,6 +10,9 @@ import {
   teamImagesKvKey,
   teamSpendKvKey,
   TEAM_IMAGE_FEATURES,
+  AUTO_PUBLISH_PLATFORMS,
+  SOCIAL_PLATFORMS,
+  isManualPublishPlatform,
   FEATURE_TEAM_OVERRIDES,
   TEAM_IDS,
   SOCIAL_MAX_IMAGES_DEFAULT,
@@ -88,5 +91,27 @@ describe('KV counter keys', () => {
 describe('social image cap default', () => {
   it('equals the retired LOCAL_IMAGE_CAP_FALLBACK so wiring the key raises nothing', () => {
     expect(SOCIAL_MAX_IMAGES_DEFAULT).toBe(12)
+  })
+})
+
+describe('isManualPublishPlatform', () => {
+  it('treats only the platforms with real plumbing as automatic', () => {
+    expect(isManualPublishPlatform('instagram')).toBe(false)
+    expect(isManualPublishPlatform('x')).toBe(false)
+  })
+
+  it('treats every other social platform as hand-posted', () => {
+    // tiktok and youtube have registry adapters, but they are not_configured
+    // stubs and the hourly job does not run them, so a draft for one can no
+    // more leave the queue on its own than a LinkedIn draft can.
+    for (const p of ['linkedin', 'tiktok', 'youtube', 'facebook']) {
+      expect(isManualPublishPlatform(p)).toBe(true)
+    }
+  })
+
+  it('every auto-publish platform is a real social platform', () => {
+    for (const p of AUTO_PUBLISH_PLATFORMS) {
+      expect(SOCIAL_PLATFORMS).toContain(p)
+    }
   })
 })

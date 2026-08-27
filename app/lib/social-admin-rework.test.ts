@@ -9,6 +9,10 @@ const dbMock = vi.hoisted(() => ({
   select: vi.fn(),
   insert: vi.fn(),
   update: vi.fn(),
+  // createOwnerReworkRow writes the child and retires its source in one
+  // transaction; the mock runs the callback against this same object so the
+  // insert/update assertions below are unchanged by the wrapping.
+  transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(dbMock)),
 }))
 const generateAndUploadSocialImageMock = vi.hoisted(() => vi.fn())
 const generateWithSystemMock = vi.hoisted(() => vi.fn())
@@ -48,6 +52,9 @@ import {
   reworkCaption,
   createOwnerReworkRow,
   ownerApprovePost,
+  shouldRetireReworkSource,
+  supersededFeedback,
+  SUPERSEDED_PREFIX,
 } from './social-admin-rework.server'
 import { parseGateStamp } from './social-publish-approve.server'
 
@@ -63,6 +70,8 @@ const BASE_ROW = {
   subject: null as string | null,
   shopifyProductId: null as string | null,
   feedback: null as string | null,
+  status: 'draft',
+  reviewStatus: 'needs_changes',
 }
 
 function selectReturning(row: unknown) {
@@ -277,11 +286,59 @@ describe('reworkCaption', () => {
 
 // ── createOwnerReworkRow ──────────────────────────────────────────────────────
 
+describe('shouldRetireReworkSource', () => {
+  it('retires a source still sitting in the queue', () => {
+    for (const reviewStatus of ['pending_review', 'needs_changes', 'approved']) {
+      expect(shouldRetireReworkSource({ status: 'draft', reviewStatus })).toBe(true)
+    }
+  })
+
+  it('leaves history alone: posted, deleted, and already-rejected sources', () => {
+    expect(shouldRetireReworkSource({ status: 'posted', reviewStatus: 'approved' })).toBe(false)
+    expect(shouldRetireReworkSource({ status: 'deleted', reviewStatus: 'approved' })).toBe(false)
+    expect(shouldRetireReworkSource({ status: 'failed', reviewStatus: 'approved' })).toBe(false)
+    // The clone path reworks precisely these; re-stamping one would rewrite a
+    // retirement note that is already correct.
+    expect(shouldRetireReworkSource({ status: 'draft', reviewStatus: 'rejected' })).toBe(false)
+  })
+})
+
+describe('supersededFeedback', () => {
+  const now = new Date('2026-08-27T12:00:00Z')
+
+  it('names the child and the day', () => {
+    expect(supersededFeedback(77, null, now))
+      .toBe(`${SUPERSEDED_PREFIX} Reworked into #77 on 2026-08-27; this draft was retired unposted.`)
+  })
+
+  it('preserves the prior feedback whole, gate stamp included', () => {
+    // This text is what the gate reads back through the child's reworkedFrom
+    // for owner-feedback-unmet, so unlike markFeedbackAddressed it must not be
+    // stripped or rewritten.
+    const prior = '[publish-gate REVISE by social-publish-gate on 2026-08-26]\nthe caption narrates the picture'
+    const out = supersededFeedback(77, prior, now)
+    expect(out.startsWith(SUPERSEDED_PREFIX)).toBe(true)
+    expect(out).toContain(prior)
+  })
+})
+
 describe('createOwnerReworkRow', () => {
+  function insertReturning(id: number) {
+    const values = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id }]) })
+    dbMock.insert.mockReturnValue({ values })
+    return values
+  }
+  function captureUpdate() {
+    const where = vi.fn().mockResolvedValue(undefined)
+    const set = vi.fn().mockReturnValue({ where })
+    dbMock.update.mockReturnValue({ set })
+    return { set, where }
+  }
+
   it('inserts a new draft row copying platform/postType from the source', async () => {
     dbMock.select.mockReturnValue(selectReturning({ ...BASE_ROW, platform: 'x', postType: 'campaign' }))
-    const values = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: 77 }]) })
-    dbMock.insert.mockReturnValue({ values })
+    const values = insertReturning(77)
+    captureUpdate()
 
     const r = await createOwnerReworkRow({
       fromPostId: 61,
@@ -291,7 +348,7 @@ describe('createOwnerReworkRow', () => {
       actor: 'owner-studio',
     })
 
-    expect(r).toEqual({ id: 77 })
+    expect(r).toEqual({ id: 77, retiredSource: true })
     expect(values).toHaveBeenCalledWith(expect.objectContaining({
       platform: 'x',
       postType: 'campaign',
@@ -302,6 +359,61 @@ describe('createOwnerReworkRow', () => {
       reviewStatus: 'pending_review',
       createdBy: 'owner-studio',
     }))
+  })
+
+  it('retires the source it reworked from, naming the child and clearing its slot', async () => {
+    dbMock.select.mockReturnValue(selectReturning({
+      ...BASE_ROW,
+      reviewStatus: 'approved',
+      feedback: 'the caption narrates the picture',
+    }))
+    insertReturning(77)
+    const { set } = captureUpdate()
+
+    const r = await createOwnerReworkRow({
+      fromPostId: 61, caption: 'the new caption', mediaUrls: [], actor: 'owner-studio',
+    })
+
+    expect(r.retiredSource).toBe(true)
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      reviewStatus: 'rejected',
+      reviewedBy: 'owner-studio',
+      scheduledAt: null,
+      scheduledFor: null,
+      feedback: expect.stringContaining('Reworked into #77'),
+    }))
+    // The instruction the child is about to be gated against survives.
+    expect(set.mock.calls[0]![0].feedback).toContain('the caption narrates the picture')
+  })
+
+  it('does not touch a source that is already posted', async () => {
+    dbMock.select.mockReturnValue(selectReturning({
+      ...BASE_ROW, status: 'posted', reviewStatus: 'approved',
+    }))
+    insertReturning(78)
+    const { set } = captureUpdate()
+
+    const r = await createOwnerReworkRow({
+      fromPostId: 61, caption: 'the new caption', mediaUrls: [], actor: 'owner-studio',
+    })
+
+    expect(r).toEqual({ id: 78, retiredSource: false })
+    expect(set).not.toHaveBeenCalled()
+  })
+
+  it('does not re-stamp a source that is already rejected', async () => {
+    dbMock.select.mockReturnValue(selectReturning({
+      ...BASE_ROW, status: 'draft', reviewStatus: 'rejected',
+    }))
+    insertReturning(79)
+    const { set } = captureUpdate()
+
+    const r = await createOwnerReworkRow({
+      fromPostId: 61, caption: 'the new caption', mediaUrls: [], actor: 'owner-studio',
+    })
+
+    expect(r.retiredSource).toBe(false)
+    expect(set).not.toHaveBeenCalled()
   })
 
   it('throws when the source row does not exist', async () => {

@@ -11,6 +11,15 @@
  * approve it by hand without waiting for the automated pre-publish gate agent
  * to run.
  *
+ * Filing the fresh row also retires the one it was reworked from. Until it
+ * did, every rework left its source behind in Review or Approved: the child
+ * got approved and published while the parent sat in the queue forever, so a
+ * caption already live on Instagram still read as work waiting on the owner,
+ * and three-generation chains put one idea in the queue three times. The
+ * source is not the post any more the moment the child exists, so it goes to
+ * `rejected` (which is where History reads from) with its slot cleared and a
+ * `[superseded]` line naming the child. See `shouldRetireReworkSource`.
+ *
  * `ownerApprovePost` is deliberately NOT a bypass of the deterministic checks
  * in `social-publish-gate.server.ts`, it runs them, the same as the
  * automated gate does on a PASS claim (`applyPublishGateVerdict`), and only
@@ -305,6 +314,50 @@ export async function reworkCaption(opts: {
 
 // ── Filing the result ────────────────────────────────────────────────────────
 
+/** The marker a superseded source row's feedback starts with. */
+export const SUPERSEDED_PREFIX = '[superseded]'
+
+/**
+ * Which rework sources get retired when the child row is minted.
+ *
+ * Only a row still sitting in the queue: `posted` and `deleted` rows are
+ * history already, and an existing `rejected` row is terminal (the clone path
+ * in `social-publish-clone.server.ts` reworks precisely those and must stay
+ * idempotent here, never re-stamping a row it already retired).
+ */
+export function shouldRetireReworkSource(post: { status: string; reviewStatus: string }): boolean {
+  return post.status === 'draft'
+    && (post.reviewStatus === 'pending_review'
+      || post.reviewStatus === 'needs_changes'
+      || post.reviewStatus === 'approved')
+}
+
+/**
+ * The feedback a retired source row carries: the marker and the child that
+ * replaced it, then whatever the row already said, preserved whole.
+ *
+ * Whole, and not stamp-stripped the way `markFeedbackAddressed` strips it,
+ * because these are opposite jobs. That one rewrites the row being reworked
+ * *into* (where a surviving `[publish-gate REVISE]` header would resurrect
+ * itself as a live verdict on a row about to be re-gated). This one writes a
+ * row that will never be gated or published again, and whose `feedback` is
+ * exactly what the gate reads back through the child's `reworkedFrom` for its
+ * `owner-feedback-unmet` check. Editing it here would delete the instruction
+ * the child is about to be judged against.
+ */
+export function supersededFeedback(
+  childId: number,
+  prior: string | null | undefined,
+  now: Date,
+): string {
+  const line =
+    `${SUPERSEDED_PREFIX} Reworked into #${childId} on ${now.toISOString().slice(0, 10)}; ` +
+    `this draft was retired unposted.`
+  const trimmed = (prior ?? '').trim()
+  return trimmed ? `${line}\n${trimmed}` : line
+}
+
+
 export async function createOwnerReworkRow(opts: {
   fromPostId: number
   caption: string
@@ -314,28 +367,58 @@ export async function createOwnerReworkRow(opts: {
   subject?: string | null
   actor: string
   scheduledFor?: string | null
-}): Promise<{ id: number }> {
+}): Promise<{ id: number; retiredSource: boolean }> {
   const source = await loadPost(opts.fromPostId)
   if (!source) throw new Error(`No social post ${opts.fromPostId} to rework from`)
 
-  const [row] = await db
-    .insert(socialPosts)
-    .values({
-      platform:      source.platform,
-      postType:      source.postType,
-      tweetText:     opts.caption,
-      altText:       opts.altText ?? null,
-      mediaUrls:     opts.mediaUrls,
-      imageBrief:    opts.imageBrief ?? null,
-      subject:       opts.subject ?? null,
-      reworkedFrom:  opts.fromPostId,
-      status:        'draft',
-      reviewStatus:  'pending_review',
-      createdBy:     opts.actor,
-      scheduledFor:  opts.scheduledFor ?? null,
-    })
-    .returning({ id: socialPosts.id })
-  return { id: row!.id }
+  const now = new Date()
+  const retire = shouldRetireReworkSource(source)
+
+  // One transaction so the queue is never left in the half state this whole
+  // change exists to remove: a live-bound child with its superseded parent
+  // still sitting in Review or Approved.
+  const id = await db.transaction(async tx => {
+    const [row] = await tx
+      .insert(socialPosts)
+      .values({
+        platform:      source.platform,
+        postType:      source.postType,
+        tweetText:     opts.caption,
+        altText:       opts.altText ?? null,
+        mediaUrls:     opts.mediaUrls,
+        imageBrief:    opts.imageBrief ?? null,
+        subject:       opts.subject ?? null,
+        reworkedFrom:  opts.fromPostId,
+        status:        'draft',
+        reviewStatus:  'pending_review',
+        createdBy:     opts.actor,
+        scheduledFor:  opts.scheduledFor ?? null,
+      })
+      .returning({ id: socialPosts.id })
+
+    if (retire) {
+      await tx
+        .update(socialPosts)
+        .set({
+          reviewStatus: 'rejected',
+          feedback:     supersededFeedback(row!.id, source.feedback, now),
+          reviewedBy:   opts.actor,
+          reviewedAt:   now,
+          // The slot was a plan for a draft that is now retired unposted.
+          // Cleared so the week grid stops rendering a chip for it beside the
+          // child that actually ships (a rejected row still draws a chip; it
+          // only stops counting against the cap, see `countsAgainstCap`).
+          scheduledAt:  null,
+          scheduledFor: null,
+          updatedAt:    now,
+        })
+        .where(eq(socialPosts.id, opts.fromPostId))
+    }
+
+    return row!.id
+  })
+
+  return { id, retiredSource: retire }
 }
 
 // ── Owner approval ───────────────────────────────────────────────────────────
