@@ -315,7 +315,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Ticket #5412(e): the X path used to hardcode isVideo:false, so a
     // video-bearing X draft (the video pipeline fans out to X too) was judged
     // by still-image rules instead of its own.
-    const isVideo = draft.videoJobId != null || !!draft.mediaUrls?.[0]?.split('?')[0]?.endsWith('.mp4')
+    const isVideo = isVideoPost(draft)
     const gate = await decideManualPublish(
       {
         isVideo,
@@ -366,7 +366,7 @@ export async function action({ request }: ActionFunctionArgs) {
         .where(eq(socialPosts.id, postId))
       return { ok: false, error: `${stock.detail} Moved to Needs Changes.` }
     }
-    const isVideo = post.videoJobId != null || !!mediaUrl.split('?')[0]?.endsWith('.mp4')
+    const isVideo = isVideoPost(post)
     // Product linkage first, legacy stamp as burn-in fallback (#4913). Resolved
     // once and shared by the manual checks and the publisher's catalog tag.
     const productHandle = await resolvePostProductHandle(post)

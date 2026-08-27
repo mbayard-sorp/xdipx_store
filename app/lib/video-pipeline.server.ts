@@ -33,7 +33,7 @@
 import { randomUUID } from 'node:crypto'
 import { eq, and, inArray, desc, isNotNull, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { videoJobs, mediaAssets, socialPosts, type VideoScriptJson, type VideoSceneSpec, type VideoSceneState } from '../../db/schema'
+import { videoJobs, mediaAssets, socialPosts, videoEpisodes, type VideoScriptJson, type VideoSceneSpec, type VideoSceneState } from '../../db/schema'
 import { kvSet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import {
   VIDEO_MODELS,
@@ -56,6 +56,7 @@ import {
 } from '~/lib/fal-video.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
 import { estimateVideoCostUsd, estimateImageCostUsd, computeRunpodActualCostUsd } from '~/lib/model-pricing.server'
+import { utcIsoToLaWallClock } from '~/lib/social-schedule-ui'
 import { logVideoCost, logImageCost } from '~/lib/token-log.server'
 import { submitRunpodVideo, getRunpodStatus, getRunpodResult } from '~/lib/runpod-video.server'
 import { getEditorPhotoUrl, getApprovedCastMembers } from '~/lib/sanity.server'
@@ -2067,21 +2068,38 @@ export async function regenerateVideoJob(jobRowId: number, feedback: string): Pr
 
 // ─── One-approval-fans-out (Video Studio approve action) ─────────────────────
 
+export interface FanOutOpts {
+  /** The episode this job rendered (defaults to job.episodeId when present). */
+  episodeId?: number
+  /** Explicit slot instant; defaults to the episode's planned_slot_at. */
+  scheduledAt?: Date
+}
+export interface FanOutResult {
+  created: { id: number; platform: string }[]
+  skipped: { platform: string; reason: string }[]
+}
+
 /**
  * Fan a finished, owner-approved video out to one social_posts row per target
  * platform. Rows land status='draft' + reviewStatus='pending_review', never
  * 'approved' (ticket #3733): both publish paths refuse an approved row without
- * a publish-gate stamp in `feedback`, and only `applyPublishGateVerdict` may
- * write one. Video Studio approval is the editorial review of the VIDEO; the
- * publish gate still owns whether the finished POST ships (repetition across
- * the feed, caption patterns, stock at publish time are its checks, not frame
- * review's). Instagram rows are swept by the social routine's Step 6.5 gate
- * pass; other platforms stay pending for the owner in the Social Studio.
- * `scheduledFor` is set to today because the publish job's eligibility query
- * requires `scheduled_for <= current_date`; a NULL there never matches, which
- * would strand the row even once gated. Nothing here posts anywhere.
+ * a publish-gate stamp, and only `applyPublishGateVerdict` may write one.
+ * Video Studio approval is the editorial review of the VIDEO; the publish gate
+ * still owns whether the finished POST ships. Nothing here posts anywhere.
+ *
+ * Ticket #5715 rewrote the row it writes:
+ *   - scheduledAt is the REAL slot instant (episode planned_slot_at or the
+ *     explicit opts value); scheduledFor dual-writes the LA calendar date of
+ *     that instant for the COALESCE readers. No slot -> today (due now),
+ *     preserving the pre-episode behavior.
+ *   - altText (episode logline), castSlugs, shopifyProductId (first placement
+ *     gid: its absence is why the pre-publish stock block never fired on
+ *     video posts), episodeId (the learn-mode join), mediaKind 'video'.
+ *   - X NEVER receives a video row (owner direction 2026-08-26: X video is
+ *     manual-only; the X publisher hard-refuses video, so a row here would
+ *     loop in the hourly tick forever). Skips are RETURNED, never silent.
  */
-export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: string): Promise<number[]> {
+export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: string, opts: FanOutOpts = {}): Promise<FanOutResult> {
   const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
   if (!job) throw new Error('Job not found')
   if (job.stage !== 'done') throw new Error('Job is not finished')
@@ -2093,13 +2111,34 @@ export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: st
     ? (await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.posterAssetId)).limit(1))[0]
     : undefined
 
+  const episodeId = opts.episodeId ?? job.episodeId ?? null
+  const episode = episodeId != null
+    ? (await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, episodeId)).limit(1))[0] ?? null
+    : null
+
+  const scheduledAt = opts.scheduledAt ?? episode?.plannedSlotAt ?? null
+  const scheduledFor = scheduledAt
+    ? (utcIsoToLaWallClock(scheduledAt)?.date ?? scheduledAt.toISOString().slice(0, 10))
+    : new Date().toISOString().slice(0, 10)
+  const altText = episode?.logline ? episode.logline.slice(0, 1000) : null
+  const castSlugs = episode?.castSlugs?.length ? episode.castSlugs : null
+  const productGid = episode?.productPlacements?.find(pl => pl.shopifyProductGid)?.shopifyProductGid ?? null
+
   const captions = (job.scriptJson.captions ?? {}) as Record<string, string>
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(' ')
 
-  const ids: number[] = []
+  const created: FanOutResult['created'] = []
+  const skipped: FanOutResult['skipped'] = []
   for (const platform of job.targetPlatforms) {
+    if (platform === 'x') {
+      skipped.push({ platform, reason: 'X video is manual-only (owner direction 2026-08-26); the X publisher refuses video and the tick would loop on the row forever' })
+      continue
+    }
     const caption = captions[platform] ?? captions['default'] ?? fallbackCaption
-    if (!caption) continue
+    if (!caption) {
+      skipped.push({ platform, reason: 'no caption for this platform in scriptJson' })
+      continue
+    }
     const [row] = await db.insert(socialPosts).values({
       platform,
       postType: platform === 'youtube' ? 'video_short' : 'video_reel',
@@ -2107,17 +2146,52 @@ export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: st
       mediaUrls: [finalAsset.blobUrl],
       posterUrl: posterAsset?.blobUrl ?? null,
       videoJobId: job.id,
+      episodeId,
+      mediaKind: 'video',
+      altText,
+      castSlugs,
+      shopifyProductId: productGid,
       status: 'draft',
       createdBy: 'agent',
       reviewStatus: 'pending_review',
-      scheduledFor: new Date().toISOString().slice(0, 10),
+      scheduledFor,
+      scheduledAt,
+      updatedAt: new Date(),
       // Who approved the VIDEO, kept for audit; the POST's reviewer is whoever
       // the gate stamp names once it verdicts.
       reviewedBy,
     }).returning({ id: socialPosts.id })
-    if (row) ids.push(row.id)
+    if (row) created.push({ id: row.id, platform })
   }
-  return ids
+
+  if (created.length && episode) {
+    await db.update(videoEpisodes)
+      .set({ productionStatus: 'scheduled', updatedAt: new Date() })
+      .where(eq(videoEpisodes.id, episode.id))
+  }
+
+  // Best-effort poster into the asset Library (source 'video_poster') so a
+  // rendered episode is findable next month. The final mp4 is NOT ingested:
+  // the library's binaries are Sanity image assets, which cannot hold video.
+  if (created.length && posterAsset?.blobUrl) {
+    try {
+      const { ingestSocialAsset } = await import('./social-asset-library.server')
+      await ingestSocialAsset({
+        sourceUrl: posterAsset.blobUrl,
+        filename: `video-${job.jobId}-poster.jpg`,
+        contentType: 'image/jpeg',
+        source: 'video_poster',
+        productHandle: job.productHandle,
+        ...(castSlugs ? { castSlugs } : {}),
+        postId: created[0]!.id,
+        createdBy: 'video-pipeline',
+      })
+    } catch (err) {
+      console.warn(`[video-pipeline] poster library ingest failed for job ${job.jobId}:`, err)
+    }
+  }
+
+  return { created, skipped }
 }
 
 /**

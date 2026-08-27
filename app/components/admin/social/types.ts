@@ -41,8 +41,15 @@ export interface SocialPostRow {
   updatedAt?: string | Date | null
 }
 
-/** True when the draft's media is a video (fanned out from the video pipeline). */
-export function isVideoPost(post: Pick<SocialPostRow, 'videoJobId' | 'mediaUrls'>): boolean {
+/**
+ * True when the draft's media is a video. The STORED media_kind (migration
+ * 086, ticket #5715) wins; the videoJobId/.mp4-suffix inference stays as the
+ * permanent fallback for pre-086 rows. This is the ONE definition; the four
+ * former inline copies (social-post-ops, social-publish-run, queue x2) all
+ * resolve here.
+ */
+export function isVideoPost(post: Pick<SocialPostRow, 'videoJobId' | 'mediaUrls'> & { mediaKind?: string | null }): boolean {
+  if (post.mediaKind) return post.mediaKind === 'video'
   return post.videoJobId != null || !!post.mediaUrls?.[0]?.split('?')[0]?.endsWith('.mp4')
 }
 
