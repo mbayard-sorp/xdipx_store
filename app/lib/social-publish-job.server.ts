@@ -36,6 +36,7 @@ import { resolvePostProductHandle } from './social-publish/product-handle.server
 import { estimateXPostCostUsd, estimateXSpendUsd } from './social-publish/x-limits'
 import { permalinkFor } from './social-permalink.server'
 import { formatLaSlot } from './social-schedule'
+import type { AutoPublishPlatform } from './team-keys'
 
 /**
  * Per-tick ceiling. A code constant, not a valve: there is no reason for the
@@ -96,7 +97,9 @@ export interface PublishTickResult {
  * return `not_configured`, and a tick that ran for them would do nothing except
  * churn rows through `publishing` and back.
  */
-export type PublishPlatform = 'instagram' | 'x'
+/** Derived, not restated, so this and `isManualPublishPlatform` cannot disagree
+ *  about which platforms the Studio may offer a real Post-now for. */
+export type PublishPlatform = AutoPublishPlatform
 
 /**
  * Every data access the tick performs, behind an interface.

@@ -28,7 +28,7 @@ import { reviewSocialPost, rescheduleSocialPost, recordLivePostFeedback, getValv
 import { laWallClockToUtc } from '~/lib/social-schedule'
 import { permalinkFor } from '~/lib/social-permalink.server'
 import { isLivePostVerdict, parseLiveFeedback } from '~/lib/live-post-feedback'
-import { SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
+import { SOCIAL_REVIEW_STATUSES, isManualPublishPlatform } from '~/lib/team-keys'
 import { ReviewQueue } from '~/components/admin/social/ReviewQueue'
 import { parseBatchPostIds } from '~/components/admin/social/review-batch'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
@@ -94,6 +94,19 @@ async function recordManualPublish(
   await db.update(socialPosts)
     .set({ feedback: `${feedback ?? ''}${note}`.trim() })
     .where(eq(socialPosts.id, postId))
+}
+
+/**
+ * The feedback line a hand-posted row carries. Says who, when, and that there
+ * is no post id to look up, so a later reader does not read the empty
+ * `external_post_id` as a publish that half-failed.
+ */
+function manualPostNote(platform: string, by: string, now: Date): string {
+  return (
+    `\n\n[posted-by-hand by ${by} on ${now.toISOString().slice(0, 10)}] ` +
+    `Marked as posted on ${platform}, which has no publisher in this codebase. ` +
+    `Nothing was published from here, so there is no post id or permalink on this row.`
+  )
 }
 
 /**
@@ -420,6 +433,56 @@ export async function action({ request }: ActionFunctionArgs) {
     return { ok: true }
   }
 
+  /**
+   * Record a post the owner shipped by hand on a platform this codebase
+   * cannot publish to.
+   *
+   * LinkedIn (and tiktok/youtube, whose registry adapters are
+   * `not_configured` stubs) had no terminal state. The hourly job only runs
+   * instagram and x, and Post-now dead-ends on `No publisher for <platform>`,
+   * so an approved LinkedIn draft sat in the Approved tab forever: #37 and
+   * #38 were scheduled for 2026-08-13 and were still there two weeks later.
+   * The Studio already told the owner to "copy the caption and post manually"
+   * and then gave him no way to say that he had.
+   *
+   * This publishes nothing. It writes down that the owner did, which is what
+   * moves the row to History and puts it on the calendar at the hour it
+   * actually went out. No externalPostId and no permalink, because there is
+   * no API response to take them from, and inventing either would make
+   * `livePostUrl` offer a link that goes nowhere.
+   *
+   * Narrow on purpose. It refuses any platform Post-now can really ship, so
+   * it can never become a way to mark an Instagram or X row live without
+   * publishing it, and it requires an already-approved row rather than
+   * approving on the way through like Post-now does: the owner had to reach
+   * Approved to get the caption he pasted, so there is no click to save.
+   */
+  if (intent === 'mark-posted') {
+    const postId = parseInt(form.get('postId') as string)
+    if (!Number.isFinite(postId)) return { ok: false, error: 'Bad post id' }
+    const [post] = await db.select().from(socialPosts).where(eq(socialPosts.id, postId)).limit(1)
+    if (!post) return { ok: false, error: 'Post not found' }
+    if (!isManualPublishPlatform(post.platform)) {
+      return { ok: false, error: `${post.platform} publishes from here; use Post now so the row gets a real post id.` }
+    }
+    if (post.status !== 'draft' || post.reviewStatus !== 'approved') {
+      return { ok: false, error: 'Only an approved draft can be marked as posted' }
+    }
+    const by = await ownerLabel(request)
+    const now = new Date()
+    await db.update(socialPosts)
+      .set({
+        status: 'posted',
+        postedAt: now,
+        // Appended, never prepended, so the gate stamp block stays intact for
+        // the burn-in readers that still parse it (#4913).
+        feedback: `${post.feedback ?? ''}${manualPostNote(post.platform, by, now)}`.trim(),
+        updatedAt: now,
+      })
+      .where(eq(socialPosts.id, postId))
+    return { ok: true, intent: 'mark-posted' }
+  }
+
   // Delete and retry are platform-aware (ticket #4908 / #4935): a retry re-runs
   // the publish the row earned, with the owner's edited text and every slide;
   // a delete works on drafts, failed rows, X posts (deleted on X first) and
@@ -572,6 +635,7 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
   const text = post.editedText?.trim() || post.tweetText
   const media = post.mediaUrls?.[0] ?? null
   const video = isVideoPost(post)
+  const manual = isManualPublishPlatform(post.platform)
   const isSubmitting = fetcher.state !== 'idle'
   const slot = formatLaWallClock(post.scheduledAt ?? null)
     ?? (post.scheduledFor ? new Date(`${post.scheduledFor}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : null)
@@ -606,6 +670,14 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
           <StatusPill status={studioStatusOf(post)} />
           <GatePill status={post.gateStatus ?? (parseGateStampClient(post.feedback))} />
           {slot && <span className="font-mono text-[11px] text-ink-3">{slot}</span>}
+          {manual && (
+            <span
+              className="font-mono text-[11px] uppercase tracking-wide text-ink-3 border border-line rounded-full px-2 py-0.5"
+              title={`Nothing publishes to ${post.platform} from here, and the hourly job does not run it. This row waits on you, not on a slot.`}
+            >
+              posts by hand
+            </span>
+          )}
           {(post.mediaUrls?.length ?? 0) > 1 && <span className="font-mono text-[11px] text-ink-4">{post.mediaUrls!.length} slides</span>}
         </div>
         <p className="text-sm text-ink break-words">{text.length > 160 ? `${text.slice(0, 160)}...` : text}</p>
@@ -616,7 +688,43 @@ function ApprovedRow({ post }: { post: SocialPostRow }) {
         {revert.data?.ok === false && <p className="text-xs text-red-700 mt-1">{revert.data.error}</p>}
       </div>
       <div className="flex flex-wrap gap-2 shrink-0">
-        {post.platform === 'x' ? (
+        {manual ? (
+          /* No publisher exists for this platform, so Post-now would only ever
+             report the manual path. Offer the action that is actually real:
+             copy the caption, post it by hand, then record that here. */
+          <>
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="mark-posted" />
+              <input type="hidden" name="postId" value={post.id} />
+              <button
+                type="submit"
+                disabled={isSubmitting || Boolean(fetcher.data?.ok)}
+                className="min-h-11 px-4 bg-coral text-white rounded-full text-sm font-semibold hover:bg-coral-2 transition-colors disabled:opacity-50"
+                title={`Nothing publishes to ${post.platform} from here. Post it by hand, then mark it so it leaves the queue and lands on the calendar.`}
+              >
+                {isSubmitting ? 'Marking' : 'Mark as posted'}
+              </button>
+            </fetcher.Form>
+            <button
+              type="button"
+              onClick={copyCaption}
+              className="min-h-11 px-4 bg-paper-2 text-ink rounded-full text-sm font-medium border border-line hover:border-ink-4 transition-colors"
+            >
+              {copied ? 'Copied' : 'Copy caption'}
+            </button>
+            {media && (
+              <a
+                href={media}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={video || undefined}
+                className="inline-flex items-center min-h-11 px-4 bg-paper-2 text-ink-3 rounded-full text-sm font-medium border border-line hover:border-ink-4 transition-colors"
+              >
+                {video ? 'Download video' : 'Open media'}
+              </a>
+            )}
+          </>
+        ) : post.platform === 'x' ? (
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="post-approved-draft" />
             <input type="hidden" name="postId" value={post.id} />
