@@ -148,6 +148,7 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
       durationSeconds: scene.durationSeconds,
       continuity,
       ...(scene.framePrompt ? { framePrompt: scene.framePrompt } : {}),
+      ...(typeof scene.reuseFrameAssetId === 'number' ? { reuseFrameAssetId: scene.reuseFrameAssetId } : {}),
     }
   })
   if (total > MULTI_SCENE_TOTAL_MAX_SECONDS) {
@@ -629,7 +630,31 @@ export async function findReusableSceneFrame(sceneSlug: string, presenter: strin
     ))
     .orderBy(desc(videoJobs.createdAt))
     .limit(1)
-  return row?.frameId ?? null
+  if (row?.frameId != null) return row.frameId
+
+  // Multi-scene jobs park their approved frames in scene_state_json (the
+  // top-level sceneFrameAssetId stays null), so an episode's standing-set
+  // frame approved once must be findable here too or every later episode
+  // recomposes the presenter (ticket #5714). A scene state at 'frame' or
+  // beyond means the owner picked those pixels (or the valve auto-picked);
+  // failed jobs are excluded because an owner rejection may be ABOUT the frame.
+  const multi = await db.execute(sql`
+    SELECT (st.state->>'frameAssetId')::int AS frame_id
+    FROM video_jobs j
+    JOIN LATERAL jsonb_array_elements(j.scenes_json) WITH ORDINALITY AS sc(scene, i) ON true
+    JOIN LATERAL jsonb_array_elements(j.scene_state_json) WITH ORDINALITY AS st(state, k) ON st.k = sc.i
+    WHERE j.scenes_json IS NOT NULL
+      AND sc.scene->>'slug' = ${sceneSlug}
+      AND j.presenter = ${presenter}
+      AND st.state->>'frameAssetId' IS NOT NULL
+      AND st.state->>'status' IN ('frame', 'clip', 'done')
+      AND j.stage <> 'failed'
+      ${excludeJobRowId != null ? sql`AND j.id <> ${excludeJobRowId}` : sql``}
+    ORDER BY j.created_at DESC
+    LIMIT 1
+  `)
+  const frameId = (multi.rows?.[0] as { frame_id?: number } | undefined)?.frame_id
+  return typeof frameId === 'number' ? frameId : null
 }
 
 async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
@@ -802,6 +827,49 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
   }
 
   const scene = scenes[idx]!
+
+  // Scene-frame REUSE, ported from the single-scene path (ticket #5714). A
+  // multi-scene talking job must NOT recompose the presenter every episode:
+  // identity drift is fatal for a recurring cast, and a reused frame also
+  // skips the owner's park (no new pixels to review). Explicit per-scene
+  // reuseFrameAssetId wins; else a slug-keyed hit on an approved
+  // same-presenter frame adopts automatically.
+  {
+    const jobSpec = VIDEO_MODELS[job.modelTier as VideoModelId]
+    const reusable = job.scriptJson['talkingHead'] === true || !!jobSpec?.audioDriven || !!jobSpec?.lipsync
+    const explicitId = typeof scene.reuseFrameAssetId === 'number' ? scene.reuseFrameAssetId : null
+    let adoptId: number | null = null
+    if (explicitId != null) {
+      if (!reusable) throw new Error(`scenes[${idx}].reuseFrameAssetId applies only to avatar/talking-head jobs`)
+      const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, explicitId)).limit(1)
+      if (!asset || asset.purpose !== 'scene_frame') {
+        throw new Error(`scenes[${idx}].reuseFrameAssetId ${explicitId} does not reference a scene-frame asset`)
+      }
+      const [approvedBy] = await db
+        .select({ id: videoJobs.id })
+        .from(videoJobs)
+        .where(and(
+          eq(videoJobs.sceneFrameAssetId, explicitId),
+          eq(videoJobs.presenter, job.presenter),
+          inArray(videoJobs.stage, FRAME_APPROVED_STAGES),
+        ))
+        .limit(1)
+      if (!approvedBy) {
+        throw new Error(`scenes[${idx}].reuseFrameAssetId ${explicitId} has never been approved for presenter '${job.presenter}'`)
+      }
+      adoptId = explicitId
+    } else if (reusable && scene.slug) {
+      adoptId = await findReusableSceneFrame(scene.slug, job.presenter, job.id)
+    }
+    if (adoptId != null) {
+      const adopted: VideoSceneState[] = state.map((s, i) =>
+        i === idx ? { ...s, frameAssetId: adoptId!, status: 'frame' } : s,
+      )
+      await touch(job, { sceneStateJson: adopted })
+      return 'progressed'
+    }
+  }
+
   // idx only ever lands on an own-frame scene (see findIndex above), which
   // validateScenes guarantees carries a framePrompt. This is a belt-and-
   // braces check, not an expected runtime path.
@@ -1109,10 +1177,19 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
   const existing = handles[sceneKey]
 
   if (!existing) {
-    // Submit this scene's clip. Ceiling re-check first: earlier scenes/frame
-    // retries may have accrued cost.
+    // Submit this scene's clip. Ceiling checks first: the per-scene re-check
+    // is the backstop, and at scene 0 the WHOLE remaining job is checked up
+    // front (ticket #5714) — the old per-scene-only check could burn scenes
+    // 0-4 of real money and then throw at scene 5, marking the row failed
+    // with nothing shippable to show for the spend.
     const clipCost = estimateVideoCostUsd(clipSpec.costKey, scene.durationSeconds)
     const maxCents = await getMaxCostCents()
+    if (idx === 0) {
+      const wholeJobUsd = estimateMultiSceneJobCostUsd(job.modelTier as VideoModelId, scenes, { reuseFrame: true })
+      if ((Number(job.costUsd) + wholeJobUsd) * 100 > maxCents) {
+        throw new Error(`Accrued + full remaining render estimate $${wholeJobUsd.toFixed(2)} would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)}); refusing before the first scene spends`)
+      }
+    }
     if ((Number(job.costUsd) + clipCost) * 100 > maxCents) {
       throw new Error(`Accrued + scene ${idx} clip cost would exceed the per-video ceiling ($${(maxCents / 100).toFixed(2)})`)
     }
@@ -1264,6 +1341,14 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
  * With the 35s speech cap and 24s part budget that is two parts in practice,
  * but the key scheme and the poll/assembly loops handle any count.
  */
+// Provisional per-render caps for the own-worker audio-driven tier (ticket
+// #5714). PENDING THE BAKE-OFF (docs/store-team/video-worker-runpod.md): the
+// real chunking behavior of the chosen model replaces these numbers; until
+// then a 60s line renders as one part and the worker's execution timeout is
+// the hard backstop.
+const S2V_MAX_RENDER_SECONDS = 60
+const S2V_PART_MAX_SECONDS = 55
+
 function avatarPartKey(i: number): string {
   return i === 0 ? 'clip' : `clip_${String.fromCharCode(97 + i)}`
 }
@@ -1286,15 +1371,18 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
     if (!line) throw new Error('scriptJson.presenterLine is required for the avatar tier')
     if (!job.sceneFrameAssetId) throw new Error('No approved scene frame for the avatar render')
 
-    const parts = splitPresenterLine(line)
+    const isRunpodAvatar = spec.provider === 'runpod'
+    const parts = isRunpodAvatar ? splitPresenterLine(line, S2V_PART_MAX_SECONDS) : splitPresenterLine(line)
     if (!parts.length) throw new Error('presenterLine produced no speakable parts')
 
     const tone = isVideoTone(job.scriptJson['presenterTone']) ? job.scriptJson['presenterTone'] : undefined
     const voiceId = await getActiveIvrVoiceId()
     const audios: Buffer[] = []
+    const partSeconds: number[] = []
     const wordTimings: WordTiming[] = []
     let timingsComplete = true
     let totalSpeechSeconds = 0
+    const perRenderCap = isRunpodAvatar ? S2V_MAX_RENDER_SECONDS : OMNIHUMAN_MAX_RENDER_SECONDS
     for (const part of parts) {
       // with-timestamps: same audio, plus the char alignment that drives the
       // word-timed caption burn. A missing alignment falls back to the
@@ -1306,8 +1394,8 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
       })
       const seconds = await probeDurationSeconds(audio)
       if (seconds <= 0) throw new Error('Could not probe TTS audio duration')
-      if (seconds > OMNIHUMAN_MAX_RENDER_SECONDS - 0.5) {
-        throw new Error(`TTS part runs ${seconds.toFixed(1)}s, over OmniHuman's ${OMNIHUMAN_MAX_RENDER_SECONDS}s per-render cap. Shorten presenterLine (or break long sentences up so the splitter can work) and re-enqueue.`)
+      if (seconds > perRenderCap - 0.5) {
+        throw new Error(`TTS part runs ${seconds.toFixed(1)}s, over the ${perRenderCap}s per-render cap for this tier. Shorten presenterLine (or break long sentences up so the splitter can work) and re-enqueue.`)
       }
       if (alignment) {
         // Offset by the REAL accumulated seconds of prior parts — the parts
@@ -1317,6 +1405,7 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
         timingsComplete = false
       }
       audios.push(audio)
+      partSeconds.push(seconds)
       totalSpeechSeconds += seconds
     }
     const billedSeconds = Math.ceil(totalSpeechSeconds)
@@ -1342,30 +1431,50 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
 
     const [frame] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.sceneFrameAssetId)).limit(1)
     if (!frame) throw new Error('Approved scene-frame asset not found')
-    const frameBuf = await blobFetchToBuffer(frame.blobUrl)
-    const imageUrl = await uploadToFalStorage(frameBuf, 'image/jpeg', `frame-${job.jobId}.jpg`)
 
     const newHandles: Record<string, QueueHandle> = {}
-    for (let i = 0; i < audios.length; i++) {
-      const audioUrl = await uploadToFalStorage(audios[i]!, 'audio/mpeg', `speech-${job.jobId}-${i}.mp3`)
-      newHandles[avatarPartKey(i)] = await submitVideoRequest('omnihuman', {
-        // Tone colors the performance, not just the read (spec §5 Phase 3).
-        prompt: tone ? TONE_EXPRESSION[tone] : '',
-        imageUrl,
-        audioUrl,
-        durationSeconds: 0,
-        aspect: '9:16',
+    if (isRunpodAvatar) {
+      // Own-worker audio-driven tier (ticket #5714): frame and speech never
+      // leave our infrastructure. The frame's Blob URL is already public; each
+      // speech part parks on Blob for the worker to fetch; the worker (mode
+      // 's2v', ticket #5713) performs the part and uploads the mp4 itself.
+      // Like the clip stage's runpod branch, NO submit-time api_token_log row:
+      // only the metered actual lands there, in the poll branch. job.costUsd
+      // still accrues the estimate now so the ceiling stays enforced.
+      for (let i = 0; i < audios.length; i++) {
+        const { url: audioUrl } = await blobPut(`video/${job.jobId}/speech-${i}.mp3`, audios[i]!, { contentType: 'audio/mpeg' })
+        newHandles[avatarPartKey(i)] = await submitRunpodVideo({
+          prompt: tone ? TONE_EXPRESSION[tone] : '',
+          imageUrl: frame.blobUrl,
+          audioUrl,
+          durationSeconds: Math.ceil(partSeconds[i]!),
+          mode: 's2v',
+          blobPathPrefix: `video/${job.jobId}/part-${i}`,
+        })
+      }
+    } else {
+      const frameBuf = await blobFetchToBuffer(frame.blobUrl)
+      const imageUrl = await uploadToFalStorage(frameBuf, 'image/jpeg', `frame-${job.jobId}.jpg`)
+      for (let i = 0; i < audios.length; i++) {
+        const audioUrl = await uploadToFalStorage(audios[i]!, 'audio/mpeg', `speech-${job.jobId}-${i}.mp3`)
+        newHandles[avatarPartKey(i)] = await submitVideoRequest('omnihuman', {
+          // Tone colors the performance, not just the read (spec §5 Phase 3).
+          prompt: tone ? TONE_EXPRESSION[tone] : '',
+          imageUrl,
+          audioUrl,
+          durationSeconds: 0,
+          aspect: '9:16',
+        })
+      }
+      void logVideoCost({
+        feature: 'video-avatar',
+        model: spec.costKey,
+        seconds: billedSeconds,
+        caller: 'video-pipeline',
+        sku: job.productHandle,
+        refId: job.jobId,
       })
     }
-
-    void logVideoCost({
-      feature: 'video-avatar',
-      model: spec.costKey,
-      seconds: billedSeconds,
-      caller: 'video-pipeline',
-      sku: job.productHandle,
-      refId: job.jobId,
-    })
 
     // Persist word timings alongside the handles: assembly runs on a later
     // cron tick and reads them back off the row. Partial coverage (some part
@@ -1377,7 +1486,14 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
 
     await touch(job, {
       status: 'awaiting_provider',
-      providerRequestIds: { ...handles, ...newHandles },
+      providerRequestIds: {
+        ...handles,
+        ...newHandles,
+        // Non-handle bookkeeping key (assembly_attempts precedent): the poll
+        // branch reverses the submit-time ESTIMATE with the metered actual,
+        // and the real billed speech seconds are not otherwise recoverable.
+        ...(isRunpodAvatar ? ({ avatar_billed_seconds: billedSeconds } as unknown as Record<string, QueueHandle>) : {}),
+      },
       scriptJson: scriptWithTimings,
       costUsd: String(Number(job.costUsd) + clipCost + ttsCost),
     })
@@ -1386,6 +1502,54 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
 
   // Poll pass: wait for EVERY part, then persist them all in one go.
   const activeKeys = avatarPartKeys(handles)
+
+  if (spec.provider === 'runpod') {
+    for (const key of activeKeys) {
+      const { status } = await getRunpodStatus(handles[key] as QueueHandle)
+      if (status === 'FAILED') throw new Error(`runpod avatar render failed (${key})`)
+      if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
+        await touch(job, {}) // heartbeat so ordering stays fair
+        return 'waiting'
+      }
+    }
+    let actualTotal = 0
+    for (const key of activeKeys) {
+      const result = await getRunpodResult(handles[key] as QueueHandle)
+      const actualCost = computeRunpodActualCostUsd(result.executionMs)
+      actualTotal += actualCost
+      // Worker already wrote the mp4 to Blob — record its URL, no re-upload.
+      await db.insert(mediaAssets).values({
+        kind: 'video',
+        purpose: key,
+        blobUrl: result.videoUrl,
+        contentType: 'video/mp4',
+        sourceModel: spec.costKey,
+        costUsd: String(actualCost),
+        videoJobId: job.id,
+      })
+    }
+    // Reverse the submit-time estimate with the metered actual (same
+    // discipline as the clip stage's runpod poll branch).
+    const billedRaw = (handles as Record<string, unknown>)['avatar_billed_seconds']
+    const billed = typeof billedRaw === 'number' ? billedRaw : 0
+    const estimated = billed > 0 ? estimateVideoCostUsd(spec.costKey, billed) : 0
+    void logVideoCost({
+      feature: 'video-avatar',
+      model: spec.costKey,
+      seconds: billed,
+      caller: 'video-pipeline',
+      sku: job.productHandle,
+      refId: job.jobId,
+      actualCostUsd: actualTotal,
+    })
+    await touch(job, {
+      stage: 'lipsync',
+      status: 'queued',
+      costUsd: String(Number(job.costUsd) - estimated + actualTotal),
+    })
+    return 'progressed'
+  }
+
   for (const key of activeKeys) {
     const { status } = await getVideoRequestStatus(handles[key] as QueueHandle)
     if (status === 'FAILED') throw new Error(`fal avatar render failed (${key})`)
@@ -1557,10 +1721,23 @@ async function advanceLipsyncPerform(job: VideoJobRow, spec: VideoModelSpec): Pr
     // Round-trip both inputs through fal storage: Blob URLs are usually
     // fetchable, but fal storage keeps inputs in-house (same as the avatar path).
     const clipBuf = await blobFetchToBuffer(clip.blobUrl)
+
+    // Speech must fit inside the rendered clip (ticket #5714): sync's cut_off
+    // mode truncates the longer track, and Wan renders run slightly long of
+    // their nominal duration, so compare against the REAL clip. Failing here
+    // costs the $0.18 TTS just booked, not the $3 lipsync pass.
+    const clipSeconds = await probeDurationSeconds(clipBuf)
+    if (clipSeconds > 0 && speechSeconds > clipSeconds - 0.5) {
+      throw new Error(`presenterLine speech runs ${speechSeconds.toFixed(1)}s but the rendered clip is ${clipSeconds.toFixed(1)}s; the performance would truncate mid-word. Trim the line or lengthen the scenes.`)
+    }
+
     const videoUrl = await uploadToFalStorage(clipBuf, 'video/mp4', `clip-${job.jobId}.mp4`)
     const audioUrl = await uploadToFalStorage(audio, 'audio/mpeg', `speech-${job.jobId}.mp3`)
 
-    const handle = await submitVideoRequest('sync-lipsync', {
+    // Route by the job's own tier (ticket #5714): this was hardcoded to
+    // 'sync-lipsync', which mis-submits (and structurally disagrees with the
+    // spec-keyed cost log below) the moment a second lipsync tier exists.
+    const handle = await submitVideoRequest(job.modelTier as VideoModelId, {
       prompt: '',
       imageUrl: '',
       videoUrl,
@@ -1813,12 +1990,39 @@ export async function approveSceneFrame(jobRowId: number, frameAssetId: number, 
 }
 
 /** Regenerate frame candidates with owner feedback folded into the prompt. */
-export async function retrySceneFrames(jobRowId: number, feedback: string): Promise<void> {
+export async function retrySceneFrames(jobRowId: number, feedback: string, sceneIndex?: number): Promise<void> {
   const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
   if (!job) throw new Error('Job not found')
   const script: VideoScriptJson = { ...job.scriptJson }
   const prior = Array.isArray(script.frameFeedback) ? script.frameFeedback : []
   script.frameFeedback = [...prior, feedback]
+
+  // Multi-scene retry (ticket #5714, mirrors approveSceneFrame's sceneIndex):
+  // fold the feedback into THAT scene's framePrompt and reset only that
+  // scene's state, so the poller recomposes one scene, not the job.
+  if (sceneIndex != null) {
+    const scenes = job.scenesJson
+    const state = job.sceneStateJson
+    if (!scenes || !state) throw new Error('sceneIndex given but this is not a multi-scene job')
+    const scene = scenes[sceneIndex]
+    if (!scene) throw new Error(`sceneIndex ${sceneIndex} out of range (job has ${scenes.length} scenes)`)
+    if (scene.continuity === 'last-frame') throw new Error(`scene ${sceneIndex} inherits the previous scene's last frame; there are no candidates to retry`)
+    const nextScenes: VideoSceneSpec[] = scenes.map((sc, i) => {
+      if (i !== sceneIndex || !feedback) return sc
+      return { ...sc, framePrompt: `${sc.framePrompt ?? ''} ${feedback}`.trim() }
+    })
+    const nextState: VideoSceneState[] = state.map((st, i) => {
+      if (i !== sceneIndex) return st
+      const { frameAssetId: _dropped, ...rest } = st
+      return { ...rest, status: 'pending' }
+    })
+    await db.update(videoJobs)
+      .set({ scriptJson: script, scenesJson: nextScenes, sceneStateJson: nextState, stage: 'scene_frame', status: 'queued', updatedAt: new Date() })
+      .where(eq(videoJobs.id, jobRowId))
+    await kvDel(KV_KEYS.videoPollerIdle)
+    return
+  }
+
   const basePrompt = typeof script['framePrompt'] === 'string' ? script['framePrompt'] as string : ''
   script['framePrompt'] = feedback ? `${basePrompt} ${feedback}`.trim() : basePrompt
   await db.update(videoJobs)

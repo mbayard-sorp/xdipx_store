@@ -55,12 +55,19 @@ function authHeaders(key: string): Record<string, string> {
 export interface RunpodVideoInput {
   prompt: string
   negativePrompt?: string
-  /** Publicly fetchable first-frame / reference image. Required for mode 'i2v'. */
+  /** Publicly fetchable first-frame / reference image. Required for modes 'i2v' and 's2v'. */
   imageUrl?: string
+  /**
+   * Publicly fetchable speech track (mp3). Required for mode 's2v', the
+   * audio-driven talking mode (ticket #5713/#5714): the worker performs the
+   * track on the identity frame and the clip's duration derives from the
+   * audio, so durationSeconds is advisory there.
+   */
+  audioUrl?: string
   durationSeconds: number
   seed?: number
   steps?: number
-  mode: 'i2v' | 't2v'
+  mode: 'i2v' | 't2v' | 's2v'
   /** Blob path prefix the worker uploads its outputs under, e.g. `video/{jobId}`. */
   blobPathPrefix: string
   /**
@@ -91,8 +98,11 @@ function resolveFast(explicit: boolean | undefined): boolean {
 export async function submitRunpodVideo(input: RunpodVideoInput): Promise<QueueHandle> {
   const key = requireKey()
   const endpointId = requireEndpointId()
-  if (input.mode === 'i2v' && !input.imageUrl) {
-    throw new Error('runpod wan22-i2v requires imageUrl')
+  if ((input.mode === 'i2v' || input.mode === 's2v') && !input.imageUrl) {
+    throw new Error(`runpod wan22 mode ${input.mode} requires imageUrl`)
+  }
+  if (input.mode === 's2v' && !input.audioUrl) {
+    throw new Error('runpod wan22-s2v requires audioUrl (the performed speech track)')
   }
 
   const body = {
@@ -100,6 +110,7 @@ export async function submitRunpodVideo(input: RunpodVideoInput): Promise<QueueH
       prompt: input.prompt,
       ...(input.negativePrompt ? { negativePrompt: input.negativePrompt } : {}),
       ...(input.imageUrl ? { imageUrl: input.imageUrl } : {}),
+      ...(input.audioUrl ? { audioUrl: input.audioUrl } : {}),
       durationSeconds: input.durationSeconds,
       ...(input.seed != null ? { seed: input.seed } : {}),
       ...(input.steps != null ? { steps: input.steps } : {}),

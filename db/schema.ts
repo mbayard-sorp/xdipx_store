@@ -1567,6 +1567,13 @@ export interface VideoSceneSpec {
   motionPrompt: string
   durationSeconds: number
   continuity?: 'last-frame' | 'own-frame'
+  /**
+   * Explicit per-scene frame reuse (ticket #5714): adopt an already-approved
+   * same-presenter scene-frame asset instead of composing. Talking jobs only;
+   * verified against the approval history at the scene_frame stage. The
+   * slug-keyed automatic reuse needs no field — this is the override.
+   */
+  reuseFrameAssetId?: number
 }
 
 /**
