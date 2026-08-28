@@ -50,7 +50,11 @@ vi.mock('~/lib/kv.server', () => ({
   KV_KEYS: { videoPollerIdle: 'video:poller:idle' },
 }))
 const configMock = vi.hoisted(() => vi.fn())
-vi.mock('~/lib/team.server', () => ({ getTeamConfig: configMock }))
+// #5943: enqueueVideoJob now also reads today's spend for the daily-budget fit
+// check. Default to 0 spent so these variant enqueues stay under the 2000c
+// daily budget.
+const spendMock = vi.hoisted(() => vi.fn(async () => 0))
+vi.mock('~/lib/team.server', () => ({ getTeamConfig: configMock, getTodaySpendCents: spendMock }))
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))
 vi.mock('~/lib/blob.server', () => ({ blobPut: vi.fn(), blobFetchToBuffer: vi.fn() }))
 vi.mock('~/lib/token-log.server', () => ({ logVideoCost: vi.fn(), logImageCost: vi.fn() }))
