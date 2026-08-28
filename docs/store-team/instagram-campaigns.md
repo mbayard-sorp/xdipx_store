@@ -620,6 +620,13 @@ Rules that survive the slate, because they are what keep it a publication:
 - **Mix the shapes, not just the subjects.** A week that is all single stills is as monotonous as a
   week that is all carousels. Carousel cadence and slide count live in §3.3: 4 slides floor, 7
   ceiling, up to 5 a week, never two days running.
+- **Prefer the carousel for the resource slot until the standing carousel target is met (ticket
+  #5940).** Single-image resource stills keep failing the publish gate and carousels carry roughly 9x
+  the saves, so while the standing target of at least one carousel published (Step 7 slate-mix
+  self-check) is unmet, the resource slot (A, or E when scheduled) prefers the carousel format at least
+  once per rolling 7. This is a preference, not a new quota: it sits inside the §3.3 cadence (up to 5 a
+  week, never two days running) and steps aside once the target is met. Report the carousel count in
+  every retro, which Step 7 already computes.
 - **The format library in §2 is a starting set, not a fence.** Owner direction 2026-08-16: *"I'm
   giving the team license to create any type of post they think will be the most effective at
   creating engagement and interest for our customers."* Invent a format when you have a real reason

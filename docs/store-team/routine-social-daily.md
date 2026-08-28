@@ -497,6 +497,13 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   product-forward" ceiling is the daily-set ceiling; this is the per-run mechanic that keeps a run
   from drifting past it. Drift this reinforces: the last 7 published IG posts ran ~86% product-forward
   with no true slot-A resource post (second measurement over the ceiling, repeating 2026-08-17).
+- **Every resource (slot A) caption carries a real engagement close, checked at draft time (ticket
+  #5940).** A resource post starves and the feed drifts product-forward when its caption reads too-tame
+  and the publish gate REVISEs it. Before a slot-A draft is written, confirm the caption ends on a real
+  engagement close — a question back to the reader, a "save this", or a "send this to" — never a CTA and
+  never a trust-boilerplate closer. A slot-A resource post is judged on its curiosity and permission
+  charge, not on product innuendo it structurally cannot carry; a caption with no engagement close is
+  reworked before it is drafted, not discovered at the gate.
 - **Volume climbs a rung at a time, on 7 clean days** (§4 of the campaign doc). Name the rung and
   the clean-day count in the run summary. Never step the quota up yourself to compensate for an
   automated step-down.
@@ -766,6 +773,16 @@ brief justifies, never a default a slot inherits. The returned brief is written 
 `imageBrief`, and the subject line as `subject` (Step 6). Charge ratio per rolling 7 is now 3 ceiling
 / 3 mid / 1 educational (§3.2b); the mid frame carries skin, touch, posture, or expression by default.
 
+**Every slot-A / resource brief carries a standing no-housewares negative (ticket #5940).** A resource
+frame with no product to anchor it defaults to tableware and styled surfaces, which the design doctrine
+§4.1 interest floor REVISEs at the publish gate (run 548 id116, a slot-A communication post, was
+REVISEd for a coffee mug in frame). So the brief `social-art-director` returns for any slot-A or
+product-free resource post states, as a standing negative: **no tableware or housewares** (mugs, cups,
+bowls, plates, candles, fruit bowls, napkins, styled empty tables) per `docs/design-doctrine.md` §4.1.
+A product-free frame carries a narrative property (a personal trace, an interrupted state) or a cast
+member, never houseware standing in for the idea. This is the same §4.1 ban the metaphor check below
+already enforces, moved forward to selection so a resource brief never reaches the gate carrying one.
+
 **Never generate a real brand's wordmark (hard pre-generation rule, ticket #5493).** Do not ask the
 image model to render a real brand's wordmark, logo lockup, or label copy on a product. These are
 real third-party brands (System JO, Le Wand, every SKU we carry), and a fabricated or garbled label
@@ -780,6 +797,29 @@ only the review. This is the same no-text-in-pixels rule the homepage lane and
 `instagram-campaigns.md` §3.6 already carry, extended to product labels, which is where it is now
 failing. It removes the cause; it does not soften the backstop — the high-zoom wordmark check below
 and the publish gate still BLOCK any garbled wordmark that reaches them.
+
+**Wordmark-risk and compliance-mark SKU preflight (tickets #5928, #5861).** The rule above removes the
+cause in the brief; this list removes it at SELECTION, before an image is generated, for the specific
+SKUs that reliably garble and burn slots at the publish gate. **Known wordmark-risk / compliance-mark
+SKUs, extend as they are found:** the **Renegade Emperor vibrating ring**
+(`renegade-emperor-vibrating-ring`) — a molded CE/UKCA compliance band wraps the ring and reproduces
+garbled, and regenerating once did NOT fix it (both morning X drafts id118 and id120 BLOCKed on the
+same defect); the **Magic Wand Rechargeable** handle wordmark (needed an occluded-grip brief and eight
+images to clear); and **Le Wand** (id95). For any SKU on this list, the `social-art-director` brief MUST
+either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
+composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
+slot. Two standing pre-generation rules reach every cast composite, not only the listed SKUs:
+
+- **A molded compliance mark is treated exactly like a wordmark.** A CE/UKCA mark or a wordmark molded
+  into the product body is a real third-party mark and garbles as a printed label does. Composite the
+  real plate, or hard-crop/occlude the marked segment; never rely on the generator to render it cleanly.
+  **A second failed regen on the same mark is the switch signal:** stop regenerating, and move the slot
+  to reuse (a clean archived asset) or to a different SKU rather than spending a third image round.
+- **A small cordless product carries a scale anchor and an explicit no-cord negative.** A small cordless
+  toy (the FemmeFunn Ultra Bullet, real body ~4.7in) reliably renders oversized and corded — id117 came
+  back as a large CORDED wand at ~2x the real scale. Every brief for a small cordless product states its
+  real dimension as a scale anchor beside an in-frame reference, and carries an explicit `no cable, no
+  cord, no power brick` negative.
 
 **A cast member in a scene is MANDATORY on every Instagram product post (owner ruling 2026-08-19,
 spec §3.7).** The lead image is a person somewhere real, with the product. A product alone, however
@@ -851,12 +891,15 @@ had all five captions PASS the voice gate yet four of five failed the publish ga
 alone. These are pre-write gates: a candidate that fails one is rejected or regenerated before the
 draft is written, not discovered at Step 6.5.
 
-1. **High-zoom wordmark check.** For any product whose real packshot carries a printed wordmark on
-   the body (e.g. the Le Wand handle logo), **download the candidate and crop-and-zoom the specific
-   wordmark region to at least 4x** — do not eyeball the full-resolution frame, which is what keeps
-   passing garbled wordmarks the publish gate then catches at 6x (id95 Le Wand Classique passed a
-   full-frame eyeball QA yet the gate BLOCKed its garbled neck glyph; same failure as id72/id83).
-   Compare the zoomed crop directly to the packshot. A garbled or illegible baked wordmark is an
+1. **High-zoom wordmark check.** For any product whose real packshot carries a printed wordmark or a
+   molded compliance mark on the body (e.g. the Le Wand handle logo, the Renegade Emperor ring's
+   CE/UKCA band), **download the candidate and crop-and-zoom the specific mark region to at least 4x** —
+   do not eyeball the full-resolution frame, which is what keeps passing garbled marks the publish gate
+   then catches at 6x (id95 Le Wand Classique passed a full-frame eyeball QA yet the gate BLOCKed its
+   garbled neck glyph; same failure as id72/id83). Compare the zoomed crop directly to the packshot.
+   **For a mark that wraps the body (a molded CE/UKCA band), zoom the FULL visible arc of the band, not
+   only the front plane** (ticket #5861): the garble commonly sits on the side of the band a front-plane
+   eyeball misses, which is how id118/id120 reached the gate. A garbled or illegible baked mark is an
    automatic publish-gate BLOCK. Reject the candidate, or add a stronger no-text negative and
    regenerate, before drafting. **When the wordmark garbles across every candidate in a run,** do not
    ship it to the publish gate to fail: either add a stronger blank-surface negative (state the

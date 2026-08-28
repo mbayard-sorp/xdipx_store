@@ -1111,9 +1111,26 @@ quiet private room" cleared it immediately on the first retry. If a slot returns
 black twice, change the phrasing before spending a third call, and prefer naming
 the fabric, the light, and the surface over naming the fluid or the bed.
 
+**3. Molded compliance marks wrap the body and garble like a wordmark (ticket #5861).** A CE/UKCA
+compliance mark molded into a product body (the Renegade Emperor vibrating ring,
+`renegade-emperor-vibrating-ring`, whose band wraps the ring) reproduces and garbles exactly as a
+printed wordmark does, and a single regen does not clear it (social drafts id118 and id120 both
+BLOCKed). Treat a molded mark as a wordmark: composite the real plate or hard-crop/occlude the marked
+segment, never rely on the generator, and QA the FULL visible arc of a wrapping band rather than the
+front plane alone. **A second failed regen on the mark is the switch signal** — move to reuse or a
+different SKU rather than spending a third round.
+
+**4. Small cordless products render oversized and corded (ticket #5861).** A small cordless toy (the
+FemmeFunn Ultra Bullet, real body ~4.7in) reliably comes back scaled up and with an invented cable —
+id117 returned as a large corded wand at ~2x the real size. Every brief for a small cordless product
+states its real dimension as a scale anchor beside an in-frame reference and carries an explicit `no
+cable, no cord, no power brick` negative.
+
 **Known-garble products (default straight to the real-photo fallback, do not
 spend a Kontext round):** We-Vibe Sync Go Turquoise Couples Vibrator
-(`we-vibe-sync-go-turquoise`, see the §0-P Notebook rejects above); Magic Wand
+(`we-vibe-sync-go-turquoise`, see the §0-P Notebook rejects above); Renegade Emperor
+vibrating ring (`renegade-emperor-vibrating-ring`, molded CE/UKCA band, see failure
+class 3 above); Magic Wand
 Mini HV-135 Rechargeable Massager (`magic-wand-mini-hv-135-rechargeable-massager`) —
 with `--ref-image` pointed at the real Shopify photo, Kontext reproduced the
 product's shape, color, and silhouette correctly but garbled its small "magic
