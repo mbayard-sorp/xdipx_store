@@ -62,7 +62,7 @@ import { logVideoCost, logImageCost } from '~/lib/token-log.server'
 import { submitRunpodVideo, getRunpodStatus, getRunpodResult, cancelRunpod } from '~/lib/runpod-video.server'
 import { getEditorPhotoUrl, getApprovedCastMembers } from '~/lib/sanity.server'
 import { getProductByHandle } from '~/lib/shopify.server'
-import { getTeamConfig } from '~/lib/team.server'
+import { getTeamConfig, getTodaySpendCents } from '~/lib/team.server'
 import {
   VIDEO_EXTRA_KEYS,
   VIDEO_MAX_COST_CENTS_DEFAULT,
@@ -324,6 +324,38 @@ export function estimateJobCostUsd(
   return Math.round((frames + clip) * 1e5) / 1e5
 }
 
+/**
+ * #5943: does this job's estimate exceed the video team's remaining daily
+ * budget? The per-video ceiling (video_team_max_cost_cents) bounds a SINGLE
+ * job but says nothing about how much of the day's budget is left, so without
+ * this a job can start that the remaining budget cannot cover ($0.50 left, a
+ * $6.00 video enqueues, the day ends ~$5.50 over). gate() in team.server.ts is
+ * deliberately NOT the place for this: it is a cheap team-wide "may you run at
+ * all" check and a protected path; the cost is only known here, beside the
+ * ceiling check.
+ *
+ * Pure so the boundary (estimate == remaining passes, one cent over refuses) is
+ * a direct unit test rather than a fully-mocked enqueueVideoJob, mirroring
+ * imageCapRefusesRun in team.server.ts. Compared in integer cents so
+ * floating-point dollar math never nudges the boundary.
+ *
+ * HONEST LIMITS (kept, not engineered away): getTodaySpendCents reads a KV
+ * counter with a re-seed window, so it can lag slightly, and this compares an
+ * ESTIMATE against spend that lands as ACTUALS later. It prevents the obvious
+ * overshoot; it cannot be exact. A variant set enqueues siblings in a loop,
+ * each checked against spend that does not yet include the earlier siblings'
+ * not-yet-logged estimates, so a set can still modestly overshoot — the
+ * per-video ceiling keeps any single job bounded regardless.
+ */
+export function estimateExceedsRemainingBudget(
+  estCostUsd: number,
+  dailyCents: number,
+  spentCents: number,
+): boolean {
+  const remainingCents = Math.max(0, dailyCents - spentCents)
+  return Math.round(estCostUsd * 100) > remainingCents
+}
+
 export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobId: string; estCostUsd: number }> {
   const modelTier = args.modelTier ?? await getDefaultModelTier()
   if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
@@ -404,6 +436,20 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
   const maxCents = await getMaxCostCents()
   if (estCostUsd * 100 > maxCents) {
     throw new Error(`Estimated cost $${estCostUsd.toFixed(2)} exceeds the per-video ceiling of $${(maxCents / 100).toFixed(2)} (video_team_max_cost_cents)`)
+  }
+
+  // #5943: daily-budget fit — refuse a job whose estimate is more than the day
+  // has left, BEFORE the job row is inserted and before any provider call. See
+  // estimateExceedsRemainingBudget above for why this lives here and not in
+  // gate(), and for its honest KV-lag / estimate-vs-actual limits.
+  const [videoCfg, spentCents] = await Promise.all([getTeamConfig('video'), getTodaySpendCents('video')])
+  const remainingCents = Math.max(0, videoCfg.dailyCents - spentCents)
+  if (estimateExceedsRemainingBudget(estCostUsd, videoCfg.dailyCents, spentCents)) {
+    throw new Error(
+      `Estimated cost $${estCostUsd.toFixed(2)} exceeds the video team's remaining daily budget ` +
+      `$${(remainingCents / 100).toFixed(2)} (video_team_daily_cents minus today's spend); ` +
+      `refusing before the job row is inserted.`,
+    )
   }
 
   const jobId = randomUUID()

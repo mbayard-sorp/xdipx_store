@@ -55,7 +55,12 @@ vi.mock('~/lib/kv.server', () => ({
   KV_KEYS: { videoPollerIdle: 'video:poller:idle' },
 }))
 const configMock = vi.hoisted(() => vi.fn())
-vi.mock('~/lib/team.server', () => ({ getTeamConfig: configMock }))
+// #5943: enqueueVideoJob now also reads today's spend for the daily-budget fit
+// check. Default to 0 spent so these multi-scene enqueues stay well under the
+// 2000c daily budget (the ceiling-refusal test throws at the ceiling check,
+// which runs first).
+const spendMock = vi.hoisted(() => vi.fn(async () => 0))
+vi.mock('~/lib/team.server', () => ({ getTeamConfig: configMock, getTodaySpendCents: spendMock }))
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))
 const blobPutMock = vi.hoisted(() => vi.fn())
 const blobFetchMock = vi.hoisted(() => vi.fn())
