@@ -295,11 +295,19 @@ function utcDay(): string {
 async function counterRead(
   key: string,
   sumFromDb: () => Promise<number>,
+  opts?: { forceFresh?: boolean },
 ): Promise<number> {
   const seedKey = `${key}:seededAt`
-  const [count, seededAt] = await Promise.all([kvGet<number>(key), kvGet<number>(seedKey)])
-  if (typeof count === 'number' && typeof seededAt === 'number' && Date.now() - seededAt < SPEND_RESEED_MS) {
-    return count
+  // #5929: a caller may force a re-seed from the DB source of truth, ignoring
+  // the cached KV value. Used by gate() to confirm an at/over-budget reading
+  // before it skips a run, so a stale or inflated counter can never be the sole
+  // reason a team forfeits a pass. The re-seed still overwrites the KV counter
+  // below, so a phantom value self-heals for every later read too.
+  if (!opts?.forceFresh) {
+    const [count, seededAt] = await Promise.all([kvGet<number>(key), kvGet<number>(seedKey)])
+    if (typeof count === 'number' && typeof seededAt === 'number' && Date.now() - seededAt < SPEND_RESEED_MS) {
+      return count
+    }
   }
   const fresh = await sumFromDb()
   // A concurrent bump between the SUM and this SET is dropped from the
@@ -317,7 +325,10 @@ async function counterRead(
  * 'notebook-images' bills to content even though it carries no team prefix;
  * ticket #581 found those real dollars counting against no team at all).
  */
-export async function getTodaySpendCents(team: TeamId): Promise<number> {
+export async function getTodaySpendCents(
+  team: TeamId,
+  opts?: { forceFresh?: boolean },
+): Promise<number> {
   return counterRead(teamSpendKvKey(team, utcDay()), async () => {
     const extras = extraSpendFeaturesForTeam(team)
     const featureCond = extras.length
@@ -330,7 +341,7 @@ export async function getTodaySpendCents(team: TeamId): Promise<number> {
     )
     const dollars = Number((res.rows?.[0] as { dollars?: number } | undefined)?.dollars ?? 0)
     return Math.round(dollars * 100)
-  })
+  }, opts)
 }
 
 /**
@@ -547,7 +558,7 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     // Same throttle, same reason: both are "a worker died holding something".
     await Promise.all([expireStaleRuns(), expireStaleClaims()])
   }
-  const [cfg, spentCents, runsToday, imagesToday, blockingRun, briefId, autopublish] = await Promise.all([
+  const [cfg, spentCentsCached, runsToday, imagesToday, blockingRun, briefId, autopublish] = await Promise.all([
     getTeamConfig(team),
     getTodaySpendCents(team),
     getTodayRunCount(team, excludeRunId),
@@ -558,6 +569,18 @@ export async function gate(team: TeamId, excludeRunId?: number): Promise<GateRes
     getActiveBriefId(),
     team === 'content' ? getValve(VALVE_KEYS.contentAutopublish) : Promise.resolve(undefined),
   ])
+  // #5929: never issue an over_budget skip on a stale or inflated KV spend
+  // counter. If the cached counter reads at/over budget, re-confirm against the
+  // DB source of truth (a forced re-seed) before trusting it. Strictly
+  // corrective: the fresh read replaces the cached value with the real DB sum,
+  // which can only be equal or LOWER when the counter drifted high, so a
+  // genuinely over-budget team still skips while a phantom (e.g. run 528's
+  // 3649c counter against a ~4c DB sum) no longer forfeits the pass. Only paid
+  // when the cheap cached read already says over budget, so the common
+  // under-budget path adds no query.
+  const spentCents = cfg.dailyCents - spentCentsCached <= 0
+    ? await getTodaySpendCents(team, { forceFresh: true })
+    : spentCentsCached
   const remainingCents = Math.max(0, cfg.dailyCents - spentCents)
   // Coalesced only for the enforcement comparisons below (byte-for-byte
   // unchanged). The gate RESPONSE omits maxImagesPerDay entirely when the team

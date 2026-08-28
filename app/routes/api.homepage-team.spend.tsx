@@ -13,25 +13,7 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/homepage-team.server'
 import { logApiTokens, logImageCost } from '~/lib/token-log.server'
-import { MAX_SUBSCRIPTION_SOURCES } from '~/lib/model-pricing.server'
-
-/**
- * Keep the stored `source` inside the known vocabulary.
- *
- * Known Max-subscription aliases pass through unchanged so `estimateCostUsd`
- * can zero-rate them (see MAX_SUBSCRIPTION_SOURCES). 'batch' and 'sync' are the
- * real API-key sources. Anything else is kept as-is for the audit trail but
- * warned about, because a silent unknown is how a feature name ended up in the
- * source column.
- */
-function normalizeSpendSource(raw: string | undefined): string {
-  if (!raw) return 'agent-sdk'
-  const known = new Set([...MAX_SUBSCRIPTION_SOURCES, 'batch', 'sync'])
-  if (known.has(raw)) return raw
-  console.warn(`[spend] unrecognised token source "${raw}"; pricing it at the premium tier. ` +
-    'Add it to MAX_SUBSCRIPTION_SOURCES if it is Max-billed, or fix the caller.')
-  return raw
-}
+import { normalizeSpendSource } from '~/lib/spend-source.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -62,9 +44,10 @@ export async function action({ request }: ActionFunctionArgs) {
       // was zero-rated, so Max-subscription usage under any other label was
       // priced at Opus list rates and charged against team budget gates. One
       // such row closed the social gate on 2026-08-21 with $43.50 of cost that
-      // was never actually spent. An unrecognised label still prices
-      // conservatively (estimateCostUsd defaults to the Opus tier), but it is
-      // logged so the caller gets fixed instead of silently mispricing forever.
+      // was never actually spent. #5929: an unrecognised label on this Max-only
+      // endpoint now normalises to a zero-rated Max source (see
+      // normalizeSpendSource) rather than pricing at the Opus tier, and is still
+      // logged so the caller gets its label fixed.
       source: normalizeSpendSource(s('source')),
       inputTokens: n('inputTokens') ?? 0,
       outputTokens: n('outputTokens') ?? 0,
