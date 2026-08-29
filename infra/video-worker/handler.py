@@ -73,17 +73,29 @@ BLOB_API_VERSION = os.environ.get("BLOB_API_VERSION", "12")
 # shared with the base tiers, 16 fps, generation in 77-frame chunks (~4.8s)
 # with extend passes adding 77 frames each (chunks = ceil(audio_s * 16 / 77)).
 #
-# TODO(verify): the API-format node class/input names below (AudioEncoderLoader,
-# LoadAudio, WanSoundImageToVideo and its chunk wiring) were not exercised
-# against a live ComfyUI during this build; the bake-off session validates the
-# graph on the endpoint BEFORE any image tag is pushed, and the endpoint pins
-# an immutable tag, so merging this cannot change live behavior. If the
-# bake-off picks InfiniteTalk or LongCat-Video-Avatar instead, this graph is
-# replaced wholesale and the handler contract stays identical.
+# Bake-off 2026-08-29: the node names and wiring below were checked against the
+# ComfyUI source at the pinned COMFY_SHA (v0.33.1) and against the official
+# Comfy-Org `video_wan2_2_14B_s2v` template. That pass REPLACED the previous
+# graph, which could not have run: it invented `audio`, `audio_encoder` and
+# `chunk_length` inputs on WanSoundImageToVideo (none exist), omitted the
+# AudioEncoderEncode node that actually produces the audio embedding, and
+# skipped ModelSamplingSD3. See docs/store-team/video-worker-runpod.md.
+#
+# TODO(verify): still NOT executed against a running ComfyUI. The bake-off's
+# render half was cut short (GHCR anonymous pull rate limits, then a host
+# pulling at ~0.6 MB/s), so nothing here has produced a frame. A render test is
+# still required before an image tag is pushed. The endpoint pins an immutable
+# tag, so merging this cannot change live behavior.
 S2V_MODEL = "wan2.2_s2v_14B_fp8_scaled.safetensors"
 S2V_AUDIO_ENCODER = "wav2vec2_large_english_fp16.safetensors"
 S2V_CHUNK_FRAMES = 77
 S2V_MAX_SECONDS = 60  # provisional per-render cap; the app splits longer lines
+# Sampling settings from the official Comfy-Org video_wan2_2_14B_s2v template.
+# S2V differs from the base tiers: shift 8 (not 5), uni_pc (not euler), and one
+# single-expert sampler pass rather than the high-noise/low-noise pair.
+S2V_SHIFT = 8.0
+S2V_SAMPLER = "uni_pc"
+S2V_CFG = 6.0
 
 LIGHTX2V_LORAS = {
     "i2v": (
@@ -252,20 +264,35 @@ def probe_audio_seconds(path: str) -> float:
 
 def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audio_seconds: float) -> dict[str, Any]:
     """
-    Programmatic API-format graph for Wan 2.2 S2V: one base generation of
-    S2V_CHUNK_FRAMES driven by the speech track and the identity frame.
-    Longer audio renders ceil(audio_s * FPS / 77) chunks via the model's
-    chunked generation (length = total frames; the node consumes the audio
-    embedding across chunks internally per the native support).
+    Programmatic API-format graph for Wan 2.2 S2V, matching the shape of the
+    official Comfy-Org `video_wan2_2_14B_s2v` template.
 
-    TODO(verify): validated on the endpoint during the bake-off before any
-    image push; see the S2V constant block's note. Node ids are fixed so a
-    future template swap edits by id exactly like build_workflow.
+    Audio reaches the sampler as an ENCODED embedding, not as raw audio:
+    LoadAudio -> AudioEncoderEncode(audio_encoder, audio) -> the S2V node's
+    `audio_encoder_output`. `WanSoundImageToVideo` has no `audio` or
+    `audio_encoder` input and never did.
+
+    Chunking is NOT internal to the node, and there is no `chunk_length` input.
+    The base node generates at most S2V_CHUNK_FRAMES; longer speech is a chain
+    of `WanSoundImageToVideoExtend` passes, each sampled and joined onto the
+    running latent with `LatentConcat` on the time axis. Every episode line
+    longer than ~4.8s takes that path, which is the normal case.
+
+    Node names and wiring checked against ComfyUI at the pinned COMFY_SHA
+    (v0.33.1) and the official template on 2026-08-29. NOT yet render-tested;
+    see docs/store-team/video-worker-runpod.md.
     """
     total_frames = min(frames_for(max(1, round(audio_seconds))), frames_for(S2V_MAX_SECONDS))
+    base_frames = min(total_frames, S2V_CHUNK_FRAMES)
+    cfg = 1.0 if p["fast"] else S2V_CFG
+
     wf: dict[str, Any] = {
         "1": {"class_type": "UNETLoader", "_meta": {"title": "s2v model"},
               "inputs": {"unet_name": S2V_MODEL, "weight_dtype": "default"}},
+        # Wan needs the flow-shift patch; the base tiers' workflow JSON does the
+        # same thing between UNETLoader and the sampler.
+        "2": {"class_type": "ModelSamplingSD3", "_meta": {"title": "shift"},
+              "inputs": {"model": ["1", 0], "shift": S2V_SHIFT}},
         "3": {"class_type": "CLIPLoader", "_meta": {"title": "umt5"},
               "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan"}},
         "4": {"class_type": "VAELoader", "_meta": {"title": "wan vae"},
@@ -280,28 +307,53 @@ def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audi
                "inputs": {"audio": audio_name}},
         "17": {"class_type": "AudioEncoderLoader", "_meta": {"title": "wav2vec2"},
                "inputs": {"audio_encoder_name": S2V_AUDIO_ENCODER}},
-        "8": {"class_type": "WanSoundImageToVideo", "_meta": {"title": "s2v"},
+        "18": {"class_type": "AudioEncoderEncode", "_meta": {"title": "encode speech"},
+               "inputs": {"audio_encoder": ["17", 0], "audio": ["16", 0]}},
+        "8": {"class_type": "WanSoundImageToVideo", "_meta": {"title": "s2v base chunk"},
               "inputs": {
                   "positive": ["5", 0], "negative": ["6", 0], "vae": ["4", 0],
-                  "ref_image": ["7", 0],
-                  "audio": ["16", 0], "audio_encoder": ["17", 0],
+                  "ref_image": ["7", 0], "audio_encoder_output": ["18", 0],
                   "width": WIDTH, "height": HEIGHT,
-                  "length": total_frames, "chunk_length": S2V_CHUNK_FRAMES,
-                  "batch_size": 1,
+                  "length": base_frames, "batch_size": 1,
               }},
-        "11": {"class_type": "KSampler", "_meta": {"title": "sample"},
-               "inputs": {"model": ["1", 0], "positive": ["8", 0], "negative": ["8", 1],
+        "11": {"class_type": "KSampler", "_meta": {"title": "sample base"},
+               "inputs": {"model": ["2", 0], "positive": ["8", 0], "negative": ["8", 1],
                           "latent_image": ["8", 2], "seed": p["seed"],
-                          "steps": p["steps"], "cfg": 1.0 if p["fast"] else 6.0,
-                          "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
-        "13": {"class_type": "VAEDecode", "_meta": {"title": "decode"},
-               "inputs": {"samples": ["11", 0], "vae": ["4", 0]}},
-        "15": {"class_type": "SaveVideo", "_meta": {"title": "save"},
-               "inputs": {"video": ["14", 0], "filename_prefix": f"video/xdipx-s2v-{p['seed']}-{uuid.uuid4().hex[:8]}",
-                          "format": "mp4", "codec": "h264"}},
-        "14": {"class_type": "CreateVideo", "_meta": {"title": "frames+audio -> video"},
-               "inputs": {"images": ["13", 0], "audio": ["16", 0], "fps": FPS}},
+                          "steps": p["steps"], "cfg": cfg,
+                          "sampler_name": S2V_SAMPLER, "scheduler": "simple", "denoise": 1.0}},
     }
+
+    # Extend chain for anything past the first chunk.
+    latent: list[Any] = ["11", 0]
+    remaining = total_frames - base_frames
+    node_id = 100
+    while remaining > 0:
+        length = min(S2V_CHUNK_FRAMES, remaining)
+        ext, ks, cat = str(node_id), str(node_id + 1), str(node_id + 2)
+        wf[ext] = {"class_type": "WanSoundImageToVideoExtend",
+                   "_meta": {"title": f"s2v extend +{length}"},
+                   "inputs": {"positive": ["5", 0], "negative": ["6", 0], "vae": ["4", 0],
+                              "length": length, "video_latent": latent,
+                              "audio_encoder_output": ["18", 0], "ref_image": ["7", 0]}}
+        wf[ks] = {"class_type": "KSampler", "_meta": {"title": f"sample +{length}"},
+                  "inputs": {"model": ["2", 0], "positive": [ext, 0], "negative": [ext, 1],
+                             "latent_image": [ext, 2], "seed": p["seed"],
+                             "steps": p["steps"], "cfg": cfg,
+                             "sampler_name": S2V_SAMPLER, "scheduler": "simple", "denoise": 1.0}}
+        wf[cat] = {"class_type": "LatentConcat", "_meta": {"title": "join chunk"},
+                   "inputs": {"samples1": latent, "samples2": [ks, 0], "dim": "t"}}
+        latent = [cat, 0]
+        remaining -= length
+        node_id += 3
+
+    wf["13"] = {"class_type": "VAEDecode", "_meta": {"title": "decode"},
+                "inputs": {"samples": latent, "vae": ["4", 0]}}
+    wf["14"] = {"class_type": "CreateVideo", "_meta": {"title": "frames+audio -> video"},
+                "inputs": {"images": ["13", 0], "audio": ["16", 0], "fps": FPS}}
+    wf["15"] = {"class_type": "SaveVideo", "_meta": {"title": "save"},
+                "inputs": {"video": ["14", 0],
+                           "filename_prefix": f"video/xdipx-s2v-{p['seed']}-{uuid.uuid4().hex[:8]}",
+                           "format": "mp4", "codec": "h264"}}
     return wf
 
 
