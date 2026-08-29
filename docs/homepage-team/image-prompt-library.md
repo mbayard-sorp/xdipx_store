@@ -274,6 +274,41 @@ property, never all of them; the packshot is the third resort, never the second.
   saturated-color-instead-of-soft-tint failure mode on this same Magic Wand product line; use it
   verbatim on any future §0-P retry that fails on background saturation.
 
+- Wicked Sensitive Water-Based Personal Lubricant 4oz (`wicked-sensitive-water-based-lubricant`),
+  `wellness-basics` category, sincere staging, post `what-lube-is-best-for-sensitive-skin`
+  ("What Lube Is Best for Sensitive Skin?", content-writer run 574). Sincere staging chosen
+  deliberately over the archetype E surreal option: the article's subject is irritation, allergy,
+  and when to stop shopping and see a clinician, which is the health-adjacent fence the §0-P
+  surreal license explicitly excludes. **Ref-image note:** this product's Shopify `images[0]`
+  (`44083A.jpg`) is a clean standalone bottle on white with no carton and no second product, so no
+  `sharp .extract()` crop was needed and it was passed to the ref-image path as-is. Its printed
+  label text is the real product's own and rendered legibly in both candidates, so the "no readable
+  invented text" rule is not engaged. One round via Atlas `seedream-4.5-edit` (Atlas primary,
+  landscape_4_3, ref-image path), 2 candidates, no retry needed:
+  - **Candidate 1 rejected at the vision gate on ground and composition:** the paper base rendered
+    as a cool light grey rather than white, and the bottle sat dead-centre with the coral fabric
+    fanning out behind it symmetrically, leaving no single quiet zone large enough for a headline.
+    Product identity, scale, and palette were all faithful; the reject is ground-lock plus
+    negative-space placement, not product fidelity.
+  - **Candidate 2 kept:** white paper base holding true, the bottle offset to the right at
+    two-thirds height with an unbroken quiet zone filling the left half of the frame, one sheer
+    coral-tinted fabric sweep out of focus behind it (setting, never subject), and a single clear
+    gel droplet on the paper catching the side light. Warm directional daylight, soft falloff, no
+    hands, no bodies, no bed, no banned domestic-metaphor object anywhere in frame →
+    `image-00cb6d3dc42164d678c6d5557389f66a47df5b00-2304x1728-jpg`.
+  - **Prompt-record correction worth knowing (applies to every §0-P and §0-H run).**
+    `gen-notebook-art.ts --upload` does not accept `--prompt`, so the `imagePrompt` it writes on
+    upload is the surface's generic **default** prompt, not the prompt that actually produced the
+    keeper. `check-hero-embed-match.ts` still passes, because it only tests for a non-empty prompt
+    and for hero/embed coupling, so this fails silently and leaves the post's stored prompt unable
+    to explain its own image on a retro. Run 574 patched `blogPost.imagePrompt` back to the real
+    composed prompt with `sanity-content-cli.ts patch` immediately after upload. Do the same until
+    `--upload` learns `--prompt`.
+  - **Composition note for future §0-P lubricant heroes:** a single sheer fabric sweep plus one
+    gel droplet reads as sensory anticipation at the charter's visual 6-7 without any body in
+    frame, and the droplet does the work the packaging shot cannot: it says what is inside the
+    bottle. Reusable on any lube, gel, or serum hero.
+
 ### §0-H human scaffold
 
 (no ref-image unless Emma appears — then `--ref-image` = the canonical Emma photo, Sanity
