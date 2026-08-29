@@ -131,6 +131,72 @@ async function getApprovalMode(): Promise<ApprovalMode> {
 }
 
 // ---------------------------------------------------------------------------
+// MAP brand scoping (owner rule 2026-08-29)
+// ---------------------------------------------------------------------------
+
+/**
+ * MAP (minimum advertised price) is a per-brand contractual floor, not a
+ * catalog-wide rule. Only these vendors' products are held at MAP; every other
+ * brand is priced purely off the target-margin markup rules and ignores any
+ * MAP value the Nalpac feed happens to report.
+ *
+ * The feed carries a MAP (frequently equal to MSRP) for many brands that impose
+ * no such restriction, and the engine's `at_map` floor was dragging those
+ * products' sell prices up to MSRP, wiping out promotional pricing across the
+ * catalog (diagnosed 2026-08-29: 919 of 925 queued changes were MAP-driven
+ * increases, none of them a MAP brand). Scoping MAP to the brands that actually
+ * enforce it is the fix.
+ *
+ * Editable without a deploy via the `pricing_map_brands` pipeline setting (JSON
+ * array of vendor names); this constant is the fallback.
+ */
+export const DEFAULT_MAP_BRANDS: readonly string[] = ['Lovense', 'Playground']
+
+/**
+ * Pure predicate: does MAP enforcement apply to this vendor? Case-insensitive,
+ * whitespace-trimmed exact match against the MAP-brand list. A null/blank
+ * vendor never matches, so an unbranded product is priced off markup rules.
+ * Exported for unit testing.
+ */
+export function mapAppliesToVendor(
+  vendor: string | null | undefined,
+  mapBrands: readonly string[],
+): boolean {
+  if (!vendor) return false
+  const v = vendor.trim().toLowerCase()
+  if (!v) return false
+  return mapBrands.some(b => b.trim().toLowerCase() === v)
+}
+
+/**
+ * Read the MAP-brand list from `pricing_map_brands` (JSON array of strings),
+ * falling back to DEFAULT_MAP_BRANDS. Read once per run and carried on
+ * RunContext so a batch does not re-read it per variant.
+ */
+export async function getMapBrands(): Promise<string[]> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, 'pricing_map_brands'))
+      .limit(1)
+    const raw = rows[0]?.value
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown
+      if (Array.isArray(parsed)) {
+        const brands = parsed.filter(
+          (b): b is string => typeof b === 'string' && b.trim().length > 0,
+        )
+        if (brands.length > 0) return brands
+      }
+    }
+  } catch {
+    // fall through to defaults
+  }
+  return [...DEFAULT_MAP_BRANDS]
+}
+
+// ---------------------------------------------------------------------------
 // Single-variant recompute
 // ---------------------------------------------------------------------------
 
@@ -160,6 +226,8 @@ interface RunContext {
   trigger:    RecomputeVariantParams['trigger']
   mode:       ApprovalMode
   thresholds: Record<ApprovalMode, number>
+  /** Vendors whose MAP the engine honors; every other brand ignores MAP. */
+  mapBrands:  string[]
 }
 
 // Minimal variant/product data the compute core needs. Matches both the
@@ -173,6 +241,7 @@ interface VariantInput {
 }
 
 interface ProductInput {
+  vendor: string | null
   productType: string | null
   metafields: {
     wholesaleCost:  number | null
@@ -192,12 +261,17 @@ async function recomputeFromData(
   ctx: RunContext,
 ): Promise<RecomputeVariantResult> {
   const { variantId } = variant
-  const { trigger, mode, thresholds } = ctx
+  const { trigger, mode, thresholds, mapBrands } = ctx
 
   // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
   // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
   const cost        = variant.unitCost ?? product.metafields.wholesaleCost
-  const map         = product.metafields.mapPrice
+  // MAP is a per-brand contractual floor (owner rule 2026-08-29): honor the
+  // feed's MAP only for the MAP brands. Every other vendor resolves MAP to null
+  // so it prices off the markup rules instead of being held at MAP/MSRP.
+  const map         = mapAppliesToVendor(product.vendor, mapBrands)
+    ? product.metafields.mapPrice
+    : null
   const msrp        = product.metafields.originalPrice
   const oldSell     = variant.price
   const oldCompare  = variant.compareAtPrice
@@ -404,6 +478,7 @@ export async function recomputeVariant(
     }
 
     product = {
+      vendor: data.product.vendor,
       productType: data.product.productType,
       metafields: {
         wholesaleCost:  mfMap['wholesale_cost']  ? parseFloat(mfMap['wholesale_cost'])  : null,
@@ -426,8 +501,9 @@ export async function recomputeVariant(
 
   const mode       = await getApprovalMode()
   const thresholds = await getModeThresholds()
+  const mapBrands  = await getMapBrands()
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds })
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands })
 }
 
 
@@ -492,6 +568,7 @@ export async function dryRunRuleChange(opts: {
   const { bulkFetchProductsForPricing } = await import('./shopify.server')
   const mode = await getApprovalMode()
   const thresholds = await getModeThresholds()
+  const mapBrands = await getMapBrands()
 
   const result: DryRunResult = {
     totalAffected: 0,
@@ -539,7 +616,9 @@ export async function dryRunRuleChange(opts: {
         // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
         // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
         const cost = variant.unitCost ?? product.metafields.wholesaleCost
-        const map = product.metafields.mapPrice
+        // MAP is brand-scoped (owner rule 2026-08-29): non-MAP brands ignore MAP.
+        const vendor = (product as { vendor?: string | null }).vendor ?? null
+        const map = mapAppliesToVendor(vendor, mapBrands) ? product.metafields.mapPrice : null
         const msrp = product.metafields.originalPrice
         const oldSell = variant.price
 
@@ -657,7 +736,8 @@ export async function recomputeCatalog(opts: {
   // serverless limit on manual runs.)
   const mode       = await getApprovalMode()
   const thresholds = await getModeThresholds()
-  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds }
+  const mapBrands  = await getMapBrands()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands }
 
   for (const product of products) {
     for (const variant of product.variants) {
