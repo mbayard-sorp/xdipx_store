@@ -3395,6 +3395,65 @@ export async function findVariantBySKU(sku: string): Promise<string | null> {
   return data.productVariants.edges[0]?.node.id ?? null
 }
 
+/** A Shopify variant's oversell-risk shape, keyed by SKU downstream. */
+export interface VariantInventoryPolicy {
+  /** 'DENY' blocks add-to-cart/checkout at qty 0; 'CONTINUE' allows oversell. */
+  inventoryPolicy: 'DENY' | 'CONTINUE'
+  /** Whether Shopify tracks inventory for this variant's inventory item. */
+  tracked: boolean
+}
+
+/**
+ * Look up Shopify variant inventory policy + tracking for a batch of SKUs.
+ * Returns a Map keyed by SKU; a SKU with no matching variant is absent from the
+ * map (the caller treats absent as "unknown"). Best-effort: batches the SKUs
+ * into `sku:"X" OR sku:"Y"` queries, and on a GraphQL error for one batch that
+ * batch's SKUs are simply left absent rather than throwing.
+ */
+export async function getVariantInventoryPolicyBySkus(
+  skus: string[],
+): Promise<Map<string, VariantInventoryPolicy>> {
+  const out = new Map<string, VariantInventoryPolicy>()
+  const unique = [...new Set(skus.filter(Boolean))]
+  const BATCH = 40
+  for (let i = 0; i < unique.length; i += BATCH) {
+    const batch = unique.slice(i, i + BATCH)
+    const query = batch.map(s => `sku:${JSON.stringify(s)}`).join(' OR ')
+    try {
+      const data = await adminGraphQL<{
+        productVariants: {
+          edges: { node: {
+            sku: string | null
+            inventoryPolicy: 'DENY' | 'CONTINUE'
+            inventoryItem: { tracked: boolean } | null
+          } }[]
+        }
+      }>(`
+        query VariantInventoryPolicy($query: String!) {
+          productVariants(first: 250, query: $query) {
+            edges { node {
+              sku
+              inventoryPolicy
+              inventoryItem { tracked }
+            } }
+          }
+        }
+      `, { query })
+      for (const { node } of data.productVariants.edges) {
+        if (!node.sku) continue
+        out.set(node.sku, {
+          inventoryPolicy: node.inventoryPolicy,
+          tracked:         node.inventoryItem?.tracked ?? false,
+        })
+      }
+    } catch (err) {
+      console.error('[shopify] getVariantInventoryPolicyBySkus batch failed:', err)
+      // Leave this batch's SKUs absent; caller fails safe (keeps flagging).
+    }
+  }
+  return out
+}
+
 /**
  * Ensure a metafield definition exists for the given owner type. Idempotent —
  * if a definition already exists at the same namespace+key+ownerType, returns
