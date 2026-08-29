@@ -27,6 +27,10 @@
 import { kvGet, kvSet } from '~/lib/kv.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import {
+  getVariantInventoryPolicyBySkus,
+  type VariantInventoryPolicy,
+} from '~/lib/shopify.server'
+import {
   fileDetectionTicket,
   makeDedupeKey,
   priorityFromSeverity,
@@ -92,9 +96,33 @@ export function computeOosStreaks(
   return { nextState, flagged }
 }
 
+/**
+ * Drop threshold-flagged SKUs that carry no checkout risk (#5213). A variant
+ * that is inventory-tracked AND `inventoryPolicy=DENY` is already blocked at a
+ * sold-out checkout by Shopify (`availableForSale=false` at qty 0), so a
+ * sustained-OOS flag on it is a no-op that only floods the product inbox. Keep
+ * only variants that can oversell (`inventoryPolicy=CONTINUE`) or are untracked
+ * (`tracksInventory=false`), plus any SKU whose policy could not be resolved
+ * (absent from the map) — an unknown fails safe toward flagging, never toward
+ * silently suppressing a real oversell risk.
+ */
+export function filterOversellRiskyFlags(
+  flagged: OosFlag[],
+  policyBySku: ReadonlyMap<string, VariantInventoryPolicy>,
+): OosFlag[] {
+  return flagged.filter(f => {
+    const p = policyBySku.get(f.sku)
+    if (!p) return true            // unknown → keep (fail safe)
+    if (!p.tracked) return true    // untracked → real oversell risk
+    return p.inventoryPolicy === 'CONTINUE' // tracked: only oversell-eligible
+  })
+}
+
 export interface OosMonitorResult {
   zeroCount:    number
   flaggedCount: number
+  /** Flagged SKUs suppressed as no-checkout-risk (tracked + inventoryPolicy=DENY). */
+  suppressedNoRisk: number
   ticketsFiled: number
   capped:       number
 }
@@ -138,7 +166,23 @@ export async function flagSustainedOutOfStock(opts: {
   // just restart from today, which only delays a flag, never files a false one.
   await kvSet(KV_OOS_ZERO_SINCE, nextState, 35 * 24 * 60 * 60)
 
-  const toFile = flagged.slice(0, maxPerRun)
+  // Suppress flags with no checkout risk (#5213): a tracked, inventoryPolicy=DENY
+  // variant is already blocked at a sold-out checkout by Shopify, so its flag is
+  // a no-op that floods the product inbox. Only oversell-eligible (CONTINUE) or
+  // untracked variants can actually let a customer reach a sold-out checkout.
+  // Best-effort and fail-safe: if the Shopify lookup throws, keep all flags.
+  let riskyFlags = flagged
+  if (flagged.length > 0) {
+    try {
+      const policyBySku = await getVariantInventoryPolicyBySkus(flagged.map(f => f.sku))
+      riskyFlags = filterOversellRiskyFlags(flagged, policyBySku)
+    } catch (err) {
+      console.error('[oos-monitor] inventory-policy lookup threw; flagging all:', err)
+    }
+  }
+  const suppressedNoRisk = flagged.length - riskyFlags.length
+
+  const toFile = riskyFlags.slice(0, maxPerRun)
   let ticketsFiled = 0
   for (const f of toFile) {
     const id = await fileDetectionTicket({
@@ -161,13 +205,14 @@ export async function flagSustainedOutOfStock(opts: {
     if (id) ticketsFiled++
   }
 
-  const capped = flagged.length - toFile.length
+  const capped = riskyFlags.length - toFile.length
   if (flagged.length > 0) {
     console.info(
       `[oos-monitor] carried qty=0: ${zeroSkus.length}; sustained >=${thresholdDays}d: ${flagged.length}; ` +
+      `suppressed (tracked+DENY, no checkout risk): ${suppressedNoRisk}; ` +
       `tickets filed: ${ticketsFiled}${capped > 0 ? `; capped ${capped} for a later run` : ''}`,
     )
   }
 
-  return { zeroCount: zeroSkus.length, flaggedCount: flagged.length, ticketsFiled, capped }
+  return { zeroCount: zeroSkus.length, flaggedCount: flagged.length, suppressedNoRisk, ticketsFiled, capped }
 }

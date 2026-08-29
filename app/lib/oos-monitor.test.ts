@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeOosStreaks,
+  filterOversellRiskyFlags,
   utcDaysBetween,
+  type OosFlag,
   type OosStreakState,
 } from './oos-monitor.server'
+import type { VariantInventoryPolicy } from './shopify.server'
 
 describe('utcDaysBetween', () => {
   it('counts whole UTC days forward', () => {
@@ -78,5 +81,50 @@ describe('computeOosStreaks (#3884)', () => {
     const prior: OosStreakState = { A: '2026-08-14' } // 3d
     expect(computeOosStreaks(['A'], prior, '2026-08-17', 5).flagged).toEqual([])
     expect(computeOosStreaks(['A'], prior, '2026-08-19', 5).flagged.map(f => f.sku)).toEqual(['A'])
+  })
+})
+
+describe('filterOversellRiskyFlags (#5213)', () => {
+  const flag = (sku: string): OosFlag => ({ sku, sinceStr: '2026-08-14', streakDays: 3 })
+  const policy = (
+    inventoryPolicy: VariantInventoryPolicy['inventoryPolicy'],
+    tracked: boolean,
+  ): VariantInventoryPolicy => ({ inventoryPolicy, tracked })
+
+  it('suppresses a tracked, inventoryPolicy=DENY variant (already blocked at checkout)', () => {
+    const map = new Map([['deny', policy('DENY', true)]])
+    expect(filterOversellRiskyFlags([flag('deny')], map)).toEqual([])
+  })
+
+  it('keeps a tracked, inventoryPolicy=CONTINUE variant (oversell allowed)', () => {
+    const map = new Map([['cont', policy('CONTINUE', true)]])
+    expect(filterOversellRiskyFlags([flag('cont')], map).map(f => f.sku)).toEqual(['cont'])
+  })
+
+  it('keeps an untracked variant regardless of policy (Shopify never blocks it)', () => {
+    const map = new Map([
+      ['untrackedDeny', policy('DENY', false)],
+      ['untrackedCont', policy('CONTINUE', false)],
+    ])
+    expect(
+      filterOversellRiskyFlags([flag('untrackedDeny'), flag('untrackedCont')], map).map(f => f.sku),
+    ).toEqual(['untrackedDeny', 'untrackedCont'])
+  })
+
+  it('keeps a SKU whose policy could not be resolved (unknown fails safe)', () => {
+    expect(filterOversellRiskyFlags([flag('missing')], new Map()).map(f => f.sku)).toEqual(['missing'])
+  })
+
+  it('filters a mixed batch to only the oversell-risky and unknown SKUs', () => {
+    const map = new Map([
+      ['deny',       policy('DENY', true)],      // suppressed
+      ['continue',   policy('CONTINUE', true)],  // kept
+      ['untracked',  policy('DENY', false)],     // kept
+      // 'unknown' absent → kept
+    ])
+    const flags = [flag('deny'), flag('continue'), flag('untracked'), flag('unknown')]
+    expect(filterOversellRiskyFlags(flags, map).map(f => f.sku)).toEqual([
+      'continue', 'untracked', 'unknown',
+    ])
   })
 })
