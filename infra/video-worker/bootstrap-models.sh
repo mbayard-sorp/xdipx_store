@@ -31,10 +31,14 @@ fetch() {
   echo "[get ] ${sub}/${name}"
   touch "${dest}.partial"
   # -C - resumes an interrupted download; HF_TOKEN is optional (these repos are public).
-  curl -L --fail --retry 5 --retry-delay 10 -C - \
+  # --no-progress-meter, not -s: errors still print, but the per-second progress bar does not.
+  # One 15 GB checkpoint otherwise buries the log in ~29 KB of redraw spam, which is how a real
+  # failure goes unnoticed.
+  curl -L --fail --no-progress-meter --retry 5 --retry-delay 10 -C - \
     ${HF_TOKEN:+-H "Authorization: Bearer ${HF_TOKEN}"} \
     -o "${dest}" "${HF_BASE}/${sub}/${name}"
   rm -f "${dest}.partial"
+  echo "[done] ${sub}/${name} ($(du -h "${dest}" 2>/dev/null | cut -f1))"
 }
 
 # Shared: text encoder + VAE. Wan 2.2 14B uses the Wan 2.1 VAE (the 2.2 VAE is for the 5B ti2v model).
@@ -69,11 +73,16 @@ echo
 
 # Audio-driven talking set (tickets #5713/#5714): the Wan 2.2 S2V checkpoint
 # plus the wav2vec2 audio encoder. The umt5 text encoder and wan_2.1 VAE above
-# are shared. Volume math: ~65 GB used of 100 before this; the fp8 checkpoint
-# (14.3 GB) + encoder (~0.6 GB) fit with ~20 GB to spare.
+# are shared. Volume math, measured on the volume 2026-08-29 rather than
+# estimated: diffusion_models was already 54 GB, loras 4.6 GB, text_encoders
+# 6.3 GB, vae 0.24 GB, so ~65 GB of the 100 GB volume before this block. The
+# checkpoint is 15.2 GB on the wire (not the 14.3 GB previously noted here) and
+# the encoder ~0.6 GB, leaving roughly 19 GB spare. A second talking model
+# (InfiniteTalk, LongCat-Video-Avatar) does NOT fit alongside this one without
+# growing the volume — worth knowing before planning a three-way bake-off.
 if [ "${WITH_S2V:-0}" = "1" ]; then
   mkdir -p "${MODELS_ROOT}/audio_encoders"
-  fetch diffusion_models wan2.2_s2v_14B_fp8_scaled.safetensors             # 14.3 GB
+  fetch diffusion_models wan2.2_s2v_14B_fp8_scaled.safetensors             # 15.2 GB
   fetch audio_encoders   wav2vec2_large_english_fp16.safetensors           # ~0.6 GB
 fi
 
