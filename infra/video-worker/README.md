@@ -65,16 +65,21 @@ duration derives from the audio (cap 60s per render; the app splits longer
 lines). The clip KEEPS its speech track (the silent modes stay `-an`).
 Checkpoints land on the volume via `WITH_S2V=1 bash bootstrap-models.sh`
 (wan2.2_s2v_14B_fp8_scaled + wav2vec2_large_english_fp16; umt5 and the VAE are
-shared with the base tiers). Generation runs 16 fps in 77-frame chunks per the
-native ComfyUI support.
+shared with the base tiers). Generation runs at 16 fps in 77-frame chunks: the
+base `WanSoundImageToVideo` pass produces the first 77 frames (4.8 s) and each
+further chunk is a `WanSoundImageToVideoExtend` pass sampled and joined onto the
+running latent with `LatentConcat(dim='t')`. The chunking is built by
+`build_s2v_workflow`, not done inside the node.
 
-**Enablement gate:** the S2V graph in `build_s2v_workflow` carries
-TODO(verify) notes (node input names were not exercised against a live
-ComfyUI during the build). The bake-off session (Wan2.2-S2V vs InfiniteTalk
-vs LongCat-Video-Avatar, results recorded in
-`docs/store-team/video-worker-runpod.md`) validates or replaces the graph on
-the endpoint BEFORE any image tag is pushed. The endpoint pins an immutable
-sha tag, so merging this repo change alters nothing live by construction.
+**Enablement gate:** the graph was rewritten on 2026-08-29 after the bake-off
+found the original could not run (invented node inputs, a missing
+`AudioEncoderEncode`, no `ModelSamplingSD3`; see
+`docs/store-team/video-worker-runpod.md`). It is verified against the ComfyUI
+source at the pinned `COMFY_SHA` and the official template, but **has never been
+executed** — no frame has been rendered, and whether 720x1280 fits in 24 GB is
+untested. A render test is still required BEFORE any image tag is pushed. The
+endpoint pins an immutable sha tag, so merging this repo change alters nothing
+live by construction.
 
 Frame count is `durationSeconds * 16 + 1` rounded down to the nearest `4k+1` (Wan latent
 constraint): 5 s = 81 frames, 15 s = 241 frames.

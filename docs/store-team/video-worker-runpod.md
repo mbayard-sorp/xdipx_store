@@ -84,10 +84,10 @@ and the writers room writes voiceover-carried b-roll, exactly as the render play
 
 Doing any of these without the others only moves the failure later and makes it cost more.
 
-1. **Validate the graph.** `build_s2v_workflow` carries `TODO(verify)` on the node class and
-   input names (handler.py lines 76, 261, 338); they were never exercised against a live
-   ComfyUI. Run the bake-off (Wan2.2-S2V vs InfiniteTalk vs LongCat-Video-Avatar) and record
-   the result here. A wrong node name fails *after* the worker boots, so this is a real cost.
+1. **Validate the graph.** Partly done — see §Bake-off below. The graph was rewritten on
+   2026-08-29 because the original could not have run. What remains is a render test: the
+   corrected graph has never produced a frame. A wrong node name fails *after* the worker
+   boots, so this is a real cost.
 2. **Load the weights.** Start a pod on network volume `q167g3em77` and run
    `MODELS_ROOT=/workspace/models WITH_S2V=1 bash bootstrap-models.sh`
    (wan2.2_s2v_14B_fp8_scaled + wav2vec2_large_english_fp16). **Terminate the pod** — a pod
@@ -99,6 +99,60 @@ Doing any of these without the others only moves the failure later and makes it 
 
 Steps 1-3 are all owner-only (GPU pod, registry credential, endpoint config), which is why
 this is a blocker-list item rather than something an agent can finish.
+
+## Bake-off (2026-08-29): Wan2.2-S2V graph
+
+**Result: the shipped S2V graph could not have run. It has been rewritten. It has not been
+render-tested.** Scope was Wan2.2-S2V only; InfiniteTalk and LongCat-Video-Avatar were never
+reached, so no quality comparison exists between the three candidates.
+
+Checked against the ComfyUI source at the pinned `COMFY_SHA` (72865f4f, v0.33.1, 2026-08-13)
+and the official Comfy-Org `video_wan2_2_14B_s2v` template. Five defects in
+`build_s2v_workflow`, all now fixed:
+
+| Assumed | Actual |
+|---|---|
+| `WanSoundImageToVideo.audio` | no such input |
+| `WanSoundImageToVideo.audio_encoder` | no such input |
+| `WanSoundImageToVideo.chunk_length` | no such input |
+| `LoadAudio` feeds the S2V node directly | must pass through `AudioEncoderEncode`, a node the graph never created |
+| `UNETLoader` → `KSampler` | needs `ModelSamplingSD3` between them (shift **8** for S2V, not the base tiers' 5) |
+
+The node's real signature is `positive, negative, vae, width, height, length, batch_size,
+audio_encoder_output?, ref_image?, control_video?, ref_motion?`. Sampler settings from the
+template: `uni_pc` / `simple`, cfg 6, 20 steps (the graph had `euler`).
+
+**The architectural one: chunking is not internal.** `chunk_length` does not exist because the
+node does not chunk. It generates at most 77 frames (4.8 s at 16 fps); longer speech is a chain
+of `WanSoundImageToVideoExtend` passes, each sampled and joined onto the running latent with
+`LatentConcat(dim='t')`. The old comment claiming the node "consumes the audio embedding across
+chunks internally" was wrong. This is not an edge case — essentially every episode line runs
+longer than 4.8 s, so the chain is the normal path. `build_s2v_workflow` now builds it.
+
+Also fixed: `extra_model_paths.yaml` mapped `diffusion_models`, `text_encoders`, `vae`, `loras`
+and `clip_vision` but **not** `audio_encoders`, so `AudioEncoderLoader` would have seen an empty
+list even with `wav2vec2_large_english_fp16.safetensors` sitting on the volume.
+
+### What is still unproven
+
+- No frame has been rendered. Node names and wiring are source-verified only.
+- **VRAM is an open question.** The official template defaults to 640x640; the worker targets
+  720x1280, 2.25x the pixels. Whether a 14B fp8 S2V pass fits in 24 GB at that size is untested,
+  and 48 GB classes (A40/L40S/L40/A6000) were all out of stock in US-IL-1 across three attempts.
+- No render time, so no cost model for the talking tier.
+- No InfiniteTalk or LongCat-Video-Avatar comparison.
+
+### Two operational traps found on the way
+
+- **GHCR anonymous pulls get rate-limited.** A pod pulling
+  `ghcr.io/mbayard-sorp/xdipx-video-worker:eb2a126` retry-looped on
+  `toomanyrequests` for ~15 minutes while billing, and never started. The package is public, but
+  public is not the same as unthrottled. The serverless endpoint pulls the same way, so pushing a
+  new sha tag and repointing the endpoint can stall identically. Attach a registry credential
+  before relying on a fresh tag pulling promptly.
+- **Host pull speed varies wildly.** A second pod pulled the base image at ~0.6 MB/s with ~8 GB
+  to go. Sample the rate a few minutes in and re-roll rather than waiting it out; three pods cost
+  about $0.50 total and none of them rendered anything.
 
 ## Spin-down: what is automatic, what is verified, what is cancelled
 
