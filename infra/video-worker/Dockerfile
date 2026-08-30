@@ -5,8 +5,11 @@
 # Build (linux/amd64 only, RunPod has no arm64 GPU hosts):
 #   docker buildx build --platform linux/amd64 -t ghcr.io/<org>/xdipx-video-worker:<tag> --push .
 
-# Tag verified on hub.docker.com/r/runpod/pytorch/tags 2026-08-22 (CUDA 12.9, torch 2.9.0, Ubuntu 24.04).
-FROM runpod/pytorch:1.1.0-cu1290-torch290-ubuntu2404
+# Pinned by DIGEST: the 1.1.0-cu1290-torch290-ubuntu2404 tag is mutable and was
+# rebuilt upstream between 2026-08-22 and 2026-08-30 (python 3.11 -> 3.12,
+# pip 26, preinstalled requests 2.34), which broke this build's old requests
+# pin. The digest below is the 2026-08-30 rebuild the fixes were verified on.
+FROM runpod/pytorch:1.1.0-cu1290-torch290-ubuntu2404@sha256:52079a229dfebb83564090868aa23a190c72baa0cfd0613536249137d598eca0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -35,7 +38,11 @@ RUN cd ${COMFY_DIR} \
  && pip install -r /tmp/req.txt
 
 # runpod 1.12.0 is the latest on PyPI as of 2026-08-10 (verified 2026-08-22).
-RUN pip install runpod==1.12.0 requests==2.32.4
+# No requests pin: the base preinstalls a newer requests and pip 26 refuses
+# the downgrade (ResolutionImpossible). --ignore-installed cryptography works
+# around the base's debian-installed cryptography that pip cannot uninstall.
+# Both verified in the live base image 2026-08-30.
+RUN pip install --ignore-installed cryptography runpod==1.12.0
 
 COPY extra_model_paths.yaml ${COMFY_DIR}/extra_model_paths.yaml
 COPY workflows /app/workflows
