@@ -551,6 +551,22 @@ regenerate the descriptor on any hit: `spread-out rumble`, `broad rumble`, `deep
 the spread-out/broad idea). Draw the replacement from the rotation bank above (low-frequency,
 full-hand, broad-contact), never a synonym of the banned phrase.
 
+**Rotate the thesis across an active campaign, checked at draft time (ticket #6107).** A campaign
+collapses to one idea when drafting keeps returning to the same thesis: 'Talk Yourself Into It'
+churned two publish-gate REVISEs in one week (rows 116, 131) because 'slower' / 'right there' and the
+technique-vs-saying-it framing were already spent in posted row 91 and queued row 129, and
+`instagram-campaigns.md` §6 already rules that "any phrase that appeared in a previous post of the
+same campaign is spent." The §5a weekly lanes exist to prevent this, but the publish gate keeps
+catching what drafting misses, so before drafting any campaign post:
+
+- **Read the last 3 posted/queued rows of the ACTIVE campaign, name the thesis/lane each used, and
+  require the new post to advance a DIFFERENT lane/thesis.** A post reusing a prior thesis is reworked
+  before it is drafted, not discovered at the gate.
+- **Grep the new caption against a short per-campaign spent-phrase list** (same mechanical shape as
+  the sensation-descriptor grep above), and rewrite any hit. Seed for 'Talk Yourself Into It':
+  `slower`, `right there`, `saying-it gap`, `technique gap`, `a little to the left`. Add each newly
+  spent phrase to the list as a campaign ships posts.
+
 **The X companion beat (crossplatform strategy §1).** For each Instagram slate post featuring a
 product, draft an X companion when the X quota allows: same campaign subject, register 6-7 per the
 social addendum, PDP link with channel UTMs, and a fresh sentence, never the IG caption reheated.
@@ -861,11 +877,14 @@ for the direct path:
   and defaults to `4:5`), matching the "Generate at 16:9 with `--platform x`" rule in the X subsection
   below.
 
-**The roster is seven, verified 2026-08-21**: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, all
-`active`, all `approvedForUse`, all with a `referencePhoto`. Rotate across them. This step
+**The roster is eight, verified 2026-08-21**: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia,
+Vivian, all `active`, all `approvedForUse`, all with a `referencePhoto`. Rotate across them. Vivian
+was approved 2026-08-21 (`referencePhoto`
+`https://cdn.sanity.io/images/0nlwk8cf/production/ccea0d34f4043e9fcb1af09c5f734f0b5ddab4ea-576x1024.jpg`)
+and has already PASSED image-identity and cast-roster at the publish gate. This step
 previously said Sanity held **zero** cast docs and that you therefore could not draft; that was a
 GROQ count run with an empty Sanity token, and anonymous reads of this dataset return only one of
-the seven. Check with `SANITY_API_TOKEN` on the `published` perspective, the client
+the eight. Check with `SANITY_API_TOKEN` on the `published` perspective, the client
 `getApprovedCastMembers()` uses.
 
 **A locked campaign pins the cast; do not rotate inside it (ticket #4701).** "Rotate across them"
@@ -878,7 +897,7 @@ it does not free-rotate the roster, because cast continuity across a campaign is
 `social-art-director` the campaign-locked cast and its pinned reference, not a fresh rotation pick.
 Run 423 generated both IG posts (72, 73) with Emma while the active campaign locked `priya`, and
 `social-publish-gate` REVISEd both for cast-identity mismatch; reading the campaign lock before
-choosing a face is what prevents that. `priya` is one of the seven `approvedForUse` members, so the
+choosing a face is what prevents that. `priya` is one of the eight `approvedForUse` members, so the
 lock and the roster agree — the lock is a continuity choice, not a roster exception.
 
 **If the roster is ever genuinely empty, you cannot draft an Instagram product post.** Declare
@@ -890,6 +909,16 @@ is what produced row 59.
 had all five captions PASS the voice gate yet four of five failed the publish gate on the image
 alone. These are pre-write gates: a candidate that fails one is rejected or regenerated before the
 draft is written, not discovered at Step 6.5.
+
+**These checks bind reuse-first candidates too, not only freshly generated ones (ticket #6076).**
+When Step 5's reuse-first path offers an existing Shopify Files asset instead of a new generation,
+run the SAME pre-write image QA on the reused frame before attaching it — at minimum the high-zoom
+wordmark/compliance-mark check (check 1) for any wordmark-risk SKU and the tableware/housewares
+screen (check 3) — and reject and regenerate a reused asset that fails either, exactly as you would
+a fresh candidate. A reused asset is not pre-cleared: run 563 reused a slot-A frame carrying a
+background coffee mug (publish-gate REVISE, design-doctrine §4.1) and deferred a Renegade Emperor
+rework whose reused asset carried a legible wrong-brand `LELO` wordmark at 4x (an automatic
+publish-gate BLOCK), both defects that these checks catch a run earlier when run on the reused frame.
 
 1. **High-zoom wordmark check.** For any product whose real packshot carries a printed wordmark or a
    molded compliance mark on the body (e.g. the Le Wand handle logo, the Renegade Emperor ring's
@@ -931,14 +960,15 @@ stops.
   than generated.
 - **Same two-stage cast composite as Instagram** (`--archetype cast --presenter-image <approved
   castMember referencePhoto> --ref-image <real product photo> --extra-ref <same> --scale <cue>`).
-  **Roster, verified 2026-08-21.** Sanity holds **seven** approved cast members, all `active`,
+  **Roster, verified 2026-08-21.** Sanity holds **eight** approved cast members, all `active`,
   all `approvedForUse`, all carrying a `referencePhoto`: **Diego, Emma, Jade, Marcus, Maya, Priya,
-  Sofia**. Rotate across them; §3.8's two-of-five cast rule is satisfiable and binds normally.
+  Sofia, Vivian** (Vivian approved 2026-08-21). Rotate across them; §3.8's two-of-five cast rule is
+  satisfiable and binds normally.
 
   This bullet twice carried the opposite claim, and both were wrong. It first said six members
   existed, which was then "corrected" on 2026-08-19 to say **zero** existed and only Emma was
   approved. The zero came from a GROQ count run with an **empty Sanity token**: anonymous access to
-  this dataset returns only one of the seven documents, and that partial read was reported as the
+  this dataset returns only one of the eight documents, and that partial read was reported as the
   whole truth. Five of the six were last updated 2026-08-17, so they already existed when the
   correction claimed they did not. **A count is only as true as the credential it ran under.** Verify
   with `SANITY_API_TOKEN` (the token production itself uses) on the `published` perspective, which is
@@ -989,7 +1019,7 @@ stops.
   face reads as a personal account; X is an ephemeral timeline with no grid, so the reason does not
   transfer. **X therefore has no per-day cast cap.**
 - **X gets a rotation floor instead, which is what the cap was really protecting.** The roster is
-  six, and a feed where one or two faces carry everything reads as a personal account just as surely
+  eight, and a feed where one or two faces carry everything reads as a personal account just as surely
   on X as on Instagram. So: **no single cast member appears in more than a third of X posts in a
   rolling 14**, and never the same face two days running. Ticket #4120's roster gap (nobody presents
   above their early 30s) makes this sharper, not softer, because the available range is already
@@ -1203,7 +1233,18 @@ drew publish-gate too-tame REVISEs the voice gate missed; open on what she will 
 product is. **Sixth check, sourced claim (ticket #5390):** any research or statistic in a caption
 carries a named source and a number at draft time, or it is cut. id101 drew a voice-gate REVISE for
 an unsourced `the research says`; cite it (e.g. `We-Vibe 2025, 87%`) or convert it to a
-non-statistical observation.
+non-statistical observation. **Seventh check, register past the hook (ticket #6314):** the fifth
+check fixes the hook, but "too-tame" is the dominant publish-gate REVISE and it lands on the middle
+and the close, not the opener — run 579 drafted four posts that all cleared the voice gate and three
+were REVISEd purely for register (id134 slot-A closed outward with a send-to-someone and never turned
+toward the reader's own anticipation; id136 read as skincare ingredient copy through the middle and
+close; id137 X ROMP sat at register 2-4 clinical spec-copy against the 6-7 X bar). So after the hook,
+confirm at least one anticipation/wanting beat is threaded through the MIDDLE or the CLOSE, not only
+the hook, matching sibling posts that shipped (X id127 "you want it in your hand, nothing in the way";
+id135 "the deep grounded thrum... vanish in your palm"). **For a slot-A / resource post this beat is
+its curiosity-and-permission charge, not product innuendo** (§4a slot-A rule and the ticket-#5940
+close check above): a resource caption is held to the curiosity/permission bar, so read it against
+that bar at draft time rather than the product-post register-9 bar it structurally cannot carry.
 
 **Every image-bearing post carries an accessibility description, and it goes in `altText`, never in
 `tweetText` (ticket #4067, re-homed by owner direction 2026-08-22).** This is standing, not an
