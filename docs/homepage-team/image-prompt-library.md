@@ -309,6 +309,43 @@ property, never all of them; the packshot is the third resort, never the second.
     frame, and the droplet does the work the packaging shot cannot: it says what is inside the
     bottle. Reusable on any lube, gel, or serum hero.
 
+- Glow Pleasure Air Clitoral Stimulator (`romp-glow`), `comparisons` category, archetype B
+  (color-block still), no second-product accent prop, post "Air Pulse vs Clitoral Suction: Are
+  They the Same?" (`air-pulse-vs-clitoral-suction`, content-writer run 590). Thesis: the two
+  names describe the same pressure-wave device, and the sealed silicone nozzle is the whole
+  mechanism, so fit matters more than raw power — the composition exists to make that nozzle
+  legible, so a two-SKU side-by-side (the category's default motif) was dropped as a reasoned
+  deviation in favor of showing the product's own detachable cap beside its body, both turned to
+  reveal the sealed opening (same Womanizer Blend precedent above: the single product's own
+  geometry already carries the article's point). **Ref-image note:** `images[0]`
+  (`98233A.jpg`) is a box-plus-device composite carrying dense printed packaging copy ("ROMP",
+  "Rose Glow", "Pleasure Air Technology", "Lights Your Lust"); `images[3]` (`98233D.jpg`) is a
+  clean two-piece shot (body + detached cap, nozzle openings visible on both, no box, no printed
+  text beyond a faint molded logo) and was used as `--ref-image` instead, per the WINX/Magic Wand
+  precedent. **Naming caution (carried forward from the `sofia`/`romp-glow` §0-H entry below):
+  never write "ROMP Glow" or "rose-shaped" in this product's `heroImageAlt`/`imagePrompt`.** Both
+  phrases are accurate to the real product but are also exactly the distinctive tokens of the
+  sibling SKU `romp-2-0` ("ROMP Rose 2.0 Pleasure Air Clitoral Stimulator"), which is not embedded
+  in this post — the sibling-SKU subset guard in `blog-hero-embed-audit.ts` does not catch this
+  case (the tokens aren't a subset of `romp-glow`'s own token set), so it reads as a false hero/embed
+  mismatch. Used "Glow" and "petal-shaped" throughout instead, which still clears
+  `heroNamesAnyProduct`'s required distinctive tokens for `romp-glow` itself (`glow`, `air`,
+  `clitoral`, `stimulator`, all present, whole-word). One round, 2 candidates via Atlas
+  `seedream-4.5-edit` (Atlas primary, `landscape_4_3`, ref-image path), no retry needed: candidate
+  1 kept — flat uniform pale plum-soft-family field (single plane, no gradient/two-tone split),
+  product and detached cap both large and bold, nozzle openings facing camera and clearly legible,
+  shape/color/finish faithful to reference, crisp soft shadow, generous negative space for a
+  headline. Candidate 2 rejected: the backdrop split into two distinct planes (a more saturated
+  purple wall behind a paler pink floor), reading as the two-tone-blend failure class the hardened
+  "flat," "uniform pastel tone," "no two-tone color blend" language exists to prevent, even though
+  product fidelity was equally clean →
+  `image-1bb5f2433e5865c357d7538eaedfd9214da8e3d6-1200x900-png` (post:
+  `air-pulse-vs-clitoral-suction`). **Precedent:** for a device whose form is inherently
+  botanical/floral (rose, tulip, petal silhouettes are a recurring air-pulse toy shape), the shape
+  itself is the product, not a banned flowers-as-subject prop — the ban is on flowers used as
+  *decorative* stand-ins for the topic, not on a product whose own molded silicone happens to
+  reference a flower.
+
 ### §0-H human scaffold
 
 (no ref-image unless Emma appears — then `--ref-image` = the canonical Emma photo, Sanity
