@@ -5,6 +5,7 @@ import {
   computePrice,
   enforceMapFloor,
   roundPsychological,
+  roundUpPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
   type PricingConfig,
 } from './pricing-engine-v2.server'
@@ -231,25 +232,37 @@ describe('computeDiscontinuedPrice — cost-based clearance ladder', () => {
   it('respects the cost-based margin floor', () => {
     // target=floor when target_margin=floor=0.60: cost=20 -> both = 50.
     // day 91 -> 50% off -> 25, floor=50 wins. roundPsychological would drop 50
-    // to 49.99 (below floor), so the re-clamp lands exactly on the floor: 50.00.
+    // to 49.99 (below floor), so the guard rounds the floor UP to the next .99:
+    // 50.99.
     const r = computeDiscontinuedPrice({
       cost: 20, msrp: 100, daysDiscontinued: 91,
       cfg: { target_margin_pct: 0.60, margin_floor_pct: 0.60 },
     })
-    expect(r?.sell).toBe(50)
-    expect(r?.sell).toBeGreaterThan(25) // floor kicked in
+    expect(r?.sell).toBe(50.99)
+    expect(r?.sell).toBeGreaterThanOrEqual(50) // at or above the floor
   })
 
-  it('never sells a cheap item below its cost-based floor (round-down guard)', () => {
+  it('never sells a cheap item below its cost-based floor (round-up guard)', () => {
     // cost=1.35, floor=1.35/0.85=1.588. roundPsychological(1.588) would be 0.99
-    // (below cost); the re-clamp keeps it at the floor, 1.59.
+    // (below cost); the guard rounds the floor up to the next .99, 1.99.
     const r = computeDiscontinuedPrice({
       cost: 1.35, msrp: 25.99, daysDiscontinued: 0,
       cfg: { target_margin_pct: 0.25, margin_floor_pct: 0.15 },
     })
-    expect(r?.sell).toBe(1.59)
+    expect(r?.sell).toBe(1.99)
     expect(r?.sell).toBeGreaterThan(1.35) // above cost
     expect(r?.compare_at).toBe(25.99)
+  })
+
+  it('floored discontinued price lands on a clean .99, not the raw floor', () => {
+    // Live config target 35% / floor 15%. cost=16, aged (day 100) -> 50% off
+    // cost-target -> 12.31, floor=16/0.85=18.82 wins. roundPsychological(18.82)
+    // = 17.99 (below floor) -> round floor up -> 18.99 (not the raw 18.82).
+    const r = computeDiscontinuedPrice({
+      cost: 16, msrp: 62, daysDiscontinued: 100,
+      cfg: { target_margin_pct: 0.35, margin_floor_pct: 0.15 },
+    })
+    expect(r?.sell).toBe(18.99)
   })
 })
 
@@ -542,5 +555,32 @@ describe('roundPsychological', () => {
 
   it('exact integer 50 -> 49.99', () => {
     expect(roundPsychological(50)).toBe(49.99)
+  })
+})
+
+describe('roundUpPsychological', () => {
+  it('rounds up to the next .99 at or above the input', () => {
+    expect(roundUpPsychological(18.82)).toBe(18.99)
+    expect(roundUpPsychological(13.22)).toBe(13.99)
+    expect(roundUpPsychological(8.06)).toBe(8.99)
+    expect(roundUpPsychological(1.588)).toBe(1.99)
+  })
+
+  it('exact integer -> that dollar .99 (50 -> 50.99)', () => {
+    expect(roundUpPsychological(50)).toBe(50.99)
+  })
+
+  it('already a .99 stays put', () => {
+    expect(roundUpPsychological(18.99)).toBe(18.99)
+  })
+
+  it('fractional part above .99 steps to the next dollar', () => {
+    expect(roundUpPsychological(18.995)).toBe(19.99)
+  })
+
+  it('result is always >= input', () => {
+    for (const n of [1.01, 4.5, 9.999, 23.53, 100.0]) {
+      expect(roundUpPsychological(n)).toBeGreaterThanOrEqual(n)
+    }
   })
 })
