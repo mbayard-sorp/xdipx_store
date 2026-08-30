@@ -455,6 +455,95 @@ export async function logVideoCost(entry: VideoCostEntry): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Out-of-band RunPod pod (GPU) spend logger
+// ---------------------------------------------------------------------------
+
+/**
+ * Feature label for GPU spend on standalone RunPod PODS created outside the
+ * video_jobs pipeline: one-time model bootstraps and the S2V graph bake-offs
+ * driven straight against the RunPod REST API rather than through
+ * POST /api/team/video-job (ticket #6320).
+ *
+ * Deliberately NOT prefixed `video-`. This spend must be RECORDED next to the
+ * pipeline's video spend, but it must NOT count against video_team_daily_cents:
+ * a bake-off or bootstrap refused by the daily gate is worse than one that is
+ * merely visible (the store's chosen "record only, do not gate" default, see
+ * docs/store-team/video-worker-runpod.md). Because the prefix is not a TeamId,
+ * teamFromFeature() returns null (bumpTeamSpendCounters no-ops) and
+ * getTodaySpendCents's `feature LIKE 'video-%'` window never sums it, so
+ * recording-without-gating falls out of the naming convention with no edit to
+ * the protected spend-control code, the same trick MEDIA_BLOCK_FEATURE uses.
+ */
+export const RUNPOD_POD_FEATURE = 'bakeoff-gpu'
+
+export interface RunpodPodCostEntry {
+  /** RunPod pod id, e.g. 'y33zcw0e9cl8ql'. Lands in ref_id. */
+  podId:      string
+  /** GPU-seconds of pod uptime this row accounts for. Lands in request_count. */
+  gpuSeconds: number
+  /** Metered USD cost for those GPU-seconds (rate * uptime). */
+  costUsd:    number
+  /** GPU model string, e.g. 'NVIDIA GeForce RTX 4090'. Lands in caller. */
+  gpu?:       string
+}
+
+/**
+ * Record incremental GPU spend for one out-of-band RunPod pod into
+ * api_token_log, so a day that spent real bake-off/bootstrap money on the Pods
+ * product no longer reads $0 on the Video tab and /admin/usage. Does NOT bump
+ * any team budget counter (record-only, see RUNPOD_POD_FEATURE). BEST-EFFORT:
+ * never throws into the caller. The pod-watch cron must keep filing its
+ * stray-pod blocker regardless of a logging failure.
+ */
+export async function logRunpodPodCost(entry: RunpodPodCostEntry): Promise<void> {
+  try {
+    if (!entry.costUsd || entry.costUsd <= 0) return
+    await insertTokenRow({
+      feature:             RUNPOD_POD_FEATURE,
+      model:               'runpod-pod',
+      source:              'sync',
+      batchId:             null,
+      productId:           null,
+      sku:                 null,
+      caller:              entry.gpu ? entry.gpu.slice(0, 96) : null,
+      refId:               entry.podId.slice(0, 64),
+      inputTokens:         0,
+      outputTokens:        0,
+      cacheCreationTokens: 0,
+      cacheReadTokens:     0,
+      requestCount:        Math.max(1, Math.round(entry.gpuSeconds)),
+      estCostUsd:          String(entry.costUsd),
+    })
+  } catch (err) {
+    console.error('[token-log] best-effort runpod pod-cost write failed (ignored):', err)
+    await recordTokenWriteFailure()
+  }
+}
+
+/**
+ * Today's out-of-band RunPod pod spend (UTC), in cents, summed from
+ * api_token_log under RUNPOD_POD_FEATURE. This is record-only GPU spend the
+ * Video tab shows beside the gated pipeline figure (ticket #6320). Returns 0
+ * when there is none, or on any read error (best-effort, never throws).
+ */
+export async function getTodayRunpodPodSpendCents(): Promise<number> {
+  try {
+    const { db } = await import('./db.server')
+    const { sql } = await import('drizzle-orm')
+    const result = await db.execute(
+      sql`SELECT COALESCE(SUM(est_cost_usd), 0) AS usd
+          FROM api_token_log
+          WHERE ts >= current_date AND feature = ${RUNPOD_POD_FEATURE}`
+    )
+    const usd = Number((result.rows[0] as { usd?: string | number } | undefined)?.usd ?? 0)
+    return Number.isFinite(usd) ? Math.round(usd * 100) : 0
+  } catch (err) {
+    console.error('[token-log] best-effort runpod pod-spend read failed (ignored):', err)
+    return 0
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Daily rollup read for /admin/usage
 // ---------------------------------------------------------------------------
 

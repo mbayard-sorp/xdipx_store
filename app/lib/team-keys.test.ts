@@ -17,6 +17,7 @@ import {
   TEAM_IDS,
   SOCIAL_MAX_IMAGES_DEFAULT,
 } from './team-keys'
+import { RUNPOD_POD_FEATURE } from './token-log.server'
 
 describe('teamFromFeature', () => {
   it('maps team-prefixed features to their team', () => {
@@ -35,6 +36,17 @@ describe('teamFromFeature', () => {
     expect(teamFromFeature('sms')).toBeNull()
     expect(teamFromFeature('media-blocks')).toBeNull()
     expect(teamFromFeature('emma-chat')).toBeNull()
+  })
+
+  // Ticket #6320: out-of-band RunPod pod spend is RECORDED next to video spend
+  // but must NOT count against video_team_daily_cents. That record-only
+  // guarantee rests entirely on the feature label NOT being a `video-` prefix,
+  // so teamFromFeature returns null (no gate-counter bump) and
+  // getTodaySpendCents's `feature LIKE 'video-%'` window never sums it. If a
+  // future rename slips it under `video-`, this test fails before the gate does.
+  it('does NOT attribute the out-of-band RunPod pod feature to any team (#6320)', () => {
+    expect(RUNPOD_POD_FEATURE.startsWith('video-')).toBe(false)
+    expect(teamFromFeature(RUNPOD_POD_FEATURE)).toBeNull()
   })
 })
 
