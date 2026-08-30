@@ -88,8 +88,9 @@ at an X row, that is the case this section exists for. Judge it, do not skip it.
   already read at step 6b. One honest limit: there is no deterministic
   person-in-frame check, so this is your judgment and not a mechanical
   guarantee.
-- **The roster is seven and rotation binds.** Diego, Emma, Jade, Marcus, Maya,
-  Priya and Sofia are all approved with reference photos (verified 2026-08-21),
+- **The roster is eight and rotation binds.** Diego, Emma, Jade, Marcus, Maya,
+  Priya, Sofia and Vivian are all approved with reference photos (Vivian added
+  2026-08-21, and has already PASSED image-identity and cast-roster here),
   so section 3.8's "no cast member on more than 2 of any 5 consecutive product
   posts" is satisfiable and you SHOULD flag a run that ignores it. Between
   2026-08-19 and 2026-08-21 these documents wrongly said only Emma was

@@ -457,13 +457,16 @@ not covered by the cast mandate and may run cast-free art per the archetypes in 
 is about product posts, because that is where a lonely packshot reads as a catalogue.
 
 **The roster, and how to check it without getting it wrong.** This rule needs approved
-`castMember` documents in Sanity carrying a `referencePhoto`. As of **2026-08-21 there are seven**:
-Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, all `active` and `approvedForUse`. The rule is
+`castMember` documents in Sanity carrying a `referencePhoto`. As of **2026-08-21 there are eight**:
+Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, Vivian, all `active` and `approvedForUse` (Vivian
+approved 2026-08-21, `referencePhoto`
+`https://cdn.sanity.io/images/0nlwk8cf/production/ccea0d34f4043e9fcb1af09c5f734f0b5ddab4ea-576x1024.jpg`).
+The rule is
 satisfiable today and §3.8's rotation windows bind normally.
 
 This paragraph previously stated there were **zero**, which was false and stalled Instagram product
 drafting on a blocker that did not exist. That count was run with an **empty Sanity token**;
-anonymous access to this dataset returns only one of the seven docs, and the partial read was
+anonymous access to this dataset returns only one of the eight docs, and the partial read was
 reported as the whole truth. **Check the roster with `SANITY_API_TOKEN` on the `published`
 perspective**, the same client `getApprovedCastMembers()` uses, and never conclude "none exist" from
 an unauthenticated read.

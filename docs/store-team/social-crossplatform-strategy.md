@@ -164,8 +164,9 @@ gate cannot see is advisory.
   being labeled per X's own rules, and `postTweet` (`app/lib/twitter.server.ts`) accepts only text
   and media ids with no sensitive-media flag. We cannot label, so we must not post anything that
   would need labeling. The ceiling remains `instagram-campaigns.md` §3.2a on both platforms.
-- **Roster, verified 2026-08-21: seven approved cast members**, all `active`, all `approvedForUse`,
-  all with a `referencePhoto`: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia. Rotate across them
+- **Roster, verified 2026-08-21: eight approved cast members**, all `active`, all `approvedForUse`,
+  all with a `referencePhoto`: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, Vivian (Vivian approved
+  2026-08-21). Rotate across them
   rather than defaulting to one face; §3.8's two-of-five cast rule is satisfiable and binds.
   **Verify the roster with `SANITY_API_TOKEN` on the `published` perspective**, the client
   `getApprovedCastMembers()` uses. On 2026-08-19 a count run with an empty token reported **zero**
