@@ -62,6 +62,21 @@ export function roundPsychological(n: number, ending: '.99' | '.95' | '.49' = '.
   return candidate > 0 ? round2(candidate) : round2(n)
 }
 
+/**
+ * Psychological rounding that never lands below the input: the smallest value
+ * ending in .99 that is >= n. e.g. 18.82 -> 18.99, 13.22 -> 13.99, 8.06 -> 8.99.
+ * Used to keep a floor-clamped price on a clean .99 point instead of the raw
+ * floor value, while staying at or above that floor.
+ */
+export function roundUpPsychological(n: number): number {
+  const base = Math.floor(n)
+  let candidate = base + 0.99
+  // Guard the rare case where n's fractional part already exceeds .99
+  // (e.g. 18.995): step to the next dollar's .99.
+  if (candidate < n) candidate = base + 1 + 0.99
+  return round2(candidate)
+}
+
 // ---------------------------------------------------------------------------
 // Velocity modifier (spec ss4)
 // Returns a new cfg with target_margin_pct shifted; margin_floor_pct unchanged.
@@ -199,10 +214,11 @@ export function computeDiscontinuedPrice(params: {
 
   // roundPsychological only rounds down, which can push the price below the
   // cost-based floor (and, for very cheap items, below cost — cost $1.35 /
-  // floor $1.59 would round to $0.99). Re-clamp after rounding so the sell
-  // price never lands under the floor. Mirrors the MAP re-clamp in computePrice.
+  // floor $1.59 would round to $0.99). When that happens, round the floor UP
+  // to the next .99 instead so the price stays on a clean point and at or above
+  // the floor ($18.82 -> $18.99), rather than landing on the raw floor value.
   let rounded = roundPsychological(sell)
-  if (rounded < floor) rounded = round2(floor)
+  if (rounded < floor) rounded = roundUpPsychological(floor)
 
   const compare_at = msrp != null && rounded < msrp ? msrp : null
   return { sell: rounded, compare_at }
