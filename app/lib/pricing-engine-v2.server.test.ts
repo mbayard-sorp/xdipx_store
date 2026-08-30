@@ -166,64 +166,90 @@ describe('computePrice — compare_at', () => {
 // computeDiscontinuedPrice — clearance ladder
 // ---------------------------------------------------------------------------
 
-describe('computeDiscontinuedPrice — clearance ladder', () => {
-  const discCfg = { margin_floor_pct: 0.15 }
+describe('computeDiscontinuedPrice — cost-based clearance ladder', () => {
+  // Clearance markdown is applied to the cost-based target price, not MSRP.
+  // target = cost/(1-0.60) = cost*2.5. For cost=20 -> target=50; floor=cost/0.85=23.53.
+  const discCfg = { target_margin_pct: 0.60, margin_floor_pct: 0.15 }
 
   it('returns null when cost is null', () => {
     expect(computeDiscontinuedPrice({ cost: null, msrp: 100, daysDiscontinued: 10, cfg: discCfg })).toBeNull()
   })
 
-  it('returns null when msrp is null', () => {
-    expect(computeDiscontinuedPrice({ cost: 10, msrp: null, daysDiscontinued: 10, cfg: discCfg })).toBeNull()
+  it('prices off cost even when msrp is null (msrp no longer required)', () => {
+    // target=50, day 0 -> 15% off -> 42.5 -> 41.99; no msrp -> no compare-at.
+    const r = computeDiscontinuedPrice({ cost: 20, msrp: null, daysDiscontinued: 10, cfg: discCfg })
+    expect(r?.sell).toBe(41.99)
+    expect(r?.compare_at).toBeNull()
   })
 
-  it('day 0 -> 15% off MSRP', () => {
-    // msrp=100, 15% off -> sell=85, floor=cost/(1-0.15)
-    // cost=20, floor=23.53 -> sell=max(85,23.53)=85 -> round -> 84.99
+  it('day 0 -> 15% off cost-based target', () => {
+    // target=50, 15% off -> 42.5 -> round -> 41.99; floor=23.53 does not bind.
     const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: 0, cfg: discCfg })
-    expect(r?.sell).toBe(84.99)
+    expect(r?.sell).toBe(41.99)
     expect(r?.compare_at).toBe(100)
   })
 
-  it('day 30 -> 15% off MSRP (boundary inclusive)', () => {
+  it('day 30 -> 15% off (boundary inclusive)', () => {
     const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: 30, cfg: discCfg })
-    expect(r?.sell).toBe(84.99) // same tier as day 0
+    expect(r?.sell).toBe(41.99) // same tier as day 0
   })
 
-  it('day 31 -> 25% off MSRP', () => {
-    // sell=75 -> round -> 74.99
+  it('day 31 -> 25% off cost-based target', () => {
+    // 50 * 0.75 = 37.5 -> 36.99
     const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: 31, cfg: discCfg })
-    expect(r?.sell).toBe(74.99)
+    expect(r?.sell).toBe(36.99)
   })
 
-  it('day 60 -> 25% off MSRP (boundary inclusive)', () => {
+  it('day 60 -> 25% off (boundary inclusive)', () => {
     const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: 60, cfg: discCfg })
-    expect(r?.sell).toBe(74.99)
+    expect(r?.sell).toBe(36.99)
   })
 
-  it('day 61 -> 35% off MSRP', () => {
-    // sell=65 -> round -> 64.99
+  it('day 61 -> 35% off cost-based target', () => {
+    // 50 * 0.65 = 32.5 -> 31.99
     const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: 61, cfg: discCfg })
-    expect(r?.sell).toBe(64.99)
+    expect(r?.sell).toBe(31.99)
   })
 
-  it('day 90 -> 35% off MSRP (boundary inclusive)', () => {
+  it('day 90 -> 35% off (boundary inclusive)', () => {
     const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: 90, cfg: discCfg })
-    expect(r?.sell).toBe(64.99)
+    expect(r?.sell).toBe(31.99)
   })
 
-  it('day 91 -> 50% off MSRP', () => {
-    // sell=50 -> round -> 49.99
+  it('day 91 -> 50% off cost-based target', () => {
+    // 50 * 0.50 = 25 -> 24.99
     const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: 91, cfg: discCfg })
-    expect(r?.sell).toBe(49.99)
+    expect(r?.sell).toBe(24.99)
   })
 
-  it('discontinued price respects margin floor', () => {
-    // cost=60, msrp=100, day 91 -> 50% off -> sell=50, floor=60/(1-0.15)=70.59 -> floor wins
-    // roundPsychological(70.59)=floor(70.59)-0.01=70-0.01=69.99
-    const r = computeDiscontinuedPrice({ cost: 60, msrp: 100, daysDiscontinued: 91, cfg: discCfg })
-    expect(r?.sell).toBe(69.99)
-    expect(r?.sell).toBeGreaterThan(50) // floor kicked in
+  it('never advertises above MSRP (ceiling clamp)', () => {
+    // target 50, day 0 -> 42.5, but msrp=30 caps it -> 30 -> 29.99.
+    const r = computeDiscontinuedPrice({ cost: 20, msrp: 30, daysDiscontinued: 0, cfg: discCfg })
+    expect(r?.sell).toBe(29.99)
+  })
+
+  it('respects the cost-based margin floor', () => {
+    // target=floor when target_margin=floor=0.60: cost=20 -> both = 50.
+    // day 91 -> 50% off -> 25, floor=50 wins. roundPsychological would drop 50
+    // to 49.99 (below floor), so the re-clamp lands exactly on the floor: 50.00.
+    const r = computeDiscontinuedPrice({
+      cost: 20, msrp: 100, daysDiscontinued: 91,
+      cfg: { target_margin_pct: 0.60, margin_floor_pct: 0.60 },
+    })
+    expect(r?.sell).toBe(50)
+    expect(r?.sell).toBeGreaterThan(25) // floor kicked in
+  })
+
+  it('never sells a cheap item below its cost-based floor (round-down guard)', () => {
+    // cost=1.35, floor=1.35/0.85=1.588. roundPsychological(1.588) would be 0.99
+    // (below cost); the re-clamp keeps it at the floor, 1.59.
+    const r = computeDiscontinuedPrice({
+      cost: 1.35, msrp: 25.99, daysDiscontinued: 0,
+      cfg: { target_margin_pct: 0.25, margin_floor_pct: 0.15 },
+    })
+    expect(r?.sell).toBe(1.59)
+    expect(r?.sell).toBeGreaterThan(1.35) // above cost
+    expect(r?.compare_at).toBe(25.99)
   })
 })
 
@@ -250,29 +276,31 @@ describe('daysDiscontinued calculation', () => {
     expect(calcDays(oneDayAgo)).toBe(1)
   })
 
+  const discCfg = { target_margin_pct: 0.60, margin_floor_pct: 0.15 }
+
   it('returns 30 for a date 30 days ago, lands in 15% tier', () => {
     const thirtyDaysAgo = new Date(Date.now() - 86_400_000 * 30)
     const days = calcDays(thirtyDaysAgo)
     expect(days).toBe(30)
-    // Confirm the tier: day 30 -> 15% off (CLEARANCE_LADDER boundary inclusive)
-    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: { margin_floor_pct: 0.15 } })
-    expect(r?.sell).toBe(84.99)
+    // Confirm the tier: day 30 -> 15% off cost-based target (boundary inclusive)
+    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: discCfg })
+    expect(r?.sell).toBe(41.99)
   })
 
   it('returns 31 for a date 31 days ago, escalates to 25% tier', () => {
     const thirtyOneDaysAgo = new Date(Date.now() - 86_400_000 * 31)
     const days = calcDays(thirtyOneDaysAgo)
     expect(days).toBe(31)
-    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: { margin_floor_pct: 0.15 } })
-    expect(r?.sell).toBe(74.99)
+    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: discCfg })
+    expect(r?.sell).toBe(36.99)
   })
 
   it('returns 91 for a date 91 days ago, escalates to 50% tier', () => {
     const ninetyOneDaysAgo = new Date(Date.now() - 86_400_000 * 91)
     const days = calcDays(ninetyOneDaysAgo)
     expect(days).toBe(91)
-    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: { margin_floor_pct: 0.15 } })
-    expect(r?.sell).toBe(49.99)
+    const r = computeDiscontinuedPrice({ cost: 20, msrp: 100, daysDiscontinued: days, cfg: discCfg })
+    expect(r?.sell).toBe(24.99)
   })
 })
 

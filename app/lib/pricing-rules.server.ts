@@ -254,7 +254,7 @@ export function buildRationale(p: RationaleParams): string {
                  p.daysDisc <= 60 ? '25%' :
                  p.daysDisc <= 90 ? '35%' : '50%'
     const sell = p.newSell != null ? `$${p.newSell.toFixed(2)}` : '?'
-    return `Discontinued day ${p.daysDisc} -> clearance tier ${tier} off MSRP -> ${sell}.`
+    return `Discontinued day ${p.daysDisc} -> clearance tier ${tier} off cost-based target -> ${sell}.`
   }
 
   // Velocity adjustment.

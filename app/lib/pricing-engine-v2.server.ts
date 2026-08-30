@@ -162,25 +162,48 @@ const CLEARANCE_LADDER: Array<[number, number]> = [
 
 /**
  * Compute sell price for a discontinued item using age-based markdown.
- * MAP does not apply to discontinued items.
- * Returns null when cost or msrp is missing.
+ *
+ * Cost-based (owner direction 2026-08-30): the clearance markdown is applied to
+ * the cost-based target price, never to MSRP. Previously the anchor was
+ * `msrp * (1 - discountPct)`, which priced discontinued stock toward MSRP and
+ * produced large, MSRP-driven increases in the approval queue. MSRP now only
+ * caps the result (never advertise above it) and supplies the compare-at
+ * strike-through; it never sets the markup basis.
+ *
+ * MAP does not apply to discontinued items. Returns null when cost is missing
+ * (cannot price without cost); MSRP is no longer required.
  */
 export function computeDiscontinuedPrice(params: {
   cost:             number | null
   msrp:             number | null
   daysDiscontinued: number
-  cfg:              Pick<PricingConfig, 'margin_floor_pct'>
+  cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'>
 }): PriceResult | null {
   const { cost, msrp, daysDiscontinued, cfg } = params
 
-  if (msrp == null || cost == null) return null
+  if (cost == null) return null
 
   const entry = CLEARANCE_LADDER.find(([maxDays]) => daysDiscontinued <= maxDays)
   const discountPct = entry ? entry[1] : 0.50
 
-  let sell = msrp * (1 - discountPct)
-  const floor = cost / (1 - cfg.margin_floor_pct)
+  // Cost-based anchor: the cost-plus-target price, marked down by the age-based
+  // clearance percentage, never below the cost-based margin floor.
+  const target = cost / (1 - cfg.target_margin_pct)
+  const floor  = cost / (1 - cfg.margin_floor_pct)
+  let sell = target * (1 - discountPct)
   sell = Math.max(sell, floor)
 
-  return { sell: roundPsychological(sell), compare_at: msrp }
+  // MSRP is a ceiling only (never advertise above it), and the compare-at
+  // reference — it never drives the sell price.
+  if (msrp != null) sell = Math.min(sell, msrp)
+
+  // roundPsychological only rounds down, which can push the price below the
+  // cost-based floor (and, for very cheap items, below cost — cost $1.35 /
+  // floor $1.59 would round to $0.99). Re-clamp after rounding so the sell
+  // price never lands under the floor. Mirrors the MAP re-clamp in computePrice.
+  let rounded = roundPsychological(sell)
+  if (rounded < floor) rounded = round2(floor)
+
+  const compare_at = msrp != null && rounded < msrp ? msrp : null
+  return { sell: rounded, compare_at }
 }
