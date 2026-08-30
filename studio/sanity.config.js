@@ -40,6 +40,11 @@ export default defineConfig({
               .icon(() => '🧱')
               .child(S.document().schemaType('storefrontHome').documentId('singleton.storefrontHome')),
             S.listItem()
+              .title('Curiosity shelf')
+              .id('curiosityShelf')
+              .icon(() => '🔮')
+              .child(S.document().schemaType('curiosityShelf').documentId('singleton.curiosityShelf')),
+            S.listItem()
               .title('Panel deck')
               .id('panelDeck')
               .icon(() => '🚪')
@@ -73,6 +78,8 @@ export default defineConfig({
               .child(S.document().schemaType('askEmmaVocabulary').documentId('singleton.askEmmaVocabulary')),
             S.documentTypeListItem('emmaPreset').title("Emma's presets").icon(() => '🎯'),
             S.documentTypeListItem('emmaCuratedRail').title('Emma curated rails').icon(() => '♥'),
+            S.documentTypeListItem('emmaContextRail').title('Emma context rails').icon(() => '🧩'),
+            S.documentTypeListItem('emmaPick').title("Emma's picks (generated)").icon(() => '💡'),
             S.listItem()
               .title('Editor (Emma)')
               .id('editor')
@@ -89,6 +96,11 @@ export default defineConfig({
               .id('pdpDefaults')
               .icon(() => '🛒')
               .child(S.document().schemaType('pdpDefaults').documentId('singleton.pdpDefaults')),
+            S.listItem()
+              .title('Social landing (/social)')
+              .id('socialLanding')
+              .icon(() => '📱')
+              .child(S.document().schemaType('socialLanding').documentId('singleton.socialLanding')),
             S.divider(),
             S.listItem()
               .title('SEO')
@@ -108,6 +120,7 @@ export default defineConfig({
             S.documentTypeListItem('researchBrief').title('Research Briefs').icon(() => '🔬'),
             S.divider(),
             S.documentTypeListItem('productPage').title('Products').icon(() => '🛍️'),
+            S.documentTypeListItem('mfgProductSpecs').title('Manufacturer specs').icon(() => '🔧'),
             S.documentTypeListItem('page').title('Pages').icon(() => '📄'),
             S.documentTypeListItem('trustItem').title('Trust Items').icon(() => '✅'),
             S.listItem()
@@ -125,6 +138,22 @@ export default defineConfig({
                       .child(S.document().schemaType('collectionsHub').documentId('singleton.collectionsHub')),
                     S.divider(),
                     S.documentTypeListItem('collectionPage').title('Collection Pages').icon(() => '🗃️'),
+                  ]),
+              ),
+            S.documentTypeListItem('comparison').title('Comparisons (vs pages)').icon(() => '⚖️'),
+            S.listItem()
+              .title('Knowledge Base')
+              .id('knowledgeBase')
+              .icon(() => '📚')
+              .child(
+                S.list()
+                  .title('Knowledge Base')
+                  .items([
+                    S.documentTypeListItem('kbShippingPolicy').title('Shipping Policy').icon(() => '🚚'),
+                    S.documentTypeListItem('kbReturnsPolicy').title('Returns Policy').icon(() => '↩️'),
+                    S.documentTypeListItem('kbCompatibilityRule').title('Compatibility Rules').icon(() => '🔌'),
+                    S.documentTypeListItem('kbTroubleshooting').title('Troubleshooting Guides').icon(() => '🛠️'),
+                    S.documentTypeListItem('kbBrandFaq').title('Brand FAQ').icon(() => '❓'),
                   ]),
               ),
             S.divider(),
