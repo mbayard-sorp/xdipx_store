@@ -1,0 +1,158 @@
+{
+  "284": {
+    "class_type": "LoadImage",
+    "_meta": {"title": "identity frame"},
+    "inputs": {"image": "__IMAGE__"}
+  },
+  "281": {
+    "class_type": "ImageScale",
+    "_meta": {"title": "resize to generation size (core stand-in for ImageResizeKJv2)"},
+    "inputs": {"image": ["284", 0], "upscale_method": "lanczos", "width": "__WIDTH__", "height": "__HEIGHT__", "crop": "center"}
+  },
+  "125": {
+    "class_type": "LoadAudio",
+    "_meta": {"title": "speech track"},
+    "inputs": {"audio": "__AUDIO__"}
+  },
+  "300": {
+    "class_type": "Wav2VecModelLoader",
+    "_meta": {"title": "chinese-wav2vec2-base (pod-local safetensors, models/wav2vec2)"},
+    "inputs": {"model": "wav2vec2-chinese-base_fp16.safetensors", "base_precision": "fp16", "load_device": "main_device"}
+  },
+  "194": {
+    "class_type": "MultiTalkWav2VecEmbeds",
+    "_meta": {"title": "audio embeds (audio_1 fed directly; example's MelBandRoFormer separator bypassed)"},
+    "inputs": {
+      "wav2vec_model": ["300", 0],
+      "audio_1": ["125", 0],
+      "normalize_loudness": true,
+      "num_frames": "__FRAMES_OR_AUTO__",
+      "fps": 25.0,
+      "audio_scale": 1.0,
+      "audio_cfg_scale": 1.0,
+      "multi_audio_type": "para"
+    }
+  },
+  "238": {
+    "class_type": "CLIPVisionLoader",
+    "_meta": {"title": "clip vision h (example note: not strictly necessary, kept as shipped)"},
+    "inputs": {"clip_name": "clip_vision_h.safetensors"}
+  },
+  "237": {
+    "class_type": "WanVideoClipVisionEncode",
+    "_meta": {"title": "encode identity frame"},
+    "inputs": {
+      "clip_vision": ["238", 0],
+      "image_1": ["281", 0],
+      "strength_1": 1.0,
+      "strength_2": 1.0,
+      "crop": "center",
+      "combine_embeds": "average",
+      "force_offload": true,
+      "tiles": 0,
+      "ratio": 0.5
+    }
+  },
+  "129": {
+    "class_type": "WanVideoVAELoader",
+    "_meta": {"title": "wan 2.1 vae (kijai repackage)"},
+    "inputs": {"model_name": "Wan2_1_VAE_bf16.safetensors", "precision": "bf16"}
+  },
+  "120": {
+    "class_type": "MultiTalkModelLoader",
+    "_meta": {"title": "InfiniteTalk single-speaker conditioning module, fp8 scaled"},
+    "inputs": {"model": "Wan2_1-InfiniteTalk-Single_fp8_e4m3fn_scaled_KJ.safetensors"}
+  },
+  "138": {
+    "class_type": "WanVideoLoraSelect",
+    "_meta": {"title": "lightx2v cfg+step distill LoRA (the example ships only this accelerated variant)"},
+    "inputs": {"lora": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors", "strength": 1.0, "low_mem_load": false, "merge_loras": false}
+  },
+  "134": {
+    "class_type": "WanVideoBlockSwap",
+    "_meta": {"title": "block swap 20 (what makes 48 GB comfortable)"},
+    "inputs": {"blocks_to_swap": 20, "offload_img_emb": false, "offload_txt_emb": false, "use_non_blocking": true, "vace_blocks_to_swap": 0, "prefetch_blocks": 1, "block_swap_debug": false}
+  },
+  "122": {
+    "class_type": "WanVideoModelLoader",
+    "_meta": {"title": "Wan2.1 I2V 14B 480p fp8 scaled + InfiniteTalk module (sdpa: sageattention is not installed by setup)"},
+    "inputs": {
+      "model": "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+      "base_precision": "fp16_fast",
+      "quantization": "fp8_e4m3fn_scaled",
+      "load_device": "offload_device",
+      "attention_mode": "sdpa",
+      "block_swap_args": ["134", 0],
+      "lora": ["138", 0],
+      "multitalk_model": ["120", 0]
+    }
+  },
+  "241": {
+    "class_type": "WanVideoTextEncodeCached",
+    "_meta": {"title": "umt5 text encode (fp8 enc file; negative is the example's own string)"},
+    "inputs": {
+      "model_name": "umt5-xxl-enc-fp8_e4m3fn.safetensors",
+      "precision": "bf16",
+      "positive_prompt": "__PROMPT__",
+      "negative_prompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
+      "quantization": "fp8_e4m3fn",
+      "use_disk_cache": false,
+      "device": "gpu"
+    }
+  },
+  "192": {
+    "class_type": "WanVideoImageToVideoMultiTalk",
+    "_meta": {"title": "infinitetalk windowed embeds (frame_window_size 81 / motion_frame 9 as the example sets)"},
+    "inputs": {
+      "vae": ["129", 0],
+      "start_image": ["281", 0],
+      "clip_embeds": ["237", 0],
+      "width": "__WIDTH__",
+      "height": "__HEIGHT__",
+      "frame_window_size": 81,
+      "motion_frame": 9,
+      "force_offload": false,
+      "colormatch": "disabled",
+      "tiled_vae": false,
+      "mode": "infinitetalk"
+    }
+  },
+  "128": {
+    "class_type": "WanVideoSampler",
+    "_meta": {"title": "sampler, example defaults: 6 steps, cfg 1.0, shift 11, dpm++_sde"},
+    "inputs": {
+      "model": ["122", 0],
+      "image_embeds": ["192", 0],
+      "text_embeds": ["241", 0],
+      "multitalk_embeds": ["194", 0],
+      "steps": 6,
+      "cfg": 1.0,
+      "shift": 11.0,
+      "seed": "__SEED__",
+      "force_offload": true,
+      "scheduler": "dpm++_sde",
+      "riflex_freq_index": 0,
+      "denoise_strength": 1.0,
+      "batched_cfg": false,
+      "rope_function": "comfy",
+      "start_step": 0,
+      "end_step": -1,
+      "add_noise_to_samples": true
+    }
+  },
+  "309": {
+    "class_type": "WanVideoPassImagesFromSamples",
+    "_meta": {"title": "windowed loop decodes internally; this pulls the decoded frames"},
+    "inputs": {"samples": ["128", 0]}
+  },
+  "131": {
+    "class_type": "CreateVideo",
+    "_meta": {"title": "frames + original audio -> video, 25 fps as the example combines (core stand-in for VHS_VideoCombine)"},
+    "inputs": {"images": ["309", 0], "audio": ["125", 0], "fps": 25.0}
+  },
+  "132": {
+    "class_type": "SaveVideo",
+    "_meta": {"title": "save"},
+    "inputs": {"video": ["131", 0], "filename_prefix": "video/xdipx-infinitetalk", "format": "mp4", "codec": "h264"}
+  }
+}

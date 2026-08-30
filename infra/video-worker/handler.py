@@ -55,6 +55,11 @@ MODELS_ROOT = os.environ.get("MODELS_ROOT", "/runpod-volume/models")
 WIDTH, HEIGHT, FPS = 720, 1280, 16
 MIN_SECONDS, MAX_SECONDS = 5, 15
 DEFAULT_STEPS, FAST_STEPS = 20, 4
+# Owner A/B verdict from the 2026-08-30 bake-off: for talking clips, 8-step
+# lightning keeps the cfg-1 look while closing most of the lip-articulation
+# gap to 20 steps, at about a quarter of the 20-step cost. Per-job `steps`
+# still overrides.
+S2V_FAST_STEPS = 8
 COMFY_BOOT_TIMEOUT_S = int(os.environ.get("COMFY_BOOT_TIMEOUT_S", "300"))
 RENDER_TIMEOUT_S = int(os.environ.get("RENDER_TIMEOUT_S", "1500"))
 
@@ -97,6 +102,16 @@ S2V_SHIFT = 8.0
 S2V_SAMPLER = "uni_pc"
 S2V_CFG = 6.0
 
+# The official Wan templates' quality-negative block (verbatim from
+# video_wan2_2_14B_s2v CLIPTextEncode node 7; the i2v/t2v templates ship the
+# same string). At cfg 6 the negative meaningfully shapes output, so an empty
+# job negative falls back to this rather than to nothing.
+WAN_DEFAULT_NEGATIVE = (
+    "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，"
+    "低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，"
+    "毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+)
+
 LIGHTX2V_LORAS = {
     "i2v": (
         "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
@@ -109,6 +124,12 @@ LIGHTX2V_LORAS = {
 }
 
 _comfy_proc: subprocess.Popen | None = None
+# Which model family the running ComfyUI has loaded. The i2v/t2v expert pair
+# and the s2v checkpoint cannot coexist in one server process: the container
+# cgroup (38 GiB observed on a 4090 pod) OOM-kills ComfyUI when the second
+# family loads on top of a warm first. Verified live 2026-08-30 during the
+# bake-off (s2v submit after an i2v render crashed the server in 3s).
+_comfy_family: str | None = None
 
 
 def log(msg: str) -> None:
@@ -126,13 +147,37 @@ def comfy_alive() -> bool:
         return False
 
 
-def ensure_comfy() -> None:
-    """Start ComfyUI once per worker and block until /system_stats answers."""
-    global _comfy_proc
+def ensure_comfy(family: str = "base") -> None:
+    """Start ComfyUI once per worker and block until /system_stats answers.
+
+    A family switch (base i2v/t2v <-> s2v) restarts the server first; see
+    _comfy_family above.
+    """
+    global _comfy_proc, _comfy_family
     if comfy_alive():
-        return
+        if _comfy_family in (None, family):
+            _comfy_family = family
+            return
+        log(f"model family switch ({_comfy_family} -> {family}): restarting ComfyUI")
+        if _comfy_proc is not None and _comfy_proc.poll() is None:
+            _comfy_proc.terminate()
+            try:
+                _comfy_proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                _comfy_proc.kill()
+                _comfy_proc.wait()
+        _comfy_proc = None
+    _comfy_family = family
     if _comfy_proc is None or _comfy_proc.poll() is not None:
         log("starting ComfyUI")
+        # COMFY_LOG decouples ComfyUI's output from this process's stdout.
+        # The bake-off harness needs that: ComfyUI outlives the handler
+        # process (deliberately, so cases reuse the warm server), and an
+        # inherited pipe both blocks the harness's EOF and dies with the
+        # first case's pipe. Unset (the serverless worker), output streams
+        # to the worker log exactly as before.
+        comfy_log = os.environ.get("COMFY_LOG")
+        out = open(comfy_log, "a") if comfy_log else sys.stdout  # noqa: SIM115
         _comfy_proc = subprocess.Popen(
             [
                 sys.executable, "main.py",
@@ -142,8 +187,8 @@ def ensure_comfy() -> None:
                 "--dont-print-server",
             ],
             cwd=COMFY_DIR,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
+            stdout=out,
+            stderr=out if comfy_log else sys.stderr,
         )
     deadline = time.time() + COMFY_BOOT_TIMEOUT_S
     while time.time() < deadline:
@@ -200,7 +245,8 @@ def validate(inp: dict[str, Any]) -> dict[str, Any]:
     fast = bool(inp.get("fast", False))
     finish = bool(inp.get("finish", False))
     steps = inp.get("steps")
-    steps = int(steps) if steps else (FAST_STEPS if fast else DEFAULT_STEPS)
+    fast_default = S2V_FAST_STEPS if mode == "s2v" else FAST_STEPS
+    steps = int(steps) if steps else (fast_default if fast else DEFAULT_STEPS)
     if not 1 <= steps <= 60:
         raise ValueError("steps must be 1..60")
     seed = inp.get("seed")
@@ -282,8 +328,14 @@ def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audi
     (v0.33.1) and the official template on 2026-08-29. NOT yet render-tested;
     see docs/store-team/video-worker-runpod.md.
     """
-    total_frames = min(frames_for(max(1, round(audio_seconds))), frames_for(S2V_MAX_SECONDS))
-    base_frames = min(total_frames, S2V_CHUNK_FRAMES)
+    # Every chunk renders the full 77 frames: the model needs at least 73 per
+    # pass (official template note), and the audio-embed bucket zero-pads past
+    # the end of speech, so overshooting the audio is the designed behavior.
+    # The decoded video is trimmed back to the audio duration in postprocess.
+    audio_frames = min(frames_for(max(1, round(audio_seconds))), frames_for(S2V_MAX_SECONDS))
+    n_chunks = max(1, -(-audio_frames // S2V_CHUNK_FRAMES))
+    total_frames = n_chunks * S2V_CHUNK_FRAMES
+    base_frames = S2V_CHUNK_FRAMES
     cfg = 1.0 if p["fast"] else S2V_CFG
 
     wf: dict[str, Any] = {
@@ -300,7 +352,7 @@ def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audi
         "5": {"class_type": "CLIPTextEncode", "_meta": {"title": "positive"},
               "inputs": {"clip": ["3", 0], "text": p["prompt"] or "a person speaking naturally to camera"}},
         "6": {"class_type": "CLIPTextEncode", "_meta": {"title": "negative"},
-              "inputs": {"clip": ["3", 0], "text": p["negative"]}},
+              "inputs": {"clip": ["3", 0], "text": p["negative"] or WAN_DEFAULT_NEGATIVE}},
         "7": {"class_type": "LoadImage", "_meta": {"title": "identity frame"},
               "inputs": {"image": image_name}},
         "16": {"class_type": "LoadAudio", "_meta": {"title": "speech"},
@@ -322,6 +374,18 @@ def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audi
                           "steps": p["steps"], "cfg": cfg,
                           "sampler_name": S2V_SAMPLER, "scheduler": "simple", "denoise": 1.0}},
     }
+
+    if p["fast"]:
+        # 4 steps at cfg 1.0 without a distillation LoRA produces mush. The
+        # official template's 4-step S2V variant loads the t2v HIGH-NOISE
+        # lightning LoRA on the single S2V expert, between UNETLoader and
+        # ModelSamplingSD3 (UNETLoader -> LoraLoaderModelOnly -> ModelSamplingSD3).
+        lora = LIGHTX2V_LORAS["t2v"][0]
+        if not os.path.exists(os.path.join(MODELS_ROOT, "loras", lora)):
+            raise RuntimeError(f"fast=true but {lora} is missing from {MODELS_ROOT}/loras (run bootstrap-models.sh with WITH_LIGHTX2V=1)")
+        wf["19"] = {"class_type": "LoraLoaderModelOnly", "_meta": {"title": "lightning 4step"},
+                    "inputs": {"model": ["1", 0], "lora_name": lora, "strength_model": 1.0}}
+        wf["2"]["inputs"]["model"] = ["19", 0]
 
     # Extend chain for anything past the first chunk.
     latent: list[Any] = ["11", 0]
@@ -346,10 +410,23 @@ def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audi
         remaining -= length
         node_id += 3
 
+    # Official-template hack: the Wan VAE overbakes the first decoded frame, so
+    # duplicate the first latent frame before the single decode and drop the
+    # decoded lead after. The causal VAE decodes T latents to 4T-3 frames (the
+    # first latent yields 1 frame, the rest 4 each), so the prepend adds exactly
+    # 4 frames; batch_index 4 removes precisely those, keeping the frame count
+    # identical to the no-hack decode. (The template drops chunk-count frames
+    # instead, an empirical choice that does not generalize.)
+    wf["94"] = {"class_type": "LatentCut", "_meta": {"title": "cut first latent frame"},
+                "inputs": {"samples": latent, "dim": "t", "index": 0, "amount": 1}}
+    wf["95"] = {"class_type": "LatentConcat", "_meta": {"title": "prepend duplicate"},
+                "inputs": {"samples1": ["94", 0], "samples2": latent, "dim": "t"}}
     wf["13"] = {"class_type": "VAEDecode", "_meta": {"title": "decode"},
-                "inputs": {"samples": latent, "vae": ["4", 0]}}
+                "inputs": {"samples": ["95", 0], "vae": ["4", 0]}}
+    wf["96"] = {"class_type": "ImageFromBatch", "_meta": {"title": "drop overbaked lead"},
+                "inputs": {"image": ["13", 0], "batch_index": 4, "length": 4096}}
     wf["14"] = {"class_type": "CreateVideo", "_meta": {"title": "frames+audio -> video"},
-                "inputs": {"images": ["13", 0], "audio": ["16", 0], "fps": FPS}}
+                "inputs": {"images": ["96", 0], "audio": ["16", 0], "fps": FPS}}
     wf["15"] = {"class_type": "SaveVideo", "_meta": {"title": "save"},
                 "inputs": {"video": ["14", 0],
                            "filename_prefix": f"video/xdipx-s2v-{p['seed']}-{uuid.uuid4().hex[:8]}",
@@ -363,7 +440,7 @@ def build_workflow(p: dict[str, Any], image_name: str | None) -> dict[str, Any]:
         wf = json.load(f)
 
     wf["5"]["inputs"]["text"] = p["prompt"]
-    wf["6"]["inputs"]["text"] = p["negative"]
+    wf["6"]["inputs"]["text"] = p["negative"] or WAN_DEFAULT_NEGATIVE
     wf["8"]["inputs"]["length"] = p["frames"]
     wf["8"]["inputs"]["width"] = WIDTH
     wf["8"]["inputs"]["height"] = HEIGHT
@@ -457,12 +534,16 @@ def run(cmd: list[str]) -> None:
         raise RuntimeError(f"{cmd[0]} failed: {res.stderr[-600:]}")
 
 
-def postprocess(src: str, workdir: str, keep_audio: bool = False) -> tuple[str, str]:
+def postprocess(src: str, workdir: str, keep_audio: bool = False,
+                trim_seconds: float | None = None) -> tuple[str, str]:
     mp4 = os.path.join(workdir, "clip.mp4")
     png = os.path.join(workdir, "last-frame.png")
     audio_args = ["-c:a", "aac", "-b:a", "128k"] if keep_audio else ["-an"]
+    # s2v renders whole 77-frame chunks past the end of speech (the model's
+    # per-pass floor); trim the padded tail back to the audio duration here.
+    trim_args = ["-t", f"{trim_seconds:.3f}"] if trim_seconds else []
     run(["ffmpeg", "-y", "-loglevel", "error", "-i", src,
-         *audio_args, "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+         *trim_args, *audio_args, "-c:v", "libx264", "-preset", "medium", "-crf", "18",
          "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-r", str(FPS), mp4])
     # -sseof -0.07 lands inside the final 16 fps frame; -update 1 writes a single image.
     run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.07", "-i", mp4,
@@ -543,7 +624,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     try:
         p = validate(job.get("input") or {})
         progress("booting ComfyUI")
-        ensure_comfy()
+        ensure_comfy(family="s2v" if p["mode"] == "s2v" else "base")
 
         if p["mode"] in ("i2v", "s2v"):
             progress("downloading scene frame")
@@ -567,7 +648,8 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
         progress("encoding mp4 + last frame")
         # s2v keeps its performed speech track; the silent tiers stay silent.
-        mp4, png = postprocess(src, workdir, keep_audio=(p["mode"] == "s2v"))
+        mp4, png = postprocess(src, workdir, keep_audio=(p["mode"] == "s2v"),
+                               trim_seconds=(audio_seconds if p["mode"] == "s2v" else None))
 
         finish_seconds = 0.0
         if p["finish"]:

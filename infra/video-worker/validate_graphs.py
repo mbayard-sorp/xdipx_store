@@ -93,10 +93,13 @@ def graphs_to_check() -> list[tuple[str, dict]]:
     handler = load_handler()
     out: list[tuple[str, dict]] = []
 
-    # s2v: short speech (single chunk) and long speech (extend chain) are different graphs.
+    # s2v: short speech (single chunk) and long speech (extend chain) are different
+    # graphs, and fast=true grafts the lightning LoRA in front of the shift patch.
     for label, seconds in (("s2v single-chunk", 3.0), ("s2v extend-chain", 12.0)):
-        p = base_params("s2v")
-        out.append((label, handler.build_s2v_workflow(p, "frame.png", "speech.wav", seconds)))
+        for fast in (False, True):
+            p = base_params("s2v", fast)
+            out.append((f"{label}{' fast' if fast else ''}",
+                        handler.build_s2v_workflow(p, "frame.png", "speech.wav", seconds)))
 
     # i2v / t2v, plain and with the lightx2v LoRAs (whose input names carry their own
     # TODO(verify) in handler.py).
