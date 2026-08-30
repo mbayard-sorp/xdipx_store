@@ -31,6 +31,7 @@ import {
   type TeamConfig, type GateResult, type TicketStatus,
 } from '~/lib/team.server'
 import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, X_METRICS_MAX_READS_MONTH_KEY, X_METRICS_MAX_READS_MONTH_DEFAULT, type TeamId, type SocialPlatform } from '~/lib/team-keys'
+import { getTodayRunpodPodSpendCents } from '~/lib/token-log.server'
 import {
   NO_EXECUTOR_KINDS, classifyTeamTablesError, facetTotal, fmtAge, sumFacetCount, truncationNote,
   type TicketFacetRow,
@@ -198,6 +199,13 @@ interface LoaderData {
   socialFrequencies: Record<SocialPlatform, number>
   releaseEngine: boolean
   releaseEngineMaxMerges: number
+  /**
+   * Today's out-of-band RunPod pod (GPU) spend in cents, record-only and NOT
+   * gated (ticket #6320). Shown on the Video tab beside the gated "Spent today"
+   * figure so a day that spent bake-off/bootstrap money on the Pods product no
+   * longer reads $0. Null on any tab other than video, or on a read failure.
+   */
+  runpodPodSpentCents: number | null
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
@@ -313,6 +321,11 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     if (classifyTeamTablesError(err) === 'unmigrated') migrated = false
     else loadError = true
   }
+  // Record-only out-of-band pod GPU spend, shown beside the video gate figure
+  // (ticket #6320). Only queried on the video tab; getTodayRunpodPodSpendCents
+  // is itself best-effort and returns 0 on error, so this never adds a failure
+  // mode to the page.
+  const runpodPodSpentCents = team === 'video' ? await getTodayRunpodPodSpendCents() : null
   // Filters live in the query string so a filtered board is a shareable URL and
   // a browser refresh keeps the owner where they were.
   const sortParam = url.searchParams.get('sort')
@@ -432,7 +445,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram,
     videoDefaultModelTier, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
-    releaseEngine, releaseEngineMaxMerges,
+    releaseEngine, releaseEngineMaxMerges, runpodPodSpentCents,
   }
 }
 
@@ -573,7 +586,7 @@ export default function AgentTeamsPage() {
     seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
-    releaseEngine, releaseEngineMaxMerges,
+    releaseEngine, releaseEngineMaxMerges, runpodPodSpentCents,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -894,6 +907,13 @@ export default function AgentTeamsPage() {
             {...(!gateResult.ok && gateResult.reason ? { sub: gateResult.reason } : {})}
             tone={gateResult.ok ? 'ok' : 'warn'}
           />
+          {team === 'video' && runpodPodSpentCents != null && (
+            <StatCard
+              label="Out-of-band GPU"
+              value={fmtUsdCents(runpodPodSpentCents)}
+              sub="RunPod pods (bootstraps, bake-offs). Recorded, not gated"
+            />
+          )}
         </div>
       )}
 

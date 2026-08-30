@@ -204,3 +204,33 @@ stopped or terminated. This exists because a bootstrap pod was left running 18.7
 `RUNPOD_API_KEY` in Vercel must keep the `api.runpod.io/graphql` (management) permission
 for this check to work; a Serverless-scoped key reports "could not ask" (a `null` probe
 verdict, never a false all-clear) rather than a real answer.
+
+### Out-of-band pod spend lands in the ledger (ticket #6320)
+
+Pods are created outside the `video_jobs` pipeline (owner bootstraps, S2V graph bake-offs
+driven straight against the RunPod REST API), so nothing wrote their cost to `api_token_log`.
+The Video tab on `/admin/homepage-team` and `/admin/usage` therefore read `$0` for a day that
+spent real GPU money: the same money-path blind spot the fleet evaluation flagged, a real cost
+with no ledger row. The stray-pod watch above catches a pod *left running*, but said nothing
+about money already spent.
+
+The same hourly `/cron/runpod-pod-watch` sweep now records the GPU spend of every `RUNNING`
+pod into `api_token_log` under feature `bakeoff-gpu` (`RUNPOD_POD_FEATURE`), with the pod id in
+`ref_id` and GPU-seconds in `request_count`. It records the **increment** since the last sweep,
+watermarked per pod in KV (`runpod-pod:recorded-cents:<podId>`) against the pod's cumulative
+uptime cost (`rate * hoursRunning`), so re-seeing the same long-lived pod each hour never
+double-counts. It captures the historically expensive case well: the 18.7h/$14 pod accruing
+hourly, and captures whatever an hourly sweep catches of sub-hour rolls. A pod created and
+terminated between two sweeps is the known gap: the pods API reports `cost 0` once a pod is
+`TERMINATED`, so a fast bake-off roll that never overlaps a sweep tick is not seen here (those
+settle via the RunPod billing API, not this poll).
+
+**Decision: recorded, NOT gated (the safer default).** This out-of-band spend is shown on the
+Video tab beside the gated "Spent today" figure as a separate "Out-of-band GPU" stat, but it is
+**not** counted against `video_team_daily_cents`. A bake-off or bootstrap refused by the daily
+gate is worse than one that is merely visible. This is enforced purely by the feature name:
+`bakeoff-gpu` is not a `video-` prefix, so `teamFromFeature()` returns `null` (no budget-counter
+bump) and `getTodaySpendCents`'s `feature LIKE 'video-%'` window never sums it, the same
+record-only trick `media-blocks` uses, with no edit to the protected spend-control code. If the
+store later decides this spend SHOULD count against the daily gate, rename the feature to a
+`video-` prefix (no exclusion is needed, the LIKE window will then include it).

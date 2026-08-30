@@ -1348,6 +1348,45 @@ export function createCronRoutes() {
         console.warn('[cron:runpod-pod-watch] endpoint idle sweep failed:', err)
       }
 
+      // Record out-of-band pod GPU spend into api_token_log (ticket #6320).
+      // Pods on the management API are only ever created outside the video_jobs
+      // pipeline (model bootstraps, S2V bake-offs driven against the RunPod REST
+      // API), so nothing else writes their cost to the ledger: the Video tab and
+      // /admin/usage read $0 for a day a stray or bake-off pod actually spent
+      // money. We record the INCREMENT since the last sweep, watermarked per pod
+      // in KV against the pod's cumulative uptime cost (rate * hoursRunning), so
+      // re-seeing the same long-lived pod each hour never double-counts. This is
+      // record-only, NOT gated (RUNPOD_POD_FEATURE is not a `video-` label). It
+      // captures the historically expensive case well: the 18.7h pod that cost
+      // ~$14 accruing hourly, and captures whatever an hourly sweep catches of
+      // sub-hour rolls; a pod created and terminated between two sweeps reports
+      // cost 0 once TERMINATED and is not seen here. Best-effort and fully
+      // guarded: a recording failure must never stop the stray-pod blocker below.
+      try {
+        const { kvGet, kvSet } = await import('../app/lib/kv.server.js')
+        const { logRunpodPodCost } = await import('../app/lib/token-log.server.js')
+        for (const pod of running) {
+          const cumulativeCents = Math.round(pod.costPerHour * pod.hoursRunning * 100)
+          if (cumulativeCents <= 0) continue
+          const wmKey = `runpod-pod:recorded-cents:${pod.id}`
+          const recorded = Number(await kvGet<number>(wmKey)) || 0
+          const deltaCents = cumulativeCents - recorded
+          if (deltaCents <= 0) continue
+          const gpuSeconds = pod.costPerHour > 0
+            ? Math.round((deltaCents / 100) / pod.costPerHour * 3600)
+            : 0
+          await logRunpodPodCost({
+            podId: pod.id,
+            gpuSeconds,
+            costUsd: deltaCents / 100,
+            ...(pod.gpu ? { gpu: pod.gpu } : {}),
+          })
+          await kvSet(wmKey, cumulativeCents)
+        }
+      } catch (err) {
+        console.warn('[cron:runpod-pod-watch] out-of-band pod-spend recording failed (ignored):', err)
+      }
+
       if (running.length === 0) {
         res.json({ ok: true, running: 0, ...(endpointEscalation ? { endpointEscalation } : {}) })
         return

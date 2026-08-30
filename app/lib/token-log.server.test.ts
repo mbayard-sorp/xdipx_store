@@ -61,7 +61,7 @@ vi.mock('~/lib/kv.server', () => ({
   },
 }))
 
-import { logImageCost } from '~/lib/token-log.server'
+import { logImageCost, logRunpodPodCost, RUNPOD_POD_FEATURE } from '~/lib/token-log.server'
 
 const LONG_HANDLE = 'sliquid-naturals-satin-personal-moisturizer' // 43 chars, > 32
 
@@ -100,6 +100,34 @@ describe('logImageCost — long product handle (#5051)', () => {
 
   it('does nothing for a non-positive image count', async () => {
     await logImageCost({ feature: 'content-images', model: 'imagen', count: 0, sku: LONG_HANDLE })
+    expect(state.inserted).toHaveLength(0)
+    expect(state.incr).toHaveLength(0)
+  })
+})
+
+describe('logRunpodPodCost: out-of-band pod GPU spend (#6320)', () => {
+  it('writes a ledger row carrying podId (ref_id) and GPU-seconds (request_count)', async () => {
+    await logRunpodPodCost({ podId: 'y33zcw0e9cl8ql', gpuSeconds: 900, costUsd: 0.185, gpu: 'NVIDIA RTX 4090' })
+
+    expect(state.inserted).toHaveLength(1)
+    const row = state.inserted[0]!
+    expect(row['feature']).toBe(RUNPOD_POD_FEATURE)
+    expect(row['refId']).toBe('y33zcw0e9cl8ql')
+    expect(row['requestCount']).toBe(900)
+    expect(row['caller']).toBe('NVIDIA RTX 4090')
+    expect(row['estCostUsd']).toBe('0.185')
+  })
+
+  it('never bumps a team budget counter, this spend is recorded not gated', async () => {
+    // team-keys.teamFromFeature is mocked to 'content' here, so any accidental
+    // route through bumpTeamSpendCounters WOULD push a SPEND: bump. It must not.
+    await logRunpodPodCost({ podId: 'gcs20qehenfni1', gpuSeconds: 1020, costUsd: 0.113 })
+    expect(state.inserted).toHaveLength(1)
+    expect(state.incr).toHaveLength(0)
+  })
+
+  it('does nothing for a non-positive cost (nothing accrued since last sweep)', async () => {
+    await logRunpodPodCost({ podId: 'gcs20qehenfni1', gpuSeconds: 0, costUsd: 0 })
     expect(state.inserted).toHaveLength(0)
     expect(state.incr).toHaveLength(0)
   })
