@@ -339,6 +339,32 @@ addendum pins authority at max and bans hedging, so trading the claim's scope fo
 an accuracy defect for a voice defect. Run 523 resolved its REVISE by deleting the contested sub-claim
 outright, and both gates confirmed that path.
 
+**The check runs both directions: under-claiming fails the accuracy gate too.** The shapes above
+catch a claim written *wider* than its evidence, but on a no-medical-claims store the incentive runs
+one way — retreating to a non-answer feels safe and reads as compliant — so the opposite defect,
+a claim written *narrower* than the evidence, is just as common a first-submit REVISE and is invisible
+to the over-claim list. Run 538 took an accuracy REVISE on exactly this (a fifth consecutive
+first-submit REVISE), so before submit also run these three under-claim checks:
+
+- **Answer every yes/no FAQ question yes or no, and state the bound.** A question phrased as yes/no
+  (e.g. "Do pelvic floor exercises help with ejaculation timing?") is answered by leading with the
+  bounded yes or no the evidence supports, not deflected into "researchers have studied it in
+  connection with". Run 538's FAQ Q4 was ruled an under-claim for exactly that deflection when
+  published evidence supported leading with a bounded yes.
+- **A hedging disclaimer in the store's own voice is a defect, not a safety measure.** A line like
+  "we make no medical claim about it" reads as compliant but is an accuracy defect: the
+  no-medical-claims rule is already satisfied by the reportage-of-research framing plus the clinician
+  hand-off this routine mandates elsewhere, so the disclaimer only substitutes evasion for the bounded
+  answer the evidence allows. Cut it and state the bound.
+- **A simplified clinical definition keeps every defining criterion.** When you deliberately simplify
+  a clinical definition, confirm the omission dropped only precision, not a load-bearing element. Run
+  538 substituted duration for the lack-of-control pillar in a three-part clinical framing, dropping a
+  genuine defining criterion while the writer believed the choice was appropriately conservative.
+
+Under-claiming is not fixed by a hedge either: the fix is stating the bounded answer the evidence
+supports, in the max-authority blog register, with reportage framing and the clinician hand-off doing
+the safety work.
+
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
 opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
