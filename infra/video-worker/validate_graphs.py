@@ -33,23 +33,32 @@ import urllib.request
 COMFY_URL = os.environ.get("COMFY_URL", "http://127.0.0.1:8188")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# handler.py reads MODELS_ROOT at import time and the `fast` path stats its LoRA files.
-# Point it at a temp tree with the expected names so that branch can be built and checked
-# without downloading 5 GB of weights.
-_FAKE_MODELS = tempfile.mkdtemp(prefix="xdipx-validate-")
-os.environ.setdefault("MODELS_ROOT", _FAKE_MODELS)
-os.makedirs(os.path.join(_FAKE_MODELS, "loras"), exist_ok=True)
+def load_handler():
+    """Import handler.py, with the environment it expects inside the container.
 
-# WORKFLOW_DIR defaults to the container path /app/workflows; outside the image the
-# templates sit next to this file.
-os.environ.setdefault("WORKFLOW_DIR", os.path.join(HERE, "workflows"))
+    Deliberately lazy. handler.py imports `requests` at module scope, and --self-test
+    runs in CI before anything is pip-installed: the self-test proves the checker can
+    fail and must not need the handler, ComfyUI, or any third-party package to say so.
+    """
+    # handler.py reads MODELS_ROOT at import time and the `fast` path stats its LoRA
+    # files. Point it at a temp tree with the expected names so that branch can be built
+    # and checked without downloading 5 GB of weights.
+    fake_models = tempfile.mkdtemp(prefix="xdipx-validate-")
+    os.environ.setdefault("MODELS_ROOT", fake_models)
+    os.makedirs(os.path.join(fake_models, "loras"), exist_ok=True)
 
-sys.path.insert(0, HERE)
-import handler  # noqa: E402  (import after MODELS_ROOT is set, by design)
+    # WORKFLOW_DIR defaults to the container path /app/workflows; outside the image the
+    # templates sit next to this file.
+    os.environ.setdefault("WORKFLOW_DIR", os.path.join(HERE, "workflows"))
 
-for _pair in handler.LIGHTX2V_LORAS.values():
-    for _name in _pair:
-        open(os.path.join(_FAKE_MODELS, "loras", _name), "a").close()
+    sys.path.insert(0, HERE)
+    import handler  # noqa: PLC0415  (import after the env above is set, by design)
+
+    for pair in handler.LIGHTX2V_LORAS.values():
+        for name in pair:
+            open(os.path.join(os.environ["MODELS_ROOT"], "loras", name), "a").close()
+
+    return handler
 
 
 def fetch_object_info(retries: int = 60, delay: float = 2.0) -> dict:
@@ -81,6 +90,7 @@ def base_params(mode: str, fast: bool = False) -> dict:
 
 def graphs_to_check() -> list[tuple[str, dict]]:
     """Every graph the worker can submit, built by the handler's own code."""
+    handler = load_handler()
     out: list[tuple[str, dict]] = []
 
     # s2v: short speech (single chunk) and long speech (extend chain) are different graphs.
