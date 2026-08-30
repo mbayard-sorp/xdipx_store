@@ -1,0 +1,129 @@
+# Validates the video worker's ComfyUI graphs against a real ComfyUI, on CPU.
+#
+# `build_s2v_workflow` merged to main carrying a `TODO(verify)` that said, accurately,
+# that its node names had never been run against a live ComfyUI. Nothing enforced the
+# comment, so it merged anyway. The 2026-08-29 bake-off found the graph could not have
+# run at all: three invented inputs on `WanSoundImageToVideo`, a missing
+# `AudioEncoderEncode`, no `ModelSamplingSD3`. Discovering that took a multi-hour GPU
+# expedition across four RunPod pods and about $1, and still produced no frame.
+#
+# The insight this job encodes: none of that needed a GPU. ComfyUI boots on CPU with no
+# models and reports every node signature it implements at /object_info. Comparing that
+# against the graphs the handler builds is a sub-minute, zero-cost check — so the bug
+# class fails here instead of failing after a worker boots and loads 15 GB of weights.
+#
+# Scope is deliberately narrow: node classes, input names, internal links, and required
+# inputs. It does NOT prove a render succeeds or looks good — no models are present, and
+# whether 720x1280 fits in 24 GB of VRAM is a separate question this cannot answer. It
+# proves the graph is well-formed against the pinned ComfyUI, which is precisely the
+# thing that was untrue and unnoticed.
+#
+# COMFY_SHA is read out of the Dockerfile rather than repeated here, so the version this
+# validates against cannot drift from the version the image builds.
+#
+# This file is a protected path (`.github/**`): the release engine's classifier stops any
+# PR touching it and escalates, so changes here are owner-merged. That is deliberate.
+name: video-graph
+
+on:
+  pull_request:
+    paths:
+      - 'infra/video-worker/**'
+      - '.github/workflows/video-graph.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/video-worker/**'
+      - '.github/workflows/video-graph.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-graph-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Read COMFY_SHA from the Dockerfile
+        id: comfy
+        run: |
+          # -oE + sed rather than -oP/\K: portable, and this has to keep working if the
+          # step is ever run somewhere without GNU grep.
+          sha=$(grep -oE '^ARG COMFY_SHA=[0-9a-f]{40}' infra/video-worker/Dockerfile \
+                | sed 's/^ARG COMFY_SHA=//')
+          if [ -z "$sha" ]; then
+            echo "could not read ARG COMFY_SHA from infra/video-worker/Dockerfile" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "validating against ComfyUI $sha"
+
+      # The checker must be able to fail. Runs before anything is installed: it needs no
+      # ComfyUI, and a broken checker should not wait on a five-minute pip install to say so.
+      - name: Self-test (checker rejects the known-bad graph)
+        run: python3 infra/video-worker/validate_graphs.py --self-test
+
+      - name: Cache ComfyUI checkout
+        uses: actions/cache@v4
+        with:
+          path: comfyui
+          key: comfyui-${{ steps.comfy.outputs.sha }}
+
+      - name: Clone ComfyUI at the pinned SHA
+        run: |
+          if [ ! -d comfyui/.git ]; then
+            git clone --filter=blob:none https://github.com/comfyanonymous/ComfyUI.git comfyui
+          fi
+          # A cache hit can predate the SHA (someone bumped the Dockerfile); fetch then.
+          git -C comfyui checkout --detach ${{ steps.comfy.outputs.sha }} 2>/dev/null || {
+            git -C comfyui fetch origin
+            git -C comfyui checkout --detach ${{ steps.comfy.outputs.sha }}
+          }
+          git -C comfyui --no-pager log -1 --oneline
+
+      - name: Install CPU torch and ComfyUI deps
+        run: |
+          python -m pip install --upgrade pip
+          # CPU wheels only: this job never touches a GPU, and the CUDA builds are ~2 GB.
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          sed -E '/^(torch|torchvision|torchaudio)([<>=!].*)?$/d' comfyui/requirements.txt > /tmp/req.txt
+          pip install -r /tmp/req.txt
+          # handler.py imports requests at module scope; runpod is imported lazily and
+          # never reached on this path.
+          pip install requests
+
+      - name: Start ComfyUI (CPU, no models)
+        run: |
+          cd comfyui
+          nohup python -u main.py --cpu --listen 127.0.0.1 --port 8188 \
+            > /tmp/comfyui.log 2>&1 &
+          echo "waiting for /object_info"
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null http://127.0.0.1:8188/object_info; then
+              echo "ComfyUI up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "ComfyUI never answered:" >&2
+          tail -60 /tmp/comfyui.log >&2
+          exit 1
+
+      - name: Validate every graph the worker builds
+        env:
+          COMFY_URL: http://127.0.0.1:8188
+        run: python3 infra/video-worker/validate_graphs.py
+
+      - name: ComfyUI log (on failure)
+        if: failure()
+        run: tail -80 /tmp/comfyui.log || true
