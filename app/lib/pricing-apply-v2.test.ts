@@ -3,7 +3,9 @@ import { describe, it, expect } from 'vitest'
 import {
   PRICING_AUDIT_RETENTION_DAYS,
   PRUNABLE_AUDIT_STATUSES,
+  DEFAULT_MAP_BRANDS,
   decideStatus,
+  mapAppliesToVendor,
 } from './pricing-apply-v2.server'
 
 const BASE = {
@@ -115,5 +117,38 @@ describe('pricing_audit_log retention', () => {
     // The owner digest's pricing check reads yesterday only; nothing in the app
     // reads further back than a quarter.
     expect(PRICING_AUDIT_RETENTION_DAYS).toBeGreaterThanOrEqual(90)
+  })
+})
+
+describe('mapAppliesToVendor', () => {
+  const brands = [...DEFAULT_MAP_BRANDS] // ['Lovense', 'Playground']
+
+  it('applies MAP to the configured MAP brands', () => {
+    expect(mapAppliesToVendor('Lovense', brands)).toBe(true)
+    expect(mapAppliesToVendor('Playground', brands)).toBe(true)
+  })
+
+  it('is case-insensitive and trims whitespace', () => {
+    expect(mapAppliesToVendor('  lovense ', brands)).toBe(true)
+    expect(mapAppliesToVendor('PLAYGROUND', brands)).toBe(true)
+  })
+
+  it('does NOT apply MAP to any other brand (the bug being fixed)', () => {
+    for (const v of ['Doc Johnson', 'Rene Rofe', 'Sportsheets', 'Classic Brands', 'LELO', 'Dame']) {
+      expect(mapAppliesToVendor(v, brands)).toBe(false)
+    }
+  })
+
+  it('never matches a null, undefined, or blank vendor', () => {
+    expect(mapAppliesToVendor(null, brands)).toBe(false)
+    expect(mapAppliesToVendor(undefined, brands)).toBe(false)
+    expect(mapAppliesToVendor('   ', brands)).toBe(false)
+  })
+
+  it('honors a custom brand list (config-driven, no partial matching)', () => {
+    expect(mapAppliesToVendor('We-Vibe', ['We-Vibe'])).toBe(true)
+    // exact match only: "Play" must not match "Playground"
+    expect(mapAppliesToVendor('Play', brands)).toBe(false)
+    expect(mapAppliesToVendor('Lovense Toys', brands)).toBe(false)
   })
 })
