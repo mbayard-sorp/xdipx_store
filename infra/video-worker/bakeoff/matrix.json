@@ -1,0 +1,72 @@
+{
+  "comment": "Tuesday bake-off matrix. Values starting with 'env:' are resolved from the environment by render-matrix.py at run time (BLOB_TOKEN is never written to disk). blobPathPrefix is assigned per run by render-matrix.py as bakeoff/<runId>/<case>. Seeds are pinned so a re-run is comparable. The finish-pass A/B is NOT a matrix case: finish_pass is pure ffmpeg, so it runs locally on the returned s2v-long clip for free.",
+  "cases": [
+    {
+      "name": "i2v-control-fast",
+      "comment": "Cheap regression control on the live lane, runs FIRST: proves the pod setup (models, extra_model_paths, ffmpeg, Blob) matches what the deployed endpoint does, for a few cents.",
+      "input": {
+        "mode": "i2v",
+        "prompt": "a woman looking at camera, subtle natural motion, hair moving gently, soft studio light, shallow depth of field, no text, no logos",
+        "negativePrompt": "text, watermark, logo, blurry, low quality, deformed, extra limbs, jitter, flicker",
+        "imageUrl": "env:IMAGE_URL",
+        "durationSeconds": 5,
+        "seed": 20260901,
+        "aspect": "9:16",
+        "fast": true,
+        "finish": false,
+        "blobToken": "env:BLOB_TOKEN"
+      }
+    },
+    {
+      "name": "s2v-short",
+      "comment": "Single-chunk baseline: audio under 4.8s so only the base WanSoundImageToVideo pass runs, no extend chain.",
+      "input": {
+        "mode": "s2v",
+        "prompt": "a woman speaking warmly to camera in a bright home studio, natural hand gestures, soft window light, shallow depth of field, no text, no logos",
+        "negativePrompt": "text, watermark, logo, blurry, low quality, deformed, extra limbs, jitter, flicker",
+        "imageUrl": "env:IMAGE_URL",
+        "audioUrl": "env:AUDIO_URL_SHORT",
+        "durationSeconds": 5,
+        "seed": 20260901,
+        "aspect": "9:16",
+        "fast": false,
+        "finish": false,
+        "blobToken": "env:BLOB_TOKEN"
+      }
+    },
+    {
+      "name": "s2v-long",
+      "comment": "THE critical case: ~12s audio forces the WanSoundImageToVideoExtend + LatentConcat chain, the path every real episode line takes. This graph has never rendered a frame.",
+      "input": {
+        "mode": "s2v",
+        "prompt": "a woman speaking warmly to camera in a bright home studio, natural hand gestures, soft window light, shallow depth of field, no text, no logos",
+        "negativePrompt": "text, watermark, logo, blurry, low quality, deformed, extra limbs, jitter, flicker",
+        "imageUrl": "env:IMAGE_URL",
+        "audioUrl": "env:AUDIO_URL_LONG",
+        "durationSeconds": 12,
+        "seed": 20260901,
+        "aspect": "9:16",
+        "fast": false,
+        "finish": false,
+        "blobToken": "env:BLOB_TOKEN"
+      }
+    },
+    {
+      "name": "s2v-long-fast",
+      "comment": "Same audio and seed as s2v-long but fast:true (4-step lightning LoRA on the single S2V expert, cfg 1). The production cost question: is 4-step talking quality shippable at roughly a fifth of the render time.",
+      "input": {
+        "mode": "s2v",
+        "prompt": "a woman speaking warmly to camera in a bright home studio, natural hand gestures, soft window light, shallow depth of field, no text, no logos",
+        "negativePrompt": "text, watermark, logo, blurry, low quality, deformed, extra limbs, jitter, flicker",
+        "imageUrl": "env:IMAGE_URL",
+        "audioUrl": "env:AUDIO_URL_LONG",
+        "durationSeconds": 12,
+        "seed": 20260901,
+        "aspect": "9:16",
+        "fast": true,
+        "finish": false,
+        "blobToken": "env:BLOB_TOKEN"
+      }
+    }
+  ]
+}

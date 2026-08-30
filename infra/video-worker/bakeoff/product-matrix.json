@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "name": "s2v-product",
+      "comment": "Product spot: Sofia holding the Intruder rabbit, approved 33-word script, fast8 production-candidate settings.",
+      "input": {
+        "mode": "s2v",
+        "prompt": "a woman holding an orange product in one hand at chest height, speaking warmly to camera in a bright bedroom, keeps the product visible and steady, soft light, no text, no logos",
+        "negativePrompt": "text, watermark, logo, blurry, low quality, deformed, extra limbs, jitter, flicker",
+        "imageUrl": "env:IMAGE_URL",
+        "audioUrl": "env:AUDIO_URL_LONG",
+        "durationSeconds": 16,
+        "seed": 20260901,
+        "aspect": "9:16",
+        "fast": true,
+        "steps": 8,
+        "finish": false,
+        "blobToken": "env:BLOB_TOKEN"
+      }
+    }
+  ]
+}

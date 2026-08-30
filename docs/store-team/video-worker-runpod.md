@@ -100,10 +100,57 @@ Doing any of these without the others only moves the failure later and makes it 
 Steps 1-3 are all owner-only (GPU pod, registry credential, endpoint config), which is why
 this is a blocker-list item rather than something an agent can finish.
 
+## Bake-off (2026-08-30): render results
+
+The corrected S2V graph rendered end to end, 4 of 4 matrix cases green, driven through the
+real handler.py in TEST_LOCAL mode on a temporary 4090 pod ($0.74/hr) via the harness in
+`infra/video-worker/bakeoff/`. All cases at the production 720x1280 @ 16 fps, Sofia cast
+reference frame, ElevenLabs speech, seed 20260901.
+
+| Case | Settings | Wall | Peak VRAM | Metered cost |
+|---|---|---|---|---|
+| i2v-control-fast | 5s, 4-step lightning | 223s | 19.2 GB | ~$0.05 (matches live lane) |
+| s2v-short | 2.9s, 1 chunk, 20 steps cfg 6 | 26.5 min | 22.1 GB | ~$0.33 |
+| s2v-long | 14.2s, 3 chunks, 20 steps cfg 6 | ~95 min | ~20 GB | ~$1.17 |
+| s2v-long-fast | same, 4-step lightning cfg 1 | 9.9 min | 19.8 GB | ~$0.12 |
+| s2v-long-fast8 | same, 8-step lightning cfg 1 | 19.3 min | 20.1 GB | ~$0.24 |
+
+Findings that bind production settings:
+
+- **24 GB fits.** Every S2V case fit a 4090; the tightest was the 20-step single chunk at
+  22.1 GB. The 48 GB preference stands for headroom, not necessity.
+- **20-step S2V does not fit the serverless execution timeout for real lines.** One 77-frame
+  chunk at 20 steps runs ~29 min on a 4090 (1800s limit ≈ one chunk); every extend chunk adds
+  the same again. Full-quality S2V is a pod job, not a serverless job, at current settings.
+  The lightning path (4 or 8 steps, cfg 1) fits easily and costs an eighth as much.
+- **One model family per ComfyUI process.** The pod container cgroup is far smaller than the
+  host (38 GiB observed); a warm server holding the i2v/t2v expert pair is OOM-killed the
+  moment the s2v checkpoint loads on top. The handler now restarts ComfyUI on a family
+  switch (`ensure_comfy(family=...)`), which also protects the serverless worker once mixed
+  modes deploy. Large downloads to the container disk count against the same cgroup, so do
+  not bootstrap weights while a render is up.
+- **Owner quality verdict 2026-08-30 (in-session):** cfg 1 lighting (the lightning path) beat
+  cfg 6 on look; 20-step won on lip articulation; post-grading cfg 6 toward cfg 1 tone reads
+  washed out and is not a substitute. The 8-step lightning hybrid was rendered as the
+  candidate production default. Chunk-seam identity held across both seams in the 14s
+  3-chunk render; hands are the visible weak point at 20 steps (fused fingers while
+  gesturing), and the lightning path gestures less, which hides it.
+- Fixes applied to `build_s2v_workflow` before the run, from the source-verification pass
+  (all CPU-validated against a live ComfyUI at the pinned sha): full 77-frame chunks with an
+  ffmpeg tail-trim to audio length (the model needs >= 73 frames per pass), the t2v
+  high-noise lightning LoRA grafted for fast mode (4 steps at cfg 1 with no distill LoRA
+  renders mush), the official first-frame VAE overbake hack (LatentCut prepend, drop 4
+  decoded frames), and the official Wan default negative when a job sends none.
+
+InfiniteTalk (kijai WanVideoWrapper at a pinned commit, weights pod-local) was render-tested
+the same day via `infra/video-worker/bakeoff/infinitetalk/`; results land here when judged.
+LongCat-Video-Avatar remains unevaluated (wrapper support is branch-grade; weakest
+operational story of the three).
+
 ## Bake-off (2026-08-29): Wan2.2-S2V graph
 
-**Result: the shipped S2V graph could not have run. It has been rewritten. It has not been
-render-tested.** Scope was Wan2.2-S2V only; InfiniteTalk and LongCat-Video-Avatar were never
+**Result: the shipped S2V graph could not have run. It has been rewritten and (2026-08-30)
+render-tested, see above.** Scope was Wan2.2-S2V only; InfiniteTalk and LongCat-Video-Avatar were never
 reached, so no quality comparison exists between the three candidates.
 
 Checked against the ComfyUI source at the pinned `COMFY_SHA` (72865f4f, v0.33.1, 2026-08-13)
