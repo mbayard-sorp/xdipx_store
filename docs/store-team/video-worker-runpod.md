@@ -142,8 +142,29 @@ Findings that bind production settings:
   renders mush), the official first-frame VAE overbake hack (LatentCut prepend, drop 4
   decoded frames), and the official Wan default negative when a job sends none.
 
-InfiniteTalk (kijai WanVideoWrapper at a pinned commit, weights pod-local) was render-tested
-the same day via `infra/video-worker/bakeoff/infinitetalk/`; results land here when judged.
+### InfiniteTalk challenger round (same day, same 4090, same assets and seed)
+
+Rendered via `infra/video-worker/bakeoff/infinitetalk/` (kijai WanVideoWrapper at the pinned
+commit, ~28.5 GB of weights pod-local, never on the volume). One defect fixed en route: the
+wrapper's vendored wav2vec2 subclass returns hidden_states=None under transformers 5 (its
+custom forward bypasses the new hidden-states machinery), crashing MultiTalkWav2VecEmbeds;
+`patch-wav2vec2-hf5.py` reroutes it through layer hooks and is applied by the setup script.
+
+| Case | Res | Wall | Peak VRAM |
+|---|---|---|---|
+| it-short (2.9s) | 480x832 | 2.0 min | 16.2 GB |
+| it-long (14.2s, 5 windows) | 480x832 | 7.2 min | 16.9 GB |
+| it-product (16.3s) | 480x832 | 8.6 min | 16.8 GB |
+| it-long-720 (14.2s) | 720x1280 | 27.9 min | 24.05 GB |
+
+Owner verdicts (2026-08-30, in-session): InfiniteTalk lip sync and motion naturalness beat
+S2V ("really close and feels more natural"); S2V fast kept a slight edge on attractiveness;
+IT sync drifts slightly on fast speech at the end of a line; the IT 480p cuts read lower
+quality than S2V's 720p, as expected from the resolution gap. The decisive operational
+datum: at 720x1280 on a 24 GB card, IT peaks at 24.05 GB and block-swap thrashing makes it
+SLOWER than 8-step S2V at the same resolution (27.9 vs 19.3 min). IT's speed advantage
+(3 to 5x) exists at 480p, or presumably at 720p on 48 GB cards, which remain low-stock.
+
 LongCat-Video-Avatar remains unevaluated (wrapper support is branch-grade; weakest
 operational story of the three).
 
