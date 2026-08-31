@@ -965,6 +965,38 @@ export function computeVocab(index: DiscoveryProduct[]): DiscoveryVocab {
   }
 }
 
+export interface VocabTagCount {
+  group: 'mood' | 'audience' | 'matters'
+  tag: string
+  productCount: number
+}
+
+/**
+ * Per-tag product counts across the three Ask Emma vocab dimensions (ticket
+ * #5631). A cloud routine with no Shopify Admin credentials cannot run
+ * `buildDiscoveryIndex()` itself (it needs `adminGraphQL`), so
+ * `app/routes/api.team.discovery-vocab.tsx` calls this over the already-built,
+ * credential-free cached index (`getDiscoveryIndex()`) instead. Frequency-sorted
+ * within each group, matching `computeVocab`'s ordering, so a caller reading
+ * only the first few rows per group still sees the most-supported tags first.
+ */
+export function computeVocabCounts(index: DiscoveryProduct[]): VocabTagCount[] {
+  const tally = (group: VocabTagCount['group'], key: 'mood' | 'audience' | 'matters'): VocabTagCount[] => {
+    const counts = new Map<string, number>()
+    for (const p of index) {
+      for (const v of p[key]) counts.set(v, (counts.get(v) ?? 0) + 1)
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag, productCount]) => ({ group, tag, productCount }))
+  }
+  return [
+    ...tally('mood', 'mood'),
+    ...tally('audience', 'audience'),
+    ...tally('matters', 'matters'),
+  ]
+}
+
 /**
  * Cached read of the chip vocabularies. 24h TTL — a tag a merchandiser
  * adds in Shopify appears as a chip within a day. KV miss falls through
