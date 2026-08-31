@@ -155,6 +155,15 @@ export function estimateImageCostUsd(model: string, count: number): number {
 const RUNPOD_GPU_USD_PER_SEC_DEFAULT = 0.00053
 const RUNPOD_FEE_MULTIPLIER_DEFAULT = 1.5
 const RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND = 45
+// Measured 2026-08-30 (docs/store-team/video-worker-runpod.md, bake-off case
+// s2v-long-fast8, the 8-step lightning hybrid rendered as the candidate
+// production default): 14.2s of finished clip took 19.3 min (1158s) of
+// render, ~81.5 render-seconds per clip-second — far above i2v/t2v's 45, and
+// wrong to share with them. Rounded UP per the never-lowball discipline
+// above. Measured on a 4090 pod; the 48GB serverless class this deploys on
+// differs, so this is env-overridable and computeRunpodActualCostUsd's
+// per-job actuals re-tune it over time.
+const RUNPOD_S2V_RENDER_SECONDS_PER_CLIP_SECOND = 82
 
 function envNumber(key: string, fallback: number): number {
   const raw = process.env[key]
@@ -181,9 +190,21 @@ export function runpodAllInRatePerSecondUsd(): number {
   return runpodGpuRatePerSecondUsd() * runpodFeeMultiplier()
 }
 
-/** ESTIMATE-only $/clip-second for the wan22 tiers. See block comment above. */
+/** ESTIMATE-only $/clip-second for the wan22 i2v/t2v tiers. See block comment above. */
 export function estimateRunpodRatePerSecondUsd(): number {
   return runpodAllInRatePerSecondUsd() * RUNPOD_RENDER_SECONDS_PER_CLIP_SECOND
+}
+
+/**
+ * ESTIMATE-only $/clip-second for the wan22-s2v talking tier. Its own render
+ * multiplier (RUNPOD_S2V_RENDER_SECONDS_PER_CLIP_SECOND above), not
+ * estimateRunpodRatePerSecondUsd()'s i2v/t2v figure: sharing it under-priced
+ * s2v by ~1.8x, which is exactly the number the per-video ceiling and the
+ * daily budget gate read before any spend happens.
+ */
+export function estimateRunpodS2vRatePerSecondUsd(): number {
+  return runpodAllInRatePerSecondUsd()
+    * envNumber('RUNPOD_S2V_RENDER_SECONDS_PER_CLIP_SECOND', RUNPOD_S2V_RENDER_SECONDS_PER_CLIP_SECOND)
 }
 
 /**
@@ -211,11 +232,12 @@ const VIDEO_RATES: Record<string, number> = {
   // only, see estimateRunpodRatePerSecondUsd() above. Actual spend is metered
   // per job via computeRunpodActualCostUsd() and replaces this in api_token_log.
   'runpod/wan22':     estimateRunpodRatePerSecondUsd(),
-  // Audio-driven talking mode on the same worker (ticket #5714). ESTIMATE
-  // shares the wan22 $/clip-second derivation until the bake-off measures the
-  // real render multiplier; actuals replace it per job via
+  // Audio-driven talking mode on the same worker (ticket #5714). The
+  // 2026-08-30 bake-off (docs/store-team/video-worker-runpod.md) measured
+  // s2v's own render multiplier — see estimateRunpodS2vRatePerSecondUsd()
+  // above; it is NOT the i2v/t2v figure. Actuals replace this per job via
   // computeRunpodActualCostUsd exactly like the i2v tier.
-  'runpod/wan22-s2v': estimateRunpodRatePerSecondUsd(),
+  'runpod/wan22-s2v': estimateRunpodS2vRatePerSecondUsd(),
   'elevenlabs/tts':   0.003, // voiceover, ~$0.20/min of speech at Creator-plan credit rates
   'elevenlabs/music': 0.008, // music bed, ~$0.48/min — APPROXIMATE Creator-plan credit conversion
 }
