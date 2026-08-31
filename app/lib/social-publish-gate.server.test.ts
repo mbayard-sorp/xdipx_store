@@ -7,18 +7,42 @@
 // Restricted Goods standard removes.
 import { describe, it, expect } from 'vitest'
 import {
-  runDeterministicPublishChecks,
+  runDeterministicPublishChecks as runChecksRaw,
   findRepeatedRun,
   shingles,
   REPETITION_SHINGLE,
   isProductSellable,
 } from './social-publish-gate.server'
+import type { VisionVerdict } from './social-vision-gate.server'
 
 const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
 const GOOD_MEDIA = [`${CDN}/social-rosales-cast-maya-20260812-1.jpg`]
 const inStock = async () => true
 const outOfStock = async () => false
 const notMember = async () => false
+
+/** Passing vision-gate verdict for tests unrelated to that check (#6763). */
+const PASSING_VERDICT: VisionVerdict = {
+  pass: true,
+  checks: { limbCount: 'pass', handAnatomy: 'pass', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'pass' },
+  notes: 'test fixture: clean',
+  checkedAt: '2026-08-31T00:00:00.000Z',
+}
+
+/**
+ * Wraps `runDeterministicPublishChecks` with a passing vision-gate verdict by
+ * default, so the call sites below that predate the vision-gate check
+ * (ticket #6763) keep testing exactly what they always tested instead of
+ * making a real database round trip through the unmocked default lookup.
+ * The `describe('vision-gate verdict', ...)` block overrides `getVisionVerdict`
+ * directly to exercise the check itself.
+ */
+function runChecks(
+  input: Parameters<typeof runChecksRaw>[0],
+  deps?: Parameters<typeof runChecksRaw>[1],
+): ReturnType<typeof runChecksRaw> {
+  return runChecksRaw(input, { getVisionVerdict: async () => PASSING_VERDICT, ...(deps ?? {}) })
+}
 
 /** A caption with nothing wrong with it. */
 const CLEAN = 'ok, a detail about silicone nobody mentions: not all of it is the same grade.'
@@ -29,7 +53,7 @@ function checks(r: { findings: { check: string }[] }): string[] {
 
 describe('a clean post', () => {
   it('passes with no findings', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'rosales' },
       { getAvailability: inStock },
     )
@@ -41,7 +65,7 @@ describe('a clean post', () => {
 
 describe('imagery provenance', () => {
   it('blocks a bare Nalpac packshot, which is what the pending drafts carry', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: [`${CDN}/77292A.jpg?v=1775408527`] },
       { isLibraryMember: notMember },
     )
@@ -50,7 +74,7 @@ describe('imagery provenance', () => {
   })
 
   it('blocks a carousel where only one slide is a packshot', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: [...GOOD_MEDIA, `${CDN}/96177A.jpg`] },
       { isLibraryMember: notMember },
     )
@@ -60,7 +84,7 @@ describe('imagery provenance', () => {
   // Library membership burn-in (#4937): prefix OR membership passes.
   it('passes a prefix-named url without consulting the library', async () => {
     let asked = 0
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA },
       { isLibraryMember: async () => { asked++; return false } },
     )
@@ -69,7 +93,7 @@ describe('imagery provenance', () => {
   })
 
   it('passes a non-prefix url that is a library member (an owner upload)', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: [`${CDN}/owner-shot-0822.jpg?v=1`] },
       { isLibraryMember: async (u) => u.includes('owner-shot-0822') },
     )
@@ -78,7 +102,7 @@ describe('imagery provenance', () => {
   })
 
   it('blocks a non-prefix url that is not a library member, naming both tests', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: [`${CDN}/owner-shot-0822.jpg`] },
       { isLibraryMember: notMember },
     )
@@ -88,7 +112,7 @@ describe('imagery provenance', () => {
   })
 
   it('fails closed when the membership lookup throws', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: [`${CDN}/owner-shot-0822.jpg`] },
       { isLibraryMember: async () => { throw new Error('neon down') } },
     )
@@ -97,7 +121,7 @@ describe('imagery provenance', () => {
   })
 
   it('blocks a post with no media rather than treating it as nothing to check', async () => {
-    const r = await runDeterministicPublishChecks({ caption: CLEAN, mediaUrls: [] })
+    const r = await runChecks({ caption: CLEAN, mediaUrls: [] })
     expect(checks(r)).toContain('image-provenance')
     expect(r.blocked).toBe(true)
   })
@@ -105,7 +129,7 @@ describe('imagery provenance', () => {
 
 describe('stock, re-checked at publish time', () => {
   it('blocks an out-of-stock product (the 2026-08-09 deleted post)', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'gone' },
       { getAvailability: outOfStock },
     )
@@ -114,7 +138,7 @@ describe('stock, re-checked at publish time', () => {
   })
 
   it('fails closed when stock cannot be resolved', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'unknown' },
       { getAvailability: async () => null },
     )
@@ -123,7 +147,7 @@ describe('stock, re-checked at publish time', () => {
   })
 
   it('fails closed when the stock lookup throws, rather than publishing anyway', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'boom' },
       { getAvailability: async () => { throw new Error('shopify down') } },
     )
@@ -133,7 +157,7 @@ describe('stock, re-checked at publish time', () => {
 
   it('does not invent a stock finding for a product-free education post', async () => {
     // License D posts legitimately feature no product.
-    const r = await runDeterministicPublishChecks({ caption: CLEAN, mediaUrls: GOOD_MEDIA })
+    const r = await runChecks({ caption: CLEAN, mediaUrls: GOOD_MEDIA })
     expect(r.findings).toEqual([])
   })
 })
@@ -148,14 +172,14 @@ describe('attempts to sell, the thing Meta actually removes', () => {
   ]
   for (const [check, caption] of cases) {
     it(`blocks ${check}`, async () => {
-      const r = await runDeterministicPublishChecks({ caption, mediaUrls: GOOD_MEDIA })
+      const r = await runChecks({ caption, mediaUrls: GOOD_MEDIA })
       expect(checks(r)).toContain(check)
       expect(r.blocked).toBe(true)
     })
   }
 
   it('does not fire on ordinary editorial copy', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'the shape does the finding, so nobody has to go looking. link in bio if you want the full guide.',
       mediaUrls: GOOD_MEDIA,
     })
@@ -165,7 +189,7 @@ describe('attempts to sell, the thing Meta actually removes', () => {
 
 describe('banned vocabulary', () => {
   it('blocks emoji anatomy, which is read as anatomy regardless of intent', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'a little something 🍑 for later',
       mediaUrls: GOOD_MEDIA,
     })
@@ -173,7 +197,7 @@ describe('banned vocabulary', () => {
   })
 
   it('blocks a lived-experience claim, which Emma can never make', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'I tried this one last week and honestly',
       mediaUrls: GOOD_MEDIA,
     })
@@ -181,7 +205,7 @@ describe('banned vocabulary', () => {
   })
 
   it('leaves second-person copy alone', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'you will feel the difference in the grip, is the thing',
       mediaUrls: GOOD_MEDIA,
     })
@@ -192,7 +216,7 @@ describe('banned vocabulary', () => {
 describe('repetition across the live feed', () => {
   it('blocks an eight-word run recycled from an earlier post', async () => {
     const prior = 'the nightstand drawer says a lot about a person, honestly'
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'ok so the nightstand drawer says a lot about a person here',
       mediaUrls: GOOD_MEDIA,
       recentCaptions: [prior],
@@ -202,7 +226,7 @@ describe('repetition across the live feed', () => {
   })
 
   it('tolerates short overlaps, which one brand voice cannot avoid', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'the thing most people miss about silicone grades',
       mediaUrls: GOOD_MEDIA,
       recentCaptions: ['the thing most people forget is how to store it'],
@@ -228,7 +252,7 @@ describe('repetition across the live feed', () => {
     // shingle and 422-blocked both (run 438).
     const link = 'https://xdipx.com/products/wand?utm_source=x&utm_medium=social&utm_campaign=aug'
     const prior = `the quiet confidence of a wand that just knows what it is doing ${link}`
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       platform: 'x',
       caption: `a slow build is its own kind of luxury, and this one earns it ${link}`,
       mediaUrls: GOOD_MEDIA,
@@ -250,7 +274,7 @@ describe('repetition across the live feed', () => {
 
 describe('result shape', () => {
   it('reports every independent failure at once rather than stopping at the first', async () => {
-    const r = await runDeterministicPublishChecks(
+    const r = await runChecks(
       {
         caption: 'I tried this, $48.99, shop now 🍑',
         mediaUrls: [`${CDN}/77292A.jpg`],
@@ -302,7 +326,7 @@ describe('platform divergence', () => {
   const PDP_CAPTION = `a detail worth knowing https://xdipx.com/products/rosales-maya`
 
   it('blocks a PDP link on Instagram', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: PDP_CAPTION, mediaUrls: GOOD_MEDIA, platform: 'instagram',
     })
     expect(checks(r)).toContain('sale-pdp-link')
@@ -312,14 +336,14 @@ describe('platform divergence', () => {
   it('defaults to Instagram when no platform is given', async () => {
     // Every caller predating X omitted this. The default must stay Instagram or
     // those callers silently lose the check.
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: PDP_CAPTION, mediaUrls: GOOD_MEDIA,
     })
     expect(checks(r)).toContain('sale-pdp-link')
   })
 
   it('allows a PDP link on X', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: PDP_CAPTION, mediaUrls: GOOD_MEDIA, platform: 'x',
     })
     expect(checks(r)).not.toContain('sale-pdp-link')
@@ -329,7 +353,7 @@ describe('platform divergence', () => {
   it('still blocks the other sale forms on X', async () => {
     // Only the PDP-link rule diverges. A price or a promo code is a charter
     // violation on any platform, and relaxing one rule must not relax the rest.
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'just $19.99 today, code SAVE20', mediaUrls: GOOD_MEDIA, platform: 'x',
     })
     expect(checks(r)).toContain('sale-price')
@@ -338,7 +362,7 @@ describe('platform divergence', () => {
   })
 
   it('blocks an over-length X post, counting links at t.co width', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'x'.repeat(281), mediaUrls: GOOD_MEDIA, platform: 'x',
     })
     expect(checks(r)).toContain('caption-too-long')
@@ -350,14 +374,14 @@ describe('platform divergence', () => {
     // counts. A naive length check would reject a publishable post.
     const caption = `${'x'.repeat(250)} https://xdipx.com/products/some-quite-long-handle`
     expect(caption.length).toBeGreaterThan(280)
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption, mediaUrls: GOOD_MEDIA, platform: 'x',
     })
     expect(checks(r)).not.toContain('caption-too-long')
   })
 
   it('does not length-check Instagram, whose ceiling is far higher', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'x'.repeat(600), mediaUrls: GOOD_MEDIA, platform: 'instagram',
     })
     expect(checks(r)).not.toContain('caption-too-long')
@@ -367,7 +391,7 @@ describe('platform divergence', () => {
     // Owner decision 2026-08-16: X would accept a text-only post, but every
     // draft is built around a generated asset and silently dropping it is a
     // content change nothing reviewed.
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'a clean caption with nothing wrong', mediaUrls: [], platform: 'x',
     })
     expect(checks(r)).toContain('image-provenance')
@@ -393,7 +417,7 @@ describe('platform divergence', () => {
 // block.
 describe('removal-tier caption lexicon', () => {
   it('blocks a crude-slang word in an Instagram caption (tier: crude-slang)', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'stop overthinking it and just go grab the pussy pump already',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -406,7 +430,7 @@ describe('removal-tier caption lexicon', () => {
     // DONE WHEN #2: the same text that blocks on Instagram must pass untouched
     // on X. Blocking it there gags the account for no safety gain. The lexicon
     // does not run on X at all (CAPTION_LEXICON_PLATFORMS is instagram-only).
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'stop overthinking it and just go grab the pussy pump already',
       mediaUrls: GOOD_MEDIA,
       platform: 'x',
@@ -416,7 +440,7 @@ describe('removal-tier caption lexicon', () => {
   })
 
   it('scans on-image text, not only the caption', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: CLEAN,
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -427,7 +451,7 @@ describe('removal-tier caption lexicon', () => {
   })
 
   it('scans alt text, not only the caption', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: CLEAN,
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -441,7 +465,7 @@ describe('removal-tier caption lexicon', () => {
     // "arousal", "stimulation", "pleasure", "climax" sit in the RESTRICTED
     // (age-gate) tier, not removal, and are exactly what a blocked drafter should
     // rewrite toward. Blocking them would make the check unusable.
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'external stimulation, blood flow, and pleasure are the whole mechanism here. arousal builds toward a climax.',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -452,7 +476,7 @@ describe('removal-tier caption lexicon', () => {
   it('respects word boundaries, so ordinary words never trip it', async () => {
     // "document" contains "cum", "peacock" contains "cock", "analysis" contains
     // "anal". None is the flagged word, and \b keeps them clear.
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'a document, a peacock, and an honest analysis of what the shape does',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -470,7 +494,7 @@ describe('removal-tier caption lexicon', () => {
 // mechanism." The gate must not refuse the charter's own worked example.
 describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   it('passes the charter\'s own mechanism example verbatim (docs/emma-voice.md line 316)', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'air pulsation seals over the clitoris and pulses',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -482,7 +506,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   it('passes the real caption fragment from social_posts row 107, the live incident', async () => {
     // 2026-08-25: the owner clicked Post now on row 107 and the gate refused
     // this exact mechanism sentence. Textbook fact framing, not act narration.
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'the vibrating part rests against the clitoris during sex, so both of you feel it',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -492,7 +516,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   })
 
   it('tier 1 (clinical-anatomy) passes: "vagina" no longer blocks', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'the toy is designed to rest just inside the vagina during use',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -502,7 +526,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   })
 
   it('tier 2 (crude-slang) still blocks: "dick"', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'this one is built for a dick of pretty much any size',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -512,7 +536,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   })
 
   it('tier 3 (act-naming) still blocks: "blowjob"', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'the sleeve is textured to mimic a blowjob',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -522,7 +546,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   })
 
   it('tier 4 (arousal-states) still blocks: "throbbing"', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'the pulses build until everything feels throbbing',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -532,7 +556,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   })
 
   it('tier 5 (borderline-acts) still blocks: "masturbation", owner direction 2026-08-25', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'this is a straightforward masturbation aid, nothing fancier than that',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -544,7 +568,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   it('a tier-1 term does not launder a tier-2 term in the same caption', async () => {
     // Mixing an allowed clinical noun with a still-banned crude term must still
     // block on the crude term. The presence of the allowed word is not a pass.
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'it rests against the clitoris, but honestly just call it what it is, a pussy toy',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -554,7 +578,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
   })
 
   it('X is unaffected either way: the lexicon never runs there', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'the vibrating part rests against the clitoris during sex, so both of you feel it',
       mediaUrls: GOOD_MEDIA,
       platform: 'x',
@@ -570,7 +594,7 @@ describe('clinical anatomy is no longer removal-tier (ticket #5482)', () => {
 // symptom directly rather than only the missing column.
 describe('caption describes its own image', () => {
   it('blocks the real row-80 sentence', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'that is jade in the photo, sleeves pushed up at a sunny bathroom sink',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -583,7 +607,7 @@ describe('caption describes its own image', () => {
   })
 
   it('does not fire on a clean caption', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: CLEAN,
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -592,14 +616,14 @@ describe('caption describes its own image', () => {
   })
 
   it('catches "pictured" and "so you can see how" variants', async () => {
-    const r1 = await runDeterministicPublishChecks({
+    const r1 = await runChecks({
       caption: 'the grip texture, pictured up close, is the whole point',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
     })
     expect(checks(r1)).toContain('caption-describes-image')
 
-    const r2 = await runDeterministicPublishChecks({
+    const r2 = await runChecks({
       caption: 'so you can see how the seam sits flush against the base',
       mediaUrls: GOOD_MEDIA,
       platform: 'instagram',
@@ -608,11 +632,84 @@ describe('caption describes its own image', () => {
   })
 
   it('fires on X too, not only Instagram', async () => {
-    const r = await runDeterministicPublishChecks({
+    const r = await runChecks({
       caption: 'that is jade in the photo, sleeves pushed up',
       mediaUrls: GOOD_MEDIA,
       platform: 'x',
     })
     expect(checks(r)).toContain('caption-describes-image')
+  })
+})
+
+// ── Vision-gate verdict (ticket #6763) ───────────────────────────────────────
+//
+// This module is text-only (see the file header); it never opens the image
+// itself. These cases exercise the block that consults the verdict recorded
+// by the generation-time vision gate (app/lib/social-vision-gate.server.ts).
+describe('vision-gate verdict', () => {
+  const NON_PREFIX_MEDIA = [`${CDN}/owner-shot-0822.jpg?v=1`]
+  // These cases test the vision-verdict check in isolation, so membership
+  // always passes; the "not a library member" case is already covered under
+  // 'imagery provenance' above.
+  const isLibraryMember = async () => true
+
+  it('passes media carrying a recorded passing verdict', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
+    )
+    expect(checks(r)).not.toContain('vision-verdict')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('blocks media carrying a recorded failing verdict', async () => {
+    const failing: VisionVerdict = {
+      pass: false,
+      checks: { limbCount: 'fail', handAnatomy: 'fail', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'fail' },
+      notes: 'three arms visible on the cast member',
+      checkedAt: '2026-08-30T00:00:00.000Z',
+    }
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { getVisionVerdict: async () => failing, isLibraryMember },
+    )
+    expect(checks(r)).toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
+    const finding = r.findings.find(f => f.check === 'vision-verdict')
+    expect(finding?.detail).toContain('three arms')
+  })
+
+  it('blocks a non-prefix asset with no recorded verdict at all, not a silent skip', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { getVisionVerdict: async () => null, isLibraryMember },
+    )
+    expect(checks(r)).toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
+    const finding = r.findings.find(f => f.check === 'vision-verdict')
+    expect(finding?.detail).toContain('no recorded vision-gate verdict')
+  })
+
+  it('exempts a legacy prefix-named asset with no recorded verdict (predates the check)', async () => {
+    // GOOD_MEDIA carries the `social-` prefix. Every NEW asset from
+    // generateAndUploadSocialImage/generateCastComposite writes its verdict
+    // synchronously at generation time, so a prefix-named url with no verdict
+    // on file is legacy art from before this check existed, the same carve-out
+    // the image-provenance burn-in already grants prefix-named urls above.
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA },
+      { getVisionVerdict: async () => null },
+    )
+    expect(checks(r)).not.toContain('vision-verdict')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('fails closed when the verdict lookup throws', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { getVisionVerdict: async () => { throw new Error('neon down') }, isLibraryMember },
+    )
+    expect(checks(r)).toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
   })
 })

@@ -40,6 +40,7 @@
 
 import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset } from './social-media.server'
 import { X_CAPTION_MAX, T_CO_LENGTH, weightedTweetLength } from './social-publish/x-limits'
+import type { VisionVerdict } from './social-vision-gate.server'
 
 /**
  * Is this product sellable right now?
@@ -448,6 +449,8 @@ export async function runDeterministicPublishChecks(
     getAvailability?: (handle: string) => Promise<boolean | null>
     /** Library membership (#4937). Defaults to the real lookup; a throw is not-a-member. */
     isLibraryMember?: (url: string) => Promise<boolean>
+    /** Recorded vision-gate verdict for a library asset (#6763). Defaults to the real lookup. */
+    getVisionVerdict?: (url: string) => Promise<VisionVerdict | null>
   },
 ): Promise<DeterministicGateResult> {
   const findings: GateFinding[] = []
@@ -490,6 +493,59 @@ export async function runDeterministicPublishChecks(
         ? `Post has no media. A ${platform === 'x' ? 'published X' : 'published Instagram'} post cannot go out without it.`
         : `Not generated social art (neither a generated-asset filename nor a social image library row): ${offenders.slice(0, 3).join(', ')}. Packshot-only stills are retired.`,
     })
+  }
+
+  // ── Vision-gate verdict (#6763) ───────────────────────────────────────────
+  //
+  // This module is text-only by design (see the file header): it reviews
+  // strings, never opens the images. The vision gate is what actually looks
+  // at the pixels, and it runs at generation time
+  // (app/lib/social-vision-gate.server.ts), recording its verdict on the
+  // asset's `social_media_assets` row before the url is ever handed back as
+  // publishable. A recorded FAILING verdict is a block. A MISSING verdict is
+  // also a block, never a silent skip, per the doctrine's own hard-check
+  // mandate (docs/design-doctrine.md:224) — the incident this closes
+  // (social_posts #145, a three-armed cast member) shipped BECAUSE nothing
+  // checked.
+  //
+  // One carve-out, mirroring the image-provenance burn-in above: a
+  // prefix-named url (`isGeneratedSocialAsset`) with no recorded verdict is
+  // treated as predating this check (legacy art from before ticket #6763, or
+  // before the Social Studio v2 library existed at all) rather than blocked.
+  // Every NEW asset from `generateAndUploadSocialImage` /
+  // `generateCastComposite` gets its verdict written synchronously at
+  // generation time, before the url is returned to any caller, so this
+  // carve-out does not open a hole for art generated going forward; it only
+  // protects art that already shipped. A non-prefix url with no verdict (an
+  // owner upload with no library row, or a library asset the generator
+  // somehow failed to check) is not covered by that carve-out and blocks.
+  const getVerdict = deps?.getVisionVerdict ?? (async (url: string) => {
+    const { getVisionVerdictByUrl } = await import('./social-vision-gate.server')
+    return getVisionVerdictByUrl(url)
+  })
+  for (const u of media) {
+    let verdict: VisionVerdict | null = null
+    try {
+      verdict = await getVerdict(u)
+    } catch (err) {
+      console.error(`[social-publish-gate] vision verdict lookup failed, treating as missing: ${u}`, err)
+    }
+    if (verdict === null) {
+      if (isGeneratedSocialAsset(u)) continue
+      findings.push({
+        check: 'vision-verdict',
+        severity: 'block',
+        detail: `Media has no recorded vision-gate verdict: ${u}. A generated asset must pass the anatomy check (limb count, hand anatomy, face/body integrity, extra or merged limbs) before it can publish.`,
+      })
+      continue
+    }
+    if (!verdict.pass) {
+      findings.push({
+        check: 'vision-verdict',
+        severity: 'block',
+        detail: `Media failed the vision-gate anatomy check: ${verdict.notes || 'no notes recorded'} (${u}).`,
+      })
+    }
   }
 
   // ── Length, X only ────────────────────────────────────────────────────────

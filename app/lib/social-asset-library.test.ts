@@ -48,6 +48,8 @@ function fakeRow(row: SocialMediaAssetInsert, id = 7): SocialMediaAssetRow {
     archivedBy: null,
     purgedAt: null,
     shopifyFileId: row.shopifyFileId ?? null,
+    visionVerdict: row.visionVerdict ?? null,
+    visionVerdictAt: row.visionVerdictAt ?? null,
   }
 }
 
