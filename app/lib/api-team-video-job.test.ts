@@ -32,6 +32,11 @@ vi.mock('~/lib/video-pipeline.server', () => ({
   // fixtures carry scriptJson.scenes, so this always returns false here — the
   // multi-scene contract is covered separately in video-multi-scene.test.ts.
   isMultiSceneScript: (script: { scenes?: unknown[] }) => Array.isArray(script?.scenes) && script.scenes.length >= 2,
+  // Real (not mocked) semantics, same grammar as the real module (ticket
+  // #6586 moved this from a route-local const into video-pipeline.server so
+  // the per-scene VideoSceneSpec.presenter validates against the identical
+  // pattern — see that file's own PRESENTER_RE doc comment).
+  PRESENTER_RE: /^(none|emma|friend:[a-z0-9-]+)$/,
 }))
 vi.mock('~/lib/sanity.server', () => ({ getApprovedCastMembers: vi.fn().mockResolvedValue([]) }))
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))

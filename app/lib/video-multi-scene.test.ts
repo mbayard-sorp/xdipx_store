@@ -108,7 +108,7 @@ vi.mock('~/lib/runpod-video.server', () => ({
   cancelRunpod: vi.fn(),
 }))
 
-import { enqueueVideoJob, advanceInflightVideoJobs, listVideoJobs } from '~/lib/video-pipeline.server'
+import { enqueueVideoJob, advanceInflightVideoJobs, listVideoJobs, dryRunEpisodeScript } from '~/lib/video-pipeline.server'
 import { estimateVideoCostUsd, estimateImageCostUsd } from '~/lib/model-pricing.server'
 import { SCENE_FRAME_COST_KEY, SCENE_PLATE_COST_KEY } from '~/lib/fal-video.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
@@ -225,6 +225,70 @@ describe('enqueueVideoJob — multi-scene validation', () => {
     expect(stored.map(s => s.continuity)).toEqual(['own-frame', 'last-frame', 'last-frame'])
     const sceneState = state.inserts[0]!['sceneStateJson'] as { status: string }[]
     expect(sceneState).toEqual([{ status: 'pending' }, { status: 'pending' }, { status: 'pending' }])
+  })
+})
+
+describe('validateScenes — per-scene presenter/spokenLine/coPresenters (ADR-014, ticket #6586)', () => {
+  it('preserves presenter, spokenLine, and coPresenters through normalization (they used to be silently dropped)', async () => {
+    await enqueueVideoJob({
+      ...baseEnqueueArgs,
+      scriptJson: {
+        scenes: [
+          scene({ presenter: 'friend:diego-r', spokenLine: 'not actually required on this tier', coPresenters: ['friend:maya'] }),
+          scene(),
+        ],
+      },
+    })
+    expect(state.inserts).toHaveLength(1)
+    const stored = state.inserts[0]!['scenesJson'] as { presenter?: string; spokenLine?: string; coPresenters?: string[] }[]
+    expect(stored[0]!.presenter).toBe('friend:diego-r')
+    expect(stored[0]!.spokenLine).toBe('not actually required on this tier')
+    expect(stored[0]!.coPresenters).toEqual(['friend:maya'])
+    // Scene 1 named nothing — nothing new appears on it (byte-for-byte for the
+    // existing single-presenter shape).
+    expect(stored[1]!.presenter).toBeUndefined()
+    expect(stored[1]!.spokenLine).toBeUndefined()
+    expect(stored[1]!.coPresenters).toBeUndefined()
+  })
+
+  it('rejects a scene presenter that does not match none | emma | friend:{slug}', async () => {
+    await expect(enqueueVideoJob({
+      ...baseEnqueueArgs,
+      scriptJson: { scenes: [scene({ presenter: 'Diego' }), scene()] },
+    })).rejects.toThrow(/scenes\[0\]\.presenter must be/)
+  })
+
+  it('rejects a coPresenters entry that does not match the presenter grammar', async () => {
+    await expect(enqueueVideoJob({
+      ...baseEnqueueArgs,
+      scriptJson: { scenes: [scene({ coPresenters: ['maya'] }), scene()] },
+    })).rejects.toThrow(/coPresenters must be/)
+  })
+
+  it('does not require spokenLine on a non-talking tier (wan22-i2v)', async () => {
+    await enqueueVideoJob({
+      ...baseEnqueueArgs,
+      scriptJson: { scenes: [scene(), scene()] },
+    })
+    expect(state.inserts).toHaveLength(1)
+  })
+
+  it('requires spokenLine per scene on the lipsync (talking) tier — dryRunEpisodeScript, since sync-lipsync is currently a retired-provider tier enqueueVideoJob refuses outright', () => {
+    expect(() => dryRunEpisodeScript(
+      { scenes: [scene({ presenter: 'friend:diego-r' }), scene({ spokenLine: 'hi' })] },
+      'sync-lipsync',
+    )).toThrow(/scenes\[0\]\.spokenLine is required/)
+  })
+
+  it('accepts scenes with spokenLine on the lipsync (talking) tier', () => {
+    // presenterLine is the pre-existing job-level field dryRunEpisodeScript's
+    // lipsync branch still requires (the render-stage-graph change that would
+    // let per-scene spokenLine replace it is ADR-014 §4's deferred work, not
+    // this ticket) — set here so this test is isolated to the spokenLine check.
+    expect(() => dryRunEpisodeScript(
+      { presenterLine: 'placeholder', scenes: [scene({ spokenLine: 'hi there' }), scene({ spokenLine: 'and welcome' })] },
+      'sync-lipsync',
+    )).not.toThrow()
   })
 })
 
