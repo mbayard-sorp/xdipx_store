@@ -364,7 +364,7 @@ export async function action({ request }: ActionFunctionArgs) {
         platforms: SOCIAL_PLATFORMS,
         models,
         sceneKit,
-        cast: cast.map(m => ({ slug: m.slug, name: m.name, role: m.role })),
+        cast: cast.map(m => ({ slug: m.slug, name: m.name, role: m.role, voiceId: m.voiceId })),
       })
     }
 

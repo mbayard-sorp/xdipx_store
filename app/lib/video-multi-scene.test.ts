@@ -111,6 +111,7 @@ vi.mock('~/lib/runpod-video.server', () => ({
 import { enqueueVideoJob, advanceInflightVideoJobs, listVideoJobs } from '~/lib/video-pipeline.server'
 import { estimateVideoCostUsd, estimateImageCostUsd } from '~/lib/model-pricing.server'
 import { SCENE_FRAME_COST_KEY, SCENE_PLATE_COST_KEY } from '~/lib/fal-video.server'
+import { getApprovedCastMembers } from '~/lib/sanity.server'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -481,5 +482,53 @@ describe('listVideoJobs — scene frame candidate grouping', () => {
     const [row] = await listVideoJobs(40)
 
     expect(row?.sceneFrames?.[0]?.map(f => f.id)).toEqual([20])
+  })
+})
+
+describe('enqueueVideoJob — presenter voice guard (ticket #6584)', () => {
+  const castMember = (overrides: Record<string, unknown> = {}) => ({
+    slug: 'maya', name: 'Maya', role: null, photoUrl: 'https://blob.test/maya.jpg', photoAlt: null,
+    shortBio: null, personaNotes: null, archetype: null, ageRange: null, description: null,
+    emotionTags: [] as string[], editorialPhotoUrl: null, voiceId: null as string | null,
+    ...overrides,
+  })
+
+  it('refuses, before any spend, to enqueue a talking friend with no voiceId assigned', async () => {
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: null })])
+    workerModes.value = ['i2v', 't2v', 's2v']
+    await expect(enqueueVideoJob({
+      ...baseEnqueueArgs,
+      presenter: 'friend:maya',
+      modelTier: 'wan22-s2v',
+      scriptJson: { presenterLine: 'This one is my favorite.', talkingHead: true },
+    })).rejects.toThrow(/no voiceId assigned/i)
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it('enqueues once the talking friend has a voiceId assigned in Sanity', async () => {
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: 'maya-voice-1' })])
+    workerModes.value = ['i2v', 't2v', 's2v']
+    const result = await enqueueVideoJob({
+      ...baseEnqueueArgs,
+      presenter: 'friend:maya',
+      modelTier: 'wan22-s2v',
+      scriptJson: { presenterLine: 'This one is my favorite.', talkingHead: true },
+    })
+    expect(result.jobId).toBeTruthy()
+    expect(state.inserts).toHaveLength(1)
+  })
+
+  it('does not gate a silent tier (no presenter voice ever spoken)', async () => {
+    // wan22-i2v is neither audioDriven nor lipsync, so a friend with no
+    // voiceId still enqueues — nothing about this tier ever calls TTS for
+    // the presenter's line.
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: null })])
+    const result = await enqueueVideoJob({
+      ...baseEnqueueArgs,
+      presenter: 'friend:maya',
+      modelTier: 'wan22-i2v',
+      scriptJson: { scenes: [scene(), scene()] },
+    })
+    expect(result.jobId).toBeTruthy()
   })
 })
