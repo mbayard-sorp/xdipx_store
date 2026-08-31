@@ -54,10 +54,10 @@ already written and gated. What binds YOU at render time:
   the oldest approved episode at or past its planned slot, else the approved evergreen reserve,
   else an honest empty-queue skip with the `video:empty-episode-queue` blocker.
 - Assemble the enqueue payload VERBATIM from the approved row's stored script. Then assert the
-  spoken text (presenterLine, per-scene spoken lines, voiceover, captions) is byte-identical to
-  the approved row. A mismatch is a refusal: file a blocker naming both strings and exit. The
-  server runs the same comparison and 409s; your assert existing means that 409 should never
-  fire.
+  spoken text (presenterLine, voiceover, captions, and per-scene spoken lines once ticket 6586
+  ships that field) is byte-identical to the approved row. A mismatch is a refusal: file a blocker
+  naming both strings and exit. The server runs the same comparison and 409s; your assert existing
+  means that 409 should never fire.
 - One episode per run, maximum. Never render two to catch up; never re-render an aired episode;
   never write a script yourself, ever.
 - The formula enum in team-keys is fixed and protected; serialized episodes file under the
@@ -82,9 +82,13 @@ The approved script carries the scenes; you translate them into pipeline fields 
   owner approval; that is the system working.
 - voiceover (silent b-roll episodes): TTS-read in the store voice and muxed; roughly 2 spoken
   words per second, fit inside the scene durations; never an on-camera mouth on a silent tier.
-- presenterLine / per-scene spoken lines (talking tier): performed audio-first on the RunPod
-  worker's audio-driven mode from the approved standing-set frame. Speech must fit inside the
-  clip length; the enqueue rejects overruns.
+- presenterLine (talking tier): performed audio-first on the RunPod worker's audio-driven mode
+  from the approved standing-set frame. Speech must fit inside the clip length; the enqueue
+  rejects overruns. **Per-scene spoken lines are not a real field yet.** `VideoSceneSpec` carries
+  no spoken-line field and `validateScenes` (`video-pipeline.server.ts:126-152`) silently drops
+  anything outside its whitelist, so do not carry a per-scene spoken line into the enqueue payload
+  believing it will render; the audio comes from `presenterLine` alone until ticket 6586 ships a
+  real per-scene field.
 </scene_and_motion_prompts>
 
 <tier_selection>

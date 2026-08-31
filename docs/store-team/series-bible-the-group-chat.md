@@ -24,9 +24,12 @@ anticipation is the product.
 ## 2. The world: standing sets
 
 The six sceneKit slugs are the show's standing sets, mapped to in-world places. A standing set's
-frame is composed once per presenter, owner-approved once, then reused free forever, and reuse
-skips the frame gate entirely. New sets are a season decision and a protected-path change; do not
-propose one casually.
+frame is composed once per configuration, owner-approved once, then reused free forever, and reuse
+skips the frame gate entirely. Per-configuration, not per-presenter: frame reuse is keyed on
+(presenter, sceneSlug), so a single-cast frame and a two-cast (or more) frame on the same set are
+different configurations, each composed and approved once and then free. New sets, and new pair or
+group configurations on an existing set, are a season decision and a protected-path change; do not
+propose either casually.
 
 | Slug | In-world place |
 |---|---|
@@ -40,19 +43,27 @@ propose one casually.
 ## 3. The eight
 
 Identity lives in Sanity (`castMember`: archetype, ageRange, description, emotionTags,
-personaNotes, referencePhoto). This section holds what Sanity does not: what each character wants
-this season and how they speak.
+personaNotes, referencePhoto, and the ElevenLabs `voiceId`). This section holds what Sanity does
+not: what each character wants this season, how they speak, and how they are cast on a given
+episode. The `voiceId` itself always lives on the Sanity `castMember` doc next to `referencePhoto`,
+never here, consistent with this section's own no-state doctrine.
 
-| Slug | Archetype (Sanity) | Speech signature | The one thing they never do |
-|---|---|---|---|
-| `emma` | Guide | Plain, warm, spec-literate. Answers the question actually asked | Claim experience she does not have |
-| `maya` | Warm best friend | Softens the hard question with food or a blanket | Judge anyone's want |
-| `diego` | Polished flirt | Says the bold thing early, then undercuts it with charm | Punch down |
-| `jade` | Calm minimalist | Short sentences. Asks the question everyone avoided | Fill silence |
-| `marcus` | Easygoing charmer | Deflects with humor until the real answer slips out | Rush anyone |
-| `priya` | Witty girlfriend | Fast, teasing, quotable. The share-line machine | Let a euphemism slide |
-| `sofia` | Bold confidante | Names the want directly, dares others to | Apologize for wanting |
-| `vivian` | Seen-it-all confidante | Mid 50s, unshockable, lands the wisdom line | Pretend to be surprised |
+| Slug | Archetype (Sanity) | Speech signature | The one thing they never do | Speaks or silent-capable |
+|---|---|---|---|---|
+| `emma` | Guide | Plain, warm, spec-literate. Answers the question actually asked | Claim experience she does not have | Speaks |
+| `maya` | Warm best friend | Softens the hard question with food or a blanket | Judge anyone's want | Speaks |
+| `diego` | Polished flirt | Says the bold thing early, then undercuts it with charm | Punch down | Speaks |
+| `jade` | Calm minimalist | Short sentences. Asks the question everyone avoided | Fill silence | Speaks |
+| `marcus` | Easygoing charmer | Deflects with humor until the real answer slips out | Rush anyone | Speaks |
+| `priya` | Witty girlfriend | Fast, teasing, quotable. The share-line machine | Let a euphemism slide | Speaks |
+| `sofia` | Bold confidante | Names the want directly, dares others to | Apologize for wanting | Speaks |
+| `vivian` | Seen-it-all confidante | Mid 50s, unshockable, lands the wisdom line | Pretend to be surprised | Speaks |
+
+**Silent-capable, not mute.** Every character above speaks in this bible; under a single-speaker
+render (the current tier, §7), casting one of them as the episode's silent presence in a two-or-more
+-cast scene is a craft decision with consequences, not a fallback for a missing capability. Choose
+who is silent for what it does to the scene (the listener, the one being watched, the one whose
+answer is still pending), never by default to the character who is "less speaking" in the bible.
 
 **Season-one wants and the relationship grid are proposed by `series-showrunner` in its first
 run and ratified by the owner's approval of the first slate.** Once ratified, the room codifies
@@ -63,7 +74,10 @@ and the first slate is the creative pitch.
 
 - Arcs run about 12 episodes; one protagonist per arc; two arcs may braid but each episode has
   exactly one A-story (rule A1 applies at season level too).
-- Every cast member appears in at least one of any eight consecutive episodes.
+- Every cast member SPEAKS in at least one of any eight consecutive episodes. Appearance alone no
+  longer binds this rule: once episodes routinely carry two or more cast, sixteen appearance slots
+  for eight people satisfy an appearance-only reading automatically, so the rule is tightened to the
+  scarce resource. Appearance is cheap now; speech is what the rotation has to protect.
 - Character state is derived from the ledger (most recent arc beat across aired episodes), and
   the open-loop ledger is derived (opened loops no later episode closed). Nothing here stores
   state, so nothing here can drift.
@@ -77,6 +91,10 @@ and the first slate is the creative pitch.
   to land cold. This is the rule most likely to be quietly broken once the room falls in love
   with the arc; the account is cold and most viewers arrive mid-season.
 - Never more than one callback per episode.
+- **The callback is strongest spoken by a character who was NOT in the episode being called back
+  to.** A third party naming your history lands cold better than self-narration: it is legible
+  proof the moment mattered beyond the room it happened in, which is what the legibility rule above
+  is really asking for. Prefer this casting whenever the scene allows it.
 
 ## 6. Part-2 mechanics: the door taxonomy
 
@@ -86,7 +104,8 @@ it. A door is a question about a person. The working taxonomy:
 1. **The unanswered question**: someone asks, cut before the answer.
 2. **The unopened object**: the box arrived, the episode ends before the lid moves.
 3. **The unsent message**: typed, not sent, phone face down.
-4. **The arrival**: someone appears in the last second who was not in the episode.
+4. **The arrival**: someone appears in the last second who was not in the episode. The only door
+   that needs two bodies, and it needs zero extra voices: silent by design.
 5. **The deferred decision**: two tabs open, a finger hovering, cut.
 
 Rotate the taxonomy; a show that always ends on the same door shape develops a tic, and the
@@ -101,17 +120,27 @@ charter's fresh-language rule applies to structure as much as to words.
 - **Scene recipe, binding for cost and for the owner's click budget:** scene 0 opens on a reused
   standing-set frame (zero cost, zero clicks), later scenes default to last-frame continuity
   (zero cost, zero clicks), and at most ONE own-frame scene per episode, the product beat (one
-  frame generation, one owner click).
-- Speech budget ~2.5 words per spoken second; the writer states spoken seconds against the scene
-  budget, and the enqueue rejects overruns.
+  frame generation, one owner click). The recipe inherits Sec 2's per-configuration reuse clause:
+  a two-or-more-cast frame reuses free exactly like a single-cast one once its (presenter(s),
+  sceneSlug) configuration has been composed and approved once.
+- Speech budget ~2.5 words per spoken second, **now stated per speaker**: each speaking role in a
+  scene carries its own spoken-seconds figure, and the sum across every speaker in the scene is
+  what binds the scene total against the enqueue's overrun check. A silent-capable cast member
+  present in the scene contributes zero to the sum.
 - Register: spoken lines 6-7 on Instagram and YouTube, 5 on TikTok. Captions per the social
   addendum (Instagram 9 by implication, engagement close, never a description of the picture).
   Every episode also ships the site-hosted register-9 cut: same audio, register-9 written
-  treatment for /social and the PDP hero.
+  treatment for /social and the PDP hero. Full multi-voice dialogue between cast members is
+  permitted in this site-hosted register-9 cut, because it is written rather than spoken and
+  therefore costs nothing to render, even on the current single-speaker tier.
 - Talking renders on the RunPod worker's audio-driven tier once live (bake-off:
   Wan2.2-S2V vs InfiniteTalk vs LongCat-Video-Avatar; see `video-worker-runpod.md`). Until it
   is live, episodes are voiceover-carried b-roll with no on-camera mouths, and the room writes
-  them that way.
+  them that way. **The audio-driven tier, once live, performs one voice onto one identity frame
+  and currently rejects multi-scene composition.** A two-voice spoken episode is therefore a
+  multi-scene assembly of single-speaker clips edited together, not one two-person talking
+  render, and it is a different cost line from a one-voice episode: budget and brief it as
+  multiple renders, not one.
 - Cost envelope at 2/week: roughly $2-3 per episode all-in on the own-worker path, against the $6
   per-video ceiling and the $20/day team budget. A regenerate is full price; the room fixes the
   line before the batch, because there is no cheap second pass.
@@ -126,7 +155,11 @@ spec_cited, review_pattern, price, category). The craft version:
 - Aggregation is audible: "reviewers keep describing", "the spec sheet says". A bare fact stated
   as personal knowledge fails SH2.
 - The gift is the highest-desire pattern available: choosing for someone is a declaration and is
-  testimony-free. Play the selection, the handoff, the reaction to being seen that well.
+  testimony-free. Play the selection, the handoff, the reaction to being seen that well. The gift
+  is inherently two-person, and the engine agrees with the craft here: `talkingHead:true` composes
+  the frame WITHOUT the product (`db/schema.ts` `VideoScriptJson.talkingHead`), so the handoff
+  frame can never be a talking frame, and the gift beat is silent by construction on either the
+  b-roll or the talking tier. Write it that way rather than reaching for a spoken handoff line.
 - Worked calibration pair: "I want to know what she does with it" passes. "It feels incredible"
   fails in every mouth, voiceover included.
 

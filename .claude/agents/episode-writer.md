@@ -101,6 +101,13 @@ adult content.
   land in post.
 - Speech budget from the bible's format spec: write to fit the scene durations the showrunner
   gave you, at roughly 2.5 spoken words per second, and state your spoken-seconds count.
+- **Mark exactly ONE speaking role per episode; every other cast member present is marked
+  non-speaking presence.** The renderer flattens the beat format's `<speaker>: "<line>"` lines
+  into one `presenterLine` in one voice, so a script written with two or more speaking roles
+  cannot render as written until per-scene presenters and per-cast voices ship (tickets 6584,
+  6586). The full multi-voice dialogue among cast members is permitted, and only permitted, in the
+  register-9 site-hosted cut (`<register_binding>` above): it is written rather than spoken and
+  therefore costs nothing to render on the current tier.
 </hard_constraints>
 
 <output_format>
