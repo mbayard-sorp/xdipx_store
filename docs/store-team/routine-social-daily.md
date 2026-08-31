@@ -375,6 +375,17 @@ rework is a draft that cannot publish. When the feedback asks for a different im
 back through Step 5 with the feedback quoted in the brief, and `op:'rework'` carries the new
 `mediaUrls`, `altText`, and `imageBrief`.
 
+**When the rework allowance is exhausted but a `needs_changes` row still needs one more fix (ticket
+#6534):** the allowance is a rate limit, not a licence to leave a legitimate fix unmade. Do **not**
+call `op:'rework'` past the allowance. Instead write a fresh `op:'draft'` row for the fix, reusing
+the gate-cleared image and correcting exactly the flagged clause, and **set `reworkedFrom` to the
+original row's id anyway**, even though it draws from the new-draft quota rather than the rework
+allowance. `reworkedFrom` is how the owner-feedback-unmet check traces lineage; a fix with no
+`reworkedFrom` is invisible to it even when the gate independently verifies the fix is correct. This
+happened in run 595: the morning run's full IG rework allowance (4/4) went to rows 134, 131, 138, 136,
+three of the reworks (139, 141, 143) came back REVISE and still needed one more fix with no rework
+budget left, and the correct move was `op:'draft'` with `reworkedFrom` still set, not left unset.
+
 ## Step 2.6 — Stock gate (never feature an out-of-stock product)
 
 Owner direction 2026-08-09, after a live post featuring an out-of-stock product had to be deleted.
@@ -1245,6 +1256,18 @@ id135 "the deep grounded thrum... vanish in your palm"). **For a slot-A / resour
 its curiosity-and-permission charge, not product innuendo** (§4a slot-A rule and the ticket-#5940
 close check above): a resource caption is held to the curiosity/permission bar, so read it against
 that bar at draft time rather than the product-post register-9 bar it structurally cannot carry.
+**Eighth check, banned-evasion-gesture (ticket #6470):** grep the ENTIRE caption, not only the
+changed clause on a rework, against the charter's named evasion-gesture list (`docs/emma-voice.md`,
+"the gap has a number", "gets there", "closes it", "the thing/part nobody explains", "get where",
+"save what") and regenerate on any hit. id139 (a rework of 134) carried "the part nobody explains"
+through unflagged because only the changed clause was checked; this grep runs over the whole caption
+every time, reworks included. **Ninth check, reused close/question template (ticket #6470):** for
+any campaign or rework caption, grep the caption's hook and close against the last ~5 posted
+captions of the same campaign for a repeated close or question shape (e.g. "tell me below", "what is
+the [X] thing you [verb]?") and rewrite any hit before `op:'draft'`. id141 (a rework of 131) shipped
+"tell me below" a day after row 133 spent it in the same campaign. Both checks are draft-time
+catches for the exact failure mode the voice gate misses (it reads a caption in isolation, not
+against posted history) and the publish gate catches at the cost of a full rework cycle.
 
 **Every image-bearing post carries an accessibility description, and it goes in `altText`, never in
 `tweetText` (ticket #4067, re-homed by owner direction 2026-08-22).** This is standing, not an
