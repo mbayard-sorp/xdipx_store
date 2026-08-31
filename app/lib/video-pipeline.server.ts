@@ -86,7 +86,7 @@ import {
 import { generateVoiceover, generateVoiceoverWithTimestamps } from '~/lib/elevenlabs.server'
 import { charAlignmentToWordTimings, type WordTiming } from '~/lib/caption-timing'
 import { expandVariantSet, type VariantAxes } from '~/lib/video-variants'
-import { getActiveIvrVoiceId } from '~/lib/ivr-voice.server'
+import { resolvePresenterVoiceId } from '~/lib/video-presenter-voice.server'
 
 const SCENE_FRAME_CANDIDATES = 3
 const POLLER_IDLE_TTL_SECONDS = 30 * 60
@@ -371,6 +371,14 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
   const spec = VIDEO_MODELS[modelTier]
   const script = args.scriptJson
   const reuseFrame = typeof script.reuseFrameAssetId === 'number'
+
+  // Refuse before any spend when this tier will speak the presenter's line
+  // (ticket #6584): a friend cast member with no Sanity voiceId would
+  // otherwise render three stages deep in the IVR/Emma voice with no gate
+  // catching it. Same posture as the missing-presenterLine checks below.
+  if (spec.audioDriven || spec.lipsync) {
+    await resolvePresenterVoiceId(args.presenter)
+  }
 
   // Multi-scene job (Phase 3, 20-60s videos): 2-8 scenes, validated + defaulted
   // here, become the pipeline's source of truth (scenes_json / scene_state_json)
@@ -1639,7 +1647,7 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
     if (!parts.length) throw new Error('presenterLine produced no speakable parts')
 
     const tone = isVideoTone(job.scriptJson['presenterTone']) ? job.scriptJson['presenterTone'] : undefined
-    const voiceId = await getActiveIvrVoiceId()
+    const voiceId = await resolvePresenterVoiceId(job.presenter)
     const audios: Buffer[] = []
     const partSeconds: number[] = []
     const wordTimings: WordTiming[] = []
@@ -1919,7 +1927,7 @@ async function advanceLipsync(job: VideoJobRow): Promise<AdvanceOutcome> {
   if (!clip) throw new Error('No clip asset to voice over')
   const clipBuf = await blobFetchToBuffer(clip.blobUrl)
 
-  const voiceId = await getActiveIvrVoiceId()
+  const voiceId = await resolvePresenterVoiceId(job.presenter)
   const audio = await generateVoiceover({ text: voiceover, ...(voiceId ? { voiceId } : {}) })
   const voiced = await muxAudio(clipBuf, audio)
 
@@ -1969,7 +1977,7 @@ async function advanceLipsyncPerform(job: VideoJobRow, spec: VideoModelSpec): Pr
     if (!clip) throw new Error('No clip asset to lip-sync')
 
     const tone = isVideoTone(job.scriptJson['presenterTone']) ? job.scriptJson['presenterTone'] : undefined
-    const voiceId = await getActiveIvrVoiceId()
+    const voiceId = await resolvePresenterVoiceId(job.presenter)
     const { audio, alignment } = await generateVoiceoverWithTimestamps({
       text: line,
       ...(voiceId ? { voiceId } : {}),

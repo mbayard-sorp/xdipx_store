@@ -386,6 +386,12 @@ export interface CastMember {
    * video pipeline keeps photoUrl (referencePhoto) for identity consistency.
    */
   editorialPhotoUrl: string | null
+  /**
+   * ElevenLabs voice ID for video TTS (ticket #6584). Null means no voice is
+   * assigned yet; the video pipeline refuses to enqueue this character rather
+   * than substitute the IVR or Emma voice.
+   */
+  voiceId: string | null
 }
 
 export async function getApprovedCastMembers(): Promise<CastMember[]> {
@@ -406,7 +412,8 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         ageRange,
         description,
         emotionTags,
-        "editorialPhotoUrl": editorialPhoto.asset->url
+        "editorialPhotoUrl": editorialPhoto.asset->url,
+        voiceId
       }`,
     )
     return (raw ?? [])
@@ -424,6 +431,7 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         description:  m.description ?? null,
         emotionTags:  Array.isArray(m.emotionTags) ? m.emotionTags : [],
         editorialPhotoUrl: m.editorialPhotoUrl ?? null,
+        voiceId:      m.voiceId ?? null,
       }))
   } catch (err) {
     console.error('[sanity] getApprovedCastMembers error:', err)

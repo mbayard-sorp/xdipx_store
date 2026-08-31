@@ -12,6 +12,7 @@
  */
 
 import castMemberEditorialFields from './castMemberEditorialFields'
+import castMemberVoiceFields from './castMemberVoiceFields'
 
 export default {
   name: 'castMember',
@@ -87,6 +88,9 @@ export default {
     // spread in from its own file so this file's original definitions stay
     // untouched (additive-only rule). See ./castMemberEditorialFields.js
     ...castMemberEditorialFields,
+    // Ticket #6584 voice extension, same additive pattern. See
+    // ./castMemberVoiceFields.js
+    ...castMemberVoiceFields,
   ],
 
   preview: {
