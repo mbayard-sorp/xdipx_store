@@ -10,3 +10,7 @@ runpod_volume:
   loras: loras/
   clip_vision: clip_vision/
   audio_encoders: audio_encoders/
+  # wav2vec2 is a folder name the WanVideoWrapper custom nodes register for
+  # their Wav2VecModelLoader (InfiniteTalk engine); ComfyUI ignores extra keys
+  # when the wrapper is absent.
+  wav2vec2: wav2vec2/

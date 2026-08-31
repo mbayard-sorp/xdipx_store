@@ -43,7 +43,11 @@ COMFY_BOOT_TIMEOUT_S = int(os.environ.get("COMFY_BOOT_TIMEOUT_S", "300"))
 # InfiniteTalk renders window by window; 12s of audio is ~5 windows. Unmeasured,
 # so this is deliberately generous (same reasoning as the S2V matrix widening).
 RENDER_TIMEOUT_S = int(os.environ.get("RENDER_TIMEOUT_S", "3600"))
-WORKFLOW_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflow_infinitetalk.json")
+# The render-proven graph was promoted out of the bake-off tree when
+# InfiniteTalk became the worker's v2 s2v engine (2026-08-30); this harness
+# reads the production template so the two can never drift apart.
+WORKFLOW_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "..", "..", "workflows", "infinitetalk_916.json")
 FPS = 25  # the example's VHS_VideoCombine frame rate; audio embeds also run at 25
 
 _comfy_proc: subprocess.Popen | None = None

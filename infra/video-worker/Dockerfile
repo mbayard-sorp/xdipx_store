@@ -37,6 +37,31 @@ RUN cd ${COMFY_DIR} \
  && grep -v -E '^(torch|torchvision|torchaudio)(\b|$)' requirements.txt > /tmp/req.txt \
  && pip install -r /tmp/req.txt
 
+# kijai/ComfyUI-WanVideoWrapper: the custom-node pack behind the InfiniteTalk
+# s2v engine (RUNPOD_S2V_ENGINE=infinitetalk). Pinned to the sha recorded in
+# bakeoff/infinitetalk/PIN.md; never float to main (node signatures change
+# without notice, and bumping the pin means re-running the CPU validation).
+# The wrapper is code, not weights: its model set lands on the network volume
+# via WITH_INFINITETALK=1 bootstrap-models.sh, so the image stays model-free.
+# torch-stripped install like ComfyUI's own requirements above; the wrapper's
+# requirements.txt does not currently pin torch, but the grep keeps that true
+# if a future pin bump changes it.
+ARG WRAPPER_SHA=088128b224242e110d3906c6750e9a3a348a659b
+RUN git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git ${COMFY_DIR}/custom_nodes/ComfyUI-WanVideoWrapper \
+ && cd ${COMFY_DIR}/custom_nodes/ComfyUI-WanVideoWrapper && git checkout ${WRAPPER_SHA} \
+ && rm -rf .git \
+ && grep -v -E '^(torch|torchvision|torchaudio)(\b|$)' requirements.txt > /tmp/wrapper-req.txt \
+ && pip install -r /tmp/wrapper-req.txt
+
+# transformers 5.x compatibility patch for the wrapper's vendored wav2vec2
+# (hidden-states capture moved to decorator machinery the vendored subclass
+# bypasses; see bakeoff/infinitetalk/PIN.md, "Local patch"). The script exits
+# non-zero if the pinned file has drifted, which fails the build loudly, by
+# design: an unpatched wrapper crashes every infinitetalk render ~15s in.
+COPY bakeoff/infinitetalk/patch-wav2vec2-hf5.py /tmp/patch-wav2vec2-hf5.py
+RUN python /tmp/patch-wav2vec2-hf5.py ${COMFY_DIR}/custom_nodes/ComfyUI-WanVideoWrapper/multitalk/wav2vec2.py \
+ && rm /tmp/patch-wav2vec2-hf5.py
+
 # runpod 1.12.0 is the latest on PyPI as of 2026-08-10 (verified 2026-08-22).
 # No requests pin: the base preinstalls a newer requests and pip 26 refuses
 # the downgrade (ResolutionImpossible). --ignore-installed cryptography works

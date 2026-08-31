@@ -13,12 +13,14 @@ Nothing in this directory is wired into the app yet. The app-side provider
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | runpod/pytorch base, ComfyUI pinned to v0.33.1, ffmpeg, runpod SDK. No models inside. |
+| `Dockerfile` | runpod/pytorch base, ComfyUI pinned to v0.33.1, kijai WanVideoWrapper pinned per `bakeoff/infinitetalk/PIN.md`, ffmpeg, runpod SDK. No models inside. |
 | `bootstrap-models.sh` | One-time, idempotent download of the model set onto the network volume. |
 | `extra_model_paths.yaml` | Points ComfyUI at `/runpod-volume/models`. |
 | `workflows/wan22_i2v_916.json` | ComfyUI API-format workflow, image to video, 720x1280, 16 fps. |
 | `workflows/wan22_t2v_916.json` | Same for text to video. |
+| `workflows/infinitetalk_916.json` | Render-proven InfiniteTalk talking graph (wrapper nodes), placeholder-filled by the handler. |
 | `handler.py` | RunPod handler: boot ComfyUI, fill workflow, render, ffmpeg, upload. |
+| `validate_graphs.py` | CPU check of every graph the handler builds against a live `/object_info`. |
 | `test_input.json` | Sample job for `TEST_LOCAL`. |
 
 ## Job contract
@@ -83,6 +85,46 @@ live by construction.
 
 Frame count is `durationSeconds * 16 + 1` rounded down to the nearest `4k+1` (Wan latent
 constraint): 5 s = 81 frames, 15 s = 241 frames.
+
+## Engine switch: RUNPOD_S2V_ENGINE (v2 talking engine, owner-directed 2026-08-30)
+
+The 2026-08-30 bake-off put full-resolution InfiniteTalk ahead of Wan2.2-S2V on lip sync
+and motion naturalness to the owner's eye. S2V fast8 ships first; InfiniteTalk is a
+switchable engine behind the SAME job contract. `mode: "s2v"` in, 720x1280 clip plus last
+frame out to Blob, and the app never knows which engine renders.
+
+Endpoint env `RUNPOD_S2V_ENGINE`:
+
+| Value | Renderer | Output fps |
+|---|---|---|
+| `wan-s2v` (default) | native Wan 2.2 S2V graph, current behavior | 16 |
+| `infinitetalk` | kijai ComfyUI-WanVideoWrapper graph (`workflows/infinitetalk_916.json`) | 25 (probed with ffprobe, kept, reported honestly) |
+
+The infinitetalk graph is the render-proven template from the bake-off, converted from the
+wrapper's own example at the sha pinned in `bakeoff/infinitetalk/PIN.md` and
+placeholder-filled per job (image, audio, prompt, seed, 720x1280, frames from audio
+duration at 25 fps). Its sampling (6 steps, cfg 1.0, shift 11, dpm++_sde, lightx2v distill
+LoRA) is baked in because those settings are what rendered; the job's `steps`/`fast`
+fields are ignored on this engine. The 60 s `S2V_MAX_SECONDS` cap and the audio-length
+trim apply to both engines. `ensure_comfy` treats infinitetalk as its own model family:
+it never shares a ComfyUI process with the base tiers or wan-s2v (cgroup OOM, see the
+family comment in handler.py).
+
+**Enablement order (each step depends on the previous):**
+
+1. Grow the network volume to 150 GB (the ~28.5 GB kijai weight set does not fit in the
+   ~19 GB the 100 GB volume has free after the S2V set).
+2. On a temporary pod with the volume attached:
+   `MODELS_ROOT=/workspace/models WITH_INFINITETALK=1 bash bootstrap-models.sh`
+   (byte-size-checked downloads; refuses to start under 30 GB free). Terminate the pod.
+3. Build and push an image from this Dockerfile (it now carries the wrapper at the pinned
+   sha, patched for transformers 5), repoint the endpoint at the new sha tag.
+4. Set `RUNPOD_S2V_ENGINE=infinitetalk` on the endpoint.
+
+**24 GB caveat (bake-off it-long-720):** at 720x1280 InfiniteTalk peaks at 24.05 GB and
+block-swap thrashing makes a 14 s line take ~28 min on a 4090. It belongs on the 48 GB
+pool. Lines much over 14 s can exceed the endpoint's 1800 s execution timeout on 24 GB
+workers; raising the endpoint timeout to 3600 s is an owner option, not done here.
 
 ## Workflow placeholders (node ids are fixed, the handler edits by id)
 

@@ -25,6 +25,12 @@ Output on success:
 Output on failure:
   { "error": "<clear message>" }
 
+Env RUNPOD_S2V_ENGINE picks the renderer behind mode "s2v": "wan-s2v" (default,
+the native Wan 2.2 S2V graph, 16 fps) or "infinitetalk" (the kijai
+WanVideoWrapper graph, 25 fps). Same contract either way; only the honest
+fps/width/height values in the response may differ. The app never knows which
+engine rendered.
+
 Facts verified 2026-08-22 (see README.md for sources): runpod handler contract and
 progress_update, /runpod-volume mount path, ComfyUI /prompt and /history shapes, node
 input names at ComfyUI v0.33.1, Vercel Blob PUT contract from the @vercel/blob SDK source.
@@ -34,6 +40,7 @@ from __future__ import annotations
 
 import glob
 import json
+import math
 import os
 import random
 import shutil
@@ -112,6 +119,28 @@ WAN_DEFAULT_NEGATIVE = (
     "毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
 )
 
+# ── InfiniteTalk engine for mode "s2v" (owner-directed 2026-08-30) ───────────
+# The 2026-08-30 bake-off put full-res InfiniteTalk ahead of Wan2.2-S2V on lip
+# sync and motion naturalness to the owner's eye. It is the v2 engine behind
+# the SAME job contract: mode "s2v" in, clip + last frame out, and the app
+# never knows which engine rendered. RUNPOD_S2V_ENGINE selects it per
+# endpoint; "wan-s2v" (the default) keeps current behavior.
+#
+# The graph is NOT built programmatically like build_s2v_workflow: it is the
+# render-proven template from the bake-off (workflows/infinitetalk_916.json,
+# converted from the kijai wrapper's own example at the sha pinned in
+# bakeoff/infinitetalk/PIN.md), parameterized by placeholder fill exactly as
+# the bake-off's run-infinitetalk.py did. Sampling (6 steps, cfg 1.0, shift 11,
+# dpm++_sde, lightx2v distill LoRA) is baked into the template because those
+# settings are what rendered; the job's `steps`/`fast` fields are ignored on
+# this engine. Output is 25 fps (the wrapper example's rate), kept honest in
+# the response rather than resampled to 16.
+S2V_ENGINE = os.environ.get("RUNPOD_S2V_ENGINE", "wan-s2v")
+S2V_ENGINES = ("wan-s2v", "infinitetalk")
+IT_WORKFLOW = "infinitetalk_916.json"
+IT_FPS = 25  # audio embeds and CreateVideo both run at 25 in the wrapper example
+IT_SAVE_NODE = "132"  # SaveVideo id in the template (base graphs use "15")
+
 LIGHTX2V_LORAS = {
     "i2v": (
         "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
@@ -129,6 +158,9 @@ _comfy_proc: subprocess.Popen | None = None
 # cgroup (38 GiB observed on a 4090 pod) OOM-kills ComfyUI when the second
 # family loads on top of a warm first. Verified live 2026-08-30 during the
 # bake-off (s2v submit after an i2v render crashed the server in 3s).
+# "infinitetalk" is its own family for the same reason (a full 14B base model
+# plus its conditioning module, loaded through wrapper nodes with their own
+# memory management); it never shares a server with "base" or "s2v".
 _comfy_family: str | None = None
 
 
@@ -150,8 +182,8 @@ def comfy_alive() -> bool:
 def ensure_comfy(family: str = "base") -> None:
     """Start ComfyUI once per worker and block until /system_stats answers.
 
-    A family switch (base i2v/t2v <-> s2v) restarts the server first; see
-    _comfy_family above.
+    A family switch (any of base i2v/t2v, s2v, infinitetalk to another)
+    restarts the server first; see _comfy_family above.
     """
     global _comfy_proc, _comfy_family
     if comfy_alive():
@@ -308,6 +340,25 @@ def probe_audio_seconds(path: str) -> float:
         raise RuntimeError(f"could not probe audio duration: {res.stderr[-300:]}")
 
 
+def probe_video_fps(path: str) -> float:
+    """Actual frame rate of a rendered file. The infinitetalk engine reports
+    (and keeps) this rather than assuming the wrapper's nominal 25."""
+    res = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", path],
+        capture_output=True, text=True,
+    )
+    raw = res.stdout.strip().splitlines()[0] if res.stdout.strip() else ""
+    try:
+        num, _, den = raw.partition("/")
+        fps = float(num) / float(den or 1)
+    except (ValueError, ZeroDivisionError):
+        raise RuntimeError(f"could not probe video fps: {res.stderr[-300:]}")
+    if fps <= 0:
+        raise RuntimeError(f"ffprobe reported a non-positive fps ({raw!r}) for {path}")
+    return fps
+
+
 def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audio_seconds: float) -> dict[str, Any]:
     """
     Programmatic API-format graph for Wan 2.2 S2V, matching the shape of the
@@ -434,6 +485,43 @@ def build_s2v_workflow(p: dict[str, Any], image_name: str, audio_name: str, audi
     return wf
 
 
+def build_infinitetalk_workflow(p: dict[str, Any], image_name: str, audio_name: str,
+                                audio_seconds: float) -> dict[str, Any]:
+    """
+    Load and parameterize the render-proven InfiniteTalk graph
+    (workflows/infinitetalk_916.json; provenance in bakeoff/infinitetalk/PIN.md).
+
+    Textual placeholder fill, same mechanics as the bake-off harness: numeric
+    placeholders are quoted strings in the template so the file stays valid
+    JSON, and the replacement includes the quotes. Frames come from the audio
+    duration at the wrapper's 25 fps; MultiTalkWav2VecEmbeds treats num_frames
+    as a maximum and clamps to the audio length, so ceil overshoot is the
+    designed behavior. Width/height are the production 720x1280 (bake-off
+    it-long-720: renders fine, peaks at 24.05 GB, belongs on the 48 GB pool).
+    """
+    path = os.path.join(WORKFLOW_DIR, IT_WORKFLOW)
+    with open(path) as f:
+        text = f.read()
+    frames = math.ceil(audio_seconds * IT_FPS)
+    for placeholder, value in (
+        ('"__WIDTH__"', str(WIDTH)),
+        ('"__HEIGHT__"', str(HEIGHT)),
+        ('"__SEED__"', str(p["seed"])),
+        ('"__FRAMES_OR_AUTO__"', str(frames)),
+        ('"__IMAGE__"', json.dumps(image_name)),
+        ('"__AUDIO__"', json.dumps(audio_name)),
+        ('"__PROMPT__"', json.dumps(p["prompt"] or "a person speaking naturally to camera")),
+    ):
+        if placeholder not in text:
+            raise RuntimeError(f"{IT_WORKFLOW} is missing placeholder {placeholder}")
+        text = text.replace(placeholder, value)
+    wf: dict[str, Any] = json.loads(text)
+    wf[IT_SAVE_NODE]["inputs"]["filename_prefix"] = (
+        f"video/xdipx-it-{p['seed']}-{uuid.uuid4().hex[:8]}"
+    )
+    return wf
+
+
 def build_workflow(p: dict[str, Any], image_name: str | None) -> dict[str, Any]:
     path = os.path.join(WORKFLOW_DIR, f"wan22_{p['mode']}_916.json")
     with open(path) as f:
@@ -535,16 +623,20 @@ def run(cmd: list[str]) -> None:
 
 
 def postprocess(src: str, workdir: str, keep_audio: bool = False,
-                trim_seconds: float | None = None) -> tuple[str, str]:
+                trim_seconds: float | None = None,
+                fps: float | None = FPS) -> tuple[str, str]:
     mp4 = os.path.join(workdir, "clip.mp4")
     png = os.path.join(workdir, "last-frame.png")
     audio_args = ["-c:a", "aac", "-b:a", "128k"] if keep_audio else ["-an"]
     # s2v renders whole 77-frame chunks past the end of speech (the model's
     # per-pass floor); trim the padded tail back to the audio duration here.
     trim_args = ["-t", f"{trim_seconds:.3f}"] if trim_seconds else []
+    # fps=None keeps the source frame rate untouched (the infinitetalk engine
+    # renders at 25; resampling it down to 16 would throw frames away).
+    rate_args = ["-r", str(fps)] if fps else []
     run(["ffmpeg", "-y", "-loglevel", "error", "-i", src,
          *trim_args, *audio_args, "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-         "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-r", str(FPS), mp4])
+         "-pix_fmt", "yuv420p", "-movflags", "+faststart", *rate_args, mp4])
     # -sseof -0.07 lands inside the final 16 fps frame; -update 1 writes a single image.
     run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.07", "-i", mp4,
          "-frames:v", "1", "-update", "1", png])
@@ -623,8 +715,19 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     audio_name = None
     try:
         p = validate(job.get("input") or {})
+        # Engine switch for mode "s2v" (see the InfiniteTalk block up top). The
+        # env is read per job so a bad value fails the job with a clear error
+        # instead of crashing the worker at import.
+        engine = S2V_ENGINE
+        if p["mode"] == "s2v" and engine not in S2V_ENGINES:
+            raise ValueError(f"RUNPOD_S2V_ENGINE must be one of {S2V_ENGINES}, got {engine!r}")
+        it = p["mode"] == "s2v" and engine == "infinitetalk"
+
+        family = "base"
+        if p["mode"] == "s2v":
+            family = "infinitetalk" if it else "s2v"
         progress("booting ComfyUI")
-        ensure_comfy(family="s2v" if p["mode"] == "s2v" else "base")
+        ensure_comfy(family=family)
 
         if p["mode"] in ("i2v", "s2v"):
             progress("downloading scene frame")
@@ -637,19 +740,37 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             if audio_seconds > S2V_MAX_SECONDS:
                 raise ValueError(f"speech track is {audio_seconds:.1f}s, over the {S2V_MAX_SECONDS}s per-render cap; split upstream")
             p["seconds"] = max(1, round(audio_seconds))
-            p["frames"] = frames_for(p["seconds"])
-            wf = build_s2v_workflow(p, image_name, audio_name, audio_seconds)
+            if it:
+                p["frames"] = math.ceil(audio_seconds * IT_FPS)
+                wf = build_infinitetalk_workflow(p, image_name, audio_name, audio_seconds)
+                save_node = IT_SAVE_NODE
+                progress(f"rendering s2v via infinitetalk, {p['seconds']}s "
+                         f"({p['frames']} frames @ {IT_FPS} fps, seed {p['seed']})")
+            else:
+                p["frames"] = frames_for(p["seconds"])
+                wf = build_s2v_workflow(p, image_name, audio_name, audio_seconds)
+                save_node = "15"
+                progress(f"rendering s2v {p['seconds']}s ({p['frames']} frames, {p['steps']} steps, seed {p['seed']})")
         else:
             wf = build_workflow(p, image_name)
-        progress(f"rendering {p['mode']} {p['seconds']}s ({p['frames']} frames, {p['steps']} steps, seed {p['seed']})")
+            save_node = "15"
+            progress(f"rendering {p['mode']} {p['seconds']}s ({p['frames']} frames, {p['steps']} steps, seed {p['seed']})")
         prompt_id = submit(wf)
         entry = wait_for(prompt_id, lambda s: progress(f"rendering... {s}s"))
-        src = find_output_video(entry, wf["15"]["inputs"]["filename_prefix"])
+        src = find_output_video(entry, wf[save_node]["inputs"]["filename_prefix"])
 
         progress("encoding mp4 + last frame")
         # s2v keeps its performed speech track; the silent tiers stay silent.
-        mp4, png = postprocess(src, workdir, keep_audio=(p["mode"] == "s2v"),
-                               trim_seconds=(audio_seconds if p["mode"] == "s2v" else None))
+        # The infinitetalk engine renders at the wrapper's 25 fps: probe the
+        # real rate and keep it (report it honestly) rather than forcing 16.
+        out_fps: float = FPS
+        if it:
+            out_fps = probe_video_fps(src)
+            mp4, png = postprocess(src, workdir, keep_audio=True,
+                                   trim_seconds=audio_seconds, fps=None)
+        else:
+            mp4, png = postprocess(src, workdir, keep_audio=(p["mode"] == "s2v"),
+                                   trim_seconds=(audio_seconds if p["mode"] == "s2v" else None))
 
         finish_seconds = 0.0
         if p["finish"]:
@@ -667,7 +788,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "lastFrameUrl": frame_url,
             "width": FINISH_WIDTH if p["finish"] else WIDTH,
             "height": FINISH_HEIGHT if p["finish"] else HEIGHT,
-            "fps": FINISH_FPS if p["finish"] else FPS,
+            "fps": FINISH_FPS if p["finish"] else (round(out_fps, 3) if out_fps != int(out_fps) else int(out_fps)),
             "durationSeconds": p["seconds"],
             "seed": p["seed"],
             "renderSeconds": round(time.time() - t0, 1),

@@ -168,6 +168,45 @@ SLOWER than 8-step S2V at the same resolution (27.9 vs 19.3 min). IT's speed adv
 LongCat-Video-Avatar remains unevaluated (wrapper support is branch-grade; weakest
 operational story of the three).
 
+## InfiniteTalk as the v2 s2v engine (owner-directed 2026-08-30)
+
+Owner call after the bake-off: full-res InfiniteTalk won on lip sync and motion
+naturalness; S2V fast8 ships first, and InfiniteTalk is productionized as a switchable
+engine behind the SAME job contract. Nothing app-side changes: `mode: "s2v"` still takes
+imageUrl + audioUrl and returns a 720x1280 clip plus last frame to Blob. The app never
+knows which engine rendered.
+
+The switch is the endpoint env `RUNPOD_S2V_ENGINE`: `wan-s2v` (default, current behavior,
+16 fps) or `infinitetalk` (the kijai WanVideoWrapper graph promoted from the bake-off
+lane to `infra/video-worker/workflows/infinitetalk_916.json`, 25 fps output, probed and
+reported honestly rather than resampled). The wrapper is baked into the image at the sha
+pinned in `infra/video-worker/bakeoff/infinitetalk/PIN.md`, with the transformers-5
+wav2vec2 patch applied at build time (the build fails loudly if the patch cannot apply).
+The weights stay off the image, on the network volume, via
+`WITH_INFINITETALK=1 bash bootstrap-models.sh` (byte-size-checked, refuses under 30 GB
+free).
+
+Enablement order (owner, each step depends on the previous):
+
+1. **Grow the volume to 150 GB.** The kijai set is ~28.5 GB and the 100 GB volume has
+   roughly 19 GB free after the S2V set. The orchestrator handles the growth.
+2. **Bootstrap on a pod:** `MODELS_ROOT=/workspace/models WITH_INFINITETALK=1 bash
+   bootstrap-models.sh`, then terminate the pod (the $14 stray-pod lesson applies).
+3. **Build and push the image** carrying the wrapper, repoint the endpoint at the sha tag.
+4. **Set `RUNPOD_S2V_ENGINE=infinitetalk`** on the endpoint.
+
+The 24 GB caveat binds where this runs: at 720x1280 InfiniteTalk peaks at 24.05 GB, and
+block-swap thrashing made the 14 s bake-off line take 27.9 min on a 4090 (slower than
+8-step S2V at the same size). The 48 GB pool is where it belongs. Lines much over 14 s
+can exceed the 1800 s execution timeout on 24 GB workers; raising the endpoint timeout to
+3600 s is listed as an owner option, not done.
+
+Unproven until a GPU run of the production path: the graph has rendered on a pod through
+the bake-off harness, but never through handler.py's engine branch end to end
+(download, render, 25 fps probe, trim, Blob upload), and never from the serverless
+endpoint. `validate_graphs.py` now checks the infinitetalk graph too whenever the ComfyUI
+under test has the wrapper loaded, and skips with a message on CI's bare ComfyUI.
+
 ## Bake-off (2026-08-29): Wan2.2-S2V graph
 
 **Result: the shipped S2V graph could not have run. It has been rewritten and (2026-08-30)
