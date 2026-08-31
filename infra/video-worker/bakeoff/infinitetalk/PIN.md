@@ -42,7 +42,10 @@ file at all.
 
 ## Workflow provenance
 
-`workflow_infinitetalk.json` is converted node for node from the wrapper's own
+The graph now lives at `infra/video-worker/workflows/infinitetalk_916.json`
+(promoted there when InfiniteTalk became the worker's v2 s2v engine,
+2026-08-30; `run-infinitetalk.py` reads it from that path). It was converted
+node for node from the wrapper's own
 example `example_workflows/wanvideo_2_1_14B_I2V_InfiniteTalk_example_03.json`
 at sha `088128b224242e110d3906c6750e9a3a348a659b` (UI format -> API format
 against a live `/object_info` at the same sha). Sampling settings are the

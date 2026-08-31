@@ -88,10 +88,32 @@ def base_params(mode: str, fast: bool = False) -> dict:
     }
 
 
-def graphs_to_check() -> list[tuple[str, dict]]:
-    """Every graph the worker can submit, built by the handler's own code."""
+def graphs_to_check(info: dict | None = None) -> list[tuple[str, dict]]:
+    """Every graph the worker can submit, built by the handler's own code.
+
+    `info` is the live /object_info, used only to decide whether the
+    infinitetalk graph is checkable at all (its nodes come from the
+    ComfyUI-WanVideoWrapper custom-node pack, which CI's bare ComfyUI does
+    not carry).
+    """
     handler = load_handler()
     out: list[tuple[str, dict]] = []
+
+    # infinitetalk (the v2 s2v engine, RUNPOD_S2V_ENGINE=infinitetalk): SKIP
+    # with a clear message when the wrapper nodes are absent from the ComfyUI
+    # under test; the check must run whenever the wrapper is present (the
+    # production image installs it at the PIN.md sha).
+    try:
+        if info is not None and "WanVideoSampler" not in info:
+            raise LookupError(
+                "ComfyUI-WanVideoWrapper custom nodes are not loaded in this ComfyUI"
+            )
+        out.append(("infinitetalk", handler.build_infinitetalk_workflow(
+            base_params("s2v"), "frame.png", "speech.wav", 12.0)))
+    except LookupError as exc:
+        print(f"  SKIP infinitetalk: {exc} "
+              f"(clone the wrapper at the bakeoff/infinitetalk/PIN.md sha into "
+              f"custom_nodes to validate this graph)")
 
     # s2v: short speech (single chunk) and long speech (extend chain) are different
     # graphs, and fast=true grafts the lightning LoRA in front of the shift patch.
@@ -195,7 +217,7 @@ def main() -> None:
     print(f"ComfyUI at {COMFY_URL} exposes {len(info)} node classes\n")
 
     all_problems: list[str] = []
-    for label, graph in graphs_to_check():
+    for label, graph in graphs_to_check(info):
         problems = check_graph(label, graph, info)
         status = "FAIL" if problems else "ok"
         print(f"  {status:<4} {label:<20} {len(graph):>2} nodes")
