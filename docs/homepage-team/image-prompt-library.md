@@ -274,6 +274,33 @@ property, never all of them; the packshot is the third resort, never the second.
   saturated-color-instead-of-soft-tint failure mode on this same Magic Wand product line; use it
   verbatim on any future §0-P retry that fails on background saturation.
 
+- Tantus Super Soft Vibrating Cock Ring in Crimson (`tantus-super-soft-vibrating-cockring-crimson`),
+  `guides` category, sincere staging, post `what-is-the-best-vibrator-for-couples` (content routine
+  run 607, media-manager). **Ref-image note:** the product's only Shopify photo (`77690A.jpg`) is
+  already a clean unpackaged shot on white with no carton and no printed label copy beyond the
+  device's own small molded "TANTUS" wordmark — not a label-heavy product, so it went straight to
+  `--ref-image` generation with no crop/short-circuit needed. **Pairing-cue staging:** per the
+  caller's brief, added a second identical ring softly out of focus behind the first (setting, not
+  a second product-family accent prop) so the frame reads "for two" with no hands or bodies in
+  frame — the caller's staging idea shapes the setting, the router still decided the archetype
+  (§0-P, unchanged). Two rounds via Atlas `seedream-4.5-edit` (Atlas primary, landscape_4_3,
+  ref-image path): round 1 (2 candidates) failed the vision gate on background — a saturated
+  terracotta/rust diagonal light-wedge (a two-tone gradient, not the flat pale coral-soft `#FFE6DD`
+  tint the ground lock requires), the same failure class already logged against the Magic Wand
+  entries above. Round 2 (2 candidates, prompt hardened verbatim with the Magic Wand precedent's
+  "flat, pale, uniform coral-soft (#FFE6DD)," "evenly lit throughout, no directional light beam and
+  no color wedge," "no saturated or deep orange/rust color anywhere," "no color gradient, no
+  two-tone color blend" language) passed on both candidates: uniform pale peach/coral-soft field, no
+  gradient, no dark corners, ring shape/color/bullet/logo faithful to reference, "TANTUS" wordmark
+  legible and correct (real product texture, not invented/garbled text), second ring reads cleanly
+  as the pairing cue, generous negative space above for the headline. Candidate 2 picked over
+  candidate 1: candidate 1's product sat lower with less headline clearance and a faint hot-spot
+  on the paper; candidate 2 was evenly lit edge to edge with the cleanest negative space →
+  `image-f2c045a85c94b106146f950d0a32c0f78fd58933-2304x1728-jpg`. **Precedent:** confirms the Magic
+  Wand background-saturation fix language generalizes across products/categories on the same Atlas
+  ref-image path, not just the Magic Wand line specifically — reuse it verbatim as the first retry
+  for any §0-P round that fails on a saturated/gradient background.
+
 - Wicked Sensitive Water-Based Personal Lubricant 4oz (`wicked-sensitive-water-based-lubricant`),
   `wellness-basics` category, sincere staging, post `what-lube-is-best-for-sensitive-skin`
   ("What Lube Is Best for Sensitive Skin?", content-writer run 574). Sincere staging chosen
