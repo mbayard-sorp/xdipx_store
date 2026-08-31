@@ -9,6 +9,7 @@ import {
   computeRunpodActualCostUsd,
   runpodAllInRatePerSecondUsd,
   estimateRunpodRatePerSecondUsd,
+  estimateRunpodS2vRatePerSecondUsd,
 } from './model-pricing.server'
 
 const MTOK = 1_000_000
@@ -139,5 +140,49 @@ describe('runpod pricing', () => {
 
   it('prices a 60s episode inside the $6 per-video ceiling at the default rate', () => {
     expect(estimateVideoCostUsd('runpod/wan22', 60)).toBeLessThan(6)
+  })
+})
+
+/**
+ * s2v pre-flight cost estimate (ticket #6585). Sharing i2v/t2v's 45x render
+ * multiplier under-priced the s2v talking tier by ~1.81x against the
+ * 2026-08-30 bake-off's fast8 measurement (14.2s clip / 19.3 min render =
+ * ~81.5 render-seconds per clip-second) — the exact number the per-video
+ * ceiling and daily budget gate read BEFORE any spend happens. Pinned apart
+ * from the i2v/t2v estimate so they cannot silently re-converge.
+ */
+describe('s2v pre-flight cost estimate', () => {
+  afterEach(() => { vi.unstubAllEnvs() })
+
+  it("does not share i2v/t2v's render multiplier", () => {
+    expect(estimateRunpodS2vRatePerSecondUsd()).not.toBeCloseTo(estimateRunpodRatePerSecondUsd(), 5)
+    expect(estimateVideoCostUsd('runpod/wan22-s2v', 1)).not.toBeCloseTo(estimateVideoCostUsd('runpod/wan22', 1), 5)
+  })
+
+  it('meets or exceeds the fast8-measured rate (never lowball)', () => {
+    // 14.2s clip / 19.3 min (1158s) render = ~81.5 render-seconds/clip-second,
+    // at the default all-in GPU rate ($0.00053 x 1.5 fee = $0.000795/GPU-s).
+    const measuredRatePerSecond = 0.000795 * (1158 / 14.2)
+    expect(estimateRunpodS2vRatePerSecondUsd()).toBeGreaterThanOrEqual(measuredRatePerSecond)
+  })
+
+  it('is about 1.8x the i2v/t2v estimate at the shipped defaults (82 vs 45 render-seconds/clip-second)', () => {
+    const ratio = estimateRunpodS2vRatePerSecondUsd() / estimateRunpodRatePerSecondUsd()
+    expect(ratio).toBeCloseTo(82 / 45, 5)
+  })
+
+  it('widens from RUNPOD_S2V_RENDER_SECONDS_PER_CLIP_SECOND independently of the i2v multiplier', () => {
+    vi.stubEnv('RUNPOD_S2V_RENDER_SECONDS_PER_CLIP_SECOND', '100')
+    expect(estimateRunpodS2vRatePerSecondUsd()).toBeCloseTo(runpodAllInRatePerSecondUsd() * 100, 10)
+    expect(estimateRunpodRatePerSecondUsd()).toBeCloseTo(runpodAllInRatePerSecondUsd() * 45, 10)
+  })
+
+  it('keeps the s2v estimate and its actual on the SAME all-in rate', () => {
+    vi.stubEnv('RUNPOD_GPU_USD_PER_SEC', '0.001')
+    vi.stubEnv('RUNPOD_FEE_MULTIPLIER', '2')
+    vi.stubEnv('RUNPOD_S2V_RENDER_SECONDS_PER_CLIP_SECOND', '82')
+    // 82 GPU-seconds assumed per clip-second, so one clip-second's s2v estimate
+    // must equal 82 GPU-seconds of measured actual.
+    expect(estimateRunpodS2vRatePerSecondUsd()).toBeCloseTo(computeRunpodActualCostUsd(82_000), 10)
   })
 })
