@@ -75,3 +75,32 @@ export function spokenTextOf(script: VideoScriptJson | null | undefined): string
 export function scriptsSpeakIdentically(a: VideoScriptJson | null | undefined, b: VideoScriptJson | null | undefined): boolean {
   return spokenTextOf(a) === spokenTextOf(b)
 }
+
+/**
+ * Maps a storyboard beat's free-text `speaker` (video_episodes.storyboardJson
+ * entries carry `speaker?: string` — a cast slug or display name, e.g. "Maya"
+ * or "maya") to the `none | emma | friend:{slug}` presenter grammar a
+ * VideoSceneSpec.presenter needs (ADR-014, ticket #6586). This mapping did
+ * not exist anywhere before this: the story layer already writes `speaker`
+ * per beat (.claude/agents/episode-writer.md's `<speaker>: "<line>"` beat
+ * format) but nothing converted that prose into a presenter string, and
+ * getting it wrong renders a scene in the wrong identity or wrong voice
+ * silently — so an unresolved speaker throws rather than guessing.
+ *
+ * No `.server` import (kept alongside this file's other pure helpers, per its
+ * header comment): callers pass whichever `{ slug, name }[]` cast list they
+ * already have (typically `getApprovedCastMembers()`), so this stays cheaply
+ * unit-testable without a Sanity client.
+ */
+export function mapSpeakerToPresenter(speaker: string | null | undefined, cast: { slug: string; name: string }[]): string {
+  const raw = (speaker ?? '').trim()
+  if (!raw) return 'none'
+  const lower = raw.toLowerCase()
+  if (lower === 'emma') return 'emma'
+  if (lower === 'none') return 'none'
+  const bySlug = cast.find(c => c.slug.toLowerCase() === lower)
+  if (bySlug) return `friend:${bySlug.slug}`
+  const byName = cast.find(c => c.name.toLowerCase() === lower)
+  if (byName) return `friend:${byName.slug}`
+  throw new Error(`speaker '${speaker}' matches no approved cast member's slug or name, and is not 'emma' or 'none'`)
+}

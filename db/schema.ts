@@ -1574,6 +1574,35 @@ export interface VideoSceneSpec {
    * slug-keyed automatic reuse needs no field — this is the override.
    */
   reuseFrameAssetId?: number
+  /**
+   * Per-scene presenter (ADR-014, ticket #6586): same 'none' | 'emma' |
+   * 'friend:{slug}' grammar as the job-level `presenter`. Absent means "this
+   * scene uses the job's presenter" (today's behavior, byte-for-byte). Lets
+   * an own-frame scene's identity (and, once a talking tier is eligible
+   * again, its voice) differ from the job's, so an episode can cut between
+   * two cast members shot/reverse-shot rather than being pinned to one face
+   * for the whole render.
+   */
+  presenter?: string
+  /**
+   * Per-scene spoken line (ADR-014, ticket #6586). Named to match, not add
+   * to, the field `spokenTextOf` (app/lib/video-episodes.ts) already reads at
+   * `scene[i].spokenLine` for the approval-integrity comparator — that guard
+   * predates this field and was written to wait for it. Required by
+   * validateScenes on a talking tier (spec.lipsync); actually driving TTS
+   * per-scene is the render-stage-graph change ADR-014 §4 defers until a
+   * talking tier is eligible again.
+   */
+  spokenLine?: string
+  /**
+   * Additional cast members visible in this own-frame scene alongside
+   * `presenter`, same grammar ('friend:{slug}' | 'emma'). Composes a two-shot
+   * via composeSceneFrame's existing `extraImageUrls` (ADR-014 addendum: the
+   * compositor already supports this for social stills; the video frame
+   * stage never wired it). Purely visual — does not imply a co-presenter
+   * speaks; only `presenter`'s voice/line renders for this scene.
+   */
+  coPresenters?: string[]
 }
 
 /**
