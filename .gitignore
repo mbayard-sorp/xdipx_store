@@ -63,3 +63,6 @@ scripts/.tmp-media/
 test-results/
 playwright-report/
 .design-snapshots/
+
+# Local voice audition reels (throwaway TTS artifacts, never committed)
+.voice-auditions/
