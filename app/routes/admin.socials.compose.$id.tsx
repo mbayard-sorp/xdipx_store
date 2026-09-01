@@ -11,7 +11,7 @@
  * is not edited.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
-import { useLoaderData, Link } from 'react-router'
+import { useLoaderData, Link, Form } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { Composer } from '~/components/admin/social/Composer'
 import { PlatformMock, mediaRefsOf } from '~/components/admin/social/PostPreviewCard'
@@ -79,6 +79,22 @@ export default function ComposeExisting() {
         <div className="rounded-2xl border border-line bg-paper-2 p-3 inline-block">
           <PlatformMock platform={row.platform} media={media} caption={row.editedText?.trim() || row.tweetText} />
         </div>
+        {row.status === 'deleted' && (
+          row.removalSource === 'owner' ? (
+            <p className="text-sm text-ink-3">Marked as removed by you. It never counts toward a takedown pattern.</p>
+          ) : (
+            <Form method="post">
+              <input type="hidden" name="intent" value="mark-removal-owner" />
+              <button
+                type="submit"
+                className="inline-flex items-center min-h-11 px-4 rounded-full border border-line bg-paper text-sm font-medium text-ink hover:border-ink-4"
+                title="The removal watcher cannot tell a platform takedown from you deleting this yourself. If this was you, say so here."
+              >
+                I removed this
+              </button>
+            </Form>
+          )
+        )}
         <Link to={`/admin/socials/compose/new?platform=${row.platform}`} className="inline-flex items-center min-h-11 px-4 rounded-full bg-coral text-white text-sm font-semibold hover:bg-coral-2">
           Draft a new one
         </Link>

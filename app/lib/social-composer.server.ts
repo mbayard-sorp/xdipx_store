@@ -15,7 +15,7 @@ import {
   updateOwnerDraft,
   type ComposerPost,
 } from '~/lib/social-studio.server'
-import { revertSocialPostToDraft } from '~/lib/social-publish-approve.server'
+import { revertSocialPostToDraft, markSocialPostRemovalOwner } from '~/lib/social-publish-approve.server'
 import { utcIsoToLaWallClock } from '~/lib/social-schedule-ui'
 import type { CastOption } from '~/components/admin/social/CastPicker'
 import type { PickedProduct } from '~/components/admin/social/ProductSearchField'
@@ -117,6 +117,11 @@ export async function handleComposerIntent(form: FormData, id: number | null) {
     if (id == null) return { ok: false, error: 'Nothing to revert yet' }
     const r = await revertSocialPostToDraft(id)
     return r.ok ? { ok: true, id, intent: 'revert-to-draft' } : { ok: false, error: r.error }
+  }
+  if (intent === 'mark-removal-owner') {
+    if (id == null) return { ok: false, error: 'Nothing to mark yet' }
+    const r = await markSocialPostRemovalOwner(id)
+    return r.ok ? { ok: true, id, intent: 'mark-removal-owner' } : { ok: false, error: r.error }
   }
   return null
 }

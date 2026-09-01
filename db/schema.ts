@@ -225,6 +225,15 @@ export const socialPosts = pgTable('social_posts', {
   // inference for pre-086 rows, so it is nullable and never backfilled in SQL.
   episodeId:       integer('episode_id'),
   mediaKind:       varchar('media_kind', { length: 8 }),
+  // Removal attribution (migration 087, ticket #6758). The removal watchers
+  // (social-removal-watch.server.ts / x-removal-watch.server.ts) can tell a
+  // post is gone but not WHY: an owner deleting a post looks identical, over
+  // the platform APIs, to a platform takedown. 'unknown' is the honest
+  // default a watcher-detected removal gets; 'owner' is set only by the
+  // admin "I removed this" action, and excludes the row from the takedown
+  // pattern count; 'platform' is reserved for a removal with independent
+  // confirmation (today, only the historical backfill in migration 088).
+  removalSource:   varchar('removal_source', { length: 10 }).default('unknown'),
 })
 
 /**
