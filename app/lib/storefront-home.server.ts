@@ -12,6 +12,7 @@
  */
 
 import { getDiscoveryIndex, getDiscoveryRails } from '~/lib/discovery.server'
+import { isOutOfStock } from '~/lib/discovery-rules.server'
 import {
   buildHomeContentBlocksLean,
   getAnchorCollectionProducts,
@@ -382,8 +383,11 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
       rails.flatMap(r => r.items).find(i => i.product.handle === pinnedHandle)?.product ??
       // Not surfaced by today's rails: pull it from the discovery index. The
       // rails call above already warmed the L1 memo, so this is an in-memory
-      // lookup, not a second KV round-trip.
-      (await getDiscoveryIndex()).find(p => p.handle === pinnedHandle) ??
+      // lookup, not a second KV round-trip. A rail lead already passed
+      // applyRules()'s stock gate, but this raw index lookup has not, so the
+      // same out-of-stock check is re-applied here (ticket #6751) — otherwise
+      // a curator-pinned handle that just sold out would still hero.
+      (await getDiscoveryIndex()).find(p => p.handle === pinnedHandle && !isOutOfStock(p.totalInventory)) ??
       null
     if (!pinnedProduct) {
       console.warn(
