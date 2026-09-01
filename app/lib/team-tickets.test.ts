@@ -1163,6 +1163,75 @@ describe('unknown-kind coercion on create', () => {
 })
 
 // ---------------------------------------------------------------------------
+// A create carrying an open pr link lands at pr_open, not approved (#6762)
+// ---------------------------------------------------------------------------
+
+describe('create with an open pr link lands at pr_open (#6762)', () => {
+  it('lands at pr_open, auto-decided, when the filing carries an open pr link', async () => {
+    h.state.selects.push([]) // getTeamConfig — irrelevant here, autoApprove would be false
+    h.state.insertResults.push([{ id: 6762 }])
+    const res = await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code',
+      suggestion: 'ticket #990: docs-only tracker PR',
+      links: [{ kind: 'pr', ref: 'https://github.com/mbayard-sorp/xdipx_store/pull/990', state: 'open' }],
+    })
+    expect(res).toEqual({ id: 6762, deduped: false })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('pr_open')
+    expect(values['decidedBy']).toBe('auto')
+    expect(values['decidedAt']).toBeInstanceOf(Date)
+  })
+
+  it('a pr link with a non-open state does not short-circuit to pr_open', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 6763 }])
+    await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code', suggestion: 'x',
+      links: [{ kind: 'pr', ref: 'https://github.com/mbayard-sorp/xdipx_store/pull/1', state: 'merged' }],
+    })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('proposed')
+  })
+
+  it('a non-pr link (e.g. a note) does not short-circuit to pr_open', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 6764 }])
+    await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code', suggestion: 'x',
+      links: [{ kind: 'note', ref: 'see also #123' }],
+    })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('proposed')
+  })
+
+  it('the current default (no pr link) is unaffected: autoApprove off -> proposed', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 6765 }])
+    const res = await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code', suggestion: 'x',
+    })
+    expect(res).toEqual({ id: 6765, deduped: false })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('proposed')
+    expect(values['decidedBy']).toBeNull()
+    expect(values['decidedAt']).toBeNull()
+  })
+
+  it('an open pr link still lands at pr_open even when the team auto-approves', async () => {
+    // autoApprove=true would otherwise land this at 'approved' — pr_open wins,
+    // since a PR that's already open needs QA, not a claim.
+    h.state.selects.push([{ key: 'strategy_team_auto_approve_suggestions', value: 'true' }])
+    h.state.insertResults.push([{ id: 6766 }])
+    await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code', suggestion: 'x',
+      links: [{ kind: 'pr', ref: 'https://github.com/mbayard-sorp/xdipx_store/pull/2', state: 'open' }],
+    })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('pr_open')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Delegated supersession dismissal (#3573) + supersedesId on create (#3406)
 // ---------------------------------------------------------------------------
 
