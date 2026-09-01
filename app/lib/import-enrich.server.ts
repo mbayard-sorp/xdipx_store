@@ -994,11 +994,14 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
 
   // Tell the social team products went live (ticket #3736). One batched row
   // per publish run, never one row per product, so a bulk publish cannot flood
-  // the bus; the social routine reads its inbound mail at Step 7b. The daily
-  // dedupe key means a re-run on the same day extends the open conversation
-  // instead of opening a second one. Products activated OUTSIDE this chain
-  // (manual Shopify status flip) are caught by handleProductUpdated in
-  // server/webhooks.ts, which skips products this chain just published.
+  // the bus; the social routine reads its inbound mail via the
+  // targetTeam:'social' mailbox query, so targetTeam must be set or the row is
+  // invisible to it. kind:'process' matches the webhook half (#4360) so a run
+  // can close the row. The daily dedupe key means a re-run on the same day
+  // extends the open conversation instead of opening a second one. Products
+  // activated OUTSIDE this chain (manual Shopify status flip) are caught by
+  // handleProductUpdated in server/webhooks.ts, which skips products this
+  // chain just published.
   if (wentLive.length > 0) {
     try {
       const day = new Date().toISOString().slice(0, 10)
@@ -1006,10 +1009,11 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
         .map(p => `- ${p.title} (handle: ${p.handle}, category: ${p.category}, vendor: ${p.vendor})`)
         .join('\n')
       await createSuggestion({
-        team:      'social',
-        kind:      'campaign',
-        category:  'social-automation',
-        dedupeKey: `new-products:enrich:${day}`,
+        team:       'social',
+        targetTeam: 'social',
+        kind:       'process',
+        category:   'social-automation',
+        dedupeKey:  `new-products:enrich:${day}`,
         // One campaign per day of new arrivals is the point here, so the date
         // is identity, not noise. Without this the key canonicalizes to
         // `new-products-enrich` and every day after the first is swallowed.
@@ -1018,7 +1022,7 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
           `${wentLive.length} product(s) went live on the storefront via the enrich-to-publish ` +
           `chain (owner direction 2026-08-16: posts about new products we now have on the site):\n` +
           `${lines}\n` +
-          `Consider a new-arrivals post per routine-social-daily.md Step 7b. Every pick still ` +
+          `Consider a new-arrivals post per routine-social-daily.md. Every pick still ` +
           `passes the usual gates: Instagram category eligibility, stock, and the voice gate.`,
       })
     } catch (err) {
