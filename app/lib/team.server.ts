@@ -899,6 +899,17 @@ export async function createSuggestionDetailed(
       'Pass dedupeScope:"daily" if a row per day is intended.',
     )
   }
+  // #6762: a filing that already carries an open `pr` link (ADR-008 step 3 —
+  // "opened a PR, file its ticket in the same breath") is a self-filed
+  // PR-tracking ticket, not new work waiting on triage or a claim. Landing it
+  // at 'approved' drops it into R-DEV's claim pool describing a PR that is
+  // already written and pushed — phantom rework (#4539) — and there is no
+  // repair path afterward, since 'approved' -> 'pr_open' is not an agent-
+  // reachable edge. operating-system.md section 3 rule 4 and program-
+  // manager.md both document the contract this enforces: it lands at
+  // pr_open with the pr link, never as a bare kind:'code' row at approved.
+  const hasOpenPrLink = (s.links ?? []).some(l => l.kind === 'pr' && l.state === 'open')
+  const initialStatus: TicketStatus = hasOpenPrLink ? 'pr_open' : autoApprove ? 'approved' : 'proposed'
   const [row] = await db
     .insert(homepageTeamSuggestions)
     .values({
@@ -910,9 +921,9 @@ export async function createSuggestionDetailed(
       suggestion:    suggestionText,
       estSavingsUsd: String(s.estSavingsUsd ?? 0),
       cxRisk:        s.cxRisk ?? 'low',
-      status:        autoApprove ? 'approved' : 'proposed',
-      decidedBy:     autoApprove ? 'auto' : null,
-      decidedAt:     autoApprove ? new Date() : null,
+      status:        initialStatus,
+      decidedBy:     initialStatus !== 'proposed' ? 'auto' : null,
+      decidedAt:     initialStatus !== 'proposed' ? new Date() : null,
       priority:      s.priority ?? 3,
       dedupeKey,
       dueAt:         s.dueAt == null ? null : new Date(s.dueAt),
