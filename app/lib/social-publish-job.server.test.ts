@@ -234,7 +234,7 @@ describe('the gate runs at publish time', () => {
     await tick({
       isEnabled: enabled, maxPerDay: cap(3), publish, repo,
       productHandleFor: async () => 'gone-oos',
-      gateDeps: { getAvailability: async () => false },
+      gateDeps: { getAvailability: async () => false, getProductTypeDial: async () => null },
     })
     expect(publish).not.toHaveBeenCalled()
     expect(calls.needsChanges[0]?.feedback).toContain('stock-out')
@@ -310,7 +310,7 @@ describe('the gate runs at publish time', () => {
     const seen: string[] = []
     await tick({
       isEnabled: enabled, maxPerDay: cap(3), publish, repo,
-      gateDeps: { getAvailability: async (h) => { seen.push(h); return false } },
+      gateDeps: { getAvailability: async (h) => { seen.push(h); return false }, getProductTypeDial: async () => null },
     })
     expect(seen).toEqual(['femmefunn-ultra-bullet'])
     expect(publish).not.toHaveBeenCalled()
@@ -391,7 +391,7 @@ describe('the gate runs at publish time', () => {
     await tick({
       isEnabled: enabled, maxPerDay: cap(3), publish, repo,
       productHandleFor: async () => 'gone-oos',
-      gateDeps: { getAvailability: async () => false },
+      gateDeps: { getAvailability: async () => false, getProductTypeDial: async () => null },
     })
     expect(publish).not.toHaveBeenCalled()
     expect(calls.needsChanges[0]?.feedback).toContain('stock-out')
@@ -406,7 +406,7 @@ describe('the gate runs at publish time', () => {
       isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
       checkStockByProductId: async () => true,
       productHandleById: async (id) => (id === 'gid://shopify/Product/42' ? 'fresh-handle' : null),
-      gateDeps: { getAvailability: async (h) => { seen.push(h); return true } },
+      gateDeps: { getAvailability: async (h) => { seen.push(h); return true }, getProductTypeDial: async () => null },
     })
     expect(seen).toEqual(['fresh-handle'])
   })
@@ -420,7 +420,7 @@ describe('the gate runs at publish time', () => {
       isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
       checkStockByProductId: async () => true,
       productHandleById: async () => null,
-      gateDeps: { getAvailability: async (h) => { seen.push(h); return true } },
+      gateDeps: { getAvailability: async (h) => { seen.push(h); return true }, getProductTypeDial: async () => null },
     })
     expect(seen).toEqual(['stamp-handle'])
   })
@@ -474,7 +474,7 @@ describe('the gate runs at publish time', () => {
     const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_reel_1' }))
     const r = await tick({
       isEnabled: enabled, maxPerDay: cap(3), publish, repo,
-      gateDeps: { getAvailability: async () => true },
+      gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => null },
     })
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
     expect(calls.posted).toEqual([1])

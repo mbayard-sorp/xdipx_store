@@ -19,6 +19,8 @@ const GOOD_MEDIA = [`${CDN}/social-rosales-cast-maya-20260812-1.jpg`]
 const inStock = async () => true
 const outOfStock = async () => false
 const notMember = async () => false
+/** Stub for tests unrelated to the pairing rule (#6745): no dial resolved, so it never fires. */
+const noPairingDial = async () => null
 
 /** A caption with nothing wrong with it. */
 const CLEAN = 'ok, a detail about silicone nobody mentions: not all of it is the same grade.'
@@ -31,7 +33,7 @@ describe('a clean post', () => {
   it('passes with no findings', async () => {
     const r = await runDeterministicPublishChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'rosales' },
-      { getAvailability: inStock },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial },
     )
     expect(r.findings).toEqual([])
     expect(r.blocked).toBe(false)
@@ -107,7 +109,7 @@ describe('stock, re-checked at publish time', () => {
   it('blocks an out-of-stock product (the 2026-08-09 deleted post)', async () => {
     const r = await runDeterministicPublishChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'gone' },
-      { getAvailability: outOfStock },
+      { getAvailability: outOfStock, getProductTypeDial: noPairingDial },
     )
     expect(checks(r)).toContain('stock-out')
     expect(r.blocked).toBe(true)
@@ -116,7 +118,7 @@ describe('stock, re-checked at publish time', () => {
   it('fails closed when stock cannot be resolved', async () => {
     const r = await runDeterministicPublishChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'unknown' },
-      { getAvailability: async () => null },
+      { getAvailability: async () => null, getProductTypeDial: noPairingDial },
     )
     expect(checks(r)).toContain('stock-unverifiable')
     expect(r.blocked).toBe(true)
@@ -125,7 +127,7 @@ describe('stock, re-checked at publish time', () => {
   it('fails closed when the stock lookup throws, rather than publishing anyway', async () => {
     const r = await runDeterministicPublishChecks(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'boom' },
-      { getAvailability: async () => { throw new Error('shopify down') } },
+      { getAvailability: async () => { throw new Error('shopify down') }, getProductTypeDial: noPairingDial },
     )
     expect(checks(r)).toContain('stock-unverifiable')
     expect(r.blocked).toBe(true)
@@ -135,6 +137,66 @@ describe('stock, re-checked at publish time', () => {
     // License D posts legitimately feature no product.
     const r = await runDeterministicPublishChecks({ caption: CLEAN, mediaUrls: GOOD_MEDIA })
     expect(r.findings).toEqual([])
+  })
+})
+
+// Ticket #6745: the pairing-presence self-check in routine-social-daily.md
+// ("a toy never travels alone") was instruction-only for three weeks and
+// never moved the miss rate, because nothing verified it before a draft
+// could reach the unattended hourly publish tick.
+describe('pairing rule: a toy never travels alone (crossplatform strategy §3, ticket #6745)', () => {
+  const vibratorDial = async () => 'vibrator'
+  const wearDial = async () => 'wear'
+
+  it('blocks a toy-featuring draft that names no lube and records no reason', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'le-wand-powerful-petite' },
+      { getAvailability: inStock, getProductTypeDial: vibratorDial },
+    )
+    expect(checks(r)).toContain('pairing-missing')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('passes when the caption names a compatible lube', async () => {
+    const r = await runDeterministicPublishChecks(
+      {
+        caption: 'this pairs beautifully with a water-based lube for effortless glide.',
+        mediaUrls: GOOD_MEDIA,
+        productHandle: 'le-wand-powerful-petite',
+      },
+      { getAvailability: inStock, getProductTypeDial: vibratorDial },
+    )
+    expect(checks(r)).not.toContain('pairing-missing')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('passes when the draft records an explicit reason none applies', async () => {
+    const r = await runDeterministicPublishChecks(
+      {
+        caption: CLEAN,
+        mediaUrls: GOOD_MEDIA,
+        productHandle: 'le-wand-powerful-petite',
+        pairingNoneReason: 'external-only feature post, no penetrative use implied here',
+      },
+      { getAvailability: inStock, getProductTypeDial: vibratorDial },
+    )
+    expect(checks(r)).not.toContain('pairing-missing')
+  })
+
+  it('does not fire for a non-toy product type dial (e.g. wear)', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'some-wear-item' },
+      { getAvailability: inStock, getProductTypeDial: wearDial },
+    )
+    expect(checks(r)).not.toContain('pairing-missing')
+  })
+
+  it('does not fire when the type dial cannot be resolved (fails open, not closed)', async () => {
+    const r = await runDeterministicPublishChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'unresolvable' },
+      { getAvailability: inStock, getProductTypeDial: async () => { throw new Error('shopify down') } },
+    )
+    expect(checks(r)).not.toContain('pairing-missing')
   })
 })
 
@@ -256,7 +318,7 @@ describe('result shape', () => {
         mediaUrls: [`${CDN}/77292A.jpg`],
         productHandle: 'gone',
       },
-      { getAvailability: outOfStock },
+      { getAvailability: outOfStock, getProductTypeDial: noPairingDial },
     )
     // One pass should tell the drafter everything that is wrong, not make it
     // rediscover the next problem on each retry.
