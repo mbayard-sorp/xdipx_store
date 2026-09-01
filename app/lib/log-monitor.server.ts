@@ -226,7 +226,15 @@ export function isNoiseLine(line: LogLine): boolean {
   return NOISE_LINE_PATTERNS.some((re) => re.test(text))
 }
 
-const DEFAULT_TOKEN_BUDGET = 18_000
+// #6769: on a real (non-empty, non-all-noise) window, filterAndCapLogs almost
+// always padded the payload with routine, non-signal lines all the way up to
+// this budget, even when nothing was worth flagging -- 18 consecutive real
+// invocations (2026-08-29 to 2026-08-31) each spent ~34,235 input tokens for
+// ~54 output tokens (report_groups came back near-empty). Padding never
+// changes WHETHER the detector fires: signal lines are always kept uncapped
+// regardless of this value (see filterAndCapLogs), so this only bounds how
+// much low-value routine context rides along with them. Lowered from 18,000.
+const DEFAULT_TOKEN_BUDGET = 4_000
 const CHARS_PER_TOKEN = 4 // rough estimate for English/log text (no tokenizer dep)
 
 export interface FilterAndCapResult {
