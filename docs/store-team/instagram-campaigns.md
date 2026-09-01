@@ -233,8 +233,9 @@ all ceiling has no ceiling. Contrast is what stops a thumb, the charged frame la
 restrained one, and fourteen maximally charged tiles read as a porn account to a human and to a
 reviewer alike, which is the reading that gets an account actioned rather than a post.
 
-Per 7 posts: **roughly 3 at the ceiling, 3 mid, 1 educational** (re-based 2026-08-22 on the owner's
-register-9 order; it was 2 / 3 / 2). Same principle, hotter floor: the peaks stay sharper than the
+Per 7 posts: **roughly 4 at the ceiling, 2 mid, 1 educational** (re-based 2026-09-01 on the owner's
+more-skin direction from the social alignment audit; it was 3 / 3 / 1 from 2026-08-22, and
+2 / 3 / 2 before that). Same principle, hotter floor: the peaks stay sharper than the
 rest, and one bad classifier day costs a post instead of the channel. Do not round every frame up
 to the ceiling, and do not round any product frame down to a packshot-in-a-room: since 2026-08-22
 the **mid** frame carries skin, touch, posture, or expression by default (§3.2a licenses all four at
@@ -247,7 +248,7 @@ those the same number. At 3 or 4 posts a day a 13-day campaign is 39 to 56 posts
 "4 of 14 per campaign" silently stops meaning anything. So read every proportion in this document as
 a **rolling window over the most recent posts**, never as a per-campaign total:
 
-- **Charge:** roughly 3 ceiling, 3 mid, 1 educational per rolling 7.
+- **Charge:** roughly 4 ceiling, 2 mid, 1 educational per rolling 7.
 - **Cast:** at most 4 cast frames per rolling 14, and never more than one cast frame in a single
   day. Still never three or more faces in one campaign; that one is about identity, not frequency,
   and it does not re-base.
@@ -332,6 +333,15 @@ frame as a product; the caption never names it. **No baked-in text on any slide.
 rendered typography over a clean plate, and a generated word is a defect even when it is spelled
 correctly.
 
+**Standalone metaphor posts are licensed (owner direction 2026-09-01), up to 2 per rolling 7.**
+A single-image post built on the doctrine's archetype D (silk, water, soft foil, fruit standing in
+for sensation) may now run on Instagram on its own, not only as a carousel hook. Every deniability
+fence holds unchanged: the fig reads as a fig at a glance, the metaphor is never composited into
+the same frame as a product, and the caption never names it. A metaphor post counts as a mid frame
+in the §3.2b charge ratio, follows the normal pillar and format rotation, and archetype E (the
+surreal euphemistic hybrids) remains off Instagram entirely, per §3.5. Two per rolling 7 is a
+ceiling, not a quota: a week with none is fine, a week with three is a defect.
+
 ### 3.4 Key art is generated as a set, before day 1
 
 This is the operational change that makes campaigns possible. Step 5 of the routine generates at most
@@ -365,9 +375,11 @@ Do not re-propose these; each one has been tried or ruled out:
   fights the high-key mandate. Sage is the heart and the tag colour.
 - **Dark, moody, candlelit "intimacy".** Failed on the homepage in July, reads porn-adjacent to a
   platform reviewer, and looks cheap at 375px. Charge comes from daylight and confidence.
-- **A campaign built on metaphor.** Produce innuendo is licensed at one slide per carousel, as a
-  hook, on the fence of deniability. A campaign of figs and peaches is the emoji-anatomy vocabulary
-  the charter bans in words, rendered in pixels. Metaphor is a door, never a room.
+- **A campaign built on metaphor.** Produce innuendo is licensed as a carousel hook and, since
+  2026-09-01, as a standalone archetype-D post capped at 2 per rolling 7 (§3.3), always on the
+  fence of deniability. What stays retired is the campaign: a whole arc of figs and peaches is the
+  emoji-anatomy vocabulary the charter bans in words, rendered in pixels. Metaphor is a door,
+  never a room.
 - **The doctrine's surreal brand art (archetype E) on Instagram.** Licensed for owned surfaces only,
   precisely because euphemistic sexual imagery is what moderation removes.
 - **A campaign that is a product rotation with a hashtag.** Fourteen posts each featuring a different
@@ -729,17 +741,18 @@ and "it is news" is not a reason to cut the cast composite.
 | Event | Where it comes from | Cadence | State |
 |---|---|---|---|
 | **Notebook post published** | `routine-content-daily.md` Step 6 files a `notebook-promo:<slug>` row targeted at social | near-daily | **Working.** Read at Step 1 item 9, never at Step 7b. |
-| **New product live** | `server/webhooks.ts` files `kind:'campaign'`, `dedupeKey:'new-product:<handle>'` | bursty, ~15/day when an import batch lands | **Fires into a dead end.** See below. |
+| **New product live** | `server/webhooks.ts` files `kind:'process'`, `dedupeKey:'new-product:<handle>'`; the enrich chain files one batched `new-products:enrich:<day>` row per publish run | bursty, ~15/day when an import batch lands | **Working since 2026-09-01** (PR #1007 added the missing `targetTeam:'social'`; before that every row was invisible to the mailbox query). See below. |
 
-### Tier 2: the detector exists, it just does not reach social
+### Tier 2: live since 2026-09-01 (was: detector built, not reaching social)
 
 **Restock after a true stockout.** `isRestockCrossing()` and `handleInventoryUpdate()`
-(`server/webhooks.ts:580`) already detect a genuine 0-to-positive crossing, with guards against
-routine noise and against the first observation. Today the crossing calls `triggerBackInStock()`,
-which is Klaviyo email only, and files nothing at social. This is the **highest-intent and cheapest
-remaining trigger**: the hard part is built and tested. Frame it as mechanism or quality ("why this
-one keeps selling out"), never as scarcity. "Back in stock" as urgency is the sale-signal register
-the charter and the gate both refuse.
+(`server/webhooks.ts:580`) detect a genuine 0-to-positive crossing, with guards against routine
+noise and against the first observation. The crossing calls `triggerBackInStock()` (Klaviyo email)
+AND, since ticket #5430, files one batched `restock-digest:<day>` row per UTC day at social
+(`app/lib/restock-digest.server.ts`; routed with `targetTeam:'social'` since 2026-09-01, PR #1007).
+So this tier is live, not waiting to be built. Frame it as mechanism or quality ("why this one
+keeps selling out"), never as scarcity. "Back in stock" as urgency is the sale-signal register the
+charter and the gate both refuse.
 
 ### Tier 3: schemas waiting for traffic. Do NOT build against these yet
 
@@ -784,14 +797,17 @@ however new it is:
   others already in the catalogue, it is filler. At this account size filler reads as having nothing
   to say, which is worse than posting less often.
 
-### Why the product-live trigger has produced zero posts
+### Why the product-live trigger produced zero posts until 2026-09-01, and what changed
 
-It files `kind:'campaign'`. `RUN_CLOSE_KINDS` is `['process','strategy']`
-(`app/lib/team.server.ts:1427`), so a run **cannot** close a `campaign` row, and `campaign` has no
-automated executor at all. 37 rows accumulated at `approved` inside 60 hours and every one is inert.
-**The trigger works; the executor does not exist.** Filing into a kind nothing can action is the
-defect, not the detection. Until that is fixed, do not treat the queue as a source of drafts, and do
-not hand-close rows to make the number go down.
+Two stacked defects, both fixed (owner audit 2026-09-01, PR #1007). First, every filer set
+`team:'social'` but no `targetTeam`, and the routine's mailbox query filters on strict
+`targetTeam:'social'` equality, so the rows were invisible: 465 products published in the prior 30
+days produced zero social coverage. Second, the enrich-chain row filed `kind:'campaign'`; it is now
+`kind:'process'`, matching the webhook half (#4360). Note the earlier version of this section
+claimed `RUN_CLOSE_KINDS` is `['process','strategy']` and that the queue was a permanent dead end;
+that was stale even then. The actual list is `['process','strategy','campaign','promo']`
+(`app/lib/team.server.ts`, `RUN_CLOSE_KINDS`), so runs can close what they act on. **The queue IS
+a source of drafts now:** read it at context load, draft against it, and close rows with the run.
 
 ## 5. The schedule
 
@@ -923,7 +939,11 @@ roughly 9x the saves of a single image and single images are losing reach year o
 | 09-06 Sun | Ask Emma | "How do I bring it up without making it weird?" | None |
 
 Drafted captions, alt text, hashtags, and image briefs for the first week live in
-`docs/store-team/social-slate-2026-08-24.md`; the routine drafts from them rather than from scratch.
+`docs/store-team/social-slate-2026-08-24.md`; the routine drafts from them rather than from scratch
+**while that slate's window is open.** A slate file is a convenience, not a dependency: when the
+current slate's window has ended and no successor file exists, the routine drafts from this
+document's campaign table, weekday lanes, and pillars directly, and says so in the run summary
+instead of stalling or treating the expired slate as current.
 
 **What the owner approved on the first rendered set (2026-08-22), so the team leans toward it:**
 the partner-sharing frame is the one to make more of: *"A partner sharing a toy with their partner!

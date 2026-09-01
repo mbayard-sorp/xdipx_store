@@ -233,7 +233,11 @@ Sources: [Etsy Prohibited Items Policy](https://www.etsy.com/legal/policy/prohib
 
 ## Creative rules (paid AND organic)
 
-- No nudity, no explicit imagery, no depiction or simulation of product use on a body.
+- No nudity, no explicit imagery. For **paid** creative, additionally no depiction or simulation
+  of product use on a body. For **organic** social, imagery is governed by the ceiling in
+  `docs/store-team/instagram-campaigns.md` §3.2a (which licenses product against skin and implied
+  use); this line was corrected 2026-09-01 to match §Organic social above, which was corrected
+  first.
 - Education/wellness framing; product-as-object photography (the store's bright editorial style is
   an asset here). Never porn-adjacent aesthetics.
 - Copy follows `docs/emma-voice.md` on top of platform rules: suggestive about what a product does,

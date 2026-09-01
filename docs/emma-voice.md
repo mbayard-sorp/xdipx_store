@@ -84,7 +84,7 @@ The authorship test, which is what actually degrades from 9 to 10: at 9 the copy
 
 ## Imagery register
 
-Visuals stay suggestive-editorial (a visual 6-7; imagery does not follow copy to a 9). Sensory, elegant, charged:
+The visual register is scoped by surface (aligned 2026-09-01; the 2026-08-19 hard-lines ruling below already scoped the bans, this line now matches it). On owned merchandising surfaces (homepage, PLP, PDP, discovery) visuals stay suggestive-editorial at a visual 6-7. On social, imagery follows the social addendum: skin in frame is the default for product posts per the §3.2a ceiling in `docs/store-team/instagram-campaigns.md`, nudity never. Everywhere, sensory, elegant, charged:
 
 - **Sensory anticipation:** tension, softness, warmth, the moment before. A hand hovering just above a petal, silk pulled taut, condensation, a finger denting ripe fruit, dripping honey. Feeling over joke.
 - **Shape and texture rhyme:** the product beside a form that echoes it (orchid, halved peach, fig), composed as editorial still life.
@@ -414,10 +414,12 @@ Draft against both, and understand which one you are avoiding.
      staying the hero. The team picks the cast member whose persona notes fit the post; no
      per-use owner approval. Cast reactions are performance, never testimony: no persona ever
      claims to have used a product.
-  3. *Tasteful visual metaphor* as a carousel hook. Produce and still-life innuendo, licensed on
-     the fence of deniability: a fig reads as a fig at a glance, the metaphor is never composited
-     into the same frame as a product, the caption and on-slide text never name it, and at most
-     one metaphor slide runs per carousel.
+  3. *Tasteful visual metaphor* as a carousel hook and, since 2026-09-01 (owner direction), as a
+     standalone archetype-D post capped at 2 per rolling 7. Produce and still-life innuendo,
+     licensed on the fence of deniability: a fig reads as a fig at a glance, the metaphor is never
+     composited into the same frame as a product, the caption and on-slide text never name it, and
+     at most one metaphor slide runs per carousel. The standalone license covers archetype D only;
+     archetype E (surreal euphemistic hybrids) remains owned-surfaces-only.
   **Superseded on 2026-08-16, and again by owner ruling 2026-08-19.** This bullet used to end
   "still banned, unchanged: simulated or implied use, product on or against a body, a person on a
   bed with product in frame, fluid or lube texture, lips or tongue in frame." Every one of those
