@@ -149,54 +149,71 @@ export async function proposeEpisodes(args: {
 
   const seasonNumber = prepared[0]?.e.seasonNumber ?? 1
 
-  const rows = await db.transaction(async tx => {
-    const maxRow = await tx
-      .select({ max: sql<number>`coalesce(max(${videoEpisodes.episodeNumber}), 0)` })
-      .from(videoEpisodes)
-      .where(and(eq(videoEpisodes.seriesId, series.id), eq(videoEpisodes.seasonNumber, seasonNumber)))
-    let next = Number(maxRow[0]?.max ?? 0)
-    const out: ProposedEpisode[] = []
-    for (const p of prepared) {
-      next += 1
-      const inserted = await tx.insert(videoEpisodes).values({
-        episodeUid: randomUUID(),
-        seriesId: series.id,
-        seasonNumber,
-        episodeNumber: next,
-        concept: p.e.concept ?? null,
-        logline: p.e.logline.trim(),
-        formula: p.e.formula,
-        arcPosition: p.arcPosition,
-        opensLoopKey: p.e.opensLoopKey ?? null,
-        paysOffLoopKey: p.e.paysOffLoopKey ?? null,
-        callbackToEpisode: p.e.callbackToEpisode ?? null,
-        part2Hook: p.e.part2Hook ?? null,
-        storyboardJson: (p.e.storyboardJson as never) ?? null,
-        hookText: p.e.hookText ?? null,
-        hookPattern: p.e.hookPattern ?? null,
-        castSlugs: p.castSlugs,
-        productPlacements: p.placements,
-        scriptJson: p.e.scriptJson ?? null,
-        siteCutJson: p.e.siteCutJson ?? null,
-        modelTier: p.modelTier,
-        estCostUsd: p.estCostUsd != null ? String(p.estCostUsd) : null,
-        gateVerdictsJson: p.e.gateVerdicts ?? null,
-        productionStatus: 'pending_approval',
-        batchId,
-        isReserve: p.e.isReserve ?? false,
-        plannedSlotAt: p.plannedSlotAt,
-        createdBy: args.createdBy ?? 'agent',
-      }).returning({ id: videoEpisodes.id, episodeUid: videoEpisodes.episodeUid, episodeNumber: videoEpisodes.episodeNumber })
-      out.push({
-        id: inserted[0]!.id,
-        episodeUid: inserted[0]!.episodeUid,
-        seasonNumber,
-        episodeNumber: inserted[0]!.episodeNumber,
-        logline: p.e.logline.trim(),
-        estCostUsd: p.estCostUsd,
-      })
+  // Number each row max+1 within (series, season) and write the whole batch as
+  // ONE multi-row INSERT. Deliberately NOT db.transaction(): the production
+  // client is drizzle-orm/neon-http, whose HTTP driver has no interactive
+  // transaction support and throws "No transactions support in neon-http
+  // driver" on the callback form. A single multi-row INSERT is itself atomic
+  // and all-or-nothing, so the batch still lands whole or not at all. The gap
+  // between reading the max and inserting is guarded by the
+  // uq_video_episodes_number unique index (series_id, season_number,
+  // episode_number): a concurrent batch that raced to the same number fails the
+  // insert loudly instead of duplicating a number, which is exactly the
+  // guarantee the old interactive transaction actually gave (it took no row
+  // lock, so it never serialized concurrent proposers either).
+  const maxRow = await db
+    .select({ max: sql<number>`coalesce(max(${videoEpisodes.episodeNumber}), 0)` })
+    .from(videoEpisodes)
+    .where(and(eq(videoEpisodes.seriesId, series.id), eq(videoEpisodes.seasonNumber, seasonNumber)))
+  let next = Number(maxRow[0]?.max ?? 0)
+  const toInsert = prepared.map(p => {
+    next += 1
+    return {
+      episodeUid: randomUUID(),
+      seriesId: series.id,
+      seasonNumber,
+      episodeNumber: next,
+      concept: p.e.concept ?? null,
+      logline: p.e.logline.trim(),
+      formula: p.e.formula,
+      arcPosition: p.arcPosition,
+      opensLoopKey: p.e.opensLoopKey ?? null,
+      paysOffLoopKey: p.e.paysOffLoopKey ?? null,
+      callbackToEpisode: p.e.callbackToEpisode ?? null,
+      part2Hook: p.e.part2Hook ?? null,
+      storyboardJson: (p.e.storyboardJson as never) ?? null,
+      hookText: p.e.hookText ?? null,
+      hookPattern: p.e.hookPattern ?? null,
+      castSlugs: p.castSlugs,
+      productPlacements: p.placements,
+      scriptJson: p.e.scriptJson ?? null,
+      siteCutJson: p.e.siteCutJson ?? null,
+      modelTier: p.modelTier,
+      estCostUsd: p.estCostUsd != null ? String(p.estCostUsd) : null,
+      gateVerdictsJson: p.e.gateVerdicts ?? null,
+      productionStatus: 'pending_approval',
+      batchId,
+      isReserve: p.e.isReserve ?? false,
+      plannedSlotAt: p.plannedSlotAt,
+      createdBy: args.createdBy ?? 'agent',
     }
-    return out
+  })
+  const inserted = await db.insert(videoEpisodes).values(toInsert)
+    .returning({ id: videoEpisodes.id, episodeUid: videoEpisodes.episodeUid, episodeNumber: videoEpisodes.episodeNumber })
+  // Map results back by episodeUid rather than trusting RETURNING order, and
+  // keep the caller's proposed order (index i lines up with prepared[i]).
+  const byUid = new Map(inserted.map(r => [r.episodeUid, r]))
+  const rows: ProposedEpisode[] = toInsert.map((v, i) => {
+    const r = byUid.get(v.episodeUid)
+    if (!r) throw new Error(`propose insert did not return a row for episode number ${v.episodeNumber}`)
+    return {
+      id: r.id,
+      episodeUid: r.episodeUid,
+      seasonNumber,
+      episodeNumber: r.episodeNumber,
+      logline: prepared[i]!.e.logline.trim(),
+      estCostUsd: prepared[i]!.estCostUsd,
+    }
   })
 
   return { batchId, seriesId: series.id, episodes: rows }
