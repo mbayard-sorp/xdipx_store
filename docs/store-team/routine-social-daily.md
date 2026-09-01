@@ -577,11 +577,28 @@ catching what drafting misses, so before drafting any campaign post:
   the sensation-descriptor grep above), and rewrite any hit. Seed for 'Talk Yourself Into It':
   `slower`, `right there`, `saying-it gap`, `technique gap`, `a little to the left`. Add each newly
   spent phrase to the list as a campaign ships posts.
+- **Check the underlying subject, not just phrasing (recurring failure, three independent findings
+  in one week).** The spent-phrase grep above only catches reused wording; it does not catch a new
+  draft answering the same reader question as a recent one in different words. Before drafting or
+  reworking a campaign post, also read the last ~10-14 campaign rows (posted AND drafted this run
+  included) and name each one's core subject or question in one line. If the new draft's core
+  question or thesis matches a recent row's (two independent drafts landed on the identical Ask
+  Emma reader question — "is it weird that i want it more than he does" — inside the same run
+  window, neither aware of the other), treat it as a duplicate subject to differentiate or drop
+  before drafting, not a phrasing collision to reword at the gate.
 
 **The X companion beat (crossplatform strategy §1).** For each Instagram slate post featuring a
 product, draft an X companion when the X quota allows: same campaign subject, register 6-7 per the
 social addendum, PDP link with channel UTMs, and a fresh sentence, never the IG caption reheated.
-The companion belongs to the campaign the same way the IG post does.
+The companion belongs to the campaign the same way the IG post does. **Pick the SKU from
+Instagram's slate, not a fresh one.** Before drafting an X product post, enumerate the Instagram
+product posts already scheduled or published in the same campaign window and write the X beat
+about ONE OF THOSE SKUs, by handle. Choose a different product only when every Instagram SKU in
+the window already has an X companion beat. X volume has not been the constraint (11 X posts can
+ship in a week with only 1 of 4 Instagram product posts getting a true companion); matching the
+SKU is. Two surfaces featuring different products in the same window read as parallel feeds, not
+one campaign spine across two channels — report the matched-companions-over-total-Instagram-product-posts
+ratio as a number in the Step 7 retro so drift is read, not recomputed from scratch each time.
 
 **The pairing rule: a toy never travels alone (crossplatform strategy §3).** When a post features a
 toy, it also names a lubricant from the catalog that genuinely suits it. Source the pairing from
@@ -1463,6 +1480,11 @@ had, so the replacement is not optional. Read instead:
    files a suggestion (`team:'social'`, kind `instructions`) against this playbook. A standing target,
    checked within two weeks of this rule landing: at least one product-free resource post AND at least
    one carousel have published.
+6. **X companion-beat match rate, computed not asserted.** Of this week's published Instagram
+   product posts, count how many got an X companion beat on the same SKU (Step 3, "Pick the SKU
+   from Instagram's slate, not a fresh one") versus how many did not, and report the ratio as a
+   number (matched/total). Two surfaces posting about different products in the same window is not
+   one campaign spine across two channels even when X volume is healthy.
 
 One `decision` event (`phase:'retro'`). When **two or more** pieces of feedback share a theme,
 file a suggestion (`team:'social'`, kind `instructions`) proposing the concrete change to your own
