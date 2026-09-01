@@ -17,7 +17,7 @@
 import sharp from 'sharp'
 import { recordFalBlock, readFalRequestId } from '~/lib/fal.server'
 import { atlasConfigured, atlasGenerate } from '~/lib/atlas.server'
-import { estimateRunpodRatePerSecondUsd } from '~/lib/model-pricing.server'
+import { estimateRunpodRatePerSecondUsd, estimateRunpodS2vRatePerSecondUsd } from '~/lib/model-pricing.server'
 import { runpodWorkerModes, runpodWorkerSupportsMode, type RunpodWorkerMode } from '~/lib/runpod-video.server'
 
 const FAL_QUEUE_ENDPOINT = 'https://queue.fal.run'
@@ -246,6 +246,16 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   // checkpoint behind mode 's2v' is the bake-off's pick (Wan2.2-S2V vs
   // InfiniteTalk vs LongCat-Video-Avatar, docs/store-team/video-worker-runpod.md);
   // this entry is inert until the worker image with that mode is live.
+  //
+  // ratePerSecondUsd MUST use the s2v-specific estimator, not the shared i2v/t2v
+  // one (#6834, follow-up to #6585). estimateVideoCostUsd (what the budget gate
+  // and per-video ceiling actually enforce) already reads VIDEO_RATES via
+  // costKey='runpod/wan22-s2v', which model-pricing.server.ts points at
+  // estimateRunpodS2vRatePerSecondUsd(). This field is a SEPARATE copy that the
+  // config op (api.team.video-job.tsx) and the fal-video Labs route surface
+  // verbatim as the advertised rate; sharing the i2v estimator here under-priced
+  // s2v's advertised rate by the s2v render multiplier (~1.8x) while the actual
+  // enforcement path was already correct.
   'wan22-s2v': {
     workerMode: 's2v',
     falModel: 'runpod/wan2.2-s2v-14b', // documentation only — provider:'runpod' means this is never dereferenced
@@ -253,7 +263,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     tier: 'avatar',
     provider: 'runpod',
     costKey: 'runpod/wan22-s2v',
-    ratePerSecondUsd: estimateRunpodRatePerSecondUsd(),
+    ratePerSecondUsd: estimateRunpodS2vRatePerSecondUsd(),
     nativeAudio: true,
     audioDriven: true,
     allowedDurations: [],

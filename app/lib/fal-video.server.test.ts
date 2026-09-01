@@ -241,6 +241,20 @@ describe('VIDEO_MODELS.wan22-s2v (own-worker talking tier, ticket #5714)', () =>
       prompt: '', imageUrl: 'https://example.com/f.jpg', durationSeconds: 10,
     })).rejects.toThrow(/RunPod-provider/)
   })
+
+  // #6834, follow-up to #6585: the advertised rate this spec surfaces (read
+  // verbatim by the config op and the fal-video Labs route) must use the
+  // s2v-specific render-multiplier estimate, not the shared i2v/t2v one --
+  // sharing it under-priced s2v's advertised rate by ~1.8x while the
+  // enforcement path (estimateVideoCostUsd via costKey) was already correct.
+  it('advertises a rate distinct from the shared i2v/t2v estimate', () => {
+    const s2vRate = VIDEO_MODELS['wan22-s2v'].ratePerSecondUsd
+    const i2vRate = VIDEO_MODELS['wan22-i2v'].ratePerSecondUsd
+    const t2vRate = VIDEO_MODELS['wan22-t2v'].ratePerSecondUsd
+    expect(i2vRate).toBe(t2vRate) // i2v/t2v deliberately still share one estimator
+    expect(s2vRate).not.toBe(i2vRate)
+    expect(s2vRate).toBeGreaterThan(0)
+  })
 })
 
 describe('legacy fal video tiers (owner direction 2026-08-26: fal is images only)', () => {
