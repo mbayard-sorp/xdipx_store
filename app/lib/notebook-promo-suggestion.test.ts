@@ -12,6 +12,7 @@ describe('notebook promo suggestion (ticket #3735)', () => {
       category: 'Mechanism Plainly',
     })
     expect(s.team).toBe('social')
+    expect(s.targetTeam).toBe('social')
     expect(s.kind).toBe('campaign')
     expect(s.dedupeKey).toBe('notebook-promo:how-air-pulsation-works')
     expect(s.suggestion).toContain('How Air Pulsation Actually Works')

@@ -606,16 +606,17 @@ async function maybeFileNewProductSuggestion(product: ShopifyProductWebhook): Pr
 
   const { createSuggestion } = await import('../app/lib/team.server.js')
   await createSuggestion({
-    team:      'social',
-    kind:      'process',
-    category:  'social-automation',
-    dedupeKey: `new-product:${product.handle}`,
+    team:       'social',
+    targetTeam: 'social',
+    kind:       'process',
+    category:   'social-automation',
+    dedupeKey:  `new-product:${product.handle}`,
     suggestion:
       `Product just went live on the storefront: "${product.title}" ` +
       `(handle: ${product.handle}, category: ${product.product_type || 'unknown'}, ` +
       `vendor: ${product.vendor || 'unknown'}). Activated outside the enrich chain ` +
       `(manual Shopify status flip). Consider a new-arrival post per ` +
-      `routine-social-daily.md Step 7b; the usual gates apply, including Instagram ` +
+      `routine-social-daily.md; the usual gates apply, including Instagram ` +
       `category eligibility and stock.`,
   })
   console.log(`[webhook:product-updated] filed new-product social suggestion for ${product.handle}`)
