@@ -99,6 +99,56 @@ describe('fetchExpiredRunGroups', () => {
     expect(groups).toEqual([])
   })
 
+  // Ticket #6760: verified against 6 real blocked tickets that the earlier
+  // per-run-id title hash produced 6 separate rows for 6 DIFFERENT teams'
+  // runs (video #507, content #569, social #595, strategy #603, homepage
+  // #599) rather than repeat occurrences of one incident -- so the fix here
+  // is a STABLE key per (team, runType), not a dismissal of those rows (each
+  // is a genuinely distinct incident). This locks in that two different runs
+  // of the SAME (team, runType) collapse onto one dedupeKey, while a
+  // different runType (or team) gets its own.
+  it('gives two different runs of the same (team, runType) the same dedupeKey', async () => {
+    world.rows = [
+      {
+        id: 603, team: 'strategy', runType: 'strategy', currentPhase: 'run-start', currentAgent: null,
+        startedAt: new Date('2026-08-24T10:00:00.000Z'), finishedAt: new Date('2026-08-24T14:00:00.000Z'),
+        error: 'auto-expired: no recorded activity for 120 minutes',
+      },
+      {
+        id: 700, team: 'strategy', runType: 'strategy', currentPhase: 'run-start', currentAgent: null,
+        startedAt: new Date('2026-08-31T10:00:00.000Z'), finishedAt: new Date('2026-08-31T14:00:00.000Z'),
+        error: 'auto-expired: no recorded activity for 120 minutes',
+      },
+    ]
+    const now = new Date('2026-08-31T16:00:00.000Z').getTime()
+    const groups = await fetchExpiredRunGroups(15, now)
+
+    expect(groups).toHaveLength(2)
+    expect(groups[0]!.title).not.toBe(groups[1]!.title) // titles still differ (embed the run id)
+    expect(groups[0]!.dedupeKey).toBeDefined()
+    expect(groups[0]!.dedupeKey).toBe(groups[1]!.dedupeKey) // but the dedupe identity is stable
+  })
+
+  it('gives a different (team, runType) pair a different dedupeKey', async () => {
+    world.rows = [
+      {
+        id: 507, team: 'video', runType: 'video', currentPhase: 'run-start', currentAgent: null,
+        startedAt: new Date('2026-08-24T10:00:00.000Z'), finishedAt: new Date('2026-08-24T14:00:00.000Z'),
+        error: 'auto-expired: no recorded activity for 240 minutes',
+      },
+      {
+        id: 603, team: 'strategy', runType: 'strategy', currentPhase: 'run-start', currentAgent: null,
+        startedAt: new Date('2026-08-31T10:00:00.000Z'), finishedAt: new Date('2026-08-31T14:00:00.000Z'),
+        error: 'auto-expired: no recorded activity for 120 minutes',
+      },
+    ]
+    const now = new Date('2026-08-31T16:00:00.000Z').getTime()
+    const groups = await fetchExpiredRunGroups(15, now)
+
+    expect(groups).toHaveLength(2)
+    expect(groups[0]!.dedupeKey).not.toBe(groups[1]!.dedupeKey)
+  })
+
   it('surfaces a run once it has stayed auto-expired past the grace window', async () => {
     world.rows = [{
       id: 517,

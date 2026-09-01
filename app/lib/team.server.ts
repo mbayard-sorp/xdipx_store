@@ -141,9 +141,48 @@ const RUN_IDLE_TIMEOUT_MIN_BY_TEAM: Partial<Record<TeamId, number>> = {
   strategy: 120,
 }
 
-/** Idle minutes after which a silent run of this team is presumed dead. */
-export function runIdleTimeoutMin(team: TeamId): number {
-  return RUN_IDLE_TIMEOUT_MIN_BY_TEAM[team] ?? RUN_IDLE_TIMEOUT_MIN_DEFAULT
+/**
+ * Per-(team, runType) overrides, layered on top of the team-level override
+ * above, for one run type within a team whose measured quiet stretch is
+ * sharply different from its teammates (ticket #6760). `strategy` team's
+ * runType `'strategy'` is the weekly cross-team retro (store-strategist
+ * orchestrating inventory-sentinel, promo-manager, loyalty-referral-manager,
+ * product-manager and program-manager IN SERIES): a real run (603,
+ * 2026-08-31) posted its first event at 17:19, 5h14m after its 12:05 start,
+ * doing legitimate research before the retro-writing phase produces anything
+ * event-worthy, then went on to post 22 more events and finish successfully
+ * at 18:03. The strategy team's other runTypes (dev/qa/apply, R-DEV/R-QA/the
+ * release engine's own passes) are the short, frequent ones #5252 measured
+ * (102.5 min healthy max) when it set the team-level 120, so raising the
+ * team-level number back up would reopen the exact hung-lock problem #5252
+ * fixed for THOSE run types. This overrides only the one run type that
+ * legitimately needs longer, at 6h (360 min) — safely above the observed
+ * 5h14m gap with room for a slower week, while a silent one still unblocks
+ * the strategy gate a full day sooner than the 240 default would.
+ */
+const RUN_IDLE_TIMEOUT_MIN_BY_TEAM_RUNTYPE: Partial<Record<TeamId, Record<string, number>>> = {
+  strategy: { strategy: 360 },
+}
+
+/** Idle minutes after which a silent run of this (team, runType) is presumed dead. */
+export function runIdleTimeoutMin(team: TeamId, runType?: string | null): number {
+  const runTypeOverride = runType ? RUN_IDLE_TIMEOUT_MIN_BY_TEAM_RUNTYPE[team]?.[runType] : undefined
+  return runTypeOverride ?? RUN_IDLE_TIMEOUT_MIN_BY_TEAM[team] ?? RUN_IDLE_TIMEOUT_MIN_DEFAULT
+}
+
+/**
+ * The widest idle allowance across every runType of this team, for callers
+ * (isRunInProgress, getBlockingRun) that check "any run of this team" in one
+ * query spanning mixed runTypes and so need a single scalar cutoff. Using the
+ * widest applicable value only ever holds the concurrency lock LONGER than a
+ * precise per-row check would — the same asymmetry the module-level comment
+ * above already accepts (a late reap costs a stale 'running' row; a false one
+ * corrupts the record) — never shorter, so this can't reintroduce a false reap.
+ */
+function maxRunIdleTimeoutMin(team: TeamId): number {
+  const byRunType = RUN_IDLE_TIMEOUT_MIN_BY_TEAM_RUNTYPE[team]
+  const runTypeMax = byRunType ? Math.max(...Object.values(byRunType)) : -Infinity
+  return Math.max(runTypeMax, RUN_IDLE_TIMEOUT_MIN_BY_TEAM[team] ?? RUN_IDLE_TIMEOUT_MIN_DEFAULT)
 }
 
 /**
@@ -419,7 +458,7 @@ export async function getTodayImageCount(team: TeamId = 'homepage'): Promise<num
  * Callers that already hold a run row pass excludeRunId to avoid self-blocking.
  */
 export async function isRunInProgress(team: TeamId, excludeRunId?: number): Promise<boolean> {
-  const since = new Date(Date.now() - runIdleTimeoutMin(team) * 60_000)
+  const since = new Date(Date.now() - maxRunIdleTimeoutMin(team) * 60_000)
   const conditions = [
     eq(homepageTeamRuns.team, team),
     eq(homepageTeamRuns.status, 'running'),
@@ -446,7 +485,7 @@ export async function getBlockingRun(
   team: TeamId,
   excludeRunId?: number,
 ): Promise<{ id: number; runType: string; idleMinutes: number } | null> {
-  const since = new Date(Date.now() - runIdleTimeoutMin(team) * 60_000)
+  const since = new Date(Date.now() - maxRunIdleTimeoutMin(team) * 60_000)
   const conditions = [
     eq(homepageTeamRuns.team, team),
     eq(homepageTeamRuns.status, 'running'),
@@ -481,11 +520,19 @@ export async function getBlockingRun(
  */
 export async function expireStaleRuns(): Promise<void> {
   const overrides = Object.entries(RUN_IDLE_TIMEOUT_MIN_BY_TEAM) as Array<[TeamId, number]>
+  // Flattened (team, runType, mins) triples, ticket #6760's per-runType tier.
+  const runTypeOverrides = (Object.entries(RUN_IDLE_TIMEOUT_MIN_BY_TEAM_RUNTYPE) as Array<[TeamId, Record<string, number>]>)
+    .flatMap(([team, byRunType]) => Object.entries(byRunType).map(([runType, mins]): [TeamId, string, number] => [team, runType, mins]))
   const expireSet = (mins: number) => ({
     status: 'failed',
     error: `auto-expired: no recorded activity for ${mins} minutes`,
     finishedAt: new Date(),
   })
+
+  // Tier 1: the default cutoff, for every team with no team-level override.
+  // A runType override only ever exists inside a team that already HAS a
+  // team-level override (strategy), so it is already excluded here — no
+  // separate runType exclusion needed at this tier.
   const defaultCutoff = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN_DEFAULT * 60_000)
   const defaultConds = [eq(homepageTeamRuns.status, 'running'), sql`${lastActivityAt} < ${defaultCutoff}`]
   if (overrides.length > 0) {
@@ -495,7 +542,25 @@ export async function expireStaleRuns(): Promise<void> {
     .update(homepageTeamRuns)
     .set(expireSet(RUN_IDLE_TIMEOUT_MIN_DEFAULT))
     .where(and(...defaultConds))
+
+  // Tier 2: each team-level override, excluding any runType inside it that
+  // has its own (necessarily longer, see maxRunIdleTimeoutMin) tier-3 cutoff.
   for (const [team, mins] of overrides) {
+    const cutoff = new Date(Date.now() - mins * 60_000)
+    const conds = [
+      eq(homepageTeamRuns.status, 'running'),
+      eq(homepageTeamRuns.team, team),
+      sql`${lastActivityAt} < ${cutoff}`,
+    ]
+    const exemptRunTypes = runTypeOverrides.filter(([t]) => t === team).map(([, rt]) => rt)
+    if (exemptRunTypes.length > 0) {
+      conds.push(sql`${homepageTeamRuns.runType} NOT IN (${sql.join(exemptRunTypes.map(rt => sql`${rt}`), sql`, `)})`)
+    }
+    await db.update(homepageTeamRuns).set(expireSet(mins)).where(and(...conds))
+  }
+
+  // Tier 3: per-runType overrides (ticket #6760).
+  for (const [team, runType, mins] of runTypeOverrides) {
     const cutoff = new Date(Date.now() - mins * 60_000)
     await db
       .update(homepageTeamRuns)
@@ -503,6 +568,7 @@ export async function expireStaleRuns(): Promise<void> {
       .where(and(
         eq(homepageTeamRuns.status, 'running'),
         eq(homepageTeamRuns.team, team),
+        eq(homepageTeamRuns.runType, runType),
         sql`${lastActivityAt} < ${cutoff}`,
       ))
   }

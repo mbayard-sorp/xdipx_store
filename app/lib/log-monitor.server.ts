@@ -90,6 +90,16 @@ export interface LogGroup {
   owner:       string
   excerpt:     string
   likelyCause: string
+  /**
+   * Overrides the default title-hash dedupe identity (ticket #6760). The
+   * title embeds identifying detail (a run id, a timestamp) that legitimately
+   * varies between recurrences of the SAME underlying issue, so hashing the
+   * title alone gives every recurrence its own ticket. Set this to a stable
+   * key when the group represents a recurring class of incident rather than a
+   * one-off, so repeat occurrences collapse onto one row instead of adding a
+   * new blocked ticket each time.
+   */
+  dedupeKey?: string
 }
 
 export interface LogMonitorReport {
@@ -399,6 +409,7 @@ export async function fetchExpiredRunGroups(
   const { db } = await import('~/lib/db.server')
   const { homepageTeamRuns } = await import('../../db/schema')
   const { and, eq, gte, like } = await import('drizzle-orm')
+  const { makeDedupeKey } = await import('~/lib/detection-tickets.server')
 
   const RECOVERY_GRACE_MIN = 60
   const graceCutoffMs = nowMs - RECOVERY_GRACE_MIN * 60_000
@@ -437,6 +448,14 @@ export async function fetchExpiredRunGroups(
     likelyCause: r.currentPhase
       ? `Run died during phase "${r.currentPhase}" without a further update and was auto-expired after the idle timeout.`
       : `Run auto-expired with no phase ever recorded -- died before any step reported progress (pre-#5431 run, or the phase-stamp fix did not reach this run's start call).`,
+    // Ticket #6760: stable per (team, runType), NOT per run id. The title
+    // above embeds the run id on purpose (so a human reading the ticket knows
+    // which row triggered it), but that means every NEW recurrence of the
+    // same recurring class of expiry -- the same routine going quiet the same
+    // way each week -- hashed to a different key and filed a brand new ticket
+    // (#5475, #5954, #6262, #6553, #6706 all trace to the same weekly
+    // strategy retro). This key collapses those onto one row.
+    dedupeKey: makeDedupeKey('logmon', 'run-auto-expired', r.team, r.runType ?? 'unknown'),
   }))
 }
 
@@ -539,7 +558,7 @@ async function fileTicketsForGroups(
     ids.push(
       await fileDetectionTicket({
         detector: 'log-monitor',
-        dedupeKey: makeDedupeKey('logmon', hashToken(group.title)),
+        dedupeKey: group.dedupeKey ?? makeDedupeKey('logmon', hashToken(group.title)),
         priority: priorityFromSeverity(group.priority),
         category: 'other',
         kind: 'code',
