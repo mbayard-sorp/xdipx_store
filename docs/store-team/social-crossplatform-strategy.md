@@ -45,17 +45,17 @@ Two consequences worth stating rather than inferring:
   exactly where the product-in-hand sits. Reuse a pool frame on X only when it genuinely survives a
   16:9 crop with the product still legible; otherwise generate the X frame at 1600x900
   (`--platform x`).
-- **The imagery fence does NOT move with the register.** Since 2026-08-22 the Instagram caption runs at 9 by implication, and X at 6-7 with more vocabulary licensed; the line below predates that ruling. Caption register goes 4-5 on Instagram to
-  6-7 on X because X's organic adult-content policy is more permissive. The *pictures* do not follow.
-  The charter's own clause is conditional: posts covered by that policy "must be labeled per X's own
-  rules", and `postTweet` (`app/lib/twitter.server.ts:95`) has no sensitive-media parameter, so this
-  store cannot label a post even when X would require it. An unlabelable post must therefore stay
-  inside the non-sensitive fence, which is the design doctrine's fence, unchanged. The charter had
-  already settled this in the harder direction: `docs/emma-voice.md` holds imagery to a visual 6-7
-  even on owned channels where the copy runs at 9, so imagery does not follow copy up on a surface
-  we own outright, let alone a rented one. `docs/ads-policy.md` §Creative is titled "paid AND
-  organic" and names X specifically. What X's permissiveness buys is caption register, a clickable
-  link, and the number. It buys nothing inside the frame.
+- **The imagery fence does NOT move with the register** (rewritten 2026-09-01 to clear two stale
+  register claims). Captions: Instagram runs 9 by implication and X runs 6-7 with more vocabulary
+  licensed, because X's organic adult-content policy is more permissive about words. The *pictures*
+  do not follow the caption on either platform: the operative ceiling is
+  `instagram-campaigns.md` §3.2a, binding identically on X and Instagram. The mechanical reason on
+  X: the charter's permission for hotter content is conditional on posts "labeled per X's own
+  rules", and `postTweet` (`app/lib/twitter.server.ts:95`) has no sensitive-media parameter, so
+  this store cannot label a post even when X would require it. An unlabelable post must stay inside
+  the non-sensitive fence. `docs/ads-policy.md` §Creative is titled "paid AND organic" and names X
+  specifically. What X's permissiveness buys is caption register, a clickable link, and the number.
+  It buys nothing inside the frame.
 
 - **A cast frame on X is a presentation, never a testimonial.** The cast are AI-generated personas
   (`scripts/generate-cast-candidates.ts`), not photographed people, so there is no likeness release
