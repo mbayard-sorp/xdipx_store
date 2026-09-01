@@ -9,10 +9,11 @@ const dbMock = vi.hoisted(() => ({
   select: vi.fn(),
   insert: vi.fn(),
   update: vi.fn(),
-  // createOwnerReworkRow writes the child and retires its source in one
-  // transaction; the mock runs the callback against this same object so the
-  // insert/update assertions below are unchanged by the wrapping.
-  transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(dbMock)),
+  // createOwnerReworkRow writes the child then, sequentially (not inside a
+  // db.transaction — neon-http has no interactive-transaction support),
+  // conditionally retires its source; delete backs the compensating cleanup
+  // when that retire write fails.
+  delete: vi.fn(),
 }))
 const generateAndUploadSocialImageMock = vi.hoisted(() => vi.fn())
 const generateWithSystemMock = vi.hoisted(() => vi.fn())
@@ -421,6 +422,28 @@ describe('createOwnerReworkRow', () => {
     await expect(createOwnerReworkRow({
       fromPostId: 999, caption: 'x', mediaUrls: [], actor: 'owner-studio',
     })).rejects.toThrow(/999/)
+  })
+
+  it('compensates by deleting the just-inserted child when the retire update fails, then rethrows', async () => {
+    // Not db.transaction() any more (neon-http has no interactive-transaction
+    // support), so the insert and the retire-update are two separate writes:
+    // this locks in that a failure in the second one does not leave a
+    // live-bound child behind with its parent un-retired.
+    dbMock.select.mockReturnValue(selectReturning({ ...BASE_ROW, reviewStatus: 'approved' }))
+    insertReturning(77)
+    const updateErr = new Error('update failed')
+    const where = vi.fn().mockRejectedValue(updateErr)
+    const set = vi.fn().mockReturnValue({ where })
+    dbMock.update.mockReturnValue({ set })
+    const deleteWhere = vi.fn().mockResolvedValue(undefined)
+    dbMock.delete.mockReturnValue({ where: deleteWhere })
+
+    await expect(createOwnerReworkRow({
+      fromPostId: 61, caption: 'the new caption', mediaUrls: [], actor: 'owner-studio',
+    })).rejects.toThrow('update failed')
+
+    expect(dbMock.delete).toHaveBeenCalledWith(expect.anything())
+    expect(deleteWhere).toHaveBeenCalled()
   })
 })
 
