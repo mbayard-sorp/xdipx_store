@@ -228,6 +228,7 @@ const METAFIELDS_FRAGMENT = `
 const PRODUCT_CORE_FRAGMENT = `
   id handle title vendor tags description descriptionHtml
   createdAt updatedAt
+  totalInventory
   collections(first: 10) {
     edges { node { handle title } }
   }
@@ -625,6 +626,7 @@ interface ShopifyProductNode {
   descriptionHtml?: string
   createdAt?: string
   updatedAt?: string
+  totalInventory?: number | null
   collections?: { edges: { node: { handle: string; title: string } }[] }
   images: { edges: { node: { url: string; altText: string | null } }[] }
   media?: { edges: { node: ShopifyMediaNode }[] }
@@ -706,6 +708,7 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     ...(Number.isFinite(mapPriceRaw) && mapPriceRaw > 0 ? { mapPrice: mapPriceRaw } : {}),
     brand: node.vendor,
     tags: node.tags,
+    totalInventory: node.totalInventory ?? null,
     ...(moodTags.length     > 0 ? { moodTags }     : {}),
     ...(audienceTags.length > 0 ? { audienceTags } : {}),
     ...(mattersTags.length  > 0 ? { mattersTags }  : {}),

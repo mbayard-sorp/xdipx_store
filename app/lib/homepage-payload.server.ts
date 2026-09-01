@@ -22,6 +22,7 @@ import { homepagePayload } from '../../db/schema'
 import { kvGet, kvSet, kvDel } from '~/lib/kv.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { getDiscoveryRails, getDiscoveryVocab } from '~/lib/discovery.server'
+import { isOutOfStock } from '~/lib/discovery-rules.server'
 import { EMPTY_STATE } from '~/types/discovery'
 import type { Rail } from '~/types/discovery'
 import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
@@ -168,10 +169,14 @@ export async function buildHomeContentBlocks(): Promise<HomeContentBlocks> {
       : Promise.resolve([] as Product[][]),
   ])
 
+  // Curator-placed carousels (productCarousel/emmaCuratedRail/playTogetherBanner)
+  // are simple Shopify fetches with no pass through applyRules(), so a product
+  // that just sold out stays pinned in these bands until a curator notices
+  // (ticket #6751). Drop zero-stock survivors the same way the rails do.
   const carouselProductMap: Record<string, Product[]> = {}
-  carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = carouselResults[i] ?? [] })
-  emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = emmaRailResults[i] ?? [] })
-  couplesBlocks.forEach((b, i) => { carouselProductMap[b._key] = couplesResults[i] ?? [] })
+  carouselBlocks.forEach((b, i) => { carouselProductMap[b._key] = dropOutOfStock(carouselResults[i] ?? []) })
+  emmaRailBlocks.forEach((b, i) => { carouselProductMap[b._key] = dropOutOfStock(emmaRailResults[i] ?? []) })
+  couplesBlocks.forEach((b, i) => { carouselProductMap[b._key] = dropOutOfStock(couplesResults[i] ?? []) })
 
   return { sections, carouselProductMap }
 }
@@ -227,7 +232,20 @@ function toLeanCardProduct(p: Product): LeanCardProduct {
   if (p.mapPrice !== undefined) lean.mapPrice = p.mapPrice
   if (p.brand !== undefined) lean.brand = p.brand
   if (p.videos && p.videos.length > 0) lean.videos = [p.videos[0]!]
+  if (p.totalInventory !== undefined) lean.totalInventory = p.totalInventory
   return lean
+}
+
+/**
+ * Out-of-stock gate for curator-placed homepage surfaces (ticket #6751). Unlike
+ * the algorithmic discovery rails, these surfaces (the Nº 03 anchor grid, the
+ * Sanity-curated carousels) are simple Shopify fetches with no pass through
+ * `applyRules()`, so a product that just sold out stays pinned until a curator
+ * notices. Same rule as the always-on rail gate: a tracked count at or below
+ * zero is dropped, untracked (`null`/absent) always passes.
+ */
+function dropOutOfStock<T extends { totalInventory?: number | null }>(products: T[]): T[] {
+  return products.filter(p => !isOutOfStock(p.totalInventory))
 }
 
 /**
@@ -252,7 +270,7 @@ export async function getAnchorCollectionProducts(
   const h = (handle ?? '').trim() || DEFAULT_ANCHOR_COLLECTION_HANDLE
   try {
     const products = await getCollectionProducts(h, limit)
-    return products.map(toLeanCardProduct)
+    return dropOutOfStock(products.map(toLeanCardProduct))
   } catch (err) {
     console.warn(
       `[homepage-payload:b] anchor collection "${h}" fetch failed, falling back to discovery best-of:`,

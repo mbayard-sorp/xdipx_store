@@ -59,7 +59,7 @@ import {
   STOREFRONT_EDGE_CACHE_HEADERS,
   hydrateStorefrontPayloadB,
 } from './storefront-home.server'
-import { getDiscoveryRails } from '~/lib/discovery.server'
+import { getDiscoveryRails, getDiscoveryIndex } from '~/lib/discovery.server'
 import {
   buildHomeContentBlocksLean,
   readHomepagePayloadB,
@@ -199,8 +199,13 @@ describe('STOREFRONT_EDGE_CACHE_HEADERS', () => {
 
 /* ── hydrateStorefrontPayloadB ───────────────────────────────────────────── */
 
-function product(handle: string): DiscoveryProduct {
-  return { id: `gid://${handle}`, handle, title: handle } as unknown as DiscoveryProduct
+function product(handle: string, totalInventory?: number | null): DiscoveryProduct {
+  return {
+    id: `gid://${handle}`,
+    handle,
+    title: handle,
+    ...(totalInventory !== undefined ? { totalInventory } : {}),
+  } as unknown as DiscoveryProduct
 }
 
 function rail(category: string, handles: string[]): Rail {
@@ -405,5 +410,63 @@ describe('assembleStorefrontHome — hero sensation dial', () => {
     const data = await assembleStorefrontHome()
 
     expect(data.heroSensationDial).toBeNull()
+  })
+})
+
+/* ── pinned-headliner out-of-stock gate (ticket #6751) ───────────────────── */
+
+describe('assembleStorefrontHome — pinned-headliner out-of-stock gate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(readHomepagePayloadB).mockResolvedValue(null)
+    // The pinned handle is deliberately absent from the rails, so resolving it
+    // must go through the raw getDiscoveryIndex() fallback branch this gate
+    // guards (storefront-home.server.ts:379-393).
+    vi.mocked(getDiscoveryRails).mockResolvedValue({
+      rails: [rail('Pleasure', ['x', 'y'])], total: 2,
+    } as unknown as Awaited<ReturnType<typeof getDiscoveryRails>>)
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue(null)
+    vi.mocked(getBlogPosts).mockResolvedValue({ posts: [], total: 0 })
+    vi.mocked(getEditor).mockResolvedValue(null)
+    vi.mocked(getCuriosityShelfData).mockResolvedValue(null)
+    vi.mocked(buildHomeContentBlocksLean).mockResolvedValue({
+      sections: [], carouselProductMap: {},
+    } as unknown as Awaited<ReturnType<typeof buildHomeContentBlocksLean>>)
+    vi.mocked(getProductByHandle).mockResolvedValue(null)
+  })
+
+  it('does not pin a tracked zero-stock product found only via the raw index lookup', async () => {
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue({
+      featuredProductHandle: 'sold-out',
+    } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
+    vi.mocked(getDiscoveryIndex).mockResolvedValue([product('sold-out', 0)])
+
+    const data = await assembleStorefrontHome()
+
+    expect(data.featured.map(p => p.handle)).not.toContain('sold-out')
+    // Falls back to the rotating rail leads, exactly like an unknown handle.
+    expect(data.featured[0]!.handle).toBe('x')
+  })
+
+  it('still pins an untracked-inventory (null) product found via the raw index lookup', async () => {
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue({
+      featuredProductHandle: 'untracked',
+    } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
+    vi.mocked(getDiscoveryIndex).mockResolvedValue([product('untracked', null)])
+
+    const data = await assembleStorefrontHome()
+
+    expect(data.featured[0]!.handle).toBe('untracked')
+  })
+
+  it('pins a healthy in-stock product found via the raw index lookup', async () => {
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue({
+      featuredProductHandle: 'healthy',
+    } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
+    vi.mocked(getDiscoveryIndex).mockResolvedValue([product('healthy', 3)])
+
+    const data = await assembleStorefrontHome()
+
+    expect(data.featured[0]!.handle).toBe('healthy')
   })
 })

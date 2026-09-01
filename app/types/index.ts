@@ -330,6 +330,13 @@ export interface Product {
   // metafield; lets lean-pipeline surfaces (category cards) render a real
   // dial instead of fabricating one.
   sensationDialV2?: SensationDialV2
+  /**
+   * Shopify's tracked stock count. `null`/absent when Shopify is not tracking
+   * inventory for this product — that is not evidence of zero stock. Powers
+   * the out-of-stock gate on curated homepage surfaces (ticket #6751), mirroring
+   * `DiscoveryProduct.totalInventory` in `~/types/discovery`.
+   */
+  totalInventory?: number | null
 }
 
 /**
@@ -360,6 +367,9 @@ export interface LeanCardProduct {
   images: ProductImage[]
   /** Server truncates to the first entry when present. */
   videos?: ProductVideo[]
+  /** See `Product.totalInventory`. Carried through so curated-surface builders
+   *  can apply the same out-of-stock gate `applyRules()` uses for rails. */
+  totalInventory?: number | null
 }
 
 /**

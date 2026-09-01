@@ -12,6 +12,7 @@ import {
   fillFallbacks,
   autoLoosen,
   resolveCollectionPins,
+  isOutOfStock,
 } from './discovery-rules.server'
 import type { DiscoveryProduct, DiscoveryRule, Rail } from '~/types/discovery'
 import { EMPTY_STATE } from '~/types/discovery'
@@ -261,6 +262,31 @@ describe('applyRules — out-of-stock gate', () => {
     expect(result.find(p => p.handle === 'vibe-1')).toBeUndefined()
     // A healthy product is untouched by either gate.
     expect(result.find(p => p.handle === 'vibe-2')).toBeDefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isOutOfStock — the shared predicate applyRules() now delegates to, also
+// reused by the curated-surface gates in homepage-payload.server.ts and
+// storefront-home.server.ts (ticket #6751)
+// ---------------------------------------------------------------------------
+
+describe('isOutOfStock', () => {
+  it('is true for a tracked zero-stock count', () => {
+    expect(isOutOfStock(0)).toBe(true)
+  })
+
+  it('is true for a negative (oversold) count', () => {
+    expect(isOutOfStock(-3)).toBe(true)
+  })
+
+  it('is false for untracked inventory (null or undefined)', () => {
+    expect(isOutOfStock(null)).toBe(false)
+    expect(isOutOfStock(undefined)).toBe(false)
+  })
+
+  it('is false for any positive count', () => {
+    expect(isOutOfStock(1)).toBe(false)
   })
 })
 

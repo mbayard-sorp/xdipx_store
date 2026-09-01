@@ -283,6 +283,18 @@ function rowToRule(row: typeof discoveryRules.$inferSelect): DiscoveryRule {
 const OUT_OF_STOCK_FLOOR = 0
 
 /**
+ * Shared predicate for the always-on out-of-stock gate, so every public
+ * featured-slot surface (rails via `applyRules`, plus the curated surfaces in
+ * `homepage-payload.server.ts` and the pinned-headliner fallback in
+ * `storefront-home.server.ts`, ticket #6751) agrees on one definition of
+ * "out of stock". Untracked (`null`/`undefined`) always passes: Shopify not
+ * tracking a count is not evidence of zero.
+ */
+export function isOutOfStock(totalInventory: number | null | undefined): boolean {
+  return totalInventory !== null && totalInventory !== undefined && totalInventory <= OUT_OF_STOCK_FLOOR
+}
+
+/**
  * Thin-stock observability threshold. Survivors at or below this (but still in
  * stock, i.e. > 0) are kept but logged once per build so a merchandiser can see
  * a featured product is about to sell out. Not a drop threshold.
@@ -395,7 +407,7 @@ export function applyRules(
     // A tracked count at or below zero never reaches a public featured slot,
     // regardless of the curator-tunable inventoryMin floor below. Untracked
     // (null) passes: no count is not the same as a zero count.
-    if (p.totalInventory !== null && p.totalInventory <= OUT_OF_STOCK_FLOOR) {
+    if (isOutOfStock(p.totalInventory)) {
       return false
     }
 
