@@ -230,11 +230,17 @@ curl -s -X POST "$BASE_URL/api/homepage-team/event" \
 
 Before picking anything new, score what was featured yesterday:
 
-- **GA4:** `getHomepageSignals()` (`app/lib/ga4.server.ts`) returns, alongside the existing
-  engagement fields, `addToCarts` / `checkouts` / `purchases` / `revenue` plus an `itemLists`
-  breakdown by `itemListName` (items viewed in list, added to cart, purchased, item revenue). Map
-  yesterday's featured handles to their views (`topProductPages`) and to their rail's `itemLists`
-  row to get per-slot views, add-to-carts, and purchases.
+- **GA4:** `GET /api/team/ga4-summary` (team-token auth, no connector needed on this trigger).
+  Returns the engagement fields plus `addToCarts` / `checkouts` / `purchases` / `revenue`, and
+  `topProductPages` for mapping yesterday's featured handles to their views. Call the endpoint, not
+  `getHomepageSignals()`: this run reaches xdipx.com over HTTP and cannot invoke a TypeScript
+  function, which is why the module sat with zero callers while the briefs reported it unreadable.
+
+  **Check `actionable` before you let any of it change a decision.** It is false below 1,000
+  sessions per 28 days, and the live property measured 141 sessions and one purchase on 2026-09-02.
+  At that volume a per-slot add-to-cart "delta" is one visitor. When it is false: record the numbers
+  in the decision event, quote the `verdict` sentence, and justify keep/drop on merchandising
+  judgement instead. Do not dress a coin flip up as a measurement.
 - **Orders + margin:** read yesterday's row from `daily_profit_summary` (Neon) for realized orders,
   revenue, and margin.
 
