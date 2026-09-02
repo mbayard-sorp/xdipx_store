@@ -209,7 +209,10 @@ export interface RecomputeVariantParams {
    * kept distinct from `batch` so a rescue can never be mistaken for (or
    * satisfy the check for) a healthy scheduled run.
    */
-  trigger:   'webhook' | 'batch' | 'manual' | 'clearance_ladder' | 'batch_catchup'
+  // 'batch_continuation' is a resumed slice of the same day's walk. Kept distinct
+  // from 'batch' on purpose: the digest's liveness check asks whether the 07:00
+  // cron itself fired, while coverage counts every slice.
+  trigger:   'webhook' | 'batch' | 'manual' | 'clearance_ladder' | 'batch_catchup' | 'batch_continuation'
 }
 
 export interface RecomputeVariantResult {
@@ -704,6 +707,13 @@ export async function dryRunRuleChange(opts: {
 // Catalog batch recompute
 // ---------------------------------------------------------------------------
 
+/**
+ * Rest between catalog pages, mirroring PRICING_FETCH_PAGE_DELAY_MS in
+ * shopify.server.ts. Kept in step with it deliberately: the streaming walk owns
+ * its own pacing now that it no longer goes through bulkFetchProductsForPricing.
+ */
+const PRICING_PAGE_PACING_MS = 500
+
 export interface RecomputeCatalogResult {
   total:         number
   autoApplied:   number
@@ -712,26 +722,132 @@ export interface RecomputeCatalogResult {
   rejected:      number
   errors:        number
   durationMs:    number
+  /** False when the wall-clock budget stopped the walk before the catalog ran out. */
+  done:          boolean
+  /** Pages fetched by this invocation (not cumulative across the day). */
+  pages:         number
+  /** Variants priced across every invocation for this UTC day, this one included. */
+  dayTotal:      number
 }
 
 /**
- * Iterate all Shopify variants (paginated via bulkFetchProductsForPricing)
- * and recompute each. Returns aggregate counts.
+ * Where a partial catalog walk left off.
+ *
+ * One row, with the day inside the value rather than in the key: `pipeline_settings`
+ * already carries 2,182 keys and a date-scoped key name would add one per day
+ * forever. A stored day that is not today is treated as absent, so a stale cursor
+ * can never silently resume into a catalog that has since been reordered.
+ */
+export const PRICING_BATCH_CURSOR_KEY = 'pricing_batch_cursor'
+
+interface PricingBatchCursor {
+  day:      string
+  cursor:   string | null
+  done:     boolean
+  dayTotal: number
+}
+
+export function utcDay(now = new Date()): string {
+  return now.toISOString().slice(0, 10)
+}
+
+export async function readPricingBatchCursor(day: string): Promise<PricingBatchCursor | null> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, PRICING_BATCH_CURSOR_KEY))
+      .limit(1)
+    const raw = rows[0]?.value
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PricingBatchCursor>
+    if (parsed.day !== day) return null
+    return {
+      day,
+      cursor:   typeof parsed.cursor === 'string' ? parsed.cursor : null,
+      done:     parsed.done === true,
+      dayTotal: typeof parsed.dayTotal === 'number' ? parsed.dayTotal : 0,
+    }
+  } catch (err) {
+    // A cursor we cannot read means "start from the top", never "stop".
+    console.warn('[pricing-batch] cursor read failed (starting fresh):', err)
+    return null
+  }
+}
+
+async function writePricingBatchCursor(state: PricingBatchCursor): Promise<void> {
+  // Ephemeral run state, not a valve: deliberately not routed through the
+  // audited settings setter, which would write one audit row per continuation.
+  try {
+    await db
+      .insert(pipelineSettings)
+      .values({ key: PRICING_BATCH_CURSOR_KEY, value: JSON.stringify(state) })
+      .onConflictDoUpdate({
+        target: pipelineSettings.key,
+        set: { value: JSON.stringify(state), updatedAt: sql`now()` },
+      })
+  } catch (err) {
+    // Losing the checkpoint costs a repeat of today's head, not correctness.
+    console.warn('[pricing-batch] cursor write failed (ignored):', err)
+  }
+}
+
+/**
+ * Walk the catalog and recompute every variant, resumably.
+ *
+ * The 07:00 pass used to drain the whole catalog into memory and then price it
+ * one variant at a time, restarting from the head every single day. When the
+ * 300s serverless ceiling killed it partway the run left no trace: `res.json`
+ * never fired, the thrown-error alarm never fired (a SIGKILL is not a throw),
+ * and the digest printed GOOD on any nonzero row count. The observable result
+ * was 2,349 SKUs whose last reprice was 2026-08-16 while every watcher read
+ * green, because the walk always re-priced the same head and starved the tail.
+ *
+ * So the walk now streams page by page, checkpoints the cursor at each page
+ * boundary, and stops cleanly when `budgetMs` is spent. Checkpointing is at the
+ * page boundary and never mid-page: a page is at most ~50 products, which the
+ * margin under the ceiling comfortably covers, and a half-page checkpoint would
+ * skip the variants it had not reached.
  */
 export async function recomputeCatalog(opts: {
-  trigger: 'batch' | 'manual' | 'batch_catchup'
+  trigger: 'batch' | 'manual' | 'batch_catchup' | 'batch_continuation'
+  /** Wall-clock budget. Omit for an unbounded walk (scripts, tests). */
+  budgetMs?: number
+  /** Resume from today's checkpoint instead of starting at the catalog head. */
+  resume?: boolean
+  /**
+   * Clock, injectable so budget behaviour can be tested without depending on
+   * wall-clock timing. A test that races a real deadline is the same class of
+   * bug as the rail-seed coin flip, so it is not one worth writing.
+   */
+  now?: () => number
 }): Promise<RecomputeCatalogResult> {
-  const { bulkFetchProductsForPricing } = await import('./shopify.server')
-  const startedAt = Date.now()
+  const { fetchPricingProductsPage } = await import('./shopify.server')
+  const now = opts.now ?? Date.now
+  const startedAt = now()
+  const deadline = opts.budgetMs != null ? startedAt + opts.budgetMs : null
+  const day = utcDay()
 
   const counts: RecomputeCatalogResult = {
-    total: 0, autoApplied: 0, pending: 0, skipped: 0, rejected: 0, errors: 0, durationMs: 0,
+    total: 0, autoApplied: 0, pending: 0, skipped: 0, rejected: 0, errors: 0,
+    durationMs: 0, done: false, pages: 0, dayTotal: 0,
   }
 
-  const products = await bulkFetchProductsForPricing()
+  const prior = opts.resume ? await readPricingBatchCursor(day) : null
+  if (prior?.done) {
+    // The catalog already ran out today. Nothing to do, and say so honestly
+    // rather than starting a second full walk.
+    counts.done = true
+    counts.dayTotal = prior.dayTotal
+    counts.durationMs = now() - startedAt
+    return counts
+  }
 
-  // Read settings once per run; recomputeFromData reuses the bulk-fetched
-  // product data so the only per-variant Shopify call is the apply mutation.
+  let cursor: string | null = prior?.cursor ?? null
+  let dayTotal = prior?.dayTotal ?? 0
+
+  // Read settings once per run; recomputeFromData reuses the fetched product
+  // data so the only per-variant Shopify call is the apply mutation.
   // (Refetching every variant + settings per variant blew past the 300s
   // serverless limit on manual runs.)
   const mode       = await getApprovalMode()
@@ -739,25 +855,50 @@ export async function recomputeCatalog(opts: {
   const mapBrands  = await getMapBrands()
   const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands }
 
-  for (const product of products) {
-    for (const variant of product.variants) {
-      if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
-      counts.total++
-      try {
-        const result = await recomputeFromData(product, variant, ctx)
-        if (result.error)                            counts.errors++
-        else if (result.status === 'auto_applied')   counts.autoApplied++
-        else if (result.status === 'pending')        counts.pending++
-        else if (result.status === 'rejected')       counts.rejected++
-        else                                         counts.skipped++
-      } catch (err) {
-        counts.errors++
-        console.error('[pricing-batch] variant error', variant.variantId, err)
+  for (;;) {
+    // Budget is checked at the page boundary, before fetching more work.
+    if (deadline != null && now() >= deadline) break
+
+    if (counts.pages > 0) {
+      // Preserve the deliberate inter-page spacing. Three separate throttle
+      // incidents (2026-07-28, 07-30, 08-19) bought this delay; a resumable
+      // walk is not a reason to spend it.
+      await new Promise(r => setTimeout(r, PRICING_PAGE_PACING_MS))
+    }
+
+    const page = await fetchPricingProductsPage({ cursor })
+    counts.pages++
+
+    for (const product of page.products) {
+      for (const variant of product.variants) {
+        if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
+        counts.total++
+        dayTotal++
+        try {
+          const result = await recomputeFromData(product, variant, ctx)
+          if (result.error)                            counts.errors++
+          else if (result.status === 'auto_applied')   counts.autoApplied++
+          else if (result.status === 'pending')        counts.pending++
+          else if (result.status === 'rejected')       counts.rejected++
+          else                                         counts.skipped++
+        } catch (err) {
+          counts.errors++
+          console.error('[pricing-batch] variant error', variant.variantId, err)
+        }
       }
+    }
+
+    cursor = page.endCursor
+    if (!page.hasNextPage) {
+      counts.done = true
+      break
     }
   }
 
-  counts.durationMs = Date.now() - startedAt
+  counts.dayTotal = dayTotal
+  await writePricingBatchCursor({ day, cursor, done: counts.done, dayTotal })
+
+  counts.durationMs = now() - startedAt
   return counts
 }
 

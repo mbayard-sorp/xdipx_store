@@ -23,7 +23,7 @@
  * this module can loosen anything.
  */
 
-import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, ne, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { lookupTweets } from './twitter.server'
@@ -104,10 +104,17 @@ export const dbXRemovalWatchRepo: RemovalWatchRepo = {
     }))
   },
   markRemoved: async (id, detail) => {
+    // Same attribution rule as the Instagram repo (ticket #6758): a
+    // watcher-detected removal is 'unknown', never 'platform' — the API
+    // cannot distinguish X suspending a tweet from the owner deleting it
+    // himself. The admin "I removed this" action sets removalSource='owner'
+    // directly, which removes the row from `recentLive` before this runs.
     await db.update(socialPosts)
-      .set({ status: 'deleted', errorMessage: detail })
+      .set({ status: 'deleted', errorMessage: detail, removalSource: 'unknown' })
       .where(eq(socialPosts.id, id))
   },
+  // Excludes removalSource='owner' (ticket #6758) — never counts a
+  // self-removed post toward the pattern that turns x_autopublish_enabled off.
   countRemovedSince: async (since) => {
     const rows = await db
       .select({ n: sql<number>`count(*)::int` })
@@ -116,6 +123,7 @@ export const dbXRemovalWatchRepo: RemovalWatchRepo = {
         eq(socialPosts.platform, 'x'),
         eq(socialPosts.status, 'deleted'),
         gte(socialPosts.postedAt, since),
+        ne(socialPosts.removalSource, 'owner'),
       ))
     return rows[0]?.n ?? 0
   },
@@ -248,6 +256,12 @@ export async function runXRemovalWatch(deps: XRemovalWatchDeps = {}): Promise<Re
       : 'Nothing. This is a notification you asked to receive, not a task blocking the team.',
     whereToGo: '/admin/socials for the post, then the Social tab of /admin/homepage-team for the valve.',
     category: pattern ? 'valve' : 'approval',
+    // A valve-off row must clear itself the moment the owner flips the valve
+    // back. Without this the owner's own action left the row open, which is how
+    // nine of ten open blockers ended up probe-less and hand-cleared.
+    ...(pattern
+      ? { verifyProbe: 'setting_true', verifyArg: VALVE_KEYS.xAutopublish }
+      : {}),
     priority: pattern ? 1 : 2,
     source: 'agent',
     evidence: `Checked the ${rows.length} most recent posted rows; ${live} live, ${gone.length} gone, ${unknown} unknown.`,

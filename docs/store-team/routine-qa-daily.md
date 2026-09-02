@@ -144,6 +144,26 @@ re-diagnosing the ticket:
 Bounce it, do not verify it. A red `check` is a hard gate and the release engine will not merge over
 it. But an unspecific `last_error` here is what turns a one-commit fix into a burned attempt.
 
+**The base-branch-red bounce (ticket #6934).** A `check:failure` that is not the stale-artifact case
+above can still be not-this-PR's fault: the failure is already present on `origin/main` itself, so
+every open PR's CI job fails identically regardless of what each PR actually changed. Verify before
+bouncing, do not assume it from the error text alone:
+
+1. `git diff origin/main...HEAD -- <failing file>` — confirm the PR does not touch the failing file
+   or the behavior it tests.
+2. Reproduce the same failure on a clean `origin/main` checkout (not the PR branch) to confirm it is
+   not this PR's diff causing it.
+
+Only once both hold, bounce with a `last_error` naming the base-branch failure and the file, so the
+next pass does not re-derive the same two steps. Run 636 (2026-09-01) hit this across three PRs at
+once (#1010, #1011, #1012), all failing on the same pre-existing `app/lib/storefront-home.server.test.ts:448`
+break on main.
+
+**A base-branch-red check is itself a P0/P1 signal.** Do not let it live only inside each PR's own
+verdict: file it as its own standalone ticket immediately (as ticket #6933 was for the case above),
+since every other open and future PR's CI is red until it is fixed, not just the one you happened to
+be reviewing.
+
 ## Step 5 — CI status and the rendered preview
 
 Cloud routines can only reach xdipx.com, so **`/api/team/pr` is the only path that works** for CI

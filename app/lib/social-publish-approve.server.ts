@@ -962,3 +962,48 @@ export async function revertSocialPostToDraft(
   })
   return { ok: true, reviewStatus: 'pending_review' }
 }
+
+// ── Removal attribution (ticket #6758) ──────────────────────────────────────
+
+export interface MarkRemovalOwnerRepo {
+  load: (id: number) => Promise<PostRow | null>
+  write: (id: number, patch: { removalSource: 'owner' }) => Promise<void>
+}
+
+export const dbMarkRemovalOwnerRepo: MarkRemovalOwnerRepo = {
+  load: dbApproveRepo.load,
+  write: async (id, patch) => {
+    await db.update(socialPosts).set(patch).where(eq(socialPosts.id, id))
+  },
+}
+
+export type MarkRemovalOwnerResult =
+  | { ok: true }
+  | { ok: false; status: 404 | 409; error: string }
+
+/**
+ * The admin socials "I removed this" action. Only valid on a row already
+ * `status='deleted'` — the removal watchers cannot tell a platform takedown
+ * from the owner deleting a post himself, so this is how the owner supplies
+ * the answer the watcher structurally cannot. Setting removalSource='owner'
+ * excludes the row from the takedown-pattern count both watchers key off
+ * (`countRemovedSince`), so one self-removed post never steps drafting
+ * frequency down or flips an autopublish valve off.
+ */
+export async function markSocialPostRemovalOwner(
+  id: number,
+  deps: { repo?: MarkRemovalOwnerRepo } = {},
+): Promise<MarkRemovalOwnerResult> {
+  const repo = deps.repo ?? dbMarkRemovalOwnerRepo
+  const post = await repo.load(id)
+  if (!post) return { ok: false, status: 404, error: `No social post ${id}` }
+  if (post.status !== 'deleted') {
+    return {
+      ok: false,
+      status: 409,
+      error: `Post ${id} is ${post.status}, not deleted. Only a removed post can be attributed.`,
+    }
+  }
+  await repo.write(id, { removalSource: 'owner' })
+  return { ok: true }
+}

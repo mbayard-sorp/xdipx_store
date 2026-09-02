@@ -82,6 +82,9 @@ import {
   summarizeSmoke,
   type PullRequestFacts,
   type TicketFacts,
+  ENGINE_HOLD_LABEL,
+  machineHoldLabel,
+  clearStaleEngineHold,
 } from '~/lib/release-engine.server'
 
 // ---------------------------------------------------------------------------
@@ -119,6 +122,8 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
     // No re-triggers spent by default, so a test that wants the exhausted
     // branch has to say so explicitly.
     ciRetriggers: 0,
+    // Production default: the valve is off-only, absent means on.
+    labelSplitEnabled: true,
     ...over,
   }
 }
@@ -944,5 +949,105 @@ describe('ageMsFromTimestamp', () => {
   it('returns 0 (never eligible) for garbage, failing closed', () => {
     expect(ageMsFromTimestamp('', Date.now())).toBe(0)
     expect(ageMsFromTimestamp('not a date', Date.now())).toBe(0)
+  })
+})
+
+/**
+ * The one-way latch (2026-09-01 audit, F18).
+ *
+ * Three machine paths applied NEEDS_OWNER_LABEL — protected escalation, CI
+ * stuck, merge attempts exhausted — while `removeLabels` did not exist anywhere
+ * in github.server.ts. So the gate's step-2 skip, whose own comment reads "the
+ * owner has already claimed this one by hand", became a latch the machine could
+ * set and nothing could lift, even after the reason stopped being true.
+ *
+ * PR #991 is the proof: `check` green, `migration-dry-run` green, and its only
+ * protected file an additive migration the repo's own classifyFile calls `auto`
+ * — labelled and skipped for two days. Across 14 days 35 PRs carried the label.
+ */
+describe('needs-owner is the owner\'s, engine-hold is the engine\'s', () => {
+  it('are two different labels', () => {
+    expect(ENGINE_HOLD_LABEL).not.toBe(NEEDS_OWNER_LABEL)
+  })
+
+  it('both still stop the gate, because both mean someone claimed it', () => {
+    for (const label of [NEEDS_OWNER_LABEL, ENGINE_HOLD_LABEL]) {
+      const d = evaluatePullRequest(facts({ labels: [label] }))
+      expect(d.action).toBe('skip')
+      expect(d.code).toBe('needs-owner-label')
+      expect(d.reason).toContain(label)
+    }
+  })
+
+  it('a PR carrying neither is evaluated on its merits', () => {
+    const d = evaluatePullRequest(facts({ labels: ['size/M', 'agents'] }))
+    expect(d.code).not.toBe('needs-owner-label')
+  })
+
+  it('protected classification still outranks both labels', () => {
+    // Ordering matters and is asserted elsewhere too: a protected PR must
+    // escalate even when it is already held, or clearing a hold could let a
+    // protected change through.
+    const protectedPaths = ['app/lib/team.server.ts']
+    const d = evaluatePullRequest(facts({
+      labels: [ENGINE_HOLD_LABEL],
+      changedPaths: protectedPaths,
+      classification: classifyChangedFiles(protectedPaths),
+    }))
+    expect(d.action).toBe('escalate-protected')
+  })
+
+  it('the exact shape of PR #991: green, held, and no longer protected', () => {
+    // Once migration-dry-run reports success, refineMigrationProtection clears
+    // an additive migration — so the classification is unprotected while the
+    // label, applied before that check reported, is still on the PR. Stripping
+    // the stale hold is what lets the gate see the PR at all; with it still on,
+    // step 2 short-circuits forever.
+    const held = facts({ labels: [ENGINE_HOLD_LABEL] })
+    expect(evaluatePullRequest(held).code).toBe('needs-owner-label')
+
+    const unheld = evaluatePullRequest({ ...held, labels: [] })
+    expect(unheld.code).not.toBe('needs-owner-label')
+    expect(unheld.action).toBe('merge')
+  })
+
+  describe('the label_split_enabled valve', () => {
+    it('writes engine-hold while on and needs-owner while off', () => {
+      expect(machineHoldLabel(true)).toBe(ENGINE_HOLD_LABEL)
+      expect(machineHoldLabel(false)).toBe(NEEDS_OWNER_LABEL)
+    })
+
+    it('keeps blocking on both labels in either state', () => {
+      // Flipping the valve is not a review. A PR the engine already stopped on
+      // must stay stopped, or the off-switch becomes a way to merge the exact
+      // PRs that were escalated.
+      for (const labelSplitEnabled of [true, false]) {
+        for (const label of [NEEDS_OWNER_LABEL, ENGINE_HOLD_LABEL]) {
+          const d = evaluatePullRequest(facts({ labels: [label], labelSplitEnabled }))
+          expect(d.action).toBe('skip')
+          expect(d.code).toBe('needs-owner-label')
+        }
+      }
+    })
+
+    it('stops taking a stale hold back while off', async () => {
+      // With the valve off the engine reverts to what it did before: it never
+      // removes a label, so a hold whose reason has cleared stays put. That is
+      // today's behaviour, which is the point of an off-switch.
+      const pr = { number: 991, headRef: 'ticket/6763', headSha: 'abc', labels: [ENGINE_HOLD_LABEL] }
+      const off = await clearStaleEngineHold(
+        pr as never,
+        facts({ labels: [ENGINE_HOLD_LABEL], labelSplitEnabled: false }),
+        true,
+      )
+      expect(off).toBe(false)
+
+      const on = await clearStaleEngineHold(
+        pr as never,
+        facts({ labels: [ENGINE_HOLD_LABEL], labelSplitEnabled: true }),
+        true,
+      )
+      expect(on).toBe(true)
+    })
   })
 })

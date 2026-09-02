@@ -245,7 +245,9 @@ program"); prompts start from the matching per-surface scaffold in
   hyperbolic fiction, not lived-experience claims).
 - **D — editorial metaphor macro.** One tasteful single-concept scene (silk,
   water, soft foil, fruit) standing in for sensation. Uses: PDP mood slides,
-  Notebook cover system.
+  Notebook cover system, and standalone Instagram metaphor posts (owner
+  license 2026-09-01, capped and fenced in
+  `docs/store-team/instagram-campaigns.md` §3.3).
 - **E — surreal brand art / visual wit** (owner license 2026-07-28, full).
   Blended forms, product-fantasy hybrids, and sexually euphemistic still
   lifes rendered with editorial craft: a dildo cactus in bloom, an
@@ -388,7 +390,8 @@ homepage merchandising art, social, video thumbnails).
    claim rather than as wit.
 4. **Unchanged, and do not read this as loosening any of it:** the warm-light lock and
    high-key mandate still bind (drama lives in the face and the hands, never in the light);
-   the charter visual cap of 6-7 holds; never crude, never porn-adjacent; adults-only hard
+   the charter visual register holds per surface (6-7 on owned merchandising surfaces; social
+   follows `docs/store-team/instagram-campaigns.md` §3.2a); never crude, never porn-adjacent; adults-only hard
    rules and the uncanny-face reject are untouched. Witty never crude. The craft is what makes
    it art instead of a shitpost.
 

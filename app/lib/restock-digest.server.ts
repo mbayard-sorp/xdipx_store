@@ -98,6 +98,7 @@ export async function fileRestockDigestEntry(
 
   const result = await createSuggestionDetailed({
     team:        'social',
+    targetTeam:  'social',
     kind:        'process',
     category:    'social-automation',
     dedupeKey,
