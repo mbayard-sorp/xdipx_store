@@ -647,7 +647,27 @@ describe('evaluatePullRequest: ticket linkage', () => {
   // run exists is one GitHub refuses, and the engine would burn all three merge
   // attempts on refusals before escalating a PR whose only problem was a
   // missing trigger. That case is the re-trigger path instead.
-  it('applies the docs-only carve-out: allowlist green is enough, no ticket needed', () => {
+  // Owner decision 2026-09-02: the docs carve-out no longer skips the ticket
+  // gate. It was doing two jobs and only one was wanted — skipping the CI WAIT
+  // is a latency optimisation and stays; skipping the ticket check meant an
+  // allowlisted `.md` PR merged with its ticket at any status. 68 of the 83
+  // instructions rows applied in 14 days were never QA-verified, and those rows
+  // are edits to the playbooks and agent definitions that govern the agents, so
+  // it was the one path where an agent merged a change to its own rules unread.
+  it('still applies the carve-out to the CI wait: a slow check does not park a playbook edit', () => {
+    const d = evaluatePullRequest(
+      facts({
+        headRef: DOCS_BRANCH,
+        changedPaths: DOCS_FILES,
+        checks: { allowlist: 'success', [REQUIRED_CHECK]: null },
+      }),
+    )
+    expect(d.action).toBe('merge')
+    expect(d.docsOnly).toBe(true)
+    expect(d.reason).toContain('verified')
+  })
+
+  it('no longer lets a docs PR merge without a ticket', () => {
     const d = evaluatePullRequest(
       facts({
         headRef: DOCS_BRANCH,
@@ -656,8 +676,23 @@ describe('evaluatePullRequest: ticket linkage', () => {
         checks: { allowlist: 'success', [REQUIRED_CHECK]: null },
       }),
     )
-    expect(d.action).toBe('merge')
-    expect(d.docsOnly).toBe(true)
+    expect(d.action).toBe('skip')
+    expect(d.code).toBe('no-ticket')
+  })
+
+  it('no longer lets a docs PR merge on an unverified ticket', () => {
+    for (const status of ['approved', 'proposed', 'in_progress', 'blocked', 'pr_open'] as const) {
+      const d = evaluatePullRequest(
+        facts({
+          headRef: DOCS_BRANCH,
+          changedPaths: DOCS_FILES,
+          ticket: { id: 4242, status, kind: 'instructions', attemptCount: 0 },
+          checks: { allowlist: 'success', [REQUIRED_CHECK]: null },
+        }),
+      )
+      expect(d.action).toBe('skip')
+      expect(d.code).toBe('ticket-not-verified')
+    }
   })
 
   it('withholds the docs carve-out while no `check` run exists at all', () => {

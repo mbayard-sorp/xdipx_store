@@ -873,7 +873,21 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
   }
 
   // 4. Ticket linkage.
-  if (!revert && !docsCarveOut) {
+  //
+  // The docs carve-out deliberately does NOT apply here any more (owner
+  // decision, 2026-09-02). It was doing two jobs, and only one of them was
+  // wanted: skipping the CI *wait* is a latency optimisation and is kept above,
+  // but it also skipped this entire block, so an allowlisted `.md` PR merged
+  // with its ticket at any status at all. `applySuccess` then 409s trying to
+  // move a non-`verified` row to `applied`, catches, logs, and the release
+  // proceeds — leaving the change live and the ticket sitting `approved`.
+  //
+  // Measured: 68 of the 83 `instructions` rows applied in 14 days were never
+  // verified by QA. The rows agent-editor writes are edits to the playbooks and
+  // agent definitions that govern the agents themselves, so this was the one
+  // path where an agent could merge a change to its own rules with no review at
+  // all. Nothing else about the carve-out changes.
+  if (!revert) {
     if (!facts.ticket) {
       return { ...base, action: 'skip', code: 'no-ticket', reason: 'no linked ticket to authorise the merge' }
     }
@@ -913,7 +927,7 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
     reason: revert
       ? 'revert PR with green CI'
       : docsCarveOut
-        ? 'docs-only agent PR with a green allowlist check'
+        ? `docs-only agent PR, ticket #${facts.ticket?.id} verified, green allowlist check`
         : `ticket #${facts.ticket?.id} verified and CI green`,
   }
 }

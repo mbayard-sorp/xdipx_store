@@ -604,12 +604,25 @@ export function renderTicketLoopSection(h: TicketLoopHealth | null): string {
   const netColor = net > 0 ? WARN : GOOD
   parts.push(`<p style="margin:0 0 4px;">Backlog, last 7 days: ${h.backlog.created7d} opened &middot; ${h.backlog.terminal7d} closed &middot; <span style="color:${netColor};">net ${net >= 0 ? '+' : ''}${net}/day</span></p>`)
 
+  const kindSplit = (rows: readonly { kind: string }[]) => {
+    if (rows.length < 2) return ''
+    const counts = new Map<string, number>()
+    for (const r of rows) counts.set(r.kind, (counts.get(r.kind) ?? 0) + 1)
+    const byCount = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    return byCount.length > 1 ? ` [${byCount.map(([k, n]) => `${esc(k)} ${n}`).join(', ')}]` : ''
+  }
+
   const staleList = (label: string, rows: readonly { id: number; ageHours: number; suggestion: string }[], limit = 5) =>
     rows.length
       ? `<p style="margin:6px 0 2px;color:${WARN};">${label} (${rows.length}):</p><ul style="margin:0;padding-left:18px;">${rows.slice(0, limit).map(r => `<li>#${r.id} &middot; ${agePhrase(r.ageHours)} &middot; ${esc(clip(r.suggestion, 100))}</li>`).join('')}</ul>`
       : ''
 
-  parts.push(staleList(`pr_open older than ${SLA_LABELS.prOpen}`, h.sla.prOpen))
+  // Split pr_open by kind. The docs carve-out was narrowed on 2026-09-02 so an
+  // `instructions` PR now needs a QA verdict like everything else, which routes
+  // roughly six more rows a day into this queue. If that lane backs up, it shows
+  // here as `instructions` rows ageing past SLA rather than as a vague total,
+  // and the answer is a fifth R-QA pass, not restoring the hole.
+  parts.push(staleList(`pr_open older than ${SLA_LABELS.prOpen}${kindSplit(h.sla.prOpen)}`, h.sla.prOpen))
   parts.push(staleList(`in_review older than ${SLA_LABELS.inReview} (a crashed QA pass leaves rows here)`, h.sla.inReview))
   if (h.sla.approvedCode.count > 0) {
     const oldest = h.sla.approvedCode.oldest

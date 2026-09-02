@@ -202,7 +202,7 @@ mode.
 |---|---|---|---|
 | **CI** | `npm run typecheck`, `npm test`, `npm run build` all pass. The required status check on `main` is the `check` job in `.github/workflows/ci.yml` | GitHub Actions | LIVE |
 | **Agent allowlist** | Every changed file on an `agents/suggestion-*` branch is inside `agent-editor`'s allowlist. Turns a prose rule into an enforced check | GitHub Actions | LIVE (`.github/workflows/agent-allowlist.yml`, mirrored by `AGENT_EDITOR_ALLOWLIST_RE` in release-engine.server.ts) |
-| **QA verdict** | A human-grade review of the diff plus CI status plus the rendered preview, with evidence. Required for `kind:'code'`; docs PRs need the allowlist check instead | `qa-reviewer`, R-QA routine | LIVE (R-QA, `trig_019GjVP9hGBU1gmXRBYtYURm`, since 2026-07-28) |
+| **QA verdict** | A human-grade review of the diff plus CI status plus the rendered preview, with evidence. Required for every non-revert merge, docs PRs included since 2026-09-02 (they additionally need the allowlist check; before that date the allowlist check stood in for review, and 68 of 83 `instructions` rows applied in 14 days were never verified). Docs PRs get the bounded five-question read in `routine-qa-daily.md` Step 3, not a code review | `qa-reviewer`, R-QA routine | LIVE (R-QA, `trig_019GjVP9hGBU1gmXRBYtYURm`, since 2026-07-28) |
 | **Protected-path classifier** | **Cost-only since 2026-08-19.** No changed file touches the cost gate (`team.server.ts`, `team-keys.ts`, `homepage-team*.ts`, `settings.server.ts`), the enforcement core (`github.server.ts`, `release-engine.server.ts`, `migration-classify.server.ts`, `.github/`), secrets (`.env*`), the checkout probe, the deploy-critical build steps (`scripts/apply-additive-migrations.ts`, `scripts/build-vercel.mjs`), or `db/migrations/**`. Runs on the changed-file list from the GitHub API, never on ticket or PR text | Release engine | LIVE (`PROTECTED_GLOBS` + `classifyChangedFiles`, app/lib/github.server.ts) |
 | **Migration content refinement** | A migration-only PR clears the classifier when every statement in every newly added `.sql` file matches the additive allowlist the build-time apply step uses. Anything else, including a modified or renamed migration and any file it cannot read, stays protected | Release engine | LIVE (`refineMigrationProtection`, app/lib/github.server.ts, on `classifyFile` from migration-classify.server.ts) |
 | **Render-truth** | The published slate demonstrably rendered on the live page. Replaces "HTTP 200 and the hero renders", which is what let a three-day breakage go unseen | Healthcheck cron + Routine A step 7 | LIVE (PR #349; 9 assertions passing in production 2026-07-28, and see the 30-minute row above, which already says LIVE) |
@@ -375,8 +375,9 @@ limits of what it was scoped to see. Read this before concluding the engine is b
 **Fact one: most PRs were outside the engine's jurisdiction by construction. Largely fixed
 2026-08-04, and the measurements below are the pre-fix baseline.** The engine considers only branches
 under `agents/`, `ticket/`, `claude/`, `phase1/`, `tonight/`, `fix/`, `pm/` or `revert/pr-` (the last
-two prefixes added by ADR-008 step 4), and for anything that is not a revert or docs-only it
-additionally requires a linked ticket in status `verified`. Classifying the last 60 merged PRs
+two prefixes added by ADR-008 step 4), and for anything that is not a revert it additionally
+requires a linked ticket in status `verified`. (Until 2026-09-02 docs-only PRs were exempt from
+that too; they are not any more.) Classifying the last 60 merged PRs
 against the rules as they stood on 2026-07-30:
 
 | | count | why the engine never merged it |
