@@ -48,7 +48,7 @@
 import { desc, eq, sql } from 'drizzle-orm'
 import { gzipSync, gunzipSync } from 'node:zlib'
 
-import { blobGetPrivate, blobListPrivate, blobPutPrivate, blobConfigured, blobDelPrivate } from '~/lib/blob.server'
+import { blobGetPrivate, blobListPrivate, blobPutPrivate, privateBlobConfigured, blobDelPrivate } from '~/lib/blob.server'
 import { db } from '~/lib/db.server'
 import { isIdent } from '~/lib/owner-blockers-core'
 import { criticalTables, unclassified } from '~/lib/backup-manifest'
@@ -165,11 +165,17 @@ export async function runBackup(now: Date = new Date()): Promise<BackupResult> {
     snapshotKey: null,
   }
 
-  if (!blobConfigured()) {
+  if (!privateBlobConfigured()) {
     // Declining because there is nowhere to write is a real outcome, not a
     // failure: reading it as one would train the alarm away before the alarm
     // ever meant anything.
-    const result: BackupResult = { ...empty, status: 'skipped', error: 'no blob token configured', elapsedMs: 0 }
+    //
+    // The PRIVATE token, not the public one. The public store's token being
+    // present says nothing about whether a private store exists, and the first
+    // live run proved it: the public token was set, this check passed, and
+    // every write then failed with `Cannot use private access on a public
+    // store`.
+    const result: BackupResult = { ...empty, status: 'skipped', error: 'no private blob token configured (BLOB_BACKUP_READ_WRITE_TOKEN)', elapsedMs: 0 }
     await record('dump', startedAt, result)
     return result
   }
@@ -292,8 +298,8 @@ export async function runRestoreProbe(now: Date = new Date()): Promise<ProbeResu
     verdicts: [], failures: 0, error: null,
   }
 
-  if (!blobConfigured()) {
-    const result = { ...base, status: 'skipped' as BackupStatus, error: 'no blob token configured', stale: false }
+  if (!privateBlobConfigured()) {
+    const result = { ...base, status: 'skipped' as BackupStatus, error: 'no private blob token configured (BLOB_BACKUP_READ_WRITE_TOKEN)', stale: false }
     await recordProbe(startedAt, result)
     return result
   }
