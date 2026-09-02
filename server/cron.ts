@@ -641,47 +641,78 @@ export function createCronRoutes() {
    * signal vs noise via Claude haiku, open GitHub issues for P0 groups.
    * Body (optional): { windowMinutes?: number }
    */
-  cronRoute('/log-monitor', async (req, res) => {
-    // Three independent jobs share this route because it is the only existing
-    // every-15-minutes slot and vercel.json is a protected path. Each gets its
-    // own try: none of them may take down another, and in particular neither
-    // conversion job may be skipped because log classification failed.
-    //
-    // Order is deliberate. The watcher observes delivery health from
-    // order_line_items (did the webhook handler run at all), then the reconciler
-    // heals CAPI delivery via meta_capi_outbox. They read different tables, so
-    // healing cannot mask the alarm, which is the failure mode that let the
-    // Purchase outage run for two months.
-
-    // 1. Conversion-delivery watcher (ticket #590). Owns the P0 alerting path.
+  /**
+   * The conversion-delivery watcher and the CAPI reconciler, on their own cron.
+   *
+   * These two rode `/cron/log-monitor` for one stated reason, written in the
+   * comment they used to sit under: it was "the only existing every-15-minutes
+   * slot and vercel.json is a protected path". **`vercel.json` stopped being a
+   * protected path on 2026-08-19**, so the constraint that put a P0 money-path
+   * watcher inside a log classifier is gone.
+   *
+   * Splitting them out is not tidiness. Stage G3 drops the log-monitor route to
+   * hourly, and leaving these attached would have quietly taken the check that
+   * notices Purchase conversion delivery is dead from every 15 minutes to every
+   * 60 — a money-path regression hidden inside a cost saving, on the exact path
+   * that once stayed broken for two months undetected.
+   *
+   * Order is deliberate and unchanged. The watcher observes delivery health from
+   * `order_line_items` (did the webhook handler run at all), then the reconciler
+   * heals CAPI delivery via `meta_capi_outbox`. They read different tables, so
+   * healing cannot mask the alarm.
+   */
+  cronRoute('/conversion-watch', async (_req, res) => {
+    // Each gets its own try: neither may take down the other, and in particular
+    // the watcher must never be skipped because reconciliation threw.
     let purchaseWatch: unknown = null
     try {
       const { runPurchaseWatcher } = await import('../app/lib/purchase-watcher.server.js')
       purchaseWatch = await runPurchaseWatcher()
     } catch (err) {
-      console.error('[cron:log-monitor] purchase-watcher failed (ignored):', err)
+      console.error('[cron:conversion-watch] purchase-watcher failed (ignored):', err)
     }
 
-    // 2. Purchase reconciliation. Sends any Purchase the webhook did not.
     let purchaseReconcile: unknown = null
     try {
       const { reconcilePurchases } = await import('../app/lib/purchase-capi.server.js')
       const r = await reconcilePurchases({ sinceHours: 26 })
       purchaseReconcile = { scanned: r.scanned, gaps: r.gaps.length, sent: r.sent.length, failed: r.failed.length, tooOld: r.tooOld.length }
     } catch (err) {
-      console.error('[cron:log-monitor] purchase reconcile error:', err)
+      console.error('[cron:conversion-watch] purchase reconcile error:', err)
     }
 
-    // 3. Log classification.
+    res.json({ ok: true, purchaseWatch, purchaseReconcile })
+  })
+
+  /**
+   * POST /cron/log-monitor
+   * Hourly. The auto-expired-run folder.
+   *
+   * The Haiku log classifier that gave this route its name is gone (Stage G3):
+   * 433 calls and 16.9M input tokens over 30 days for zero log-derived tickets
+   * in its lifetime. What is left reads `homepage_team_runs` for runs the idle
+   * reaper marked failed and files one ticket per recurring class at the lane
+   * that owns the run. That never needed a model, and it was the only thing
+   * here that ever produced a ticket.
+   *
+   * Hourly rather than every 15 minutes because these are post-hoc diagnostic
+   * tickets, not real-time pages — `fetchExpiredRunGroups` deliberately holds a
+   * run back through a recovery grace before surfacing it, since a quiet-but-
+   * alive run can be reaped and then finish successfully minutes later.
+   *
+   * The route path is kept rather than renamed: ADR-009 records the decision to
+   * ride it, and rewriting an ADR to match a later change falsifies the record.
+   */
+  cronRoute('/log-monitor', async (req, res) => {
     try {
       const { runLogMonitor } = await import('../app/lib/log-monitor.server.js')
       const rawWindow = req.body?.windowMinutes ?? (req.query['windowMinutes'] ? Number(req.query['windowMinutes']) : undefined)
-      const windowMinutes = typeof rawWindow === 'number' && !isNaN(rawWindow) ? rawWindow : 15
+      const windowMinutes = typeof rawWindow === 'number' && !isNaN(rawWindow) ? rawWindow : 60
       const result = await runLogMonitor({ windowMinutes })
-      res.json({ ok: true, ...result, purchaseWatch, purchaseReconcile })
+      res.json({ ok: true, ...result })
     } catch (err) {
       console.error('[cron:log-monitor]', err)
-      res.status(500).json({ error: String(err), purchaseWatch, purchaseReconcile })
+      res.status(500).json({ error: String(err) })
     }
   })
 
@@ -691,7 +722,7 @@ export function createCronRoutes() {
    * On-demand Meta CAPI Purchase reconciliation. Sends a Purchase for every
    * paid Shopify order with no resolved ledger row. Idempotent by construction
    * (deterministic purchase_<orderId> event id), so it is always safe to run.
-   * No vercel.json cron entry: the sweep also rides /cron/log-monitor.
+   * No vercel.json cron entry: the sweep also rides /cron/conversion-watch.
    */
   cronRoutePost('/purchase-reconcile', async (req, res) => {
     try {
@@ -1547,6 +1578,126 @@ export function createCronRoutes() {
    * files at that lane, never an email to the owner), the lane floors, and the
    * blocked-class routing. This pass reports; it does not yet act.
    */
+  /**
+   * The nightly logical dump (Stage G1).
+   *
+   * Neon point-in-time restore is the primary recovery path and needs no code,
+   * but it rewinds the WHOLE database — including the 19 `public` tables that
+   * belong to a dormant video-studio application sharing it — and cannot undo
+   * one table without undoing every other write since. This is the surgical
+   * alternative, and the only copy that survives the Neon account.
+   *
+   * It also carries the cheap half of G1, which is arguably the useful one: a
+   * PITR only helps inside the retention window, so what actually decides
+   * whether a mass-delete is recoverable is how fast anyone notices. Comparing
+   * per-table row counts against the previous dump is how anyone notices.
+   */
+  cronRoute('/db-backup', async (_req, res) => {
+    try {
+      const { runBackup, detectRowDrift, previousDumpTables } =
+        await import('../app/lib/db-backup.server.js')
+
+      const result = await runBackup()
+
+      // Drift is read from the two newest dumps, so a failed or partial run
+      // simply produces no comparison rather than a spurious "everything
+      // vanished" against a truncated snapshot.
+      let drift: Array<{ table: string; previousRows: number; currentRows: number; delta: number }> = []
+      if (result.status === 'succeeded') {
+        const { db } = await import('../app/lib/db.server.js')
+        const { backupRuns } = await import('../db/schema.js')
+        const { desc } = await import('drizzle-orm')
+        const [row] = await db.select({ id: backupRuns.id }).from(backupRuns).orderBy(desc(backupRuns.id)).limit(1)
+        if (row) drift = detectRowDrift(await previousDumpTables(row.id), result.tables)
+      }
+
+      for (const d of drift) {
+        console.warn(`[cron:db-backup] DRIFT ${d.table}: ${d.previousRows} -> ${d.currentRows} (${d.delta})`)
+      }
+      if (result.unclassified.length > 0) {
+        // A migration that adds a table is merged unattended; nothing in that
+        // path asks whether the new table needs backing up. So an unclassified
+        // table is the normal outcome of the system working as designed, and
+        // it has to be loud rather than assumed absent.
+        console.warn(`[cron:db-backup] ${result.unclassified.length} live table(s) not in the backup manifest: ${result.unclassified.join(', ')}`)
+      }
+      if (result.status === 'failed' || result.status === 'partial') {
+        console.error(`[cron:db-backup] ${result.status}: ${result.error}`)
+      }
+
+      // The status code, not the `ok` field, is what the wrapper reads.
+      // `classifyCronOutcome` treats any 200 without a `skipped` string as
+      // `succeeded`, so answering 200 here with `ok: false` would record a
+      // failed backup as a healthy cron run — the exact "prints GOOD over a
+      // dead pipeline" failure this whole program exists to remove,
+      // reintroduced by the change meant to close it. A partial counts as a
+      // failure for the same reason: it wrote no manifest and is unreadable.
+      if (result.status === 'failed' || result.status === 'partial') res.status(500)
+      res.json({
+        ok: result.status === 'succeeded' || result.status === 'skipped',
+        ...(result.status === 'skipped' ? { skipped: result.error } : {}),
+        status: result.status,
+        snapshotKey: result.snapshotKey,
+        tables: result.tables.length,
+        rows: result.tables.reduce((n, t) => n + t.rows, 0),
+        bytes: result.totalBytes,
+        elapsedMs: result.elapsedMs,
+        unclassified: result.unclassified,
+        drift,
+        error: result.error,
+      })
+    } catch (err) {
+      console.error('[cron:db-backup]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
+   * Read the newest dump back and grade it.
+   *
+   * This is the half that makes the other half a backup. A dump nobody has read
+   * back is a file, and the failure modes it hides are exactly the expensive
+   * ones: a table that serialised to nothing, a gzip that never finished, a
+   * private object the token can no longer read. Every one of those leaves a
+   * `succeeded` dump row behind an unusable snapshot.
+   *
+   * Daily rather than weekly, because the gap between "the backup broke" and
+   * "someone found out" is the whole quantity this stage is trying to shrink,
+   * and reading 16 MB of blobs costs nothing worth saving.
+   */
+  cronRoute('/db-restore-probe', async (_req, res) => {
+    try {
+      const { runRestoreProbe } = await import('../app/lib/db-backup.server.js')
+      const result = await runRestoreProbe()
+
+      if (result.status === 'failed') {
+        console.error(
+          `[cron:db-restore-probe] ${result.error}`
+          + result.verdicts.filter(v => !v.ok).map(v => `\n  ${v.table}: ${v.note ?? 'mismatch'}`).join(''),
+        )
+      }
+
+      // Same reasoning as the dump above: a probe that found an unreadable
+      // backup must not be recorded as a successful cron run.
+      if (result.status === 'failed') res.status(500)
+      res.json({
+        ok: result.status === 'succeeded' || result.status === 'skipped',
+        ...(result.status === 'skipped' ? { skipped: result.error } : {}),
+        status: result.status,
+        snapshotKey: result.snapshotKey,
+        ageHours: result.ageHours == null ? null : Number(result.ageHours.toFixed(1)),
+        stale: result.stale,
+        checked: result.verdicts.length,
+        failures: result.failures,
+        failed: result.verdicts.filter(v => !v.ok).map(v => ({ table: v.table, note: v.note })),
+        error: result.error,
+      })
+    } catch (err) {
+      console.error('[cron:db-restore-probe]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   cronRoute('/janitor-sweep', async (_req, res) => {
     try {
       const {
@@ -1555,12 +1706,20 @@ export function createCronRoutes() {
         countUnfinishedTerminalRuns,
         pruneCronRuns,
       } = await import('../app/lib/cron-runs.server.js')
+      const { readUnwatchedLanes } = await import('../app/lib/ticket-janitor.server.js')
 
       const expectations = await syncCronExpectations()
       const liveness = await readCronLiveness()
       const breaches = liveness.filter(l => l.breached)
       const unfinished = await countUnfinishedTerminalRuns()
       const pruned = await pruneCronRuns()
+      // The inverse of the liveness check above, and it catches what that one
+      // structurally cannot. A routine created after ROUTINE_CADENCES was last
+      // curated is not late, it is absent, and absence from a hand-maintained
+      // list looks exactly like health. On its first run this found the entire
+      // video program — the most expensive lane in the estate — running with no
+      // liveness entry at all, six days after both its triggers were created.
+      const unwatched = await readUnwatchedLanes()
 
       for (const b of breaches) {
         console.warn(
@@ -1573,6 +1732,12 @@ export function createCronRoutes() {
       }
       if (unfinished > 0) {
         console.error(`[cron:janitor-sweep] ${unfinished} cron_runs row(s) terminal with a NULL finished_at`)
+      }
+      for (const u of unwatched) {
+        console.warn(
+          `[cron:janitor-sweep] UNWATCHED LANE ${u.team}/${u.runType}: `
+          + `${u.runs} run(s) in 30d, last ${u.lastRunAt ?? 'never'}, no ROUTINE_CADENCES entry`,
+        )
       }
 
       res.json({
@@ -1589,6 +1754,7 @@ export function createCronRoutes() {
           lastStatus: b.lastStatus,
         })),
         unfinishedTerminalRuns: unfinished,
+        unwatchedLanes: unwatched,
         pruned,
       })
     } catch (err) {

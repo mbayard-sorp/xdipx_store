@@ -32,13 +32,18 @@
  *     reference the transition 409s exactly as before.
  *   { op: 'get', id } -> { suggestion, links, events }
  *   { op: 'rekind', id, kind, actor, note? } -> { ok: true, suggestion }
- *   { op: 'retire', id, actor, note, supersededById?, satisfiedBy? }
+ *   { op: 'retire', id, actor, note, supersededById?, satisfiedBy?,
+ *     noCodeWorkNote?, noCodeWorkFile? }
  *       -> { ok: true, suggestion }
  *     Evidence retire (#2864): with supersededById (a live-or-applied row
  *     whose text names this one) or satisfiedBy (PR URL or doc path#anchor),
  *     agent-editor may also retire instructions/agent-def rows; the evidence
  *     is validated server-side and recorded as links. Evidence-free retires
  *     on those kinds still 409.
+ *     noCodeWorkNote + noCodeWorkFile (#7037, both required together): the
+ *     dev-lane `code` diagnosis-complete shape — a substantive note plus the
+ *     repo file/symbol path the investigator read. See RetireEvidence in
+ *     team.server.ts for the validation and why the file check is format-only.
  *   { op: 'note', id, ref } -> { ok: true }
  *
  * Lifecycle (app/lib/team.server.ts ALLOWED is the single source of truth):
@@ -314,11 +319,20 @@ export async function action({ request }: ActionFunctionArgs) {
         ? b['supersededById'] : undefined
     const satisfiedBy =
       typeof b['satisfiedBy'] === 'string' && b['satisfiedBy'].trim() ? b['satisfiedBy'].trim() : undefined
+    // #7037: both halves required together, or neither — a note with no file
+    // (or vice versa) is a malformed evidence attempt, not "no evidence given".
+    const noCodeWork =
+      typeof b['noCodeWorkNote'] === 'string' && b['noCodeWorkNote'].trim()
+      && typeof b['noCodeWorkFile'] === 'string' && b['noCodeWorkFile'].trim()
+        ? { note: b['noCodeWorkNote'].trim(), file: b['noCodeWorkFile'].trim() }
+        : undefined
     const suggestion = await agentRetireSuggestion(
       b['id'],
       b['actor'],
       b['note'],
-      supersededById != null || satisfiedBy ? { supersededById, satisfiedBy } : undefined,
+      supersededById != null || satisfiedBy || noCodeWork
+        ? { supersededById, satisfiedBy, noCodeWork }
+        : undefined,
     )
     return Response.json({ ok: true, suggestion })
   }

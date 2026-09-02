@@ -1,11 +1,13 @@
 /**
  * Browser-tier synthetic checkout probe (runs in GitHub Actions, not on Vercel).
  *
- * Walks the real purchase UI with Playwright: homepage, PDP, add to cart, age
- * confirm if shown, checkout button, arrival at the Shopify hosted checkout with
- * a contact/email field. Builds a ProbeResult and POSTs it to
- * /cron/checkout-probe-report, which records it and alerts on failure through
- * the same path as the server-side HTTP tier.
+ * Walks the real purchase UI with Playwright: homepage, PDP, pick a variant,
+ * add to cart, age confirm if shown, checkout button, arrival at the Shopify
+ * hosted checkout with a contact/email field, and then — added in Stage G5 —
+ * that there is a non-zero amount on that checkout page, which is what proves
+ * the CART reached it rather than just that a checkout page rendered. Builds a
+ * ProbeResult and POSTs it to /cron/checkout-probe-report, which records it and
+ * alerts on failure through the same path as the server-side HTTP tier.
  *
  * Each step is isolated: a failure records a failed step and stops, so a broken
  * selector reports a diagnosable result rather than crashing the job. Analytics
@@ -209,6 +211,58 @@ try {
       push('checkout-page', visible, visible ? undefined : 'no email/contact field found on checkout')
       if (!visible) ok = false
     } catch (e) { push('checkout-page', false, e.message); ok = false }
+  }
+  // 8. Confirm there is money on the checkout page (Stage G5).
+  //
+  // Step 7 proves a checkout page rendered. It does not prove the CART reached
+  // it, and those are different failures: a checkout showing an email field over
+  // an empty basket, or a $0.00 total, is a broken money path that every
+  // assertion above passes cleanly. This is the gap the audit meant by "the
+  // browser tier stops at the checkout page", and it is the last assertion
+  // before a real card would be needed.
+  //
+  // Deliberately markup-agnostic. Shopify's checkout DOM varies by theme and
+  // changes without notice, so this reads text rather than selectors, and takes
+  // the LARGEST amount on the page: a collapsed mobile order summary (this
+  // context is 390px wide) puts the total in the disclosure header, and any
+  // stray $0.00 elsewhere cannot drag the maximum down. `textContent` rather
+  // than `innerText` on purpose — if the figure is in the DOM at all we want to
+  // see it, even inside a collapsed region.
+  if (ok) {
+    try {
+      const text = (await page.locator('body').textContent({ timeout: 15000 })) ?? ''
+      const amounts = [...text.matchAll(/(?:\$|USD\s?)\s?(\d[\d,]*\.\d{2})/g)]
+        .map(m => Number(m[1].replace(/,/g, '')))
+        .filter(n => Number.isFinite(n))
+      const max = amounts.length ? Math.max(...amounts) : 0
+      const good = max > 0
+      push(
+        'checkout-total',
+        good,
+        good
+          ? `largest amount $${max.toFixed(2)} of ${amounts.length} figures`
+          : `no positive amount on the checkout page (${amounts.length} figures found) — the cart may not have carried through`,
+      )
+      if (!good) ok = false
+    } catch (e) { push('checkout-total', false, e.message); ok = false }
+  }
+
+  // 9. Is a payment section present? Recorded, NOT fatal, and the split is
+  // deliberate rather than timid.
+  //
+  // A checkout with no way to pay is a real money-path break, so this belongs
+  // in the probe. But payment-provider markup is the most variable thing on the
+  // page, this probe is one of only two signals allowed to page the owner by
+  // SMS, and a false page at 07:30 costs more trust than a missed one costs
+  // money — a genuinely dead payment section also shows up as a zero total in
+  // step 8, which IS fatal. So it records for now and graduates to fatal once
+  // it has a clean run history to justify the promotion.
+  if (ok) {
+    try {
+      const text = (await page.locator('body').textContent({ timeout: 10000 })) ?? ''
+      const seen = /payment|card number|credit card|pay with/i.test(text)
+      push('checkout-payment', true, seen ? 'payment section present' : 'OBSERVED: no payment section text found (not failing the probe)')
+    } catch (e) { push('checkout-payment', true, `skipped: ${e.message}`) }
   }
 } catch (err) {
   push('probe-crash', false, err instanceof Error ? err.message : String(err))

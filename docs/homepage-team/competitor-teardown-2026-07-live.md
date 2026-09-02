@@ -545,3 +545,91 @@ no Sanity schema modified, no code changed. The only artifacts are docs: this de
 the `either-or.md` build-readiness resolution, and the changelog entry. Either/Or
 stays a proposal pending `homepage-ia` Nº 07-slot sign-off + the additive `eitherOr`
 block before any build.
+
+---
+
+## Delta — 2026-09-02 (Routine B design cycle, run 646)
+
+**Captures (real, this run; egress partial):** `unboundbabes.com`, `dame.com/pages/quiz`
+(reached via the standing `dameproducts.com` → `dame.com` 301, followed), and
+`tootimid.com` fetched successfully and are the only three sites reported below.
+`lovehoney.com` returned HTTP 403 at the edge this run (it succeeded on 2026-08-26,
+so this is edge variance, not a site change); `spectrumboutique.com` returned 403 for
+the second consecutive cycle; `vush.com` failed DNS resolution (`ETIMEOUT`). Nothing
+is reported for those three beyond the refusal itself, and no competitor copy is
+quoted from memory. The standing 16-capture baseline is unchanged. This is Routine B's
+step 0.5 lightweight delta, not the Wednesday five-site recon.
+
+**The lens this run:** the cycle's build subject is the Either/Or finder, so the
+teardown looked specifically at how the field builds a product-finder instrument,
+rather than re-walking homepage spines already covered by the baseline.
+
+### The finding: the field's finders ask who you ARE, not what you WANT
+
+This is the cross-site pattern, and it is the most useful thing the teardown has
+produced for the discovery lane.
+
+- **Dame — "Find Your Vibe" quiz, 4 questions.** Q1 "How do you plan to use your
+  toy?" (Mostly by myself / Mostly with a partner / A little bit of both) is the only
+  question about use. The other three are demographic: "I identify as..." (Woman /
+  Man / Non-binary / Other / Prefer not to say), "What is your relationship status?"
+  (Single / Dating Around / Committed relationship), and "How old are you?" (18-30 /
+  31-40 / 41-50 / 51-60 / 61+). Results are 7 recommended products plus an add-ons
+  row, and the flow offers "Enter your email to save your results" with a skip.
+- **Unbound Babes — product quiz in the main nav,** billboarded off the hero line
+  "Not sure where to start? We've got you covered." with the entry label "Where do I
+  start?". Answers are multi-select chips, and the visible categories are status
+  (new / experienced / gift buyer / pregnant / menopausal) and hardware specs
+  (powerful, waterproof, popular, USB rechargeable, quiet). Above the fold it runs
+  two "End of Summer Sale" 25%-off banners and a free-gift-with-purchase line.
+- **TooTimid — no finder at all.** The hero is SEO-shaped ("Adult Toys With Discreet
+  Shipping: Your Satisfaction Is Guaranteed!") over five stacked discount banners
+  ("$5 Air Rose - LMTD TIME ONLY!", "50% OFF All Orders w/ code: Love50", up to 80%
+  off, free shipping $59+). Its discretion mechanics remain the one thing worth
+  keeping from this site and are already on the bench: "All orders arrive in plain
+  packaging, and the shipping label doesn't say what company it's from."
+
+Not one of the three asks a single desire-shaped question. Dame comes closest and
+still spends three of its four questions on identity, relationship status, and age.
+
+### Adopted
+
+**Either/Or's three axes are the empty lane, and the teardown adds a second reason to
+build it beyond differentiation.** Register (Sensual ↔ Bold), Company (Solo ↔
+Couples), and Control (Surrendered ↔ In Charge) are all desire questions, so the
+instrument collects nothing identifying. That means the finder can *carry* the
+discretion pillar rather than undercut it, which is not true of any captured
+competitor: a shopper who will not tell a sex toy store their age and relationship
+status can still complete ours. Recorded in `concepts/either-or.md` as a design
+rationale, not just a differentiator.
+
+### Rejected, with reasons, so they are not re-proposed
+
+- **Demographic or identity questions (Dame's Q2-Q4).** They collect personal data
+  for no fit gain, they read as a form rather than a game, and asking a shopper their
+  gender and age in a sex toy store is exactly the friction the mission calls a dead
+  end. Dame can afford it because it sells its own six-product line; against a 4,954-
+  product index the demographic answer does almost no filtering work.
+- **Email-gated results (Dame's "save your results").** The result IS the payoff.
+  Gating it is the pressure the charter bans, and a skip link does not fix a gate.
+- **Spec chips as the axis (Unbound's waterproof / rechargeable / quiet).** Those are
+  filters, not a self-discovery moment. They belong on a PLP facet rail, which we
+  already have on `/discover`; putting them in the finder would make Either/Or a
+  second facet UI instead of a game.
+- **Sale-banner stacking above the fold (Unbound, TooTimid).** Standing refusal, no
+  change.
+
+### The one thing we will do this week that none of them do
+
+End the instrument on a *named single product* with an Emma line written about the
+reader, instead of a seven-item grid behind an email wall. All three captured sites
+end a finder on a grid; two of the three ask for an email on the way.
+
+### IA fence check
+
+Nothing proposed here implies a new URL, a new route, or a twelfth section. Either/Or
+remains a candidate for an existing slot pending `homepage-ia` sign-off (see the
+`either-or.md` resolution appended the same run, which re-opens the slot question
+because Nº 07 is now occupied by the shipped Curiosity Shelf). The two-link `/discover`
+cap and the retired-route denylist are untouched. No `app/` code and no Sanity schema
+changed this run.
