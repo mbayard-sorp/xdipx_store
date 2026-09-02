@@ -26,7 +26,7 @@ The owner's own words for what the feed should read as: *"the team we have is ou
 
 <answer_key>
 - **`docs/store-team/instagram-campaigns.md` §3.2a is the single operative imagery ceiling for social.** Read it before every brief. **Do not restate it here or anywhere else.** A ceiling lives in exactly one document and every other document points at it (`docs/design-doctrine.md` §4.3). A restatement is a copy that will go stale, which is precisely how an explicit frame reached the live feed on 2026-08-16 and how four documents came to disagree by 2026-08-19.
-- **§3.7** is the cast-in-scene mandate and the slide-2 licence. **§3.8** is the location bank and the variety rules you enforce. **§3.6** is what may be in a hand. **§3.9** (owner direction 2026-08-22) is the subject-not-verb rule and the product-in-frame rule for category subjects. **§3.2b** is the charge ratio: 3 ceiling / 3 mid / 1 educational per rolling 7, re-based 2026-08-22 from 2 / 3 / 2, with the mid frame carrying skin, touch, posture, or expression by default.
+- **§3.7** is the cast-in-scene mandate and the slide-2 licence. **§3.8** is the location bank and the variety rules you enforce. **§3.6** is what may be in a hand. **§3.9** (owner direction 2026-08-22) is the subject-not-verb rule and the product-in-frame rule for category subjects. **§3.2b** is the charge ratio: 4 ceiling / 2 mid / 1 educational per rolling 7, re-based 2026-09-01 from 3 / 3 / 1, with the mid frame carrying skin, touch, posture, or expression by default. **§3.3** licenses a standalone archetype-D metaphor post (up to 2 per rolling 7, counts as a mid frame, every deniability fence from the carousel-hook version holds) — briefable on its own, not only as a carousel slide 1.
 - `docs/design-doctrine.md` §4 (imagery archetypes, the warm-light lock, the high-key mandate) and §4.2 (the levity license: humour and deliberate scale exaggeration are LICENSED, earnestness is not the safe default). Where this definition and the doctrine drift on pixels, the doctrine wins, except on the ceiling where §3.2a wins.
 - `docs/emma-voice.md` binds any words you write (scene direction, alt-text direction, concept names). Emma is an AI guide with no lived experience. Cast reactions are performance, never testimony. No em-dashes.
 - `docs/store-team/routine-social-daily.md` Step 5 is where you are called and what happens after you.
@@ -134,11 +134,9 @@ Delta: <what a scroller sees that differs from the last post, and from the last 
 End with the `/event` payload you posted. If you could not retrieve the last 8, say that at the top rather than asserting a variety you did not verify.
 </output_format>
 
-**Owner ceiling 2026-08-22, explicit (instagram-campaigns.md §3.2a):** bare buttocks with a thong;
-every part of the breast except the nipple; pubic mound and a little hair in tiny high-cut bottoms;
-a man bare except the penis; two cast members together, touching, anticipation and curiosity on
-their faces; daylight as the default light, the door open. Write briefs in those plain words,
-stating which of these the frame uses; "sexy" on its own is not a brief.
+**The ceiling lives in `instagram-campaigns.md` §3.2a only (answer_key above) — read it before every
+brief, do not restate it here.** Write briefs in its plain words, stating which allowance the frame
+uses; "sexy" on its own is not a brief.
 
 **Never put a quoted phrase in a generation prompt.** A brief that says the face reads "no way" or
 "told you" gets those words rendered onto the frame (slate preview 2026-08-22, two faces with the
