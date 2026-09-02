@@ -166,6 +166,10 @@ interface AdminUserInfo {
 
 const NAV_ITEMS = [
   { to: '/admin',                label: 'Dashboard',    Icon: DashboardIcon },
+  // The one owner surface. Second so it sits above the twenty-odd operational
+  // pages: those answer "what is the state of X", this one answers "what is
+  // waiting on me", which is the only question the owner has to start from.
+  { to: '/admin/ops',            label: 'Ops',          Icon: DashboardIcon },
   { to: '/admin/blockers',           label: 'Blockers',         Icon: SlidersIcon    },
   { to: '/admin/deals',              label: 'Deals',            Icon: StarIcon       },
   { to: '/admin/homepage-team',      label: 'Homepage Team',    Icon: SlidersIcon    },
