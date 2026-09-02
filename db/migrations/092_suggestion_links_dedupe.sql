@@ -7,9 +7,17 @@
 -- 332 times. The writers are addTicketLinks (app/lib/team.server.ts) and
 -- addTicketLink (app/lib/release-engine.server.ts, called every polling
 -- cycle from handleProtected/escalateStuckCi/settleDeployment on a PR that is
--- still waiting) — both now insert with onConflictDoNothing targeting the
--- unique index this file adds, so a repeat write of the same triple is a
--- no-op going forward.
+-- still waiting) — both now insert with an UNTARGETED onConflictDoNothing(),
+-- so a repeat write of the same triple becomes a no-op the moment this file's
+-- index exists, and stays a plain insert (untidy, never an error) until then.
+--
+-- 2026-09-02, after the fact: the writers originally NAMED these columns as
+-- the conflict target. That makes Postgres infer this index at plan time, so
+-- every link and note write raised 42P10 on production, where this manual file
+-- had not been run — a hours-long ticket-bus outage caused purely by code
+-- shipping ahead of an index that cannot auto-apply. The target was dropped;
+-- this file is still needed for the dedupe and for race-safety, but nothing
+-- breaks while it waits.
 --
 -- NOT ADDITIVE: this file opens with a DELETE (DML), so the whole file is
 -- 'manual' per scripts/apply-additive-migrations.ts / classifyFile — it never

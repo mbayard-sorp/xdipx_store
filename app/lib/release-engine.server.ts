@@ -2658,9 +2658,14 @@ async function addTicketLink(ticketId: number, link: { kind: string; ref: string
       kind: link.kind.slice(0, 12),
       ref: link.ref,
       state: link.state ? link.state.slice(0, 16) : null,
-    }).onConflictDoNothing({
-      target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
-    })
+      // Untargeted on purpose, for the reason spelled out over addTicketLinks
+      // in team.server.ts: naming the arbiter columns makes Postgres infer an
+      // index at plan time and raise 42P10 wherever migration 092 (manual, so
+      // it never auto-applies) has not run. The catch below meant this call
+      // site only warned rather than 500'd, which is why the engine survived
+      // the outage that took the team API down -- at the cost of writing no
+      // links at all for hours.
+    }).onConflictDoNothing()
   } catch (err) {
     console.warn(`${LOG} could not add ${link.kind} link to ticket #${ticketId}`, err)
   }

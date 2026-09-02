@@ -444,14 +444,22 @@ describe('transitionSuggestion', () => {
   // Ticket #7038: a link write used to insert unconditionally, so the same
   // (suggestion_id, kind, ref) triple piled up duplicate rows on every retry
   // or polling cycle (ticket #3895 alone carried 332 copies of one PR link).
-  // addTicketLinks now upserts on that triple via onConflictDoNothing, backed
-  // by the uq_suggestion_links_sugg_kind_ref index (migration 092).
-  it('writes a link as onConflictDoNothing on (suggestionId, kind, ref), so a repeat write is a no-op', async () => {
+  // addTicketLinks now writes with onConflictDoNothing, which the
+  // uq_suggestion_links_sugg_kind_ref index (migration 092) turns into a no-op
+  // on a repeat triple.
+  //
+  // The clause names NO arbiter columns, and this test asserts that rather than
+  // the columns it used to assert. Naming them makes Postgres infer the index
+  // at plan time, so the statement raises 42P10 on any database where 092 has
+  // not been run -- 092 is manual, and on 2026-09-02 that took the entire
+  // /api/team/suggestion write surface down in production for hours. The
+  // dedupe is the index's job; the write must not depend on the index existing.
+  // See suggestion-links-conflict.test.ts for the rendered SQL of both forms.
+  it('writes a link with an untargeted onConflictDoNothing, so it plans on any schema', async () => {
     seedTicket({ status: 'in_review' })
     await transitionSuggestion(42, 'verified', 'agent:qa-reviewer', { note: 'preview renders' })
     expect(h.state.conflictTargets).toHaveLength(1)
-    const target = h.state.conflictTargets[0] as Array<{ name: string }>
-    expect(target.map(c => c.name)).toEqual(['suggestion_id', 'kind', 'ref'])
+    expect(h.state.conflictTargets[0]).toBeUndefined()
   })
 
   it('409s on a pair outside the map', async () => {

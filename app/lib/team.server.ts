@@ -2178,6 +2178,28 @@ export interface TransitionOpts {
 
 export type TicketRow = typeof homepageTeamSuggestions.$inferSelect
 
+/**
+ * Append links to a ticket, skipping a triple the row already carries.
+ *
+ * The conflict clause is deliberately UNTARGETED. Naming the arbiter columns
+ * (`onConflictDoNothing({ target: [...] })`) makes Postgres infer an index at
+ * PLAN time, so the statement fails with 42P10 -- "no unique or exclusion
+ * constraint matching the ON CONFLICT specification" -- on any database where
+ * `uq_suggestion_links_sugg_kind_ref` has not been created yet. That is not
+ * hypothetical: #1045 shipped the targeted form together with migration 092,
+ * which is manual (it opens with a DELETE, so classifyFile calls it 'manual'
+ * and the build-time apply step skips it). The code deployed, the index did
+ * not, and every link and note write through this function 500'd in production
+ * for hours -- taking transitionSuggestion, createSuggestion and the whole
+ * /api/team/suggestion write surface down with it.
+ *
+ * Untargeted, the statement plans against any schema and its behaviour tracks
+ * the schema instead of assuming it: no index yet means a duplicate triple is
+ * still inserted (exactly the pre-#1045 behaviour, which was untidy, not
+ * broken), and the moment 092 lands the same call dedupes race-safely with no
+ * redeploy. Correctness of the WRITE must never depend on a migration that
+ * cannot auto-apply.
+ */
 async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Promise<void> {
   if (links.length === 0) return
   await db.insert(suggestionLinks).values(
@@ -2187,9 +2209,7 @@ async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Pr
       ref:          l.ref,
       state:        l.state ? l.state.slice(0, 16) : null,
     })),
-  ).onConflictDoNothing({
-    target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
-  })
+  ).onConflictDoNothing()
 }
 
 /**

@@ -1453,9 +1453,13 @@ export const suggestionLinks = pgTable('suggestion_links', {
   suggKindIdx: index('idx_suggestion_links_sugg_kind').on(t.suggestionId, t.kind),
   // 092: the per-cycle writers (addTicketLinks/addTicketLink in team.server.ts
   // and release-engine.server.ts) re-add the same (suggestionId, kind, ref)
-  // link on every poll instead of upserting; this index plus onConflictDoNothing
-  // at both call sites makes a repeat write a no-op. See migration 092 for the
-  // one-time dedupe of rows this constraint would otherwise reject.
+  // link on every poll instead of upserting; this index is what turns their
+  // UNTARGETED onConflictDoNothing() into a no-op on a repeat write. The clause
+  // names no arbiter columns on purpose (see addTicketLinks): targeting them
+  // makes Postgres infer this index at plan time and fail with 42P10 wherever
+  // migration 092 has not been run, which is how the ticket bus went down on
+  // 2026-09-02. See migration 092 for the one-time dedupe of the rows this
+  // constraint would otherwise reject.
   uniqSuggKindRef: uniqueIndex('uq_suggestion_links_sugg_kind_ref').on(t.suggestionId, t.kind, t.ref),
 }))
 
