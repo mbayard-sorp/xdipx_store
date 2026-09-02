@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { timingSafeEqual } from 'node:crypto'
-import { handlePricingBatchRecompute } from './cron.pricing-batch-recompute.js'
+import { handlePricingBatchRecompute, handlePricingAuditPrune } from './cron.pricing-batch-recompute.js'
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a)
@@ -615,6 +615,8 @@ export function createCronRoutes() {
    * Query: ?dry=1 to inspect counts without applying (not yet implemented; returns counts).
    */
   cronRoute('/pricing-batch-recompute', handlePricingBatchRecompute)
+  // Retention, deliberately on its own budget rather than riding the recompute's.
+  cronRoute('/pricing-audit-prune', handlePricingAuditPrune)
 
   /**
    * POST /cron/import-monitor

@@ -148,3 +148,42 @@ describe('findNearDuplicate', () => {
     expect(hit).toBeNull()
   })
 })
+
+/**
+ * Regression cover for the dead new-product weekly cap.
+ *
+ * `server/webhooks.ts` filed rows keyed `new-product:<handle>` and then counted
+ * this week's rows with `LIKE 'new-product:%'`. Because every key written through
+ * `createSuggestion` is canonicalised — colons become dashes — the stored key was
+ * `new-product-<handle>` and the count matched nothing, forever. `weeklyCount` was
+ * permanently 0, so a cap of three launches a week never fired once: 122 rows in
+ * six days, all auto-approved into a lane that could not drain them.
+ *
+ * The property that matters is not the literal string, it is that the prefix a
+ * reader searches for is derived from the same function the writer stores through.
+ */
+describe('new-product dedupe key: reader and writer agree', () => {
+  const stem = canonicalDedupeKey('new-product')
+
+  it('canonicalises the colon form the webhook used to write', () => {
+    expect(canonicalDedupeKey('new-product:some-handle')).toBe('new-product-some-handle')
+  })
+
+  it('the raw colon prefix matches nothing that is actually stored', () => {
+    // This is the bug, pinned: searching the pre-canonical form can never hit.
+    expect(canonicalDedupeKey('new-product:some-handle').startsWith('new-product:')).toBe(false)
+  })
+
+  it('a key built from the derived stem survives canonicalisation intact', () => {
+    const written = canonicalDedupeKey(`${stem}-some-handle`)
+    expect(written).toBe(`${stem}-some-handle`)
+    expect(written.startsWith(`${stem}-`)).toBe(true)
+  })
+
+  it('holds for handles carrying separators the canonicaliser rewrites', () => {
+    for (const handle of ['we-vibe_chorus', 'lelo.sona/2', 'njoy pure wand']) {
+      const written = canonicalDedupeKey(`${stem}-${handle}`)
+      expect(written.startsWith(`${stem}-`)).toBe(true)
+    }
+  })
+})

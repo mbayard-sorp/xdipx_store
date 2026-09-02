@@ -1411,6 +1411,12 @@ export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   blockedById:    integer('blocked_by_id'),
   attemptCount:   integer('attempt_count').notNull().default(0),
   lastError:      text('last_error'),
+  /**
+   * Why a ticket is `blocked`, as a queryable class rather than prose (089).
+   * R-DEV already names it in the transition note; this is the half a router
+   * can read. See TICKET_BLOCK_CLASSES in app/lib/team.server.ts.
+   */
+  blockClass:     varchar('block_class', { length: 24 }),
   verifiedBy:     varchar('verified_by', { length: 32 }),
   verifiedAt:     timestamp('verified_at', { withTimezone: true }),
 }, t => ({
