@@ -35,6 +35,9 @@ import {
   WATCH_SAMPLE,
   WATCH_WINDOW_DAYS,
   VALVE_OFF_AT_REMOVALS,
+  ceilingKey,
+  changedAtKey,
+  recoveredFrequency,
   steppedDown,
   type RemovalWatchResult,
   type RemovalWatchRepo,
@@ -219,14 +222,43 @@ export async function runXRemovalWatch(deps: XRemovalWatchDeps = {}): Promise<Re
     removalsInWindow,
     unknown,
   }
-  if (gone.length === 0) return result
-
-  // ── A removal happened. Step down. ───────────────────────────────────────
   const raw = await readSetting('social_freq_x')
   const current = Number.isFinite(Number(raw)) && Number(raw) > 0 ? Number(raw) : 1
+
+  // ── Nothing gone. The only place volume climbs back. ─────────────────────
+  // Same rule and same reasoning as the Instagram watcher; see
+  // `recoveredFrequency` for why each refusal exists. Reaching here means the
+  // sweep looked, saw posts, and found none removed.
+  if (gone.length === 0) {
+    const ceilingRaw = await readSetting(ceilingKey('x'))
+    const changedRaw = await readSetting(changedAtKey('x'))
+    const changedAt = changedRaw ? new Date(changedRaw) : null
+    const restored = recoveredFrequency({
+      current,
+      ceiling: Number.isFinite(Number(ceilingRaw)) && Number(ceilingRaw) > 0 ? Number(ceilingRaw) : null,
+      removalsInWindow,
+      lastChangeAt: changedAt && !Number.isNaN(changedAt.getTime()) ? changedAt : null,
+      now,
+      observed: true,
+    })
+    if (restored !== null) {
+      await writeSetting('social_freq_x', String(restored))
+      await writeSetting(changedAtKey('x'), now.toISOString())
+      result.frequencyRestoredTo = restored
+      // No valve write, ever. x_autopublish_enabled goes off on a pattern and
+      // back on only by the owner.
+    }
+    return result
+  }
+
+  // ── A removal happened. Step down. ───────────────────────────────────────
   const next = steppedDown(current)
   if (next !== current) {
     await writeSetting('social_freq_x', String(next))
+    const priorCeiling = Number(await readSetting(ceilingKey('x')))
+    const ceiling = Math.max(current, Number.isFinite(priorCeiling) ? priorCeiling : 0)
+    await writeSetting(ceilingKey('x'), String(ceiling))
+    await writeSetting(changedAtKey('x'), now.toISOString())
     result.frequencySteppedTo = next
   }
 

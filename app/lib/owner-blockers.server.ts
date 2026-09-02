@@ -302,6 +302,52 @@ async function endpoint200(arg: string): Promise<ProbeVerdict> {
   return res.status >= 200 && res.status < 300
 }
 
+/**
+ * Re-run the credential check that filed the row.
+ *
+ * The tri-state maps straight across, which is the point of having written the
+ * checkers that way: `live` clears the row, `dead` and a required-but-missing
+ * value keep it open, and `unknown` — a timeout, a 5xx, a shape the checker did
+ * not recognise — is a could-not-ask that must never clear or condemn.
+ */
+async function credentialLive(key: string): Promise<ProbeVerdict> {
+  const { checkCredential } = await import('~/lib/credential-health.server')
+  const { integration } = await import('~/lib/credential-health')
+  const v = await checkCredential(key)
+  if (v.state === 'live') return true
+  if (v.state === 'dead') return false
+  if (v.state === 'unconfigured') return integration(key)?.required ? false : null
+  return null
+}
+
+/**
+ * `table|keyColumn|keyValue|column|expectedValue` — does one identified row hold
+ * one expected value?
+ *
+ * Exists because `rows_exist` is the wrong shape for a "go change this data"
+ * ask: it asks whether a table has any rows, which is usually already true, and
+ * blocker #57 would have closed itself instantly on that. Every identifier is
+ * checked with `isIdent` before interpolation, and both values are bound
+ * parameters, so nothing here concatenates caller text into SQL.
+ *
+ * A malformed arg returns null, not false: a probe that cannot parse its own
+ * argument has not asked the question, and answering "still blocked" would be
+ * the #4702 collapse in a new place.
+ */
+async function rowMatches(arg: string): Promise<ProbeVerdict> {
+  const [table, keyCol, keyVal, col, want] = arg.split('|')
+  if (!table || !keyCol || !keyVal || !col || want === undefined) return null
+  if (!isIdent(table) || !isIdent(keyCol) || !isIdent(col)) return null
+  const exists = await tableExists(table)
+  if (exists !== true) return null
+  const res = await db.execute(sql`
+    SELECT 1 FROM ${sql.raw(`"${table}"`)}
+     WHERE ${sql.raw(`"${keyCol}"`)}::text = ${keyVal}
+       AND ${sql.raw(`"${col}"`)}::text = ${want}
+     LIMIT 1`)
+  return (res.rows ?? []).length > 0
+}
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -317,6 +363,8 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   pr_merged:     prMerged,
   check_green:   checkGreen,
   endpoint_200:  endpoint200,
+  credential_live: credentialLive,
+  row_matches:   rowMatches,
 }
 
 /**

@@ -7,6 +7,7 @@
 // var. The cases below are mostly about telling those two apart.
 import { describe, it, expect } from 'vitest'
 import {
+  recoveredFrequency,
   runRemovalWatch,
   steppedDown,
   VALVE_OFF_AT_REMOVALS,
@@ -77,7 +78,13 @@ describe('runRemovalWatch', () => {
     })
     expect(r.removed).toEqual([1])
     expect(calls.removed).toEqual([1])
-    expect(calls.settings).toEqual([{ key: 'social_freq_instagram', value: '2' }])
+    // Three writes, not one. The cut is the first; the other two are what makes
+    // it reversible, and before this the cut was permanent by omission.
+    expect(calls.settings).toEqual([
+      { key: 'social_freq_instagram', value: '2' },
+      { key: 'social_freq_instagram_ceiling', value: '4' },
+      { key: 'social_freq_instagram_changed_at', value: expect.any(String) },
+    ])
   })
 
   it('leaves autopublish ON after a single removal', async () => {
@@ -152,5 +159,106 @@ describe('runRemovalWatch', () => {
     expect(calls.settings.some(s => s.key === 'social_freq_instagram')).toBe(false)
     // Still tells the owner, which is the part that must not be skipped.
     expect(calls.blockers).toHaveLength(1)
+  })
+})
+
+describe('recoveredFrequency — the half that was written down and never built', () => {
+  const base = {
+    current: 1,
+    ceiling: 3,
+    removalsInWindow: 0,
+    lastChangeAt: new Date('2026-08-01T00:00:00Z'),
+    now: new Date('2026-09-02T00:00:00Z'),   // 32 days clean
+    observed: true,
+  }
+
+  it('gives one step back after a clean stretch', () => {
+    // The blocker email the owner receives has always said "volume is earned
+    // back by a clean stretch". Nothing implemented that sentence, so a single
+    // removal was a permanent halving.
+    expect(recoveredFrequency(base)).toBe(2)
+  })
+
+  it('climbs by one where it fell by half', () => {
+    // Asymmetric on purpose: trust that took a strike to lose should not come
+    // back in a single tick.
+    expect(steppedDown(4)).toBe(2)
+    expect(recoveredFrequency({ ...base, current: 2, ceiling: 4 })).toBe(3)
+  })
+
+  it('never climbs past where it was before the cut', () => {
+    expect(recoveredFrequency({ ...base, current: 3, ceiling: 3 })).toBeNull()
+    expect(recoveredFrequency({ ...base, current: 2, ceiling: 3 })).toBe(3)
+  })
+
+  it('does nothing when no ceiling was ever recorded', () => {
+    // Reversing a penalty, not setting policy. With no record of a cut there is
+    // nothing to reverse, and inventing a target would be this function
+    // deciding the store's posting volume.
+    expect(recoveredFrequency({ ...base, ceiling: null })).toBeNull()
+  })
+
+  it('refuses while a removal sits inside the window', () => {
+    expect(recoveredFrequency({ ...base, removalsInWindow: 1 })).toBeNull()
+  })
+
+  it('refuses before the stretch is long enough', () => {
+    const now = new Date('2026-08-21T00:00:00Z')   // 20 days
+    expect(recoveredFrequency({ ...base, now })).toBeNull()
+    expect(recoveredFrequency({ ...base, now: new Date('2026-08-22T00:00:00Z') })).toBe(2)
+  })
+
+  it('refuses when it does not know when the clock started', () => {
+    // The safe default for a missing timestamp on a channel under a strike is
+    // to stay throttled, not to assume the cut was long ago.
+    expect(recoveredFrequency({ ...base, lastChangeAt: null })).toBeNull()
+  })
+
+  it('refuses when the sweep could not actually look', () => {
+    // #4702 applied here: a could-not-ask is not a no. Zero removals because
+    // the token is dead, and zero removals because nothing was taken down, must
+    // never mean the same thing — and only one of them is a clean stretch. The
+    // same holds for a channel that posted nothing at all, which has proved
+    // nothing.
+    expect(recoveredFrequency({ ...base, observed: false })).toBeNull()
+  })
+})
+
+describe('runRemovalWatch restores volume', () => {
+  it('climbs one step when everything is live and the stretch is clean', async () => {
+    const { calls, deps } = harness([row(1), row(2)])
+    const long_ago = new Date(Date.now() - 40 * 86_400_000).toISOString()
+    const r = await runRemovalWatch({
+      ...deps,
+      mediaState: allLive,
+      readSetting: async (k: string) =>
+        k === 'social_freq_instagram' ? '1'
+        : k === 'social_freq_instagram_ceiling' ? '3'
+        : k === 'social_freq_instagram_changed_at' ? long_ago
+        : null,
+    })
+    expect(r.frequencyRestoredTo).toBe(2)
+    expect(calls.settings).toEqual([
+      { key: 'social_freq_instagram', value: '2' },
+      { key: 'social_freq_instagram_changed_at', value: expect.any(String) },
+    ])
+  })
+
+  it('never turns the autopublish valve back on', async () => {
+    // Volume is a throttle and can be earned back. Permission to publish
+    // unattended is a judgement call, turned off by a pattern of removals and
+    // back on only by the owner. Nothing here is entitled to make it.
+    const { calls, deps } = harness([row(1), row(2)])
+    const long_ago = new Date(Date.now() - 40 * 86_400_000).toISOString()
+    await runRemovalWatch({
+      ...deps,
+      mediaState: allLive,
+      readSetting: async (k: string) =>
+        k === 'social_freq_instagram' ? '1'
+        : k === 'social_freq_instagram_ceiling' ? '3'
+        : k === 'social_freq_instagram_changed_at' ? long_ago
+        : null,
+    })
+    expect(calls.settings.some(s => s.key.includes('autopublish'))).toBe(false)
   })
 })
