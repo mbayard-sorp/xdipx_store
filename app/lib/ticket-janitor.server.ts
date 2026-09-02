@@ -47,12 +47,15 @@
  * `dedupe_key` and has already reached a tracked-or-shipped status, or (b) the
  * ticket's own text cites a PR number that GitHub reports merged.
  *
- * `buildBlockedDigest` / `runBlockedTicketDigest` (#2863) is the weekly
- * blocked-ticket parking-lot digest. It is NOT wired to a cron schedule:
- * `vercel.json` and `server/cron*.ts` are protected paths this module cannot
- * touch. `runBlockedTicketDigest` is ready to call from either once the owner
- * adds the one-line schedule and route; see the PR description for the exact
- * remainder.
+ * The weekly blocked-ticket digest (#2863) used to live here, fully built and
+ * connected to nothing. Deleted 2026-09-02 rather than wired. Its stated reason
+ * for being unwired — that `vercel.json` and `server/cron*.ts` were protected —
+ * stopped being true on 2026-08-19, so it could have been connected at any
+ * point in the fortnight after. It was not, and connecting it now would have
+ * made it a sixteenth thing emailing the owner at exactly the moment the other
+ * fifteen were being collapsed into one queue. Its content is a line in the
+ * health strip: `computeOwnerQueue()` already reports the blocked count, the
+ * at-zero-attempts count, and the oldest blocker's age.
  */
 
 import { and, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
@@ -67,8 +70,6 @@ import {
   type PullRequestSummary,
 } from '~/lib/github.server'
 import { runWithOutOfBandReconcile, transitionSuggestion } from '~/lib/team.server'
-import { sendOwnerEmail } from '~/lib/owner-alerts.server'
-import { kvSetNX } from '~/lib/kv.server'
 
 /* ── SLA thresholds ────────────────────────────────────────────────────────── */
 
@@ -1172,203 +1173,4 @@ export async function reconcilePrLinkStates(
   const adopted = await adoptReplacementPrLinks(closed)
 
   return { checked: byNumber.size, updated, adopted, skipped: false }
-}
-
-/* ── Weekly blocked-ticket digest (#2863) ──────────────────────────────────── */
-
-function digestEsc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-function digestClip(s: string, n: number): string {
-  const t = s.replace(/\s+/g, ' ').trim()
-  return t.length <= n ? t : `${t.slice(0, n - 1)}…`
-}
-
-export interface BlockedDigestRow {
-  id: number
-  kind: string
-  priority: number
-  ageHours: number
-  suggestion: string
-  /** The single question or action that would clear this block, derived from
-   *  `lastError`/the note text, or the literal string below when neither
-   *  carries a reason. */
-  unblockQuestion: string
-}
-
-export interface BlockedDigestGroup {
-  priority: number
-  rows: BlockedDigestRow[]
-}
-
-export interface BlockedDigest {
-  generatedAt: string
-  totalCount: number
-  /** Rows with no `lastError` and no note: parked without a reason. */
-  reasonUnknownCount: number
-  /** Ascending by priority (1 = highest). Each group's rows are oldest first. */
-  byPriority: BlockedDigestGroup[]
-}
-
-/** The literal marker for a block that carries no reason anywhere (mirrors
- *  `BlockedTicket.emptyReason`), so a silent park is visible as exactly that
- *  rather than smoothed into a vague summary. */
-export const REASON_UNKNOWN = 'REASON UNKNOWN: no last_error and no note recorded on this row.'
-
-/**
- * Turn a blocked ticket's reason text into the one question or action that
- * would clear it. Heuristic only, never authoritative — it recognizes the
- * phrasing R-DEV's own blocks already use (protected-path escalations,
- * migration asks, explicit owner asks) and otherwise echoes the reason
- * verbatim, clipped. `REASON_UNKNOWN` covers the emptyReason case.
- */
-export function deriveUnblockQuestion(b: BlockedTicket): string {
-  const reason = (b.lastError?.trim() || b.noteRef?.trim() || '')
-  if (!reason) return REASON_UNKNOWN
-  if (/protected path/i.test(reason)) {
-    return `Owner-authored change needed (protected path): ${digestClip(reason, 160)}`
-  }
-  if (/\bmigration\b/i.test(reason)) {
-    return `Owner needs to apply a migration: ${digestClip(reason, 160)}`
-  }
-  if (/\bowner\b/i.test(reason)) {
-    return `Needs an owner decision: ${digestClip(reason, 160)}`
-  }
-  return digestClip(reason, 160)
-}
-
-/**
- * Pure digest builder: group blocked rows by priority (ascending, 1 highest),
- * oldest-first within each group, with a derived unblock question per row.
- * Every row that comes in is represented in exactly one output row — nothing
- * here may drop a blocked ticket, since a dropped row is the exact silent
- * parking-lot failure #2863 exists to fix.
- */
-export function buildBlockedDigest(rows: readonly BlockedTicket[], now: Date = new Date()): BlockedDigest {
-  const byPriority = new Map<number, BlockedDigestRow[]>()
-  let reasonUnknownCount = 0
-  for (const b of rows) {
-    if (b.emptyReason) reasonUnknownCount += 1
-    const priority = b.priority ?? 3
-    const row: BlockedDigestRow = {
-      id: b.id,
-      kind: b.kind,
-      priority,
-      ageHours: b.ageHours,
-      suggestion: b.suggestion,
-      unblockQuestion: deriveUnblockQuestion(b),
-    }
-    const list = byPriority.get(priority) ?? []
-    list.push(row)
-    byPriority.set(priority, list)
-  }
-  const byPriorityGroups: BlockedDigestGroup[] = [...byPriority.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([priority, groupRows]) => ({
-      priority,
-      rows: [...groupRows].sort((a, b) => b.ageHours - a.ageHours),
-    }))
-  return {
-    generatedAt: now.toISOString(),
-    totalCount: rows.length,
-    reasonUnknownCount,
-    byPriority: byPriorityGroups,
-  }
-}
-
-/**
- * Approximate weekly bucket key for the send-once KV guard: `${year}-W${n}`,
- * n = days since Jan 1 of that year divided by 7. Not calendar-precise ISO
- * week numbering (no need — this only has to be stable within one calendar
- * week and roll over once a week), kept simple and pure so it is testable
- * without a clock library.
- */
-export function weekBucketKey(date: Date): string {
-  const start = Date.UTC(date.getUTCFullYear(), 0, 1)
-  const diffDays = Math.floor((date.getTime() - start) / 86_400_000)
-  const week = Math.floor(diffDays / 7)
-  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
-}
-
-export function blockedDigestSubject(digest: BlockedDigest): string {
-  const reasonSuffix = digest.reasonUnknownCount > 0 ? `, ${digest.reasonUnknownCount} REASON UNKNOWN` : ''
-  return `xdipx blocked-ticket digest: ${digest.totalCount} row${digest.totalCount === 1 ? '' : 's'}${reasonSuffix}`
-}
-
-/** Renders the weekly blocked-ticket email. Pure HTML string, no send side
- *  effect, so it is testable without mocking the mail transport. */
-export function renderBlockedDigestEmail(digest: BlockedDigest): string {
-  if (digest.totalCount === 0) {
-    return '<p>No blocked tickets this week. The parking lot is empty.</p>'
-  }
-  const summary = `<p>${digest.totalCount} blocked ticket${digest.totalCount === 1 ? '' : 's'}`
-    + `${digest.reasonUnknownCount > 0 ? `, <strong>${digest.reasonUnknownCount} with REASON UNKNOWN</strong>` : ''}.</p>`
-  const groups = digest.byPriority.map(g => {
-    const rows = g.rows.map(r => (
-      `<li><strong>#${r.id}</strong> (${digestEsc(r.kind)}, ${r.ageHours}h old) `
-      + `${digestEsc(digestClip(r.suggestion, 90))}<br>`
-      + `<span style="color:#6f645c;">${digestEsc(digestClip(r.unblockQuestion, 200))}</span></li>`
-    )).join('')
-    return `<h3>Priority ${g.priority} (${g.rows.length})</h3><ul style="margin:0 0 10px;padding-left:18px;">${rows}</ul>`
-  }).join('')
-  return summary + groups
-}
-
-/** Every blocked ticket, whatever its age or kind. Reuses `gatherSlaRows` and
- *  `classifySlaBreaches` rather than a second query, so the priority field and
- *  the age/reason computation can never drift from the daily digest's. */
-async function gatherBlockedTickets(now: Date = new Date()): Promise<BlockedTicket[]> {
-  const rows = await gatherSlaRows()
-  return classifySlaBreaches(rows, now).blocked
-}
-
-/** KV key prefix for the weekly send-once guard. */
-export const BLOCKED_DIGEST_KV_PREFIX = 'blocked-digest:sent:'
-
-export interface BlockedDigestRunResult {
-  sent: boolean
-  skipped?: string
-  totalCount: number
-  reasonUnknownCount: number
-}
-
-/**
- * Build and send the weekly blocked-ticket digest (#2863). NOT wired to a
- * cron schedule: `vercel.json` and `server/cron*.ts` are protected paths this
- * module cannot touch. Call this manually to verify (see the PR description
- * for the exact one-line remainder needed to register `0 13 * * 1`), or from
- * the owner-digest cron's Monday branch once that lands.
- *
- * KV-guarded once per calendar week (see `weekBucketKey`), the same
- * once-per-period pattern `runOwnerDigest` uses daily. `force: true` bypasses
- * the guard for manual testing. Sends nothing when there are zero blocked
- * rows, same as a clean bill of health needs no email.
- */
-export async function runBlockedTicketDigest(
-  opts: { force?: boolean; now?: Date } = {},
-): Promise<BlockedDigestRunResult> {
-  const now = opts.now ?? new Date()
-
-  if (!opts.force) {
-    const key = `${BLOCKED_DIGEST_KV_PREFIX}${weekBucketKey(now)}`
-    const first = await kvSetNX(key, String(Date.now()), 8 * 24 * 3600)
-    if (!first) {
-      return { sent: false, skipped: 'already sent this week (pass force=true to re-send)', totalCount: 0, reasonUnknownCount: 0 }
-    }
-  }
-
-  const rows = await gatherBlockedTickets(now)
-  const digest = buildBlockedDigest(rows, now)
-
-  if (digest.totalCount === 0) {
-    return { sent: false, skipped: 'no blocked tickets', totalCount: 0, reasonUnknownCount: 0 }
-  }
-
-  const result = await sendOwnerEmail(
-    blockedDigestSubject(digest),
-    renderBlockedDigestEmail(digest),
-    { escalation: 'blocker-list' },
-  )
-  return { sent: result.sent, totalCount: digest.totalCount, reasonUnknownCount: digest.reasonUnknownCount }
 }

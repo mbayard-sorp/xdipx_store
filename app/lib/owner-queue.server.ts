@@ -50,6 +50,7 @@ import { sql } from 'drizzle-orm'
 
 import { db } from '~/lib/db.server'
 import { listOpenBlockers } from '~/lib/owner-blockers.server'
+import { recentSettingChanges } from '~/lib/settings.server'
 import type { OwnerBlocker } from '~/lib/owner-blockers-core'
 
 const LOG = '[owner-queue]'
@@ -115,6 +116,26 @@ export interface MoneyBlock {
   verdict: string
 }
 
+export interface ValveChange {
+  key: string
+  oldValue: string | null
+  newValue: string | null
+  actor: string | null
+  source: string | null
+  changedAt: string
+  /**
+   * True when nothing recorded who made the change.
+   *
+   * `settings_audit_log` gained actor and source in migration 072 precisely so
+   * a flip could be attributed afterwards, and it matters: four team
+   * auto-approve valves were flipped on 2026-07-18 while the docs said
+   * otherwise for eleven days. An unattributed flip is not an accusation, it is
+   * a gap in the record, and the owner is the only person who can say whether
+   * it was theirs.
+   */
+  unattributed: boolean
+}
+
 export interface LaneFlow {
   kind: string
   created14d: number
@@ -137,6 +158,18 @@ export interface HealthBlock {
    * failing" from "the fleet is succeeding into a state nothing empties".
    */
   laneFlow: LaneFlow[]
+  /**
+   * Valve flips in the last 24h.
+   *
+   * `recentSettingChanges()` has carried the docstring "used by the owner
+   * digest so a flip the owner did not make is visible the next morning rather
+   * than discovered weeks later by an audit" while having ZERO callers. The
+   * plan for this stage said delete it. Wiring it is strictly better: the
+   * function was right about what the owner needs, it simply had nowhere to
+   * report to until there was one owner surface — and deleting it would also
+   * have meant editing a protected path to remove something useful.
+   */
+  recentValveChanges: ValveChange[]
 }
 
 export interface OwnerQueue {
@@ -364,6 +397,22 @@ async function gatherHealth(gaps: string[]): Promise<HealthBlock> {
     openBlockers: 0,
     blockersWithoutProbe: 0,
     laneFlow: [],
+    recentValveChanges: [],
+  }
+
+  try {
+    out.recentValveChanges = (await recentSettingChanges(24, 20)).map((c) => ({
+      key: c.key,
+      oldValue: c.oldValue,
+      newValue: c.newValue,
+      actor: c.actor,
+      source: c.source,
+      changedAt: c.changedAt.toISOString(),
+      unattributed: !c.actor || c.actor === 'unknown',
+    }))
+  } catch (err) {
+    gaps.push('valve-changes')
+    console.warn(`${LOG} health: valve changes failed`, err)
   }
 
   try {
