@@ -641,47 +641,78 @@ export function createCronRoutes() {
    * signal vs noise via Claude haiku, open GitHub issues for P0 groups.
    * Body (optional): { windowMinutes?: number }
    */
-  cronRoute('/log-monitor', async (req, res) => {
-    // Three independent jobs share this route because it is the only existing
-    // every-15-minutes slot and vercel.json is a protected path. Each gets its
-    // own try: none of them may take down another, and in particular neither
-    // conversion job may be skipped because log classification failed.
-    //
-    // Order is deliberate. The watcher observes delivery health from
-    // order_line_items (did the webhook handler run at all), then the reconciler
-    // heals CAPI delivery via meta_capi_outbox. They read different tables, so
-    // healing cannot mask the alarm, which is the failure mode that let the
-    // Purchase outage run for two months.
-
-    // 1. Conversion-delivery watcher (ticket #590). Owns the P0 alerting path.
+  /**
+   * The conversion-delivery watcher and the CAPI reconciler, on their own cron.
+   *
+   * These two rode `/cron/log-monitor` for one stated reason, written in the
+   * comment they used to sit under: it was "the only existing every-15-minutes
+   * slot and vercel.json is a protected path". **`vercel.json` stopped being a
+   * protected path on 2026-08-19**, so the constraint that put a P0 money-path
+   * watcher inside a log classifier is gone.
+   *
+   * Splitting them out is not tidiness. Stage G3 drops the log-monitor route to
+   * hourly, and leaving these attached would have quietly taken the check that
+   * notices Purchase conversion delivery is dead from every 15 minutes to every
+   * 60 — a money-path regression hidden inside a cost saving, on the exact path
+   * that once stayed broken for two months undetected.
+   *
+   * Order is deliberate and unchanged. The watcher observes delivery health from
+   * `order_line_items` (did the webhook handler run at all), then the reconciler
+   * heals CAPI delivery via `meta_capi_outbox`. They read different tables, so
+   * healing cannot mask the alarm.
+   */
+  cronRoute('/conversion-watch', async (_req, res) => {
+    // Each gets its own try: neither may take down the other, and in particular
+    // the watcher must never be skipped because reconciliation threw.
     let purchaseWatch: unknown = null
     try {
       const { runPurchaseWatcher } = await import('../app/lib/purchase-watcher.server.js')
       purchaseWatch = await runPurchaseWatcher()
     } catch (err) {
-      console.error('[cron:log-monitor] purchase-watcher failed (ignored):', err)
+      console.error('[cron:conversion-watch] purchase-watcher failed (ignored):', err)
     }
 
-    // 2. Purchase reconciliation. Sends any Purchase the webhook did not.
     let purchaseReconcile: unknown = null
     try {
       const { reconcilePurchases } = await import('../app/lib/purchase-capi.server.js')
       const r = await reconcilePurchases({ sinceHours: 26 })
       purchaseReconcile = { scanned: r.scanned, gaps: r.gaps.length, sent: r.sent.length, failed: r.failed.length, tooOld: r.tooOld.length }
     } catch (err) {
-      console.error('[cron:log-monitor] purchase reconcile error:', err)
+      console.error('[cron:conversion-watch] purchase reconcile error:', err)
     }
 
-    // 3. Log classification.
+    res.json({ ok: true, purchaseWatch, purchaseReconcile })
+  })
+
+  /**
+   * POST /cron/log-monitor
+   * Hourly. The auto-expired-run folder.
+   *
+   * The Haiku log classifier that gave this route its name is gone (Stage G3):
+   * 433 calls and 16.9M input tokens over 30 days for zero log-derived tickets
+   * in its lifetime. What is left reads `homepage_team_runs` for runs the idle
+   * reaper marked failed and files one ticket per recurring class at the lane
+   * that owns the run. That never needed a model, and it was the only thing
+   * here that ever produced a ticket.
+   *
+   * Hourly rather than every 15 minutes because these are post-hoc diagnostic
+   * tickets, not real-time pages — `fetchExpiredRunGroups` deliberately holds a
+   * run back through a recovery grace before surfacing it, since a quiet-but-
+   * alive run can be reaped and then finish successfully minutes later.
+   *
+   * The route path is kept rather than renamed: ADR-009 records the decision to
+   * ride it, and rewriting an ADR to match a later change falsifies the record.
+   */
+  cronRoute('/log-monitor', async (req, res) => {
     try {
       const { runLogMonitor } = await import('../app/lib/log-monitor.server.js')
       const rawWindow = req.body?.windowMinutes ?? (req.query['windowMinutes'] ? Number(req.query['windowMinutes']) : undefined)
-      const windowMinutes = typeof rawWindow === 'number' && !isNaN(rawWindow) ? rawWindow : 15
+      const windowMinutes = typeof rawWindow === 'number' && !isNaN(rawWindow) ? rawWindow : 60
       const result = await runLogMonitor({ windowMinutes })
-      res.json({ ok: true, ...result, purchaseWatch, purchaseReconcile })
+      res.json({ ok: true, ...result })
     } catch (err) {
       console.error('[cron:log-monitor]', err)
-      res.status(500).json({ error: String(err), purchaseWatch, purchaseReconcile })
+      res.status(500).json({ error: String(err) })
     }
   })
 
@@ -691,7 +722,7 @@ export function createCronRoutes() {
    * On-demand Meta CAPI Purchase reconciliation. Sends a Purchase for every
    * paid Shopify order with no resolved ledger row. Idempotent by construction
    * (deterministic purchase_<orderId> event id), so it is always safe to run.
-   * No vercel.json cron entry: the sweep also rides /cron/log-monitor.
+   * No vercel.json cron entry: the sweep also rides /cron/conversion-watch.
    */
   cronRoutePost('/purchase-reconcile', async (req, res) => {
     try {
