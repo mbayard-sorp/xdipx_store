@@ -1479,11 +1479,31 @@ export interface RetireEvidence {
    *  `docs/store-team/routine-agent-editor.md#step-2`), showing the rule
    *  already exists in the target doc. */
   satisfiedBy?: string | undefined
+  /**
+   * Diagnosis evidence (#7037): the row was investigated and no code fix is
+   * warranted (block class `no-code-work`). Unlike the other two shapes there
+   * is no external artifact to check the claim against — no PR, no
+   * superseding row — so the fence is a substantive note plus a real repo
+   * path the investigator names as what they read.
+   */
+  noCodeWork?: { note: string; file: string } | undefined
 }
 
 /** `docs/foo/bar.md` or `docs/foo/bar.md#anchor` — a repo doc reference. */
 const SATISFIED_BY_DOC_RE = /^[\w./-]+\.md(#[\w./-]+)?$/
 const SATISFIED_BY_PR_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d{1,6}\b/
+/**
+ * A repo source/doc path, e.g. `app/lib/foo.server.ts` or `db/schema.ts`.
+ * Format-only, like SATISFIED_BY_DOC_RE above — deliberately NOT an
+ * `existsSync` disk check. Only `docs/**`, `build/**` and `.claude/agents/**`
+ * ship in the Vercel function bundle (`includeFiles` in vercel.json); a real
+ * `app/lib/*.ts` diagnosis target is compiled away and would never resolve on
+ * disk in production, so a disk check would reject every genuine no-code-work
+ * evidence rather than validate it.
+ */
+const NO_CODE_WORK_FILE_RE = /^(app|server|db|scripts|ivr|docs)\/[\w./-]+\.\w+$/
+/** Filters out "n/a", "see above", and other non-answers. */
+const NO_CODE_WORK_MIN_NOTE_LEN = 40
 
 /**
  * agent-editor retiring an approved row, during its hygiene pass. Thin wrapper
@@ -1508,7 +1528,7 @@ export async function agentRetireSuggestion(
   note: string,
   evidence?: RetireEvidence,
 ): Promise<TicketRow> {
-  if (!evidence || (evidence.supersededById == null && !evidence.satisfiedBy)) {
+  if (!evidence || (evidence.supersededById == null && !evidence.satisfiedBy && !evidence.noCodeWork)) {
     return transitionSuggestion(id, 'dismissed', actor, { note })
   }
 
@@ -1556,6 +1576,25 @@ export async function agentRetireSuggestion(
       )
     }
     links.push({ kind: isPr ? 'pr' : 'doc', ref })
+  }
+  if (evidence.noCodeWork) {
+    const diagNote = evidence.noCodeWork.note?.trim() ?? ''
+    const file = evidence.noCodeWork.file?.trim() ?? ''
+    if (diagNote.length < NO_CODE_WORK_MIN_NOTE_LEN) {
+      throw new Response(
+        `Conflict: retire evidence rejected — noCodeWork.note must be a substantive diagnosis `
+        + `(>= ${NO_CODE_WORK_MIN_NOTE_LEN} chars, got ${diagNote.length})`,
+        { status: 409 },
+      )
+    }
+    if (!NO_CODE_WORK_FILE_RE.test(file)) {
+      throw new Response(
+        'Conflict: retire evidence rejected — noCodeWork.file must name a real repo source/doc path '
+        + '(e.g. app/lib/foo.server.ts) that the investigator read',
+        { status: 409 },
+      )
+    }
+    links.push({ kind: 'diagnosis', ref: `no-code-work: ${file} — ${diagNote}` })
   }
 
   return transitionSuggestion(id, 'dismissed', actor, {
@@ -1716,6 +1755,12 @@ export const AGENT_EVIDENCE_RETIRE_KINDS: readonly string[] = ['instructions', '
  * Reading the 45 notes, ~20 of them already cite a merged PR or a superseding
  * ticket in prose. This edge is what lets that evidence close the row instead of
  * sitting in a note nobody can query.
+ *
+ * A third bucket (#7037) has no PR and no superseding row to cite: rows whose
+ * note says the investigation is complete and no code fix is warranted
+ * ('DIAGNOSIS COMPLETE', 'not a reproducible repo defect'). `RetireEvidence
+ * .noCodeWork` covers those — see its own doc comment for why the fence is a
+ * substantive note plus a repo path, not a disk existence check.
  */
 export const CODE_EVIDENCE_RETIRE_KINDS: readonly string[] = ['code']
 export const CODE_EVIDENCE_RETIRE_ACTORS: readonly TicketActor[] = [
