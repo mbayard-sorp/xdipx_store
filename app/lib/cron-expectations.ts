@@ -245,6 +245,37 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'The daily money row every downstream report reads. A gap here silently zeroes a day.',
   },
   {
+    route: '/cron/db-backup',
+    plane: 'vercel',
+    schedule: '40 4 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'strategy',
+    notes:
+      'The only copy of this database that survives the Neon account. Recorded because a missing '
+      + 'nightly dump has a next actor and a 36h staleness floor the restore probe enforces. Not '
+      + 'money-relevant in the paging sense: a missed dump is not an outage, it is a widening '
+      + 'window, and paging on it would spend the SMS channel on something a queue row covers.',
+  },
+  {
+    route: '/cron/db-restore-probe',
+    plane: 'vercel',
+    schedule: '10 6 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'strategy',
+    notes:
+      'The half that makes the other half a backup. A dump nobody reads back is a file, and the '
+      + 'failures it hides are the expensive ones: a table that serialised to nothing, a gzip that '
+      + 'never finished, a private object the token can no longer read. Daily rather than weekly '
+      + 'because the gap between "the backup broke" and "someone found out" is the quantity G1 '
+      + 'exists to shrink.',
+  },
+  {
     route: '/cron/janitor-sweep',
     plane: 'vercel',
     schedule: '0 */6 * * *',
@@ -338,19 +369,39 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'As warm-homepage, for variant b.',
   },
   {
-    route: '/cron/log-monitor',
+    route: '/cron/conversion-watch',
     plane: 'vercel',
     schedule: '*/15 * * * *',
     periodMinutes: EVERY_15_MIN,
     graceMinutes: 30,
     recorded: false,
+    moneyRelevant: true,
+    ownerTeam: 'strategy',
+    notes:
+      'The conversion-delivery watcher and the CAPI reconciler, split off log-monitor in G3. They '
+      + 'rode that route only because it was the one every-15-minutes slot back when vercel.json '
+      + 'was protected, which it stopped being on 2026-08-19. Leaving them attached while '
+      + 'log-monitor dropped to hourly would have taken the check that notices Purchase delivery '
+      + 'is dead from 15 minutes to 60, on the path that once stayed broken for two months. '
+      + 'moneyRelevant, and the watcher owns one of the two paging classes.',
+  },
+  {
+    route: '/cron/log-monitor',
+    plane: 'vercel',
+    schedule: '25 * * * *',
+    periodMinutes: HOURLY,
+    graceMinutes: 30,
+    recorded: false,
     moneyRelevant: false,
     ownerTeam: 'strategy',
     notes:
-      'Slated to drop to hourly and lose its classifier entirely (milestone g3-logmonitor): 433 '
-      + 'classifier calls and 16.9M input tokens over 30 days, faithfully classifying npm-install '
-      + 'lines, with zero log-derived tickets in its lifetime. The auto-expiry folder is the part '
-      + 'worth keeping.',
+      'Classifier deleted in G3: 433 calls and 16.9M input tokens over 30 days, faithfully '
+      + 'classifying npm-install lines, for zero log-derived tickets in its lifetime. What remains '
+      + 'is the auto-expired-run folder, which never needed a model — an expired run is a '
+      + 'homepage_team_runs row, not a console line, so the classifier could never have seen it. '
+      + 'Hourly because these are post-hoc diagnostic tickets and the query already holds a run '
+      + 'back through a recovery grace. The route keeps its name because ADR-009 records the '
+      + 'decision to ride it and rewriting an ADR to match a later change falsifies the record.',
   },
   {
     route: '/cron/import-monitor',

@@ -384,6 +384,11 @@ describe('ROUTINE_CADENCES', () => {
       'strategy|qa',
       'strategy|strategy',
       'support|support',
+      // Added 2026-09-02. Both were found by findUnwatchedLanes on its first
+      // run: the triggers were created 2026-08-27 and had been producing runs,
+      // and GPU spend, with nothing watching either of them.
+      'video|writers-room',
+      'video|video-render',
     ].sort())
     for (const c of ROUTINE_CADENCES) {
       expect(c.routine.length).toBeGreaterThan(0)
