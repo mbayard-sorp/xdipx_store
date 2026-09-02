@@ -407,3 +407,198 @@ to "proposal, axes confirmed against live vocab, one credentialed count-check
 remaining." It is the most build-ready concept in `concepts/` and the recommended
 next-to-build when traffic returns, or as a cheap-and-certain Nº 07 renderer swap the
 moment the count-check passes.
+
+---
+
+## Count-check resolution + v1 build spec — 2026-09-02 (Routine B, run 646)
+
+> Closes the single residual pre-build gate the 2026-08-26 resolution pinned, and it
+> **did not pass as specified**. Two defects surfaced; both are fixed below. This
+> section supersedes the 2026-08-26 axis table and its tooling instruction where they
+> conflict, and leaves §1-§10 otherwise intact. Still a design artifact: nothing ships
+> without `homepage-ia` slot sign-off, the additive `eitherOr` block, and a reviewed
+> `rr7-engineer` PR.
+
+### The gate needed no credentials after all
+
+The 2026-08-26 resolution deferred this check as "needs credentials this cloud routine
+lacks" and prescribed `tsx scripts/dump-discovery-vocab.ts --csv --group mood`. That
+instruction is now wrong, and the deferral was avoidable. Ticket **#5631** shipped
+`GET /api/team/discovery-vocab` (team-token auth, `computeVocabCounts` in
+`app/lib/discovery.server.ts`) for exactly this purpose: per-tag product counts across
+all three dimensions, served to credential-free cloud routines. Per-pole counts below
+come from that endpoint. Pole *co-occurrence*, which the endpoint does not expose and
+which turned out to be the check that mattered, was measured against the public
+`GET /api/discovery` scoring endpoint, using the fact that `aggScore` for a category is
+the sum of `scoreProduct` over every product in it (`app/lib/discovery-emma.ts`, with
+`SCORE_MOOD = 3`, `SCORE_AUDIENCE = 2`), so a single-tag query yields
+`sum(rails[].score) / 3` as an exact product count, and a multi-tag query yields the
+full-match count as the number of returned items at the maximum possible score.
+
+**Future cycles run this, not the credentialed script.**
+
+### Defect 1 — the 2026-08-26 pole list was in DISPLAY form, not storage form
+
+The 2026-08-26 capture read the rendered facet chips off `/discover` and recorded them
+verbatim as "the live vocab." Rendered chips are `displayLabel()` output;
+the stored tag is `normalizeTag()` form, and for multi-word tags the two differ by
+hyphenation (`app/lib/discovery-tags.ts`: `"Slow-And-Intimate"` → displays as
+`"Slow and Intimate"`). Measured:
+
+| String as written 2026-08-26 | products | Storage form | products |
+|---|---|---|---|
+| `Slow and Intimate` | **0** | `Slow-And-Intimate` | 224 |
+| `In Charge` | **0** | `In-Charge` | 257 |
+
+Neither display string exists as a tag in the live vocab at all (67 tags, index size
+4,954; confirmed against `/api/team/discovery-vocab`). A build that had copied the
+2026-08-26 table into the `eitherOr` tag map would have shipped **two dead poles** —
+precisely the dead-tag failure §6 raised and that the resolution existed to close.
+`app/lib/discovery-presets.ts` already gets this right and documents why; the concept
+doc was the only place carrying the wrong form.
+
+**Rule for this doc and for the `eitherOr` block: pole tags are always recorded in
+storage form. Display form is what the card label happens to render, never what the
+filter carries.**
+
+### Defect 2 — Q1 × Q3 is not a live 2×2 (the one that actually blocks)
+
+All six poles individually clear the ≥2 floor by three orders of magnitude, so the
+pole-existence check the gate was written to run would have passed cleanly and told us
+nothing. The combination check is what fails. Full-match counts over the live in-stock
+index (score 8 = 3 + 2 + 3):
+
+| Q1 Register | Q2 Company | Q3 Control | full matches |
+|---|---|---|---|
+| Slow-And-Intimate | Solo | Surrendered | **0** |
+| Slow-And-Intimate | Solo | In-Charge | **0** |
+| Slow-And-Intimate | Couples | Surrendered | **0** |
+| Slow-And-Intimate | Couples | In-Charge | **0** |
+| Bold | Solo | Surrendered | 5 |
+| Bold | Solo | In-Charge | 11 |
+| Bold | Couples | Surrendered | 15 |
+| Bold | Couples | In-Charge | 24 |
+
+Half the instrument's outcomes are empty. The cause is co-occurrence, not stock:
+**no live product carries `Slow-And-Intimate` together with either control tag.**
+Maximum achievable score on that arm is 5 of 8, meaning the Q3 answer contributes
+literally nothing once a shopper picks the slow pole. `Intimate` behaves identically
+(0 with both).
+
+This invalidates the 2026-08-26 collision argument, and the error is worth naming so
+it is not repeated: that resolution reasoned that Q1 and Q3 "draw from *disjoint* tag
+sets ... so they do not collide." **Disjointness of tag sets is not independence of tag
+co-occurrence.** Two axes can be built from non-overlapping tags and still be perfectly
+correlated in the data. Any future axis proposal is checked by measuring co-occurrence,
+never by inspecting the vocabulary list.
+
+### The fix — Q1 Pole A becomes `Sensual`, and Q1 is renamed Pace → Register
+
+`Sensual` is already listed in §6's own support-tag set for Q1 Pole A, which is the
+documented remedy for a thin pole, and it co-occurs healthily with both control poles.
+Candidates measured (mood-pair full matches):
+
+| Q1 Pole A candidate | × Surrendered | × In-Charge |
+|---|---|---|
+| Slow-And-Intimate | 0 | 0 |
+| Intimate | 0 | 0 |
+| Romantic | 2 | 5 |
+| Tender | 3 | 4 |
+| Comforting | 3 | 5 |
+| **Sensual** | **15** | **17** |
+
+**Revised v1 axis table — all poles verified in storage form:**
+
+| Q | Axis | Pole A (tag) | count | Pole B (tag) | count |
+|---|---|---|---|---|---|
+| Q1 | **Register** | `Sensual` | 1893 | `Bold` | 1632 |
+| Q2 | Company | `Solo` | 3833 | `Couples` | 3179 |
+| Q3 | Control | `Surrendered` | 327 | `In-Charge` | 257 |
+
+**Revised outcome matrix — all 8 PASS the ≥2 floor:**
+
+| Q1 | Q2 | Q3 | full matches |
+|---|---|---|---|
+| Sensual | Solo | Surrendered | 5 |
+| Sensual | Solo | In-Charge | 5 |
+| Sensual | Couples | Surrendered | 15 |
+| Sensual | Couples | In-Charge | 17 |
+| Bold | Solo | Surrendered | 5 |
+| Bold | Solo | In-Charge | 11 |
+| Bold | Couples | Surrendered | 15 |
+| Bold | Couples | In-Charge | 24 |
+
+The axis is renamed **Pace → Register** deliberately. `Sensual` ↔ `Bold` is an
+intensity duality, not a speed one, and calling it Pace would let a card promise
+"slow" while filtering on a tag that does not mean slow — the mission brief §6
+label-keeps-its-promise failure. Card copy for Q1 must be honest to *intensity*.
+All card labels, prompts, and the Emma read line still go to `emma-copywriter` and
+clear `emma-empathy-reviewer` before any build ships; nothing in this table is copy.
+
+### Architecture correction — v1 needs NO resource route and NO client fetch
+
+The 2026-08-26 build estimate ("medium") assumed reuse of "the `/api/sensation-map`
+resource-route pattern." That surface no longer exists: the Sensation Map was retired
+on 2026-08-18 (#3532) and its route and lib modules are gone. The replacement pattern
+is better and cheaper. The **Curiosity Shelf** (`app/lib/curiosity-shelf.ts` +
+`curiosity-shelf.server.ts`, Nº 07) resolves entirely at payload-build time in a pure,
+dependency-free module and ships fully resolved, with "every runtime interaction local
+state over in-memory data."
+
+Either/Or fits that pattern exactly, because **the instrument has only eight possible
+outcomes.** Three binary questions is a closed set, all eight verified non-empty above.
+So v1:
+
+- resolves all 8 result sets server-side at payload-build time, in a pure
+  `either-or.ts` module unit-tested the way `curiosity-shelf.test.ts` is;
+- ships them in the payload and runs the stepper as **local state over in-memory
+  data** — no `useFetcher`, no `/api/either-or`, no client fetch of any kind;
+- therefore has no loading state, no spinner, no layout shift on reveal, and works
+  identically under reduced motion, which the `Reveal` primitive already handles.
+
+This **removes two of the four "new work" items** in the build-effort estimate above
+(the resource route, and the `useFetcher` data flow), and it removes the `relaxed`
+fallback path as runtime machinery: with all 8 sets verified non-empty and resolved at
+build time, a thin set is a build-time condition the module handles deterministically,
+not a runtime branch. Revised effort: **small-to-medium.** The remaining new work is
+the stepper component, the additive `eitherOr` Sanity block, and the copy.
+
+The one live-data dependency worth stating plainly: the 8 sets are only as fresh as the
+payload build, which is correct for a merchandising surface and matches the Curiosity
+Shelf, but it means a re-tagging pass changes the outcomes. The per-pole and
+co-occurrence probes above are cheap enough to re-run each design cycle, and should be.
+
+### The slot question is re-opened (for `homepage-ia`, not settled here)
+
+§7's Option A proposed rotating Either/Or through the **Nº 07** slot. That premise
+changed after it was written: Nº 07 was taken by the Curiosity Shelf on 2026-08-18.
+The governance note in §7 stands and now cuts harder — the page runs **one discovery
+instrument at a time**, and Nº 07 currently has one that shipped. So the slot decision
+is a genuine `homepage-ia` call between (a) Either/Or and the Curiosity Shelf rotating
+through Nº 07 on a weekly cadence, and (b) Either/Or replacing it. This resolution
+takes no position; it only records that the concept can no longer assume an empty slot,
+and that shipping both simultaneously is the "three finders" clutter the mission warns
+against. The locked Nº01-Nº11 shell is not in question either way: no new section type
+and no new URL is proposed.
+
+### What is left before an `rr7-engineer` build ticket
+
+The count-check gate is **CLOSED**. Remaining, in order:
+
+1. `homepage-ia` slot sign-off (Nº 07 rotation vs replacement, above).
+2. `emma-copywriter` + `emma-empathy-reviewer` on the six card labels, three question
+   prompts, and the templated reveal line — dial-9, fresh language, honest to the
+   Register rename.
+3. `sanity-content-builder`: the additive `eitherOr` block (new file only), plus
+   registering the type in `VARIANT_B_SECTION_TYPES` (`app/lib/homepage-payload.server.ts`)
+   so the lean variant-b payload does not filter it out. That registration is easy to
+   miss and is a code change riding the build PR.
+4. `rr7-engineer`: the pure `either-or.ts` resolver + its test, the stepper component,
+   the payload wiring. Reviewed PR, never auto-merged.
+5. `qa-reviewer` + `design-critic`: 375/768/1440, CLS, reduced motion, and the
+   link-ratio count (every reveal ends on a `/products/{handle}` link, which helps the
+   mission brief §1 70% target rather than spending against it).
+
+Net: Either/Or moves from "axes unverified" to **"axes verified against live data,
+one axis corrected, architecture simplified, gate closed"** — blocked now only on an IA
+slot decision and copy, neither of which needs another data probe.
