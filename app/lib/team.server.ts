@@ -2142,7 +2142,9 @@ async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Pr
       ref:          l.ref,
       state:        l.state ? l.state.slice(0, 16) : null,
     })),
-  )
+  ).onConflictDoNothing({
+    target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
+  })
 }
 
 /**
