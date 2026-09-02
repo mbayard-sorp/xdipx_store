@@ -59,6 +59,7 @@ const CONVERSATIONAL_ADDENDUM = slice(charter, '<!-- addendum:conversational:sta
 const SUPPORT_ADDENDUM        = slice(charter, '<!-- addendum:support:start -->', '<!-- addendum:support:end -->')
 const VIDEO_ADDENDUM          = slice(charter, '<!-- addendum:video:start -->', '<!-- addendum:video:end -->')
 const SOCIAL_ADDENDUM         = slice(charter, '<!-- addendum:social:start -->', '<!-- addendum:social:end -->')
+const LINKEDIN_ADDENDUM       = slice(charter, '<!-- addendum:linkedin:start -->', '<!-- addendum:linkedin:end -->')
 
 /** CORE + the marketing/advertising addendum (site, email, ads, themed calendar copy). */
 export const EMMA_VOICE_MARKETING = `${EMMA_VOICE_CORE}\n\n${MARKETING_ADDENDUM}`
@@ -77,6 +78,9 @@ export const EMMA_VOICE_VIDEO = `${EMMA_VOICE_CORE}\n\n${VIDEO_ADDENDUM}`
 
 /** CORE + the social addendum (Instagram/TikTok/X organic posts; migration 084). */
 export const EMMA_VOICE_SOCIAL = `${EMMA_VOICE_CORE}\n\n${SOCIAL_ADDENDUM}`
+
+/** CORE + the LinkedIn addendum (brand-byline authority posts, industry-first, no product links). */
+export const EMMA_VOICE_LINKEDIN = `${EMMA_VOICE_CORE}\n\n${LINKEDIN_ADDENDUM}`
 
 /** The full charter text, unsliced, for callers that want everything (e.g. an eval judge). */
 export const EMMA_VOICE_FULL = charter

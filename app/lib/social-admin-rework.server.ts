@@ -374,34 +374,43 @@ export async function createOwnerReworkRow(opts: {
   const now = new Date()
   const retire = shouldRetireReworkSource(source)
 
-  // One transaction so the queue is never left in the half state this whole
-  // change exists to remove: a live-bound child with its superseded parent
-  // still sitting in Review or Approved.
-  const id = await db.transaction(async tx => {
-    const [row] = await tx
-      .insert(socialPosts)
-      .values({
-        platform:      source.platform,
-        postType:      source.postType,
-        tweetText:     opts.caption,
-        altText:       opts.altText ?? null,
-        mediaUrls:     opts.mediaUrls,
-        imageBrief:    opts.imageBrief ?? null,
-        subject:       opts.subject ?? null,
-        reworkedFrom:  opts.fromPostId,
-        status:        'draft',
-        reviewStatus:  'pending_review',
-        createdBy:     opts.actor,
-        scheduledFor:  opts.scheduledFor ?? null,
-      })
-      .returning({ id: socialPosts.id })
+  // NOT db.transaction(): the production client is drizzle-orm/neon-http,
+  // whose HTTP driver has no interactive-transaction support and throws
+  // "No transactions support in neon-http driver" unconditionally on the
+  // callback form (app/lib/db.server.ts; drizzle-orm/neon-http/session.ts)
+  // — every call into this function failed at runtime until this fix.
+  // Each write below is individually atomic on its own; the child insert
+  // has no dependency on anything the retire update would produce, so the
+  // two are sequenced instead, with a compensating delete if the retire
+  // update fails, so the queue is never left in the half state this whole
+  // module exists to remove: a live-bound child with its superseded parent
+  // still sitting in Review or Approved (see module header).
+  const [row] = await db
+    .insert(socialPosts)
+    .values({
+      platform:      source.platform,
+      postType:      source.postType,
+      tweetText:     opts.caption,
+      altText:       opts.altText ?? null,
+      mediaUrls:     opts.mediaUrls,
+      imageBrief:    opts.imageBrief ?? null,
+      subject:       opts.subject ?? null,
+      reworkedFrom:  opts.fromPostId,
+      status:        'draft',
+      reviewStatus:  'pending_review',
+      createdBy:     opts.actor,
+      scheduledFor:  opts.scheduledFor ?? null,
+    })
+    .returning({ id: socialPosts.id })
+  const id = row!.id
 
-    if (retire) {
-      await tx
+  if (retire) {
+    try {
+      await db
         .update(socialPosts)
         .set({
           reviewStatus: 'rejected',
-          feedback:     supersededFeedback(row!.id, source.feedback, now),
+          feedback:     supersededFeedback(id, source.feedback, now),
           reviewedBy:   opts.actor,
           reviewedAt:   now,
           // The slot was a plan for a draft that is now retired unposted.
@@ -413,10 +422,20 @@ export async function createOwnerReworkRow(opts: {
           updatedAt:    now,
         })
         .where(eq(socialPosts.id, opts.fromPostId))
+    } catch (err) {
+      // Compensating cleanup: the retire is the invariant this module exists
+      // to guarantee, so a child left behind with its parent un-retired is
+      // worse than no child at all. Delete what we just inserted rather than
+      // leave the half state, then surface the original failure.
+      await db.delete(socialPosts).where(eq(socialPosts.id, id)).catch(delErr => {
+        console.error(
+          `[social-admin-rework] compensating delete of orphaned rework child ${id} also failed after the retire-update failure below:`,
+          delErr,
+        )
+      })
+      throw err
     }
-
-    return row!.id
-  })
+  }
 
   return { id, retiredSource: retire }
 }

@@ -1,4 +1,5 @@
 import {
+  bigint,
   bigserial,
   boolean,
   date,
@@ -2042,4 +2043,24 @@ export const cronExpectations = pgTable('cron_expectations', {
   ownerTeam:     varchar('owner_team', { length: 24 }),
   notes:         text('notes'),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * Backup and restore-probe history (migration 092, Stage G1).
+ *
+ * Two kinds share one table so that "the dump ran" and "the dump was readable"
+ * are two facts with two independent ages. A dump nobody has ever read back is
+ * not a backup; it is a file.
+ */
+export const backupRuns = pgTable('backup_runs', {
+  id:          serial('id').primaryKey(),
+  kind:        varchar('kind', { length: 24 }).notNull(), // dump|restore-probe
+  startedAt:   timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt:  timestamp('finished_at', { withTimezone: true }),
+  status:      varchar('status', { length: 16 }).notNull(), // succeeded|partial|failed|skipped
+  snapshotKey: varchar('snapshot_key', { length: 200 }),
+  tables:      jsonb('tables'),
+  totalBytes:  bigint('total_bytes', { mode: 'number' }),
+  error:       text('error'),
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
