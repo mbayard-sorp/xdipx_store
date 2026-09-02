@@ -71,6 +71,8 @@ export interface RemovalWatchResult {
   /** Set when the sweep declined to conclude anything (see `abstained`). */
   abstained?: 'token_unhealthy' | 'nothing_posted'
   frequencySteppedTo?: number
+  /** Set when a clean stretch earned one step of volume back. */
+  frequencyRestoredTo?: number
   valveTurnedOff?: boolean
 }
 
@@ -176,6 +178,84 @@ export function steppedDown(current: number): number {
 }
 
 /**
+ * Days of clean, OBSERVED posting before volume climbs back one step.
+ *
+ * Longer than WATCH_WINDOW_DAYS on purpose. The window is "is this still the
+ * same incident"; this is "has the channel proved it is fine", and those should
+ * not be the same number, or the first quiet fortnight after a strike would
+ * read as vindication.
+ */
+export const RECOVERY_CLEAN_DAYS = 21
+
+/** `social_freq_<platform>_ceiling` — the value volume climbs back toward. */
+export function ceilingKey(platform: 'instagram' | 'x'): string {
+  return `social_freq_${platform}_ceiling`
+}
+
+/** `social_freq_<platform>_changed_at` — when volume last moved, either way. */
+export function changedAtKey(platform: 'instagram' | 'x'): string {
+  return `social_freq_${platform}_changed_at`
+}
+
+export interface RecoveryInput {
+  /** Current drafting frequency. */
+  current: number
+  /** The pre-cut value recorded at step-down, or null if none was ever recorded. */
+  ceiling: number | null
+  /** Platform-attributed removals inside WATCH_WINDOW_DAYS. */
+  removalsInWindow: number
+  /** When frequency last moved, either direction. */
+  lastChangeAt: Date | null
+  now: Date
+  /**
+   * Whether this sweep actually observed the account. False when it abstained.
+   * See below — this is the load-bearing argument.
+   */
+  observed: boolean
+}
+
+/**
+ * The half of the ratchet that was written down and never built.
+ *
+ * `steppedDown` halves and nothing restores, while the blocker email the owner
+ * receives says in as many words that "volume is earned back by a clean
+ * stretch". So a single removal has been a permanent cut since the watcher
+ * shipped, and an expired Instagram token — which is indistinguishable from a
+ * takedown to the media-state lookup — could halve the channel forever.
+ *
+ * Returns the new frequency, or null to leave it alone. Four ways it declines,
+ * and each one is a way this could have gone wrong:
+ *
+ * 1. **Nothing to restore.** No recorded ceiling, or already at it. Volume never
+ *    climbs above where it was before the cut: this reverses a penalty, it does
+ *    not set policy.
+ * 2. **Not clean.** Any platform-attributed removal in the window. Owner-removed
+ *    posts are already excluded upstream by `removalSource != 'owner'`, which is
+ *    why "platform-attributed" is the right word here and not "any removal".
+ * 3. **Not long enough**, or never stamped. An absent `changed_at` declines
+ *    rather than defaulting to "long ago" — the safe default for a missing
+ *    timestamp on a channel under a strike is to stay throttled.
+ * 4. **Not observed.** The sweep abstained: the token looked unhealthy, or
+ *    nothing was posted at all. This is the #4702 lesson applied here — a
+ *    could-not-ask is not a no. Zero removals because we could not look, and
+ *    zero removals because nothing was taken down, must never mean the same
+ *    thing, and only one of them is a clean stretch. "Nothing posted" is the
+ *    subtler of the two: a channel that published nothing has proved nothing.
+ *
+ * It climbs by ONE and falls by HALF, deliberately. Trust that took a strike to
+ * lose should not come back in a single tick.
+ */
+export function recoveredFrequency(i: RecoveryInput): number | null {
+  if (!i.observed) return null
+  if (i.ceiling === null || i.ceiling <= i.current) return null
+  if (i.removalsInWindow > 0) return null
+  if (i.lastChangeAt === null) return null
+  const days = (i.now.getTime() - i.lastChangeAt.getTime()) / 86_400_000
+  if (days < RECOVERY_CLEAN_DAYS) return null
+  return Math.min(i.current + 1, i.ceiling)
+}
+
+/**
  * One sweep. Safe to call every tick; it makes at most WATCH_SAMPLE API calls
  * and writes nothing unless something is actually gone.
  */
@@ -241,14 +321,56 @@ export async function runRemovalWatch(deps: RemovalWatchDeps = {}): Promise<Remo
     removalsInWindow,
     unknown,
   }
-  if (gone.length === 0) return result
-
-  // ── A removal happened. Step down. ───────────────────────────────────────
   const raw = await readSetting('social_freq_instagram')
   const current = Number.isFinite(Number(raw)) && Number(raw) > 0 ? Number(raw) : 1
+
+  // ── Nothing gone. This is the only place volume can climb back. ──────────
+  //
+  // The blocker email the owner receives says "volume is earned back by a clean
+  // stretch", and until now nothing implemented that sentence: steppedDown
+  // halved and nothing ever restored, so one removal was a permanent cut, and
+  // an expired token — indistinguishable from a takedown to the media lookup —
+  // could halve the channel forever.
+  //
+  // Reaching here means the sweep looked, saw posts, and found none removed, so
+  // `observed` is true by construction; the abstain paths above have already
+  // returned. It is passed explicitly anyway so the rule states its own
+  // precondition rather than inheriting it from control flow.
+  if (gone.length === 0) {
+    const ceilingRaw = await readSetting(ceilingKey('instagram'))
+    const changedRaw = await readSetting(changedAtKey('instagram'))
+    const changedAt = changedRaw ? new Date(changedRaw) : null
+    const restored = recoveredFrequency({
+      current,
+      ceiling: Number.isFinite(Number(ceilingRaw)) && Number(ceilingRaw) > 0 ? Number(ceilingRaw) : null,
+      removalsInWindow,
+      lastChangeAt: changedAt && !Number.isNaN(changedAt.getTime()) ? changedAt : null,
+      now,
+      observed: true,
+    })
+    if (restored !== null) {
+      await writeSetting('social_freq_instagram', String(restored))
+      await writeSetting(changedAtKey('instagram'), now.toISOString())
+      result.frequencyRestoredTo = restored
+      // Deliberately no valve write. instagram_autopublish_enabled is turned OFF
+      // by a pattern of removals and turned back ON only by the owner. Volume is
+      // a throttle and can be earned back; permission to publish unattended is a
+      // judgement call, and nothing here is entitled to make it.
+    }
+    return result
+  }
+
+  // ── A removal happened. Step down. ───────────────────────────────────────
   const next = steppedDown(current)
   if (next !== current) {
     await writeSetting('social_freq_instagram', String(next))
+    // Record what to climb back to, and when the clock started. `max` so that a
+    // second cut before any recovery does not lower the ceiling to the already
+    // reduced value, which would make the first cut permanent after all.
+    const priorCeiling = Number(await readSetting(ceilingKey('instagram')))
+    const ceiling = Math.max(current, Number.isFinite(priorCeiling) ? priorCeiling : 0)
+    await writeSetting(ceilingKey('instagram'), String(ceiling))
+    await writeSetting(changedAtKey('instagram'), now.toISOString())
     result.frequencySteppedTo = next
   }
 

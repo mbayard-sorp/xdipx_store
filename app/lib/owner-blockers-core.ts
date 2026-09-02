@@ -145,6 +145,17 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
    * Re-runs the same authenticated read that filed the row, so the row closes
    * itself the moment a renewed token answers. */
   credential_live: a => `the ${a} credential answers an authenticated read`,
+  /* Arg is `table|keyColumn|keyValue|column|expectedValue`.
+   *
+   * The scoped answer to the trap `rows_exist` walks into. `rows_exist` asks
+   * only whether a table has any rows at all, which for most asks is already
+   * true before the owner does anything — blocker #57 would have closed itself
+   * instantly on a lie. This asks whether one identified row now holds one
+   * expected value, which is what a "go change this data" ask actually means. */
+  row_matches:   a => {
+    const [table, keyCol, keyVal, col, want] = a.split('|')
+    return `${table}.${col} is "${want}" for ${keyCol}=${keyVal}`
+  },
 }
 
 /**
