@@ -45,7 +45,7 @@ under their own `feature` labels (`social-drafts`, `ads-planning`, `email-planni
 | Team | Entry agent | Cadence | Money valve state (stub) |
 |---|---|---|---|
 | homepage | `homepage-orchestrator` | daily (Routine A) + weekly (Routine B) | live (content auto-publish, PR for code) |
-| social | `social-media-manager` | daily or 3×/week | **draft-only** — writes `social_posts` rows `status:'draft'`; owner posts |
+| social | `social-media-manager` | twice daily (14:00 and 22:00 UTC) | **drafts and gates, never posts directly** — writes `social_posts` rows `status:'draft'`, then relays the independent `social-publish-gate` verdict; the hourly `/cron/social-publish` job ships gate-approved rows while `instagram_autopublish_enabled` / `x_autopublish_enabled` are on. Both have been ON since 2026-08-22, so the store is publishing unattended; this row said "owner posts" for eleven days after that stopped being true |
 | social | `social-art-director` | per product post, inside the social run | picks location + cast, enforces the §3.8 variety windows, writes the scene brief `media-manager` executes; never picks products, never generates, never publishes |
 | ads | `ads-manager` | weekly | **propose-only** — writes `ad_campaigns` proposals; owner launches in-platform |
 | email | `email-marketing-manager` | weekly | **plan-only** — campaign briefs as suggestions; owner executes in Klaviyo |

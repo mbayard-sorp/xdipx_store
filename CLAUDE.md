@@ -231,13 +231,24 @@ db/
 
 ## Cron Schedule
 
-| Route | Schedule | Action |
-|---|---|---|
-| `/cron/discontinued-sweep` | 11:45 PM | Fetch Nalpac CSV, archive products the feed now marks discontinued |
-| `/cron/profit-summary` | 12:05 AM | Write daily_profit_summary to Neon |
-| `/cron/runpod-pod-watch` | hourly, :17 | List RUNNING RunPod pods; file an owner blocker if any are left running |
+**There are 32 scheduled surfaces across two planes, and this file does not list them.** It listed
+three for months, which read as the complete set and was wrong by an order of magnitude. The sources
+of truth are:
 
-Cron routes protected by `x-cron-secret` header matching `CRON_SECRET` env var.
+- `vercel.json` `crons[]` — what is scheduled on the Vercel plane.
+- `app/lib/cron-expectations.ts` — every surface on **both** planes, with the floor each is held to,
+  whether a breach is a money event, and which lane it files at. It also covers the GitHub Actions
+  plane that `vercel.json` structurally cannot see: `.github/workflows/checkout-probe.yml` runs the
+  browser checkout probe at `30 7 * * *`, and it is the closest thing this estate has to "can a
+  customer actually reach checkout".
+
+Adding a cron to `vercel.json` without an expectation reds the `check` job (`cron-expectations.test.ts`),
+so the two cannot drift.
+
+Cron routes protected by `x-cron-secret` header matching `CRON_SECRET` env var. Roughly a dozen
+routes — the ones whose failure has a next actor — write a `cron_runs` row per invocation; the
+high-frequency rest leave a KV heartbeat instead, so that the two every-2-minute pollers keep the
+Neon negative cache they were deliberately given.
 
 ## Claude API Voice — Emma persona
 

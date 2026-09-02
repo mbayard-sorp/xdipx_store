@@ -1555,12 +1555,20 @@ export function createCronRoutes() {
         countUnfinishedTerminalRuns,
         pruneCronRuns,
       } = await import('../app/lib/cron-runs.server.js')
+      const { readUnwatchedLanes } = await import('../app/lib/ticket-janitor.server.js')
 
       const expectations = await syncCronExpectations()
       const liveness = await readCronLiveness()
       const breaches = liveness.filter(l => l.breached)
       const unfinished = await countUnfinishedTerminalRuns()
       const pruned = await pruneCronRuns()
+      // The inverse of the liveness check above, and it catches what that one
+      // structurally cannot. A routine created after ROUTINE_CADENCES was last
+      // curated is not late, it is absent, and absence from a hand-maintained
+      // list looks exactly like health. On its first run this found the entire
+      // video program — the most expensive lane in the estate — running with no
+      // liveness entry at all, six days after both its triggers were created.
+      const unwatched = await readUnwatchedLanes()
 
       for (const b of breaches) {
         console.warn(
@@ -1573,6 +1581,12 @@ export function createCronRoutes() {
       }
       if (unfinished > 0) {
         console.error(`[cron:janitor-sweep] ${unfinished} cron_runs row(s) terminal with a NULL finished_at`)
+      }
+      for (const u of unwatched) {
+        console.warn(
+          `[cron:janitor-sweep] UNWATCHED LANE ${u.team}/${u.runType}: `
+          + `${u.runs} run(s) in 30d, last ${u.lastRunAt ?? 'never'}, no ROUTINE_CADENCES entry`,
+        )
       }
 
       res.json({
@@ -1589,6 +1603,7 @@ export function createCronRoutes() {
           lastStatus: b.lastStatus,
         })),
         unfinishedTerminalRuns: unfinished,
+        unwatchedLanes: unwatched,
         pruned,
       })
     } catch (err) {
