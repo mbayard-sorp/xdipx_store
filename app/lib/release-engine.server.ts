@@ -51,6 +51,7 @@ import { db } from '~/lib/db.server'
 import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
 import {
   addLabels,
+  removeLabels,
   classifyChangedFiles,
   createRevertBranch,
   getChecksForRef,
@@ -141,8 +142,34 @@ export const MIGRATION_DRY_RUN_CHECK = 'migration-dry-run'
  */
 export const ALLOWLIST_CHECK_NAMES: readonly string[] = ['allowlist', 'agent-allowlist']
 
-/** Applied to a PR the owner must merge by hand. */
+/**
+ * The OWNER's manual opt-out. Applied by a person, never by this module.
+ *
+ * `evaluatePullRequest` step 2 skips a PR carrying it, and its comment says why:
+ * "the owner has already claimed this one by hand". That is the correct meaning
+ * and it is unchanged. What changed is that the engine no longer writes it.
+ */
 export const NEEDS_OWNER_LABEL = 'needs-owner'
+
+/**
+ * The engine's own hold marker, and the fix for a one-way latch.
+ *
+ * Three machine paths used to apply NEEDS_OWNER_LABEL — protected-path
+ * escalation, CI stuck, merge attempts exhausted — while `removeLabels` did not
+ * exist anywhere in github.server.ts. So the gate's step-2 skip, designed as the
+ * owner's opt-out, became a latch the machine could set and nothing could clear,
+ * even after the reason stopped being true.
+ *
+ * Live proof: PR #991 had `check` green, `migration-dry-run` green, and its only
+ * protected file was an additive migration the repo's own classifyFile calls
+ * `auto` — and it sat labelled for two days. Across 14 days, 35 PRs carried the
+ * label; the owner cleared six of them by hand in 90 seconds on 2026-09-01, and
+ * missed #991 in that batch.
+ *
+ * Separating the two means the engine can take back its own marker when the
+ * reason clears, without ever touching a label a person applied.
+ */
+export const ENGINE_HOLD_LABEL = 'engine-hold'
 
 /**
  * The agent-editor allowlist, verbatim from agent-allowlist.yml. `[^/]+` so a
@@ -233,7 +260,13 @@ const KEYS = {
   rollbacks: (day: string) => `release-engine:rollbacks:${day}`,
   escalated: (pr: number) => `release-engine:escalated:pr-${pr}`,
   /** Consecutive failed merge attempts for one PR. Cleared on success. */
-  mergeFail: (pr: number) => `release-engine:merge-fail:pr-${pr}`,
+  // Keyed by head SHA, not PR number (2026-09-02). The counter is only cleared
+  // on a successful merge, and once the hold label was applied at
+  // MAX_MERGE_ATTEMPTS the engine skipped the PR forever — so the merge that
+  // would clear the counter could never happen. Keying by SHA means a new push
+  // earns a fresh set of attempts (new code, new attempts) while a PR nobody has
+  // touched stays held, which is the behaviour the escalation was for.
+  mergeFail: (sha: string) => `release-engine:merge-fail:sha-${sha}`,
   /** Once-a-day dedupe for the config-error email. */
   selfCheckAlert: (day: string) => `release-engine:self-check-alert:${day}`,
   /** Marks the cycle that last ran the out-of-band reconciliation sweep. */
@@ -548,6 +581,56 @@ export function prNumberFromRef(ref: string): number | null {
 }
 
 /**
+ * Take back the engine's own hold once the reason for it has gone.
+ *
+ * Classification is already recomputed from scratch every cycle — `gatherFacts`
+ * re-reads the PR's files and checks on each of the 144 daily ticks — so the
+ * facts were never stale. Only the label was, because nothing could remove it.
+ * That is how PR #991 sat green for two days: an additive migration that
+ * `refineMigrationProtection` clears the moment `migration-dry-run` goes green,
+ * held by a label applied before that check had reported.
+ *
+ * Two reasons can lapse, and they are treated differently on purpose:
+ *
+ *   protected     recomputed each cycle. If the PR is no longer protected, the
+ *                 hold is simply wrong now, so lift it.
+ *   merge-attempts keyed by head SHA. A new push earns a fresh set of attempts;
+ *                 an untouched PR that GitHub keeps refusing stays held, which
+ *                 is what the escalation was for.
+ *
+ * Deliberately never touches NEEDS_OWNER_LABEL. A person applied that one, and
+ * the engine taking it off would be the same bug pointing the other way.
+ */
+export async function clearStaleEngineHold(
+  pr: PullRequestSummary,
+  facts: PullRequestFacts,
+  dryRun: boolean,
+): Promise<boolean> {
+  if (!pr.labels.includes(ENGINE_HOLD_LABEL)) return false
+  if (facts.classification.protected) return false
+
+  const attempts = Number((await kvGet<string>(KEYS.mergeFail(pr.headSha))) ?? 0)
+  if (attempts >= MAX_MERGE_ATTEMPTS) return false
+
+  if (dryRun) {
+    console.log(`${LOG} [dry-run] would clear ${ENGINE_HOLD_LABEL} from PR #${pr.number}`)
+    return true
+  }
+
+  const cleared = await removeLabels(pr.number, [ENGINE_HOLD_LABEL], 'release-engine')
+  if (!cleared.ok) {
+    console.warn(`${LOG} could not clear ${ENGINE_HOLD_LABEL} from PR #${pr.number}: ${cleared.error}`)
+    return false
+  }
+  // Let the next genuine escalation email through: the dedupe key is what
+  // suppressed a second one, and this PR is no longer in the state that sent
+  // the first.
+  await kvDel(`${KEYS.escalated(pr.number)}:protected`).catch(() => {})
+  console.log(`${LOG} cleared ${ENGINE_HOLD_LABEL} from PR #${pr.number}: no longer protected`)
+  return true
+}
+
+/**
  * The gate. Pure: no network, no clock, no database, no environment.
  *
  * Order matters and is asserted in the tests. Protected is first so a protected
@@ -580,9 +663,16 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
     }
   }
 
-  // 2. The owner has already claimed this one by hand.
-  if (facts.labels.includes(NEEDS_OWNER_LABEL)) {
-    return { ...base, action: 'skip', code: 'needs-owner-label', reason: `labelled ${NEEDS_OWNER_LABEL}` }
+  // 2. Someone has claimed this one. Two distinct labels, deliberately:
+  // NEEDS_OWNER_LABEL is a person saying "leave this to me" and no code writes
+  // it; ENGINE_HOLD_LABEL is this engine's own marker, which it applies when it
+  // escalates and takes back itself once the reason clears (see
+  // `clearStaleEngineHold`). Collapsing the two is what turned the owner's
+  // opt-out into a latch the machine could set and nothing could lift.
+  for (const label of [NEEDS_OWNER_LABEL, ENGINE_HOLD_LABEL]) {
+    if (facts.labels.includes(label)) {
+      return { ...base, action: 'skip', code: 'needs-owner-label', reason: `labelled ${label}` }
+    }
   }
 
   // A draft is invisible to every gate below, so it is resolved before them.
@@ -1426,6 +1516,12 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
   for (const summary of candidates) {
     const facts = await gatherFacts(summary)
     if (!facts) continue
+    // Take back a hold whose reason has stopped being true, BEFORE the gate
+    // reads the labels — otherwise step 2 short-circuits and the PR can never
+    // be re-evaluated, which is the latch this exists to break.
+    if (await clearStaleEngineHold(summary, facts, dryRun)) {
+      facts.labels = facts.labels.filter(l => l !== ENGINE_HOLD_LABEL)
+    }
     const decision = evaluatePullRequest(facts)
     decisions.push(decision)
     console.log(
@@ -1844,8 +1940,8 @@ async function maybeSweepExhaustedTickets(dryRun: boolean): Promise<void> {
 }
 
 async function handleProtected(pr: PullRequestSummary, decision: ReleaseDecision, dryRun: boolean): Promise<void> {
-  if (!dryRun && !pr.labels.includes(NEEDS_OWNER_LABEL)) {
-    const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], 'release-engine')
+  if (!dryRun && !pr.labels.includes(ENGINE_HOLD_LABEL)) {
+    const labelled = await addLabels(pr.number, [ENGINE_HOLD_LABEL], 'release-engine')
     if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
   }
   // Record the stop on the ticket itself. The owner digest builds its
@@ -1944,8 +2040,8 @@ async function escalateStuckCi(
   decision: ReleaseDecision,
   dryRun: boolean,
 ): Promise<void> {
-  if (!dryRun && !pr.labels.includes(NEEDS_OWNER_LABEL)) {
-    const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], 'release-engine')
+  if (!dryRun && !pr.labels.includes(ENGINE_HOLD_LABEL)) {
+    const labelled = await addLabels(pr.number, [ENGINE_HOLD_LABEL], 'release-engine')
     if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
   }
   if (!dryRun && decision.ticketId !== null) {
@@ -2009,10 +2105,10 @@ async function mergeOne(
     // Count the failure. A merge that cannot succeed (a rule GitHub enforces
     // and the gate does not model, say) used to be retried every ten minutes
     // forever with no record and no escalation.
-    const attempts = await kvIncr(KEYS.mergeFail(pr.number))
+    const attempts = await kvIncr(KEYS.mergeFail(pr.headSha))
     if (attempts >= MAX_MERGE_ATTEMPTS) {
-      if (!pr.labels.includes(NEEDS_OWNER_LABEL)) {
-        const labelled = await addLabels(pr.number, [NEEDS_OWNER_LABEL], 'release-engine')
+      if (!pr.labels.includes(ENGINE_HOLD_LABEL)) {
+        const labelled = await addLabels(pr.number, [ENGINE_HOLD_LABEL], 'release-engine')
         if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
       }
       await escalate(
@@ -2028,7 +2124,7 @@ async function mergeOne(
             ['Last error', merged.error],
           ],
           `<p>The gate keeps saying this PR is mergeable and GitHub keeps refusing. It now carries the
-          <code>${escapeHtml(NEEDS_OWNER_LABEL)}</code> label, so the engine will skip it from here on:
+          <code>${escapeHtml(ENGINE_HOLD_LABEL)}</code> label, so the engine will skip it from here on:
           <a href="${escapeHtml(pr.htmlUrl)}">${escapeHtml(pr.htmlUrl)}</a></p>`,
         ),
         false,
@@ -2043,7 +2139,7 @@ async function mergeOne(
     }
   }
 
-  await kvDel(KEYS.mergeFail(pr.number))
+  await kvDel(KEYS.mergeFail(pr.headSha))
   await kvIncr(KEYS.merges(day))
   const pending: PendingMerge = {
     prNumber: pr.number,

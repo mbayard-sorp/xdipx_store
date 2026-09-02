@@ -103,6 +103,7 @@ vi.mock('~/lib/github.server', async (importOriginal) => {
     listPullRequestFiles: vi.fn(),
     getChecksForRef: vi.fn(),
     addLabels: vi.fn(async () => ({ ok: true, status: 200, data: [] })),
+    removeLabels: vi.fn(async () => ({ ok: true, status: 200, data: [] })),
     markPullRequestReadyForReview: vi.fn(async () => ({ ok: true, status: 200, data: {} })),
     squashMergePullRequest: vi.fn(),
     openPullRequest: vi.fn(),
@@ -125,7 +126,7 @@ import { sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { transitionSuggestion } from '~/lib/team.server'
 import { autoFileTicketForPr } from '~/lib/release-ticket-autofile.server'
 import {
-  NEEDS_OWNER_LABEL,
+  ENGINE_HOLD_LABEL,
   checkVercelCredentials,
   runReleaseEngineCycle,
   runSelfCheck,
@@ -239,7 +240,7 @@ describe('daily cap decoupling', () => {
     // The protected PR was labelled and escalated the same day it appeared.
     const prot = res.decisions.find((d) => d.prNumber === 11)
     expect(prot?.action).toBe('escalate-protected')
-    expect(vi.mocked(addLabels)).toHaveBeenCalledWith(11, [NEEDS_OWNER_LABEL], 'release-engine')
+    expect(vi.mocked(addLabels)).toHaveBeenCalledWith(11, [ENGINE_HOLD_LABEL], 'release-engine')
     expect(vi.mocked(sendOwnerEmail)).toHaveBeenCalledTimes(1)
 
     // The machine-lane draft was still taken out of draft.
@@ -347,7 +348,7 @@ describe('migration PRs are cleared by content, not by filename', () => {
 
     expect(res.decisions.find((d) => d.prNumber === 20)?.action).toBe('escalate-protected')
     expect(vi.mocked(squashMergePullRequest)).not.toHaveBeenCalled()
-    expect(vi.mocked(addLabels)).toHaveBeenCalledWith(20, [NEEDS_OWNER_LABEL], 'release-engine')
+    expect(vi.mocked(addLabels)).toHaveBeenCalledWith(20, [ENGINE_HOLD_LABEL], 'release-engine')
   })
 
   it('still escalates when the migration body cannot be read', async () => {

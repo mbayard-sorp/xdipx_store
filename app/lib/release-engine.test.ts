@@ -82,6 +82,7 @@ import {
   summarizeSmoke,
   type PullRequestFacts,
   type TicketFacts,
+  ENGINE_HOLD_LABEL,
 } from '~/lib/release-engine.server'
 
 // ---------------------------------------------------------------------------
@@ -944,5 +945,65 @@ describe('ageMsFromTimestamp', () => {
   it('returns 0 (never eligible) for garbage, failing closed', () => {
     expect(ageMsFromTimestamp('', Date.now())).toBe(0)
     expect(ageMsFromTimestamp('not a date', Date.now())).toBe(0)
+  })
+})
+
+/**
+ * The one-way latch (2026-09-01 audit, F18).
+ *
+ * Three machine paths applied NEEDS_OWNER_LABEL — protected escalation, CI
+ * stuck, merge attempts exhausted — while `removeLabels` did not exist anywhere
+ * in github.server.ts. So the gate's step-2 skip, whose own comment reads "the
+ * owner has already claimed this one by hand", became a latch the machine could
+ * set and nothing could lift, even after the reason stopped being true.
+ *
+ * PR #991 is the proof: `check` green, `migration-dry-run` green, and its only
+ * protected file an additive migration the repo's own classifyFile calls `auto`
+ * — labelled and skipped for two days. Across 14 days 35 PRs carried the label.
+ */
+describe('needs-owner is the owner\'s, engine-hold is the engine\'s', () => {
+  it('are two different labels', () => {
+    expect(ENGINE_HOLD_LABEL).not.toBe(NEEDS_OWNER_LABEL)
+  })
+
+  it('both still stop the gate, because both mean someone claimed it', () => {
+    for (const label of [NEEDS_OWNER_LABEL, ENGINE_HOLD_LABEL]) {
+      const d = evaluatePullRequest(facts({ labels: [label] }))
+      expect(d.action).toBe('skip')
+      expect(d.code).toBe('needs-owner-label')
+      expect(d.reason).toContain(label)
+    }
+  })
+
+  it('a PR carrying neither is evaluated on its merits', () => {
+    const d = evaluatePullRequest(facts({ labels: ['size/M', 'agents'] }))
+    expect(d.code).not.toBe('needs-owner-label')
+  })
+
+  it('protected classification still outranks both labels', () => {
+    // Ordering matters and is asserted elsewhere too: a protected PR must
+    // escalate even when it is already held, or clearing a hold could let a
+    // protected change through.
+    const protectedPaths = ['app/lib/team.server.ts']
+    const d = evaluatePullRequest(facts({
+      labels: [ENGINE_HOLD_LABEL],
+      changedPaths: protectedPaths,
+      classification: classifyChangedFiles(protectedPaths),
+    }))
+    expect(d.action).toBe('escalate-protected')
+  })
+
+  it('the exact shape of PR #991: green, held, and no longer protected', () => {
+    // Once migration-dry-run reports success, refineMigrationProtection clears
+    // an additive migration — so the classification is unprotected while the
+    // label, applied before that check reported, is still on the PR. Stripping
+    // the stale hold is what lets the gate see the PR at all; with it still on,
+    // step 2 short-circuits forever.
+    const held = facts({ labels: [ENGINE_HOLD_LABEL] })
+    expect(evaluatePullRequest(held).code).toBe('needs-owner-label')
+
+    const unheld = evaluatePullRequest({ ...held, labels: [] })
+    expect(unheld.code).not.toBe('needs-owner-label')
+    expect(unheld.action).toBe('merge')
   })
 })
