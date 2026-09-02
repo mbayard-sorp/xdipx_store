@@ -532,12 +532,20 @@ const TWICE_WEEKLY_GAP = 96 + 26
 
 /**
  * What should be running, as data. Mirrors `docs/store-team/routine-schedule.md`
- * as of 2026-08-07 (R-QA at two passes, the trend-scout/research triggers
- * created, the social trend scout trigger now enabled). If the manifest and
- * this table disagree, fix one of them in the same PR that moved the other.
+ * as of 2026-09-02. If the manifest and this table disagree, fix one of them in
+ * the same PR that moved the other.
  *
  * The podcast lane's playbook opens its run with runType 'manual', so its
  * liveness rides the manual bucket and is approximate by construction.
+ *
+ * **Curating this by hand is the known failure mode, not an aside.** R-ENRICH
+ * had no entry, so its total failure on 2026-08-23 and 08-24 was invisible to
+ * every liveness check while 136 products sat unenriched. The same thing had
+ * quietly happened again by 2026-09-02: the entire video program — the most
+ * expensive lane in the estate — was running with no entry at all, because both
+ * of its triggers were created on 08-27 and this list was last curated on
+ * 08-07. `findUnwatchedLanes` below exists so that the next one is found by a
+ * query rather than by an audit.
  */
 export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   { routine: 'R-DEV daily dev', team: 'strategy', runType: 'dev', kind: 'thrice-daily', schedule: '10:00, 15:00 and 20:00 daily', maxGapHours: RDEV_GAP },
@@ -571,7 +579,76 @@ export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   { routine: 'Weekly trend scout', team: 'content', runType: 'trend-scout', kind: 'weekly', schedule: 'Sat 19:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly business research', team: 'social', runType: 'research', kind: 'weekly', schedule: 'Thu 16:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly social trend scout', team: 'social', runType: 'social-trend-scout', kind: 'weekly', schedule: 'Mon 17:00', maxGapHours: WEEKLY_GAP },
+  // Both added 2026-09-02, found by findUnwatchedLanes on its first run. The
+  // triggers were created 2026-08-27 and had been producing runs — and GPU
+  // spend — with nothing watching either of them for six days.
+  { routine: 'Weekly writers room', team: 'video', runType: 'writers-room', kind: 'weekly', schedule: 'Tue 17:00', maxGapHours: WEEKLY_GAP },
+  { routine: 'Video render (2x weekly)', team: 'video', runType: 'video-render', kind: 'twice-weekly', schedule: 'Mon and Thu 13:00', maxGapHours: TWICE_WEEKLY_GAP },
 ]
+
+/**
+ * Lanes that produce run rows and deliberately have no cadence entry.
+ *
+ * Every exemption needs a reason, because the alternative to writing one down
+ * is the lane quietly joining the unwatched set. This is the same discipline as
+ * the note above about the daily pricing sweep, which is absent from
+ * ROUTINE_CADENCES on purpose: it runs without a team gate and has never
+ * written a run row, so an entry for it flagged on every sweep from the day it
+ * was added, and a permanent false positive teaches everyone to skim the list.
+ */
+export const LANE_COVERAGE_EXEMPT: ReadonlyArray<{ team: string; runType: string; why: string }> = [
+  { team: 'video', runType: 'video', why: 'The retired pre-serialization video lane. Its last run was 2026-08-25; video-render replaced it.' },
+  { team: 'social', runType: 'noop-check', why: 'A one-off diagnostic run written by hand on 2026-08-11, not a routine.' },
+  {
+    team: 'social',
+    runType: 'trend-scout',
+    why:
+      'The social trend scout writes this runType on alternate weeks and '
+      + '`social-trend-scout` on the others (runs 254 and 488 vs 364 and 610), which is why the '
+      + 'watched entry appears to miss every second week. `.claude/agents/social-trend-scout.md:47` '
+      + 'says `social-trend-scout` is the intended one. Exempted rather than watched, because '
+      + 'watching both names would make an inconsistency read as coverage; the fix belongs in the '
+      + 'social lane\'s prompt and is filed as a ticket there.',
+  },
+]
+
+export interface LaneCoverageGap {
+  team: string
+  runType: string
+  runs: number
+  lastRunAt: string | null
+}
+
+/**
+ * Lanes that produced runs and that no liveness check is watching.
+ *
+ * This is the inverse of `checkRoutineLiveness`, and it catches the failure
+ * that one structurally cannot: a routine created after this file was last
+ * curated is not late, it is absent, and absence from a hand-maintained list
+ * looks exactly like health. Derived entirely from run rows, so it needs no
+ * manifest of its own to fall out of date in turn.
+ *
+ * It cannot catch a routine that has never written a single run row — nothing
+ * data-derived can — which is what the cadence list is for. The two halves are
+ * complementary and neither replaces the other.
+ */
+export function findUnwatchedLanes(
+  observed: ReadonlyArray<{ team: string; runType: string; runs: number; lastRunAt: string | null }>,
+  cadences: readonly RoutineCadence[] = ROUTINE_CADENCES,
+  exempt: ReadonlyArray<{ team: string; runType: string }> = LANE_COVERAGE_EXEMPT,
+): LaneCoverageGap[] {
+  const watched = new Set(cadences.map(c => `${c.team ?? ''}|${c.runType}`))
+  const excused = new Set(exempt.map(e => `${e.team}|${e.runType}`))
+  return observed
+    .filter(o => {
+      const key = `${o.team}|${o.runType}`
+      // A cadence entry with a null team watches the runType across every team,
+      // so both spellings have to miss before a lane counts as unwatched.
+      return !watched.has(key) && !watched.has(`|${o.runType}`) && !excused.has(key)
+    })
+    .map(o => ({ team: o.team, runType: o.runType, runs: o.runs, lastRunAt: o.lastRunAt }))
+    .sort((a, b) => b.runs - a.runs)
+}
 
 export interface RoutineLivenessFlag {
   routine: string
@@ -966,6 +1043,26 @@ async function gatherRoutineFlags(): Promise<RoutineLivenessFlag[]> {
     startedAt: String(r['last_started'] ?? ''),
   }))
   return checkRoutineLiveness(lastRuns)
+}
+
+/**
+ * Read the lanes that actually produced runs, and return the ones nothing
+ * watches. Thirty days rather than all time, so a lane retired months ago does
+ * not report forever as a coverage gap.
+ */
+export async function readUnwatchedLanes(days = 30): Promise<LaneCoverageGap[]> {
+  const res = await db.execute(sql`
+    SELECT team, run_type, COUNT(*)::int AS runs, MAX(started_at) AS last_started
+      FROM homepage_team_runs
+     WHERE started_at > now() - (${days} || ' days')::interval
+     GROUP BY team, run_type`)
+  const observed = ((res.rows ?? []) as Array<Record<string, unknown>>).map(r => ({
+    team: String(r['team'] ?? ''),
+    runType: String(r['run_type'] ?? ''),
+    runs: Number(r['runs'] ?? 0),
+    lastRunAt: r['last_started'] ? String(r['last_started']) : null,
+  }))
+  return findUnwatchedLanes(observed)
 }
 
 /**
