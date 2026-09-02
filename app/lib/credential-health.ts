@@ -140,9 +140,9 @@ export const INTEGRATIONS: readonly Integration[] = [
     required: true,
     ownerTeam: 'strategy',
     breaks:
-      'SMS in both directions: the IVR and support lanes, and the owner pager. This is the alerting path '
-      + 'itself, and nothing else in the estate checks that it is alive — a unit test proves the call site '
-      + 'exists, not that a message would arrive.',
+      'SMS in both directions for the IVR and support lanes. Not the owner pager: SMS paging is off by '
+      + 'owner decision (2026-09-02), so the owner is paged by email only and this credential is a '
+      + 'customer-facing one.',
     moneyPath: false,
     whereToGo: 'Twilio Console > Account > API keys & tokens',
   },

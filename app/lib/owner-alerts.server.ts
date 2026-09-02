@@ -64,6 +64,10 @@ export function escapeHtml(s: string): string {
 export interface OwnerSendResult {
   sent: boolean
   error?: string
+  /** `'sms-off'`: SMS paging is off by owner decision (2026-09-02), so the SMS
+   *  half of a page is a recorded no-op; the email half still went. Not an
+   *  error. */
+  skipped?: 'sms-off'
   /** Set when the send was withheld because its class is rendered by the owner
    *  queue instead. Not an error: the information reached the owner by another
    *  surface, and distinguishing the two is what keeps a real failure legible. */
@@ -143,9 +147,14 @@ export async function sendOwnerEmail(
 }
 
 /**
- * Send an SMS to the owner. No-ops (sent:false) until OWNER_ALERT_PHONE is
- * set, so the P0 hooks are safe to ship before the env var exists. Never
- * throws.
+ * Send an SMS to the owner.
+ *
+ * OFF BY OWNER DECISION (2026-09-02): the owner does not want to be paged by
+ * SMS, so `OWNER_ALERT_PHONE` is deliberately unset in every environment and
+ * this returns `{ sent: false, skipped: 'sms-off' }` without logging a
+ * warning. The paging classes still reach the owner by email at any hour. The
+ * function and its `PagingClass` fence stay so that turning SMS back on is one
+ * env var and a reviewable decision, not a rebuild. Never throws.
  */
 export async function sendOwnerSms(body: string, escalation: PagingClass): Promise<OwnerSendResult> {
   // `escalation` is typed to the two-member PagingClass union, so anything else
@@ -153,10 +162,7 @@ export async function sendOwnerSms(body: string, escalation: PagingClass): Promi
   // whole enforcement: there is no runtime list to fall out of date with.
   void escalation
   const to = process.env['OWNER_ALERT_PHONE']
-  if (!to) {
-    console.warn('[owner-alerts] OWNER_ALERT_PHONE not set. Skipping SMS.')
-    return { sent: false, error: 'OWNER_ALERT_PHONE not set' }
-  }
+  if (!to) return { sent: false, skipped: 'sms-off' }
   try {
     await sendSms(to, body.length > 320 ? `${body.slice(0, 317)}...` : body)
     return { sent: true }

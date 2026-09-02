@@ -716,9 +716,12 @@ gates it already obeys. Close each one you did execute so tomorrow's run does no
 ```bash
 -d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:content-writer","note":"<what changed>"}'
 ```
-Only `process` and `strategy` rows can be closed this way (`RUN_CLOSE_KINDS`). A `campaign`,
-`promo`, `instructions`, or `code` row returns 409 — those have their own executor, or the owner's,
-and are not yours to end. Note them instead.
+`process`, `strategy`, `campaign` and `promo` rows can be closed this way (`RUN_CLOSE_KINDS`,
+widened to campaign and promo in PR #789 on 2026-08-20). **Close every `campaign` row you drafted
+against in the same run**, with a note naming the post or draft it produced; that edge went unwalked
+for two weeks because this paragraph said it did not exist, and 52 approved campaign rows piled up
+behind it. An `instructions` or `code` row returns 409 — those have their own executor, or the
+owner's, and are not yours to end. Note them instead.
 
 
 Looked but deliberately did not act (out of scope, no longer true, needs code)? Post a note with
