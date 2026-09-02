@@ -58,3 +58,27 @@ describe('displayLabel', () => {
     expect(displayLabel('Sensual')).toBe('Sensual')
   })
 })
+
+describe('normalizeTag(displayLabel(x)) composition trap', () => {
+  // displayLabel() is a one-way UI formatter, not an inverse of normalizeTag().
+  // Feeding its output back into normalizeTag() does NOT reconstruct the
+  // original stored/canonical form for a hyphenated tag: displayLabel turns
+  // hyphens into spaces, so normalizeTag sees separate words and Title-Cases
+  // each one with a space, not a hyphen. This is exactly the trap that let
+  // Routine B run 646 read a chip label off the rendered page, re-normalize
+  // it, and silently match zero products:
+  //
+  //   'Slow-And-Intimate'  --displayLabel-->  'Slow and Intimate'
+  //                        --normalizeTag-->  'Slow And Intimate'  (dead: not a live tag)
+  //
+  // Callers must normalizeTag() the raw storage-form value, never the display
+  // label. See app/lib/discovery-presets.ts, which does this correctly: it
+  // calls normalizeTag() directly on live vocab strings like 'Slow-And-Intimate'
+  // and never round-trips through displayLabel() first.
+  it('is deliberately NOT identity for a hyphenated multi-word tag', () => {
+    const stored = 'Slow-And-Intimate'
+    const roundTripped = normalizeTag(displayLabel(stored))
+    expect(roundTripped).not.toBe(stored)
+    expect(roundTripped).toBe('Slow And Intimate')
+  })
+})
