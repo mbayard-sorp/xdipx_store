@@ -1547,6 +1547,126 @@ export function createCronRoutes() {
    * files at that lane, never an email to the owner), the lane floors, and the
    * blocked-class routing. This pass reports; it does not yet act.
    */
+  /**
+   * The nightly logical dump (Stage G1).
+   *
+   * Neon point-in-time restore is the primary recovery path and needs no code,
+   * but it rewinds the WHOLE database — including the 19 `public` tables that
+   * belong to a dormant video-studio application sharing it — and cannot undo
+   * one table without undoing every other write since. This is the surgical
+   * alternative, and the only copy that survives the Neon account.
+   *
+   * It also carries the cheap half of G1, which is arguably the useful one: a
+   * PITR only helps inside the retention window, so what actually decides
+   * whether a mass-delete is recoverable is how fast anyone notices. Comparing
+   * per-table row counts against the previous dump is how anyone notices.
+   */
+  cronRoute('/db-backup', async (_req, res) => {
+    try {
+      const { runBackup, detectRowDrift, previousDumpTables } =
+        await import('../app/lib/db-backup.server.js')
+
+      const result = await runBackup()
+
+      // Drift is read from the two newest dumps, so a failed or partial run
+      // simply produces no comparison rather than a spurious "everything
+      // vanished" against a truncated snapshot.
+      let drift: Array<{ table: string; previousRows: number; currentRows: number; delta: number }> = []
+      if (result.status === 'succeeded') {
+        const { db } = await import('../app/lib/db.server.js')
+        const { backupRuns } = await import('../db/schema.js')
+        const { desc } = await import('drizzle-orm')
+        const [row] = await db.select({ id: backupRuns.id }).from(backupRuns).orderBy(desc(backupRuns.id)).limit(1)
+        if (row) drift = detectRowDrift(await previousDumpTables(row.id), result.tables)
+      }
+
+      for (const d of drift) {
+        console.warn(`[cron:db-backup] DRIFT ${d.table}: ${d.previousRows} -> ${d.currentRows} (${d.delta})`)
+      }
+      if (result.unclassified.length > 0) {
+        // A migration that adds a table is merged unattended; nothing in that
+        // path asks whether the new table needs backing up. So an unclassified
+        // table is the normal outcome of the system working as designed, and
+        // it has to be loud rather than assumed absent.
+        console.warn(`[cron:db-backup] ${result.unclassified.length} live table(s) not in the backup manifest: ${result.unclassified.join(', ')}`)
+      }
+      if (result.status === 'failed' || result.status === 'partial') {
+        console.error(`[cron:db-backup] ${result.status}: ${result.error}`)
+      }
+
+      // The status code, not the `ok` field, is what the wrapper reads.
+      // `classifyCronOutcome` treats any 200 without a `skipped` string as
+      // `succeeded`, so answering 200 here with `ok: false` would record a
+      // failed backup as a healthy cron run — the exact "prints GOOD over a
+      // dead pipeline" failure this whole program exists to remove,
+      // reintroduced by the change meant to close it. A partial counts as a
+      // failure for the same reason: it wrote no manifest and is unreadable.
+      if (result.status === 'failed' || result.status === 'partial') res.status(500)
+      res.json({
+        ok: result.status === 'succeeded' || result.status === 'skipped',
+        ...(result.status === 'skipped' ? { skipped: result.error } : {}),
+        status: result.status,
+        snapshotKey: result.snapshotKey,
+        tables: result.tables.length,
+        rows: result.tables.reduce((n, t) => n + t.rows, 0),
+        bytes: result.totalBytes,
+        elapsedMs: result.elapsedMs,
+        unclassified: result.unclassified,
+        drift,
+        error: result.error,
+      })
+    } catch (err) {
+      console.error('[cron:db-backup]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
+   * Read the newest dump back and grade it.
+   *
+   * This is the half that makes the other half a backup. A dump nobody has read
+   * back is a file, and the failure modes it hides are exactly the expensive
+   * ones: a table that serialised to nothing, a gzip that never finished, a
+   * private object the token can no longer read. Every one of those leaves a
+   * `succeeded` dump row behind an unusable snapshot.
+   *
+   * Daily rather than weekly, because the gap between "the backup broke" and
+   * "someone found out" is the whole quantity this stage is trying to shrink,
+   * and reading 16 MB of blobs costs nothing worth saving.
+   */
+  cronRoute('/db-restore-probe', async (_req, res) => {
+    try {
+      const { runRestoreProbe } = await import('../app/lib/db-backup.server.js')
+      const result = await runRestoreProbe()
+
+      if (result.status === 'failed') {
+        console.error(
+          `[cron:db-restore-probe] ${result.error}`
+          + result.verdicts.filter(v => !v.ok).map(v => `\n  ${v.table}: ${v.note ?? 'mismatch'}`).join(''),
+        )
+      }
+
+      // Same reasoning as the dump above: a probe that found an unreadable
+      // backup must not be recorded as a successful cron run.
+      if (result.status === 'failed') res.status(500)
+      res.json({
+        ok: result.status === 'succeeded' || result.status === 'skipped',
+        ...(result.status === 'skipped' ? { skipped: result.error } : {}),
+        status: result.status,
+        snapshotKey: result.snapshotKey,
+        ageHours: result.ageHours == null ? null : Number(result.ageHours.toFixed(1)),
+        stale: result.stale,
+        checked: result.verdicts.length,
+        failures: result.failures,
+        failed: result.verdicts.filter(v => !v.ok).map(v => ({ table: v.table, note: v.note })),
+        error: result.error,
+      })
+    } catch (err) {
+      console.error('[cron:db-restore-probe]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
   cronRoute('/janitor-sweep', async (_req, res) => {
     try {
       const {

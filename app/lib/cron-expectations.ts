@@ -245,6 +245,37 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'The daily money row every downstream report reads. A gap here silently zeroes a day.',
   },
   {
+    route: '/cron/db-backup',
+    plane: 'vercel',
+    schedule: '40 4 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'strategy',
+    notes:
+      'The only copy of this database that survives the Neon account. Recorded because a missing '
+      + 'nightly dump has a next actor and a 36h staleness floor the restore probe enforces. Not '
+      + 'money-relevant in the paging sense: a missed dump is not an outage, it is a widening '
+      + 'window, and paging on it would spend the SMS channel on something a queue row covers.',
+  },
+  {
+    route: '/cron/db-restore-probe',
+    plane: 'vercel',
+    schedule: '10 6 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'strategy',
+    notes:
+      'The half that makes the other half a backup. A dump nobody reads back is a file, and the '
+      + 'failures it hides are the expensive ones: a table that serialised to nothing, a gzip that '
+      + 'never finished, a private object the token can no longer read. Daily rather than weekly '
+      + 'because the gap between "the backup broke" and "someone found out" is the quantity G1 '
+      + 'exists to shrink.',
+  },
+  {
     route: '/cron/janitor-sweep',
     plane: 'vercel',
     schedule: '0 */6 * * *',
