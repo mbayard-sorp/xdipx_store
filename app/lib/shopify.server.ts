@@ -7574,6 +7574,52 @@ async function fetchPricingPageWithBackoff(
   }
 }
 
+export interface PricingProductsPage {
+  products: PricingProductSnapshot[]
+  /** Cursor to resume after this page, or null when the catalog is exhausted. */
+  endCursor: string | null
+  hasNextPage: boolean
+}
+
+/**
+ * One page of pricing snapshots, plus the cursor to resume from.
+ *
+ * `bulkFetchProductsForPricing` drains the whole catalog into memory before
+ * the caller sees a single product, which is fine for a run that will finish
+ * but useless for one that has to stop at a wall clock and pick up tomorrow:
+ * there is nothing to persist mid-walk. This exposes the page boundary so a
+ * resumable recompute can interleave fetching and pricing, and checkpoint the
+ * cursor as it goes.
+ *
+ * Deliberately does NOT sleep: the caller owns pacing, because it is the one
+ * that knows whether it is about to do per-variant work (which is its own
+ * pause) or fetch straight through. `bulkFetchProductsForPricing` keeps the
+ * PRICING_FETCH_PAGE_DELAY_MS spacing that its three throttle incidents bought.
+ */
+export async function fetchPricingProductsPage(opts?: {
+  cursor?: string | null
+  limit?: number
+}): Promise<PricingProductsPage> {
+  const data = await fetchPricingPageWithBackoff({
+    first: opts?.limit ?? PRICING_FETCH_PAGE_SIZE,
+    after: opts?.cursor ?? null,
+    query: 'metafields.xdipx.nalpac_sku:*',
+  })
+
+  const products: PricingProductSnapshot[] = []
+  for (const node of data.products.nodes) {
+    const snapshot = parsePricingSnapshot(node)
+    if (snapshot) products.push(snapshot)
+  }
+
+  const hasNextPage = data.products.pageInfo.hasNextPage
+  return {
+    products,
+    endCursor: hasNextPage ? (data.products.pageInfo.endCursor ?? null) : null,
+    hasNextPage,
+  }
+}
+
 export async function bulkFetchProductsForPricing(opts?: {
   cursor?: string | null
   limit?: number
@@ -7589,18 +7635,9 @@ export async function bulkFetchProductsForPricing(opts?: {
     }
     firstPage = false
 
-    const data = await fetchPricingPageWithBackoff({
-      first: pageSize,
-      after: cursor ?? null,
-      query: 'metafields.xdipx.nalpac_sku:*',
-    })
-
-    for (const node of data.products.nodes) {
-      const snapshot = parsePricingSnapshot(node)
-      if (snapshot) results.push(snapshot)
-    }
-
-    cursor = data.products.pageInfo.hasNextPage ? (data.products.pageInfo.endCursor ?? null) : null
+    const page = await fetchPricingProductsPage({ cursor, limit: pageSize })
+    results.push(...page.products)
+    cursor = page.endCursor
   } while (cursor !== null)
 
   return results
