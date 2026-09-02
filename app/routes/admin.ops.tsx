@@ -169,6 +169,28 @@ export default function AdminOps() {
           &ldquo;At 0 attempts&rdquo; is the three-strikes ladder that has never fired:
           <code> MAX_TICKET_ATTEMPTS</code> is 3, and every blocked row has been tried zero times.
         </p>
+
+        {health.recentValveChanges.length > 0 && (
+          <div className="mt-6">
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink-3">
+              Valve changes, last 24h
+            </h3>
+            <ul className="space-y-1 text-sm">
+              {health.recentValveChanges.map((c) => (
+                <li key={`${c.key}-${c.changedAt}`} className="text-ink-2">
+                  <code className="text-ink">{c.key}</code>{' '}
+                  {c.oldValue ?? '(unset)'} &rarr; <strong>{c.newValue ?? '(unset)'}</strong>{' '}
+                  {c.unattributed
+                    // Not an accusation, a gap in the record. Four team valves
+                    // were flipped on 2026-07-18 while the docs said otherwise
+                    // for eleven days, and only the owner can say whose it was.
+                    ? <span className="text-coral">by an unrecorded actor</span>
+                    : <span className="text-ink-4">by {c.actor}{c.source ? ` (${c.source})` : ''}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
     </div>
   )
