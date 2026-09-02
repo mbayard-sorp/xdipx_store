@@ -22,6 +22,10 @@ vi.mock('~/lib/ticket-janitor.server', () => ({
 }))
 vi.mock('~/lib/kv.server', () => ({
   kvGet: vi.fn(async () => null),
+  // The send-on-change rule stores the queue fingerprint here. kvGet returning
+  // null means "no prior fingerprint", so these tests take the first-ever-run
+  // branch and still send, which is what they were written to assert.
+  kvSet: vi.fn(async () => undefined),
   kvSetNX: vi.fn(async () => true),
   kvDel: vi.fn(async () => undefined),
 }))
