@@ -256,6 +256,12 @@ export async function runXRemovalWatch(deps: XRemovalWatchDeps = {}): Promise<Re
       : 'Nothing. This is a notification you asked to receive, not a task blocking the team.',
     whereToGo: '/admin/socials for the post, then the Social tab of /admin/homepage-team for the valve.',
     category: pattern ? 'valve' : 'approval',
+    // A valve-off row must clear itself the moment the owner flips the valve
+    // back. Without this the owner's own action left the row open, which is how
+    // nine of ten open blockers ended up probe-less and hand-cleared.
+    ...(pattern
+      ? { verifyProbe: 'setting_true', verifyArg: VALVE_KEYS.xAutopublish }
+      : {}),
     priority: pattern ? 1 : 2,
     source: 'agent',
     evidence: `Checked the ${rows.length} most recent posted rows; ${live} live, ${gone.length} gone, ${unknown} unknown.`,

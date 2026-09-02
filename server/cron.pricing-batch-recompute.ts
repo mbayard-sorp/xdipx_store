@@ -19,48 +19,123 @@
 //     scheduled 07:00 pass. That distinction is the whole point: while both
 //     wrote trigger='batch', every late rescue reset the agent's 26-hour
 //     look-back, so a dead daily cron looked like a healthy every-other-day one.
-//  3. It prunes aged-out pricing_audit_log noise. That table had no retention
-//     and was at 310,170 rows growing ~5k/day. See prunePricingAuditLog for why
-//     only two of the four statuses are eligible.
+//  3. It used to prune aged-out pricing_audit_log noise on the way out. That
+//     moved to /cron/pricing-audit-prune (below, 07:15 UTC): a DELETE of up to
+//     20,000 rows was competing for the same 300s budget the recompute needs to
+//     finish the catalog, which is budget contention on the money path in
+//     service of pure housekeeping. Retention is unchanged.
 
 import type { Request, Response } from 'express'
 
 /** Products a healthy full-catalog recompute is expected to consider. */
 const EXPECTED_MIN_PRODUCTS = 800
 
+/**
+ * Wall-clock budget for one invocation, against the 300s global maxDuration in
+ * vercel.json. The 60s margin covers the in-flight page, response
+ * serialization, and the continuation kick. A walk that hits this stops at a
+ * page boundary with its cursor persisted, rather than being SIGKILLed
+ * mid-catalog and leaving no trace, which is what starved 2,349 SKUs for
+ * seventeen days.
+ */
+const RECOMPUTE_BUDGET_MS = 240_000
+
+/**
+ * Ceiling on self-scheduled continuations per UTC day. A persistent Shopify
+ * outage must not spin; once this is spent the coverage floor is what escalates.
+ */
+const MAX_CONTINUATIONS_PER_DAY = 8
+
+/**
+ * Lock TTL, seconds. Must exceed the budget so the 07:00 pass and a pricing-ops
+ * catch-up can never both hold a cursor and double-apply on the money path.
+ */
+const RECOMPUTE_LOCK_TTL_SECONDS = 295
+
 export async function handlePricingBatchRecompute(req: Request, res: Response): Promise<void> {
   const body = (req.body ?? {}) as { trigger?: unknown }
-  const isCatchup =
-    body.trigger === 'batch_catchup' || String(req.query['trigger'] ?? '') === 'batch_catchup'
-  const trigger = isCatchup ? ('batch_catchup' as const) : ('batch' as const)
+  const asked = String(body.trigger ?? req.query['trigger'] ?? '')
+  const trigger =
+    asked === 'batch_catchup'      ? ('batch_catchup' as const)
+    : asked === 'batch_continuation' ? ('batch_continuation' as const)
+    : ('batch' as const)
+
+  // A continuation resumes today's checkpoint; so does a catch-up, so the agent's
+  // one daily rescue finishes the walk instead of restarting the same head.
+  const resume = trigger === 'batch_continuation' || trigger === 'batch_catchup'
+
+  const { kvSetNX, kvDel, kvGet, kvSet } = await import('../app/lib/kv.server.js')
+  const lockKey = 'lock:pricing-batch-recompute'
+  const acquired = await kvSetNX(lockKey, String(Date.now()), RECOMPUTE_LOCK_TTL_SECONDS)
+  if (!acquired) {
+    res.json({ ok: true, trigger, skipped: 'locked' })
+    return
+  }
 
   try {
     const { recomputeCatalog } = await import('../app/lib/pricing-apply-v2.server.js')
-    const result = await recomputeCatalog({ trigger })
+    const result = await recomputeCatalog({ trigger, budgetMs: RECOMPUTE_BUDGET_MS, resume })
 
     // A run that "succeeds" while pricing almost nothing is the quiet version
-    // of the same failure, so name it instead of reporting ok on a stub.
-    if (result.total > 0 && result.total < EXPECTED_MIN_PRODUCTS) {
+    // of the same failure, so name it instead of reporting ok on a stub. Measured
+    // against the day's cumulative total, not this invocation's slice, or every
+    // continuation would look like a stub.
+    if (result.done && result.dayTotal > 0 && result.dayTotal < EXPECTED_MIN_PRODUCTS) {
       console.warn(
-        `[cron:pricing-batch-recompute] only ${result.total} products considered (expected >= ${EXPECTED_MIN_PRODUCTS})`,
+        `[cron:pricing-batch-recompute] only ${result.dayTotal} variants priced today (expected >= ${EXPECTED_MIN_PRODUCTS})`,
       )
     }
 
-    // Housekeeping rides the same handler. Independently guarded: a recompute
-    // that succeeded must never be reported as failed because a DELETE did not.
-    let pruned = 0
-    try {
-      const { prunePricingAuditLog } = await import('../app/lib/pricing-apply-v2.server.js')
-      pruned = await prunePricingAuditLog()
-    } catch (e) {
-      console.warn('[cron:pricing-batch-recompute] audit-log prune skipped (ignored):', e)
+    let continued = false
+    if (!result.done) {
+      const kickKey = `pricing-batch:continuations:${new Date().toISOString().slice(0, 10)}`
+      const spent = Number((await kvGet<string>(kickKey)) ?? 0)
+      if (spent < MAX_CONTINUATIONS_PER_DAY) {
+        await kvSet(kickKey, String(spent + 1))
+        continued = await kickContinuation()
+      } else {
+        console.warn('[cron:pricing-batch-recompute] continuation cap spent; coverage floor will escalate')
+      }
     }
 
-    res.json({ ok: true, trigger, pruned, ...result })
+    res.json({ ok: true, trigger, continued, ...result })
   } catch (err) {
     console.error('[cron:pricing-batch-recompute]', err)
     await alertPricingFailure(err, trigger)
     res.status(500).json({ error: String(err), trigger })
+  } finally {
+    // Release before the TTL so the continuation is not blocked by our own lock.
+    await kvDel(lockKey).catch(() => {})
+  }
+}
+
+/**
+ * Fire-and-forget kick for the next slice.
+ *
+ * Preferred over extra vercel.json entries at fixed offsets: those would race
+ * this invocation while it still holds its own budget, and they add two more
+ * scheduled surfaces that can silently go missing, which is the original bug.
+ */
+async function kickContinuation(): Promise<boolean> {
+  const origin = process.env['APP_URL'] ?? process.env['VERCEL_URL']
+  const secret = process.env['CRON_SECRET']
+  if (!origin || !secret) {
+    console.warn('[cron:pricing-batch-recompute] no APP_URL/CRON_SECRET; cannot self-continue')
+    return false
+  }
+  const base = origin.startsWith('http') ? origin : `https://${origin}`
+  try {
+    // Deliberately not awaited to completion: we only need the request to be
+    // accepted. The next invocation takes the lock this one is about to drop.
+    void fetch(`${base}/cron/pricing-batch-recompute`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-cron-secret': secret },
+      body: JSON.stringify({ trigger: 'batch_continuation' }),
+    }).catch(e => console.warn('[cron:pricing-batch-recompute] continuation kick failed:', e))
+    return true
+  } catch (e) {
+    console.warn('[cron:pricing-batch-recompute] continuation kick threw:', e)
+    return false
   }
 }
 
@@ -112,5 +187,25 @@ async function alertPricingFailure(err: unknown, trigger: string): Promise<void>
     )
   } catch (e) {
     console.error('[cron:pricing-batch-recompute] owner email failed (ignored):', e)
+  }
+}
+
+/**
+ * Audit-log retention, on its own budget.
+ *
+ * Split out of the recompute handler on 2026-09-02. `prunePricingAuditLog`
+ * deletes up to PRUNE_CHUNK rows, and it ran after the full variant walk inside
+ * the same 300s function — so on exactly the days the recompute most needed its
+ * remaining margin, housekeeping was spending it. Retention policy itself is
+ * unchanged (PRICING_AUDIT_RETENTION_DAYS).
+ */
+export async function handlePricingAuditPrune(_req: Request, res: Response): Promise<void> {
+  try {
+    const { prunePricingAuditLog } = await import('../app/lib/pricing-apply-v2.server.js')
+    const pruned = await prunePricingAuditLog()
+    res.json({ ok: true, pruned })
+  } catch (err) {
+    console.error('[cron:pricing-audit-prune]', err)
+    res.status(500).json({ error: String(err) })
   }
 }

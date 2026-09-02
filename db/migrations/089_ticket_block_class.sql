@@ -1,0 +1,40 @@
+-- 089_ticket_block_class.sql
+-- Machine-readable reason class for a blocked ticket (2026-09-01 automation audit, F14).
+--
+-- Today `blocked` is the de facto close for `code` tickets: 45 rows, every one
+-- at attempt_count 0, so the three-strikes ladder has never fired once. Its only
+-- exits are owner-dismiss, owner-approve, or a fenced system reconcile — no
+-- agent-reachable edge at all — while routine-dev-daily.md:259-277 actively
+-- instructs R-DEV to park superseded and vague tickets there. The fleet is told
+-- to fill a state it cannot empty.
+--
+-- The reason is not missing, only unqueryable. Reading all 45 transition notes
+-- (suggestion_links rows with kind='note'), R-DEV is ALREADY naming the class in
+-- prose, sometimes in literal brackets ([owner-env], [owner-migration],
+-- [cross-agent-epic]):
+--
+--     protected-path        15   belongs to an owner-attended session
+--     needs-split            7   conjunctive DONE WHEN, should be split not blocked
+--     superseded             7   names a merged PR in its own note
+--     duplicate              5   names the ticket it duplicates
+--     no-code-work           4   diagnosis complete, nothing to build
+--     owner-env              3   an owner-only environment or secret action
+--     other                  4
+--
+--   block_class   varchar(24), nullable. One of the vocabulary above. Nullable
+--                  because every existing row predates it and backfilling from
+--                  prose is a judgement call, not a migration.
+--
+-- What this column is FOR: routing. A row whose class names its real next actor
+-- can be handed to that actor instead of to the owner by default. The transition
+-- edges that consume it ship separately, in app/lib/team.server.ts, which is a
+-- protected path.
+--
+-- FULLY ADDITIVE: ADD COLUMN IF NOT EXISTS only. No DROP, no RENAME, no
+-- ALTER TYPE, no DML. Merges on the ordinary release-engine lane once
+-- migration-dry-run is green.
+--
+-- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 089
+-- Idempotent: safe to re-run.
+
+ALTER TABLE homepage_team_suggestions ADD COLUMN IF NOT EXISTS block_class varchar(24);

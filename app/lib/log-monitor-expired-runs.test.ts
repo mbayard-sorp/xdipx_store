@@ -5,13 +5,25 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const world = vi.hoisted(() => ({ rows: [] as any[] }))
+// `rows` are the expiries inside the window. `classCounts` is the fortnight
+// recurrence tally the filter now consults; it defaults to "every class has
+// recurred" so the pre-existing cases still exercise what they were written for.
+const world = vi.hoisted(() => ({ rows: [] as any[], classCounts: null as any[] | null }))
 
 vi.mock('~/lib/db.server', () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: () => Promise.resolve(world.rows),
+        where: () => {
+          const p: any = Promise.resolve(world.rows)
+          // Only the recurrence query chains .groupBy; the window query awaits
+          // the thenable directly.
+          p.groupBy = () => Promise.resolve(
+            world.classCounts
+              ?? world.rows.map(r => ({ team: r.team, runType: r.runType, n: 3 })),
+          )
+          return p
+        },
       }),
     }),
   },
@@ -21,6 +33,7 @@ import { fetchExpiredRunGroups } from './log-monitor.server'
 
 beforeEach(() => {
   world.rows = []
+  world.classCounts = null
 })
 
 describe('fetchExpiredRunGroups', () => {
@@ -167,5 +180,94 @@ describe('fetchExpiredRunGroups', () => {
 
     expect(groups).toHaveLength(1)
     expect(groups[0]!.title).toContain('content run #517')
+  })
+})
+
+/**
+ * One auto-expiry is an event, not a defect, and it belongs to the lane whose
+ * run died. Filing on the first occurrence, at the storefront default team,
+ * produced eight P1 rows in nine days — #5475, #5954, #6262, #6553, #6706,
+ * #6707, and #6936/#6950 filed while this was being written — for runs
+ * belonging to video, strategy, content and social. Six went `blocked`; two
+ * are still sitting `approved` at the wrong desk.
+ */
+describe('fetchExpiredRunGroups: recurrence and routing', () => {
+  const expiry = (over: Record<string, unknown> = {}) => ({
+    id: 601,
+    team: 'video',
+    runType: 'video-render',
+    currentPhase: 'run-start',
+    currentAgent: null,
+    startedAt: new Date('2026-08-25T10:00:00.000Z'),
+    finishedAt: new Date('2026-08-25T11:00:00.000Z'),
+    error: 'auto-expired: no recorded activity for 60 minutes',
+    ...over,
+  })
+  const now = new Date('2026-08-25T13:00:00.000Z').getTime()
+
+  it('stays silent on a first, one-off expiry', async () => {
+    world.rows = [expiry()]
+    world.classCounts = [{ team: 'video', runType: 'video-render', n: 1 }]
+
+    expect(await fetchExpiredRunGroups(15, now)).toEqual([])
+  })
+
+  it('stays silent below the recurrence threshold', async () => {
+    world.rows = [expiry()]
+    world.classCounts = [{ team: 'video', runType: 'video-render', n: 2 }]
+
+    expect(await fetchExpiredRunGroups(15, now)).toEqual([])
+  })
+
+  it('files once the same (team, runType) class has expired three times', async () => {
+    world.rows = [expiry()]
+    world.classCounts = [{ team: 'video', runType: 'video-render', n: 3 }]
+
+    const groups = await fetchExpiredRunGroups(15, now)
+    expect(groups).toHaveLength(1)
+  })
+
+  it('routes to the team whose run died, not the storefront default', async () => {
+    world.rows = [expiry({ team: 'social', runType: 'social' })]
+    world.classCounts = [{ team: 'social', runType: 'social', n: 3 }]
+
+    const groups = await fetchExpiredRunGroups(15, now)
+    expect(groups[0]!.targetTeam).toBe('social')
+  })
+
+  it('files as process, which the detector can close, not as an owner-only code row', async () => {
+    world.rows = [expiry()]
+    world.classCounts = [{ team: 'video', runType: 'video-render', n: 3 }]
+
+    const groups = await fetchExpiredRunGroups(15, now)
+    // `code` has no agent-reachable close edge; `process` is in
+    // DETECTOR_SELF_CLOSE_KINDS, so the detector that raised it can close it.
+    expect(groups[0]!.kind).toBe('process')
+  })
+
+  it('leaves targetTeam unset for a team value that is not a real team id', async () => {
+    // `homepage_team_runs.team` is a free varchar. A legacy or typo'd value
+    // must fall back to the default rather than route at a team that cannot exist.
+    world.rows = [expiry({ team: 'not-a-team' })]
+    world.classCounts = [{ team: 'not-a-team', runType: 'video-render', n: 5 }]
+
+    const groups = await fetchExpiredRunGroups(15, now)
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.targetTeam).toBeUndefined()
+  })
+
+  it('counts each class independently', async () => {
+    world.rows = [
+      expiry({ id: 1, team: 'video', runType: 'video-render' }),
+      expiry({ id: 2, team: 'social', runType: 'social' }),
+    ]
+    world.classCounts = [
+      { team: 'video', runType: 'video-render', n: 3 },
+      { team: 'social', runType: 'social', n: 1 },
+    ]
+
+    const groups = await fetchExpiredRunGroups(15, now)
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.targetTeam).toBe('video')
   })
 })
