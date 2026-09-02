@@ -1292,10 +1292,33 @@ export function resolveListOrder(
   return 'created'
 }
 
-function listConditions(filter: SuggestionListFilter): SQL[] {
+/**
+ * Exported for the same reason `buildClaimQuery` is: the target_team semantics
+ * are load-bearing and easier to prove against the rendered predicate than
+ * through a mocked select chain. Pure — no IO.
+ */
+export function listConditions(filter: SuggestionListFilter): SQL[] {
   const conditions: SQL[] = []
   if (filter.team) conditions.push(eq(homepageTeamSuggestions.team, filter.team))
-  if (filter.targetTeam) conditions.push(eq(homepageTeamSuggestions.targetTeam, filter.targetTeam))
+  // NULL target_team means "the proposer owns it", which createSuggestion already
+  // declares at the write side (`const actingTeam = s.targetTeam ?? s.team`) and
+  // db/schema.ts documents on the column. The read side used a plain eq(), so 75
+  // approved rows filed without an explicit route were invisible to every
+  // target-filtered mailbox — reachable by nobody, on either team.
+  //
+  // Deliberately NOT `OR target_team IS NULL`, which was the first fix I wrote
+  // and is a fan-out bug: it shows all 75 rows to all five teams, any of which
+  // could then close a row it does not own. Scoping the NULL branch to the
+  // proposing team reproduces the documented semantics exactly.
+  if (filter.targetTeam) {
+    conditions.push(or(
+      eq(homepageTeamSuggestions.targetTeam, filter.targetTeam),
+      and(
+        isNull(homepageTeamSuggestions.targetTeam),
+        eq(homepageTeamSuggestions.team, filter.targetTeam),
+      ),
+    )!)
+  }
   if (filter.status) conditions.push(eq(homepageTeamSuggestions.status, filter.status))
   if (filter.statuses?.length) {
     conditions.push(inArray(homepageTeamSuggestions.status, [...filter.statuses]))
@@ -1385,7 +1408,14 @@ export async function retireSuggestion(id: number): Promise<void> {
  */
 export const REKIND_FROM_KINDS: readonly string[] = ['process']
 export const REKIND_TO_KINDS: readonly string[] = ['instructions', 'code']
-export const REKIND_ACTORS: readonly TicketActor[] = ['owner', 'agent:agent-editor']
+// `agent:store-strategist` joined 2026-09-02: the weekly three-strikes rung asks
+// the strategist to dismiss with evidence, rekind, or retire a stalled row, and
+// it could previously do none of those — the rung was unbuildable as written.
+// Rekind stays one-way (REKIND_FROM_KINDS -> REKIND_TO_KINDS), so this cannot be
+// used to launder a row into a kind that is easier to retire.
+export const REKIND_ACTORS: readonly TicketActor[] = [
+  'owner', 'agent:agent-editor', 'agent:store-strategist',
+]
 
 export async function rekindSuggestion(
   id: number,
@@ -1668,6 +1698,60 @@ export const AGENT_RETIRE_KINDS: readonly string[] = ['process', 'strategy', 'pr
 export const AGENT_EVIDENCE_RETIRE_KINDS: readonly string[] = ['instructions', 'agent-def']
 
 /**
+ * Kinds the dev lane may retire WITH EVIDENCE, and who may do it.
+ *
+ * `code` had no agent-reachable terminal state except a merged PR, so R-DEV
+ * expressed "done", "duplicate", "not a bug" and "needs the owner" the only way
+ * the map allowed: by parking the row at `blocked`. Live consequence, measured
+ * 2026-09-02: 45 blocked rows, every one at attempt_count 0, so the
+ * three-strikes ladder has never fired once; and nine rows the owner un-blocked
+ * by hand were re-blocked on the next pass, because nothing about the ticket had
+ * changed and the playbook still said to park it.
+ *
+ * The fence is the evidence, not the actor's good intentions. `retireEvidenceOnly`
+ * means this edge matches ONLY when `agentRetireSuggestion` validated either a
+ * merged-PR reference or a live superseding row that names this ticket by id.
+ * An evidence-free retire on a `code` row still 409s, exactly as before.
+ *
+ * Reading the 45 notes, ~20 of them already cite a merged PR or a superseding
+ * ticket in prose. This edge is what lets that evidence close the row instead of
+ * sitting in a note nobody can query.
+ */
+export const CODE_EVIDENCE_RETIRE_KINDS: readonly string[] = ['code']
+export const CODE_EVIDENCE_RETIRE_ACTORS: readonly TicketActor[] = [
+  'agent:rr7-engineer',
+  'agent:qa-reviewer',
+  'agent:store-strategist',
+]
+
+/**
+ * Why a ticket is blocked, as a closed vocabulary (migration 089).
+ *
+ * R-DEV already writes these in the transition note, sometimes in literal
+ * brackets. Persisting the class is what lets a router hand the row to the actor
+ * the class names, instead of defaulting every one of them to the owner:
+ *
+ *   protected-path  an owner-attended session authors it
+ *   needs-split     a conjunctive DONE WHEN; split it rather than block it
+ *   superseded      already shipped, usually with the PR named in the note
+ *   duplicate       another row covers it
+ *   no-code-work    diagnosis complete, nothing to build
+ *   owner-env       an owner-only environment, secret, or console action
+ *   dependency      waiting on another ticket that is not yet applied
+ *
+ * Advisory, not a gate: an unrecognised value is dropped rather than rejected,
+ * because a filer that cannot classify its own block must still be able to block.
+ */
+export const TICKET_BLOCK_CLASSES: readonly string[] = [
+  'protected-path', 'needs-split', 'superseded', 'duplicate',
+  'no-code-work', 'owner-env', 'dependency',
+]
+
+export function normalizeBlockClass(value: unknown): string | null {
+  return typeof value === 'string' && TICKET_BLOCK_CLASSES.includes(value) ? value : null
+}
+
+/**
  * Entry agents for the daily routines, permitted to close an inbound
  * operational row they acted on.
  *
@@ -1820,6 +1904,10 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // agent-editor retiring a superseded/satisfied instructions row WITH
     // EVIDENCE (#2864). Evidence-free retires on these kinds still 409.
     { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
+    // The dev lane's evidence-only retire for `code` (2026-09-01 audit, F14).
+    // Same fence as the rule above: matches only when agentRetireSuggestion
+    // validated a merged PR or a live superseding row that names this ticket.
+    { to: 'dismissed', actors: CODE_EVIDENCE_RETIRE_ACTORS, kinds: CODE_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
     OWNER_DISMISS,
   ],
   in_progress: [
@@ -1896,6 +1984,14 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // PR #508 merged. Fenced by `outOfBandReconcileOnly` like the `approved`
     // edge above: a plain system transition is rejected at the map.
     { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
+    // Evidence-only retire out of `blocked`, the state R-DEV was instructed to
+    // park code tickets in and that nothing but the owner could empty. 45 rows
+    // sit here, every one at attempt_count 0; ~20 already cite a merged PR or a
+    // superseding ticket in their own transition note. This edge is what lets
+    // that evidence close the row. An evidence-free retire still 409s, so
+    // "blocked" cannot become a quiet delete.
+    { to: 'dismissed', actors: CODE_EVIDENCE_RETIRE_ACTORS, kinds: CODE_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
+    { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
     OWNER_DISMISS,
   ],
   applied: [],
@@ -2007,6 +2103,13 @@ export interface TransitionOpts {
   note?: string | undefined
   links?: readonly TicketLinkInput[] | undefined
   lastError?: string | undefined
+  /**
+   * Closed-vocabulary reason class, persisted when transitioning to `blocked`
+   * (089, TICKET_BLOCK_CLASSES). Advisory rather than required: a filer that
+   * cannot classify its own block must still be able to block, so an
+   * unrecognised value is dropped and a missing one is simply null.
+   */
+  blockClass?: string | undefined
   /** Force an attempt increment on an edge that does not always spend one. */
   incrementAttempt?: boolean | undefined
   /**
@@ -2139,6 +2242,14 @@ export async function transitionSuggestion(
   // left the owner digest nothing to flag and the owner nothing to act on. The
   // transition itself is never rejected, since refusing it would strand the
   // ticket in a worse state; the stamp just makes the silence attributable.
+  // Persist the reason class alongside the prose (089). Advisory: an
+  // unrecognised value is dropped rather than rejected, because a filer that
+  // cannot classify its own block must still be able to block.
+  if (to === 'blocked') {
+    const blockClass = normalizeBlockClass(opts.blockClass)
+    if (blockClass) patch['blockClass'] = blockClass
+  }
+
   if (to === 'blocked' && !opts.lastError?.trim() && !opts.note?.trim()) {
     patch['lastError'] = `blocked without stated reason by ${actor}`
   }
@@ -2292,7 +2403,11 @@ export function buildClaimQuery(c: ResolvedClaim): SQL {
   if (c.id != null) conds.push(sql`c.id = ${c.id}`)
   if (c.filter.kind) conds.push(sql`c.kind = ${c.filter.kind}`)
   if (c.filter.team) conds.push(sql`c.team = ${c.filter.team}`)
-  if (c.filter.targetTeam) conds.push(sql`c.target_team = ${c.filter.targetTeam}`)
+  // Same NULL-means-own-team semantics as listConditions above; the claim query
+  // has to agree with the list query or a routine can see a row it cannot claim.
+  if (c.filter.targetTeam) {
+    conds.push(sql`(c.target_team = ${c.filter.targetTeam} OR (c.target_team IS NULL AND c.team = ${c.filter.targetTeam}))`)
+  }
   // A live claim on the row blocks it; an expired one does not (expireStaleClaims
   // is throttled, so the queue must not wait on it to reclaim).
   conds.push(sql`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`)
