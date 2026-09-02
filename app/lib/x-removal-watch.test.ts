@@ -67,7 +67,13 @@ describe('runXRemovalWatch', () => {
     const r = await runXRemovalWatch({ ...deps, tweetStates: states(['tw_1']) })
     expect(r.removed).toEqual([1])
     expect(calls.removed).toEqual([1])
-    expect(calls.settings).toEqual([{ key: 'social_freq_x', value: '2' }])
+    // Three writes, not one. The cut is the first; the other two are what makes
+    // it reversible, and before this the cut was permanent by omission.
+    expect(calls.settings).toEqual([
+      { key: 'social_freq_x', value: '2' },
+      { key: 'social_freq_x_ceiling', value: '4' },
+      { key: 'social_freq_x_changed_at', value: expect.any(String) },
+    ])
   })
 
   it('leaves autopublish ON after a single removal', async () => {
