@@ -87,7 +87,7 @@ describe('the escalation class registry', () => {
 
   it('rejects an unknown class name', () => {
     expect(isEscalationClass('made-up')).toBe(false)
-    expect(isPagingClass('runtime-errors')).toBe(false)
+    expect(isPagingClass('daily-digest')).toBe(false)
   })
 })
 
@@ -115,17 +115,22 @@ describe('every owner-alert call site declares a class', () => {
     expect(missing).toEqual([])
   })
 
-  it('never lets log-monitor reach a phone', () => {
-    // The specific regression this guards: log-monitor held an SMS hook while
-    // producing zero log-derived tickets in its lifetime. `sendOwnerSms` is now
-    // typed to PagingClass so this cannot compile, but the assertion states the
-    // intent for whoever is tempted to add a class for it.
+  it('never lets log-monitor reach the owner at all', () => {
+    // This started as "never lets log-monitor reach a phone", when it held an
+    // SMS hook while producing zero log-derived tickets in its lifetime. Stage
+    // G3 deleted the classifier outright, and the first-detection email went
+    // with it: the email was tied to opening a GitHub issue for a P0 group, and
+    // the only remaining source of groups emits P1 by construction. So the
+    // assertion widens from "no SMS" to "no owner channel of any kind", and the
+    // `runtime-errors` class is gone with its last producer.
+    //
+    // The call, not the mention: the file carries comments explaining why these
+    // are gone, and an assertion that cannot tell those apart is a tripwire for
+    // its own documentation.
     const src = readFileSync(join(REPO_ROOT, 'app/lib/log-monitor.server.ts'), 'utf8')
-    // The call, not the mention: the file carries a comment explaining why the
-    // SMS is gone, and an assertion that cannot tell those apart is a tripwire
-    // for its own documentation.
     expect(src).not.toMatch(/\bsendOwnerSms\s*\(/)
-    expect(escalationChannel('runtime-errors')).toBe('lane')
+    expect(src).not.toMatch(/\bsendOwnerEmail\s*\(/)
+    expect(isEscalationClass('runtime-errors')).toBe(false)
   })
 
   it('only pages from the money path and the storefront', () => {
