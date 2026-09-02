@@ -244,7 +244,7 @@ export async function recordAndAlertProbe(tier: 'http' | 'browser', result: Prob
     }
 
     // Ticket the failure onto the improvement bus at top priority. This is an
-    // ADDITION to the Sentry capture and the owner email/SMS above, never a
+    // ADDITION to the Sentry capture and the owner email above, never a
     // replacement: checkout is a protected path, so a human is always paged and
     // a human always fixes it. No automated fix path may touch checkout, which
     // is why the ticket exists purely as the visible, trackable record of an
