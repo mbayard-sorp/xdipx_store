@@ -131,12 +131,111 @@ export function createCronRoutes() {
     next()
   }
 
+  /**
+   * Wrap a cron handler so the invocation leaves a durable trace.
+   *
+   * Three rules this obeys, each of which was a way to get it wrong:
+   *
+   * 1. **Bookkeeping never changes the outcome.** Every recording call swallows
+   *    its own errors inside `cron-runs.server.ts`, and the whole `finally`
+   *    block is additionally wrapped here. A cron that ran perfectly but could
+   *    not write its row is a gap in the record, not an incident; a failed write
+   *    must never turn a success into a reported failure, nor mask a real one.
+   *
+   * 2. **`skipped` is a real outcome, not a failure.** An idle poller and a
+   *    gate-closed routine both did their job. Reading the response body is the
+   *    only way to know, since every one of them answers HTTP 200 with
+   *    `{ ok: true, skipped: '...' }`, so `res.json` is intercepted rather than
+   *    inferred from the status code.
+   *
+   * 3. **The write is awaited, not fired and forgotten.** On a serverless
+   *    platform, work started after the response is sent can be killed with the
+   *    invocation. Awaiting costs the function's own lifetime, not the caller's
+   *    latency — the handler has already responded by the time this runs.
+   *
+   * Only ~12 routes actually write a row (see `app/lib/cron-expectations.ts`);
+   * the rest get a KV heartbeat. That split is a deliberate cost decision, not
+   * an oversight: the two every-2-minute pollers have a KV negative cache built
+   * specifically so their 1,440 daily invocations touch Neon zero times, and a
+   * blanket INSERT here would undo it and pin DB compute awake around the clock.
+   */
+  const instrument = (
+    path: string,
+    handler: (req: Request, res: Response) => void | Promise<void>,
+  ) => async (req: Request, res: Response) => {
+    const route = `/cron${path}`
+    const startedAt = new Date()
+    const triggerKind: 'schedule' | 'manual' = req.method === 'GET' ? 'schedule' : 'manual'
+
+    let payload: unknown = null
+    const originalJson = res.json.bind(res)
+    res.json = ((body: unknown) => {
+      payload = body
+      return originalJson(body as never)
+    }) as typeof res.json
+
+    let thrown: unknown = null
+    try {
+      await handler(req, res)
+    } catch (err) {
+      thrown = err
+      throw err
+    } finally {
+      try {
+        const { classifyCronOutcome, recordCronRun, heartbeatCron } =
+          await import('../app/lib/cron-runs.server.js')
+        const { status, error } = classifyCronOutcome({
+          thrown,
+          statusCode: res.statusCode,
+          payload,
+        })
+        const failed = status === 'failed'
+
+        await recordCronRun({
+          route,
+          startedAt,
+          finishedAt: new Date(),
+          status,
+          error,
+          result: payload,
+          triggerKind,
+        })
+        // Heartbeat on any non-failed completion, recorded routes included: a
+        // recorded route whose INSERT failed still beat, so a database blip
+        // degrades the record's resolution instead of reading as a dead cron.
+        if (!failed) await heartbeatCron(route, startedAt)
+      } catch (bookkeepingErr) {
+        console.warn(`[cron:${path}] recording failed (ignored):`, bookkeepingErr)
+      }
+    }
+  }
+
   // Registers a scheduled cron endpoint on both GET (Vercel native cron) and POST
-  // (GitHub fallback / manual / internal). POST-only internal routes keep router.post.
+  // (GitHub fallback / manual / internal).
   const cronRoute = (
     path: string,
     handler: (req: Request, res: Response) => void | Promise<void>,
-  ) => router.route(path).get(guard, handler).post(guard, handler)
+  ) => {
+    const wrapped = instrument(path, handler)
+    return router.route(path).get(guard, wrapped).post(guard, wrapped)
+  }
+
+  /**
+   * POST-only internal endpoints, instrumented the same way.
+   *
+   * Three routes used a bare `router.post` and were therefore invisible to
+   * anything wrapper-level — including `/cron/purchase-reconcile`, which
+   * reconciles paid Shopify orders against the conversion ledger, so nothing
+   * could have told you it had stopped. They go through the recorder now.
+   *
+   * Deliberately POST-only rather than folded into `cronRoute`: two of them
+   * require a request body, and giving an internal endpoint a GET surface it
+   * never had is an unrequested change to the HTTP surface, not instrumentation.
+   */
+  const cronRoutePost = (
+    path: string,
+    handler: (req: Request, res: Response) => void | Promise<void>,
+  ) => router.post(path, guard, instrument(path, handler))
 
   /**
    * GET|POST /cron/discontinued-sweep
@@ -328,7 +427,7 @@ export function createCronRoutes() {
    * Regenerates one Emma context rail's picks against the current (or given)
    * live deal. Used by Studio actions, admins, and agents via MCP/HTTP.
    */
-  router.post('/regenerate-emma-rail', guard, async (req, res) => {
+  cronRoutePost('/regenerate-emma-rail', async (req, res) => {
     try {
       const railId = typeof req.body?.railId === 'string' ? req.body.railId : null
       if (!railId) {
@@ -594,7 +693,7 @@ export function createCronRoutes() {
    * (deterministic purchase_<orderId> event id), so it is always safe to run.
    * No vercel.json cron entry: the sweep also rides /cron/log-monitor.
    */
-  router.post('/purchase-reconcile', guard, async (req, res) => {
+  cronRoutePost('/purchase-reconcile', async (req, res) => {
     try {
       const { reconcilePurchases } = await import('../app/lib/purchase-capi.server.js')
       const rawSince = req.body?.sinceHours ?? (req.query['sinceHours'] ? Number(req.query['sinceHours']) : undefined)
@@ -1068,7 +1167,7 @@ export function createCronRoutes() {
    * Called by triggerDiscoveryRebuild() (fire-and-forget from SSR on cold KV miss)
    * and by /cron/warm. Builds the full discovery index and vocab, writes to KV.
    */
-  router.post('/warm-discovery-index', guard, async (_req, res) => {
+  cronRoutePost('/warm-discovery-index', async (_req, res) => {
     try {
       const {
         buildDiscoveryIndex,
@@ -1418,6 +1517,82 @@ export function createCronRoutes() {
       res.json({ ok: true, running: running.length, pods: running })
     } catch (err) {
       console.error('[cron:runpod-pod-watch]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
+   * GET|POST /cron/janitor-sweep
+   * Schedule: every 6 hours (0 asterisk-slash-6).
+   *
+   * The reader for everything Stage C records. Three jobs today, and it is
+   * deliberately the ONLY caller of `syncCronExpectations`: a manifest nothing
+   * pushes into the database is a file, not an expectation, and a table nothing
+   * writes to is not a record.
+   *
+   *   1. Push the code manifest into `cron_expectations` (upsert, never delete).
+   *   2. Read liveness for every declared surface across BOTH scheduler planes
+   *      and report the breaches. A route with no evidence of life is breached,
+   *      not unknown: silence must never read as a pass, which is the whole
+   *      lesson of the pricing batch dying at the 300s ceiling every morning for
+   *      four days while the digest printed GOOD.
+   *   3. Assert zero rows landed terminal with a NULL `finished_at`. That should
+   *      be impossible by construction — one INSERT in a `finally` carries both
+   *      timestamps — but the same class existed on `homepage_team_runs` (18
+   *      `succeeded` runs with a NULL finish in one fortnight) precisely because
+   *      nothing ever checked, and "should be impossible" is not a measurement.
+   *
+   * NOT YET, and named here so the gap is visible rather than assumed covered:
+   * filing a ticket at the breached route's own lane (invariant 3 — a breach
+   * files at that lane, never an email to the owner), the lane floors, and the
+   * blocked-class routing. This pass reports; it does not yet act.
+   */
+  cronRoute('/janitor-sweep', async (_req, res) => {
+    try {
+      const {
+        syncCronExpectations,
+        readCronLiveness,
+        countUnfinishedTerminalRuns,
+        pruneCronRuns,
+      } = await import('../app/lib/cron-runs.server.js')
+
+      const expectations = await syncCronExpectations()
+      const liveness = await readCronLiveness()
+      const breaches = liveness.filter(l => l.breached)
+      const unfinished = await countUnfinishedTerminalRuns()
+      const pruned = await pruneCronRuns()
+
+      for (const b of breaches) {
+        console.warn(
+          `[cron:janitor-sweep] BREACH ${b.route} (${b.plane}): `
+          + (b.lastSeenAt ? `last seen ${b.ageMinutes} min ago` : 'never seen')
+          + `, floor ${b.periodMinutes}+${b.graceMinutes} min`
+          + (b.moneyRelevant ? ' [money]' : '')
+          + (b.ownerTeam ? ` -> ${b.ownerTeam}` : ''),
+        )
+      }
+      if (unfinished > 0) {
+        console.error(`[cron:janitor-sweep] ${unfinished} cron_runs row(s) terminal with a NULL finished_at`)
+      }
+
+      res.json({
+        ok: true,
+        expectations,
+        checked: liveness.length,
+        breaches: breaches.map(b => ({
+          route: b.route,
+          plane: b.plane,
+          ageMinutes: b.ageMinutes,
+          source: b.source,
+          moneyRelevant: b.moneyRelevant,
+          ownerTeam: b.ownerTeam,
+          lastStatus: b.lastStatus,
+        })),
+        unfinishedTerminalRuns: unfinished,
+        pruned,
+      })
+    } catch (err) {
+      console.error('[cron:janitor-sweep]', err)
       res.status(500).json({ error: String(err) })
     }
   })

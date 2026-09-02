@@ -145,6 +145,10 @@
     {
       "path": "/cron/social-asset-auto-archive",
       "schedule": "50 3 * * *"
+    },
+    {
+      "path": "/cron/janitor-sweep",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
