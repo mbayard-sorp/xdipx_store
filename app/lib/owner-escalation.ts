@@ -158,16 +158,6 @@ export const ESCALATION_CLASSES = {
     laneTeam: 'product',
     why: 'The enrich-to-publish chain stalled or produced nothing. The product lane owns it.',
   },
-  'runtime-errors': {
-    channel: 'lane',
-    laneTeam: 'strategy',
-    why:
-      'Grouped runtime errors from log-monitor. Deliberately `lane`, and deliberately NOT a '
-      + 'PagingClass: 433 classifier calls and 16.9M input tokens over 30 days produced zero '
-      + 'log-derived tickets in its lifetime while faithfully classifying npm-install lines. '
-      + 'Sentry already sees these patterns natively. It earns the pager back when the feed is '
-      + 'fixed, not before.',
-  },
 } as const satisfies Record<string, EscalationClass>
 
 export type EscalationClassName = keyof typeof ESCALATION_CLASSES

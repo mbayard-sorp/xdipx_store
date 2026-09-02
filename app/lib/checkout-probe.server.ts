@@ -16,6 +16,7 @@
  *
  * Server-only.
  */
+import { classifyCheckoutStatus, type FetchCheck } from '~/lib/checkout-probe-core'
 import { Sentry } from '~/lib/sentry.server'
 import { db } from '~/lib/db.server'
 import { checkoutProbeRuns } from '../../db/schema'
@@ -46,15 +47,8 @@ function baseUrl(override?: string): string {
   return (override || process.env['BASE_URL'] || 'https://xdipx.com').replace(/\/+$/, '')
 }
 
-export interface FetchCheck {
-  status: number
-  ok: boolean
-  detail?: string
-  /** Response body when one was read. Callers that need to inspect the HTML
-   *  (the daily SEO tripwire checks canonical + robots directives) read this
-   *  instead of re-fetching the page. */
-  body?: string
-}
+export type { FetchCheck } from '~/lib/checkout-probe-core'
+export { classifyCheckoutStatus } from '~/lib/checkout-probe-core'
 
 /**
  * GET a URL with a timeout and assert status 200, a minimum body size, and that
@@ -135,31 +129,9 @@ async function followWithCookies(startUrl: string, maxHops = 12): Promise<{ stat
   return { status: 0, finalUrl: url, body: '', hops: maxHops, detail: 'too many redirects' }
 }
 
-/**
- * Assert the Storefront checkoutUrl routes to a genuine Shopify checkout
- * endpoint. Failure modes this must separate:
- *   - dead domain (the bug we hit): the URL returns a hard 404.
- *   - checkout bounced away (password-protected store / misconfig): the chain
- *     redirects to the store root and never reaches a /checkouts/ path.
- *   - healthy: the chain (through Shop Pay) lands on /checkouts/cn/...
- * Shopify's checkout sits behind Cloudflare bot protection that 403s a headless
- * agent regardless of UA, so a 200 render is not reliably observable from the
- * HTTP tier. Reaching a /checkouts/ URL (even a 403) proves the routing is
- * healthy; the browser tier verifies the actual render + payment fields.
- */
 async function checkCheckout(url: string): Promise<FetchCheck> {
   const r = await followWithCookies(url)
-  if (r.status === 0 && r.detail) return { status: 0, ok: false, detail: r.detail }
-  if (r.status === 404) return { status: 404, ok: false, detail: `404 at ${r.finalUrl.split('?')[0]} (checkout URL dead)` }
-  const onCheckout = /\/checkouts?\//i.test(r.finalUrl)
-  if (!onCheckout) {
-    return { status: r.status, ok: false, detail: `checkout did not route to a Shopify checkout page (landed ${r.finalUrl.split('?')[0]}, status ${r.status})` }
-  }
-  // On a checkout URL. 200 with markers is ideal; a 403/anything-non-404 here is
-  // the Cloudflare bot wall, not a routing break, so the HTTP tier accepts it.
-  const rendered = r.status === 200 && /order summary|payment|contact information/i.test(r.body)
-  if (rendered) return { status: r.status, ok: true }
-  return { status: r.status, ok: true, detail: `reached checkout endpoint (status ${r.status}; full render verified by browser tier)` }
+  return classifyCheckoutStatus({ status: r.status, finalUrl: r.finalUrl, body: r.body, detail: r.detail })
 }
 
 /**
