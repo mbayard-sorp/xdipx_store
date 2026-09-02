@@ -141,6 +141,10 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
   },
   /* Arg is an absolute URL. */
   endpoint_200:  a => `${a} answers 2xx`,
+  /* Arg is an integration key from `credential-health.ts` (e.g. `instagram`).
+   * Re-runs the same authenticated read that filed the row, so the row closes
+   * itself the moment a renewed token answers. */
+  credential_live: a => `the ${a} credential answers an authenticated read`,
   /* Arg is `table|keyColumn|keyValue|column|expectedValue`.
    *
    * The scoped answer to the trap `rows_exist` walks into. `rows_exist` asks
