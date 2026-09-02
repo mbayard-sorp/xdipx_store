@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { TEAM_IDS, type TeamId } from '~/lib/team-keys'
 
 /**
  * Autonomous log-monitor: pulls recent Vercel runtime logs, classifies signal
@@ -100,6 +101,21 @@ export interface LogGroup {
    * new blocked ticket each time.
    */
   dedupeKey?: string
+  /**
+   * Team that owns the fix. `fileDetectionTicket` defaults to `homepage`, which
+   * is right for a storefront runtime error and wrong for anything that already
+   * knows whose lane it came from: six auto-expiry rows (#5475, #5954, #6262,
+   * #6553, #6706, #6707) and two more since (#6936 social, #6950 video) were all
+   * filed at homepage for runs belonging to video, strategy, content and social.
+   */
+  targetTeam?: TeamId
+  /**
+   * Ticket kind. Defaults to `code`. A liveness signal is not a code defect, and
+   * `code` has no agent-reachable close edge, so filing one there guarantees an
+   * owner-only row. `process` is both honest and closeable by the detector that
+   * raised it (DETECTOR_SELF_CLOSE_KINDS).
+   */
+  kind?: string
 }
 
 export interface LogMonitorReport {
@@ -402,16 +418,25 @@ async function classifyLogs(logs: LogLine[]): Promise<LogMonitorReport> {
  * `nowMs` is injectable for deterministic tests (repo convention, e.g.
  * `attribution.server.ts` `buildFbc`).
  */
+/** Narrow a free-text `homepage_team_runs.team` to a real team id. */
+function isTeamId(value: string): value is TeamId {
+  return (TEAM_IDS as readonly string[]).includes(value)
+}
+
 export async function fetchExpiredRunGroups(
   windowMinutes: number,
   nowMs: number = Date.now(),
 ): Promise<LogGroup[]> {
   const { db } = await import('~/lib/db.server')
   const { homepageTeamRuns } = await import('../../db/schema')
-  const { and, eq, gte, like } = await import('drizzle-orm')
+  const { and, eq, gte, like, count: sqlCount } = await import('drizzle-orm')
   const { makeDedupeKey } = await import('~/lib/detection-tickets.server')
 
   const RECOVERY_GRACE_MIN = 60
+  /** How far back a recurring auto-expiry class is counted. */
+  const EXPIRY_CLASS_WINDOW_DAYS = 14
+  /** Occurrences of one (team, runType) class before it is worth a ticket. */
+  const EXPIRY_CLASS_MIN_OCCURRENCES = 3
   const graceCutoffMs = nowMs - RECOVERY_GRACE_MIN * 60_000
   const since = new Date(nowMs - (windowMinutes + 15 + RECOVERY_GRACE_MIN) * 60_000)
   const rows = await db
@@ -432,12 +457,45 @@ export async function fetchExpiredRunGroups(
       gte(homepageTeamRuns.finishedAt, since),
     ))
 
-  return rows
+  const settled = rows
     // Skip runs auto-expired within the grace window: they may still be a slow
     // but alive run that will recover before it is genuinely dead (#5632).
     .filter((r) => r.finishedAt != null && r.finishedAt.getTime() <= graceCutoffMs)
+
+  // One auto-expiry is an event, not a defect. Runs go quiet for reasons that
+  // resolve themselves, and filing on the first occurrence produced eight
+  // P1 tickets in nine days, every one of which ended up `blocked` or sitting
+  // `approved` at the wrong team. A class only becomes actionable once it
+  // repeats, so count how often this (team, runType) pair has expired over a
+  // fortnight and stay silent below the threshold. The liveness fact is still
+  // recorded either way: the run row itself carries status and error.
+  const classCounts = await db
+    .select({
+      team:    homepageTeamRuns.team,
+      runType: homepageTeamRuns.runType,
+      n:       sqlCount(),
+    })
+    .from(homepageTeamRuns)
+    .where(and(
+      eq(homepageTeamRuns.status, 'failed'),
+      like(homepageTeamRuns.error, 'auto-expired:%'),
+      gte(homepageTeamRuns.finishedAt, new Date(nowMs - EXPIRY_CLASS_WINDOW_DAYS * 86_400_000)),
+    ))
+    .groupBy(homepageTeamRuns.team, homepageTeamRuns.runType)
+
+  const countFor = (team: string, runType: string | null): number =>
+    Number(classCounts.find(c => c.team === team && c.runType === runType)?.n ?? 0)
+
+  return settled
+    .filter(r => countFor(r.team, r.runType) >= EXPIRY_CLASS_MIN_OCCURRENCES)
     .map((r): LogGroup => ({
     priority:    'P1',
+    // The lane that owns the run owns the fix. `team` is a free varchar on the
+    // runs table, so an unrecognised value falls back to the default rather
+    // than routing a ticket at a team that does not exist.
+    ...(isTeamId(r.team) ? { targetTeam: r.team } : {}),
+    // Liveness, not a code defect - and `process` is closeable by the detector.
+    kind:        'process',
     title:       `Team run auto-expired: ${r.team} run #${r.id} (phase: ${r.currentPhase ?? 'unknown'})`,
     occurrences: 1,
     firstSeen:   r.startedAt.toISOString(),
@@ -561,7 +619,10 @@ async function fileTicketsForGroups(
         dedupeKey: group.dedupeKey ?? makeDedupeKey('logmon', hashToken(group.title)),
         priority: priorityFromSeverity(group.priority),
         category: 'other',
-        kind: 'code',
+        // A group that knows its own lane routes there; the rest keep the
+        // storefront default, which is right for a runtime error.
+        ...(group.targetTeam ? { targetTeam: group.targetTeam } : {}),
+        kind: group.kind ?? 'code',
         suggestion:
           `${group.priority} runtime error: ${group.title}\n\n`
           + `Occurrences: ${group.occurrences} in the last ${windowMinutes} min\n`
