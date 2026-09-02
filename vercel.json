@@ -149,6 +149,14 @@
     {
       "path": "/cron/janitor-sweep",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/cron/db-backup",
+      "schedule": "40 4 * * *"
+    },
+    {
+      "path": "/cron/db-restore-probe",
+      "schedule": "10 6 * * *"
     }
   ]
 }

@@ -1614,6 +1614,74 @@ describe('code evidence-retire edge', () => {
   })
 })
 
+/**
+ * The `noCodeWork` evidence shape (#7037): closes a `code` row whose note
+ * says the investigation is complete and no fix is warranted, with no PR and
+ * no superseding row to point at. The fence is a substantive note plus a
+ * repo-shaped file path — format-only, never an `existsSync` disk check,
+ * because only docs/**, build/** and .claude/agents/** ship in the Vercel
+ * function bundle (vercel.json includeFiles); a real app/lib/*.ts diagnosis
+ * target is compiled away and would never resolve on disk in production.
+ */
+describe('noCodeWork evidence retire (#7037)', () => {
+  const LONG_NOTE = 'Read the whole assembleStorefrontHome fallback path end to end; '
+    + 'the described defect does not reproduce against current main.'
+
+  it('retires a blocked code row and records the diagnosis as its own link kind', async () => {
+    seedTicket({ status: 'blocked', kind: 'code' })
+    await agentRetireSuggestion(42, 'agent:rr7-engineer', 'investigated, no fix warranted', {
+      noCodeWork: { note: LONG_NOTE, file: 'app/lib/storefront-home.server.ts' },
+    })
+    expect(h.state.patches[0]!['status']).toBe('dismissed')
+    const links = h.state.inserts[0] as Array<Record<string, unknown>>
+    expect(links.some(l =>
+      l['kind'] === 'diagnosis'
+      && String(l['ref']).includes('app/lib/storefront-home.server.ts')
+      && String(l['ref']).includes(LONG_NOTE),
+    )).toBe(true)
+  })
+
+  it('rejects a note that is not substantive', async () => {
+    expect(await status(
+      agentRetireSuggestion(42, 'agent:rr7-engineer', 'x', {
+        noCodeWork: { note: 'not a bug', file: 'app/lib/storefront-home.server.ts' },
+      }),
+    )).toBe(409)
+  })
+
+  it('rejects a file that is not a repo-shaped source/doc path', async () => {
+    for (const bad of ['trust me', '/etc/passwd', 'storefront-home.server.ts', 'app/lib/../../etc/passwd']) {
+      expect(await status(
+        agentRetireSuggestion(42, 'agent:rr7-engineer', 'x', {
+          noCodeWork: { note: LONG_NOTE, file: bad },
+        }),
+      )).toBe(409)
+    }
+  })
+
+  it('does not check the file against disk — format only', async () => {
+    // This path does not exist anywhere in the repo. Rejecting it would mean
+    // every real app/lib/*.ts diagnosis 409s in production, since only
+    // docs/**, build/** and .claude/agents/** ship in the function bundle.
+    seedTicket({ status: 'approved', kind: 'code' })
+    await agentRetireSuggestion(42, 'agent:rr7-engineer', 'investigated, no fix warranted', {
+      noCodeWork: { note: LONG_NOTE, file: 'app/lib/this-file-does-not-exist.server.ts' },
+    })
+    expect(h.state.patches[0]!['status']).toBe('dismissed')
+  })
+
+  it('is fenced exactly like the other code evidence shapes: dev-lane actors, approved/blocked only', () => {
+    const ctx = { assignee: 'agent:rr7-engineer', kind: 'code', viaRetireEvidence: true }
+    for (const from of ['approved', 'blocked'] as const) {
+      for (const actor of CODE_EVIDENCE_RETIRE_ACTORS) {
+        expect(isTransitionAllowed(from, 'dismissed', actor, ctx)).toBe(true)
+      }
+    }
+    expect(isTransitionAllowed('pr_open', 'dismissed', 'agent:rr7-engineer', ctx)).toBe(false)
+    expect(isTransitionAllowed('approved', 'dismissed', 'agent:content-writer', ctx)).toBe(false)
+  })
+})
+
 describe('block class', () => {
   it('accepts every class in the vocabulary and nothing else', () => {
     for (const c of TICKET_BLOCK_CLASSES) expect(normalizeBlockClass(c)).toBe(c)
