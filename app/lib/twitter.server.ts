@@ -52,6 +52,36 @@ function getToken() {
   }
 }
 
+/**
+ * Is the X credential set still valid?
+ *
+ * A signed `users/me`, which is free and side-effect-free. Lives here rather
+ * than in `credential-health.server.ts` so that OAuth 1.0a signing stays in one
+ * file — a second signer would be a second thing to get subtly wrong.
+ *
+ * Returns the tri-state directly: only a 401 or 403 from a correctly signed
+ * request is `dead`. A 429 is the rate limit, not a bad credential, and a
+ * network failure is a could-not-ask.
+ */
+export async function xVerifyCredentials(): Promise<{ state: 'live' | 'dead' | 'unknown'; detail: string }> {
+  const url = 'https://api.x.com/2/users/me'
+  try {
+    const oauth = getOAuth()
+    const authHeader = oauth.toHeader(oauth.authorize({ url, method: 'GET' }, getToken()))
+    const res = await fetch(url, { headers: { ...authHeader } })
+    if (res.ok) {
+      const body = await res.json().catch(() => null) as { data?: { username?: string } } | null
+      return { state: 'live', detail: body?.data?.username ? `@${body.data.username}` : 'users/me 200' }
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { state: 'dead', detail: `users/me HTTP ${res.status}` }
+    }
+    return { state: 'unknown', detail: `users/me HTTP ${res.status}` }
+  } catch (err) {
+    return { state: 'unknown', detail: `could not ask: ${String(err).slice(0, 120)}` }
+  }
+}
+
 // ─── Low-Level API Calls ─────────────────────────────────────────────────
 
 async function xFetch<T>(

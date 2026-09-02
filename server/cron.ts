@@ -1562,6 +1562,31 @@ export function createCronRoutes() {
       const unfinished = await countUnfinishedTerminalRuns()
       const pruned = await pruneCronRuns()
 
+      // Credential liveness. Nothing in this estate has ever probed whether the
+      // store's own Shopify, Klaviyo, Instagram, X, GitHub, Vercel, Twilio or
+      // RunPod credentials still work — the `webhook_registered` probe has
+      // existed since it was built and no blocker row has ever used it. The
+      // cost of that gap is not hypothetical: an expired IG token reads as a
+      // takedown to the removal watcher, which then halves posting volume.
+      //
+      // Wrapped so a third-party API having a bad day can never fail the sweep
+      // that reads cron liveness.
+      let credentials: Awaited<ReturnType<typeof import('../app/lib/credential-health.server.js')['checkAllCredentials']>> = []
+      let credentialBlockers: string[] = []
+      try {
+        const { checkAllCredentials, fileCredentialBlockers } =
+          await import('../app/lib/credential-health.server.js')
+        credentials = await checkAllCredentials()
+        credentialBlockers = await fileCredentialBlockers(credentials)
+      } catch (err) {
+        console.error('[cron:janitor-sweep] credential sweep failed (ignored):', err)
+      }
+      for (const c of credentials) {
+        if (c.state === 'dead') console.error(`[cron:janitor-sweep] CREDENTIAL DEAD ${c.key}: ${c.detail}`)
+        else if (c.state === 'unconfigured') console.warn(`[cron:janitor-sweep] credential unconfigured ${c.key}: ${c.detail}`)
+        else if (c.state === 'unknown') console.warn(`[cron:janitor-sweep] credential could-not-ask ${c.key}: ${c.detail}`)
+      }
+
       for (const b of breaches) {
         console.warn(
           `[cron:janitor-sweep] BREACH ${b.route} (${b.plane}): `
@@ -1589,6 +1614,8 @@ export function createCronRoutes() {
           lastStatus: b.lastStatus,
         })),
         unfinishedTerminalRuns: unfinished,
+        credentials: credentials.map(c => ({ key: c.key, state: c.state, detail: c.detail })),
+        credentialBlockers,
         pruned,
       })
     } catch (err) {
