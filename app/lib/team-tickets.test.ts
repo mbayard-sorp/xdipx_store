@@ -24,6 +24,8 @@ const h = vi.hoisted(() => {
     updateWheres: [] as unknown[],
     /** Every value array passed to .values(), in order. */
     inserts: [] as unknown[],
+    /** Every target passed to .onConflictDoNothing(), in order. */
+    conflictTargets: [] as unknown[],
     /** FIFO of results handed to successive db.insert() chains. */
     insertResults: [] as unknown[][],
     execute: null as null | ((q: SQL) => Promise<{ rows: Record<string, unknown>[] }>),
@@ -57,7 +59,10 @@ const h = vi.hoisted(() => {
     ),
     insert: () => chain(
       () => state.insertResults.shift() ?? [],
-      (m, args) => { if (m === 'values') state.inserts.push(args[0]) },
+      (m, args) => {
+        if (m === 'values') state.inserts.push(args[0])
+        if (m === 'onConflictDoNothing') state.conflictTargets.push((args[0] as { target?: unknown } | undefined)?.target)
+      },
     ),
     execute: (q: SQL) => state.execute!(q),
   }
@@ -117,6 +122,7 @@ beforeEach(() => {
   h.state.patches = []
   h.state.updateWheres = []
   h.state.inserts = []
+  h.state.conflictTargets = []
   h.state.insertResults = []
   h.state.execute = null
 })
@@ -433,6 +439,19 @@ describe('transitionSuggestion', () => {
     expect(h.state.inserts[0]).toEqual([
       { suggestionId: 42, kind: 'note', ref: 'preview renders', state: 'verified' },
     ])
+  })
+
+  // Ticket #7038: a link write used to insert unconditionally, so the same
+  // (suggestion_id, kind, ref) triple piled up duplicate rows on every retry
+  // or polling cycle (ticket #3895 alone carried 332 copies of one PR link).
+  // addTicketLinks now upserts on that triple via onConflictDoNothing, backed
+  // by the uq_suggestion_links_sugg_kind_ref index (migration 092).
+  it('writes a link as onConflictDoNothing on (suggestionId, kind, ref), so a repeat write is a no-op', async () => {
+    seedTicket({ status: 'in_review' })
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer', { note: 'preview renders' })
+    expect(h.state.conflictTargets).toHaveLength(1)
+    const target = h.state.conflictTargets[0] as Array<{ name: string }>
+    expect(target.map(c => c.name)).toEqual(['suggestion_id', 'kind', 'ref'])
   })
 
   it('409s on a pair outside the map', async () => {

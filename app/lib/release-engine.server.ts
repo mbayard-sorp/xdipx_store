@@ -2658,6 +2658,8 @@ async function addTicketLink(ticketId: number, link: { kind: string; ref: string
       kind: link.kind.slice(0, 12),
       ref: link.ref,
       state: link.state ? link.state.slice(0, 16) : null,
+    }).onConflictDoNothing({
+      target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
     })
   } catch (err) {
     console.warn(`${LOG} could not add ${link.kind} link to ticket #${ticketId}`, err)

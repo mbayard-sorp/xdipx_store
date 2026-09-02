@@ -1451,6 +1451,12 @@ export const suggestionLinks = pgTable('suggestion_links', {
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => ({
   suggKindIdx: index('idx_suggestion_links_sugg_kind').on(t.suggestionId, t.kind),
+  // 092: the per-cycle writers (addTicketLinks/addTicketLink in team.server.ts
+  // and release-engine.server.ts) re-add the same (suggestionId, kind, ref)
+  // link on every poll instead of upserting; this index plus onConflictDoNothing
+  // at both call sites makes a repeat write a no-op. See migration 092 for the
+  // one-time dedupe of rows this constraint would otherwise reject.
+  uniqSuggKindRef: uniqueIndex('uq_suggestion_links_sugg_kind_ref').on(t.suggestionId, t.kind, t.ref),
 }))
 
 /**
