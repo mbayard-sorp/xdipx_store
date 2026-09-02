@@ -77,3 +77,95 @@ export async function blobDel(url: string): Promise<void> {
     console.error('[blob] best-effort delete failed (ignored):', err)
   }
 }
+
+/* -------------------------------------------------------------------------
+ * Private objects.
+ *
+ * Everything above this line is `access: 'public'`, which is correct for the
+ * video and ad pipelines: those bytes end up on Instagram. Database dumps are
+ * the opposite case. A dump of the critical tier contains consent records,
+ * voicemail rows, SMS transcripts and every order line — publishing that to a
+ * public URL would be a data breach whether or not the URL is guessable, and
+ * `addRandomSuffix` is obscurity, not access control.
+ *
+ * So these four keep `access: 'private'`, which the store enforces server-side:
+ * reads require the read-write token, which lives only in the Vercel
+ * environment. They are deliberately separate functions rather than an `access`
+ * parameter on the public ones, so that no future caller makes a dump public by
+ * forgetting an argument.
+ * ------------------------------------------------------------------------- */
+
+/** Upload a private object at an exact pathname, overwriting any prior copy. */
+export async function blobPutPrivate(
+  pathname: string,
+  data: Buffer,
+  opts: { contentType: string },
+): Promise<{ url: string; pathname: string }> {
+  const token = requireToken()
+  const { put } = await import('@vercel/blob')
+  const result = await put(pathname, data, {
+    access: 'private',
+    contentType: opts.contentType,
+    token,
+    // Deterministic paths, so a restore probe can address yesterday's dump by
+    // name rather than by listing and guessing, and so a re-run of the same
+    // night's dump replaces it instead of accumulating near-duplicates.
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  })
+  return { url: result.url, pathname: result.pathname }
+}
+
+/** Read a private object back into a Buffer, bypassing the CDN cache. */
+export async function blobGetPrivate(pathname: string): Promise<Buffer> {
+  const token = requireToken()
+  const { get } = await import('@vercel/blob')
+  const res = await get(pathname, {
+    access: 'private',
+    token,
+    // The restore probe exists to prove the bytes in origin storage are
+    // readable. A CDN hit would prove the CDN is readable, which is not the
+    // question being asked.
+    useCache: false,
+  })
+  // `get` resolves to null when the object does not exist. A missing dump is
+  // the single most important thing this whole stage detects, so it throws
+  // rather than returning an empty buffer that would read as a valid dump of
+  // nothing.
+  if (!res) throw new Error(`blob not found: ${pathname}`)
+  if (res.statusCode !== 200 || !res.stream) {
+    throw new Error(`blob get returned ${res.statusCode} for ${pathname}`)
+  }
+  const chunks: Uint8Array[] = []
+  for await (const chunk of res.stream as unknown as AsyncIterable<Uint8Array>) chunks.push(chunk)
+  return Buffer.concat(chunks)
+}
+
+/** List objects under a prefix. Returns pathnames and sizes, newest first. */
+export async function blobListPrivate(
+  prefix: string,
+): Promise<Array<{ pathname: string; size: number; uploadedAt: Date }>> {
+  const token = requireToken()
+  const { list } = await import('@vercel/blob')
+  const out: Array<{ pathname: string; size: number; uploadedAt: Date }> = []
+  let cursor: string | undefined
+  do {
+    const page = await list({ prefix, token, ...(cursor === undefined ? {} : { cursor }) })
+    for (const b of page.blobs) {
+      out.push({ pathname: b.pathname, size: b.size, uploadedAt: b.uploadedAt })
+    }
+    cursor = page.hasMore ? page.cursor : undefined
+  } while (cursor)
+  return out.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime())
+}
+
+/** Delete private objects by pathname. Best-effort, same as blobDel. */
+export async function blobDelPrivate(pathnames: string[]): Promise<void> {
+  if (pathnames.length === 0) return
+  try {
+    const { del } = await import('@vercel/blob')
+    await del(pathnames, { token: requireToken() })
+  } catch (err) {
+    console.error('[blob] best-effort private delete failed (ignored):', err)
+  }
+}

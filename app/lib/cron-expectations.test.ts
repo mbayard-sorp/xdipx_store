@@ -101,7 +101,14 @@ describe('the cron expectation manifest', () => {
     // ~12 routes at their declared cadences is ~360 rows/day, ~5 MB/month
     // against 29 MB if everything were recorded. The number is not sacred; the
     // discipline of noticing when it grows is.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(15)
+    //
+    // Raised 15 -> 17 for /cron/db-backup and /cron/db-restore-probe (Stage
+    // G1), and the arithmetic is why the raise is fine rather than the start of
+    // a slide: both are DAILY, so they add 2 rows a day to ~360. The number
+    // this cap actually guards against is a poller — the two every-2-minute
+    // ones would add 2,880 a day between them, which is why they are asserted
+    // unrecorded by name in the test above rather than left to this ceiling.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(17)
   })
 
   it('records the surfaces whose failure has a next actor', () => {
