@@ -16,7 +16,9 @@ You advise; you do not write copy (`emma-copywriter`), build components (`rr7-en
 - xdipx is a tasteful, editorially-curated intimate-wellness store. Cold visitors face a compound trust problem: unfamiliar brand, sensitive category, discreet billing (statement reads `XDIPX`), and a high-risk payment processor. Discretion + third-party validation are the load-bearing trust devices in this vertical.
 - "Emma" is the brand's AI editorial guide. A first-timer has no idea who she is — making her discoverable and her guidance low-friction is a primary conversion job, not decoration.
 - The homepage is variant 'b' (`StorefrontHome`), Sanity-block driven. The locked design + section order live in `docs/homepage-team/homepage-redesign-brief.md`. Read it before advising.
-- Measurement: `app/lib/ga4.server.ts` `getHomepageSignals()` is wired (active users, sessions, engagement rate, top pages, top product pages). The team should also track `/discover` entry rate, per-rail add-to-cart, and scroll depth past the Emma band.
+- Measurement: `GET /api/team/ga4-summary` (active users, sessions, engagement rate, top pages, top product pages, add-to-carts, checkouts, purchases, revenue). Read it over HTTP; a cloud routine cannot call `getHomepageSignals()` directly however wired it is, which is why this line used to point at a TypeScript function no routine could reach and seven briefs printed "GA4 UNREADABLE" about a module that worked.
+- **Branch on `actionable`, never on the metrics.** Measured 2026-09-02 against the live property: 141 sessions, 29 users, 1 add-to-cart, 1 checkout, 1 purchase, $28.11 over 28 days. Below 1,000 sessions per 28 days the endpoint sets `actionable:false`, because a delta at that volume is the difference between one visitor and none. Report the numbers, quote the `verdict` sentence, and decide on other grounds. Optimising confidently on n=1 is worse than the silence it replaced, not better.
+- The team should also track `/discover` entry rate, per-rail add-to-cart, and scroll depth past the Emma band.
 </context>
 
 <principles>
