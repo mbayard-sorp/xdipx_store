@@ -1982,3 +1982,57 @@ export const ownerBlockers = pgTable('owner_blockers', {
   openIdx:  index('idx_owner_blockers_open').on(t.status, t.priority, t.firstSeenAt),
   verifyIdx: index('idx_owner_blockers_verify').on(t.status, t.lastVerifiedAt),
 }))
+
+/**
+ * One row per recorded cron invocation (migration 090).
+ *
+ * Written in a `finally` so both timestamps and the terminal status land in a
+ * single INSERT. An INSERT-then-UPDATE pair would double the writes and invent
+ * a started-without-finish class indistinguishable from a real kill, which is
+ * the thing this table is here to detect rather than to manufacture.
+ *
+ * Deliberately NOT every cron: see `app/lib/cron-expectations.ts`. The two
+ * every-2-minute pollers have a KV negative cache built specifically so 1,440
+ * daily invocations touch Neon zero times, and a blanket write here would undo
+ * it and pin DB compute awake around the clock.
+ */
+export const cronRuns = pgTable('cron_runs', {
+  id:          serial('id').primaryKey(),
+  route:       varchar('route', { length: 120 }).notNull(),
+  startedAt:   timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt:  timestamp('finished_at', { withTimezone: true }),
+  status:      varchar('status', { length: 16 }).notNull(), // succeeded|skipped|failed
+  error:       text('error'),
+  result:      jsonb('result'),
+  triggerKind: varchar('trigger_kind', { length: 16 }).notNull().default('schedule'), // schedule|manual
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  routeIdx:  index('idx_cron_runs_route_started').on(t.route, t.startedAt),
+  statusIdx: index('idx_cron_runs_status_started').on(t.status, t.startedAt),
+}))
+
+/**
+ * The floor each scheduled surface is held to (migration 090).
+ *
+ * Covers BOTH scheduler planes. `vercel.json` is not the whole truth: the
+ * browser checkout probe runs from GitHub Actions, outside Vercel and outside
+ * `cronRoute`, and it is the closest thing this estate has to "can a customer
+ * actually reach checkout". A manifest that stopped at the Vercel crons would
+ * certify that blindness as healthy.
+ *
+ * Upserted from `app/lib/cron-expectations.ts` rather than seeded by the
+ * migration: an INSERT would fail the additive allowlist and cost an owner
+ * merge for a table definition.
+ */
+export const cronExpectations = pgTable('cron_expectations', {
+  route:         varchar('route', { length: 120 }).primaryKey(),
+  plane:         varchar('plane', { length: 16 }).notNull().default('vercel'), // vercel|actions
+  schedule:      varchar('schedule', { length: 64 }),
+  periodMinutes: integer('period_minutes').notNull(),
+  graceMinutes:  integer('grace_minutes').notNull().default(10),
+  recorded:      boolean('recorded').notNull().default(false),
+  moneyRelevant: boolean('money_relevant').notNull().default(false),
+  ownerTeam:     varchar('owner_team', { length: 24 }),
+  notes:         text('notes'),
+  updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
