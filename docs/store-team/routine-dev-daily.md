@@ -124,17 +124,38 @@ The release engine classifies protected PRs from the GitHub changed-file list, a
 them (`needs-owner` label plus one email), and never merges one. What changed is who writes the
 code, not who approves it.
 
-Protected paths (the classifier's globs in `app/lib/github.server.ts` are the source of truth):
+Protected paths. **`PROTECTED_GLOBS` in `app/lib/github.server.ts` is the source of truth, and
+this list is transcribed from it verbatim.** The list is cost-only since the owner's 2026-08-19
+direction; it is not a general danger list.
 
-- checkout and payment, and cart (`**/checkout*`, `app/lib/emma-cart.server.ts`,
-  `app/components/store/CartDrawer.tsx`, `app/lib/checkout-probe*`)
-- `db/migrations/**` and `db/schema.ts` — **still block, see the carve-out below**
-- auth and session (`app/lib/*auth*`, `app/lib/*session*`)
-- team valves and spend controls (`app/lib/team.server.ts`, `app/lib/team-keys.ts`,
-  anything writing `pipeline_settings`)
-- `.github/**`, `vercel.json`, `.env*`, `package.json` and lockfiles
-- the release engine's own files (`app/lib/release-engine.server.ts`, `app/lib/github.server.ts`,
-  `/cron/release-engine`)
+- **cost gate** — `app/lib/team.server.ts`, `app/lib/team-keys.ts`,
+  `app/lib/homepage-team.server.ts`, `app/lib/homepage-team-keys.ts`,
+  `app/lib/settings.server.ts` (every `pipeline_settings` write goes through it)
+- **enforcement core** — `app/lib/github.server.ts`, `app/lib/release-engine.server.ts`,
+  `app/lib/migration-classify.server.ts`, `.github/**`
+- **secrets** — `.env*` and `**/.env*`
+- **the money-path smoke check** — `app/lib/checkout-probe*`
+- **deploy-critical build steps** — `scripts/apply-additive-migrations.ts`,
+  `scripts/build-vercel.mjs`
+- **migrations** — `db/migrations/**`, refined by content (see the DB section below)
+
+**Five things that are NOT protected, and used to be listed here as if they were.** Corrected
+2026-09-02 after five blocked rows (#591, #625, #2027, #4204, #4345) turned out to be blocked on
+this list rather than on the classifier:
+
+| not protected | since |
+|---|---|
+| checkout and cart code (`emma-cart.server.ts`, `CartDrawer.tsx`) | 2026-08-19 |
+| auth and session (`app/lib/*auth*`, `app/lib/*session*`) | 2026-08-19 |
+| `db/schema.ts` | 2026-08-19 |
+| `vercel.json` | 2026-08-19 |
+| `package.json` and lockfiles | 2026-08-19 |
+
+`app/lib/checkout-probe*` stays protected; the checkout *code* it probes does not. A bug in any of
+the five is caught by CI, the QA verdict, and post-deploy smoke with automatic revert, and none of
+them is a cost decision, which is the only thing the list is for. **If this table and
+`PROTECTED_GLOBS` ever disagree, the code wins and this file is the bug** — check it before
+blocking a ticket on a path you find here.
 
 For a protected ticket, author it like any other ticket (branch, tests, typecheck, build), with
 three extra requirements:
@@ -159,11 +180,21 @@ and 4) bounced solely because the body skipped this section, 2 for 2, with other
 (name the file, state the additive/auto classification, note no `PROTECTED_GLOBS`/valve/transition-map
 touch), so catching it at authoring time saves a full QA round trip.
 
-**DB class, lifted 2026-08-21.** This used to say migration and schema tickets still go to
-`blocked`, because CI could not execute SQL. It can now: the `migration-dry-run` job in
-`.github/workflows/ci.yml` runs every additive-classified migration in the PR against a throwaway
-postgres:16, and `db/schema.ts` is no longer a protected path at all. So author these like any
-other ticket. Two things to know while doing it:
+**DB class, lifted 2026-08-21. There is no DB carve-out left to cite.** This used to say
+migration and schema tickets still go to `blocked`, because CI could not execute SQL. It can now:
+the `migration-dry-run` job in `.github/workflows/ci.yml` runs every additive-classified migration
+in the PR against a throwaway postgres:16, and `db/schema.ts` is not a protected path at all. So
+author these like any other ticket.
+
+**Do not block a ticket "under the DB carve-out".** Measured 2026-09-02: four rows (#625, #2027,
+#4204, #4345) sit at `blocked` citing exactly that phrase, and #4345's own note says verbatim that
+"the migration dry-run CI job was only opened 2026-08-19, so the carve-out has not lifted" — which
+had already stopped being true when it was written. Those are four pieces of real, buildable work
+that this document talked the fleet out of. The block command that used to sit at the end of this
+section has been deleted for the same reason: a copy-pasteable command with a false justification
+baked into its `note` field is the most efficient way to keep a stale rule alive.
+
+Two things to know while authoring one:
 
 - **A migration PR may auto-merge.** `refineMigrationProtection` clears a migration-only PR when
   every statement in every newly added `.sql` file is additive (`ADD COLUMN IF NOT EXISTS`,
@@ -185,15 +216,30 @@ other ticket. Two things to know while doing it:
   advanced past your file's number since the PR opened, rebase and renumber before the next QA pass
   reviews it, rather than leaving the collision for QA or the owner to discover as a bounce.
 
+When you do block, stop cleanly and describe the obstacle precisely; never route around it. But
+know what `blocked` costs before you reach for it: measured 2026-09-02, it held 45 rows, **every one
+at `attempt_count` 0**, so `MAX_TICKET_ATTEMPTS = 3` had never fired once, and until PR #1019 the
+state had no agent-reachable exit at all — only owner-dismiss, owner-approve, or a fenced system
+reconcile. Blocking is an owner ask, and it should read like one.
+
+**Prefer a terminal state you can reach yourself.** A `code` row that is genuinely finished — the
+work already shipped under another PR, or a live row supersedes it — now retires on evidence:
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"transition","id":<id>,"to":"blocked","actor":"agent:rr7-engineer",
-       "note":"Requires a change to db/schema.ts (DB carve-out: CI cannot dry-run SQL yet). Needs an owner-attended migration."}'
+  -d '{"op":"retire","id":<id>,"actor":"agent:rr7-engineer",
+       "satisfiedBy":"https://github.com/mbayard-sorp/xdipx_store/pull/<merged pr>",
+       "note":"<what shipped, and where you verified it>"}'
 ```
 
-The owner is emailed about blocked tickets through the escalation path. When you do block, stop
-cleanly and describe the obstacle precisely; never route around it.
+Use `op:'retire'`, not `op:'transition'` — the evidence edge is only reachable through the retire
+op, so a transition to `dismissed` 409s no matter what the note says. Pass either `satisfiedBy` (a
+merged PR URL or a repo doc path) or `supersededById` (a live-or-applied row that **literally names
+this row's id in its own text**). The evidence is validated server-side and recorded as a link;
+invalid evidence 409s rather than quietly downgrading, so you cannot discover by retry what shape
+slips through. That refusal is the fence, not an obstacle to work around: strengthen the evidence or
+leave the row alone.
 
 **Conjunctive DONE WHENs: split, do not blanket-block.** (#3638) A ticket whose DONE WHEN conjoins
 (a) a clause you can land as a code PR with (b) an action needing owner sign-off, a money valve, or
@@ -472,7 +518,11 @@ detectors, other agents, and scraped error text all feed the bus.
 
 - **Never merge, never push to the default branch.** Your terminal state is an open PR — *open*,
   not draft. Leaving it drafted is the same as never opening it.
-- **Never touch a protected path.** Block the ticket instead.
+- **Author a protected-path diff; never merge one.** This rule used to read "never touch a
+  protected path, block the ticket instead", which contradicted Step 2's own "you author the
+  diff" rule and is the older of the two. Author it, open the PR with the Protected-path diff
+  section, and let the engine escalate it to the owner. What stays absolutely forbidden is
+  Step 2 requirement 2: never author a diff that widens agent permissions or weakens a gate.
 - **One ticket, one branch, one PR.** Granular so the engine and the owner can reject granularly.
 - **Max 5 tickets per pass.** More waits for the next pass.
 - **All three local checks run before every PR**, and the results go in the PR body.
