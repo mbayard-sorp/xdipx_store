@@ -10,7 +10,17 @@
  */
 
 export const BLOCKER_CATEGORIES = [
-  'migration', 'valve', 'console', 'credential', 'approval', 'merge', 'execute', 'other',
+  'migration', 'valve', 'console', 'credential', 'approval', 'merge', 'execute',
+  /**
+   * A judgement only the owner can make, with no observable completion state:
+   * a brand call, a spend call, a "should we do this at all". These are the one
+   * legitimate carve-out from "no blocker without a probe", and they get their
+   * own category rather than hiding in `other`, which also catches rows that
+   * are perfectly checkable and simply were not given a probe. Of 32 blockers
+   * ever filed, 25 had no probe and 15 of those were cleared by hand.
+   */
+  'decision',
+  'other',
 ] as const
 export type BlockerCategory = (typeof BLOCKER_CATEGORIES)[number]
 
@@ -117,6 +127,71 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
    * drained because the owner reopened a valve or because the rows were
    * rescheduled or withdrawn. */
   social_no_overdue: a => `${a} has no approved post left waiting days past its slot`,
+  /* Arg is one or more env var names, comma-separated. Reads this process's own
+   * environment, which is the honest question: a value set in the Vercel
+   * dashboard but not yet redeployed has not reached the app, and the row
+   * should stay open until it has. */
+  env_present:   a => `${a} is set in the app's environment`,
+  /* Arg is a PR number or URL. */
+  pr_merged:     a => `PR ${a} is merged`,
+  /* Arg is `<checkName>` for main's head, or `<checkName>|<ref>`. */
+  check_green:   a => {
+    const [name, ref] = a.split('|')
+    return `the ${name} check is green on ${ref ?? 'main'}`
+  },
+  /* Arg is an absolute URL. */
+  endpoint_200:  a => `${a} answers 2xx`,
+}
+
+/**
+ * Categories where a row without a probe is a defect, not a style choice.
+ *
+ * `console` and `decision` are the carve-outs, and for opposite reasons:
+ * `console` completes inside a third-party UI this server cannot read, and
+ * `decision` has no observable completion state at all. Everything else leaves
+ * a trace something here can check, so a probe-less row in those categories is
+ * a row that will be cleared by hand — which is what 15 of the 32 blockers
+ * filed to date actually were.
+ */
+export const PROBE_REQUIRED_CATEGORIES: readonly BlockerCategory[] = [
+  'migration', 'valve', 'credential', 'merge', 'execute',
+]
+
+/**
+ * Derive a probe for a row that arrived without one.
+ *
+ * Deliberately narrow. Most probes need an argument only the filer knows (which
+ * valve, which table, which env var), and inventing one would produce a probe
+ * that answers the wrong question — worse than none, because it can clear a row
+ * that is still true. So this only fires where the argument is unambiguously
+ * present in the row itself.
+ */
+export function suggestProbeFor(
+  input: Pick<BlockerInput, 'category' | 'sourceRef' | 'verifyProbe'>,
+): { verifyProbe: string; verifyArg: string } | null {
+  if (input.verifyProbe) return null
+
+  // A merge row whose sourceRef is a PR: the PR number is the argument.
+  if (input.category === 'merge' && typeof input.sourceRef === 'string') {
+    const m = /(?:\/pull\/|#)(\d+)\b/.exec(input.sourceRef)
+    if (m) return { verifyProbe: 'pr_merged', verifyArg: m[1]! }
+  }
+
+  return null
+}
+
+/**
+ * Does this row still need a probe after auto-assignment? Reported, not thrown:
+ * a filer that cannot supply one must still be able to put the blocker in front
+ * of the owner. Losing the row is worse than losing the probe.
+ */
+export function probeGapReason(
+  input: Pick<BlockerInput, 'category' | 'verifyProbe'>,
+): string | null {
+  if (input.verifyProbe) return null
+  const category = (input.category ?? 'other') as BlockerCategory
+  if (!PROBE_REQUIRED_CATEGORIES.includes(category)) return null
+  return `category '${category}' should carry a verifyProbe; this row will need clearing by hand`
 }
 
 export function isProbe(name: unknown): name is string {

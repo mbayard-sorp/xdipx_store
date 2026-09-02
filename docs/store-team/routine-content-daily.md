@@ -495,6 +495,17 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      fix and expensive to detect late. Cheap mechanical hint: a scope-widening rewrite almost always
      introduces a universal quantifier (whatever, anything, everything, always, never), so treat any
      of those words appearing in a rewrite as a prompt to re-read the rest of the post.
+   - **Enumeration-consistency scan (part of the same pre-resubmit self-check, ticket #6910):** when
+     a gate asks for a change to an enumerated list, a red-flag list, a safety enumeration, or a tier
+     assignment, first grep the whole document for every other instance of that enumeration, the FAQ
+     block included, and apply the change to all of them in the same rewrite, listing each site
+     explicitly for the re-gate. The universal-quantifier hint above does not catch this shape: the
+     defect is not a widened quantifier, it is the same enumeration existing in two places with only
+     one of them edited (run 327 lost its publish to this class in a body/FAQ split; run 626 lost it
+     again when a fever-severity tier change to the body red-flag list left FAQ Q5's copy of the same
+     enumeration unchanged). A post-scoped enumeration is exactly the shape the post-scoped-cap
+     carve-out above already exists for, so that carve-out's permission to edit anywhere in the
+     document covers this case too.
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.

@@ -225,13 +225,14 @@ export const STOREFRONT_EDGE_CACHE_HEADERS = {
  * writes the blob on its way out.
  */
 export async function assembleStorefrontHome(
-  opts: { fresh?: boolean } = {},
+  opts: { fresh?: boolean; seed?: number } = {},
 ): Promise<StorefrontData> {
+  const seed = opts.seed ?? railSeedBucket()
   // `fresh` (admin sessions) skips the blob so an editor sees their Sanity /
   // settings change on the next reload instead of waiting for the next warm.
   // It deliberately does NOT write the blob back: an admin preview shouldn't
   // reset the rotation window that anonymous visitors are sharing.
-  if (opts.fresh) return hydrateStorefrontPayloadB(await buildHomepagePayloadB())
+  if (opts.fresh) return hydrateStorefrontPayloadB(await buildHomepagePayloadB(), seed)
 
   const payload = await readHomepagePayloadB()
   if (payload) {
@@ -239,7 +240,7 @@ export async function assembleStorefrontHome(
     // was built. Rebuilding inline wouldn't help — the index is what's missing —
     // so kick a background warm and render what we have.
     if (payload.degraded) triggerHomepageWarmB()
-    return hydrateStorefrontPayloadB(payload)
+    return hydrateStorefrontPayloadB(payload, seed)
   }
 
   // Cold miss: build inline so we never render an empty storefront, then write
@@ -249,7 +250,7 @@ export async function assembleStorefrontHome(
   void writeHomepagePayloadB(fresh).catch(err => {
     console.warn('[storefront-home] payload write after cold build failed:', err)
   })
-  return hydrateStorefrontPayloadB(fresh)
+  return hydrateStorefrontPayloadB(fresh, seed)
 }
 
 /**
@@ -261,8 +262,19 @@ export async function assembleStorefrontHome(
  * recomputed from the reshuffled rails (rather than stored) so the hero product
  * and the rail beneath it can never disagree about what's in slot 0.
  */
-export function hydrateStorefrontPayloadB(payload: HomepagePayloadB): StorefrontData {
-  const rails = reshuffleRailsWithSeed(payload.rails, railSeedBucket())
+export function hydrateStorefrontPayloadB(
+  payload: HomepagePayloadB,
+  /**
+   * Rotation seed. Defaults to the wall-clock bucket, which is the production
+   * behaviour; passing it explicitly is what lets a test assert rail order
+   * without racing the clock. Called with no argument, this made
+   * `storefront-home.server.test.ts` a coin flip that reddened `check` in
+   * roughly half of all 15-minute windows, and `check` is the gate the release
+   * engine waits on — so a wall-clock shuffle was quietly costing merges.
+   */
+  seed: number = railSeedBucket(),
+): StorefrontData {
+  const rails = reshuffleRailsWithSeed(payload.rails, seed)
 
   let featured = rails
     .map(r => r.items[0]?.product)

@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
 import { ga4PurchaseOutbox, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
 import { eq, sql } from 'drizzle-orm'
+import { canonicalDedupeKey } from '../app/lib/dedupe-key.js'
 
 /**
  * Ceiling on the pre-response conversion sends. Shopify gives a webhook 5s
@@ -536,6 +537,20 @@ const ENRICH_CHAIN_LOOKBACK_MS = 2 * 60 * 60 * 1000
 const PRICING_RATIONALE_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000
 const NEW_PRODUCT_WEEKLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
+/**
+ * Dedupe-key stem this trigger owns, in the form the bus actually stores.
+ *
+ * `createSuggestion` runs every key through `canonicalDedupeKey`, which splits
+ * on `[-:._/\s]+` and rejoins with `-`. So a row filed as `new-product:<handle>`
+ * lands as `new-product-<handle>`, and the weekly cap below — which hand-wrote
+ * the raw `new-product:%` prefix — matched zero rows on every single call. The
+ * count was permanently 0, so the cap of three launches a week never once fired:
+ * 122 rows in six days, all auto-approved into a lane that then could not drain
+ * them. Deriving the stem from the same helper that stores it is what stops the
+ * reader and the writer drifting apart again.
+ */
+const NEW_PRODUCT_KEY_STEM = canonicalDedupeKey('new-product')
+
 async function maybeFileNewProductSuggestion(product: ShopifyProductWebhook): Promise<void> {
   if (product.status !== 'active' || !product.published_at || !product.handle) return
   const publishedAtMs = Date.parse(product.published_at)
@@ -588,7 +603,7 @@ async function maybeFileNewProductSuggestion(product: ShopifyProductWebhook): Pr
     .select({ n: count() })
     .from(homepageTeamSuggestions)
     .where(and(
-      like(homepageTeamSuggestions.dedupeKey, 'new-product:%'),
+      like(homepageTeamSuggestions.dedupeKey, `${NEW_PRODUCT_KEY_STEM}-%`),
       gte(homepageTeamSuggestions.createdAt, new Date(Date.now() - NEW_PRODUCT_WEEKLY_WINDOW_MS)),
     ))
   const weeklyCount = Number(weeklyRows[0]?.n ?? 0)
@@ -610,7 +625,7 @@ async function maybeFileNewProductSuggestion(product: ShopifyProductWebhook): Pr
     targetTeam: 'social',
     kind:       'process',
     category:   'social-automation',
-    dedupeKey:  `new-product:${product.handle}`,
+    dedupeKey:  `${NEW_PRODUCT_KEY_STEM}-${product.handle}`,
     suggestion:
       `Product just went live on the storefront: "${product.title}" ` +
       `(handle: ${product.handle}, category: ${product.product_type || 'unknown'}, ` +

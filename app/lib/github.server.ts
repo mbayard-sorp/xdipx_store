@@ -543,6 +543,37 @@ export async function addLabels(number: number, labels: string[], context = 'git
   return { ok: true, status: res.status, data: res.data.map((l) => l.name) }
 }
 
+/**
+ * Remove one or more labels from a PR.
+ *
+ * The counterpart to `addLabels`, and its absence was a real bug rather than an
+ * omission: three machine paths in the release engine applied `needs-owner` and
+ * nothing anywhere could take it off, so the gate's step-2 skip — written as the
+ * OWNER's manual opt-out — became a one-way latch the machine could set. PR #991
+ * sat fully green behind it for two days over a migration the repo's own
+ * classifier calls `auto`.
+ *
+ * GitHub has no bulk label-delete, so this is one DELETE per label. A 404 is
+ * success-if-absent: removing a label that is not there is the state we wanted.
+ */
+export async function removeLabels(number: number, labels: string[], context = 'github'): Promise<GithubResult<string[]>> {
+  const removed: string[] = []
+  for (const label of labels) {
+    const res = await githubRequest<unknown>(
+      `/repos/{owner}/{repo}/issues/${number}/labels/${encodeURIComponent(label)}`,
+      { method: 'DELETE', context },
+    )
+    if (res.ok) {
+      removed.push(label)
+      continue
+    }
+    // Already gone is the outcome we wanted; anything else is a real failure.
+    if (res.status === 404) continue
+    return res
+  }
+  return { ok: true, status: 200, data: removed }
+}
+
 export async function createIssueComment(number: number, body: string, context = 'github'): Promise<GithubResult<{ html_url: string }>> {
   return githubRequest<{ html_url: string }>(`/repos/{owner}/{repo}/issues/${number}/comments`, {
     method: 'POST',
