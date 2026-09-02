@@ -31,6 +31,7 @@
 import { generateImage } from './generate-image.server'
 import { uploadMoodImageToShopifyFilesWithId } from './shopify.server'
 import { tryIngestSocialAsset } from './social-asset-library.server'
+import type { VisionVerdict } from './social-vision-gate.server'
 
 /**
  * Filename prefixes that mark an asset as generated social art.
@@ -429,10 +430,12 @@ export interface GenerateCastCompositeResult {
   assetIds?: (number | null)[]
 }
 
-export async function generateCastComposite(
+/** One composeSceneFrame call, rehosted, ingested, and vision-gated per candidate. */
+async function generateCastCompositeBatch(
   opts: GenerateCastCompositeOpts,
-): Promise<GenerateCastCompositeResult> {
+): Promise<Required<Pick<GenerateCastCompositeResult, 'urls' | 'filenames' | 'costs' | 'requestIds' | 'assetIds'>> & Pick<GenerateCastCompositeResult, 'plateRequestId'>> {
   const { composeSceneFrame } = await import('./fal-video.server')
+  const { runVisionGate, recordVisionVerdict } = await import('./social-vision-gate.server')
 
   const frame = await composeSceneFrame({
     prompt: withProductScale(opts.prompt, opts.scale),
@@ -475,11 +478,6 @@ export async function generateCastComposite(
       if (!res.ok) continue
       const buffer = Buffer.from(await res.arrayBuffer())
       const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
-      urls.push(url)
-      filenames.push(filename)
-      // Keep aligned with the surviving urls/filenames (a fetch or upload
-      // failure above skips both this filename and its request id).
-      requestIds.push(frame.requestIds[i])
       // Library dual-write (#4937): the buffer is already in hand, so no
       // re-fetch. Non-fatal; the Shopify url is what the gate checks, so the
       // row indexes under it and carries the Sanity asset id alongside.
@@ -502,7 +500,20 @@ export async function generateCastComposite(
         createdBy: opts.caller ?? 'social-media-manager',
         ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
       })
+      // Vision-gate every candidate before it can reach a draft (#6763): the
+      // verdict is recorded on the row regardless of outcome (a missing
+      // verdict is what makes social-publish-gate block, not a failing one
+      // alone), and a failing candidate is dropped from what this function
+      // returns, exactly the same as a rehost failure above.
+      const verdict = await runVisionGate(url)
+      if (asset?.id != null) await recordVisionVerdict(asset.id, verdict)
+      if (!verdict.pass) continue
+      urls.push(url)
+      filenames.push(filename)
       assetIds.push(asset?.id ?? null)
+      // Keep aligned with the surviving urls/filenames (a fetch, upload, or
+      // vision-gate failure above skips both this filename and its request id).
+      requestIds.push(frame.requestIds[i])
     } catch (err) {
       console.error(`[social-media] cast candidate rehost failed (billed, dropped): ${filename}`, err)
     }
@@ -516,6 +527,24 @@ export async function generateCastComposite(
     assetIds,
     ...(frame.plateRequestId ? { plateRequestId: frame.plateRequestId } : {}),
   }
+}
+
+/**
+ * Two-attempt vision-gate budget across the whole batch (#6763,
+ * docs/homepage-team/mission-brief.md:142): when every candidate in the first
+ * composeSceneFrame call fails the vision gate, regenerate the batch once
+ * more before giving up. Both attempts are billed and both contribute
+ * `costs`; a caller that gets `urls: []` back has exhausted the budget and
+ * must fall back exactly as it already does on a zero-candidate result.
+ */
+export async function generateCastComposite(
+  opts: GenerateCastCompositeOpts,
+): Promise<GenerateCastCompositeResult> {
+  const first = await generateCastCompositeBatch(opts)
+  if (first.urls.length > 0) return first
+
+  const second = await generateCastCompositeBatch(opts)
+  return { ...second, costs: [...first.costs, ...second.costs] }
 }
 
 export interface GenerateSocialImageOpts {
@@ -560,8 +589,11 @@ export interface GenerateSocialImageOpts {
 export interface GenerateSocialImageResult {
   /**
    * Permanent Shopify Files CDN URL. Null when generation produced nothing
-   * (provider 'none' — nothing billed) OR when rehosting failed after a billed
-   * generation (provider set — the caller must still post the spend row, #887).
+   * (provider 'none' — nothing billed), rehosting failed after a billed
+   * generation (provider set — the caller must still post the spend row,
+   * #887), or every attempt failed the vision gate (#6763, see
+   * `visionVerdict` — the caller must fall back the same way, and the
+   * rejected asset's row stays in the library for provenance only).
    */
   url: string | null
   filename: string
@@ -569,14 +601,21 @@ export interface GenerateSocialImageResult {
   model: string
   /** `social_media_assets` id when the library write succeeded (#4937). */
   assetId?: number | null
+  /** The last vision-gate verdict recorded, whichever attempt it came from (#6763). */
+  visionVerdict?: VisionVerdict | null
+  /** How many generate+check attempts this call made (budget: `generateWithVisionGate`'s default of 2). */
+  visionAttempts?: number
 }
 
 /**
- * Generate one social image and rehost it to Shopify Files.
+ * Generate one social image, rehost it to Shopify Files, and vision-gate it.
  *
  * Never throws on a generation miss: a provider that returns nothing yields
  * `url: null` so the caller can fall back to a pool asset and report honestly,
- * matching `generateImage`'s own contract.
+ * matching `generateImage`'s own contract. A vision-gate failure is treated
+ * the same way after the retry budget is exhausted (#6763): `url: null`, so
+ * every existing "fall back when there is no usable image" caller already
+ * handles it correctly with no changes on their side.
  */
 export async function generateAndUploadSocialImage(
   opts: GenerateSocialImageOpts,
@@ -594,51 +633,75 @@ export async function generateAndUploadSocialImage(
     ...(opts.slide ? { slide: opts.slide } : {}),
   })
 
-  const result = await generateImage({
-    prompt: opts.prompt,
-    count: 1,
-    // The social team's own spend feature. Nothing emitted this before, which
-    // is why social image spend was invisible to the budget gate: it sums
-    // `feature LIKE 'social-%'`.
-    feature: 'social-images',
-    caller: opts.caller ?? 'social-media-manager',
-    logCost: opts.logCost ?? false,
-    ...(opts.refImageUrl ? { refImageUrl: opts.refImageUrl } : {}),
-    ...(opts.imageSize ? { imageSize: opts.imageSize } : {}),
-    ...(opts.only ? { only: opts.only } : {}),
+  let lastProvider: GenerateSocialImageResult['provider'] = 'none'
+  let lastModel = ''
+  const { generateWithVisionGate, runVisionGate, recordVisionVerdict } =
+    await import('./social-vision-gate.server')
+
+  const outcome = await generateWithVisionGate({
+    generate: async () => {
+      const result = await generateImage({
+        prompt: opts.prompt,
+        count: 1,
+        // The social team's own spend feature. Nothing emitted this before, which
+        // is why social image spend was invisible to the budget gate: it sums
+        // `feature LIKE 'social-%'`.
+        feature: 'social-images',
+        caller: opts.caller ?? 'social-media-manager',
+        logCost: opts.logCost ?? false,
+        ...(opts.refImageUrl ? { refImageUrl: opts.refImageUrl } : {}),
+        ...(opts.imageSize ? { imageSize: opts.imageSize } : {}),
+        ...(opts.only ? { only: opts.only } : {}),
+      })
+      lastProvider = result.provider
+      lastModel = result.model
+
+      const buffer = result.buffers[0]
+      if (!buffer) return null
+
+      // Rehost failure must not throw: the generation above is already billed
+      // by the provider, and an exception here used to unwind the caller
+      // before it could post the spend row, leaving billed generations
+      // uncounted (#887). Returning null here (a "generation miss" to the
+      // vision-gate loop) tells the caller "billed but unshipped".
+      try {
+        const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
+        // Library dual-write (#4937), non-fatal, buffer already in hand.
+        // `shopifyFileId` (#5426) makes a future purge deterministic.
+        const asset = await tryIngestSocialAsset({
+          buffer,
+          filename,
+          contentType: 'image/jpeg',
+          url,
+          shopifyFileId: fileId,
+          aspect: opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
+          source: 'generated',
+          provider: result.provider,
+          model: result.model,
+          prompt: opts.prompt,
+          archetype: opts.archetype,
+          productHandle: opts.handle,
+          generationBatchId: crypto.randomUUID(),
+          isPicked: false,
+          createdBy: opts.caller ?? 'social-media-manager',
+        })
+        return { url, assetId: asset?.id ?? null }
+      } catch (err) {
+        console.error(`[social-media] rehost failed (generation billed, no asset): ${filename}`, err)
+        return null
+      }
+    },
+    runGate: (url) => runVisionGate(url),
+    recordVerdict: (assetId, verdict) => recordVisionVerdict(assetId, verdict),
   })
 
-  const buffer = result.buffers[0]
-  if (!buffer) return { url: null, filename, provider: 'none', model: result.model }
-
-  // Rehost failure must not throw: the generation above is already billed by
-  // the provider, and an exception here used to unwind the caller before it
-  // could post the spend row, leaving billed generations uncounted (#887).
-  // `url: null` with a real provider tells the caller "billed but unshipped".
-  try {
-    const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
-    // Library dual-write (#4937), non-fatal, buffer already in hand.
-    // `shopifyFileId` (#5426) makes a future purge deterministic.
-    const asset = await tryIngestSocialAsset({
-      buffer,
-      filename,
-      contentType: 'image/jpeg',
-      url,
-      shopifyFileId: fileId,
-      aspect: opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
-      source: 'generated',
-      provider: result.provider,
-      model: result.model,
-      prompt: opts.prompt,
-      archetype: opts.archetype,
-      productHandle: opts.handle,
-      generationBatchId: crypto.randomUUID(),
-      isPicked: false,
-      createdBy: opts.caller ?? 'social-media-manager',
-    })
-    return { url, filename, provider: result.provider, model: result.model, assetId: asset?.id ?? null }
-  } catch (err) {
-    console.error(`[social-media] rehost failed (generation billed, no asset): ${filename}`, err)
-    return { url: null, filename, provider: result.provider, model: result.model }
+  return {
+    url: outcome.url,
+    filename,
+    provider: lastProvider,
+    model: lastModel,
+    assetId: outcome.assetId,
+    visionVerdict: outcome.verdict,
+    visionAttempts: outcome.attempts,
   }
 }

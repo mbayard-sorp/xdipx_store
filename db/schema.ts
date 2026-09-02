@@ -21,6 +21,8 @@ import {
 // Type-only import — fully erased at build, so no runtime coupling / cycle
 // despite homepage-payload.server.ts importing the `homepagePayload` table back.
 import type { HomepagePayloadA, HomepagePayloadB } from '~/lib/homepage-payload.server'
+// Type-only import for the vision-gate verdict shape (ticket #6763).
+import type { VisionVerdict } from '~/lib/social-vision-gate.server'
 
 export const dealHistory = pgTable('deal_history', {
   id:               serial('id').primaryKey(),
@@ -281,6 +283,11 @@ export const socialMediaAssets = pgTable('social_media_assets', {
   // The Shopify Files GID for `url`, when rehosted there. Populated going
   // forward (uploadMoodImageToShopifyFilesWithId); historic rows stay null.
   shopifyFileId:     varchar('shopify_file_id', { length: 120 }),
+  // Vision-gate hard check (migration 087, ticket #6763). NULL means never
+  // checked; the publish gate treats that as a BLOCK for any library asset,
+  // never a silent skip. See app/lib/social-vision-gate.server.ts.
+  visionVerdict:     jsonb('vision_verdict').$type<VisionVerdict>(),
+  visionVerdictAt:   timestamp('vision_verdict_at', { withTimezone: true }),
 }, t => ({
   createdIdx:  index('idx_social_media_assets_created').on(t.createdAt),
   productIdx:  index('idx_social_media_assets_product').on(t.productHandle),
