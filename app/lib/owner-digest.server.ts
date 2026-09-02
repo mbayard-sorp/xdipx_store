@@ -35,7 +35,8 @@ import {
   type RoutineLivenessFlag,
   type TicketLoopHealth,
 } from '~/lib/ticket-janitor.server'
-import { kvDel, kvGet, kvSetNX } from '~/lib/kv.server'
+import { kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
+import { computeOwnerQueue, type MoneyBlock, type OwnerQueueEntry } from '~/lib/owner-queue.server'
 import type { SeoDailyResult } from '~/lib/seo-daily.server'
 import type { EditorialTilesBlock, EmmaCuratedRailBlock } from '~/types/cms'
 
@@ -75,6 +76,94 @@ export interface OwnerDigestResult {
   skipped?: string
   error?: string
   subject?: string
+}
+
+/**
+ * The money block, first in the email because of what it says.
+ *
+ * `null` renders as "could not read", never as zero. A dead query and a dead
+ * store both produce no number, and conflating them is the single most
+ * expensive habit this program has been unpicking.
+ */
+/** KV key holding the fingerprint of the last queue that was actually sent. */
+export const QUEUE_FINGERPRINT_KEY = 'owner-digest:queue-fingerprint'
+
+/**
+ * Whether today's digest is worth sending.
+ *
+ * Three reasons to send: the queue changed, something has been waiting a week,
+ * or it is Monday. Otherwise the owner gets nothing, which is the whole point
+ * of the stage.
+ *
+ * ## The hazard this creates, and why it is already closed
+ *
+ * Once quiet days stop sending, a FAILED send becomes indistinguishable from a
+ * quiet one — a seven-day blind window, strictly worse than the noise it
+ * replaced. That is a real objection and it would have shipped as a bug.
+ *
+ * It is closed by Stage C rather than by anything here. `/cron/owner-digest` is
+ * a `recorded: true` route, and `classifyCronOutcome` reads a handler that
+ * answers `{ ok: true, skipped: '...' }` as status `skipped`, distinct from
+ * both `succeeded` and `failed`. So a deliberately quiet day writes a `skipped`
+ * row, a broken send writes `failed`, and `/cron/janitor-sweep` sees a route
+ * with NO row at all as a breach against its daily floor. Three outcomes, three
+ * different records. This function must therefore always return a decision the
+ * handler can report — never silently do nothing.
+ */
+export function shouldSendDigest(input: {
+  fingerprint: string
+  lastFingerprint: string | null
+  oldestEntryAgeDays: number
+  /** 1 = Monday, matching Date#getUTCDay()'s 0-is-Sunday scheme shifted by the caller. */
+  isMonday: boolean
+  force?: boolean
+}): { send: boolean; reason: string } {
+  if (input.force) return { send: true, reason: 'forced' }
+  if (input.isMonday) return { send: true, reason: 'monday' }
+  if (input.fingerprint !== input.lastFingerprint) return { send: true, reason: 'queue-changed' }
+  if (input.oldestEntryAgeDays >= 7) {
+    return { send: true, reason: 'entry-older-than-7d' }
+  }
+  return { send: false, reason: 'queue-unchanged' }
+}
+
+export function renderMoneyBlock(m: MoneyBlock): string {
+  const usd = (v: number | null) => (v === null ? '<span style="color:#a00;">could not read</span>' : `$${v.toFixed(2)}`)
+  const int = (v: number | null) => (v === null ? '<span style="color:#a00;">could not read</span>' : String(v))
+  return `<table style="border-collapse:collapse;font-size:12px;">
+      <tr><td style="padding:1px 10px 1px 0;">Orders, last 7d</td><td><strong>${int(m.ordersLast7)}</strong></td></tr>
+      <tr><td style="padding:1px 10px 1px 0;">Revenue, last 7d</td><td><strong>${usd(m.revenueLast7Usd)}</strong></td></tr>
+      <tr><td style="padding:1px 10px 1px 0;">Profit, last 30d</td><td>${usd(m.profitLast30Usd)} <span style="color:#6f645c;">of $${m.goalUsd}/mo goal</span></td></tr>
+      <tr><td style="padding:1px 10px 1px 0;">Estate spend, last 30d</td><td>${usd(m.estateSpendLast30Usd)}</td></tr>
+    </table>
+    <p style="margin:6px 0 0;">${esc(m.verdict)}</p>`
+}
+
+/**
+ * The unified queue: every owner ask, each with the one move that clears it.
+ *
+ * Replaces the per-surface sections that each decided independently the owner
+ * needed telling. The `move` is rendered in bold because it is the only part
+ * that asks anything of the reader; everything else is context for it.
+ */
+export function renderOwnerQueueEntries(entries: readonly OwnerQueueEntry[]): string {
+  if (entries.length === 0) {
+    return '<p style="margin:0;color:#3a7d44;">Nothing is waiting on you.</p>'
+  }
+  return entries
+    .slice(0, 25)
+    .map((e) => {
+      const probe = e.probe
+        ? e.probe.stale
+          ? ` <span style="color:${WARN};">probe ${esc(e.probe.kind)} not evaluated in 24h</span>`
+          : ` <span style="color:#6f645c;">probe ${esc(e.probe.kind)}, checked ${esc((e.probe.lastEvaluatedAt ?? '').slice(0, 16))}</span>`
+        : ' <span style="color:#6f645c;">no probe</span>'
+      return `<p style="margin:8px 0 0;"><strong>P${e.priority}</strong> &middot; ${esc(e.title)}</p>
+        <p style="margin:0;"><strong>&rarr; ${esc(e.move)}</strong></p>
+        <p style="margin:0;color:#6f645c;font-size:11px;">${esc(e.source)} &middot; ${e.ageDays}d${probe}</p>`
+    })
+    .join('')
+    + (entries.length > 25 ? `<p style="margin:8px 0 0;color:#6f645c;">and ${entries.length - 25} more on /admin/ops</p>` : '')
 }
 
 function esc(s: string): string {
@@ -1348,6 +1437,15 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // send so a re-render does not imply a real escalation happened; `null` renders
   // as "not computed", distinct from a real zero.
   const staleUndecided = opts.force ? null : await countStaleUndecidedOwnerAsks()
+  // The unified queue, computed once and rendered here exactly as
+  // /api/team/status and /admin/ops render it. Never fatal: a digest that
+  // cannot compute the queue must still deliver the fifteen sections it always
+  // did, because the alternative is no email at all on the day something broke.
+  const unified = await computeOwnerQueue().catch((err) => {
+    console.warn('[owner-digest] owner queue unavailable', err)
+    return null
+  })
+
   const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames] =
     await Promise.all([
       gatherShipped(),
@@ -1508,6 +1606,9 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   const html = `<body style="margin:0;padding:16px;background:#faf7f2;">
     <div style="max-width:640px;">
       <h2 style="font-family:Inter,sans-serif;font-size:16px;margin:0 0 4px;">xdipx daily digest &middot; ${day}</h2>
+      ${unified ? section('Money', renderMoneyBlock(unified.money)) : ''}
+      ${unified ? section(`Your queue${unified.entries.length > 0 ? ` (${unified.entries.length})` : ''}`, renderOwnerQueueEntries(unified.entries)) : ''}
+      ${unified && unified.gaps.length > 0 ? section('Queue is incomplete', `<p style="margin:0;color:${WARN};">Could not read: ${esc(unified.gaps.join(', '))}. Treat the queue above as partial, not as clear.</p>`) : ''}
       ${section('Needs Mike', renderNeedsMikeSection(needsMike))}
       ${section(`Escalations${needsOwner > 0 ? ` (${needsOwner})` : ''}`, renderEscalationsSection(escalations))}
       ${section(`Shipped, last 24h (${shipped.length})`, renderShippedSection(shipped))}
@@ -1529,8 +1630,33 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     </div>
   </body>`
 
+  // Send-on-change. Deliberately AFTER composing: the cost of rendering is
+  // trivial next to the gathering already done, and deciding here means the
+  // decision sees the same queue the email would have carried rather than a
+  // second, possibly different, read.
+  if (unified) {
+    const lastFingerprint = await kvGet<string>(QUEUE_FINGERPRINT_KEY).catch(() => null)
+    const decision = shouldSendDigest({
+      fingerprint: unified.fingerprint,
+      lastFingerprint: lastFingerprint ?? null,
+      oldestEntryAgeDays: unified.entries.reduce((m, e) => Math.max(m, e.ageDays), 0),
+      isMonday: new Date().getUTCDay() === 1,
+      ...(opts.force === undefined ? {} : { force: opts.force }),
+    })
+    if (!decision.send) {
+      // Record what the queue looked like even though nothing was sent, so
+      // tomorrow's comparison is against today's reality rather than against
+      // the last day that happened to send.
+      await kvSet(QUEUE_FINGERPRINT_KEY, unified.fingerprint, 30 * 86_400).catch(() => {})
+      return { sent: false, skipped: decision.reason }
+    }
+  }
+
   const res = await sendOwnerEmail(subject, html, { escalation: 'daily-digest', fromName: 'xdipx daily digest' })
-  if (res.sent) return { sent: true, subject }
+  if (res.sent) {
+    if (unified) await kvSet(QUEUE_FINGERPRINT_KEY, unified.fingerprint, 30 * 86_400).catch(() => {})
+    return { sent: true, subject }
+  }
 
   // The day slot was claimed before composing, to stop a double cron
   // invocation sending twice. If the send itself failed, give the slot back and
