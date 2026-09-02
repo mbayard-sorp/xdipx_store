@@ -675,15 +675,19 @@ export async function runLogMonitor(
   // comments on an existing open issue run every 15 min and must not re-page.
   const created = issues.filter((i) => i.created)
   if (created.length > 0) {
-    const { sendOwnerSms, sendOwnerEmail, escapeHtml } = await import('~/lib/owner-alerts.server')
-    await sendOwnerSms(
-      `xdipx P0 logs: ${created.length} new issue${created.length === 1 ? '' : 's'}. ${created[0]!.title}`,
-    )
+    // The SMS that used to fire here is gone, and not as a tidy-up. `sendOwnerSms`
+    // now takes a `PagingClass`, and log-monitor has no claim to one: measured over
+    // 30 days it made 433 classifier calls on 16.9M input tokens and produced ZERO
+    // log-derived tickets in its entire lifetime, while faithfully classifying
+    // npm-install lines. A channel demonstrated to be reading the wrong feed must
+    // not be able to wake anyone. It earns the pager back when the feed is fixed.
+    const { sendOwnerEmail, escapeHtml } = await import('~/lib/owner-alerts.server')
     await sendOwnerEmail(
       `[P0] xdipx log-monitor: ${created.length} new issue${created.length === 1 ? '' : 's'}`,
       created
         .map((i) => `<p><a href="${i.url}">${escapeHtml(i.title)}</a></p>`)
         .join(''),
+      { escalation: 'runtime-errors' },
     )
   }
 

@@ -213,7 +213,7 @@ export async function pollOutreachInbox(): Promise<OutreachPollResult> {
                 `<pre>${escapeHtml(bodyText.slice(0, 3000))}</pre>`,
                 '<p>The thread is in hello@xdipx.com. Reply from there to take over.</p>',
               ].join('\n'),
-              { fromName: 'xdipx outreach' },
+              { escalation: 'inbox', fromName: 'xdipx outreach' },
             )
           }
         }

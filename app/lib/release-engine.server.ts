@@ -1398,7 +1398,7 @@ async function escalate(
     console.log(`${LOG} escalation (${kind}) already sent for ${dedupeKey}, not re-sending`)
     return false
   }
-  const res = await sendOwnerEmail(subject, html, { fromName: 'xdipx release engine' })
+  const res = await sendOwnerEmail(subject, html, { escalation: 'protected-merge', fromName: 'xdipx release engine' })
   if (!res.sent) console.warn(`${LOG} escalation email not sent: ${res.error}`)
   return res.sent
 }
@@ -1798,6 +1798,7 @@ async function alertSelfCheckFailure(problems: readonly string[], dryRun: boolea
       <code>GITHUB_TOKEN</code> in the Vercel project environment.</p>
       <p>This message is sent once a day while the condition lasts.</p>`,
     ),
+    { escalation: 'engine-down' },
   )
 }
 

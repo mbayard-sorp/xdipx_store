@@ -293,6 +293,7 @@ export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
       await sendOwnerEmail(
         '[P1] xdipx notebook healthcheck failing',
         `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ''}`,
+        { escalation: 'content-health' },
       )
     }
   }

@@ -1,5 +1,6 @@
 import { getPipelineSetting } from './feed-processor.server'
 import { sendOwnerEmail, escapeHtml } from './owner-alerts.server'
+import type { EscalationClassName } from './owner-escalation'
 import { addSuggestionNote } from './team.server'
 
 /**
@@ -229,7 +230,7 @@ export interface CampaignPushDeps {
   sendOwnerEmail: (
     subject: string,
     html: string,
-    opts?: { fromName?: string },
+    opts: { escalation: EscalationClassName; fromName?: string },
   ) => Promise<{ sent: boolean; error?: string }>
   addNote: (id: number, ref: string) => Promise<void>
   env: {
@@ -379,7 +380,7 @@ export async function pushApprovedCampaign(
       audienceSource: audience.source,
       body: brief.body,
     })
-    const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { fromName: 'xdipx email' })
+    const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { escalation: 'owner-decision', fromName: 'xdipx email' })
     await deps.addNote(
       row.id,
       `Campaign push skipped: no Klaviyo audience list configured (${audience.source}). Owner emailed the brief.`,
@@ -412,7 +413,7 @@ export async function pushApprovedCampaign(
     audienceSource: audience.source,
     body: brief.body,
   })
-  const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { fromName: 'xdipx email' })
+  const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { escalation: 'owner-decision', fromName: 'xdipx email' })
   await deps.addNote(
     row.id,
     `Klaviyo draft campaign created: ${editUrl} (audience: ${audience.source}). Review and send in Klaviyo. Draft only, nothing was sent.`,

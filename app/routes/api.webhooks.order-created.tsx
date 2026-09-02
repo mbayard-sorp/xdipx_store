@@ -44,6 +44,9 @@ export async function action({ request }: ActionFunctionArgs) {
         'An orders/create webhook hit the fallback stub at /api/webhooks/order-created, which does not process orders.\n\n' +
         'Repoint the subscription to https://xdipx.com/webhooks/order-created in Shopify Admin under Settings > Notifications > Webhooks.\n\n' +
         'Meta CAPI Purchase events are still recovered by the reconcile sweep, but profit metafields, co-purchase data and referral capture are lost for any order that lands here.',
+        // A real order arrived and this stub cannot process it: profit metafields,
+        // co-purchase data and referral capture are lost for it. Money path.
+        { escalation: 'money-path-down' },
       )
     } catch (err) {
       console.error('[rr-webhook] owner alert failed', err)

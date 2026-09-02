@@ -184,6 +184,9 @@ async function alertPricingFailure(err: unknown, trigger: string): Promise<void>
       `<p>The ${trigger === 'batch_catchup' ? 'catch-up' : '07:00 UTC scheduled'} pricing recompute threw before writing any rows.</p>
        <pre style="font-family:monospace;white-space:pre-wrap;font-size:12px;">${escapeHtml(detail.slice(0, 1500))}</pre>
        <p>Prices are unchanged from the last successful run. The daily pricing sweep will attempt one catch-up.</p>`,
+      // Not money-path-down: prices are stale, not wrong, and nobody is blocked
+      // from buying. A genuinely broken purchase path is the checkout probe's.
+      { escalation: 'pricing-report' },
     )
   } catch (e) {
     console.error('[cron:pricing-batch-recompute] owner email failed (ignored):', e)

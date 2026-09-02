@@ -9,6 +9,42 @@
  */
 
 import { sendSms } from '~/lib/twilio.server'
+import {
+  escalationChannel,
+  isPagingClass,
+  type EscalationClassName,
+  type PagingClass,
+} from '~/lib/owner-escalation'
+
+/**
+ * The queue valve, read here rather than passed in.
+ *
+ * Absent means OFF, so every `queue` and `lane` class keeps sending exactly as
+ * it does today until the owner queue that replaces them is live and the valve
+ * is flipped. A failed read also means off: a settings blip must never silently
+ * mute the owner.
+ */
+const OWNER_QUEUE_SETTING = 'owner_queue_enabled'
+
+let queueEnabledCache: { value: boolean; at: number } | null = null
+const QUEUE_CACHE_MS = 60_000
+
+async function ownerQueueEnabled(now = Date.now()): Promise<boolean> {
+  if (queueEnabledCache && now - queueEnabledCache.at < QUEUE_CACHE_MS) return queueEnabledCache.value
+  try {
+    const { getPipelineSetting } = await import('~/lib/feed-processor.server')
+    const value = (await getPipelineSetting(OWNER_QUEUE_SETTING)) === 'true'
+    queueEnabledCache = { value, at: now }
+    return value
+  } catch {
+    return false
+  }
+}
+
+/** Test seam: drop the memoised valve read. */
+export function resetOwnerQueueCache(): void {
+  queueEnabledCache = null
+}
 
 /** Fallback recipients, matching the original pricing-report hardcoded pair. */
 const DEFAULT_RECIPIENTS = ['mike@xdipx.com', 'mikebayard@me.com']
@@ -28,6 +64,10 @@ export function escapeHtml(s: string): string {
 export interface OwnerSendResult {
   sent: boolean
   error?: string
+  /** Set when the send was withheld because its class is rendered by the owner
+   *  queue instead. Not an error: the information reached the owner by another
+   *  surface, and distinguishing the two is what keeps a real failure legible. */
+  suppressed?: 'queue' | 'lane'
 }
 
 /**
@@ -37,8 +77,23 @@ export interface OwnerSendResult {
 export async function sendOwnerEmail(
   subject: string,
   html: string,
-  opts: { fromName?: string } = {},
+  opts: { escalation: EscalationClassName; fromName?: string },
 ): Promise<OwnerSendResult> {
+  // The class decides whether this send happens at all. Enforcement lives here
+  // rather than in a lint because a lint is a rule someone can forget to run,
+  // and the thing being fixed is precisely a prose rule that nothing enforced.
+  //
+  // A paging class is never suppressed, whatever the valve says: muting the
+  // money path by flipping a queue setting would be a far worse bug than the
+  // noise this is reducing.
+  const channel = escalationChannel(opts.escalation)
+  if (channel !== 'page' && !isPagingClass(opts.escalation) && (await ownerQueueEnabled())) {
+    console.log(
+      `[owner-alerts] withheld "${subject}" (${opts.escalation}, ${channel}): rendered by the owner queue`,
+    )
+    return { sent: false, suppressed: channel }
+  }
+
   const host = process.env['ZOHO_SMTP_HOST'] ?? 'smtp.zoho.com'
   const port = parseInt(process.env['ZOHO_SMTP_PORT'] ?? '465', 10)
   const user = process.env['ZOHO_SMTP_USER']
@@ -92,7 +147,11 @@ export async function sendOwnerEmail(
  * set, so the P0 hooks are safe to ship before the env var exists. Never
  * throws.
  */
-export async function sendOwnerSms(body: string): Promise<OwnerSendResult> {
+export async function sendOwnerSms(body: string, escalation: PagingClass): Promise<OwnerSendResult> {
+  // `escalation` is typed to the two-member PagingClass union, so anything else
+  // is a compile error at the call site rather than a review note. That is the
+  // whole enforcement: there is no runtime list to fall out of date with.
+  void escalation
   const to = process.env['OWNER_ALERT_PHONE']
   if (!to) {
     console.warn('[owner-alerts] OWNER_ALERT_PHONE not set. Skipping SMS.')
