@@ -83,6 +83,8 @@ import {
   type PullRequestFacts,
   type TicketFacts,
   ENGINE_HOLD_LABEL,
+  machineHoldLabel,
+  clearStaleEngineHold,
 } from '~/lib/release-engine.server'
 
 // ---------------------------------------------------------------------------
@@ -120,6 +122,8 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
     // No re-triggers spent by default, so a test that wants the exhausted
     // branch has to say so explicitly.
     ciRetriggers: 0,
+    // Production default: the valve is off-only, absent means on.
+    labelSplitEnabled: true,
     ...over,
   }
 }
@@ -1005,5 +1009,45 @@ describe('needs-owner is the owner\'s, engine-hold is the engine\'s', () => {
     const unheld = evaluatePullRequest({ ...held, labels: [] })
     expect(unheld.code).not.toBe('needs-owner-label')
     expect(unheld.action).toBe('merge')
+  })
+
+  describe('the label_split_enabled valve', () => {
+    it('writes engine-hold while on and needs-owner while off', () => {
+      expect(machineHoldLabel(true)).toBe(ENGINE_HOLD_LABEL)
+      expect(machineHoldLabel(false)).toBe(NEEDS_OWNER_LABEL)
+    })
+
+    it('keeps blocking on both labels in either state', () => {
+      // Flipping the valve is not a review. A PR the engine already stopped on
+      // must stay stopped, or the off-switch becomes a way to merge the exact
+      // PRs that were escalated.
+      for (const labelSplitEnabled of [true, false]) {
+        for (const label of [NEEDS_OWNER_LABEL, ENGINE_HOLD_LABEL]) {
+          const d = evaluatePullRequest(facts({ labels: [label], labelSplitEnabled }))
+          expect(d.action).toBe('skip')
+          expect(d.code).toBe('needs-owner-label')
+        }
+      }
+    })
+
+    it('stops taking a stale hold back while off', async () => {
+      // With the valve off the engine reverts to what it did before: it never
+      // removes a label, so a hold whose reason has cleared stays put. That is
+      // today's behaviour, which is the point of an off-switch.
+      const pr = { number: 991, headRef: 'ticket/6763', headSha: 'abc', labels: [ENGINE_HOLD_LABEL] }
+      const off = await clearStaleEngineHold(
+        pr as never,
+        facts({ labels: [ENGINE_HOLD_LABEL], labelSplitEnabled: false }),
+        true,
+      )
+      expect(off).toBe(false)
+
+      const on = await clearStaleEngineHold(
+        pr as never,
+        facts({ labels: [ENGINE_HOLD_LABEL], labelSplitEnabled: true }),
+        true,
+      )
+      expect(on).toBe(true)
+    })
   })
 })

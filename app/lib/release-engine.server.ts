@@ -172,6 +172,35 @@ export const NEEDS_OWNER_LABEL = 'needs-owner'
 export const ENGINE_HOLD_LABEL = 'engine-hold'
 
 /**
+ * The label split's off-switch (`pipeline_settings`).
+ *
+ * Reversibility, not opt-in. This change alters how the engine labels and
+ * un-labels PRs, and the only other way back would be reverting a protected
+ * path by hand: the slowest path in the system, gated on the owner, which is
+ * the exact thing this program exists to remove. So the split ships ON and the
+ * valve exists to take it off again in one write, with no deploy.
+ *
+ * Hence `!== 'false'`: absent means on, and only the literal string `false`
+ * disables it. That is deliberately the opposite convention to
+ * `release_engine_enabled` (`=== 'true'`, absent means off), because the two
+ * valves answer opposite questions. That one asks "may the engine act at all",
+ * where silence must mean no. This one asks "has someone switched a shipped
+ * fix back off", where silence means nobody has.
+ *
+ * OFF restores today's behaviour exactly: the machine writes NEEDS_OWNER_LABEL
+ * again and `clearStaleEngineHold` stops taking anything back. What it does NOT
+ * do is un-hold PRs already carrying `engine-hold` — the gate keeps blocking on
+ * both labels in both states, because each of those PRs was escalated for a
+ * reason and flipping a valve is not a review.
+ */
+export const LABEL_SPLIT_SETTING = 'label_split_enabled'
+
+/** The label the machine writes when it stops on a PR. */
+export function machineHoldLabel(labelSplitEnabled: boolean): string {
+  return labelSplitEnabled ? ENGINE_HOLD_LABEL : NEEDS_OWNER_LABEL
+}
+
+/**
  * The agent-editor allowlist, verbatim from agent-allowlist.yml. `[^/]+` so a
  * single `*` never crosses a directory boundary, matching the workflow exactly.
  * If these two ever disagree the workflow wins, because the workflow is the
@@ -351,6 +380,13 @@ export interface PullRequestFacts {
    * pure function of its facts.
    */
   ciRetriggers: number
+  /**
+   * `label_split_enabled`, read once per cycle by the caller so
+   * `evaluatePullRequest` stays a pure function of its facts (same contract as
+   * `ciRetriggers`). Only `clearStaleEngineHold` and the label writers consult
+   * it; the gate blocks on both labels either way.
+   */
+  labelSplitEnabled: boolean
 }
 
 export type ReleaseAction =
@@ -606,6 +642,9 @@ export async function clearStaleEngineHold(
   facts: PullRequestFacts,
   dryRun: boolean,
 ): Promise<boolean> {
+  // Valve off: the engine goes back to never taking a label off. A PR already
+  // holding `engine-hold` keeps holding it, which is the conservative side.
+  if (!facts.labelSplitEnabled) return false
   if (!pr.labels.includes(ENGINE_HOLD_LABEL)) return false
   if (facts.classification.protected) return false
 
@@ -1446,6 +1485,17 @@ export async function runReleaseEngineCycle(opts: { dryRun?: boolean } = {}): Pr
 async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
   const result = baseResult(dryRun)
 
+  // Read once per cycle, then threaded as a plain boolean, so the gate and the
+  // label writers cannot disagree about it partway through a pass. A failed
+  // read leaves the split ON: this is a fix, and a transient settings blip must
+  // not silently reinstate the latch it removes.
+  let labelSplitEnabled = true
+  try {
+    labelSplitEnabled = (await getPipelineSetting(LABEL_SPLIT_SETTING)) !== 'false'
+  } catch (err) {
+    console.warn(`${LOG} could not read ${LABEL_SPLIT_SETTING}, assuming on`, err)
+  }
+
   const self = await runSelfCheck()
   if (!self.ok) {
     // A silent config error stops every merge. The GitHub token expiring in
@@ -1514,7 +1564,7 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
   const undraftErrors: string[] = []
   let undrafted = 0
   for (const summary of candidates) {
-    const facts = await gatherFacts(summary)
+    const facts = await gatherFacts(summary, labelSplitEnabled)
     if (!facts) continue
     // Take back a hold whose reason has stopped being true, BEFORE the gate
     // reads the labels — otherwise step 2 short-circuits and the PR can never
@@ -1529,7 +1579,7 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
     )
 
     if (decision.action === 'escalate-protected') {
-      await handleProtected(summary, decision, dryRun)
+      await handleProtected(summary, decision, dryRun, labelSplitEnabled)
       continue
     }
     // Undrafting is not a merge and does not consume the one-merge-per-cycle
@@ -1558,7 +1608,7 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
       continue
     }
     if (decision.action === 'escalate-ci') {
-      await escalateStuckCi(summary, decision, dryRun)
+      await escalateStuckCi(summary, decision, dryRun, labelSplitEnabled)
       continue
     }
     if (decision.code === 'ci-red' && decision.isRevert) {
@@ -1599,7 +1649,7 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
         message: `[dry-run] would squash-merge PR #${summary.number} (${summary.headRef})`,
       }
     }
-    return mergeOne(summary, decision, decisions, day)
+    return mergeOne(summary, decision, decisions, day, labelSplitEnabled)
   }
 
   const undraftNote = undrafted > 0 ? `, ${undrafted} taken out of draft` : ''
@@ -1644,7 +1694,10 @@ async function undraftOne(pr: PullRequestSummary, dryRun: boolean): Promise<stri
 
 /** Assemble the decision inputs for one PR. Returns null when GitHub will not
  *  tell us something the decision needs: fail closed, evaluate nothing. */
-async function gatherFacts(summary: PullRequestSummary): Promise<PullRequestFacts | null> {
+async function gatherFacts(
+  summary: PullRequestSummary,
+  labelSplitEnabled: boolean,
+): Promise<PullRequestFacts | null> {
   // Re-read the PR: the list endpoint does not populate `mergeable`.
   const full = await getPullRequest(summary.number, 'release-engine')
   const pr = full.ok ? full.data : summary
@@ -1708,6 +1761,7 @@ async function gatherFacts(summary: PullRequestSummary): Promise<PullRequestFact
     checks,
     ticket,
     ciRetriggers: Number((await kvGet<number>(KEYS.ciRetrigger(pr.headSha))) ?? 0),
+    labelSplitEnabled,
   }
 }
 
@@ -1939,9 +1993,15 @@ async function maybeSweepExhaustedTickets(dryRun: boolean): Promise<void> {
   }
 }
 
-async function handleProtected(pr: PullRequestSummary, decision: ReleaseDecision, dryRun: boolean): Promise<void> {
-  if (!dryRun && !pr.labels.includes(ENGINE_HOLD_LABEL)) {
-    const labelled = await addLabels(pr.number, [ENGINE_HOLD_LABEL], 'release-engine')
+async function handleProtected(
+  pr: PullRequestSummary,
+  decision: ReleaseDecision,
+  dryRun: boolean,
+  labelSplitEnabled: boolean,
+): Promise<void> {
+  const hold = machineHoldLabel(labelSplitEnabled)
+  if (!dryRun && !pr.labels.includes(hold)) {
+    const labelled = await addLabels(pr.number, [hold], 'release-engine')
     if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
   }
   // Record the stop on the ticket itself. The owner digest builds its
@@ -2039,9 +2099,11 @@ async function escalateStuckCi(
   pr: PullRequestSummary,
   decision: ReleaseDecision,
   dryRun: boolean,
+  labelSplitEnabled: boolean,
 ): Promise<void> {
-  if (!dryRun && !pr.labels.includes(ENGINE_HOLD_LABEL)) {
-    const labelled = await addLabels(pr.number, [ENGINE_HOLD_LABEL], 'release-engine')
+  const hold = machineHoldLabel(labelSplitEnabled)
+  if (!dryRun && !pr.labels.includes(hold)) {
+    const labelled = await addLabels(pr.number, [hold], 'release-engine')
     if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
   }
   if (!dryRun && decision.ticketId !== null) {
@@ -2088,6 +2150,7 @@ async function mergeOne(
   decision: ReleaseDecision,
   decisions: ReleaseDecision[],
   day: string,
+  labelSplitEnabled: boolean,
 ): Promise<ReleaseCycleResult> {
   const result = baseResult(false)
 
@@ -2107,8 +2170,9 @@ async function mergeOne(
     // forever with no record and no escalation.
     const attempts = await kvIncr(KEYS.mergeFail(pr.headSha))
     if (attempts >= MAX_MERGE_ATTEMPTS) {
-      if (!pr.labels.includes(ENGINE_HOLD_LABEL)) {
-        const labelled = await addLabels(pr.number, [ENGINE_HOLD_LABEL], 'release-engine')
+      const hold = machineHoldLabel(labelSplitEnabled)
+      if (!pr.labels.includes(hold)) {
+        const labelled = await addLabels(pr.number, [hold], 'release-engine')
         if (!labelled.ok) console.warn(`${LOG} could not label PR #${pr.number}: ${labelled.error}`)
       }
       await escalate(
