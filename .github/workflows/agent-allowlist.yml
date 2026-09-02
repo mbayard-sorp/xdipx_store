@@ -20,6 +20,19 @@
 # `requiresAllowlistCheck` in app/lib/release-engine.server.ts mirrors the
 # head-ref condition on the job; the two must stay in lockstep.
 #
+# agent-editor.md's <file_allowlist> has a third bullet permitting
+# `docs/ads-policy.md` and `docs/emma-voice.md`, but only when the suggestion
+# explicitly targets them, cx_risk was marked/approved, and the PR carries a
+# `voice-charter` label. The base ALLOW regex below deliberately does not
+# cover those two files: cx_risk approval lives in the suggestion row on the
+# team bus, which this job has no access to, so it cannot verify that half of
+# the bullet's condition. What it CAN verify from the PR itself is the file
+# path and the label, so a PR touching exactly those two files additionally
+# passes only when it carries the `voice-charter` label (VOICE_CHARTER_ALLOW
+# + the label check below). This does not widen what agent-editor may do —
+# it is the same third bullet, checked as far as GitHub Actions data permits
+# — and the label carries no weight for any other file.
+#
 # This file is itself a protected path: agent-editor is forbidden from
 # `.github/**` and the classifier stops any PR that touches it, so changes here
 # come from an engineer PR and an owner merge. That is deliberate.
@@ -65,17 +78,33 @@ jobs:
           echo "Changed files:"
           sed 's/^/  /' files.txt
 
-          # Allowlist, verbatim from .claude/agents/agent-editor.md.
+          # Allowlist, verbatim from .claude/agents/agent-editor.md bullets 1-2.
           # `[^/]+` so a single `*` never crosses a directory boundary.
           ALLOW='^(\.claude/agents/[^/]+\.md|docs/store-team/[^/]+\.md|docs/homepage-team/[^/]+\.md)$'
+
+          # Bullet 3: the two voice-charter docs, gated on the `voice-charter`
+          # label since cx_risk approval is not visible to this job (see the
+          # header comment).
+          VOICE_CHARTER_ALLOW='^(docs/ads-policy\.md|docs/emma-voice\.md)$'
+          has_voice_charter_label=$(gh api "repos/${REPO}/pulls/${PR}" \
+            --jq '([.labels[].name] | index("voice-charter")) != null')
 
           violations=0
           while IFS= read -r file; do
             [ -z "$file" ] && continue
-            if ! printf '%s' "$file" | grep -Eq "$ALLOW"; then
-              echo "::error file=${file}::${file} is outside the agent-editor allowlist"
-              violations=$((violations + 1))
+            if printf '%s' "$file" | grep -Eq "$ALLOW"; then
+              continue
             fi
+            if printf '%s' "$file" | grep -Eq "$VOICE_CHARTER_ALLOW"; then
+              if [ "$has_voice_charter_label" = "true" ]; then
+                continue
+              fi
+              echo "::error file=${file}::${file} needs the 'voice-charter' PR label (agent-editor.md file_allowlist bullet 3)"
+              violations=$((violations + 1))
+              continue
+            fi
+            echo "::error file=${file}::${file} is outside the agent-editor allowlist"
+            violations=$((violations + 1))
           done < files.txt
 
           if [ "$violations" -gt 0 ]; then
@@ -84,6 +113,7 @@ jobs:
             echo "  .claude/agents/*.md"
             echo "  docs/store-team/*.md"
             echo "  docs/homepage-team/*.md"
+            echo "  docs/ads-policy.md, docs/emma-voice.md (only with the 'voice-charter' PR label)"
             echo "Code or config changes belong on an engineer branch with human review."
             exit 1
           fi

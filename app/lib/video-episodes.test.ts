@@ -9,6 +9,7 @@ import {
   validatePlacements,
   spokenTextOf,
   scriptsSpeakIdentically,
+  mapSpeakerToPresenter,
 } from './video-episodes'
 import type { VideoScriptJson } from '../../db/schema'
 
@@ -81,5 +82,35 @@ describe('spokenTextOf / scriptsSpeakIdentically', () => {
     const b = { presenterLine: 'line', framePrompt: 'frame B' } as VideoScriptJson
     expect(scriptsSpeakIdentically(a, b)).toBe(true)
     expect(spokenTextOf(a)).toBe('presenterLine:line')
+  })
+})
+
+describe('mapSpeakerToPresenter (ADR-014, ticket #6586)', () => {
+  const cast = [
+    { slug: 'maya', name: 'Maya' },
+    { slug: 'diego-r', name: 'Diego' },
+  ]
+
+  it('maps a cast slug case-insensitively', () => {
+    expect(mapSpeakerToPresenter('maya', cast)).toBe('friend:maya')
+    expect(mapSpeakerToPresenter('Maya', cast)).toBe('friend:maya')
+  })
+
+  it('maps a display name to its slug', () => {
+    expect(mapSpeakerToPresenter('Diego', cast)).toBe('friend:diego-r')
+  })
+
+  it('maps emma and none as themselves, case-insensitively', () => {
+    expect(mapSpeakerToPresenter('Emma', cast)).toBe('emma')
+    expect(mapSpeakerToPresenter('none', cast)).toBe('none')
+  })
+
+  it('treats an absent or blank speaker as none (non-speaking presence beats)', () => {
+    expect(mapSpeakerToPresenter(undefined, cast)).toBe('none')
+    expect(mapSpeakerToPresenter('  ', cast)).toBe('none')
+  })
+
+  it('throws rather than guess on an unresolved speaker — wrong identity/voice is a silent failure otherwise', () => {
+    expect(() => mapSpeakerToPresenter('Some Rando', cast)).toThrow(/matches no approved cast member/)
   })
 })

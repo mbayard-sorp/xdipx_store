@@ -36,7 +36,7 @@
  * this module can loosen anything.
  */
 
-import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, ne, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { getInstagramMediaState } from './social-publish/instagram.server'
@@ -130,8 +130,14 @@ export const dbRemovalWatchRepo: RemovalWatchRepo = {
   markRemoved: async (id, detail) => {
     // `deleted` is the status the 2026-08-09 hand-deleted post already carries,
     // so the vocabulary is not new; what is new is something writing it.
+    // removalSource: 'unknown' (ticket #6758) — a watcher-detected removal
+    // cannot tell a platform takedown from the owner deleting the post
+    // directly on Instagram, so it never claims 'platform'. An owner who
+    // removes a post through OUR admin "I removed this" action instead sets
+    // status='deleted' + removalSource='owner' directly, which takes the row
+    // out of `recentLive`'s candidate pool before this ever runs on it.
     await db.update(socialPosts)
-      .set({ status: 'deleted', errorMessage: detail })
+      .set({ status: 'deleted', errorMessage: detail, removalSource: 'unknown' })
       .where(eq(socialPosts.id, id))
   },
   /**
@@ -145,6 +151,10 @@ export const dbRemovalWatchRepo: RemovalWatchRepo = {
    * roughly the same span as the window itself. If Instagram ever starts
    * removing months-old posts, this under-counts and the valve-off threshold is
    * reached later than it should be.
+   *
+   * Excludes removalSource='owner' (ticket #6758): a post the owner removed
+   * himself is not a takedown signal and must never count toward the
+   * pattern that turns instagram_autopublish_enabled off.
    */
   countRemovedSince: async (since) => {
     const rows = await db
@@ -154,6 +164,7 @@ export const dbRemovalWatchRepo: RemovalWatchRepo = {
         eq(socialPosts.platform, 'instagram'),
         eq(socialPosts.status, 'deleted'),
         gte(socialPosts.postedAt, since),
+        ne(socialPosts.removalSource, 'owner'),
       ))
     return rows[0]?.n ?? 0
   },
@@ -267,6 +278,12 @@ export async function runRemovalWatch(deps: RemovalWatchDeps = {}): Promise<Remo
       : 'Nothing. This is a notification you asked to receive, not a task blocking the team.',
     whereToGo: '/admin/socials for the post, then the Social tab of /admin/homepage-team for the valve.',
     category: pattern ? 'valve' : 'approval',
+    // A valve-off row must clear itself the moment the owner flips the valve
+    // back. Without this the owner's own action left the row open, which is how
+    // nine of ten open blockers ended up probe-less and hand-cleared.
+    ...(pattern
+      ? { verifyProbe: 'setting_true', verifyArg: VALVE_KEYS.instagramAutopublish }
+      : {}),
     priority: pattern ? 1 : 2,
     source: 'agent',
     evidence: `Checked the ${rows.length} most recent posted rows; ${live} live, ${gone.length} gone, ${unknown} unknown.`,

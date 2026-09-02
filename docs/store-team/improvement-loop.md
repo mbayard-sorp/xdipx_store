@@ -226,8 +226,9 @@ hit, a routine that skipped at the gate. Those are ordinary states with an owner
 
 ## Safety properties
 
-- **The execution gate always remains:** self-modifications still require a PR that passes CI and
-  the allowlist check, and money/content actions still require a manual step. Auto-approve can
+- **The execution gate always remains:** self-modifications still require a PR that passes CI, the
+  allowlist check, and (since 2026-09-02) a QA verdict of `verified` on its ticket, and
+  money/content actions still require a manual step. Auto-approve can
   automate the *triage* gate for a team, and the release engine can automate the *merge* gate, but
   an agent can never change its own instructions without a reviewable diff that a machine outside
   its own process approved against rules the agent cannot edit. Two rules make that real: the

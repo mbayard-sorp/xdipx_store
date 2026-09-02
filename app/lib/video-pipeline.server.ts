@@ -91,6 +91,15 @@ import { resolvePresenterVoiceId } from '~/lib/video-presenter-voice.server'
 const SCENE_FRAME_CANDIDATES = 3
 const POLLER_IDLE_TTL_SECONDS = 30 * 60
 
+/**
+ * The 'none' | 'emma' | 'friend:{slug}' presenter grammar. Canonical here
+ * (ticket #6586) so a per-scene `VideoSceneSpec.presenter` validates against
+ * the exact same pattern the job-level `presenter` does — api.team.video-job.tsx
+ * re-exports this rather than hand-typing its own copy, so the two can never
+ * drift the way a duplicated enum/regex does (CLAUDE.md's canonical-vocab rule).
+ */
+export const PRESENTER_RE = /^(none|emma|friend:[a-z0-9-]+)$/
+
 // TTS_CHARS_PER_SECOND lives in avatar-script.ts (b-roll voiceover rate; the
 // avatar tier estimates with its own conservative AVATAR_TTS_CHARS_PER_SECOND).
 // Declared here (rather than down by advanceLipsync, its main call site) so the
@@ -122,6 +131,11 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
   }
   const clipModelId = spec.lipsync ? spec.lipsync.baseClip : undefined
   const clipSpec = clipModelId ? VIDEO_MODELS[clipModelId] : spec
+  // Only the lipsync compound tier reaches here talking (ticket #6586,
+  // ADR-014): the audio-driven avatar tier refuses multi-scene outright
+  // before this function is ever called (both callers below), so a scene's
+  // spoken line only needs enforcing for spec.lipsync.
+  const talkingTier = !!spec.lipsync
   let total = 0
   const normalized = raw.map((scene, i): VideoSceneSpec => {
     if (!scene || typeof scene !== 'object') throw new Error(`scenes[${i}] must be an object`)
@@ -143,6 +157,22 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
     if (continuity === 'own-frame' && (typeof scene.framePrompt !== 'string' || !scene.framePrompt.trim())) {
       throw new Error(`scenes[${i}].framePrompt is required for own-frame scenes`)
     }
+    // Per-scene presenter (ADR-014): validated only when explicitly given —
+    // absent means "this scene uses the job's presenter" (validated upstream
+    // by the route/enqueueVideoJob already), so there is nothing new to check
+    // and nothing new stored, keeping every existing single-presenter job
+    // byte-for-byte unchanged.
+    if (typeof scene.presenter === 'string' && !PRESENTER_RE.test(scene.presenter)) {
+      throw new Error(`scenes[${i}].presenter must be none | emma | friend:{slug}`)
+    }
+    if (scene.coPresenters !== undefined) {
+      if (!Array.isArray(scene.coPresenters) || scene.coPresenters.some(p => typeof p !== 'string' || !PRESENTER_RE.test(p))) {
+        throw new Error(`scenes[${i}].coPresenters must be an array of none | emma | friend:{slug}`)
+      }
+    }
+    if (talkingTier && (typeof scene.spokenLine !== 'string' || !scene.spokenLine.trim())) {
+      throw new Error(`scenes[${i}].spokenLine is required on the lipsync tier`)
+    }
     total += scene.durationSeconds
     return {
       slug: scene.slug,
@@ -151,6 +181,9 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
       continuity,
       ...(scene.framePrompt ? { framePrompt: scene.framePrompt } : {}),
       ...(typeof scene.reuseFrameAssetId === 'number' ? { reuseFrameAssetId: scene.reuseFrameAssetId } : {}),
+      ...(typeof scene.presenter === 'string' ? { presenter: scene.presenter } : {}),
+      ...(typeof scene.spokenLine === 'string' ? { spokenLine: scene.spokenLine } : {}),
+      ...(Array.isArray(scene.coPresenters) ? { coPresenters: scene.coPresenters } : {}),
     }
   })
   if (total > MULTI_SCENE_TOTAL_MAX_SECONDS) {
@@ -1073,13 +1106,22 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
   }
 
   const scene = scenes[idx]!
+  // Per-scene presenter (ADR-014, ticket #6586): absent means "this scene
+  // uses the job's presenter" — every existing single-presenter job takes
+  // this branch and is byte-for-byte unchanged. Frame identity (and, once a
+  // talking tier is eligible again, voice) keys off THIS, not job.presenter,
+  // so an episode can cut between cast members shot/reverse-shot.
+  const scenePresenter = scene.presenter ?? job.presenter
 
   // Scene-frame REUSE, ported from the single-scene path (ticket #5714). A
   // multi-scene talking job must NOT recompose the presenter every episode:
   // identity drift is fatal for a recurring cast, and a reused frame also
   // skips the owner's park (no new pixels to review). Explicit per-scene
   // reuseFrameAssetId wins; else a slug-keyed hit on an approved
-  // same-presenter frame adopts automatically.
+  // same-presenter frame adopts automatically. Checked against scenePresenter
+  // (not job.presenter): a differing per-scene presenter must reuse only a
+  // frame previously approved for THAT identity, never borrow another cast
+  // member's approved likeness.
   {
     const jobSpec = VIDEO_MODELS[job.modelTier as VideoModelId]
     const reusable = job.scriptJson['talkingHead'] === true || !!jobSpec?.audioDriven || !!jobSpec?.lipsync
@@ -1096,16 +1138,16 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
         .from(videoJobs)
         .where(and(
           eq(videoJobs.sceneFrameAssetId, explicitId),
-          eq(videoJobs.presenter, job.presenter),
+          eq(videoJobs.presenter, scenePresenter),
           inArray(videoJobs.stage, FRAME_APPROVED_STAGES),
         ))
         .limit(1)
       if (!approvedBy) {
-        throw new Error(`scenes[${idx}].reuseFrameAssetId ${explicitId} has never been approved for presenter '${job.presenter}'`)
+        throw new Error(`scenes[${idx}].reuseFrameAssetId ${explicitId} has never been approved for presenter '${scenePresenter}'`)
       }
       adoptId = explicitId
     } else if (reusable && scene.slug) {
-      adoptId = await findReusableSceneFrame(scene.slug, job.presenter, job.id)
+      adoptId = await findReusableSceneFrame(scene.slug, scenePresenter, job.id)
     }
     if (adoptId != null) {
       const adopted: VideoSceneState[] = state.map((s, i) =>
@@ -1125,16 +1167,25 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
   // the one spending stage with no getMaxCostCents check.
   await assertFrameCostFitsCeiling(job)
 
-  const presenterUrl = await resolvePresenterPhotoUrl(job.presenter)
+  const presenterUrl = await resolvePresenterPhotoUrl(scenePresenter)
   if (talkingHead && !presenterUrl) throw new Error('talkingHead requires a presenter (emma or friend:{slug})')
   const productUrl = talkingHead ? null : await resolveProductImageUrl(job.productHandle)
   const baseImageUrl = presenterUrl ?? productUrl
   if (!baseImageUrl) throw new Error(`No reference image available for scene ${idx} composition`)
 
+  // Two-shot composition (ADR-014 addendum, ticket #6586): composeSceneFrame
+  // already accepts extraImageUrls (scripts/generate-slate-2026-08-24.ts uses
+  // it for social stills); this is the video frame stage's first caller.
+  // Absent coPresenters means the same single-face request as before.
+  const coPresenterUrls = scene.coPresenters?.length
+    ? await Promise.all(scene.coPresenters.map(p => resolvePresenterPhotoUrl(p)))
+    : []
+
   const { urls, requestIds, costKey, plate, plateRequestId } = await composeSceneFrame({
     prompt: scene.framePrompt,
     presenterImageUrl: baseImageUrl,
     ...(productUrl ? { productImageUrl: productUrl } : {}),
+    ...(coPresenterUrls.length ? { extraImageUrls: coPresenterUrls.filter((u): u is string => !!u) } : {}),
     count: SCENE_FRAME_CANDIDATES,
   })
 

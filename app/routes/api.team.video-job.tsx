@@ -44,7 +44,7 @@ import {
   SCENE_KIT,
   VIDEO_EXTRA_KEYS,
 } from '~/lib/team-keys'
-import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame, isMultiSceneScript } from '~/lib/video-pipeline.server'
+import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame, isMultiSceneScript, PRESENTER_RE } from '~/lib/video-pipeline.server'
 import { assertEpisodeMatchesScript, linkEpisodeToJob } from '~/lib/video-episodes.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { VIDEO_MODELS, isVideoModelId, tierIneligibility } from '~/lib/fal-video.server'
@@ -54,8 +54,6 @@ import { socialPosts } from '../../db/schema'
 import { inArray } from 'drizzle-orm'
 import { apiError } from '~/lib/api-error.server'
 import type { VideoScriptJson } from '../../db/schema'
-
-const PRESENTER_RE = /^(none|emma|friend:[a-z0-9-]+)$/
 
 interface ValidatedEnqueueCommon {
   productHandle: string

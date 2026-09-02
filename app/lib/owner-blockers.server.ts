@@ -36,6 +36,8 @@ import { canonicalDedupeKey, findNearDuplicate } from '~/lib/dedupe-key'
 export * from '~/lib/owner-blockers-core'
 import {
   BLOCKER_CATEGORIES,
+  suggestProbeFor,
+  probeGapReason,
   BLOCKER_SOURCES,
   PROBE_DESCRIPTIONS,
   blockerEmailSubject,
@@ -216,6 +218,90 @@ async function socialNoOverdue(platform: string): Promise<ProbeVerdict> {
   return overdue.length === 0
 }
 
+
+/* ── Probes added 2026-09-02 (audit Stage A) ──────────────────────────────────
+ *
+ * Of 32 blockers ever filed, 25 carried no probe and 15 of those were cleared
+ * by the owner's own hand. The vocabulary had ten kinds and none of them could
+ * answer the four questions the open list actually asked: is this env var set,
+ * did this PR merge, is this CI check green, is this endpoint up.
+ *
+ * Every one of these owns the "could not ask" half of the #4702 invariant for
+ * its own source: an unconfigured GitHub client, a network failure, a malformed
+ * arg — all `null`, never `false`.
+ */
+
+/**
+ * Is this env var set in the app's own process?
+ *
+ * Deliberately answers "has it reached the app", not "is it in the Vercel
+ * dashboard" — which the app cannot see, and which is the weaker question
+ * anyway: a value set but not yet redeployed has not reached anything, and the
+ * row should stay open until it has. Comma-separated args require all of them.
+ */
+async function envPresent(arg: string): Promise<ProbeVerdict> {
+  const names = arg.split(',').map(n => n.trim()).filter(Boolean)
+  if (names.length === 0) return null
+  return names.every(n => {
+    const v = process.env[n]
+    return typeof v === 'string' && v.trim().length > 0
+  })
+}
+
+/** Is this PR merged? Arg is a PR number or any URL ending in one. */
+async function prMerged(arg: string): Promise<ProbeVerdict> {
+  const m = /(\d+)\s*$/.exec(arg.trim())
+  if (!m) return null
+  const { getPullRequest, isGithubConfigured } = await import('~/lib/github.server')
+  if (!isGithubConfigured()) return null
+  const res = await getPullRequest(Number(m[1]), 'blocker-probe')
+  // A failed lookup is a could-not-ask: a 404 can mean a typo'd number just as
+  // easily as a PR that does not exist, and neither is proof it did not merge.
+  if (!res.ok || !res.data) return null
+  return res.data.merged === true
+}
+
+/**
+ * Is a named check green? Arg is `<checkName>` (against main's head) or
+ * `<checkName>|<ref>`.
+ */
+async function checkGreen(arg: string): Promise<ProbeVerdict> {
+  const [rawName, rawRef] = arg.split('|')
+  const name = (rawName ?? '').trim()
+  if (!name) return null
+  const { getRef, getChecksForRef, checkConclusion, isGithubConfigured } =
+    await import('~/lib/github.server')
+  if (!isGithubConfigured()) return null
+
+  let sha = (rawRef ?? '').trim()
+  if (!sha) {
+    const ref = await getRef('heads/main', 'blocker-probe')
+    if (!ref.ok || !ref.data) return null
+    sha = ref.data.sha
+  }
+  const report = await getChecksForRef(sha, 'blocker-probe')
+  if (!report.ok || !report.data) return null
+  const conclusion = checkConclusion(report.data, name)
+  // Not reported yet is not the same as red. Only a real conclusion decides.
+  if (conclusion == null) return null
+  return conclusion === 'success'
+}
+
+/** Does this URL answer 2xx? */
+async function endpoint200(arg: string): Promise<ProbeVerdict> {
+  const url = arg.trim()
+  if (!/^https?:\/\//i.test(url)) return null
+  const res = await fetch(url, {
+    method: 'GET',
+    redirect: 'follow',
+    signal: AbortSignal.timeout(10_000),
+  })
+  // Reached and answered: that is authoritative either way. A throw (DNS,
+  // timeout, egress rule) is a could-not-ask and guardedRun maps it to null —
+  // an endpoint unreachable from THIS network is not proof it is down.
+  return res.status >= 200 && res.status < 300
+}
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -227,6 +313,10 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   runpod_no_pods: runpodNoPods,
   runpod_endpoint_idle: runpodEndpointIdle,
   social_no_overdue: socialNoOverdue,
+  env_present:   envPresent,
+  pr_merged:     prMerged,
+  check_green:   checkGreen,
+  endpoint_200:  endpoint200,
 }
 
 /**
@@ -328,6 +418,19 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
 
   const category = (BLOCKER_CATEGORIES as readonly string[]).includes(input.category ?? '')
     ? input.category! : 'other'
+
+  // Derive a probe where the row already carries its own argument, then say so
+  // loudly when one is still missing in a category that should have had it.
+  // Reported rather than thrown on purpose: a filer that cannot supply a probe
+  // must still be able to put the blocker in front of the owner, because losing
+  // the row is worse than losing the probe. The warning is what makes the gap
+  // visible instead of silent.
+  const derived = suggestProbeFor({ ...input, category })
+  if (derived) {
+    input = { ...input, verifyProbe: derived.verifyProbe, verifyArg: derived.verifyArg }
+  }
+  const gap = probeGapReason({ category, verifyProbe: input.verifyProbe ?? null })
+  if (gap) console.warn(`[owner-blockers] ${dedupeKey}: ${gap}`)
   const source = (BLOCKER_SOURCES as readonly string[]).includes(input.source ?? '')
     ? input.source! : 'agent'
   const priority = Math.min(Math.max(Math.round(Number(input.priority ?? 3)) || 3, 1), 5)

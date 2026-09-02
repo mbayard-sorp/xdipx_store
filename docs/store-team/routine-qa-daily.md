@@ -41,17 +41,21 @@ to `in_review`, it is already there.
 
 **Merged-PR fast-path (run before opening any full review).** (#2503) For every listed row that
 carries a `pr` link, hit `/api/team/pr?number=<n>` first. Any row whose PR already shows
-`merged:true` is stale bookkeeping, not review work: the release engine merges a docs-only
-agent-editor PR on the allowlist path without requiring the ticket to reach `verified` first, and
-nothing writes the ticket status forward when it takes that path, so the row sits at `pr_open`
-indefinitely. The 2026-08-11 03:30 pass found 16 of 17 queue rows in this state, some merged 3 days
-earlier, and burned full review passes re-verifying shipped code. For a `merged:true` row, skip the
-diff read and the local checks and take it through a lightweight verified transition instead:
-`in_review`, then `verified` with a note of the shape "PR #<n> already merged by the release engine
-(docs-allowlist path); CI was green at merge time", still confirming the transition landed per Step
-6. The engine-side half of the fix (the engine writing the status forward itself when it merges via
-the docs-allowlist path) is release-engine code, a protected path, and owner work; until that
-ships, this fast-path is the only drain for these rows.
+`merged:true` is stale bookkeeping, not review work. Skip the diff read and the local checks and
+take it through a lightweight verified transition instead: `in_review`, then `verified` with a note
+of the shape "PR #<n> already merged; CI was green at merge time", still confirming the transition
+landed per Step 6.
+
+The structural cause of this state is fixed as of 2026-09-02: the docs carve-out no longer skips the
+ticket gate, so the engine will not merge a docs-only agent-editor PR whose ticket has not reached
+`verified`. Before that, it did, and nothing wrote the ticket status forward on that path, so those
+rows sat at `pr_open` indefinitely; the 2026-08-11 03:30 pass found 16 of 17 queue rows in this
+state, some merged 3 days earlier, and burned full review passes re-verifying shipped code. Keep the
+fast-path anyway: it drains the rows left over from that era, and it still catches the paths that
+legitimately merge without a QA verdict (a `revert/` PR, an owner hand-merge, a protected-path
+escalation the owner clicked). What it must no longer do is stand in for reviewing a docs PR — under
+the current gate an unverified docs row is one the engine is *waiting* on you for, not one that
+already shipped.
 
 **PR-number recovery for note-only rows (bounded).** (#3265) A `pr_open`/`in_review` row whose only
 link is a `note` (no `pr`-kind link, typically an interactive session that wrote "implemented and
@@ -123,6 +127,36 @@ What you are looking for, in rough order of how often it matters:
    work against `docs/design-doctrine.md` and the v3 tokens.
 7. **Sanity schema is additive only.** A modified existing schema file is a bounce.
 
+**Docs-only PRs are reviewed, and reviewed fast.** (2026-09-02) A PR whose diff is entirely `.md`
+files on the agent-editor allowlist used to merge without ever reaching you: the docs carve-out
+skipped the ticket gate as well as the CI wait, so 68 of the 83 `instructions` rows applied in the
+14 days to 2026-09-01 were applied unverified. Since agent-editor's diffs are edits to the playbooks
+and agent definitions that govern the agents themselves, that was the one path where an agent could
+merge a change to its own rules with nobody reading it. The gate is closed; these rows now come to
+you, roughly six a day across four passes.
+
+That volume is affordable only if you do not review a docs diff the way you review code. Skip Step 4
+entirely (there is nothing to typecheck, and CI's `check` job still runs on the PR regardless) and
+skip the preview fetch in Step 5. Read the diff and answer five questions:
+
+1. **Does the edit match its ticket's DONE WHEN, and touch nothing else?** An allowlisted `.md` PR
+   that also rewrites an unrelated playbook is scope creep and a bounce, same as in code.
+2. **Does it state a live fact that is now wrong?** Cadences, cron schedules, valve names, protected
+   paths, merge caps. A doc asserting a number is only correct if the number is checkable, so check
+   the one it changed. This is the failure mode that matters most here, because every routine reads
+   these files as instructions at run start.
+3. **Does it weaken a gate?** Removing a verification step, a cap, an owner escalation, or a "never"
+   from a playbook is a bounce unless the ticket explicitly asked for it and cites the owner
+   direction that authorised it. An agent relaxing its own constraints is exactly what this gate
+   exists to catch.
+4. **Is it internally consistent with the file it edits and with `CLAUDE.md`?** A playbook step that
+   contradicts the mission brief or the operating system is a bounce.
+5. **Voice and formatting**, only for reader-facing prose: `docs/emma-voice.md` still binds anything
+   a customer could read.
+
+A clean docs PR should take a couple of minutes. Verify it with a note naming which of the five you
+actually checked; "docs-only, read the diff" is not evidence.
+
 ## Step 4 — Run static checks
 
 ```bash
@@ -143,6 +177,26 @@ re-diagnosing the ticket:
 
 Bounce it, do not verify it. A red `check` is a hard gate and the release engine will not merge over
 it. But an unspecific `last_error` here is what turns a one-commit fix into a burned attempt.
+
+**The base-branch-red bounce (ticket #6934).** A `check:failure` that is not the stale-artifact case
+above can still be not-this-PR's fault: the failure is already present on `origin/main` itself, so
+every open PR's CI job fails identically regardless of what each PR actually changed. Verify before
+bouncing, do not assume it from the error text alone:
+
+1. `git diff origin/main...HEAD -- <failing file>` — confirm the PR does not touch the failing file
+   or the behavior it tests.
+2. Reproduce the same failure on a clean `origin/main` checkout (not the PR branch) to confirm it is
+   not this PR's diff causing it.
+
+Only once both hold, bounce with a `last_error` naming the base-branch failure and the file, so the
+next pass does not re-derive the same two steps. Run 636 (2026-09-01) hit this across three PRs at
+once (#1010, #1011, #1012), all failing on the same pre-existing `app/lib/storefront-home.server.test.ts:448`
+break on main.
+
+**A base-branch-red check is itself a P0/P1 signal.** Do not let it live only inside each PR's own
+verdict: file it as its own standalone ticket immediately (as ticket #6933 was for the case above),
+since every other open and future PR's CI is red until it is fixed, not just the one you happened to
+be reviewing.
 
 ## Step 5 — CI status and the rendered preview
 

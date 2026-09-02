@@ -78,6 +78,10 @@ import {
   ALLOWED,
   AGENT_EDITOR_APPLY_KINDS,
   AGENT_EVIDENCE_RETIRE_KINDS,
+  CODE_EVIDENCE_RETIRE_ACTORS,
+  TICKET_BLOCK_CLASSES,
+  normalizeBlockClass,
+  listConditions,
   BOUNCE_LEASE_SEC,
   CLAIM_LEASE_DEFAULT_SEC,
   TICKET_STATUSES,
@@ -1163,6 +1167,75 @@ describe('unknown-kind coercion on create', () => {
 })
 
 // ---------------------------------------------------------------------------
+// A create carrying an open pr link lands at pr_open, not approved (#6762)
+// ---------------------------------------------------------------------------
+
+describe('create with an open pr link lands at pr_open (#6762)', () => {
+  it('lands at pr_open, auto-decided, when the filing carries an open pr link', async () => {
+    h.state.selects.push([]) // getTeamConfig — irrelevant here, autoApprove would be false
+    h.state.insertResults.push([{ id: 6762 }])
+    const res = await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code',
+      suggestion: 'ticket #990: docs-only tracker PR',
+      links: [{ kind: 'pr', ref: 'https://github.com/mbayard-sorp/xdipx_store/pull/990', state: 'open' }],
+    })
+    expect(res).toEqual({ id: 6762, deduped: false })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('pr_open')
+    expect(values['decidedBy']).toBe('auto')
+    expect(values['decidedAt']).toBeInstanceOf(Date)
+  })
+
+  it('a pr link with a non-open state does not short-circuit to pr_open', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 6763 }])
+    await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code', suggestion: 'x',
+      links: [{ kind: 'pr', ref: 'https://github.com/mbayard-sorp/xdipx_store/pull/1', state: 'merged' }],
+    })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('proposed')
+  })
+
+  it('a non-pr link (e.g. a note) does not short-circuit to pr_open', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 6764 }])
+    await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code', suggestion: 'x',
+      links: [{ kind: 'note', ref: 'see also #123' }],
+    })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('proposed')
+  })
+
+  it('the current default (no pr link) is unaffected: autoApprove off -> proposed', async () => {
+    h.state.selects.push([])
+    h.state.insertResults.push([{ id: 6765 }])
+    const res = await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code', suggestion: 'x',
+    })
+    expect(res).toEqual({ id: 6765, deduped: false })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('proposed')
+    expect(values['decidedBy']).toBeNull()
+    expect(values['decidedAt']).toBeNull()
+  })
+
+  it('an open pr link still lands at pr_open even when the team auto-approves', async () => {
+    // autoApprove=true would otherwise land this at 'approved' — pr_open wins,
+    // since a PR that's already open needs QA, not a claim.
+    h.state.selects.push([{ key: 'strategy_team_auto_approve_suggestions', value: 'true' }])
+    h.state.insertResults.push([{ id: 6766 }])
+    await createSuggestionDetailed({
+      team: 'strategy', category: 'other', kind: 'code', suggestion: 'x',
+      links: [{ kind: 'pr', ref: 'https://github.com/mbayard-sorp/xdipx_store/pull/2', state: 'open' }],
+    })
+    const values = h.state.inserts[0] as Record<string, unknown>
+    expect(values['status']).toBe('pr_open')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Delegated supersession dismissal (#3573) + supersedesId on create (#3406)
 // ---------------------------------------------------------------------------
 
@@ -1472,5 +1545,138 @@ describe('list ordering and total (#2071)', () => {
     expect(await countSuggestions({ status: 'approved' })).toBe(137)
     h.state.selects.push([])
     expect(await countSuggestions({ status: 'approved' })).toBe(0)
+  })
+})
+
+/**
+ * The `code` evidence-retire edge (2026-09-01 audit, F14).
+ *
+ * `code` had no agent-reachable terminal state except a merged PR, so R-DEV
+ * expressed "done", "duplicate", "not a bug" and "needs the owner" the only way
+ * the map allowed: by parking the row at `blocked`. Measured 2026-09-02: 45
+ * blocked rows, every one at attempt_count 0 — so MAX_TICKET_ATTEMPTS = 3 has
+ * never fired once — and nine rows the owner un-blocked by hand were re-blocked
+ * on the next pass.
+ *
+ * The fence is the evidence, not the actor's good intentions, so that is what
+ * these prove: the edge is invisible without a validated retire, and it stays
+ * invisible to actors and kinds it was not opened for.
+ */
+describe('code evidence-retire edge', () => {
+  const CODE = { assignee: 'agent:rr7-engineer', kind: 'code' }
+
+  it('is closed without the evidence declaration, from both approved and blocked', () => {
+    for (const from of ['approved', 'blocked'] as const) {
+      for (const actor of CODE_EVIDENCE_RETIRE_ACTORS) {
+        expect(isTransitionAllowed(from, 'dismissed', actor, CODE)).toBe(false)
+      }
+    }
+  })
+
+  it('opens for the dev-lane actors once evidence validated', () => {
+    const ctx = { ...CODE, viaRetireEvidence: true }
+    for (const from of ['approved', 'blocked'] as const) {
+      for (const actor of CODE_EVIDENCE_RETIRE_ACTORS) {
+        expect(isTransitionAllowed(from, 'dismissed', actor, ctx)).toBe(true)
+      }
+    }
+  })
+
+  it('stays closed to an agent outside the named set, even with evidence', () => {
+    const ctx = { ...CODE, viaRetireEvidence: true }
+    for (const actor of ['agent:social-media-manager', 'agent:content-writer', 'agent:agent-editor'] as const) {
+      expect(isTransitionAllowed('blocked', 'dismissed', actor, ctx)).toBe(false)
+    }
+  })
+
+  it('does not let the dev lane retire kinds it was not opened for', () => {
+    // agent-editor's own work queue stays agent-editor's; the dev lane getting a
+    // code edge must not become a general retire verb.
+    for (const kind of ['instructions', 'agent-def', 'config', 'campaign', 'promo']) {
+      expect(isTransitionAllowed('blocked', 'dismissed', 'agent:rr7-engineer', {
+        assignee: 'agent:rr7-engineer', kind, viaRetireEvidence: true,
+      })).toBe(false)
+    }
+  })
+
+  it('does not open any status pair other than the two intended', () => {
+    const ctx = { ...CODE, viaRetireEvidence: true }
+    const opened: string[] = []
+    for (const from of TICKET_STATUSES) {
+      for (const to of TICKET_STATUSES) {
+        if (isTransitionAllowed(from, to, 'agent:rr7-engineer', ctx)
+          && !isTransitionAllowed(from, to, 'agent:rr7-engineer', CODE)) {
+          opened.push(`${from} -> ${to}`)
+        }
+      }
+    }
+    expect(opened.sort()).toEqual(['approved -> dismissed', 'blocked -> dismissed'])
+  })
+})
+
+describe('block class', () => {
+  it('accepts every class in the vocabulary and nothing else', () => {
+    for (const c of TICKET_BLOCK_CLASSES) expect(normalizeBlockClass(c)).toBe(c)
+    for (const bad of ['', 'nonsense', 'PROTECTED-PATH', null, undefined, 7, {}]) {
+      expect(normalizeBlockClass(bad)).toBeNull()
+    }
+  })
+
+  it('covers the classes R-DEV already writes in prose', () => {
+    // Derived from reading all 45 live blocked-row transition notes.
+    for (const c of ['protected-path', 'needs-split', 'superseded', 'duplicate', 'no-code-work', 'owner-env']) {
+      expect(TICKET_BLOCK_CLASSES).toContain(c)
+    }
+  })
+})
+
+describe('target_team NULL means the proposing team, not everyone', () => {
+  const base = { assignee: 'agent:rr7-engineer' as TicketActor, leaseSeconds: 1200, from: 'approved' as TicketStatus }
+
+  it('scopes the NULL branch to the proposer in the claim query', () => {
+    const { text, params } = render(buildClaimQuery({ ...base, filter: { targetTeam: 'social' } }))
+    // The bug this replaces: a bare `OR c.target_team IS NULL` shows all 75
+    // unrouted rows to all five teams, any of which could then close a row it
+    // does not own. The NULL branch has to carry the team check with it.
+    expect(text).toContain('c.target_team IS NULL AND c.team =')
+    expect(params.filter(p => p === 'social')).toHaveLength(2)
+  })
+
+  it('still binds the team as a parameter rather than interpolating it', () => {
+    const { text } = render(buildClaimQuery({ ...base, filter: { targetTeam: 'social' } }))
+    expect(text).not.toContain("'social'")
+  })
+})
+
+describe('listConditions target_team semantics', () => {
+  it('matches the routed team OR an unrouted row proposed by that team', () => {
+    const [pred] = listConditions({ targetTeam: 'social' })
+    const { text, params } = render(pred!)
+    expect(text).toContain('target_team')
+    expect(text).toContain('is null')
+    expect(text).toContain('"team"')
+    // Bound twice — once per branch — never interpolated.
+    expect(params.filter(p => p === 'social')).toHaveLength(2)
+    expect(text).not.toContain("'social'")
+  })
+
+  it('agrees with the claim query, so a routine cannot see a row it cannot claim', () => {
+    // The two render in different dialects — the list builder quotes its
+    // identifiers, the claim query aliases the table as `c` — so the shared
+    // property to assert is the shape, not the string: each scopes its NULL
+    // branch by team, and each binds the team twice rather than interpolating.
+    const list = render(listConditions({ targetTeam: 'product' })[0]!)
+    const claim = render(buildClaimQuery({
+      assignee: 'agent:rr7-engineer', leaseSeconds: 1200, from: 'approved',
+      filter: { targetTeam: 'product' },
+    }))
+    for (const { text, params } of [list, claim]) {
+      const t = text.toLowerCase()
+      expect(t).toContain('target_team')
+      expect(t).toContain('is null')
+      expect(t).toMatch(/\bteam\b/)
+      expect(params.filter(x => x === 'product')).toHaveLength(2)
+      expect(text).not.toContain("'product'")
+    }
   })
 })

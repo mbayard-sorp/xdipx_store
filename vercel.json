@@ -51,6 +51,10 @@
       "schedule": "0 7 * * *"
     },
     {
+      "path": "/cron/pricing-audit-prune",
+      "schedule": "15 7 * * *"
+    },
+    {
       "path": "/cron/import-monitor",
       "schedule": "0 8 * * *"
     },
@@ -141,6 +145,10 @@
     {
       "path": "/cron/social-asset-auto-archive",
       "schedule": "50 3 * * *"
+    },
+    {
+      "path": "/cron/janitor-sweep",
+      "schedule": "0 */6 * * *"
     }
   ]
 }

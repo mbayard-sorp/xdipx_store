@@ -84,7 +84,7 @@ The authorship test, which is what actually degrades from 9 to 10: at 9 the copy
 
 ## Imagery register
 
-Visuals stay suggestive-editorial (a visual 6-7; imagery does not follow copy to a 9). Sensory, elegant, charged:
+The visual register is scoped by surface (aligned 2026-09-01; the 2026-08-19 hard-lines ruling below already scoped the bans, this line now matches it). On owned merchandising surfaces (homepage, PLP, PDP, discovery) visuals stay suggestive-editorial at a visual 6-7. On social, imagery follows the social addendum: skin in frame is the default for product posts per the §3.2a ceiling in `docs/store-team/instagram-campaigns.md`, nudity never. Everywhere, sensory, elegant, charged:
 
 - **Sensory anticipation:** tension, softness, warmth, the moment before. A hand hovering just above a petal, silk pulled taut, condensation, a finger denting ripe fruit, dripping honey. Feeling over joke.
 - **Shape and texture rhyme:** the product beside a form that echoes it (orchid, halved peach, fig), composed as editorial still life.
@@ -326,6 +326,16 @@ Draft against both, and understand which one you are avoiding.
   runs 5**: TikTok moderates the category harder than Meta and the 9-by-implication ruling does
   not extend there. Empathy layer stays fully on everywhere: this is where the shame-free voice
   does its work.
+- **X carve-out: PDP links and hashtags.** Two rules elsewhere in this section are calibrated for
+  Instagram/TikTok and do not extend to X as written. (1) The "commerce goes post → profile → link
+  in bio → site; the caption never points at a PDP" rule below is an Instagram/TikTok rule: on X, a
+  direct `/products/{slug}` PDP link with channel UTMs is **allowed and encouraged**
+  (`docs/store-team/routine-social-daily.md` Step 4c), including the second link a toy+lube pairing
+  post requires. (2) The 5-to-8 hashtag count below is an Instagram search-keyword calibration: X
+  runs **0-3** hashtags, because the 280 weighted-character limit (each URL counts 23) plus one or
+  two mandatory pairing links leaves little room, and X's discovery model does not reward a
+  hashtag block the way Instagram's does. Every other rule in this section (register, vocabulary,
+  imagery, no lived experience) applies to X unchanged.
 - **On Instagram the register is Emma off the clock (codified 2026-08-08).** The account reads
   like a group chat with a friend who happens to work in the industry: first person, direct
   address, reactions, questions back to the audience. Lowercase-casual is licensed here and only
@@ -359,7 +369,8 @@ Draft against both, and understand which one you are avoiding.
   or placed by a cast member, and may be named. Product-free frames are for subjects with no
   product in them (communication, consent, the orgasm gap as a conversation). "No product in
   frame" is a choice a brief has to justify, not a default it inherits from a slot.
-- **Hashtags: 5 to 8, and they are search keywords, not reach.** Two broad category tags
+- **Hashtags: 5 to 8, and they are search keywords, not reach** (Instagram/TikTok; X carves out to
+  0-3, see above). Two broad category tags
   (#sexualwellness, #sexualhealth, #intimacy, #selfcare), three niche tags on the post's subject
   (#bodysafe, #wandmassager, #airpulsation, #lube, #couplesintimacy), and one or two tags specific
   to the post or campaign. Every tag is verified in-app before first use (a tag whose recent posts
@@ -386,6 +397,7 @@ Draft against both, and understand which one you are avoiding.
 - **Never sell in the post.** No prices, no discounts, no promo codes, no "shop", no site CTAs
   (the whitelist is for site and email; a CTA in a caption is the sale attempt that gets the post
   pulled). Commerce goes post → profile → link in bio → site. The caption never points at a PDP.
+  (Instagram/TikTok; X carves out to allow a direct PDP link, see above.)
 - **Tag the maker.** When a featured brand's Instagram handle is verified in the registry
   (`docs/store-team/brand-ig-handles.json`), tag it in the caption. Never guess a handle; a wrong
   tag is worse than none.
@@ -414,10 +426,12 @@ Draft against both, and understand which one you are avoiding.
      staying the hero. The team picks the cast member whose persona notes fit the post; no
      per-use owner approval. Cast reactions are performance, never testimony: no persona ever
      claims to have used a product.
-  3. *Tasteful visual metaphor* as a carousel hook. Produce and still-life innuendo, licensed on
-     the fence of deniability: a fig reads as a fig at a glance, the metaphor is never composited
-     into the same frame as a product, the caption and on-slide text never name it, and at most
-     one metaphor slide runs per carousel.
+  3. *Tasteful visual metaphor* as a carousel hook and, since 2026-09-01 (owner direction), as a
+     standalone archetype-D post capped at 2 per rolling 7. Produce and still-life innuendo,
+     licensed on the fence of deniability: a fig reads as a fig at a glance, the metaphor is never
+     composited into the same frame as a product, the caption and on-slide text never name it, and
+     at most one metaphor slide runs per carousel. The standalone license covers archetype D only;
+     archetype E (surreal euphemistic hybrids) remains owned-surfaces-only.
   **Superseded on 2026-08-16, and again by owner ruling 2026-08-19.** This bullet used to end
   "still banned, unchanged: simulated or implied use, product on or against a body, a person on a
   bed with product in frame, fluid or lube texture, lips or tongue in frame." Every one of those

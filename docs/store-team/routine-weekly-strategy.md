@@ -313,8 +313,17 @@ the day's drafting to real context (the social routine reads this section at run
 `docs/store-team/routine-social-daily.md` already treats it as the volume driver):
 
 - new aisles/drops going live and any featured brand of the week (tag the verified brand handle);
+- **this week's featured products, named** (owner direction 2026-09-01): pick 3-5 specific
+  in-stock products from the week's new arrivals, restocks, and the promo window's theme that
+  deserve social coverage, each with handle and the one-line reason it earns a post. This is what
+  makes social posts pegged to real products instead of category abstractions, and it is the same
+  set the homepage and content sections should reference where they fit, so the store carries one
+  message across surfaces instead of five;
 - `marketing_calendar` promos and campaign themes landing in the window (coordinate with
-  `merch-calendar`, which marks the rows that deserve Instagram coverage);
+  `merch-calendar`, which marks the rows that deserve Instagram coverage), with the platform
+  scoping stated per promo: code and link on X and email, theme-only on Instagram;
+- the week's Notebook slate tie-ins worth amplifying (which planned posts pair naturally with
+  which products or campaign beats);
 - adopted trend briefs from **both** trend scouts (`trend-scout` community discourse and
   `social-trend-scout` format trends);
 

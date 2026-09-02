@@ -365,6 +365,24 @@ Under-claiming is not fixed by a hedge either: the fix is stating the bounded an
 supports, in the max-authority blog register, with reportage framing and the clinician hand-off doing
 the safety work.
 
+**PDP-as-source pre-flight (mandatory, before Step 5).** Our own Shopify PDP description is
+Emma-authored marketing copy, not evidence, but it reads exactly like a spec sheet at drafting
+time, which is why it keeps getting promoted to fact. Runs 590 and 607 each lost a first-submit
+accuracy REVISE this way: run 590's four claim-carrying flags (a pressure-level count, a named
+mode, a runtime figure, a brand-spec comparative) all traced only to our own PDP copy, with no
+`mfgProductSpecs` doc, no spec metafield, and the Nalpac feed down; run 607 took a REVISE on a
+brand-policy claim ("silicone toy makers... specify water-based only") lifted straight from a
+named manufacturer's PDP line, which the accuracy gate web-verified was wrong about that
+manufacturer's actual policy. This is a different defect from claim-scope above: claim-scope
+narrows a claim that is true but stated too widely; this catches a claim whose only source is our
+own marketing prose, which may be imprecise or simply wrong about a third party. Before submit,
+list every brand-policy, spec, runtime, material-limit, or comparative claim in the draft whose
+only source is a Shopify product description (ours or a cited competitor's), and for each one
+either trace it to a first-party source (the manufacturer's own published guidance, an
+`mfgProductSpecs` doc, or a spec metafield) or delete it. Never hedge it: a product description
+under the `xdipx` namespace is our own copy and carries no evidentiary weight, and a claim naming a
+real company is the highest-risk shape because it is checkable and wrong-able.
+
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
 opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
@@ -477,6 +495,17 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      fix and expensive to detect late. Cheap mechanical hint: a scope-widening rewrite almost always
      introduces a universal quantifier (whatever, anything, everything, always, never), so treat any
      of those words appearing in a rewrite as a prompt to re-read the rest of the post.
+   - **Enumeration-consistency scan (part of the same pre-resubmit self-check, ticket #6910):** when
+     a gate asks for a change to an enumerated list, a red-flag list, a safety enumeration, or a tier
+     assignment, first grep the whole document for every other instance of that enumeration, the FAQ
+     block included, and apply the change to all of them in the same rewrite, listing each site
+     explicitly for the re-gate. The universal-quantifier hint above does not catch this shape: the
+     defect is not a widened quantifier, it is the same enumeration existing in two places with only
+     one of them edited (run 327 lost its publish to this class in a body/FAQ split; run 626 lost it
+     again when a fever-severity tier change to the body red-flag list left FAQ Q5's copy of the same
+     enumeration unchanged). A post-scoped enumeration is exactly the shape the post-scoped-cap
+     carve-out above already exists for, so that carve-out's permission to edit anywhere in the
+     document covers this case too.
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.

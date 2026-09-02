@@ -141,9 +141,48 @@ const RUN_IDLE_TIMEOUT_MIN_BY_TEAM: Partial<Record<TeamId, number>> = {
   strategy: 120,
 }
 
-/** Idle minutes after which a silent run of this team is presumed dead. */
-export function runIdleTimeoutMin(team: TeamId): number {
-  return RUN_IDLE_TIMEOUT_MIN_BY_TEAM[team] ?? RUN_IDLE_TIMEOUT_MIN_DEFAULT
+/**
+ * Per-(team, runType) overrides, layered on top of the team-level override
+ * above, for one run type within a team whose measured quiet stretch is
+ * sharply different from its teammates (ticket #6760). `strategy` team's
+ * runType `'strategy'` is the weekly cross-team retro (store-strategist
+ * orchestrating inventory-sentinel, promo-manager, loyalty-referral-manager,
+ * product-manager and program-manager IN SERIES): a real run (603,
+ * 2026-08-31) posted its first event at 17:19, 5h14m after its 12:05 start,
+ * doing legitimate research before the retro-writing phase produces anything
+ * event-worthy, then went on to post 22 more events and finish successfully
+ * at 18:03. The strategy team's other runTypes (dev/qa/apply, R-DEV/R-QA/the
+ * release engine's own passes) are the short, frequent ones #5252 measured
+ * (102.5 min healthy max) when it set the team-level 120, so raising the
+ * team-level number back up would reopen the exact hung-lock problem #5252
+ * fixed for THOSE run types. This overrides only the one run type that
+ * legitimately needs longer, at 6h (360 min) — safely above the observed
+ * 5h14m gap with room for a slower week, while a silent one still unblocks
+ * the strategy gate a full day sooner than the 240 default would.
+ */
+const RUN_IDLE_TIMEOUT_MIN_BY_TEAM_RUNTYPE: Partial<Record<TeamId, Record<string, number>>> = {
+  strategy: { strategy: 360 },
+}
+
+/** Idle minutes after which a silent run of this (team, runType) is presumed dead. */
+export function runIdleTimeoutMin(team: TeamId, runType?: string | null): number {
+  const runTypeOverride = runType ? RUN_IDLE_TIMEOUT_MIN_BY_TEAM_RUNTYPE[team]?.[runType] : undefined
+  return runTypeOverride ?? RUN_IDLE_TIMEOUT_MIN_BY_TEAM[team] ?? RUN_IDLE_TIMEOUT_MIN_DEFAULT
+}
+
+/**
+ * The widest idle allowance across every runType of this team, for callers
+ * (isRunInProgress, getBlockingRun) that check "any run of this team" in one
+ * query spanning mixed runTypes and so need a single scalar cutoff. Using the
+ * widest applicable value only ever holds the concurrency lock LONGER than a
+ * precise per-row check would — the same asymmetry the module-level comment
+ * above already accepts (a late reap costs a stale 'running' row; a false one
+ * corrupts the record) — never shorter, so this can't reintroduce a false reap.
+ */
+function maxRunIdleTimeoutMin(team: TeamId): number {
+  const byRunType = RUN_IDLE_TIMEOUT_MIN_BY_TEAM_RUNTYPE[team]
+  const runTypeMax = byRunType ? Math.max(...Object.values(byRunType)) : -Infinity
+  return Math.max(runTypeMax, RUN_IDLE_TIMEOUT_MIN_BY_TEAM[team] ?? RUN_IDLE_TIMEOUT_MIN_DEFAULT)
 }
 
 /**
@@ -419,7 +458,7 @@ export async function getTodayImageCount(team: TeamId = 'homepage'): Promise<num
  * Callers that already hold a run row pass excludeRunId to avoid self-blocking.
  */
 export async function isRunInProgress(team: TeamId, excludeRunId?: number): Promise<boolean> {
-  const since = new Date(Date.now() - runIdleTimeoutMin(team) * 60_000)
+  const since = new Date(Date.now() - maxRunIdleTimeoutMin(team) * 60_000)
   const conditions = [
     eq(homepageTeamRuns.team, team),
     eq(homepageTeamRuns.status, 'running'),
@@ -446,7 +485,7 @@ export async function getBlockingRun(
   team: TeamId,
   excludeRunId?: number,
 ): Promise<{ id: number; runType: string; idleMinutes: number } | null> {
-  const since = new Date(Date.now() - runIdleTimeoutMin(team) * 60_000)
+  const since = new Date(Date.now() - maxRunIdleTimeoutMin(team) * 60_000)
   const conditions = [
     eq(homepageTeamRuns.team, team),
     eq(homepageTeamRuns.status, 'running'),
@@ -481,11 +520,19 @@ export async function getBlockingRun(
  */
 export async function expireStaleRuns(): Promise<void> {
   const overrides = Object.entries(RUN_IDLE_TIMEOUT_MIN_BY_TEAM) as Array<[TeamId, number]>
+  // Flattened (team, runType, mins) triples, ticket #6760's per-runType tier.
+  const runTypeOverrides = (Object.entries(RUN_IDLE_TIMEOUT_MIN_BY_TEAM_RUNTYPE) as Array<[TeamId, Record<string, number>]>)
+    .flatMap(([team, byRunType]) => Object.entries(byRunType).map(([runType, mins]): [TeamId, string, number] => [team, runType, mins]))
   const expireSet = (mins: number) => ({
     status: 'failed',
     error: `auto-expired: no recorded activity for ${mins} minutes`,
     finishedAt: new Date(),
   })
+
+  // Tier 1: the default cutoff, for every team with no team-level override.
+  // A runType override only ever exists inside a team that already HAS a
+  // team-level override (strategy), so it is already excluded here — no
+  // separate runType exclusion needed at this tier.
   const defaultCutoff = new Date(Date.now() - RUN_IDLE_TIMEOUT_MIN_DEFAULT * 60_000)
   const defaultConds = [eq(homepageTeamRuns.status, 'running'), sql`${lastActivityAt} < ${defaultCutoff}`]
   if (overrides.length > 0) {
@@ -495,7 +542,25 @@ export async function expireStaleRuns(): Promise<void> {
     .update(homepageTeamRuns)
     .set(expireSet(RUN_IDLE_TIMEOUT_MIN_DEFAULT))
     .where(and(...defaultConds))
+
+  // Tier 2: each team-level override, excluding any runType inside it that
+  // has its own (necessarily longer, see maxRunIdleTimeoutMin) tier-3 cutoff.
   for (const [team, mins] of overrides) {
+    const cutoff = new Date(Date.now() - mins * 60_000)
+    const conds = [
+      eq(homepageTeamRuns.status, 'running'),
+      eq(homepageTeamRuns.team, team),
+      sql`${lastActivityAt} < ${cutoff}`,
+    ]
+    const exemptRunTypes = runTypeOverrides.filter(([t]) => t === team).map(([, rt]) => rt)
+    if (exemptRunTypes.length > 0) {
+      conds.push(sql`${homepageTeamRuns.runType} NOT IN (${sql.join(exemptRunTypes.map(rt => sql`${rt}`), sql`, `)})`)
+    }
+    await db.update(homepageTeamRuns).set(expireSet(mins)).where(and(...conds))
+  }
+
+  // Tier 3: per-runType overrides (ticket #6760).
+  for (const [team, runType, mins] of runTypeOverrides) {
     const cutoff = new Date(Date.now() - mins * 60_000)
     await db
       .update(homepageTeamRuns)
@@ -503,6 +568,7 @@ export async function expireStaleRuns(): Promise<void> {
       .where(and(
         eq(homepageTeamRuns.status, 'running'),
         eq(homepageTeamRuns.team, team),
+        eq(homepageTeamRuns.runType, runType),
         sql`${lastActivityAt} < ${cutoff}`,
       ))
   }
@@ -899,6 +965,17 @@ export async function createSuggestionDetailed(
       'Pass dedupeScope:"daily" if a row per day is intended.',
     )
   }
+  // #6762: a filing that already carries an open `pr` link (ADR-008 step 3 —
+  // "opened a PR, file its ticket in the same breath") is a self-filed
+  // PR-tracking ticket, not new work waiting on triage or a claim. Landing it
+  // at 'approved' drops it into R-DEV's claim pool describing a PR that is
+  // already written and pushed — phantom rework (#4539) — and there is no
+  // repair path afterward, since 'approved' -> 'pr_open' is not an agent-
+  // reachable edge. operating-system.md section 3 rule 4 and program-
+  // manager.md both document the contract this enforces: it lands at
+  // pr_open with the pr link, never as a bare kind:'code' row at approved.
+  const hasOpenPrLink = (s.links ?? []).some(l => l.kind === 'pr' && l.state === 'open')
+  const initialStatus: TicketStatus = hasOpenPrLink ? 'pr_open' : autoApprove ? 'approved' : 'proposed'
   const [row] = await db
     .insert(homepageTeamSuggestions)
     .values({
@@ -910,9 +987,9 @@ export async function createSuggestionDetailed(
       suggestion:    suggestionText,
       estSavingsUsd: String(s.estSavingsUsd ?? 0),
       cxRisk:        s.cxRisk ?? 'low',
-      status:        autoApprove ? 'approved' : 'proposed',
-      decidedBy:     autoApprove ? 'auto' : null,
-      decidedAt:     autoApprove ? new Date() : null,
+      status:        initialStatus,
+      decidedBy:     initialStatus !== 'proposed' ? 'auto' : null,
+      decidedAt:     initialStatus !== 'proposed' ? new Date() : null,
       priority:      s.priority ?? 3,
       dedupeKey,
       dueAt:         s.dueAt == null ? null : new Date(s.dueAt),
@@ -1215,10 +1292,33 @@ export function resolveListOrder(
   return 'created'
 }
 
-function listConditions(filter: SuggestionListFilter): SQL[] {
+/**
+ * Exported for the same reason `buildClaimQuery` is: the target_team semantics
+ * are load-bearing and easier to prove against the rendered predicate than
+ * through a mocked select chain. Pure — no IO.
+ */
+export function listConditions(filter: SuggestionListFilter): SQL[] {
   const conditions: SQL[] = []
   if (filter.team) conditions.push(eq(homepageTeamSuggestions.team, filter.team))
-  if (filter.targetTeam) conditions.push(eq(homepageTeamSuggestions.targetTeam, filter.targetTeam))
+  // NULL target_team means "the proposer owns it", which createSuggestion already
+  // declares at the write side (`const actingTeam = s.targetTeam ?? s.team`) and
+  // db/schema.ts documents on the column. The read side used a plain eq(), so 75
+  // approved rows filed without an explicit route were invisible to every
+  // target-filtered mailbox — reachable by nobody, on either team.
+  //
+  // Deliberately NOT `OR target_team IS NULL`, which was the first fix I wrote
+  // and is a fan-out bug: it shows all 75 rows to all five teams, any of which
+  // could then close a row it does not own. Scoping the NULL branch to the
+  // proposing team reproduces the documented semantics exactly.
+  if (filter.targetTeam) {
+    conditions.push(or(
+      eq(homepageTeamSuggestions.targetTeam, filter.targetTeam),
+      and(
+        isNull(homepageTeamSuggestions.targetTeam),
+        eq(homepageTeamSuggestions.team, filter.targetTeam),
+      ),
+    )!)
+  }
   if (filter.status) conditions.push(eq(homepageTeamSuggestions.status, filter.status))
   if (filter.statuses?.length) {
     conditions.push(inArray(homepageTeamSuggestions.status, [...filter.statuses]))
@@ -1308,7 +1408,14 @@ export async function retireSuggestion(id: number): Promise<void> {
  */
 export const REKIND_FROM_KINDS: readonly string[] = ['process']
 export const REKIND_TO_KINDS: readonly string[] = ['instructions', 'code']
-export const REKIND_ACTORS: readonly TicketActor[] = ['owner', 'agent:agent-editor']
+// `agent:store-strategist` joined 2026-09-02: the weekly three-strikes rung asks
+// the strategist to dismiss with evidence, rekind, or retire a stalled row, and
+// it could previously do none of those — the rung was unbuildable as written.
+// Rekind stays one-way (REKIND_FROM_KINDS -> REKIND_TO_KINDS), so this cannot be
+// used to launder a row into a kind that is easier to retire.
+export const REKIND_ACTORS: readonly TicketActor[] = [
+  'owner', 'agent:agent-editor', 'agent:store-strategist',
+]
 
 export async function rekindSuggestion(
   id: number,
@@ -1591,6 +1698,60 @@ export const AGENT_RETIRE_KINDS: readonly string[] = ['process', 'strategy', 'pr
 export const AGENT_EVIDENCE_RETIRE_KINDS: readonly string[] = ['instructions', 'agent-def']
 
 /**
+ * Kinds the dev lane may retire WITH EVIDENCE, and who may do it.
+ *
+ * `code` had no agent-reachable terminal state except a merged PR, so R-DEV
+ * expressed "done", "duplicate", "not a bug" and "needs the owner" the only way
+ * the map allowed: by parking the row at `blocked`. Live consequence, measured
+ * 2026-09-02: 45 blocked rows, every one at attempt_count 0, so the
+ * three-strikes ladder has never fired once; and nine rows the owner un-blocked
+ * by hand were re-blocked on the next pass, because nothing about the ticket had
+ * changed and the playbook still said to park it.
+ *
+ * The fence is the evidence, not the actor's good intentions. `retireEvidenceOnly`
+ * means this edge matches ONLY when `agentRetireSuggestion` validated either a
+ * merged-PR reference or a live superseding row that names this ticket by id.
+ * An evidence-free retire on a `code` row still 409s, exactly as before.
+ *
+ * Reading the 45 notes, ~20 of them already cite a merged PR or a superseding
+ * ticket in prose. This edge is what lets that evidence close the row instead of
+ * sitting in a note nobody can query.
+ */
+export const CODE_EVIDENCE_RETIRE_KINDS: readonly string[] = ['code']
+export const CODE_EVIDENCE_RETIRE_ACTORS: readonly TicketActor[] = [
+  'agent:rr7-engineer',
+  'agent:qa-reviewer',
+  'agent:store-strategist',
+]
+
+/**
+ * Why a ticket is blocked, as a closed vocabulary (migration 089).
+ *
+ * R-DEV already writes these in the transition note, sometimes in literal
+ * brackets. Persisting the class is what lets a router hand the row to the actor
+ * the class names, instead of defaulting every one of them to the owner:
+ *
+ *   protected-path  an owner-attended session authors it
+ *   needs-split     a conjunctive DONE WHEN; split it rather than block it
+ *   superseded      already shipped, usually with the PR named in the note
+ *   duplicate       another row covers it
+ *   no-code-work    diagnosis complete, nothing to build
+ *   owner-env       an owner-only environment, secret, or console action
+ *   dependency      waiting on another ticket that is not yet applied
+ *
+ * Advisory, not a gate: an unrecognised value is dropped rather than rejected,
+ * because a filer that cannot classify its own block must still be able to block.
+ */
+export const TICKET_BLOCK_CLASSES: readonly string[] = [
+  'protected-path', 'needs-split', 'superseded', 'duplicate',
+  'no-code-work', 'owner-env', 'dependency',
+]
+
+export function normalizeBlockClass(value: unknown): string | null {
+  return typeof value === 'string' && TICKET_BLOCK_CLASSES.includes(value) ? value : null
+}
+
+/**
  * Entry agents for the daily routines, permitted to close an inbound
  * operational row they acted on.
  *
@@ -1743,6 +1904,10 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // agent-editor retiring a superseded/satisfied instructions row WITH
     // EVIDENCE (#2864). Evidence-free retires on these kinds still 409.
     { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
+    // The dev lane's evidence-only retire for `code` (2026-09-01 audit, F14).
+    // Same fence as the rule above: matches only when agentRetireSuggestion
+    // validated a merged PR or a live superseding row that names this ticket.
+    { to: 'dismissed', actors: CODE_EVIDENCE_RETIRE_ACTORS, kinds: CODE_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
     OWNER_DISMISS,
   ],
   in_progress: [
@@ -1819,6 +1984,14 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // PR #508 merged. Fenced by `outOfBandReconcileOnly` like the `approved`
     // edge above: a plain system transition is rejected at the map.
     { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
+    // Evidence-only retire out of `blocked`, the state R-DEV was instructed to
+    // park code tickets in and that nothing but the owner could empty. 45 rows
+    // sit here, every one at attempt_count 0; ~20 already cite a merged PR or a
+    // superseding ticket in their own transition note. This edge is what lets
+    // that evidence close the row. An evidence-free retire still 409s, so
+    // "blocked" cannot become a quiet delete.
+    { to: 'dismissed', actors: CODE_EVIDENCE_RETIRE_ACTORS, kinds: CODE_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
+    { to: 'dismissed', actors: ['agent:agent-editor'], kinds: AGENT_EVIDENCE_RETIRE_KINDS, retireEvidenceOnly: true },
     OWNER_DISMISS,
   ],
   applied: [],
@@ -1930,6 +2103,13 @@ export interface TransitionOpts {
   note?: string | undefined
   links?: readonly TicketLinkInput[] | undefined
   lastError?: string | undefined
+  /**
+   * Closed-vocabulary reason class, persisted when transitioning to `blocked`
+   * (089, TICKET_BLOCK_CLASSES). Advisory rather than required: a filer that
+   * cannot classify its own block must still be able to block, so an
+   * unrecognised value is dropped and a missing one is simply null.
+   */
+  blockClass?: string | undefined
   /** Force an attempt increment on an edge that does not always spend one. */
   incrementAttempt?: boolean | undefined
   /**
@@ -2062,6 +2242,14 @@ export async function transitionSuggestion(
   // left the owner digest nothing to flag and the owner nothing to act on. The
   // transition itself is never rejected, since refusing it would strand the
   // ticket in a worse state; the stamp just makes the silence attributable.
+  // Persist the reason class alongside the prose (089). Advisory: an
+  // unrecognised value is dropped rather than rejected, because a filer that
+  // cannot classify its own block must still be able to block.
+  if (to === 'blocked') {
+    const blockClass = normalizeBlockClass(opts.blockClass)
+    if (blockClass) patch['blockClass'] = blockClass
+  }
+
   if (to === 'blocked' && !opts.lastError?.trim() && !opts.note?.trim()) {
     patch['lastError'] = `blocked without stated reason by ${actor}`
   }
@@ -2215,7 +2403,11 @@ export function buildClaimQuery(c: ResolvedClaim): SQL {
   if (c.id != null) conds.push(sql`c.id = ${c.id}`)
   if (c.filter.kind) conds.push(sql`c.kind = ${c.filter.kind}`)
   if (c.filter.team) conds.push(sql`c.team = ${c.filter.team}`)
-  if (c.filter.targetTeam) conds.push(sql`c.target_team = ${c.filter.targetTeam}`)
+  // Same NULL-means-own-team semantics as listConditions above; the claim query
+  // has to agree with the list query or a routine can see a row it cannot claim.
+  if (c.filter.targetTeam) {
+    conds.push(sql`(c.target_team = ${c.filter.targetTeam} OR (c.target_team IS NULL AND c.team = ${c.filter.targetTeam}))`)
+  }
   // A live claim on the row blocks it; an expired one does not (expireStaleClaims
   // is throttled, so the queue must not wait on it to reclaim).
   conds.push(sql`(c.claim_expires_at IS NULL OR c.claim_expires_at < now())`)

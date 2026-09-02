@@ -1,4 +1,4 @@
--- 087_social_asset_vision_verdict.sql
+-- 091_social_asset_vision_verdict.sql
 -- Vision-gate hard check on generated social imagery (ticket #6763, incident:
 -- social_posts #145, a three-armed cast member published to Instagram and
 -- removed by the owner the same day). docs/design-doctrine.md:224 mandates a
@@ -21,7 +21,7 @@
 -- TYPE, no DML. Merges on the ordinary release-engine lane once
 -- migration-dry-run is green.
 --
--- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 087
+-- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 091
 -- Idempotent: safe to re-run.
 
 ALTER TABLE social_media_assets ADD COLUMN IF NOT EXISTS vision_verdict jsonb;

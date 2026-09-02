@@ -25,6 +25,12 @@ export interface NotebookPromoInput {
 
 export interface NotebookPromoSuggestion {
   team: 'social'
+  /**
+   * The routine's mailbox query filters on strict targetTeam equality
+   * (team.server.ts listSuggestions), so a row filed without it is invisible
+   * to the consumer even though `team` says social.
+   */
+  targetTeam: 'social'
   kind: 'campaign'
   category: string
   suggestion: string
@@ -45,12 +51,13 @@ export function buildNotebookPromoSuggestion(input: NotebookPromoInput): Noteboo
   const category = input.category?.trim() || 'uncategorized'
   return {
     team: 'social',
+    targetTeam: 'social',
     kind: 'campaign',
     category: 'social-automation',
     dedupeKey: notebookPromoDedupeKey(input.slug),
     suggestion:
       `New Notebook post published: "${title}" (${url}). Category: ${category}. ` +
-      `Draft the cross-platform promo per routine-social-daily.md Step 7b: one post per ` +
+      `Draft the cross-platform promo per routine-social-daily.md: one post per ` +
       `enabled platform pointing readers at the piece, voice-gated as always. ` +
       `Filed by the sanity-publish webhook as the event-driven backstop for the ` +
       `content-run handoff; if the content run already filed this slug, the shared ` +

@@ -30,7 +30,10 @@ const mockGetProductsByHandles = vi.mocked(getProductsByHandles)
 const mockGetCollectionProducts = vi.mocked(getCollectionProducts)
 
 /** Full Shopify `Product` fixture — deliberately fat (variants, tags, every
- *  image) so the test can assert the lean map strips it down. */
+ *  image) so the test can assert the lean map strips it down. Single-arg on
+ *  purpose: several call sites use `handles.map(makeFatProduct)` directly, and
+ *  a second positional param would silently collect Array.map's index
+ *  argument. Use `withStock()` to set `totalInventory` on a fixture. */
 function makeFatProduct(handle: string): Product {
   return {
     id: `gid://shopify/Product/${handle}`,
@@ -65,6 +68,11 @@ function makeFatProduct(handle: string): Product {
     category: 'Pleasure',
     rating: { value: 4.5, count: 12 },
   }
+}
+
+/** Sets `totalInventory` on a fixture for the out-of-stock gate tests. */
+function withStock(p: Product, totalInventory: number | null): Product {
+  return { ...p, totalInventory }
 }
 
 function makeSections(): HomepageSections {
@@ -311,5 +319,64 @@ describe('getAnchorCollectionProducts — Nº 03 grid source (ticket #464)', () 
     expect(await getAnchorCollectionProducts('empty-one')).toEqual([])
     mockGetCollectionProducts.mockRejectedValue(new Error('shopify down'))
     expect(await getAnchorCollectionProducts('best-sellers')).toEqual([])
+  })
+
+  // Out-of-stock gate for curated surfaces (ticket #6751): the Nº 03 anchor
+  // grid is a simple collection fetch with no pass through applyRules(), so it
+  // structurally cannot know a pinned product just sold out unless it checks
+  // itself. Mirrors discovery-rules.test.ts's "applyRules — out-of-stock gate"
+  // suite.
+  it('drops a tracked zero-stock product even though the collection still lists it', async () => {
+    mockGetCollectionProducts.mockResolvedValue([
+      withStock(makeFatProduct('oos-1'), 0),
+      withStock(makeFatProduct('healthy-1'), 5),
+    ])
+    const lean = await getAnchorCollectionProducts('curated-picks')
+    expect(lean.map(p => p.handle)).toEqual(['healthy-1'])
+  })
+
+  it('drops a negative-inventory (oversold) product', async () => {
+    mockGetCollectionProducts.mockResolvedValue([withStock(makeFatProduct('oversold-1'), -2)])
+    expect(await getAnchorCollectionProducts('curated-picks')).toEqual([])
+  })
+
+  it('keeps untracked inventory (null) — a missing count is not a zero count', async () => {
+    mockGetCollectionProducts.mockResolvedValue([withStock(makeFatProduct('untracked-1'), null)])
+    const lean = await getAnchorCollectionProducts('curated-picks')
+    expect(lean.map(p => p.handle)).toEqual(['untracked-1'])
+  })
+
+  it('keeps a product with exactly one unit in stock', async () => {
+    mockGetCollectionProducts.mockResolvedValue([withStock(makeFatProduct('last-one'), 1)])
+    const lean = await getAnchorCollectionProducts('curated-picks')
+    expect(lean.map(p => p.handle)).toEqual(['last-one'])
+  })
+})
+
+describe('buildHomeContentBlocksLean — out-of-stock gate on curated carousels (ticket #6751)', () => {
+  it('drops a zero-stock product from an emmaCuratedRail/couples carousel, keeps the rest', async () => {
+    mockGetHomepageSections.mockResolvedValue(makeSections())
+    mockGetProductsByHandles.mockImplementation(async (handles: string[]) =>
+      handles.map(h => withStock(makeFatProduct(h), h === 'lean-product-a' ? 0 : 5)),
+    )
+
+    const result = await buildHomeContentBlocksLean()
+
+    expect(result.carouselProductMap['rail1']?.map(p => p.handle)).toEqual(['lean-product-b'])
+    // Untouched: the couples strip's own products are healthy.
+    expect(result.carouselProductMap['couples1']?.map(p => p.handle)).toEqual(['couples-product-a'])
+  })
+
+  it('keeps untracked-inventory (null) products in a curated carousel', async () => {
+    mockGetHomepageSections.mockResolvedValue(makeSections())
+    mockGetProductsByHandles.mockImplementation(async (handles: string[]) =>
+      handles.map(h => withStock(makeFatProduct(h), null)),
+    )
+
+    const result = await buildHomeContentBlocksLean()
+
+    expect(result.carouselProductMap['rail1']?.map(p => p.handle)).toEqual(
+      ['lean-product-a', 'lean-product-b'],
+    )
   })
 })

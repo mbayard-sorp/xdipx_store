@@ -85,16 +85,38 @@ describe('runIdleTimeoutMin', () => {
     // (390/414/420), each holding the lock ~148 min past death and skipping a
     // real QA/apply sibling at only ~92 min idle. 120 is above the 102.5 min
     // healthy max, so a slow run is safe while a dead one unblocks ~2h sooner.
+    // This is the threshold for the SHORT strategy runTypes (dev/qa/apply);
+    // see the runType override below for the long weekly retro.
     expect(runIdleTimeoutMin('strategy')).toBe(120)
+    expect(runIdleTimeoutMin('strategy', 'dev')).toBe(120)
+    expect(runIdleTimeoutMin('strategy', 'qa')).toBe(120)
+  })
+
+  it('gives strategy runType "strategy" (the weekly cross-team retro) a 360-minute threshold', () => {
+    // Ticket #6760: run 603 (2026-08-31) legitimately posted its first event
+    // 5h14m after starting -- five sub-agents run in series before the
+    // retro-writing phase produces anything event-worthy -- then finished
+    // successfully. #5252's 102.5 min healthy max was measured across the
+    // short strategy runTypes (dev/qa/apply) and never applied to this one.
+    // 360 sits safely above the observed 5h14m gap; the team-level 120 stays
+    // correct for dev/qa/apply, which is why this is a runType override
+    // rather than a change to the team-level number.
+    expect(runIdleTimeoutMin('strategy', 'strategy')).toBe(360)
+  })
+
+  it('an unknown runType on a team with a runType override falls back to the team-level number', () => {
+    expect(runIdleTimeoutMin('strategy', 'some-future-run-type')).toBe(120)
   })
 })
 
 describe('expireStaleRuns', () => {
-  it('sweeps override teams on their own cutoff and everything else on the default', async () => {
+  it('sweeps override teams on their own cutoff, the strategy runType override on its own, and everything else on the default', async () => {
     await expireStaleRuns()
 
-    expect(state.updates.length).toBe(3)
-    const [dflt, social, strategy] = state.updates
+    // Ticket #6760 adds a 4th (tier-3, per-runType) sweep alongside the
+    // pre-existing default + 2 team-level sweeps.
+    expect(state.updates.length).toBe(4)
+    const [dflt, social, strategy, strategyRetro] = state.updates
 
     // Default sweep: 240-minute cutoff, excludes every override team so a
     // fast-team zombie is never given the long leash.
@@ -114,12 +136,24 @@ describe('expireStaleRuns', () => {
     expect(cutoffAgeMinutes(social!.where)).toBeGreaterThanOrEqual(59)
     expect(cutoffAgeMinutes(social!.where)).toBeLessThanOrEqual(61)
 
-    // Strategy sweep: 120-minute cutoff scoped to the strategy team only
-    // (ticket #5252). Reaps a dead strategy run ~2h sooner than the default.
+    // Strategy team sweep: 120-minute cutoff scoped to the strategy team,
+    // EXCLUDING the 'strategy' runType (ticket #5252 + #6760) so the weekly
+    // retro's own longer tier-3 cutoff below is never double-reaped by this
+    // tighter one first.
     expect(String(strategy!.vals['error'])).toContain('120 minutes')
-    expect(new PgDialect().sqlToQuery(strategy!.where as SQL).params).toContain('strategy')
+    const strategySql = new PgDialect().sqlToQuery(strategy!.where as SQL)
+    expect(strategySql.sql.toLowerCase()).toContain('not in')
+    expect(strategySql.params).toContain('strategy')
     expect(cutoffAgeMinutes(strategy!.where)).toBeGreaterThanOrEqual(119)
     expect(cutoffAgeMinutes(strategy!.where)).toBeLessThanOrEqual(121)
+
+    // Strategy runType 'strategy' sweep (ticket #6760): 360-minute cutoff,
+    // scoped to team=strategy AND runType=strategy only.
+    expect(String(strategyRetro!.vals['error'])).toContain('360 minutes')
+    const retroSql = new PgDialect().sqlToQuery(strategyRetro!.where as SQL)
+    expect(retroSql.params).toContain('strategy')
+    expect(cutoffAgeMinutes(strategyRetro!.where)).toBeGreaterThanOrEqual(359)
+    expect(cutoffAgeMinutes(strategyRetro!.where)).toBeLessThanOrEqual(361)
   })
 })
 

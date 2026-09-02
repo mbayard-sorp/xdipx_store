@@ -34,8 +34,14 @@
  * | draft                     | `code: 'draft'`                          |
  * | `needs-owner` label       | `code: 'needs-owner-label'`               |
  * | protected path            | `action: 'escalate-protected'`            |
- * | docs-only on `agents/*`   | `docsCarveOut` skips the ticket check     |
  * | already has a ticket      | `code: 'ticket-not-verified'`             |
+ *
+ * The one ADR condition that is deliberately no longer honoured is the docs
+ * carve-out. It skipped the ticket check entirely until 2026-09-02, so a
+ * ticket-less docs PR merged and this module was told to leave it alone. Now
+ * that the carve-out covers only the CI wait, such a PR returns `no-ticket`
+ * like any other and lands here, which is what we want: it is the same strand
+ * this file exists to prevent, and QA needs a row to review against.
  *
  * Re-deriving them here would be a second copy of the gate order, free to drift
  * from the real one. The single caller is the enforcement point instead.

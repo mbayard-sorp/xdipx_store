@@ -261,6 +261,10 @@ export async function action({ request }: ActionFunctionArgs) {
       // pr_open is the other place agents attach the mergeability-deciding link.
       links:     parseLinksWithPr(b),
       lastError: typeof b['lastError'] === 'string' ? b['lastError'] : undefined,
+      // Reason class for a block (089). Safe to forward, unlike the fence flags
+      // above it: this one only labels the row, it unlocks no edge. An
+      // unrecognised value is dropped server-side.
+      blockClass: typeof b['blockClass'] === 'string' ? b['blockClass'] : undefined,
     })
     return Response.json({ ok: true, suggestion })
   }

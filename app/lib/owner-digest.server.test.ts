@@ -634,6 +634,33 @@ describe('renderTicketLoopSection', () => {
     expect(html).toContain('no run row ever')
   })
 
+  it('splits the pr_open line by kind, so a backed-up docs lane is legible', () => {
+    // Narrowing the docs carve-out (2026-09-02) routes ~6 more `instructions`
+    // rows a day into pr_open. A bare total cannot tell "R-QA is behind on docs"
+    // from "R-QA is behind on code", and those have different answers.
+    const row = (id: number, kind: string) =>
+      ({ id, status: 'pr_open', kind, priority: 2, ageHours: 30, suggestion: `row ${id}` })
+    const html = renderTicketLoopSection({
+      ...healthyLoop,
+      sla: {
+        ...healthyLoop.sla,
+        prOpen: [row(1, 'instructions'), row(2, 'instructions'), row(3, 'instructions'), row(4, 'code')],
+      },
+    })
+    expect(html).toContain('[instructions 3, code 1]')
+  })
+
+  it('omits the kind split when every stale pr_open row is the same kind', () => {
+    const row = (id: number) =>
+      ({ id, status: 'pr_open', kind: 'code', priority: 2, ageHours: 30, suggestion: `row ${id}` })
+    const html = renderTicketLoopSection({
+      ...healthyLoop,
+      sla: { ...healthyLoop.sla, prOpen: [row(1), row(2)] },
+    })
+    expect(html).toContain('#1')
+    expect(html).not.toContain('[code 2]')
+  })
+
   it('reports a skipped orphan scan as skipped, not as zero orphans', () => {
     const html = renderTicketLoopSection({ ...healthyLoop, orphanScanSkipped: true })
     expect(html).toContain('Orphan scan skipped')

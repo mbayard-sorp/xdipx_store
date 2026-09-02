@@ -65,6 +65,19 @@ render (the current tier, §7), casting one of them as the episode's silent pres
 who is silent for what it does to the scene (the listener, the one being watched, the one whose
 answer is still pending), never by default to the character who is "less speaking" in the bible.
 
+**Casting the voices (owner direction 2026-08-31).** Which ElevenLabs voice belongs to which
+character is `series-showrunner` craft, cast against the speech signature column above, which is
+the casting brief. The owner ratifies the finished slate in one batch, the same posture as
+approving an episode slate, because a synthetic voice bound to a synthetic face is likeness.
+Three constraints bind the cast: no two characters share a base voice; Vivian is mid 50s and a
+wrong age read is unfixable; the showrunner states an accent policy and holds to it. Emma is
+excluded from this process: her voice is the store voice and is not the showrunner's to cast.
+Note the register interaction, because it is a real trap: a voice that performs sultriness commits
+the register violation before a word is written. The charter bans porn-copy and "sexy" as a
+branding adjective, and the desire doctrine is anticipation, attention, privacy, never sensation.
+Casting must respect that, and the boldest available voice is not automatically the right one for
+the boldest character.
+
 **Season-one wants and the relationship grid are proposed by `series-showrunner` in its first
 run and ratified by the owner's approval of the first slate.** Once ratified, the room codifies
 them here by PR so they stop living in one session's memory. Until then this table is scaffolding

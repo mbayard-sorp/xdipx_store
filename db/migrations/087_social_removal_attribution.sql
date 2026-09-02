@@ -1,0 +1,25 @@
+-- 087_social_removal_attribution.sql
+-- Removal attribution for social_posts (ticket #6758). The removal watchers
+-- (social-removal-watch.server.ts / x-removal-watch.server.ts) can tell a
+-- post is gone, never WHY: an owner deleting his own post looks identical,
+-- over the platform APIs, to a platform takedown. That ambiguity already
+-- produced a false P1 owner blocker (#59, dismissed 2026-08-31 once the
+-- owner said in-session he removed social_posts #145 himself).
+--
+--   removal_source   varchar(10), default 'unknown'. Set on every row that
+--                     transitions to status='deleted'. 'unknown' is what a
+--                     watcher-detected removal gets (the honest default: we
+--                     cannot tell); 'owner' is set only by the admin
+--                     "I removed this" action and excludes the row from the
+--                     takedown-pattern count; 'platform' is reserved for a
+--                     removal with independent confirmation (today, only the
+--                     historical backfill in migration 088).
+--
+-- FULLY ADDITIVE: ADD COLUMN IF NOT EXISTS only. No DROP, no RENAME, no
+-- ALTER TYPE, no DML. Merges on the ordinary release-engine lane once
+-- migration-dry-run is green.
+--
+-- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 087
+-- Idempotent: safe to re-run.
+
+ALTER TABLE social_posts ADD COLUMN IF NOT EXISTS removal_source varchar(10) DEFAULT 'unknown';

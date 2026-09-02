@@ -274,6 +274,33 @@ property, never all of them; the packshot is the third resort, never the second.
   saturated-color-instead-of-soft-tint failure mode on this same Magic Wand product line; use it
   verbatim on any future §0-P retry that fails on background saturation.
 
+- Tantus Super Soft Vibrating Cock Ring in Crimson (`tantus-super-soft-vibrating-cockring-crimson`),
+  `guides` category, sincere staging, post `what-is-the-best-vibrator-for-couples` (content routine
+  run 607, media-manager). **Ref-image note:** the product's only Shopify photo (`77690A.jpg`) is
+  already a clean unpackaged shot on white with no carton and no printed label copy beyond the
+  device's own small molded "TANTUS" wordmark — not a label-heavy product, so it went straight to
+  `--ref-image` generation with no crop/short-circuit needed. **Pairing-cue staging:** per the
+  caller's brief, added a second identical ring softly out of focus behind the first (setting, not
+  a second product-family accent prop) so the frame reads "for two" with no hands or bodies in
+  frame — the caller's staging idea shapes the setting, the router still decided the archetype
+  (§0-P, unchanged). Two rounds via Atlas `seedream-4.5-edit` (Atlas primary, landscape_4_3,
+  ref-image path): round 1 (2 candidates) failed the vision gate on background — a saturated
+  terracotta/rust diagonal light-wedge (a two-tone gradient, not the flat pale coral-soft `#FFE6DD`
+  tint the ground lock requires), the same failure class already logged against the Magic Wand
+  entries above. Round 2 (2 candidates, prompt hardened verbatim with the Magic Wand precedent's
+  "flat, pale, uniform coral-soft (#FFE6DD)," "evenly lit throughout, no directional light beam and
+  no color wedge," "no saturated or deep orange/rust color anywhere," "no color gradient, no
+  two-tone color blend" language) passed on both candidates: uniform pale peach/coral-soft field, no
+  gradient, no dark corners, ring shape/color/bullet/logo faithful to reference, "TANTUS" wordmark
+  legible and correct (real product texture, not invented/garbled text), second ring reads cleanly
+  as the pairing cue, generous negative space above for the headline. Candidate 2 picked over
+  candidate 1: candidate 1's product sat lower with less headline clearance and a faint hot-spot
+  on the paper; candidate 2 was evenly lit edge to edge with the cleanest negative space →
+  `image-f2c045a85c94b106146f950d0a32c0f78fd58933-2304x1728-jpg`. **Precedent:** confirms the Magic
+  Wand background-saturation fix language generalizes across products/categories on the same Atlas
+  ref-image path, not just the Magic Wand line specifically — reuse it verbatim as the first retry
+  for any §0-P round that fails on a saturated/gradient background.
+
 - Wicked Sensitive Water-Based Personal Lubricant 4oz (`wicked-sensitive-water-based-lubricant`),
   `wellness-basics` category, sincere staging, post `what-lube-is-best-for-sensitive-skin`
   ("What Lube Is Best for Sensitive Skin?", content-writer run 574). Sincere staging chosen
@@ -1356,6 +1383,50 @@ returned dimensions.
   product-only path (no human reference) rather than Kontext single-ref on a label-heavy hero.
 
 **Reject:** Frame 3 (cast + product together) — see the hard fence above.
+
+---
+
+## Notebook §0-H keeper — content run 626, "Why Does Sex Sometimes Hurt, and What Helps?"
+
+`cast: maya` + Intimate Earth Hydra Plant Cellulose Water-Based Personal Lubricant 4oz
+(`intimate-earth-hydra-water-based-glide-with-plant-cellulose`), `blogPost-why-does-penetration-sometimes-hurt`
+(category `real-talk`, † health-adjacent — sincere staging, levity license not applicable). Route:
+`--surface hero --cast maya`, `composeSceneFrame()` → Atlas one-stage (`atlas/seedream-4.5-edit`),
+composite rung on both rounds (no fallback-ladder rungs needed).
+
+**Keeper (round 2, candidate 1):** "…Both of her hands stay wrapped fully around a water-based
+lubricant bottle, holding it pressed close against her sternum the entire time; her hands never
+touch her hair or her face. Her shoulders are hunched and tensed upward in a physical brace, like a
+flinch held in the body, chin tucked slightly down. Her expression is a hopeful wince looking
+straight at camera: eyebrows raised and drawn, lips pressed together in a small nervous
+almost-smile, apprehensive but hopeful, bracing for an answer she wants to be good. Sincere
+expression, not comic, not a big open smile…" — full prompt persisted to `imagePrompt` on the doc.
+Passed gate: product co-primary and gripped correctly in both hands (no floating/uncanny hand
+anatomy), shoulders/brow/mouth read as genuine braced-hope apprehension (not the levity register),
+bright daylight, dusty-plum sweater reads palette-compatible, no baked-in text, unambiguous adult.
+**Logged deviation, accepted:** gaze fell to the product rather than dead to camera — not one of
+the file's named §0-H hard-reject criteria, and the introspective down-gaze reads as more specific
+to "bracing for her own answer" than a generic camera-stare would, so it clears the swap test.
+
+**Rejects:**
+- Round 1 (3 candidates): the compositor repeatedly rendered "shoulders up near her ears" as a
+  literal hands-to-ears/hair gesture (fixing-hair pose) instead of a hunched-shoulder brace, and the
+  bottle was either loosely floating rather than gripped (candidate 1, borderline hand-anatomy
+  reject) or held one-handed off to the side while the free hand touched the ear (candidates 1-2).
+  Candidate 3 additionally broke the emotional register with a full open smile — wrong for a
+  sincere, braced-hope health topic. All three read as generic "having a hair moment," failing the
+  swap test (could belong to any post). **Fix that worked:** drop the phrase "shoulders up near her
+  ears" entirely (it invites a literal hands-to-ears read); instead spell out the physical posture
+  directly ("shoulders hunched and tensed upward in a physical brace, like a flinch held in the
+  body") and add an explicit negative clause that hands never leave the bottle or touch hair/face.
+- Round 2, candidates 2-3: hand grip on the bottle fixed cleanly (both hands wrapped, close to
+  chest, good anatomy), gaze landed straight at camera as asked — but expression drifted to a
+  warm, confident, closed-mouth smile on both, reading as pleased/content rather than the specified
+  "hopeful wince" / apprehension. Rejected for wrong emotional register on a sincere † topic where
+  the levity license does not apply.
+
+Two rounds, 6 candidates total, all via Atlas one-stage composite, well inside the content-team
+daily image budget. `heroImage`, `heroImageAlt`, and `imagePrompt` all set on the published doc.
 
 ---
 

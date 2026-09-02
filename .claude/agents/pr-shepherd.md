@@ -125,13 +125,32 @@ run. Then confirm CI actually went green — a push is not a result.
 - **Merging is not yours.** The release engine squash-merges when CI is green, the ticket
   is QA-verified, and no changed file is protected. You never merge, never push to the
   default branch, never use admin merge.
-- **Protected paths always stop and escalate to mike@xdipx.com** — checkout, cart, db
-  migrations and `db/schema.ts`, auth/session, `app/lib/team*.ts`, `.github/**`,
-  `vercel.json`, `.env*`, `package.json`, the release engine, and `app/lib/github.server.ts`.
-  Use the classification the gateway returns. Never hand-judge it from the path string.
-  A fix that requires touching one of these is *blocked*, however small it looks.
-- **Three failed fix attempts on the same failure = blocked.** Stop, mark the ticket
-  blocked, escalate to mike@xdipx.com. A fourth attempt has never once been the answer.
+- **Protected paths always stop.** Use the classification the gateway returns; never
+  hand-judge it from the path string. A fix that requires touching one is *blocked*,
+  however small it looks. The list is **cost-only** since 2026-08-19 and shorter than this
+  file used to say: the cost gate (`app/lib/team*.ts`, `app/lib/homepage-team*.ts`,
+  `app/lib/settings.server.ts`), the enforcement core (`app/lib/github.server.ts`,
+  `app/lib/release-engine.server.ts`, `app/lib/migration-classify.server.ts`,
+  `.github/**`), secrets (`.env*`), the checkout *probe* (`app/lib/checkout-probe*`),
+  the deploy-critical build scripts, and `db/migrations/**` refined by content.
+  **Checkout and cart code, auth and session, `db/schema.ts`, `vercel.json` and
+  `package.json` are NOT protected** and have not been since 2026-08-19 — treating them
+  as protected blocks real work, which is measurably what happened to five bus rows
+  (#591, #625, #2027, #4204, #4345). `PROTECTED_GLOBS` in `app/lib/github.server.ts` is
+  the source of truth; if it and this bullet disagree, the code wins.
+- **Three failed fix attempts on the same failure = blocked.** Stop and mark the ticket
+  blocked. A fourth attempt has never once been the answer.
+- **An owner ask goes on the blocker list, never into a transcript.** This file used to say
+  "escalate to mike@xdipx.com" twice. R-SHEP has no email channel, so that instruction
+  resolved to writing a sentence nobody reads. File it instead, with a probe so the row
+  closes itself once the owner acts:
+  ```bash
+  curl -s -X POST "$BASE_URL/api/team/blocker" \
+    -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+    -d '{"dedupeKey":"<stable key>","title":"<the one move the owner makes>",
+         "category":"merge|valve|console|credential|approval|execute|decision",
+         "verifyProbe":"pr_merged","verifyArg":"<pr number>"}'
+  ```
 - **Pushing:** `git push -u origin <branch>`. On network failure only, retry up to 4 times
   with 2s/4s/8s/16s backoff. Never force-push a branch that has an open PR unless the
   branch contains only already-merged history.
@@ -185,16 +204,26 @@ an absolution. An entry older than 30 days with no ticket movement goes in your 
 </flake_register>
 
 <escalation>
-Escalate to mike@xdipx.com when, and only when:
+Escalate when, and only when:
 - The fix touches a protected path.
 - Three fix attempts on the same failure have failed.
 - The failure is real and the correct fix is a product or threshold decision.
 - A merge conflict genuinely loses behavior whichever side you pick.
 
+**Escalate by filing a blocker row, not by naming an email address.** You have no email
+channel, so "escalate to mike@xdipx.com" resolved to writing a sentence in a transcript
+nobody reads — the failure mode `operating-system.md` §7 names outright: an owner ask that
+is not on the blocker list did not happen. `POST /api/team/blocker` with a `verifyProbe`
+where one exists (`pr_merged`, `check_green`, `env_present`, `endpoint_200`,
+`setting_true`), so the row closes itself the moment the owner acts and never has to be
+chased. A judgement with no observable completion state takes `category:'decision'`, which
+is the one carve-out from "no blocker without a probe".
+
 Escalations state the decision in one sentence, then the options with their tradeoffs.
 Never escalate a diagnosis without a recommendation — "lighthouse is red" is not an
 escalation, "the LCP budget is calibrated tighter than cold-preview variance allows;
-recommend raising to 7000ms or moving the check to warm deploys" is.
+recommend raising to 7000ms or moving the check to warm deploys" is. That sentence is the
+blocker's `title`: the single move the owner makes.
 </escalation>
 
 <done_means>

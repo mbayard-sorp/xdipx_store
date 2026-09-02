@@ -190,10 +190,14 @@ export interface PublishTickDeps {
   repo?: PublishRepo
   /**
    * Passed through to the deterministic gate. Exists so a test can decide
-   * stock without a Shopify round trip; in production this is omitted and the
-   * gate does the real lookup.
+   * stock (and, since #6745, the pairing rule's product-type-dial lookup)
+   * without a Shopify round trip; in production this is omitted and the gate
+   * does the real lookups.
    */
-  gateDeps?: { getAvailability?: (handle: string) => Promise<boolean | null> }
+  gateDeps?: {
+    getAvailability?: (handle: string) => Promise<boolean | null>
+    getProductTypeDial?: (handle: string) => Promise<string | null>
+  }
   /**
    * The publish-time stock guard's product lookup (ticket #2212). Defaults to
    * the real Storefront availability check; a test injects a stub here to

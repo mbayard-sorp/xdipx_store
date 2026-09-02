@@ -58,7 +58,19 @@ curl -s -X POST "$BASE_URL/api/team/run" \
    2026-08-16): the one-campaign-two-registers through line, the X companion beat, the pairing
    rule, maker relations, and the Meta-approved-catalog preference. Where it and a charter or gate
    disagree, the charter and the gate win, as that file itself states.
-5. Calendar (`GET /api/team/calendar`), current featured products/deals.
+5. Calendar (`GET /api/team/calendar`), current featured products/deals. Read it for two signals,
+   not as a formality (owner audit 2026-09-01, after the WANDWEEK20 window ran 08-25 to 08-31 with
+   zero posts):
+   - **Rows flagged `ig_worthy` in `assets_json`** are `merch-calendar` telling this team a row
+     deserves Instagram coverage. Treat each as a first-class candidate for the day's slate while
+     its window is open.
+   - **An active promo window is covered on the right platform, every day of its window.** On X:
+     the code, the depth, and the PDP or collection link, plainly (X permits it). In email: the
+     email team's lane. On Instagram: never the code and never sale language (that is the exact
+     commerce signal Meta removes); instead the window's THEME shapes the day's product picks and
+     subjects, so a Wand Week window makes wand posts without a wand sale. A promo window that
+     ends with zero coverage on its permitted platforms is a run failure to report, not a quiet
+     miss.
 6. Today's quota: `POST /api/team/social-post {"op":"config"}` → per-platform posts/day
    (`social_freq_*`; 0 = skip that platform entirely).
 
@@ -122,6 +134,27 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 
    Honest note so nobody reads the softer output as ignoring direction: the owner asked for
    promotion, and the compliant version of promotion on this platform is teaching.
+
+10. **Product news, read here and not at Step 7b (owner audit 2026-09-01).** From the same
+   suggestion list as item 9, pull every approved row whose `dedupeKey` starts
+   `new-products:enrich:` (the enrich chain's daily batch of newly published products),
+   `new-product:` (out-of-chain activations), or `restock-digest:` (the day's true
+   sold-out-to-in-stock crossings). All three file `kind:'process'` with `targetTeam:'social'`
+   since PR #1007; before that fix they were invisible to this query, which is how 465 products
+   went live in 30 days with zero social coverage. The same timing rule as item 9 applies: read
+   at context load so today's slate can use them, because a row first seen at Step 7b is a post
+   drafted tomorrow at the earliest. These rows are the source for slot D (what's new) and for
+   product-pegged picks in slots C and E. Curation still applies (§4c of
+   `instagram-campaigns.md`): new does not mean postable, and the freshest in-stock product with
+   a distinct story wins. Close consumed rows `applied` per Step 7b's bookkeeping; age out
+   product-launch rows older than 14 days there as before.
+
+11. **Trend briefs, read here (owner audit 2026-09-01).** From the same list, approved
+   `kind:'strategy'` rows filed by `social-trend-scout` (format trends, sound verdicts, competitor
+   moves). They inform today's format and treatment choices and are the licensed source for the
+   Trend React format in `instagram-campaigns.md` §4; that format has no other input. A trend row
+   read after drafting is a trend reacted to late, which on platform timescales is not reacted to
+   at all.
 
 ## Posting posture (read before Step 2b, Step 2.5, and Step 7)
 
@@ -484,6 +517,14 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   `social_freq_instagram` is met: A resource, B campaign, C Today's Pick, D what's new, E carousel.
   Slot A ships even on a one-post day. Baseline is at least one post daily, no zero days; 10/day is
   a hard ceiling for an exceptional moment, never a target.
+- **Every product-forward post is pegged to a specific product with a reason (owner direction
+  2026-09-01).** When a slot is product-forward it names one real, in-stock product and exists for
+  a reason the run can state: it is new (Step 2 item 10), it restocked, it fits the active promo
+  window's theme, it anchors a live Notebook post, or the campaign calls for it. A product-forward
+  post about a category in the abstract, with no product the store sells at its center, is the
+  defect this rule retires. This does not raise the product-forward ceilings above; it raises the
+  bar for what qualifies to fill them. The X companion carries the PDP link and UTMs as
+  §crossplatform already requires.
 - **Draft slot A FIRST, before any product post (ticket #4066).** Slot A is the product-free resource
   post; it is drafted before slot B, C, or D, not after. A run that fills the day with product posts
   and then reports it could not produce slot A has the order backwards, and that is the exact drift
@@ -577,11 +618,28 @@ catching what drafting misses, so before drafting any campaign post:
   the sensation-descriptor grep above), and rewrite any hit. Seed for 'Talk Yourself Into It':
   `slower`, `right there`, `saying-it gap`, `technique gap`, `a little to the left`. Add each newly
   spent phrase to the list as a campaign ships posts.
+- **Check the underlying subject, not just phrasing (recurring failure, three independent findings
+  in one week).** The spent-phrase grep above only catches reused wording; it does not catch a new
+  draft answering the same reader question as a recent one in different words. Before drafting or
+  reworking a campaign post, also read the last ~10-14 campaign rows (posted AND drafted this run
+  included) and name each one's core subject or question in one line. If the new draft's core
+  question or thesis matches a recent row's (two independent drafts landed on the identical Ask
+  Emma reader question — "is it weird that i want it more than he does" — inside the same run
+  window, neither aware of the other), treat it as a duplicate subject to differentiate or drop
+  before drafting, not a phrasing collision to reword at the gate.
 
 **The X companion beat (crossplatform strategy §1).** For each Instagram slate post featuring a
 product, draft an X companion when the X quota allows: same campaign subject, register 6-7 per the
 social addendum, PDP link with channel UTMs, and a fresh sentence, never the IG caption reheated.
-The companion belongs to the campaign the same way the IG post does.
+The companion belongs to the campaign the same way the IG post does. **Pick the SKU from
+Instagram's slate, not a fresh one.** Before drafting an X product post, enumerate the Instagram
+product posts already scheduled or published in the same campaign window and write the X beat
+about ONE OF THOSE SKUs, by handle. Choose a different product only when every Instagram SKU in
+the window already has an X companion beat. X volume has not been the constraint (11 X posts can
+ship in a week with only 1 of 4 Instagram product posts getting a true companion); matching the
+SKU is. Two surfaces featuring different products in the same window read as parallel feeds, not
+one campaign spine across two channels — report the matched-companions-over-total-Instagram-product-posts
+ratio as a number in the Step 7 retro so drift is read, not recomputed from scratch each time.
 
 **The pairing rule: a toy never travels alone (crossplatform strategy §3).** When a post features a
 toy, it also names a lubricant from the catalog that genuinely suits it. Source the pairing from
@@ -797,8 +855,9 @@ materials, first toys): the relevant in-stock product is held or placed by a cas
 stock gate (Step 2.6) and the Instagram-eligibility filter (§4b) apply to it as they would in slot
 C. Product-free frames are for subjects with no product in them, and "no product" is a choice the
 brief justifies, never a default a slot inherits. The returned brief is written to the draft as
-`imageBrief`, and the subject line as `subject` (Step 6). Charge ratio per rolling 7 is now 3 ceiling
-/ 3 mid / 1 educational (§3.2b); the mid frame carries skin, touch, posture, or expression by default.
+`imageBrief`, and the subject line as `subject` (Step 6). Charge ratio per rolling 7 is now 4 ceiling
+/ 2 mid / 1 educational (§3.2b, re-based 2026-09-01); the mid frame carries skin, touch, posture, or
+expression by default.
 
 **Every slot-A / resource brief carries a standing no-housewares negative (ticket #5940).** A resource
 frame with no product to anchor it defaults to tableware and styled surfaces, which the design doctrine
@@ -989,8 +1048,8 @@ stops.
   addendum; Instagram runs 9 by implication since the 2026-08-22 owner ruling (`docs/emma-voice.md`
   v5.5), reached through innuendo rather than vocabulary because X's organic policy is more
   permissive about words than Meta's. The picture standard is unchanged on both.
-  The charter settled it in the harder direction already (imagery stays a visual 6-7 even on owned
-  channels where copy runs at 9), `docs/ads-policy.md` §Creative binds "paid AND organic" and names
+  The charter scopes the visual register by surface (6-7 on owned merchandising surfaces; on social
+  the §3.2a ceiling binds, identically for X and Instagram), `docs/ads-policy.md` §Creative binds "paid AND organic" and names
   X, and `social-publish-gate.md` states that everything about the image binds identically across
   platforms. There is a mechanical reason too: the charter's permission is conditional on covered
   posts being "labeled per X's own rules", and `postTweet` (`app/lib/twitter.server.ts:95`) accepts
@@ -1022,7 +1081,7 @@ stops.
 - **Product-free X post** (education beat, Notebook promo companion): still a cast frame, just
   without the product. Drop `--presenter-image` and pass the cast reference as `--ref-image`, exactly
   as the Instagram product-free form does below.
-- **The Instagram cast caps are Instagram-scoped and do not cap X.** `instagram-campaigns.md` §7
+- **The Instagram cast caps are Instagram-scoped and do not cap X.** `instagram-campaigns.md` §3.2b
   says "at most 4 cast frames per rolling 14, and never more than one cast frame in a single day".
   Read account-wide, that makes this rule impossible on day one: X runs 4 posts a day. The caps are
   a **grid** rule, and the reasoning is visibly grid-shaped in that same section (no pairing repeats
@@ -1463,6 +1522,11 @@ had, so the replacement is not optional. Read instead:
    files a suggestion (`team:'social'`, kind `instructions`) against this playbook. A standing target,
    checked within two weeks of this rule landing: at least one product-free resource post AND at least
    one carousel have published.
+6. **X companion-beat match rate, computed not asserted.** Of this week's published Instagram
+   product posts, count how many got an X companion beat on the same SKU (Step 3, "Pick the SKU
+   from Instagram's slate, not a fresh one") versus how many did not, and report the ratio as a
+   number (matched/total). Two surfaces posting about different products in the same window is not
+   one campaign spine across two channels even when X volume is healthy.
 
 One `decision` event (`phase:'retro'`). When **two or more** pieces of feedback share a theme,
 file a suggestion (`team:'social'`, kind `instructions`) proposing the concrete change to your own
@@ -1489,12 +1553,13 @@ run does not re-read it:
 ```
 
 **Campaign and promo rows are yours to execute too (owner direction 2026-08-19).** The
-product-went-live signals (`kind:'campaign'`) are exactly what feeds the "what's new" slate slot,
-so consume them there rather than treating them as someone else's mail:
+product-went-live and restock signals (all `kind:'process'` with `targetTeam:'social'` since
+PR #1007, 2026-09-01) are exactly what feeds the "what's new" slate slot. Since 2026-09-01 they
+are READ at Step 2 item 10, before drafting; this step is where their bookkeeping happens:
 
-- When picking slot D (what's new), read the approved `campaign` rows for team social first and
-  prefer the freshest in-stock ones as the slot's candidates. When a run drafts and gates the post
-  a row asked for, close that row `applied` with the draft id in the note.
+- When picking slot D (what's new), prefer the freshest in-stock candidates from the Step 2
+  item 10 rows. When a run drafts and gates the post a row asked for, close that row `applied`
+  with the draft id in the note.
 - **Age out honestly.** A product-launch signal older than 14 days is no longer "new"; close it
   `applied` with a note saying it aged past the what's-new window without a slot (that is the
   system deciding, which is the point; it is not a failure). Do this for up to 5 aged rows per run

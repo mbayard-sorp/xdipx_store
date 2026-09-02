@@ -100,6 +100,15 @@ export interface DeterministicGateInput {
    * than assumed in stock.
    */
   productHandle?: string | null
+  /**
+   * Explicit reason the drafter recorded for why no lube pairing applies to a
+   * toy-featuring draft, per the pairing-presence self-check
+   * (docs/store-team/routine-social-daily.md, "Pairing-presence self-check
+   * (every toy-featuring draft, at draft time)"). `social_posts` has no
+   * column for this yet, so like `onImageText`/`altText` below it is
+   * caller-supplied; absent means "no reason recorded", never "cleared".
+   */
+  pairingNoneReason?: string | null
   /** Captions of recent posted rows, newest first, for the repetition check. */
   recentCaptions?: readonly string[]
   /**
@@ -400,6 +409,31 @@ function normalizeForShingles(s: string): string {
     .trim()
 }
 
+/**
+ * `xdipx.product_type_dial` values that are physical, body-contact toys where
+ * the pairing rule (crossplatform strategy §3) applies. Deliberately excludes
+ * `lube` (it IS the pairing, not something that needs one), `wear` (apparel),
+ * `condom` (a barrier product, not a toy), `bondage`/`harness`
+ * (restraint/apparel-adjacent, not body-contact in the sense the rule means),
+ * and `wellness`/`novelty`/`book-media` (not consistently toys). This is a
+ * judgment call, not a formula; a future reader adjusting it is a one-line
+ * change of which values this set holds, never the check logic below.
+ */
+const PAIRING_REQUIRED_TYPE_DIALS = new Set([
+  'vibrator', 'dildo', 'anal', 'cock-ring', 'stroker', 'couples',
+  'extender', 'pump', 'massage', 'enhancer', 'sex-machine',
+])
+
+/**
+ * Loose "the caption names a lubricant" match (crossplatform strategy §3):
+ * the generic word, or a base-type descriptor a pairing sentence would use.
+ * This is a scripted PRESENCE check, not a material-compatibility judgment —
+ * confirming the named lube genuinely suits the featured toy stays the
+ * independent voice reviewer's job, same split as every other check in this
+ * module (see the file header).
+ */
+const LUBE_MENTION_RE = /\blubes?\b|\blubricants?\b|\bglide\b|\bwater-based\b|\bsilicone-based\b|\bhybrid lube\b/i
+
 /** Every n-word window of a caption. */
 export function shingles(text: string, n: number): Set<string> {
   const words = normalizeForShingles(text).split(' ').filter(Boolean)
@@ -451,6 +485,15 @@ export async function runDeterministicPublishChecks(
     isLibraryMember?: (url: string) => Promise<boolean>
     /** Recorded vision-gate verdict for a library asset (#6763). Defaults to the real lookup. */
     getVisionVerdict?: (url: string) => Promise<VisionVerdict | null>
+    /**
+     * `xdipx.product_type_dial` for the featured product (#6745, the pairing
+     * check below). Defaults to the real lookup via `getDealByHandle`. Unlike
+     * `getAvailability`, a failure here is NOT fail-closed: it means "cannot
+     * tell whether the pairing rule even applies", and blocking every draft
+     * whose type cannot be resolved would be a far wider blast radius than
+     * the stock check's narrow "this one product is unverifiable".
+     */
+    getProductTypeDial?: (handle: string) => Promise<string | null>
   },
 ): Promise<DeterministicGateResult> {
   const findings: GateFinding[] = []
@@ -590,6 +633,45 @@ export async function runDeterministicPublishChecks(
         severity: 'block',
         detail: `"${input.productHandle}" is not available for sale.`,
       })
+    }
+  }
+
+  // ── Pairing rule: a toy never travels alone ───────────────────────────────
+  //
+  // crossplatform strategy §3 / the pairing-presence self-check
+  // (docs/store-team/routine-social-daily.md): every draft featuring a
+  // physical, body-contact toy either names a compatible lubricant in the
+  // caption or records an explicit reason none applies. Instruction-only
+  // reminders (#3881) were tried for three weeks and never moved the miss
+  // rate — 3 of 5 genuine toy posts shipped with no pairing the week #6745
+  // was filed — because nothing checked it before a draft could reach the
+  // unattended hourly publish tick. Supersedes the self-check-only framing
+  // of #3881, which stays open as the drafting instruction this backs up.
+  if (input.productHandle) {
+    const getTypeDial = deps?.getProductTypeDial ?? (async (handle: string) => {
+      const { getDealByHandle } = await import('./shopify.server')
+      const deal = await getDealByHandle(handle)
+      return deal?.productTypeDial ?? null
+    })
+    let typeDial: string | null
+    try {
+      typeDial = await getTypeDial(input.productHandle)
+    } catch {
+      typeDial = null
+    }
+    if (typeDial && PAIRING_REQUIRED_TYPE_DIALS.has(typeDial)) {
+      const named = LUBE_MENTION_RE.test(caption)
+      const reasoned = !!(input.pairingNoneReason && input.pairingNoneReason.trim())
+      if (!named && !reasoned) {
+        findings.push({
+          check: 'pairing-missing',
+          severity: 'block',
+          detail:
+            `"${input.productHandle}" is a ${typeDial} toy; the caption names no compatible ` +
+            `lubricant and the draft records no reason none applies (routine-social-daily.md ` +
+            `pairing-presence self-check). Name a compatible lube or log why none applies.`,
+        })
+      }
     }
   }
 

@@ -227,6 +227,15 @@ export const socialPosts = pgTable('social_posts', {
   // inference for pre-086 rows, so it is nullable and never backfilled in SQL.
   episodeId:       integer('episode_id'),
   mediaKind:       varchar('media_kind', { length: 8 }),
+  // Removal attribution (migration 087, ticket #6758). The removal watchers
+  // (social-removal-watch.server.ts / x-removal-watch.server.ts) can tell a
+  // post is gone but not WHY: an owner deleting a post looks identical, over
+  // the platform APIs, to a platform takedown. 'unknown' is the honest
+  // default a watcher-detected removal gets; 'owner' is set only by the
+  // admin "I removed this" action, and excludes the row from the takedown
+  // pattern count; 'platform' is reserved for a removal with independent
+  // confirmation (today, only the historical backfill in migration 088).
+  removalSource:   varchar('removal_source', { length: 10 }).default('unknown'),
 })
 
 /**
@@ -1409,6 +1418,12 @@ export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   blockedById:    integer('blocked_by_id'),
   attemptCount:   integer('attempt_count').notNull().default(0),
   lastError:      text('last_error'),
+  /**
+   * Why a ticket is `blocked`, as a queryable class rather than prose (089).
+   * R-DEV already names it in the transition note; this is the half a router
+   * can read. See TICKET_BLOCK_CLASSES in app/lib/team.server.ts.
+   */
+  blockClass:     varchar('block_class', { length: 24 }),
   verifiedBy:     varchar('verified_by', { length: 32 }),
   verifiedAt:     timestamp('verified_at', { withTimezone: true }),
 }, t => ({
@@ -1581,6 +1596,35 @@ export interface VideoSceneSpec {
    * slug-keyed automatic reuse needs no field — this is the override.
    */
   reuseFrameAssetId?: number
+  /**
+   * Per-scene presenter (ADR-014, ticket #6586): same 'none' | 'emma' |
+   * 'friend:{slug}' grammar as the job-level `presenter`. Absent means "this
+   * scene uses the job's presenter" (today's behavior, byte-for-byte). Lets
+   * an own-frame scene's identity (and, once a talking tier is eligible
+   * again, its voice) differ from the job's, so an episode can cut between
+   * two cast members shot/reverse-shot rather than being pinned to one face
+   * for the whole render.
+   */
+  presenter?: string
+  /**
+   * Per-scene spoken line (ADR-014, ticket #6586). Named to match, not add
+   * to, the field `spokenTextOf` (app/lib/video-episodes.ts) already reads at
+   * `scene[i].spokenLine` for the approval-integrity comparator — that guard
+   * predates this field and was written to wait for it. Required by
+   * validateScenes on a talking tier (spec.lipsync); actually driving TTS
+   * per-scene is the render-stage-graph change ADR-014 §4 defers until a
+   * talking tier is eligible again.
+   */
+  spokenLine?: string
+  /**
+   * Additional cast members visible in this own-frame scene alongside
+   * `presenter`, same grammar ('friend:{slug}' | 'emma'). Composes a two-shot
+   * via composeSceneFrame's existing `extraImageUrls` (ADR-014 addendum: the
+   * compositor already supports this for social stills; the video frame
+   * stage never wired it). Purely visual — does not imply a co-presenter
+   * speaks; only `presenter`'s voice/line renders for this scene.
+   */
+  coPresenters?: string[]
 }
 
 /**
@@ -1945,3 +1989,57 @@ export const ownerBlockers = pgTable('owner_blockers', {
   openIdx:  index('idx_owner_blockers_open').on(t.status, t.priority, t.firstSeenAt),
   verifyIdx: index('idx_owner_blockers_verify').on(t.status, t.lastVerifiedAt),
 }))
+
+/**
+ * One row per recorded cron invocation (migration 090).
+ *
+ * Written in a `finally` so both timestamps and the terminal status land in a
+ * single INSERT. An INSERT-then-UPDATE pair would double the writes and invent
+ * a started-without-finish class indistinguishable from a real kill, which is
+ * the thing this table is here to detect rather than to manufacture.
+ *
+ * Deliberately NOT every cron: see `app/lib/cron-expectations.ts`. The two
+ * every-2-minute pollers have a KV negative cache built specifically so 1,440
+ * daily invocations touch Neon zero times, and a blanket write here would undo
+ * it and pin DB compute awake around the clock.
+ */
+export const cronRuns = pgTable('cron_runs', {
+  id:          serial('id').primaryKey(),
+  route:       varchar('route', { length: 120 }).notNull(),
+  startedAt:   timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt:  timestamp('finished_at', { withTimezone: true }),
+  status:      varchar('status', { length: 16 }).notNull(), // succeeded|skipped|failed
+  error:       text('error'),
+  result:      jsonb('result'),
+  triggerKind: varchar('trigger_kind', { length: 16 }).notNull().default('schedule'), // schedule|manual
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  routeIdx:  index('idx_cron_runs_route_started').on(t.route, t.startedAt),
+  statusIdx: index('idx_cron_runs_status_started').on(t.status, t.startedAt),
+}))
+
+/**
+ * The floor each scheduled surface is held to (migration 090).
+ *
+ * Covers BOTH scheduler planes. `vercel.json` is not the whole truth: the
+ * browser checkout probe runs from GitHub Actions, outside Vercel and outside
+ * `cronRoute`, and it is the closest thing this estate has to "can a customer
+ * actually reach checkout". A manifest that stopped at the Vercel crons would
+ * certify that blindness as healthy.
+ *
+ * Upserted from `app/lib/cron-expectations.ts` rather than seeded by the
+ * migration: an INSERT would fail the additive allowlist and cost an owner
+ * merge for a table definition.
+ */
+export const cronExpectations = pgTable('cron_expectations', {
+  route:         varchar('route', { length: 120 }).primaryKey(),
+  plane:         varchar('plane', { length: 16 }).notNull().default('vercel'), // vercel|actions
+  schedule:      varchar('schedule', { length: 64 }),
+  periodMinutes: integer('period_minutes').notNull(),
+  graceMinutes:  integer('grace_minutes').notNull().default(10),
+  recorded:      boolean('recorded').notNull().default(false),
+  moneyRelevant: boolean('money_relevant').notNull().default(false),
+  ownerTeam:     varchar('owner_team', { length: 24 }),
+  notes:         text('notes'),
+  updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
