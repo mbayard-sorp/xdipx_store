@@ -145,3 +145,32 @@ describe('endpoint_200 runner', () => {
     fetchSpy.mockRestore()
   })
 })
+
+describe('the vocabulary and the runners cannot drift apart', () => {
+  it('gives every runner a description, or it is silently not a probe at all', async () => {
+    // Caught in the act, 2026-09-02. `PROBES` is built by filtering
+    // PROBE_DESCRIPTIONS down to the names that have a runner:
+    //
+    //   Object.entries(PROBE_DESCRIPTIONS).filter(([n]) => hasOwn(RUNNERS, n))
+    //
+    // so a runner added WITHOUT a description is dropped from PROBES entirely
+    // and disappears with no error anywhere. `credential_live` shipped that way
+    // for one commit: the runner existed, the row would have been filed, and
+    // the probe would never have run — a blocker that can never clear itself,
+    // which is precisely the failure the probe was added to prevent.
+    const { PROBES } = await import('./owner-blockers.server')
+    const described = Object.keys(PROBE_DESCRIPTIONS)
+    const usable = Object.keys(PROBES)
+    for (const name of usable) {
+      expect(described, `${name} has a runner but no description`).toContain(name)
+    }
+    // And the other direction: a described probe with no runner is a name the
+    // API will accept and nothing will ever evaluate.
+    expect(usable.sort()).toEqual(described.sort())
+  })
+
+  it('describes the credential probe', () => {
+    expect(PROBE_DESCRIPTIONS['credential_live']!('instagram'))
+      .toBe('the instagram credential answers an authenticated read')
+  })
+})
