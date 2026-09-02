@@ -169,6 +169,7 @@ const DERIVED: ReadonlyArray<[string, string]> = [
   ['import_monitor_runs', 'Monitoring history for the import lane; the next monitor run re-establishes the current answer.'],
   ['checkout_probe_runs', 'Probe history. The next probe re-establishes the current answer within 6 hours.'],
   ['cron_runs', 'Liveness history under its own 14/90-day retention. The next cycle re-establishes liveness.'],
+  ['backup_runs', 'The backup ledger itself, added by migration 092 and caught by this file’s own unclassified-table alarm on its first live run. Derived rather than critical: the snapshots are listable from the blob store without it, and the next dump re-establishes the ledger.'],
   ['cron_expectations', 'Upserted from app/lib/cron-expectations.ts on every janitor sweep. The file is the source of truth, deliberately.'],
   ['pricing_changes', 'Recomputed by the pricing pass from pricing_rules, which is critical.'],
   ['ga4_purchase_outbox', 'An outbox. Undelivered rows re-send; delivered rows are history GA4 already holds.'],

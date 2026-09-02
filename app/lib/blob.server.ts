@@ -30,6 +30,42 @@ export function blobConfigured(): boolean {
   return !!resolveToken()
 }
 
+/**
+ * The PRIVATE store's token, which is a different store, not a different mode.
+ *
+ * Found the hard way on the first live backup run, 2026-09-02: the existing
+ * store answered `Cannot use private access on a public store. The store must
+ * be configured with private access.` Access is a property of the store, not of
+ * the request, and the existing one has to stay public — the video and ad
+ * pipelines put bytes there that Instagram and Meta fetch by URL. Flipping it
+ * would break publishing to fix backups.
+ *
+ * So database dumps go to a second, private store with its own token. No
+ * fallback to the public token: a fallback here would put consent records,
+ * voicemail rows and SMS transcripts on a public URL the moment the private
+ * token went missing, which is the exact outcome `blobPutPrivate` exists to
+ * make impossible.
+ */
+function resolvePrivateToken(): string | undefined {
+  return process.env['BLOB_BACKUP_READ_WRITE_TOKEN']?.trim()
+}
+
+export function privateBlobConfigured(): boolean {
+  return !!resolvePrivateToken()
+}
+
+function requirePrivateToken(): string {
+  const token = resolvePrivateToken()
+  if (!token) {
+    throw new Error(
+      'BLOB_BACKUP_READ_WRITE_TOKEN is required for private Blob storage. It must be a token for a '
+      + 'store created with private access; the public store cannot serve private objects, and this '
+      + 'deliberately does not fall back to it.',
+    )
+  }
+  return token
+}
+
 function requireToken(): string {
   const token = resolveToken()
   if (!token) throw new Error('A Blob read-write token (BLOB_READ_WRITE_TOKEN or XDIPX_READ_WRITE_TOKEN) is required for Blob storage')
@@ -93,6 +129,10 @@ export async function blobDel(url: string): Promise<void> {
  * environment. They are deliberately separate functions rather than an `access`
  * parameter on the public ones, so that no future caller makes a dump public by
  * forgetting an argument.
+ *
+ * They also use a DIFFERENT STORE, not just a different flag. Vercel Blob makes
+ * access a property of the store: the first live backup run got `Cannot use
+ * private access on a public store`. See `resolvePrivateToken` above.
  * ------------------------------------------------------------------------- */
 
 /** Upload a private object at an exact pathname, overwriting any prior copy. */
@@ -101,7 +141,7 @@ export async function blobPutPrivate(
   data: Buffer,
   opts: { contentType: string },
 ): Promise<{ url: string; pathname: string }> {
-  const token = requireToken()
+  const token = requirePrivateToken()
   const { put } = await import('@vercel/blob')
   const result = await put(pathname, data, {
     access: 'private',
@@ -118,7 +158,7 @@ export async function blobPutPrivate(
 
 /** Read a private object back into a Buffer, bypassing the CDN cache. */
 export async function blobGetPrivate(pathname: string): Promise<Buffer> {
-  const token = requireToken()
+  const token = requirePrivateToken()
   const { get } = await import('@vercel/blob')
   const res = await get(pathname, {
     access: 'private',
@@ -145,7 +185,7 @@ export async function blobGetPrivate(pathname: string): Promise<Buffer> {
 export async function blobListPrivate(
   prefix: string,
 ): Promise<Array<{ pathname: string; size: number; uploadedAt: Date }>> {
-  const token = requireToken()
+  const token = requirePrivateToken()
   const { list } = await import('@vercel/blob')
   const out: Array<{ pathname: string; size: number; uploadedAt: Date }> = []
   let cursor: string | undefined
@@ -164,7 +204,7 @@ export async function blobDelPrivate(pathnames: string[]): Promise<void> {
   if (pathnames.length === 0) return
   try {
     const { del } = await import('@vercel/blob')
-    await del(pathnames, { token: requireToken() })
+    await del(pathnames, { token: requirePrivateToken() })
   } catch (err) {
     console.error('[blob] best-effort private delete failed (ignored):', err)
   }

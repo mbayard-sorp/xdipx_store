@@ -52,7 +52,7 @@ vi.mock('~/lib/db.server', () => ({
 }))
 
 vi.mock('~/lib/blob.server', () => ({
-  blobConfigured: () => blobOn,
+  privateBlobConfigured: () => blobOn,
   blobPutPrivate: async (pathname: string, data: Buffer) => {
     blobStore.set(pathname, data)
     return { url: `https://blob.test/${pathname}`, pathname }
@@ -97,6 +97,11 @@ describe('the dump', () => {
     // Reading "no blob token" as a failure would make the alarm red on day one
     // and trained away by day three, which is how the "enrich stage may be
     // stalled" line came to warn every day for six weeks against a dead table.
+    //
+    // The gate is the PRIVATE store's token specifically. On the first live run
+    // the public token was set, a `blobConfigured()` gate passed, and every
+    // write then failed with `Cannot use private access on a public store` —
+    // access is a property of the store, not the request.
     blobOn = false
     const r = await runBackup()
     expect(r.status).toBe('skipped')

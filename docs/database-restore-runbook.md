@@ -88,9 +88,19 @@ a partial PITR.
 touching anything else. Also the only path if the Neon project itself is gone.
 
 **What exists.** `/cron/db-backup` runs at 04:40 UTC and writes one gzipped
-NDJSON object per critical table to Vercel Blob with **`access: 'private'`**,
+NDJSON object per critical table to a **separate, private Vercel Blob store**,
 under `db-backup/<YYYY-MM-DD>/<table>.ndjson.gz`, plus a `_manifest.json`
 recording per-table row counts and byte sizes. Fourteen days are kept.
+
+**A separate store, not a separate flag.** The first live run failed on the
+first table with `Cannot use private access on a public store. The store must
+be configured with private access.` Access is a property of the store in Vercel
+Blob, and the existing store has to stay public — the video and ad pipelines put
+bytes there that Instagram and Meta fetch by URL, so flipping it would break
+publishing to fix backups. Dumps therefore go to a second store with its own
+token, `BLOB_BACKUP_READ_WRITE_TOKEN`, and there is deliberately **no fallback**
+to the public token: a fallback would put consent records, voicemail rows and
+SMS transcripts on a public URL the moment the private token went missing.
 
 Private is not a detail. The critical tier contains consent records, SMS and
 voicemail transcripts, order lines and every conversation a customer has had
@@ -203,3 +213,6 @@ reads complete is the failure mode this whole document is about.
 - **Blob storage is one provider.** A snapshot that survives the Neon account
   does not survive the Vercel account. A second destination is worth having
   before it is worth automating.
+- **The private store does not exist yet.** Until it does and
+  `BLOB_BACKUP_READ_WRITE_TOKEN` is set, `/cron/db-backup` records `skipped`
+  every night and there is no dump at all. Owner blocker filed.
