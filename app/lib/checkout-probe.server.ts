@@ -262,8 +262,12 @@ export async function recordAndAlertProbe(tier: 'http' | 'browser', result: Prob
         `<p>The ${escapeHtml(tier)} checkout probe failed at step <strong>${escapeHtml(failedStep)}</strong>.</p>`
           + `<p>${stepList}</p>`
           + `<p>The purchase path is broken up to at least this step. Check the storefront and the Shopify checkout.</p>`,
+        { escalation: 'money-path-down' },
       )
-      await sendOwnerSms(`xdipx checkout probe FAILED at ${failedStep} (${tier}). Purchase path broken.`)
+      await sendOwnerSms(
+        `xdipx checkout probe FAILED at ${failedStep} (${tier}). Purchase path broken.`,
+        'money-path-down',
+      )
       alerted = true
     }
 

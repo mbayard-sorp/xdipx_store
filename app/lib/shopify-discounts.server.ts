@@ -1,5 +1,6 @@
 import { getPipelineSetting } from './feed-processor.server'
 import { sendOwnerEmail, escapeHtml } from './owner-alerts.server'
+import type { EscalationClassName } from './owner-escalation'
 import { addSuggestionNote } from './team.server'
 import { getProductsByHandles, findProductBySKU, adminGraphQL } from './shopify.server'
 
@@ -295,7 +296,7 @@ export interface PromoExecuteDeps {
   sendOwnerEmail: (
     subject: string,
     html: string,
-    opts?: { fromName?: string },
+    opts: { escalation: EscalationClassName; fromName?: string },
   ) => Promise<{ sent: boolean; error?: string }>
   addNote: (id: number, ref: string) => Promise<void>
 }
@@ -359,7 +360,7 @@ async function refuse(
     discountId: null,
     body: parsed.body,
   })
-  const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { fromName: 'xdipx promo' })
+  const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { escalation: 'owner-decision', fromName: 'xdipx promo' })
   await deps.addNote(row.id, `REFUSED (${reason}): no Shopify discount minted. Owner emailed.`)
   return { minted: false, refused: true, reason, ownerEmailed: sent.sent }
 }
@@ -428,7 +429,7 @@ export async function executeApprovedPromo(
     discountId: result.id,
     body: parsed.body,
   })
-  const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { fromName: 'xdipx promo' })
+  const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { escalation: 'owner-decision', fromName: 'xdipx promo' })
   await deps.addNote(
     row.id,
     `Shopify discount code minted: ${parsed.code} (${parsed.percentage}% off, ${parsed.startsAt} to ${parsed.endsAt}, ${productGids.length} products). Discount id: ${result.id}.`,

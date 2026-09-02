@@ -1529,7 +1529,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     </div>
   </body>`
 
-  const res = await sendOwnerEmail(subject, html, { fromName: 'xdipx daily digest' })
+  const res = await sendOwnerEmail(subject, html, { escalation: 'daily-digest', fromName: 'xdipx daily digest' })
   if (res.sent) return { sent: true, subject }
 
   // The day slot was claimed before composing, to stop a double cron

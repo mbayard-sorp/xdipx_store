@@ -698,7 +698,7 @@ export async function runBlockerEmail(opts: { force?: boolean } = {}): Promise<B
 
   const subject = blockerEmailSubject(open)
   const html = renderBlockerEmail(open, cleared, baseUrl)
-  const res = await sendOwnerEmail(subject, html, { fromName: 'xdipx blockers' })
+  const res = await sendOwnerEmail(subject, html, { escalation: 'blocker-list', fromName: 'xdipx blockers' })
 
   if (res.sent) {
     return { sent: true, subject, open: open.length, autoCleared: verified.autoCleared.length }

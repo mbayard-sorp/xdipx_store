@@ -1088,10 +1088,11 @@ export async function runHomepageHealthcheck(): Promise<HomepageHealthResult> {
     // every-30-min recurrence comments. Both senders are non-throwing.
     if (issue.created) {
       const { sendOwnerSms, sendOwnerEmail, escapeHtml } = await import('~/lib/owner-alerts.server')
-      await sendOwnerSms(`xdipx P0: homepage healthcheck failing. ${summary}`)
+      await sendOwnerSms(`xdipx P0: homepage healthcheck failing. ${summary}`, 'storefront-down')
       await sendOwnerEmail(
         '[P0] xdipx homepage healthcheck failing',
         `<pre style="font-family:monospace;white-space:pre-wrap;">${escapeHtml(issueBody)}</pre>${issue.url ? `<p><a href="${issue.url}">${issue.url}</a></p>` : ''}`,
+        { escalation: 'storefront-down' },
       )
     }
   }

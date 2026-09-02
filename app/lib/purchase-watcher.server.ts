@@ -286,18 +286,21 @@ export async function runPurchaseWatcher(now: number = Date.now()): Promise<Purc
 
   if (decision.p0Alert) {
     const { sendOwnerEmail, sendOwnerSms, escapeHtml } = await import('./owner-alerts.server')
-    await sendOwnerSms(`xdipx P0: purchase webhook path appears DEAD with live orders. ${decision.p0Reason}`.slice(0, 300))
+    await sendOwnerSms(
+      `xdipx P0: purchase webhook path appears DEAD with live orders. ${decision.p0Reason}`.slice(0, 300),
+      'money-path-down',
+    )
     await sendOwnerEmail(
       '[P0] xdipx conversion tracking: purchase webhook path appears dead',
       `<p>The server-side Purchase conversion path is not delivering while the store has live orders.</p><p>${escapeHtml(decision.p0Reason)}</p>`,
-      { fromName: 'xdipx ops' },
+      { escalation: 'money-path-down', fromName: 'xdipx ops' },
     )
   } else if (decision.p1Alert) {
     const { sendOwnerEmail, escapeHtml } = await import('./owner-alerts.server')
     await sendOwnerEmail(
       '[P1] xdipx conversion tracking: unresolved Purchase send failures',
       `<p>Individual Purchase conversions have failed to send and remain unresolved.</p><p>${escapeHtml(decision.p1Reason)}</p>`,
-      { fromName: 'xdipx ops' },
+      { escalation: 'money-path-down', fromName: 'xdipx ops' },
     )
   }
 

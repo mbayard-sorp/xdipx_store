@@ -418,7 +418,7 @@ export async function runSeoDaily(): Promise<SeoDailyResult> {
         <ul style="margin:0 0 12px;padding-left:18px;">${rows}</ul>
         <p style="margin:0;color:#6f645c;">This is the same signature as the May 2026 outage, which left 1,230 URLs on a cached noindex verdict for two months. Sent by /cron/seo-daily.</p>
       </body>`,
-      { fromName: 'xdipx SEO tripwire' },
+      { escalation: 'seo-report', fromName: 'xdipx SEO tripwire' },
     )
     ownerEmailed = res.sent
   }

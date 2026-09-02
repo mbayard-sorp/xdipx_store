@@ -1365,6 +1365,10 @@ export async function runBlockedTicketDigest(
     return { sent: false, skipped: 'no blocked tickets', totalCount: 0, reasonUnknownCount: 0 }
   }
 
-  const result = await sendOwnerEmail(blockedDigestSubject(digest), renderBlockedDigestEmail(digest))
+  const result = await sendOwnerEmail(
+    blockedDigestSubject(digest),
+    renderBlockedDigestEmail(digest),
+    { escalation: 'blocker-list' },
+  )
   return { sent: result.sent, totalCount: digest.totalCount, reasonUnknownCount: digest.reasonUnknownCount }
 }

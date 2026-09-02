@@ -535,6 +535,7 @@ export async function detectImportEnrichStall(enabled: boolean): Promise<{ stuck
         + `(oldest ${escapeHtml(String(oldestHours ?? '?'))}h). The import_enrich pipeline is <strong>${state}</strong>.</p>`
         + `<p>If disabled, this is an expected backlog. If enabled, the submit step is failing to stamp enrich_batch_id; `
         + `check the /cron/import-enrich logs and the import_enrich_batch_cap setting.</p>`,
+      { escalation: 'import-health' },
     )
     console.warn(`[import-enrich] STALL: ${stuck} stuck (oldest ${oldestHours}h), pipeline ${state}; owner alerted`)
     return { stuck, oldestHours, alerted: true }
@@ -713,6 +714,7 @@ export async function reportSubmitBlocker(
         + `in flight ${snap.inFlight}, parked ${snap.parked}, enriched ${snap.enriched}.</p>`
         + `<p>Check the /cron/import-enrich logs. If parked, the candidates hit the retry cap; if an upstream `
         + `backlog, check product_manager_enabled and the import path; if no briefs, check dealHistory linkage.</p>`,
+      { escalation: 'import-health' },
     )
     console.warn(`[import-enrich] NO-SUBMIT alert (${blocker.kind}): ${blocker.detail}; owner alerted`)
     return { alerted: true }

@@ -339,7 +339,7 @@ export async function runMainCiWatch(
     const res = await sendOwnerEmail(
       SUBJECTS['recovered']!(sha),
       renderMainCiAlert('recovered', sha, decision.reason, commit.ok ? commit.data.message : null, check?.url ?? null),
-      { fromName: 'xdipx main ci' },
+      { escalation: 'ci-red-main', fromName: 'xdipx main ci' },
     )
     // Clear regardless of whether the email left the building. A send failure
     // must not wedge the watcher into re-sending a recovery notice every cycle
@@ -370,7 +370,7 @@ export async function runMainCiWatch(
       check?.url ?? null,
       Boolean(probeSha),
     ),
-    { fromName: 'xdipx main ci' },
+    { escalation: 'ci-red-main', fromName: 'xdipx main ci' },
   )
   if (!res.sent) console.warn(`${LOG} alert email not sent: ${res.error}`)
 

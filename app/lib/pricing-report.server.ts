@@ -331,5 +331,5 @@ export async function sendPricingReportEmail(
   const html = renderPricingReportHTML(report, adminUrl)
   const subject = `xdipx pricing: ${report.totalChanges} changes, ${report.pending} pending review (${report.runDate})`
   const { sendOwnerEmail } = await import('~/lib/owner-alerts.server')
-  return sendOwnerEmail(subject, html, { fromName: 'xdipx pricing agent' })
+  return sendOwnerEmail(subject, html, { escalation: 'pricing-report', fromName: 'xdipx pricing agent' })
 }
