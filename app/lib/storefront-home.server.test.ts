@@ -441,11 +441,31 @@ describe('assembleStorefrontHome — pinned-headliner out-of-stock gate', () => 
     } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
     vi.mocked(getDiscoveryIndex).mockResolvedValue([product('sold-out', 0)])
 
-    const data = await assembleStorefrontHome()
+    // Pin the rotation seed. The rail has two items, so the per-bucket
+    // Fisher-Yates makes the lead a coin flip on the wall clock: measured over
+    // 1,000 consecutive 15-minute buckets it is 495 'x' / 505 'y'. Asserting a
+    // specific lead without a seed reddened `check` in about half of all
+    // windows, and `check` is the gate the release engine waits on.
+    const data = await assembleStorefrontHome({ seed: 1 })
 
     expect(data.featured.map(p => p.handle)).not.toContain('sold-out')
     // Falls back to the rotating rail leads, exactly like an unknown handle.
     expect(data.featured[0]!.handle).toBe('x')
+  })
+
+  it('rejects the zero-stock pin at every rotation seed, not just a lucky one', async () => {
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue({
+      featuredProductHandle: 'sold-out',
+    } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
+    vi.mocked(getDiscoveryIndex).mockResolvedValue([product('sold-out', 0)])
+
+    // The invariant under test is the stock gate, which must hold whichever way
+    // the rotation lands. Both permutations of the two-item rail are covered.
+    for (const seed of [0, 1]) {
+      const data = await assembleStorefrontHome({ seed })
+      expect(data.featured.map(p => p.handle)).not.toContain('sold-out')
+      expect(['x', 'y']).toContain(data.featured[0]!.handle)
+    }
   })
 
   it('still pins an untracked-inventory (null) product found via the raw index lookup', async () => {
