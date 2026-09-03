@@ -237,6 +237,15 @@ export const socialPosts = pgTable('social_posts', {
   // pattern count; 'platform' is reserved for a removal with independent
   // confirmation (today, only the historical backfill in migration 088).
   removalSource:   varchar('removal_source', { length: 10 }).default('unknown'),
+  // Scene variety tracking (migration 093, ticket #4345, owner ruling
+  // 2026-08-19 in instagram-campaigns.md §3.8: no location repeat inside 8
+  // consecutive Instagram product posts, no cast member on more than 2 of any
+  // 5). `castSlugs` above already exists (migration 084) but was never
+  // threaded through the draft op; `sceneLocation` is new. Both are set at
+  // draft time and read back through the existing {op:'list'} response so a
+  // routine can compute the two variety windows from one list call instead of
+  // re-deriving rotation by reading captions.
+  sceneLocation:   varchar('scene_location', { length: 80 }),
 })
 
 /**

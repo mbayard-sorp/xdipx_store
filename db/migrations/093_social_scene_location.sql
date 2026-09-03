@@ -1,0 +1,21 @@
+-- 093_social_scene_location.sql
+-- Scene variety tracking (ticket #4345). instagram-campaigns.md §3.8 (owner
+-- ruling 2026-08-19, "Variety is key here") requires no location repeat
+-- inside 8 consecutive Instagram product posts and no cast member on more
+-- than 2 of any 5. Nothing persisted the location half of that: social_posts
+-- already has cast_slugs (migration 084), but no location column, so a run
+-- could only re-derive rotation by reading captions and guessing.
+--
+--   scene_location  varchar(80). The location/setting chosen for a post's
+--                     imagery at draft time (e.g. "bedroom-loft",
+--                     "bathroom-spa"), nullable and never backfilled: only
+--                     rows drafted after this column exists carry a value.
+--
+-- FULLY ADDITIVE: ADD COLUMN IF NOT EXISTS only. No DROP, no RENAME, no ALTER
+-- TYPE, no DML. Merges on the ordinary release-engine lane once
+-- migration-dry-run is green.
+--
+-- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 093
+-- Idempotent: safe to re-run.
+
+ALTER TABLE social_posts ADD COLUMN IF NOT EXISTS scene_location varchar(80);
