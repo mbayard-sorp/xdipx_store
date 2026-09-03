@@ -526,6 +526,14 @@ meaningless. These rules exist so that cannot happen again:
 - **The image answers "why should she care" before "what is happening".** The test for a brief:
   name the feeling a woman scrolling past should have in the half second before she reads a word.
   If the honest answer is "she learns that someone is washing their hands", the brief failed.
+- **A genuinely product-free caption reaches register 9 on wanting/curiosity/permission, not on a
+  product outcome (ticket #5862).** When the subject truly has no product in it (communication,
+  consent, the orgasm gap as a conversation), the caption cannot borrow the "everything on that
+  nightstand has a job" pattern because there is no nightstand item to anchor it to, and reaching
+  for a vague gesture instead ("the thing nobody explains") is exactly the evasion the voice charter
+  bans. Name the feeling plainly instead: curious, wanting, permission, relief. `docs/emma-voice.md`
+  social addendum carries the worked lines; judge a product-free draft on whether it lands the
+  curiosity-or-permission charge on its own terms, not on whether it manages to reference a product.
 - **Owner feedback on a rejected post binds the rework, clause by clause.** Row 74 was rejected
   with *"Show a cast member cleaning a toy with one of our toy cleaning products"*; the rework
   satisfied "cast member" and dropped "toy" and "cleaning product". A rework that satisfies part of
