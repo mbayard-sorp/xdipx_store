@@ -197,6 +197,20 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'The only thing that ships gate-approved posts. Absence is silent: drafts simply accumulate approved.',
   },
   {
+    route: '/cron/instagram-comments-ingest',
+    plane: 'vercel',
+    schedule: '0 * * * *',
+    periodMinutes: HOURLY,
+    graceMinutes: 30,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'social',
+    notes:
+      'Instagram comment support lane, phase 1 (ticket #2027). Pulls comments for posts from the '
+      + 'last 14 days into social_comments at status inbound. Absence is silent: new comments simply '
+      + 'stop showing up in the /admin/socials/comments queue, so a support reply never happens.',
+  },
+  {
     route: '/cron/discontinued-sweep',
     plane: 'vercel',
     schedule: '45 23 * * *',

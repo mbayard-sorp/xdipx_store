@@ -2178,18 +2178,47 @@ export interface TransitionOpts {
 
 export type TicketRow = typeof homepageTeamSuggestions.$inferSelect
 
+/**
+ * Postgres reports "no unique or exclusion constraint matching the ON
+ * CONFLICT specification" as SQLSTATE 42P10 (invalid_column_reference).
+ * `addTicketLinks` targets `uq_suggestion_links_sugg_kind_ref`, which only
+ * migration 092 creates; that migration is manual-only (it opens with a
+ * DELETE, per db/migrations/092_suggestion_links_dedupe.sql) and may not be
+ * applied in every environment yet. Same cause-chain walk as
+ * `classifyTeamTablesError` in ticket-queue-view.ts, since drizzle and the
+ * Neon driver both wrap the raw pg error and the code can sit a level deep.
+ */
+export function isMissingConflictTarget(err: unknown): boolean {
+  let cur: unknown = err
+  for (let depth = 0; cur != null && typeof cur === 'object' && depth < 5; depth++) {
+    const rec = cur as Record<string, unknown>
+    if (rec['code'] === '42P10') return true
+    if (typeof rec['message'] === 'string' && rec['message'].includes('42P10')) return true
+    cur = rec['cause']
+  }
+  return false
+}
+
 async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Promise<void> {
   if (links.length === 0) return
-  await db.insert(suggestionLinks).values(
-    links.map(l => ({
-      suggestionId: id,
-      kind:         l.kind.slice(0, 12),
-      ref:          l.ref,
-      state:        l.state ? l.state.slice(0, 16) : null,
-    })),
-  ).onConflictDoNothing({
-    target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
-  })
+  const rows = links.map(l => ({
+    suggestionId: id,
+    kind:         l.kind.slice(0, 12),
+    ref:          l.ref,
+    state:        l.state ? l.state.slice(0, 16) : null,
+  }))
+  try {
+    await db.insert(suggestionLinks).values(rows).onConflictDoNothing({
+      target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
+    })
+  } catch (err) {
+    // #7150: without the migration-092 index this throws AFTER the caller's
+    // status update already committed, turning a successful transition into
+    // a 500 with the note/link silently lost. Degrade to a plain insert
+    // (possible duplicate row, recoverable) rather than losing the write.
+    if (!isMissingConflictTarget(err)) throw err
+    await db.insert(suggestionLinks).values(rows)
+  }
 }
 
 /**
