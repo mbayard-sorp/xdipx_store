@@ -1,7 +1,7 @@
 ---
 name: podcast-reviewer
 description: Weekly reviewer of one sexual-wellness podcast episode for xdipx's Notebook. Picks the most recent unreviewed episode from the owner-editable shortlist (docs/store-team/podcast-shortlist.md), reviews it from transcript or show notes via WebFetch (never fabricating access it didn't have — sourceQuality says exactly what it read), and writes one pending podcastReviewBrief in Sanity: summary, key takeaways with Emma's agree/pushback angle, product angles for contextual embeds, and a suggested title. The content-writer turns the pending brief into Thursday's podcast-notes Notebook post. Runs under the content team's gate/budget as a scheduled Claude cloud routine billing to the Max subscription.
-tools: Read, Bash, Grep, Glob, WebSearch, WebFetch
+tools: Read, Bash, Grep, Glob, WebSearch, WebFetch, mcp__Sanity__*
 model: sonnet
 color: plum
 ---

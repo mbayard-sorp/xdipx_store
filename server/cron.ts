@@ -1222,6 +1222,39 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/instagram-comments-ingest
+   * Schedule: hourly. Instagram comment support lane, phase 1 (ticket #2027).
+   * Pulls comments for every Instagram post from the last 14 days via the
+   * Graph API and upserts them into social_comments at status 'inbound'.
+   * Never fails loudly on a missing/under-scoped token: `ingestRecentComments`
+   * reports `ok:false` with a `detail` the admin queue renders as a banner,
+   * so a token problem degrades to "nothing new ingested, here's why" rather
+   * than a 500 or a silent empty result.
+   */
+  cronRoute('/instagram-comments-ingest', async (_req, res) => {
+    const { kvSetNX, kvDel, kvSet } = await import('../app/lib/kv.server.js')
+    const acquired = await kvSetNX('lock:instagram-comments-ingest', String(Date.now()), 290)
+    if (!acquired) {
+      res.json({ ok: true, skipped: 'locked' })
+      return
+    }
+    try {
+      const { ingestRecentComments } = await import('../app/lib/social-publish/instagram-comments.server.js')
+      const result = await ingestRecentComments()
+      // Read by the /admin/socials/comments loader to render a banner when a
+      // token is missing or under-scoped, instead of the page silently
+      // showing zero new comments with no explanation.
+      await kvSet('social-comments-ingest:last', { ...result, checkedAt: new Date().toISOString() }, 3600 * 6)
+      res.json(result)
+    } catch (err) {
+      console.error('[cron:instagram-comments-ingest]', err)
+      res.status(500).json({ error: String(err) })
+    } finally {
+      await kvDel('lock:instagram-comments-ingest')
+    }
+  })
+
+  /**
    * GET|POST /cron/warm
    * Schedule: every 15 min (Vercel cron; see vercel.json).
    * (1) Rebuilds the discovery index via the warm-discovery-index handler.

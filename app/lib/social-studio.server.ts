@@ -12,7 +12,7 @@
  * `draft`/`pending_review`, which is exactly the state the gate verdicts.
  */
 import { db } from '~/lib/db.server'
-import { socialPosts, socialMediaAssets, socialPostSlides } from '../../db/schema'
+import { socialPosts, socialMediaAssets, socialPostSlides, socialComments } from '../../db/schema'
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm'
 import { SOCIAL_PLATFORMS } from '~/lib/team-keys'
 import { revertSocialPostToDraft } from '~/lib/social-publish-approve.server'
@@ -29,22 +29,30 @@ export interface StudioCounts {
   approved: number
   scheduled: number
   failed: number
+  inboundComments: number
 }
 
 export async function getStudioCounts(): Promise<StudioCounts> {
-  const [row] = await db
-    .select({
-      pending: sql<number>`count(*) filter (where ${socialPosts.status} = 'draft' and ${socialPosts.reviewStatus} in ('pending_review', 'needs_changes'))`,
-      approved: sql<number>`count(*) filter (where ${socialPosts.status} = 'draft' and ${socialPosts.reviewStatus} = 'approved')`,
-      scheduled: sql<number>`count(*) filter (where ${socialPosts.status} = 'draft' and ${socialPosts.reviewStatus} = 'approved' and coalesce(${socialPosts.scheduledAt}, ${socialPosts.scheduledFor}::timestamptz) is not null)`,
-      failed: sql<number>`count(*) filter (where ${socialPosts.status} = 'failed')`,
-    })
-    .from(socialPosts)
+  const [[row], [commentsRow]] = await Promise.all([
+    db
+      .select({
+        pending: sql<number>`count(*) filter (where ${socialPosts.status} = 'draft' and ${socialPosts.reviewStatus} in ('pending_review', 'needs_changes'))`,
+        approved: sql<number>`count(*) filter (where ${socialPosts.status} = 'draft' and ${socialPosts.reviewStatus} = 'approved')`,
+        scheduled: sql<number>`count(*) filter (where ${socialPosts.status} = 'draft' and ${socialPosts.reviewStatus} = 'approved' and coalesce(${socialPosts.scheduledAt}, ${socialPosts.scheduledFor}::timestamptz) is not null)`,
+        failed: sql<number>`count(*) filter (where ${socialPosts.status} = 'failed')`,
+      })
+      .from(socialPosts),
+    db
+      .select({ inboundComments: sql<number>`count(*)` })
+      .from(socialComments)
+      .where(eq(socialComments.status, 'inbound')),
+  ])
   return {
     pending: Number(row?.pending ?? 0),
     approved: Number(row?.approved ?? 0),
     scheduled: Number(row?.scheduled ?? 0),
     failed: Number(row?.failed ?? 0),
+    inboundComments: Number(commentsRow?.inboundComments ?? 0),
   }
 }
 
