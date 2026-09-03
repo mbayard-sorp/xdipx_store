@@ -287,6 +287,30 @@ export async function uploadMedia(
   return data.media_id_string
 }
 
+/**
+ * Attach accessibility alt text to an already-uploaded media id (v1.1
+ * `media/metadata/create`, ticket #4204). X truncates or rejects an
+ * over-length value; 1000 chars matches the Instagram adapter's own
+ * `ALT_TEXT_MAX` (`instagram.server.ts`) so callers can share one constant
+ * later if this is ever unified. Non-fatal by design: the caller degrades to
+ * publishing without alt text on failure, mirroring how the Instagram
+ * adapter degrades on a product-tag failure, rather than failing the post
+ * over an accessibility metadata call.
+ */
+export async function setMediaAltText(
+  mediaId: string,
+  altText: string,
+): Promise<{ ok: true } | { ok: false; detail: string }> {
+  const url = 'https://upload.x.com/1.1/media/metadata/create.json'
+  try {
+    await xFetch(url, 'POST', { media_id: mediaId, alt_text: { text: altText.slice(0, 1000) } })
+    return { ok: true }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, detail: message }
+  }
+}
+
 export async function uploadMediaFromUrl(
   imageUrl: string,
 ): Promise<string | null> {
