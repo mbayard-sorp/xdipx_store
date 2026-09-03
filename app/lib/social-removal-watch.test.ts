@@ -16,6 +16,13 @@ import {
 } from './social-removal-watch.server'
 import type { BlockerInput } from './owner-blockers-core'
 
+// Fixed instant the harness's `now()` reports. Tests below that need a stretch
+// of clean days measured "40 days ago" must derive it from this constant, not
+// the real wall clock — otherwise the gap between real Date.now() and this
+// frozen now shrinks as real time passes, and the assertion goes red on its own
+// (ticket #7281: it did, on 2026-09-03, for both `long_ago` stamps below).
+const FROZEN_NOW = new Date('2026-08-15T12:00:00Z')
+
 function row(id: number): PostedRow {
   return {
     id,
@@ -46,7 +53,7 @@ function harness(rows: PostedRow[], removedInWindow = 0) {
         calls.blockers.push({ dedupeKey: input.dedupeKey, category: input.category })
         return {}
       },
-      now: () => new Date('2026-08-15T12:00:00Z'),
+      now: () => new Date(FROZEN_NOW),
     },
   }
 }
@@ -227,7 +234,7 @@ describe('recoveredFrequency — the half that was written down and never built'
 describe('runRemovalWatch restores volume', () => {
   it('climbs one step when everything is live and the stretch is clean', async () => {
     const { calls, deps } = harness([row(1), row(2)])
-    const long_ago = new Date(Date.now() - 40 * 86_400_000).toISOString()
+    const long_ago = new Date(FROZEN_NOW.getTime() - 40 * 86_400_000).toISOString()
     const r = await runRemovalWatch({
       ...deps,
       mediaState: allLive,
@@ -249,7 +256,7 @@ describe('runRemovalWatch restores volume', () => {
     // unattended is a judgement call, turned off by a pattern of removals and
     // back on only by the owner. Nothing here is entitled to make it.
     const { calls, deps } = harness([row(1), row(2)])
-    const long_ago = new Date(Date.now() - 40 * 86_400_000).toISOString()
+    const long_ago = new Date(FROZEN_NOW.getTime() - 40 * 86_400_000).toISOString()
     await runRemovalWatch({
       ...deps,
       mediaState: allLive,
