@@ -1142,6 +1142,29 @@ export async function findDeploymentBySha(sha: string): Promise<VercelDeployment
 }
 
 /**
+ * A READY deployment created after `afterMs`, for a commit other than
+ * `excludeSha`. Used by `handleMissingDeploymentRecord` (ticket #7241) to
+ * tell "genuinely stuck, nothing has shipped since this merge" apart from
+ * "superseded: main moved on and Vercel simply skipped building this exact
+ * commit" -- the latter will never get a deployment record no matter how
+ * long the engine waits, because a later commit already deployed instead.
+ */
+export function findSupersedingDeployment(
+  list: readonly VercelDeployment[],
+  afterMs: number,
+  excludeSha: string,
+): VercelDeployment | null {
+  return (
+    list.find(
+      (d) =>
+        d.readyState === 'READY'
+        && d.createdAt > afterMs
+        && (!d.sha || d.sha.toLowerCase() !== excludeSha.toLowerCase()),
+    ) ?? null
+  )
+}
+
+/**
  * The last READY production deployment that is NOT the bad one. This is the
  * instant-mitigation target: re-promoting it puts the previous good build back
  * in front of shoppers within seconds, well before the revert PR merges.
@@ -1442,6 +1465,7 @@ export type CyclePhase =
   | 'applied'
   | 'rolled-back'
   | 'no-deploy-record'
+  | 'superseded-self-cleared'
 
 export interface ReleaseCycleResult {
   ok: boolean
@@ -2356,7 +2380,11 @@ export async function handleMissingDeploymentRecord(pending: PendingMerge, dryRu
   const result = baseResult(dryRun)
   const minutesSinceMerge = Math.round((Date.now() - pending.mergedAt) / 60_000)
 
-  const retry = await findDeploymentBySha(pending.mergeSha)
+  // One fetch, reused for both the sha-match retry and the superseded check
+  // below, so this branch costs the same single deployments-list call it
+  // always has.
+  const deployments = await listProductionDeployments(20)
+  const retry = deployments.find((d) => d.sha && d.sha.toLowerCase() === pending.mergeSha.toLowerCase()) ?? null
   const settled = await settleDeployment(pending, retry, dryRun)
   if (settled) return settled
 
@@ -2368,6 +2396,37 @@ export async function handleMissingDeploymentRecord(pending: PendingMerge, dryRu
       phase: 'awaiting-deploy',
       resolved: { prNumber: pending.prNumber, outcome: 'waiting' },
       message: `PR #${pending.prNumber} merged ${minutesSinceMerge} min ago, deployment ${retry.readyState} (found on retry)`,
+    }
+  }
+
+  // No record for this exact SHA, even after a retry. If a LATER deployment
+  // has already gone READY since this merge, main has moved past this SHA
+  // for good (ticket #7241): Vercel skipped building it, most likely a rapid
+  // follow-up push superseding the queued build, and no amount of further
+  // waiting will ever produce a record for it. Leaving the pending row in
+  // place in that case blocks every future cycle -- merges, the out-of-band
+  // sweep, everything -- on a deployment that will never appear. Evidence:
+  // PR #1030 (de5353d) halted the engine from ~17:51 UTC to past 22:00 this
+  // way while 14 later commits deployed fine and 7 already-merged tickets
+  // sat stranded at `verified`. Self-clearing here does not lose anything:
+  // the merge is still on `main` (part of every later deployment's history),
+  // it just never got its own dedicated build.
+  const supersededBy = findSupersedingDeployment(deployments, pending.mergedAt, pending.mergeSha)
+  if (supersededBy) {
+    console.warn(
+      `${LOG} PR #${pending.prNumber} (${pending.mergeSha.slice(0, 7)}) has no deployment record, but `
+      + `${(supersededBy.sha ?? supersededBy.uid).slice(0, 7)} deployed READY ${minutesSinceMerge} min after `
+      + `the merge -- treating as superseded, not stuck, and clearing the pending row so the engine resumes.`,
+    )
+    if (!dryRun) await kvDel(KEYS.pending)
+    return {
+      ...result,
+      phase: 'superseded-self-cleared',
+      resolved: { prNumber: pending.prNumber, outcome: 'no-deploy-record' },
+      message:
+        `PR #${pending.prNumber} merged ${minutesSinceMerge} min ago, never got its own deployment record, but `
+        + `a later commit (${(supersededBy.sha ?? supersededBy.uid).slice(0, 7)}) shipped READY -- self-cleared `
+        + `the pending row instead of blocking the engine`,
     }
   }
 
