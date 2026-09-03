@@ -325,7 +325,16 @@ REVISE:
   without the condition that bounds it;
 - **two different objects sharing one coordinated noun phrase**, where a modifier parses onto a
   category it does not belong to (e.g. "silicone and latex condoms" reading as the nonexistent
-  "silicone condoms").
+  "silicone condoms");
+- an **absolute or guaranteed OUTCOME for the reader from a named product**, especially in future
+  tense (`it will`, `you will`, `this delivers`), where the post elsewhere acknowledges individual
+  variation. This shape hides in product pairing copy rather than in a factual sentence, so it is
+  easy to miss: run 649 took a first-submit accuracy REVISE on exactly this ("Use more lubricant
+  than feels necessary and go slower than feels necessary, and it will make its case in the first
+  minute" on vush-peachy-g-spot, ruled an implied-guaranteed universal result) after every other
+  documented pre-flight had already passed clean. As with every shape above, the fix is narrowing or
+  deletion, never a hedge — run 649 resolved its instance by deletion and both gates confirmed the
+  result.
 
 The accuracy gate (`sex-wellness-reviewer`) returned REVISE on first submit in four consecutive
 daily-writer runs (466, 485, 502, 523), and every one resolved the same way — by narrowing or

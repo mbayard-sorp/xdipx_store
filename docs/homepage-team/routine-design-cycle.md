@@ -97,6 +97,33 @@ plus the retired-route denylist stand.
   cheap-and-certain. This is not a call to stop inventing — it is a call to bank ambition as design
   proposals now and spend build / image-generation budget (`generateImage()`, routing per
   `docs/media-model-routing.md`) when it can actually be seen.
+- **The live-page design-critic spot-check is independent of the traffic gate and of whether this
+  cycle ships code (p4-retro, run 646).** A docs-only or held cycle (banking design capital per the
+  bullet above) still owes a critic verdict: `design-critic` scores a rendered screenshot, not a
+  shipped change, and Routine A's Step 7.5 post-publish spot-check (`docs/homepage-team/
+  routine-daily-merchandise.md`) already proves this needs no PR, no build, and no traffic — it runs
+  against the live page every day regardless of what that day shipped. Run the equivalent live-page
+  spot-check this cycle even when the rest of the run is docs-only, and post the verdict as an
+  `/event` row (`eventType:'decision'`, `agentRole:'design-critic'`) so the milestone tracker sees a
+  data point instead of a silent gap. If "design-critic skipped at the turn cap" happens, that is a
+  **named failure**: state why in the run summary (turn budget, tooling blocker, etc.) rather than
+  letting the skip pass silently — three unexplained skips in a row read as a milestone with no
+  owner, not as a traffic problem.
+- **Multi-axis discovery instrument build-readiness is gated on the CROSS-PRODUCT of its options,
+  not the options themselves (run 646, `concepts/either-or.md`).** A concept with N binary/multi-way
+  axes is not buildable just because every individual pole clears the `>=2` product-count floor:
+  disjoint tag sets are not independent co-occurrence, so a reachable *combination* of poles across
+  axes can still return zero even when each pole alone passes by orders of magnitude. Before calling
+  a multi-axis concept buildable, measure every reachable pole COMBINATION against the same `>=2`
+  floor, not just each option in isolation, and record the combination matrix in the concept doc
+  (`docs/homepage-team/concepts/<slug>.md`).
+- **Credential-free probes available to cloud routines — check this list before recording a
+  deferral.** A build-readiness check that looks like it needs owner/admin credentials sometimes
+  already has a credential-free equivalent shipped for cloud routines: `GET
+  /api/team/discovery-vocab` (#5631) serves live per-tag and per-combination product counts without
+  needing Shopify or Sanity session credentials. Deferring a check as "needs credentials this cloud
+  routine lacks" without checking this list first costs a full cycle of delay for no reason (run 520
+  deferred exactly this check, which run 646 then ran credential-free).
 
 ### 2. Prototype on a branch
 
