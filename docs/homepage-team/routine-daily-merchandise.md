@@ -1018,6 +1018,13 @@ exist precisely so you can tell the two apart.
 
 ## Step 7.5 — Post-publish design spot-check (`design-critic`)
 
+**Independent of the traffic gate and of whether the day's cycle shipped code (p4-retro, run 646).**
+This check scores a rendered screenshot of the live page, not a shipped change, so it owes a verdict
+every day this routine publishes, exactly the same as `docs/homepage-team/routine-design-cycle.md`
+Routine B owes one even on a docs-only/traffic-gated cycle. If it is skipped at the turn cap (it sits
+in the OPTIONAL tier of the turn-budget table above), that is a **named failure**: state why in the
+Step 8 summary, not a silent line — repeated unexplained skips read as a milestone with no owner.
+
 After self-validation passes, run `design-critic` once against the live homepage: capture a 375px
 screenshot (768/1440 optional on content-only runs) and score the rubric against
 `docs/design-doctrine.md`. **It cannot post its own verdict.** As a spawned subagent, every
