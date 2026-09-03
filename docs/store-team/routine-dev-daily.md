@@ -160,9 +160,20 @@ blocking a ticket on a path you find here.
 For a protected ticket, author it like any other ticket (branch, tests, typecheck, build), with
 three extra requirements:
 
-1. **The PR body opens with a "Protected-path diff" section** stating: which protected invariant
-   this diff touches, how the diff preserves it, and what you ran to prove it. An owner reading
-   cold must be able to approve or reject from the body plus the diff alone.
+1. **The PR body opens with a "Protected-path diff" section, written FIRST, before the What-changed
+   narrative.** Use a fixed template so it is mechanical to satisfy and mechanical to QA-check:
+
+   ```
+   ## Protected-path diff
+   **Invariant:** <which protected invariant this diff touches>
+   **Preserved-because:** <how the diff preserves it>
+   **Evidence:** <what you ran to prove it>
+   ```
+
+   An owner reading cold must be able to approve or reject from the body plus the diff alone.
+   Section placement is not cosmetic: ticket #7150 was bounced by QA solely for missing this
+   section on an otherwise-correct diff, costing a full review cycle on substance that was already
+   right. Write it first so it cannot be an afterthought.
 2. **Never author a diff that widens agent permissions or weakens a gate**: no edits to
    `PROTECTED_GLOBS`, no new agent write paths to `pipeline_settings`, no valve default changes, no
    loosening of the transition map, no touching money-valve semantics (`import_enrich_enabled`,
