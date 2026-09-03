@@ -50,6 +50,7 @@ const PLP_SAMPLE = 2
 const INDEXED_DROP_PCT = 5     // week-over-week fall that counts as a regression
 const NEWLY_DROPPED_MAX = 20   // URLs falling out of the index in one day
 const SERVER_ERROR_MAX = 10    // 5xx verdicts sitting in the inspection set
+const REGRESSED_URLS_LIMIT = 25  // cap on rows fetched/stored for the regression list
 
 export interface IndexDailyRow {
   day: string
@@ -79,6 +80,14 @@ export interface SeoCoverageCounters {
   enrichedDistinctProducts: number | null
 }
 
+export interface RegressedUrl {
+  url: string
+  previousCoverageState: string | null
+  coverageState: string | null
+  verdict: string | null
+  changedAt: string | null
+}
+
 export interface SeoDailyResult {
   day: string
   today: IndexDailyRow | null
@@ -91,6 +100,16 @@ export interface SeoDailyResult {
     newlyDropped: number | null
   }
   transitions: { cleared: number; regressed: number; total: number }
+  /**
+   * URLs that moved off an indexed coverage state in the last 7 days (ticket
+   * #7247): the `indexed-drop` anomaly used to fire with a bare count and no
+   * way to name what changed, so "investigate what changed on the affected
+   * URLs" had no data to investigate with. Same predicate as
+   * `transitions.regressed`, widened from a 24h to a 7-day window to match
+   * the week-over-week comparison the anomaly itself uses. Capped; see
+   * REGRESSED_URLS_LIMIT.
+   */
+  regressedUrls: RegressedUrl[]
   verdictCounts: Record<string, number>
   serverErrors: number
   indexnowPushed24h: number
@@ -125,6 +144,25 @@ function delta(a: number | undefined, b: number | undefined): number | null {
 function num(v: unknown): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * The " Affected: ..." suffix an indexed-drop anomaly appends to name what
+ * regressed, or an honest "no per-URL match" note when the drop is not
+ * explained by a tracked coverage regression (ticket #7247 — the anomaly used
+ * to fire with a bare percentage and no way to investigate it). Pure, so the
+ * cap/truncation/empty-list behavior is directly testable without a database.
+ */
+export function formatRegressedUrlsSuffix(regressedUrls: readonly RegressedUrl[], max = 8): string {
+  if (regressedUrls.length === 0) {
+    return ' No per-URL regression matched this window in gsc_url_inspections; the drop may be sitemap churn rather than a tracked coverage regression.'
+  }
+  const named = regressedUrls.slice(0, max)
+  const rest = regressedUrls.length - named.length
+  const list = named
+    .map(u => `${u.url} (${u.previousCoverageState ?? 'indexed'} -> ${u.coverageState ?? u.verdict ?? 'unknown'})`)
+    .join('; ')
+  return ` Affected: ${list}${rest > 0 ? `; +${rest} more` : ''}`
 }
 
 /** ISO week label, e.g. 2026-W31. The dedupe_key grain: a signal that trips
@@ -298,6 +336,33 @@ export async function runSeoDaily(): Promise<SeoDailyResult> {
     return { cleared: num(row?.['cleared']), regressed: num(row?.['regressed']), total: num(row?.['total']) }
   }, { cleared: 0, regressed: 0, total: 0 })
 
+  // Same predicate as `transitions.regressed` above, widened to a 7-day
+  // window (transitions' 24h window is for the day-to-day tripwire; the
+  // indexed-drop anomaly compares week over week, so its "what changed"
+  // answer needs the wider window too). Named rows, not just a count, so the
+  // anomaly text and the team-facing seo-status API can say which URLs.
+  const regressedUrls = await guard('regressed url list', async () => {
+    const r = await db.execute(sql`
+      SELECT url, previous_coverage_state, coverage_state, verdict,
+             coverage_changed_at::text AS changed_at
+      FROM gsc_url_inspections
+      WHERE coverage_changed_at >= now() - interval '7 days'
+        AND verdict <> 'PASS'
+        AND previous_coverage_state IN ('Submitted and indexed', 'Indexed, not submitted in sitemap')
+      ORDER BY coverage_changed_at DESC
+      LIMIT ${REGRESSED_URLS_LIMIT}`)
+    return (r.rows ?? []).map((row): RegressedUrl => {
+      const r2 = row as Record<string, unknown>
+      return {
+        url:                    String(r2['url']),
+        previousCoverageState:  r2['previous_coverage_state'] != null ? String(r2['previous_coverage_state']) : null,
+        coverageState:          r2['coverage_state'] != null ? String(r2['coverage_state']) : null,
+        verdict:                r2['verdict'] != null ? String(r2['verdict']) : null,
+        changedAt:              r2['changed_at'] != null ? String(r2['changed_at']) : null,
+      }
+    })
+  }, [] as RegressedUrl[])
+
   const verdictCounts = await guard('verdict breakdown', async () => {
     const r = await db.execute(sql`
       SELECT COALESCE(coverage_state, 'unknown') AS state, count(*)::int AS n
@@ -359,7 +424,10 @@ export async function runSeoDaily(): Promise<SeoDailyResult> {
   if (today && weekAgo && weekAgo.indexed_count > 0) {
     const pct = ((today.indexed_count - weekAgo.indexed_count) / weekAgo.indexed_count) * 100
     if (pct < -INDEXED_DROP_PCT) {
-      const text = `Indexed URLs fell ${Math.abs(pct).toFixed(1)}% week over week: ${weekAgo.indexed_count} on ${weekAgo.day} to ${today.indexed_count} on ${today.day}. Investigate what changed on the affected URLs before it caches.`
+      // Name the affected URLs when gsc_url_inspections has them (it will not
+      // for every drop: a URL can also fall off by leaving the sitemap
+      // entirely, which regressedUrls does not capture).
+      const text = `Indexed URLs fell ${Math.abs(pct).toFixed(1)}% week over week: ${weekAgo.indexed_count} on ${weekAgo.day} to ${today.indexed_count} on ${today.day}.${formatRegressedUrlsSuffix(regressedUrls)}`
       anomalies.push(text)
       signals.push({ signal: 'indexed-drop', priority: 2, text })
     }
@@ -424,7 +492,7 @@ export async function runSeoDaily(): Promise<SeoDailyResult> {
   }
 
   const result: SeoDailyResult = {
-    day, today, weekAgo, deltas, transitions, verdictCounts, serverErrors,
+    day, today, weekAgo, deltas, transitions, regressedUrls, verdictCounts, serverErrors,
     indexnowPushed24h, snapshot, coverage, probes, probeFailures, anomalies,
     ticketsFiled, ownerEmailed, errors,
   }
