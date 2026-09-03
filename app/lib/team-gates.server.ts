@@ -330,13 +330,27 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
 
   const msg = await client.messages.create({
     model: SONNET,
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: PUBLISH_GATE_SYSTEM,
     messages: [{ role: 'user', content }],
   })
   void logTokens('publish-gate', msg.usage)
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('runPublishGateCheck: unexpected Claude response type')
+  if (msg.stop_reason === 'max_tokens') {
+    // #7148: a response cut off by the token cap fails JSON.parse and
+    // fails closed to BLOCK by design (extractJson below), which then reads
+    // exactly like a genuine adversarial finding unless this is logged
+    // distinctly. 1024 was measured too tight for a full findings array plus
+    // a multi-sentence notes field on an image-heavy post; raised to 2048 to
+    // make this rarer, but log it whenever it still happens so a run of BLOCKs
+    // caused by truncation is diagnosable instead of read as real findings.
+    console.error(
+      `[publish-gate] response for post ${postId} hit max_tokens ` +
+        `(${msg.usage.output_tokens} output tokens); the JSON may be truncated ` +
+        'and will fail-closed to BLOCK if so',
+    )
+  }
   const modelResult = parsePublishGateModelOutput(block.text)
 
   return {
