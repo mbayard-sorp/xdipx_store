@@ -61,6 +61,7 @@ apply-shadow.log
 # scripts/_tmp-scratch/, which scripts/.tmp-media/ alone did not match).
 scripts/.tmp-media/
 scripts/_tmp-*/
+scripts/.tmp/
 
 # Playwright visual harness artifacts (tests/visual/__screenshots__ baselines ARE committed)
 test-results/

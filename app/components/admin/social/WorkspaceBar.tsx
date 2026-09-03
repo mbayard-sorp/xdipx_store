@@ -3,18 +3,20 @@
  * Horizontal scroll on mobile, never a page-wide sideways scroll.
  */
 import { NavLink } from 'react-router'
-import { CalendarIcon, InboxIcon, PenIcon, ImageIcon, ChartIcon, SlidersIcon } from './icons'
+import { CalendarIcon, InboxIcon, PenIcon, ImageIcon, ChartIcon, SlidersIcon, CommentIcon } from './icons'
 
 export interface WorkspaceCounts {
   pending: number
   approved: number
   scheduled: number
   failed: number
+  inboundComments: number
 }
 
 export function WorkspaceBar({ counts }: { counts: WorkspaceCounts }) {
   const items: Array<{ to: string; label: string; Icon: typeof InboxIcon; count?: number; accent?: boolean; end?: boolean }> = [
     { to: '/admin/socials/queue', label: 'Queue', Icon: InboxIcon, count: counts.pending, accent: counts.pending > 0 },
+    { to: '/admin/socials/comments', label: 'Comments', Icon: CommentIcon, count: counts.inboundComments, accent: counts.inboundComments > 0 },
     { to: '/admin/socials/calendar', label: 'Calendar', Icon: CalendarIcon, count: counts.scheduled },
     { to: '/admin/socials/compose/new', label: 'Compose', Icon: PenIcon },
     { to: '/admin/socials/library', label: 'Library', Icon: ImageIcon },
