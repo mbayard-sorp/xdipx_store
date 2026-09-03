@@ -198,6 +198,40 @@ verdict: file it as its own standalone ticket immediately (as ticket #6933 was f
 since every other open and future PR's CI is red until it is fixed, not just the one you happened to
 be reviewing.
 
+**The tracked-flake bounce (ticket #7289).** A widespread, already-registered flake can turn the
+base-branch-red bounce above into a false owner-escalation machine: 5 of 6 tickets bounced in the
+2026-09-03 16:30 UTC pass shared one root cause (`app/lib/social-removal-watch.test.ts`'s wall-clock
+bug, ticket #7281), each independently verified sound apart from that one unrelated test, and each
+still had to be bounced because a red required `check` job cannot be verified over. At three
+attempts a ticket auto-escalates to the owner, so a slow-to-land root-cause fix can push several
+unrelated tickets to owner escalation for a problem none of them caused.
+
+This is a narrower, stronger case than the general base-branch-red bounce: it applies only when
+**both** hold:
+
+1. The failure reproduces identically on `origin/main` with no diff-under-review changes applied
+   (same verification as the base-branch-red bounce above), **and**
+2. It matches an entry already present in `docs/store-team/ci-flake-register.md`, i.e. it is a
+   *tracked* flake, not merely one you suspect is pre-existing.
+
+When both hold, the bounce still happens exactly as normal — QA cannot merge over a red required
+check, tracked or not — but the `last_error` must say so explicitly, naming the `ci-flake-register.md`
+entry, so the bounce reads as "blocked by a tracked, unrelated infra flake" rather than "this PR is
+defective" to whoever reads the ticket or an eventual owner-escalation email:
+
+> CI `check` red only because \`app/lib/social-removal-watch.test.ts\` uses the real wall clock
+> against a frozen \`now()\` (ticket #7281, registered in ci-flake-register.md). Reproduces
+> identically on origin/main HEAD, no diff-under-review changes. This PR's own logic verified
+> correct: <what you actually checked>. Re-push once #7281 lands; no other changes needed.
+
+**Known gap, stated rather than silently assumed away:** the transition API increments
+`attempt_count` on every bounce today, tracked flake or not — this playbook change does not by
+itself stop that clock, only makes the reason legible. Suppressing the counter for this specific
+case is a separate, code-level change (to the transition-map / attempt-counting logic, not this
+routine), out of scope here. Until that lands, flag a ticket that hits three attempts *solely* on
+tracked-flake bounces as exactly that in the run summary, so the owner reading the escalation email
+knows it is a queue-clock problem, not three independent defects in the same ticket.
+
 ## Step 5 — CI status and the rendered preview
 
 Cloud routines can only reach xdipx.com, so **`/api/team/pr` is the only path that works** for CI
