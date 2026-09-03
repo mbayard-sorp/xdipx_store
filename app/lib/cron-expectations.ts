@@ -516,6 +516,17 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'Daily SEO aggregate.',
   },
   {
+    route: '/cron/conversation-quality-daily',
+    plane: 'vercel',
+    schedule: '20 3 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'strategy',
+    notes: 'Nightly sms_turns rollup into conversation_quality_daily (ticket #625); the support retro baseline.',
+  },
+  {
     route: '/cron/keyword-research',
     plane: 'vercel',
     schedule: '0 2 1 * *',

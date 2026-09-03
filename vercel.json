@@ -115,6 +115,10 @@
       "schedule": "30 12 * * *"
     },
     {
+      "path": "/cron/conversation-quality-daily",
+      "schedule": "20 3 * * *"
+    },
+    {
       "path": "/cron/owner-digest",
       "schedule": "0 13 * * *"
     },

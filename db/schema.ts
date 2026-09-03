@@ -1491,6 +1491,40 @@ export const seoCoverageDaily = pgTable('seo_coverage_daily', {
 })
 
 /**
+ * Nightly per-channel conversation quality rollup (ticket #625), the
+ * conversation-surfaces twin of seo_coverage_daily above. One row per
+ * (day, channel), channel one of 'web' | 'sms' | 'voice', sourced entirely
+ * from `sms_turns` — the unified per-turn log all three channels write to
+ * (see app/lib/sms-v2/turn-logger.server.ts, web-turn-logger.server.ts,
+ * adapters/voice.server.ts). Filled by /cron/conversation-quality-daily
+ * (app/lib/conversation-quality-daily.server.ts), which documents exactly
+ * which of these come from real, already-instrumented columns versus which
+ * of the ticket's originally-requested signals (refusal rate, agent_failed
+ * 500s, cost per session) have no persisted source today and are left for a
+ * follow-up ticket rather than fabricated.
+ */
+export const conversationQualityDaily = pgTable('conversation_quality_daily', {
+  id:                  serial('id').primaryKey(),
+  day:                 date('day').notNull(),
+  channel:             varchar('channel', { length: 8 }).notNull(),   // 'web' | 'sms' | 'voice'
+  sessions:            integer('sessions').notNull().default(0),      // distinct conversation_id
+  turns:               integer('turns').notNull().default(0),
+  fabricationTrips:    integer('fabrication_trips').notNull().default(0),
+  toolBudgetExhausted: integer('tool_budget_exhausted').notNull().default(0),
+  errorTurns:          integer('error_turns').notNull().default(0),
+  // web only today (pipeline_version='v1-web-fallback', #3915); always 0 for
+  // sms/voice, which have no v1 to fall back to.
+  v2FallbackCount:     integer('v2_fallback_count').notNull().default(0),
+  p50LatencyMs:        integer('p50_latency_ms'),
+  p95LatencyMs:        integer('p95_latency_ms'),
+  createdAt:           timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:           timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  dayChannelUniq: uniqueIndex('conversation_quality_daily_day_channel_uniq').on(t.day, t.channel),
+  dayIdx:         index('idx_conversation_quality_daily_day').on(t.day),
+}))
+
+/**
  * Weekly store-wide strategy brief (051) — written by store-strategist, read by
  * every team routine at run start. Publishing a new brief supersedes the
  * previous active one; exactly one row is 'active' at a time.
