@@ -249,9 +249,15 @@ those the same number. At 3 or 4 posts a day a 13-day campaign is 39 to 56 posts
 a **rolling window over the most recent posts**, never as a per-campaign total:
 
 - **Charge:** roughly 4 ceiling, 2 mid, 1 educational per rolling 7.
-- **Cast:** at most 4 cast frames per rolling 14, and never more than one cast frame in a single
-  day. Still never three or more faces in one campaign; that one is about identity, not frequency,
-  and it does not re-base.
+- **Cast:** at most 4 cast frames per rolling 14. The cap is on repetition of the same face, not on
+  frames-per-day: no single cast member appears in more than 2 of any 5 consecutive cast frames,
+  mirroring the §3.7 product-post rotation floor ("no cast member carries more than 2 of any 5
+  consecutive product posts"). On a multi-post day, more than one cast frame is expected, not
+  exceptional — §3.7's cast-on-every-product-post rule and §5a's weekday-lane structure now
+  structurally require it at `social_freq_instagram >= 2` — so ship them, varying WHICH cast member
+  appears. The spirit of the old flat one-frame-per-day ceiling (no single face carrying the whole
+  feed) is served by that rotation floor, not by capping frame count. Still never three or more
+  faces in one campaign; that one is about identity, not frequency, and it does not re-base.
 - **Product-forward:** at most half of any single day's set, per `mission-brief.md` §6b.
 
 **State the garment in every prompt regardless.** Not a restriction, a fidelity rule: the model
@@ -520,6 +526,14 @@ meaningless. These rules exist so that cannot happen again:
 - **The image answers "why should she care" before "what is happening".** The test for a brief:
   name the feeling a woman scrolling past should have in the half second before she reads a word.
   If the honest answer is "she learns that someone is washing their hands", the brief failed.
+- **A genuinely product-free caption reaches register 9 on wanting/curiosity/permission, not on a
+  product outcome (ticket #5862).** When the subject truly has no product in it (communication,
+  consent, the orgasm gap as a conversation), the caption cannot borrow the "everything on that
+  nightstand has a job" pattern because there is no nightstand item to anchor it to, and reaching
+  for a vague gesture instead ("the thing nobody explains") is exactly the evasion the voice charter
+  bans. Name the feeling plainly instead: curious, wanting, permission, relief. `docs/emma-voice.md`
+  social addendum carries the worked lines; judge a product-free draft on whether it lands the
+  curiosity-or-permission charge on its own terms, not on whether it manages to reference a product.
 - **Owner feedback on a rejected post binds the rework, clause by clause.** Row 74 was rejected
   with *"Show a cast member cleaning a toy with one of our toy cleaning products"*; the rework
   satisfied "cast member" and dropped "toy" and "cleaning product". A rework that satisfies part of
