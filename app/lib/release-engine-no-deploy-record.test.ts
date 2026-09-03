@@ -110,9 +110,11 @@ import { kvDel } from '~/lib/kv.server'
 import { createRevertBranch, openPullRequest } from '~/lib/github.server'
 import {
   DEPLOY_TIMEOUT_MS,
+  findSupersedingDeployment,
   handleMissingDeploymentRecord,
   resolvePending,
   type PendingMerge,
+  type VercelDeployment,
 } from '~/lib/release-engine.server'
 
 // ---------------------------------------------------------------------------
@@ -215,6 +217,108 @@ describe('handleMissingDeploymentRecord: no Vercel deployment record for the SHA
     const res = await handleMissingDeploymentRecord(pending(), true)
     expect(res.phase).toBe('no-deploy-record')
     expect(vi.mocked(sendOwnerEmail)).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 1b. Ticket #7241 (split from #7140): a pending SHA that never got its own
+//     deployment record, but a LATER commit already deployed READY, is
+//     superseded rather than stuck -- self-clear instead of blocking the
+//     engine forever. #7140 evidenced this halting the engine for hours on
+//     PR #1030 (de5353d) while 14 later commits deployed fine.
+// ---------------------------------------------------------------------------
+
+describe('findSupersedingDeployment (pure)', () => {
+  const dep = (over: Partial<VercelDeployment> = {}): VercelDeployment => ({
+    uid: 'dpl_x', readyState: 'READY', url: 'x.vercel.app', sha: 'aaaa', createdAt: 1_000, ...over,
+  })
+
+  it('finds a READY deployment created after the cutoff for a different sha', () => {
+    const list = [dep({ sha: 'bbbb', createdAt: 2_000 })]
+    expect(findSupersedingDeployment(list, 1_000, 'aaaa')?.sha).toBe('bbbb')
+  })
+
+  it('ignores one created before the cutoff', () => {
+    const list = [dep({ sha: 'bbbb', createdAt: 500 })]
+    expect(findSupersedingDeployment(list, 1_000, 'aaaa')).toBeNull()
+  })
+
+  it('ignores a later deployment that is not READY', () => {
+    const list = [dep({ sha: 'bbbb', createdAt: 2_000, readyState: 'BUILDING' })]
+    expect(findSupersedingDeployment(list, 1_000, 'aaaa')).toBeNull()
+  })
+
+  it('ignores the excluded sha itself even if later and READY', () => {
+    const list = [dep({ sha: 'aaaa', createdAt: 2_000 })]
+    expect(findSupersedingDeployment(list, 1_000, 'aaaa')).toBeNull()
+  })
+
+  it('returns null on an empty list', () => {
+    expect(findSupersedingDeployment([], 1_000, 'aaaa')).toBeNull()
+  })
+
+  it('ignores a later READY deployment with no recorded sha (cannot confirm it differs from the excluded sha)', () => {
+    const list = [dep({ sha: null, createdAt: 2_000 })]
+    expect(findSupersedingDeployment(list, 1_000, 'aaaa')).toBeNull()
+  })
+})
+
+describe('handleMissingDeploymentRecord: pending SHA superseded by a later successful deploy', () => {
+  it('self-clears the pending row instead of escalating, when a later deployment is READY', async () => {
+    const p = pending() // mergedAt is DEPLOY_TIMEOUT_MS + 5min in the past
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        deployments: [
+          {
+            uid: 'dpl_later',
+            readyState: 'READY',
+            url: 'later.vercel.app',
+            created: p.mergedAt + 5 * 60_000, // deployed after this merge
+            meta: { githubCommitSha: 'ffffffffffffffffffffffffffffffffffffffff' },
+          },
+        ],
+      }), { status: 200 }),
+    ))
+
+    const res = await handleMissingDeploymentRecord(p, false)
+
+    expect(res.phase).toBe('superseded-self-cleared')
+    expect(res.resolved?.prNumber).toBe(p.prNumber)
+    // The core behavior: the pending row is cleared so the next cycle
+    // resumes merges and the out-of-band sweep, rather than sitting stuck.
+    expect(vi.mocked(kvDel)).toHaveBeenCalledWith('release-engine:pending')
+    // Not treated as a real failure: no revert, no rollback, no owner email.
+    expect(vi.mocked(createRevertBranch)).not.toHaveBeenCalled()
+    expect(vi.mocked(sendOwnerEmail)).not.toHaveBeenCalled()
+  })
+
+  it('does NOT self-clear when no later deployment has gone READY -- falls through to escalate as before', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => emptyDeploymentsResponse()))
+
+    const res = await handleMissingDeploymentRecord(pending(), false)
+
+    expect(res.phase).toBe('no-deploy-record')
+    expect(vi.mocked(kvDel)).not.toHaveBeenCalledWith('release-engine:pending')
+    expect(vi.mocked(sendOwnerEmail)).toHaveBeenCalledTimes(1)
+  })
+
+  it('dry run self-clears in-memory but never calls kvDel', async () => {
+    const p = pending()
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        deployments: [{
+          uid: 'dpl_later',
+          readyState: 'READY',
+          created: p.mergedAt + 5 * 60_000,
+          meta: { githubCommitSha: 'ffffffffffffffffffffffffffffffffffffffff' },
+        }],
+      }), { status: 200 }),
+    ))
+
+    const res = await handleMissingDeploymentRecord(p, true)
+
+    expect(res.phase).toBe('superseded-self-cleared')
+    expect(vi.mocked(kvDel)).not.toHaveBeenCalled()
   })
 })
 
