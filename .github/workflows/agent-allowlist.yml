@@ -36,10 +36,20 @@
 # This file is itself a protected path: agent-editor is forbidden from
 # `.github/**` and the classifier stops any PR that touches it, so changes here
 # come from an engineer PR and an owner merge. That is deliberate.
+#
+# `types` includes `labeled` (ticket #7244) because agent-editor attaches the
+# `voice-charter` label in a separate follow-up API call after opening the PR,
+# not atomically at creation. GitHub's default trigger set (opened, synchronize,
+# reopened) does not include `labeled`, so without this the job runs once
+# against the PR's label state at open time — before the label lands — and
+# never re-runs once it does. Confirmed on PR #1053 (job 100532946465): the
+# job read no `voice-charter` label and failed docs/emma-voice.md, but the
+# label was present minutes later with no further push to retrigger the check.
 name: agent-allowlist
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
