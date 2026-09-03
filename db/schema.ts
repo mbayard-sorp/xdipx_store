@@ -328,6 +328,34 @@ export const socialFollowerHistory = pgTable('social_follower_history', {
   platformIdx: index('idx_social_follower_history_platform').on(t.platform, t.capturedAt),
 }))
 
+// Instagram comment support lane, phase 1 (migration 093, ticket #2027).
+// Ingested hourly from the Graph API into `inbound`; an admin edits
+// `replyText` in the /admin/socials/comments queue and approves it, which
+// posts via POST /{comment_id}/replies and records `externalReplyId`.
+// Auto-reply is a separate, later ticket -- every row here needs a human
+// click to leave this table.
+export const socialComments = pgTable('social_comments', {
+  id:                 serial('id').primaryKey(),
+  externalCommentId:  varchar('external_comment_id', { length: 60 }).notNull(),
+  externalPostId:     varchar('external_post_id', { length: 60 }).notNull(),
+  platform:           varchar('platform', { length: 20 }).default('instagram').notNull(),
+  username:           varchar('username', { length: 120 }),
+  text:               text('text').notNull(),
+  commentedAt:        timestamp('commented_at'),
+  fetchedAt:          timestamp('fetched_at').defaultNow().notNull(),
+  // inbound|drafted|replied|ignored|escalated
+  status:             varchar('status', { length: 20 }).default('inbound').notNull(),
+  replyText:          text('reply_text'),
+  repliedAt:          timestamp('replied_at'),
+  repliedBy:          varchar('replied_by', { length: 60 }),
+  externalReplyId:    varchar('external_reply_id', { length: 60 }),
+  createdAt:          timestamp('created_at').defaultNow().notNull(),
+  updatedAt:          timestamp('updated_at').defaultNow().notNull(),
+}, t => ({
+  externalIdUq: uniqueIndex('uq_social_comments_external_id').on(t.externalCommentId),
+  statusIdx:    index('idx_social_comments_status').on(t.status),
+}))
+
 export const adminRoles = pgTable('admin_roles', {
   id:              serial('id').primaryKey(),
   neonAuthUserId:  varchar('neon_auth_user_id', { length: 60 }).notNull().unique(),
@@ -1453,13 +1481,9 @@ export const suggestionLinks = pgTable('suggestion_links', {
   suggKindIdx: index('idx_suggestion_links_sugg_kind').on(t.suggestionId, t.kind),
   // 092: the per-cycle writers (addTicketLinks/addTicketLink in team.server.ts
   // and release-engine.server.ts) re-add the same (suggestionId, kind, ref)
-  // link on every poll instead of upserting; this index is what turns their
-  // UNTARGETED onConflictDoNothing() into a no-op on a repeat write. The clause
-  // names no arbiter columns on purpose (see addTicketLinks): targeting them
-  // makes Postgres infer this index at plan time and fail with 42P10 wherever
-  // migration 092 has not been run, which is how the ticket bus went down on
-  // 2026-09-02. See migration 092 for the one-time dedupe of the rows this
-  // constraint would otherwise reject.
+  // link on every poll instead of upserting; this index plus onConflictDoNothing
+  // at both call sites makes a repeat write a no-op. See migration 092 for the
+  // one-time dedupe of rows this constraint would otherwise reject.
   uniqSuggKindRef: uniqueIndex('uq_suggestion_links_sugg_kind_ref').on(t.suggestionId, t.kind, t.ref),
 }))
 

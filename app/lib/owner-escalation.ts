@@ -13,10 +13,13 @@
  * So the rule is data here, and the mechanism is the type system plus the
  * sender, not a lint someone has to remember to run.
  *
- * ## Three channels, and only one of them reaches a phone
+ * ## Three channels, and only one of them may interrupt
  *
- * - **`page`** — the money path is down or the storefront is down. Email AND
- *   SMS, at any hour. Exactly two classes qualify, by owner decision.
+ * - **`page`** — the money path is down or the storefront is down. Email at
+ *   any hour, never suppressed by the queue valve. Exactly two classes
+ *   qualify, by owner decision. SMS is OFF by owner decision (2026-09-02):
+ *   `sendOwnerSms` still exists behind its type fence, but `OWNER_ALERT_PHONE`
+ *   is deliberately unset and the SMS half of a page is a recorded no-op.
  * - **`queue`** — real, owner-owned, and not urgent. Suppressed once
  *   `owner_queue_enabled` is on, because `computeOwnerQueue()` renders it from
  *   the same underlying rows (blockers, tickets, PRs) that the email was
@@ -66,7 +69,7 @@ export type PagingClass = 'money-path-down' | 'storefront-down'
 export const PAGING_CLASSES: readonly PagingClass[] = ['money-path-down', 'storefront-down']
 
 export const ESCALATION_CLASSES = {
-  // --- page: email + SMS, any hour -----------------------------------------
+  // --- page: email, any hour (SMS off by owner decision 2026-09-02) --------
   'money-path-down': {
     channel: 'page',
     why:

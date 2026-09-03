@@ -325,7 +325,16 @@ REVISE:
   without the condition that bounds it;
 - **two different objects sharing one coordinated noun phrase**, where a modifier parses onto a
   category it does not belong to (e.g. "silicone and latex condoms" reading as the nonexistent
-  "silicone condoms").
+  "silicone condoms");
+- an **absolute or guaranteed OUTCOME for the reader from a named product**, especially in future
+  tense (`it will`, `you will`, `this delivers`), where the post elsewhere acknowledges individual
+  variation. This shape hides in product pairing copy rather than in a factual sentence, so it is
+  easy to miss: run 649 took a first-submit accuracy REVISE on exactly this ("Use more lubricant
+  than feels necessary and go slower than feels necessary, and it will make its case in the first
+  minute" on vush-peachy-g-spot, ruled an implied-guaranteed universal result) after every other
+  documented pre-flight had already passed clean. As with every shape above, the fix is narrowing or
+  deletion, never a hedge — run 649 resolved its instance by deletion and both gates confirmed the
+  result.
 
 The accuracy gate (`sex-wellness-reviewer`) returned REVISE on first submit in four consecutive
 daily-writer runs (466, 485, 502, 523), and every one resolved the same way — by narrowing or
@@ -716,9 +725,12 @@ gates it already obeys. Close each one you did execute so tomorrow's run does no
 ```bash
 -d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:content-writer","note":"<what changed>"}'
 ```
-Only `process` and `strategy` rows can be closed this way (`RUN_CLOSE_KINDS`). A `campaign`,
-`promo`, `instructions`, or `code` row returns 409 — those have their own executor, or the owner's,
-and are not yours to end. Note them instead.
+`process`, `strategy`, `campaign` and `promo` rows can be closed this way (`RUN_CLOSE_KINDS`,
+widened to campaign and promo in PR #789 on 2026-08-20). **Close every `campaign` row you drafted
+against in the same run**, with a note naming the post or draft it produced; that edge went unwalked
+for two weeks because this paragraph said it did not exist, and 52 approved campaign rows piled up
+behind it. An `instructions` or `code` row returns 409 — those have their own executor, or the
+owner's, and are not yours to end. Note them instead.
 
 
 Looked but deliberately did not act (out of scope, no longer true, needs code)? Post a note with

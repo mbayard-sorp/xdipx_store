@@ -260,6 +260,22 @@ only the owner can set (§7 — #4139's `ATLAS_CLOUD_API_KEY`), and `[needs-visu
 Playwright / axe / screenshot baseline the cloud runner does not have (§5 — #3789). Run 217 burned a
 claim on each of the first two, and run 386 on #4139 and #3789. Transition it to `blocked` with a
 note naming the tag and the lane it belongs to, and spend the rest of the pass on the next ticket.
+
+**Every block carries a machine-readable class.** (migration 089, self-healing program Stage B)
+The bracket tags above are prose; the bus also has a `blockClass` column so the janitor and the
+owner queue can route a blocked row to its real next actor without reading the note. Pass it on
+the transition alongside the note, from exactly this vocabulary: `protected-path` (needs an
+owner-attended session), `needs-split` (conjunctive DONE WHEN or cross-agent epic: split it instead
+where you can), `superseded` (a merged PR or live row already covers it: prefer the evidence-retire
+edge), `duplicate`, `no-code-work` (investigated, no defect: use the #7037 evidence shape),
+`owner-env` (a secret or Vercel variable: also file a blocker with an `env_present` probe), or
+`dependency` (waiting on another ticket, named in the note). An unrecognised value is dropped
+server-side, so a typo is a silent NULL: copy the spelling. Example:
+```bash
+-d '{"op":"transition","id":<id>,"to":"blocked","actor":"agent:rr7-engineer","blockClass":"owner-env",
+     "note":"[owner-env] needs SENTRY_AUTH_TOKEN in Vercel; blocker #<n> filed with env_present probe"}'
+```
+On 2026-09-02, 34 of the 35 blocked rows had no class because nothing told this routine to set one.
 Watch for the capability even when the tag is missing: a DONE WHEN that hinges on an env secret or the
 visual harness is disposed the same way and flagged for the tag, since filers are still learning to
 apply it.
