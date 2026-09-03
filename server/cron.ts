@@ -592,6 +592,31 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/conversation-quality-daily
+   * Schedule: daily 03:20 UTC — well after midnight UTC so it always
+   * aggregates a fully-closed prior day across every timezone that matters
+   * here. Aggregates yesterday's sms_turns (the unified per-turn log for
+   * web/sms/voice) into conversation_quality_daily: sessions, turns,
+   * fabrication-guard trips, tool-budget exhaustion, error turns, the
+   * v2-to-v1 web fallback count, and p50/p95 latency, per channel (ticket
+   * #625). See app/lib/conversation-quality-daily.server.ts for exactly
+   * which of the ticket's originally-requested signals this does and does
+   * not cover.
+   */
+  cronRoute('/conversation-quality-daily', async (req, res) => {
+    try {
+      const { runConversationQualityDaily } = await import('../app/lib/conversation-quality-daily.server.js')
+      const dayParam = req.query['day'] ?? req.body?.day
+      const day = typeof dayParam === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : undefined
+      const result = await runConversationQualityDaily(day)
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:conversation-quality-daily]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/keyword-research
    * Schedule: monthly, 1st 02:00 UTC — discover new SEO keywords via
    * DataForSEO (when creds exist) or LLM-only expansion, classify, and write

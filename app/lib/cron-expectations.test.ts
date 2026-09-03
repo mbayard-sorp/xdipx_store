@@ -108,7 +108,10 @@ describe('the cron expectation manifest', () => {
     // this cap actually guards against is a poller — the two every-2-minute
     // ones would add 2,880 a day between them, which is why they are asserted
     // unrecorded by name in the test above rather than left to this ceiling.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(17)
+    //
+    // Raised 17 -> 18 for /cron/conversation-quality-daily (ticket #625), also
+    // DAILY: +1 row a day, same arithmetic.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(18)
   })
 
   it('records the surfaces whose failure has a next actor', () => {
