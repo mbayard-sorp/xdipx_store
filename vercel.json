@@ -143,6 +143,10 @@
       "schedule": "20 */6 * * *"
     },
     {
+      "path": "/cron/instagram-comments-ingest",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/cron/runpod-pod-watch",
       "schedule": "17 * * * *"
     },
