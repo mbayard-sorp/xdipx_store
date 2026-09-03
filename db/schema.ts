@@ -328,6 +328,34 @@ export const socialFollowerHistory = pgTable('social_follower_history', {
   platformIdx: index('idx_social_follower_history_platform').on(t.platform, t.capturedAt),
 }))
 
+// Instagram comment support lane, phase 1 (migration 093, ticket #2027).
+// Ingested hourly from the Graph API into `inbound`; an admin edits
+// `replyText` in the /admin/socials/comments queue and approves it, which
+// posts via POST /{comment_id}/replies and records `externalReplyId`.
+// Auto-reply is a separate, later ticket -- every row here needs a human
+// click to leave this table.
+export const socialComments = pgTable('social_comments', {
+  id:                 serial('id').primaryKey(),
+  externalCommentId:  varchar('external_comment_id', { length: 60 }).notNull(),
+  externalPostId:     varchar('external_post_id', { length: 60 }).notNull(),
+  platform:           varchar('platform', { length: 20 }).default('instagram').notNull(),
+  username:           varchar('username', { length: 120 }),
+  text:               text('text').notNull(),
+  commentedAt:        timestamp('commented_at'),
+  fetchedAt:          timestamp('fetched_at').defaultNow().notNull(),
+  // inbound|drafted|replied|ignored|escalated
+  status:             varchar('status', { length: 20 }).default('inbound').notNull(),
+  replyText:          text('reply_text'),
+  repliedAt:          timestamp('replied_at'),
+  repliedBy:          varchar('replied_by', { length: 60 }),
+  externalReplyId:    varchar('external_reply_id', { length: 60 }),
+  createdAt:          timestamp('created_at').defaultNow().notNull(),
+  updatedAt:          timestamp('updated_at').defaultNow().notNull(),
+}, t => ({
+  externalIdUq: uniqueIndex('uq_social_comments_external_id').on(t.externalCommentId),
+  statusIdx:    index('idx_social_comments_status').on(t.status),
+}))
+
 export const adminRoles = pgTable('admin_roles', {
   id:              serial('id').primaryKey(),
   neonAuthUserId:  varchar('neon_auth_user_id', { length: 60 }).notNull().unique(),
