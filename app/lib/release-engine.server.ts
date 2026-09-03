@@ -1159,7 +1159,8 @@ export function findSupersedingDeployment(
       (d) =>
         d.readyState === 'READY'
         && d.createdAt > afterMs
-        && (!d.sha || d.sha.toLowerCase() !== excludeSha.toLowerCase()),
+        && d.sha
+        && d.sha.toLowerCase() !== excludeSha.toLowerCase(),
     ) ?? null
   )
 }

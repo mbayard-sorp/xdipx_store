@@ -256,6 +256,11 @@ describe('findSupersedingDeployment (pure)', () => {
   it('returns null on an empty list', () => {
     expect(findSupersedingDeployment([], 1_000, 'aaaa')).toBeNull()
   })
+
+  it('ignores a later READY deployment with no recorded sha (cannot confirm it differs from the excluded sha)', () => {
+    const list = [dep({ sha: null, createdAt: 2_000 })]
+    expect(findSupersedingDeployment(list, 1_000, 'aaaa')).toBeNull()
+  })
 })
 
 describe('handleMissingDeploymentRecord: pending SHA superseded by a later successful deploy', () => {
