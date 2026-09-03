@@ -200,6 +200,25 @@ export async function getMapBrands(): Promise<string[]> {
 // Single-variant recompute
 // ---------------------------------------------------------------------------
 
+/**
+ * Every value the `trigger` column may hold, and the single source of truth for
+ * it on the code side.
+ *
+ * It has a twin in the database -- `pricing_audit_log_trigger_check` -- and the
+ * two drifted apart for months without anyone noticing, because the audit write
+ * is wrapped in a try/catch: the CHECK still listed only the first four while
+ * the code had started passing 'batch_catchup' and then 'batch_continuation',
+ * so every one of those inserts was rejected, swallowed, and reported as a
+ * successful run. pricing-trigger-values.test.ts now holds the two lists equal
+ * so the next value added here cannot ship ahead of the migration that permits
+ * it. See db/migrations/093_pricing_audit_trigger_values.sql.
+ */
+export const PRICING_TRIGGERS = [
+  'webhook', 'batch', 'manual', 'clearance_ladder', 'batch_catchup', 'batch_continuation',
+] as const
+
+export type PricingTrigger = (typeof PRICING_TRIGGERS)[number]
+
 export interface RecomputeVariantParams {
   /** Shopify variant GID, e.g. "gid://shopify/ProductVariant/12345" */
   variantId: string
@@ -212,7 +231,7 @@ export interface RecomputeVariantParams {
   // 'batch_continuation' is a resumed slice of the same day's walk. Kept distinct
   // from 'batch' on purpose: the digest's liveness check asks whether the 07:00
   // cron itself fired, while coverage counts every slice.
-  trigger:   'webhook' | 'batch' | 'manual' | 'clearance_ladder' | 'batch_catchup' | 'batch_continuation'
+  trigger:   PricingTrigger
 }
 
 export interface RecomputeVariantResult {
@@ -220,6 +239,12 @@ export interface RecomputeVariantResult {
   auditId:   number | null
   applied:   boolean
   error?:    string
+  /**
+   * The audit row could not be written, so this price change happened without
+   * a record. Surfaced rather than only logged: see the counter on
+   * RecomputeCatalogResult for what that silence cost.
+   */
+  auditFailed?: boolean
 }
 
 const TEST_SKU_PREFIX = /^XDX-TEST-/i
@@ -361,6 +386,7 @@ async function recomputeFromData(
   })
 
   let auditId: number | null = null
+  let auditFailed = false
   try {
     const rows = await db
       .insert(pricingAuditLog)
@@ -390,6 +416,7 @@ async function recomputeFromData(
     auditId = rows[0]?.id ?? null
   } catch (err) {
     console.error('[pricing-apply-v2] audit log write failed:', err)
+    auditFailed = true
   }
 
   let applied = false
@@ -428,7 +455,13 @@ async function recomputeFromData(
     }
   }
 
-  return { status, auditId, applied, ...(applyError ? { error: applyError } : {}) }
+  return {
+    status,
+    auditId,
+    applied,
+    ...(applyError  ? { error: applyError } : {}),
+    ...(auditFailed ? { auditFailed: true } : {}),
+  }
 }
 
 export async function recomputeVariant(
@@ -728,6 +761,29 @@ export interface RecomputeCatalogResult {
   pages:         number
   /** Variants priced across every invocation for this UTC day, this one included. */
   dayTotal:      number
+  /**
+   * Variants whose audit row could not be written. Nonzero means prices moved
+   * that the pricing audit log does not know about.
+   *
+   * This is counted because it once was not. `pricing_audit_log_trigger_check`
+   * allowed only webhook|batch|manual|clearance_ladder, while the code had been
+   * passing 'batch_catchup' and then 'batch_continuation' for months. Every one
+   * of those inserts failed the CHECK, was caught by the try/catch around the
+   * write, logged to a console nobody reads, and the run reported success. On
+   * 2026-09-03 the four continuation passes applied 1,426 price changes and
+   * wrote zero audit rows; the only surviving trace was the id sequence, which
+   * had advanced 3,320 past the highest surviving row.
+   *
+   * The cost was not just the missing history. Catalog coverage -- the A1
+   * milestone's whole acceptance criterion -- is measured off this table, so it
+   * read 44% while the walk had in fact reached 94%. A fix that works and a
+   * metric that says it does not is the same failure the resumable walk was
+   * built to end.
+   *
+   * Deliberately counted rather than made fatal: a price the shopper sees
+   * should not be held hostage to its bookkeeping row. But it must be loud.
+   */
+  auditWriteFailures: number
 }
 
 /**
@@ -810,7 +866,7 @@ async function writePricingBatchCursor(state: PricingBatchCursor): Promise<void>
  * skip the variants it had not reached.
  */
 export async function recomputeCatalog(opts: {
-  trigger: 'batch' | 'manual' | 'batch_catchup' | 'batch_continuation'
+  trigger: Extract<PricingTrigger, 'batch' | 'manual' | 'batch_catchup' | 'batch_continuation'>
   /** Wall-clock budget. Omit for an unbounded walk (scripts, tests). */
   budgetMs?: number
   /** Resume from today's checkpoint instead of starting at the catalog head. */
@@ -830,7 +886,7 @@ export async function recomputeCatalog(opts: {
 
   const counts: RecomputeCatalogResult = {
     total: 0, autoApplied: 0, pending: 0, skipped: 0, rejected: 0, errors: 0,
-    durationMs: 0, done: false, pages: 0, dayTotal: 0,
+    durationMs: 0, done: false, pages: 0, dayTotal: 0, auditWriteFailures: 0,
   }
 
   const prior = opts.resume ? await readPricingBatchCursor(day) : null
@@ -876,6 +932,7 @@ export async function recomputeCatalog(opts: {
         dayTotal++
         try {
           const result = await recomputeFromData(product, variant, ctx)
+          if (result.auditFailed)                      counts.auditWriteFailures++
           if (result.error)                            counts.errors++
           else if (result.status === 'auto_applied')   counts.autoApplied++
           else if (result.status === 'pending')        counts.pending++

@@ -13,6 +13,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const settingsStore = new Map<string, string>()
 const auditRows: Array<Record<string, unknown>> = []
+/** Set to simulate the CHECK constraint rejecting a trigger value. */
+let auditInsertFails = false
 
 vi.mock('./db.server', () => ({
   db: {
@@ -35,6 +37,12 @@ vi.mock('./db.server', () => ({
               settingsStore.set(String(row['key']), String(row['value']))
             },
           }
+        }
+        if (auditInsertFails) {
+          throw new Error(
+            'new row for relation "pricing_audit_log" violates check constraint '
+            + '"pricing_audit_log_trigger_check"',
+          )
         }
         auditRows.push(row)
         return { returning: async () => [{ id: auditRows.length }] }
@@ -127,6 +135,39 @@ beforeEach(() => {
   auditRows.length = 0
   pages.length = 0
   fetchCalls.length = 0
+  auditInsertFails = false
+})
+
+/**
+ * The audit write is wrapped in a try/catch that logs and carries on, which is
+ * the right call on a money path -- a shopper-visible price should not be held
+ * hostage to its bookkeeping row -- but for months it meant nobody could tell
+ * the write was failing at all. `pricing_audit_log_trigger_check` allowed only
+ * webhook|batch|manual|clearance_ladder while the code passed 'batch_catchup'
+ * and 'batch_continuation', so on 2026-09-03 the continuation passes applied
+ * 1,426 price changes and recorded none, and every watcher read green.
+ */
+describe('swallowed audit writes', () => {
+  it('counts them, and still finishes the walk', async () => {
+    auditInsertFails = true
+    pages.push({ products: [product('a', 3)], endCursor: null, hasNextPage: false })
+
+    const result = await recomputeCatalog({ trigger: 'batch_continuation' })
+
+    expect(result.done).toBe(true)
+    expect(result.total).toBe(3)
+    expect(result.auditWriteFailures).toBe(3)
+    expect(auditRows).toHaveLength(0)
+  })
+
+  it('reports zero when the writes land, so the counter means something', async () => {
+    pages.push({ products: [product('a', 3)], endCursor: null, hasNextPage: false })
+
+    const result = await recomputeCatalog({ trigger: 'batch_continuation' })
+
+    expect(result.auditWriteFailures).toBe(0)
+    expect(auditRows).toHaveLength(3)
+  })
 })
 
 describe('recomputeCatalog resumable walk', () => {
