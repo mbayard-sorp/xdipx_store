@@ -351,8 +351,11 @@ anyone opens Studio, so a drafts-perspective read gives you the wrong clock:
 
 ```bash
 npx tsx scripts/sanity-content-cli.ts query \
-  --query '*[_id == "singleton.homeSeo"][0]{seoTitle, seoDescription, ogImageUrl, note, _updatedAt}'
+  '*[_id == "singleton.homeSeo"][0]{seoTitle, seoDescription, ogImageUrl, note, _updatedAt}'
 ```
+
+The GROQ string is a **positional** argument (`query '<groq>'`), not a `--query` flag — passing
+`--query` exits 1 with `query needs a GROQ string`.
 
 **Read the live tags:**
 
@@ -505,7 +508,10 @@ Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counte
    script's internal gate re-check from refusing on your own running row. `--ref-image` routes to
    the ref-image path of `generateImage()` (Atlas `seedream-v4.5/edit` primary, fal Kontext
    fallback; routing per `docs/media-model-routing.md`) so the real product appears in the
-   scene — use it whenever the surface links to a product.
+   scene — use it whenever the surface links to a product. **`--ref-image` is required**; on a
+   surface with genuinely no product target (an abstract mood band, a collection-door tile with no
+   single SKU to anchor on), pass `--no-ref --no-ref-reason "<why>"` instead — omitting both fails
+   the first generation of the run with `--ref-image is required`.
 3. The script **gates → generates (Atlas → fal → Imagen) → uploads to a Sanity asset → patches
    `singleton.homepage` → posts spend → prints a JSON manifest**. Read the manifest; if
    `placed:true`, increment `imagesSoFar`. If `skipped:true`, stop the imagery loop.
