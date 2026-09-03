@@ -87,7 +87,7 @@ export const xPublisher: SocialPublisher = {
       )
     }
 
-    const { uploadMediaFromUrl, postTweet } = await import('../twitter.server')
+    const { uploadMediaFromUrl, postTweet, setMediaAltText } = await import('../twitter.server')
 
     // uploadMediaFromUrl swallows its own failures and returns null. Treat that
     // as terminal rather than posting text-only: an image post that quietly
@@ -105,9 +105,25 @@ export const xPublisher: SocialPublisher = {
       mediaIds.push(id)
     }
 
+    // Alt text (social_posts.alt_text, ticket #4204), on the first image only,
+    // mirroring the Instagram adapter's own carousel convention. Additive and
+    // non-fatal: a metadata-call failure degrades to publishing without alt
+    // text rather than failing the post, the same shape as the Instagram
+    // product tag's degrade-on-failure (instagram.server.ts
+    // createContainerWithOptionalTag).
+    const altText = input.altText?.trim()
+    let altTextNote: string | undefined
+    if (altText && mediaIds[0]) {
+      const attached = await setMediaAltText(mediaIds[0], altText)
+      if (!attached.ok) {
+        console.warn(`[x-publisher] post ${input.postId} alt text failed, publishing without it: ${attached.detail}`)
+        altTextNote = `Alt text failed, published without it: ${attached.detail}`
+      }
+    }
+
     try {
       const tweet = await postTweet(caption, mediaIds)
-      return { ok: true, externalPostId: tweet.id }
+      return { ok: true, externalPostId: tweet.id, ...(altTextNote ? { note: altTextNote } : {}) }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return { ok: false, reason: 'error', detail: describeXApiError(message) }
