@@ -369,6 +369,19 @@ Draft against both, and understand which one you are avoiding.
   or placed by a cast member, and may be named. Product-free frames are for subjects with no
   product in them (communication, consent, the orgasm gap as a conversation). "No product in
   frame" is a choice a brief has to justify, not a default it inherits from a slot.
+- **Product-free resource posts reach 9-by-implication on wanting, permission, and curiosity, not
+  on a product outcome (ticket #5862).** Every worked example above anchors the charge to a product
+  ("everything on that nightstand has a job") because slot A's resource posts (§3.9,
+  `docs/store-team/instagram-campaigns.md`) usually carry no product to promise an outcome from, and
+  a caption written to that pattern with nothing to swap in reads as too-tame or reaches for vague
+  evasion instead ("the thing nobody explains") to manufacture heat it has no anchor for. On a
+  product-free post the charge comes from naming the *feeling* plainly and leaving the *act*
+  implied, exactly the same fence, just aimed at wanting/curiosity/permission instead of a product:
+  "Curious is not behind. It just means you have not gotten there yet." "Nobody is going to hand you
+  permission. You get to just take it." "The wanting does not need an explanation. It never did."
+  "You are allowed to want something and not know yet what it is." Each names a real state (curious,
+  wanting, permission) as fact, never narrates a body or an act, and never manufactures a product
+  substitute for the missing anchor.
 - **Hashtags: 5 to 8, and they are search keywords, not reach** (Instagram/TikTok; X carves out to
   0-3, see above). Two broad category tags
   (#sexualwellness, #sexualhealth, #intimacy, #selfcare), three niche tags on the post's subject
