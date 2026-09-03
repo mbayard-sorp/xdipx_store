@@ -817,6 +817,44 @@ total (21 images), still trivial against the daily content-team budget.
 > default expression), and that someone studying a product is visibly weighing a question while
 > someone meeting the viewer's eye is endorsing one.
 
+- `cast: vivian` + FemmeFunn Ultra Bullet Massager (`femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator`,
+  catalog title "Ultra Bullet Rechargeable Mini Vibrator 4.3 Inches"), "How Do You Get More
+  Confident in Bed? Start With the Feeling You Want" (`podcast-notes`, content run 669). Gesture
+  per the "How do I even start?" row: product held out at arm's length in both hands, leaning back
+  slightly, wide-eyed, reading it like instructions in a language she almost knows. **Casting:**
+  brief-directed `vivian` (`emotionTags` warm/reassuring/candid/amused), deliberate against type —
+  the post's thesis is that feeling inexperienced does not track with how much sex you have had,
+  so a woman in her mid 50s staging "how do I even start" IS the thesis, not a mismatch. Checked
+  against the keeper log's five most recent named human heroes (`maya` 09-01, `sofia` 08-28,
+  `marcus` 08-27, `jade` 08-25, `priya` 08-20); `vivian` last appeared 08-18, six heroes back, so
+  no-repeat-within-5 is clear. **Register constraints applied (post touches shame/body image, per
+  caller brief):** sincere and warm with a wry edge, explicitly not a comic punchline; real-world
+  product proportions, no scale exaggeration under the levity license. **Camera distance stated
+  explicitly** ("waist-up framing, generous room on both sides of the subject") per the Emma
+  guide-mode / jade / marcus precedent, since `vivian`'s `referencePhoto` is also a tight portrait
+  crop (no `editorialPhoto` on file, composited against `referencePhoto`). Two rounds via
+  `composeSceneFrame` (Atlas `atlas/seedream-4.5-edit` one-stage composite, `landscape_4_3`, 2
+  candidates each).
+  - **Round 1 (2 candidates, REJECTED both):** product identity (teal body, pink end-cap),
+    gesture, hand anatomy, waist-up framing and warm-light lock all held clean, but both
+    candidates rendered a broad open-mouth delighted grin reading as a triumphant selfie moment,
+    not the brief's wide-eyed, wry, quietly-afraid-of-being-behind register — closer to the
+    disallowed comic-punchline read than the sincere-with-wry-edge one, and would fit almost any
+    "look what I found" post equally well (swap-test risk).
+  - **Round 2 (corrected prompt, 2 candidates):** added explicit affect language ("brows raised in
+    mild bewilderment, eyes wide and a little uncertain, lips pressed into a small closed-mouth
+    wry almost-smile rather than a grin... a flicker of quiet self-conscious worry underneath the
+    composure") plus matching negatives ("no delighted grin, no toothy triumphant smile, no joyful
+    open-mouth laugh, no celebratory selfie energy, no gleeful expression"). Candidate 2: wide
+    eyes, raised brows, closed-mouth wry near-smile, gaze on the product and not the camera (no
+    testimonial-grammar eye contact, the standing lesson from the entry above), product held
+    faithfully at real-world scale → picked, `image-74fbacfd899d79740199eb6ae7a19ca843cb13fe-1200x900-png`.
+    Candidate 1 close runner-up, gaze reads slightly past the product rather than on it; not used.
+  - **Checker note:** the catalog title's distinctive tokens are `ultra` + `inches` (not
+    `femmefunn` — the `productPage` title omits the brand word); the composed prompt states both
+    ("FemmeFunn Ultra Bullet Massager" and "a compact bullet just over four inches long"), so
+    `heroNamesAnyProduct()` passes.
+
 ### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
 
 For owned surfaces only: homepage editorial tiles, §0-P surreal-option blog heroes (never on †
