@@ -53,6 +53,7 @@ function row(over: Partial<NonNullable<Row>> = {}): NonNullable<Row> {
     episodeId: null,
     mediaKind: null,
     removalSource: 'unknown',
+    sceneLocation: null,
     ...over,
   }
 }

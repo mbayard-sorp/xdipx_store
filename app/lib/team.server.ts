@@ -2702,6 +2702,13 @@ export interface DraftSocialPostInput {
   altText?: string | undefined
   imageBrief?: string | undefined
   subject?: string | undefined
+  // Scene variety tracking (migration 093, ticket #4345, instagram-campaigns.md
+  // §3.8). castSlugs already existed as a column (migration 084) but was never
+  // threaded through the draft op; sceneLocation is the new column. Both are
+  // optional: not every post is a cast/location shoot (education, inspiration
+  // posts legitimately carry neither).
+  sceneLocation?: string | undefined
+  castSlugs?: string[] | undefined
 }
 
 /** Review states a still-open draft can sit in before the gate or the owner
@@ -2778,6 +2785,8 @@ export async function createDraftSocialPost(
       altText:       p.altText ?? null,
       imageBrief:    p.imageBrief ?? null,
       subject:       p.subject ?? null,
+      sceneLocation: p.sceneLocation ?? null,
+      castSlugs:     p.castSlugs ?? null,
     })
     .returning({ id: socialPosts.id })
   return { id: row!.id, deduped: false }

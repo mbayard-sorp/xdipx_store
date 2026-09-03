@@ -3,7 +3,7 @@
  *
  *   { op: 'draft', platform, postType?, tweetText, mediaUrls?, dealHistoryId?,
  *     scheduledFor?, reworkedFrom?, shopifyProductId?, altText?, imageBrief?,
- *     subject?,
+ *     subject?, sceneLocation?, castSlugs?,
  *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id, deduped }
  *     `deduped:true` means a still-open (pending_review/needs_changes) row for
  *     the same platform, caption, and campaign day already existed and `id`
@@ -14,7 +14,11 @@
  *     083, owner direction 2026-08-22) are the accessibility description and
  *     the durable "what does this image depict" record; altText is what the
  *     Instagram publisher sends as alt_text and must never be folded into the
- *     caption.
+ *     caption. sceneLocation/castSlugs (migration 093, ticket #4345) persist
+ *     the scene-variety choice at draft time (instagram-campaigns.md §3.8: no
+ *     location repeat inside 8 consecutive Instagram product posts, no cast
+ *     member on more than 2 of any 5), read back through {op:'list'} so a
+ *     routine can compute both windows from one list call.
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
  *   { op: 'config' } -> { frequencies, autopostValve, platformValves: { instagram, x } }
  *     autopostValve (social_team_autopost) gates nothing on the publish path;
@@ -159,6 +163,13 @@ export async function action({ request }: ActionFunctionArgs) {
       altText:      typeof b['altText'] === 'string' && b['altText'].length > 0 ? b['altText'] : undefined,
       imageBrief:   typeof b['imageBrief'] === 'string' && b['imageBrief'].length > 0 ? b['imageBrief'] : undefined,
       subject:      typeof b['subject'] === 'string' && b['subject'].length > 0 ? b['subject'] : undefined,
+      sceneLocation:
+        typeof b['sceneLocation'] === 'string' && b['sceneLocation'].trim().length > 0 && b['sceneLocation'].length <= 80
+          ? b['sceneLocation'].trim()
+          : undefined,
+      castSlugs: Array.isArray(b['castSlugs'])
+        ? (b['castSlugs'] as unknown[]).filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+        : undefined,
     })
     // Library pick (#4937): the agent chooses one of the generated candidates
     // client-side, so the pick is recorded here, by url, when the draft row
