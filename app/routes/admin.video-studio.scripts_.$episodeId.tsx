@@ -15,7 +15,8 @@ import { requireAdmin, getAdminUser } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { videoEpisodes, videoSeries } from '../../db/schema'
 import { and, eq } from 'drizzle-orm'
-import { decideEpisode } from '~/lib/video-episodes.server'
+import { decideEpisode, editEpisodeScript } from '~/lib/video-episodes.server'
+import { SCRIPT_LOCKED_STATUSES } from '~/lib/video-episodes'
 import { getTeamConfig } from '~/lib/team.server'
 import { VIDEO_MAX_COST_CENTS_DEFAULT } from '~/lib/team-keys'
 import { REVIEW_NOTE_TAGS } from './admin.video-studio.scripts'
@@ -87,8 +88,43 @@ export async function action({ request, params }: ActionFunctionArgs) {
   await requireAdmin(request)
   const user = await getAdminUser(request)
   const form = await request.formData()
-  const decision = String(form.get('decision') ?? '')
   const id = Number(params['episodeId'])
+
+  // The owner editing script text (ticket #7558) is a separate intent from
+  // the approve/needs_changes/rejected decision below, so it never touches
+  // production_status or the approval note.
+  if (String(form.get('intent') ?? '') === 'edit') {
+    const str = (k: string) => { const v = form.get(k); return typeof v === 'string' ? v : undefined }
+    const script: NonNullable<Parameters<typeof editEpisodeScript>[0]['script']> = {}
+    const voiceover = str('voiceover'); if (voiceover !== undefined) script.voiceover = voiceover
+    const presenterLine = str('presenterLine'); if (presenterLine !== undefined) script.presenterLine = presenterLine
+    const cta = str('cta'); if (cta !== undefined) script.cta = cta
+    const shareLine = str('shareLine'); if (shareLine !== undefined) script.shareLine = shareLine
+    const captions: Record<string, string> = {}
+    for (const [key, value] of form.entries()) {
+      if (key.startsWith('caption_') && typeof value === 'string') captions[key.slice('caption_'.length)] = value
+    }
+    if (Object.keys(captions).length) script.captions = captions
+
+    const siteCut: NonNullable<Parameters<typeof editEpisodeScript>[0]['siteCut']> = {}
+    const siteCutTitle = str('siteCutTitle'); if (siteCutTitle !== undefined) siteCut.title = siteCutTitle
+    const siteCutDek = str('siteCutDek'); if (siteCutDek !== undefined) siteCut.dek = siteCutDek
+    const siteCutCopy = str('siteCutCopy'); if (siteCutCopy !== undefined) siteCut.copy = siteCutCopy
+
+    try {
+      await editEpisodeScript({
+        episodeId: id,
+        editedBy: user?.email ?? 'owner',
+        ...(Object.keys(script).length ? { script } : {}),
+        ...(Object.keys(siteCut).length ? { siteCut } : {}),
+      })
+      return Response.json({ ok: true, edited: true })
+    } catch (err) {
+      return Response.json({ ok: false, error: err instanceof Error ? err.message : 'Edit failed' }, { status: 400 })
+    }
+  }
+
+  const decision = String(form.get('decision') ?? '')
   if (decision !== 'approved' && decision !== 'needs_changes' && decision !== 'rejected') {
     return Response.json({ ok: false, error: 'Bad decision' }, { status: 400 })
   }
@@ -120,8 +156,10 @@ function Closer({ label, rule, value }: { label: string; rule: string; value: st
 export default function ScriptReader() {
   const { ep, maxCostCents } = useLoaderData<typeof loader>()
   const fetcher = useFetcher<{ ok: boolean; decision?: string; error?: string }>()
+  const editFetcher = useFetcher<{ ok: boolean; edited?: boolean; error?: string }>()
   const navigate = useNavigate()
   const [changesOpen, setChangesOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [tags, setTags] = useState<string[]>([])
   const busy = fetcher.state !== 'idle'
   const decided = fetcher.data?.ok ? fetcher.data.decision : null
@@ -132,6 +170,13 @@ export default function ScriptReader() {
   // on a failed row is a RETAKE and spends again, so it says so on the button.
   const failed = ep.productionStatus === 'failed'
   const decidable = ep.productionStatus === 'pending_approval' || ep.productionStatus === 'needs_changes' || failed
+  // Mirrors SCRIPT_LOCKED_STATUSES in video-episodes.server.ts: editing text
+  // after a render has started or completed cannot change what was actually
+  // rendered.
+  const scriptEditable = !(SCRIPT_LOCKED_STATUSES as readonly string[]).includes(ep.productionStatus)
+  const editBusy = editFetcher.state !== 'idle'
+  const editSaved = editFetcher.data?.ok && editFetcher.data.edited
+  const editErr = editFetcher.data && !editFetcher.data.ok ? editFetcher.data.error : null
 
   return (
     <div className="space-y-4">
@@ -210,6 +255,77 @@ export default function ScriptReader() {
           </fetcher.Form>
         )}
         {err && <p className="mx-auto mt-1 max-w-4xl text-xs text-red-700">{err}</p>}
+
+        {/* Owner script edit (ticket #7558): separate from the decide flow
+            above, so editing text never touches production_status. Available
+            on any status that has not started or finished rendering. */}
+        {scriptEditable && (
+          <div className="mx-auto mt-2 flex max-w-4xl items-center justify-end gap-2">
+            {editSaved && !editOpen && <span className="text-xs text-ink-3">Saved ✓</span>}
+            <button type="button" onClick={() => setEditOpen(v => !v)}
+              className="text-xs font-semibold text-ink-3 underline hover:text-ink">
+              {editOpen ? 'Close edit' : 'Edit script'}
+            </button>
+          </div>
+        )}
+        {editOpen && scriptEditable && (
+          <editFetcher.Form method="post" className="mx-auto mt-2 max-w-4xl space-y-2 rounded-xl border border-line bg-paper-2 p-3">
+            <input type="hidden" name="intent" value="edit" />
+            <p className="text-[11px] uppercase tracking-wide text-ink-4">Edit script text</p>
+            {ep.presenterLine != null && (
+              <label className="block text-xs text-ink-3">
+                Spoken line
+                <textarea name="presenterLine" defaultValue={ep.presenterLine} rows={2}
+                  className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+              </label>
+            )}
+            {ep.voiceover != null && (
+              <label className="block text-xs text-ink-3">
+                Voiceover
+                <textarea name="voiceover" defaultValue={ep.voiceover} rows={2}
+                  className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+              </label>
+            )}
+            <label className="block text-xs text-ink-3">
+              Share line
+              <input name="shareLine" type="text" defaultValue={ep.shareLine ?? ''}
+                className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+            </label>
+            <label className="block text-xs text-ink-3">
+              CTA
+              <input name="cta" type="text" defaultValue={ep.cta ?? ''}
+                className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+            </label>
+            {Object.keys(ep.captions).length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs text-ink-3">Captions</p>
+                {Object.entries(ep.captions).map(([platform, text]) => (
+                  <label key={platform} className="block text-xs text-ink-4">
+                    <span className="font-mono">{platform}</span>
+                    <textarea name={`caption_${platform}`} defaultValue={text} rows={2}
+                      className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+                  </label>
+                ))}
+              </div>
+            )}
+            {ep.siteCut && (
+              <div className="space-y-1">
+                <p className="text-xs text-ink-3">Site cut (register 9, /social + PDP)</p>
+                <input name="siteCutTitle" type="text" placeholder="Title" defaultValue={ep.siteCut.title ?? ''}
+                  className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+                <input name="siteCutDek" type="text" placeholder="Dek" defaultValue={ep.siteCut.dek ?? ''}
+                  className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+                <textarea name="siteCutCopy" placeholder="Copy" rows={3} defaultValue={ep.siteCut.copy ?? ''}
+                  className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+              </div>
+            )}
+            <button type="submit" disabled={editBusy}
+              className="rounded-full bg-ink px-4 py-1.5 text-xs font-semibold text-paper disabled:opacity-40">
+              Save edit
+            </button>
+            {editErr && <p className="text-xs text-red-700">{editErr}</p>}
+          </editFetcher.Form>
+        )}
       </div>
 
       <div className="mx-auto max-w-4xl space-y-4 pb-28 md:pb-4">

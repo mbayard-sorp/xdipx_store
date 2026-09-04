@@ -1855,13 +1855,13 @@ export interface VideoEpisodePlacement {
 export interface VideoEpisodeReviewNote {
   at: string
   /**
-   * Owner decisions, plus the two machine-written entries the render lane
-   * appends (ticket #5726): 'released' when a claimed episode was handed back
-   * unrendered, 'render_failed' when its job died at the provider. Both are
-   * audit trail only; neither is an owner decision and neither can be written
-   * through decideEpisode.
+   * Owner decisions, plus machine-written entries: 'released' when a claimed
+   * episode was handed back unrendered, 'render_failed' when its job died at
+   * the provider (ticket #5726), 'edited' when the owner saved a script edit
+   * via editEpisodeScript (ticket #7558). None of the three is an owner
+   * decision and none can be written through decideEpisode.
    */
-  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed'
+  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed' | 'edited'
   tags?: string[]
   note?: string
   by?: string
