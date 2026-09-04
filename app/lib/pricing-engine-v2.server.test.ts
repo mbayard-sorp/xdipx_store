@@ -133,6 +133,25 @@ describe('computePrice — MSRP ceiling', () => {
     expect(r?.compare_at).toBe(80)
   })
 
+  it('msrpBelowFloor is true when the floor-satisfying price exceeds MSRP (#7515)', () => {
+    // cost=9, margin_floor=0.25 -> floor=12.00; msrp=11.99 < floor, so MSRP will
+    // pin sell below the margin floor no matter what target_margin_pct says.
+    const r = computePrice({ cost: 9, map: null, msrp: 11.99, cfg: cfg({ margin_floor_pct: 0.25 }) })
+    expect(r?.msrpBelowFloor).toBe(true)
+    expect(r!.sell).toBeLessThanOrEqual(11.99)
+  })
+
+  it('msrpBelowFloor is false when MSRP sits at or above the margin floor', () => {
+    // cost=9, margin_floor=0.25 -> floor=12.00; msrp=50 is well above it.
+    const r = computePrice({ cost: 9, map: null, msrp: 50, cfg: cfg({ margin_floor_pct: 0.25 }) })
+    expect(r?.msrpBelowFloor).toBe(false)
+  })
+
+  it('msrpBelowFloor is false when MSRP is null (no ceiling to conflict with the floor)', () => {
+    const r = computePrice({ cost: 9, map: null, msrp: null, cfg: cfg({ margin_floor_pct: 0.25 }) })
+    expect(r?.msrpBelowFloor).toBe(false)
+  })
+
   it('MSRP missing -> no ceiling applied, no compare_at', () => {
     const r = computePrice({ cost: 10, map: null, msrp: null, cfg: cfg() })
     expect(r?.compare_at).toBeNull()

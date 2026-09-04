@@ -116,7 +116,7 @@ export function computePrice(params: {
   msrp:               number | null
   cfg:                PricingConfig
   absolutePriceFloor?: number
-}): PriceResult & { belowAbsoluteFloor: boolean } | null {
+}): PriceResult & { belowAbsoluteFloor: boolean; msrpBelowFloor: boolean } | null {
   const { cost, map, msrp, cfg } = params
   const absolutePriceFloor = params.absolutePriceFloor ?? ABSOLUTE_PRICE_FLOOR_DEFAULT
 
@@ -124,6 +124,14 @@ export function computePrice(params: {
 
   const target = cost / (1 - cfg.target_margin_pct)
   const floor  = cost / (1 - cfg.margin_floor_pct)
+
+  // The margin-floor clamp below only raises `sell` to `floor`; the MSRP
+  // ceiling that follows can still pull it back down past that floor when
+  // `msrp` itself sits below the floor-satisfying price. That is not a
+  // pricing-rule violation to silently drop (ticket #7515) — it is an
+  // unsatisfiable constraint (MSRP too low for the configured margin floor)
+  // that decideStatus surfaces to a human instead of rejecting outright.
+  const msrpBelowFloor = msrp != null && floor > msrp
 
   let sell = target
 
@@ -161,7 +169,7 @@ export function computePrice(params: {
       ? msrp
       : null
 
-  return { sell, compare_at, belowAbsoluteFloor: sell < absolutePriceFloor }
+  return { sell, compare_at, belowAbsoluteFloor: sell < absolutePriceFloor, msrpBelowFloor }
 }
 
 // ---------------------------------------------------------------------------
