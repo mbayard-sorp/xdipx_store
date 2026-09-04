@@ -557,12 +557,58 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      touches no string that gate verified, re-run only the gate that returned REVISE and carry the
      clean gate's verdict and citations forward unchanged. The mandatory dual re-run above still
      applies whenever the rewrite touches any accuracy-verified or frozen safety string.
-4. **BLOCK** (from either gate, either cycle) → the post stays `status:'draft'`, and you file a
-   suggestion row (`team:'content'`, kind `process`) with the reviewer's reasons. The blocked draft
-   still occupies its slug: **leave its `seoContentBrief` status at `'drafted'` (do not re-queue it to
-   `'queued'`, see Step 6)**, so the next run that picks this brief resumes that draft via the Step 3
-   slug pre-check's `resume-draft` branch, instead of treating the slug as taken and skipping to
-   another topic, or the finished work is silently orphaned.
+4. **BLOCK → triage, repair, re-gate. Holding the post is the last resort, not the first move.**
+   Until 2026-09-04 this step read "the post stays `status:'draft'`, file a suggestion row" with no
+   repair branch at all, which made every BLOCK an automatic lost day even when the defect was one
+   sentence. Run 687 lost a finished, hero-complete, pre-flight-clean post that way, over a single
+   unsourced claim, and the owner had to say "fix it" to get a ten-minute edit made. That is the
+   defect this step now fixes. The sibling social routine has always said a blocked draft "is
+   rewritten or dropped"; content was the outlier. **The mission brief's standing ruling governs
+   here and outranks this playbook: a gate BLOCK is a work order, not a verdict.**
+
+   a. **Triage the BLOCK before anything else, and record the class in a `step` event.** Read what
+      the gate actually objected to:
+      - **Repairable (the default, and the overwhelmingly common case).** The gate named a string, a
+        claim, a structure, or a fact. Anything of the form "this claim is unsourced", "this is
+        stated wider than the evidence", "this contradicts that", "this is factually wrong", "this
+        section is missing a required element" is repairable. **Repair it in this run.**
+      - **Not repairable in-run.** Reserved and narrow. Only when the gate objects to the *premise*
+        rather than to any string, so that no honest edit saves it; or when repair would require
+        crossing a valve, inventing evidence, or making a money / brand / legal / likeness call that
+        §2b reserves for the owner. Being hard, slow, or requiring a fresh source is **not** this
+        class.
+   b. **Repair budget: up to two remediation attempts, separate from the REVISE shared-rewrite
+      cycle in item 3.** A BLOCK is the more serious finding, so it gets its own budget rather than
+      inheriting zero. Each attempt fixes what the gate named, re-runs the deterministic pre-flights,
+      and re-gates. The mandatory dual re-run and every rule in item 3 (de-construct the shape, do not
+      hedge, frozen safety strings, cross-gate self-check, no gate-authored claim wording) apply
+      unchanged to a repair.
+   c. **Fixing a claim means sourcing, narrowing, or deleting it. Never softening it.** Resolve the
+      source first: `POST /api/team/url-liveness {"includeBody": true}` reads allowlisted hosts
+      server-side. **Read what the source actually says before citing it.** Run 690 attributed the
+      exact sentence run 687 was BLOCKed on, and reading the abstract showed the source did not
+      support the claim at all, so the right repair was deletion, not a citation bolted onto a wrong
+      sentence. A citation that does not survive reading is worse than no citation.
+   d. **Escalate only on exhaustion.** Hold the post and file the suggestion row when triage returned
+      not-repairable, or when two honest repair attempts have failed. The row (`team:'content'`, kind
+      `process`) then states what was tried, in what order, and what the gate said each time, so the
+      owner decides rather than re-diagnoses. **"The gate said no" is never sufficient.**
+   e. **A run may not finish with a BLOCKed post it did not attempt to repair.** A held post requires
+      a triage class and an attempt count in the run summary. A run that files the row and goes home
+      without trying is a defect the weekly retro treats as one, exactly like filing the owner a
+      question an agent lane could answer.
+   f. **When a post is genuinely held**, the blocked draft still occupies its slug: **leave its
+      `seoContentBrief` status at `'drafted'` (do not re-queue it to `'queued'`, see Step 6)**, so the
+      next run resumes that draft via the Step 3 slug pre-check's `resume-draft` branch, instead of
+      treating the slug as taken and skipping to another topic, or the finished work is silently
+      orphaned.
+   g. **A non-PASS is not automatically a BLOCK.** Item 3's "a second non-PASS from either is treated
+      as BLOCK" exists to stop endless rewrite loops, not to kill a post over polish. When a cycle-2
+      verdict carries only non-blocking findings and the reviewer's own verdict line says 0 BLOCK or
+      ship-ready, treat it as remediable under this step. Run 690's cycle-2 voice REVISE was a
+      two-word wording mismatch inside a frozen safety enumeration; the correct move was to reconcile
+      it and take a targeted authorization from the gate that owns frozen strings, which shipped the
+      post with zero open findings instead of holding it a second day over a synonym.
 5. **Sources insertion (mechanical, after the final PASS).** The accuracy gate returns 0-2
    citations it actually resolved. **Verify every returned URL through `/api/team/url-liveness`
    before appending it** — the endpoint enforces a fixed host allowlist (`CITATION_HOST_ALLOWLIST`
@@ -690,7 +736,10 @@ image is not. This post is finished work waiting on an administrative gate, not 
 `'queued'` correctly tells tomorrow's run "pick this back up" (Step 3's `resume-draft` branch will
 find and resume it either way, since it is still an unpublished draft at that slug).
 
-**A gate BLOCK is different: do not re-queue it to `'queued'` (ticket #94).** A drafted post already
+**A gate BLOCK is different: do not re-queue it to `'queued'` (ticket #94).** First confirm you are
+even entitled to be here: since 2026-09-04 a post reaches this paragraph only after Step 5 item 4's
+triage returned not-repairable, or after two repair attempts failed. A BLOCK that was never worked is
+not a held post, it is an unfinished run. A drafted post already
 exists in Sanity for this brief. Re-queuing to `'queued'` puts it back in the Step 3 primary
 brief-queue GROQ (`status == "queued"`) looking indistinguishable from a topic that was never
 started, and the topic can cycle: pick it up, hit the slug pre-check, and either skip past your own

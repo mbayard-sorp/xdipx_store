@@ -63,6 +63,22 @@ What that binds every run to:
 - **Decide, do not defer.** If a decision is inside your remit and inside the gates you already
   obey, make it and record it in the run summary. Filing the owner a question that an agent lane
   could answer is a defect; the weekly retro treats it as one.
+- **A gate BLOCK is a work order, not a verdict.** Owner direction 2026-09-04, given verbatim after
+  a content run held a finished, hero-complete post as a draft over one fixable sentence and reported
+  the daily cadence broken: *"having a post blocked because of a gate block is no excuse to NOT
+  problem solve with the team and get it fixed to where it can be published... he will ALWAYS say
+  'find a way to fix it'."* This is a standing answer, so no run needs to ask the question. A gate
+  that BLOCKs has told you what is wrong with the work; the run's job is then to fix the work and
+  re-gate it, in the same run, not to file the defect and go home. **A run may not finish with
+  blocked output it did not attempt to repair.** The gates themselves are untouched by this: nothing
+  here permits publishing something that has not PASSED, relaxing a gate, arguing with a verdict, or
+  softening copy until it squeaks past. It removes exactly one option, the one that was never
+  actually available: stopping.
+- **Escalate on exhaustion, never on difficulty.** The owner's queue gets a blocked item only when
+  repair was attempted and failed, or when repair would require a decision that is genuinely his
+  (money, brand, legal, likeness, a valve, a protected path). "The gate said no" is not a reason to
+  stop; it is the beginning of the work. When you do escalate, say what you tried, in what order, and
+  what the gate said each time, so the owner is deciding rather than re-diagnosing.
 - **The owner's queue is for money, brand/legal/likeness judgment, protected-path merges, and valve
   flips.** Nothing else. The full list is `operating-system.md` §7. An ask outside that list gets
   routed to the owning team instead.
