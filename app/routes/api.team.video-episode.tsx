@@ -48,6 +48,7 @@ import {
   listEpisodes,
   claimNextEpisode,
   releaseEpisodeClaim,
+  listOwnerScriptEdits,
   type ProposeEpisodeInput,
 } from '~/lib/video-episodes.server'
 import { apiError } from '~/lib/api-error.server'
@@ -102,6 +103,17 @@ export async function action({ request }: ActionFunctionArgs) {
         episodes: rows,
         rollups: Object.fromEntries(dims.map(d => [d, rollupByDimension(rows, d)])),
       })
+    }
+
+    if (b['op'] === 'owner-edits') {
+      // The writers room's learning read (ticket #7557): recent owner script
+      // edits, newest first, each before -> after per changed field with its
+      // episode label. series-showrunner and episode-writer read this at run
+      // start to learn what the owner actually rewrites. Read-only.
+      const edits = await listOwnerScriptEdits({
+        ...(typeof b['limit'] === 'number' ? { limit: b['limit'] } : {}),
+      })
+      return Response.json({ edits })
     }
 
     if (b['op'] === 'episode-release') {

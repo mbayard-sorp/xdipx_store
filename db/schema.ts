@@ -1859,9 +1859,11 @@ export interface VideoEpisodeReviewNote {
    * appends (ticket #5726): 'released' when a claimed episode was handed back
    * unrendered, 'render_failed' when its job died at the provider. Both are
    * audit trail only; neither is an owner decision and neither can be written
-   * through decideEpisode.
+   * through decideEpisode. 'owner_edit' (ticket #7557) is appended by
+   * editEpisodeScript when the owner edits the script text in place; it is an
+   * audit-trail entry, not a decision, and it never changes production_status.
    */
-  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed'
+  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed' | 'owner_edit'
   tags?: string[]
   note?: string
   by?: string
@@ -1952,6 +1954,27 @@ export const videoEpisodes = pgTable('video_episodes', {
   batchIdx:  index('idx_video_episodes_batch').on(t.batchId),
   jobIdx:    index('idx_video_episodes_job').on(t.videoJobId),
   // GIN index on product_placements lives in the SQL migration (jsonb_path_ops).
+}))
+
+/**
+ * Owner script edits as a writers-room learning signal (ticket #7557,
+ * migration 094). When the owner edits an episode's script text in place on
+ * /admin/video-studio/scripts/{id}, editEpisodeScript writes one row per
+ * changed field capturing before (what the room shipped) -> after (the owner's
+ * words). listOwnerScriptEdits surfaces these to the writers room so it learns
+ * what the owner actually changes, instead of re-deriving it from prose notes.
+ */
+export const videoScriptEdits = pgTable('video_script_edits', {
+  id:         serial('id').primaryKey(),
+  episodeId:  integer('episode_id').notNull().references(() => videoEpisodes.id, { onDelete: 'cascade' }),
+  field:      varchar('field', { length: 48 }).notNull(), // voiceover|shareLine|presenterLine|caption.<platform>|siteCut.title|siteCut.dek|siteCut.copy
+  beforeText: text('before_text'),
+  afterText:  text('after_text'),
+  editedBy:   varchar('edited_by', { length: 120 }).notNull(),
+  createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  episodeIdx: index('idx_video_script_edits_episode').on(t.episodeId),
+  createdIdx: index('idx_video_script_edits_created').on(t.createdAt),
 }))
 
 /**

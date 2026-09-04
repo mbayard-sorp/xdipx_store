@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
-import { videoEpisodes, videoSeries, videoJobs } from '../../db/schema'
+import { videoEpisodes, videoSeries, videoJobs, videoScriptEdits } from '../../db/schema'
 import type { VideoEpisodeReviewNote, VideoScriptJson } from '../../db/schema'
 import { HOOK_PATTERNS, VIDEO_FORMULAS } from './team-keys'
 import { ARC_POSITIONS, validatePlacements, scriptsSpeakIdentically, spokenTextOf } from './video-episodes'
@@ -504,4 +504,159 @@ export async function linkEpisodeToJob(episodeId: number, jobId: string): Promis
 export async function episodeForJob(jobRowId: number): Promise<VideoEpisodeRow | null> {
   const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.videoJobId, jobRowId)).limit(1)
   return rows[0] ?? null
+}
+
+/**
+ * Owner script edit (ticket #7557). ADMIN-SESSION ONLY, exactly like
+ * decideEpisode: the owner edits an episode's script text in place on
+ * /admin/video-studio/scripts/{id} and saves. This updates scriptJson and
+ * siteCutJson on the SAME row (no new episode number, unlike proposeEpisodes),
+ * captures a before -> after per changed field into video_script_edits as the
+ * writers room's learning signal, and appends an 'owner_edit' audit note. It
+ * deliberately does NOT change production_status: the owner is editing their
+ * own content, and the render lane reads the updated scriptJson directly, so an
+ * approved episode renders the edited words and a pending one still waits for
+ * the Approve click. Editing a rendering/rendered/posted/measured row is
+ * refused (a render is in flight or already shipped).
+ */
+export interface EpisodeScriptEdit {
+  voiceover?: string
+  presenterLine?: string
+  shareLine?: string
+  captions?: Record<string, string>
+  siteCut?: { title?: string; dek?: string; copy?: string }
+}
+
+const EDITABLE_FROM = ['pending_approval', 'needs_changes', 'approved', 'failed']
+
+export async function editEpisodeScript(args: {
+  episodeId: number
+  edits: EpisodeScriptEdit
+  editedBy: string
+}): Promise<{ changedFields: string[] }> {
+  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, args.episodeId)).limit(1)
+  const ep = rows[0]
+  if (!ep) throw new Error(`episode ${args.episodeId} not found`)
+  if (!EDITABLE_FROM.includes(ep.productionStatus)) {
+    throw new Error(`episode ${args.episodeId} is ${ep.productionStatus}; only ${EDITABLE_FROM.join('/')} rows can be edited (a render is in flight or already shipped otherwise)`)
+  }
+
+  const script = { ...((ep.scriptJson ?? {}) as VideoScriptJson) }
+  const siteCut = { ...((ep.siteCutJson ?? {}) as { title?: string; dek?: string; copy?: string }) }
+  const e = args.edits
+
+  // Collect before -> after per field, applying only the fields the caller sent
+  // and only when the value actually changed. A trimmed empty string clears a
+  // field (before non-empty, after null).
+  const diffs: { field: string; before: string | null; after: string | null }[] = []
+  const norm = (v: unknown): string | null => {
+    if (typeof v !== 'string') return null
+    const t = v.trim()
+    return t ? t : null
+  }
+  const apply = (field: string, current: unknown, next: string | undefined, set: (v: string | undefined) => void) => {
+    if (next === undefined) return
+    const before = norm(current)
+    const after = norm(next)
+    if (before === after) return
+    diffs.push({ field, before, after })
+    set(after ?? undefined)
+  }
+
+  apply('voiceover', script['voiceover'], e.voiceover, v => { if (v === undefined) delete script['voiceover']; else script['voiceover'] = v })
+  apply('presenterLine', script['presenterLine'], e.presenterLine, v => { if (v === undefined) delete script['presenterLine']; else script['presenterLine'] = v })
+  apply('shareLine', (script as Record<string, unknown>)['shareLine'], e.shareLine, v => { if (v === undefined) delete (script as Record<string, unknown>)['shareLine']; else (script as Record<string, unknown>)['shareLine'] = v })
+  if (e.captions) {
+    const caps: Record<string, string> = { ...((script['captions'] as Record<string, string>) ?? {}) }
+    for (const [platform, text] of Object.entries(e.captions)) {
+      apply(`caption.${platform}`, caps[platform], text, v => { if (v === undefined) delete caps[platform]; else caps[platform] = v })
+    }
+    script['captions'] = caps
+  }
+  if (e.siteCut) {
+    apply('siteCut.title', siteCut.title, e.siteCut.title, v => { if (v === undefined) delete siteCut.title; else siteCut.title = v })
+    apply('siteCut.dek', siteCut.dek, e.siteCut.dek, v => { if (v === undefined) delete siteCut.dek; else siteCut.dek = v })
+    apply('siteCut.copy', siteCut.copy, e.siteCut.copy, v => { if (v === undefined) delete siteCut.copy; else siteCut.copy = v })
+  }
+
+  if (diffs.length === 0) return { changedFields: [] }
+
+  const note: VideoEpisodeReviewNote = {
+    at: new Date().toISOString(),
+    decision: 'owner_edit',
+    note: `owner edited: ${diffs.map(d => d.field).join(', ')}`,
+    by: args.editedBy,
+  }
+  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
+
+  // neon-http has no interactive transactions: update the row, then record the
+  // audit rows in one multi-row insert. Orphaning either way is harmless audit
+  // data, and the row update is the source of truth the render lane reads.
+  await db.update(videoEpisodes).set({
+    scriptJson: script,
+    siteCutJson: Object.keys(siteCut).length ? siteCut : null,
+    reviewNotesJson: notes,
+    updatedAt: new Date(),
+  }).where(eq(videoEpisodes.id, args.episodeId))
+
+  await db.insert(videoScriptEdits).values(diffs.map(d => ({
+    episodeId: args.episodeId,
+    field: d.field,
+    beforeText: d.before,
+    afterText: d.after,
+    editedBy: args.editedBy,
+  })))
+
+  return { changedFields: diffs.map(d => d.field) }
+}
+
+export interface OwnerScriptEditRow {
+  id: number
+  episodeId: number
+  seasonNumber: number
+  episodeNumber: number
+  label: string
+  field: string
+  beforeText: string | null
+  afterText: string | null
+  editedBy: string
+  at: string
+}
+
+/**
+ * The writers room's learning read (ticket #7557): recent owner script edits,
+ * newest first, each carrying its episode label so the room can see WHICH
+ * scripts the owner rewrote and HOW. series-showrunner and episode-writer read
+ * this at run start alongside the ledger's prose notes.
+ */
+export async function listOwnerScriptEdits(opts: { limit?: number } = {}): Promise<OwnerScriptEditRow[]> {
+  const limit = Math.min(Math.max(1, opts.limit ?? 50), 200)
+  const rows = await db
+    .select({
+      id: videoScriptEdits.id,
+      episodeId: videoScriptEdits.episodeId,
+      field: videoScriptEdits.field,
+      beforeText: videoScriptEdits.beforeText,
+      afterText: videoScriptEdits.afterText,
+      editedBy: videoScriptEdits.editedBy,
+      createdAt: videoScriptEdits.createdAt,
+      seasonNumber: videoEpisodes.seasonNumber,
+      episodeNumber: videoEpisodes.episodeNumber,
+    })
+    .from(videoScriptEdits)
+    .innerJoin(videoEpisodes, eq(videoScriptEdits.episodeId, videoEpisodes.id))
+    .orderBy(desc(videoScriptEdits.createdAt))
+    .limit(limit)
+  return rows.map(r => ({
+    id: r.id,
+    episodeId: r.episodeId,
+    seasonNumber: r.seasonNumber,
+    episodeNumber: r.episodeNumber,
+    label: `S${r.seasonNumber}E${r.episodeNumber}`,
+    field: r.field,
+    beforeText: r.beforeText,
+    afterText: r.afterText,
+    editedBy: r.editedBy,
+    at: (r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt as unknown as string)).toISOString(),
+  }))
 }

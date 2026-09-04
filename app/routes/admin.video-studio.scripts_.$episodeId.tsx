@@ -15,7 +15,7 @@ import { requireAdmin, getAdminUser } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { videoEpisodes, videoSeries } from '../../db/schema'
 import { and, eq } from 'drizzle-orm'
-import { decideEpisode } from '~/lib/video-episodes.server'
+import { decideEpisode, editEpisodeScript, type EpisodeScriptEdit } from '~/lib/video-episodes.server'
 import { getTeamConfig } from '~/lib/team.server'
 import { VIDEO_MAX_COST_CENTS_DEFAULT } from '~/lib/team-keys'
 import { REVIEW_NOTE_TAGS } from './admin.video-studio.scripts'
@@ -87,8 +87,40 @@ export async function action({ request, params }: ActionFunctionArgs) {
   await requireAdmin(request)
   const user = await getAdminUser(request)
   const form = await request.formData()
-  const decision = String(form.get('decision') ?? '')
   const id = Number(params['episodeId'])
+
+  // Owner in-place script edit (ticket #7557): save the edited text on this same
+  // row and capture the before -> after as the writers room's learning signal.
+  if (String(form.get('intent') ?? '') === 'edit-script') {
+    const str = (k: string): string | undefined => (form.has(k) ? String(form.get(k) ?? '') : undefined)
+    const captions: Record<string, string> = {}
+    for (const p of ['instagram', 'tiktok', 'youtube', 'facebook']) {
+      const v = str(`caption_${p}`)
+      if (v !== undefined) captions[p] = v
+    }
+    const vo = str('voiceover'), sl = str('shareLine'), pl = str('presenterLine')
+    const scTitle = str('siteCut_title'), scDek = str('siteCut_dek'), scCopy = str('siteCut_copy')
+    const siteCut = {
+      ...(scTitle !== undefined ? { title: scTitle } : {}),
+      ...(scDek !== undefined ? { dek: scDek } : {}),
+      ...(scCopy !== undefined ? { copy: scCopy } : {}),
+    }
+    const edits: EpisodeScriptEdit = {
+      ...(vo !== undefined ? { voiceover: vo } : {}),
+      ...(sl !== undefined ? { shareLine: sl } : {}),
+      ...(pl !== undefined ? { presenterLine: pl } : {}),
+      ...(Object.keys(captions).length ? { captions } : {}),
+      ...(Object.keys(siteCut).length ? { siteCut } : {}),
+    }
+    try {
+      const { changedFields } = await editEpisodeScript({ episodeId: id, edits, editedBy: user?.email ?? 'owner' })
+      return Response.json({ ok: true, saved: true, changedFields })
+    } catch (err) {
+      return Response.json({ ok: false, error: err instanceof Error ? err.message : 'Save failed' }, { status: 400 })
+    }
+  }
+
+  const decision = String(form.get('decision') ?? '')
   if (decision !== 'approved' && decision !== 'needs_changes' && decision !== 'rejected') {
     return Response.json({ ok: false, error: 'Bad decision' }, { status: 400 })
   }
@@ -119,12 +151,18 @@ function Closer({ label, rule, value }: { label: string; rule: string; value: st
 
 export default function ScriptReader() {
   const { ep, maxCostCents } = useLoaderData<typeof loader>()
-  const fetcher = useFetcher<{ ok: boolean; decision?: string; error?: string }>()
+  const fetcher = useFetcher<{ ok: boolean; decision?: string; error?: string; saved?: boolean; changedFields?: string[] }>()
   const navigate = useNavigate()
   const [changesOpen, setChangesOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [tags, setTags] = useState<string[]>([])
   const busy = fetcher.state !== 'idle'
   const decided = fetcher.data?.ok ? fetcher.data.decision : null
+  const saved = fetcher.data?.ok && fetcher.data.saved ? fetcher.data.changedFields ?? [] : null
+  // Editable in the same states an edit makes sense: before render, or after a
+  // failed render. 'approved' is editable too (the owner refining their own
+  // approved words); the render lane reads the updated scriptJson directly.
+  const editable = ['pending_approval', 'needs_changes', 'approved', 'failed'].includes(ep.productionStatus)
   const err = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null
   const overCeiling = ep.estCostUsd != null && Number(ep.estCostUsd) * 100 > maxCostCents
   // 'failed' is decidable too (ticket #5726): a render that died at the
@@ -168,6 +206,9 @@ export default function ScriptReader() {
               <button type="button" onClick={() => setChangesOpen(v => !v)} className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink hover:border-coral">
                 Changes
               </button>
+              <button type="button" onClick={() => setEditOpen(v => !v)} className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink hover:border-coral">
+                {editOpen ? 'Close editor' : 'Edit script'}
+              </button>
               <fetcher.Form method="post" onSubmit={e => { if (!confirm(`Reject ${ep.label}?`)) e.preventDefault() }}>
                 <input type="hidden" name="decision" value="rejected" />
                 <input type="hidden" name="note" value="rejected from the reader" />
@@ -175,6 +216,13 @@ export default function ScriptReader() {
                   Reject
                 </button>
               </fetcher.Form>
+            </div>
+          ) : editable ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-ink-4">status: {ep.productionStatus}</span>
+              <button type="button" onClick={() => setEditOpen(v => !v)} className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink hover:border-coral">
+                {editOpen ? 'Close editor' : 'Edit script'}
+              </button>
             </div>
           ) : (
             <span className="text-xs text-ink-4">status: {ep.productionStatus}</span>
@@ -209,11 +257,81 @@ export default function ScriptReader() {
             </button>
           </fetcher.Form>
         )}
+        {saved && (
+          <p className="mx-auto mt-1 max-w-4xl text-xs text-emerald-700">
+            {saved.length ? `Saved ✓ — ${saved.join(', ')}. The writers room will learn from this edit.` : 'No changes to save.'}
+          </p>
+        )}
         {err && <p className="mx-auto mt-1 max-w-4xl text-xs text-red-700">{err}</p>}
       </div>
 
       <div className="mx-auto max-w-4xl space-y-4 pb-28 md:pb-4">
         <Link to="/admin/video-studio/scripts" className="text-xs text-ink-3 hover:text-ink">← Back to the slate</Link>
+
+        {editOpen && editable && (
+          <fetcher.Form method="post" className="space-y-3 rounded-2xl border border-coral bg-coral-soft/30 p-4" onSubmit={() => setEditOpen(false)}>
+            <input type="hidden" name="intent" value="edit-script" />
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-ink">Edit the script</p>
+              <p className="text-[11px] text-ink-3">Saves in place. Every change trains the writers room.</p>
+            </div>
+            {ep.voiceover != null && (
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-wide text-ink-4">Voiceover</span>
+                <textarea name="voiceover" defaultValue={ep.voiceover ?? ''} rows={5}
+                  className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm" />
+              </label>
+            )}
+            {ep.presenterLine != null && (
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-wide text-ink-4">Spoken line</span>
+                <textarea name="presenterLine" defaultValue={ep.presenterLine ?? ''} rows={3}
+                  className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm" />
+              </label>
+            )}
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-wide text-ink-4">Share line</span>
+              <textarea name="shareLine" defaultValue={ep.shareLine ?? ''} rows={2}
+                className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm" />
+            </label>
+            {Object.entries(ep.captions).map(([platform, value]) => (
+              <label key={platform} className="block">
+                <span className="text-[11px] uppercase tracking-wide text-ink-4">Caption · <span className="font-mono">{platform}</span></span>
+                <textarea name={`caption_${platform}`} defaultValue={value} rows={3}
+                  className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm" />
+              </label>
+            ))}
+            {ep.siteCut && (
+              <div className="space-y-2 rounded-xl border border-line bg-paper p-3">
+                <p className="text-[11px] uppercase tracking-wide text-ink-4">Site cut (register 9)</p>
+                <label className="block">
+                  <span className="text-[11px] text-ink-4">Title</span>
+                  <input name="siteCut_title" defaultValue={ep.siteCut.title ?? ''}
+                    className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm" />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] text-ink-4">Dek</span>
+                  <input name="siteCut_dek" defaultValue={ep.siteCut.dek ?? ''}
+                    className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm" />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] text-ink-4">Copy</span>
+                  <textarea name="siteCut_copy" defaultValue={ep.siteCut.copy ?? ''} rows={6}
+                    className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm" />
+                </label>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <button type="submit" disabled={busy} className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper disabled:opacity-40">
+                Save edits
+              </button>
+              <button type="button" onClick={() => setEditOpen(false)} className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink">
+                Cancel
+              </button>
+              <span className="text-[11px] text-ink-3">Saving does not change approval status; approve or send back separately.</span>
+            </div>
+          </fetcher.Form>
+        )}
 
         {/* Arc context: what this pays off, what it leaves open. */}
         <div className="grid gap-2 md:grid-cols-2">
