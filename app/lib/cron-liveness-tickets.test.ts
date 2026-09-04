@@ -55,6 +55,16 @@ vi.mock('~/lib/team.server', () => ({
 import { ESCALATE_AFTER_SWEEPS, reconcileCronAlarms } from '~/lib/cron-liveness-tickets.server'
 
 type L = Parameters<typeof reconcileCronAlarms>[0][number]
+type F = NonNullable<Parameters<typeof reconcileCronAlarms>[2]>[number]
+
+function floor(over: Partial<F> = {}): F {
+  return {
+    lane: 'indexnow', team: 'content', kind: 'staleness', threshold: 7,
+    describe: 'IndexNow has submitted no URL for 7 days',
+    rationale: 'measured', measured: 3, breached: false, detail: 'ok',
+    ...over,
+  } as F
+}
 
 function live(over: Partial<L> = {}): L {
   return {
@@ -182,6 +192,38 @@ describe('what it refuses to file', () => {
     fileDetectionTicket.mockRejectedValue(new Error('bus down'))
     const out = await reconcileCronAlarms([live({ breached: true })], [])
     expect(out.filed).toEqual([])
+  })
+})
+
+describe('lane output floors', () => {
+  it('files at the lane, never at the owner', async () => {
+    const out = await reconcileCronAlarms([], [], [floor({ breached: true, measured: 12 })])
+    expect(out.filed).toEqual(['lane-floor:indexnow'])
+    expect(filed().kind).toBe('process')
+    expect(filed().targetTeam).toBe('content')
+  })
+
+  it('closes the row once the lane produces again', async () => {
+    listSuggestions.mockImplementation(openRowsFor('lane-floor', [11]))
+    const out = await reconcileCronAlarms([], [], [floor({ breached: false })])
+    expect(out.closed).toContain(11)
+  })
+
+  it('treats an unreadable floor as no opinion, not as healthy', async () => {
+    // The rule that keeps a shut gate from ending a real alarm. `null` means
+    // the probe could not ask; closing on it would clear a lane's row for a
+    // reason that has nothing to do with the lane.
+    listSuggestions.mockImplementation(openRowsFor('lane-floor', [12]))
+    const out = await reconcileCronAlarms([], [], [floor({ breached: null, measured: null })])
+    expect(out.closed).not.toContain(12)
+    expect(out.filed).toEqual([])
+  })
+
+  it('carries the reason for the bound into the ticket', async () => {
+    // A threshold with no stated derivation is a guess, and a guess that fires
+    // is indistinguishable from a fault.
+    await reconcileCronAlarms([], [], [floor({ breached: true, rationale: '26 of 30 days at zero' })])
+    expect(filed().suggestion).toContain('26 of 30 days at zero')
   })
 })
 
