@@ -436,10 +436,18 @@ export interface FileBlockerResult {
  * nightly DB sweep, and the transcript miner will all independently rediscover
  * the same blocker, and the owner should see one line, aging, not three.
  *
- * A re-observation of an OPEN row bumps last_seen_at and fills in any field
- * that was previously empty, but never overwrites detail the owner may have
- * edited. A re-observation of a CLEARED row reopens it: the condition came
- * back, which is a real event worth surfacing rather than silently ignoring.
+ * A re-observation of an OPEN row bumps `last_seen_at`, refreshes the two
+ * MEASURED fields (`title`, `detail`) to the newest observation, and fills gaps
+ * in the AUTHORED-ONCE fields without overwriting them. A re-observation of a
+ * CLEARED row reopens it: the condition came back, which is a real event worth
+ * surfacing rather than silently ignoring.
+ *
+ * The measured/authored split is the correction to an earlier rule of "fill
+ * gaps, never clobber", which was right about authored prose and wrong about
+ * everything a watcher computes. Applied uniformly it froze every recurring
+ * blocker's headline at its first observation, so the owner's top-priority row
+ * could describe a condition that had changed days earlier while its timestamps
+ * insisted it was current.
  */
 export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResult> {
   // Canonicalized, not just clamped: blockers 20 and 21 on 2026-08-24 were one
@@ -512,8 +520,24 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
                           ELSE owner_blockers.cleared_at END,
       cleared_by   = CASE WHEN owner_blockers.status = 'cleared' THEN NULL
                           ELSE owner_blockers.cleared_by END,
-      -- Fill gaps, never clobber what is already recorded.
-      detail       = COALESCE(owner_blockers.detail, EXCLUDED.detail),
+      -- MEASURED fields take the newest observation. title was absent from
+      -- this list entirely and detail filled gaps only, so a watcher that
+      -- re-observes a changing condition every hour could never change what the
+      -- owner reads. Live cost, 2026-09-04: blocker #50 was priority 1, open,
+      -- last_seen_at fresh to the minute, and its title still named a GPU pod
+      -- that had stopped six days earlier, because hoursRunning is recomputed
+      -- hourly into a string frozen at whatever the first tick observed.
+      --
+      -- EXCLUDED is wrapped rather than taken bare: a caller that omits a field
+      -- passes NULL, and a bare assignment would erase what an earlier, richer
+      -- filing recorded. Newest-wins, but only when there is a newest.
+      title        = COALESCE(EXCLUDED.title, owner_blockers.title),
+      detail       = COALESCE(EXCLUDED.detail, owner_blockers.detail),
+      -- AUTHORED-ONCE fields keep filling gaps only. These are written by a
+      -- human or by a registry, not measured, and evidence in particular is
+      -- the verbatim justification titleClaimsConfirmed exists to require: no
+      -- cron caller passes it, so newest-wins here would let a routine re-file
+      -- silently erase a hand-written CONFIRMED note.
       unblocks     = COALESCE(owner_blockers.unblocks, EXCLUDED.unblocks),
       where_to_go  = COALESCE(owner_blockers.where_to_go, EXCLUDED.where_to_go),
       evidence     = COALESCE(owner_blockers.evidence, EXCLUDED.evidence),
