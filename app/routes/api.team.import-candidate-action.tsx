@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from 'react-router'
-import { and, eq, gte, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, sql } from 'drizzle-orm'
 import { assertTeamAuth } from '~/lib/team.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import {
@@ -38,6 +38,32 @@ export function splitApprovalChunk(
 ): { toProcess: number[]; deferred: number[] } {
   const limit = intent === 'approve' ? perRequestLimit : capAllowed.length
   return { toProcess: capAllowed.slice(0, limit), deferred: capAllowed.slice(limit) }
+}
+
+/**
+ * Ticket #7387: `product_manager_max_actions_per_run` used to count every
+ * action toward the same budget, so Step 4b hygiene closeouts (reject on a
+ * row already `status='imported'` -- an enrich-parked row, or one whose
+ * Shopify draft was since deleted) competed with the pending-drain for cap
+ * and always lost, letting rows like #4880 age indefinitely for lack of
+ * budget. A reject on an already-imported row is not a new import decision,
+ * so it is exempt from the cap; only `reject` is checked (approve/watch on
+ * an already-imported row is not a real workflow, so skip the query then).
+ */
+async function partitionHygieneRejects(
+  ids: number[],
+  intent: string,
+): Promise<{ hygiene: number[]; regular: number[] }> {
+  if (intent !== 'reject' || ids.length === 0) return { hygiene: [], regular: ids }
+  const rows = await db
+    .select({ id: importCandidates.id, status: importCandidates.status })
+    .from(importCandidates)
+    .where(inArray(importCandidates.id, ids))
+  const importedIds = new Set(rows.filter(r => r.status === 'imported').map(r => r.id))
+  return {
+    hygiene: ids.filter(id => importedIds.has(id)),
+    regular: ids.filter(id => !importedIds.has(id)),
+  }
 }
 
 async function countProcessedToday(reviewedBy: string): Promise<number> {
@@ -104,8 +130,10 @@ export async function action({ request }: ActionFunctionArgs) {
       .map(s => parseInt(s.trim(), 10))
       .filter(n => !isNaN(n))
 
-    const capAllowed = ids.slice(0, remaining)
-    const skippedDueToCap = ids.slice(remaining)
+    // #7387: hygiene rejects on already-imported rows never touch the cap.
+    const { hygiene, regular } = await partitionHygieneRejects(ids, intent)
+    const capAllowed = regular.slice(0, remaining)
+    const skippedDueToCap = regular.slice(remaining)
 
     // Chunk approvals per request; overflow is returned for resubmission.
     const { toProcess, deferred } = splitApprovalChunk(capAllowed, intent)
@@ -118,7 +146,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const results: unknown[] = []
-    for (const id of toProcess) {
+    for (const id of [...hygiene, ...toProcess]) {
       results.push(await runIntent(id, intent, reviewedBy, reason, preloadedMasters))
     }
     return Response.json({ ok: true, results, skippedDueToCap, deferred })
@@ -131,7 +159,12 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (remaining <= 0) {
-    return Response.json({ ok: true, results: [], skippedDueToCap: [id] })
+    // #7387: a hygiene reject (already-imported row) still isn't a new
+    // import decision even at full cap.
+    const { hygiene } = await partitionHygieneRejects([id], intent)
+    if (hygiene.length === 0) {
+      return Response.json({ ok: true, results: [], skippedDueToCap: [id] })
+    }
   }
 
   const result = await runIntent(id, intent, reviewedBy, reason)
