@@ -12,6 +12,8 @@ import {
   escalationLaneTeam,
   isEscalationClass,
   isPagingClass,
+  isSuppressibleByQueue,
+  type EscalationClassName,
 } from '~/lib/owner-escalation'
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..')
@@ -83,6 +85,40 @@ describe('the escalation class registry', () => {
     for (const name of ESCALATION_CLASS_NAMES) {
       expect(ESCALATION_CLASSES[name].why.length, name).toBeGreaterThan(40)
     }
+  })
+
+  it('has exactly one carrier, and the queue valve may not swallow it', () => {
+    // The bug this encodes: `daily-digest` was classed `queue`, so the valve
+    // that folds classes INTO the digest folded the digest into itself. A class
+    // cannot be a section of the surface it delivers, and the channel data is
+    // where that has to be false, because the sender only reads the channel.
+    const carriers = ESCALATION_CLASS_NAMES.filter((n) => escalationChannel(n) === 'digest')
+    expect(carriers).toEqual(['daily-digest'])
+    expect(isSuppressibleByQueue('daily-digest')).toBe(false)
+  })
+
+  it('suppresses queue and lane classes, and nothing else', () => {
+    // The allowlist and the channel data are two spellings of one rule, and the
+    // previous spelling (`channel !== 'page'`) drifted from this one silently.
+    // Anything added to EscalationChannel later shows up here as a failure
+    // rather than as an unnoticed change in who hears from the estate.
+    for (const name of ESCALATION_CLASS_NAMES) {
+      const channel = escalationChannel(name)
+      expect(isSuppressibleByQueue(name), name).toBe(channel === 'queue' || channel === 'lane')
+    }
+    expect(ESCALATION_CLASS_NAMES.some((n) => isSuppressibleByQueue(n))).toBe(true)
+  })
+
+  it('keeps the digest cron sending, whatever class it is later given', () => {
+    // Derived from source rather than asserted as a constant, so reclassifying
+    // the digest fails here instead of in production two days later. The 500s
+    // that outage produced were recorded in `cron_runs` and read by nothing.
+    const src = readFileSync(join(REPO_ROOT, 'app/lib/owner-digest.server.ts'), 'utf8')
+    const match = src.match(/escalation:\s*'([a-z-]+)'/)
+    expect(match, 'owner-digest.server.ts declares no escalation class').toBeTruthy()
+    const cls = match![1]!
+    expect(isEscalationClass(cls), cls).toBe(true)
+    expect(isSuppressibleByQueue(cls as EscalationClassName), cls).toBe(false)
   })
 
   it('rejects an unknown class name', () => {

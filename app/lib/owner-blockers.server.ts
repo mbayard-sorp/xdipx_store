@@ -752,6 +752,22 @@ export async function runBlockerEmail(opts: { force?: boolean } = {}): Promise<B
     return { sent: true, subject, open: open.length, autoCleared: verified.autoCleared.length }
   }
 
+  // Suppression here is the DESIGNED outcome, not a failure. Stage D4 folded
+  // this list into the owner queue and kept the cron because verifyBlockers()
+  // above is the only thing in the estate that evaluates probes and auto-clears
+  // rows. That work is done by the time we get here, so the run succeeded with
+  // nothing to post. Throwing instead returned 500 daily and made a healthy,
+  // load-bearing cron look broken, which is how the digest's own outage stayed
+  // invisible inside the same noise.
+  if (res.suppressed) {
+    return {
+      sent: false,
+      skipped: `suppressed by the owner queue valve (channel ${res.suppressed}); probes were still verified`,
+      open: open.length,
+      autoCleared: verified.autoCleared.length,
+    }
+  }
+
   // Give the day slot back and fail loudly, same contract as the digest: a
   // list that silently did not send is the exact failure class it exists to catch.
   if (!opts.force) await kvDel(`blocker-email:sent:${day}`)
