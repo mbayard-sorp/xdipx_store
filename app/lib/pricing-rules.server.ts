@@ -236,6 +236,9 @@ export interface RationaleParams {
   mapHeld:        boolean
   marginAfter:    number | null
   map?:           number | null
+  msrp?:          number | null
+  /** True when the MSRP ceiling, not a rule violation, is what pinned the price below the margin floor (#7515). */
+  msrpBelowFloor?: boolean
   deltaPct?:      number | null
   approvalThreshold?: number | null
 }
@@ -266,6 +269,16 @@ export function buildRationale(p: RationaleParams): string {
     const oldFmt = p.oldSell != null ? `$${p.oldSell.toFixed(2)}` : '?'
     const newFmt = p.newSell != null ? `$${p.newSell.toFixed(2)}` : '?'
     return `Velocity: ${label} -> target margin ${dir}; new sell ${newFmt} (was ${oldFmt}).`
+  }
+
+  // Queued because MSRP pins the price below the margin floor — an
+  // unsatisfiable constraint (#7515), not a rule violation, so it needs an
+  // owner decision (raise/verify MSRP, accept the lower margin, or an
+  // exception) rather than a silent, permanently recurring rejection.
+  if (p.status === 'pending' && p.msrpBelowFloor) {
+    const sell = p.newSell != null ? `$${p.newSell.toFixed(2)}` : '?'
+    const msrpFmt = p.msrp != null ? `$${p.msrp.toFixed(2)}` : '?'
+    return `Queued: MSRP ceiling ${msrpFmt} holds sell at ${sell} below the margin floor (margin ${margin}); needs an MSRP decision.`
   }
 
   // Queued because delta exceeds threshold. Direction is taken from the actual

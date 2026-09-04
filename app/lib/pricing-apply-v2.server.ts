@@ -79,6 +79,13 @@ export interface DecideStatusParams {
   marginFloor:  number
   marginAfter:  number
   mode:         ApprovalMode
+  /**
+   * True when computePrice's margin-floor clamp was subsequently overridden by
+   * the MSRP ceiling (the floor-satisfying price exceeds MSRP): an
+   * unsatisfiable pricing constraint, not a rule violation, so it queues for a
+   * human instead of being rejected and silently recurring forever (#7515).
+   */
+  msrpBelowFloor?: boolean
   /** Optional per-mode threshold override; defaults to DEFAULT_MODE_THRESHOLD[mode]. */
   threshold?:   number
 }
@@ -94,7 +101,7 @@ export function decideStatus(p: DecideStatusParams): AuditStatus {
     return 'skipped_no_change'
   }
 
-  if (marginAfter < marginFloor) return 'rejected'
+  if (marginAfter < marginFloor) return p.msrpBelowFloor ? 'pending' : 'rejected'
 
   const mapApplies = mapBehavior !== 'ignore_map' && map != null
   if (mapApplies && newPrice < map!) return 'rejected'
@@ -325,6 +332,7 @@ async function recomputeFromData(
   let newSell:    number | null = null
   let newCompare: number | null = null
   let daysDisc:   number | undefined
+  let msrpBelowFloor = false
 
   if (isDiscontinued) {
     const discontinuedAt = product.metafields.discontinuedAt ?? null
@@ -338,6 +346,7 @@ async function recomputeFromData(
     if (result) {
       newSell = result.sell
       newCompare = result.compare_at
+      msrpBelowFloor = result.msrpBelowFloor
       // Absolute price floor: queue instead of auto-applying prices below the floor
       if (result.belowAbsoluteFloor) {
         return {
@@ -365,6 +374,7 @@ async function recomputeFromData(
     marginFloor: cfg.margin_floor_pct,
     marginAfter,
     mode,
+    msrpBelowFloor,
     threshold: thresholds[mode],
   })
 
@@ -378,9 +388,11 @@ async function recomputeFromData(
     trigger,
     mapHeld:    map != null && newSell <= map + 0.02,
     marginAfter,
+    msrpBelowFloor,
     ...(velocityBucket !== undefined ? { velocityBucket }             : {}),
     ...(daysDisc       !== undefined ? { daysDisc }                  : {}),
     ...(map            != null       ? { map }                       : {}),
+    ...(msrp           != null       ? { msrp }                      : {}),
     ...(deltaPct       != null       ? { deltaPct }                  : {}),
     approvalThreshold: thresholds[mode],
   })

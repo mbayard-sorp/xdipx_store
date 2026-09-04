@@ -61,6 +61,21 @@ describe('decideStatus', () => {
     // No old price -> deltaPct = 1 which exceeds any threshold -> pending
     expect(decideStatus({ ...BASE, oldPrice: null, newPrice: 25, marginAfter: 0.50 })).toBe('pending')
   })
+
+  it('returns pending, not rejected, when margin is below floor because MSRP pins the price down (#7515)', () => {
+    // MSRP-below-floor case: the margin-floor clamp was overridden by the MSRP
+    // ceiling, so this is an unsatisfiable constraint for a human to resolve,
+    // not a rule violation to reject and silently repeat every batch run.
+    expect(
+      decideStatus({ ...BASE, oldPrice: 13.99, newPrice: 11.99, marginAfter: 0.2252, msrpBelowFloor: true }),
+    ).toBe('pending')
+  })
+
+  it('still returns rejected when margin is below floor and msrpBelowFloor is false', () => {
+    expect(
+      decideStatus({ ...BASE, oldPrice: 13.99, newPrice: 11.99, marginAfter: 0.2252, msrpBelowFloor: false }),
+    ).toBe('rejected')
+  })
 })
 
 describe('TEST_SKU_PREFIX exclusion regex', () => {
