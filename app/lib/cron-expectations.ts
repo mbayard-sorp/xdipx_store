@@ -66,6 +66,22 @@ export interface CronExpectation {
   moneyRelevant: boolean
   /** Whose lane a breach files a ticket at. Never the owner's inbox. */
   ownerTeam: string | null
+  /**
+   * True when nothing schedules this route: it fires on demand, or not at all.
+   *
+   * Such a route has a period in the sense of "how often we would expect to
+   * hear from it if it were busy", and no floor in the sense of "silence is a
+   * fault". Reading the first as the second is what produced five of the seven
+   * standing breaches the 2026-09-04 audit measured, against routes that were
+   * behaving exactly as designed. A demand-driven route is never breached on
+   * age; it is still listed, because the manifest's job is to be the full
+   * surface rather than the scheduled subset.
+   *
+   * Not the same as `schedule: 'internal'`, which only says "not in
+   * vercel.json". `/cron/purchase-reconcile` is internal and genuinely fires
+   * on a schedule of its own; these do not fire unless something asks.
+   */
+  demandDriven?: boolean
   notes: string
 }
 
@@ -369,6 +385,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     recorded: false,
     moneyRelevant: false,
     ownerTeam: 'homepage',
+    demandDriven: true, // fires only on a cold KV-miss SSR render
     notes: 'Registered route, not in vercel.json: driven internally. Listed so the manifest is the full surface, not just the scheduled subset.',
   },
   {
@@ -380,6 +397,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     recorded: false,
     moneyRelevant: false,
     ownerTeam: 'homepage',
+    demandDriven: true, // fires only on a cold KV-miss SSR render
     notes: 'As warm-homepage, for variant b.',
   },
   {
@@ -596,6 +614,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     recorded: false,
     moneyRelevant: false,
     ownerTeam: 'homepage',
+    demandDriven: true, // POST-only with a required railId; Studio, admins and MCP call it, nothing schedules it
     notes:
       'One of the three routes that bypassed cronRoute entirely with a bare router.post, so it was '
       + 'invisible to any wrapper-level instrumentation. Routed through cronRoute in this change.',
@@ -623,6 +642,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     recorded: false,
     moneyRelevant: false,
     ownerTeam: 'homepage',
+    demandDriven: true, // fires only when the index blob and its Neon row are both missing
     notes: 'The third bypass. Routed through cronRoute in this change.',
   },
 ]

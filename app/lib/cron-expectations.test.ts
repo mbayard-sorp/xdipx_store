@@ -25,6 +25,7 @@ import {
   RECORDED_CRON_ROUTES,
   isRecordedCronRoute,
 } from '~/lib/cron-expectations'
+import { EXTERNAL_LIVENESS } from '~/lib/cron-runs.server'
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..')
 
@@ -34,6 +35,59 @@ function vercelCrons(): Array<{ path: string; schedule: string }> {
 }
 
 describe('the cron expectation manifest', () => {
+  it('keeps a scheduled expectation scheduled', () => {
+    // The direction the file was missing, and the gap was not theoretical: a PR
+    // deleting /cron/checkout-probe and /cron/pricing-batch-recompute from
+    // vercel.json passed every assertion here with zero failures. Both
+    // vercel.json-reading assertions iterate `vercelCrons()`, so a DELETED cron
+    // simply drops out of the iteration and is never missed by anything.
+    //
+    // The owner declined to protect vercel.json (2026-09-04), which is the
+    // right call under the cost-only doctrine: a schedule change is not a cost
+    // decision and should not need a click. This is the guard that makes that
+    // safe, and it is the whole of item 4 of the 2026-09-04 audit.
+    const scheduled = new Set(vercelCrons().map((c) => c.path))
+    const orphaned = CRON_EXPECTATIONS
+      // `internal` declares "registered route, not in vercel.json" on purpose.
+      .filter((e) => e.plane === 'vercel' && e.schedule !== 'internal')
+      .map((e) => e.route)
+      .filter((route) => !scheduled.has(route))
+    // If this fails, a cron was removed from vercel.json while the manifest
+    // still expects it to fire. Either restore the schedule or, if the removal
+    // was deliberate, delete the expectation in the same commit so the two
+    // cannot disagree silently.
+    expect(orphaned).toEqual([])
+  })
+
+  it('bounds graceMinutes, so a floor cannot be widened into meaninglessness', () => {
+    // The lower bound has always been asserted; the upper bound never was, so
+    // `graceMinutes: 100000` on the checkout probe was a legal one-line edit
+    // that would have disabled the estate's only money-path floor while leaving
+    // every test green.
+    for (const e of CRON_EXPECTATIONS) {
+      const ceiling = Math.max(e.periodMinutes, 60) * 4
+      expect(e.graceMinutes, `${e.route} grace is more than 4x its period`)
+        .toBeLessThanOrEqual(ceiling)
+    }
+  })
+
+  it('leaves no expectation permanently unreadable', () => {
+    // The invariant behind five of the seven standing breaches measured on
+    // 2026-09-04. An expectation must have SOME tier that can produce evidence
+    // of life, or it will report breached forever and train its reader to skip
+    // the list. Three ways to satisfy it: write a cron_runs row, beat the KV
+    // heartbeat (any route registered through cronRoute does), or declare an
+    // external reader. A demand-driven route is exempt because it has no floor.
+    const unreadable = CRON_EXPECTATIONS.filter((e) => {
+      if (e.demandDriven === true) return false
+      if (e.recorded) return false
+      if (EXTERNAL_LIVENESS[e.route]) return false
+      // Everything on the vercel plane runs in-process and heartbeats.
+      return e.plane !== 'vercel'
+    }).map((e) => e.route)
+    expect(unreadable).toEqual([])
+  })
+
   it('declares an expectation for every cron in vercel.json', () => {
     const missing = vercelCrons()
       .map((c) => c.path)
