@@ -604,6 +604,106 @@ no-product hero MUST log its reason in its entry)
   - Two rounds, 4 candidates total, both via Atlas one-stage composite (`atlas/seedream-4.5-edit`),
     well inside the content-team daily image budget.
 
+- `cast: diego` + Magic Wand Plus Corded Intimate Massager (`magic-wand-plus-hv-265-massager`),
+  "Why Does It Take Longer to Orgasm as You Get Older?" (`real-talk`, † health-adjacent, content run
+  687). Gesture per the "Is this normal? / Is it just me?" row: product held up in one hand at eye
+  level, head tilted toward it, brow up, mid-question, free hand open at his side asking the room.
+  **Casting correction (independent verification caught a caller error):** the routing brief
+  proposed `marcus`, reasoning the last 7 human heroes did not include him by name. Checked against
+  the actual publish history (`blogPost` docs with `heroImage`, not the brief's summary) instead of
+  taking it on faith, same method as the `sofia`/`romp-glow` entry above: the true last-5 human
+  heroes in order were `how-to-get-more-confident-in-bed` (vivian, 09-03),
+  `why-does-penetration-sometimes-hurt` (unnamed, description matches `maya`, 09-01),
+  `what-to-do-when-medication-changes-your-libido` (sofia, 08-28),
+  `what-counts-as-premature-ejaculation` (**marcus**, 08-27), `what-helps-when-stress-kills-your-sex-drive`
+  (jade, 08-25). `marcus` is the 4th-most-recent human hero, squarely inside the no-repeat-within-5
+  window — the brief's "unnamed man in his early 30s (08-27)" was in fact `marcus` in disguise (the
+  imagePrompt never states his name but the physical description is an exact match to his
+  `castMember` doc). **`marcus` excluded on this independently-verified repeat.** Of the two-member
+  male roster (`marcus`, `diego`), `diego` is the only remaining option that keeps a male figure —
+  the brief's own rationale for wanting one (delayed ejaculation is the half of this query most
+  consumer writing drops). **Logged roster gap:** `diego`'s `emotionTags`
+  (flirtatious/bold/magnetic/playful) do not match this post's reader-emotion (quietly unsettled,
+  searching, afraid the extra time signals losing sex altogether) — no better match exists once
+  `marcus` is excluded and a male figure is held fixed, same "no roster member closely fits this
+  affect, documented rather than silently picked" gap already logged against `jade` and `sofia`
+  above. **Wardrobe override required:** `diego.editorialPhotoUrl` is unset, so compositing fell
+  back to `referencePhoto` per `editorialPhoto ?? referencePhoto` — his `referencePhoto` is a tight
+  head-and-shoulders crop, shirt wide open with bare chest visible and a broad open-mouth grin (the
+  ticket #2751 video-register-wardrobe problem, same failure class hit on `marcus` and `sofia`
+  above), the opposite of this †-topic's sincere register. Explicit strip-and-replace language
+  added: "fully clothed in a soft plain crew-neck t-shirt, collar closed, no open collar shirt, no
+  bare chest" plus explicit expression override ("mouth fully closed, no visible teeth, not
+  smiling, not grinning... not his usual flirty grin"). **Camera distance and staging variation:**
+  camera distance stated explicitly ("standing, medium-wide waist-up framing, generous room on both
+  sides and above him") per the marcus/jade/sofia precedent, since `diego`'s reference photo is also
+  a tight crop; additionally, per caller direction, staged the figure **standing** (not seated) and
+  turned toward the window light to vary the composition from the two immediately preceding human
+  heroes (`jade` 08-25, `sofia` 08-28), which had both used a seated, tight-crop "held up at eye
+  level" framing. **† health-adjacent constraints applied:** no levity license, no scale
+  exaggeration, sincere realistic staging only, explicit "no comic register, no oversized prop, no
+  levity" negatives. Product reference: Shopify `images[1]` (`69840B...jpg`), hand-picked over the
+  catalog default `images[0]` (`69840A...jpg`, a box-plus-device composite carrying heavy printed
+  packaging copy "magicwand PLUS", "VARIABLE SPEED PLUG-IN POWER") per the WINX/Magic
+  Wand HV-270/ROMP Glow precedent above — `gen-notebook-art.ts`'s `resolveProductPhotoUrl` hardcodes
+  `images[0]`, so this run called `composeSceneFrame` directly with the clean image substituted in,
+  flagging the hardcoded index as a script gap for whoever picks up label-heavy §0-H products next.
+  Four rounds via Atlas one-stage composite (`atlas/seedream-4.5-edit`, `landscape_4_3`/`4:3`, 2
+  candidates each except the last):
+  - **Round 1 (2 candidates, both REJECTED):** gesture, product shape, and expression all read
+    correctly, but both candidates rendered the background as a saturated maroon-to-coral diagonal
+    gradient wall — a hard ground-lock fail (must be pale coral-soft/plum-soft/paper, never a
+    saturated color block) and a banned two-tone gradient, the same failure class logged repeatedly
+    above (Magic Wand HV-270, Tantus ring, ROMP Glow, Wicked bottle).
+  - **Round 2 (2 candidates, background-only fix, the Magic Wand HV-270 precedent's hardened
+    language reused verbatim — "flat, pale, uniform coral-soft," "NOT saturated," "no gradient,"
+    plus explicit "no maroon/burgundy/magenta/red wall"): both REJECTED, new failure mode.** The
+    background fix worked (both candidates showed a compliant off-white/pale-coral wall), but
+    candidate 1 rendered a garbled invented brand mark on the handle (illegible pseudo-lettering
+    where "magicwand" should be) and candidate 2 rendered a floating rectangular white label reading
+    "magicwand PLUS" hovering beside the wand head, disconnected from the product surface — both
+    are baked-in/invented-text and uncanny-artifact hard rejects.
+  - **Round 3 (2 candidates, added explicit "plain smooth white surface, no legible letters" +
+    "no floating label/sticker/card/text box" language on top of round 2's prompt): both REJECTED,
+    a third failure mode.** The logo/label fix worked (neither candidate showed invented text or a
+    floating label), but both candidates rendered the product's cord and its electrical plug
+    malformed at the WRONG end: the plug and a length of coiled cord appeared attached to or hovering
+    just above the silicone head, with a second coiled segment also descending to the hand — the
+    real product's cord exits the base of the handle only. A warped-object hard reject; candidate 2
+    also regressed the background to a full-frame coral-to-salmon gradient.
+  - **Round 4 (2 candidates, shortened and reorganized prompt — trimmed redundant negative
+    language per the Wicked-bottle rounds 4-7 lesson above, moved the cord-anatomy instruction to
+    early/positive phrasing: "the cord exits ONLY from the round white cap at the very BOTTOM end
+    of the handle... the head end has nothing attached to it and nothing emerging from it"):
+    candidate 1 PASSED every check** — cord correctly anchored at the base coiling to the floor, head
+    a clean sealed dome with nothing attached, no logo text of any kind (plain white handle surface,
+    as instructed), off-white wall with only natural warm window-light falloff (no gradient, no
+    saturated block), gaze directed straight at the product, brow furrowed, mouth fully closed, free
+    hand open and relaxed at his side, five natural fingers on both hands, standing turned toward the
+    window with visible room and daylight to the right → kept. Candidate 2 also fixed cord/logo but
+    the gaze drifted away from the product and a faint illegible mark reappeared on the handle;
+    candidate 1 was the clean pass. **Precedent: an overlong, heavily-negated prompt (rounds 1-3)
+    reliably produced one new bug per round even as the previously-fixed issues stayed fixed;
+    trimming the prompt and moving the hardest instruction (cord anatomy) to early, positive,
+    specific phrasing in round 4 cleared every remaining check in one pass — reuse this
+    shorten-and-reorder technique before assuming a fourth failure means a capability ceiling.**
+    → `image-9dd99299c6378b606670880d5160834b8ed4ec87-1200x900-png` (post:
+    `what-to-do-when-orgasm-takes-longer-than-it-used-to`).
+  - **Token-collision false positive, fixed at upload, not generation:** the first `imagePrompt`
+    draft used "palm up" (gesture) and "power cord" (product description), which together spelled
+    out both distinctive tokens of an unrelated catalog SKU, `palm-power-massager-rechargeable-waterproof`
+    ("Palm Power Rechargeable Waterproof Wand Massager") — neither word individually is a problem,
+    but `check-hero-embed-match.ts`'s two-distinctive-token rule flags a false hero/embed mismatch
+    when both happen to co-occur. Fixed by rewording, not regenerating: "palm up" → "fingers relaxed
+    and turned upward", "power cord" → "cord". Verified green via `check-hero-embed-match.ts --slug
+    what-to-do-when-orgasm-takes-longer-than-it-used-to`. **Flagging as a recurring checker-adjacent
+    risk** (not a code bug this time, unlike the ROMP Glow/`romp-2-0` case above): ordinary gesture
+    and product-anatomy vocabulary can incidentally spell out a real sibling product's name; scan the
+    composed `imagePrompt` + `heroImageAlt` against the live catalog before the final upload commit
+    on any future run, the same way this run's retro-check caught it.
+  - Four rounds, 8 candidates total, all via Atlas one-stage composite, well inside the content-team
+    daily image budget.
+
 **Rejects:** `cast: none (roster gap, documented exception)` + Wicked Simply Timeless Water-Based
 Personal Lubricant & Moisturizer 4oz (`wicked-simply-timeless-jelle`), "How Does Menopause Change
 Sex, and What Helps?" (real-talk, † health-adjacent, content run 379). **Casting decision:** all
