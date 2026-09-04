@@ -6,6 +6,7 @@ import {
   DEFAULT_MAP_BRANDS,
   decideStatus,
   mapAppliesToVendor,
+  isPartialBatchDay,
 } from './pricing-apply-v2.server'
 
 const BASE = {
@@ -75,6 +76,48 @@ describe('decideStatus', () => {
     expect(
       decideStatus({ ...BASE, oldPrice: 13.99, newPrice: 11.99, marginAfter: 0.2252, msrpBelowFloor: false }),
     ).toBe('rejected')
+  })
+})
+
+describe('isPartialBatchDay (#7516)', () => {
+  // The real streak this ticket diagnosed: healthy baseline 3,000-5,900+,
+  // four consecutive partial days at 1,154-2,138 — all well over the old
+  // hardcoded EXPECTED_MIN_PRODUCTS=800 floor, so nothing flagged them.
+  const HEALTHY_BASELINE = [3972, 4023, 3019, 5585, 4501, 3800, 4200]
+
+  it('flags a synthetic partial day against a healthy trailing baseline', () => {
+    expect(isPartialBatchDay(1362, HEALTHY_BASELINE)).toBe(true)
+    expect(isPartialBatchDay(2138, HEALTHY_BASELINE)).toBe(true)
+  })
+
+  it('does not flag a count that clears the 60% threshold', () => {
+    // median of HEALTHY_BASELINE is 4023; 60% of that is ~2413.8
+    expect(isPartialBatchDay(4000, HEALTHY_BASELINE)).toBe(false)
+    expect(isPartialBatchDay(2500, HEALTHY_BASELINE)).toBe(false)
+  })
+
+  it('a hardcoded floor of 800 would have missed this exact streak, but the baseline check catches it', () => {
+    const partialStreak = [1362, 1154, 2011, 2138]
+    for (const count of partialStreak) {
+      expect(count).toBeGreaterThan(800) // would have passed the old static check
+      expect(isPartialBatchDay(count, HEALTHY_BASELINE)).toBe(true) // caught by the new one
+    }
+  })
+
+  it('returns false when there is no positive baseline to compare against', () => {
+    expect(isPartialBatchDay(500, [])).toBe(false)
+    expect(isPartialBatchDay(500, [0, 0, 0])).toBe(false)
+  })
+
+  it('returns false for a zero-row day (a full miss, not a partial one)', () => {
+    expect(isPartialBatchDay(0, HEALTHY_BASELINE)).toBe(false)
+  })
+
+  it('ignores zero-count days (full misses) when computing the baseline median', () => {
+    // A full-miss day folded into the baseline would drag the median down and
+    // could mask the next genuinely partial day.
+    const baselineWithAMiss = [0, 4000, 4200, 3900]
+    expect(isPartialBatchDay(1500, baselineWithAMiss)).toBe(true)
   })
 })
 

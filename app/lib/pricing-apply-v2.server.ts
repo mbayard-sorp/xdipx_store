@@ -1029,3 +1029,62 @@ export async function prunePricingAuditLog(): Promise<number> {
      RETURNING id`)
   return (res.rows ?? []).length
 }
+
+// ---------------------------------------------------------------------------
+// Partial-run detection (ticket #7516)
+// ---------------------------------------------------------------------------
+
+/**
+ * How far below the trailing baseline a day's `trigger='batch'` row count
+ * must fall to be flagged partial, rather than ordinary day-to-day
+ * catalog-size fluctuation. The 2026-08-30..09-02 partial-run streak (a
+ * maxDuration-limited walk) logged 1,154-2,138 rows against a 3,000-5,900+
+ * healthy baseline — comfortably under 60% of it — so this threshold catches
+ * that streak without being noisy on ordinary variation.
+ */
+export const PARTIAL_BATCH_THRESHOLD = 0.6
+
+/**
+ * Pure function: is today's `trigger='batch'` row count a partial run against
+ * its trailing baseline?
+ *
+ * The daily digest's existing check (`owner-digest.server.ts`) only asks
+ * whether any `trigger='batch'` rows exist for the day, and the cron
+ * handler's own check compares against a hardcoded floor (`EXPECTED_MIN_PRODUCTS
+ * = 800`). Neither catches this class of failure: every day in the
+ * 2026-08-30..09-02 streak logged well over 800 rows, so a run killed
+ * partway through the catalog by the serverless time budget read as healthy
+ * on both checks while un-priced SKUs went stale until the next (possibly
+ * also partial) run.
+ *
+ * Returns false — never "partial" — when there is no positive trailing
+ * baseline to compare against; an empty or all-zero history cannot judge a
+ * shortfall, and a genuine zero-row day is a full miss, caught separately.
+ */
+export function isPartialBatchDay(todayCount: number, baselineCounts: number[]): boolean {
+  const positive = baselineCounts.filter(n => n > 0)
+  if (positive.length === 0) return false
+  const sorted = [...positive].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  const median = sorted.length % 2 !== 0 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
+  return todayCount > 0 && todayCount < median * PARTIAL_BATCH_THRESHOLD
+}
+
+/**
+ * Trailing `trigger='batch'` daily row counts from `pricing_audit_log`,
+ * oldest constraint applied via the date filter, one entry per day that has
+ * at least one such row (a day with none is a full miss, not a `0` baseline
+ * sample — folding it in would silently drag the median down and mask the
+ * next partial day). Excludes today (UTC) so the current day is never its
+ * own baseline. Feeds `isPartialBatchDay`.
+ */
+export async function getRecentBatchDayCounts(days = 7): Promise<number[]> {
+  const res = await db.execute(sql`
+    SELECT date_trunc('day', occurred_at)::date AS day, COUNT(*)::int AS n
+      FROM pricing_audit_log
+     WHERE trigger = 'batch'
+       AND occurred_at >= now()::date - make_interval(days => ${days})
+       AND occurred_at <  now()::date
+     GROUP BY day`)
+  return (res.rows ?? []).map(r => Number((r as { n: unknown }).n ?? 0))
+}

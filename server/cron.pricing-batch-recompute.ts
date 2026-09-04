@@ -73,7 +73,8 @@ export async function handlePricingBatchRecompute(req: Request, res: Response): 
   }
 
   try {
-    const { recomputeCatalog } = await import('../app/lib/pricing-apply-v2.server.js')
+    const { recomputeCatalog, isPartialBatchDay, getRecentBatchDayCounts } =
+      await import('../app/lib/pricing-apply-v2.server.js')
     const result = await recomputeCatalog({ trigger, budgetMs: RECOMPUTE_BUDGET_MS, resume })
 
     // A run that "succeeds" while pricing almost nothing is the quiet version
@@ -84,6 +85,26 @@ export async function handlePricingBatchRecompute(req: Request, res: Response): 
       console.warn(
         `[cron:pricing-batch-recompute] only ${result.dayTotal} variants priced today (expected >= ${EXPECTED_MIN_PRODUCTS})`,
       )
+    }
+
+    // A hardcoded floor (EXPECTED_MIN_PRODUCTS) misses a run that finishes
+    // well above it but still far below the catalog's actual daily baseline
+    // (see isPartialBatchDay's doc comment: the 2026-08-30..09-02 streak
+    // logged 1,154-2,138 rows against a 3,000-5,900+ baseline, clearing 800
+    // every day while still being partial). Compare against the trailing
+    // baseline instead so that class of silent partial run gets a
+    // distinguishable log line, same as the pricing-ops daily sweep looks for.
+    if (result.done && result.dayTotal > 0) {
+      try {
+        const baseline = await getRecentBatchDayCounts(7)
+        if (isPartialBatchDay(result.dayTotal, baseline)) {
+          console.warn(
+            `[cron:pricing-batch-recompute] PARTIAL RUN: ${result.dayTotal} variants priced today vs trailing baseline [${baseline.join(', ')}]`,
+          )
+        }
+      } catch (err) {
+        console.warn('[cron:pricing-batch-recompute] partial-run baseline check failed (ignored):', err)
+      }
     }
 
     let continued = false
