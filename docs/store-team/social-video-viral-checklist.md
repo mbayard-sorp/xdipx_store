@@ -45,7 +45,9 @@ charter's invented-testimonial ban wearing a rule number).
 - **W2.** The wink is with the viewer, never at them. No jokes at the customer's expense,
   no smirking at the category.
 - **W3.** Displacement holds: speech covers care, storage, and materials, never usage technique.
-  The wink implies what everyone knows; the words never say it.
+  The wink implies what everyone knows; the words never say it. (Relaxed for the serialized video
+  program per the 2026-09-04 amendment: that show's cast may name pleasure and sensation plainly;
+  displacement remains the default for every other script.)
 
 ## Share-trigger (S1-S3): why it gets sent
 
@@ -66,7 +68,10 @@ charter's invented-testimonial ban wearing a rule number).
 ## Platform (P1-P3): survival
 
 - **P1.** Register caps hold on the most intense line: TikTok 5, IG/YT Shorts 6-7. Acts implied,
-  never named, in anything spoken or on screen.
+  never named, in anything spoken or on screen. (Lifted for the serialized video program per the
+  charter amendment 2026-09-04: that show's spoken track runs at 9, plain, with acts nameable; the
+  owner posts it manually and accepts the platform risk. These caps remain the default for every
+  other script.)
 - **P2.** Judge by the most revealing frame: no product-on-body, no simulated use, wardrobe safe
   in every frame, and the AI-generated label is always on.
 - **P3.** Audio and caption hygiene: no trending audio with flagged lyrics ever (instrumentals
@@ -126,6 +131,18 @@ on this family.
 
 The charter bans a named recurring character presented as if they used the product. These rules
 make that mechanically checkable line by line. Any SH FAIL is a BLOCK.
+
+**Serialized video program override (owner direction 2026-09-04, `docs/emma-voice.md` codify).**
+For the serialized recurring-cast program only, SH is narrowed: the one banned product line is
+claiming a character **tested or tried a specific product**. That show's cast MAY want to feel
+sensation, want another person to feel it, and reference having felt things before, so **SH4**'s
+"never a claimed sensation" and **W3**'s usage-displacement do not bind the program's spoken
+track, and **P1**'s register cap is lifted for it (that track runs at 9, plain). **SH1** (a
+consideration or gifting verb on the product line, never "I tried this one"), **SH2** (facts are
+specs or audibly-aggregated review patterns, never personal knowledge of the SKU), and **SH3**
+(no line claims the character used or is reacting to the specific product operating) still hold in
+that narrowed form. Emma is never in this carve-out. The four rules below are the default and
+govern every non-program script.
 
 - **SH1.** Every product line uses a consideration verb: considering, comparing, asking about,
   gifting, saving for, going back to look. Possession and experience verbs fail in every mouth,

@@ -19,6 +19,8 @@
 > Amended 2026-08-22 on Mike's explicit direction ("I'm officially saying, our posts should be at a 9 for the explicit register. That's an order. I want innuendo, suggestive phrases, skin in the images (not nudity)."): the social addendum's Instagram register moves from 4-5 to **9 by implication**. The desire-forward intent of the core register now runs in full on Instagram captions and imagery: innuendo, anticipation, the wanting nameable, skin in frame per `instagram-campaigns.md` §3.2a. What does not move is the machine-moderation vocabulary fence, because it is Meta's rule and not ours: no explicit act naming, no orgasm or arousal vocabulary, no anatomy nouns in a caption, no emoji-anatomy (Bellesa Boutique, 700K followers, was permanently deleted in March 2026 over organic caption vocabulary, and 100+ sexual-health accounts were suspended in April 2026). Three new hard rules land with it: the caption never describes the picture (the accessibility description lives in alt text, never in the caption), the picture depicts the subject of the post and never a literal illustration of its verb, and a post about a category we sell shows the product. "Too tame" becomes a gate-checkable defect on Instagram. TikTok stays at 5 because TikTok moderates harder. This moves the charter to v5.5.
 >
 > Amended the same day on Mike's review of the first six drafts ("Stop trying to hide what you are talking about. It sounds fake and is immediately detectable by humans." / "Nights don't make plans, don't say they do. Stop the messaging around a scarcity of time." / "The door doesn't have to stay closed, and we don't have to hide in the dark to use sex toys. That is a core message of the brand."): the vocabulary fence is narrowed to what Meta actually removes, graphic detail, so that facts are named plainly (orgasm, the orgasm gap, clitoris in a sentence that explains something); the no-personified-time and no-scarcity-of-time rules land in the social addendum; daylight and an open door become the default frame; and the imagery ceiling in `instagram-campaigns.md` §3.2a is restated in the owner's explicit terms. Still v5.5.
+>
+> Amended 2026-09-04 on Mike's explicit direction ("I'd rather push the limits and get a strike, rather than be read as timid in a market that demands plain language" / "these characters are interested in products because they want to feel sensation themselves or for another person to feel sensations. They can say they have 'felt' things before. We are only staying away from language that explicitly says they have 'tested' or 'tried' a specific product."): the video addendum gains a scoped **serialized video program override**. For the serialized recurring-cast program (`docs/store-team/series-bible-the-group-chat.md`) only, the posted spoken/voiceover track runs at register 9 with plain desire-forward language, and the machine-moderation vocabulary fence is lifted on that track, because the owner posts those episodes manually (editing in CapCut) and accepts the platform risk. The program's cast are written as real people who may want to feel sensation, want another person to feel it, and reference having felt things before; the one hard product line that remains for them is claiming a character tested or tried a specific product, and every factual product line is still a spec or an audibly-aggregated review pattern. Nothing else moves: **Emma's no-lived-experience rule stands everywhere** (she is the guide, not a character with a history), and every non-program surface (site, email, blog, support, product copy, the social team's separate Instagram/TikTok/X posting, and the register table's default rows for any non-program video) is unchanged. Still v5.5.
 
 <!-- core:start -->
 
@@ -502,6 +504,8 @@ surface, at scripting time, in the brief:
 | Caption (TikTok) | 5 | Conversational, one engagement question as the close; never a CTA, never trust boilerplate; the social addendum governs |
 | Site-hosted cut (PDP hero, /social, email) | 9 | The full desire-forward register per the core charter; this is where the uncut version of a reel lives |
 
+**Serialized video program override (owner direction 2026-09-04).** The rows above are the default for video and still bind any non-program clip. For the serialized recurring-cast program (`docs/store-team/series-bible-the-group-chat.md`), whose episodes the owner posts manually and edits in CapCut, the posted **spoken/voiceover** line runs at **register 9, plain**, and the machine-moderation vocabulary fence is **lifted on that track** (pleasure, sensation, "come", the act nameable plainly). This is a deliberate, owner-accepted platform-risk decision for that show only; timidity is the defect there. Captions and the site-hosted cut already run at 9. The override changes the register, not the shopper rule: the program's cast may name and want sensation, but the no-tested/tried-a-specific-product line still holds (see the amended lived-experience paragraph below and the checklist's SH family).
+
 A script brief states, before drafting starts: the platform-bound register number, a
 script-specific banned-move list, and the mechanical self-check below. Register feedback is craft
 feedback; a rejected line means fix the line, not switch genres.
@@ -528,10 +532,16 @@ the product in frame; b-roll keeps the product the compositional hero. Skin, wea
 designed, and tease are licensed; explicit nudity never appears, no frame depicts or simulates
 the product operating on a body, and wardrobe is stated in every frame prompt and judged by the
 most revealing frame of the clip. Emma has no lived experience, on camera exactly as in text:
-she speaks to what the viewer will feel, never what she has felt. Friends of Emma follow the
-same rule and may voice aggregated review patterns only; a named recurring character presented
-as if they used the product is an invented testimonial and is banned. The product is never given
-a personality or feelings. Every presenter video is labeled AI-generated where platforms provide
+she speaks to what the viewer will feel, never what she has felt (this is unchanged everywhere;
+Emma is the guide, not a character with a history). In the serialized video program only (owner
+direction 2026-09-04), the recurring cast are written as real people: they may want to feel
+sensation themselves, may want another person to feel it, and may say they have felt things
+before. The one hard product line that remains for them is that a character never claims to have
+tested or tried a specific product, and every factual product line is still a spec or an
+audibly-aggregated review pattern ("the spec sheet says", "reviewers keep describing"), never
+personal knowledge of a specific SKU. Outside that program, the original rule stands: a named
+character presented as if they used the product is an invented testimonial and is banned. The
+product is never given a personality or feelings. Every presenter video is labeled AI-generated where platforms provide
 the flag.
 
 Scripts open on the hook inside the first two seconds. Spoken closes may end on the product beat

@@ -7,7 +7,10 @@
 >
 > Owner approvals that bind this file: shoppers-not-owners (2026-08-26), 2 episodes/week during
 > learn mode, fal for images only with all video and lipsync on the RunPod Wan worker, X video
-> manual only. The working title stands until the owner renames it.
+> manual only, and (2026-09-04) a register-9 plain spoken track with the cast written as real
+> people who may name and want sensation, the only hard product line being that no character
+> claims to have tested or tried a specific product. The working title stands until the owner
+> renames it.
 
 ## 1. Premise
 
@@ -166,22 +169,32 @@ spec_cited, review_pattern, price, category). The craft version:
 - The six licensed verbs: considering, comparing, asking about, gifting, saving for, going back
   to look at again.
 - Aggregation is audible: "reviewers keep describing", "the spec sheet says". A bare fact stated
-  as personal knowledge fails SH2.
+  as personal knowledge of a specific product fails SH2.
+- The cast are real people (owner amendment 2026-09-04). They may want to feel sensation, may want
+  another person to feel it, and may reference having felt things before. The one banned product
+  line is claiming a character tested or tried a specific product; every factual product line is
+  still a spec or an audibly-aggregated review pattern, never personal knowledge of the SKU.
 - The gift is the highest-desire pattern available: choosing for someone is a declaration and is
   testimony-free. Play the selection, the handoff, the reaction to being seen that well. The gift
   is inherently two-person, and the engine agrees with the craft here: `talkingHead:true` composes
   the frame WITHOUT the product (`db/schema.ts` `VideoScriptJson.talkingHead`), so the handoff
   frame can never be a talking frame, and the gift beat is silent by construction on either the
   b-roll or the talking tier. Write it that way rather than reaching for a spoken handoff line.
-- Worked calibration pair: "I want to know what she does with it" passes. "It feels incredible"
-  fails in every mouth, voiceover included.
+- Worked calibration pair (as amended 2026-09-04): "I want to know what she does with it" and "I
+  know how much a first time like that matters" pass. "I tried this one and it feels incredible"
+  fails, because the ban is now narrowed to claiming a specific product was tested or tried. Plain
+  desire and sensation in the abstract or attached to a person are fine; personal knowledge of the
+  specific SKU is not.
 
 ## 9. Desire doctrine
 
-Three licensed sources, none of them sensation: **anticipation** (a decision not yet made),
+Four licensed sources as amended 2026-09-04: **anticipation** (a decision not yet made),
 **attention** (one person watching another), **privacy** (a door that closes, not the act behind
-it). The register cap binds spoken and on-screen text, not the frame, so the picture may be
-bolder than the line. The imagery ceiling is `instagram-campaigns.md` §3.2a, read through
+it), and now **sensation itself** for this show's real-people cast (wanting to feel it, or wanting
+another person to feel it). The one line still uncrossable is claiming a specific product was
+tested or tried. The register cap no longer binds this show's posted spoken track (it runs at 9,
+plain, per the charter amendment); on every other surface the cap still binds spoken and on-screen
+text, not the frame, so the picture may be bolder than the line. The imagery ceiling is `instagram-campaigns.md` §3.2a, read through
 social-art-director. The calibration benchmark is the drawer line at 6.5/10: physically true,
 specific, understated. The wink escalates; the boldest beat lands just before the close. Humour
 is licensed and load-bearing.
