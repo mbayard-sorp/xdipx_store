@@ -41,6 +41,7 @@ vi.mock('~/lib/team.server', () => ({
   transitionSuggestion: vi.fn(),
   getTicket: vi.fn(),
   runWithOutOfBandReconcile: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+  isMissingConflictTarget: vi.fn((err: unknown) => (err as { code?: string } | null)?.code === '42P10'),
 }))
 // ADR-008 step 2. Mocked here because this file is about the engine's decision
 // logic; the autofile module's own behaviour is tested in
