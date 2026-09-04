@@ -27,6 +27,14 @@
  * suggestion bus rejects an illegal transition, so a routine cannot walk a row
  * backwards (done -> planned) or skip a state (planned -> done). Terminal
  * states ('done', 'skipped') have no outbound edges.
+ *
+ * This machine is deliberately strict for the team-token path above and gains
+ * no new edge (#7310): an automated campaign-close that turns out to be wrong
+ * (a false-positive removal-watch step-down, a stale window) is an owner
+ * correction, not something a routine should be able to talk itself into. The
+ * admin-session route admin.marketing-calendar.tsx carries that correction
+ * capability instead, ungated by CALENDAR_TRANSITIONS, matching the trust
+ * boundary it already has for outright row deletion.
  */
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
