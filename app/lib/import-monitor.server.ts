@@ -182,6 +182,39 @@ function buildMasterUpsertPayload(
   return { tier, gapReason, score, upsertPayload }
 }
 
+/**
+ * What to do with a 'watching' candidate on this sweep (ticket #7232).
+ *
+ * A price drop alone used to be enough to reopen any watching row to
+ * 'pending'. But MAP is only a real discount floor when it sits below MSRP
+ * (same invariant as the tier-C mapClean gate in autoImportPhase2: `map >=
+ * msrp` means MAP can never produce a deal) -- so for a MAP=MSRP-locked
+ * master, a price drop can never become an actionable deal. That reopened
+ * these rows every run regardless, and product-manager rejected the same
+ * handful by hand each time (run 661: 4 rows, all MAP=MSRP, all re-swept).
+ * A genuine score improvement is a separate, valid signal and still reopens
+ * normally even on a MAP-locked master.
+ */
+export function decideWatchingReopen(input: {
+  priorScore: number
+  score: number
+  watchScoreDelta: number
+  priorPrice: number
+  proposedPrice: number
+  watchPriceDropPct: number
+  map: number
+  msrp: number
+}): 'reopen' | 'reject-map-locked' | 'refresh' {
+  const scoreImproved = input.score >= input.priorScore + input.watchScoreDelta
+  const priceDropped =
+    input.priorPrice > 0 && input.proposedPrice <= input.priorPrice * (1 - input.watchPriceDropPct)
+  const mapLocksOutDeal = input.map > 0 && input.map >= input.msrp
+
+  if (priceDropped && mapLocksOutDeal && !scoreImproved) return 'reject-map-locked'
+  if (scoreImproved || priceDropped) return 'reopen'
+  return 'refresh'
+}
+
 // ─── Main monitor run ──────────────────────────────────────────────────────────
 
 export async function runImportMonitor(
@@ -385,13 +418,31 @@ export async function runImportMonitor(
           .set({ lastSeenAt: new Date(), updatedAt: new Date() })
           .where(eq(importCandidates.masterKey, masterKey))
       } else if (existing.status === 'watching') {
-        // Reopen to 'pending' if score improved materially OR price dropped materially.
         const priorScore = parseFloat(existing.watchScore ?? '0')
         const priorPrice = parseFloat(existing.watchPrice ?? '0')
-        const scoreImproved = score >= priorScore + watchScoreDelta
-        const priceDropped  = priorPrice > 0 && proposedPrice <= priorPrice * (1 - watchPriceDropPct)
+        const action = decideWatchingReopen({
+          priorScore, score, watchScoreDelta,
+          priorPrice, proposedPrice, watchPriceDropPct,
+          map: master.map, msrp: master.msrp,
+        })
 
-        if (scoreImproved || priceDropped) {
+        if (action === 'reject-map-locked') {
+          // #7232: MAP is only a real discount floor when it sits below MSRP;
+          // a price-drop-only reopen on a MAP=MSRP-locked master can never
+          // become an actionable deal, so it was structural queue rot:
+          // reopened, re-swept, and manually rejected every run (run 661: 4
+          // rows, same pattern). Close it straight to 'rejected' instead of
+          // resurfacing it to 'pending'.
+          await db
+            .update(importCandidates)
+            .set({
+              ...upsertPayload,
+              status:     'rejected',
+              reviewedBy: 'system:map-eq-msrp-reopen-guard',
+              reviewedAt: new Date(),
+            })
+            .where(eq(importCandidates.masterKey, masterKey))
+        } else if (action === 'reopen') {
           // Reopening clears the watch-era review stamp: a pending row must
           // never carry reviewed_by, or it reads as claimed and pollutes the
           // per-day action-cap count (ticket #554).
