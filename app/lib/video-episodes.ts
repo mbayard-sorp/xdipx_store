@@ -15,6 +15,16 @@ export const PLACEMENT_MENTION_TYPES = ['spec_cited', 'review_pattern', 'price',
 export const ARC_POSITIONS = ['setup', 'escalation', 'turn', 'payoff', 'standalone'] as const
 
 /**
+ * production_status values a script may no longer be edited from (ticket
+ * #7558): a render has started, finished, or the episode has moved past
+ * render entirely. Lives here (not the .server twin) so the admin UI's
+ * client-rendered component can read it without pulling a .server module
+ * into the client bundle — React Router only strips server code out of
+ * `loader`/`action`/`middleware`/`headers`, not other route exports.
+ */
+export const SCRIPT_LOCKED_STATUSES = ['rendering', 'rendered', 'scheduled', 'posted', 'measured', 'shelved'] as const
+
+/**
  * Validate a raw product_placements payload. Returns the normalized array or
  * throws with a message naming the first defect. Empty is allowed (an episode
  * may carry no product, and that absence is a choice the script justifies).

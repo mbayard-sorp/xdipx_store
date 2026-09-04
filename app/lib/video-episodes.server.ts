@@ -17,7 +17,7 @@ import { db } from './db.server'
 import { videoEpisodes, videoSeries, videoJobs } from '../../db/schema'
 import type { VideoEpisodeReviewNote, VideoScriptJson } from '../../db/schema'
 import { HOOK_PATTERNS, VIDEO_FORMULAS } from './team-keys'
-import { ARC_POSITIONS, validatePlacements, scriptsSpeakIdentically, spokenTextOf } from './video-episodes'
+import { ARC_POSITIONS, SCRIPT_LOCKED_STATUSES, validatePlacements, scriptsSpeakIdentically, spokenTextOf } from './video-episodes'
 import { dryRunEpisodeScript, getMaxCostCents } from './video-pipeline.server'
 import { isVideoModelId, tierIneligibility } from './fal-video.server'
 import type { VideoModelId } from './fal-video.server'
@@ -331,6 +331,75 @@ export async function decideEpisode(args: {
     ...(args.decision === 'rejected' && args.note?.trim() ? { rejectReason: args.note.trim() } : {}),
     ...(plannedSlotAt ? { plannedSlotAt } : {}),
     ...(retaking ? { videoJobId: null, priorJobIdsJson: priorJobIds, renderStartedAt: null } : {}),
+  }).where(eq(videoEpisodes.id, args.episodeId))
+}
+
+/**
+ * Owner edit of episode script text, ADMIN-SESSION ONLY by design (ticket
+ * #7558, Part A of #7557): called from the /admin/video-studio script-reader
+ * action, never exposed on the team-token API, mirroring decideEpisode's own
+ * admin-only boundary — agents never mutate a script via the team token.
+ *
+ * Merges the given fields into the existing scriptJson/siteCutJson rather
+ * than replacing them wholesale, so an edit to one field (say, the CTA)
+ * cannot silently drop scene/timing/model-tier data the writers room wrote
+ * that the reader UI does not surface. `captions` merges shallowly per
+ * platform key for the same reason.
+ *
+ * Deliberately does NOT capture a before/after diff for the writers-room
+ * learning loop — that is Part B (bus ticket, `[cross-agent-epic]`, since it
+ * also requires an agent-editor PR to change how series-showrunner and
+ * episode-writer read prompts) and depends on this function existing first.
+ */
+export interface EditEpisodeScriptInput {
+  episodeId: number
+  editedBy: string
+  /**
+   * Scoped to what the script reader (`/admin/video-studio/scripts/{id}`)
+   * actually renders as editable text — not every VideoScriptJson field
+   * (scenes, timings, model routing) is meant for hand-editing here.
+   */
+  script?: Pick<VideoScriptJson, 'voiceover' | 'presenterLine' | 'cta'> & {
+    shareLine?: string
+    captions?: Record<string, string>
+  }
+  siteCut?: { title?: string; dek?: string; copy?: string }
+}
+
+export async function editEpisodeScript(args: EditEpisodeScriptInput): Promise<void> {
+  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, args.episodeId)).limit(1)
+  const ep = rows[0]
+  if (!ep) throw new Error(`episode ${args.episodeId} not found`)
+  if ((SCRIPT_LOCKED_STATUSES as readonly string[]).includes(ep.productionStatus)) {
+    throw new Error(
+      `episode ${args.episodeId} is ${ep.productionStatus}; script edits are not allowed once a render has started or completed`,
+    )
+  }
+  if (!args.script && !args.siteCut) {
+    throw new Error('editEpisodeScript requires at least one of script or siteCut')
+  }
+
+  const currentScript = (ep.scriptJson ?? {}) as VideoScriptJson
+  const { captions: captionEdits, ...scriptEdits } = args.script ?? {}
+  const nextScript: VideoScriptJson = {
+    ...currentScript,
+    ...scriptEdits,
+    ...(captionEdits ? { captions: { ...(currentScript.captions ?? {}), ...captionEdits } } : {}),
+  }
+
+  const note: VideoEpisodeReviewNote = {
+    at: new Date().toISOString(),
+    decision: 'edited',
+    note: 'owner edited script text',
+    by: args.editedBy,
+  }
+  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
+
+  await db.update(videoEpisodes).set({
+    scriptJson: nextScript,
+    reviewNotesJson: notes,
+    updatedAt: new Date(),
+    ...(args.siteCut ? { siteCutJson: { ...(ep.siteCutJson ?? {}), ...args.siteCut } } : {}),
   }).where(eq(videoEpisodes.id, args.episodeId))
 }
 

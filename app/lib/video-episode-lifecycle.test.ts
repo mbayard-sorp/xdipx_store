@@ -22,6 +22,8 @@ interface EpisodeRow {
   priorJobIdsJson: number[] | null
   reviewNotesJson: unknown[] | null
   plannedSlotAt: Date | null
+  scriptJson: Record<string, unknown> | null
+  siteCutJson: { title?: string; dek?: string; copy?: string } | null
 }
 
 const state = vi.hoisted(() => ({
@@ -58,6 +60,7 @@ import {
   markEpisodeRenderFailed,
   reapStaleEpisodeClaims,
   decideEpisode,
+  editEpisodeScript,
 } from './video-episodes.server'
 
 function episode(over: Partial<EpisodeRow> = {}): EpisodeRow {
@@ -68,6 +71,8 @@ function episode(over: Partial<EpisodeRow> = {}): EpisodeRow {
     priorJobIdsJson: null,
     reviewNotesJson: null,
     plannedSlotAt: null,
+    scriptJson: null,
+    siteCutJson: null,
     ...over,
   }
 }
@@ -191,5 +196,83 @@ describe('decideEpisode on a failed render', () => {
     state.row = episode({ productionStatus: 'posted' })
     await expect(decideEpisode({ episodeId: 7, decision: 'approved', decidedBy: 'mike@xdipx.com' }))
       .rejects.toThrow(/can be decided/)
+  })
+})
+
+describe('editEpisodeScript (ticket #7558)', () => {
+  it('merges an edited field into scriptJson without dropping the rest', async () => {
+    state.row = episode({
+      productionStatus: 'pending_approval',
+      scriptJson: { presenterLine: 'old line', durationSeconds: 12, sceneSlug: 'kitchen' },
+    })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { presenterLine: 'new line' } })
+    expect(state.sets[0]?.['scriptJson']).toEqual({ presenterLine: 'new line', durationSeconds: 12, sceneSlug: 'kitchen' })
+  })
+
+  it('merges caption edits shallowly, per platform key, leaving other platforms untouched', async () => {
+    state.row = episode({
+      productionStatus: 'approved',
+      scriptJson: { captions: { instagram: 'old ig caption', tiktok: 'old tiktok caption' } },
+    })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { captions: { instagram: 'new ig caption' } } })
+    expect((state.sets[0]?.['scriptJson'] as { captions: Record<string, string> }).captions).toEqual({
+      instagram: 'new ig caption',
+      tiktok: 'old tiktok caption',
+    })
+  })
+
+  it('merges siteCut edits into siteCutJson without dropping untouched fields', async () => {
+    state.row = episode({ productionStatus: 'needs_changes', siteCutJson: { title: 'old title', dek: 'old dek' } })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', siteCut: { title: 'new title' } })
+    expect(state.sets[0]?.['siteCutJson']).toEqual({ title: 'new title', dek: 'old dek' })
+  })
+
+  it('appends an "edited" review note without overwriting prior notes', async () => {
+    state.row = episode({
+      productionStatus: 'approved',
+      reviewNotesJson: [{ at: '2026-09-01T00:00:00.000Z', decision: 'approved', by: 'mike@xdipx.com' }],
+    })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { cta: 'new cta' } })
+    const notes = state.sets[0]?.['reviewNotesJson'] as { decision: string }[]
+    expect(notes).toHaveLength(2)
+    expect(notes[0]?.decision).toBe('approved')
+    expect(notes[1]?.decision).toBe('edited')
+  })
+
+  it('never touches productionStatus (edit is not a decision)', async () => {
+    state.row = episode({ productionStatus: 'needs_changes' })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { voiceover: 'new voiceover' } })
+    expect(state.sets[0]).not.toHaveProperty('productionStatus')
+  })
+
+  it.each(['rendering', 'rendered', 'scheduled', 'posted', 'measured', 'shelved'])(
+    'refuses to edit a script once the episode is %s',
+    async status => {
+      state.row = episode({ productionStatus: status })
+      await expect(editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { cta: 'x' } }))
+        .rejects.toThrow(/script edits are not allowed/)
+      expect(state.sets).toHaveLength(0)
+    },
+  )
+
+  it('allows editing on statuses short of render', async () => {
+    for (const status of ['idea', 'drafting', 'pending_approval', 'needs_changes', 'approved', 'failed', 'rejected']) {
+      state.row = episode({ productionStatus: status })
+      state.sets = []
+      await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { cta: 'x' } })
+      expect(state.sets).toHaveLength(1)
+    }
+  })
+
+  it('refuses when neither script nor siteCut is given', async () => {
+    state.row = episode({ productionStatus: 'approved' })
+    await expect(editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com' }))
+      .rejects.toThrow(/requires at least one/)
+  })
+
+  it('refuses an unknown episode', async () => {
+    state.row = null
+    await expect(editEpisodeScript({ episodeId: 999, editedBy: 'mike@xdipx.com', script: { cta: 'x' } }))
+      .rejects.toThrow(/not found/)
   })
 })
