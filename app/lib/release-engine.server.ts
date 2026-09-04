@@ -76,7 +76,13 @@ import { checkUrl, runCheckoutProbe } from '~/lib/checkout-probe.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { KV_KEYS, kvDel, kvGet, kvIncr, kvSet, kvSetNX } from '~/lib/kv.server'
 import { escapeHtml, sendOwnerEmail } from '~/lib/owner-alerts.server'
-import { getTicket, runWithOutOfBandReconcile, transitionSuggestion, type TicketStatus } from '~/lib/team.server'
+import {
+  getTicket,
+  isMissingConflictTarget,
+  runWithOutOfBandReconcile,
+  transitionSuggestion,
+  type TicketStatus,
+} from '~/lib/team.server'
 // One-directional: the autofile module imports team.server and github.server,
 // never this file, so there is no cycle. Keeping the tunable half of ADR-008
 // step 2 out of this protected file is the point (see that module's header).
@@ -2711,18 +2717,36 @@ ${recentErrors.length > 0 ? `<p>Recent notes:</p><ul>${recentErrors.map((e) => `
 // except its own kill switch in the circuit breaker)
 // ---------------------------------------------------------------------------
 
-async function addTicketLink(ticketId: number, link: { kind: string; ref: string; state?: string }): Promise<void> {
+// #7308: same degrade as addTicketLinks in team.server.ts (#7150). Without
+// migration 092's unique index, the targeted onConflictDoNothing throws
+// SQLSTATE 42P10, which this function used to swallow into a console.warn --
+// quieter than the 500 team.server.ts had, since this writer never throws at
+// all, so the link row was just silently never written. Retry with a plain
+// insert on that specific error; any other error keeps the existing warn.
+export async function addTicketLink(
+  ticketId: number,
+  link: { kind: string; ref: string; state?: string },
+): Promise<void> {
+  const row = {
+    suggestionId: ticketId,
+    kind: link.kind.slice(0, 12),
+    ref: link.ref,
+    state: link.state ? link.state.slice(0, 16) : null,
+  }
   try {
-    await db.insert(suggestionLinks).values({
-      suggestionId: ticketId,
-      kind: link.kind.slice(0, 12),
-      ref: link.ref,
-      state: link.state ? link.state.slice(0, 16) : null,
-    }).onConflictDoNothing({
+    await db.insert(suggestionLinks).values(row).onConflictDoNothing({
       target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
     })
   } catch (err) {
-    console.warn(`${LOG} could not add ${link.kind} link to ticket #${ticketId}`, err)
+    if (!isMissingConflictTarget(err)) {
+      console.warn(`${LOG} could not add ${link.kind} link to ticket #${ticketId}`, err)
+      return
+    }
+    try {
+      await db.insert(suggestionLinks).values(row)
+    } catch (retryErr) {
+      console.warn(`${LOG} could not add ${link.kind} link to ticket #${ticketId}`, retryErr)
+    }
   }
 }
 

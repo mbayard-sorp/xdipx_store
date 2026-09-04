@@ -82,6 +82,7 @@ vi.mock('~/lib/team.server', () => ({
   transitionSuggestion: vi.fn(async () => ({ attemptCount: 1 })),
   getTicket: vi.fn(async () => null),
   runWithOutOfBandReconcile: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+  isMissingConflictTarget: vi.fn((err: unknown) => (err as { code?: string } | null)?.code === '42P10'),
 }))
 vi.mock('~/lib/release-ticket-autofile.server', () => ({
   autoFileTicketForPr: vi.fn(async () => null),
