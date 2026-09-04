@@ -1658,6 +1658,21 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     return { sent: true, subject }
   }
 
+  // A deliberate suppression is not a failed send, and must not be reported as
+  // one. This cannot fire for the digest today (its class is `digest`, the one
+  // channel the queue valve may not swallow), but it fired for two days when
+  // the class was `queue`, and the 500 it produced was indistinguishable from
+  // SMTP being down. If a future reclassification puts the carrier back in a
+  // suppressible channel, this degrades to a recorded skip that the liveness
+  // floor still reads, rather than to a lie about why nothing arrived.
+  //
+  // The fingerprint is deliberately NOT stored: nothing was delivered, so
+  // tomorrow's comparison must still see today's queue as unsent.
+  if (res.suppressed) {
+    if (!opts.force) await kvDel(`owner-digest:sent:${day}`)
+    return { sent: false, skipped: `suppressed by the owner queue valve (channel ${res.suppressed})` }
+  }
+
   // The day slot was claimed before composing, to stop a double cron
   // invocation sending twice. If the send itself failed, give the slot back and
   // throw so the cron returns 500 instead of a cheerful 200: a digest that

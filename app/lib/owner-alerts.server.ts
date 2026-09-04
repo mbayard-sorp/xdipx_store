@@ -10,10 +10,11 @@
 
 import { sendSms } from '~/lib/twilio.server'
 import {
-  escalationChannel,
   isPagingClass,
+  suppressibleChannel,
   type EscalationClassName,
   type PagingClass,
+  type SuppressibleChannel,
 } from '~/lib/owner-escalation'
 
 /**
@@ -71,7 +72,7 @@ export interface OwnerSendResult {
   /** Set when the send was withheld because its class is rendered by the owner
    *  queue instead. Not an error: the information reached the owner by another
    *  surface, and distinguishing the two is what keeps a real failure legible. */
-  suppressed?: 'queue' | 'lane'
+  suppressed?: SuppressibleChannel
 }
 
 /**
@@ -90,12 +91,18 @@ export async function sendOwnerEmail(
   // A paging class is never suppressed, whatever the valve says: muting the
   // money path by flipping a queue setting would be a far worse bug than the
   // noise this is reducing.
-  const channel = escalationChannel(opts.escalation)
-  if (channel !== 'page' && !isPagingClass(opts.escalation) && (await ownerQueueEnabled())) {
+  //
+  // Nor is the carrier. `suppressibleChannel` names the two channels the queue
+  // may swallow instead of asking what this class is not: the guard used to
+  // read `channel !== 'page'`, which suppressed `daily-digest` the moment the
+  // valve came on and left /cron/owner-digest returning 500 for two days. See
+  // the incident note in owner-escalation.ts.
+  const swallowedBy = suppressibleChannel(opts.escalation)
+  if (swallowedBy && !isPagingClass(opts.escalation) && (await ownerQueueEnabled())) {
     console.log(
-      `[owner-alerts] withheld "${subject}" (${opts.escalation}, ${channel}): rendered by the owner queue`,
+      `[owner-alerts] withheld "${subject}" (${opts.escalation}, ${swallowedBy}): rendered by the owner queue`,
     )
-    return { sent: false, suppressed: channel }
+    return { sent: false, suppressed: swallowedBy }
   }
 
   const host = process.env['ZOHO_SMTP_HOST'] ?? 'smtp.zoho.com'

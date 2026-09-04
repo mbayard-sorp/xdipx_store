@@ -13,13 +13,18 @@
  * So the rule is data here, and the mechanism is the type system plus the
  * sender, not a lint someone has to remember to run.
  *
- * ## Three channels, and only one of them may interrupt
+ * ## Four channels, and only one of them may interrupt
  *
  * - **`page`** — the money path is down or the storefront is down. Email at
  *   any hour, never suppressed by the queue valve. Exactly two classes
  *   qualify, by owner decision. SMS is OFF by owner decision (2026-09-02):
  *   `sendOwnerSms` still exists behind its type fence, but `OWNER_ALERT_PHONE`
  *   is deliberately unset and the SMS half of a page is a recorded no-op.
+ * - **`digest`** — the carrier itself. Exactly one class, `daily-digest`, and
+ *   it is never suppressed by the queue valve because it IS the queue's
+ *   delivery. Distinct from `page` because a late digest is not an incident,
+ *   and distinct from `queue` because a class cannot be folded into itself.
+ *   This channel exists because of a real incident: see the note below.
  * - **`queue`** — real, owner-owned, and not urgent. Suppressed once
  *   `owner_queue_enabled` is on, because `computeOwnerQueue()` renders it from
  *   the same underlying rows (blockers, tickets, PRs) that the email was
@@ -27,7 +32,26 @@
  * - **`lane`** — not the owner's at all. A team's own floor breached, or a
  *   detector fired. It files a ticket at `laneTeam` instead. Invariant 3 of the
  *   self-healing program: a breach files at the owning lane, never at the
- *   owner's inbox.
+ *   owner's inbox. *
+ * ## Why `digest` is its own channel, and the sender uses an allowlist
+ *
+ * `daily-digest` was originally classed `queue`, and the sender's guard read
+ * `channel !== 'page'`. Both were individually reasonable and together they
+ * were a self-suppression bug: the digest is not a page, so it satisfied the
+ * guard, and the moment `owner_queue_enabled` was turned on (2026-09-03 05:06
+ * UTC) the carrier of the queue began suppressing itself. `sendOwnerEmail`
+ * returned `{ sent: false, suppressed: 'queue' }` with no `error`, the caller
+ * read that as a failed send and threw, and `/cron/owner-digest` returned 500
+ * on both days it ran. Nothing noticed: the failure was recorded in
+ * `cron_runs` and nothing reads failed rows, and the surface that would have
+ * reported it was the surface that had failed.
+ *
+ * Two changes keep that shape from recurring. The carrier gets a channel of
+ * its own, so "may the queue swallow this?" is a property of the data rather
+ * than an accident of what the class is NOT. And `isSuppressibleByQueue` is a
+ * positive allowlist, so a new channel added later defaults to sending rather
+ * than to silence. A negative guard fails open toward suppression, which is
+ * the direction that loses information.
  *
  * ## `sendOwnerSms` takes only a paging class, by type
  *
@@ -48,7 +72,7 @@
  * reduction arrives with the queue that replaces it.
  */
 
-export type EscalationChannel = 'page' | 'queue' | 'lane'
+export type EscalationChannel = 'page' | 'digest' | 'queue' | 'lane'
 
 export interface EscalationClass {
   /** Why this class exists, and why it sits in the channel it does. */
@@ -139,12 +163,12 @@ export const ESCALATION_CLASSES = {
     why: 'An inbound reply on the outreach lane that wants a human answer.',
   },
   'daily-digest': {
-    channel: 'queue',
+    channel: 'digest',
     why:
       'The digest itself: the one legitimate scheduled send, and the surface every other class '
-      + 'here folds into. Classed `queue` rather than `page` because a late digest is not an '
-      + 'incident — but a MISSING one is, and that is why /cron/owner-digest is a recorded cron '
-      + 'with its own liveness floor.',
+      + 'here folds into. Classed `digest` rather than `queue` because a class cannot be folded '
+      + 'into itself, and rather than `page` because a late digest is not an incident. A MISSING '
+      + 'one is, which is why /cron/owner-digest is a recorded cron with its own liveness floor.',
   },
 
   // --- lane: a team's problem, filed at that team ---------------------------
@@ -186,6 +210,34 @@ export function escalationLaneTeam(name: EscalationClassName): string | null {
  */
 export function isPagingClass(name: string): name is PagingClass {
   return (PAGING_CLASSES as readonly string[]).includes(name)
+}
+
+/** The channels `owner_queue_enabled` is allowed to swallow. */
+export type SuppressibleChannel = Extract<EscalationChannel, 'queue' | 'lane'>
+
+/**
+ * The channel the queue may swallow this class into, or null if it may not.
+ *
+ * A positive allowlist on purpose. The guard this replaces was
+ * `channel !== 'page'`, which silently included the digest carrier and turned
+ * the queue valve into a mute button for the queue itself. Enumerating the
+ * suppressible channels means a channel added later has to opt IN to being
+ * silenced, and the default for anything unclassified is that the owner still
+ * hears it. Losing an interruption is recoverable; losing the only delivery is
+ * not.
+ *
+ * Returns the channel rather than a boolean so the sender can report WHICH
+ * surface absorbed the message without re-deriving it, and so the compiler
+ * proves the reported channel is one that may absorb anything at all.
+ */
+export function suppressibleChannel(name: EscalationClassName): SuppressibleChannel | null {
+  const channel = escalationChannel(name)
+  return channel === 'queue' || channel === 'lane' ? channel : null
+}
+
+/** Predicate form, for the invariants that read better as a yes or no. */
+export function isSuppressibleByQueue(name: EscalationClassName): boolean {
+  return suppressibleChannel(name) !== null
 }
 
 export function isEscalationClass(name: string): name is EscalationClassName {
