@@ -1777,7 +1777,17 @@ export function createCronRoutes() {
       // list looks exactly like health. On its first run this found the entire
       // video program — the most expensive lane in the estate — running with no
       // liveness entry at all, six days after both its triggers were created.
-      const unwatched = await readUnwatchedLanes()
+      // Wrapped for the same reason the credential sweep below is: this is the
+      // only awaited call in the handler that had no guard of its own, so a
+      // `homepage_team_runs` blip 500ed the whole sweep — which `cronRoute`
+      // then recorded as the JANITOR failing and suppressed its heartbeat. The
+      // watcher could take itself down, silently, on someone else's outage.
+      let unwatched: Awaited<ReturnType<typeof readUnwatchedLanes>> = []
+      try {
+        unwatched = await readUnwatchedLanes()
+      } catch (err) {
+        console.error('[cron:janitor-sweep] unwatched-lane read failed (ignored):', err)
+      }
 
       // Credential liveness. Nothing in this estate has ever probed whether the
       // store's own Shopify, Klaviyo, Instagram, X, GitHub, Vercel, Twilio or
@@ -1804,13 +1814,38 @@ export function createCronRoutes() {
         else if (c.state === 'unknown') console.warn(`[cron:janitor-sweep] credential could-not-ask ${c.key}: ${c.detail}`)
       }
 
+      // The actuator. Until this shipped, everything above was measured every
+      // six hours and written to console.warn — a log stream whose only reader
+      // Stage G3 deleted. `readCronLiveness` had one caller and no consumer,
+      // which is why both of the owner's own delivery crons could return HTTP
+      // 500 for two days with this sweep running four times in between.
+      //
+      // Closing runs before filing, inside the module: a condition that cleared
+      // must release its dedupe key before anything tries to file against it.
+      let alarms: {
+        filed: string[]; closed: number[]; escalated: string[]; unreadable: string[]
+      } = { filed: [], closed: [], escalated: [], unreadable: [] }
+      try {
+        const { reconcileCronAlarms } = await import('../app/lib/cron-liveness-tickets.server.js')
+        alarms = await reconcileCronAlarms(liveness, unwatched)
+      } catch (err) {
+        console.error('[cron:janitor-sweep] alarm reconcile failed (ignored):', err)
+      }
+
+      const failing = liveness.filter(l => l.failing)
       for (const b of breaches) {
         console.warn(
           `[cron:janitor-sweep] BREACH ${b.route} (${b.plane}): `
-          + (b.lastSeenAt ? `last seen ${b.ageMinutes} min ago` : 'never seen')
+          + (b.lastSeenAt ? `last seen ${b.lastSeenAt.toISOString()}` : 'never seen')
           + `, floor ${b.periodMinutes}+${b.graceMinutes} min`
           + (b.moneyRelevant ? ' [money]' : '')
           + (b.ownerTeam ? ` -> ${b.ownerTeam}` : ''),
+        )
+      }
+      for (const f of failing) {
+        console.error(
+          `[cron:janitor-sweep] FAILING ${f.route}: ${f.consecutiveFailures} consecutive failed run(s), `
+          + `last ${f.lastSeenAt ? f.lastSeenAt.toISOString() : 'never'}: ${(f.lastError ?? '').slice(0, 200)}`,
         )
       }
       if (unfinished > 0) {
@@ -1820,6 +1855,12 @@ export function createCronRoutes() {
         console.warn(
           `[cron:janitor-sweep] UNWATCHED LANE ${u.team}/${u.runType}: `
           + `${u.runs} run(s) in 30d, last ${u.lastRunAt ?? 'never'}, no ROUTINE_CADENCES entry`,
+        )
+      }
+      for (const r of alarms.unreadable) {
+        console.error(
+          `[cron:janitor-sweep] UNREADABLE ${r}: no row, no heartbeat and no external reader. `
+          + 'Not ticketed on purpose — this is a manifest bug, not a route fault.',
         )
       }
 
@@ -1838,6 +1879,24 @@ export function createCronRoutes() {
         })),
         unfinishedTerminalRuns: unfinished,
         unwatchedLanes: unwatched,
+        // Alive and broken, the fault `breaches` structurally cannot see.
+        failing: failing.map(f => ({
+          route: f.route,
+          consecutiveFailures: f.consecutiveFailures,
+          lastStatus: f.lastStatus,
+          lastError: f.lastError,
+          moneyRelevant: f.moneyRelevant,
+          ownerTeam: f.ownerTeam,
+        })),
+        // Counted here rather than inferred from fileDetectionTicket's return
+        // value, which is 0 both for a dedupe hit and for a thrown error.
+        alarms: {
+          filed: alarms.filed.length,
+          closed: alarms.closed.length,
+          escalated: alarms.escalated.length,
+          unreadable: alarms.unreadable,
+          closedIds: alarms.closed,
+        },
         credentials: credentials.map(c => ({ key: c.key, state: c.state, detail: c.detail })),
         credentialBlockers,
         pruned,

@@ -47,7 +47,7 @@ import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { kvGet, kvSet } from '~/lib/kv.server'
-import { cronExpectations, cronRuns } from '../../db/schema'
+import { checkoutProbeRuns, cronExpectations, cronRuns } from '../../db/schema'
 import { CRON_EXPECTATIONS, isRecordedCronRoute } from '~/lib/cron-expectations'
 
 const LOG = '[cron-runs]'
@@ -67,6 +67,9 @@ export function heartbeatKey(route: string): string {
 const HEARTBEAT_TTL_SECONDS = 60 * 60 * 24 * 60
 
 export type CronRunStatus = 'succeeded' | 'skipped' | 'failed'
+
+/** Consecutive failed runs before `failing` trips. One failure is noise. */
+export const CONSECUTIVE_FAILURES_BEFORE_ALARM = 2
 
 /**
  * Classify one completed invocation from what the handler actually did.
@@ -236,15 +239,76 @@ export interface CronLiveness {
   ownerTeam: string | null
   /** Most recent evidence of life from either tier, or null when there is none. */
   lastSeenAt: Date | null
-  /** Where that evidence came from. `none` means neither tier has anything. */
-  source: 'row' | 'heartbeat' | 'none'
+  /** Where that evidence came from. `none` means no tier has anything. */
+  source: 'row' | 'heartbeat' | 'external' | 'none'
   /** Minutes since `lastSeenAt`, or null when nothing has ever been seen. */
   ageMinutes: number | null
-  /** True when age exceeds `periodMinutes + graceMinutes`, or nothing was ever seen. */
+  /**
+   * True when age exceeds `periodMinutes + graceMinutes`, or nothing was ever
+   * seen. Always false for a demand-driven route, which has no schedule to
+   * miss: silence there is the absence of demand, not the absence of health.
+   */
   breached: boolean
+  /** Mirrored onto the row so a reader can tell "healthy" from "not applicable". */
+  demandDriven: boolean
   /** The most recent terminal status, for recorded routes only. */
   lastStatus: CronRunStatus | null
   lastError: string | null
+  /** Consecutive failed runs, newest first. Zero for heartbeat-only routes. */
+  consecutiveFailures: number
+  /**
+   * Alive and broken: it fired on time and threw, twice or more in a row.
+   *
+   * Deliberately separate from `breached`. Silence and failure are two
+   * different faults with two different first questions ("is the scheduler
+   * delivering?" versus "why is the handler throwing?"), so they get two
+   * signals and, downstream, two dedupe keys.
+   */
+  failing: boolean
+}
+
+/**
+ * Liveness for surfaces that do not execute inside this app.
+ *
+ * A route on the `actions` plane runs on a GitHub runner: it cannot write a
+ * `cron_runs` row and it cannot beat the KV heartbeat, so both tiers are
+ * structurally empty and `lastSeenAt` is null forever. That is not a dead
+ * cron, it is an unreadable one, and the two must not render the same way —
+ * the browser checkout probe, the closest thing this estate has to "can a
+ * customer reach checkout", reported breached on every sweep while succeeding
+ * 12 times out of 12.
+ *
+ * The manifest already promised this read. `cron-expectations.ts` says of the
+ * probe row that "liveness is read from its `checkout_probe_runs` rows
+ * instead"; the reader was never written. This is it.
+ *
+ * Keyed by route rather than by plane so the mapping is explicit and a new
+ * external surface has to declare where its evidence lives. `EXTERNAL_LIVENESS`
+ * plus `recorded` is also what lets a test assert the real invariant: no
+ * expectation may be permanently unreadable.
+ */
+export const EXTERNAL_LIVENESS: Record<string, () => Promise<Date | null>> = {
+  '.github/workflows/checkout-probe.yml': lastBrowserCheckoutProbeAt,
+}
+
+/** Most recent browser-tier checkout probe, the workflow's own side effect.
+ *
+ *  `tier` is the discriminator that matters: the 6-hourly Vercel probe writes
+ *  `http` rows to the same table, and reading those would report the Actions
+ *  workflow as alive off a completely different scheduler. */
+async function lastBrowserCheckoutProbeAt(): Promise<Date | null> {
+  try {
+    const rows = await db
+      .select({ ranAt: checkoutProbeRuns.ranAt })
+      .from(checkoutProbeRuns)
+      .where(eq(checkoutProbeRuns.tier, 'browser'))
+      .orderBy(desc(checkoutProbeRuns.ranAt))
+      .limit(1)
+    return rows[0]?.ranAt ?? null
+  } catch (err) {
+    console.warn(`${LOG} browser-probe liveness read failed`, err)
+    return null
+  }
 }
 
 /**
@@ -280,6 +344,16 @@ export async function readCronLiveness(now = new Date()): Promise<CronLiveness[]
       source = 'heartbeat'
     }
 
+    // Third tier, for surfaces that run outside this app entirely.
+    const external = EXTERNAL_LIVENESS[e.route]
+    if (external) {
+      const at = await external()
+      if (at && (!lastSeenAt || at > lastSeenAt)) {
+        lastSeenAt = at
+        source = 'external'
+      }
+    }
+
     const ageMinutes = lastSeenAt
       ? Math.max(0, Math.round((now.getTime() - lastSeenAt.getTime()) / 60_000))
       : null
@@ -294,9 +368,14 @@ export async function readCronLiveness(now = new Date()): Promise<CronLiveness[]
       lastSeenAt,
       source,
       ageMinutes,
-      breached: ageMinutes === null || ageMinutes > e.periodMinutes + e.graceMinutes,
+      breached: e.demandDriven
+        ? false
+        : ageMinutes === null || ageMinutes > e.periodMinutes + e.graceMinutes,
+      demandDriven: e.demandDriven,
       lastStatus: (row?.status as CronRunStatus | undefined) ?? null,
       lastError: row?.error ?? null,
+      consecutiveFailures: row?.consecutiveFailures ?? 0,
+      failing: (row?.consecutiveFailures ?? 0) >= CONSECUTIVE_FAILURES_BEFORE_ALARM,
     })
   }
   return out
@@ -368,6 +447,9 @@ interface LoadedExpectation {
   recorded: boolean
   moneyRelevant: boolean
   ownerTeam: string | null
+  /** Merged from the code manifest, never from the row: whether a route has a
+   *  scheduler at all is a structural fact about the code, not a tunable. */
+  demandDriven: boolean
 }
 
 /**
@@ -390,7 +472,7 @@ async function loadExpectations(): Promise<LoadedExpectation[]> {
         ownerTeam: cronExpectations.ownerTeam,
       })
       .from(cronExpectations)
-    if (rows.length > 0) return rows
+    if (rows.length > 0) return rows.map((r) => ({ ...r, demandDriven: isDemandDriven(r.route) }))
   } catch (err) {
     console.warn(`${LOG} expectation read failed, using the code manifest`, err)
   }
@@ -402,13 +484,34 @@ async function loadExpectations(): Promise<LoadedExpectation[]> {
     recorded: e.recorded,
     moneyRelevant: e.moneyRelevant,
     ownerTeam: e.ownerTeam,
+    demandDriven: e.demandDriven === true,
   }))
+}
+
+/** Whether the code manifest marks this route as having no scheduler. */
+function isDemandDriven(route: string): boolean {
+  return CRON_EXPECTATIONS.some((e) => e.route === route && e.demandDriven === true)
 }
 
 interface LatestRun {
   startedAt: Date
   status: string
   error: string | null
+  /**
+   * How many of the most recent consecutive runs failed, newest first.
+   *
+   * The whole point of the second desk. `breached` answers "did it fire", and a
+   * route that fires exactly on schedule and throws every single time is
+   * perfectly alive by that measure. Both of the owner's own delivery crons
+   * were in precisely that state for two days in September 2026, recorded as
+   * `failed` in this table on every run, while the sweep that reads this file
+   * ran through the outage four times and reported nothing, because nothing
+   * looked at status.
+   *
+   * Counted rather than flagged so a single blip is not an alarm: one failure
+   * is noise, two in a row is a fault.
+   */
+  consecutiveFailures: number
 }
 
 /**
@@ -435,8 +538,21 @@ async function latestRunByRoute(routes: string[], now: Date): Promise<Map<string
       .where(and(inArray(cronRuns.route, routes), gte(cronRuns.startedAt, since)))
       .orderBy(desc(cronRuns.startedAt))
       .limit(2000)
+    // Rows arrive newest-first, so the first row per route is the latest and
+    // the leading run of `failed` is the consecutive-failure streak.
+    const streak = new Map<string, number>()
+    const closed = new Set<string>()
     for (const r of rows) {
-      if (!out.has(r.route)) out.set(r.route, { startedAt: r.startedAt, status: r.status, error: r.error })
+      if (!out.has(r.route)) {
+        out.set(r.route, { startedAt: r.startedAt, status: r.status, error: r.error, consecutiveFailures: 0 })
+      }
+      if (closed.has(r.route)) continue
+      if (r.status === 'failed') streak.set(r.route, (streak.get(r.route) ?? 0) + 1)
+      else closed.add(r.route)
+    }
+    for (const [route, n] of streak) {
+      const row = out.get(route)
+      if (row) row.consecutiveFailures = n
     }
   } catch (err) {
     console.warn(`${LOG} latest-run read failed`, err)

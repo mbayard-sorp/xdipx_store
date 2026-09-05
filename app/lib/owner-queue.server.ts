@@ -170,6 +170,30 @@ export interface HealthBlock {
    * have meant editing a protected path to remove something useful.
    */
   recentValveChanges: ValveChange[]
+  /**
+   * Crons that are alive and broken, and crons that have gone silent.
+   *
+   * The queue read no cron health at all until this. That was survivable only
+   * for as long as the push channel worked, and the incident that motivated it
+   * was the push channel itself: `/cron/owner-digest` and `/cron/blocker-list`
+   * returned HTTP 500 on every run for two days while `/admin/ops` rendered
+   * perfectly, so the one surface still working had nothing to say about the
+   * two that were not. A health strip that cannot report the failure of its own
+   * delivery is not a health strip.
+   */
+  cronsFailing: CronFault[]
+  cronsSilent: CronFault[]
+}
+
+export interface CronFault {
+  route: string
+  moneyRelevant: boolean
+  ownerTeam: string | null
+  /** ISO, or null when nothing has ever been seen. */
+  lastSeenAt: string | null
+  /** Failing routes only: how many consecutive runs threw. */
+  consecutiveFailures?: number
+  detail: string | null
 }
 
 export interface OwnerQueue {
@@ -398,6 +422,37 @@ async function gatherHealth(gaps: string[]): Promise<HealthBlock> {
     blockersWithoutProbe: 0,
     laneFlow: [],
     recentValveChanges: [],
+    cronsFailing: [],
+    cronsSilent: [],
+  }
+
+  // Read through the same manifest the janitor uses, so the owner surface and
+  // the lane tickets can never disagree about what is broken.
+  try {
+    const { readCronLiveness } = await import('~/lib/cron-runs.server')
+    const liveness = await readCronLiveness()
+    out.cronsFailing = liveness
+      .filter(l => l.failing)
+      .map(l => ({
+        route: l.route,
+        moneyRelevant: l.moneyRelevant,
+        ownerTeam: l.ownerTeam,
+        lastSeenAt: l.lastSeenAt ? l.lastSeenAt.toISOString() : null,
+        consecutiveFailures: l.consecutiveFailures,
+        detail: l.lastError ? l.lastError.slice(0, 200) : null,
+      }))
+    out.cronsSilent = liveness
+      .filter(l => l.breached)
+      .map(l => ({
+        route: l.route,
+        moneyRelevant: l.moneyRelevant,
+        ownerTeam: l.ownerTeam,
+        lastSeenAt: l.lastSeenAt ? l.lastSeenAt.toISOString() : null,
+        detail: `floor ${l.periodMinutes}+${l.graceMinutes} min, source ${l.source}`,
+      }))
+  } catch (err) {
+    gaps.push('cron-health')
+    console.warn(`${LOG} health: cron liveness failed`, err)
   }
 
   try {
