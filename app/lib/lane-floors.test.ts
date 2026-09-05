@@ -8,8 +8,18 @@
  * is a check that cannot fail. These assertions lock in the shape that
  * measurement produced instead.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { LANE_FLOORS } from '~/lib/lane-floors.server'
+
+// Used only by the socialGateOpen regression suite below, hoisted to the top
+// level per vitest's own mocking contract (a vi.mock/vi.hoisted call nested
+// inside a describe block still runs first, but vitest warns and says this
+// will become an error).
+const executeMock = vi.hoisted(() => vi.fn())
+const getPipelineSettingMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: getPipelineSettingMock }))
 
 describe('every floor is derived, not guessed', () => {
   it('states why its bound is that number', () => {
@@ -60,5 +70,66 @@ describe('the kind matches the lane shape it was measured against', () => {
     // slow one: at the configured rate it would breach on ordinary variance and
     // become the permanent-WARN class the manifest warns about.
     expect(LANE_FLOORS.find(f => f.lane === 'social')?.threshold).toBeLessThan(2)
+  })
+})
+
+describe('the social gate reads only the per-platform valves (#7608 QA bounce)', () => {
+  // docs/store-team/routine-social-daily.md: "social_team_autopost /
+  // autopostValve gates nothing on the publish path ... must never be used to
+  // decide posture, only platformValves.instagram and platformValves.x." Ticket
+  // #5413 (run 500, 2026-08-25) is the incident that documented exactly this
+  // wrong read. ANDing the legacy team valve into socialGateOpen() would report
+  // the social lane closed whenever `social_team_autopost` happens to be false,
+  // even while a real platform valve is genuinely on -- the same
+  // check-that-cannot-fail shape the lane floors exist to catch, just arriving
+  // through the gate read instead of the threshold.
+  beforeEach(() => {
+    executeMock.mockReset()
+    getPipelineSettingMock.mockReset()
+    // indexnow / outreach staleness queries: report "never seen", which is a
+    // harmless breached:null for both and keeps this test's focus on social.
+    executeMock.mockResolvedValue({ rows: [{ days: null }] })
+  })
+
+  it('treats the lane as open on a real platform valve alone, with the legacy team valve OFF', async () => {
+    getPipelineSettingMock.mockImplementation(async (key: string) => {
+      if (key === 'social_team_autopost') return 'false'
+      if (key === 'instagram_autopublish_enabled') return 'true'
+      if (key === 'x_autopublish_enabled') return 'false'
+      return null
+    })
+    // The social count query specifically; every other db.execute call in this
+    // run is a days-since lookup already stubbed to { days: null } above.
+    const dialect = new PgDialect()
+    executeMock.mockImplementation(async (query: unknown) => {
+      const { sql: text } = dialect.sqlToQuery(query as Parameters<typeof dialect.sqlToQuery>[0])
+      if (text.includes('social_posts')) return { rows: [{ n: 2 }] }
+      return { rows: [{ days: null }] }
+    })
+
+    const { checkLaneFloors } = await import('~/lib/lane-floors.server')
+    const verdicts = await checkLaneFloors()
+    const social = verdicts.find(v => v.lane === 'social')!
+
+    expect(social.measured).toBe(2)
+    expect(social.breached).toBe(false)
+    expect(social.detail).not.toContain('gates closed')
+  })
+
+  it('treats the lane as closed when every real platform valve is off, team valve notwithstanding', async () => {
+    getPipelineSettingMock.mockImplementation(async (key: string) => {
+      if (key === 'social_team_autopost') return 'true'
+      if (key === 'instagram_autopublish_enabled') return 'false'
+      if (key === 'x_autopublish_enabled') return 'false'
+      return null
+    })
+
+    const { checkLaneFloors } = await import('~/lib/lane-floors.server')
+    const verdicts = await checkLaneFloors()
+    const social = verdicts.find(v => v.lane === 'social')!
+
+    expect(social.measured).toBeNull()
+    expect(social.breached).toBeNull()
+    expect(social.detail).toContain('gates closed')
   })
 })

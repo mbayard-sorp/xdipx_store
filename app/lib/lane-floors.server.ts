@@ -131,17 +131,27 @@ async function countRows(query: ReturnType<typeof sql>): Promise<number> {
   return Number(row?.['n'] ?? 0)
 }
 
-/** True when at least one social platform is cleared to publish today. */
+/**
+ * True when at least one social platform is cleared to publish today.
+ *
+ * Reads only the per-platform valves. `social_team_autopost` gates nothing on
+ * the publish path (docs/store-team/routine-social-daily.md, "Read
+ * platformValves.instagram and platformValves.x ... as the authoritative
+ * per-platform posture"): the hourly tick reads `instagram_autopublish_enabled`
+ * and `x_autopublish_enabled` directly. Ticket #5413 (run 500, 2026-08-25) is
+ * the incident that documented this: ANDing in the legacy team valve here
+ * would report the lane closed whenever that valve is off, even while a real
+ * platform valve is genuinely on — the exact "check that cannot fail" shape
+ * this file's floors exist to catch, just arriving through the gate read.
+ */
 async function socialGateOpen(): Promise<boolean> {
   try {
     const { getPipelineSetting } = await import('~/lib/feed-processor.server')
-    const [team, ig, x] = await Promise.all([
-      getPipelineSetting('social_team_autopost'),
+    const [ig, x] = await Promise.all([
       getPipelineSetting('instagram_autopublish_enabled'),
       getPipelineSetting('x_autopublish_enabled'),
     ])
-    // The team valve is the master; either platform valve is enough downstream.
-    return team === 'true' && (ig === 'true' || x === 'true')
+    return ig === 'true' || x === 'true'
   } catch (err) {
     console.warn(`${LOG} gate read failed, treating as closed`, err)
     // Fail CLOSED for the alarm, not for the lane: if we cannot prove the gate
