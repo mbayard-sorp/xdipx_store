@@ -147,6 +147,15 @@ Below 300 sessions/week the retro leans on margin math, stock depth, and these h
 - **No prices in body text.** Pricing lives on the PDP and in the embed component, never in prose. No discount framing that would trip MAP rules.
 - **Internal links every post.** At least one collection link and one PDP, using canonical `/products/{slug}` and `/collections/{handle}`. The embedded `blogProductEmbed.productHandle` is also what powers the inbound PDP/collection backlinks — a wrong handle silently breaks them. Full rules: `docs/store-team/internal-linking.md`.
 - **No em-dashes, no countdowns, no urgency, CTAs from the whitelist only.** Billing descriptor is always XDIPX.
+- **"X, not Y" antithesis cap, whole-document (ticket #7462).** The charter's fresh-language rule
+  (`docs/emma-voice.md`) says to watch for and rotate out any phrase that starts repeating, but a
+  repeating rhetorical SHAPE is the same defect one layer up from a repeating phrase, and no
+  deterministic checker sees it: `check-fresh-language.ts` compares word 6-grams, so the antithesis
+  construction (copula or verb, then a comma or full stop, then "not" plus a contrasting noun phrase
+  — "a change, not a loss"; "It does not lower the threshold. It meets it.") slips past clean even
+  when it runs eight times in one post, because the words never repeat while the mold does. Cap it at
+  **2-3 instances per post, at most 1 on a heading** (headings are the most visible repeat), counted
+  whole-document including the FAQ block, the same way the aphorism-as-closer cap is counted.
 
 ## 8. Editorial formats (owner-added 2026-07)
 

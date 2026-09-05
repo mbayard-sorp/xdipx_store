@@ -291,6 +291,17 @@ abstract-noun-plus-copula sentence stating an idea for the first time is never a
 unchanged: 3 per post, 1 per section, never 2 in a paragraph. Trim by de-constructing the flagged
 shape, not by swapping synonyms inside it.
 
+**"X, not Y" antithesis pre-flight (mandatory, before Step 5, content-plan §7):** no deterministic
+checker exists for this one yet, so it is a manual count. Read the whole draft including the FAQ
+block and count every instance of the antithesis construction — copula or verb, then a comma or full
+stop, then "not" plus a contrasting noun phrase ("a change, not a loss"; "It does not lower the
+threshold. It meets it."). The charter's own fresh-language rule says to rotate out any phrase that
+starts repeating, and `check-fresh-language.ts`'s word 6-gram comparison cannot see this class at
+all: the words never repeat while the rhetorical mold does (found on content run 687, eight instances
+in one post, clean 0 shared 6-grams). Trim to content-plan §7's cap — 2-3 per post, at most 1 on a
+heading — before submitting to the voice gate, by de-constructing the shape, not by swapping a
+synonym inside it.
+
 **Unsourced-frequency pre-flight (mandatory, before Step 5):** run the deterministic checker on the
 draft JSON and drive it to exit 0 before submitting to the voice gate:
 
@@ -457,7 +468,8 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    question-shaped material concentrated in the FAQ (blog addendum + content-plan §8B, owner-codified
    2026-07-28). Restate in the request that a mandatory or charter-granted element is never a valid
    gate objection. Any rule the
-   gate enforces per-post or per-section (the aphorism-as-closer cap is the live example) must be
+   gate enforces per-post or per-section (the aphorism-as-closer cap and the "X, not Y" antithesis
+   cap, content-plan §7, are the live examples) must be
    **counted across the whole document on this first pass** — the FAQ block included. Because the
    routine allows exactly one shared rewrite (item 3), a defect first discovered in cycle 2 is
    unfixable by construction and converts straight to a BLOCK; a section that was never audited in
