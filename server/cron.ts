@@ -1822,14 +1822,29 @@ export function createCronRoutes() {
       //
       // Closing runs before filing, inside the module: a condition that cleared
       // must release its dedupe key before anything tries to file against it.
+      // Lane output floors: liveness answers "did it run", this answers "did it
+      // produce". A lane can be perfectly alive and shipping nothing, which is
+      // the state every dead lane in the estate was in while reading green.
+      let floors: Awaited<ReturnType<typeof import('../app/lib/lane-floors.server.js')['checkLaneFloors']>> = []
+      try {
+        const { checkLaneFloors } = await import('../app/lib/lane-floors.server.js')
+        floors = await checkLaneFloors()
+      } catch (err) {
+        console.error('[cron:janitor-sweep] lane floor check failed (ignored):', err)
+      }
+
       let alarms: {
         filed: string[]; closed: number[]; escalated: string[]; unreadable: string[]
       } = { filed: [], closed: [], escalated: [], unreadable: [] }
       try {
         const { reconcileCronAlarms } = await import('../app/lib/cron-liveness-tickets.server.js')
-        alarms = await reconcileCronAlarms(liveness, unwatched)
+        alarms = await reconcileCronAlarms(liveness, unwatched, floors)
       } catch (err) {
         console.error('[cron:janitor-sweep] alarm reconcile failed (ignored):', err)
+      }
+
+      for (const v of floors.filter(f => f.breached === true)) {
+        console.warn(`[cron:janitor-sweep] FLOOR ${v.lane} -> ${v.team}: ${v.detail}`)
       }
 
       const failing = liveness.filter(l => l.failing)
@@ -1879,6 +1894,10 @@ export function createCronRoutes() {
         })),
         unfinishedTerminalRuns: unfinished,
         unwatchedLanes: unwatched,
+        laneFloors: floors.map(v => ({
+          lane: v.lane, team: v.team, kind: v.kind, threshold: v.threshold,
+          measured: v.measured, breached: v.breached, detail: v.detail,
+        })),
         // Alive and broken, the fault `breaches` structurally cannot see.
         failing: failing.map(f => ({
           route: f.route,

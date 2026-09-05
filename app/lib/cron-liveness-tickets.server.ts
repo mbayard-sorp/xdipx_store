@@ -59,6 +59,7 @@ import { kvDel, kvGet, kvSet } from '~/lib/kv.server'
 import { listSuggestions, transitionSuggestion, type TeamId } from '~/lib/team.server'
 import type { CronLiveness } from '~/lib/cron-runs.server'
 import type { LaneCoverageGap } from '~/lib/ticket-janitor.server'
+import type { FloorVerdict } from '~/lib/lane-floors.server'
 
 const LOG = '[cron-alarms]'
 
@@ -146,6 +147,30 @@ function failingAlarm(l: CronLiveness, sweeps: number): Alarm {
       + 'This is a different fault from silence and has a different first question: not '
       + '"is the scheduler delivering" but "why is the handler throwing".'
       + recheckFooter(`${l.route} in failing[]`),
+  }
+}
+
+/**
+ * A lane produced less than its floor, or nothing for too long.
+ *
+ * Files at the lane, never at the owner: invariant 3. Same tier-1 shape as a
+ * cron breach, so it closes itself the moment the lane produces again, which is
+ * what lets the key stay undated and the alarm stay armed for the next time.
+ */
+function floorAlarm(v: FloorVerdict): Alarm {
+  return {
+    dedupeKey: makeDedupeKey('lane-floor', v.lane),
+    team: v.team,
+    priority: 2,
+    title: `${v.lane} is below its output floor: ${v.describe}`,
+    body:
+      `${v.describe}.\n\n`
+      + `Measured: ${v.measured ?? 'unreadable'}\n`
+      + `Bound: ${v.kind === 'rate' ? `at least ${v.threshold}` : `at most ${v.threshold} days`}\n`
+      + `Detail: ${v.detail}\n`
+      + `Owning lane: ${v.team}\n\n`
+      + `Why this bound: ${v.rationale}`
+      + recheckFooter(`${v.lane} in laneFloors[]`),
   }
 }
 
@@ -250,6 +275,7 @@ async function file(a: Alarm, kind: 'process' | 'code', detector: string): Promi
 export async function reconcileCronAlarms(
   liveness: readonly CronLiveness[],
   unwatched: readonly LaneCoverageGap[],
+  floors: readonly FloorVerdict[] = [],
   now = new Date(),
 ): Promise<AlarmOutcome> {
   const nowIso = now.toISOString()
@@ -280,7 +306,15 @@ export async function reconcileCronAlarms(
     .map(l => makeDedupeKey('cron-failing', l.route))
   const watchedLaneKeys: string[] = [] // lanes resolve by disappearing from `unwatched`
 
+  // `breached === null` means the probe had no opinion (gate shut, or it could
+  // not ask). That is not "healthy": closing on it would end a real alarm for a
+  // reason unrelated to the lane. Only an explicit false closes a floor row.
+  const healthyFloorKeys = floors
+    .filter(v => v.breached === false)
+    .map(v => makeDedupeKey('lane-floor', v.lane))
+
   out.closed.push(...await closeResolved(healthyBreachKeys, 'the route reported evidence of life inside its floor again.', nowIso))
+  out.closed.push(...await closeResolved(healthyFloorKeys, 'the lane produced inside its floor again.', nowIso))
   out.closed.push(...await closeResolved(healthyFailKeys, 'the route completed without failing again.', nowIso))
   if (watchedLaneKeys.length) out.closed.push(...await closeResolved(watchedLaneKeys, 'the lane is watched again.', nowIso))
 
@@ -313,6 +347,11 @@ export async function reconcileCronAlarms(
   for (const u of unwatched) {
     const a = laneAlarm(u)
     if (await file(a, 'process', 'unwatched-lane')) out.filed.push(a.dedupeKey)
+  }
+
+  for (const v of floors.filter(f => f.breached === true)) {
+    const a = floorAlarm(v)
+    if (await file(a, 'process', 'lane-floor')) out.filed.push(a.dedupeKey)
   }
 
   return out
