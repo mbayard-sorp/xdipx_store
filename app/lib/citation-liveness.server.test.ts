@@ -236,6 +236,17 @@ describe('isChallengePage (2xx bot-protection interstitial)', () => {
     expect(isChallengePage(null, 'Please enable JavaScript and cookies to continue')).toBe(true)
   })
 
+  it('flags a 203 cookie wall with no WAF-vendor machinery (ticket #7739, pubmed.ncbi.nlm.nih.gov)', () => {
+    // Reproduced live in content run 705: status 203, title the bare hostname,
+    // body the whole cookie wall verbatim.
+    expect(
+      isChallengePage(
+        'pubmed.ncbi.nlm.nih.gov',
+        'Cookies must be enabled Enable cookies for pubmed.ncbi.nlm.nih.gov and reload this page to continue.',
+      ),
+    ).toBe(true)
+  })
+
   it('does not flag a genuine health article that merely mentions captcha/Cloudflare in prose', () => {
     // The real page title from the #3946 citation, plus incidental mentions.
     expect(
