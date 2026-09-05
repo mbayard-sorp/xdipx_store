@@ -59,6 +59,16 @@ Your brief and suggestions are internal, but any example copy you include must f
   "dead" verdict; the sandbox's lack of Shopify creds is exactly why a stale "enrich chain is dead"
   claim rode three consecutive briefs while live DB showed the chain keeping pace.
 - Context: `marketing_calendar` (upcoming promos/holidays), the previous strategy brief (`GET /api/team/brief`), and `docs/store-team/mission-brief.md` (binding doctrine).
+- **Shopify's own checkout-funnel numbers are contaminated and must never be read as customer
+  behaviour.** "Reached checkout N, completed 0" in Shopify Analytics is very largely the estate's
+  own browser-tier checkout probe (`.github/workflows/checkout-probe.yml`, Stage G5b), which drives
+  a real cart to a real checkout page once daily and by design never completes. Measured
+  2026-09-04: `abandonedCheckouts` returns exactly one real record for 2026-08-01..09-05 against one
+  real paid order, while `checkout_probe_runs` logged 34 browser-tier runs in the same window — the
+  same order of magnitude as the funnel's reported "reached checkout" count. Read `daily_profit_summary`
+  and the `abandonedCheckouts` query directly for funnel/revenue health; never Shopify's own
+  funnel-analytics view. Full writeup: `operating-system.md`'s "A note on the checkout-funnel
+  numbers" (2026-09-04).
 </inputs>
 
 <workflow>
