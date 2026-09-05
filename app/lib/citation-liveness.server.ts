@@ -278,11 +278,13 @@ export function extractReadableText(html: string, maxChars: number): string {
 /**
  * Detect a bot-protection / WAF interstitial served with a 2xx status. Some
  * challenge services (Cloudflare "Just a moment", reCAPTCHA/hCaptcha gates,
- * Incapsula/Imperva, PerimeterX) answer 200 with the challenge as the whole
+ * Incapsula/Imperva, PerimeterX) answer with the challenge as the whole
  * document rather than a 401/403, so classifyStatus reads them as `live` and,
  * without this check, the unread challenge page would ship as a citation
  * (ticket #3946: run 362 fetched a PMC article and got back a 200 titled
- * "Checking your browser - reCAPTCHA").
+ * "Checking your browser - reCAPTCHA"). A plain cookie-consent wall is the
+ * same shape on a different status: ticket #7739 found pubmed.ncbi.nlm.nih.gov
+ * answering 203 with a "Cookies must be enabled" body and nothing else.
  *
  * Title signals are matched as human-readable phrases; body signals are matched
  * only against WAF-specific machinery (script hooks, resource paths, challenge
@@ -311,6 +313,13 @@ export function isChallengePage(title: string | null, bodyText: string): boolean
     /perimeterx|px-captcha|_pxhd\b/i, // PerimeterX
     /enable javascript and cookies to continue/i, // generic JS/cookie gate
     /ddos protection by cloudflare/i,
+    // Cookie-wall interstitials (ticket #7739): NCBI/PubMed and peers answer a
+    // 2xx (203 on pubmed.ncbi.nlm.nih.gov) whose whole body is a cookie-consent
+    // gate rather than the article, with no WAF-vendor machinery for the
+    // vendor-specific patterns above to match.
+    /cookies must be enabled/i,
+    /enable cookies for/i,
+    /reload this page to continue/i,
   ]
   return bodySignals.some((re) => re.test(bodyText))
 }
