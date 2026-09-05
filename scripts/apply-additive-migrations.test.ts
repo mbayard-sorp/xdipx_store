@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { classifyFile, isAdditiveStatement, splitStatements, sslConfigFor, stripSqlComments } from './apply-additive-migrations'
+import type { QueryClient } from './apply-additive-migrations'
 
 describe('stripSqlComments', () => {
   it('drops a line comment', () => {
@@ -163,6 +167,77 @@ describe('classifyFile', () => {
     const result = classifyFile(body)
     expect(result.verdict).toBe('auto')
     expect(result.statements).toHaveLength(0)
+  })
+})
+
+const fileBlockerMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: 1, created: true }))
+vi.mock('~/lib/owner-blockers.server', () => ({ fileBlocker: fileBlockerMock }))
+
+describe('runBuildMode: MANUAL migrations file a self-clearing blocker', () => {
+  let dir: string
+
+  beforeEach(() => {
+    fileBlockerMock.mockClear()
+    dir = mkdtempSync(join(tmpdir(), 'xdipx-additive-migrations-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  function fakeClient(): QueryClient {
+    return {
+      async query(text) {
+        if (text.includes('SELECT filename FROM schema_migrations_applied')) return { rows: [] }
+        return { rows: [] }
+      },
+    }
+  }
+
+  it('files exactly one blocker, carrying the migration_applied probe, for a non-additive file', async () => {
+    const { runBuildMode } = await import('./apply-additive-migrations')
+    writeFileSync(join(dir, '999_drop_thing.sql'), 'DROP TABLE old_table;\n')
+
+    const outcome = await runBuildMode(fakeClient(), [
+      { filename: '999_drop_thing.sql', path: join(dir, '999_drop_thing.sql'), number: 999 },
+    ])
+
+    expect(outcome.results).toEqual([
+      expect.objectContaining({ file: '999_drop_thing.sql', verdict: 'manual' }),
+    ])
+    expect(fileBlockerMock).toHaveBeenCalledTimes(1)
+    expect(fileBlockerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: 'migration',
+        verifyProbe: 'migration_applied',
+        verifyArg: '999_drop_thing.sql',
+        dedupeKey: expect.stringContaining('999_drop_thing.sql'),
+      }),
+    )
+  })
+
+  it('never files a blocker for an auto-applied (additive) file', async () => {
+    const { runBuildMode } = await import('./apply-additive-migrations')
+    writeFileSync(join(dir, '998_add_col.sql'), 'ALTER TABLE t ADD COLUMN IF NOT EXISTS x int;\n')
+
+    await runBuildMode(fakeClient(), [
+      { filename: '998_add_col.sql', path: join(dir, '998_add_col.sql'), number: 998 },
+    ])
+
+    expect(fileBlockerMock).not.toHaveBeenCalled()
+  })
+
+  it('does not fail the build when filing the blocker itself throws', async () => {
+    fileBlockerMock.mockRejectedValueOnce(new Error('db unreachable'))
+    const { runBuildMode } = await import('./apply-additive-migrations')
+    writeFileSync(join(dir, '997_drop_thing.sql'), 'DROP TABLE old_table;\n')
+
+    const outcome = await runBuildMode(fakeClient(), [
+      { filename: '997_drop_thing.sql', path: join(dir, '997_drop_thing.sql'), number: 997 },
+    ])
+
+    expect(outcome.failedFile).toBeNull()
+    expect(outcome.results[0]).toEqual(expect.objectContaining({ verdict: 'manual' }))
   })
 })
 

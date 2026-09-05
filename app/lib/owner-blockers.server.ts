@@ -348,6 +348,22 @@ async function rowMatches(arg: string): Promise<ProbeVerdict> {
   return (res.rows ?? []).length > 0
 }
 
+/**
+ * Has this migration file been recorded in schema_migrations_applied? Arg is
+ * the filename. Table-existence is checked first because a very old, pre-081
+ * database might not have the ledger yet; that is a could-not-ask, not a
+ * still-blocked, exactly like every other probe here.
+ */
+async function migrationApplied(filename: string): Promise<ProbeVerdict> {
+  const name = filename.trim()
+  if (!name) return null
+  const exists = await tableExists('schema_migrations_applied')
+  if (exists !== true) return null
+  const res = await db.execute(sql`
+    SELECT 1 FROM schema_migrations_applied WHERE filename = ${name} LIMIT 1`)
+  return (res.rows ?? []).length > 0
+}
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -365,6 +381,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   endpoint_200:  endpoint200,
   credential_live: credentialLive,
   row_matches:   rowMatches,
+  migration_applied: migrationApplied,
 }
 
 /**

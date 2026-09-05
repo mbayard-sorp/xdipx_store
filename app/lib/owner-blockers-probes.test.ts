@@ -146,6 +146,42 @@ describe('endpoint_200 runner', () => {
   })
 })
 
+describe('migration_applied probe', () => {
+  it('describes itself and is registered as a real probe', () => {
+    expect(PROBE_DESCRIPTIONS['migration_applied']!('093_pricing_audit_trigger_values.sql'))
+      .toBe('migration 093_pricing_audit_trigger_values.sql is recorded in schema_migrations_applied')
+    expect(isProbe('migration_applied')).toBe(true)
+  })
+
+  it('cannot answer an empty filename, and says so with null rather than false', async () => {
+    const { PROBES } = await import('./owner-blockers.server')
+    expect(await PROBES['migration_applied']!.run('')).toBeNull()
+  })
+
+  it('clears the moment the ledger records the file it was filed against', async () => {
+    const executeMock = vi.fn()
+    vi.doMock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+    vi.resetModules()
+    const { PROBES } = await import('./owner-blockers.server')
+
+    // 1: table_exists check (schema_migrations_applied is present).
+    // 2: SELECT ... WHERE filename = $1 — not yet recorded.
+    executeMock
+      .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+      .mockResolvedValueOnce({ rows: [] })
+    expect(await PROBES['migration_applied']!.run('093_pricing_audit_trigger_values.sql')).toBe(false)
+
+    // Same two-query shape, now the row exists: the file was recorded.
+    executeMock
+      .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+      .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+    expect(await PROBES['migration_applied']!.run('093_pricing_audit_trigger_values.sql')).toBe(true)
+
+    vi.doUnmock('~/lib/db.server')
+    vi.resetModules()
+  })
+})
+
 describe('the vocabulary and the runners cannot drift apart', () => {
   it('gives every runner a description, or it is silently not a probe at all', async () => {
     // Caught in the act, 2026-09-02. `PROBES` is built by filtering

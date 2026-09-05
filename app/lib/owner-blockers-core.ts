@@ -156,6 +156,12 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
     const [table, keyCol, keyVal, col, want] = a.split('|')
     return `${table}.${col} is "${want}" for ${keyCol}=${keyVal}`
   },
+  /* Arg is a migration filename (e.g. "093_pricing_audit_trigger_values.sql").
+   * Clears the moment scripts/apply-migrations.ts records the file in
+   * schema_migrations_applied, so a MANUAL-classified migration's blocker
+   * closes itself on the owner's own hand-run instead of needing a clear by
+   * hand. */
+  migration_applied: a => `migration ${a} is recorded in schema_migrations_applied`,
 }
 
 /**
