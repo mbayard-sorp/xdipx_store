@@ -45,6 +45,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Client } from 'pg'
+import { fileBlocker } from '~/lib/owner-blockers.server'
 
 const MIGRATIONS_DIR = join(process.cwd(), 'db', 'migrations')
 
@@ -130,16 +131,16 @@ export function sslConfigFor(url: string): { rejectUnauthorized: boolean } | und
   return /sslmode=require|neon\.tech/i.test(url) ? { rejectUnauthorized: false } : undefined
 }
 
-async function ensureLedgerTable(client: QueryClient): Promise<void> {
+export async function ensureLedgerTable(client: QueryClient): Promise<void> {
   await client.query(LEDGER_DDL)
 }
 
-async function getAppliedFilenames(client: QueryClient): Promise<Set<string>> {
+export async function getAppliedFilenames(client: QueryClient): Promise<Set<string>> {
   const res = await client.query('SELECT filename FROM schema_migrations_applied')
   return new Set(res.rows.map((r) => String(r['filename'])))
 }
 
-async function markApplied(client: QueryClient, filename: string): Promise<void> {
+export async function markApplied(client: QueryClient, filename: string): Promise<void> {
   await client.query('INSERT INTO schema_migrations_applied (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING', [filename])
 }
 
@@ -209,6 +210,27 @@ export async function runBuildMode(client: QueryClient, files: MigrationFile[]):
       console.warn(
         `[apply-additive-migrations] MANUAL: ${f.filename} is not additive-only (${reason}). requires owner: run scripts/apply-migrations.ts`,
       )
+      // Files a self-clearing owner blocker so a manual migration never again
+      // sits unapplied with no next actor: this MANUAL branch was previously
+      // the whole gap (079/080, 082, 093 — see the ticket this closes). The
+      // probe re-checks schema_migrations_applied, so the row clears itself
+      // the moment scripts/apply-migrations.ts records the file, without
+      // anyone remembering to clear it by hand. Best-effort: filing a blocker
+      // must never fail the build the classification itself already succeeded.
+      await fileBlocker({
+        dedupeKey: `manual-migration-unapplied-${f.filename}`,
+        title: `Migration ${f.filename} needs a manual apply`,
+        detail: `${f.filename} is not additive-only (${reason}), so the production build's auto-apply step skipped it. It will not run itself.`,
+        unblocks: 'the schema change this migration makes, and anything reading tables/columns it adds',
+        whereToGo: `run against production: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from ${f.filename.slice(0, f.filename.indexOf('_'))}`,
+        category: 'migration',
+        priority: 2,
+        sourceRef: f.filename,
+        verifyProbe: 'migration_applied',
+        verifyArg: f.filename,
+      }).catch((err) => {
+        console.warn(`[apply-additive-migrations] could not file blocker for ${f.filename}:`, String(err).slice(0, 200))
+      })
       results.push({ file: f.filename, verdict: 'manual', statementCount: statements.length, reason })
       continue
     }
