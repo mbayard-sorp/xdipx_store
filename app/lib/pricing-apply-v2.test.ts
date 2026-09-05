@@ -172,9 +172,12 @@ describe('pricing_audit_log retention', () => {
   })
 
   it('keeps a retention window longer than any reporting window', () => {
-    // The owner digest's pricing check reads yesterday only; nothing in the app
-    // reads further back than a quarter.
-    expect(PRICING_AUDIT_RETENTION_DAYS).toBeGreaterThanOrEqual(90)
+    // The owner digest's pricing check reads yesterday only. Tightened from 90
+    // to 30 days (owner direction, 2026-09-04): the table sat at 440,593 rows /
+    // 192MB, 86% of it noise ('skipped_no_change'/'rejected') the daily batch
+    // writes for every SKU whether or not anything changed; 30 days is still
+    // comfortably longer than the digest's yesterday-only read.
+    expect(PRICING_AUDIT_RETENTION_DAYS).toBeGreaterThanOrEqual(30)
   })
 })
 
