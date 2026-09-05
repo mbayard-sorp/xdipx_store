@@ -11,13 +11,33 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { getTrackers } from '~/lib/tracker.server'
+import { measureMilestones } from '~/lib/tracker-probes.server'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 export const meta: MetaFunction = () => [{ title: 'Trackers · xdipx admin' }]
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
-  return { trackers: getTrackers() }
+  // Measured verdicts for the milestones that have a registered probe. The RAG
+  // pill is a claim someone typed; this column is the evidence, and the page
+  // rendered the claim alone until now.
+  const measurements = await measureMilestones().catch(() => [])
+  return { trackers: getTrackers(), measurements }
+}
+
+/** Measured verdict beside an asserted RAG, or an honest blank. */
+function EvidenceCell(
+  { verdict, measured }: { verdict?: string | undefined; measured?: number | null | undefined },
+) {
+  if (!verdict) return <span className="text-xs text-gray-400">asserted</span>
+  if (verdict === 'unreadable') return <span className="text-xs text-gray-500">unreadable</span>
+  const pass = verdict === 'pass'
+  return (
+    <span className={`text-xs font-medium ${pass ? 'text-emerald-700' : 'text-red-700'}`}>
+      {pass ? 'measured pass' : 'measured FAIL'}
+      {measured === null || measured === undefined ? '' : ` (${measured})`}
+    </span>
+  )
 }
 
 function RagPill({ rag }: { rag: string }) {
@@ -37,7 +57,7 @@ function RagPill({ rag }: { rag: string }) {
 }
 
 export default function AdminTrackers() {
-  const { trackers } = useLoaderData<typeof loader>()
+  const { trackers, measurements } = useLoaderData<typeof loader>()
 
   return (
     <div className="space-y-8">
@@ -78,13 +98,22 @@ export default function AdminTrackers() {
                     <th className="py-2 pr-3">target</th>
                     <th className="py-2 pr-3">status</th>
                     <th className="py-2 pr-3">RAG</th>
+                    <th className="py-2 pr-3">evidence</th>
                     <th className="py-2 pr-3">verified</th>
                     <th className="py-2">notes</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {t.milestones.map(m => (
-                    <tr key={m.id} className="border-b border-gray-100 align-top">
+                  {t.milestones.map(m => {
+                    const measurement = measurements.find(x => x.key === `${t.slug}:${m.id}`)
+                    // An unearned GREEN is the whole reason this column exists:
+                    // done/GREEN with a failing probe reads as finished and is not.
+                    const contradicted = m.rag === 'GREEN' && measurement?.verdict === 'fail'
+                    return (
+                    <tr
+                      key={m.id}
+                      className={`border-b border-gray-100 align-top${contradicted ? ' bg-red-50' : ''}`}
+                    >
                       <td className="py-2 pr-3 font-mono text-xs">{m.id}</td>
                       <td className="py-2 pr-3" title={m.evidenceProbe}>{m.milestone}</td>
                       <td className="py-2 pr-3">{m.phase}</td>
@@ -92,10 +121,22 @@ export default function AdminTrackers() {
                       <td className="py-2 pr-3 whitespace-nowrap">{m.targetWeek}</td>
                       <td className="py-2 pr-3">{m.status}</td>
                       <td className="py-2 pr-3"><RagPill rag={m.rag} /></td>
+                      <td className="py-2 pr-3" title={m.evidenceProbe}>
+                        <EvidenceCell
+                          verdict={measurement?.verdict}
+                          measured={measurement?.measured}
+                        />
+                      </td>
                       <td className="py-2 pr-3 whitespace-nowrap">{m.lastVerified}</td>
-                      <td className="py-2 max-w-[360px]">{m.notes}</td>
+                      <td className="py-2 max-w-[360px]">
+                        {m.malformed
+                          ? <span className="mr-1 text-xs text-amber-700">[columns may be misaligned]</span>
+                          : null}
+                        {m.notes}
+                      </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </ResponsiveTable>
