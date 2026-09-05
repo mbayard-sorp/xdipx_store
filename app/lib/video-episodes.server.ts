@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
-import { videoEpisodes, videoSeries, videoJobs } from '../../db/schema'
+import { videoEpisodes, videoSeries, videoJobs, videoScriptEdits } from '../../db/schema'
 import type { VideoEpisodeReviewNote, VideoScriptJson } from '../../db/schema'
 import { HOOK_PATTERNS, VIDEO_FORMULAS } from './team-keys'
 import { ARC_POSITIONS, SCRIPT_LOCKED_STATUSES, validatePlacements, scriptsSpeakIdentically, spokenTextOf } from './video-episodes'
@@ -346,10 +346,11 @@ export async function decideEpisode(args: {
  * that the reader UI does not surface. `captions` merges shallowly per
  * platform key for the same reason.
  *
- * Deliberately does NOT capture a before/after diff for the writers-room
- * learning loop — that is Part B (bus ticket, `[cross-agent-epic]`, since it
- * also requires an agent-editor PR to change how series-showrunner and
- * episode-writer read prompts) and depends on this function existing first.
+ * Captures a before/after diff per changed field into video_script_edits
+ * (ticket #7567, B1 of #7559 — Part B of #7557), read back by
+ * listOwnerScriptEdits below. Wiring series-showrunner/episode-writer to
+ * actually READ that feed at run start is B2 — an agent-editor PR — and is
+ * tracked separately; this function only writes and serves the diff.
  */
 export interface EditEpisodeScriptInput {
   episodeId: number
@@ -395,12 +396,70 @@ export async function editEpisodeScript(args: EditEpisodeScriptInput): Promise<v
   }
   const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
 
+  // One video_script_edits row per field whose value actually changed, so
+  // the writers room can later read what the owner changes without
+  // re-deriving it from reviewNotesJson prose. A field re-saved unchanged
+  // (the reader form round-tripping an untouched value) writes no row — it
+  // is not a preference signal.
+  const currentScriptRec = currentScript as Record<string, unknown>
+  const currentSiteCutRec = (ep.siteCutJson ?? {}) as Record<string, string | undefined>
+  const diffEntries: { field: string; before: string | null; after: string }[] = []
+  for (const [key, after] of Object.entries(scriptEdits)) {
+    if (after == null) continue
+    const before = currentScriptRec[key]
+    const beforeStr = before == null ? null : String(before)
+    const afterStr = String(after)
+    if (beforeStr !== afterStr) diffEntries.push({ field: `script.${key}`, before: beforeStr, after: afterStr })
+  }
+  if (captionEdits) {
+    for (const [platform, after] of Object.entries(captionEdits)) {
+      const before = currentScript.captions?.[platform] ?? null
+      if (before !== after) diffEntries.push({ field: `script.captions.${platform}`, before, after })
+    }
+  }
+  if (args.siteCut) {
+    for (const [key, after] of Object.entries(args.siteCut)) {
+      if (after == null) continue
+      const before = currentSiteCutRec[key] ?? null
+      if (before !== after) diffEntries.push({ field: `siteCut.${key}`, before, after })
+    }
+  }
+
   await db.update(videoEpisodes).set({
     scriptJson: nextScript,
     reviewNotesJson: notes,
     updatedAt: new Date(),
     ...(args.siteCut ? { siteCutJson: { ...(ep.siteCutJson ?? {}), ...args.siteCut } } : {}),
   }).where(eq(videoEpisodes.id, args.episodeId))
+
+  if (diffEntries.length) {
+    await db.insert(videoScriptEdits).values(
+      diffEntries.map(d => ({
+        episodeId: args.episodeId,
+        field: d.field,
+        before: d.before,
+        after: d.after,
+        editedBy: args.editedBy,
+      })),
+    )
+  }
+}
+
+/**
+ * Recent owner script edits (ticket #7567), the writers room's read side of
+ * editEpisodeScript's diff capture: every before/after a real owner save
+ * produced, newest first. Team-token auth (read-only, no script mutation) —
+ * distinct from decideEpisode/editEpisodeScript, which stay admin-only.
+ */
+export async function listOwnerScriptEdits(opts: { episodeId?: number; limit?: number } = {}): Promise<{
+  edits: (typeof videoScriptEdits.$inferSelect)[]
+}> {
+  const limit = Math.min(Math.max(1, opts.limit ?? 50), 200)
+  const edits = await db.select().from(videoScriptEdits)
+    .where(opts.episodeId != null ? eq(videoScriptEdits.episodeId, opts.episodeId) : undefined)
+    .orderBy(desc(videoScriptEdits.createdAt))
+    .limit(limit)
+  return { edits }
 }
 
 /**

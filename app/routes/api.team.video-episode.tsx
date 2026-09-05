@@ -22,6 +22,13 @@
  *     closed by none). This is the writers room's continuity read and the
  *     script-doctor's evidence source.
  *
+ *   { op: 'owner-edits', episodeId?, limit? }
+ *     -> { edits }
+ *     Recent before/after diffs captured by editEpisodeScript (ticket
+ *     #7567) when the owner saves a script edit in /admin/video-studio.
+ *     Read-only, team-token auth — the writers room's line-level signal of
+ *     what the owner changes. Never a path to mutate a script.
+ *
  *   { op: 'episode-claim', runId? }
  *     -> { episode } | 404 { error: 'empty_episode_queue' }
  *     Render lane only: the oldest approved episode at/past its planned slot,
@@ -48,6 +55,7 @@ import {
   listEpisodes,
   claimNextEpisode,
   releaseEpisodeClaim,
+  listOwnerScriptEdits,
   type ProposeEpisodeInput,
 } from '~/lib/video-episodes.server'
 import { apiError } from '~/lib/api-error.server'
@@ -85,6 +93,14 @@ export async function action({ request }: ActionFunctionArgs) {
       const result = await listEpisodes({
         ...(typeof b['seriesSlug'] === 'string' ? { seriesSlug: b['seriesSlug'] } : {}),
         ...(typeof b['status'] === 'string' ? { status: b['status'] } : {}),
+        ...(typeof b['limit'] === 'number' ? { limit: b['limit'] } : {}),
+      })
+      return Response.json(result)
+    }
+
+    if (b['op'] === 'owner-edits') {
+      const result = await listOwnerScriptEdits({
+        ...(typeof b['episodeId'] === 'number' ? { episodeId: b['episodeId'] } : {}),
         ...(typeof b['limit'] === 'number' ? { limit: b['limit'] } : {}),
       })
       return Response.json(result)
