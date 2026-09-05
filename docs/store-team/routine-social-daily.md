@@ -603,6 +603,16 @@ regenerate the descriptor on any hit: `spread-out rumble`, `broad rumble`, `deep
 the spread-out/broad idea). Draw the replacement from the rotation bank above (low-frequency,
 full-hand, broad-contact), never a synonym of the banned phrase.
 
+**Pre-write register check: open in first-person Emma voice with a real wanting beat (ticket
+#7447).** Run 685 (2026-09-04) drifted a category-education/comparison caption to flat third-person
+explainer register twice on the same draft (rows 167 v1 and v2), caught by emma-empathy-reviewer
+rather than self-caught at draft time; a mechanism-heavy subject pulls toward informing rather than
+wanting. This is the class of post most likely to read as a neutral explainer, so before any draft
+goes to the voice gate, confirm it opens in first-person Emma-off-the-clock voice and contains at
+least one explicit anticipation/wanting beat, not only product information. Education and
+comparison posts (no active slate/campaign subject) get this check specifically, since they are the
+posts with no built-in wanting hook the way a campaign thesis or a restock moment provides one.
+
 **Rotate the thesis across an active campaign, checked at draft time (ticket #6107).** A campaign
 collapses to one idea when drafting keeps returning to the same thesis: 'Talk Yourself Into It'
 churned two publish-gate REVISEs in one week (rows 116, 131) because 'slower' / 'right there' and the
@@ -659,6 +669,16 @@ genuinely applies (a no-product education beat, or a feature that is not a toy) 
 in one clause why none applies. A toy-featuring draft that names no lube and logs no reason has
 failed this check and is not ready to ship. This is real helpfulness sourced from
 `accessory_product_ids` / `pairing_why` or material compatibility, never upsell theater.
+
+**This self-check binds on every toy-featuring draft, full stop — slate, campaign, evergreen, or a
+Notebook companion post alike (ticket #7448).** Run 685 (2026-09-04) skipped it on both of that
+run's drafts, and both were evergreen/off-slate posts (no active Instagram campaign that day); an
+evergreen post is exactly the condition where the drafter's attention is on subject and register
+rather than the standing per-toy checklist, since nothing about a slate or campaign is prompting it.
+The rule was never written to apply only to slate/campaign posts, but reading it in sequence right
+after the campaign and X-companion sections above made it easy to treat as scoped to those. It is
+not: run this check on every toy-featuring draft regardless of whether today has an active
+Instagram campaign, a scheduled slate slot, or is a stand-alone Notebook-companion or evergreen post.
 
 **Author quotes are real or absent (crossplatform strategy §4).** Quotes from educators and authors
 in the space are licensed and encouraged: short, attributed by name, and verified against a real
