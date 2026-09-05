@@ -981,8 +981,15 @@ export async function recomputeCatalog(opts: {
  * The table grows about 5,000 rows a day from the full-catalog recompute and
  * had no retention at all, sitting at 310,170 rows. A 90-day prune was promised
  * alongside the recompute alarm and never shipped, so this closes that.
+ *
+ * Tightened 90 -> 30 (owner direction, 2026-09-04): at 440,593 rows / 192MB,
+ * 86% of them 'skipped_no_change' or 'rejected' rows the daily batch writes
+ * for every SKU whether or not anything changed. Only the prunable window
+ * moved; PRUNABLE_AUDIT_STATUSES is unchanged, so 'applied', 'auto_applied',
+ * and 'pending' rows -- the permanent price-change trail and any live pending
+ * decision -- are untouched at any retention window.
  */
-export const PRICING_AUDIT_RETENTION_DAYS = 90
+export const PRICING_AUDIT_RETENTION_DAYS = 30
 
 /**
  * The only statuses the prune may delete.
