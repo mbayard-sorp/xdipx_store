@@ -191,6 +191,18 @@ the row text and its links are the only carriers, so the conventions are the con
    Sanity content must state how the read was authenticated (token or MCP) and which perspective it used,
    and a draft-inclusive raw read must be attempted before the claim is filed. A bare empty-result
    observation is not filable as an absence.
+8. **Grep for an existing ticket on the same route/feature before filing a new `code` row.** (#7645)
+   Rule 2 covers a filer who knows they are creating a chain and links it; this rule covers the case
+   nobody notices at filing time — two sessions independently specifying and implementing the exact
+   same feature with no link between them. Tickets #7557 and #7558 both independently specified owner
+   in-place video-episode script editing on `admin.video-studio.scripts_.$episodeId.tsx`, producing two
+   divergent PRs (#1083 merged first; #1082 then became unmergeable, dirty against main, with
+   incompatible intent names and decision labels) — a full dev-pass claim and a PR burned on work that
+   had to be bounced at QA rather than caught at filing. Before filing a new `code` row, grep open and
+   `in_progress` suggestion text (`POST /api/team/suggestion {op:'list'}`, filtered to status
+   `approved`/`in_progress`/`pr_open`) for the target route or file path. If an existing ticket already
+   covers the same route and feature, set `blockedById` against it (or fold the new finding into it as
+   a note) instead of filing a fresh, unlinked duplicate.
 
 ---
 
@@ -580,3 +592,21 @@ Two things follow. Rotate `VERCEL_TOKEN` and `GITHUB_TOKEN` together, since both
 same time and both expired silently. And when the poller reports "not found" for more than a couple
 of minutes, check the token before believing the deployment is missing: confirm against the commit
 status on GitHub, which is written by Vercel's own integration and does not depend on our token.
+
+## A note on the checkout-funnel numbers, 2026-09-04
+
+Shopify's own funnel analytics for this store ("reached checkout N, completed 0") is **not**
+customer behaviour and must never be read as an abandonment cliff. It is very largely the estate's
+own browser-tier checkout probe: `.github/workflows/checkout-probe.yml` drives a real Storefront cart
+to a real checkout page and asserts a non-zero total there (Stage G5b) once daily, so each run is a
+genuine "reached checkout" session that, by design, never completes. Measured 2026-09-04 for
+2026-08-01..09-05: Shopify's `abandonedCheckouts` query returns exactly **one** real record in the
+whole window against **one** real paid order, while `checkout_probe_runs` shows 34 browser-tier runs
+in the same window (every one `ok`) — the same order of magnitude as the funnel's reported "reached
+checkout" count. The real cart-to-order ratio is roughly 1 abandoned to 1 completed over five weeks,
+which is not a funnel problem; the store's actual gap is acquisition volume, not checkout conversion.
+Do not "fix" this by making the probe stop short of the checkout page — the non-zero-total assertion
+is the only proof in the estate that a cart carries through to a real checkout, added deliberately in
+Stage G5b, and contaminated analytics is the correct price for that proof. The truthful sources for
+funnel and revenue health are `daily_profit_summary` and the `abandonedCheckouts` query read directly,
+never Shopify's own funnel-analytics view.
