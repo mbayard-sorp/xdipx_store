@@ -134,7 +134,24 @@ export function renderMoneyBlock(m: MoneyBlock): string {
       <tr><td style="padding:1px 10px 1px 0;">Orders, last 7d</td><td><strong>${int(m.ordersLast7)}</strong></td></tr>
       <tr><td style="padding:1px 10px 1px 0;">Revenue, last 7d</td><td><strong>${usd(m.revenueLast7Usd)}</strong></td></tr>
       <tr><td style="padding:1px 10px 1px 0;">Profit, last 30d</td><td>${usd(m.profitLast30Usd)} <span style="color:#6f645c;">of $${m.goalUsd}/mo goal</span></td></tr>
-      <tr><td style="padding:1px 10px 1px 0;">Estate spend, last 30d</td><td>${usd(m.estateSpendLast30Usd)}</td></tr>
+      <tr><td style="padding:1px 10px 1px 0;">Estate spend, last 30d</td><td>${usd(m.estateSpendLast30Usd)} <span style="color:#6f645c;">metered API only</span></td></tr>
+      <tr><td style="padding:1px 10px 1px 0;">Subscription-rated, 30d</td><td>${
+        m.subscriptionRatedCeilingUsd === null
+          ? '<span style="color:#a00;">could not read</span>'
+          : `<span title="What the Max-billed tokens would have cost at API list price.">&le; ${usd(m.subscriptionRatedCeilingUsd)}</span>${
+              // A number that is mostly DEFAULT_RATE has to say so, or the next
+              // reader quotes a ceiling as a fact. That is precisely what
+              // happened to the audit that produced this line.
+              m.subscriptionRatedUnknownPct !== null && m.subscriptionRatedUnknownPct >= 25
+                ? ` <span style="color:${WARN};">ceiling: ${m.subscriptionRatedUnknownPct}% priced at the unknown-model default</span>`
+                : ''
+            }`
+      }</td></tr>
+      <tr><td style="padding:1px 10px 1px 0;">Fixed monthly SaaS</td><td>${
+        m.fixedMonthlyUsd === null
+          ? '<span style="color:#6f645c;">not recorded, so the true denominator is still unknown</span>'
+          : usd(m.fixedMonthlyUsd)
+      }</td></tr>
     </table>
     <p style="margin:6px 0 0;">${esc(m.verdict)}</p>`
 }

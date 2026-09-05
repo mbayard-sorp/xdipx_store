@@ -59,6 +59,9 @@ describe('the money block', () => {
     profitLast30Usd: 19.62,
     goalUsd: 2000,
     estateSpendLast30Usd: 93.31,
+    subscriptionRatedCeilingUsd: 2397.14,
+    subscriptionRatedUnknownPct: 95,
+    fixedMonthlyUsd: null,
     verdict: 'the fleet cost more than the store took',
   }
 

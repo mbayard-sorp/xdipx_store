@@ -25,6 +25,24 @@ const RATES: Record<string, Rate> = {
 const DEFAULT_RATE: Rate = { input: 15, output: 75 }
 
 /**
+ * Is this model's price actually known, or is it falling through to DEFAULT?
+ *
+ * The distinction does not matter for a budget gate, where over-counting an
+ * unknown model tightens the cap and is the safe direction. It matters a great
+ * deal for a REPORTED figure, where the same behaviour inflates.
+ *
+ * Measured 2026-09-04: of 142.3M subscription-rated tokens in 30 days, 124.3M
+ * (87%) were on models absent from RATES, so 95% of the list-priced total came
+ * from DEFAULT_RATE. `claude-sonnet-5` alone accounts for about $329 of that,
+ * priced at Opus rates because the table predates it. Any surface reporting a
+ * list-priced total must therefore say how much of it is a guess, which is what
+ * this exists for.
+ */
+export function isKnownModelRate(model: string): boolean {
+  return Object.hasOwn(RATES, model)
+}
+
+/**
  * Source labels that mean "billed to a Max subscription, not the API key".
  *
  * `api.homepage-team.spend.tsx` accepted its `source` field through a bare

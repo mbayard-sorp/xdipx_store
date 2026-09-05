@@ -105,8 +105,39 @@ export interface MoneyBlock {
   revenueLast7Usd: number | null
   profitLast30Usd: number | null
   goalUsd: number
-  /** Fleet cost over the same 30 days, from api_token_log. */
+  /** Fleet cost over the same 30 days, from api_token_log. Metered only. */
   estateSpendLast30Usd: number | null
+  /**
+   * What the subscription-rated tokens WOULD have cost at API list price.
+   *
+   * `api_token_log.est_cost_usd` is zero for every Max-subscription row by
+   * design, and that design is right for a budget gate: charging a team for
+   * money that never moved throttles it on a phantom. But it means the metered
+   * figure alone answers "what did the API key bill" and not "what is this
+   * fleet consuming", and the second question is the one a spend-to-revenue
+   * ratio needs. Measured 2026-09-04: $98.32 metered against roughly $2,400 of
+   * list-priced consumption over the same 30 days.
+   *
+   * A CEILING, not an estimate. See `subscriptionRatedUnknownPct`.
+   */
+  subscriptionRatedCeilingUsd: number | null
+  /**
+   * The share of that ceiling priced at DEFAULT_RATE because the model is not
+   * in the rate table. Measured 2026-09-04 it was 95%, since 87% of
+   * subscription-rated tokens were on models the table predates, all of them
+   * charged at Opus rates. A number that is mostly a guess must say so, or the
+   * next reader quotes it as a fact — which is exactly what happened to the
+   * audit that produced this field.
+   */
+  subscriptionRatedUnknownPct: number | null
+  /**
+   * Fixed monthly SaaS, hand-maintained in `fixed_monthly_costs`.
+   *
+   * Null when the table is empty, which is honest: until someone types the
+   * numbers in, the denominator genuinely is unknown, and rendering 0 would
+   * assert that hosting is free.
+   */
+  fixedMonthlyUsd: number | null
   /**
    * The sentence that matters. Spend against revenue, not profit against pace:
    * at current volume the store earns less than the fleet costs, and a money
@@ -366,6 +397,9 @@ async function gatherMoney(gaps: string[]): Promise<MoneyBlock> {
   let revenueLast7Usd: number | null = null
   let profitLast30Usd: number | null = null
   let estateSpendLast30Usd: number | null = null
+  let subscriptionRatedCeilingUsd: number | null = null
+  let subscriptionRatedUnknownPct: number | null = null
+  let fixedMonthlyUsd: number | null = null
 
   try {
     const r = await db.execute(sql`
@@ -403,12 +437,71 @@ async function gatherMoney(gaps: string[]): Promise<MoneyBlock> {
     console.warn(`${LOG} money: estate spend read failed`, err)
   }
 
+  // Price the subscription-rated rows as if the API key had paid, by calling
+  // the estate's own estimator with a metered source. Grouped by model so the
+  // rate table is consulted once per model rather than once per row, and so the
+  // unknown-model share can be measured rather than assumed.
+  try {
+    const { estimateCostUsd, isKnownModelRate, MAX_SUBSCRIPTION_SOURCES } =
+      await import('~/lib/model-pricing.server')
+    const sources = [...MAX_SUBSCRIPTION_SOURCES]
+    const r = await db.execute(sql`
+      SELECT model,
+             COALESCE(SUM(input_tokens), 0)::bigint          AS inp,
+             COALESCE(SUM(output_tokens), 0)::bigint         AS outp,
+             COALESCE(SUM(cache_creation_tokens), 0)::bigint AS cc,
+             COALESCE(SUM(cache_read_tokens), 0)::bigint     AS cr
+        FROM api_token_log
+       WHERE ts >= now() - INTERVAL '30 days'
+         AND source = ANY(${sources})
+       GROUP BY model`)
+    let total = 0
+    let unknown = 0
+    for (const raw of (r.rows ?? []) as Array<Record<string, unknown>>) {
+      const model = String(raw['model'] ?? '')
+      const cost = estimateCostUsd({
+        model,
+        source: 'sync', // the whole point: price it as if metered
+        inputTokens: Number(raw['inp'] ?? 0),
+        outputTokens: Number(raw['outp'] ?? 0),
+        cacheCreationTokens: Number(raw['cc'] ?? 0),
+        cacheReadTokens: Number(raw['cr'] ?? 0),
+      })
+      total += cost
+      if (!isKnownModelRate(model)) unknown += cost
+    }
+    subscriptionRatedCeilingUsd = Math.round(total * 100) / 100
+    subscriptionRatedUnknownPct = total > 0 ? Math.round((unknown / total) * 100) : 0
+  } catch (err) {
+    gaps.push('subscription-rated-spend')
+    console.warn(`${LOG} money: subscription-rated spend failed`, err)
+  }
+
+  try {
+    const r = await db.execute(sql`
+      SELECT COALESCE(SUM(monthly_usd), 0)::float8 AS usd
+        FROM fixed_monthly_costs
+       WHERE effective_from <= CURRENT_DATE
+         AND (effective_to IS NULL OR effective_to > CURRENT_DATE)`)
+    const usd = Number(((r.rows ?? [])[0] as Record<string, unknown>)?.['usd'] ?? 0)
+    // Zero rows means nobody has entered the numbers, not that hosting is free.
+    fixedMonthlyUsd = usd > 0 ? usd : null
+  } catch (err) {
+    // The table arrives with migration 094; a digest must still send before it
+    // has been applied, so this is a gap rather than a failure.
+    gaps.push('fixed-costs')
+    console.warn(`${LOG} money: fixed monthly costs read failed`, err)
+  }
+
   const base = {
     ordersLast7,
     revenueLast7Usd,
     profitLast30Usd,
     goalUsd: MONTHLY_PROFIT_GOAL_USD,
     estateSpendLast30Usd,
+    subscriptionRatedCeilingUsd,
+    subscriptionRatedUnknownPct,
+    fixedMonthlyUsd,
   }
   return { ...base, verdict: moneyVerdict(base) }
 }
