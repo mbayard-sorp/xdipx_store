@@ -32,6 +32,17 @@ export interface TrackerMilestone {
   evidenceProbe: string
   lastVerified: string
   notes: string
+  /**
+   * True when the row had more cells than the format defines.
+   *
+   * The parser is positional, so a stray `|` anywhere before the last column
+   * shifts every field after it: a pipe in the evidence-probe cell silently
+   * turns `lastVerified` into the tail of the probe text and `notes` into the
+   * old `lastVerified`. Surfaced rather than guessed at, because a row that
+   * quietly mis-parses into plausible-looking values is worse than one that
+   * says it could not be read.
+   */
+  malformed: boolean
 }
 
 export interface TrackerLogEntry {
@@ -85,6 +96,12 @@ function parseMilestones(md: string): TrackerMilestone[] {
     if (cells.length < 10) continue
     if (cells[0] === 'id') continue                       // header row
     if (cells.every(c => /^:?-+:?$/.test(c))) continue    // separator row
+    // Overflow is folded back into `notes`, the last column, so the common case
+    // (a pipe in prose at the end of the row) parses correctly instead of being
+    // dropped. The flag still rides along, because an overflow anywhere EARLIER
+    // shifted the columns and the values above it are not to be trusted.
+    const malformed = cells.length > 10
+    const notes = malformed ? cells.slice(9).join(' | ') : cells[9]!
     rows.push({
       id:            cells[0]!,
       milestone:     cells[1]!,
@@ -95,7 +112,8 @@ function parseMilestones(md: string): TrackerMilestone[] {
       rag:           parseRag(cells[6]!),
       evidenceProbe: cells[7]!,
       lastVerified:  cells[8]!,
-      notes:         cells[9]!,
+      notes,
+      malformed,
     })
   }
   return rows
@@ -116,7 +134,10 @@ function parseStatusLog(md: string): TrackerLogEntry[] {
   return entries
 }
 
-function parseTracker(slug: string, md: string): Tracker {
+/** Exported for tests: the parse is positional and its edge cases are the
+ *  reason `malformed` exists, so they are asserted directly rather than
+ *  through the filesystem. */
+export function parseTracker(slug: string, md: string): Tracker {
   return {
     slug,
     title:     matchLine(md, /^#\s+(.+)$/m),

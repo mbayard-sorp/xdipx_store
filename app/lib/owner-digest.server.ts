@@ -1386,6 +1386,28 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   const trackers = getTrackers()
   const redTrackers = trackers.filter(t => t.overall === 'RED').length
 
+  // A tracker's RAG letter is hand-typed and the evidence-probe column beside
+  // it was executed by nothing, so a milestone could read done/GREEN
+  // indefinitely after its own stated condition stopped holding. Measured on
+  // 2026-09-04: two of the three machine-checkable milestones were GREEN while
+  // their probes failed (b1-bus wanted "below 10" and measured 33;
+  // e3-targetteam wanted 0 and measured 95).
+  //
+  // Best-effort: a probe that cannot be read reports nothing rather than
+  // blocking the digest, and an empty list is the healthy case.
+  let ragContradictions: Awaited<ReturnType<typeof import('~/lib/tracker-probes.server')['measureMilestones']>> = []
+  let contradicted: ReturnType<typeof import('~/lib/tracker-probes.server')['findContradictions']> = []
+  try {
+    const { measureMilestones, findContradictions } = await import('~/lib/tracker-probes.server')
+    ragContradictions = await measureMilestones()
+    contradicted = findContradictions(
+      trackers.flatMap(t => t.milestones.map(m => ({ slug: t.slug, id: m.id, rag: m.rag }))),
+      ragContradictions,
+    )
+  } catch (err) {
+    console.warn('[owner-digest] tracker probe measurement failed (ignored)', err)
+  }
+
   // The SEO section reads yesterday's /cron/seo-daily result (12:30 UTC, 30
   // min before this digest) rather than re-querying and re-deriving the same
   // deltas here. One computation, one interpretation, two readers.
@@ -1504,7 +1526,11 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
 
   // ── Compose ───────────────────────────────────────────────────────────────
   const ordersY = yesterday?.orders ?? 0
-  const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? '' : 's'}, ${redTrackers} RED tracker${redTrackers === 1 ? '' : 's'}${needsOwner > 0 ? `, ${needsOwner} need${needsOwner === 1 ? 's' : ''} you` : ''}`
+  // A contradicted milestone counts in the subject line beside the RED ones,
+  // because "asserted GREEN, measured failing" is strictly worse news than an
+  // honest RED and should not be quieter than one.
+  const contradictedCount = contradicted.length
+  const subject = `xdipx daily digest: ${ordersY} orders yesterday, ${failures.length} run failure${failures.length === 1 ? '' : 's'}, ${redTrackers} RED tracker${redTrackers === 1 ? '' : 's'}${contradictedCount > 0 ? `, ${contradictedCount} unearned GREEN` : ''}${needsOwner > 0 ? `, ${needsOwner} need${needsOwner === 1 ? 's' : ''} you` : ''}`
 
   const profitRows = profit
     .map(p => `<tr><td style="padding:2px 10px 2px 0;">${esc(p.day)}</td><td style="padding:2px 10px;">${p.orders}</td><td style="padding:2px 10px;">$${p.revenue.toFixed(2)}</td><td style="padding:2px 10px;">$${p.profit.toFixed(2)}</td><td style="padding:2px 0;">${esc(p.featured_sku ?? '')}</td></tr>`)
@@ -1589,12 +1615,31 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${ticketList ? `<p style="margin:6px 0 2px;">Tickets filed overnight:</p><ul style="margin:0;padding-left:18px;">${ticketList}</ul>` : '<p style="margin:0;color:#6f645c;">No SEO tickets filed overnight.</p>'}`
   }
 
-  const trackerBlocks = trackers
+  // Measured beats asserted, and the disagreement leads. A RAG letter is a
+  // claim; the probe beside it is the evidence, and until now nothing compared
+  // the two.
+  const contradictionBlock = contradicted.length === 0
+    ? ''
+    : `<p style="margin:0 0 6px;color:${WARN};"><strong>${contradicted.length} milestone${contradicted.length === 1 ? '' : 's'} asserting GREEN while the stated probe fails.</strong></p>
+       <ul style="margin:0 0 8px;padding-left:18px;">${
+         contradicted.map(c =>
+           `<li><code>${esc(c.key)}</code>: wants ${esc(c.describe)}, measured <strong>${c.measured ?? 'unreadable'}</strong></li>`,
+         ).join('')
+       }</ul>`
+
+  const unreadableProbes = ragContradictions.filter(m => m.verdict === 'unreadable')
+  const unreadableBlock = unreadableProbes.length === 0
+    ? ''
+    : `<p style="margin:0 0 8px;color:#6f645c;">${unreadableProbes.length} probe${unreadableProbes.length === 1 ? '' : 's'} could not be read, so ${unreadableProbes.length === 1 ? 'that milestone is' : 'those milestones are'} unverified rather than passing.</p>`
+
+  const trackerBlocks = contradictionBlock + unreadableBlock + trackers
     .map(t => {
       const asks = latestOwnerAsks(t)
       const latest = t.statusLog[0]
+      const bad = t.milestones.filter(m => m.malformed).length
       return `<p style="margin:8px 0 2px;"><strong style="color:${ragColor(t.overall)};">${esc(t.overall)}</strong> &middot; ${esc(t.title)}</p>
         ${latest ? `<p style="margin:0 0 2px;color:#6f645c;">Latest: ${esc(latest.heading)}</p>` : ''}
+        ${bad > 0 ? `<p style="margin:0;color:${WARN};">${bad} row${bad === 1 ? '' : 's'} had more columns than the format defines; those fields may be misaligned.</p>` : ''}
         ${asks ? `<p style="margin:0;"><em>Asks for the owner:</em> ${esc(asks)}</p>` : ''}`
     })
     .join('')
