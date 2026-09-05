@@ -1973,6 +1973,27 @@ export const videoEpisodes = pgTable('video_episodes', {
 }))
 
 /**
+ * video_script_edits (095) — per-field before/after diff captured on every
+ * owner script save via editEpisodeScript (ticket #7567, B1 of #7559 —
+ * Part B of #7557). One row per changed field per save (e.g. field
+ * 'script.cta' or 'script.captions.instagram'), never overwritten. Read by
+ * listOwnerScriptEdits as the writers room's line-level "what the owner
+ * changes" signal; wiring series-showrunner/episode-writer to actually read
+ * it is B2, agent-editor's lane, tracked separately.
+ */
+export const videoScriptEdits = pgTable('video_script_edits', {
+  id:         serial('id').primaryKey(),
+  episodeId:  integer('episode_id').notNull().references(() => videoEpisodes.id, { onDelete: 'cascade' }),
+  field:      varchar('field', { length: 64 }).notNull(),
+  before:     text('before'),
+  after:      text('after').notNull(),
+  editedBy:   varchar('edited_by', { length: 60 }).notNull(),
+  createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  episodeIdx: index('idx_video_script_edits_episode').on(t.episodeId, t.createdAt),
+}))
+
+/**
  * Ad studio creative variants (065) — batches generated under an ad_campaigns
  * proposal. policy_check is required per creative, mirroring ad_campaigns:
  * docs/ads-policy.md prohibits Meta/TikTok paid for the pleasure catalog, so

@@ -32,6 +32,8 @@ const state = vi.hoisted(() => ({
   sets: [] as Record<string, unknown>[],
   /** Rows the update pretends to have matched (drives the boolean returns). */
   updateReturns: [] as { id: number }[],
+  /** Every db.insert(...).values(...) payload, in order (video_script_edits). */
+  inserts: [] as Record<string, unknown>[][],
 }))
 
 vi.mock('./db.server', () => ({
@@ -48,6 +50,12 @@ vi.mock('./db.server', () => ({
           where: () => ({ returning: () => Promise.resolve(state.updateReturns) }),
           returning: () => Promise.resolve(state.updateReturns),
         }
+      },
+    }),
+    insert: () => ({
+      values: (payload: Record<string, unknown>[]) => {
+        state.inserts.push(payload)
+        return Promise.resolve(undefined)
       },
     }),
   },
@@ -81,6 +89,7 @@ beforeEach(() => {
   state.row = null
   state.sets = []
   state.updateReturns = [{ id: 7 }]
+  state.inserts = []
 })
 
 describe('releaseEpisodeClaim', () => {
@@ -274,5 +283,61 @@ describe('editEpisodeScript (ticket #7558)', () => {
     state.row = null
     await expect(editEpisodeScript({ episodeId: 999, editedBy: 'mike@xdipx.com', script: { cta: 'x' } }))
       .rejects.toThrow(/not found/)
+  })
+})
+
+describe('editEpisodeScript diff capture (ticket #7567)', () => {
+  it('writes a video_script_edits row per changed script field', async () => {
+    state.row = episode({ productionStatus: 'approved', scriptJson: { cta: 'old cta', voiceover: 'old voiceover' } })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { cta: 'new cta' } })
+    expect(state.inserts).toHaveLength(1)
+    expect(state.inserts[0]).toEqual([
+      { episodeId: 7, field: 'script.cta', before: 'old cta', after: 'new cta', editedBy: 'mike@xdipx.com' },
+    ])
+  })
+
+  it('writes one row per edited caption platform, field-scoped', async () => {
+    state.row = episode({ productionStatus: 'approved', scriptJson: { captions: { instagram: 'old ig', tiktok: 'old tiktok' } } })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { captions: { instagram: 'new ig' } } })
+    expect(state.inserts[0]).toEqual([
+      { episodeId: 7, field: 'script.captions.instagram', before: 'old ig', after: 'new ig', editedBy: 'mike@xdipx.com' },
+    ])
+  })
+
+  it('writes a row for a siteCut field with the prior value as before', async () => {
+    state.row = episode({ productionStatus: 'approved', siteCutJson: { title: 'old title' } })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', siteCut: { title: 'new title' } })
+    expect(state.inserts[0]).toEqual([
+      { episodeId: 7, field: 'siteCut.title', before: 'old title', after: 'new title', editedBy: 'mike@xdipx.com' },
+    ])
+  })
+
+  it('records null before for a field with no prior value', async () => {
+    state.row = episode({ productionStatus: 'approved', scriptJson: null })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { cta: 'first cta' } })
+    expect(state.inserts[0]).toEqual([
+      { episodeId: 7, field: 'script.cta', before: null, after: 'first cta', editedBy: 'mike@xdipx.com' },
+    ])
+  })
+
+  it('writes nothing when the saved value is unchanged from before', async () => {
+    state.row = episode({ productionStatus: 'approved', scriptJson: { cta: 'same cta' } })
+    await editEpisodeScript({ episodeId: 7, editedBy: 'mike@xdipx.com', script: { cta: 'same cta' } })
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it('writes one row per changed field across script and siteCut in a single save', async () => {
+    state.row = episode({ productionStatus: 'approved', scriptJson: { cta: 'old cta' }, siteCutJson: { title: 'old title' } })
+    await editEpisodeScript({
+      episodeId: 7,
+      editedBy: 'mike@xdipx.com',
+      script: { cta: 'new cta' },
+      siteCut: { title: 'new title' },
+    })
+    expect(state.inserts[0]).toHaveLength(2)
+    expect(state.inserts[0]).toEqual(expect.arrayContaining([
+      { episodeId: 7, field: 'script.cta', before: 'old cta', after: 'new cta', editedBy: 'mike@xdipx.com' },
+      { episodeId: 7, field: 'siteCut.title', before: 'old title', after: 'new title', editedBy: 'mike@xdipx.com' },
+    ]))
   })
 })
