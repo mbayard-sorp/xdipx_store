@@ -155,14 +155,23 @@ Install those guards whether or not you ever build the agent.
 
 The high-value work needs no new agent. **Wire the janitor sweep's existing computations to the actuator that is already in the same function.**
 
+*[Corrected after implementation. This block originally routed every branch through `fileDetectionTicket` and described the result as self-closing. It is not. `fileDetectionTicket` files `kind: 'code'`, `code` has no agent-reachable close edge, and the dedupe index it writes against is partial on everything but `applied` and `dismissed` (`detection-tickets.server.ts:20-25`). An open undated `cron-breach:<route>` row would therefore hold its key forever, and the next real breach of that route would file nothing. The alarm would permanently disarm itself the first time it fired. The correct mechanism already existed and was unused. Shipped as [PR #1085](https://github.com/mbayard-sorp/xdipx_store/pull/1085), ticket #7601.]*
+
 ```
-for (const b of breaches)      → fileDetectionTicket at b.ownerTeam,
+for (const b of breaches)      → file kind: 'process' at b.ownerTeam,
                                   priority 1 when b.moneyRelevant,
-                                  dedupeKey `cron-breach:<route>`, self-closing
+                                  dedupeKey `cron-breach:<route>`
 lastStatus === 'failed'        → the same, after 2 consecutive failures
 for (const u of unwatched)     → dedupeKey `unwatched-lane:<team>:<runType>`
 countUnfinishedTerminalRuns    → one rollup row
+
+route healthy on a later sweep → close the row on that same sweep, via the
+                                  `system → applied` edge already fenced to
+                                  DETECTOR_SELF_CLOSE_KINDS
+still breached after N sweeps  → escalate once to a `code` row
 ```
+
+`kind: 'process'` is doing two jobs. It is the honest label for a liveness signal, and it is the only kind the detector that raised the alarm is permitted to clear: `DETECTOR_SELF_CLOSE_KINDS = ['process']` (`team.server.ts:1840`) with the fenced `system → applied` edge at `:1905` and `:1922`. `closeStaleSamenessTickets` (`homepage-healthcheck.server.ts:830-873`) is the working shape to copy, including its ordering: close the cleared conditions first, then file, so a key that should be free is free before anything files against it. Filing `process` rather than `code` is also what keeps these rows off the protected path, the choice `log-monitor.server.ts:74-80` already argues verbatim.
 
 Preconditions, in order, because filing against a 0/7-precision alarm would be worse than silence:
 
@@ -209,15 +218,15 @@ Effort is agent effort unless it says owner.
 |---|---|---|---|---|
 | 1 | **Merge PR #1084.** Restores both push channels. Already green, ticket #7582 at `pr_open`. | The blackout | engine, after R-QA | done |
 | 2 | **Apply migrations 092 and 093.** Stops ~2,240 rejected pricing writes a day and unblocks A1's acceptance metric. `npx tsx scripts/apply-migrations.ts --from 092` | 2.4 | **owner, 2 min** | S |
-| 3 | **Clean the breach list, then wire the actuator.** The three preconditions in §5, then `fileDetectionTicket` on breaches, failed-status routes and unwatched lanes. Add `cronsFailed` to `HealthBlock`. | 2.1, the verdict | R-DEV | M |
+| 3 | **Clean the breach list, then wire the actuator.** The three preconditions in §5, then file `kind: 'process'` at the route's owning team on breaches, failed-status routes and unwatched lanes, closing each row on the detector edge as soon as the route reads healthy and escalating to a `code` row only after the alarm has stayed open across several sweeps. Add `cronsFailed` to `HealthBlock`. *[Corrected: `fileDetectionTicket` was the wrong actuator and would have disarmed the alarm permanently, see §5. Shipped as PR #1085.]* | 2.1, the verdict | R-DEV | M |
 | 4 | **Protect `vercel.json` and tighten `cron-expectations.test.ts`** to assert manifest → vercel.json and a floor on `graceMinutes`. Do this before anything gains schedule-write. | §5.3 | R-DEV | S |
 | 5 | **Add an R-DEV pass at 02:00 UTC.** 2.65h off the mean per ticket, into an R-QA pass that is already idle. | §4 | trigger session | S |
 | 6 | **Give blocked tickets probes.** Reuse the `owner_blockers` probe vocabulary; the janitor re-runs each blocked row's probe every 6h and auto-dismisses on pass. Clears at least 3 rows immediately. | 2.3 | R-DEV | M |
-| 7 | **`fileBlocker` takes `EXCLUDED` for title, detail and evidence.** One statement. Your #1 blocker stops lying. | 2.3 | R-DEV | S |
+| 7 | **`fileBlocker` takes newest-wins on `title` and `detail` only**, written `COALESCE(EXCLUDED.x, owner_blockers.x)` rather than bare `EXCLUDED`, so a re-file that omits a field cannot null it. `evidence` must keep its existing reverse COALESCE: only title and detail are machine-measured at all eight call sites, no cron caller passes `evidence` at all, and newest-wins there would let the hourly RunPod pod watcher erase a hand-written CONFIRMED justification, which is the exact thing `titleClaimsConfirmed` (`owner-blockers.server.ts:460-465`) exists to require. `unblocks`, `where_to_go`, `verify_probe` and `verify_arg` are authored once and keep theirs for the same reason. Your #1 blocker stops lying. *[Corrected: this originally said `EXCLUDED` for title, detail and evidence. Shipped as PR #1086.]* | 2.3 | R-DEV | S |
 | 8 | **Stop the two idle GPU pods.** $2.08/hr, now. | | **owner, 1 min** | S |
 | 9 | **Rotate the GitHub PAT off the RunPod pod** and give the pod watcher an ownership filter. | §6 | owner + R-DEV | S |
-| 10 | **Add lane output floors** (`floor_value`, `completeness_probe` on `cron_expectations`, additive). Seed four: IndexNow published URLs/day, outreach sends/week, homepage slots changed/day, social posts on a gate-open day. | 2.1 | R-DEV | M |
-| 11 | **Make the tracker's evidence-probe column executable** and render measured-vs-asserted RAG. | §6.5 | R-DEV | S |
+| 10 | **Add lane output floors in code, keyed by lane.** Not on `cron_expectations`, and no migration: outreach sends are agent work with no cron behind them, so a cron-keyed floor cannot express them at all. Seed three. IndexNow and outreach get a **staleness** bound ("nothing in N days"), not a rate bound, because the measured p10 over 30 days is **0 on all three lanes** (IndexNow 26 zero-days of 30, outreach 1 message in 8 weeks, social 12 zero-days of 30) and a rate floor seeded at p10 is a check that cannot fail, which is the same defect as a permanently-WARNing line. Social is the only lane regular enough for a rate floor. Drop the homepage floor as unmeasurable: `homepage_payload` is a `(variant, version)` upsert whose `built_at` moves on every warm even when nothing changed, so "slots changed/day" has no data source. *[Corrected: this originally asked for four floors on `cron_expectations`, each seeded at the observed p10. Shipped as PR #1087.]* | 2.1 | R-DEV | M |
+| 11 | **Add a probe registry in code, keyed by milestone id**, and render measured-vs-asserted RAG against it, the pattern the `owner_blockers` probe vocabulary already uses. Do **not** execute the tracker's evidence-probe column: `docs/store-team/trackers/*.md` sits inside the agent-editor docs allowlist, which merges docs PRs with no QA verdict (this report's own F25), so running those cells as SQL would let an agent-authored markdown row run arbitrary SQL as the application's database user with no human anywhere in the path. Coverage is partial by design, and a milestone with no registered probe renders as "asserted" rather than measured. *[Corrected: this originally said to make the tracker column itself executable, which is a code-execution surface. Shipped as PR #1088, `app/lib/tracker-probes.server.ts`.]* | §6.5 | R-DEV | S |
 | 12 | **One `costs` row, hand-entered monthly**, plus subscription-rated consumption at list beside the metered figure in the money block. | §6.2 | owner + R-DEV | S |
 | 13 | **Decide the two demand valves.** `ads_team_enabled` (3 campaigns approved and unspent for 53 days) and `email_campaign_push_enabled` (does not exist; 2 briefs waiting 17 days). Neither has ever been put to you as a blocker. | §1, §6.1 | **owner decision** | |
 | 14 | **Resolve the checkout question**: run an `abandonedCheckouts` query for 08-01 to 09-04. If the cliff is real it outranks everything above it. | §6.4 | R-DEV | S |
@@ -229,3 +238,16 @@ Items 3, 4, 6, 7 and 10 are the self-healing ask, properly scoped. Items 13 and 
 Vercel, Neon and Upstash billing (no scope on the token available). The Klaviyo list size, so whether unblocking email buys anything is unknown. Whether an agent can update an existing trigger it did not create, asserted in two docs and contradicted in a third. The full cloud-routine plane could not be enumerated independently: `RemoteTrigger list` returns 20 spent one-shot reminders and ignores its own cursor, so routine-plane claims rest on per-id reads. Whether any of the 65 admin pages are used.
 
 Findings resting on a single number: the 7,077 SKU catalog size, the 36% engine-signature share (a squash heuristic), the $2,088 list-price figure (Max consumption priced at Sonnet list, which is a modelling choice not a cash fact), and the 45-session bot attribution.
+
+## 9. Corrections after implementation
+
+Four of the recommendations in §7 were wrong. Items 3, 7, 10 and 11 have been corrected in place above, each carrying a note that names the PR which overturned it. The findings underneath them all held.
+
+- **Item 3** named an actuator that permanently disarms itself. `fileDetectionTicket` files `code`, which has no agent-reachable close edge, so the first breach of a route would have held that route's dedupe key open forever and the second breach would have filed nothing.
+- **Item 7** would have handed an hourly watcher the power to erase a hand-written CONFIRMED justification, because no cron caller passes `evidence` at all.
+- **Item 10** put a rate floor at a p10 that measures 0 on every lane it named, on a table that structurally cannot express agent work, and named a fourth floor with no data source behind it.
+- **Item 11** proposed executing SQL authored in markdown files that merge without a QA verdict.
+
+None of the four was caught by reading the recommendation. Each was caught by measuring the thing the recommendation assumed, before writing the code: reading the dedupe index's own WHERE clause, listing the `fileBlocker` call sites to see which fields callers actually pass, running the p10 the recommendation asked to seed, and asking which allowlist the tracker files sit in. Three of the four read as correct on the page. The fourth reads as a small chore.
+
+That is worth generalising. This audit was produced by 34 agents, and what that many agents are good at is establishing what is true: 169 findings survived adversarial verification and the four errors here are all downstream of findings that stand. What they are less good at is the last step from a true finding to the right fix, because that step depends on the code the fix would touch rather than on the state the finding measured. Treat the findings in an agent-written audit as findings. Treat the recommendations as hypotheses, and measure before implementing one.
