@@ -233,6 +233,9 @@ describe('the money verdict', () => {
       profitLast30Usd: 19.62,
       goalUsd: MONTHLY_PROFIT_GOAL_USD,
       estateSpendLast30Usd: 93.31,
+      subscriptionRatedCeilingUsd: 2397.14,
+      subscriptionRatedUnknownPct: 95,
+      fixedMonthlyUsd: null,
     })
     expect(v).toContain('$93.31')
     expect(v).toContain('took nothing')
@@ -246,6 +249,9 @@ describe('the money verdict', () => {
       profitLast30Usd: null,
       goalUsd: MONTHLY_PROFIT_GOAL_USD,
       estateSpendLast30Usd: null,
+      subscriptionRatedCeilingUsd: null,
+      subscriptionRatedUnknownPct: null,
+      fixedMonthlyUsd: null,
     })
     expect(v).toContain('gap, not a zero')
   })
@@ -257,6 +263,9 @@ describe('the money verdict', () => {
       profitLast30Usd: 300,
       goalUsd: MONTHLY_PROFIT_GOAL_USD,
       estateSpendLast30Usd: 93.31,
+      subscriptionRatedCeilingUsd: 2397.14,
+      subscriptionRatedUnknownPct: 95,
+      fixedMonthlyUsd: null,
     })
     expect(v).toContain('$240.00')
     expect(v).toContain('$93.31')

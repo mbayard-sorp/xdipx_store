@@ -98,6 +98,24 @@ export const referrals = pgTable('referrals', {
   createdAt:          timestamp('created_at').defaultNow().notNull(),
 })
 
+/**
+ * Fixed monthly SaaS costs (migration 094).
+ *
+ * Hand-maintained, because there is no billing API wired here and nine numbers
+ * a month is cheaper than inventing one. A ledger rather than a mutable row:
+ * `effectiveTo` NULL means current, so a price change is recorded instead of
+ * overwriting the history a past month's ratio was computed against.
+ */
+export const fixedMonthlyCosts = pgTable('fixed_monthly_costs', {
+  id:            serial('id').primaryKey(),
+  vendor:        varchar('vendor', { length: 48 }).notNull(),
+  note:          text('note'),
+  monthlyUsd:    decimal('monthly_usd', { precision: 10, scale: 2 }).notNull(),
+  effectiveFrom: date('effective_from').notNull().defaultNow(),
+  effectiveTo:   date('effective_to'),
+  createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const dailyProfitSummary = pgTable('daily_profit_summary', {
   summaryDate:   date('summary_date').primaryKey(),
   totalOrders:   integer('total_orders'),
