@@ -262,8 +262,14 @@ export function applyMattersRules(input: RuleInput): RuleResult {
   }
 
   // ── M-RCH-1  Rechargeable ─────────────────────────────────────────────────
-  const rechargeableBoolean = input.rechargeable === true
-  const rechargeableCorpus  = /rechargeable|usb|magnetic charging/i.test(corpus)
+  // A title that says "Corded" or "Plug-In" is the most reliable power-source
+  // signal available and overrides both the corpus regex and the spec boolean:
+  // the corpus regex otherwise false-matches a corded/plug-in wand whose copy
+  // mentions a USB-charged remote or similar, and a corded product is never
+  // rechargeable regardless of what an upstream boolean claims.
+  const cordedOrPlugIn      = /\bcorded\b|\bplug[- ]in\b/i.test(titleLc)
+  const rechargeableBoolean = !cordedOrPlugIn && input.rechargeable === true
+  const rechargeableCorpus  = !cordedOrPlugIn && /rechargeable|usb|magnetic charging/i.test(corpus)
   if (rechargeableBoolean || rechargeableCorpus) {
     addTag(matters, hits, 'M-RCH-1', 'Rechargeable',
       rechargeableBoolean ? 'spec boolean rechargeable=true' :
