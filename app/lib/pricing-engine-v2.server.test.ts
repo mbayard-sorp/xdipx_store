@@ -100,24 +100,29 @@ describe('computePrice — MAP enforcement', () => {
 describe('computePrice — margin floor', () => {
   it('margin floor wins when target is below floor', () => {
     // cost=10, target_margin=0.10 -> target=11.11, floor=cost/(1-0.25)=13.33
-    // sell=max(11.11, 13.33)=13.33 -> round -> 13.33 -> floor(13.33)=13 -> 12.99
+    // sell=max(11.11, 13.33)=13.33 -> round -> 12.99, which is BELOW the
+    // floor, so the post-round margin-floor guard (#7884) raises it to
+    // roundUpPsychological(13.33)=13.99, the smallest .99 price that still
+    // clears the floor.
     const r = computePrice({ cost: 10, map: null, msrp: 50, cfg: cfg({ target_margin_pct: 0.10 }) })
-    expect(r?.sell).toBe(12.99)
+    expect(r?.sell).toBe(13.99)
+    expect((r!.sell - 10) / r!.sell).toBeGreaterThanOrEqual(0.25)
   })
 
   it('margin floor overrides MAP when floor > MAP', () => {
     // cost=20, floor=cost/(1-0.25)=26.67, MAP=24 (below floor)
-    // sell=max(target,MAP)=max(40,24)=40, then max(40,26.67)=40 -> 39.99
-    // But with target_margin=0.10: target=22.22, snap to MAP=24, floor=26.67 -> floor wins
+    // target=22.22, snap to MAP=24, then floor clamp: max(24,26.67)=26.67.
+    // roundPsychological(26.67)=25.99, which is BELOW the floor, so the
+    // post-round margin-floor guard (#7884) raises it to
+    // roundUpPsychological(26.67)=26.99.
     const r = computePrice({
       cost: 20,
       map: 24,
       msrp: 80,
       cfg: cfg({ target_margin_pct: 0.10 }),
     })
-    // target=22.22, MAP=24 -> max=24, floor=26.67 -> floor wins -> 26.67 -> 26.99? No.
-    // roundPsychological(26.67) = floor(26.67)-0.01 = 26-0.01 = 25.99
-    expect(r?.sell).toBe(25.99)
+    expect(r?.sell).toBe(26.99)
+    expect((r!.sell - 20) / r!.sell).toBeGreaterThanOrEqual(0.25)
     // floor 26.67 > MAP 24, so floor wins
     expect(r!.sell).toBeGreaterThan(24)
   })
@@ -156,6 +161,60 @@ describe('computePrice — MSRP ceiling', () => {
     const r = computePrice({ cost: 10, map: null, msrp: null, cfg: cfg() })
     expect(r?.compare_at).toBeNull()
     expect(r?.sell).toBe(19.99)
+  })
+})
+
+describe('computePrice — margin-floor rounding guard (#7884)', () => {
+  // cost=10, margin_floor=0.35 -> floor=15.384615..., roundPsychological(floor)
+  // rounds DOWN to 14.99, which sits below the floor and would manufacture a
+  // margin-floor violation that decideStatus rejects, recurring forever, even
+  // though 15.384615 was itself a satisfiable, floor-clearing price.
+  it('a target below the margin floor rounds UP to the floor, not below it', () => {
+    const r = computePrice({
+      cost: 10,
+      map: null,
+      msrp: null,
+      cfg: cfg({ target_margin_pct: 0.30, margin_floor_pct: 0.35 }),
+    })
+    const floor = 10 / (1 - 0.35)
+    expect(r!.sell).toBeGreaterThanOrEqual(floor)
+    expect(r!.sell).toBe(roundUpPsychological(floor))
+    const marginAfter = (r!.sell - 10) / r!.sell
+    expect(marginAfter).toBeGreaterThanOrEqual(0.35)
+  })
+
+  it('reproduces the dead-velocity reject storm (#7884): a "dead" shift that dips below floor still clears it after rounding', () => {
+    // Same 0.40 -> 0.30 shift the velocity modifier applies to a dead-bucket
+    // variant (-10pp, applyVelocityModifier), against a 0.35 floor typical of
+    // the affected pricing group.
+    const shifted = applyVelocityModifier(cfg({ target_margin_pct: 0.40, margin_floor_pct: 0.35 }), 'dead')
+    expect(shifted.target_margin_pct).toBeCloseTo(0.30)
+    const r = computePrice({ cost: 10, map: null, msrp: null, cfg: shifted })
+    const marginAfter = (r!.sell - 10) / r!.sell
+    expect(marginAfter).toBeGreaterThanOrEqual(0.35)
+  })
+
+  it('MSRP-below-floor is still routed to msrpBelowFloor, not silently forced up to the floor', () => {
+    // cost=9, margin_floor=0.25 -> floor=12.00; msrp=11.99 is the real,
+    // unsatisfiable constraint (#7515) and must not be overridden by the
+    // rounding guard added for #7884.
+    const r = computePrice({ cost: 9, map: null, msrp: 11.99, cfg: cfg({ margin_floor_pct: 0.25 }) })
+    expect(r?.msrpBelowFloor).toBe(true)
+    expect(r!.sell).toBeLessThanOrEqual(11.99)
+  })
+
+  it('the floor-rounding guard still respects MSRP as a ceiling when MSRP sits between the floor and its rounded-up value', () => {
+    // floor = 10/0.65 = 15.384615...; roundUpPsychological(floor) = 15.99.
+    // msrp=15.50 sits strictly between the two, so the guard's own re-clamp
+    // to msrp should win over the psychological rounding.
+    const r = computePrice({
+      cost: 10,
+      map: null,
+      msrp: 15.50,
+      cfg: cfg({ target_margin_pct: 0.30, margin_floor_pct: 0.35 }),
+    })
+    expect(r?.msrpBelowFloor).toBe(false)
+    expect(r!.sell).toBe(15.50)
   })
 })
 
