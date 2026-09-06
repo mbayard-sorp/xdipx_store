@@ -207,7 +207,12 @@ em.brand {
 .slide-in-right { animation: slide-in-right 0.28s var(--ease-entrance) forwards; }
 .slide-in-left  { animation: slide-in-left  0.28s var(--ease-entrance) forwards; }
 
-/* TrustBar mobile marquee */
+/* TrustBar mobile marquee.
+   The -50% keyframe assumes the track carries the items twice; TrustBar.tsx
+   appends that second copy on the client only, so this animation is applied
+   only once it is present. Cancelled here rather than with an `md:animate-none`
+   utility because `.animate-marquee` and `.md\:animate-none` share specificity
+   (0,1,0) and the winner would depend on stylesheet order. */
 @keyframes marquee {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
@@ -215,6 +220,15 @@ em.brand {
 
 .animate-marquee {
   animation: marquee 20s linear infinite;
+}
+
+/* At md and up the same list is a static justify-between row, not a track. */
+@media (min-width: 768px) {
+  .animate-marquee { animation: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee { animation: none; }
 }
 
 /* Curiosity Shelf (Nº 07) restock crossfade. A state transition (a lane tap or a
