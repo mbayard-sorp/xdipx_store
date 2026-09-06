@@ -61,6 +61,17 @@ holds the lane: exit cleanly (`{"op":"update","id":$RUN_ID,"update":{"status":"s
 rather than drafting a second post over the first. `excludeRun` in the Step 1 gate does not catch
 this, because a session sharing your run id is not a separate run to exclude.
 
+**Mandatory gate event, before Step 2 (#7738).** The scheduled ~10:0x UTC fire has twice opened a run
+row and died before Step 3's topic event with zero events recorded — run 643 at least wrote a failure
+summary, run 699 wrote nothing at all (0 events, no summary, no phase), which is indistinguishable
+from a session that never started. Steps 1-2 are a gate call plus loading the charter, blog addendum,
+mission brief, strategy brief, calendar, and content plan — a lot of session lifetime with no
+diagnostic checkpoint in it. Close that gap: immediately after the Step 1 gate returns `ok:true` and
+before Step 2 begins, post one `phase:"gate"` step event carrying the gate payload verbatim
+(`enabled`, `remainingCents`, `runsToday`/`maxRunsPerDay`, `valves.autopublish`,
+`contentSlot.weekday`/`expectedCategory`) plus the concurrency-reconciliation result above. One curl,
+negligible cost, and it converts a silent dead row into "gate passed at T, died during doctrine load."
+
 ## Step 2: Load doctrine + context (data only)
 
 1. `docs/emma-voice.md` core + **blog addendum** (mandatory, before any words). Either missing →
