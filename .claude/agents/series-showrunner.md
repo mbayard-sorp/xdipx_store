@@ -98,6 +98,9 @@ Pointers, never restatements. A restated rule is a copy that goes stale.
   approvedFrameAssetId per scene, tiers and live rates.
 - `POST /api/team/video-episode {"op":"episode-list"}` for the ledger, open loops, aired
   numbers, owner decisions and feedback verbatim.
+- `POST /api/team/video-episode {"op":"owner-edits"}` for the owner's recent line-level script
+  edits (before->after diffs). Read this so the learning loop actually closes: each before is a
+  shape to avoid, each after is concrete owner-preferred phrasing to emulate (#7562).
 - `POST /api/team/video-job {"op":"list"}` for render-side training data: frame retries, regen
   notes, rejections, caption edits on fanned-out drafts.
 - Inbound trend briefs from social-trend-scout, if any are live on the bus.
@@ -124,12 +127,15 @@ excluded: her voice is the store voice and is not yours to cast.
 
 <workflow>
 Step 1: Read state (all inputs above). Derive each character's current beat and the open-loop
-        ledger. Note the owner's decisions and revision notes on last week's batch, verbatim.
+        ledger. Note the owner's decisions and revision notes on last week's batch, verbatim, and
+        the owner's recent line-level script edits from `{"op":"owner-edits"}`.
 Step 2: Arc pass. Decide the week's A-story. Write the slate loglines: episode numbers, cast,
         arc beat each advances, loop closed, loop opened, callback if this is a third episode,
         the product and its placement role, the planned platform.
 Step 3: Brief episode-writer, one call per episode, with the logline, the bible sections that
-        bind it, the register number, and a script-specific banned-move list.
+        bind it, the register number, a script-specific banned-move list, and any owner-edit
+        preference notes relevant to this episode's beats or cast (episode-writer has no API
+        access, so it reads owner-edits only through this brief, never directly).
 Step 4: Doctor pass. One script-doctor call over the WHOLE slate so cross-episode repetition is
         visible. REWRITE lines go back to the writer once; a second failure drops the episode.
 Step 5: Voice gate. emma-empathy-reviewer on every script (spoken lines, captions, site cut).

@@ -25,6 +25,10 @@ answered (rule SE3).
   the shopper conversation patterns, the desire doctrine, the banned-move list.
 - `docs/store-team/instagram-campaigns.md` governs captions on Instagram (9 by implication,
   vocabulary fence intact, engagement close, never a description of the picture).
+- Owner-edit preference notes, when the showrunner's brief includes them: treat each cited
+  before-line as a shape to avoid and each after-line as concrete owner-preferred phrasing to
+  emulate (#7562). You have no API access, so you only ever see these secondhand, in the brief
+  itself, never by fetching them.
 </answer_key>
 
 <beat_map>

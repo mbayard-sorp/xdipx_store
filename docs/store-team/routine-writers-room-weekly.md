@@ -48,6 +48,9 @@ enqueueing renders directly; that is the exact pre-approval spend this routine e
    loops, character beats, owner decisions and revision notes on the last batch, verbatim.
 7. Render-side training data: `POST /api/team/video-job {"op":"list"}` -> frame retries, regen
    feedback, rejections, owner caption edits on fanned-out drafts.
+8. Owner script edits: `POST /api/team/video-episode {"op":"owner-edits"}` -> recent before->after
+   line diffs. Read alongside the ledger's revision notes (item 6) so the room closes the learning
+   loop instead of only reading which episodes the owner rejected (#7562).
 
 ## Step 3: The room
 
