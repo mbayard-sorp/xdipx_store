@@ -343,6 +343,35 @@ degraded-to-zero into a silent unpublishable draft that looks like output, which
 zero, because zero is visible.** If the imagery path is down, write zero Instagram drafts and say
 so, exactly as runs 361 and 368 correctly did.
 
+**Zero posts published in a day is a run failure to root-cause, never a shrug (owner direction
+2026-09-06).** The baseline is at least one live post a day, no zero days, and that stands: a day
+where the account posts nothing is a real miss, not a neutral outcome. Two things follow, and
+neither weakens a single gate above:
+
+1. **Pivot after 2 failed iterations on one idea; don't grind it to the daily ceiling.** If a post
+   concept (the same product, subject, or image angle) draws two BLOCK/REVISE verdicts in a run,
+   stop iterating it and move to a genuinely different subject, product, or format for the
+   remaining allowance. On 2026-09-05, 10 of the day's Instagram allowance and both of X's
+   new-draft slots were spent on one toy-care angle before the day's quota was gone, and every
+   single attempt failed the gate. A pivot after the second failure leaves room to try something
+   with better odds instead of guaranteeing a zero day on the way to exhausting the ceiling. A
+   grinding loop on one failing idea is what manufactures a zero day; it is not a defense against
+   one.
+2. **A zero-post day still gets an honest root cause in the run summary, and a suggestion or owner
+   blocker when the cause recurs.** "The gate BLOCKed everything we tried" is not, by itself, an
+   acceptable end state twice running — per the mission brief's owner-bandwidth doctrine, a gate
+   BLOCK is a work order: try a different angle, asset, or product before the day's allowance runs
+   out. Only after real attempts at a different, compliant angle fail does a zero day stand as
+   reported.
+
+**What this does not change, stated because the temptation cuts exactly here: this never licenses
+publishing anything that fails the publish gate, the voice gate, the Step 2.6 stock gate, or
+platform policy, in order to avoid reporting zero.** A BLOCK is still a BLOCK regardless of how the
+day's quota looks. The fix for a day where every angle tried is genuinely unsafe or non-compliant
+is to try a different angle sooner and escalate honestly if none clears, never to lower the bar on
+the one that already failed. One bad post is still worse than one honest zero; this rule changes
+how the run spends its attempts before it gets to that choice, not the choice itself.
+
 Reworks (Step 2.5) and Step 7b suggestion handling run as normal under both postures. This only
 sizes down *new* drafting; it never touches a gate.
 
