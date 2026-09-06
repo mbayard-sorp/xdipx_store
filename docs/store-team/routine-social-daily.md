@@ -96,6 +96,14 @@ and the publish gate; nothing here softens a verdict.
    planned successor in the same Step 2a pass and pull its window forward; that is date arithmetic
    inside your remit, not inventing campaign N+1. Both zero days ran on "no active campaign, so a
    resource filler", and the filler was the class that could not clear the gate.
+4b. **A recovery draft is scheduled for today, never tomorrow.** The Step 3 default of
+   `scheduledFor` = tomorrow is for a day that is already covered. While the platform is at zero,
+   every new draft and rework carries today's UTC date (or no slot at all, which the publisher
+   reads as "ship when there is room"), so the hourly tick ships it the same day the gate PASSes
+   it. Row 193 (2026-09-06) cleared the gate at 17:28 UTC after eight attempts and was scheduled
+   for 2026-09-07, which would have counted the recovery as a zero day anyway and fired the
+   day-close alarm on a post that was already approved. The owner moved it by hand; that is the
+   move this rung makes automatic.
 5. **Attempt ceiling: 4 x `social_freq_<platform>` drafts per platform per UTC day, all statuses,
    both runs combined.** This replaces the day-of-quota exhaustion in Step 3 as the thing that ends
    drafting: `rejected` rows no longer consume `today_remaining`, but every row you write consumes
