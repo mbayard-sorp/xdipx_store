@@ -120,14 +120,21 @@ the row text and its links are the only carriers, so the conventions are the con
    filing time: read the DONE WHEN for an "and" joining a code clause to an owner clause. A `code`
    row's DONE WHEN must be fully in-repo actionable, and it cites the real repo file/symbol it
    changes, or states plainly that none exists yet.
-2. **Dependency links are mandatory for same-file chains.** (#1693) When one audit or session files
-   multiple tickets against the same file or subsystem, set an explicit dependency (`blockedById`,
-   or a `Depends-on: #<id>` line in the row text) so downstream siblings enter the bus already
-   blocked on the lead ticket instead of being claimed and re-blocked by hand. A chained row is not
-   claimable before its lead ticket lands. Concrete instance: conv-audit-2026-08-04 P1 items
-   10/11/13 became tickets 1268/1269/1270, all reworking the same functions in
-   `app/lib/ivr-search.server.ts`; R-DEV claimed the siblings independently and had to hand-block
-   both, two wasted claims, where blind parallel implementation would have collided semantically.
+2. **Dependency links are mandatory for same-file chains, and for the same external condition.**
+   (#1693) When one audit or session files multiple tickets against the same file or subsystem, set
+   an explicit dependency (`blockedById`, or a `Depends-on: #<id>` line in the row text) so
+   downstream siblings enter the bus already blocked on the lead ticket instead of being claimed and
+   re-blocked by hand. A chained row is not claimable before its lead ticket lands. Concrete
+   instance: conv-audit-2026-08-04 P1 items 10/11/13 became tickets 1268/1269/1270, all reworking
+   the same functions in `app/lib/ivr-search.server.ts`; R-DEV claimed the siblings independently and
+   had to hand-block both, two wasted claims, where blind parallel implementation would have
+   collided semantically. **The same rule covers two tickets filed against the same external
+   condition, not only the same file** (#7709): a detector or session filing a follow-up about a
+   PR/condition an already-open ticket tracks sets `blockedById`/`Depends-on` against that earlier
+   row instead of re-diagnosing it from scratch. Concrete instance: #7577 (flagging PR #1082 vs
+   #1083 as a duplicate/conflict) and #7615 (the same PR #1082, filed later with a deeper root-cause
+   pass) were never linked, so run 698 spent two separate R-DEV claims on one condition and the
+   second re-covered ground the first had already diagnosed.
 3. **Tag design-gated and cross-agent-epic rows.** (#1909) A row that defers to a design decision,
    needs a visual-regression judgment no scheduled pass can run, or is a self-described multi-agent
    epic is either split into single-agent scoped tickets before filing, or tagged at the head of its
