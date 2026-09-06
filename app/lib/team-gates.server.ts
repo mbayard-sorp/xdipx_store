@@ -215,10 +215,16 @@ already failed, your verdict must be BLOCK regardless of what you see, and your 
 findings, not to overturn it.
 
 Judge these, all BLOCK-class unless noted:
-- Does each image actually show the product the caption claims, not a lookalike?
+- Does each image actually show the product the caption claims, not a lookalike? Compare silhouette,
+  proportion, cap type, and colour bands against the real packshot. A solid colour band, stripe, or
+  cap colour with no glyphs on it is product identity, exactly what the packshot shows, not text.
 - Is the product's apparent size plausible against the hand/room in frame (not palm-sized rendered
   vase-sized or the reverse)?
-- Any word, letter, logo, watermark, or garbled wordmark baked into the image? (BLOCK)
+- Any letter, digit, wordmark, logo mark, or garbled glyph run baked into the image? (BLOCK) A solid
+  colour band, stripe, or cap colour with no glyphs on it is the product's own packaging, never
+  baked-in text on its own, however bold or high-contrast the colour. Worked example: a yellow band
+  with no letters on the Pjur bottle is identity (PASS); the same band with garbled letters on it is
+  text (BLOCK).
 - Hands, faces, bodies: anatomy that is wrong, uncanny, or ambiguous in age. Age ambiguity is judged
   on ambiguity itself, not intent, and is an automatic BLOCK.
 - The withholding test: name what the frame makes a viewer want to see that it does not show. If the
