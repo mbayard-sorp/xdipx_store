@@ -58,7 +58,7 @@ routine's to raise (Preconditions, above); do not treat a bigger budget as the f
 
 | Tier | Steps | Rule |
 |---|---|---|
-| MANDATORY, first | 0, 1, 1b (cheaper-read note below), 2c (capture the baseline, do not yet analyze), 3 (minimal picks), 4 (fresh-art floor minimum only), 5 (the 7 per-run surfaces), **5b deck-floor when the panel deck is >7 days old (minimal door/banner refresh only — see Step 5b)** | No optional-tier step runs until Step 5 has published. The deck-floor exception is the one Step 5b item in this tier: it runs even on cold-start and theme-change days, ahead of the optional deep-refresh. |
+| MANDATORY, first | 0, 1, 1b (cheaper-read note below), 2c (capture the baseline, do not yet analyze), 3 (minimal picks), 4 (fresh-art floor minimum only), 5 (the 7 per-run surfaces), **5b deck-floor when the panel deck is >7 days old (minimal door/banner refresh only — see Step 5b)**, **5b category micro-refresh floor when today's deep-refresh pair would otherwise defer (masthead standfirst only — see Step 5b)** | No optional-tier step runs until Step 5 has published. The deck-floor and micro-refresh-floor exceptions are the two Step 5b items in this tier: both run even on cold-start and theme-change days, ahead of the optional full deep-refresh. |
 | VERIFY, never skip | 7 | An unverified publish is worse than no publish (runs 8/10 lesson, cited in #2165's retro). Run it even if nothing below starts. |
 | OPTIONAL, after Step 7 verifies | 1c (Monday only — recon/theme run FIRST on Mondays, since Step 3 needs the theme), 2 (GA4/Nalpac/imports depth), 2b, 2d, 2e, 3.5 (a full scheme; the mandatory path uses a minimal one), 5b deep-refresh pair, 5c, 7.5, retro extras | Running out of turns here is a successful run that shipped its mandatory surfaces. Name what was skipped and why in the Step 8 summary — silence is the failure, not the skip. |
 
@@ -92,6 +92,16 @@ or link targets, reusing existing art so no image budget is needed) is a MANDATO
 this run regardless of cold-start or a theme change, ahead of the deferred pair. This closes the exact
 gap seen on run 395 (2026-08-19), where the deck read 20 days stale while the run correctly deferred
 the deep-refresh pair under this branch and the floor was silently skipped with it.
+
+**Second carve-out from this deferral: a masthead-only micro-refresh floor.** Run 662 (2026-09-03,
+a full hero-rotation day) and run 680 (2026-09-04, a light day with no hero rotation and no image
+generation) both deferred the whole deep-refresh pair, which proves the health-sweep-only branch was
+firing on ordinary turn-budget pressure, not only genuine cold-start (#7396). When the scheduled pair
+would otherwise defer, run a masthead `standfirst`-only patch (text only, no shelf reorder, no art
+regen, no `--ref-image` generation) on today's pair instead of skipping it outright. This is a
+MANDATORY-tier item, the same shape as the panel-deck floor above: it survives cold-start and the
+theme-change-day branch, and it is not the full deep-refresh, which may still defer. Record in the
+run summary which pages got the micro-touch versus the full pass.
 
 ## Step 0 — Start the run
 
@@ -769,8 +779,16 @@ npx tsx scripts/sanity-content-cli.ts get --id categoryPage-pleasure \
   --query '{blocks[]{_key, _type, headline, title, collectionHandle}}'
 # 2. patch one masthead field by its _key (leaves every other block untouched)
 npx tsx scripts/sanity-content-cli.ts patch --id categoryPage-pleasure \
-  --set 'blocks[_key=="<mastheadKey>"].standfirst=<voice-gated copy>'
+  --set '{"blocks[_key==\"<mastheadKey>\"].standfirst":"<voice-gated copy>"}'
 ```
+
+**`--set` takes ONLY a JSON object** (a bare JSONMatch-path assignment like the old
+`'blocks[_key=="k"].standfirst=copy'` form fails with `patch: invalid JSON`). Put the JSONMatch path
+as the object key, exactly as shown above (#7707). Worse, a failed patch does not stop the following
+publish from exiting 0 and reporting success, which reads as a completed refresh while the write was
+actually a silent no-op (run 697 lost a turn to this on both drop pages and the whole wayfinder,
+couples, and announcement blocks). After every patch, re-`get` the field to confirm the write landed
+before treating the step as done.
 
 ### Register banding on merchandised pages (owner-approved, NOT a charter edit)
 
