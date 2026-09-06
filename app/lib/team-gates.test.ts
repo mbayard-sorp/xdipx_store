@@ -101,3 +101,19 @@ describe('publish-gate calibration (owner direction 2026-09-06)', () => {
     expect(PUBLISH_GATE_SYSTEM).toContain(IMAGERY_CEILING_EXCERPT)
   })
 })
+
+describe('publish-gate baked-in-text vs product-identity (ticket #7890)', () => {
+  it('never lets a glyph-free colour band trip the baked-in-text check on its own', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain(
+      'A solid\n  colour band, stripe, or cap colour with no glyphs on it is the product\'s own packaging, never\n  baked-in text on its own',
+    )
+    expect(PUBLISH_GATE_SYSTEM).toContain('Compare silhouette,\n  proportion, cap type, and colour bands against the real packshot')
+  })
+
+  it('carries the worked example distinguishing a bare band from a lettered one', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('a yellow band\n  with no letters on the Pjur bottle is identity (PASS)')
+    expect(PUBLISH_GATE_SYSTEM).toContain('the same band with garbled letters on it is\n  text (BLOCK)')
+  })
+})
