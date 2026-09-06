@@ -153,6 +153,23 @@ export function computePrice(params: {
 
   sell = roundPsychological(sell)
 
+  // Margin-floor re-clamp AFTER rounding (ticket #7884). roundPsychological
+  // only rounds down, so a sell price clamped exactly to the margin floor at
+  // line 147 can round back below it (floor 15.38 -> 14.99), manufacturing a
+  // margin-floor violation that decideStatus then rejects, forever, out of a
+  // price that was actually satisfiable. This is the same rounding defect
+  // computeDiscontinuedPrice below already guards against; velocity's -10pp
+  // "dead" shift (applyVelocityModifier) pushes target_margin_pct toward the
+  // floor often enough to turn this into a recurring reject storm on the
+  // affected group. Skip the guard when MSRP itself is the binding, sub-floor
+  // ceiling (msrpBelowFloor) — that case is a real unsatisfiable constraint
+  // routed to 'pending' for an owner decision (#7515), not a rounding
+  // artifact to paper over.
+  if (!msrpBelowFloor && sell < floor) {
+    sell = roundUpPsychological(floor)
+    if (msrp != null) sell = Math.min(sell, msrp)
+  }
+
   // MAP re-clamp AFTER rounding (ticket #3714). roundPsychological only rounds
   // down, so a MAP-clamped sell came out below MAP (MAP 25.00 -> 24.99, and
   // MAP 24.99 -> 23.99, a full dollar under the advertised floor). That made

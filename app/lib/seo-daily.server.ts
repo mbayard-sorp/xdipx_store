@@ -38,6 +38,7 @@ import { extractJsonLd } from '~/lib/homepage-healthcheck.server'
 import { checkUrl } from '~/lib/checkout-probe.server'
 import { createSuggestion } from '~/lib/team.server'
 import { sendOwnerEmail, escapeHtml } from '~/lib/owner-alerts.server'
+import { INDEX_VERSION } from '~/lib/discovery.server'
 
 const SITE_ORIGIN = (process.env['BASE_URL'] || 'https://xdipx.com').replace(/\/+$/, '')
 
@@ -274,7 +275,7 @@ async function coverageCounters(): Promise<SeoCoverageCounters> {
           WHERE jsonb_typeof(e->'mood') = 'array' AND jsonb_array_length(e->'mood') > 0) AS has_mood,
         (SELECT count(*)::int FROM jsonb_array_elements(index_json::jsonb) e
           WHERE e->>'imageUrl' IS NOT NULL AND e->>'imageUrl' <> '') AS has_image
-      FROM discovery_index_payload WHERE version = 'v7' LIMIT 1`)
+      FROM discovery_index_payload WHERE version = ${INDEX_VERSION} LIMIT 1`)
     const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
     const enrichRes = await db.execute(sql`
       SELECT count(DISTINCT product_id)::int AS n FROM product_enrichment_cache`)

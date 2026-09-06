@@ -59,7 +59,15 @@ import {
 //     struck price + badge on the MAP rule (ticket #3675). v8 entries lack it;
 //     the gate reads a missing value as "no MAP", i.e. the pre-fix behavior, so
 //     the bump forces a rebuild that populates the field for MAP-locked SKUs.
-const INDEX_VERSION = 'v9'
+/**
+ * Exported so the SEO coverage gauge (seo-daily.server.ts) measures the SAME
+ * payload the storefront serves. It previously hardcoded `version = 'v7'`, so
+ * when v8 shipped on 2026-08-16 the gauge silently froze on a five-week-old
+ * payload and kept reporting 4,380 products while the live index held 4,982.
+ * A stale number that looks live is worse than no number, so the version now
+ * has exactly one definition and a bump moves every reader at once.
+ */
+export const INDEX_VERSION = 'v9'
 export const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 export const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
 
