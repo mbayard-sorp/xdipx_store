@@ -990,6 +990,20 @@ curl -s -X POST "$BASE_URL/api/team/social-image" \
        "caller":"social-media-manager"}'
 ```
 
+**A second real product passed via `extraImageUrls` is a known high-failure-rate composite
+(#7728).** The two-stage packaging-strip treatment that `productImageUrl` (the PRIMARY product)
+receives does not extend to a second real, labeled product referenced through `extraImageUrls`, so
+it renders with an invented, sometimes-legible label even when the prompt explicitly says the label
+should face away or stay illegible. Observed twice in one run (2026-09-05): a JO Refresh Toy Cleaner
+bottle passed as an `extraImageUrls` reference came back with a fully legible wordmark, and switching
+it to be the PRIMARY `productImageUrl` instead still produced a baked-in-looking label panel that the
+publish gate BLOCKed. The fix that worked both times was dropping the second physical product from
+frame entirely and naming and linking it in the caption/alt text only, the same practice Step 4c
+already licenses for X. **Default to that for any real branded second product with a printed label**
+(a two-real-product-in-one-frame pairing shot, e.g. toy + cleaner) rather than trying the composite
+first and falling back after a BLOCK — this is distinct from the toy+lube pairing rule above, which
+is already naming-only by design and never puts the lube bottle in frame.
+
 **Pick the location from §3.8 and respect the variety rules**: no location repeat inside 8
 consecutive product posts, no cast member on more than 2 of any 5. State both choices and their
 last-used dates in the retro decision event.
