@@ -1099,7 +1099,9 @@ SKUs, extend as they are found:** the **Renegade Emperor vibrating ring**
 (`renegade-emperor-vibrating-ring`) — a molded CE/UKCA compliance band wraps the ring and reproduces
 garbled, and regenerating once did NOT fix it (both morning X drafts id118 and id120 BLOCKed on the
 same defect); the **Magic Wand Rechargeable** handle wordmark (needed an occluded-grip brief and eight
-images to clear); and **Le Wand** (id95). For any SKU on this list, the `social-art-director` brief MUST
+images to clear); **Le Wand** (id95); and **Pjur Basic Silicone Lubricant 100ml** — see the
+accent-color-band bullet below for the target state that cleared it (run 725, rows 193/196). For any
+SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
 composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
 slot. Two standing pre-generation rules reach every cast composite, not only the listed SKUs:
@@ -1114,6 +1116,19 @@ slot. Two standing pre-generation rules reach every cast composite, not only the
   back as a large CORDED wand at ~2x the real scale. Every brief for a small cordless product states its
   real dimension as a scale anchor beside an in-frame reference, and carries an explicit `no cable, no
   cord, no power brick` negative.
+- **A distinct accent-color band with no letters on it is a target to show, not a defect to eliminate
+  (ticket #7891).** For a product that combines printed label text with a separate solid accent-color
+  band or stripe (Pjur Basic Silicone Lubricant's yellow stripe is the reference case), full occlusion
+  of the whole product reads as an unbranded lookalike at the publish gate's product-identity check,
+  and full exposure of the printed label risks a garbled wordmark at the baked-in-text check — there is
+  no single frame that satisfies both if the brief just says "occlude the product". The frame that
+  clears both: a correctly-shaped, correctly-proportioned product body with a thin, undistorted sliver
+  of its real accent-color band visible (the colour itself, with no letters or numbers on it) and the
+  printed label surface fully occluded (grip, angle, or crop it out of frame). State this as an
+  explicit positive in the brief — "show the [colour] accent band, fully occlude the printed label" —
+  rather than a blanket "occlude the product" negative that a generation pass can satisfy by hiding the
+  band too. Run 725 (2026-09-06) took six prompt iterations to find this by trial and error before this
+  rule existed (rows 193, 196 are the frames that finally cleared).
 
 **A cast member in a scene is MANDATORY on every Instagram product post (owner ruling 2026-08-19,
 spec §3.7).** The lead image is a person somewhere real, with the product. A product alone, however
