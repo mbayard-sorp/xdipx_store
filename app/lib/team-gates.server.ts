@@ -85,6 +85,19 @@ function sliceBetweenHeadings(doc: string, startHeading: string, endHeading: str
 }
 
 const ADS_POLICY_DOC = loadDoc('docs/ads-policy.md')
+/**
+ * `docs/store-team/instagram-campaigns.md` §3.2a, the single operative imagery
+ * ceiling for social (owner ruling 2026-08-16, explicit list 2026-08-22). The
+ * gate judged frames without it for its first two weeks and BLOCKed a licensed
+ * eyes-closed, head-back frame as "post-coital" on 2026-09-06 (row 183), one
+ * of two zero-post days. Read fresh at module init like the ads policy.
+ */
+const INSTAGRAM_CAMPAIGNS_DOC = loadDoc('docs/store-team/instagram-campaigns.md')
+export const IMAGERY_CEILING_EXCERPT = sliceBetweenHeadings(
+  INSTAGRAM_CAMPAIGNS_DOC,
+  '### 3.2a The ceiling',
+  '### 3.2b The ceiling is a target for the set',
+)
 /** `docs/ads-policy.md` §Organic social + §Creative rules, read fresh at module init. */
 const ADS_POLICY_SOCIAL_EXCERPT = [
   sliceBetweenHeadings(ADS_POLICY_DOC, '## Organic social', '## Meta Shops'),
@@ -182,11 +195,19 @@ export interface PublishGateOutput {
   }
 }
 
-const PUBLISH_GATE_SYSTEM = `You are the independent pre-publish gate for one xdipx.com social post, standing
+export const PUBLISH_GATE_SYSTEM = `You are the independent pre-publish gate for one xdipx.com social post, standing
 in for social-publish-gate where no subagent can be spawned. You are adversarial by design: find
-the reason this should not ship, not confirmation that it is fine. When a call is genuinely close,
-it is not close — treat it as a fail. You do not know why the drafter believes this post is
-compliant; judge the finished caption and images cold, as a stranger would.
+the reason this should not ship, not confirmation that it is fine. You do not know why the drafter
+believes this post is compliant; judge the finished caption and images cold, as a stranger would.
+
+Close calls split by class. A close call on a BLOCK-class check (a hard stop in the imagery
+ceiling, age ambiguity, baked-in text, product identity or colour, the vocabulary fence, a
+deterministic finding) fails closed: one post is never worth the account. A close call on a
+REVISE-class quality check ("too tame", the interest floor, caption narrates its image) resolves
+against the live precedents you are given: those captions PASSED this gate and stayed live, so a
+caption at or above their register in a shape they share is not too tame, and if your reading
+would also condemn the precedents, the reading is miscalibrated and that check passes. Name the
+precedent you calibrated against whenever you REVISE on register.
 
 You will be given the caption, the platform, whether the post already failed a mechanical
 (deterministic) check, and the images. The mechanical result is a floor you may never lower: if it
@@ -207,16 +228,20 @@ Judge these, all BLOCK-class unless noted:
   clothing, a depicted or discernible sex act, fluid on or near genitalia, product against
   genitalia: all BLOCK regardless of platform.
 - Instagram only: does the post, taken as a whole, read as an offer/sale rather than an editorial
-  piece (Meta's Restricted Goods standard)? BLOCK if yes.
+  piece (Meta's Restricted Goods standard)? BLOCK if yes. A sale attempt is what the policy below
+  defines: a price, a discount, a promo code, or a shop CTA, or a caption that reads as an
+  advertorial for named products taken whole. A cast member holding one in-stock product under an
+  editorial caption with none of those is this account's standing product-forward shape (Today's
+  Pick), not an offer; say which of the policy's four signals you saw before you BLOCK on this.
 - Caption/alt text: explicit vocabulary, crude slang, emoji-anatomy, or algospeak/character
   substitution meant to evade a filter: BLOCK.
 - Caption narrates its own image ("in the photo", "that is <name> holding", "pictured", "so you can
   see"): REVISE (the description belongs in alt text, not the caption).
 - A caption that could run unchanged on a skincare account, with zero wanting, innuendo, or
   anticipation, on a post whose register should be 9 by implication: REVISE ("too tame").
-- Anything you cannot judge with confidence from what you were given (no live feed history, no
-  campaign scheme) is not a reason to pass — say so honestly in notes and prefer REVISE over a
-  confident PASS you cannot back up.
+- Anything you cannot judge with confidence from what you were given (no campaign scheme, no
+  cast-rotation history) is not a reason to pass — say so honestly in notes. It is also not a
+  reason to REVISE: a REVISE names a specific fix in the draft, never a gap in your own inputs.
 
 Return exactly one JSON object, no prose before or after it, no markdown code fence:
 
@@ -230,7 +255,15 @@ never reach for it when BLOCK would do, and never to avoid a hard call.
 The current platform policy (docs/ads-policy.md, read fresh at process start) follows. Where it and
 the checks above disagree, the platform policy's live rules outrank a stale reading of this prompt:
 
-${ADS_POLICY_SOCIAL_EXCERPT}`
+${ADS_POLICY_SOCIAL_EXCERPT}
+
+The imagery ceiling (docs/store-team/instagram-campaigns.md section 3.2a, the single operative
+ceiling for social, read fresh at process start) follows. Everything it lists as licensed is
+licensed at zero policy cost, including eyes closed, head back, parted lips, an open shirt,
+aftermath and anticipation, and product against skin; everything it lists as a hard stop is a
+BLOCK regardless of how good the frame is:
+
+${IMAGERY_CEILING_EXCERPT}`
 
 /**
  * Everything this function does NOT do, stated so the gap is visible rather
@@ -322,7 +355,7 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
         `Deterministic check: clean (no mechanical findings)${deterministic.held ? ', held pending owner review of a mechanical warn/hold' : ''}.\n` +
         `Caption (as it will publish):\n${post.tweetText}\n\n` +
         `Alt text: ${post.altText ?? '(none)'}\n\n` +
-        `Recent captions on this platform (repetition context, newest first):\n${recentCaptions.map(c => `- ${c}`).join('\n') || '(none)'}\n\n` +
+        `${describePrecedents(recentCaptions)}\n\n` +
         `${media.length} image(s) follow.`,
     },
     ...media.map((url): Anthropic.ContentBlockParam => ({ type: 'image', source: { type: 'url', url } })),
@@ -396,6 +429,20 @@ export function parsePublishGateModelOutput(
     findings.push(note ? { check, verdict: fv, note } : { check, verdict: fv })
   }
   return { verdict, notes, findings }
+}
+
+/**
+ * The live precedents block of the user turn. Exported for the test that pins
+ * the calibration contract: the captions are labeled as PASSED-and-live, so
+ * the model reads them as calibration for REVISE-class register calls and as
+ * repetition context, never as a licence for a BLOCK-class risk.
+ */
+export function describePrecedents(captions: readonly string[]): string {
+  const head =
+    'Live precedents on this platform (posted rows that PASSED this gate and stayed live, newest ' +
+    'first). Calibration for REVISE-class register calls and context for the repetition check. ' +
+    'Not a licence for any BLOCK-class risk.'
+  return `${head}\n${captions.map(c => `- ${c}`).join('\n') || '(none yet)'}`
 }
 
 function toStoredFinding(f: GateFinding): PublishGateFinding {

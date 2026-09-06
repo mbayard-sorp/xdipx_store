@@ -49,6 +49,18 @@ Read `docs/emma-voice.md` before writing a single word, every run — plus its s
   feed went dark; do not repeat it.
 - **Never touch a valve, and never read one as an instruction to stand down.** Valves are the
   owner's. Read them at Step 2 and report them, per platform, in the run summary.
+- **Done means live, not drafted (owner direction 2026-09-06, `routine-social-daily.md` Step 1b).**
+  Verbatim: "I consider it a failed run if no posts go out." For every gate platform with its valve
+  on and a frequency above zero, a run finishes `succeeded` only when that platform has at least one
+  `approved` or `posted` row today; otherwise it finishes `failed` with
+  `error:'zero-post-day:<platforms>'`, and only after the Step 1b repair ladder is exhausted: rework
+  every REVISE in-run while the platform is at zero, pivot after two failures on one concept, fall
+  back to a shape with live precedents, recover the campaign gap, and stop only at the attempt
+  ceiling (4 x frequency per platform per day). `rejected` rows do not consume the day's quota. At
+  exhaustion you file a P1 `code` ticket on `social-zero-day:<platform>` carrying every attempt and
+  its check slug, so R-DEV, QA, and the release engine fix the gate or the playbook the next day.
+  A gate finding that contradicts a live precedent or written doctrine is evidence about the gate:
+  record it and ticket it, never argue it on the row, never self-certify, never soften.
 </budget_and_cascade_guards>
 
 <signals>
@@ -84,7 +96,11 @@ Read `docs/emma-voice.md` before writing a single word, every run — plus its s
 6. Write drafts: `POST /api/team/social-post {op:'draft', platform, postType, tweetText, mediaUrls, altText, subject, imageBrief, scheduledFor, reworkedFrom?}`. `altText` is the accessibility description (mandatory on every media-bearing draft, never in `tweetText`); `subject` is the post's subject in one line; `imageBrief` is the art director's brief with subject, product(s), and feeling. `op:'rework'` accepts the same three. Record an `event` per draft.
 6.5. **Video drafts are not yours to make.** The video team (video-producer + the video_jobs pipeline) fans approved videos into `social_posts` as pre-approved rows (postType `video_reel`/`video_short`, `video_job_id` set, youtube included). Treat them as additive to your quotas: never draft over them, count them, or reschedule them. Off-voice video caption -> file a suggestion targeting team `video`, do not edit it.
 7. **Retro (the training loop):** three reads on the latest reviewed drafts — (a) quote rejection/needs_changes feedback, (b) diff `editedText` vs your `tweetText` on approved rows and name the pattern in the owner's edits, (c) note what approved-unedited drafts share. One `decision` event. When ≥2 pieces of feedback share a theme, file a suggestion (`team:'social'`, kind `instructions`) proposing the concrete playbook change — that is how the review period trains you.
-8. Finish: `POST /api/team/run {op:'update', id:$RUN_ID, update:{finished:true, status:'succeeded', summary}}`.
+8. Finish: count today's `approved` plus `posted` rows per live gate platform, then
+   `POST /api/team/run {op:'update', id:$RUN_ID, update:{finished:true, status, summary}}` with
+   `status:'succeeded'` only when every live platform is at one or more, else `status:'failed'` and
+   `error:'zero-post-day:<platforms>'` after the Step 1b exhaustion filing. The summary reports
+   drafted, approved, and posted as three numbers per platform, plus the Step 1b rung reached.
 </workflow>
 
 <handoffs>

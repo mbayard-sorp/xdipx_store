@@ -43,6 +43,128 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 
 `GET /api/team/gate?team=social&excludeRun=$RUN_ID`. If `ok:false` → post skipped, stop.
 
+## Step 1b — Definition of done: posts live, not drafts written (owner direction 2026-09-06)
+
+The owner, verbatim, after two consecutive zero-post days (2026-09-05 and 2026-09-06): *"I consider
+it a failed run if no posts go out... Build out rules so they are not allowed to fail and keep
+working until posts go out each day."* This section is those rules. It outranks any sentence
+elsewhere in this file that treats "drafted and honestly gated" as a finished run.
+
+**What done means.** For every gate platform (Instagram, X) whose valve is on and whose
+`social_freq_<platform>` is above zero, the day is done when at least one row for that platform is
+`approved` or `posted` today, and the target is the full quota. A run ends with the day's count in
+front of it: count `approved` plus `posted` rows per platform for today's UTC date before you write
+the final run update.
+
+**Run status is derived from that count, not from effort.**
+
+- A run that ends with every live platform at one or more `approved`/`posted` rows today finishes
+  `status:'succeeded'`.
+- A run that ends with any live platform at zero `approved`/`posted` rows today finishes
+  `status:'failed'` with `error:'zero-post-day:<platform>[,<platform>]'`, whatever else it did.
+  Twelve gated drafts and a thorough retro do not make it a success. This applies to the morning
+  run as much as the evening run: the morning run had its allowance and the evening run now has to
+  recover, so the morning run's row must say so on the dashboard.
+- `succeeded` with zero live posts is a false report. The server files a day-close alarm at the last
+  publish tick of the UTC day for any live platform with nothing posted (`social-zero-day`
+  suggestion, see below), so the false report is also visible; do not write it.
+
+**The repair ladder.** When a live platform is at zero `approved`/`posted` for today, work this
+ladder inside the run, in order, before you may stop. Every rung still goes through the voice gate
+and the publish gate; nothing here softens a verdict.
+
+1. **Rework every REVISE in this run.** While the platform is at zero for the day, a REVISE is this
+   run's work, not next run's (this narrows the "next run's rework" line in Step 6.5). The rework
+   allowance and the combined 2x ceiling in Step 2.5 do not bind on a zero platform; the attempt
+   ceiling in rung 5 does. Run 720 (2026-09-06) left rows 185 and 186 at `needs_changes` on a
+   one-line "add anticipation" REVISE and finished at zero. Those were twenty minutes from live.
+2. **Pivot after two failed iterations on one concept** (Step 2b). Same product, subject, or image
+   angle failing twice is a dead concept for today.
+3. **Fall back to a proven shape.** List `status:'posted'` rows for the platform from the last 14
+   days. Those rows PASSed this exact gate and stayed live; their shape is the calibration. Draft the
+   next attempt in a shape that has at least two live precedents: the same slot, the same format,
+   the same charge level, a fresh in-stock product or subject, and where one fits, a gate-cleared
+   image asset reused from `social_media_assets` (Step 5 reuse-first) so the image cannot be the
+   reason. As of 2026-09-06 the shapes with live precedents are the cast-plus-product Today's Pick
+   and the category-comparison education post with the product in frame (rows 142, 149, 167, 168,
+   152). A subject class that failed the gate on two consecutive days (toy care and cleaning,
+   2026-09-05 and 2026-09-06, twelve attempts) is off the table until the calibration ticket for it
+   closes; do not lead a zero day with it.
+4. **Recover the campaign before recovering the caption.** A day with no active `IG: ` campaign
+   is a defect, not a context (`instagram-campaigns.md` §4: there is never a day with no active
+   campaign). If the active campaign was closed early (a removal, an owner deletion), activate its
+   planned successor in the same Step 2a pass and pull its window forward; that is date arithmetic
+   inside your remit, not inventing campaign N+1. Both zero days ran on "no active campaign, so a
+   resource filler", and the filler was the class that could not clear the gate.
+5. **Attempt ceiling: 4 x `social_freq_<platform>` drafts per platform per UTC day, all statuses,
+   both runs combined.** This replaces the day-of-quota exhaustion in Step 3 as the thing that ends
+   drafting: `rejected` rows no longer consume `today_remaining`, but every row you write consumes
+   this. Reaching it without a live post is exhaustion, and exhaustion is when you may stop.
+
+**Exhaustion is the only stopping point, and it has a fixed shape.** Only when the ladder is walked
+to rung 5 with the platform still at zero:
+
+- Finish `status:'failed'`, `error:'zero-post-day:<platforms>'`.
+- File one ticket per platform: `POST /api/team/suggestion {op:'create', team:'social',
+  kind:'code', priority:1, category:'other', dedupeKey:'social-zero-day:<platform>',
+  suggestion:...}`. The suggestion names every attempt (row id, verdict, the gate's check slug),
+  which precedent row each attempt was modeled on, and ends with `DONE WHEN: a <platform> row is
+  status posted on the next calendar day, and the named gate finding(s) have a merged fix (gate
+  prompt or deterministic check in app/lib, or this playbook), QA-verified.` The server's day-close
+  alarm files a bare ticket on the same key if you did not; yours carries the diagnosis, so file
+  yours.
+- Record an `error` event on the run quoting the last verdict per platform verbatim.
+- Do **not** file an owner blocker for "the gate said no". The owner's list is money, brand, legal,
+  likeness, valves (`mission-brief.md` §2b). A gate calibration defect is the team's, and the
+  ticket above is how the team gets it.
+
+**Gate disagreement is a calibration ticket, never an argument on the row.** The verdict is relayed
+verbatim, always (Step 6.5). But two patterns are evidence about the gate rather than the draft,
+and you record them as such:
+
+- The same check slug fires on a draft modeled on a live precedent (a `posted` row from the last 14
+  days in the same shape) and the finding would also condemn the precedent.
+- The finding contradicts written doctrine. Two current examples: `instagram-campaigns.md` §3.2a
+  licenses "eyes closed, head back, parted lips" and "aftermath and anticipation" at zero policy
+  cost, and `docs/ads-policy.md` §Organic social defines a sale attempt as a price, discount, promo
+  code, or shop CTA, so a cast member holding one in-stock product under an editorial caption with
+  none of those is not a sale attempt (rows 180 and 183, 2026-09-05 and 2026-09-06, were BLOCKed on
+  exactly these two readings).
+
+When either fires: record an `error` event quoting the verdict and the precedent or doctrine line
+it contradicts, file or refresh the `social-zero-day:<platform>` ticket with that evidence even if
+the day is not yet at zero, and keep walking the ladder in a different shape. Never re-gate the same
+row hoping for a different answer, never self-certify, never soften.
+
+**The evening run is the recovery run.** It reads the day's `approved`/`posted` counts first. A
+live platform at zero means recovery is its first job and its quota arithmetic must not stop it:
+`rejected` rows do not count against `today_remaining` (Step 3), and rung 1 reworks bind before any
+new drafting. "The morning run already used the quota" describes a day the morning run filled with
+live posts, not one it filled with rejections.
+
+**Who supports a zero day (the rest of the team).** The ticket is the handoff, and each lane has a
+standing job it does not get to decline:
+
+- **R-DEV** (`routine-dev-daily.md`, 14:00 and 20:00 UTC) claims a P1 `social` `code` ticket ahead
+  of everything else in its claim pool and treats "diagnose from the findings, fix the gate prompt,
+  the deterministic check, or the playbook" as in scope, whichever of the three the evidence names.
+  Editing `docs/` inside a `code` ticket is normal here.
+- **QA** (`routine-qa-daily.md`) verifies the fix against the failing rows named in the ticket, not
+  against a fresh example.
+- **The release engine** merges on QA's verdict; none of the files involved are protected paths.
+- **agent-editor** applies any `instructions` ticket the retro files from the same evidence.
+- **store-strategist** owns campaign runway; a runway suggestion from Step 2a is theirs the same
+  week, not the next planning cycle.
+- **The owner** sees the failed run and the ticket in the 13:00 digest, and gets a blocker only if a
+  rung genuinely needs his decision (a valve, a cast approval, spend).
+
+**What this does not change, stated because the temptation cuts exactly here.** No rung publishes
+anything that did not PASS the publish gate and the voice gate and the Step 2.6 stock gate. No rung
+lowers a check, argues with a verdict on its own row, or re-submits a softened BLOCK. The vocabulary
+fence, the §3.2a hard stops, and the age-ambiguity rule do not move. What moved is the definition
+of finished: a run is finished when a post is live, or when the ladder is exhausted and the failure
+is on the record with a ticket the team can act on tomorrow.
+
 ## Step 2 — Load doctrine + context (data only)
 
 1. `docs/emma-voice.md` + the **social addendum** (mandatory, before any words), or the LinkedIn
@@ -421,6 +543,10 @@ pools together: reworks + new drafts for a platform together never exceed
 `2 x social_freq_<platform>` in a day. If the combined ceiling binds, **rework wins and new
 drafting yields** for that platform this run.
 
+**Exception, Step 1b rung 1:** while a platform has no `approved` or `posted` row today, neither the
+rework allowance nor this combined ceiling binds on that platform; the Step 1b attempt ceiling does.
+A REVISE on a zero day is this run's work.
+
 Cost note: drafting already outruns publishing by roughly 4x (13 posts published against 106 rows
 ever drafted, as of 2026-08-25), so this change must not raise total volume. It reallocates within
 the existing ceiling to fix a real starvation case: `social_freq_x` = 2/day with six X rows waiting
@@ -502,8 +628,17 @@ the account actioned. So the first thing Step 3 does is arithmetic:
 
 ```
 today_remaining(platform) = social_freq_<platform>
-                          - new rows already written for that platform today (any review_status)
+                          - new rows written for that platform today at review_status
+                            pending_review, needs_changes, or approved, or at status posted
 ```
+
+**`rejected` rows do not count (Step 1b, owner direction 2026-09-06).** A row the gate BLOCKed is
+dead: it will never publish, so it fills nothing. Counting it as filled is how the evening run of
+2026-09-05 (run 710) drafted nothing on a day with zero live posts, because twelve rejections had
+"used the quota". What bounds runaway drafting instead is the **attempt ceiling** in Step 1b rung
+5: `4 x social_freq_<platform>` rows per platform per UTC day, all statuses, both runs combined.
+Reaching it with the platform still at zero live posts is exhaustion, with the fixed shape Step 1b
+gives it.
 
 **Reworks are not part of this formula (ticket #5421).** They draw down their own
 `rework_allowance(platform)`, defined in Step 2.5, and do not subtract from `today_remaining`. The
@@ -1557,8 +1692,10 @@ rule below.
 What you do with the outcome:
 
 - **PASS** — the row is `approved` and, when the valve is on, the publish job takes it from there.
-- **REVISE** — `needs_changes` with the specific fix. It is next run's rework (Step 2.5), not
-  something to re-argue this run.
+- **REVISE** — `needs_changes` with the specific fix. When the platform already has an `approved`
+  or `posted` row today it is next run's rework (Step 2.5), not something to re-argue this run.
+  When the platform is at zero for the day it is **this run's** rework (Step 1b rung 1): write the
+  fix, re-gate the new row, and keep going until a row is live or the attempt ceiling is reached.
 - **BLOCK** — `rejected`. Drop it. Do not soften it and resubmit; that is the failure mode the gate
   exists to catch.
 - **HOLD** — stays `pending_review` for the owner. Name it in the run summary, because a HOLD spends
@@ -1699,5 +1836,16 @@ row.
 
 ## Step 8 — Spend + finish
 
-Log tokens (`feature:'social-drafts'`), then post the final run update
-(`status:'succeeded'`, summary = drafts written + reworks + gate results + retro verdict).
+Log tokens (`feature:'social-drafts'`). Then count, per gate platform with its valve on and
+`social_freq_<platform>` above zero, today's `approved` plus `posted` rows, and post the final run
+update with the status Step 1b derives from that count:
+
+- every live platform at one or more → `status:'succeeded'`;
+- any live platform at zero → `status:'failed'`, `error:'zero-post-day:<platforms>'`, and the
+  exhaustion filing in Step 1b already done (ticket per platform on `social-zero-day:<platform>`,
+  `error` event quoting the last verdict).
+
+The summary always carries: drafts written and reworks (per platform), gate results by verdict with
+check slugs, **drafted versus approved versus posted as three separate numbers per platform**, the
+Step 1b rung the run reached, and the retro verdict. A summary that reports twelve drafts and does
+not say how many are live has not reported the run.
