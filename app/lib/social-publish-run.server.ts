@@ -181,5 +181,20 @@ export async function runAllSocialPublishTicks(): Promise<PublishTickResult[]> {
       })
     }
   }
+
+  // Day-close alarm (owner direction 2026-09-06): on the last tick of the UTC
+  // day, a live platform with nothing posted files a P1 ticket and marks the
+  // day's social run. Awaited, isolated, and never allowed to fail the tick:
+  // publishing is the job, the alarm is the backstop.
+  const now = new Date()
+  const { isDayCloseHour, runSocialZeroDayCheck } = await import('./social-zero-day.server')
+  if (isDayCloseHour(now)) {
+    try {
+      const report = await runSocialZeroDayCheck(now)
+      console.log('[social-publish] day-close zero-day check:', JSON.stringify(report))
+    } catch (err) {
+      console.error('[social-publish] day-close zero-day check failed (ignored):', err)
+    }
+  }
   return results
 }

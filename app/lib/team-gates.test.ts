@@ -80,3 +80,24 @@ describe('parsePublishGateModelOutput', () => {
     expect(parsePublishGateModelOutput(raw).findings).toEqual([{ check: 'x', verdict: 'pass' }])
   })
 })
+
+describe('publish-gate calibration (owner direction 2026-09-06)', () => {
+  it('labels live precedents as PASSED-and-live calibration, never a BLOCK licence', async () => {
+    const { describePrecedents } = await import('./team-gates.server')
+    const block = describePrecedents(['a live caption', 'another'])
+    expect(block).toContain('PASSED this gate and stayed live')
+    expect(block).toContain('Not a licence for any BLOCK-class risk')
+    expect(block).toContain('- a live caption')
+    expect(describePrecedents([])).toContain('(none yet)')
+  })
+
+  it('carries the split close-call rule, the sale-attempt definition, and the section 3.2a ceiling', async () => {
+    const { PUBLISH_GATE_SYSTEM, IMAGERY_CEILING_EXCERPT } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('Close calls split by class')
+    expect(PUBLISH_GATE_SYSTEM).toContain('a price, a discount, a promo code, or a shop CTA')
+    expect(PUBLISH_GATE_SYSTEM).not.toContain('it is not close')
+    expect(IMAGERY_CEILING_EXCERPT).toContain('Licensed at the ceiling')
+    expect(IMAGERY_CEILING_EXCERPT).toContain('The ceiling stops here')
+    expect(PUBLISH_GATE_SYSTEM).toContain(IMAGERY_CEILING_EXCERPT)
+  })
+})

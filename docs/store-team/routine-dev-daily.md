@@ -62,6 +62,16 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
        "filter":{"kind":"code","status":"approved"}}'
 ```
 
+**Social zero-day tickets are claimed first (owner direction 2026-09-06).** Before the general claim
+above, list `{op:'list', status:'approved', kind:'code', team:'social'}` and claim by `id` any row
+whose text begins `Zero-post day on` (dedupe key `social-zero-day:<platform>`, priority 1). These
+are filed by the social routine at exhaustion, or by the day-close alarm in
+`app/lib/social-zero-day.server.ts`, when Instagram or X went a whole day with the valve on and no
+live post. The fix is whichever of three surfaces the findings name: the publish-gate prompt
+(`app/lib/team-gates.server.ts`), a deterministic check (`app/lib/social-publish-gate.server.ts`),
+or the drafting rules (`docs/store-team/routine-social-daily.md`, the social agent defs). Editing
+`docs/` inside this `code` ticket is in scope. QA verifies against the rows the ticket names.
+
 `leaseSeconds: 10800` is three hours, sized for one ticket including `typecheck`, `test`, and
 `build`. The endpoint caps a lease at six hours. Do not lower it to save time; nothing is waiting on
 the lease, and a lease that expires mid-ticket costs a whole PR. That is not hypothetical: the
