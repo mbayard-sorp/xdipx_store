@@ -71,6 +71,14 @@ describe('the kind matches the lane shape it was measured against', () => {
     // become the permanent-WARN class the manifest warns about.
     expect(LANE_FLOORS.find(f => f.lane === 'social')?.threshold).toBeLessThan(2)
   })
+
+  it('gives the Instagram reach step-change a ratio bound below 1 (#8014)', () => {
+    // A ratio floor >= 1 would breach on any dip at all, including ordinary
+    // week-to-week variance; a ratio must be strictly below 1 to mean anything.
+    const f = LANE_FLOORS.find(fl => fl.lane === 'instagram-reach')
+    expect(f?.kind).toBe('ratio')
+    expect(f?.threshold).toBeLessThan(1)
+  })
 })
 
 describe('the social gate reads only the per-platform valves (#7608 QA bounce)', () => {
@@ -131,5 +139,62 @@ describe('the social gate reads only the per-platform valves (#7608 QA bounce)',
     expect(social.measured).toBeNull()
     expect(social.breached).toBeNull()
     expect(social.detail).toContain('gates closed')
+  })
+})
+
+describe('instagram-reach (#8014: reach-per-post step-changed 6x with a flat follower base)', () => {
+  beforeEach(() => {
+    executeMock.mockReset()
+    getPipelineSettingMock.mockReset()
+    // Every other db.execute call this run is a days-since lookup for
+    // indexnow/outreach and a count for social; give them harmless defaults so
+    // the reach case below is the only one under test.
+    getPipelineSettingMock.mockResolvedValue('false')
+  })
+
+  function mockReachWindows(row: Record<string, unknown>) {
+    const dialect = new PgDialect()
+    executeMock.mockImplementation(async (query: unknown) => {
+      const { sql: text } = dialect.sqlToQuery(query as Parameters<typeof dialect.sqlToQuery>[0])
+      if (text.includes('metrics_json')) return { rows: [row] }
+      if (text.includes('social_posts')) return { rows: [{ n: 0 }] } // social rate floor: gate closed anyway
+      return { rows: [{ days: null }] } // indexnow / outreach staleness
+    })
+  }
+
+  it('breaches when the trailing-7d mean drops below half the trailing-28d mean', async () => {
+    // Roughly the ticket's own numbers: ~1.5 trailing-7d vs ~6 trailing-28d.
+    mockReachWindows({ n7: 4, n28: 15, mean7: '1.5', mean28: '6.0' })
+
+    const { checkLaneFloors } = await import('~/lib/lane-floors.server')
+    const verdicts = await checkLaneFloors()
+    const reach = verdicts.find(v => v.lane === 'instagram-reach')!
+
+    expect(reach.measured).toBeCloseTo(0.25)
+    expect(reach.breached).toBe(true)
+    expect(reach.detail).toContain('1.50')
+    expect(reach.detail).toContain('6.00')
+  })
+
+  it('does not breach when the trailing-7d mean is at or above half the trailing-28d mean', async () => {
+    mockReachWindows({ n7: 5, n28: 18, mean7: '5.0', mean28: '6.0' })
+
+    const { checkLaneFloors } = await import('~/lib/lane-floors.server')
+    const verdicts = await checkLaneFloors()
+    const reach = verdicts.find(v => v.lane === 'instagram-reach')!
+
+    expect(reach.breached).toBe(false)
+  })
+
+  it('reports not-applicable rather than breached when there are too few reach readings', async () => {
+    mockReachWindows({ n7: 0, n28: 3, mean7: 0, mean28: '4.5' })
+
+    const { checkLaneFloors } = await import('~/lib/lane-floors.server')
+    const verdicts = await checkLaneFloors()
+    const reach = verdicts.find(v => v.lane === 'instagram-reach')!
+
+    expect(reach.measured).toBeNull()
+    expect(reach.breached).toBeNull()
+    expect(reach.detail).toContain('not enough Instagram posts')
   })
 })

@@ -46,7 +46,7 @@ import { sql } from 'drizzle-orm'
 
 const LOG = '[lane-floors]'
 
-export type FloorKind = 'rate' | 'staleness'
+export type FloorKind = 'rate' | 'staleness' | 'ratio'
 
 export interface LaneFloor {
   /** Stable id, used in the dedupe key. */
@@ -54,7 +54,12 @@ export interface LaneFloor {
   /** Team the breach files at. */
   team: string
   kind: FloorKind
-  /** `rate`: minimum output in the window. `staleness`: maximum days of silence. */
+  /**
+   * `rate`: minimum output in the window. `staleness`: maximum days of
+   * silence. `ratio`: minimum trailing-short-window mean divided by
+   * trailing-long-window mean (e.g. 0.5 = the short window must not have
+   * dropped below half the long window's average).
+   */
   threshold: number
   /** Human sentence for the ticket body. */
   describe: string
@@ -73,8 +78,9 @@ export interface FloorVerdict extends LaneFloor {
 /**
  * The floors, with the measurement each was chosen from.
  *
- * Deliberately three, not a sweep of every lane. A floor nobody chose from real
- * data is a guess, and a guess that fires is indistinguishable from a fault.
+ * Deliberately a short, hand-picked list, not a sweep of every lane. A floor
+ * nobody chose from real data is a guess, and a guess that fires is
+ * indistinguishable from a fault.
  */
 export const LANE_FLOORS: readonly LaneFloor[] = [
   {
@@ -115,6 +121,21 @@ export const LANE_FLOORS: readonly LaneFloor[] = [
       + 'days in the window are the finding, and one deduped row that closes on the next post '
       + 'reports them without becoming a daily alarm.',
   },
+  {
+    lane: 'instagram-reach',
+    team: 'social',
+    kind: 'ratio',
+    threshold: 0.5,
+    describe: 'Instagram reach-per-post has more than halved: trailing-7-day mean below 50% of the trailing-28-day mean',
+    rationale:
+      'Ticket #8014, measured from social_posts.metrics_json against a flat 24-follower base '
+      + 'while posting volume went DOWN, ruling out both a follower and a volume artifact: '
+      + 'reach-per-post held ~6/post from 08-08 through 08-29 (six posting days, range 5.0-11.0), '
+      + 'then stepped to ~1-3/post from 08-30 onward (08-30 3.0, 09-01 2.5, 09-02 1.0, 09-04 1.5, '
+      + '09-06 1.0) with saves at 0 across the whole 30-day window and likes falling from 3/week '
+      + 'to 0. That is roughly a 5-6x drop, so a 50% ratio floor catches this and any future '
+      + 'step-change of similar size without firing on ordinary week-to-week variance.',
+  },
 ]
 
 /** Days since the most recent row, or null when the table has never had one. */
@@ -129,6 +150,35 @@ async function countRows(query: ReturnType<typeof sql>): Promise<number> {
   const r = await db.execute(query)
   const row = (r.rows ?? [])[0] as Record<string, unknown> | undefined
   return Number(row?.['n'] ?? 0)
+}
+
+/**
+ * Trailing-7-day and trailing-28-day mean reach-per-post for posted Instagram
+ * rows that carry a reach reading, plus how many rows fed each mean. `n7`/`n28`
+ * let the caller tell "genuinely dropped" apart from "nothing posted (or
+ * measured) recently" — the same distinction `socialGateOpen` exists for on
+ * the rate floor, here driven by row counts instead of a valve read.
+ */
+async function instagramReachWindows(): Promise<{ n7: number; n28: number; mean7: number; mean28: number }> {
+  const r = await db.execute(sql`
+    SELECT
+      COUNT(*) FILTER (WHERE posted_at > now() - interval '7 days') AS n7,
+      COUNT(*) FILTER (WHERE posted_at > now() - interval '28 days') AS n28,
+      COALESCE(AVG((metrics_json->>'reach')::numeric)
+        FILTER (WHERE posted_at > now() - interval '7 days'), 0) AS mean7,
+      COALESCE(AVG((metrics_json->>'reach')::numeric)
+        FILTER (WHERE posted_at > now() - interval '28 days'), 0) AS mean28
+    FROM social_posts
+    WHERE platform = 'instagram' AND status = 'posted'
+      AND metrics_json->>'reach' IS NOT NULL
+      AND posted_at > now() - interval '28 days'`)
+  const row = (r.rows ?? [])[0] as Record<string, unknown> | undefined
+  return {
+    n7:     Number(row?.['n7'] ?? 0),
+    n28:    Number(row?.['n28'] ?? 0),
+    mean7:  Number(row?.['mean7'] ?? 0),
+    mean28: Number(row?.['mean28'] ?? 0),
+  }
 }
 
 /**
@@ -185,6 +235,22 @@ async function measure(f: LaneFloor): Promise<{ measured: number | null; breache
         SELECT COUNT(*)::int AS n FROM social_posts
          WHERE status = 'posted' AND posted_at > now() - interval '24 hours'`)
       return { measured: n, breached: n < f.threshold, detail: `${n} post(s) in 24h with gates open, floor ${f.threshold}` }
+    }
+    case 'instagram-reach': {
+      const { n7, n28, mean7, mean28 } = await instagramReachWindows()
+      if (n7 === 0 || n28 === 0 || mean28 <= 0) {
+        return {
+          measured: null, breached: null,
+          detail: `not enough Instagram posts with a reach reading in the trailing windows (n7=${n7}, n28=${n28})`,
+        }
+      }
+      const ratio = mean7 / mean28
+      return {
+        measured: ratio,
+        breached: ratio < f.threshold,
+        detail: `trailing-7d mean reach ${mean7.toFixed(2)} vs trailing-28d mean ${mean28.toFixed(2)} `
+          + `(ratio ${ratio.toFixed(2)}, floor ${f.threshold})`,
+      }
     }
     default:
       return { measured: null, breached: null, detail: `no probe implemented for lane ${f.lane}` }
