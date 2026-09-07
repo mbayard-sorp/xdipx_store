@@ -373,6 +373,46 @@ property, never all of them; the packshot is the third resort, never the second.
   *decorative* stand-ins for the topic, not on a product whose own molded silicone happens to
   reference a flower.
 
+- ILY by Je Joue Panty Vibrator (`ily-by-je-joue-panty-vibe`), `guides` category, sincere
+  staging, post `how-do-wearable-vibrators-work` (media-manager, run 2026-09-07). Article thesis:
+  what anchors a wearable in place, how much sound escapes through clothing, how far a remote
+  really reaches — staged as quiet held-in-place anticipation rather than a bare white-paper still
+  life. **Ref-image note:** `images[0]` (`99635A.jpg`) is a box-plus-device composite carrying
+  dense printed packaging copy ("THE PANTY VIBE", "ILY by JE JOUE"); `images[1]` (`99635B.jpg`) is
+  a clean unpackaged shot of the device together with its remote, no box, no printed text beyond
+  the device's own small molded "ILY" logo — used that as `--ref-image` instead, per the
+  WINX/Magic Wand precedent. **Setting deviation (caller brief, shared-rules license):** the
+  standard §0-P negative prompt bans cloth/fabric outright; this brief's caller asked for the
+  product staged "at rest against soft fabric... the moment before it is worn," which is
+  product-relevant context for a wearable (not the banned domestic-metaphor towel/blanket class)
+  per the doctrine's "fabric... welcome as setting, never the subject." Added one soft out-of-focus
+  corner of sheer blush satin beneath the product rather than a towel/washcloth; kept every other
+  §0-P negative intact. **Atlas outage:** Atlas Cloud errored with "account has an overdue balance"
+  on both parallel requests (misclassified in the block log as `reason=content_policy` — it is a
+  billing failure, not a content refusal; `atlas.server.ts`'s failed-prediction path always logs
+  status 422/content-block regardless of the real cause). Fell through to the documented fal
+  Kontext fallback (`fal/flux-kontext-dev`), 2 candidates, no retry needed: candidate 2 kept —
+  crisp warm single-direction highlight (not a two-tone gradient), product and remote both large
+  and bold, shape/color/molded ILY logo faithful to reference, fabric anchored to the lower-left
+  corner leaving the product and the right two-thirds of the frame clear for a headline. Candidate
+  1 rejected only on composition: the fabric trailed up through the frame's vertical center,
+  crowding the product's clear space. **Hero/embed false-positive (new precedent):** the first
+  upload's prompt described the device as "coral-pink silicone," which false-matched an unrelated,
+  non-embedded product (`femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink`) —
+  its title reduces to the single short distinctive token "pink" (4 chars, below the 6-char
+  standalone bar), and the prompt's own incidental "silicone" supplied exactly the corroborating
+  generic word `isNamedIn()` needed to promote that short token to a match. Removed "silicone" from
+  both `--prompt` and `--alt` (no material descriptor needed — the reference image already carries
+  the material) and re-ran `--upload` with the corrected copy on the same file; `assetId` was
+  identical (Sanity dedupes by content hash), only `heroImageAlt`/`imagePrompt` changed, and
+  `check-hero-embed-match.ts` went clean. **Precedent:** a generic material/finish word
+  ("silicone", "rechargeable", "bullet", "massager" — anything in `GENERIC_TOKENS`) sitting next to
+  a plain color word in hero copy can corroborate a short, otherwise-harmless color token into a
+  false match against an unrelated catalog product; when `check-hero-embed-match.ts` flags a
+  surprise mismatch on a single short `matchedOn` token, first try dropping the incidental generic
+  word from the copy before treating it as a real naming problem →
+  `image-95a13e8a4d998ddd4a1d3d22db7c15b42b82e61c-1184x880-jpg`.
+
 ### §0-H human scaffold
 
 (no ref-image unless Emma appears — then `--ref-image` = the canonical Emma photo, Sanity
