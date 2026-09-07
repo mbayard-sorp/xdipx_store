@@ -83,11 +83,25 @@ every 4 weeks after: state plainly whether `script-doctor`'s findings duplicate 
 and file a retire suggestion if over 80% duplicative. File suggestions (acting team `video`) for
 structural findings.
 
+**Close the run on the LAST retro event, in the same call, via `finish` — never as a separate
+`/api/team/run` call afterward (ticket #8027).** Runs #633 and #654 each posted a full retro event
+trail and then never made that separate finish call: the session died (turn/token budget,
+container teardown) in the gap between the two calls, and the run sat idle for hours until the
+reaper marked it `'auto-expired'` even though the retro event trail showed completed work.
+`POST /api/team/event {op:'record', ...}` now accepts an optional `finish` object that closes the
+run atomically with that same event:
+
 ```bash
-curl -s -X POST "$BASE_URL/api/team/run" \
+curl -s -X POST "$BASE_URL/api/team/event" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"update","id":'$RUN_ID',"finished":true,"status":"succeeded","summary":"..."}'
+  -d '{"op":"record","runId":'$RUN_ID',"phase":"retro",
+       "summary":"slate: 2 filed, next week est $X",
+       "finish":{"status":"succeeded","summary":"..."}}'
 ```
+
+Nothing else needs to happen after this request for the run to close. Do not follow it with a
+separate `POST /api/team/run {op:'update', finished:true, ...}` — that reintroduces the exact gap
+this fixes.
 
 ## Enablement runbook (owner)
 
