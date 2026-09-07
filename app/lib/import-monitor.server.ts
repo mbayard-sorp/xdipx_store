@@ -1007,13 +1007,29 @@ export async function approveAndImport(id: number, reviewedBy?: string, opts: { 
 
   const repSku = candidate.sku
 
-  // Guard: check dealHistory for already-imported SKU.
+  // Guard: check dealHistory for already-imported SKU. Backfill dealHistoryId
+  // to the existing row so this candidate is not left structurally invisible
+  // to enrichment: submitEnrichmentBatch and claimEnrichmentForSubagent INNER
+  // JOIN dealHistory, so a status:'imported' row with a NULL dealHistoryId
+  // can never be claimed for enrichment, yet still counts as outstanding
+  // "importedUnenriched" work in every funnel report forever (#7983 line,
+  // confirmed live on candidate 3441/dealHistory 5266).
   if (await isSkuAlreadyImported(repSku)) {
+    const existing = await db
+      .select({ id: dealHistory.id })
+      .from(dealHistory)
+      .where(eq(dealHistory.sku, repSku))
+      .limit(1)
     await db
       .update(importCandidates)
-      .set({ status: 'imported', updatedAt: new Date(), ...reviewedStamp })
+      .set({
+        status: 'imported',
+        updatedAt: new Date(),
+        ...(existing[0] ? { dealHistoryId: existing[0].id } : {}),
+        ...reviewedStamp,
+      })
       .where(eq(importCandidates.id, id))
-    return { ok: true, skipped: true }
+    return { ok: true, skipped: true, ...(existing[0] ? { dealHistoryId: existing[0].id } : {}) }
   }
 
   // Re-fetch and re-collapse today's feed to get fresh per-variant data.
