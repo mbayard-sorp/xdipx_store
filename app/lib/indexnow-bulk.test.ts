@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { batchIdForDay, selectPushableUrls } from '~/lib/indexnow-bulk.server'
 import {
-  INDEXNOW_MAX_URLS_PER_REQUEST, chunkUrls, isRetryableStatus, normalizeUrls,
+  INDEXNOW_MAX_URLS_PER_REQUEST, chunkUrls, isRetryableStatus, normalizeUrls, publishBatchId,
 } from '~/lib/search-ping.server'
 
 const u = (n: number) => `https://xdipx.com/products/p${n}`
@@ -118,5 +118,12 @@ describe('batchIdForDay', () => {
   it('groups a day of pushes under one id', () => {
     expect(batchIdForDay(new Date('2026-07-27T04:40:00Z'))).toBe('bulk-2026-07-27')
     expect(batchIdForDay(new Date('2026-07-27T23:59:00Z'))).toBe('bulk-2026-07-27')
+  })
+})
+
+describe('publishBatchId', () => {
+  it('groups a day of publish-time pings under one id, distinct from bulk batches', () => {
+    expect(publishBatchId(new Date('2026-07-27T04:40:00Z'))).toBe('publish-2026-07-27')
+    expect(publishBatchId(new Date('2026-07-27T23:59:00Z'))).toBe('publish-2026-07-27')
   })
 })
