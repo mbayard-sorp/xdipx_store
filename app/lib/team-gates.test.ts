@@ -102,6 +102,32 @@ describe('publish-gate calibration (owner direction 2026-09-06)', () => {
   })
 })
 
+describe('publish-gate register-too-tame stability (ticket #7896)', () => {
+  it('pins a fixed, non-empty product-free register precedent set', async () => {
+    const { PRODUCT_FREE_REGISTER_PRECEDENTS } = await import('./team-gates.server')
+    expect(PRODUCT_FREE_REGISTER_PRECEDENTS.length).toBeGreaterThan(0)
+    for (const p of PRODUCT_FREE_REGISTER_PRECEDENTS) {
+      expect(typeof p.id).toBe('number')
+      expect(p.text.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('describeRegisterPrecedents names the anchors as a fixed, call-stable set', async () => {
+    const { describeRegisterPrecedents, PRODUCT_FREE_REGISTER_PRECEDENTS } = await import('./team-gates.server')
+    const block = describeRegisterPrecedents()
+    expect(block).toContain('fixed set, does not change between')
+    for (const p of PRODUCT_FREE_REGISTER_PRECEDENTS) {
+      expect(block).toContain(`#${p.id}`)
+    }
+  })
+
+  it('the too-tame rule points a product-free register call at the pinned anchor set', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('calibrate this call against the pinned')
+    expect(PUBLISH_GATE_SYSTEM).toContain('product-free register precedents')
+  })
+})
+
 describe('publish-gate baked-in-text vs product-identity (ticket #7890)', () => {
   it('never lets a glyph-free colour band trip the baked-in-text check on its own', async () => {
     const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
