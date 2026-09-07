@@ -48,7 +48,9 @@ beforeEach(() => {
 
 describe('fileBlocker canonicalizes the write key regardless of caller spelling (#7044)', () => {
   it('a raw, colon-separated key is written under its canonical form', async () => {
-    await fileBlocker({ dedupeKey: 'runpod:vercel-env', title: 'RunPod vercel env missing' })
+    // category: 'console' sidesteps the #8028 probe-required gate, which is
+    // orthogonal to what this suite tests (dedupe-key canonicalization).
+    await fileBlocker({ dedupeKey: 'runpod:vercel-env', title: 'RunPod vercel env missing', category: 'console' })
 
     const canon = canonicalDedupeKey('runpod:vercel-env', { maxLength: 80 })
     expect(canon).toBe('runpod-vercel-env')
@@ -57,14 +59,16 @@ describe('fileBlocker canonicalizes the write key regardless of caller spelling 
   })
 
   it('a raw key and its already-canonical form resolve to the identical stored key', async () => {
-    await fileBlocker({ dedupeKey: 'runpod:vercel-env', title: 'RunPod vercel env missing' })
+    // category: 'console' sidesteps the #8028 probe-required gate, which is
+    // orthogonal to what this suite tests (dedupe-key canonicalization).
+    await fileBlocker({ dedupeKey: 'runpod:vercel-env', title: 'RunPod vercel env missing', category: 'console' })
     const rawWrite = dedupeKeyParam(1)
 
     executeMock.mockReset()
     executeMock
       .mockResolvedValueOnce({ rows: [{ status: 'open' }] })
       .mockResolvedValueOnce({ rows: [{ id: 1, created: false }] })
-    await fileBlocker({ dedupeKey: 'runpod-vercel-env', title: 'RunPod vercel env missing' })
+    await fileBlocker({ dedupeKey: 'runpod-vercel-env', title: 'RunPod vercel env missing', category: 'console' })
     const canonicalWrite = dedupeKeyParam(1)
 
     // Same target row either way: this is what makes ON CONFLICT (dedupe_key)

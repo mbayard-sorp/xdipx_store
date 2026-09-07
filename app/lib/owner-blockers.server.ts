@@ -492,18 +492,29 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
   const category = (BLOCKER_CATEGORIES as readonly string[]).includes(input.category ?? '')
     ? input.category! : 'other'
 
-  // Derive a probe where the row already carries its own argument, then say so
-  // loudly when one is still missing in a category that should have had it.
-  // Reported rather than thrown on purpose: a filer that cannot supply a probe
-  // must still be able to put the blocker in front of the owner, because losing
-  // the row is worse than losing the probe. The warning is what makes the gap
-  // visible instead of silent.
+  // Derive a probe where the row already carries its own argument, then
+  // enforce that one is still missing in a category that should have had it
+  // (ticket #8028). A warning nobody reads is how 9 probe-less rows sat open
+  // with nothing requiring a probe. A filer that genuinely cannot supply one
+  // must still be able to put the blocker in front of the owner, so this is
+  // not an unconditional reject: an explicit, non-empty `overrideNoProbeReason`
+  // still lands the row, same as the CONFIRMED-title guard above requires
+  // naming a credential rather than blocking the filing outright.
   const derived = suggestProbeFor({ ...input, category })
   if (derived) {
     input = { ...input, verifyProbe: derived.verifyProbe, verifyArg: derived.verifyArg }
   }
   const gap = probeGapReason({ category, verifyProbe: input.verifyProbe ?? null })
-  if (gap) console.warn(`[owner-blockers] ${dedupeKey}: ${gap}`)
+  const overrideNoProbeReason = clamp(input.overrideNoProbeReason, 500)
+  if (gap) {
+    if (!overrideNoProbeReason) {
+      throw new Error(
+        `fileBlocker: ${gap}. File with a verifyProbe, or set a non-empty overrideNoProbeReason `
+        + 'explaining why no probe exists for this row.',
+      )
+    }
+    console.warn(`[owner-blockers] ${dedupeKey}: ${gap} (override: ${overrideNoProbeReason})`)
+  }
   const source = (BLOCKER_SOURCES as readonly string[]).includes(input.source ?? '')
     ? input.source! : 'agent'
   const priority = Math.min(Math.max(Math.round(Number(input.priority ?? 3)) || 3, 1), 5)
