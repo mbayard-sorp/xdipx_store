@@ -165,7 +165,13 @@ describe('the cron expectation manifest', () => {
     //
     // Raised 17 -> 18 for /cron/conversation-quality-daily (ticket #625), also
     // DAILY: +1 row a day, same arithmetic.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(18)
+    //
+    // Raised 18 -> 19 for /cron/promo-execute (ticket #8022), also DAILY: +1
+    // row a day, same arithmetic. This is the surface that mints Shopify
+    // discount codes for approved promos; a failure here has a direct next
+    // actor (the strategy lane) and a money angle, exactly the "next actor"
+    // bar this set exists to hold.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(19)
   })
 
   it('records the surfaces whose failure has a next actor', () => {
