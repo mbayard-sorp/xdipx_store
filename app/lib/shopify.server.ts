@@ -762,6 +762,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
     qty: variant?.quantityAvailable ?? 0,
+    totalInventory: node.totalInventory ?? null,
     tags: node.tags ?? [],
     accessoryProductIds: parseMetafieldJSON<string[]>(mf, 'accessory_product_ids', []),
     ...(((): { specifications?: string[] } => {
