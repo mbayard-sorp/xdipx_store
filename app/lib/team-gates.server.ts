@@ -244,7 +244,10 @@ Judge these, all BLOCK-class unless noted:
 - Caption narrates its own image ("in the photo", "that is <name> holding", "pictured", "so you can
   see"): REVISE (the description belongs in alt text, not the caption).
 - A caption that could run unchanged on a skincare account, with zero wanting, innuendo, or
-  anticipation, on a post whose register should be 9 by implication: REVISE ("too tame").
+  anticipation, on a post whose register should be 9 by implication: REVISE ("too tame"). On a
+  product-free (no product in this post) caption, calibrate this call against the pinned
+  product-free register precedents given below in the user turn (a fixed anchor set, not the
+  general live-precedents list), and name which of those anchors you calibrated against.
 - Anything you cannot judge with confidence from what you were given (no campaign scheme, no
   cast-rotation history) is not a reason to pass — say so honestly in notes. It is also not a
   reason to REVISE: a REVISE names a specific fix in the draft, never a gap in your own inputs.
@@ -362,6 +365,7 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
         `Caption (as it will publish):\n${post.tweetText}\n\n` +
         `Alt text: ${post.altText ?? '(none)'}\n\n` +
         `${describePrecedents(recentCaptions)}\n\n` +
+        `${featuresProduct ? '' : `${describeRegisterPrecedents()}\n\n`}` +
         `${media.length} image(s) follow.`,
     },
     ...media.map((url): Anthropic.ContentBlockParam => ({ type: 'image', source: { type: 'url', url } })),
@@ -370,6 +374,13 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
   const msg = await client.messages.create({
     model: SONNET,
     max_tokens: 2048,
+    // Pinned at 0 (ticket #7896): the same caption against the same
+    // precedent set must return the same verdict. Rows #182/#185 showed the
+    // opposite at the SDK default temperature — identical input, three
+    // calls, PASS then REVISE then REVISE, citing different precedents each
+    // time. This is a judgment task with a fail-closed contract, not one
+    // where call-to-call variety is a feature.
+    temperature: 0,
     system: PUBLISH_GATE_SYSTEM,
     messages: [{ role: 'user', content }],
   })
@@ -449,6 +460,116 @@ export function describePrecedents(captions: readonly string[]): string {
     'first). Calibration for REVISE-class register calls and context for the repetition check. ' +
     'Not a licence for any BLOCK-class risk.'
   return `${head}\n${captions.map(c => `- ${c}`).join('\n') || '(none yet)'}`
+}
+
+/**
+ * A pinned, versioned register-calibration anchor for product-free (Slot A)
+ * Instagram captions, ticket #7896.
+ *
+ * `describePrecedents` above draws from `recentPostedCaptions`, a live query
+ * of the platform's last 12 *posted* rows regardless of type, which mixes
+ * product-forward captions (naturally quieter; the product itself carries
+ * some of the register) in with product-free ones. Two rows on 2026-09-05/06
+ * (#182, #185) showed the model's register-too-tame call drifting on that
+ * mixed set: the SAME unchanged caption text, gated three times back to
+ * back with no new posts landing in between (so the live-precedent set was
+ * byte-identical across calls), returned PASS then REVISE then REVISE,
+ * citing a different pair of precedent posts each time. That is not the
+ * precedent set moving, it is the model's own sampling choosing a different
+ * subset of it to calibrate against on every call.
+ *
+ * The fix has two parts, both here and in `runPublishGateCheck`: (1) this
+ * fixed, hand-picked set of already-live product-free posts is the anchor
+ * for register calibration specifically, so the comparison set cannot vary
+ * call to call the way a live top-12 query can as new rows post; (2)
+ * `runPublishGateCheck` now calls the model at `temperature: 0` so the same
+ * caption against the same anchor set returns the same verdict.
+ *
+ * Update this list only by adding a new id, never by rewriting or dropping
+ * an existing one (a removed anchor is exactly the drift this exists to
+ * prevent). Add a post once it has cleared this gate on a single call
+ * with no REVISE and stayed live; do not add a post that itself needed a
+ * rework to clear register.
+ */
+export const PRODUCT_FREE_REGISTER_PRECEDENTS: readonly { id: number; text: string }[] = [
+  {
+    id: 142,
+    text:
+      "forget how it looks sitting on the shelf. the moment it switches on, it does something no vibrator can.\n\n" +
+      'this runs on air pulse, not a buzzing motor: waves of air and pressure that seal over one spot instead of ' +
+      'vibrating everywhere. six intensities and four patterns, so you set the pace instead of the toy setting it, ' +
+      'and the whole thing vanishes into a cupped palm. the silicone glows in the dark, easy to find when the ' +
+      'lights are low, and it is waterproof enough to bring into the shower. if you want to meet it, the link is ' +
+      'in our bio.\n\n' +
+      'one pairing note: keep it to a water-based glide, the sliquid organics is a clean glycerin-free pick, ' +
+      'because silicone toys and silicone lube do not get along.\n\n' +
+      'this is a slow-morning-with-the-door-open object, not just the last ten minutes before sleep. be honest ' +
+      'with me: are you a run-through-all-six person, or a find-one-and-stay person?',
+  },
+  {
+    id: 149,
+    text:
+      '"does this do suction or air pulse?" wrong question. everything we carry in air pulse works the same way: ' +
+      'waves of pressure that seal around one spot and hold there, never a vacuum pulling in. break the seal and ' +
+      "the feeling goes with it, no matter how high you turn the number. a real suction toy is a different animal, " +
+      'a clitoral pump built to draw and hold a swell, sold as exactly that.\n\n' +
+      'the toy that goes quiet after ten seconds was never underpowered. it lost its seal, that\'s all, and no ' +
+      'setting fixes a seal.\n\n' +
+      "the enhance stops making you choose. air pulse on one side, a separate vibration motor on the other, ten " +
+      "levels each, layered however much of each you're chasing. start with one, let the other build in behind " +
+      'it, and keep going until the two are doing more together than either ever did alone.\n\n' +
+      'ipx7 means the shower and the bath are genuinely fair game, not a guess printed on the label. silicone ' +
+      "body, so keep what's in the drawer water-based. h2o original earns its spot next to this one.\n\n" +
+      "save this for the next listing that promises everything and gives you a shrug. ♥",
+  },
+  {
+    id: 167,
+    text:
+      "Ok, we need to talk about rabbit vibrators for a second, because half of you are picturing the wrong " +
+      "thing.\n\n" +
+      "Rabbit is a shape. Dual stimulation is the job you actually want it doing: inside and outside, at once. A " +
+      "classic rabbit's arms are molded at one fixed angle, and where you need contact is not the same as the " +
+      "body next to you. That gap between what's molded in and what you actually need is the whole reason one " +
+      "gets forgotten after a week, another gets reached for on the regular. Motor count was never the deciding " +
+      "vote, fit was.\n\n" +
+      "You want something that bends to find your angle instead of asking you to match its geometry. Keep " +
+      "whatever you pair it with water-based, silicone doesn't play well with anything else, and the rest is the " +
+      "difference between fine and checking the clock afterward, surprised by what it says.\n\n" +
+      "Which have you actually tried, the classic shape or something that bends? Tell me below.",
+  },
+  {
+    id: 193,
+    text:
+      "the lube aisle lies to you a little. every bottle promises \"ultra glide\" and none of them tell you the " +
+      "one thing that actually decides everything else: what it's made of.\n\n" +
+      'water-based soaks in fast, which sounds like a downside until you remember it means safe with every toy ' +
+      'in the drawer and every condom in the nightstand, silicone included. the tradeoff is you reach for it ' +
+      "again partway through, and that's not a flaw, that's just water doing what water does.\n\n" +
+      'silicone-based lasts. it beads instead of soaking in, so one round covers the whole stretch, and it ' +
+      'survives water, so the shower is fair game too. the tradeoff is real: it breaks down silicone toys over ' +
+      'time, so keep it for skin-only nights or toys made from something else.\n\n' +
+      "pjur's basic silicone glide is the second kind, built for the unhurried stretch where you do not want to " +
+      'stop and reach for anything twice.\n\n' +
+      'which is actually in your drawer right now, water or silicone? tell me, i am curious.',
+  },
+]
+
+/**
+ * The pinned register-calibration block for a product-free (`featuresProduct:
+ * false`) post, ticket #7896. Distinct from `describePrecedents`: that block
+ * is a live, platform-wide, newest-first query used for repetition context
+ * and general REVISE calibration; this one is a fixed anchor set that never
+ * changes call to call, used specifically to stop the register-too-tame
+ * check from drifting on product-free content. Included in addition to, not
+ * instead of, `describePrecedents`.
+ */
+export function describeRegisterPrecedents(): string {
+  const head =
+    'Pinned product-free (Slot A) register-calibration anchors (fixed set, does not change between ' +
+    'calls or as new posts go live). These are the specific "clears register-too-tame" precedents for ' +
+    'product-free content named in the calibration rule above: read the caption against these, not ' +
+    'against whichever posts happen to come to mind, so the same caption gets the same verdict on every call.'
+  return `${head}\n${PRODUCT_FREE_REGISTER_PRECEDENTS.map(p => `- (#${p.id}) ${p.text}`).join('\n')}`
 }
 
 function toStoredFinding(f: GateFinding): PublishGateFinding {
