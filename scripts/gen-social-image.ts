@@ -42,10 +42,15 @@
  *      cap is enforced by step 1: the gate sums spend on 'social-%' features
  *      and that check is untouched.
  *   3. --dry-run prints the resolved plan and exits without generating.
- *   4. Generate + rehost to Shopify Files.
- *   5. POST the spend row once — this script is its single owner. Spend posts
- *      for every BILLED generation, rehosted or not (#887).
- *   6. Print one JSON manifest line.
+ *   4. Generate + rehost to Shopify Files. POST /api/team/social-image now
+ *      logs its own spend row server-side for every BILLED generation,
+ *      rehosted or not (#887), for both op:generate and op:cast (#8032: the
+ *      scheduled cloud sandbox has no node_modules to run this script, so a
+ *      sandbox-originated caller hit the route directly and this script's old
+ *      step 5 below never ran, leaving spend uncounted). This script no
+ *      longer posts spend itself — doing so as well as the route would
+ *      double-bill every image.
+ *   5. Print one JSON manifest line.
  *
  * Never run without the gate passing: this costs real money per image.
  */
@@ -268,37 +273,9 @@ async function main() {
       ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),
     })
 
-    let spendPosted = true
-    const postSpend = async (payload: Record<string, unknown>) => {
-      const res = await fetch(`${BASE_URL}/api/homepage-team/spend`, {
-        method: 'POST',
-        headers: teamHeaders,
-        body: JSON.stringify({ kind: 'image', feature: 'social-images', caller, ...payload }),
-      })
-      if (!res.ok) spendPosted = false
-    }
-    // Stage 2 (compositor) is the first cost entry; anything after it is the
-    // stage-1 plate. Post ONE image row per surviving candidate carrying that
-    // candidate's fal request id and its filename (as ref_id), so an owner can
-    // resolve a fal request id to the exact social asset it produced. Any
-    // billed candidate that failed to rehost has no file, so its spend is
-    // posted once as a remainder row to keep the social-images total exact.
-    const frameCostKey = result.costs[0]?.costKey ?? 'fal/flux-2-edit'
-    const framesBilled = result.costs[0]?.count ?? result.urls.length
-    for (let i = 0; i < result.urls.length; i++) {
-      await postSpend({
-        model: frameCostKey, count: 1, refId: result.filenames[i],
-        ...(result.requestIds[i] ? { requestId: result.requestIds[i] } : {}),
-      })
-    }
-    const remainder = framesBilled - result.urls.length
-    if (remainder > 0) await postSpend({ model: frameCostKey, count: remainder })
-    for (const plate of result.costs.slice(1)) {
-      await postSpend({
-        model: plate.costKey, count: plate.count,
-        ...(result.plateRequestId ? { requestId: result.plateRequestId } : {}),
-      })
-    }
+    // Spend is now logged server-side by POST /api/team/social-image itself
+    // (#8032) — one row per surviving candidate, a remainder row for any
+    // billed-but-dropped candidate, and any stage-1 plate. Nothing to post here.
 
     console.log(JSON.stringify({
       assets: result.urls.map((url, i) => ({
@@ -308,15 +285,15 @@ async function main() {
       provider: 'fal',
       stages: result.costs,
       scale,
-      spendPosted, cap, capSource,
+      cap, capSource,
     }))
     process.exit(0)
   }
 
   // ── 4. Generate + rehost, SERVER-SIDE (ticket #4133) ──────────────────────
   // The privileged rehost (Shopify Files, needs the Admin token) runs on the
-  // server via the route below, not in this sandbox. The route generates with
-  // logCost off, so this script stays the single owner of the spend row (#887).
+  // server via the route below, not in this sandbox. The route also owns the
+  // spend row now (#8032), so this script does not post it.
   const result = await callSocialImageRoute<GenerateSocialImageResult>({
     op: 'generate',
     prompt,
@@ -332,34 +309,16 @@ async function main() {
     ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),
   })
 
-  // ── 5. Spend, once. Posted for every BILLED generation (provider !== 'none'),
-  //      whether or not the rehost produced a usable asset: counting only on
-  //      upload let a run that kept failing its vision gate spend real dollars
-  //      without ever moving the number the cap enforces (#887). ─────────────
-  let spendPosted = false
-  if (result.provider !== 'none') {
-    const spendRes = await fetch(`${BASE_URL}/api/homepage-team/spend`, {
-      method: 'POST',
-      headers: teamHeaders,
-      body: JSON.stringify({
-        kind: 'image',
-        model: result.model,
-        count: 1,
-        feature: 'social-images',
-        caller,
-      }),
-    })
-    spendPosted = spendRes.ok
-  }
-
-  // ── 6. Manifest ───────────────────────────────────────────────────────────
+  // ── 5. Manifest ───────────────────────────────────────────────────────────
+  // Spend is logged server-side by POST /api/team/social-image itself (#8032),
+  // for every BILLED generation (provider !== 'none'), whether or not the
+  // rehost produced a usable asset (#887). Nothing to post here.
   console.log(JSON.stringify({
     asset: result.url
       ? { url: result.url, filename: result.filename, kind: 'image', archetype, platform }
       : null,
     provider: result.provider,
     model: result.model,
-    spendPosted,
     cap,
     capSource,
     ...(refImage ? {} : { noRefReason }),
