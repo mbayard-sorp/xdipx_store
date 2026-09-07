@@ -22,17 +22,25 @@
  * out of the sandbox with a smaller diff, and either satisfies
  * `isGeneratedSocialAsset`, so the rehost target is left unchanged here.)
  *
- * Spend accounting is unchanged: this route generates with `logCost` off, and
- * the CLI stays the single owner of the `social-images` spend row (#887). The
- * money gate is enforced here too as defense-in-depth, because this is now a
- * real spend surface reachable with a team token — mirroring
- * `api.team.video-job`'s enqueue ops.
+ * Spend accounting (changed by ticket #8032): this route now owns the
+ * `social-images` spend row itself, for both ops, instead of leaving it to
+ * `scripts/gen-social-image.ts` (#887's original design). The CLI has no
+ * node_modules in the scheduled cloud sandbox, so a sandbox-originated run
+ * calls this route directly and the CLI's step-5 spend post never ran,
+ * leaving generation invisible to the money gate and the daily image cap
+ * (run 738, 2026-09-07: 11 images generated, gate still read spentCents:0).
+ * `scripts/gen-social-image.ts` no longer posts its own spend for the same
+ * reason double-logging would over-bill: this route is now the single owner
+ * regardless of caller. The money gate is enforced here too as
+ * defense-in-depth, because this is now a real spend surface reachable with
+ * a team token — mirroring `api.team.video-job`'s enqueue ops.
  */
 
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth, gate } from '~/lib/team.server'
 import { SOCIAL_ARCHETYPES, type SocialArchetype } from '~/lib/social-media.server'
 import { apiError } from '~/lib/api-error.server'
+import { logImageCost } from '~/lib/token-log.server'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ONLY_VALUES = ['atlas', 'fal', 'imagen'] as const
@@ -131,6 +139,32 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(extraImageUrls?.length ? { extraImageUrls } : {}),
         ...(aspectRatio ? { aspectRatio } : {}),
       })
+
+      // Log spend for every billed frame (mirrors what the CLI used to do in
+      // its own process, #8032). One row per surviving candidate, keyed by
+      // filename/requestId so a fal request id resolves to the exact asset it
+      // produced; a remainder row for any billed-but-dropped candidate (failed
+      // rehost or vision gate — still billed, #887); then any stage-1 plate.
+      const frameCostKey = result.costs[0]?.costKey ?? 'fal/flux-2-edit'
+      const framesBilled = result.costs[0]?.count ?? result.urls.length
+      for (let i = 0; i < result.urls.length; i++) {
+        await logImageCost({
+          feature: 'social-images', model: frameCostKey, count: 1, caller,
+          refId: result.filenames[i]!,
+          ...(result.requestIds[i] ? { requestId: result.requestIds[i]! } : {}),
+        })
+      }
+      const remainder = framesBilled - result.urls.length
+      if (remainder > 0) {
+        await logImageCost({ feature: 'social-images', model: frameCostKey, count: remainder, caller })
+      }
+      for (const plate of result.costs.slice(1)) {
+        await logImageCost({
+          feature: 'social-images', model: plate.costKey, count: plate.count, caller,
+          ...(result.plateRequestId ? { requestId: result.plateRequestId } : {}),
+        })
+      }
+
       return Response.json(result)
     }
 
@@ -147,7 +181,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const imageSize = imageSizeVal(b['imageSize'])
 
     const { generateAndUploadSocialImage } = await import('~/lib/social-media.server')
-    // logCost defaults off: the CLI owns the single social-images spend row (#887).
+    // logCost:true — this route is the single owner of the social-images spend
+    // row (#8032; was `false` under #887's older CLI-owns-it design). Same
+    // pattern already proven at api.admin.social-image.tsx's generate path.
     const result = await generateAndUploadSocialImage({
       prompt,
       handle,
@@ -155,6 +191,7 @@ export async function action({ request }: ActionFunctionArgs) {
       mood,
       date,
       caller,
+      logCost: true,
       ...(slide ? { slide } : {}),
       ...(refImageUrl ? { refImageUrl } : {}),
       ...(imageSize ? { imageSize } : {}),
