@@ -1024,7 +1024,9 @@ export async function approveAndImport(id: number, reviewedBy?: string, opts: { 
   const master = masters.find(m => m.masterKey === candidate.masterKey)
 
   if (!master) {
-    return { ok: false, error: 'master no longer in feed' }
+    const error = 'master no longer in feed'
+    await stampImportFailure(id, candidate.importAttemptCount, error)
+    return { ok: false, error }
   }
 
   const { axes, variantRows } = detectAxes(master)
@@ -1099,7 +1101,9 @@ export async function approveAndImport(id: number, reviewedBy?: string, opts: { 
   const result = await importProductGroupRaw(group)
 
   if (!result.success && !result.skipped) {
-    return { ok: false, error: result.error ?? 'importProductGroupRaw failed' }
+    const error = result.error ?? 'importProductGroupRaw failed'
+    await stampImportFailure(id, candidate.importAttemptCount, error)
+    return { ok: false, error }
   }
 
   // Look up the new dealHistory row by the representative SKU.
@@ -1125,4 +1129,24 @@ export async function approveAndImport(id: number, reviewedBy?: string, opts: { 
     ...(result.shopifyProductId !== undefined ? { shopifyProductId: result.shopifyProductId } : {}),
     ...(dealHistoryId !== undefined ? { dealHistoryId } : {}),
   }
+}
+
+/**
+ * Record a failed approveAndImport() attempt on the candidate row, ticket
+ * #7983. Before this, a failure (e.g. "master no longer in feed") returned
+ * from the function and touched nothing on the row itself: the candidate
+ * re-swept every product-daily run looking exactly like an untouched
+ * `pending` row, with no count and no reason visible on /admin/imports. A
+ * systemically-broken queue (as opposed to one bad candidate) was invisible
+ * without a manual per-row approve probe.
+ */
+async function stampImportFailure(id: number, currentAttemptCount: number, error: string): Promise<void> {
+  await db
+    .update(importCandidates)
+    .set({
+      importAttemptCount: currentAttemptCount + 1,
+      importLastError:    error,
+      updatedAt:           new Date(),
+    })
+    .where(eq(importCandidates.id, id))
 }
