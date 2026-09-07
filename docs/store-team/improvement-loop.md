@@ -123,7 +123,7 @@ never before. "Acting team" = the suggestion's `target_team`, or the proposer wh
 | `config` | doc-level config (playbooks), never `pipeline_settings` values | agent-editor PR |
 | `code` | needs engineering | **R-DEV claims it automatically** (`rr7-engineer`, 14:00 + 20:00), one `ticket/<id>` PR, QA-verified, engine-merged |
 | `campaign` | a full email campaign brief | `scripts/push-approved-campaigns.ts` (from `routine-email-weekly.md`), gated by `email_campaign_push_enabled` (default off); otherwise owner executes in Klaviyo. Execution writes a `note` link and does **not** close the row |
-| `promo` | a designed discount/sale (MAP-checked) | `scripts/execute-approved-promos.ts` (from `routine-weekly-strategy.md` Step 4 2b), gated by `promo_execute_enabled` (default off); otherwise owner mints the code in Shopify. Execution writes a `note` link and does **not** close the row |
+| `promo` | a designed discount/sale (MAP-checked) | `runPromoExecutionPass` via `/cron/promo-execute` (daily, 15:00 UTC, ticket #8022) is the primary caller now; `scripts/execute-approved-promos.ts` (from `routine-weekly-strategy.md` Step 4 2b) still runs weekly as a redundant, idempotent safety net. Both gated by `promo_execute_enabled` (default off); otherwise owner mints the code in Shopify. Execution writes a `note` link and does **not** close the row |
 | `program` | referral/loyalty mechanics | owner decides; code parts become `code` rows |
 
 **The `promo`/`campaign` dead end.** Both scripts write a `suggestion_links` row of kind `note` as

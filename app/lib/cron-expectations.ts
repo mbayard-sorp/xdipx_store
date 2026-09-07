@@ -173,6 +173,25 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'strands tickets as well as merges.',
   },
   {
+    route: '/cron/promo-execute',
+    plane: 'vercel',
+    schedule: '0 15 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 90,
+    recorded: true,
+    moneyRelevant: true,
+    ownerTeam: 'strategy',
+    notes:
+      'Ticket #8022. Mints Shopify discount codes for APPROVED promo briefs via runPromoExecutionPass, '
+      + 'valve-gated by promo_execute_enabled. Was inlined in scripts/execute-approved-promos.ts as the '
+      + 'ONLY caller, which meant it only ran when the weekly strategy routine invoked the script -- '
+      + 'roughly once a week. Two consecutive approved promos (#6757/#6756, and predecessor #5231) '
+      + "missed their whole activation window because nothing ran between the routine's weekly passes. "
+      + 'executeApprovedPromo does not gate on the window having opened (Shopify enforces activation via '
+      + 'startsAt/endsAt), so running this daily is safe. The weekly script invocation stays as a '
+      + 'redundant, harmless safety net: the pass is idempotent.',
+  },
+  {
     route: '/cron/owner-digest',
     plane: 'vercel',
     schedule: '0 13 * * *',

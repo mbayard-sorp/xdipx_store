@@ -127,6 +127,10 @@
       "schedule": "30 13 * * *"
     },
     {
+      "path": "/cron/promo-execute",
+      "schedule": "0 15 * * *"
+    },
+    {
       "path": "/cron/release-engine",
       "schedule": "*/10 * * * *"
     },

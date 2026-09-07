@@ -221,10 +221,17 @@ its payload server-side, so a relay error still cannot write something the API i
    nothing in this license mints a discount by itself.
 2b. **Execute approved promos (valve-gated).** For promo rows the owner has already approved, mint
    the Shopify discount code. Gated by `promo_execute_enabled`, default **off**; with the valve off
-   the script exits without touching Shopify. It is fail-closed: a row flagged with a MAP conflict,
-   missing an explicit window, or with no resolvable eligible product is refused (loud owner email +
-   ticket note), never minted. On a clean mint the owner is emailed the code and window and a note
-   link lands on the ticket. Idempotent: rows already carrying a minted note are skipped.
+   nothing touches Shopify. It is fail-closed: a row flagged with a MAP conflict, missing an explicit
+   window, or with no resolvable eligible product is refused (loud owner email + ticket note), never
+   minted. On a clean mint the owner is emailed the code and window and a note link lands on the
+   ticket. Idempotent: rows already carrying a minted note are skipped.
+
+   **The primary caller is now `/cron/promo-execute`, daily at 15:00 UTC (ticket #8022).** An
+   approved promo whose activation window opened between weekly strategy passes used to miss it
+   entirely (two consecutive live incidents, #6757/#6756 and predecessor #5231) — `executeApprovedPromo`
+   does not gate on the window having opened, so running it only once a week was strictly worse than
+   running it daily. The manual invocation below still runs every week as part of this routine; it is
+   a redundant, harmless safety net now, not the only path.
 
    ```bash
    tsx scripts/execute-approved-promos.ts

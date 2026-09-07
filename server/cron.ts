@@ -966,6 +966,30 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/promo-execute
+   * Schedule: daily, 15:00 UTC.
+   *
+   * Ticket #8022: mints a Shopify discount code for every APPROVED, MAP-clean
+   * `kind:'promo'` brief. Was previously reachable only by hand, via
+   * scripts/execute-approved-promos.ts from the weekly strategy routine, so an
+   * approved promo whose activation window opened between weekly passes
+   * missed it entirely (two consecutive live incidents). Valve-gated by
+   * `promo_execute_enabled` inside `executeApprovedPromo` itself and
+   * idempotent (an already-handled promo row is skipped), so this is safe to
+   * run daily alongside the still-standing weekly script invocation.
+   */
+  cronRoute('/promo-execute', async (_req, res) => {
+    try {
+      const { runPromoExecutionPass } = await import('../app/lib/shopify-discounts.server.js')
+      const result = await runPromoExecutionPass()
+      res.status(200).json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:promo-execute]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * GET|POST /cron/main-ci-watch
    * Schedule: every 10 minutes. Emails the owner when main's `check` run is
    * red, produced no verdict, or never happened at all.

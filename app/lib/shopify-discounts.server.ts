@@ -1,8 +1,11 @@
+import { eq, and } from 'drizzle-orm'
 import { getPipelineSetting } from './feed-processor.server'
 import { sendOwnerEmail, escapeHtml } from './owner-alerts.server'
 import type { EscalationClassName } from './owner-escalation'
-import { addSuggestionNote } from './team.server'
+import { addSuggestionNote, listSuggestions } from './team.server'
 import { getProductsByHandles, findProductBySKU, adminGraphQL } from './shopify.server'
+import { db } from './db.server'
+import { suggestionLinks } from '../../db/schema'
 
 /**
  * Executor for `kind:'promo'` suggestion rows (the promo-manager brief format).
@@ -442,4 +445,80 @@ export async function executeApprovedPromo(
     code: parsed.code as string,
     ownerEmailed: sent.sent,
   }
+}
+
+// ─── Execution pass (ticket #8022) ─────────────────────────────────────────
+//
+// Was inlined in scripts/execute-approved-promos.ts::main() as the ONLY
+// caller of executeApprovedPromo/defaultPromoExecuteDeps, which meant this
+// pass only ran when the weekly strategy cloud routine invoked the script,
+// roughly once a week. executeApprovedPromo does not gate on "has the
+// promo's window opened" -- it embeds startsAt/endsAt into the Shopify
+// discountCodeBasicCreate mutation and lets Shopify enforce activation, so
+// running this pass daily (or more often) is safe and in fact desirable: an
+// approved promo whose window opens between weekly runs currently misses it
+// entirely (two consecutive live incidents, #6757/#6756 and predecessor
+// #5231). The fix is cadence, not logic, so the loop now lives here with one
+// implementation, callable from both the daily cron (server/cron.ts) and the
+// script (which stays a thin wrapper for the manual/weekly path).
+
+const PROMO_HANDLED_NOTE_RE = /discount code minted|REFUSED \(|mint FAILED/i
+
+async function promoAlreadyHandled(id: number): Promise<boolean> {
+  const links = await db
+    .select({ ref: suggestionLinks.ref })
+    .from(suggestionLinks)
+    .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'note')))
+  return links.some(l => PROMO_HANDLED_NOTE_RE.test(l.ref ?? ''))
+}
+
+export interface PromoExecutionPassResult {
+  total: number
+  minted: number
+  refused: number
+  skipped: number
+}
+
+/**
+ * Mint a Shopify discount code for every APPROVED, MAP-clean promo brief that
+ * has not already been handled. Valve-gated (via `deps.getSetting`) inside
+ * `executeApprovedPromo` itself, so with `promo_execute_enabled` off this
+ * still lists rows but mints nothing and adds no notes. Idempotent: a promo
+ * row that already carries an execution note (minted, refused, or failed) is
+ * skipped, so calling this from multiple schedules never double-mints or
+ * re-spams the owner.
+ */
+export async function runPromoExecutionPass(
+  deps: PromoExecuteDeps = defaultPromoExecuteDeps(),
+): Promise<PromoExecutionPassResult> {
+  const rows = await listSuggestions({
+    team: 'strategy',
+    kinds: ['promo'],
+    statuses: ['approved'],
+    orderBy: 'age',
+  })
+
+  let minted = 0
+  let refused = 0
+  let skipped = 0
+  for (const row of rows) {
+    if (await promoAlreadyHandled(row.id)) {
+      skipped++
+      console.log(`[promo-execute] #${row.id} already handled. Skipping.`)
+      continue
+    }
+    const res = await executeApprovedPromo({ id: row.id, suggestion: row.suggestion }, deps)
+    if (res.minted) {
+      minted++
+      console.log(`[promo-execute] #${row.id} minted ${res.code} (${res.discountId}).`)
+    } else if (res.refused) {
+      refused++
+      console.log(`[promo-execute] #${row.id} refused: ${res.reason}.`)
+    } else {
+      console.log(`[promo-execute] #${row.id} not minted: ${res.reason}.`)
+    }
+  }
+
+  console.log(`[promo-execute] done. minted=${minted} refused=${refused} skipped=${skipped} of ${rows.length}.`)
+  return { total: rows.length, minted, refused, skipped }
 }
