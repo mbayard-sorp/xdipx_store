@@ -1140,6 +1140,11 @@ export const importCandidates = pgTable('import_candidates', {
   // row (enrichBatchId is left set so it is neither re-submitted nor published).
   enrichAttempts:  integer('enrich_attempts').notNull().default(0),
   enrichFailedAt:  timestamp('enrich_failed_at'),
+  // Migration 096: approveAndImport() failure visibility (ticket #7983).
+  // Distinct from enrichAttempts/enrichFailedAt above, which gate the
+  // enrich stage, not approve/import.
+  importAttemptCount: integer('import_attempt_count').notNull().default(0),
+  importLastError:    text('import_last_error'),
 }, t => ({
   statusRunIdx:   index('idx_import_candidates_status_run').on(t.status, t.runDate),
   tierScoreIdx:   index('idx_import_candidates_tier_score').on(t.tier, t.dealScore),
