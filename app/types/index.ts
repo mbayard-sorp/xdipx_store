@@ -294,6 +294,15 @@ export interface Deal {
   createdAt?:              string
   /** Shopify Product.updatedAt. */
   updatedAt?:              string
+  /**
+   * Shopify Product.totalInventory: tracked stock summed across all variants.
+   * `null` when no variant on the product tracks inventory at all (never a
+   * stock signal in that case). A tracked product summing to 0 or less is an
+   * unambiguous "nothing left" signal even when a variant's own
+   * `availableForSale` reads true because its `inventoryPolicy` allows
+   * oversell (ticket #8025).
+   */
+  totalInventory?:         number | null
 }
 
 export interface Product {

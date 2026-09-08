@@ -64,6 +64,7 @@ import { VariantSelector, resolveVariant } from '~/components/store/VariantSelec
 import { CircleOptionSelector } from '~/components/store/CircleOptionSelector'
 import { ProductSummaryGrid } from '~/components/store/ProductSummaryGrid'
 import { getSwatchMap } from '~/lib/swatches.server'
+import { isPdpInStock } from '~/lib/pdp-stock'
 import { StockIndicator } from '~/components/store/StockIndicator'
 import { WaitlistButton }         from '~/components/store/WaitlistButton'
 import { SubscriptionSelector } from '~/components/store/SubscriptionSelector'
@@ -817,7 +818,13 @@ function ProductPage() {
       })
       .sort((a, b) => rank(a.name) - rank(b.name))[0]?.name
   })()
-  const inStock  = isDigital ? true : (selectedVariant?.availableForSale ?? (multiVariant ? false : deal.qty > 0))
+  const inStock  = isPdpInStock({
+    isDigital,
+    totalInventory: deal.totalInventory,
+    variantAvailableForSale: selectedVariant?.availableForSale,
+    multiVariant,
+    dealQty: deal.qty,
+  })
   // Stock count for the StockIndicator trust signal. Prefer the selected
   // variant's real count over the stale deal-level qty on multi-variant
   // products; fall back to deal.qty only when no variant is resolved yet.
