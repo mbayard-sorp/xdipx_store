@@ -264,7 +264,7 @@ extend freely — additions need a slug, problem, and target query):
 | 12 | what-helps-when-stress-kills-your-sex-drive | Stress and burnout flattening desire † | "stress has killed my sex drive what helps" |
 | 13 | what-to-do-when-medication-changes-your-libido | Medication side effects on libido and orgasm † | "my antidepressant lowered my libido what can I do" |
 | 14 | why-does-penetration-sometimes-hurt | Discomfort or pain with penetration † | "why does sex sometimes hurt and what helps" |
-| 15 | what-helps-when-you-finish-faster-than-you-want | Finishing sooner than wanted, and the pressure spiral † | "how to last longer in bed" |
+| 15 | what-helps-when-you-finish-faster-than-you-want | Finishing sooner than wanted, and the pressure spiral † **COVERED, do not write as-is** | "how to last longer in bed" |
 | 16 | what-to-do-when-orgasm-takes-longer-than-it-used-to | Orgasm taking longer with age or medication † | "why does it take longer to orgasm as I get older" |
 | 17 | can-a-vibrator-make-you-less-sensitive | The desensitization worry, and what the research says † | "can using a vibrator too much make you less sensitive" |
 | 18 | how-do-long-distance-couples-stay-intimate | Long-distance intimacy logistics | "how do couples stay intimate long distance" |
@@ -282,6 +282,20 @@ extend freely — additions need a slug, problem, and target query):
 | 30 | can-you-travel-with-a-sex-toy | Travel worry: security lines, packing, batteries | "can you bring a sex toy on a plane" |
 
 † = health-adjacent; the "worth seeing a clinician if…" line is mandatory.
+
+**Row 15 is already covered and needs a new angle before anyone writes it (content run 760, 2026-09-08).**
+The published podcast-notes post `/notebook/what-counts-as-premature-ejaculation` ("How Long Should It
+Take to Finish? What Premature Ejaculation Actually Means", 2026-08-27) already carries this row's whole
+resolution: what counts as premature ejaculation, the scorecard reframe, pelvic floor exercises,
+desensitizing sprays, the clinician hand-off, and the same three candidate embeds
+(`we-vibe-chorus-couples-vibrator`, `je-joue-ami-3-piece-silicone-kegel-set`,
+`promescent-climax-control-desensitizer-spray-60-sprays`). Writing row 15 to its current brief would
+cannibalise a live page rather than add one, and the fresh-language checker would fight it the whole
+way. Run 760 reordered past it to row 17 for exactly this reason. Either give row 15 a genuinely
+distinct angle that the podcast post does not already answer (the target query "how to last longer in
+bed" is high volume and still worth owning, so a dedicated page is the right instinct, but it needs its
+own substance), or strike it and let the podcast post hold the cluster. Do not write it to the brief as
+written.
 
 Bank composition: roughly a third health-adjacent, a third relationship and communication, a third
 practical confidence. Rows 1-10 are the original launch bank and seed the `real-talk` series in
