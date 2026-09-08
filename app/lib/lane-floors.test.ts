@@ -142,6 +142,70 @@ describe('the social gate reads only the per-platform valves (#7608 QA bounce)',
   })
 })
 
+describe('the social floor asks about a calendar day, not a rolling 24h window (#8026)', () => {
+  beforeEach(() => {
+    executeMock.mockReset()
+    getPipelineSettingMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [{ days: null }] })
+  })
+
+  it('queries a completed calendar day boundary, not a rolling 24h interval', async () => {
+    getPipelineSettingMock.mockImplementation(async (key: string) => {
+      if (key === 'instagram_autopublish_enabled') return 'true'
+      if (key === 'x_autopublish_enabled') return 'true'
+      return null
+    })
+    const dialect = new PgDialect()
+    let capturedSocialSql = ''
+    executeMock.mockImplementation(async (query: unknown) => {
+      const { sql: text } = dialect.sqlToQuery(query as Parameters<typeof dialect.sqlToQuery>[0])
+      // The instagram-reach floor's query also selects FROM social_posts, so
+      // match on the social rate floor's own distinctive shape rather than
+      // the bare table name.
+      if (text.includes('COUNT(*)::int AS n FROM social_posts')) {
+        capturedSocialSql = text
+        return { rows: [{ n: 0 }] }
+      }
+      return { rows: [{ days: null }] }
+    })
+
+    const { checkLaneFloors } = await import('~/lib/lane-floors.server')
+    const verdicts = await checkLaneFloors()
+    const social = verdicts.find(v => v.lane === 'social')!
+
+    // 2026-08-31 and 2026-09-05 both posted zero while a rolling 24h window
+    // (checked at 14:xx/22:xx) stayed unbreached, because a late post the
+    // evening before still counted inside the window at the next check.
+    // Asserting the query text proves the fix without a real database.
+    expect(capturedSocialSql).toContain("date_trunc('day'")
+    expect(capturedSocialSql).not.toContain('24 hours')
+    expect(social.measured).toBe(0)
+    expect(social.breached).toBe(true)
+    expect(social.detail).not.toContain('24h')
+  })
+
+  it('still breaches on a zero completed day even with gates open', async () => {
+    getPipelineSettingMock.mockImplementation(async (key: string) => {
+      if (key === 'instagram_autopublish_enabled') return 'true'
+      if (key === 'x_autopublish_enabled') return 'false'
+      return null
+    })
+    const dialect = new PgDialect()
+    executeMock.mockImplementation(async (query: unknown) => {
+      const { sql: text } = dialect.sqlToQuery(query as Parameters<typeof dialect.sqlToQuery>[0])
+      if (text.includes('social_posts')) return { rows: [{ n: 3 }] }
+      return { rows: [{ days: null }] }
+    })
+
+    const { checkLaneFloors } = await import('~/lib/lane-floors.server')
+    const verdicts = await checkLaneFloors()
+    const social = verdicts.find(v => v.lane === 'social')!
+
+    expect(social.measured).toBe(3)
+    expect(social.breached).toBe(false)
+  })
+})
+
 describe('instagram-reach (#8014: reach-per-post step-changed 6x with a flat follower base)', () => {
   beforeEach(() => {
     executeMock.mockReset()

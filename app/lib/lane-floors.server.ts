@@ -119,13 +119,18 @@ export const LANE_FLOORS: readonly LaneFloor[] = [
     team: 'social',
     kind: 'rate',
     threshold: 1,
-    describe: 'no social post published in 24h while the gates were open',
+    describe: 'the most recently completed UTC calendar day posted no social post while the gates were open',
     rationale:
       'The only lane regular enough for a rate floor: 18 of 30 days active, median 2 posts on '
       + 'an active day, with social_freq_* set to 2 per platform. The floor is 1 rather than '
       + 'the configured 2 because it should catch a stopped lane, not a slow one; the 12 quiet '
       + 'days in the window are the finding, and one deduped row that closes on the next post '
-      + 'reports them without becoming a daily alarm.',
+      + 'reports them without becoming a daily alarm. Measured as a completed CALENDAR day, not '
+      + 'a rolling 24h window (#8026): a rolling window checked twice daily at 14:xx/22:xx can '
+      + 'never see a completed day that took zero, because a late post the evening before still '
+      + 'counts inside the window at the next check. That is exactly how 2026-08-31 and '
+      + '2026-09-05 both posted zero while every run that day reported \'succeeded\' with this '
+      + 'floor reading unbreached.',
   },
   {
     lane: 'instagram-reach',
@@ -237,10 +242,21 @@ async function measure(f: LaneFloor): Promise<{ measured: number | null; breache
       if (!await socialGateOpen()) {
         return { measured: null, breached: null, detail: 'gates closed, the lane is not permitted to publish' }
       }
+      // A rolling 24h window can never see a completed CALENDAR day that took
+      // zero: a post late in the evening before still counts inside the
+      // window at the next check, which is how 2026-08-31 and 2026-09-05 both
+      // posted nothing while this floor read unbreached (#8026). Ask about the
+      // most recently completed UTC calendar day directly instead.
       const n = await countRows(sql`
         SELECT COUNT(*)::int AS n FROM social_posts
-         WHERE status = 'posted' AND posted_at > now() - interval '24 hours'`)
-      return { measured: n, breached: n < f.threshold, detail: `${n} post(s) in 24h with gates open, floor ${f.threshold}` }
+         WHERE status = 'posted'
+           AND posted_at >= date_trunc('day', now() - interval '1 day')
+           AND posted_at <  date_trunc('day', now())`)
+      return {
+        measured: n,
+        breached: n < f.threshold,
+        detail: `${n} post(s) on the most recently completed UTC day with gates open, floor ${f.threshold}`,
+      }
     }
     case 'instagram-reach': {
       const { n7, n28, mean7, mean28 } = await instagramReachWindows()
