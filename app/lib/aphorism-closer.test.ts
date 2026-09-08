@@ -70,6 +70,12 @@ describe('matchSentence — charter non-hits (must NOT flag)', () => {
     const c = matchSentence('This is the practical default for most people.')
     expect(c?.strength).toBe('borderline')
   })
+
+  it('returns borderline for an "as ADJ as ..." comparative predicate (#8230, run 760)', () => {
+    const c = matchSentence('That is as precise as the evidence gets, and it is precise enough to act on.')
+    expect(c?.strength).toBe('borderline')
+    expect(c?.subject).toBe('That')
+  })
 })
 
 describe('splitSentences', () => {
