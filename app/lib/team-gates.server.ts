@@ -248,6 +248,16 @@ Judge these, all BLOCK-class unless noted:
   product-free (no product in this post) caption, calibrate this call against the pinned
   product-free register precedents given below in the user turn (a fixed anchor set, not the
   general live-precedents list), and name which of those anchors you calibrated against.
+  **Two distinct, equally licensed shapes clear this bar for product-free content, not one
+  (ticket #8212).** The pinned "category" anchors build their charge through product-mechanics
+  detail (air pulse vs vacuum, motor counts, lube chemistry) even though no specific SKU is
+  tagged; the pinned "feeling-first" anchors build the identical 9-by-implication charge with
+  zero product or mechanism at all, naming the feeling (curious, wanting, permission) as plain
+  fact per docs/emma-voice.md's own worked exemplars (ticket #5862). A feeling-first caption is
+  never too tame merely because it does not read like a category anchor — that is comparing two
+  different, both-licensed shapes, not a register gap. Judge a feeling-first draft against the
+  feeling-first anchors; judge a category draft against the category anchors; never require one
+  shape to imitate the other's structure to pass.
 - Anything you cannot judge with confidence from what you were given (no campaign scheme, no
   cast-rotation history) is not a reason to pass — say so honestly in notes. It is also not a
   reason to REVISE: a REVISE names a specific fix in the draft, never a gap in your own inputs.
@@ -575,6 +585,24 @@ export function describePrecedents(captions: readonly string[]): string {
  * prevent). Add a post once it has cleared this gate on a single call
  * with no REVISE and stayed live; do not add a post that itself needed a
  * rework to clear register.
+ *
+ * **Named "category" anchors, ticket #8212.** All four posts below carry no
+ * tagged `shopifyProductId` (so `featuresProduct` reads false and this is the
+ * set the gate reaches for), but every one builds its register through
+ * product-mechanics detail: air-pulse-vs-vacuum, motor counts, IPX ratings,
+ * lube chemistry. That is a real, licensed way to be product-free and still
+ * charged, but it is not the only one. Row #182's own gate feedback (seven
+ * consecutive register-too-tame REVISEs, 2026-09-05) named the failure mode
+ * directly: a caption "modeled near-verbatim on the charter's own
+ * product-free exemplar lines" — the plain feeling-naming pattern
+ * `docs/emma-voice.md` documents under ticket #5862, with zero product
+ * mechanics — was judged too tame for not resembling this category set. Row
+ * #185's PASS feedback confirms the gate was in fact calibrating a
+ * feeling-first caption against "#142/#193" specifically, i.e. against this
+ * category set with no feeling-first anchor available at all. See
+ * `FEELING_FIRST_REGISTER_ANCHORS` below for the missing second shape, added
+ * to fix that gap; both sets are anchors for the *same* too-tame check, not
+ * competing ones.
  */
 export const PRODUCT_FREE_REGISTER_PRECEDENTS: readonly { id: number; text: string }[] = [
   {
@@ -640,21 +668,53 @@ export const PRODUCT_FREE_REGISTER_PRECEDENTS: readonly { id: number; text: stri
 ]
 
 /**
+ * The second, missing anchor shape for the register-too-tame check on
+ * product-free content, ticket #8212. `PRODUCT_FREE_REGISTER_PRECEDENTS`
+ * above is exclusively the "category" shape (product mechanics named, no SKU
+ * tagged); this is the "feeling-first" shape, where the register comes from
+ * naming a feeling (curious, wanting, permission) as plain fact, with zero
+ * product or mechanism at all.
+ *
+ * These four lines are quoted verbatim from `docs/emma-voice.md`'s own
+ * worked exemplars for exactly this pattern (ticket #5862, "Product-free
+ * resource posts reach 9-by-implication on wanting, permission, and
+ * curiosity, not on a product outcome"). They are charter-approved lines, not
+ * posted rows, so the "cleared this gate on a single call, no rework" rule
+ * on the category set above does not apply to them the same way — the
+ * charter itself is the standing approval. Update this list only by adding a
+ * new charter-cited line, never by rewriting or dropping an existing one.
+ */
+export const FEELING_FIRST_REGISTER_ANCHORS: readonly string[] = [
+  'Curious is not behind. It just means you have not gotten there yet.',
+  'Nobody is going to hand you permission. You get to just take it.',
+  'The wanting does not need an explanation. It never did.',
+  'You are allowed to want something and not know yet what it is.',
+]
+
+/**
  * The pinned register-calibration block for a product-free (`featuresProduct:
- * false`) post, ticket #7896. Distinct from `describePrecedents`: that block
- * is a live, platform-wide, newest-first query used for repetition context
- * and general REVISE calibration; this one is a fixed anchor set that never
- * changes call to call, used specifically to stop the register-too-tame
- * check from drifting on product-free content. Included in addition to, not
- * instead of, `describePrecedents`.
+ * false`) post, ticket #7896, extended with the feeling-first shape in
+ * ticket #8212. Distinct from `describePrecedents`: that block is a live,
+ * platform-wide, newest-first query used for repetition context and general
+ * REVISE calibration; this one is a fixed anchor set that never changes call
+ * to call, used specifically to stop the register-too-tame check from
+ * drifting on product-free content. Included in addition to, not instead of,
+ * `describePrecedents`.
  */
 export function describeRegisterPrecedents(): string {
   const head =
     'Pinned product-free (Slot A) register-calibration anchors (fixed set, does not change between ' +
     'calls or as new posts go live). These are the specific "clears register-too-tame" precedents for ' +
-    'product-free content named in the calibration rule above: read the caption against these, not ' +
-    'against whichever posts happen to come to mind, so the same caption gets the same verdict on every call.'
-  return `${head}\n${PRODUCT_FREE_REGISTER_PRECEDENTS.map(p => `- (#${p.id}) ${p.text}`).join('\n')}`
+    'product-free content named in the calibration rule above: read the caption against whichever group ' +
+    'matches its own shape, not against whichever posts happen to come to mind, so the same caption gets ' +
+    'the same verdict on every call.\n\n' +
+    'Group A, "category" (product mechanics named, no SKU tagged):'
+  const groupA = PRODUCT_FREE_REGISTER_PRECEDENTS.map(p => `- (#${p.id}) ${p.text}`).join('\n')
+  const groupBHead =
+    '\n\nGroup B, "feeling-first" (zero product or mechanism; the register comes from naming the feeling ' +
+    'itself as plain fact, per docs/emma-voice.md ticket #5862):'
+  const groupB = FEELING_FIRST_REGISTER_ANCHORS.map(line => `- "${line}"`).join('\n')
+  return `${head}\n${groupA}${groupBHead}\n${groupB}`
 }
 
 function toStoredFinding(f: GateFinding): PublishGateFinding {

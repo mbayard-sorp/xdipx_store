@@ -128,6 +128,40 @@ describe('publish-gate register-too-tame stability (ticket #7896)', () => {
   })
 })
 
+describe('publish-gate feeling-first register anchors (ticket #8212)', () => {
+  it('pins a fixed, non-empty feeling-first anchor set quoting the emma-voice #5862 exemplars', async () => {
+    const { FEELING_FIRST_REGISTER_ANCHORS } = await import('./team-gates.server')
+    expect(FEELING_FIRST_REGISTER_ANCHORS.length).toBeGreaterThan(0)
+    for (const line of FEELING_FIRST_REGISTER_ANCHORS) {
+      expect(typeof line).toBe('string')
+      expect(line.length).toBeGreaterThan(0)
+    }
+    expect(FEELING_FIRST_REGISTER_ANCHORS).toContain(
+      'Nobody is going to hand you permission. You get to just take it.',
+    )
+  })
+
+  it('describeRegisterPrecedents includes both the category and feeling-first anchor groups', async () => {
+    const { describeRegisterPrecedents, PRODUCT_FREE_REGISTER_PRECEDENTS, FEELING_FIRST_REGISTER_ANCHORS } =
+      await import('./team-gates.server')
+    const block = describeRegisterPrecedents()
+    expect(block).toContain('Group A, "category"')
+    expect(block).toContain('Group B, "feeling-first"')
+    for (const p of PRODUCT_FREE_REGISTER_PRECEDENTS) {
+      expect(block).toContain(`#${p.id}`)
+    }
+    for (const line of FEELING_FIRST_REGISTER_ANCHORS) {
+      expect(block).toContain(line)
+    }
+  })
+
+  it('the too-tame rule tells the gate the two shapes are equally licensed, not one imitating the other', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('Two distinct, equally licensed shapes')
+    expect(PUBLISH_GATE_SYSTEM).toContain('never require one\n  shape to imitate the other')
+  })
+})
+
 describe('verdictConsistencyCheck (ticket #8060)', () => {
   it('flags a BLOCK verdict against an all-pass findings array (the row 207 incident)', () => {
     const out = verdictConsistencyCheck(
