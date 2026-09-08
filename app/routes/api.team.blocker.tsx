@@ -4,8 +4,14 @@
  * /api/team/* route.
  *
  *   { op: 'file', dedupeKey, title, detail?, unblocks?, whereToGo?, category?,
- *     priority?, source?, sourceRef?, evidence?, verifyProbe?, verifyArg? }
+ *     priority?, source?, sourceRef?, evidence?, verifyProbe?, verifyArg?,
+ *     overrideNoProbeReason? }
  *       -> { id, created, reopened }
+ *
+ * A category that requires a probe (PROBE_REQUIRED_CATEGORIES: every category
+ * except console/decision) and has neither verifyProbe, a derivable one, nor
+ * overrideNoProbeReason is rejected with 400 (ticket #8028) rather than filed
+ * silently probe-less.
  *   { op: 'list', includeCleared? } -> { open: [...], cleared: [...] }
  *   { op: 'clear', id, note? }      -> { ok }
  *   { op: 'dismiss', id, note? }    -> { ok }
@@ -31,6 +37,8 @@ import {
   fileBlocker,
   listOpenBlockers,
   listRecentlyCleared,
+  probeGapReason,
+  suggestProbeFor,
   titleClaimsConfirmed,
   verifyBlockers,
 } from '~/lib/owner-blockers.server'
@@ -85,6 +93,22 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 },
       )
     }
+    const verifyProbe = str(b['verifyProbe'], 32) ?? null
+    const overrideNoProbeReason = str(b['overrideNoProbeReason'], 500) ?? null
+    // Ticket #8028: a row whose category needs a probe (BLOCKER_CATEGORIES
+    // other than console/decision) and has neither a probe nor a derivable
+    // one nor an explicit override is rejected with a clean 400 here, mirroring
+    // the CONFIRMED-title guard above -- fileBlocker enforces the same for
+    // direct callers, this just avoids surfacing it as a 500 to HTTP clients.
+    const resolvedCategory = category ?? 'other'
+    const derived = suggestProbeFor({ category: resolvedCategory, sourceRef: str(b['sourceRef'], 500) ?? null, verifyProbe })
+    const gap = probeGapReason({ category: resolvedCategory, verifyProbe: derived?.verifyProbe ?? verifyProbe })
+    if (gap && !overrideNoProbeReason) {
+      return new Response(
+        `Bad Request: ${gap}. Pass verifyProbe, or a non-empty overrideNoProbeReason explaining why none exists.`,
+        { status: 400 },
+      )
+    }
     const result = await fileBlocker({
       dedupeKey,
       title,
@@ -96,8 +120,9 @@ export async function action({ request }: ActionFunctionArgs) {
       source: str(b['source'], 32) ?? null,
       sourceRef: str(b['sourceRef'], 500) ?? null,
       evidence: str(b['evidence']) ?? null,
-      verifyProbe: str(b['verifyProbe'], 32) ?? null,
+      verifyProbe,
       verifyArg: str(b['verifyArg'], 200) ?? null,
+      overrideNoProbeReason,
     })
     return Response.json(result)
   }

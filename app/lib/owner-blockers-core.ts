@@ -64,6 +64,14 @@ export interface BlockerInput {
   evidence?: string | null
   verifyProbe?: string | null
   verifyArg?: string | null
+  /**
+   * Required (ticket #8028) when the row's category needs a probe
+   * (`PROBE_REQUIRED_CATEGORIES`) and none was given or derivable: a
+   * non-empty sentence naming why no probe exists for this row. `fileBlocker`
+   * rejects such a row outright with neither a probe nor this reason, rather
+   * than merely logging a warning nobody reads.
+   */
+  overrideNoProbeReason?: string | null
 }
 
 /**
@@ -173,9 +181,17 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
  * a trace something here can check, so a probe-less row in those categories is
  * a row that will be cleared by hand — which is what 15 of the 32 blockers
  * filed to date actually were.
+ *
+ * `other` joined this list in ticket #8028 (self-healing-automation tracker
+ * milestone a4-probes). It is the catch-all a filer reaches for when nothing
+ * else fits, which is exactly how a perfectly checkable row goes probe-less
+ * unnoticed: measured 2026-09-07, 9 open rows carried no probe under a
+ * non-`decision` category with nothing requiring one. `other` is not a third
+ * legitimate carve-out the way `console`/`decision` are — a row that genuinely
+ * has no observable completion state belongs in `decision`, not `other`.
  */
 export const PROBE_REQUIRED_CATEGORIES: readonly BlockerCategory[] = [
-  'migration', 'valve', 'credential', 'merge', 'execute',
+  'migration', 'valve', 'credential', 'merge', 'execute', 'other',
 ]
 
 /**
