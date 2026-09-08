@@ -35,6 +35,16 @@ export interface IndexNowChunkResult {
   error?: string
 }
 
+/**
+ * Batch id for a publish-time (non-bulk) submission, grouped by calendar day
+ * so the ledger can tell a publish-time ping apart from a bulk-pusher batch
+ * (`bulk-YYYY-MM-DD`, indexnow-bulk.server.ts) at a glance. Pure, mirroring
+ * `batchIdForDay` there.
+ */
+export function publishBatchId(d: Date = new Date()): string {
+  return `publish-${d.toISOString().slice(0, 10)}`
+}
+
 /** Absolutize a path and drop anything that is not a same-origin http(s) URL. */
 export function normalizeUrls(paths: string[], origin = SITE_ORIGIN): string[] {
   const out: string[] = []
@@ -117,12 +127,42 @@ export interface IndexNowSubmitResult {
 }
 
 /**
+ * Record a confirmed-pushed URL set to the shared `indexnow_pings` ledger.
+ * Lazily imports the DB client (same reason as indexnow-bulk.server.ts's
+ * `recordPushed`: keeps this module's pure helpers importable in a unit test
+ * with no DATABASE_URL) and never throws — a ledger write failing must not
+ * turn a successful IndexNow submission into a thrown error on the calling
+ * route. Without this write, publish-time pings (the daily blog/homepage/
+ * Sanity-webhook callers of `pingSearchEngines`) were invisible to
+ * `indexnow_pings`, which is the only table the `indexnow` lane floor reads
+ * (`lane-floors.server.ts`) and the only writer the bulk pusher checks for
+ * its suppression window.
+ */
+async function recordPinged(urls: string[], batchId: string, statusCode: number): Promise<void> {
+  if (urls.length === 0) return
+  try {
+    const { neon } = await import('@neondatabase/serverless')
+    const sql = neon(process.env['DATABASE_URL']!)
+    await sql`
+      INSERT INTO indexnow_pings (url, pinged_at, batch_id, engine, status_code)
+      SELECT u, now(), ${batchId}, 'indexnow', ${statusCode}
+      FROM unnest(${urls}::text[]) AS t(u)
+      ON CONFLICT (url) DO UPDATE SET
+        pinged_at   = EXCLUDED.pinged_at,
+        batch_id    = EXCLUDED.batch_id,
+        status_code = EXCLUDED.status_code`
+  } catch (err) {
+    console.error('[search-ping] indexnow_pings write failed (non-blocking):', err)
+  }
+}
+
+/**
  * Chunk + submit an arbitrary URL list. Respects SEARCH_PING_ENABLED and the
  * presence of INDEXNOW_API_KEY, and never throws.
  */
 export async function submitIndexNow(
   paths: string[],
-  opts: { origin?: string; chunkSize?: number } = {},
+  opts: { origin?: string; chunkSize?: number; batchId?: string } = {},
 ): Promise<IndexNowSubmitResult> {
   if (process.env['SEARCH_PING_ENABLED'] !== 'true') {
     return { skipped: 'SEARCH_PING_ENABLED is not true', submitted: 0, chunks: [] }
@@ -137,12 +177,16 @@ export async function submitIndexNow(
   const urlList = normalizeUrls(paths, origin)
   if (urlList.length === 0) return { skipped: 'no submittable URLs', submitted: 0, chunks: [] }
 
+  const batchId = opts.batchId ?? publishBatchId()
   const chunks: IndexNowChunkResult[] = []
   let submitted = 0
   for (const chunk of chunkUrls(urlList, opts.chunkSize)) {
     const result = await submitIndexNowChunk(chunk, { key, origin })
     chunks.push(result)
-    if (result.ok) submitted += chunk.length
+    if (result.ok) {
+      submitted += chunk.length
+      await recordPinged(chunk, batchId, result.status)
+    }
     console.log(`[search-ping] IndexNow ${result.status} for ${chunk.length} url(s)`)
     // A rate limit or a server error means stop pushing for this run; the
     // remaining chunks are simply retried on the next scheduled pass.

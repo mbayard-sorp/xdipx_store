@@ -94,7 +94,13 @@ export const LANE_FLOORS: readonly LaneFloor[] = [
       + 'A rate floor on that distribution is either always breached or never. Silence is the '
       + 'signal that matters, and the gaps between real pushes have been 3 to 15 days, so 7 '
       + 'sits above normal cadence and below the outage the audit measured (19 URLs in 9 days '
-      + 'while the sitemap grew 220 and indexed pages fell from 97 to 91).',
+      + 'while the sitemap grew 220 and indexed pages fell from 97 to 91). Measured against only '
+      + 'the bulk pusher\'s 14-day PING_SUPPRESSION_DAYS window (indexnow-bulk.server.ts), a '
+      + '7-day floor breached by construction for 7 of every 14 days once the stale-URL set '
+      + 'stabilized. Fixed by recording publish-time pings too (search-ping.server.ts\'s '
+      + '`submitIndexNow`, used by the daily blog/homepage/Sanity-webhook callers) into the same '
+      + '`indexnow_pings` ledger this floor reads, so the 7-day bound now measures all submission '
+      + 'activity, not only bulk-batch recency.',
   },
   {
     lane: 'outreach',
