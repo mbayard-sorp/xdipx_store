@@ -252,11 +252,15 @@ Judge these, all BLOCK-class unless noted:
   cast-rotation history) is not a reason to pass — say so honestly in notes. It is also not a
   reason to REVISE: a REVISE names a specific fix in the draft, never a gap in your own inputs.
 
-Return exactly one JSON object, no prose before or after it, no markdown code fence:
+Return exactly one JSON object, no prose before or after it, no markdown code fence. List every
+finding and write your notes BEFORE deciding the verdict field: work through the checks first, let
+notes state your reasoned conclusion, and only then write verdict to match that conclusion exactly.
+Never decide verdict first and rationalize around it afterward, and never let verdict contradict the
+harshest finding you listed or the conclusion your own notes reach.
 
-{"verdict": "PASS" | "REVISE" | "BLOCK" | "HOLD",
- "notes": "<what you looked at and what you found, at least two full sentences>",
- "findings": [{"check": "<short-slug>", "verdict": "pass|revise|block|hold", "note": "<detail>"}]}
+{"findings": [{"check": "<short-slug>", "verdict": "pass|revise|block|hold", "note": "<detail>"}],
+ "notes": "<what you looked at and what you found, at least two full sentences, ending with your reasoned conclusion>",
+ "verdict": "PASS" | "REVISE" | "BLOCK" | "HOLD"}
 
 HOLD is reserved for genuine account-risk judgment calls this instruction set does not cover —
 never reach for it when BLOCK would do, and never to avoid a hard call.
@@ -273,6 +277,81 @@ aftermath and anticipation, and product against skin; everything it lists as a h
 BLOCK regardless of how good the frame is:
 
 ${IMAGERY_CEILING_EXCERPT}`
+
+/** One publish-gate model call: request, token logging, max_tokens diagnostics, and parsing. */
+async function callPublishGateModel(
+  postId: number,
+  content: Anthropic.ContentBlockParam[],
+): Promise<ReturnType<typeof parsePublishGateModelOutput>> {
+  const msg = await client.messages.create({
+    model: SONNET,
+    max_tokens: 2048,
+    // Pinned at 0 (ticket #7896): the same caption against the same
+    // precedent set must return the same verdict. Rows #182/#185 showed the
+    // opposite at the SDK default temperature — identical input, three
+    // calls, PASS then REVISE then REVISE, citing different precedents each
+    // time. This is a judgment task with a fail-closed contract, not one
+    // where call-to-call variety is a feature.
+    temperature: 0,
+    system: PUBLISH_GATE_SYSTEM,
+    messages: [{ role: 'user', content }],
+  })
+  void logTokens('publish-gate', msg.usage)
+  const block = msg.content[0]
+  if (block?.type !== 'text') throw new Error('runPublishGateCheck: unexpected Claude response type')
+  if (msg.stop_reason === 'max_tokens') {
+    // #7148: a response cut off by the token cap fails JSON.parse and
+    // fails closed to BLOCK by design (extractJson below), which then reads
+    // exactly like a genuine adversarial finding unless this is logged
+    // distinctly. 1024 was measured too tight for a full findings array plus
+    // a multi-sentence notes field on an image-heavy post; raised to 2048 to
+    // make this rarer, but log it whenever it still happens so a run of BLOCKs
+    // caused by truncation is diagnosable instead of read as real findings.
+    console.error(
+      `[publish-gate] response for post ${postId} hit max_tokens ` +
+        `(${msg.usage.output_tokens} output tokens); the JSON may be truncated ` +
+        'and will fail-closed to BLOCK if so',
+    )
+  }
+  return parsePublishGateModelOutput(block.text)
+}
+
+/**
+ * Cheap internal-consistency check between the model's structured `verdict`
+ * and its own findings array / notes conclusion (ticket #8060). Exported so
+ * `runPublishGateCheck`'s retry decision is unit-testable directly, the same
+ * way `parsePublishGateModelOutput` is.
+ */
+export function verdictConsistencyCheck(
+  verdict: 'PASS' | 'REVISE' | 'BLOCK' | 'HOLD',
+  findings: readonly PublishGateFinding[],
+  notes: string,
+): { consistent: boolean; reason?: string } {
+  const impliedByFindings = findings.length
+    ? findings.some(f => f.verdict === 'block')
+      ? 'BLOCK'
+      : findings.some(f => f.verdict === 'hold')
+        ? 'HOLD'
+        : findings.some(f => f.verdict === 'revise')
+          ? 'REVISE'
+          : 'PASS'
+    : null
+  if (impliedByFindings && impliedByFindings !== verdict) {
+    return {
+      consistent: false,
+      reason: `structured verdict "${verdict}" disagrees with the findings array, which implies "${impliedByFindings}"`,
+    }
+  }
+  const finalVerdictMatch = notes.match(/final verdict:?\s*["']?(pass|revise|block|hold)\b/i)
+  const stated = finalVerdictMatch?.[1]?.toUpperCase()
+  if (stated && stated !== verdict) {
+    return {
+      consistent: false,
+      reason: `structured verdict "${verdict}" disagrees with the notes' own conclusion ("${finalVerdictMatch?.[0]}")`,
+    }
+  }
+  return { consistent: true }
+}
 
 /**
  * Everything this function does NOT do, stated so the gap is visible rather
@@ -371,37 +450,43 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
     ...media.map((url): Anthropic.ContentBlockParam => ({ type: 'image', source: { type: 'url', url } })),
   ]
 
-  const msg = await client.messages.create({
-    model: SONNET,
-    max_tokens: 2048,
-    // Pinned at 0 (ticket #7896): the same caption against the same
-    // precedent set must return the same verdict. Rows #182/#185 showed the
-    // opposite at the SDK default temperature — identical input, three
-    // calls, PASS then REVISE then REVISE, citing different precedents each
-    // time. This is a judgment task with a fail-closed contract, not one
-    // where call-to-call variety is a feature.
-    temperature: 0,
-    system: PUBLISH_GATE_SYSTEM,
-    messages: [{ role: 'user', content }],
-  })
-  void logTokens('publish-gate', msg.usage)
-  const block = msg.content[0]
-  if (block?.type !== 'text') throw new Error('runPublishGateCheck: unexpected Claude response type')
-  if (msg.stop_reason === 'max_tokens') {
-    // #7148: a response cut off by the token cap fails JSON.parse and
-    // fails closed to BLOCK by design (extractJson below), which then reads
-    // exactly like a genuine adversarial finding unless this is logged
-    // distinctly. 1024 was measured too tight for a full findings array plus
-    // a multi-sentence notes field on an image-heavy post; raised to 2048 to
-    // make this rarer, but log it whenever it still happens so a run of BLOCKs
-    // caused by truncation is diagnosable instead of read as real findings.
-    console.error(
-      `[publish-gate] response for post ${postId} hit max_tokens ` +
-        `(${msg.usage.output_tokens} output tokens); the JSON may be truncated ` +
-        'and will fail-closed to BLOCK if so',
-    )
+  let modelResult = await callPublishGateModel(postId, content)
+
+  // #8060: a model can talk itself from an initial structured verdict to a
+  // different conclusion in its own findings/notes without updating the
+  // verdict field to match — self-contradictory, not merely ambiguous. The
+  // original incident (row 207) had verdict:"BLOCK" against an all-pass
+  // findings array and a notes narrative ending "Final verdict: PASS.",
+  // which the parser correctly failed closed on, but that quietly spent the
+  // day's last image-generation credit on a rejection the model's own
+  // reasoning disagreed with. Detect that mismatch and retry once, naming
+  // the contradiction, rather than trusting the first confused answer. A
+  // blind identical retry would not help here: the call is pinned at
+  // temperature 0 (#7896) specifically so the same input returns the same
+  // verdict, so the retry must give the model new information (the
+  // contradiction itself) to have any chance of a different, clean answer.
+  const consistency = verdictConsistencyCheck(modelResult.verdict, modelResult.findings, modelResult.notes)
+  if (!consistency.consistent) {
+    console.error(`[publish-gate] post ${postId}: verdict/narrative mismatch on first pass (${consistency.reason}); retrying once`)
+    const retryContent: Anthropic.ContentBlockParam[] = [
+      ...content,
+      {
+        type: 'text',
+        text:
+          `Your previous response was internally inconsistent: ${consistency.reason}. Re-examine the ` +
+          'same post from scratch and return one clean JSON object where the verdict field matches ' +
+          "your own findings and notes exactly. Do not reference this correction in your notes.",
+      },
+    ]
+    modelResult = await callPublishGateModel(postId, retryContent)
+    const retryConsistency = verdictConsistencyCheck(modelResult.verdict, modelResult.findings, modelResult.notes)
+    if (!retryConsistency.consistent) {
+      console.error(
+        `[publish-gate] post ${postId}: verdict/narrative mismatch persisted after retry (${retryConsistency.reason}); ` +
+          'using the retry\'s structured verdict field as the fail-closed result',
+      )
+    }
   }
-  const modelResult = parsePublishGateModelOutput(block.text)
 
   return {
     id: postId,
