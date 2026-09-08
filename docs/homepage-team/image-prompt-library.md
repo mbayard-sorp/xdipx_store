@@ -995,6 +995,40 @@ total (21 images), still trivial against the daily content-team budget.
     ("FemmeFunn Ultra Bullet Massager" and "a compact bullet just over four inches long"), so
     `heroNamesAnyProduct()` passes.
 
+- `cast: maya` + ROMP Kiss Clitoral Suction Vibrator Pink/Coral (`romp-kiss-pink-coral`), "Can a
+  Vibrator Make You Less Sensitive Over Time?" (`real-talk`, † health-adjacent, content run 760).
+  Gesture per the "Is this normal? / Is it just me?" row: product held up in one hand at eye
+  level, head tilted at it, brow raised, free hand palm-up asking the room. **Casting:**
+  brief-directed `maya` (`emotionTags` playful/comforted/welcomed/tender — no exact "worried"
+  tag on the roster, same gap already logged against `jade`/`sofia` above; the caller's rotation
+  check against the last five named human heroes — Diego 09-04, a woman in her fifties 09-03, a
+  woman in her early 30s 09-01, Sofia 08-28, a man in his early 30s 08-27 — cleared `maya` of the
+  no-repeat-within-5 rule and was trusted rather than re-derived). No `editorialPhoto` on
+  `castMember.maya` (only `referencePhoto`, a tight portrait crop), so `editorialPhoto ??
+  referencePhoto` fell back to `referencePhoto` per ticket #2751; composited with explicit
+  wardrobe override ("fully clothed in a soft plain casual top, no jewelry") and **camera
+  distance stated explicitly** ("waist-up framing with room on both sides of the subject") per
+  the Emma guide-mode / jade / marcus / vivian precedent. **† health-adjacent constraints
+  applied:** no levity license, no scale exaggeration, sincere realistic staging only, explicit
+  "no comic register, no punchline expression, no oversized prop, no scale exaggeration"
+  negatives added to the standard scaffold negatives. One round, 2 candidates via
+  `composeSceneFrame` (Atlas `atlas/seedream-4.5-edit` one-stage composite, `landscape_4_3`).
+  Candidate 1: plain white/warm-neutral wall and window light (ground-lock compliant paper tone),
+  waist-up framing with room on both sides, product held faithfully at real-world scale with the
+  reference's pink-to-orange-to-yellow gradient body and pink fin intact, brow furrowed and lips
+  pressed in sincere worried questioning (not amused, not grinning), free hand open palm-up, no
+  uncanny artifacts, five fingers each hand → picked,
+  `image-d1a32e4470f69868b0f1cc319bcc93c04cad4382-1200x900-png`. Candidate 2 rejected: background
+  rendered as a saturated full-intensity coral/red wall (not the pale coral-soft `#FFE6DD` tint
+  the ground lock requires) — the same saturated-color-instead-of-soft-tint failure already
+  logged against the `jade`/Le Wand Mini Micro entry above. **Checker note:** the catalog title
+  ("Clitoral Suction ROMP Kiss Vibrator Pink/Coral") strips to six distinctive tokens (`clitoral`,
+  `suction`, `romp`, `kiss`, `pink`, `coral` — `vibrator` is generic/stripped), all six required
+  present verbatim for the multi-token match path; the generation prompt already named the
+  product this way ("the ROMP Kiss clitoral suction vibrator in pink and coral"), so no
+  alt-text patch was needed — verified green via `check-hero-embed-match.ts --slug
+  can-a-vibrator-make-you-less-sensitive` on the first upload.
+
 ### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
 
 For owned surfaces only: homepage editorial tiles, §0-P surreal-option blog heroes (never on †
