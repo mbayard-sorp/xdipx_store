@@ -6,7 +6,7 @@
  * response must never read as a PASS.
  */
 import { describe, expect, it } from 'vitest'
-import { parsePublishGateModelOutput, parseVoiceGateModelOutput } from './team-gates.server'
+import { parsePublishGateModelOutput, parseVoiceGateModelOutput, verdictConsistencyCheck } from './team-gates.server'
 
 describe('parseVoiceGateModelOutput', () => {
   it('parses a clean PASS', () => {
@@ -125,6 +125,47 @@ describe('publish-gate register-too-tame stability (ticket #7896)', () => {
     const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
     expect(PUBLISH_GATE_SYSTEM).toContain('calibrate this call against the pinned')
     expect(PUBLISH_GATE_SYSTEM).toContain('product-free register precedents')
+  })
+})
+
+describe('verdictConsistencyCheck (ticket #8060)', () => {
+  it('flags a BLOCK verdict against an all-pass findings array (the row 207 incident)', () => {
+    const out = verdictConsistencyCheck(
+      'BLOCK',
+      [{ check: 'withholding-test', verdict: 'pass' }, { check: 'age-ambiguity', verdict: 'pass' }],
+      'Re-derived every check and each one clears. Final verdict: PASS.',
+    )
+    expect(out.consistent).toBe(false)
+    expect(out.reason).toContain('findings array, which implies "PASS"')
+  })
+
+  it('flags a verdict that disagrees with an explicit "Final verdict:" conclusion even with no findings', () => {
+    const out = verdictConsistencyCheck('REVISE', [], 'Everything checks out. Final verdict: PASS.')
+    expect(out.consistent).toBe(false)
+    expect(out.reason).toContain('notes\' own conclusion')
+  })
+
+  it('passes a BLOCK verdict that matches a blocking finding', () => {
+    const out = verdictConsistencyCheck(
+      'BLOCK',
+      [{ check: 'age-ambiguity', verdict: 'block', note: 'ambiguous age' }],
+      'One BLOCK-class finding on age ambiguity.',
+    )
+    expect(out.consistent).toBe(true)
+  })
+
+  it('passes a clean PASS with all-pass findings and no contradicting notes', () => {
+    const out = verdictConsistencyCheck('PASS', [{ check: 'withholding-test', verdict: 'pass' }], 'Clears every check.')
+    expect(out.consistent).toBe(true)
+  })
+
+  it('does not misfire on a REVISE verdict backed by a revise-only findings array', () => {
+    const out = verdictConsistencyCheck(
+      'REVISE',
+      [{ check: 'too-tame', verdict: 'revise' }, { check: 'withholding-test', verdict: 'pass' }],
+      'Register reads too tame against the live precedents.',
+    )
+    expect(out.consistent).toBe(true)
   })
 })
 
