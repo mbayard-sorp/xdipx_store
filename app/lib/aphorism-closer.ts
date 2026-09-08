@@ -129,6 +129,13 @@ export function matchSentence(rawSentence: string): AphorismCandidate | null {
   if (['the', 'a', 'an'].includes(predicateWords[0]!)) {
     return { sentence, subject: subjectRaw, strength: 'borderline' }
   }
+  // "as ADJ as ..." comparative predicate ("That is as precise as the evidence
+  // gets"): a defining-clause shape the RELATIVE_WORDS/article checks above
+  // miss entirely (#8230). Condition 3 is still a semantic judgment, so this
+  // is borderline, same as the bare-predicate-nominal case above, not strong.
+  if (predicateWords[0] === 'as' && predicateWords[2] === 'as') {
+    return { sentence, subject: subjectRaw, strength: 'borderline' }
+  }
   // "This is quiet." — predicate adjective, no defining clause: not a candidate.
   return null
 }
