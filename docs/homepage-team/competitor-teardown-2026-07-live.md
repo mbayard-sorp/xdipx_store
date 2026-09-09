@@ -633,3 +633,252 @@ remains a candidate for an existing slot pending `homepage-ia` sign-off (see the
 because Nº 07 is now occupied by the shipped Curiosity Shelf). The two-link `/discover`
 cap and the retired-route denylist are untouched. No `app/` code and no Sanity schema
 changed this run.
+
+---
+
+## Delta — 2026-09-09 (Routine B design cycle, run 778)
+
+**Captures (real, this run; egress partial, and the capture route changed):**
+`unboundbabes.com`, `www.glossier.com`, `dame.com`, `www.sextoy.com` and
+`spectrumboutique.com` were fetched successfully and are the only five sites
+reported below. Two capture notes, because they matter for reproducing this:
+
+- **WebFetch was unusable this run.** Every WebFetch attempt returned HTTP 429
+  across four different hosts (`dame.com`, `www.aesop.com`, `www.glossier.com`,
+  `unboundbabes.com`), including on serial retry. Since the 429 followed the
+  tool rather than the host, this is the fetch tool's own upstream rate limit,
+  not a site block. The proxy reported healthy (`__agentproxy/status`:
+  `enabled: true`, no relay failures against these hosts). Captures were taken
+  with `curl` through the same proxy instead and parsed locally.
+- **Refusals, recorded as results:** `www.aesop.com` HTTP 403 (bot wall, first
+  time this reference has been attempted and refused — the doctrine §7 bench
+  lists it, so log it as unreachable rather than as prior knowledge);
+  `www.arket.com` HTTP 403 (bot wall, first attempt); `lovehoney.com` HTTP 403
+  (403 again, second consecutive cycle after its 2026-08-26 success — treat the
+  403 as its normal state now); `maude.com` connection reset by peer (curl 35 —
+  a *different* failure mode from the 2026-08-26 GoDaddy-parked redirect, so the
+  domain is doing something new, still not reachable); `vush.com` CONNECT tunnel
+  failed 502 (unreachable for the second consecutive cycle, previously ETIMEOUT
+  DNS).
+- **`spectrumboutique.com` resolved 200 for the first time in three cycles**
+  (403 on 2026-08-26 and 2026-09-02). Reported below on real bytes.
+
+Nothing is reported for Aesop, Arket, Lovehoney, Maude or Vush beyond the
+refusal itself, and no competitor copy is quoted from memory. The standing
+16-capture baseline is unchanged.
+
+**The lens this run:** the homepage's **discovery/navigation layer** — the
+category/aisle entry tier, specifically. The occasion is a live defect: the
+panel deck (`app/components/home/panels/PanelDeck.tsx`, `aria-label="Browse by
+category"`, H2 "Pick your door.") is silently dropping out of the served HTML —
+zero `data-panel` attributes on the live page — while the Nº 05 wayfinder
+mosaic ("Find the door that feels like yours.") renders and is doing
+door-shaped work on its own. This run fixes the drop in code, which raises the
+design question the teardown had to answer with evidence: **when the deck comes
+back, the page carries two door layers. Is that a defect, and which layer owns
+the job?**
+
+### The finding: two door layers is normal. Two door layers with the same *vocabulary* is the defect.
+
+Counting only **in-page** doors (header/mega-nav excluded), across five real
+captures:
+
+| Site | In-page door layers | Doors | Where | Labelled by |
+|---|---|---|---|---|
+| Unbound Babes | **0** | 0 | — (taxonomy lives entirely in the header nav) | n/a |
+| Dame | **1** | 2 | late, *after* the brand story | taxonomy, with a concrete-contents subtitle |
+| Glossier | **2** | 2 + 5 | adjacent, both below a product row | layer 1 = named edits, layer 2 = taxonomy |
+| sextoy.com | **3** | 5 + 4 + 9 | spread down the page | audience, then curation, then hardware taxonomy |
+| Spectrum Boutique | **2** | 4 + 17 *(+ "Load More")* | promo carousel at top, chip rail low | promo codes, then hardware taxonomy |
+
+The two references the doctrine holds up for restraint (Glossier by name in §7;
+Dame as the category-adjacent bench entry) sit at opposite ends of the
+one-vs-two question, so "how many layers" is plainly not the governing
+variable. What separates the good ones from the bloated ones is whether each
+layer **names its own job in its own vocabulary**.
+
+- **Glossier — two layers, adjacent, zero collision.** Two distinct Shopify
+  sections run back to back: a `two_column` module of exactly **2** large 4:3
+  image tiles labelled with named edits — "Back to School Essentials"
+  (`/collections/back-to-school-edit`) and "I ❤️ NY" (`/pages/i-love-ny`) —
+  immediately followed by a `visual_links` fixed strip of exactly **5** small
+  image+label tiles that are pure taxonomy: "Fragrance", "Makeup", "Lip",
+  "Skincare", "Sets" (all `/collections/*`). The two layers touch and still
+  never read as duplicates, because one is answering *"what's the store excited
+  about right now"* and the other *"which aisle"*. Neither layer carries a
+  section heading at all — the `two-column__header` is rendered empty. The tile
+  frames are fixed-ratio wrappers (`ir--four-three`, `ir--visual-links-image`),
+  which is the same zero-CLS discipline our doctrine §8 mandates.
+- **Dame — one layer, only 2 doors, deliberately late.** The entire in-page
+  door tier is a 2-up `experts-grid`: "Sexual Health" (`/collections/sexual-health`)
+  and "Intimate Essentials" (`/collections/affordable-sex-toys`). It sits *after*
+  the bestseller grid, press carousel, trust strip and brand story. Each card
+  carries a lowercase subtitle naming the concrete contents above the aisle name
+  — "Sti kits" over "Sexual Health", "hand + vibe cleaner" over "Intimate
+  Essentials". Taxonomy is pushed entirely into the header nav (Vibrators /
+  Intimate Essentials / Sexual Health / Home Goods / Accessories), which also
+  carries the two intent doors "For Solo Play" and "For Couples". Directly
+  beneath the 2-up sits the single homepage guidance moment: "Not sure which toy
+  is right for you? Find Your Vibe" → "Take Our Quiz".
+- **Unbound Babes — zero in-page doors, one intent door.** The homepage body has
+  no shop-by-category grid at all. All nine aisles ("Shop All", "Best Sellers",
+  "Vibrators", "Dildos & Plugs", "Lubes & Liquids", "Accessories", "Sets &
+  Gifts", "Body Care ☁️", "Under $40") live only in the header. The only
+  body-level wayfinding is intent-shaped: the hero line "Not sure where to
+  start? We've got you covered." with "Take Product Quiz", and a "Where do I
+  start?" link sitting *inside* the "TRAVEL BEST SELLERS" product band.
+  **Delta against 2026-09-02:** the two "End of Summer Sale" 25%-off banners
+  recorded last cycle are gone; above the fold this week is "SHOP SQUISH" and
+  "TRAVEL BEST SELLERS". Their standing nav curiosity, a named "Vibe Matrix"
+  comparison page, is still there.
+- **sextoy.com — three layers, and it works structurally even though the volume
+  is bloat.** Each layer carries its own section header AND its own kicker
+  vocabulary, so nothing collides: "Shop by category / Adult Toy Top Categories"
+  (5 audience doors, kickers "Best sellers", "Easy start", "Partner play", "Top
+  picks"); "Curated collections / Picks from the SexToy Team" (4 editorial
+  doors, kickers "Staff pick", "Curated pick", "In-house favorites", "Trending
+  now"); "More ways to shop / Shop by sex toy category" (9 hardware doors,
+  kickers "Fresh picks", "Core category", "Popular choice", "Exploration",
+  "Best sellers", "Classic category", "Targeted play", "Power picks", "Deals").
+  Every door also carries a one-sentence description of what is behind it. 18
+  in-page doors is too many and the labels are SEO-shaped, but the *architecture*
+  — layer = named job = own kicker vocabulary — is the cleanest statement of the
+  rule in the whole capture set.
+- **Spectrum Boutique — the anti-pattern, now captured rather than assumed.**
+  Above the fold is a rotating carousel of four discount slides, each of which is
+  itself a door ("Tantus Sale!" → "Shop Tantus", "Rise & Grind" → "Shop
+  Grinders", "Get Dressed Up" → "Shop Apparel", "Hit the Books" → "Shop Books"),
+  every one gated on a promo code. Lower down, a "Shop our Favorites" chip rail
+  of 17 identical taxonomy chips ("Shop All", "Shop Vibrators", "Shop Dildos",
+  "Shop Butt", … "Shop Apparel") **followed by a "Load More" button** — an
+  unbounded door layer. Nobody is guiding; the second layer is a sitemap wearing
+  tiles.
+
+**The cross-site rule this produces, stated so it can be applied:** a homepage
+may carry more than one door layer, but every layer must answer a *different
+question*, and the label vocabularies must not overlap. Glossier: edits vs
+aisles. sextoy.com: who you are vs what we like vs what it is. Spectrum breaks
+it by making both layers "browse the catalogue", and pays for it with 21 doors
+and a Load More.
+
+**Applied to our page, the collision is exact and it is in the copy.** The deck
+says "Pick your **door**." The wayfinder says "Find the **door** that feels like
+yours." Same noun, same metaphor, one screen apart. On the evidence above that
+is the one thing none of the five captured sites does — not even the two that
+run three layers and 18 doors.
+
+### Adopted
+
+1. **Two layers stay, differentiated by job — deck = browse, wayfinder = begin.**
+   Glossier is the direct precedent and it is already on the doctrine §7 bench.
+   The deck already declares the browse job in its accessibility name
+   (`aria-label="Browse by category"`) and is the only layer that can carry
+   variable rows; the wayfinder is a fixed 3-tile intent set ("New here?", "For
+   two", "Best sellers") plus the single `/discover` promo, which is the
+   first-step job. Nothing structural has to move for that split to be true. The
+   thing that has to move is the words.
+2. **The deck surrenders the "door" metaphor; the wayfinder keeps it.** The
+   wayfinder is the intent layer, and "the door that feels like yours" is an
+   intent sentence — it belongs there. The deck's H2 becomes a browse sentence
+   matching what it already says to a screen reader. Copy goes to
+   `emma-copywriter` gated by `emma-empathy-reviewer`; this teardown does not
+   write the final string, it fixes the job assignment. Content-level change to
+   the deck's `heading`/`eyebrow`, no schema and no component contract touched.
+3. **Cap the deck at content level: 8 doors, hard.** Doctrine has no door budget
+   and the component is deliberately unbounded ("nothing in this component may
+   assume a row count"), which is correct engineering and a merchandising hazard
+   — Spectrum's chip rail is what unbounded looks like at scale. The two
+   references we actually admire run 7 (Glossier, 2+5) and 2 (Dame) in-page
+   doors. 8 is the ceiling that keeps us inside that band with one row of slack,
+   and it is enforced by the merchandiser's editorial judgment in Sanity, not by
+   a code constant.
+4. **Move the deck below the anchor grid rather than directly under the
+   headliner.** Not one captured site puts its taxonomy tier immediately after
+   the hero: Glossier puts a product row first, Dame puts four sections first,
+   Unbound never renders one, and the two that lead with browse-y density
+   (Spectrum's promo carousel, sextoy's dual hero CTAs) are the two we reject on
+   every other axis. Letting one finite set of real products land before the
+   aisle wall matches both admired references. This is a slot reorder inside the
+   locked shell via the existing `panelDeckSection` layout placement — content,
+   not code, and `resolveBandOrder` already guarantees the hero stays first so
+   the LCP is untouched either way.
+5. **Dame's concrete-contents subtitle, adopted for deck panels.** "Sti kits"
+   above "Sexual Health" tells you what is behind the door in product nouns
+   before you commit a tap. sextoy.com does the same thing at sentence length on
+   all 18 of its doors. Ours currently label and stop. A short contents line per
+   deck panel is a content-level fill of fields the panel components already
+   render, and it is the cheapest legibility win in this teardown.
+
+### Rejected, with reasons, so they are not re-proposed
+
+- **Deleting one of the two layers.** The tempting simple fix, and the evidence
+  says no: the layers do different jobs, and the field's own two-layer example is
+  the reference we most admire. Deleting the deck would also delete the only
+  variable-row merchandising surface the homepage has. The defect is vocabulary
+  collision, not layer count.
+- **Promoting the wayfinder to the browse layer (or vice versa).** The wayfinder
+  is a fixed 3-tile block with a `/discover` promo slot and a caption-card
+  geometry built for intent language; making it carry the catalogue would either
+  break the 3-tile discipline or reimpose the two-link `/discover` cap on a
+  browse surface. Rejected as fighting both components' shapes.
+- **A "Load More" or otherwise unbounded door layer (Spectrum).** Standing
+  refusal, now with a capture behind it. A door layer that needs pagination has
+  stopped being a door layer.
+- **Promo-code doors as the top-of-page entry tier (Spectrum's four-slide
+  carousel).** Urgency theatre plus code-gating, banned by the charter twice
+  over. No change.
+- **SEO-shaped door labels ("Sex Toys for Women", "Adult Toys With Discreet
+  Shipping").** sextoy.com's door *architecture* is adopted in part; its label
+  register is rejected. Our doors are read by a person deciding where to start,
+  not by a crawler.
+- **Pushing taxonomy entirely into the header nav (Dame, Unbound).** Genuinely
+  tempting and genuinely the field norm — and rejected for us on a specific
+  asymmetry: both of them sell a small own-brand line where the header can hold
+  the whole catalogue, while we index thousands of products across a curated
+  storefront. Their nav can be complete; ours cannot. Logged rather than
+  discarded, because if the nav ever gains a full mega-menu this decision should
+  be re-opened.
+- **A quiz-shaped guidance moment attached to the door layer (Dame's "Not sure
+  which toy is right for you?" directly under its 2-up).** The *adjacency* is
+  right and we already have it — the wayfinder's `/discover` promo does this job
+  — but adding a second entry point to `/discover` from the deck would breach the
+  two-link cap. Rejected on the fence, not on taste.
+- **Dropping the deck's section heading entirely (Glossier renders an empty
+  `two-column__header`).** Works for a brand whose tiles are self-evidently
+  campaign art. Ours is a numbered editorial shell where every band carries a
+  numeral and a kicker; a headless band would read as a rendering failure, which
+  is precisely the failure state we are fixing this run.
+
+### The one thing we will do this week that none of them do
+
+Give the two door layers **explicitly different questions in the visible copy**
+— one asks *where do you want to begin*, the other asks *what do you want to
+browse* — instead of leaving the reader to infer the difference from tile size.
+Glossier gets away with silent differentiation because its two layers look
+nothing alike; sextoy.com differentiates with kicker vocabulary but says the
+same SEO sentence in every label; Spectrum does not differentiate at all. None
+of the five states the split in words. We will, because our shell is numbered
+and editorial and can afford a sentence where a fashion-beauty grid cannot.
+
+### IA fence check
+
+Nothing here proposes a new section type, a new URL, or a twelfth band. Every
+adopted item is content-level inside the locked Nº 01–Nº 11 shell: the deck's
+heading and eyebrow are existing payload fields, the 8-door cap is editorial
+judgment applied in Sanity, the contents subtitle fills fields the panel
+components already render, and the deck's placement moves through the existing
+`panelDeckSection` layout ordering that `resolveBandOrder` already governs. No
+Sanity schema is added or modified, no `/discover` link is added (the two-link
+cap is explicitly the reason one idea was rejected above), and the retired-route
+denylist is untouched. The deck's own component contract — unbounded rows,
+renders nothing when empty, never above the hero — is respected, not amended;
+the cap is a merchandising rule, not a code constant. The silent-drop bug this
+run fixes is a defect repair, not a design change, and is out of this document's
+scope. Copy lands with `emma-copywriter` under `emma-empathy-reviewer`; any
+build lands with `rr7-engineer`.
+
+**One bench-maintenance note for a future agent-editor pass (not actioned here,
+this document does not own the doctrine):** doctrine §7 lists Aesop and Arket as
+bench references, and both refused capture this run for the first time. If they
+refuse again next cycle they should be annotated as prior-knowledge-only
+entries so no future teardown implies a fetch it cannot make.

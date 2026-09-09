@@ -28,6 +28,7 @@
 import { Sentry } from '~/lib/sentry.server'
 import { getClient } from '~/lib/sanity.server'
 import { readHomepagePayloadB } from '~/lib/homepage-payload.server'
+import { resolveBandOrder } from '~/lib/home-band-order'
 import { kvSet } from '~/lib/kv.server'
 
 /** Latest sweep verdict, read by the admin "Merchandised pages" panel. */
@@ -67,6 +68,14 @@ export interface CategoryHealthResult {
   alerted: boolean
   /** Improvement-bus ticket ids filed for failing pages (0 = deduped/failed). */
   ticketsFiled?: number[]
+  /**
+   * `singleton.panelDeck` is published but every row of it is empty, so the
+   * homepage's navigation layer renders nothing (#8414). Not a page failure —
+   * `PanelDeck` is behaving as written — so it never reddens the sweep, but the
+   * admin panel needs to see it rather than read the skipped assertion as
+   * health.
+   */
+  emptyDeckPublished?: boolean
 }
 
 function siteOrigin(): string {
@@ -193,16 +202,30 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
     })),
   ]
 
-  // Deck render-truth, conditional: assert only when the payload actually
-  // carries a deck AND the published layout places it enabled. Before the
-  // two-key flip both are absent and the deck is (correctly) invisible —
-  // asserting then would fail every run for the wrong reason.
+  // Deck render-truth, conditional: assert only when the deck is genuinely
+  // expected on screen. Before the two-key flip the deck is absent and
+  // (correctly) invisible — asserting then would fail every run for the wrong
+  // reason.
+  //
+  // Both preconditions ask the code that actually decides, rather than
+  // re-reading `layout.sections` with a predicate of this file's own (#8414).
+  // The old version did exactly that and went red against a page behaving as
+  // written, because it could see neither of the two ways a placed deck legally
+  // renders nothing:
+  //   1. `resolveBandOrder` may not give the deck a slot at all. A layout with
+  //      a `panelDeckSection` and no usable `homeBand` used to fall back to
+  //      `DEFAULT_BAND_ORDER`, which is `BandName[]` and cannot carry the deck.
+  //      That drop is now fixed at the source, but the check asks the resolver
+  //      either way so the two can never disagree again.
+  //   2. `PanelDeck` renders null when every row is empty, so a published deck
+  //      whose rows carry no items is a content problem, not a render failure.
+  //      Asserting `data-panel=` against it accuses the wrong layer.
+  let emptyDeckPublished = false
   try {
     const payload = await readHomepagePayloadB()
-    const deckPlaced = (payload?.layout?.sections ?? []).some(
-      (s) => s._type === 'panelDeckSection' && s.enabled !== false,
-    )
-    if (payload?.panelDeck && deckPlaced) {
+    const deckSlotted = resolveBandOrder(payload?.layout ?? null).includes('panelDeck')
+    const deckHasRows = (payload?.panelDeck?.rows ?? []).some((r) => r.items.length > 0)
+    if (deckSlotted && deckHasRows) {
       expectations.push({
         // ?variant=b pins the storefront render so the assertion holds whatever
         // the served default is mid-rollout.
@@ -210,6 +233,14 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
         surface: 'deck',
         markers: ['data-panel='],
       })
+    } else if (deckSlotted && payload?.panelDeck && !deckHasRows) {
+      // Worth naming rather than skipping silently: the layout has RESERVED the
+      // navigation slot and every row of the published deck is empty, so the
+      // page renders a hole no amount of re-rendering will fill. Reported as
+      // its own condition with its own remediation instead of being mislabelled
+      // a render failure on /?variant=b. An unplaced empty deck is not flagged:
+      // that is just unused content, which is the correct pre-flip state.
+      emptyDeckPublished = true
     }
   } catch (err) {
     console.warn('[category-healthcheck] payload read failed (deck check skipped):', err)
@@ -219,7 +250,13 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
   if (expectations.length === 0) {
     // Nothing published yet — healthy by definition, and the honest zero keeps
     // the admin panel from reading "all green" as "all covered".
-    const empty: CategoryHealthResult = { ok: true, liveDocs, checks: [], alerted: false }
+    const empty: CategoryHealthResult = {
+      ok: true,
+      liveDocs,
+      checks: [],
+      alerted: false,
+      ...(emptyDeckPublished ? { emptyDeckPublished: true } : {}),
+    }
     await persistLatest(empty)
     return empty
   }
@@ -227,7 +264,13 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
   const checks = await Promise.all(expectations.map(checkPage))
   const healthy = checks.every((c) => c.ok)
   if (healthy) {
-    const green: CategoryHealthResult = { ok: true, liveDocs, checks, alerted: false }
+    const green: CategoryHealthResult = {
+      ok: true,
+      liveDocs,
+      checks,
+      alerted: false,
+      ...(emptyDeckPublished ? { emptyDeckPublished: true } : {}),
+    }
     await persistLatest(green)
     return green
   }
@@ -244,7 +287,13 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
     },
   )
 
-  const result: CategoryHealthResult = { ok: false, liveDocs, checks, alerted: true }
+  const result: CategoryHealthResult = {
+    ok: false,
+    liveDocs,
+    checks,
+    alerted: true,
+    ...(emptyDeckPublished ? { emptyDeckPublished: true } : {}),
+  }
 
   // Ticket each failing page onto the improvement bus, deduped per path so a
   // page that stays broken across daily runs stays one ticket. Wrapped so a
@@ -265,9 +314,25 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
             `Merchandised-page healthcheck failing on ${c.path} (HTTP ${c.status}).\n\n`
             + `Problems:\n${c.problems.map((p) => `- ${p}`).join('\n')}\n\n`
             + `Detected inside /cron/homepage-healthcheck against ${siteOrigin()}. `
-            + 'If the masthead marker is missing, the live Sanity doc is not reaching the page: '
-            + 'check the category resolver logs, then the doc itself. Unpublishing the doc '
-            + '(status back to draft) is the rollback. Re-run the cron to confirm.',
+            + (c.surface === 'deck'
+              // The deck fails for reasons a category masthead never does, and
+              // the generic advice below actively misdirected (#8414): it sent
+              // readers to the category resolver and offered "unpublish the
+              // doc" as a rollback for a surface whose two real failure modes
+              // are a dropped render slot and an empty row set, neither of
+              // which unpublishing fixes.
+              ? 'This is the homepage panel deck, not a category masthead. The sweep only '
+                + 'asserts data-panel= when resolveBandOrder() gives the deck a slot AND '
+                + 'singleton.panelDeck has at least one non-empty row, so both preconditions '
+                + 'already held and the deck still did not reach the HTML. Check, in order: '
+                + 'the published singleton.storefrontHome layout still carries an enabled '
+                + 'panelDeckSection; the payload blob is not stale (POST /cron/warm-homepage-b '
+                + 'and re-run); then PanelDeck/PanelSquareRow rendering. Do NOT unpublish '
+                + 'singleton.panelDeck: that removes the navigation layer instead of '
+                + 'restoring it.'
+              : 'If the masthead marker is missing, the live Sanity doc is not reaching the page: '
+                + 'check the category resolver logs, then the doc itself. Unpublishing the doc '
+                + '(status back to draft) is the rollback. Re-run the cron to confirm.'),
           links: [{ kind: 'url', ref: `${siteOrigin()}${c.path}`, state: 'failed' }],
         }),
       )

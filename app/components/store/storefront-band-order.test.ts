@@ -167,9 +167,33 @@ describe('resolveBandOrder — Sanity layout to render order', () => {
     expect(resolveBandOrder(layout)).toEqual(['hero', 'anchorGrid', 'faq'])
   })
 
-  it('falls back when a layout contains no usable band', () => {
-    // A deck marker alone is not a homepage.
+  it('falls back on the bands but keeps a deck the layout explicitly placed', () => {
+    // #8414. A deck marker alone is still not a homepage, so the bands fall
+    // back to the shipped order — but the placement is the ONE instruction the
+    // layout carried, and returning DEFAULT_BAND_ORDER verbatim used to delete
+    // it, because that constant is BandName[] and cannot hold the deck slot.
+    // The published deck then rendered nowhere while the category healthcheck,
+    // reading the same layout with its own predicate, asserted it must be on
+    // screen. Permanent red against a page behaving exactly as coded.
     const layout = { sections: [{ _type: 'panelDeckSection', enabled: true }] }
+    const order = resolveBandOrder(layout)
+    expect(order).toContain('panelDeck')
+    // Directly below the headliner, which after the anchor guard is right after
+    // anchorGrid — the same slot the hero-first guard gives a deck published
+    // above the hero.
+    expect(order.slice(0, 3)).toEqual(['hero', 'anchorGrid', 'panelDeck'])
+    // Nothing else moved: every band keeps its shipped order.
+    expect(order.filter(s => s !== 'panelDeck')).toEqual(DEFAULT_BAND_ORDER)
+  })
+
+  it('falls back cleanly when the only marker is a DISABLED deck', () => {
+    // Nothing was placed, so nothing is preserved.
+    const layout = { sections: [{ _type: 'panelDeckSection', enabled: false }] }
+    expect(resolveBandOrder(layout)).toEqual(DEFAULT_BAND_ORDER)
+  })
+
+  it('falls back cleanly when the layout is entirely unrecognised', () => {
+    const layout = { sections: [{ _type: 'somethingFromANewerSchema' }] }
     expect(resolveBandOrder(layout)).toEqual(DEFAULT_BAND_ORDER)
   })
 })
