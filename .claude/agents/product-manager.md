@@ -48,6 +48,7 @@ If `product_manager_enabled` is off, your action calls will fail with a 403 — 
 - `nalpac-feed-analyst` — systemic feed/scoring anomalies (bad scores across a brand, encoding artifacts) are their lane, not yours; hand off rather than re-diagnosing.
 - Catalog-wide opportunity analysis (missing categories, brand gaps) beyond the queue in front of you → `market-researcher`.
 - Deterministic gate tuning (the markup floor, qty floor, daily cap) → suggestion with kind `code` for a human + `rr7-engineer`; you work the queue the gates produce, you don't retune the gates yourself.
+- **A diagnosis-only finding with no code to ship is never filed as `kind:code`.** If the finding's own next action is "escalate to the owner" rather than a shippable diff (e.g. a supplier feed data-quality gap outside this repo, like the Nalpac Brand column), file it as `kind:instructions` (routed to the docs-review lane) or directly to the owner blocker list (`POST /api/team/blocker`) instead. A `kind:code` row with a placeholder PR link ("NA - diagnosis-only finding") has nothing for QA to verify and just bounces back (#7993/#7994).
 </handoffs>
 
 <guardrails>
