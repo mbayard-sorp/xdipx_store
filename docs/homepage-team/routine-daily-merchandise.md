@@ -608,6 +608,14 @@ Every merchandise run touches all of these, not just the hero and rails:
    pick (bare handle, verify it resolves 200).
 2. **Curated rails** — create/refresh `emmaCuratedRail` docs (Emma heading/eyebrow/aside + valid
    Shopify handles, verify each resolves 200) and wire 2–4 into `singleton.homepage.sections`.
+   **`emmaCuratedRail` DOCUMENT ids are not the `singleton.homepage` section `_key`s and must be
+   resolved before patching.** `rails-fingerprint.ts` and a `sections[]` read both print the section
+   `_key` (e.g. `teamRail-2026-07-24-0`), which looks authoritative but is not the document to patch
+   and can go stale the moment a rail is refreshed under a new date-stamped id. Resolve the live
+   document id first: `npx tsx scripts/sanity-content-cli.ts query '*[_type=="emmaCuratedRail" &&
+   target=="homepage" && status=="live"]{_id,heading}'`, then patch by `_id`. Patching a stale
+   section-key id returns `Mutation failed: document not found` and, on a tighter run, can ship a
+   page with the rail left unchanged (run 732).
    **Depth floor (owner direction 2026-08-15): at least 4 products per wired rail, at least 6 in
    the under-$30 entry rail.** `getProductsByHandles` silently drops handles that stop resolving,
    so verify the RESOLVED count, not the authored count, meets the floor.
