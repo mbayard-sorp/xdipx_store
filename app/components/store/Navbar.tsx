@@ -132,7 +132,11 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
 
   return (
     <>
-      <header className="sticky top-0 z-[60] bg-cream/95 backdrop-blur-sm border-b border-cream-2">
+      {/* v3 tokens, not the v2 cream/cream-2 aliases (ticket #8418, design-critic
+          run 778): bg-cream and border-cream-2 compute to the exact same colors
+          as bg-paper and border-paper-2 (app.css legacy alias table), so this is
+          a pixel-identical rename, not a restyle. */}
+      <header className="sticky top-0 z-[60] bg-paper/95 backdrop-blur-sm border-b border-paper-2">
         <nav className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
 
           {/* Logo */}
