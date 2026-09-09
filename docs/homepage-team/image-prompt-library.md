@@ -413,6 +413,37 @@ property, never all of them; the packshot is the third resort, never the second.
   word from the copy before treating it as a real naming problem →
   `image-95a13e8a4d998ddd4a1d3d22db7c15b42b82e61c-1184x880-jpg`.
 
+- Infinity Silicone-Based Personal Lubricant 1.7 oz (`pjur-infinity-silicone-based-personal-lubricant-1-7-oz`),
+  `guides` category, sincere staging, post `how-long-does-lube-actually-last` ("How Long Does Lube
+  Actually Last?", content run 781). **Zero generation attempted — label-heavy short-circuit.**
+  This product's Shopify `images[0]` is a box-plus-device composite with dense printed label copy
+  ("pjur", "INFINITY", "SILICONE-BASED PERSONAL LUBRICANT", "50ml/1.7fl.oz", "MEDICAL QUALITY Made
+  in Germany"); per the media-pipeline label-heavy-hero rule (lube bottles are the paradigm case),
+  skipped `--ref-image` generation entirely rather than spending an attempt fal Kontext was likely
+  to fail on baked-in label text. Used `images[1]` (`84854B.jpg`), a clean bottle-only shot with no
+  box, and built the hero as a local composite instead of a generation call: (1) detected the tight
+  pixel bbox of the bottle directly (sharp's default `.trim()` left a visible white-halo rectangle
+  against a tinted ground — do not rely on it for a pure-white product shot that will sit on a
+  non-white backdrop), (2) chroma-keyed the near-white background to transparent with a soft
+  whiteness ramp (fully transparent ≥250, fully opaque ≤232, feathered between) rather than a hard
+  crop, which is what actually removed the halo, (3) composited the cutout large and offset
+  right-of-center (bottle centered at ~67% width) onto a 1200×900 canvas with a horizontal
+  paper-to-coral-soft gradient ground (`#FFFFFF` → `#FFE6DD`, blend starting ~45-52% width) plus a
+  soft flat-opacity contact-shadow ellipse under the base, leaving the left ~55% as a quiet zone for
+  the headline. No AI text/logo risk at all since every printed character in frame is the real
+  product's own label, photographed. **`imagePrompt`/`heroImageAlt` note:** `gen-notebook-art.ts
+  --upload` does accept `--prompt` as of this run (the run-574 workaround above is stale — verify
+  before assuming it's still broken) and correctly writes the real composed description, not the
+  surface default. Wrote the sourcing rationale into `imagePrompt` itself (not a generation prompt,
+  since none ran) so a retro can see why no generation was attempted. Distinctive tokens for this
+  title are `infinity`, `based`, `personal` (silicone/lubricant/oz are generic/too-short) — all
+  three must appear as whole words in `heroImageAlt`+`imagePrompt` combined for
+  `check-hero-embed-match.ts` to clear; naming "Pjur Infinity ... silicone-based personal
+  lubricant" in the alt satisfies this naturally. **Reusable technique for any label-heavy lube/gel
+  bottle hero:** manual bbox detect → whiteness-ramp chroma-key → offset composite on a paper→tint
+  gradient with a flat contact shadow. No `sharp .extract()`-only crop; that is what produced the
+  halo on the first attempt.
+
 ### §0-H human scaffold
 
 (no ref-image unless Emma appears — then `--ref-image` = the canonical Emma photo, Sanity
