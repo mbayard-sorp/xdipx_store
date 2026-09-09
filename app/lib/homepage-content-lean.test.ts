@@ -75,6 +75,11 @@ function withStock(p: Product, totalInventory: number | null): Product {
   return { ...p, totalInventory }
 }
 
+/** Sets `title` on a fixture for the size-variant dedupe tests. */
+function withTitle(p: Product, title: string): Product {
+  return { ...p, title }
+}
+
 function makeSections(): HomepageSections {
   return {
     _id: 'homepage',
@@ -350,6 +355,45 @@ describe('getAnchorCollectionProducts — Nº 03 grid source (ticket #464)', () 
     mockGetCollectionProducts.mockResolvedValue([withStock(makeFatProduct('last-one'), 1)])
     const lean = await getAnchorCollectionProducts('curated-picks')
     expect(lean.map(p => p.handle)).toEqual(['last-one'])
+  })
+
+  // Sibling size-variant dedupe (ticket #8419, design-critic run 778): two
+  // Shopify Products that are really the same lube at two sizes ("...16oz" /
+  // "...8oz") landed in adjacent No03 grid cells and read as a data error.
+  // Nalpac imports one Product per size rather than size variants on one
+  // Product, so there is no shared product/variant id to key off — only the
+  // title, with its size token stripped.
+  it('collapses two Shopify Products that differ only by a trailing size token, keeping the first (highest-ranked)', async () => {
+    mockGetCollectionProducts.mockResolvedValue([
+      withTitle(makeFatProduct('fw-16oz'), 'Water-Based Fuck Water Original H2O Lubricant 16oz'),
+      withTitle(makeFatProduct('fw-8oz'), 'Water-Based Fuck Water Original H2O Lubricant 8oz'),
+      withTitle(makeFatProduct('other'), 'Rechargeable Petite Vibrating Massager'),
+    ])
+    const lean = await getAnchorCollectionProducts('curated-picks')
+    expect(lean.map(p => p.handle)).toEqual(['fw-16oz', 'other'])
+  })
+
+  it('does not collapse two genuinely different products that happen to share a size token', async () => {
+    mockGetCollectionProducts.mockResolvedValue([
+      withTitle(makeFatProduct('dildo-6in'), 'Realrock Crystal Clear Realistic Dildo 6-Inch'),
+      withTitle(makeFatProduct('plug-6in'), 'Rimming Rotating Anal Plug 6 in'),
+    ])
+    const lean = await getAnchorCollectionProducts('curated-picks')
+    expect(lean.map(p => p.handle)).toEqual(['dildo-6in', 'plug-6in'])
+  })
+
+  it('leaves distinct flavors of the same base line alone (no size token to strip)', async () => {
+    mockGetCollectionProducts.mockResolvedValue([
+      withTitle(makeFatProduct('jo-raspberry'), 'Raspberry Sorbet JO H2O Water-Based Flavored Lubricant 1oz'),
+      withTitle(makeFatProduct('jo-watermelon'), 'Watermelon Flavored JO H2O Water-Based Lubricant 1 oz'),
+    ])
+    const lean = await getAnchorCollectionProducts('curated-picks')
+    // Both strip to the same "...1oz"-stripped base only if their PREFIXES
+    // also match; these differ in flavor wording before the size token, so
+    // both survive as distinct products — the dedupe only collapses true
+    // same-line size siblings, not every product that happens to end in a
+    // size.
+    expect(lean.map(p => p.handle)).toEqual(['jo-raspberry', 'jo-watermelon'])
   })
 })
 
