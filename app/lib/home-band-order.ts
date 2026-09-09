@@ -114,6 +114,14 @@ export function resolveBandOrder(
     // anchor guard means immediately after `anchorGrid`, the same place the
     // hero-first guard already lands a deck published above the hero. Bands
     // fall back; the deck placement is honoured.
+    //
+    // This branch deliberately ignores `opts.anchorReplaced` and keeps the
+    // `anchorGrid` that `DEFAULT_BAND_ORDER` carries, exactly as it did before
+    // this fix. That is inert rather than wrong: the band's own slot in
+    // `StorefrontHome` independently renders null when a rail has replaced it,
+    // so naming the slot here costs nothing. Noted because an edit to the
+    // anchor guard alone, without touching this fallback, would break that
+    // assumption silently.
     if (!ordered.some(slot => slot !== 'panelDeck')) {
       if (!ordered.includes('panelDeck')) return DEFAULT_BAND_ORDER
       const at = DEFAULT_BAND_ORDER.indexOf('anchorGrid') + 1

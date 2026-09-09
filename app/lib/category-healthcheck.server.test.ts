@@ -168,6 +168,68 @@ describe('runCategoryHealthcheck', () => {
     expect(result.checks[0]?.problems.join(' ')).toContain('data-panel=')
   })
 
+  it('drops a deck failure when the payload no longer expects a deck (warm-cycle race)', async () => {
+    // The check decides the expectation from one payload read and asserts it
+    // against a separately-served, edge-cached render. Observed live on
+    // 2026-09-09: red at 14:00 UTC with no data-panel in a 266 KB body, green
+    // 25 minutes later with the marker present in a 291 KB body, nothing
+    // deployed in between. First read expects a deck; the re-read after the
+    // failure no longer does, so the verdict was stale.
+    sanityFetch.mockResolvedValue({ categories: [], drops: [] })
+    readPayload
+      .mockResolvedValueOnce(LIVE_DECK)
+      .mockResolvedValue({ panelDeck: null, layout: null })
+    serveHtml(`<html><body>mid-warm, no deck yet${'x'.repeat(2000)}</body></html>`)
+    const result = await runCategoryHealthcheck()
+    expect(result.ok).toBe(true)
+    expect(result.deckRaced).toBe(true)
+    // The failed check stays visible; it is simply not scored and files nothing.
+    expect(result.checks.some((c) => c.surface === 'deck' && !c.ok)).toBe(true)
+    expect(fileDetectionTicket).not.toHaveBeenCalled()
+    expect(captureException).not.toHaveBeenCalled()
+  })
+
+  it('keeps a deck failure when the deck is STILL expected on the re-read', async () => {
+    // The guard must not be a way to look away. Same failure, but the state it
+    // was asserting still holds, so the verdict stands and tickets as before.
+    sanityFetch.mockResolvedValue({ categories: [], drops: [] })
+    readPayload.mockResolvedValue(LIVE_DECK)
+    serveHtml(`<html><body>still no deck${'x'.repeat(2000)}</body></html>`)
+    const result = await runCategoryHealthcheck()
+    expect(result.ok).toBe(false)
+    expect(result.checks.map((c) => c.surface)).toEqual(['deck'])
+    expect(fileDetectionTicket).toHaveBeenCalled()
+  })
+
+  it('keeps a deck failure when the re-read itself throws', async () => {
+    // An unreadable payload cannot prove the failure stale.
+    sanityFetch.mockResolvedValue({ categories: [], drops: [] })
+    readPayload.mockResolvedValueOnce(LIVE_DECK).mockRejectedValue(new Error('kv down'))
+    serveHtml(`<html><body>still no deck${'x'.repeat(2000)}</body></html>`)
+    const result = await runCategoryHealthcheck()
+    expect(result.ok).toBe(false)
+    expect(result.checks.map((c) => c.surface)).toEqual(['deck'])
+  })
+
+  it('never lets the race guard rescue a failing CATEGORY page', async () => {
+    // The guard is scoped to the deck. A masthead failure alongside a raced
+    // deck must still red the sweep.
+    sanityFetch.mockResolvedValue({ categories: ['pleasure'], drops: [] })
+    readPayload
+      .mockResolvedValueOnce(LIVE_DECK)
+      .mockResolvedValue({ panelDeck: null, layout: null })
+    serveHtml(`<html><body>no masthead, no deck${'x'.repeat(2000)}</body></html>`)
+    const result = await runCategoryHealthcheck()
+    expect(result.ok).toBe(false)
+    expect(result.deckRaced).toBe(true)
+    // The category failure alone reds the sweep and is the only thing ticketed.
+    const ticketed = fileDetectionTicket.mock.calls.map(
+      (c) => (c[0] as { links: { ref: string }[] }).links[0]?.ref,
+    )
+    expect(ticketed).toHaveLength(1)
+    expect(ticketed[0]).toContain('/collections/pleasure')
+  })
+
   it('gives a deck failure deck-shaped remediation, not the category-masthead advice', async () => {
     sanityFetch.mockResolvedValue({ categories: [], drops: [] })
     readPayload.mockResolvedValue(LIVE_DECK)
