@@ -52,6 +52,22 @@ enqueueing renders directly; that is the exact pre-approval spend this routine e
    line diffs. Read alongside the ledger's revision notes (item 6) so the room closes the learning
    loop instead of only reading which episodes the owner rejected (#7562).
 
+## Step 2.5: Backlog guard (before any new drafting)
+
+The room cannot serialize past episodes that have never aired: character state and the open-loop
+ledger derive only from AIRED episodes, so with 0 aired the arc has nothing to advance and any new
+loop-dependent episode is built on continuity the owner has not ratified and could still revise (as
+he revised E1/E2). Runs 633/654 filed S1E3-E4 into an unapproved queue on 2026-09-04 anyway, and
+this pattern would have stacked S1E5-E6 on top of those same two still-pending scripts.
+
+After Step 2 item 6 (`episode-list`): if **0 aired episodes AND >=2 episodes at
+`pending_approval`**, file **no** new serialized slate. Post one `phase:'slate'` event stating the
+backlog block and the owner-approval unblock (blocker #57), then finish the run `succeeded` —
+skip Step 3 entirely. Evergreen reserve top-up is likewise skipped while 0 aired: the reserve is a
+safety net for a live cadence and must itself be owner-approved first. The guard lifts
+automatically once the owner approves the first episode (`aired>0` or pending backlog drops below
+the render cadence). This keeps the room zero-spend and honest without churning the owner queue.
+
 ## Step 3: The room
 
 Run the writers room exactly as `series-showrunner`'s workflow specifies:
