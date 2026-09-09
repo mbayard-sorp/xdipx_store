@@ -1099,9 +1099,17 @@ SKUs, extend as they are found:** the **Renegade Emperor vibrating ring**
 (`renegade-emperor-vibrating-ring`) — a molded CE/UKCA compliance band wraps the ring and reproduces
 garbled, and regenerating once did NOT fix it (both morning X drafts id118 and id120 BLOCKed on the
 same defect); the **Magic Wand Rechargeable** handle wordmark (needed an occluded-grip brief and eight
-images to clear); **Le Wand** (id95); and **Pjur Basic Silicone Lubricant 100ml** — see the
-accent-color-band bullet below for the target state that cleared it (run 725, rows 193/196). For any
-SKU on this list, the `social-art-director` brief MUST
+images to clear); **Le Wand** (id95); **Pjur Basic Silicone Lubricant 100ml** — see the
+accent-color-band bullet below for the target state that cleared it (run 725, rows 193/196); and two
+SKUs where the accent-color-band escape hatch does NOT apply because the product's real design has no
+separate solid accent band, only printed text (run 738, 2026-09-07): **Wicked Simply Hybrid
+Lubricant 4oz** (`wicked-simply-hybrid-lubricant-4-oz`) — a clear bottle whose only brand cue is
+printed text (WICKED / simply HYBRID), full occlusion drew a "generic unbranded lookalike"
+product-identity BLOCK across 3 attempts; and **Botanical ON Original Arousal Oil 5ml**
+(`sensuva-on-original-arousal-oil-5-ml-large-box`) — a pink/black box whose only cues are printed
+text and the boxed "on" logotype, same failure mode. For these two, composite-the-real-plate (ticket
+#5493 route a) or reuse of a pre-cleared library asset is the recommended path, not more
+occlusion-angle generation rounds. For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
 composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
 slot. Two standing pre-generation rules reach every cast composite, not only the listed SKUs:
