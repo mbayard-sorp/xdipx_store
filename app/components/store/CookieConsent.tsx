@@ -67,14 +67,10 @@ export function CookieConsent() {
         <a href="/pages/privacy-policy" className="underline text-white/60 hover:text-white">Privacy policy</a>
       </p>
       <div className="flex gap-2">
-        {/* Ink/white, not coral: the coral budget reserves it for one primary
-            action per viewport, and this banner can be on screen alongside
-            the hero CTA (ticket #8418, design-critic run 778). Solid white
-            still reads as the primary of the two buttons against bg-ink. */}
         <button
           ref={firstButtonRef}
           onClick={() => accept('all')}
-          className="flex-1 bg-white text-ink text-sm font-bold py-2 rounded-full hover:opacity-90 transition-opacity"
+          className="flex-1 bg-coral text-white text-sm font-bold py-2 rounded-full hover:opacity-90 transition-opacity"
           style={{ fontFamily: 'var(--font-display)' }}
         >
           Accept all

@@ -64,7 +64,6 @@ export function ProductCarousel({
 
   const bgClass = BG_CLASSES[bgStyle] ?? 'bg-white'
   const dark = isDark(bgStyle)
-  const storefront = chrome === 'storefront'
   // Light-mode scroll-arrow border: the legacy `border-cream-2` (#FAFAF9) is a
   // near-invisible hairline on the paper ground; the storefront chrome uses the
   // real `border-line` hairline the rest of the v3 surface uses.
@@ -80,12 +79,7 @@ export function ProductCarousel({
   }
 
   return (
-    // Storefront chrome gets the doctrine section rhythm (py-16 md:py-20),
-    // not the legacy py-12 (ticket #8418: three published emmaCuratedRail
-    // blocks on the storefront home all measured at 48px, off the 64/80
-    // scale). Legacy chrome (ForHim/ForHer, the deferred daily-deal home)
-    // is untouched.
-    <section className={`${storefront ? 'py-16 md:py-20' : 'py-12'} px-4 ${bgClass}`}>
+    <section className={`py-12 px-4 ${bgClass}`}>
       <div className="max-w-6xl mx-auto">
         {/* Header — flex-wrap + gap so the CTA drops onto its own row instead of
             colliding with the heading at narrow widths (390px / the 375px floor);
@@ -98,20 +92,12 @@ export function ProductCarousel({
                 {eyebrow}
               </Reveal>
             )}
-            {/* Storefront chrome matches the rail heading scale every other
-                Nº 06-shaped rail on the page uses (StorefrontHome's own
-                Rail(): text-[1.8rem] md:text-[2.7rem], weight 400, no bold).
-                Legacy chrome keeps its original text-2xl font-bold. */}
             <Reveal
               as="h2"
               variant="up"
               index={1}
-              className={
-                storefront
-                  ? `text-[1.8rem] leading-[1.1] tracking-[-0.01em] md:text-[2.7rem] ${dark ? 'text-white' : 'text-ink'}`
-                  : `text-2xl font-bold ${dark ? 'text-white' : 'text-ink'}`
-              }
-              style={{ fontFamily: 'var(--font-display)', fontWeight: storefront ? 400 : undefined }}
+              className={`text-2xl font-bold ${dark ? 'text-white' : 'text-ink'}`}
+              style={{ fontFamily: 'var(--font-display)' }}
             >
               {heading}
             </Reveal>
@@ -145,18 +131,12 @@ export function ProductCarousel({
               </>
             )}
             {ctaLink && (
-              // Plum is reserved for emphasis, not action (doctrine §3); a
-              // storefront rail's See-all now matches the ink + coral-hairline
-              // treatment the Nº 03 grid's own See-all already uses (ticket
-              // #8418). Legacy chrome and dark backgrounds are unchanged.
               <Link
                 to={ctaLink}
                 className={`text-sm font-semibold transition-colors ml-1 shrink-0 whitespace-nowrap ${
                   dark
                     ? 'text-white/80 hover:text-white'
-                    : storefront
-                      ? 'text-ink link-coral'
-                      : 'text-plum hover:text-plum-2'
+                    : 'text-plum hover:text-plum-2'
                 }`}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
