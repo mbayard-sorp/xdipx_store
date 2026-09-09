@@ -41,7 +41,10 @@ export function EmailSubscribe({
   const isPending = fetcher.state !== 'idle'
 
   return (
-    <section className="bg-cream-2 py-16 px-4">
+    // v3 token + full doctrine rhythm, not the v2 cream-2 alias at a partial
+    // scale (ticket #8418): bg-cream-2 computes to the same color as
+    // bg-paper-2, and the section standard is py-16 md:py-20, not py-16 alone.
+    <section className="bg-paper-2 py-16 px-4 md:py-20">
       <div className="max-w-xl mx-auto text-center">
         <p className="text-sage text-2xl mb-2" aria-hidden="true">♥</p>
         <h2
