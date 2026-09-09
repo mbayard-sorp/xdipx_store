@@ -49,16 +49,10 @@ export function NotebookRail({
       <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         {posts.map(post => (
           <li key={post._id}>
-            {/* rounded-2xl already resolves to the locked 22px --radius-2xl
-                (app.css @theme), so no radius change is needed here. Dropped
-                hover:shadow-md: doctrine gives cards a hairline border-line,
-                not a shadow, matching every other card on the page (ticket
-                #8418). bg-cream-2 -> bg-paper-2 is a pixel-identical rename
-                (same value in the legacy alias table). */}
-            <div className="flex h-full flex-col rounded-2xl overflow-hidden border border-line bg-paper transition-colors hover:border-line-2">
+            <div className="flex h-full flex-col rounded-2xl overflow-hidden border border-line bg-paper hover:shadow-md transition-shadow">
               <Link to={`/notebook/${post.slug}`} className="group block">
                 {post.heroImageUrl && (
-                  <div className="aspect-[4/3] bg-paper-2 overflow-hidden">
+                  <div className="aspect-[4/3] bg-cream-2 overflow-hidden">
                     <img
                       src={sanityImageUrl(post.heroImageUrl, { w: 600 })}
                       srcSet={sanityImageSrcSet(post.heroImageUrl, [400, 600, 800]) || undefined}
@@ -71,12 +65,7 @@ export function NotebookRail({
                   </div>
                 )}
                 <div className="p-3">
-                  {/* Newsreader, not DM Sans bold: every other card/tile title
-                      on the page uses font-display (ticket #8418). */}
-                  <h3
-                    className="text-sm text-ink line-clamp-2 group-hover:text-coral transition-colors"
-                    style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
-                  >
+                  <h3 className="text-sm font-semibold text-ink line-clamp-2 group-hover:text-coral transition-colors">
                     {post.title}
                   </h3>
                   {post.excerpt && (
