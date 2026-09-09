@@ -132,11 +132,11 @@ function SectionNumeral({ n, className = '', tone = 'ink-4' }: { n: string; clas
 
 /** Voice-charter CTA whitelist. A Sanity-supplied hero CTA label must be one
  *  of these exactly or the hero falls back to the default label. */
-const HERO_CTA_WHITELIST = ['Take a peek →', 'Show me', 'Find your fit →', "I'll take it ♥"]
+export const HERO_CTA_WHITELIST = ['Take a peek →', 'Show me', 'Find your fit →', "I'll take it ♥"]
 
 /** Strip a whitelist label's trailing arrow so the arrow can render as its own
  *  aria-hidden glyph (the label text itself stays exactly as whitelisted). */
-function ctaText(label: string): string {
+export function ctaText(label: string): string {
   return label.endsWith('→') ? label.slice(0, -1).trimEnd() : label
 }
 
@@ -1086,7 +1086,12 @@ function PhotoBand({
           className="relative z-[1] inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-coral px-6 py-3.5 text-[15px] font-medium text-white transition-transform hover:-translate-y-0.5"
           style={BODY}
         >
-          {ctaLabel} <span aria-hidden="true">→</span>
+          {/* ctaText(), not the raw label: two of the four whitelisted labels
+              already end in "→" ('Take a peek →', 'Find your fit →'), and
+              rendering one of those raw alongside this arrow span doubles it
+              (ticket #8419). Every other CTA on the page already goes through
+              ctaText() for this reason; this was the one that didn't. */}
+          {ctaText(ctaLabel)} <span aria-hidden="true">→</span>
         </span>
       </Link>
     </Reveal>

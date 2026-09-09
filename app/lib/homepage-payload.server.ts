@@ -249,6 +249,44 @@ function dropOutOfStock<T extends { totalInventory?: number | null }>(products: 
 }
 
 /**
+ * Strips a trailing size/volume token ("16oz", "8 oz", "1oz", "6-Inch",
+ * "6.5in") from a product title and normalizes case/whitespace, so two
+ * separately-Shopify-listed sizes of what is really one product line
+ * ("Water-Based Fuck Water Original H2O Lubricant 16oz" /
+ * "...Lubricant 8oz") reduce to the same key. Nalpac imports one Product per
+ * size rather than one Product with size variants, so the anchor grid has no
+ * variant-level relationship to key off of — title normalization is the only
+ * signal available.
+ */
+function sizeVariantKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\s+\d+(\.\d+)?\s?-?\s?(oz|ml|in(ch)?|ft)\.?\s*$/i, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+/**
+ * Collapses sibling size-variant products (see `sizeVariantKey`) to their
+ * first, highest-ranked occurrence, so the No03 anchor grid's "considered
+ * set" never shows what a shopper reads as the same bottle twice at two
+ * prices (ticket #8419, design-critic run 778: two H2O-brand lubes,
+ * differing only by size, landed in adjacent grid cells). Order-preserving:
+ * the collection's own MANUAL/BEST_SELLING order decides which size wins.
+ */
+function dedupeSizeVariants<T extends { title: string }>(products: T[]): T[] {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const p of products) {
+    const key = sizeVariantKey(p.title)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(p)
+  }
+  return out
+}
+
+/**
  * Default collection filling the promoted Nº 03 anchor grid when the team has
  * not pinned one via `singleton.emmaHeroStorefront.anchorCollectionHandle`.
  */
@@ -270,7 +308,7 @@ export async function getAnchorCollectionProducts(
   const h = (handle ?? '').trim() || DEFAULT_ANCHOR_COLLECTION_HANDLE
   try {
     const products = await getCollectionProducts(h, limit)
-    return dropOutOfStock(products.map(toLeanCardProduct))
+    return dedupeSizeVariants(dropOutOfStock(products.map(toLeanCardProduct)))
   } catch (err) {
     console.warn(
       `[homepage-payload:b] anchor collection "${h}" fetch failed, falling back to discovery best-of:`,

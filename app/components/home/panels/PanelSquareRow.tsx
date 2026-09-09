@@ -17,6 +17,27 @@ const SQUARE_WIDTHS = [200, 260, 320, 400, 520]
 const SQUARE_SIZES = '(min-width: 768px) 23vw, 44vw'
 
 /**
+ * The md+ column count for a square row, sized to its own item count rather
+ * than a fixed 4 (ticket #8419, design-critic run 778). A row with fewer
+ * than 4 items on a fixed 4-column grid left-aligns and leaves an empty,
+ * visibly-tinted half-row ("Last Chance"/"Couples" in columns 1-2, columns
+ * 3-4 empty paper-2). Sizing the grid to the row's own count instead makes
+ * those items fill the row at a larger size rather than leaving dead space;
+ * a row of 4 or more keeps the standard 4-up. Every returned value is a
+ * literal Tailwind class (never built from a template/arbitrary value), so
+ * the JIT scanner picks up every branch regardless of which one a given
+ * deck's row count actually takes at runtime.
+ */
+export function panelSquareRowMdColsClass(itemCount: number): string {
+  switch (itemCount) {
+    case 1: return 'md:grid-cols-1'
+    case 2: return 'md:grid-cols-2'
+    case 3: return 'md:grid-cols-3'
+    default: return 'md:grid-cols-4'
+  }
+}
+
+/**
  * The evergreen aisle doors: Pleasure / Play / Body / Wear.
  *
  * Art direction (owner decision 2026-07-29): a square carries a product cutout
@@ -49,7 +70,7 @@ export function PanelSquareRow({
   if (items.length === 0) return null
 
   return (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3.5">
+    <div className={`grid grid-cols-2 gap-2 ${panelSquareRowMdColsClass(items.length)} md:gap-3.5`}>
       {items.map((tile, i) => {
         const s = surfaceStyle(tile.surface)
         const ruled = theme === 'ruled'
@@ -101,8 +122,13 @@ export function PanelSquareRow({
                 </div>
               )}
 
+              {/* line-clamp-1: a label long enough to wrap (e.g. "Last
+                  Chance") otherwise grows its own label band while every
+                  sibling in the row stays single-line, reading as an
+                  inconsistent tile even though the fixed aspect-ratio box
+                  keeps every tile's outer height identical (ticket #8419). */}
               <span
-                className={`pt-2 text-[22px] leading-none tracking-[-0.01em] md:text-[24px] ${ruled ? 'text-ink' : s.text}`}
+                className={`line-clamp-1 pt-2 text-[22px] leading-none tracking-[-0.01em] md:text-[24px] ${ruled ? 'text-ink' : s.text}`}
                 style={DISPLAY}
               >
                 {tile.label}
