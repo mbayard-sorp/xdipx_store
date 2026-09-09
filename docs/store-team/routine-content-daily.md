@@ -414,6 +414,19 @@ either trace it to a first-party source (the manufacturer's own published guidan
 under the `xdipx` namespace is our own copy and carries no evidentiary weight, and a claim naming a
 real company is the highest-risk shape because it is checkable and wrong-able.
 
+**The same pre-flight also covers secondary-source-as-primary, not just our-own-PDP-as-source
+(second occurrence: runs 607 and 760).** An allowlisted host is not an evidentiary source for
+every sentence printed on it, and an expert's anecdotal aside inside a real article is not a
+research finding. Run 760 lost a REVISE to a numeric claim ("resolves within about a day")
+attributed to "published reporting on that research": the host was allowlisted and genuinely read,
+which is exactly why it read as evidence, but the accuracy gate traced the number only to one named
+sexologist describing an unnamed, undated study about "a few" respondents, secondhand, with no
+established link to the primary study the rest of the post rested on. Before submit, for every
+numeric or comparative claim, identify whether its source is the primary study itself or a
+secondary page's paraphrase of one, and delete or re-scope any claim whose only trace is a named
+individual's anecdotal reference to an unnamed study. The standing rule is unchanged: narrow or
+delete, never hedge.
+
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
 opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
