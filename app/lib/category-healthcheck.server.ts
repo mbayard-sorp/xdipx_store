@@ -7,9 +7,16 @@
  * and asserts the merchandised layer actually rendered: HTTP 200, untruncated
  * HTML, the masthead block marker present (a live doc rendering the fallback
  * collection page is the failure this check exists to catch), and at most one
- * FAQPage JSON-LD node. When the homepage payload carries a panel deck AND the
- * layout places it enabled, the deck's markers are asserted on the variant-b
- * homepage too.
+ * FAQPage JSON-LD node.
+ *
+ * The panel deck is asserted on the variant-b homepage too, but only when it is
+ * genuinely expected on screen — see `readDeckExpectation`, which asks
+ * `resolveBandOrder` whether the renderer will place the deck and mirrors
+ * `PanelDeck`'s own non-empty-rows guard. A published deck sitting in a
+ * reserved slot with nothing in it is reported as `emptyDeckPublished` instead
+ * of being asserted (a content problem, not a render failure), and a deck
+ * failure that no longer reproduces on a payload re-read is dropped as a
+ * warm-cycle race rather than ticketed. All three are #8414.
  *
  * REPORT-ONLY by design, like the Notebook healthcheck: there is no rollback
  * path here (category publishes are already gate-checked by the routine, and
@@ -28,6 +35,7 @@
 import { Sentry } from '~/lib/sentry.server'
 import { getClient } from '~/lib/sanity.server'
 import { readHomepagePayloadB } from '~/lib/homepage-payload.server'
+import { resolveBandOrder } from '~/lib/home-band-order'
 import { kvSet } from '~/lib/kv.server'
 
 /** Latest sweep verdict, read by the admin "Merchandised pages" panel. */
@@ -67,6 +75,21 @@ export interface CategoryHealthResult {
   alerted: boolean
   /** Improvement-bus ticket ids filed for failing pages (0 = deduped/failed). */
   ticketsFiled?: number[]
+  /**
+   * `singleton.panelDeck` is published but every row of it is empty, so the
+   * homepage's navigation layer renders nothing (#8414). Not a page failure —
+   * `PanelDeck` is behaving as written — so it never reddens the sweep, but the
+   * admin panel needs to see it rather than read the skipped assertion as
+   * health.
+   */
+  emptyDeckPublished?: boolean
+  /**
+   * The deck assertion failed but the payload no longer expected a deck, so the
+   * sweep raced a warm cycle rather than catching a defect (#8414). The failed
+   * check stays in `checks` for visibility; it is simply not scored, and it
+   * files no ticket. `ok` therefore reflects the other surfaces only.
+   */
+  deckRaced?: boolean
 }
 
 function siteOrigin(): string {
@@ -90,6 +113,35 @@ function countJsonLdType(html: string, type: string): number {
     }
   }
   return count
+}
+
+/**
+ * Does the payload currently expect a rendered panel deck?
+ *
+ * `published` reports whether a deck doc exists at all, which is what separates
+ * "empty deck occupying a reserved slot" from the pre-flip state of no deck.
+ */
+async function readDeckExpectation(): Promise<{
+  expected: boolean
+  published: boolean
+  slotted: boolean
+}> {
+  const payload = await readHomepagePayloadB()
+  const slotted = resolveBandOrder(payload?.layout ?? null).includes('panelDeck')
+  const hasRows = (payload?.panelDeck?.rows ?? []).some((r) => r.items.length > 0)
+  return { expected: slotted && hasRows, published: !!payload?.panelDeck, slotted }
+}
+
+/** True when the deck is no longer expected, i.e. the assertion went stale. */
+async function deckExpectationLapsed(): Promise<boolean> {
+  try {
+    return !(await readDeckExpectation()).expected
+  } catch (err) {
+    // An unreadable payload cannot prove the failure stale, so the verdict
+    // stands. Never let this path turn a real failure green.
+    console.warn('[category-healthcheck] deck re-read failed (failure stands):', err)
+    return false
+  }
 }
 
 interface PageExpectation {
@@ -193,16 +245,28 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
     })),
   ]
 
-  // Deck render-truth, conditional: assert only when the payload actually
-  // carries a deck AND the published layout places it enabled. Before the
-  // two-key flip both are absent and the deck is (correctly) invisible —
-  // asserting then would fail every run for the wrong reason.
+  // Deck render-truth, conditional: assert only when the deck is genuinely
+  // expected on screen. Before the two-key flip the deck is absent and
+  // (correctly) invisible — asserting then would fail every run for the wrong
+  // reason.
+  //
+  // Both preconditions ask the code that actually decides, rather than
+  // re-reading `layout.sections` with a predicate of this file's own (#8414).
+  // The old version did exactly that and went red against a page behaving as
+  // written, because it could see neither of the two ways a placed deck legally
+  // renders nothing:
+  //   1. `resolveBandOrder` may not give the deck a slot at all. A layout with
+  //      a `panelDeckSection` and no usable `homeBand` used to fall back to
+  //      `DEFAULT_BAND_ORDER`, which is `BandName[]` and cannot carry the deck.
+  //      That drop is now fixed at the source, but the check asks the resolver
+  //      either way so the two can never disagree again.
+  //   2. `PanelDeck` renders null when every row is empty, so a published deck
+  //      whose rows carry no items is a content problem, not a render failure.
+  //      Asserting `data-panel=` against it accuses the wrong layer.
+  let emptyDeckPublished = false
   try {
-    const payload = await readHomepagePayloadB()
-    const deckPlaced = (payload?.layout?.sections ?? []).some(
-      (s) => s._type === 'panelDeckSection' && s.enabled !== false,
-    )
-    if (payload?.panelDeck && deckPlaced) {
+    const deck = await readDeckExpectation()
+    if (deck.expected) {
       expectations.push({
         // ?variant=b pins the storefront render so the assertion holds whatever
         // the served default is mid-rollout.
@@ -210,6 +274,14 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
         surface: 'deck',
         markers: ['data-panel='],
       })
+    } else if (deck.slotted && deck.published) {
+      // Worth naming rather than skipping silently: the layout has RESERVED the
+      // navigation slot and every row of the published deck is empty, so the
+      // page renders a hole no amount of re-rendering will fill. Reported as
+      // its own condition with its own remediation instead of being mislabelled
+      // a render failure on /?variant=b. An unplaced empty deck is not flagged:
+      // that is just unused content, which is the correct pre-flip state.
+      emptyDeckPublished = true
     }
   } catch (err) {
     console.warn('[category-healthcheck] payload read failed (deck check skipped):', err)
@@ -219,20 +291,59 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
   if (expectations.length === 0) {
     // Nothing published yet — healthy by definition, and the honest zero keeps
     // the admin panel from reading "all green" as "all covered".
-    const empty: CategoryHealthResult = { ok: true, liveDocs, checks: [], alerted: false }
+    const empty: CategoryHealthResult = {
+      ok: true,
+      liveDocs,
+      checks: [],
+      alerted: false,
+      ...(emptyDeckPublished ? { emptyDeckPublished: true } : {}),
+    }
     await persistLatest(empty)
     return empty
   }
 
   const checks = await Promise.all(expectations.map(checkPage))
-  const healthy = checks.every((c) => c.ok)
+
+  // Deck race guard (#8414). The deck expectation is decided from one read of
+  // the payload blob and asserted against a separately-served, edge-cached
+  // render of the page. Those are two reads of a value that changes: during a
+  // warm cycle the payload can already carry the deck while the cached HTML was
+  // built before it, so the sweep reds on a race rather than on a defect. The
+  // observed signature is exactly that — red at 14:00 UTC on 2026-09-09 with no
+  // data-panel in a 266 KB body, green 25 minutes later with the marker present
+  // in a 291 KB body and nothing deployed in between.
+  //
+  // So a FAILED deck assertion re-reads the payload and keeps the failure only
+  // if the deck is still expected. This is not the check looking away: a deck
+  // that should be on screen and stays missing still fails, on this sweep and
+  // every one after it. It only drops the verdict when the state it was
+  // asserting no longer exists, which is the definition of a stale assertion.
+  // Scoped to the deck — no category or drop failure is ever rescued by it.
+  const deckRaced =
+    checks.some((c) => c.surface === 'deck' && !c.ok) && (await deckExpectationLapsed())
+  const scored = deckRaced ? checks.filter((c) => c.surface !== 'deck') : checks
+  if (deckRaced) {
+    console.warn(
+      '[category-healthcheck] deck assertion failed but the payload no longer expects a deck — '
+        + 'treating as a warm-cycle race, not a defect',
+    )
+  }
+
+  const healthy = scored.every((c) => c.ok)
   if (healthy) {
-    const green: CategoryHealthResult = { ok: true, liveDocs, checks, alerted: false }
+    const green: CategoryHealthResult = {
+      ok: true,
+      liveDocs,
+      checks,
+      alerted: false,
+      ...(emptyDeckPublished ? { emptyDeckPublished: true } : {}),
+      ...(deckRaced ? { deckRaced: true } : {}),
+    }
     await persistLatest(green)
     return green
   }
 
-  const failed = checks.filter((c) => !c.ok)
+  const failed = scored.filter((c) => !c.ok)
   const summary = failed.map((c) => `${c.path}: ${c.problems.join('; ')}`).join(' | ')
   const hard = failed.some((c) => c.hardFail)
 
@@ -244,7 +355,14 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
     },
   )
 
-  const result: CategoryHealthResult = { ok: false, liveDocs, checks, alerted: true }
+  const result: CategoryHealthResult = {
+    ok: false,
+    liveDocs,
+    checks,
+    alerted: true,
+    ...(emptyDeckPublished ? { emptyDeckPublished: true } : {}),
+    ...(deckRaced ? { deckRaced: true } : {}),
+  }
 
   // Ticket each failing page onto the improvement bus, deduped per path so a
   // page that stays broken across daily runs stays one ticket. Wrapped so a
@@ -265,9 +383,25 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
             `Merchandised-page healthcheck failing on ${c.path} (HTTP ${c.status}).\n\n`
             + `Problems:\n${c.problems.map((p) => `- ${p}`).join('\n')}\n\n`
             + `Detected inside /cron/homepage-healthcheck against ${siteOrigin()}. `
-            + 'If the masthead marker is missing, the live Sanity doc is not reaching the page: '
-            + 'check the category resolver logs, then the doc itself. Unpublishing the doc '
-            + '(status back to draft) is the rollback. Re-run the cron to confirm.',
+            + (c.surface === 'deck'
+              // The deck fails for reasons a category masthead never does, and
+              // the generic advice below actively misdirected (#8414): it sent
+              // readers to the category resolver and offered "unpublish the
+              // doc" as a rollback for a surface whose two real failure modes
+              // are a dropped render slot and an empty row set, neither of
+              // which unpublishing fixes.
+              ? 'This is the homepage panel deck, not a category masthead. The sweep only '
+                + 'asserts data-panel= when resolveBandOrder() gives the deck a slot AND '
+                + 'singleton.panelDeck has at least one non-empty row, so both preconditions '
+                + 'already held and the deck still did not reach the HTML. Check, in order: '
+                + 'the published singleton.storefrontHome layout still carries an enabled '
+                + 'panelDeckSection; the payload blob is not stale (POST /cron/warm-homepage-b '
+                + 'and re-run); then PanelDeck/PanelSquareRow rendering. Do NOT unpublish '
+                + 'singleton.panelDeck: that removes the navigation layer instead of '
+                + 'restoring it.'
+              : 'If the masthead marker is missing, the live Sanity doc is not reaching the page: '
+                + 'check the category resolver logs, then the doc itself. Unpublishing the doc '
+                + '(status back to draft) is the rollback. Re-run the cron to confirm.'),
           links: [{ kind: 'url', ref: `${siteOrigin()}${c.path}`, state: 'failed' }],
         }),
       )
