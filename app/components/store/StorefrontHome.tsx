@@ -100,6 +100,25 @@ const MONO = { fontFamily: 'var(--font-mono)' } as const
 /* No-image wayfinder tiles cycle these tints so an unfilled row still has
    rhythm instead of three grey plates. */
 const TILE_TINTS = ['bg-coral-soft', 'bg-plum-soft', 'bg-paper-3'] as const
+
+/* Ink scrim for text over a promo photo, shared by every band that overlays
+   copy on CMS-supplied photography (ticket #8417). The old scrim was a single
+   `linear-gradient(to top, rgba(...,0.72), rgba(...,0.05) 55%)` that assumed
+   short, bottom-anchored copy: past the 55% stop it fades to near-transparent,
+   so a band whose actual rendered text (CMS-length heading + body, wrapped at
+   375px) grows past that line reads its top lines against almost bare photo.
+   Measured live: the plum `.em-on-dark` emphasis word landed at 1.03:1 there.
+   Fixed floor, not a fade: this gradient never drops below 0.78 alpha at
+   EITHER end, which is the minimum that clears the doctrine floors (4.5:1
+   body, 3:1 large display, plum-on-dark's 3:1) against a worst-case
+   near-white photo pixel (verified: white/85 body 7.07:1, white heading
+   9.01:1, plum-on-dark 3.35:1 at alpha 0.78). Because the floor holds across
+   the whole box, this is also alignment-agnostic — a future top-aligned band
+   reusing this constant is protected the same as a bottom-aligned one, so
+   there is no "flip the direction" step to remember. See
+   `storefront-photo-scrim.test.ts` for the guard that pins both the floor and
+   that every scrim usage in this file goes through this one constant. */
+export const PHOTO_SCRIM_STYLE = 'linear-gradient(to top, rgba(26,20,24,0.85), rgba(26,20,24,0.78))'
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
 const DISPLAY_MED = { fontFamily: 'var(--font-display)', fontWeight: 500 } as const
 const BODY = { fontFamily: 'var(--font-body)' } as const
@@ -872,10 +891,12 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
                   />
                   {/* Ink scrim so the label stays legible over any promo photo,
                       mirroring PhotoBand. Without it the ink text sat directly on
-                      the image (mission-brief §2 legibility rule). */}
+                      the image (mission-brief §2 legibility rule). Shared
+                      PHOTO_SCRIM_STYLE, not a hand-typed gradient — see its
+                      definition above for the contrast-floor math (#8417). */}
                   <div
                     className="absolute inset-0"
-                    style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.72), rgba(26,20,24,0.05) 55%)' }}
+                    style={{ background: PHOTO_SCRIM_STYLE }}
                     aria-hidden="true"
                   />
                 </>
@@ -1061,9 +1082,11 @@ function PhotoBand({
               sizes="100vw"
               className="absolute inset-0 h-full w-full object-cover"
             />
+            {/* Shared PHOTO_SCRIM_STYLE, not a hand-typed gradient — see its
+                definition above for the contrast-floor math (#8417). */}
             <div
               className="absolute inset-0"
-              style={{ background: 'linear-gradient(to top, rgba(26,20,24,0.72), rgba(26,20,24,0.05) 55%)' }}
+              style={{ background: PHOTO_SCRIM_STYLE }}
               aria-hidden="true"
             />
           </>
