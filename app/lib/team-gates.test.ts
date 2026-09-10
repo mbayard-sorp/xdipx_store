@@ -6,7 +6,12 @@
  * response must never read as a PASS.
  */
 import { describe, expect, it } from 'vitest'
-import { parsePublishGateModelOutput, parseVoiceGateModelOutput, verdictConsistencyCheck } from './team-gates.server'
+import {
+  computePublishGateContentHash,
+  parsePublishGateModelOutput,
+  parseVoiceGateModelOutput,
+  verdictConsistencyCheck,
+} from './team-gates.server'
 
 describe('parseVoiceGateModelOutput', () => {
   it('parses a clean PASS', () => {
@@ -216,5 +221,52 @@ describe('publish-gate baked-in-text vs product-identity (ticket #7890)', () => 
     const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
     expect(PUBLISH_GATE_SYSTEM).toContain('a yellow band\n  with no letters on the Pjur bottle is identity (PASS)')
     expect(PUBLISH_GATE_SYSTEM).toContain('the same band with garbled letters on it is\n  text (BLOCK)')
+  })
+})
+
+describe('computePublishGateContentHash (ticket #8452)', () => {
+  const base = {
+    platform: 'instagram' as const,
+    tweetText: 'a caption about pjur aqua',
+    mediaUrls: ['https://cdn.example/social-a.jpg'],
+    altText: 'a bottle on a counter',
+    productHandle: 'pjur-aqua',
+  }
+
+  it('is stable across repeated calls on identical input, the exact incident this closes', () => {
+    // Run 786 (2026-09-09) gated row 215 twice minutes apart with no caption
+    // or media change and got PASS then BLOCK. The hash must not be a source
+    // of that: same input, same hash, every time.
+    expect(computePublishGateContentHash(base)).toBe(computePublishGateContentHash({ ...base }))
+  })
+
+  it('changes when the caption changes (a genuine rework judges fresh)', () => {
+    const h1 = computePublishGateContentHash(base)
+    const h2 = computePublishGateContentHash({ ...base, tweetText: 'a different caption entirely' })
+    expect(h1).not.toBe(h2)
+  })
+
+  it('changes when the media changes', () => {
+    const h1 = computePublishGateContentHash(base)
+    const h2 = computePublishGateContentHash({ ...base, mediaUrls: ['https://cdn.example/social-b.jpg'] })
+    expect(h1).not.toBe(h2)
+  })
+
+  it('changes when alt text or the resolved product handle changes', () => {
+    const h1 = computePublishGateContentHash(base)
+    expect(h1).not.toBe(computePublishGateContentHash({ ...base, altText: 'different alt text' }))
+    expect(h1).not.toBe(computePublishGateContentHash({ ...base, productHandle: 'some-other-handle' }))
+  })
+
+  it('treats null and missing mediaUrls/altText the same way (no accidental cache miss on that alone)', () => {
+    const withNulls = computePublishGateContentHash({ ...base, mediaUrls: null, altText: null })
+    const withUndefined = computePublishGateContentHash({ ...base, mediaUrls: undefined, altText: undefined })
+    expect(withNulls).toBe(withUndefined)
+  })
+
+  it('is platform-sensitive: the same caption gated for a different platform is a different judgment', () => {
+    const h1 = computePublishGateContentHash(base)
+    const h2 = computePublishGateContentHash({ ...base, platform: 'x' })
+    expect(h1).not.toBe(h2)
   })
 })

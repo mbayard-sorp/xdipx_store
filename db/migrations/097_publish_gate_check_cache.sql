@@ -1,0 +1,34 @@
+-- 097_publish_gate_check_cache.sql
+-- Ticket #8452: social-publish-gate's vision judgment (baked-in-text vs
+-- product-identity, register calibration) is a subjective LLM call, and
+-- pinning temperature to 0 (#7896) did not make it call-to-call stable on
+-- borderline-legible composited text -- confirmed on run 786 (2026-09-09),
+-- where the SAME unmodified row (215) was gated twice minutes apart with no
+-- caption or media change and returned PASS then BLOCK. The routine already
+-- documents "one call per draft" (routine-social-daily.md Step 6.5), but
+-- that is an instruction an unattended scheduled pass can still violate by
+-- accident; this closes the gap in code instead of prose, per the ticket's
+-- DONE WHEN option (b): treat the first verdict as final for an unmodified
+-- row.
+--
+-- last_publish_gate_check_json caches the RAW result of the last
+-- runPublishGateCheck() vision-judgment call for this row, keyed by a content
+-- hash of exactly what was judged (platform, caption, media, alt text,
+-- product handle). A second call against unchanged content returns this
+-- cached result instead of invoking the model again; a call after the
+-- content changes (a rework) sees a hash mismatch and judges fresh, same as
+-- today. Deliberately separate from gate_status/gate_checked_at/gate_findings
+-- (migration 084+, Phase 5 #4913), which record the verdict of record ONCE
+-- THE ROUTINE HAS RELAYED AND APPLIED IT via {op:'gate'} -- this column
+-- caches the read-only judgment call itself, before any relay/apply
+-- decision, and never drives review_status, the hourly publish tick, or any
+-- other downstream gate logic.
+--
+-- FULLY ADDITIVE: ADD COLUMN IF NOT EXISTS only. No DROP, no RENAME, no ALTER
+-- TYPE, no DML. Merges on the ordinary release-engine lane once
+-- migration-dry-run is green.
+--
+-- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 097
+-- Idempotent: safe to re-run.
+
+ALTER TABLE social_posts ADD COLUMN IF NOT EXISTS last_publish_gate_check_json jsonb;

@@ -54,6 +54,7 @@ function row(over: Partial<NonNullable<Row>> = {}): NonNullable<Row> {
     mediaKind: null,
     removalSource: 'unknown',
     sceneLocation: null,
+    lastPublishGateCheckJson: null,
     ...over,
   }
 }
