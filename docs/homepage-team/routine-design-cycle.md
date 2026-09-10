@@ -124,6 +124,19 @@ plus the retired-route denylist stand.
   needing Shopify or Sanity session credentials. Deferring a check as "needs credentials this cloud
   routine lacks" without checking this list first costs a full cycle of delay for no reason (run 520
   deferred exactly this check, which run 646 then ran credential-free).
+  - **Homepage singleton diagnosis (`storefrontHome`, `panelDeck`) has no credential-free path yet
+    (ticket #8424, run 778).** Findings worth knowing before re-deriving them: (1) the Sanity
+    dataset IS publicly readable without a token at
+    `https://0nlwk8cf.apicdn.sanity.io/v2023-05-03/data/query/production?query=<groq>`; (2) but the
+    published perspective exposes only 28 doc types (`blogPost`, `categoryPage`, `emmaCuratedRail`,
+    `product`, `trustItem`, and so on) and **zero** `singleton.*` documents, so a query for any
+    homepage singleton reads back `null` indistinguishably from "the doc does not exist"; (3)
+    `scripts/rails-fingerprint.ts` reads exactly these docs but needs a Sanity token, so it is
+    unavailable to a cloud routine. Net effect: a cloud routine can prove WHAT the page rendered
+    (fetch the HTML) but not WHY the homepage singletons produced it — half a diagnosis. Until a
+    small team-token endpoint closes this gap (e.g. `GET /api/team/homepage-payload` returning
+    `layout.sections` plus panel-deck row/item counts, no product data — a `code` ticket, not this
+    routine's to build), stop at the HTML and say so honestly rather than re-discovering the above.
 
 ### 2. Prototype on a branch
 
@@ -138,6 +151,27 @@ Finish the implementation on the branch: components wired to Sanity blocks, mobi
 imagery via `media-manager` (reuse-first), copy via `emma-copywriter`.
 
 ### 4. Review gates (all must pass before the PR is opened for approval)
+
+**Commit before dispatching any gate (ticket #8423).** A review gate and the build step share one
+working tree, and a gate legitimately asked to mutate it (`qa-reviewer`'s revert-to-prove-the-test
+check: temporarily revert the fix, observe the test fail, restore it) runs `git checkout -- <file>`.
+Run 778 hit this collision twice: the gate correctly refused to evaluate foreign uncommitted content
+it found in the tree and discarded it, silently destroying the orchestrator's own in-flight work (a
+race-guard helper plus tests, and two nit fixes) — and a verification run afterward reported "10
+passed" for tests that were no longer on disk, which reads as a pass and is not one. The gate behaved
+exactly right; the collision was the playbook's to prevent. Three rules:
+
+1. **Commit before dispatching any review gate**, so the gate has an immutable target and the
+   orchestrator has nothing uncommitted left to lose.
+2. **Any gate asked to mutate the tree runs in an isolated git worktree, not the shared checkout** —
+   `scripts/setup-worktree.sh` already exists for exactly this.
+3. **After any gate that reports touching the tree, re-verify your own work is still present**
+   (grep for a distinctive symbol from your change) before trusting a green test run. This is the
+   cheap check and catches the silent case even if 1 or 2 is skipped.
+
+The same hazard applies to Routine A whenever it dispatches a gate agent mid-edit. Keep the
+revert-to-prove-the-test instruction itself — it is genuinely valuable — these three rules stop it
+from colliding with uncommitted work, they do not remove it.
 
 - `tech-architect` — coupling, layer, Oxygen-seam integrity, migration impact; writes/links an ADR if
   the change is non-trivial.
@@ -169,6 +203,13 @@ imagery via `media-manager` (reuse-first), copy via `emma-copywriter`.
   375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
   type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
   re-review. Record the verdict + scores as an `/event` row (`agentRole:'design-critic'`).
+  **Working browser-capture recipe for cloud routines (ticket #8421).** Chromium cannot reach
+  `xdipx.com` directly through the agent proxy — `page.goto()` returns `ERR_CONNECTION_RESET` and the
+  proxy logs `ws_closed_mid_exchange`, and neither `--proxy-server` nor `--disable-http2` fixes it.
+  The working path: intercept every request with Playwright's `context.route()` and fulfil it from
+  Node `fetch` under `NODE_USE_ENV_PROXY=1`. Chromium is pre-installed at
+  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; do **not** run `playwright install`. Routine A's Step
+  7.5 post-publish spot-check captures the same way and reads this same recipe.
 - **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
   `docs/emma-voice.md` (the canonical voice charter).
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the

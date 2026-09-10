@@ -1059,7 +1059,11 @@ Step 8 summary, not a silent line — repeated unexplained skips read as a miles
 
 After self-validation passes, run `design-critic` once against the live homepage: capture a 375px
 screenshot (768/1440 optional on content-only runs) and score the rubric against
-`docs/design-doctrine.md`. **It cannot post its own verdict.** As a spawned subagent, every
+`docs/design-doctrine.md`. **Use the working browser-capture recipe documented in
+`docs/homepage-team/routine-design-cycle.md` Step 4 (ticket #8421)** — Chromium cannot reach
+`xdipx.com` directly through the agent proxy, and the recipe (Playwright `context.route()` fulfilled
+from Node `fetch` under `NODE_USE_ENV_PROXY=1`) is the same for this capture as for Routine B's.
+**It cannot post its own verdict.** As a spawned subagent, every
 request it makes carrying the team credential is refused by the session's permission classifier
 before dispatch (run 331, 2026-08-15 — the same failure #673 fixed for `social-publish-gate`). It
 returns the verdict block to you; **you post it verbatim** as an `/event` row
