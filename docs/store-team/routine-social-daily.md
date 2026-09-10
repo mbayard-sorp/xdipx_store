@@ -1109,7 +1109,31 @@ product-identity BLOCK across 3 attempts; and **Botanical ON Original Arousal Oi
 (`sensuva-on-original-arousal-oil-5-ml-large-box`) — a pink/black box whose only cues are printed
 text and the boxed "on" logotype, same failure mode. For these two, composite-the-real-plate (ticket
 #5493 route a) or reuse of a pre-cleared library asset is the recommended path, not more
-occlusion-angle generation rounds. For any SKU on this list, the `social-art-director` brief MUST
+occlusion-angle generation rounds.
+
+**pjur Aqua** (`pjur-water-based-personal-lubricant`, ticket #8416) — a squat pump-cap bottle
+(~4.5in) with a blue accent band. Unlike Pjur Basic's yellow band (which clears reliably with the
+accent-color-band technique above), a blank-label rendering of pjur Aqua's blue band BLOCKed twice
+(run 2026-09-09, rows 211/212): once for showing no wordmark at all (read as a generic
+thermos/travel-mug silhouette) and once for showing the band with a fully blank label (read as an
+unbranded lookalike). The accent-color-band technique alone is not enough here; a brief for this SKU
+needs an explicit target frame (how much of the wordmark/band to show, not just "occlude the label")
+validated against a cleared candidate before the next attempt, or fall back to a pre-cleared library
+asset.
+
+**System JO Classic Hybrid Silicone Water-Based Personal Lubricant 4oz**
+(`jo-classic-hybrid-lubricant`, ticket #8451) — a distinct failure shape from every SKU above: the
+label carries a two-tier wordmark (a cyan-blue panel with a clean, legible "JO" wordmark) stacked
+above a black band with "HYBRID" in bold condensed type plus small subtitle microtext. The JO panel
+composites cleanly, but the HYBRID band and microtext garble on every attempt regardless of
+occlusion strategy (run 786, 2026-09-09: 3 rounds, 6 candidates, all rejected pre-write), and full
+occlusion still leaves the JO panel legible (the model resists occluding the brand rectangle
+specifically) while the rest of the frame reads as an unbranded generic bottle. The single-wordmark
+accent-color-band technique does not transfer to a two-tier label. Treat this SKU as **reuse-only**
+until Shopify Files holds a pre-cleared asset for it, or a working frame is found that keeps the
+HYBRID band fully cropped or out of frame (not merely occluded).
+
+For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
 composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
 slot. Two standing pre-generation rules reach every cast composite, not only the listed SKUs:
