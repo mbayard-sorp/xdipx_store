@@ -775,6 +775,74 @@ no-product hero MUST log its reason in its entry)
   - Four rounds, 8 candidates total, all via Atlas one-stage composite, well inside the content-team
     daily image budget.
 
+- `cast: priya` + Sliquid Massage Oil Unscented Natural Nut and Seed Blend 4.2oz
+  (`sliquid-massage-oil-unscented`), "How Do You Initiate Sex Without It Feeling Like Pressure?"
+  (`podcast-notes`, content run 799). Gesture is a caller-authored deviation from the standard
+  question-to-gesture table, on purpose: she stands in bright window light and holds the bottle
+  out toward camera on one open, extended palm — offering it, not presenting it — free hand lifted
+  in a small half-shrug, mouth closed, brows raised, caught in the second after asking. Deliberately
+  NOT the eye-level-hold-plus-palm-up gesture, which had run on five of the last six human heroes and
+  would have failed the swap test. **Casting:** `priya`, last used 08-20 (a card-deck gesture, unlike
+  this bottle-offering gesture) and clear of the no-repeat-within-5 window against the true publish
+  order (maya 09-08, diego 09-04, unnamed mid-50s woman 09-03, unnamed early-30s woman 09-01, sofia
+  08-28). **Wardrobe override required:** `castMember.priya.editorialPhoto` is unset, so compositing
+  fell back to `referencePhoto` per `editorialPhoto ?? referencePhoto`; downloaded and inspected the
+  actual reference file (not just its Sanity alt text, which undersells the problem) — it is a tight
+  lace-lingerie crop with bare shoulders and cleavage, same ticket #2751 wardrobe-propagation failure
+  already logged against `marcus`, `sofia`, and `diego` above. Explicit strip-and-replace language
+  added: "fully clothed in a soft plain crew-neck t-shirt or simple blouse, modest daywear only, no
+  lingerie, no bra visible, no cleavage, no bare shoulders, not the low-cut wardrobe shown in
+  reference 1." **Camera distance stated explicitly** ("waist-up framing, generous room on both sides
+  of the subject") per the marcus/jade/sofia/diego precedent, since `priya`'s reference photo is also
+  a tight portrait crop. **Product handle resolution note (script gap, not content):**
+  `gen-notebook-art.ts --surface hero --cast <slug>` auto-resolves the composited product via
+  `resolveHeroProductHandle()`, which takes the post's FIRST `blogProductEmbed` in body order —
+  for this post that is `vush-curiosity-cues-cards`, not the brief-specified
+  `sliquid-massage-oil-unscented` (the second embed). Bypassed the script's auto-resolution and
+  called `composeSceneFrame` directly with the correct `productImageUrl` (the Sliquid bottle's
+  Shopify photo), then used `--upload` (which does not regenerate) to place the file and patch
+  `heroImage`/`heroImageAlt`/`imagePrompt` — same pattern as the Magic Wand Plus `images[1]`
+  workaround above for `resolveProductPhotoUrl`'s hardcoded `images[0]`. **Label-heavy caution
+  weighed and accepted:** the bottle carries a printed front label ("sliquid massage oil
+  unscented") directly on the bottle, the paradigm case the media-pipeline label-heavy-hero rule
+  names for skipping ref-image generation outright. Attempted composite generation anyway on the
+  Atlas primary path (not the fal Kontext fallback the rule specifically calls out as unreliable),
+  since this codebase's own Atlas-path precedent (Wicked Sensitive, Tantus "TANTUS" wordmark, Magic
+  Wand's molded logo) shows faithful real-label reproduction rather than invented garble; the label
+  rendered correctly and legibly on every round without a single garbled-text reject, which
+  validates trying Atlas first on a label-heavy product before falling back to a real-photo-only
+  hero, rather than skipping generation unconditionally. Three rounds via Atlas one-stage composite
+  (`atlas/seedream-4.5-edit`, `landscape_4_3`/`4:3`, 2 candidates each):
+  - **Round 1 (2 candidates, both REJECTED):** product identity, label fidelity, gesture, hands, and
+    wardrobe override all held clean, but both candidates rendered the wall as a saturated
+    terracotta/coral-red field (`#db6439`, `#ce6243` sampled), not the pale coral-soft `#FFE6DD` tint
+    the ground lock requires — the same "saturated color instead of soft tint" failure class already
+    logged repeatedly above (Magic Wand HV-270, Tantus ring, ROMP Glow, jade, sofia, Magic Wand
+    Plus).
+  - **Round 2 (2 candidates, background-only fix, the Magic Wand HV-270 precedent's hardened
+    coral-soft language reused verbatim): both REJECTED, same failure persisted.** Measured wall
+    color came back only slightly less saturated (`#d58763`, `#d38264`) — still a clear ground-lock
+    fail, not the pale blush the hex target calls for. Confirms the coral-soft family is a
+    particularly hard target for this exact composite path on this run; hardening the same color
+    family's wording a second time did not converge.
+  - **Round 3 (2 candidates, switched ground family from coral-soft to paper — plain warm-white wall
+    near `#FAFAF9`, explicit "NOT coral, NOT orange, NOT pink, NOT saturated" plus one hard-edged
+    window-light band for an hour cue — rather than hardening coral-soft a third time): both PASSED.**
+    Measured wall color came back warm light grey/beige (`#d1-#db` range sampled off-corner), clearly
+    inside the paper-tint family and nowhere near orange/saturated. Candidate 2 kept over candidate 1:
+    both had correct wardrobe, gesture, faithful product/label, and natural five-fingered hands;
+    candidate 2's expression read warmer and more open (closer to "hopeful and a little exposed" than
+    candidate 1's slightly more skeptical brow), and its window-light band crossing the wall gave the
+    frame a named hour the flatter candidate 1 lacked → `image-fb293b51425d56504790e0b2d410e8c36a724433-1200x900-png`
+    (post: `how-do-you-initiate-sex-without-pressure`). **Precedent: when the coral-soft family drifts
+    saturated twice in a row on the same composite path even after the standard hardened-language fix,
+    switching ground families to paper (still inside the doctrine's ground lock) is a more reliable
+    third move than hardening the same coral-soft wording a third time** — reuse this before assuming
+    a capability ceiling on coral-soft specifically.
+  - Three rounds, 6 candidates total, all via Atlas one-stage composite, well inside the
+    content-team's 500-cents/day daily image budget (round 1 + round 2 rejected, round 3 kept; $0
+    spent on this run before this post).
+
 **Rejects:** `cast: none (roster gap, documented exception)` + Wicked Simply Timeless Water-Based
 Personal Lubricant & Moisturizer 4oz (`wicked-simply-timeless-jelle`), "How Does Menopause Change
 Sex, and What Helps?" (real-talk, † health-adjacent, content run 379). **Casting decision:** all
