@@ -264,6 +264,24 @@ export const socialPosts = pgTable('social_posts', {
   // routine can compute the two variety windows from one list call instead of
   // re-deriving rotation by reading captions.
   sceneLocation:   varchar('scene_location', { length: 80 }),
+  // Publish-gate raw-judgment cache (migration 097, ticket #8452). Caches the
+  // last runPublishGateCheck() vision-judgment result keyed by a content hash
+  // of exactly what was judged, so a second call against an unchanged row
+  // returns the first verdict instead of re-invoking the model (confirmed
+  // unstable call-to-call on borderline baked-in-text/product-identity calls
+  // even at temperature 0). Deliberately distinct from gateStatus/
+  // gateCheckedAt/gateFindings above, which record the verdict of record once
+  // the routine relays and applies it; this caches the read-only judgment
+  // itself and never drives review_status or any publish decision.
+  lastPublishGateCheckJson: jsonb('last_publish_gate_check_json').$type<{
+    contentHash: string
+    checkedAt: string
+    gate: {
+      verdict: 'PASS' | 'REVISE' | 'BLOCK' | 'HOLD'
+      notes: string
+      findings: { check: string; verdict: 'pass' | 'revise' | 'block' | 'hold'; note?: string }[]
+    }
+  }>(),
 })
 
 /**

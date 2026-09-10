@@ -40,6 +40,7 @@
  * quietly dropped so a future ticket can close them.
  */
 import Anthropic from '@anthropic-ai/sdk'
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
@@ -191,6 +192,44 @@ export interface PublishGateOutput {
     notes: string
     featuresProduct: boolean
     productHandle?: string
+    findings: PublishGateFinding[]
+  }
+}
+
+/**
+ * Content identity for the vision-judgment cache (ticket #8452). Hashes
+ * exactly what the model is shown — platform, caption, media, alt text, and
+ * the resolved product handle — so a hash match means the model would be
+ * shown byte-identical input to the call that produced the cached verdict.
+ * Deliberately excludes `recentCaptions`/precedents: those drift as new posts
+ * go live between calls, and treating that drift as "the row changed" would
+ * defeat the point (a row gated twice minutes apart, as in the incident this
+ * closes, sees the same precedent set both times anyway).
+ */
+export function computePublishGateContentHash(input: {
+  platform: GatePlatform
+  tweetText: string
+  mediaUrls: readonly string[] | null | undefined
+  altText: string | null | undefined
+  productHandle: string | null
+}): string {
+  const stable = JSON.stringify({
+    platform: input.platform,
+    tweetText: input.tweetText,
+    mediaUrls: input.mediaUrls ?? [],
+    altText: input.altText ?? null,
+    productHandle: input.productHandle,
+  })
+  return createHash('sha256').update(stable).digest('hex')
+}
+
+/** The cached shape stored in `social_posts.last_publish_gate_check_json`. */
+export interface PublishGateCacheEntry {
+  contentHash: string
+  checkedAt: string
+  gate: {
+    verdict: 'PASS' | 'REVISE' | 'BLOCK' | 'HOLD'
+    notes: string
     findings: PublishGateFinding[]
   }
 }
@@ -386,6 +425,7 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
       status: socialPosts.status,
       reviewStatus: socialPosts.reviewStatus,
       shopifyProductId: socialPosts.shopifyProductId,
+      lastPublishGateCheckJson: socialPosts.lastPublishGateCheckJson,
     })
     .from(socialPosts)
     .where(eq(socialPosts.id, postId))
@@ -445,6 +485,39 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
   }
 
   const media = post.mediaUrls ?? []
+
+  // Vision-judgment cache (ticket #8452). The deterministic floor above is
+  // always re-run fresh (it is cheap and stock-sensitive), but the model
+  // call below is neither: run 786 (2026-09-09) gated row 215 twice minutes
+  // apart with byte-identical caption/media and got PASS then BLOCK, even
+  // though the call is pinned at temperature 0 (#7896). A hash match here
+  // means this call would show the model exactly the same input as the call
+  // that produced the cached verdict, so the first verdict is treated as
+  // final rather than re-rolled. A hash miss (any rework of caption, media,
+  // alt text, or product) judges fresh exactly as before.
+  const contentHash = computePublishGateContentHash({
+    platform,
+    tweetText: post.tweetText,
+    mediaUrls: post.mediaUrls,
+    altText: post.altText,
+    productHandle,
+  })
+  const cached = post.lastPublishGateCheckJson
+  if (cached && cached.contentHash === contentHash) {
+    console.error(`[publish-gate] post ${postId}: serving cached verdict (unmodified since ${cached.checkedAt}), skipping model call`)
+    return {
+      id: postId,
+      gate: {
+        verdict: cached.gate.verdict,
+        reviewer: 'publish-gate',
+        notes: cached.gate.notes,
+        featuresProduct,
+        ...(productHandle ? { productHandle } : {}),
+        findings: [...deterministicFindings, ...cached.gate.findings],
+      },
+    }
+  }
+
   const content: Anthropic.ContentBlockParam[] = [
     {
       type: 'text',
@@ -496,6 +569,22 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
           'using the retry\'s structured verdict field as the fail-closed result',
       )
     }
+  }
+
+  // Persist the raw judgment (not the deterministic findings, which are
+  // re-run fresh on every call and would go stale in the cache) so the next
+  // call against this exact content is served from cache instead of judged
+  // again. Best-effort: a write failure here means the next call re-judges
+  // rather than losing the verdict this call already computed.
+  const cacheEntry: PublishGateCacheEntry = {
+    contentHash,
+    checkedAt: new Date().toISOString(),
+    gate: { verdict: modelResult.verdict, notes: modelResult.notes, findings: modelResult.findings },
+  }
+  try {
+    await db.update(socialPosts).set({ lastPublishGateCheckJson: cacheEntry }).where(eq(socialPosts.id, postId))
+  } catch (err) {
+    console.error(`[publish-gate] post ${postId}: failed to persist verdict cache (ignored, next call will re-judge):`, err)
   }
 
   return {
