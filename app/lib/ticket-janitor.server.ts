@@ -562,6 +562,12 @@ export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   // Support review (routine 21). routine-schedule.md says outright that a
   // missing run here is a fault, not expected-missing, but nothing watched it.
   { routine: 'Daily support review', team: 'support', runType: 'support', kind: 'daily', schedule: '16:30 daily', maxGapHours: DAILY_GAP },
+  // R-BLOCK (routine-blocker-scout.md). Added 2026-09-10 (#7667): it had no
+  // entry, so its own total silence would have gone unnoticed by the exact
+  // mechanism it exists to close for everything else. docs/store-team/
+  // routine-blocker-scout.md commits to a daily 12:00 UTC cadence even though
+  // it prefers a local desktop scheduled task over a cloud trigger.
+  { routine: 'Daily blocker scout (R-BLOCK)', team: 'strategy', runType: 'blocker-scout', kind: 'daily', schedule: '12:00 daily', maxGapHours: DAILY_GAP },
   // NOTE: the daily pricing sweep is deliberately absent. It runs without a
   // team gate and has never written a run row of any runType, so an entry for
   // it flagged on every single sweep from the day it was added. A permanent

@@ -378,6 +378,7 @@ describe('ROUTINE_CADENCES', () => {
       'social|social',
       'social|social-trend-scout',
       'strategy|apply',
+      'strategy|blocker-scout',
       'strategy|cost-review',
       'strategy|dev',
       'strategy|offsite',
