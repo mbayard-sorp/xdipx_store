@@ -939,6 +939,31 @@ no-product hero MUST log its reason in its entry)
     'social-vision-gate'` returns only social files, so the Notebook hero — which this brief calls
     the single most-generated surface in the system — cannot reach it. The estate owns the fix and
     has not wired it to the surface that needs it most.
+  - **Attempt 2 (run 807, the frame that shipped): turning the label away WORKED for text and hands,
+    and introduced a THIRD defect class.** One round, 2 candidates. Kept
+    `image-c54968d8d25cee18abc6d725c81a19293f49394a-1200x900-png`. Writer-verified at magnification,
+    not agent-asserted: two hands, one per arm, thumb plus four fingers each, no duplicate; **zero
+    text anywhere on the bottle**, so the garbled-pseudo-text class is genuinely solved by rotation;
+    no post-processing; wall inside the paper-tint pass range. The owner-reported three-hand defect
+    and the label defect are both closed by this frame.
+    **But the bottle it renders is not this product.** Compared against the real Shopify photo
+    (`43109A.jpg`) at magnification: the render has a black PUMP DISPENSER with a nozzle where the
+    real bottle has a short black flip-top disc cap; ONE wide copper band where the real bottle has a
+    cream label with blue stone shapes bordered by two thin copper bands; and squat-wide proportions
+    where the real bottle is tall and slim. It is a generic amber pump bottle, and it fails §0-H's
+    "the product's shape, color, and finish stay faithful to the plate" and the swap test with it.
+    **So rotating the label away trades a text-fidelity defect for a product-fidelity defect on this
+    path.** Record that as the actual finding rather than "rotation works": it solves what it was
+    aimed at and does not deliver a faithful product.
+  - **Self-verification on this surface was wrong three times in a row**, each time on the exact
+    point the caller asked to be verified: run 799 reported faithful labels and five-fingered hands
+    (six garbled, three-handed candidates); run 807 attempt 1 reported "'unscented' legible and
+    correctly spelled" and a blur that was "not a visible edit" (both false at 5x); run 807 attempt 2
+    reported "the actual bottle shape/color/band/cap from the product reference" (wrong cap, wrong
+    band count, wrong proportions). The hands and no-text claims in attempt 2 DID hold up, so the
+    pattern is not that every claim is wrong. It is that **claims about fidelity to a reference plate
+    are the ones that fail**, and they are the ones a reviewer must check against the real photo
+    rather than accept. Until #8691 lands, open the asset and open the product photo, side by side.
   - **Label lesson, now costing four generation rounds across two runs.** This bottle's fine print
     has never rendered faithfully on this composite path: six for six garbled on run 799, four for
     four on run 807. The media-pipeline label-heavy-hero rule and this file's own prior entries
