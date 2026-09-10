@@ -49,6 +49,15 @@ orthogonal — you can be enabled-to-run but off-to-execute.
 
 ## Step 3: Judge + execute
 
+**Feed-health pre-check, before any approve call (ticket #8393).** Read the latest two
+`import_monitor_runs` rows. If both show `candidates_found=0`, or the owner blocker with dedupeKey
+`nalpac-main-feed-brand-column-empty` is currently open, the queue is feed-blocked: every approve
+this run would return `master-no-longer-in-feed` and burn 0 cap while stamping nothing (seen on runs
+582 and 771, up to 20 doomed calls before noticing). Skip the approve loop entirely, post a `decision`
+event stating imports are held on the upstream feed outage (queue depth + downstream health from Step
+4), and finish the run honestly. Resume normal approve behavior automatically once discovery reports
+`candidates_found>0` again — this is a per-run check, not a standing state to remember.
+
 **Before approving, gate approval VOLUME on downstream enrich health.** Run the Step 4 health check
 first: read `max(enriched_at)` and the `status='imported' AND enriched_at IS NULL` backlog depth. An
 approval only creates a Shopify draft; while enrich is dark those drafts never reach the live
