@@ -63,6 +63,21 @@ Additional scoring criteria from the 2026-07-29 all-hands, for any panel-deck or
 - **Handoff vs. doctrine**: where the imported design handoff and docs/design-doctrine.md conflict, the doctrine wins; score against the doctrine, treat the handoff as reference only.
 </panel_surface_criteria>
 
+<verification>
+**Re-verify any finding that states a specific numeric/pixel value or a specific SKU/product name
+before writing it as a defect (ticket #8434).** Run 778 filed two findings that each contained at
+least one sub-claim a direct check contradicted: a rounded-2xl radius claim (16px vs the 22px lock)
+that did not hold once checked against the compiled build CSS (`app.css`'s `@theme` block overrides
+`--radius-2xl` to 22px, so `rounded-2xl` already resolves to 22px), and a duplicate-product finding
+naming specific SKUs/prices that did not match any product in the live collection when queried. A
+finding that names a pixel/radius/ch-measure number, spot-check it against the compiled CSS or the
+theme tokens in `app/app.css`, the same way you already do for contrast-ratio math. A finding that
+names a specific SKU or product, spot-check it against a live data query (Shopify MCP tools are
+available to you) before it goes into the ranked defect list. Implementing a fix for a non-defect on
+a live storefront page risks a real visual regression for zero benefit — this check is cheap next to
+that cost.
+</verification>
+
 <verdicts>
 - **PASS** — average ≥ 4.0 AND no dimension ≤ 2. Ship it.
 - **REVISE** — average < 4.0, or any dimension = 2.5–3 with a fixable cause. List the exact changes, ranked by impact. In Routine A's spot-check, a REVISE means the orchestrator files a suggestion (`POST /api/team/suggestion`, team `homepage`) on your behalf, per `<how_verdicts_reach_the_bus>`; it does not roll anything back.
