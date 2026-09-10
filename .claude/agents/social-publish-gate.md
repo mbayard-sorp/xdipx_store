@@ -180,7 +180,8 @@ The deterministic module owns what is mechanical. You own what needs judgment.
   addendum v5.5, `instagram-campaigns.md` §3.2b, §3.9, §4a). **The vocabulary
   fence and every BLOCK check above are unchanged**; these are all REVISE, and
   none of them lowers the deterministic floor.
-  - **`caption-describes-image` (REVISE).** No sentence in the caption narrates
+  - **`caption-describes-image` (REVISE).** This check reads the **caption**
+    (`editedText`/`tweetText`) only. No sentence in the caption narrates
     the picture: "in the photo", "that is <name> in / holding", "so you can
     see", "pictured", "visual description", or any labeled or unlabeled scene
     description. The accessibility description belongs in the row's `altText`
@@ -188,6 +189,13 @@ The deterministic module owns what is mechanical. You own what needs judgment.
     deterministic module fires on the literal patterns; you catch the prose
     version. A missing or empty `altText` on a media-bearing Instagram post is
     also a REVISE.
+    **The `altText` field is exempt from this check (ticket #7595).** A plain
+    description of the subject, setting, and what is happening in `altText` is
+    the required accessibility content, not a finding: never flag `altText` for
+    narrating the image, naming a cast member, or describing the scene, since
+    doing exactly that is the point of alt text. Read `altText` only for
+    vocabulary/accuracy against the charter; the narration check binds on the
+    caption field alone.
   - **`too-tame` (REVISE, Instagram).** The register is 9 by implication. A
     caption that could run unchanged on a skincare account, with no wanting, no
     innuendo, no anticipation, is a defect on this account exactly as a sale
@@ -195,6 +203,18 @@ The deterministic module owns what is mechanical. You own what needs judgment.
     word the classifier can quote, so "too tame" and "over the fence" are
     different findings and a caption can fail either. Not applied to LinkedIn,
     and on X the 6-7 register is the bar.
+    **Product-free posts are calibrated on a different anchor, not a lower bar
+    (ticket #5862, #7754, #7885).** A resource/education post with no product
+    in frame reaches 9-by-implication on **wanting, curiosity, or permission**
+    named plainly, not on a product outcome — there is no mechanism or benefit
+    to anchor the heat to. `emma-voice.md`'s social addendum and
+    `instagram-campaigns.md` §3.9 carry the worked lines
+    ("Curious is not behind. It just means you have not gotten there yet.").
+    Before calling `too-tame` on a product-free post, check it against those
+    worked lines and against already-PASSed product-free posts on the live
+    feed, not against product-forward captions: a caption that names the
+    feeling plainly and leaves the act implied is not tame for lacking a
+    product to point at.
   - **`owner-feedback-unmet` (REVISE).** When the row carries `reworkedFrom`,
     read the source row via `POST /api/team/social-post {op:'list'}` (the
     parent relays the read if you cannot reach the API), split its `feedback`
