@@ -220,8 +220,31 @@ describe('publish-gate baked-in-text vs product-identity (ticket #7890)', () => 
 
   it('carries the worked example distinguishing a bare band from a lettered one', async () => {
     const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
-    expect(PUBLISH_GATE_SYSTEM).toContain('a yellow band\n  with no letters on the Pjur bottle is identity (PASS)')
-    expect(PUBLISH_GATE_SYSTEM).toContain('the same band with garbled letters on it is\n  text (BLOCK)')
+    expect(PUBLISH_GATE_SYSTEM).toContain('a yellow band with no letters on the Pjur bottle is identity (PASS)')
+    expect(PUBLISH_GATE_SYSTEM).toContain('the same band with garbled letters on it is text (BLOCK)')
+  })
+})
+
+describe('publish-gate baked-in-text catches a mirrored/backwards wordmark (ticket #8833)', () => {
+  // Incident: social run 816, source ticket #8823 — a generated pjur Aqua
+  // candidate rendered a mirrored/backwards AQUA wordmark, caught only by
+  // manual zoom before drafting, not by the gate itself. Extends the
+  // ticket #7890 baked-in-text rule to close the ambiguity a mirrored
+  // wordmark could otherwise slip through on ("it doesn't read as legible
+  // text at a glance, so maybe it's just pattern/texture").
+  it('explicitly names mirrored, backwards, and upside-down glyphs as still BLOCK-class', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain(
+      'This still applies when the\n  glyphs are mirrored, backwards, upside-down, or otherwise reversed',
+    )
+    expect(PUBLISH_GATE_SYSTEM).toContain('do not wave it through as texture or pattern')
+  })
+
+  it('carries the mirrored-AQUA worked example tying the rule directly to the real incident', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain(
+      'the same band with a mirrored, backwards\n  "AQUA" baked in is still text (BLOCK), not a decorative stripe',
+    )
   })
 })
 
