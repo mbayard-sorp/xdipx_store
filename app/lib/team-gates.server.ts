@@ -269,9 +269,14 @@ Judge these, all BLOCK-class unless noted:
   vase-sized or the reverse)?
 - Any letter, digit, wordmark, logo mark, or garbled glyph run baked into the image? (BLOCK) A solid
   colour band, stripe, or cap colour with no glyphs on it is the product's own packaging, never
-  baked-in text on its own, however bold or high-contrast the colour. Worked example: a yellow band
-  with no letters on the Pjur bottle is identity (PASS); the same band with garbled letters on it is
-  text (BLOCK).
+  baked-in text on its own, however bold or high-contrast the colour. This still applies when the
+  glyphs are mirrored, backwards, upside-down, or otherwise reversed: a flipped orientation does not
+  make it decorative or make it read as the product's real packaging, since the real product's own
+  wordmark is never mirrored. Judge a mirrored or backwards wordmark exactly as you would a forwards
+  one (BLOCK); do not wave it through as texture or pattern because it does not read as legible text
+  at a glance. Worked example: a yellow band with no letters on the Pjur bottle is identity (PASS);
+  the same band with garbled letters on it is text (BLOCK); the same band with a mirrored, backwards
+  "AQUA" baked in is still text (BLOCK), not a decorative stripe.
 - Hands, faces, bodies: anatomy that is wrong, uncanny, or ambiguous in age. Age ambiguity is judged
   on ambiguity itself, not intent, and is an automatic BLOCK.
 - The withholding test: name what the frame makes a viewer want to see that it does not show. If the
