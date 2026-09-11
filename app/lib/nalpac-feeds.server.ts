@@ -198,8 +198,18 @@ export async function fetchAllNalpacFeeds(opts: { force?: boolean } = {}): Promi
     saleIndex.set(sku, row)
   }
 
-  const newSkus    = new Set(newRows.map(skuOf).filter(Boolean))
-  const top100Skus = new Set(top100Rows.map(skuOf).filter(Boolean))
+  const newIndex = new Map<string, RawRow>()
+  for (const row of newRows) {
+    const sku = skuOf(row)
+    if (sku) newIndex.set(sku, row)
+  }
+  const top100Index = new Map<string, RawRow>()
+  for (const row of top100Rows) {
+    const sku = skuOf(row)
+    if (sku) top100Index.set(sku, row)
+  }
+  const newSkus    = new Set(newIndex.keys())
+  const top100Skus = new Set(top100Index.keys())
 
   for (const [sku, snap] of snapshots) {
     const saleRow = saleIndex.get(sku)
@@ -222,6 +232,31 @@ export async function fetchAllNalpacFeeds(opts: { force?: boolean } = {}): Promi
     const snap = snapshotFromSale(row)
     if (newSkus.has(sku))    snap.inNewFeed    = true
     if (top100Skus.has(sku)) snap.inTop100Feed = true
+    snapshots.set(sku, snap)
+  }
+
+  // SKUs that appear ONLY in the new or top100 feeds — never in main or sale
+  // — still surface them (ticket #8794). Before this fix, this function only
+  // ever SET inNewFeed/inTop100Feed on a snapshot that already existed from
+  // main/sale; a SKU exclusive to new/top100 never got a snapshot at all, so
+  // collapseMasters had no matching masterKey and approveAndImport failed
+  // every one of them with "master no longer in feed" — permanent queue rot
+  // on real, in-stock, sellable products (the Together Toy / NudeFit
+  // cluster). new/top100 are the same Wyomind product-attributes export as
+  // main, just row-filtered, so the main-shaped parser applies; a genuinely
+  // missing column still resolves safely via parseNum/safeText's own
+  // defaults rather than throwing.
+  for (const [sku, row] of newIndex) {
+    if (snapshots.has(sku)) continue
+    const snap = snapshotFromMain(row)
+    snap.inNewFeed    = true
+    snap.inTop100Feed = top100Skus.has(sku)
+    snapshots.set(sku, snap)
+  }
+  for (const [sku, row] of top100Index) {
+    if (snapshots.has(sku)) continue
+    const snap = snapshotFromMain(row)
+    snap.inTop100Feed = true
     snapshots.set(sku, snap)
   }
 
