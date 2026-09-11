@@ -20,6 +20,13 @@
  * does not parse as the expected shape all produce a FAILING verdict, never
  * a pass-by-default. "Could not check" and "checked and it's fine" are
  * different answers, and only the second one is `pass: true`.
+ *
+ * Reused (ticket #8691) by the Notebook hero generation path
+ * (scripts/gen-notebook-art.ts) via `runVisionGateOnImage`, the buffer-based
+ * core `runVisionGate` itself delegates to: that path holds a local,
+ * not-yet-uploaded candidate buffer rather than a live url, but the same four
+ * doctrine checks apply, so it calls the same checks directly instead of
+ * forking a second implementation.
  */
 
 import { sql } from 'drizzle-orm'
@@ -149,20 +156,39 @@ function resolve(deps?: VisionGateDeps): Required<VisionGateDeps> {
 }
 
 /**
+ * Run the vision gate against an already-decoded image (base64 data plus its
+ * media type). Shared core for `runVisionGate` (url-based, fetches first) and
+ * any caller that already holds the image bytes in memory, e.g. a local
+ * generation buffer that has not been uploaded anywhere yet (the Notebook
+ * hero path, gen-notebook-art.ts). Never throws, same fail-closed contract.
+ */
+export async function runVisionGateOnImage(
+  image: { data: string; mediaType: string },
+  deps?: VisionGateDeps,
+): Promise<VisionVerdict> {
+  const d = resolve(deps)
+  try {
+    const parsed = await d.callVision(image.data, image.mediaType)
+    if (!isValidVerdictShape(parsed)) {
+      return failClosedVerdict('Vision gate response did not match the expected verdict shape; failing closed.')
+    }
+    return { ...parsed, checkedAt: new Date().toISOString() }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return failClosedVerdict(`Vision gate check could not complete: ${message}`)
+  }
+}
+
+/**
  * Run the vision gate against one image url. Never throws: any failure along
  * the way (fetch, model call, malformed response) returns a failing verdict
  * rather than propagating, because a generation step that cannot complete
  * this check must treat that exactly like a real anatomy defect.
  */
 export async function runVisionGate(imageUrl: string, deps?: VisionGateDeps): Promise<VisionVerdict> {
-  const d = resolve(deps)
   try {
-    const { data, mediaType } = await d.fetchImageBase64(imageUrl)
-    const parsed = await d.callVision(data, mediaType)
-    if (!isValidVerdictShape(parsed)) {
-      return failClosedVerdict('Vision gate response did not match the expected verdict shape; failing closed.')
-    }
-    return { ...parsed, checkedAt: new Date().toISOString() }
+    const { data, mediaType } = await resolve(deps).fetchImageBase64(imageUrl)
+    return await runVisionGateOnImage({ data, mediaType }, deps)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return failClosedVerdict(`Vision gate check could not complete: ${message}`)

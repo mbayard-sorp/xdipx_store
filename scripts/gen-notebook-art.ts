@@ -6,8 +6,15 @@
  * reviewed keeper to its Sanity home. Run by the media-manager agent or the
  * store owner — one invocation per asset.
  *
- * The vision gate is manual by design (see the image brief): generation and
- * upload are two separate steps so every asset gets eyeballed before it ships.
+ * The broader curatorial vision gate (composition, mood, palette — see the
+ * image brief) stays manual by design: generation and upload are two separate
+ * steps so every asset gets eyeballed before it ships. The anatomy sub-check
+ * (limb count, hand anatomy, face/body integrity, extra or merged limbs) is
+ * NOT manual on the hero surface (ticket #8691): every hero candidate is run
+ * through the same code-enforced check the social path uses
+ * (app/lib/social-vision-gate.server.ts) before it can reach disk or Sanity,
+ * a failing verdict triggers regeneration, and exhausting the budget holds
+ * the post heroless rather than shipping an uncaught anatomy defect.
  *
  *   # Step 1 — generate candidates to a local dir (no upload):
  *   npx tsx scripts/gen-notebook-art.ts --surface category --slug care \
@@ -41,7 +48,44 @@ import './_load-env'
 
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { resolve, basename } from 'node:path'
-import { HERO_TARGET, resizeToExactCover } from '~/lib/hero-image-resize'
+// Relative, not the '~/lib' alias: scripts/**/* is excluded from tsconfig.json,
+// so vitest's tsconfig-paths resolution does not apply to imports written in
+// this directory (unlike tsx's runtime resolver, which reads paths regardless
+// of "exclude" and is why this script has always run fine via the CLI). A
+// relative import here is what makes gen-notebook-art.test.ts able to load
+// this module at all — matches the majority of scripts/*.ts, which already
+// import app/lib this way rather than via the alias.
+import { HERO_TARGET, resizeToExactCover } from '../app/lib/hero-image-resize'
+import type { VisionGateDeps, VisionVerdict } from '../app/lib/social-vision-gate.server'
+
+// ─── Anatomy vision gate for the hero surface (ticket #8691) ─────────────────
+//
+// Reuses app/lib/social-vision-gate.server.ts's checks directly rather than
+// forking a second implementation. Matches that module's own default budget
+// (generateWithVisionGate's maxAttempts) so the two surfaces behave the same.
+const HERO_VISION_MAX_ATTEMPTS = 2
+
+/** Base64-encode a candidate buffer and run it through the shared anatomy
+ *  vision gate. Never throws — same fail-closed contract as the social path. */
+export async function gateHeroBuffer(buf: Buffer, deps?: VisionGateDeps): Promise<VisionVerdict> {
+  const { runVisionGateOnImage } = await import('../app/lib/social-vision-gate.server')
+  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: 'image/png' }, deps)
+}
+
+/** Keep only the buffers whose paired verdict passed. `verdicts[i]` must correspond to `buffers[i]`. */
+export function splitByVerdict(
+  buffers: Buffer[],
+  verdicts: VisionVerdict[],
+): { passing: Buffer[]; failing: VisionVerdict[] } {
+  const passing: Buffer[] = []
+  const failing: VisionVerdict[] = []
+  buffers.forEach((buf, i) => {
+    const verdict = verdicts[i]
+    if (verdict?.pass) passing.push(buf)
+    else if (verdict) failing.push(verdict)
+  })
+  return { passing, failing }
+}
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`)
@@ -237,7 +281,15 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
       buffers.push(await resizeToExactCover(raw))
     }
     if (!buffers.length) throw new Error('composite produced no candidates')
-    return { rung, buffers, provider: 'fal', model: res.costKey }
+    // Anatomy vision gate (ticket #8691): a rung whose every candidate fails
+    // is treated exactly like a rung that threw, so the existing ladder below
+    // is the regeneration budget — no separate retry mechanism to invent.
+    const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf)))
+    const { passing, failing } = splitByVerdict(buffers, verdicts)
+    if (!passing.length) {
+      throw new Error(`vision gate rejected every ${rung} candidate: ${failing.map(f => f.notes).join(' | ') || 'no notes'}`)
+    }
+    return { rung, buffers: passing, provider: 'fal', model: res.costKey }
   }
 
   // Rung 4 — simpler single-figure, no product composite. Falls back to the
@@ -253,7 +305,12 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     })
     if (res.provider === 'none' || !res.buffers.length) throw new Error('single-figure generation produced no candidates')
     const buffers = await Promise.all(res.buffers.map(b => resizeToExactCover(b)))
-    return { rung: 'single-figure', buffers, provider: res.provider, model: res.model }
+    const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf)))
+    const { passing, failing } = splitByVerdict(buffers, verdicts)
+    if (!passing.length) {
+      throw new Error(`vision gate rejected every single-figure candidate: ${failing.map(f => f.notes).join(' | ') || 'no notes'}`)
+    }
+    return { rung: 'single-figure', buffers: passing, provider: res.provider, model: res.model }
   }
 
   const SECONDARY_SCALE_HINT =
@@ -286,26 +343,64 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   const { generateImage } = await import('~/lib/generate-image.server')
   const spec = SURFACES[surface]
 
-  const res = await generateImage({
-    prompt: opts.prompt,
-    count: opts.count,
-    feature: 'notebook-images',
-    caller: `media-manager/notebook-${surface}`,
-    // Text-to-image takes the exact pixel size; the Kontext ref-image path only
-    // honors a string aspect enum, so send the nearest enum there instead of a
-    // {width,height} object that would silently fall back to 16:9.
-    imageSize: opts.refImage ? spec.aspect : spec.size,
-    ...(opts.only ? { only: opts.only } : {}),
-    ...(opts.refImage ? { refImageUrl: opts.refImage } : {}),
-  })
+  async function generateOnce() {
+    return generateImage({
+      prompt: opts.prompt,
+      count: opts.count,
+      feature: 'notebook-images',
+      caller: `media-manager/notebook-${surface}`,
+      // Text-to-image takes the exact pixel size; the Kontext ref-image path only
+      // honors a string aspect enum, so send the nearest enum there instead of a
+      // {width,height} object that would silently fall back to 16:9.
+      imageSize: opts.refImage ? spec.aspect : spec.size,
+      ...(opts.only ? { only: opts.only } : {}),
+      ...(opts.refImage ? { refImageUrl: opts.refImage } : {}),
+    })
+  }
 
+  let res = await generateOnce()
   if (res.provider === 'none') {
     console.log(JSON.stringify({ generated: 0, provider: 'none', reason: 'no provider configured or both failed' }))
     process.exit(0)
   }
 
+  // Anatomy vision gate (ticket #8691), hero surface only: every candidate is
+  // checked before it can reach disk (and therefore before --upload can ever
+  // see it). A failing verdict regenerates the whole batch, within the same
+  // budget generateWithVisionGate uses on the social path, rather than being
+  // advisory. Other surfaces (masthead/category/series/spot) are mostly
+  // product-only still lifes and keep the existing manual curatorial review.
+  let candidates = res.buffers
+  if (surface === 'hero') {
+    for (let attempt = 1; ; attempt++) {
+      const verdicts = await Promise.all(res.buffers.map(buf => gateHeroBuffer(buf)))
+      const { passing, failing } = splitByVerdict(res.buffers, verdicts)
+      if (passing.length) {
+        candidates = passing
+        break
+      }
+      console.error(
+        `[gen-notebook-art] vision gate rejected every candidate on attempt ${attempt}/${HERO_VISION_MAX_ATTEMPTS}: ` +
+        (failing.map(f => f.notes).join(' | ') || 'no notes'),
+      )
+      if (attempt >= HERO_VISION_MAX_ATTEMPTS) {
+        console.log(JSON.stringify({
+          generated: 0,
+          provider: res.provider,
+          reason: 'every candidate failed the anatomy vision gate (limb count / hand anatomy / face-body integrity / extra-or-merged limbs); nothing written to disk',
+        }))
+        process.exit(0)
+      }
+      res = await generateOnce()
+      if (res.provider === 'none') {
+        console.log(JSON.stringify({ generated: 0, provider: 'none', reason: 'no provider configured or both failed' }))
+        process.exit(0)
+      }
+    }
+  }
+
   mkdirSync(resolve(opts.saveDir), { recursive: true })
-  const files = res.buffers.map((buf, i) => {
+  const files = candidates.map((buf, i) => {
     const name = `${surface}${slug ? `-${slug}` : ''}-${i + 1}.png`
     const path = resolve(opts.saveDir, name)
     writeFileSync(path, buf)
@@ -349,6 +444,23 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
   })
 
   const buffer = readFileSync(resolve(filePath))
+
+  // Anatomy vision gate (ticket #8691): the final, unconditional check before
+  // any hero candidate can ship, independent of which path produced the file
+  // (the gated generate() step above, the composite ladder, or a file handed
+  // to --upload directly). A failing verdict blocks the Sanity write outright
+  // rather than being advisory — no upload happens on a fail.
+  let heroVerdict: VisionVerdict | undefined
+  if (surface === 'hero') {
+    heroVerdict = await gateHeroBuffer(buffer)
+    if (!heroVerdict.pass) {
+      console.error(`[gen-notebook-art] BLOCKED: this candidate failed the anatomy vision gate and will not be uploaded.`)
+      console.error(`checks: ${JSON.stringify(heroVerdict.checks)}`)
+      console.error(`notes: ${heroVerdict.notes}`)
+      process.exit(1)
+    }
+  }
+
   const { assetId, url } = await uploadBufferToSanity(buffer, basename(filePath), 'image/png')
   const imageRef = sanityImageRef(assetId, alt)
 
@@ -402,8 +514,18 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
     // hero could never be retro'd and the hero/embed audit only ever saw half its
     // inputs (ticket #2750). postId prefers the published doc when one exists, so
     // this writes to the same perspective heroImage already does.
-    await client.patch(postId).set({ heroImage: imageRef, heroImageAlt: alt, imagePrompt: prompt }).commit()
-    console.log(JSON.stringify({ placed: true, target: `${postId}.heroImage`, assetId, url, imagePrompt: prompt }))
+    //
+    // heroImageVisionVerdict (ticket #8691) is the durable record of the anatomy
+    // check this exact upload passed, the same way social records its verdict
+    // onto the asset row, so a hero that ships with a defect the gate did NOT
+    // catch (a false pass, not a missed check) can still be retro'd.
+    await client.patch(postId).set({
+      heroImage: imageRef,
+      heroImageAlt: alt,
+      imagePrompt: prompt,
+      heroImageVisionVerdict: heroVerdict,
+    }).commit()
+    console.log(JSON.stringify({ placed: true, target: `${postId}.heroImage`, assetId, url, imagePrompt: prompt, visionVerdict: heroVerdict }))
     return
   }
 
@@ -528,7 +650,10 @@ async function main() {
   })
 }
 
-main().catch(err => {
-  console.error(err)
-  process.exit(1)
-})
+// Only run when invoked directly (not when imported by the unit tests).
+if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+  main().catch(err => {
+    console.error(err)
+    process.exit(1)
+  })
+}
