@@ -55,13 +55,24 @@ export interface VisionVerdict {
   /** Free-text reasoning, always present so a block finding can explain itself. */
   notes: string
   checkedAt: string
+  /**
+   * True only when the model actually returned and parsed a real verdict on
+   * this image. False means the check itself never ran to completion (auth
+   * failure, transport error, timeout, or a malformed response) and `pass:
+   * false` here is the fail-closed default, not a genuine anatomy read.
+   * Callers that bill for a judged image (ticket #8830) must key off this,
+   * not `pass`: a real anatomy FAIL should still bill (the image was
+   * produced and judged), a check that never completed should not (nothing
+   * was evaluated, let alone kept).
+   */
+  checkCompleted: boolean
 }
 
 /** A verdict that fails every check, used whenever the check could not run at all. */
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
-  return { pass: false, checks, notes, checkedAt: new Date().toISOString() }
+  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false }
 }
 
 /** Structural validation of a parsed model response before it is trusted as a verdict. */
@@ -172,7 +183,7 @@ export async function runVisionGateOnImage(
     if (!isValidVerdictShape(parsed)) {
       return failClosedVerdict('Vision gate response did not match the expected verdict shape; failing closed.')
     }
-    return { ...parsed, checkedAt: new Date().toISOString() }
+    return { ...parsed, checkedAt: new Date().toISOString(), checkCompleted: true }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return failClosedVerdict(`Vision gate check could not complete: ${message}`)

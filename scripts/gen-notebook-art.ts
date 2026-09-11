@@ -87,6 +87,19 @@ export function splitByVerdict(
   return { passing, failing }
 }
 
+/**
+ * How many of these candidates should be billed (ticket #8830): only the ones
+ * the vision gate actually evaluated. `checkCompleted: false` means the check
+ * itself never ran to completion (auth failure, transport error, timeout) and
+ * `pass: false` there is only the fail-closed default, not a real anatomy
+ * read — that candidate was never evaluated, let alone kept, so it must not
+ * be billed. A genuine anatomy FAIL (`checkCompleted: true`, `pass: false`)
+ * still counts: that image was actually produced and judged.
+ */
+export function billableCandidateCount(verdicts: VisionVerdict[]): number {
+  return verdicts.filter(v => v.checkCompleted).length
+}
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`)
   if (i === -1) return undefined
@@ -270,11 +283,6 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
       aspectRatio: '4:3',
       count,
     })
-    // composeSceneFrame logs no spend of its own — bill both keys here.
-    void logImageCost({ feature: 'notebook-images', model: res.costKey, count: res.urls.length, caller: `notebook-hero-composite/${rung}`, sku: productHandle ?? undefined })
-    if (res.plate) {
-      void logImageCost({ feature: 'notebook-images', model: res.plate.costKey, count: res.plate.count, caller: 'notebook-hero-composite/plate', sku: productHandle ?? undefined })
-    }
     const buffers: Buffer[] = []
     for (const url of res.urls) {
       const raw = await downloadFalAsset(url)
@@ -285,6 +293,17 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     // is treated exactly like a rung that threw, so the existing ladder below
     // is the regeneration budget — no separate retry mechanism to invent.
     const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf)))
+    // composeSceneFrame logs no spend of its own — bill both keys here, but
+    // only for candidates the gate actually evaluated (ticket #8830): when
+    // the gate cannot complete at all (auth/transport/timeout), nothing was
+    // evaluated, let alone kept, so nothing gets billed for this rung.
+    const billable = billableCandidateCount(verdicts)
+    if (billable > 0) {
+      void logImageCost({ feature: 'notebook-images', model: res.costKey, count: billable, caller: `notebook-hero-composite/${rung}`, sku: productHandle ?? undefined })
+      if (res.plate) {
+        void logImageCost({ feature: 'notebook-images', model: res.plate.costKey, count: res.plate.count, caller: 'notebook-hero-composite/plate', sku: productHandle ?? undefined })
+      }
+    }
     const { passing, failing } = splitByVerdict(buffers, verdicts)
     if (!passing.length) {
       throw new Error(`vision gate rejected every ${rung} candidate: ${failing.map(f => f.notes).join(' | ') || 'no notes'}`)
@@ -296,16 +315,26 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
   // existing text-to-image hero generator so a hero still gets produced.
   async function runSingleFigure(): Promise<HeroRungResult> {
     const { generateImage } = await import('~/lib/generate-image.server')
+    // logCost: false — this rung bills itself below, only for candidates the
+    // gate actually evaluated (ticket #8830), same as the composite rungs.
+    // generateImage()'s own default (bill on generate) would post spend for a
+    // candidate the gate never reached a verdict on.
     const res = await generateImage({
       prompt: `${SHARED_PREFIX}editorial hero portrait, a single relatable person in soft directional daylight, calm negative space for a headline, unembarrassed and inviting.`,
       count: opts.count,
       feature: 'notebook-images',
       caller: 'notebook-hero-composite/single-figure',
       imageSize: SURFACES.hero.size,
+      logCost: false,
     })
     if (res.provider === 'none' || !res.buffers.length) throw new Error('single-figure generation produced no candidates')
     const buffers = await Promise.all(res.buffers.map(b => resizeToExactCover(b)))
     const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf)))
+    const billable = billableCandidateCount(verdicts)
+    if (billable > 0) {
+      const { logImageCost } = await import('~/lib/token-log.server')
+      void logImageCost({ feature: 'notebook-images', model: res.model, count: billable, caller: 'notebook-hero-composite/single-figure' })
+    }
     const { passing, failing } = splitByVerdict(buffers, verdicts)
     if (!passing.length) {
       throw new Error(`vision gate rejected every single-figure candidate: ${failing.map(f => f.notes).join(' | ') || 'no notes'}`)

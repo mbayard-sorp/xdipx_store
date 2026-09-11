@@ -73,6 +73,7 @@ describe('runVisionGate', () => {
     expect(verdict.pass).toBe(true)
     expect(verdict.checks.handAnatomy).toBe('pass')
     expect(verdict.checkedAt).toBeTruthy()
+    expect(verdict.checkCompleted).toBe(true)
   })
 
   it('rejects an anatomy-fail asset', async () => {
@@ -81,6 +82,9 @@ describe('runVisionGate', () => {
     expect(verdict.pass).toBe(false)
     expect(verdict.checks.limbCount).toBe('fail')
     expect(verdict.notes).toContain('three arms')
+    // A genuine anatomy read, not a check that failed to run — ticket #8830
+    // callers must still bill this one.
+    expect(verdict.checkCompleted).toBe(true)
   })
 
   it('fails closed when the fetch throws', async () => {
@@ -89,6 +93,9 @@ describe('runVisionGate', () => {
     expect(verdict.pass).toBe(false)
     expect(verdict.notes).toContain('network down')
     expect(VISION_CHECK_NAMES.every(n => verdict.checks[n] === 'fail')).toBe(true)
+    // Ticket #8830: the check never ran, so a billing caller must not treat
+    // this like a genuine judged-and-rejected image.
+    expect(verdict.checkCompleted).toBe(false)
   })
 
   it('fails closed when the model call throws', async () => {
@@ -96,6 +103,7 @@ describe('runVisionGate', () => {
     const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', d)
     expect(verdict.pass).toBe(false)
     expect(verdict.notes).toContain('anthropic 529')
+    expect(verdict.checkCompleted).toBe(false)
   })
 
   it('fails closed when the model response does not match the expected shape', async () => {
@@ -103,6 +111,7 @@ describe('runVisionGate', () => {
     const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', d)
     expect(verdict.pass).toBe(false)
     expect(verdict.notes).toContain('expected verdict shape')
+    expect(verdict.checkCompleted).toBe(false)
   })
 
   it('never throws, even when every dep throws', async () => {

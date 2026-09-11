@@ -7,7 +7,7 @@
 // (app/lib/social-vision-gate.server.ts) the hero path now calls on every
 // candidate before it can reach disk or Sanity.
 import { describe, expect, it, vi } from 'vitest'
-import { gateHeroBuffer, splitByVerdict } from './gen-notebook-art'
+import { gateHeroBuffer, splitByVerdict, billableCandidateCount } from './gen-notebook-art'
 import type { VisionVerdict } from '../app/lib/social-vision-gate.server'
 
 const CLEAN_VERDICT = {
@@ -47,6 +47,53 @@ describe('gateHeroBuffer', () => {
     const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision })
     expect(verdict.pass).toBe(false)
     expect(verdict.notes).toContain('anthropic 529')
+  })
+
+  // Ticket #8830 (MONEY BUG): a fail-closed verdict from an auth/transport/
+  // timeout failure must be distinguishable from a genuine anatomy read, so
+  // callers can bill only the latter. Reproduces content run 818's exact
+  // failure: `ANTHROPIC_API_KEY` unset, so the Anthropic client construction
+  // itself throws "Could not resolve authentication method".
+  it('marks checkCompleted false when the check never ran to completion (auth outage)', async () => {
+    const callVision = vi.fn(async () => { throw new Error('Could not resolve authentication method') })
+    const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision })
+    expect(verdict.checkCompleted).toBe(false)
+    expect(verdict.pass).toBe(false)
+  })
+
+  it('marks checkCompleted true on a genuine verdict, pass or fail', async () => {
+    const clean = await gateHeroBuffer(Buffer.from('a'), { callVision: vi.fn(async () => CLEAN_VERDICT) })
+    const fail = await gateHeroBuffer(Buffer.from('b'), { callVision: vi.fn(async () => THREE_HANDS_VERDICT) })
+    expect(clean.checkCompleted).toBe(true)
+    expect(fail.checkCompleted).toBe(true)
+  })
+})
+
+describe('billableCandidateCount', () => {
+  // Ticket #8830 (MONEY BUG): logImageCost fired inside runComposite before
+  // the vision gate ran, so a gate that could not authenticate still billed
+  // real fal spend for zero evaluated images. billableCandidateCount is the
+  // fix's decision function — callers must bill only what it returns.
+  it('counts a candidate whose gate check completed, pass or fail', () => {
+    const completedPass = { ...CLEAN_VERDICT, checkCompleted: true } as unknown as VisionVerdict
+    const completedFail = { ...THREE_HANDS_VERDICT, checkCompleted: true } as unknown as VisionVerdict
+    expect(billableCandidateCount([completedPass, completedFail])).toBe(2)
+  })
+
+  it('excludes a candidate whose gate check never completed, reproducing the run-818 auth outage', () => {
+    const authOutage = {
+      pass: false,
+      checks: {},
+      notes: 'Vision gate check could not complete: Could not resolve authentication method',
+      checkCompleted: false,
+    } as unknown as VisionVerdict
+    expect(billableCandidateCount([authOutage, authOutage])).toBe(0)
+  })
+
+  it('bills only the completed candidates in a mixed batch', () => {
+    const completed = { ...CLEAN_VERDICT, checkCompleted: true } as unknown as VisionVerdict
+    const notCompleted = { pass: false, checks: {}, notes: 'timeout', checkCompleted: false } as unknown as VisionVerdict
+    expect(billableCandidateCount([completed, notCompleted, completed])).toBe(2)
   })
 })
 

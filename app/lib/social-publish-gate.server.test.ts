@@ -29,6 +29,7 @@ const PASSING_VERDICT: VisionVerdict = {
   checks: { limbCount: 'pass', handAnatomy: 'pass', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'pass' },
   notes: 'test fixture: clean',
   checkedAt: '2026-08-31T00:00:00.000Z',
+  checkCompleted: true,
 }
 
 /**
@@ -730,6 +731,7 @@ describe('vision-gate verdict', () => {
       checks: { limbCount: 'fail', handAnatomy: 'fail', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'fail' },
       notes: 'three arms visible on the cast member',
       checkedAt: '2026-08-30T00:00:00.000Z',
+      checkCompleted: true,
     }
     const r = await runChecksRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
