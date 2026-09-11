@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   runVisionGate,
+  runVisionGateOnImage,
   recordVisionVerdict,
   getVisionVerdictByUrl,
   generateWithVisionGate,
@@ -110,6 +111,32 @@ describe('runVisionGate', () => {
       callVision: vi.fn(async () => { throw new Error('unreachable') }),
     })
     await expect(runVisionGate('https://cdn.shopify.com/files/x.jpg', d)).resolves.toMatchObject({ pass: false })
+  })
+})
+
+describe('runVisionGateOnImage', () => {
+  it('passes a clean already-decoded image with no fetch involved', async () => {
+    const callVision = vi.fn(async () => CLEAN_RESPONSE)
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/png' }, { callVision })
+    expect(verdict.pass).toBe(true)
+    expect(callVision).toHaveBeenCalledWith('ZmFrZQ==', 'image/png')
+  })
+
+  it('rejects an extraOrMergedLimbs defect on a local buffer, same as the url path', async () => {
+    const callVision = vi.fn(async () => ANATOMY_FAIL_RESPONSE)
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/png' }, { callVision })
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checks.extraOrMergedLimbs).toBe('fail')
+    expect(verdict.notes).toContain('three arms')
+  })
+
+  it('fails closed when the model call throws, without ever touching fetch', async () => {
+    const fetchImageBase64 = vi.fn()
+    const callVision = vi.fn(async () => { throw new Error('anthropic 529') })
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/png' }, { callVision, fetchImageBase64 })
+    expect(verdict.pass).toBe(false)
+    expect(verdict.notes).toContain('anthropic 529')
+    expect(fetchImageBase64).not.toHaveBeenCalled()
   })
 })
 

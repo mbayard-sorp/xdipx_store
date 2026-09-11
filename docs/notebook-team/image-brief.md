@@ -217,6 +217,15 @@ is unchanged; images are expression, words are claims.
   product's real Shopify photo cropped editorially. Two failures on §0-H: retry with a simpler
   single-figure composition; if that also fails, the post holds as a Sanity draft for the
   owner rather than publishing heroless.
+- **The anatomy sub-check is code-enforced, not manual (ticket #8691).** Of the vision-gate
+  notes above, limb count / hand anatomy / face-body integrity / extra-or-merged limbs are no
+  longer agent judgment on the hero surface: `scripts/gen-notebook-art.ts` runs every hero
+  candidate through the same check the social path uses
+  (`app/lib/social-vision-gate.server.ts`) before it can reach disk or Sanity, discards a
+  failing candidate and regenerates, and blocks `--upload` outright on a fail. The rest of
+  this checklist (composition, mood, product match, palette) is still the reviewer's manual
+  call — this closes only the class of defect (extra/missing/merged limbs, wrong hand anatomy)
+  that shipped in production because nothing but a fast human scroll was ever checking for it.
 
 ---
 

@@ -130,6 +130,35 @@ export default {
       description: 'Describe the hero image for accessibility and SEO.',
     },
     {
+      // Durable record of the anatomy vision-gate verdict this exact hero
+      // image passed before upload (ticket #8691, scripts/gen-notebook-art.ts).
+      // Read-only: written by the generation script, not hand-edited, so a
+      // hero that ships with a defect the gate did not catch can still be
+      // retro'd by reading what the gate actually saw.
+      name: 'heroImageVisionVerdict',
+      title: 'Hero Image Vision-Gate Verdict',
+      type: 'object',
+      group: 'content',
+      readOnly: true,
+      description: 'Anatomy check result (limb count / hand anatomy / face-body integrity / extra-or-merged limbs) recorded automatically at upload.',
+      fields: [
+        { name: 'pass', title: 'Passed', type: 'boolean' },
+        {
+          name: 'checks',
+          title: 'Per-check verdicts',
+          type: 'object',
+          fields: [
+            { name: 'limbCount', title: 'Limb count', type: 'string' },
+            { name: 'handAnatomy', title: 'Hand anatomy', type: 'string' },
+            { name: 'faceBodyIntegrity', title: 'Face/body integrity', type: 'string' },
+            { name: 'extraOrMergedLimbs', title: 'Extra or merged limbs', type: 'string' },
+          ],
+        },
+        { name: 'notes', title: 'Notes', type: 'text', rows: 2 },
+        { name: 'checkedAt', title: 'Checked at', type: 'datetime' },
+      ],
+    },
+    {
       name: 'body',
       title: 'Body',
       type: 'array',
