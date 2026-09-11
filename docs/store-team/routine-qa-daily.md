@@ -88,6 +88,20 @@ link gives you the PR number.
 
 ## Step 3 — Read the diff
 
+**First move, before pulling the branch: check `mergeable`/`mergeableState`.**
+
+```bash
+curl -s "$BASE_URL/api/team/pr?number=<n>" -H "x-team-secret: $TEAM_TOKEN"
+```
+
+`mergeable:false` or `mergeableState:dirty` means the PR has diverged from `origin/main` and needs a
+rebase or merge before it can land, whatever the diff itself looks like. Catching that in one API
+call is cheaper than discovering it after a full diff read and a worktree setup. Concrete instance:
+ticket #8696 / PR #1156 (2026-09-11) was `mergeableState:dirty` because it diverged before an
+adjacent PR merged an entry to the same append-only file; the conflict was only found after reading
+the full 197-line diff. Note the state in your review; a dirty PR is a bounce (ask for a rebase),
+not a Step 6 verdict call.
+
 Pull the branch and read it locally. Git works in a cloud session; the GitHub API does not, because
 egress is restricted to xdipx.com.
 
