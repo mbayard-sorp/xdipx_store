@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  buildPublishGateUserContent,
   computePublishGateContentHash,
   parsePublishGateModelOutput,
   parseVoiceGateModelOutput,
@@ -221,6 +222,72 @@ describe('publish-gate baked-in-text vs product-identity (ticket #7890)', () => 
     const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
     expect(PUBLISH_GATE_SYSTEM).toContain('a yellow band\n  with no letters on the Pjur bottle is identity (PASS)')
     expect(PUBLISH_GATE_SYSTEM).toContain('the same band with garbled letters on it is\n  text (BLOCK)')
+  })
+})
+
+describe('buildPublishGateUserContent (ticket #8823, product-identity hallucination fix)', () => {
+  const base = {
+    platform: 'instagram' as const,
+    tweetText: 'a caption about pjur aqua',
+    altText: 'a bottle on a counter',
+    deterministicHeld: false,
+    recentCaptionsBlock: 'RECENT_CAPTIONS_BLOCK',
+    registerPrecedentsBlock: 'REGISTER_PRECEDENTS_BLOCK',
+    mediaUrls: ['https://cdn.example/generated-candidate.jpg'],
+  }
+
+  it('places the real packshot image before the generated candidate and labels it as ground truth', () => {
+    const content = buildPublishGateUserContent({
+      ...base,
+      featuresProduct: true,
+      packshotUrl: 'https://cdn.shopify.com/real-packshot.jpg',
+    })
+    // text block, then the packshot image, then the one generated candidate.
+    expect(content).toHaveLength(3)
+    expect(content[0]).toMatchObject({ type: 'text' })
+    expect((content[0] as { text: string }).text).toContain('REAL PRODUCT PACKSHOT')
+    expect((content[0] as { text: string }).text).toContain('not in memory of what the product looks like')
+    expect(content[1]).toEqual({
+      type: 'image',
+      source: { type: 'url', url: 'https://cdn.shopify.com/real-packshot.jpg' },
+    })
+    expect(content[2]).toEqual({
+      type: 'image',
+      source: { type: 'url', url: 'https://cdn.example/generated-candidate.jpg' },
+    })
+  })
+
+  it('never invents a packshot: featuresProduct true with no fetched url sends no packshot image and says so', () => {
+    const content = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
+    expect(content).toHaveLength(2) // text + the one generated candidate, no packshot image block
+    const text = (content[0] as { text: string }).text
+    expect(text).toContain('no real packshot could be fetched')
+    expect(text).toContain('say so explicitly in your')
+    expect(content.some(b => b.type === 'image' && (b as { source: { url: string } }).source.url.includes('packshot'))).toBe(false)
+  })
+
+  it('a product-free post gets no packshot note at all (nothing to misrepresent)', () => {
+    const content = buildPublishGateUserContent({ ...base, featuresProduct: false, packshotUrl: null })
+    const text = (content[0] as { text: string }).text
+    expect(text).not.toContain('packshot')
+    expect(text).toContain('REGISTER_PRECEDENTS_BLOCK')
+  })
+
+  it('the text turn always carries the caption, alt text, and recent-precedents block', () => {
+    const content = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
+    const text = (content[0] as { text: string }).text
+    expect(text).toContain('a caption about pjur aqua')
+    expect(text).toContain('a bottle on a counter')
+    expect(text).toContain('RECENT_CAPTIONS_BLOCK')
+  })
+})
+
+describe('publish-gate identity grounding system prompt (ticket #8823)', () => {
+  it('tells the model to ground identity in a supplied packshot image, never memory', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('real product packshot photo is supplied to you directly in this call')
+    expect(PUBLISH_GATE_SYSTEM).toContain('ground this comparison in those exact pixels, never')
+    expect(PUBLISH_GATE_SYSTEM).toContain('you\n  cannot verify identity against a real photo this call')
   })
 })
 

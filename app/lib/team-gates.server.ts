@@ -50,7 +50,7 @@ import { socialPosts } from '../../db/schema'
 import { SONNET } from './models.server'
 import { EMMA_VOICE_SOCIAL, EMMA_VOICE_LINKEDIN } from './emma-voice.server'
 import { runDeterministicPublishChecks, type GatePlatform, type GateFinding } from './social-publish-gate.server'
-import { getProductHandleById } from './shopify.server'
+import { getProductHandleById, getProductByHandle } from './shopify.server'
 import { logApiTokens } from './token-log.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
@@ -257,6 +257,14 @@ Judge these, all BLOCK-class unless noted:
 - Does each image actually show the product the caption claims, not a lookalike? Compare silhouette,
   proportion, cap type, and colour bands against the real packshot. A solid colour band, stripe, or
   cap colour with no glyphs on it is product identity, exactly what the packshot shows, not text.
+  **When a real product packshot photo is supplied to you directly in this call (labeled as such,
+  shown before the generated candidate images), ground this comparison in those exact pixels, never
+  in memory or a guess at what the product typically looks like** — a vision call has no reliable
+  memory of a specific SKU's exact shape, and judging from one produces a different, contradictory
+  description of the same product on every call, which is not a real defect in the image. When no
+  packshot is supplied for a product-tagged post (also noted explicitly, in the text turn), you
+  cannot verify identity against a real photo this call; say so honestly rather than assuming a
+  match, per the general rule below on what you cannot judge with confidence.
 - Is the product's apparent size plausible against the hand/room in frame (not palm-sized rendered
   vase-sized or the reverse)?
 - Any letter, digit, wordmark, logo mark, or garbled glyph run baked into the image? (BLOCK) A solid
@@ -518,20 +526,25 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
     }
   }
 
-  const content: Anthropic.ContentBlockParam[] = [
-    {
-      type: 'text',
-      text:
-        `Platform: ${platform}\n` +
-        `Deterministic check: clean (no mechanical findings)${deterministic.held ? ', held pending owner review of a mechanical warn/hold' : ''}.\n` +
-        `Caption (as it will publish):\n${post.tweetText}\n\n` +
-        `Alt text: ${post.altText ?? '(none)'}\n\n` +
-        `${describePrecedents(recentCaptions)}\n\n` +
-        `${featuresProduct ? '' : `${describeRegisterPrecedents()}\n\n`}` +
-        `${media.length} image(s) follow.`,
-    },
-    ...media.map((url): Anthropic.ContentBlockParam => ({ type: 'image', source: { type: 'url', url } })),
-  ]
+  // Real product packshot for grounding (ticket #8823). Fetched after the
+  // cache check above (a cache hit never needs it) so a cached re-check
+  // costs nothing extra. `null` when the post features no product, or when
+  // the fetch fails or the product has no images on Shopify — either way the
+  // model has nothing real to compare against and must say so rather than
+  // judging identity from its own memory of the SKU.
+  const packshotUrl = await fetchPackshotUrl(productHandle)
+
+  const content = buildPublishGateUserContent({
+    platform,
+    tweetText: post.tweetText,
+    altText: post.altText,
+    deterministicHeld: deterministic.held,
+    recentCaptionsBlock: describePrecedents(recentCaptions),
+    registerPrecedentsBlock: describeRegisterPrecedents(),
+    featuresProduct,
+    mediaUrls: media,
+    packshotUrl,
+  })
 
   let modelResult = await callPublishGateModel(postId, content)
 
@@ -630,6 +643,84 @@ export function parsePublishGateModelOutput(
     findings.push(note ? { check, verdict: fv, note } : { check, verdict: fv })
   }
   return { verdict, notes, findings }
+}
+
+/**
+ * The real Shopify packshot for the gated post's tagged product, so the
+ * product-identity/colour judgment in `PUBLISH_GATE_SYSTEM` has an actual
+ * photo to compare against instead of the model's own memory of the SKU
+ * (ticket #8823). Incident: run 816 (2026-09-11) BLOCKed 5 consecutive
+ * candidates across 3 real SKUs with mutually contradictory shape
+ * descriptions of the identical product (one pjur Aqua call read
+ * squat/wide/deodorant-stick, another tall/slender/pump-cap) — direct pixel
+ * comparison against the live CDN packshots confirmed every candidate
+ * actually matched. Nothing in the call before this fix ever sent the model
+ * a real product photo to compare against; `PUBLISH_GATE_SYSTEM` told it to
+ * "compare against the real packshot" while giving it no such image, so it
+ * was necessarily judging from a hallucinated reference. Returns `null`
+ * (never throws) when there is no tagged product, the Shopify fetch fails,
+ * or the product has no images — every one of those means there is nothing
+ * real to ground the check in, which the user-turn text must say plainly.
+ */
+async function fetchPackshotUrl(productHandle: string | null): Promise<string | null> {
+  if (!productHandle) return null
+  try {
+    const product = await getProductByHandle(productHandle)
+    return product?.images?.[0]?.url ?? null
+  } catch (err) {
+    console.error(`[publish-gate] packshot fetch failed for product "${productHandle}" (treating as unavailable):`, err)
+    return null
+  }
+}
+
+/**
+ * Builds the publish-gate user turn: caption, precedents, the real packshot
+ * (when one was fetched) labeled and placed BEFORE the generated candidates
+ * so the model reads it as ground truth rather than another candidate to
+ * judge, and the generated images themselves. Pure and exported so the
+ * packshot-grounding fix (ticket #8823) is unit-testable without a live
+ * Shopify call or model call: given a `packshotUrl` (or `null`), assert
+ * exactly what gets sent.
+ */
+export function buildPublishGateUserContent(input: {
+  platform: GatePlatform
+  tweetText: string
+  altText: string | null
+  deterministicHeld: boolean
+  recentCaptionsBlock: string
+  registerPrecedentsBlock: string
+  featuresProduct: boolean
+  mediaUrls: readonly string[]
+  packshotUrl: string | null
+}): Anthropic.ContentBlockParam[] {
+  const packshotNote = input.featuresProduct
+    ? input.packshotUrl
+      ? 'The REAL PRODUCT PACKSHOT follows immediately below, before any generated candidate images. ' +
+        'Ground every product-identity, colour, and proportion judgment in those exact pixels, not in ' +
+        'memory of what the product looks like.'
+      : 'This post features a product, but no real packshot could be fetched for comparison this call. ' +
+        'You cannot ground the product-identity/colour check in a real photo; say so explicitly in your ' +
+        'notes rather than assuming the generated image matches.'
+    : ''
+
+  return [
+    {
+      type: 'text',
+      text:
+        `Platform: ${input.platform}\n` +
+        `Deterministic check: clean (no mechanical findings)${input.deterministicHeld ? ', held pending owner review of a mechanical warn/hold' : ''}.\n` +
+        `Caption (as it will publish):\n${input.tweetText}\n\n` +
+        `Alt text: ${input.altText ?? '(none)'}\n\n` +
+        `${input.recentCaptionsBlock}\n\n` +
+        `${input.featuresProduct ? '' : `${input.registerPrecedentsBlock}\n\n`}` +
+        `${packshotNote ? `${packshotNote}\n\n` : ''}` +
+        `${input.mediaUrls.length} generated candidate image(s) follow${input.packshotUrl ? ' after the packshot' : ''}.`,
+    },
+    ...(input.packshotUrl
+      ? [{ type: 'image', source: { type: 'url', url: input.packshotUrl } } satisfies Anthropic.ContentBlockParam]
+      : []),
+    ...input.mediaUrls.map((url): Anthropic.ContentBlockParam => ({ type: 'image', source: { type: 'url', url } })),
+  ]
 }
 
 /**
