@@ -1870,5 +1870,51 @@ daily image budget. `heroImage`, `heroImageAlt`, and `imagePrompt` all set on th
 
 ---
 
+## Notebook §0-H attempt (blocked, not a reject) — content run 818, "How Do Couples Stay Intimate Long Distance?"
+
+`cast: jade` + Lovense Lush 3 Bluetooth Remote-Controlled Egg Vibrator
+(`lush-3-bluetooth-remote-controlled-egg-vibrator`), `blogPost-how-do-long-distance-couples-stay-intimate`
+(category `real-talk`, routed to §0-H human hero, not † health-adjacent — sincere staging per
+caller instruction, no levity license invoked). Gesture per the "Is this normal? / Is it just
+me?" row: product held up in one hand at eye level, head tilted toward it mid-question, free
+hand palm-up beside her asking the room whether a small object can carry a long-distance
+relationship. **Casting:** independently re-verified against actual `blogPost` publish history
+(not just this file's log) — true last-7 real-talk/podcast-notes human heroes in order:
+`how-do-you-initiate-sex-without-pressure` (priya, 09-10), `can-a-vibrator-make-you-less-sensitive`
+(maya, 09-08), `what-to-do-when-orgasm-takes-longer-than-it-used-to` (diego, 09-04),
+`how-to-get-more-confident-in-bed` (vivian, 09-03), `why-does-penetration-sometimes-hurt`
+(unnamed, description matches maya, 09-01), `what-to-do-when-medication-changes-your-libido`
+(sofia, 08-28), `what-counts-as-premature-ejaculation` (marcus, 08-27). `jade` (last used 08-25)
+appears in none of the last 7 — clear of the no-repeat-within-5 window. **Wardrobe override
+applied:** `castMember.jade.editorialPhoto` is unset, so compositing would fall back to
+`referencePhoto` per `editorialPhoto ?? referencePhoto`; explicit strip-and-replace language added
+regardless ("plain soft crew-neck t-shirt... no lingerie, no bra visible, no cleavage, no bare
+shoulders... overriding the wardrobe shown in reference 1") per the standing ticket #2751
+precedent, as a safety margin rather than a confirmed defect in this specific reference photo.
+Product reference (`77295A.jpg`) inspected directly before use: it is a box+phone-app composite
+shot (Lovense branded carton, "Closing the Distance" copy, and a phone screen full of app UI), not
+a bare device plate, so the prompt carried explicit negatives beyond the standard set — "no
+packaging, no box, no retail carton," "no phone, no smartphone screen, no app UI" — anticipating
+that risk on top of `compositeProductClauses('atlas', ...)`'s built-in carton clause.
+
+**Blocked, not generated — genuine credential outage, not a content or anatomy fail:**
+`scripts/gen-notebook-art.ts --surface hero --cast jade` ran the full fallback ladder
+(composite → composite-retry → secondary-scale → single-figure) and every rung failed the
+mandatory ticket #8691 anatomy vision gate with `Vision gate check could not complete: Could not
+resolve authentication method` — `app/lib/social-vision-gate.server.ts` needs `ANTHROPIC_API_KEY`,
+which is not configured in this checkout (no `.env` present; only `.env.example`, and the value is
+absent from the process environment). The Atlas one-stage composite additionally logged one
+`content_policy` media-block and one download timeout before the fal two-stage fallback engaged;
+those may or may not have been genuine content rejections, but it never reached a verdict either
+way because the gate itself could not authenticate. Because `logImageCost` fires (inside
+`runComposite`) before the gate runs, the three `composeSceneFrame`-based ladder rungs posted real
+fal spend against `notebook-images` with zero images produced — flagged here so the spend is not
+mistaken for a content-quality reject. **Correctly held as a Sanity draft** (`heroImage`,
+`heroImageAlt`, `imagePrompt` all confirmed still `null` post-run) rather than publishing heroless
+or bypassing the gate. Re-run once `ANTHROPIC_API_KEY` is configured in this environment; the
+routing, casting, and prompt above are reusable as-is — no rework needed, only the credential.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
