@@ -6,8 +6,8 @@
 // which missed it. These tests exercise the same reused check
 // (app/lib/social-vision-gate.server.ts) the hero path now calls on every
 // candidate before it can reach disk or Sanity.
-import { describe, expect, it, vi } from 'vitest'
-import { gateHeroBuffer, splitByVerdict, billableCandidateCount } from './gen-notebook-art'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { gateHeroBuffer, splitByVerdict, billableCandidateCount, remoteVisionCallVision, heroVisionDeps } from './gen-notebook-art'
 import type { VisionVerdict } from '../app/lib/social-vision-gate.server'
 
 const CLEAN_VERDICT = {
@@ -66,6 +66,96 @@ describe('gateHeroBuffer', () => {
     const fail = await gateHeroBuffer(Buffer.from('b'), { callVision: vi.fn(async () => THREE_HANDS_VERDICT) })
     expect(clean.checkCompleted).toBe(true)
     expect(fail.checkCompleted).toBe(true)
+  })
+})
+
+// Ticket #8989 (blocker #142): the scheduled content sandbox carries no
+// ANTHROPIC_API_KEY, so the default in-process `callVision` failed closed on
+// every hero candidate and a hero-mandatory post could not publish. These
+// cover the remote fallback that runs the same check server-side instead.
+describe('heroVisionDeps / remoteVisionCallVision (ticket #8989)', () => {
+  const realFetch = global.fetch
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    global.fetch = realFetch
+  })
+
+  it('heroVisionDeps keeps the in-process path when ANTHROPIC_API_KEY is present', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test')
+    expect(heroVisionDeps()).toBeUndefined()
+  })
+
+  it('heroVisionDeps routes through the remote callVision when no key is present', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '')
+    const deps = heroVisionDeps()
+    expect(deps?.callVision).toBeTypeOf('function')
+  })
+
+  it('no-local-key path: remoteVisionCallVision returns a real verdict from a completed remote check', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    vi.stubEnv('BASE_URL', 'https://xdipx.example')
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://xdipx.example/api/team/vision-gate')
+      expect((init?.headers as Record<string, string>)['x-team-secret']).toBe('test-team-token')
+      return new Response(JSON.stringify({
+        ...CLEAN_VERDICT,
+        checkedAt: '2026-09-12T00:00:00.000Z',
+        checkCompleted: true,
+      }), { status: 200 })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision: remoteVisionCallVision() })
+    expect(verdict.pass).toBe(true)
+    expect(verdict.checkCompleted).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('route-unreachable path fails closed on a transport error, never a silent pass', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    global.fetch = vi.fn(async () => { throw new Error('fetch failed: ECONNREFUSED') }) as unknown as typeof fetch
+
+    const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision: remoteVisionCallVision() })
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checkCompleted).toBe(false)
+  })
+
+  it('route-unreachable path fails closed on a non-2xx response', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    global.fetch = vi.fn(async () => new Response('gated', { status: 403 })) as unknown as typeof fetch
+
+    const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision: remoteVisionCallVision() })
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checkCompleted).toBe(false)
+  })
+
+  it('does not force checkCompleted:true when the remote route itself could not complete the check', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      pass: false,
+      checks: {},
+      notes: 'Vision gate check could not complete: anthropic 529',
+      checkedAt: '2026-09-12T00:00:00.000Z',
+      checkCompleted: false,
+    }), { status: 200 })) as unknown as typeof fetch
+
+    const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision: remoteVisionCallVision() })
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checkCompleted).toBe(false)
+  })
+
+  it('throws when no team token is configured, rather than sending an unauthenticated request', async () => {
+    vi.stubEnv('TEAM_TOKEN', '')
+    vi.stubEnv('HOMEPAGE_TEAM_TOKEN', '')
+    vi.stubEnv('CRON_SECRET', '')
+    const fetchMock = vi.fn()
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision: remoteVisionCallVision() })
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checkCompleted).toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 

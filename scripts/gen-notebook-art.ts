@@ -65,11 +65,58 @@ import type { VisionGateDeps, VisionVerdict } from '../app/lib/social-vision-gat
 // (generateWithVisionGate's maxAttempts) so the two surfaces behave the same.
 const HERO_VISION_MAX_ATTEMPTS = 2
 
+/**
+ * Remote fallback for the anatomy vision gate's `callVision` hook (ticket
+ * #8989). `social-vision-gate.server.ts`'s default `callVision` builds
+ * `new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })` IN THIS
+ * process, which the scheduled content sandbox does not carry — every hero
+ * candidate failed closed there and blocker #142 was filed. The fix already
+ * proven for social images (ticket #4133): POST to a route that runs the
+ * privileged call SERVER-SIDE, where the key already lives, instead of
+ * needing the key here. Throws on any transport/HTTP failure, and also when
+ * the server itself could not complete the check (its own
+ * `checkCompleted: false`) — either way `runVisionGateOnImage` (this
+ * function's caller, via `gateHeroBuffer`) treats the throw exactly like a
+ * local auth/transport failure and produces the same fail-closed verdict, so
+ * a route outage degrades the same way a missing key always has, never as a
+ * silent pass.
+ */
+export function remoteVisionCallVision(): NonNullable<VisionGateDeps['callVision']> {
+  const BASE_URL = (process.env['BASE_URL'] ?? 'https://xdipx.com').replace(/\/$/, '')
+  const TEAM_TOKEN = process.env['TEAM_TOKEN'] ?? process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
+  return async (imageBase64, mediaType) => {
+    if (!TEAM_TOKEN) throw new Error('vision-gate: no TEAM_TOKEN/HOMEPAGE_TEAM_TOKEN/CRON_SECRET in env for the remote route')
+    const res = await fetch(`${BASE_URL}/api/team/vision-gate`, {
+      method: 'POST',
+      headers: { 'x-team-secret': TEAM_TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ imageBase64, mediaType }),
+    })
+    if (!res.ok) throw new Error(`vision-gate route HTTP ${res.status}`)
+    const verdict = (await res.json()) as VisionVerdict
+    if (!verdict.checkCompleted) {
+      throw new Error(`vision-gate route could not complete the check: ${verdict.notes}`)
+    }
+    return { pass: verdict.pass, checks: verdict.checks, notes: verdict.notes }
+  }
+}
+
+/**
+ * Which `callVision` `gateHeroBuffer`'s default should use: the in-process
+ * Anthropic call when `ANTHROPIC_API_KEY` is present (owner/local/preview
+ * runs, unchanged), the privileged route when it is not (the scheduled
+ * content sandbox, ticket #8989). Only consulted when a caller passes no
+ * explicit `deps` — every test in this file passes its own `callVision` and
+ * is unaffected by which branch this returns.
+ */
+export function heroVisionDeps(): VisionGateDeps | undefined {
+  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision() }
+}
+
 /** Base64-encode a candidate buffer and run it through the shared anatomy
  *  vision gate. Never throws — same fail-closed contract as the social path. */
 export async function gateHeroBuffer(buf: Buffer, deps?: VisionGateDeps): Promise<VisionVerdict> {
   const { runVisionGateOnImage } = await import('../app/lib/social-vision-gate.server')
-  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: 'image/png' }, deps)
+  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: 'image/png' }, deps ?? heroVisionDeps())
 }
 
 /** Keep only the buffers whose paired verdict passed. `verdicts[i]` must correspond to `buffers[i]`. */
