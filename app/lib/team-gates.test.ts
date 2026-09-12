@@ -10,6 +10,7 @@ import {
   buildPublishGateUserContent,
   buildVoiceGateUserContent,
   computePublishGateContentHash,
+  formatProductIdentityLogLine,
   parsePublishGateModelOutput,
   parseVoiceGateModelOutput,
   verdictConsistencyCheck,
@@ -332,6 +333,54 @@ describe('publish-gate identity grounding system prompt (ticket #8823)', () => {
     expect(PUBLISH_GATE_SYSTEM).toContain('real product packshot photo is supplied to you directly in this call')
     expect(PUBLISH_GATE_SYSTEM).toContain('ground this comparison in those exact pixels, never')
     expect(PUBLISH_GATE_SYSTEM).toContain('you\n  cannot verify identity against a real photo this call')
+  })
+})
+
+describe('formatProductIdentityLogLine (ticket #8854)', () => {
+  it('tags the line with the productHandle and packshotUrl so a repeat SKU is grep-able', () => {
+    const line = formatProductIdentityLogLine({
+      postId: 230,
+      productHandle: 'pjur-basic-100ml',
+      packshotUrl: 'https://cdn.shopify.com/pjur-basic.jpg',
+      verdict: 'BLOCK',
+      findings: [{ check: 'product-identity', verdict: 'block', note: 'squat, wide-shouldered, flip-disc cap' }],
+      notes: 'Candidate does not match the real packshot.',
+    })
+    expect(line).toContain('[publish-gate:product-identity]')
+    expect(line).toContain('postId=230')
+    expect(line).toContain('productHandle=pjur-basic-100ml')
+    expect(line).toContain('packshotUrl=https://cdn.shopify.com/pjur-basic.jpg')
+    expect(line).toContain('product-identity:block (squat, wide-shouldered, flip-disc cap)')
+  })
+
+  it('two calls for the same productHandle produce comparable lines a diff can catch diverging', () => {
+    const call = (note: string) =>
+      formatProductIdentityLogLine({
+        postId: 1,
+        productHandle: 'pjur-basic-100ml',
+        packshotUrl: 'https://cdn.shopify.com/pjur-basic.jpg',
+        verdict: 'BLOCK',
+        findings: [{ check: 'product-identity', verdict: 'block', note }],
+        notes: 'n/a',
+      })
+    const first = call('squat, wide-shouldered, flip-disc cap')
+    const second = call('near-base band, squat-wide, tall-slim')
+    expect(first).not.toBe(second)
+    expect(first).toContain('productHandle=pjur-basic-100ml')
+    expect(second).toContain('productHandle=pjur-basic-100ml')
+  })
+
+  it('falls back to a plain marker when the model returned no findings', () => {
+    const line = formatProductIdentityLogLine({
+      postId: 1,
+      productHandle: 'sliquid-organics-oceanics',
+      packshotUrl: null,
+      verdict: 'PASS',
+      findings: [],
+      notes: 'Clean.',
+    })
+    expect(line).toContain('packshotUrl=(none)')
+    expect(line).toContain('findings=(no findings)')
   })
 })
 

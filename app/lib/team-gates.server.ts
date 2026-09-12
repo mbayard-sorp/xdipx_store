@@ -53,6 +53,7 @@ import { runDeterministicPublishChecks, type GatePlatform, type GateFinding } fr
 import { SOCIAL_PLATFORMS } from './team-keys'
 import { getProductHandleById, getProductByHandle } from './shopify.server'
 import { logApiTokens } from './token-log.server'
+import { cached } from './kv.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
@@ -638,6 +639,24 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
     console.error(`[publish-gate] post ${postId}: failed to persist verdict cache (ignored, next call will re-judge):`, err)
   }
 
+  // Ticket #8854: log this call's product-identity judgment tagged by
+  // productHandle, so a repeat self-contradiction (the same SKU described
+  // two different ways across two separate calls, run 823's incident) is
+  // machine-detectable by grepping `[publish-gate:product-identity]` for a
+  // productHandle, not lost the moment the request returns.
+  if (productHandle) {
+    console.error(
+      formatProductIdentityLogLine({
+        postId,
+        productHandle,
+        packshotUrl,
+        verdict: modelResult.verdict,
+        findings: modelResult.findings,
+        notes: modelResult.notes,
+      }),
+    )
+  }
+
   return {
     id: postId,
     gate: {
@@ -699,16 +718,61 @@ export function parsePublishGateModelOutput(
  * (never throws) when there is no tagged product, the Shopify fetch fails,
  * or the product has no images — every one of those means there is nothing
  * real to ground the check in, which the user-turn text must say plainly.
+ *
+ * Cached separately from `getProductByHandle`'s own 60s read cache, at a
+ * TTL sized to a whole routine run rather than one page view (ticket
+ * #8854): two gate calls for the same SKU minutes apart (the common case —
+ * a run gates several candidates per product across a pass) must resolve to
+ * byte-identical packshot pixels, or the model's product-identity judgment
+ * is not comparable across calls even before its own vision variance is
+ * considered. `images[0]` is already Shopify-position-stable, so this does
+ * not change *which* image is chosen, only guarantees it cannot flip
+ * mid-run on a cache expiry. A failed fetch is cached only briefly so a
+ * transient outage does not pin "no packshot" for the run.
  */
+const PACKSHOT_CACHE_TTL_SECONDS = 1800
+const PACKSHOT_FETCH_FAILURE_TTL_SECONDS = 30
+
 async function fetchPackshotUrl(productHandle: string | null): Promise<string | null> {
   if (!productHandle) return null
-  try {
-    const product = await getProductByHandle(productHandle)
-    return product?.images?.[0]?.url ?? null
-  } catch (err) {
-    console.error(`[publish-gate] packshot fetch failed for product "${productHandle}" (treating as unavailable):`, err)
-    return null
-  }
+  return cached(
+    `publish-gate:packshot:${productHandle}`,
+    PACKSHOT_CACHE_TTL_SECONDS,
+    async () => {
+      try {
+        const product = await getProductByHandle(productHandle)
+        return product?.images?.[0]?.url ?? null
+      } catch (err) {
+        console.error(`[publish-gate] packshot fetch failed for product "${productHandle}" (treating as unavailable):`, err)
+        return null
+      }
+    },
+    PACKSHOT_FETCH_FAILURE_TTL_SECONDS,
+  )
+}
+
+/**
+ * Formats one call's product-identity judgment as a single grep-able log
+ * line, tagged by `productHandle` (ticket #8854). Exported so the shape is
+ * unit-testable without a network or model call; the caller logs it via
+ * `console.error` so it lands in the same place every other publish-gate
+ * diagnostic does.
+ */
+export function formatProductIdentityLogLine(input: {
+  postId: number
+  productHandle: string
+  packshotUrl: string | null
+  verdict: string
+  findings: readonly PublishGateFinding[]
+  notes: string
+}): string {
+  const findingsText = input.findings.length
+    ? input.findings.map(f => `${f.check}:${f.verdict}${f.note ? ` (${f.note})` : ''}`).join(' | ')
+    : '(no findings)'
+  return (
+    `[publish-gate:product-identity] postId=${input.postId} productHandle=${input.productHandle} ` +
+    `packshotUrl=${input.packshotUrl ?? '(none)'} verdict=${input.verdict} findings=${findingsText} notes=${input.notes}`
+  )
 }
 
 /**
