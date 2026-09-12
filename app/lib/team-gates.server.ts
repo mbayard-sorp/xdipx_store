@@ -50,6 +50,7 @@ import { socialPosts } from '../../db/schema'
 import { SONNET } from './models.server'
 import { EMMA_VOICE_SOCIAL, EMMA_VOICE_LINKEDIN } from './emma-voice.server'
 import { runDeterministicPublishChecks, type GatePlatform, type GateFinding } from './social-publish-gate.server'
+import { stripUrlQuery } from './social-asset-library.server'
 import { SOCIAL_PLATFORMS } from './team-keys'
 import { getProductHandleById, getProductByHandle } from './shopify.server'
 import { logApiTokens } from './token-log.server'
@@ -266,6 +267,132 @@ export interface PublishGateCacheEntry {
     notes: string
     findings: PublishGateFinding[]
   }
+}
+
+/**
+ * Known check slugs from `PUBLISH_GATE_SYSTEM` whose basis is the image
+ * alone, independent of the caption: product identity/colour/proportion,
+ * baked-in text, and anatomy/age ambiguity (the numbered image checks near
+ * the top of the system prompt below). Matched by keyword rather than a
+ * fixed enum because the model composes its own short slug per the prompt's
+ * own instruction ("<short-slug>"), not a controlled vocabulary; both
+ * incident reports on ticket #8976 quoted the literal slugs `product-identity`
+ * and `baked-in-text`, which these keywords cover along with their natural
+ * variants. A check that does not match one of these stays unclassified and
+ * is simply judged fresh next call, exactly as today: the classifier can only
+ * under-include, never over-include, so a miss costs a skipped cache hit,
+ * never a skipped safety check.
+ */
+const IMAGE_LEVEL_FINDING_KEYWORDS = ['identity', 'baked', 'proportion', 'anatomy', 'age-ambig', 'age_ambig']
+
+export function isImageLevelFinding(check: string): boolean {
+  const normalized = check.toLowerCase()
+  return IMAGE_LEVEL_FINDING_KEYWORDS.some(kw => normalized.includes(kw))
+}
+
+/** A normalized, order-independent identity for a post's media, for exact-asset matching. Empty urls never match. */
+function mediaAssetKey(mediaUrls: readonly string[] | null | undefined): string | null {
+  const bare = (mediaUrls ?? []).map(u => stripUrlQuery(u)).filter(Boolean).sort()
+  return bare.length ? JSON.stringify(bare) : null
+}
+
+export interface AssetReusePrecedent {
+  postId: number
+  platform: string
+  checkedAt: string
+  imageFindings: PublishGateFinding[]
+}
+
+/**
+ * Pure candidate-selection for the asset-reuse precedent (ticket #8976),
+ * exported so it is unit-testable without a live DB. Given the current
+ * post's media and a batch of other posted rows (as `listSocialPosts` returns
+ * them), returns the newest row whose media is byte-identical (same CDN
+ * urls, ignoring query strings, order-independent) to this post's and whose
+ * cached publish-gate verdict was PASS, or null when there is no such row.
+ */
+export function selectAssetReusePrecedent(
+  mediaUrls: readonly string[] | null | undefined,
+  excludePostId: number,
+  candidates: readonly {
+    id: number
+    platform: string
+    mediaUrls: readonly string[] | null
+    lastPublishGateCheckJson: PublishGateCacheEntry | null
+  }[],
+): AssetReusePrecedent | null {
+  const key = mediaAssetKey(mediaUrls)
+  if (!key) return null
+  for (const row of candidates) {
+    if (row.id === excludePostId) continue
+    if (mediaAssetKey(row.mediaUrls) !== key) continue
+    const cachedGate = row.lastPublishGateCheckJson
+    if (!cachedGate || cachedGate.gate.verdict !== 'PASS') continue
+    return {
+      postId: row.id,
+      platform: row.platform,
+      checkedAt: cachedGate.checkedAt,
+      imageFindings: cachedGate.gate.findings.filter(f => isImageLevelFinding(f.check)),
+    }
+  }
+  return null
+}
+
+/**
+ * Cross-post asset-reuse precedent (ticket #8976). The per-row cache above
+ * (ticket #8452) only helps a SECOND call against the SAME row; it does
+ * nothing when a NEW row reuses byte-identical media a DIFFERENT row already
+ * cleared and posted, which is exactly the incident that opened this
+ * ticket: row 237 (X) reused row 226's (Instagram, posted, still live) exact
+ * CDN url and got BLOCKed on `baked-in-text`, a check the identical pixels
+ * had already PASSED three days earlier. Looks across the last 200 posted
+ * rows (posted implies the platform itself accepted the media, and excludes
+ * removed rows via `listSocialPosts('posted', ...)`'s own status filter) for
+ * an exact media match with a recorded PASS, so a repeat vision call on
+ * unchanged pixels is never the only source of truth for them.
+ */
+async function findAssetReusePrecedent(
+  mediaUrls: readonly string[] | null | undefined,
+  excludePostId: number,
+): Promise<AssetReusePrecedent | null> {
+  if (!mediaAssetKey(mediaUrls)) return null
+  try {
+    const { listSocialPosts } = await import('./team.server')
+    const posted = (await listSocialPosts('posted', 200)) as {
+      id: number
+      platform: string
+      mediaUrls: string[] | null
+      lastPublishGateCheckJson: PublishGateCacheEntry | null
+    }[]
+    return selectAssetReusePrecedent(mediaUrls, excludePostId, posted)
+  } catch (err) {
+    console.error('[publish-gate] asset-reuse precedent lookup failed (treating as no precedent):', err)
+    return null
+  }
+}
+
+/**
+ * The user-turn text block grounding the model in a prior asset-reuse
+ * precedent, or '' when there is none. Mirrors the packshot-grounding block
+ * (ticket #8823): named ground truth the model must defer to for the checks
+ * it covers, rather than another candidate to judge from scratch.
+ */
+export function describeAssetReusePrecedent(precedent: AssetReusePrecedent | null): string {
+  if (!precedent) return ''
+  const findingsBlock = precedent.imageFindings.length
+    ? precedent.imageFindings.map(f => `- ${f.check}: ${f.verdict}${f.note ? ` (${f.note})` : ''}`).join('\n')
+    : '- (no image-level findings were recorded against it; it cleared clean)'
+  return (
+    'This exact image asset (byte-identical CDN url(s), zero pixel modification) already cleared this gate ' +
+    `on ${precedent.platform} (post #${precedent.postId}, checked ${precedent.checkedAt}) and has been posted ` +
+    'and stayed live since with no removal. A vision call has no memory across calls and cannot legitimately ' +
+    'derive a different reading of pixels that have not changed, so treat these image-level findings as ' +
+    `settled for this exact asset rather than re-deriving them from scratch:\n${findingsBlock}\n` +
+    'Judge fresh only what could actually differ on this call: the caption, alt text, and any caption-dependent ' +
+    'or platform-specific check. Do not re-open product identity, colour, baked-in text, proportion, or anatomy ' +
+    'for this unchanged image unless you can point to a pixel that is visibly different from the prior check, ' +
+    'which an unchanged url makes very unlikely.'
+  )
 }
 
 export const PUBLISH_GATE_SYSTEM = `You are the independent pre-publish gate for one xdipx.com social post, standing
@@ -573,6 +700,19 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
   // judging identity from its own memory of the SKU.
   const packshotUrl = await fetchPackshotUrl(productHandle)
 
+  // Asset-reuse precedent (ticket #8976): a different row that already
+  // cleared this gate with byte-identical media, still live. Grounds the
+  // model against a settled prior read instead of a fresh vision call on
+  // pixels it has already, inconsistently, judged before.
+  const assetPrecedent = await findAssetReusePrecedent(media, postId)
+  if (assetPrecedent) {
+    console.error(
+      `[publish-gate] post ${postId}: found asset-reuse precedent from post #${assetPrecedent.postId} ` +
+        `(${assetPrecedent.platform}, checked ${assetPrecedent.checkedAt}), grounding ` +
+        `${assetPrecedent.imageFindings.length} image-level finding(s)`,
+    )
+  }
+
   const content = buildPublishGateUserContent({
     platform,
     tweetText: post.tweetText,
@@ -583,6 +723,7 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
     featuresProduct,
     mediaUrls: media,
     packshotUrl,
+    assetPrecedentBlock: describeAssetReusePrecedent(assetPrecedent),
   })
 
   let modelResult = await callPublishGateModel(postId, content)
@@ -794,6 +935,8 @@ export function buildPublishGateUserContent(input: {
   featuresProduct: boolean
   mediaUrls: readonly string[]
   packshotUrl: string | null
+  /** Asset-reuse grounding block (ticket #8976), or '' when there is no precedent. */
+  assetPrecedentBlock?: string
 }): Anthropic.ContentBlockParam[] {
   const packshotNote = input.featuresProduct
     ? input.packshotUrl
@@ -816,6 +959,7 @@ export function buildPublishGateUserContent(input: {
         `${input.recentCaptionsBlock}\n\n` +
         `${input.featuresProduct ? '' : `${input.registerPrecedentsBlock}\n\n`}` +
         `${packshotNote ? `${packshotNote}\n\n` : ''}` +
+        `${input.assetPrecedentBlock ? `${input.assetPrecedentBlock}\n\n` : ''}` +
         `${input.mediaUrls.length} generated candidate image(s) follow${input.packshotUrl ? ' after the packshot' : ''}.`,
     },
     ...(input.packshotUrl
