@@ -50,6 +50,7 @@ import { socialPosts } from '../../db/schema'
 import { SONNET } from './models.server'
 import { EMMA_VOICE_SOCIAL, EMMA_VOICE_LINKEDIN } from './emma-voice.server'
 import { runDeterministicPublishChecks, type GatePlatform, type GateFinding } from './social-publish-gate.server'
+import { SOCIAL_PLATFORMS } from './team-keys'
 import { getProductHandleById, getProductByHandle } from './shopify.server'
 import { logApiTokens } from './token-log.server'
 
@@ -110,10 +111,31 @@ const ADS_POLICY_SOCIAL_EXCERPT = [
 export const VOICE_GATE_ADDENDA = ['social', 'linkedin'] as const
 export type VoiceGateAddendum = (typeof VOICE_GATE_ADDENDA)[number]
 
+/**
+ * Platforms the 'social' addendum's own text calibrates differently (ticket
+ * #8853): Instagram/TikTok run the 5-to-8 hashtag count, X runs 0-3 and
+ * allows a direct PDP link (`docs/emma-voice.md`'s "X carve-out" bullet).
+ * The charter already states both calibrations; without knowing which
+ * platform the caption is for, the model cannot tell which one applies and
+ * defaults to the Instagram/TikTok reading. Drawn from the canonical
+ * `SOCIAL_PLATFORMS` vocab, not hand-typed.
+ */
+export const VOICE_GATE_PLATFORMS = SOCIAL_PLATFORMS.filter(
+  (p): p is 'instagram' | 'tiktok' | 'x' => p === 'instagram' || p === 'tiktok' || p === 'x',
+)
+export type VoiceGatePlatform = (typeof VOICE_GATE_PLATFORMS)[number]
+
 export interface VoiceGateInput {
   text: string
   /** Defaults to 'social' (Instagram/TikTok/X), the routine's primary caller. */
   addendum?: VoiceGateAddendum | undefined
+  /**
+   * Which of Instagram/TikTok/X this caption is for. Optional (omit for
+   * LinkedIn, or when genuinely unknown); when given with the 'social'
+   * addendum it tells the model which of the charter's own per-platform
+   * calibrations to apply instead of defaulting to Instagram/TikTok's.
+   */
+  platform?: VoiceGatePlatform | undefined
 }
 
 export interface VoiceGateOutput {
@@ -149,19 +171,30 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
   const text = input.text?.trim()
   if (!text) throw new Response('Bad Request: text required', { status: 400 })
   const addendum = input.addendum && VOICE_GATE_ADDENDA.includes(input.addendum) ? input.addendum : 'social'
+  const platform = input.platform && VOICE_GATE_PLATFORMS.includes(input.platform) ? input.platform : undefined
 
   const system = `${VOICE_GATE_SYSTEM_PREFIX}${charterFor(addendum)}`
   const msg = await client.messages.create({
     model: SONNET,
     max_tokens: 512,
     system,
-    messages: [{ role: 'user', content: `Caption to review:\n\n${text}` }],
+    messages: [{ role: 'user', content: buildVoiceGateUserContent({ text, platform }) }],
   })
   void logTokens('voice-gate', msg.usage)
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('runVoiceGateCheck: unexpected Claude response type')
   const parsed = parseVoiceGateModelOutput(block.text)
   return { verdict: parsed.verdict, reviewer: 'voice-gate', notes: parsed.notes }
+}
+
+/**
+ * The voice gate's user turn. Exported so the platform-disambiguation line
+ * (ticket #8853) is unit-testable without a network call: with no platform
+ * given the output is byte-identical to the pre-#8853 prompt.
+ */
+export function buildVoiceGateUserContent(input: { text: string; platform?: VoiceGatePlatform | undefined }): string {
+  const platformLine = input.platform ? `Platform: ${input.platform}\n\n` : ''
+  return `${platformLine}Caption to review:\n\n${input.text}`
 }
 
 /** Pure parse of the model's raw text into a verdict, so the contract is unit-testable directly. */

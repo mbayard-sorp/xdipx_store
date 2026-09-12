@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildPublishGateUserContent,
+  buildVoiceGateUserContent,
   computePublishGateContentHash,
   parsePublishGateModelOutput,
   parseVoiceGateModelOutput,
@@ -46,6 +47,26 @@ describe('parseVoiceGateModelOutput', () => {
 
   it('substitutes a placeholder when notes is missing', () => {
     expect(parseVoiceGateModelOutput('{"verdict":"PASS"}').notes).toBe('(no notes returned)')
+  })
+})
+
+describe('buildVoiceGateUserContent (ticket #8853)', () => {
+  it('omits the Platform line, byte-identical to the pre-#8853 prompt, when no platform is given', () => {
+    const out = buildVoiceGateUserContent({ text: 'Everything on that nightstand has a job.' })
+    expect(out).toBe('Caption to review:\n\nEverything on that nightstand has a job.')
+    expect(out).not.toContain('Platform:')
+  })
+
+  it('prepends a Platform line naming X so the gate applies the 0-3 hashtag / PDP-link calibration, not Instagram/TikTok\'s', () => {
+    const out = buildVoiceGateUserContent({ text: 'A clean X caption with two tags. #wellness #selfcare', platform: 'x' })
+    expect(out).toBe(
+      'Platform: x\n\nCaption to review:\n\nA clean X caption with two tags. #wellness #selfcare',
+    )
+  })
+
+  it('prepends the given platform for instagram and tiktok too', () => {
+    expect(buildVoiceGateUserContent({ text: 'ig caption', platform: 'instagram' })).toContain('Platform: instagram\n\n')
+    expect(buildVoiceGateUserContent({ text: 'tt caption', platform: 'tiktok' })).toContain('Platform: tiktok\n\n')
   })
 })
 
