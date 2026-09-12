@@ -10,9 +10,12 @@ import {
   buildPublishGateUserContent,
   buildVoiceGateUserContent,
   computePublishGateContentHash,
+  describeAssetReusePrecedent,
   formatProductIdentityLogLine,
+  isImageLevelFinding,
   parsePublishGateModelOutput,
   parseVoiceGateModelOutput,
+  selectAssetReusePrecedent,
   verdictConsistencyCheck,
 } from './team-gates.server'
 
@@ -325,6 +328,19 @@ describe('buildPublishGateUserContent (ticket #8823, product-identity hallucinat
     expect(text).toContain('a bottle on a counter')
     expect(text).toContain('RECENT_CAPTIONS_BLOCK')
   })
+
+  it('includes the asset-reuse precedent block (ticket #8976) when supplied, omits it entirely when not', () => {
+    const withPrecedent = buildPublishGateUserContent({
+      ...base,
+      featuresProduct: true,
+      packshotUrl: null,
+      assetPrecedentBlock: 'ASSET_PRECEDENT_BLOCK',
+    })
+    expect((withPrecedent[0] as { text: string }).text).toContain('ASSET_PRECEDENT_BLOCK')
+
+    const withoutPrecedent = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
+    expect((withoutPrecedent[0] as { text: string }).text).not.toContain('ASSET_PRECEDENT_BLOCK')
+  })
 })
 
 describe('publish-gate identity grounding system prompt (ticket #8823)', () => {
@@ -428,5 +444,120 @@ describe('computePublishGateContentHash (ticket #8452)', () => {
     const h1 = computePublishGateContentHash(base)
     const h2 = computePublishGateContentHash({ ...base, platform: 'x' })
     expect(h1).not.toBe(h2)
+  })
+})
+
+describe('isImageLevelFinding (ticket #8976)', () => {
+  it('matches the exact slugs quoted in the incident report', () => {
+    expect(isImageLevelFinding('product-identity')).toBe(true)
+    expect(isImageLevelFinding('baked-in-text')).toBe(true)
+  })
+
+  it('matches natural variants by keyword, not exact string', () => {
+    expect(isImageLevelFinding('proportion')).toBe(true)
+    expect(isImageLevelFinding('anatomy')).toBe(true)
+    expect(isImageLevelFinding('age-ambiguity')).toBe(true)
+  })
+
+  it('does not match caption/platform-dependent checks', () => {
+    expect(isImageLevelFinding('register')).toBe(false)
+    expect(isImageLevelFinding('withholding-test')).toBe(false)
+    expect(isImageLevelFinding('sale-vs-editorial')).toBe(false)
+    expect(isImageLevelFinding('caption-narrates')).toBe(false)
+    expect(isImageLevelFinding('vocabulary')).toBe(false)
+  })
+})
+
+describe('selectAssetReusePrecedent (ticket #8976)', () => {
+  const candidates = [
+    {
+      id: 226,
+      platform: 'instagram',
+      mediaUrls: ['https://cdn.example/pjur-aqua.jpg'],
+      lastPublishGateCheckJson: {
+        contentHash: 'h1',
+        checkedAt: '2026-09-09T00:00:00.000Z',
+        gate: {
+          verdict: 'PASS' as const,
+          notes: 'clean',
+          findings: [
+            { check: 'product-identity', verdict: 'pass' as const },
+            { check: 'baked-in-text', verdict: 'pass' as const, note: 'yellow band, no glyphs' },
+            { check: 'register', verdict: 'pass' as const, note: 'fine for this caption' },
+          ],
+        },
+      },
+    },
+  ]
+
+  it('the exact incident: row 237 (X) reusing row 226\'s (Instagram, posted) exact CDN url finds the precedent', () => {
+    const precedent = selectAssetReusePrecedent(['https://cdn.example/pjur-aqua.jpg'], 237, candidates)
+    expect(precedent).not.toBeNull()
+    expect(precedent?.postId).toBe(226)
+    expect(precedent?.platform).toBe('instagram')
+    // Only the image-level findings carry over; the caption-dependent "register" finding from
+    // row 226's own (different) caption must never be presented as settled for a new caption.
+    expect(precedent?.imageFindings).toEqual([
+      { check: 'product-identity', verdict: 'pass' },
+      { check: 'baked-in-text', verdict: 'pass', note: 'yellow band, no glyphs' },
+    ])
+  })
+
+  it('ignores query-string differences on an otherwise identical CDN url', () => {
+    const precedent = selectAssetReusePrecedent(['https://cdn.example/pjur-aqua.jpg?v=2'], 237, candidates)
+    expect(precedent?.postId).toBe(226)
+  })
+
+  it('never matches itself', () => {
+    expect(selectAssetReusePrecedent(['https://cdn.example/pjur-aqua.jpg'], 226, candidates)).toBeNull()
+  })
+
+  it('no match on a different asset', () => {
+    expect(selectAssetReusePrecedent(['https://cdn.example/something-else.jpg'], 237, candidates)).toBeNull()
+  })
+
+  it('never reuses a candidate whose own recorded verdict was not PASS', () => {
+    const blocked = [{ ...candidates[0]!, lastPublishGateCheckJson: { ...candidates[0]!.lastPublishGateCheckJson, gate: { ...candidates[0]!.lastPublishGateCheckJson.gate, verdict: 'BLOCK' as const } } }]
+    expect(selectAssetReusePrecedent(['https://cdn.example/pjur-aqua.jpg'], 237, blocked)).toBeNull()
+  })
+
+  it('a candidate with no cached verdict at all is never a precedent', () => {
+    const uncached = [{ ...candidates[0]!, lastPublishGateCheckJson: null }]
+    expect(selectAssetReusePrecedent(['https://cdn.example/pjur-aqua.jpg'], 237, uncached)).toBeNull()
+  })
+
+  it('no media on either side never matches', () => {
+    expect(selectAssetReusePrecedent([], 237, candidates)).toBeNull()
+    expect(selectAssetReusePrecedent(null, 237, candidates)).toBeNull()
+  })
+})
+
+describe('describeAssetReusePrecedent (ticket #8976)', () => {
+  it('returns empty string for no precedent, adding nothing to the prompt', () => {
+    expect(describeAssetReusePrecedent(null)).toBe('')
+  })
+
+  it('names the platform, post, and settled findings, and tells the model what to judge fresh', () => {
+    const block = describeAssetReusePrecedent({
+      postId: 226,
+      platform: 'instagram',
+      checkedAt: '2026-09-09T00:00:00.000Z',
+      imageFindings: [{ check: 'baked-in-text', verdict: 'pass', note: 'yellow band, no glyphs' }],
+    })
+    expect(block).toContain('byte-identical CDN url')
+    expect(block).toContain('post #226')
+    expect(block).toContain('instagram')
+    expect(block).toContain('baked-in-text: pass (yellow band, no glyphs)')
+    expect(block).toContain('Judge fresh only what could actually differ')
+  })
+
+  it('says findings cleared clean when the precedent recorded none', () => {
+    const block = describeAssetReusePrecedent({
+      postId: 226,
+      platform: 'instagram',
+      checkedAt: '2026-09-09T00:00:00.000Z',
+      imageFindings: [],
+    })
+    expect(block).toContain('cleared clean')
   })
 })
