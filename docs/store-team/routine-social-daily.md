@@ -934,9 +934,17 @@ same way it already calls every other `/api/team/*` route:
 ```bash
 curl -s -X POST "$BASE_URL/api/team/voice-gate" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"text":"<the exact caption you are about to draft>","addendum":"social"}'
+  -d '{"text":"<the exact caption you are about to draft>","addendum":"social","platform":"instagram"}'
 # -> {"verdict":"PASS|REVISE|BLOCK","reviewer":"voice-gate","notes":"..."}
 ```
+
+Always pass `"platform"` (`"instagram"`, `"tiktok"`, or `"x"`) alongside `"addendum":"social"` (ticket
+#8853): the social addendum's own text calibrates hashtag count and PDP-link use differently per
+platform (X runs 0-3 hashtags and may link the PDP directly; Instagram/TikTok run 5-8 and never link
+a PDP from the caption), and without `platform` the gate cannot tell which caption it is reading and
+defaults to the Instagram/TikTok reading — which is exactly what REVISEd clean, on-charter X drafts
+for "too few hashtags" before this ticket. Omit `platform` only for LinkedIn drafts, where
+`"addendum":"linkedin"` already selects the one calibration that addendum has.
 
 Use `"addendum":"linkedin"` for LinkedIn drafts, omit or send `"social"` for everything else. This
 call runs independently, server-side, with no visibility into why you believe the caption is

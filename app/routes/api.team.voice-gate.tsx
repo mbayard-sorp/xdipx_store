@@ -1,7 +1,7 @@
 /**
  * POST /api/team/voice-gate
  *
- *   { op omitted; body: { text, addendum? } } -> { verdict, reviewer, notes }
+ *   { op omitted; body: { text, addendum?, platform? } } -> { verdict, reviewer, notes }
  *
  * The voice-gate half of ticket #6916. Runs `emma-empathy-reviewer`'s charter
  * check as a server-side model call instead of a spawned subagent, which the
@@ -16,10 +16,17 @@
  *
  * `addendum` is `'social'` (Instagram/TikTok/X, the default) or `'linkedin'`.
  * Any other value falls back to `'social'`.
+ *
+ * `platform` (ticket #8853) is `'instagram' | 'tiktok' | 'x'`, optional. The
+ * 'social' addendum's own text calibrates hashtag count and PDP-link use
+ * differently per platform (X runs 0-3 hashtags where Instagram/TikTok run
+ * 5-8); without `platform` the model cannot tell which caption it is reading
+ * and defaults to the Instagram/TikTok reading. Omit for LinkedIn drafts or
+ * when genuinely unknown — omitting reproduces the pre-#8853 prompt exactly.
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
-import { runVoiceGateCheck, type VoiceGateAddendum } from '~/lib/team-gates.server'
+import { runVoiceGateCheck, type VoiceGateAddendum, type VoiceGatePlatform } from '~/lib/team-gates.server'
 import { apiError } from '~/lib/api-error.server'
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -36,9 +43,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const text = typeof body['text'] === 'string' ? body['text'] : ''
   if (!text.trim()) return new Response('Bad Request: text required', { status: 400 })
   const addendum = typeof body['addendum'] === 'string' ? (body['addendum'] as VoiceGateAddendum) : undefined
+  const platform = typeof body['platform'] === 'string' ? (body['platform'] as VoiceGatePlatform) : undefined
 
   try {
-    const result = await runVoiceGateCheck({ text, addendum })
+    const result = await runVoiceGateCheck({ text, addendum, platform })
     return Response.json(result, { headers: { 'Cache-Control': 'no-store' } })
   } catch (err) {
     if (err instanceof Response) return err
