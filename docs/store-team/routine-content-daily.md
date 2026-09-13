@@ -772,6 +772,16 @@ image is not. This post is finished work waiting on an administrative gate, not 
 `'queued'` correctly tells tomorrow's run "pick this back up" (Step 3's `resume-draft` branch will
 find and resume it either way, since it is still an unpublished draft at that slug).
 
+**No brief was claimed (backlog-sourced topic).** The re-queue above assumes a `seoContentBrief` or
+`podcastReviewBrief` exists to flip back to `'queued'`/`'pending'`; a topic pulled straight from the
+content-plan backlog bank (Step 2, section 8B) has none, so a finished draft held only on a missing
+hero has nothing pointing any future run back to its slug (ticket #8991:
+`drafts.blogPost-how-do-long-distance-couples-stay-intimate` sat unreachable this way across two
+runs). When you hold a post for this reason and no brief was claimed for it, file a `priority:2`
+`process` suggestion naming the slug and the single missing element (e.g. "needs a section 0-H human
+hero, prose already PASSED both gates") so Step 6b's next run reads it and can resume publishing
+without re-drafting or re-gating the prose.
+
 **A gate BLOCK is different: do not re-queue it to `'queued'` (ticket #94).** First confirm you are
 even entitled to be here: since 2026-09-04 a post reaches this paragraph only after Step 5 item 4's
 triage returned not-repairable, or after two repair attempts failed. A BLOCK that was never worked is
