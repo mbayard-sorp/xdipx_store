@@ -15,6 +15,7 @@ import {
   isImageLevelFinding,
   parsePublishGateModelOutput,
   parseVoiceGateModelOutput,
+  respondedWithPreambleOnly,
   selectAssetReusePrecedent,
   verdictConsistencyCheck,
 } from './team-gates.server'
@@ -109,6 +110,20 @@ describe('parsePublishGateModelOutput', () => {
   it('normalizes an unrecognized finding verdict to pass rather than throwing', () => {
     const raw = JSON.stringify({ verdict: 'PASS', notes: 'fine', findings: [{ check: 'x', verdict: 'whatever' }] })
     expect(parsePublishGateModelOutput(raw).findings).toEqual([{ check: 'x', verdict: 'pass' }])
+  })
+})
+
+describe('respondedWithPreambleOnly (ticket #9153)', () => {
+  it('is true for prose cut off before any JSON object was started', () => {
+    expect(respondedWithPreambleOnly('I need to work through each check carefully...')).toBe(true)
+  })
+
+  it('is false once the response has reached the opening brace, even if the object is incomplete', () => {
+    expect(respondedWithPreambleOnly('Sure, here is my analysis. {"verdict": "BLOCK", "notes": "cut off mid')).toBe(false)
+  })
+
+  it('is false for a clean, complete JSON object', () => {
+    expect(respondedWithPreambleOnly('{"verdict":"PASS","notes":"fine","findings":[]}')).toBe(false)
   })
 })
 

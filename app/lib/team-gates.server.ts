@@ -501,10 +501,25 @@ BLOCK regardless of how good the frame is:
 
 ${IMAGERY_CEILING_EXCERPT}`
 
+/**
+ * True when a model response hit `max_tokens` before writing a single `{` —
+ * i.e. the whole budget went to prose, never reaching the JSON object at
+ * all. Distinguished from a response that started a well-formed object and
+ * was cut off mid-way through it (a real token-sizing problem): the
+ * preamble case is a prompt-adherence miss the system prompt already
+ * forbids ("no prose before or after it"), which a corrective retry that
+ * tells the model to skip straight to the object can fix; a mid-object cut
+ * cannot be talked out of by asking nicer and needs a bigger budget instead.
+ */
+export function respondedWithPreambleOnly(raw: string): boolean {
+  return !raw.includes('{')
+}
+
 /** One publish-gate model call: request, token logging, max_tokens diagnostics, and parsing. */
 async function callPublishGateModel(
   postId: number,
   content: Anthropic.ContentBlockParam[],
+  isRetry = false,
 ): Promise<ReturnType<typeof parsePublishGateModelOutput>> {
   const msg = await client.messages.create({
     model: SONNET,
@@ -535,6 +550,30 @@ async function callPublishGateModel(
         `(${msg.usage.output_tokens} output tokens); the JSON may be truncated ` +
         'and will fail-closed to BLOCK if so',
     )
+    // #9153: post 246 (run 850) hit this twice in a row with byte-identical
+    // truncated output on both calls — expected at temperature 0, since a
+    // blind identical retry gives the model no new information and just
+    // spends the same budget on the same prose again. When the whole budget
+    // went to unstructured reasoning before ever reaching the JSON object
+    // (no `{` anywhere in the raw text), retry once with an explicit
+    // instruction to drop the preamble, which changes the input enough to
+    // have a real chance at a different, complete answer. A response that
+    // already started the object and was cut mid-way is a sizing problem,
+    // not a prompt-adherence one, so it is left to fail closed as before.
+    if (!isRetry && respondedWithPreambleOnly(block.text)) {
+      console.error(`[publish-gate] post ${postId}: max_tokens spent entirely on prose before any JSON; retrying once with a skip-the-preamble instruction`)
+      const retryContent: Anthropic.ContentBlockParam[] = [
+        ...content,
+        {
+          type: 'text',
+          text:
+            'Your previous response ran out of tokens before reaching the JSON object. Do not explain your ' +
+            'reasoning in prose first. Respond now with ONLY the JSON object described above, starting with ' +
+            'the { character as the very first character of your response.',
+        },
+      ]
+      return callPublishGateModel(postId, retryContent, true)
+    }
   }
   return parsePublishGateModelOutput(block.text)
 }
