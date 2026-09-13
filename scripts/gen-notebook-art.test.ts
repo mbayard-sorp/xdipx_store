@@ -7,7 +7,7 @@
 // (app/lib/social-vision-gate.server.ts) the hero path now calls on every
 // candidate before it can reach disk or Sanity.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { gateHeroBuffer, splitByVerdict, billableCandidateCount, remoteVisionCallVision, heroVisionDeps } from './gen-notebook-art'
+import { gateHeroBuffer, splitByVerdict, billableCandidateCount, remoteVisionCallVision, heroVisionDeps, sniffImageMediaType } from './gen-notebook-art'
 import type { VisionVerdict } from '../app/lib/social-vision-gate.server'
 
 const CLEAN_VERDICT = {
@@ -24,14 +24,36 @@ const THREE_HANDS_VERDICT = {
   notes: 'the figure has an extra hand cupped beneath the hand gripping the bottle',
 }
 
+// Real PNG magic bytes (0x89 'P' 'N' 'G') prefixed onto fake payload bytes so
+// the media-type sniff (sniffImageMediaType) genuinely exercises PNG
+// detection rather than falling through to its unknown-format default.
+const FAKE_PNG_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from('fake-png-bytes')])
+
+describe('sniffImageMediaType', () => {
+  it('detects PNG from its magic bytes', () => {
+    expect(sniffImageMediaType(FAKE_PNG_BYTES)).toBe('image/png')
+  })
+
+  it('detects JPEG from its magic bytes (the Atlas ref-image path commonly returns JPEG)', () => {
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from('fake-jpeg-bytes')])
+    expect(sniffImageMediaType(jpeg)).toBe('image/jpeg')
+  })
+
+  it('falls back to image/jpeg for unrecognized bytes, matching the social path default', () => {
+    expect(sniffImageMediaType(Buffer.from('not-a-real-image'))).toBe('image/jpeg')
+  })
+})
+
 describe('gateHeroBuffer', () => {
   it('passes a clean candidate', async () => {
     const callVision = vi.fn(async () => CLEAN_VERDICT)
-    const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision })
+    const verdict = await gateHeroBuffer(FAKE_PNG_BYTES, { callVision })
     expect(verdict.pass).toBe(true)
     expect(callVision).toHaveBeenCalledTimes(1)
-    // Called with the buffer's own base64 data, not a placeholder or a url.
-    expect(callVision).toHaveBeenCalledWith(Buffer.from('fake-png-bytes').toString('base64'), 'image/png')
+    // Called with the buffer's own base64 data (media-type sniffed from its
+    // real magic bytes, ticket: Atlas-sourced JPEG candidates 400ing against
+    // a hardcoded image/png declaration), not a placeholder or a url.
+    expect(callVision).toHaveBeenCalledWith(FAKE_PNG_BYTES.toString('base64'), 'image/png')
   })
 
   it('rejects the three-hands / extraOrMergedLimbs defect from the real incident', async () => {

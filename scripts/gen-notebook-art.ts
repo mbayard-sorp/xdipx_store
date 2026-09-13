@@ -19,7 +19,13 @@
  *   # Step 1 — generate candidates to a local dir (no upload):
  *   npx tsx scripts/gen-notebook-art.ts --surface category --slug care \
  *     [--prompt "..."] [--alt "..."] [--count 2] [--save-dir .notebook-art] \
- *     [--only fal|imagen] [--ref-image <url>] [--dry-run]
+ *     [--only fal|imagen] [--ref-image <url>] [--run-id <contentRunId>] [--dry-run]
+ *
+ *   # --run-id (hero surface): pass the calling content run's id so the remote
+ *   # anatomy vision-gate call (see remoteVisionCallVision below) can exclude
+ *   # THIS run from its own run_in_progress blocking-run check. Without it a
+ *   # content-run-scheduled hero generation always sees itself as the
+ *   # blocking sibling run and the gate fails closed on every candidate.
  *
  *   # Step 2 — after review, upload the chosen file and patch the target doc:
  *   npx tsx scripts/gen-notebook-art.ts --surface category --slug care \
@@ -81,7 +87,7 @@ const HERO_VISION_MAX_ATTEMPTS = 2
  * a route outage degrades the same way a missing key always has, never as a
  * silent pass.
  */
-export function remoteVisionCallVision(): NonNullable<VisionGateDeps['callVision']> {
+export function remoteVisionCallVision(runId?: number): NonNullable<VisionGateDeps['callVision']> {
   const BASE_URL = (process.env['BASE_URL'] ?? 'https://xdipx.com').replace(/\/$/, '')
   const TEAM_TOKEN = process.env['TEAM_TOKEN'] ?? process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
   return async (imageBase64, mediaType) => {
@@ -89,7 +95,12 @@ export function remoteVisionCallVision(): NonNullable<VisionGateDeps['callVision
     const res = await fetch(`${BASE_URL}/api/team/vision-gate`, {
       method: 'POST',
       headers: { 'x-team-secret': TEAM_TOKEN, 'content-type': 'application/json' },
-      body: JSON.stringify({ imageBase64, mediaType }),
+      // runId lets the route's gate('content', runId) exclude the caller's OWN
+      // in-progress content run from the run_in_progress blocking-run check
+      // (mirrors the already-proven --run-id plumbing in gen-social-image.ts).
+      // Without it, a content-run-scheduled hero generation always sees itself
+      // as the blocking sibling run and the gate fails closed on every call.
+      body: JSON.stringify({ imageBase64, mediaType, ...(runId !== undefined ? { runId } : {}) }),
     })
     if (!res.ok) throw new Error(`vision-gate route HTTP ${res.status}`)
     const verdict = (await res.json()) as VisionVerdict
@@ -108,15 +119,35 @@ export function remoteVisionCallVision(): NonNullable<VisionGateDeps['callVision
  * explicit `deps` — every test in this file passes its own `callVision` and
  * is unaffected by which branch this returns.
  */
-export function heroVisionDeps(): VisionGateDeps | undefined {
-  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision() }
+export function heroVisionDeps(runId?: number): VisionGateDeps | undefined {
+  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision(runId) }
 }
 
 /** Base64-encode a candidate buffer and run it through the shared anatomy
  *  vision gate. Never throws — same fail-closed contract as the social path. */
-export async function gateHeroBuffer(buf: Buffer, deps?: VisionGateDeps): Promise<VisionVerdict> {
+/**
+ * Sniff the real container format from a candidate buffer's magic bytes.
+ * `generateImage()`'s `GenerateImageResult` carries no content-type alongside
+ * its raw `Buffer[]` (providers are mixed: Atlas's ref-image/edit path
+ * commonly returns JPEG, fal/Imagen commonly return PNG), and this function
+ * used to hardcode `image/png` regardless of the actual bytes. Anthropic's
+ * vision endpoint validates the declared media type against the bytes and
+ * 400s on a mismatch, which meant every Atlas-sourced (JPEG) hero candidate
+ * failed the gate closed with `checkCompleted: false` — never a real anatomy
+ * read. Same allowlist/fallback as the social path's own detection
+ * (`social-vision-gate.server.ts`'s `fetchImageBase64` default).
+ */
+export function sniffImageMediaType(buf: Buffer): 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf.length >= 6 && buf.toString('ascii', 0, 3) === 'GIF') return 'image/gif'
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
+  return 'image/jpeg' // matches the social path's own unknown-format fallback
+}
+
+export async function gateHeroBuffer(buf: Buffer, deps?: VisionGateDeps, runId?: number): Promise<VisionVerdict> {
   const { runVisionGateOnImage } = await import('../app/lib/social-vision-gate.server')
-  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: 'image/png' }, deps ?? heroVisionDeps())
+  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) }, deps ?? heroVisionDeps(runId))
 }
 
 /** Keep only the buffers whose paired verdict passed. `verdicts[i]` must correspond to `buffers[i]`. */
@@ -314,6 +345,7 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
   prompt: string
   count: number
   saveDir: string
+  runId?: number
 }): Promise<HeroRungResult | null> {
   const { composeSceneFrame, downloadFalAsset } = await import('~/lib/fal-video.server')
   const { logImageCost } = await import('~/lib/token-log.server')
@@ -339,7 +371,7 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     // Anatomy vision gate (ticket #8691): a rung whose every candidate fails
     // is treated exactly like a rung that threw, so the existing ladder below
     // is the regeneration budget — no separate retry mechanism to invent.
-    const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf)))
+    const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId)))
     // composeSceneFrame logs no spend of its own — bill both keys here, but
     // only for candidates the gate actually evaluated (ticket #8830): when
     // the gate cannot complete at all (auth/transport/timeout), nothing was
@@ -376,7 +408,7 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     })
     if (res.provider === 'none' || !res.buffers.length) throw new Error('single-figure generation produced no candidates')
     const buffers = await Promise.all(res.buffers.map(b => resizeToExactCover(b)))
-    const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf)))
+    const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId)))
     const billable = billableCandidateCount(verdicts)
     if (billable > 0) {
       const { logImageCost } = await import('~/lib/token-log.server')
@@ -415,6 +447,7 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   saveDir: string
   only?: 'atlas' | 'fal' | 'imagen'
   refImage?: string
+  runId?: number
 }) {
   const { generateImage } = await import('~/lib/generate-image.server')
   const spec = SURFACES[surface]
@@ -449,7 +482,7 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   let candidates = res.buffers
   if (surface === 'hero') {
     for (let attempt = 1; ; attempt++) {
-      const verdicts = await Promise.all(res.buffers.map(buf => gateHeroBuffer(buf)))
+      const verdicts = await Promise.all(res.buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId)))
       const { passing, failing } = splitByVerdict(res.buffers, verdicts)
       if (passing.length) {
         candidates = passing
@@ -492,7 +525,7 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   }))
 }
 
-async function upload(surface: Surface, slug: string | undefined, filePath: string, alt: string, prompt: string) {
+async function upload(surface: Surface, slug: string | undefined, filePath: string, alt: string, prompt: string, runId?: number) {
   if (surface === 'spot') {
     console.error('--upload is not supported for --surface spot (spot art is placed per-post via Studio)')
     process.exit(1)
@@ -528,7 +561,7 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
   // rather than being advisory — no upload happens on a fail.
   let heroVerdict: VisionVerdict | undefined
   if (surface === 'hero') {
-    heroVerdict = await gateHeroBuffer(buffer)
+    heroVerdict = await gateHeroBuffer(buffer, undefined, runId)
     if (!heroVerdict.pass) {
       console.error(`[gen-notebook-art] BLOCKED: this candidate failed the anatomy vision gate and will not be uploaded.`)
       console.error(`checks: ${JSON.stringify(heroVerdict.checks)}`)
@@ -627,9 +660,14 @@ async function main() {
   const refImage = arg('ref-image')
   const cast = arg('cast')
   const dryRun = hasFlag('dry-run')
+  // Threaded into every gateHeroBuffer() call on the hero surface so the
+  // vision-gate route's gate('content', runId) can exclude THIS run from its
+  // own run_in_progress blocking-run check (mirrors gen-social-image.ts).
+  const runIdArg = arg('run-id')
+  const runId = runIdArg && /^\d+$/.test(runIdArg) ? Number(runIdArg) : undefined
 
   if (!surface || !(surface in SURFACES)) {
-    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--dry-run]')
+    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--run-id <n>] [--dry-run]')
     process.exit(1)
   }
   if (cast && surface !== 'hero') {
@@ -648,7 +686,7 @@ async function main() {
       console.error('--alt is required with --upload (Emma-voice alt text, descriptive and non-explicit)')
       process.exit(1)
     }
-    await upload(surface, slug, uploadFile, alt, prompt)
+    await upload(surface, slug, uploadFile, alt, prompt, runId)
     return
   }
 
@@ -688,7 +726,7 @@ async function main() {
   // passed by the caller; without --cast the hero stays the plain text-to-image
   // path below, unchanged.
   if (surface === 'hero' && cast) {
-    const result = await generateHeroComposite(slug!, cast, { prompt, count, saveDir })
+    const result = await generateHeroComposite(slug!, cast, { prompt, count, saveDir, runId })
     if (!result) {
       console.log(JSON.stringify({
         generated: 0,
@@ -723,6 +761,7 @@ async function main() {
     saveDir,
     ...(only ? { only } : {}),
     ...(refImage ? { refImage } : {}),
+    ...(runId !== undefined ? { runId } : {}),
   })
 }
 
