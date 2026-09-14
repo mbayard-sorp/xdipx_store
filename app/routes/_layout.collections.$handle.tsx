@@ -660,13 +660,7 @@ export default function CollectionPage() {
       {/* Notebook section renders only on page 1 to keep deeper paginated
           pages clearly secondary documents. Posts featuring a product from this
           collection are preferred, falling back to the latest posts. */}
-      {isCanonicalPage && (
-        <NotebookRail
-          posts={notebookPosts}
-          seeAllHref="/notebook"
-          seeAllLabel="More from the Notebook →"
-        />
-      )}
+      {isCanonicalPage && <NotebookRail posts={notebookPosts} />}
 
       {/* Side-by-side info boxes (description + FAQ accordion) — page 1 only.
           Both blocks live in the SSR'd DOM so Google reads everything; the
