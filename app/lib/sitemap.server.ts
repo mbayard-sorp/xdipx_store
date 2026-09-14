@@ -56,6 +56,18 @@ const sql = neon(process.env['DATABASE_URL']!)
  * Every coverage state that means "Google's cached verdict is bad news".
  * Whether a given row is *dead* or merely *stale* depends on when Google last
  * crawled it — see isTrustworthyDeadVerdict.
+ *
+ * Ticket #9316 re-examined the 'Excluded by 'noindex' tag' cohort (1,208
+ * URLs, 2026-09-14) and reaffirmed this file's existing decision rather than
+ * changing it: these rows stay in the sitemap (never added to `dead` —
+ * `isTrustworthyDeadVerdict` only ever trusts a 'Not found (404)' verdict)
+ * with their lastmod floored to the fix date below, and are additionally
+ * pushed via IndexNow (indexnow-bulk.server.ts, `scope: 'stale'`), which the
+ * `indexnow_pings` ledger confirms is live (a 1,561-URL batch on 2026-09-09
+ * covering this exact cohort, HTTP 200). Dropping live, sellable products
+ * from the sitemap to save crawl budget would make the stale noindex verdict
+ * permanent by construction, since the sitemap is Google's main path back to
+ * a URL to reconsider it.
  */
 const BAD_VERDICT_STATES = [
   'Excluded by ‘noindex’ tag',
