@@ -410,6 +410,15 @@ export interface VaultDeal {
   /** Phase 2 — multi-select audience tags. Empty array = unspecified. */
   category: Array<'for-him' | 'for-her' | 'couples'>
   qty: number
+  /**
+   * True when ANY variant is purchasable (`availableForSale`), unlike `qty`
+   * which reads only the first-listed variant. Ticket #9323: listing cards
+   * had no sold-out signal beyond a silently-missing quick-add button, so
+   * this is the field the card badge gates on rather than `qty` — `qty`
+   * stays as-is since it also drives structured data / feed availability
+   * elsewhere and changing its semantics is out of scope here.
+   */
+  inStock: boolean
   defaultVariantId?:    string | null
   hasMultipleVariants?: boolean
   /** Card-level option preview for the lower-right swatch on PLP cards. */

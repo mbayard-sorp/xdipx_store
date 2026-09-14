@@ -105,6 +105,16 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
             images={deal.images}
           />
 
+          {!deal.inStock && (
+            <span
+              className="absolute bottom-2 left-2 z-10 inline-flex items-center gap-1.5 rounded-full bg-ink/90 px-2.5 py-1 text-[11px] font-semibold text-paper shadow-md"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-hidden="true" />
+              Sold out
+            </span>
+          )}
+
           {canAtc && (
             <button
               type="button"

@@ -354,7 +354,7 @@ interface ShopifyProductCardNode {
   metafields: ({ namespace: string; key: string; value: string } | null)[]
 }
 
-function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
+export function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
   const mf = node.metafields
   const variantEdges = node.variants.edges
   const variant = variantEdges[0]?.node
@@ -396,6 +396,7 @@ function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
     qty: variant?.quantityAvailable ?? 0,
+    inStock: variantEdges.some(e => e.node.availableForSale),
     defaultVariantId:    variant?.id ?? null,
     hasMultipleVariants: variantEdges.length > 1,
     ...(colorValues ? { colorValues } : {}),
@@ -1864,6 +1865,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
     qty: variant?.quantityAvailable ?? 0,
+    inStock: variantEdges.some(e => e.node.availableForSale),
     defaultVariantId:    variant?.id ?? null,
     hasMultipleVariants: variantEdges.length > 1,
     ...(maxSavingsAmount > 0 ? { maxSavingsAmount, maxSavingsPercent } : {}),
