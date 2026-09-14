@@ -51,6 +51,16 @@ const LIVE_BRIEF_51 =
   `containing ONLY map_price=0 SKUs, because any further code discount on those would ` +
   `sell below MAP. WINDOW: 2026-07-27 through 2026-08-09 for this proposal.`
 
+// Excerpt of the real #6757 (LUBE20) brief text that false-positived as a MAP
+// conflict on 2026-09-08: exclusion-rationale prose explaining why 9 SKUs were
+// left OUT of the promo's scope trips the "breaches MAP" alternative even
+// though it is not a verdict on the promo itself. The same brief states an
+// explicit "MAP CHECK CLEAN" verdict a little further on.
+const MAP_EXCLUSION_RATIONALE_BRIEF =
+  '9 excluded already at MAP floor / zero headroom (further discount breaches MAP -- ' +
+  '75267 Intimate Earth Mojo Clove Anal Glide, 77096 LELO Water-Based Moisturizer). ' +
+  '42 SKUs remain, all map_price null -> fully discountable, MAP CHECK CLEAN.'
+
 describe('promoExecuteEnabled', () => {
   it('is off unless the setting is exactly "true"', () => {
     expect(promoExecuteEnabled(null)).toBe(false)
@@ -79,6 +89,18 @@ describe('detectMapConflict', () => {
     expect(detectMapConflict('any further discount on those would sell below MAP')).toBe(false)
     expect(detectMapConflict(LIVE_BRIEF_51)).toBe(false)
   })
+  // Ticket #9366 (split from #9319, defect D): #6757 (LUBE20) false-positived
+  // on 2026-09-08 because "further discount breaches MAP" sits inside
+  // exclusion-rationale prose ("9 excluded already at MAP floor / ...").
+  it('does not flag a MAP-fail phrase sitting inside exclusion-rationale prose (#6757)', () => {
+    expect(detectMapConflict(MAP_EXCLUSION_RATIONALE_BRIEF)).toBe(false)
+  })
+  it('still flags a real conflict verdict elsewhere in a brief that also excludes SKUs', () => {
+    // The exclusion-context guard must not mask an unrelated, real conflict
+    // verdict that appears far enough away in the same brief.
+    const text = `${MAP_EXCLUSION_RATIONALE_BRIEF}\n\nSeparately: MAP conflict on a different SKU, not eligible.`
+    expect(detectMapConflict(text)).toBe(true)
+  })
 })
 
 describe('detectMapClean', () => {
@@ -91,6 +113,9 @@ describe('detectMapClean', () => {
   it('is false when the brief never states MAP compliance', () => {
     expect(detectMapClean('Code: X10\nDepth: 10%\nWindow: 2026-08-12 to 2026-08-19')).toBe(false)
     expect(detectMapClean('this sits below MAP')).toBe(false)
+  })
+  it('reads the explicit clean verdict on the #6757 exclusion-rationale brief', () => {
+    expect(detectMapClean(MAP_EXCLUSION_RATIONALE_BRIEF)).toBe(true)
   })
 })
 
@@ -169,8 +194,27 @@ describe('decidePromo', () => {
   it('refuses a missing code or depth', () => {
     const noCode = 'Depth: 10%\nWindow: 2026-08-12 to 2026-08-19'
     expect(decidePromo(parsePromoBrief(noCode), noCode).reason).toBe('no-code')
-    const noDepth = 'Code: X10\nWindow: 2026-08-12 to 2026-08-19'
+    // Depth: 0% is a percentage-code candidate (matches the bare NN% check)
+    // whose stated depth is out of the valid 1-99 range, so parsePromoBrief
+    // still resolves percentage to null and this is a real 'no-depth' case,
+    // not 'not-applicable' — a brief with literally zero percent anywhere
+    // (the old fixture here) is the not-applicable case, tested below.
+    const noDepth = 'Code: X10\nWindow: 2026-08-12 to 2026-08-19\nDepth: 0%'
     expect(decidePromo(parsePromoBrief(noDepth), noDepth).reason).toBe('no-depth')
+  })
+
+  // Ticket #9366 (split from #9319, defect C): a brief describing a
+  // non-percentage mechanism (free-shipping threshold, bundle, loyalty perk)
+  // has no bare NN% anywhere and can never pass this pipeline's later checks
+  // meaningfully — it is the wrong mechanism, not a malformed percent brief.
+  it('refuses a non-percentage mechanism as not-applicable, before any other check', () => {
+    const freeShipping = 'Code: X10\nWindow: 2026-08-12 to 2026-08-19\nLower the free-shipping threshold from $99 to $59.'
+    expect(decidePromo(parsePromoBrief(freeShipping), freeShipping)).toEqual({ ok: false, reason: 'not-applicable' })
+    // Checked before the MAP-conflict check too: a non-percentage brief that
+    // happens to mention "MAP violation" in passing is still not-applicable,
+    // not map-conflict-flagged.
+    const freeShippingWithMapWord = `${freeShipping}\nNote: unrelated MAP violation on a different SKU.`
+    expect(decidePromo(parsePromoBrief(freeShippingWithMapWord), freeShippingWithMapWord).reason).toBe('not-applicable')
   })
 })
 
@@ -256,6 +300,24 @@ describe('executeApprovedPromo', () => {
     expect(deps.createDiscount).not.toHaveBeenCalled()
     expect(deps.sendOwnerEmail).toHaveBeenCalledOnce()          // loud
     expect(deps.addNote).toHaveBeenCalledOnce()                 // loud
+  })
+
+  // Ticket #9366 (split from #9319, defect C): a non-percentage mechanism
+  // refuses silently — no owner email, since there is no percentage-code
+  // defect for the owner to fix by re-reading the same brief every day.
+  it('refuses a non-percentage-mechanism row silently, without emailing the owner', async () => {
+    const deps = makeDeps()
+    const freeShipping = 'Code: X10\nWindow: 2026-08-12 to 2026-08-19\nLower the free-shipping threshold from $99 to $59.'
+    const res = await executeApprovedPromo({ id: 55, suggestion: freeShipping }, deps)
+    expect(res.minted).toBe(false)
+    expect(res.refused).toBe(true)
+    expect(res.reason).toBe('not-applicable')
+    expect(res.ownerEmailed).toBe(false)
+    expect(deps.createDiscount).not.toHaveBeenCalled()
+    expect(deps.sendOwnerEmail).not.toHaveBeenCalled()
+    expect(deps.addNote).toHaveBeenCalledOnce()
+    const [, noteRef] = (deps.addNote as any).mock.calls[0]
+    expect(noteRef).toContain('REFUSED (not-applicable)')
   })
 
   it('refuses rather than minting a catalog-wide code when no product resolves', async () => {

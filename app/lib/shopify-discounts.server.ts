@@ -45,12 +45,26 @@ export const PROMO_EXECUTE_VALVE = 'promo_execute_enabled'
  * explicit clean verdict. The executor refuses on a FAIL verdict AND refuses
  * unless a PASS verdict is explicitly present, so a brief that merely mentions
  * MAP in passing is refused, never minted.
+ *
+ * `detectMapConflict` additionally guards against a second false-positive shape
+ * (ticket #9319/#9366): a brief's exclusion-rationale prose explaining why a
+ * SKU was left OUT of the promo's scope ("9 excluded already at MAP floor /
+ * zero headroom (further discount breaches MAP -- ...)") trips the
+ * `violates?|breaches?|breaking` alternative even though it is not a verdict
+ * on the promo itself. This false-positived LUBE20 (#6757) on 2026-09-08 even
+ * though the same brief carries an explicit "MAP CHECK CLEAN" verdict. A match
+ * only counts as a real conflict when the ~120 characters immediately
+ * preceding it do not contain "exclud" (case-insensitive) — exclusion
+ * rationale always names the excluded SKUs right before explaining why.
  */
 const MAP_FAIL_RE =
   /\bmap\b[^.\n]{0,40}?\b(?:conflict|violation|violates?|breach(?:es|ed)?|fail(?:s|ed|ure)?|flagged?)\b|\b(?:violates?|breaches?|breaking)\s+map\b|\bnot\s+map[\s-]*compliant\b|\bmap[\s-]*(?:check|status|result)[\s:_-]*fail/i
 
 const MAP_PASS_RE =
   /\bmap\b[^.\n]{0,40}?\b(?:pass(?:ed|es)?|clean|clear|compliant|legal)\b|\bmap[\s_]*(?:price)?[\s_]*=?\s*0\b/i
+
+/** How far back to look for exclusion-rationale prose before a FAIL match. */
+const MAP_FAIL_CONTEXT_WINDOW = 120
 
 export interface ParsedPromo {
   code: string | null
@@ -70,8 +84,8 @@ export interface ParsedPromo {
 export interface PromoDecision {
   ok: boolean
   /**
-   * 'ok' | 'map-conflict-flagged' | 'map-not-confirmed' | 'no-code' |
-   * 'no-depth' | 'no-explicit-window' | 'invalid-window'
+   * 'ok' | 'not-applicable' | 'map-conflict-flagged' | 'map-not-confirmed' |
+   * 'no-code' | 'no-depth' | 'no-explicit-window' | 'invalid-window'
    */
   reason: string
 }
@@ -91,9 +105,21 @@ export function promoExecuteEnabled(settingValue: string | null): boolean {
   return settingValue === 'true'
 }
 
-/** True when the brief carries an explicit MAP-FAIL verdict about this promo. */
+/**
+ * True when the brief carries an explicit MAP-FAIL verdict about this promo.
+ * A match is discarded when it sits inside exclusion-rationale prose (see the
+ * doc comment above MAP_FAIL_RE) — checked per match, so a real conflict
+ * verdict elsewhere in the same brief is never masked by an unrelated
+ * exclusion note.
+ */
 export function detectMapConflict(text: string): boolean {
-  return MAP_FAIL_RE.test(text)
+  const re = new RegExp(MAP_FAIL_RE.source, 'gi')
+  for (const m of text.matchAll(re)) {
+    const precedingStart = Math.max(0, m.index - MAP_FAIL_CONTEXT_WINDOW)
+    const preceding = text.slice(precedingStart, m.index)
+    if (!/exclud/i.test(preceding)) return true
+  }
+  return false
 }
 
 /**
@@ -191,10 +217,27 @@ export function parsePromoBrief(text: string): ParsedPromo {
 }
 
 /**
- * The pre-mint guard. Order matters: the loudest, most safety-critical refusal
- * (a MAP conflict) is reported first, then the structural requirements.
+ * Whether the brief even describes a percentage discount code at all, as
+ * opposed to a different promo mechanism (a free-shipping-threshold change, a
+ * bundle, a loyalty perk) that this executor has no way to mint and never
+ * should try to. A bare `NN%` anywhere in the text is the loosest possible
+ * signal a percentage mechanism could leave, matching the loosest of
+ * parsePromoBrief's own depth-extraction fallbacks — so when this is false,
+ * `parsed.percentage` is guaranteed null too, and 'no-depth' would otherwise
+ * misreport a wrong-mechanism row as a malformed percentage row.
+ */
+const DISCOUNT_CODE_CANDIDATE_RE = /\d{1,2}\s*%/
+
+/**
+ * The pre-mint guard. Order matters: whether this is even a percentage-code
+ * mechanism is checked first (ticket #9366) — a non-applicable row can never
+ * pass any later check, and mis-refusing it as 'no-depth' invites retrying it
+ * forever once refusals become retryable — then the loudest, most
+ * safety-critical refusal (a MAP conflict) is reported, then the structural
+ * requirements.
  */
 export function decidePromo(parsed: ParsedPromo, fullText: string): PromoDecision {
+  if (!DISCOUNT_CODE_CANDIDATE_RE.test(fullText)) return { ok: false, reason: 'not-applicable' }
   if (detectMapConflict(fullText)) return { ok: false, reason: 'map-conflict-flagged' }
   if (!parsed.code) return { ok: false, reason: 'no-code' }
   if (parsed.percentage == null) return { ok: false, reason: 'no-depth' }
@@ -344,6 +387,14 @@ export function defaultPromoExecuteDeps(): PromoExecuteDeps {
   }
 }
 
+/**
+ * Refusal reasons that never reach the owner's inbox: the row is not a defect
+ * in *this* brief, it is the wrong mechanism entirely for this executor
+ * (ticket #9366), and there is nothing for the owner to decide by re-reading
+ * the same non-percentage brief every day.
+ */
+const SILENT_REFUSAL_REASONS = new Set(['not-applicable'])
+
 async function refuse(
   row: { id: number },
   parsed: ParsedPromo,
@@ -351,6 +402,11 @@ async function refuse(
   productCount: number,
   deps: PromoExecuteDeps,
 ): Promise<PromoExecuteResult> {
+  if (SILENT_REFUSAL_REASONS.has(reason)) {
+    await deps.addNote(row.id, `REFUSED (${reason}): no Shopify discount minted. Not a percentage-code mechanism; owner not emailed.`)
+    return { minted: false, refused: true, reason, ownerEmailed: false }
+  }
+
   const mail = buildPromoOwnerEmail({
     suggestionId: row.id,
     outcome: 'refused',
