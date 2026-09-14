@@ -113,6 +113,19 @@ export async function fetchInstagramEngagement(
     else if (entry.name === 'ig_reels_avg_watch_time') metrics.avgWatchTimeMs = value
     else if (entry.name === 'ig_reels_video_view_total_time') metrics.totalWatchTimeMs = value
   }
+  // Reach is impossible to be zero alongside a real like/comment/save — a
+  // person cannot engage with a post they were not reached by. Meta applies
+  // privacy thresholding to reach at very small audience sizes and reports it
+  // as a numeric 0 rather than omitting the field, which is indistinguishable
+  // from genuine zero delivery unless checked against the engagement counts
+  // (ticket #9327). Drop it back to "not measured" (absent from `metrics`,
+  // same as a field Meta never returned) so persistMetrics never stores an
+  // impossible reading and the instagram-reach lane floor's existing
+  // "not enough readings" guard (lane-floors.server.ts) treats it as
+  // unmeasured rather than a real zero.
+  if (metrics.reach === 0 && (metrics.likes ?? 0) + (metrics.comments ?? 0) + (metrics.saved ?? 0) > 0) {
+    delete metrics.reach
+  }
   return { ok: true, metrics }
 }
 

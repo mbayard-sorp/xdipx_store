@@ -261,4 +261,24 @@ describe('instagram-reach (#8014: reach-per-post step-changed 6x with a flat fol
     expect(reach.breached).toBeNull()
     expect(reach.detail).toContain('not enough Instagram posts')
   })
+
+  it('reports UNMEASURED rather than a false breach for the 2026-09-07..09-13 zero-suppressed week (#9327)', async () => {
+    // Real shape of that week: 13 posts, all with reach zero-suppressed by
+    // Meta at this account's small follower count (fixed in
+    // social-engagement.server.ts to store reach as absent rather than 0
+    // when likes/comments/saved are nonzero). Once fixed, the SQL's
+    // `metrics_json->>'reach' IS NOT NULL` filter excludes every one of
+    // those rows, so n7 collapses to 0 instead of averaging a near-zero
+    // reach that would read as a >99% collapse against a healthy trailing-28d
+    // mean.
+    mockReachWindows({ n7: 0, n28: 12, mean7: 0, mean28: '6.2' })
+
+    const { checkLaneFloors } = await import('~/lib/lane-floors.server')
+    const verdicts = await checkLaneFloors()
+    const reach = verdicts.find(v => v.lane === 'instagram-reach')!
+
+    expect(reach.measured).toBeNull()
+    expect(reach.breached).toBeNull()
+    expect(reach.detail).toContain('not enough Instagram posts')
+  })
 })
