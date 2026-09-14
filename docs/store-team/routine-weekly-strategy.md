@@ -167,9 +167,19 @@ a six-line verdict in the weekly brief, one yes/no per line, where **yes is the 
    engagement is a yes, said plainly.
 
 Every "no" becomes a suggestion row filed the same run at the team that owns it, with a
-`dedupeKey`, never a narrative-only note. Once migration 079 lands (ticket #3536), the check also
-reads the engagement op and names the week's best and worst theme by saves; until then, say plainly
-in the brief that engagement is unmeasured.
+`dedupeKey`, never a narrative-only note. Migration 079 has landed (ticket #3536): the check reads
+the engagement op (`captureInstagramEngagement`) and names the week's best and worst theme by saves.
+
+**State plainly, every week, which metric the engagement line is steering by.** Reach is not a
+reliable Instagram proxy at this account's follower count: Meta applies privacy thresholding and
+reports a numeric `0` rather than omitting the field, which social-engagement.server.ts's
+zero-suppression guard (ticket #9327) now drops back to "not measured" whenever a real
+like/comment/save exists alongside it, and the instagram-reach lane floor already treats too few
+genuine readings as unmeasured rather than a collapse. Saves is the metric this account's size
+still measures honestly (the carousel format is built for saves per the voice charter), so name it
+explicitly as the proxy the brief is steering by rather than quoting a reach figure that may be a
+suppressed near-zero, or say plainly that engagement is unmeasured if even saves has too few rows
+to read.
 
 ## Step 4 — Sub-specialists (sequence, same $RUN_ID)
 

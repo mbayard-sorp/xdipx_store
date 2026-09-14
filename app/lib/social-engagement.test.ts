@@ -77,6 +77,55 @@ describe('fetchInstagramEngagement', () => {
     expect(result).toEqual({ ok: false, detail: 'Instagram keys are not configured' })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+  // Ticket #9327: 2026-09-07..09-13 real rows. A person cannot like/comment/
+  // save a post they were not reached by, so reach:0 alongside a real
+  // engagement count is Meta's small-audience privacy thresholding reporting
+  // a numeric zero, not genuine zero delivery. The fix drops reach back to
+  // "not measured" (absent from `metrics`) rather than storing the
+  // impossible zero, so the instagram-reach lane floor's existing
+  // not-enough-readings guard treats these as unmeasured instead of a real
+  // collapse.
+  describe('zero-suppressed reach (#9327)', () => {
+    const rows: Array<{ id: number; values: { reach: number; likes: number; comments: number; saved: number } }> = [
+      { id: 243, values: { reach: 0, likes: 1, comments: 1, saved: 0 } },
+      { id: 225, values: { reach: 0, likes: 2, comments: 1, saved: 0 } },
+      { id: 226, values: { reach: 0, likes: 1, comments: 0, saved: 0 } },
+    ]
+
+    for (const row of rows) {
+      it(`drops reach on row ${row.id} (likes/comments/saved: ${JSON.stringify(row.values)})`, async () => {
+        vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+        vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(insightsFixture(row.values))))
+
+        const result = await fetchInstagramEngagement(`media-${row.id}`)
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        expect(result.metrics.reach).toBeUndefined()
+        expect(result.metrics.likes).toBe(row.values.likes)
+        expect(result.metrics.comments).toBe(row.values.comments)
+        expect(result.metrics.saved).toBe(row.values.saved)
+      })
+    }
+
+    it('keeps a genuine reach:0 when every engagement count is also zero', async () => {
+      vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        jsonResponse(insightsFixture({ reach: 0, likes: 0, comments: 0, saved: 0 })),
+      ))
+      const result = await fetchInstagramEngagement('media-zero')
+      expect(result).toEqual({ ok: true, metrics: { reach: 0, likes: 0, comments: 0, saved: 0 } })
+    })
+
+    it('leaves a real nonzero reach alone', async () => {
+      vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        jsonResponse(insightsFixture({ reach: 900, likes: 40, comments: 3, saved: 22 })),
+      ))
+      const result = await fetchInstagramEngagement('media-healthy')
+      expect(result).toEqual({ ok: true, metrics: { reach: 900, likes: 40, comments: 3, saved: 22 } })
+    })
+  })
 })
 
 // ─── Account-level readings (ticket #4064) ───────────────────────────────────
