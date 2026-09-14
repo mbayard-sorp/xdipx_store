@@ -313,7 +313,11 @@ export default function CollectionsHub() {
         </section>
       )}
 
-      <NotebookRail posts={notebookPosts} />
+      <NotebookRail
+        posts={notebookPosts}
+        seeAllHref="/notebook"
+        seeAllLabel="More from the Notebook →"
+      />
     </div>
   )
 }
