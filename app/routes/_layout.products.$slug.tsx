@@ -12,7 +12,7 @@ import {
 } from '~/lib/shopify.server'
 import { normalizeProductHandles } from '~/lib/product-handles'
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
-import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct, getNotebookPostsForProductType } from '~/lib/sanity.server'
+import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct, getNotebookPostsForProductType, getBlogPosts } from '~/lib/sanity.server'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 // Reviews: UI + aggregateRating JSON-LD flip together behind the
 // reviews_pdp_enabled valve. They must never be decoupled (Google's
@@ -174,6 +174,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   let notebookPosts = embedNotebookPosts
   if (notebookPosts.length === 0 && deal.productTypeDial) {
     notebookPosts = await getNotebookPostsForProductType(deal.productTypeDial, slug, 3)
+  }
+  // Last resort: latest published posts, so a PDP whose product type has no
+  // Notebook coverage yet still links out to the Notebook (ticket #9312 —
+  // crawled-but-unindexed Notebook posts need inbound links from indexed
+  // surfaces, and every PDP is one). Mirrors the collection pages' fallback.
+  if (notebookPosts.length === 0) {
+    notebookPosts = (await getBlogPosts({ perPage: 3 })).posts
   }
 
   // Resolve current customer (for sticky vote state + gating). Failures here
@@ -1272,7 +1279,12 @@ function ProductPage() {
           <BundleSaveCard bundle={companionBundle} buyButtonText={buyButtonText} />
         )}
         {!hasCuratedGuides && (
-          <NotebookRail posts={notebookPosts} heading="From the Notebook" />
+          <NotebookRail
+            posts={notebookPosts}
+            heading="From the Notebook"
+            seeAllHref="/notebook"
+            seeAllLabel="More from the Notebook →"
+          />
         )}
       </div>
 

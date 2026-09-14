@@ -8,10 +8,12 @@ import { sanityImageUrl, sanityImageSrcSet } from '~/lib/sanity-image'
  * the PDP, and the homepage. Renders nothing when there are no posts, so callers
  * can drop it in unconditionally.
  *
- * `seeAllLabel` and `showProductChips` are OPTIONAL and off by default, so the
- * three non-homepage call sites keep their exact current markup. Only the
- * homepage opts in: the Notebook is ~21% of sessions with long dwell and, until
- * now, no path out of it to a product or to the rest of the archive.
+ * `seeAllLabel` and `showProductChips` are OPTIONAL and off by default.
+ * `seeAllLabel` is now set on every call site (ticket #9312): PDP and
+ * collection pages are exactly the surfaces Google already crawls, so an
+ * explicit link to the Notebook index from each one gives every published
+ * post an inbound link from an indexed page, not only from the homepage.
+ * `showProductChips` stays homepage-only.
  */
 export function NotebookRail({
   posts,
