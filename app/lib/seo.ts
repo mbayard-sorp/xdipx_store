@@ -61,6 +61,26 @@ export function robotsContent(opts: { index?: boolean; follow?: boolean } = {}):
   return `${index ? 'index' : 'noindex'}, ${follow ? 'follow' : 'nofollow'}`
 }
 
+/**
+ * Whether a route error's HTTP status means the page is genuinely gone, the
+ * one case root.tsx's shared ErrorBoundary is allowed to emit `noindex` for.
+ * Every other status (a transient 5xx, a 503 Storefront outage, a 499
+ * aborted render, or no error at all) must fall through with no robots meta,
+ * because Google treats `noindex` as sticky and a momentary blip should cost
+ * a retry, not de-indexing (ticket #173, 2026-06-13 — see root.tsx and
+ * sitemap-xml.ts's RECRAWL_EPOCH).
+ *
+ * Extracted as a pure predicate (ticket #9316) so the PDP's "no noindex for
+ * an ACTIVE product in any stock state" guarantee is independently testable:
+ * the PDP loader only ever throws 404 when Shopify does not return the
+ * product at all, never for a stock level, so an active product can only
+ * hit this ErrorBoundary via a non-404/410 status, which this always reads
+ * as indexable.
+ */
+export function isPermanentlyUnindexableStatus(status: number | null): boolean {
+  return status === 404 || status === 410
+}
+
 export function pageTitle(parts: Array<string | null | undefined>): string {
   // Sanity-authored titles sometimes arrive already suffixed ("Play … | xdipx");
   // strip that before appending so no title ever reads "… | xdipx | xdipx".

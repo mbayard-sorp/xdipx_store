@@ -26,6 +26,7 @@ import { SITE_ORIGIN } from '~/lib/social-meta'
 import { captureUTM, captureFbClickId, captureGoogleClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 import { isQaAgeBypassRequest } from '~/lib/qa-preview.server'
+import { isPermanentlyUnindexableStatus } from '~/lib/seo'
 
 const BOTID_PROTECTED_ROUTES = [
   { path: '/api/waitlist',  method: 'POST' },
@@ -357,7 +358,10 @@ export function ErrorBoundary() {
   // render error must NEVER emit noindex: Google treats noindex as a sticky,
   // semi-permanent signal and will drop the URL for what was a momentary blip.
   // Those cases fall through with no robots meta so Googlebot simply retries.
-  const isPermanentlyUnindexable = status === 404 || status === 410
+  // Extracted to app/lib/seo.ts (ticket #9316) so this guarantee — and its
+  // PDP corollary that no stock state ever emits noindex, since the PDP only
+  // ever 404s when Shopify has no such product at all — is unit-testable.
+  const isPermanentlyUnindexable = isPermanentlyUnindexableStatus(status)
 
   // Brand-safe SEO title + noindex so error pages never get indexed.
   // React 19 hoists <title>/<meta>/<link> from anywhere in the tree into <head>.
