@@ -58,6 +58,17 @@ import { cached } from './kv.server'
 
 const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
 
+/**
+ * Both gate system prompts below are almost entirely static charter/policy
+ * text re-sent byte-identical on every call (ticket #9399). Tagging the
+ * block lets the second and later calls read it from the ephemeral cache at
+ * ~10% of input price instead of rebilling the whole charter every time.
+ * Same pattern as `cacheableSystem()` in claude.server.ts.
+ */
+function cacheableSystem(system: string): Anthropic.TextBlockParam[] {
+  return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /**
@@ -179,7 +190,7 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
   const msg = await client.messages.create({
     model: SONNET,
     max_tokens: 512,
-    system,
+    system: cacheableSystem(system),
     messages: [{ role: 'user', content: buildVoiceGateUserContent({ text, platform }) }],
   })
   void logTokens('voice-gate', msg.usage)
@@ -531,7 +542,7 @@ async function callPublishGateModel(
     // time. This is a judgment task with a fail-closed contract, not one
     // where call-to-call variety is a feature.
     temperature: 0,
-    system: PUBLISH_GATE_SYSTEM,
+    system: cacheableSystem(PUBLISH_GATE_SYSTEM),
     messages: [{ role: 'user', content }],
   })
   void logTokens('publish-gate', msg.usage)
