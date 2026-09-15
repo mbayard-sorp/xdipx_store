@@ -142,7 +142,10 @@ row.
 
 Post one `decision` event under your `$RUN_ID` (`agentRole:'product-manager'`): queue depth,
 approve/reject/watch executed (and any skipped due to cap or kill switch), price-drop rows surfaced,
-downstream health, top opportunities with the numbers. Log spend
+downstream health, top opportunities with the numbers. **Reject-rate math uses `reviewed_at`, never
+`updated_at`**: a discovery run that still sees an already-rejected row in-feed bumps `updated_at`
+with no new review (`import-monitor.server.ts`'s "never reopen" behavior), so an `updated_at`-based
+count inflates the reject rate. Log spend
 (`POST /api/homepage-team/spend {"kind":"tokens","source":"agent-sdk","feature":"product-daily",...}`
 — the `product-` prefix is required or the budget gate reads 0), then finish:
 
