@@ -2115,6 +2115,11 @@ export const ownerBlockers = pgTable('owner_blockers', {
   evidence:       text('evidence'),
   verifyProbe:    varchar('verify_probe', { length: 32 }),
   verifyArg:      text('verify_arg'),
+  // Migration 098. Authored once, same as evidence/unblocks/whereToGo: a
+  // human (or an agent acting on the owner's standing direction) recorded
+  // why no verifyProbe applies to this row. A row carrying one is as
+  // legitimately probe-less as category='console'/'decision'.
+  overrideNoProbeReason: text('override_no_probe_reason'),
   lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
   lastVerifyOk:   boolean('last_verify_ok'),
   firstSeenAt:    timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),

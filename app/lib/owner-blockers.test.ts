@@ -35,6 +35,7 @@ function blocker(over: Partial<OwnerBlocker> = {}): OwnerBlocker {
     evidence: null,
     verifyProbe: null,
     verifyArg: null,
+    overrideNoProbeReason: null,
     lastVerifiedAt: null,
     lastVerifyOk: null,
     firstSeenAt: '2026-08-01T00:00:00.000Z',

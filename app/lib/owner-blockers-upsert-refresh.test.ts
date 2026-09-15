@@ -79,7 +79,10 @@ describe('measured fields take the newest observation', () => {
 })
 
 describe('authored-once fields are never clobbered', () => {
-  for (const column of ['unblocks', 'where_to_go', 'evidence', 'verify_probe', 'verify_arg']) {
+  for (const column of [
+    'unblocks', 'where_to_go', 'evidence', 'verify_probe', 'verify_arg',
+    'override_no_probe_reason',
+  ]) {
     it(`keeps the stored ${column} when one exists`, () => {
       // COALESCE(stored, EXCLUDED.x) — the original order, deliberately.
       expect(assignment(column)).toMatch(/COALESCE\(\s*owner_blockers\./i)
