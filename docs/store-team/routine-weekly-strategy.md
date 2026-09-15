@@ -355,7 +355,11 @@ lead with orders/margin attributable to newly-imported SKUs and to price-dropped
 items; GA4 item-list/PDP only when the week has ≥300 sessions, else flag the number heuristic) —
 that tie-back is the headline. Throughput is the supporting detail, sourced from the product-manager
 and inventory-sentinel events: queue depth (pending/watching); auto-imported A/B + Tier-C and
-product-manager approve/reject/watch this week (and any `skippedDueToCap` days); enrichment stuck
+product-manager approve/reject/watch this week (and any `skippedDueToCap` days) — **reject-rate math
+uses `reviewed_at`, never `updated_at`**: `import_monitor.server.ts`'s "never reopen, bump
+`lastSeenAt` only" behavior re-stamps `updated_at` on already-rejected rows every discovery run that
+still sees them in-feed, with no new review taking place, so an `updated_at`-filtered count inflates
+the apparent reject rate (measured once at 71% against a true 30% by `reviewed_at`); enrichment stuck
 (`imported AND enriched_at IS NULL`) and quality-gate parks (`enrich_failed_at`); publish stuck
 (`enriched_at set, published_at NULL`) and rough import→live latency; new-arrival products surfaced;
 price drops detected / repriced / routed. Per `mission-brief.md`: throughput is an activity metric,
