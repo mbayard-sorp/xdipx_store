@@ -272,6 +272,14 @@ terminal state. When you claim one anyway: file a new linked `kind:'code'` row c
 (a) criteria and citing the original, transition the original to `blocked` naming the owner-gated
 remainder, and move on. Never implement the owner-gated half.
 
+**A split-off follow-up row never inherits the current PR's link.** (#9401) The same applies when
+this routine finds an out-of-scope piece mid-PR and splits it into its own follow-up row: that row
+has no implementation in the PR you are currently working, so it is filed at `approved` with no `pr`
+link, never the parent PR's. #9396 (split off #9323/PR #1179, whose own body says the split-off fix
+was NOT included) landed at `pr_open` unclaimed with nothing to review, and QA had to bounce it —
+an attempt burned on a ticket nobody had worked. Only attach a `pr` link to a follow-up row once you
+open a PR that actually implements it.
+
 **Tagged rows dispose in seconds.** (#1909, extended #4142) A claimed row whose text opens with
 `[design-gated]`, `[cross-agent-epic]`, `[owner-env]`, or `[needs-visual-harness]` (filing
 conventions, `operating-system.md` §3) is not a single-agent code PR by its filer's own declaration:
