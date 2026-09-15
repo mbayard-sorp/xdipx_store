@@ -120,6 +120,14 @@ the row text and its links are the only carriers, so the conventions are the con
    filing time: read the DONE WHEN for an "and" joining a code clause to an owner clause. A `code`
    row's DONE WHEN must be fully in-repo actionable, and it cites the real repo file/symbol it
    changes, or states plainly that none exists yet.
+   **A split-off row with no implementation of its own never carries the parent PR's link.** (#9401)
+   When a pass discovers an out-of-scope piece mid-PR and splits it into a new follow-up row, that
+   row is not the same work as the PR already open: filing it with the parent PR's link attached
+   auto-lands it at `pr_open`, unclaimed, with nothing in that PR to review (ticket #9396, split off
+   #9323/PR #1179, whose own body says the split-off fix was NOT included — QA had to bounce a row
+   nobody had worked). A follow-up row with no PR of its own is filed at `approved` with no `pr`
+   link (or an explicit note that none exists yet), never the parent's, so it does not surface for
+   review before real work exists.
 2. **Dependency links are mandatory for same-file chains, and for the same external condition.**
    (#1693) When one audit or session files multiple tickets against the same file or subsystem, set
    an explicit dependency (`blockedById`, or a `Depends-on: #<id>` line in the row text) so
