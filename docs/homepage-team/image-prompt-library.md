@@ -1257,6 +1257,70 @@ total (21 images), still trivial against the daily content-team budget.
   alt-text patch was needed — verified green via `check-hero-embed-match.ts --slug
   can-a-vibrator-make-you-less-sensitive` on the first upload.
 
+- `cast: marcus` + Curiosity Cues Conversation Cards for Couples 50-Card Deck
+  (`vush-curiosity-cues-cards`), "How Do You Get Out of a Sexual Rut in a Long Relationship?"
+  (`real-talk`, not †-health-adjacent, content run 888, ticket #2748). Gesture per the "Is this
+  normal? / Is it just me?" row: card-deck box held up in one hand at eye level, head tilted at
+  it, brow up, mid-question, free hand palm-up at his side asking the room. **Casting:**
+  routine-briefed `marcus`; independently re-verified against the actual Sanity publish history
+  (not the brief's summary alone, same method as the `sofia`/`diego` entries above) — true
+  last-5 human heroes in order were `jade` (09-11), `priya` (09-10), `maya` (09-08), `diego`
+  (09-04), an unnamed woman in her fifties (09-03); `marcus` last appeared 08-27, outside the
+  window, so no-repeat-within-5 is clear. No `editorialPhoto` on `castMember.marcus` (only
+  `referencePhoto`), so `editorialPhoto ?? referencePhoto` fell back to `referencePhoto` per
+  ticket #2751; that photo carries an open-collar-shirt-plus-necklace video-register look (same
+  problem already logged on the We-Vibe Chorus `marcus` entry above), stripped with explicit
+  in-prompt wardrobe override ("fully clothed in a soft plain crew-neck t-shirt... no open
+  collar shirt, no necklace"). **Camera distance stated explicitly** ("waist-up framing, the
+  subject centered with generous room on both sides") per the standing precedent, since
+  `marcus`'s reference photo is a tight crop. Not †-health-adjacent (a rut in a long relationship
+  carries no safety-claim risk), so the levity license was available; chose sincere staging
+  anyway as a reasoned deviation matching the brief's quiet, held-back-worry reader emotion
+  rather than a comic register — no scale exaggeration, no punchline expression.
+  **Label-heavy product, no clean alternate photo:** `vush-curiosity-cues-cards` has exactly one
+  Shopify photo (`A03055A.jpg`), a box-plus-fanned-cards composite carrying dense
+  sentence-level printed copy on both the box face and multiple visible cards — the label-heavy
+  failure class, but with no packaging-free second photo to substitute (unlike the WINX/Magic
+  Wand/ROMP Glow precedent) and no bare "device" for `composeSceneFrame`'s carton-stripping
+  stage to extract, since the box+cards *is* the product. Mitigated in-prompt instead of via
+  packaging-strip: box oriented so its plain spine/side panel faces camera, front title panel
+  turned away, no individual card fanned out, explicit "no legible text, letters, or words
+  visible anywhere on the box or any card" negative. **Precedent for any future card-deck /
+  card-game hero:** rotate the box to its unlabeled edge rather than fighting the model to
+  render (or blank) a readable front panel — same rotate-away-from-the-label technique as the
+  `priya`/Sliquid bottle-back entry above, extended from a bottle label to a box's whole face.
+  One round, 2 candidates via `composeSceneFrame` (Atlas `atlas/seedream-4.5-edit` one-stage
+  composite, `landscape_4_3`), no retry needed: candidate 1 kept — plain warm off-white wall
+  (ground-lock compliant, no saturated color block), box's true rectangular shape and warm
+  orange-to-yellow gradient finish faithful to the reference with no legible text anywhere on
+  it, gesture matching the table exactly, gaze directed at the product, eyebrows drawn and
+  raised, mouth closed in a small private worried line (not smiling, not amused), free hand
+  open palm-up, five natural fingers on both hands, waist-up framing with room on both sides →
+  `image-0a9cf51a130508e2a962a38604355c674e5f741e-1200x900-png` (post:
+  `what-to-do-when-sex-feels-routine`). Candidate 2 rejected on curatorial review, not the
+  anatomy gate: gaze directed skyward and away from the product rather than at it, the same
+  gaze-away failure mode already logged against the `sofia`/ROMP Glow and `jade`/Lush 3 entries
+  above. Both candidates passed the code-enforced anatomy vision gate
+  (`app/lib/social-vision-gate.server.ts`) before reaching disk. **`--upload` prompt-overwrite
+  bug, avoided:** per inbound suggestion #9369, `gen-notebook-art.ts --upload` silently rewrites
+  `imagePrompt` to the surface's generic default when `--prompt` is not repeated on the upload
+  call — passed the same composed prompt (plus an appended `[cast: ...]` metadata block) on the
+  `--upload` invocation and confirmed via a published-perspective Sanity read that `imagePrompt`
+  carried the real composed text, not the default. `check-hero-embed-match.ts --slug
+  what-to-do-when-sex-feels-routine` verified green (all six of this product's distinctive
+  tokens — `curiosity`, `cues`, `conversation`, `cards`, `card`, `deck` — present in
+  `heroImageAlt`). One round, 2 candidates total, well inside the 500-cents/day content-team
+  daily image budget (0 spend logged before this run).
+  **Standing correction, recorded because this run got it wrong (run 888).** The hero step
+  patched the post's own `status` to `'published'` after attaching the image, reasoning that the
+  upload script never touches `status` and the loader filters on it. That is out of sequence and
+  the content routine reverted it within the same run: at that moment the post had taken a REVISE
+  from BOTH gates and had not been re-gated, so the publish put ungated text on a public URL.
+  `status` is **not** part of the hero step. Routine Step 6 is the only thing that may set it, and
+  only once both gates PASS, a hero is attached, and `content_team_autopublish` is on. A hero
+  request ends at `heroImage` / `heroImageAlt` / `imagePrompt` / `heroImageVisionVerdict`, and
+  leaving the doc a draft afterwards is the correct outcome, never a defect to fix.
+
 ### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
 
 For owned surfaces only: homepage editorial tiles, §0-P surreal-option blog heroes (never on †
