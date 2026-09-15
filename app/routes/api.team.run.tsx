@@ -20,6 +20,18 @@
  * that module holds team valves and spend controls and is a protected path, so
  * a read-op addition stays in the (unprotected) route, matching how sibling
  * api.team.* routes (status, calendar, outreach) query db directly.
+ *
+ * `{op:'update'}` validation (ticket #9336): the request body's `update` used
+ * to be cast straight into RunUpdate with no runtime check, so a caller could
+ * write any string as `status` -- RunUpdate's own type union was compile-time
+ * only. Live rows show five stale spellings ('completed', 'success', 'done',
+ * 'finished') that slipped through this way, backfilled in migration 098.
+ * parseRunUpdate below validates `status` against the same RUN_STATUSES
+ * allow-list api.team.event.tsx's `parseFinish` already uses (ticket #8027),
+ * and -- also mirroring that fix -- always stamps `finished:true` when the
+ * new status is a terminal one, so a caller that sets status:'succeeded'
+ * without separately passing `finished:true` can no longer leave
+ * finished_at permanently NULL.
  */
 
 import type { ActionFunctionArgs } from 'react-router'
@@ -32,6 +44,40 @@ import { homepageTeamRuns } from '../../db/schema'
 export const RUN_LIST_MAX = 100
 /** Default run rows returned by { op: 'list' } when no limit is given. */
 const RUN_LIST_DEFAULT = 25
+
+/** Same allow-list as api.team.event.tsx's RUN_STATUSES (ticket #8027/#9336). */
+const RUN_STATUSES = ['running', 'succeeded', 'failed', 'skipped', 'rolled_back'] as const
+type RunStatus = (typeof RUN_STATUSES)[number]
+
+/**
+ * Validate + narrow a raw `update` payload into a RunUpdate. Rejects an
+ * out-of-enum `status` instead of passing it through unchecked, and forces
+ * `finished:true` whenever the new status is terminal (anything but
+ * 'running'), so status and finished_at can no longer drift apart.
+ */
+export function parseRunUpdate(raw: unknown): { update: RunUpdate } | { error: string } {
+  if (raw === undefined || raw === null) return { update: {} }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { error: 'Bad Request: update must be an object' }
+  }
+  const b = raw as Record<string, unknown>
+  const update: RunUpdate = {}
+  if (b['status'] !== undefined) {
+    if (!(RUN_STATUSES as readonly string[]).includes(b['status'] as string)) {
+      return { error: `Bad Request: unknown status '${String(b['status'])}'` }
+    }
+    update.status = b['status'] as RunStatus
+    if (update.status !== 'running') update.finished = true
+  }
+  if (typeof b['currentPhase'] === 'string') update.currentPhase = b['currentPhase']
+  if (typeof b['currentAgent'] === 'string') update.currentAgent = b['currentAgent']
+  if (typeof b['summary'] === 'string') update.summary = b['summary']
+  if (typeof b['prUrl'] === 'string') update.prUrl = b['prUrl']
+  if (typeof b['error'] === 'string') update.error = b['error']
+  if (b['finished'] === true) update.finished = true
+  if (b['incrementAttempt'] === true) update.incrementAttempt = true
+  return { update }
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -61,7 +107,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (b['op'] === 'update' && typeof b['id'] === 'number') {
-    await updateRun(b['id'] as number, (b['update'] ?? {}) as RunUpdate)
+    const parsed = parseRunUpdate(b['update'])
+    if ('error' in parsed) return new Response(parsed.error, { status: 400 })
+    await updateRun(b['id'] as number, parsed.update)
     return Response.json({ ok: true })
   }
 
