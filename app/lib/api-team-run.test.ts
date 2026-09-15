@@ -158,6 +158,69 @@ describe('unchanged behavior', () => {
   })
 })
 
+// ticket #9336: `update` used to be cast straight into RunUpdate with no
+// runtime check, letting a caller write a status string outside the type
+// union (live rows show 'completed'/'success'/'done'/'finished') and letting
+// a terminal status land with finished_at never stamped. parseRunUpdate
+// closes both gaps the same way api.team.event.tsx's parseFinish already
+// does for the `finish` payload (#8027).
+describe('op:update status validation (#9336)', () => {
+  it('accepts a valid terminal status and always stamps finished', async () => {
+    const res = await post({ op: 'update', id: 42, update: { status: 'succeeded' } })
+    expect(res.status).toBe(200)
+    expect(updateRun).toHaveBeenCalledWith(42, { status: 'succeeded', finished: true })
+  })
+
+  it('rejects an out-of-enum status instead of passing it through', async () => {
+    const res = await post({ op: 'update', id: 42, update: { status: 'completed' } })
+    expect(res.status).toBe(400)
+    expect(updateRun).not.toHaveBeenCalled()
+  })
+
+  it('does not force finished on a status:"running" update', async () => {
+    const res = await post({ op: 'update', id: 42, update: { status: 'running' } })
+    expect(res.status).toBe(200)
+    expect(updateRun).toHaveBeenCalledWith(42, { status: 'running' })
+  })
+
+  it('still honors an explicit finished:true independent of status', async () => {
+    await post({ op: 'update', id: 42, update: { finished: true } })
+    expect(updateRun).toHaveBeenCalledWith(42, { finished: true })
+  })
+
+  it('passes through the other known fields unchanged', async () => {
+    await post({
+      op: 'update',
+      id: 42,
+      update: {
+        status: 'failed',
+        currentPhase: 'collect',
+        currentAgent: 'rr7-engineer',
+        summary: 'hit a snag',
+        prUrl: 'https://github.com/x/y/pull/1',
+        error: 'boom',
+        incrementAttempt: true,
+      },
+    })
+    expect(updateRun).toHaveBeenCalledWith(42, {
+      status: 'failed',
+      finished: true,
+      currentPhase: 'collect',
+      currentAgent: 'rr7-engineer',
+      summary: 'hit a snag',
+      prUrl: 'https://github.com/x/y/pull/1',
+      error: 'boom',
+      incrementAttempt: true,
+    })
+  })
+
+  it('defaults to an empty update when `update` is absent', async () => {
+    const res = await post({ op: 'update', id: 42 })
+    expect(res.status).toBe(200)
+    expect(updateRun).toHaveBeenCalledWith(42, {})
+  })
+})
+
 describe('op:start phase stamp (#5431b)', () => {
   it('stamps a default currentPhase so the row is never created with phase NULL', async () => {
     await post({ op: 'start', team: 'social', runType: 'social' })
