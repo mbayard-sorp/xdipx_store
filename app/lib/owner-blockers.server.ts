@@ -531,12 +531,12 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
   const res = await db.execute(sql`
     INSERT INTO owner_blockers (
       dedupe_key, title, detail, unblocks, where_to_go, category, priority,
-      source, source_ref, evidence, verify_probe, verify_arg
+      source, source_ref, evidence, verify_probe, verify_arg, override_no_probe_reason
     ) VALUES (
       ${dedupeKey}, ${title}, ${clamp(input.detail, 4000)}, ${clamp(input.unblocks, 2000)},
       ${clamp(input.whereToGo, 1000)}, ${category}, ${priority},
       ${source}, ${clamp(input.sourceRef, 500)}, ${evidence},
-      ${probe}, ${clamp(input.verifyArg, 200)}
+      ${probe}, ${clamp(input.verifyArg, 200)}, ${overrideNoProbeReason}
     )
     ON CONFLICT (dedupe_key) DO UPDATE SET
       last_seen_at = now(),
@@ -570,7 +570,9 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
       where_to_go  = COALESCE(owner_blockers.where_to_go, EXCLUDED.where_to_go),
       evidence     = COALESCE(owner_blockers.evidence, EXCLUDED.evidence),
       verify_probe = COALESCE(owner_blockers.verify_probe, EXCLUDED.verify_probe),
-      verify_arg   = COALESCE(owner_blockers.verify_arg, EXCLUDED.verify_arg)
+      verify_arg   = COALESCE(owner_blockers.verify_arg, EXCLUDED.verify_arg),
+      override_no_probe_reason =
+        COALESCE(owner_blockers.override_no_probe_reason, EXCLUDED.override_no_probe_reason)
     RETURNING id, (xmax = 0) AS created`)
 
   const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
@@ -661,6 +663,8 @@ function toBlocker(r: Record<string, unknown>): OwnerBlocker {
     evidence: r['evidence'] == null ? null : String(r['evidence']),
     verifyProbe: r['verify_probe'] == null ? null : String(r['verify_probe']),
     verifyArg: r['verify_arg'] == null ? null : String(r['verify_arg']),
+    overrideNoProbeReason: r['override_no_probe_reason'] == null
+      ? null : String(r['override_no_probe_reason']),
     lastVerifiedAt: r['last_verified_at'] == null ? null : String(r['last_verified_at']),
     lastVerifyOk: r['last_verify_ok'] == null ? null : r['last_verify_ok'] === true,
     firstSeenAt: firstSeen,
@@ -672,6 +676,7 @@ function toBlocker(r: Record<string, unknown>): OwnerBlocker {
 const SELECT_COLS = sql`
   id, dedupe_key, title, detail, unblocks, where_to_go, category, priority,
   status, source, source_ref, evidence, verify_probe, verify_arg,
+  override_no_probe_reason,
   last_verified_at::text AS last_verified_at, last_verify_ok,
   first_seen_at::text AS first_seen_at, last_seen_at::text AS last_seen_at,
   EXTRACT(epoch FROM now() - first_seen_at)::float8 / 86400 AS age_days`

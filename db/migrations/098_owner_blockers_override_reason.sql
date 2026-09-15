@@ -1,0 +1,33 @@
+-- 098_owner_blockers_override_reason.sql
+-- Ticket #9338 (self-healing-automation.md milestone a4-probes, legacy backfill).
+--
+-- overrideNoProbeReason has existed on BlockerInput and the POST
+-- /api/team/blocker 'file' op since #8028 (fileBlocker's probe-required-
+-- category gate), but it was only ever an in-memory bypass for that gate's
+-- 400: nothing persisted it, so a row filed with an override was
+-- indistinguishable afterwards from a row that simply never got a probe.
+-- That is why the 7 pre-#8028 legacy blockers this ticket exists to clear
+-- (#57, #85, #87, #91, #92, #138, #139) cannot honestly be "backfilled" by
+-- re-filing with overrideNoProbeReason alone: the reason has nowhere to
+-- land, and the milestone's own evidence probe (`verify_probe is null`)
+-- would not move.
+--
+-- override_no_probe_reason records that reason on the row itself, the same
+-- authored-once way `evidence`/`unblocks`/`where_to_go` already work: set
+-- once, filled on conflict only when still null, never clobbered by a later
+-- re-observation. A row that carries one is exactly as legitimately
+-- probe-less as a `category='console'`/`'decision'` row -- a human looked at
+-- it and said no automated check applies, on the record -- so the milestone
+-- probe is corrected in the same commit to exclude it (and to exclude
+-- `category='console'`, a separate wording gap the 2026-09-14 program-
+-- manager audit found: the shipped code exempts console the same as
+-- decision, but the milestone's literal SQL only ever excluded decision).
+--
+-- FULLY ADDITIVE: ADD COLUMN IF NOT EXISTS only. No DROP, no RENAME, no ALTER
+-- TYPE, no DML. Merges on the ordinary release-engine lane once
+-- migration-dry-run is green.
+--
+-- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 098
+-- Idempotent: safe to re-run.
+
+ALTER TABLE owner_blockers ADD COLUMN IF NOT EXISTS override_no_probe_reason text;

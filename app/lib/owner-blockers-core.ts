@@ -44,6 +44,7 @@ export interface OwnerBlocker {
   evidence: string | null
   verifyProbe: string | null
   verifyArg: string | null
+  overrideNoProbeReason: string | null
   lastVerifiedAt: string | null
   lastVerifyOk: boolean | null
   firstSeenAt: string
