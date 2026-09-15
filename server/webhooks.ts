@@ -62,6 +62,25 @@ export function referralCodeFromNoteAttributes(
   return attrs?.find(a => a.name === '_ref_code')?.value
 }
 
+/**
+ * A logged-in customer's own email, carried on the order's note_attributes as
+ * `_customer_email` (ticket #9329; stamped by customerEmailCartAttr in
+ * app/lib/attribution-cart.server.ts, same mechanism as `_ref_code` above).
+ *
+ * This store is on the Basic plan, where Admin API PII redaction empties
+ * `order.email`/`contact_email`/`customer.email` on every order (see the PII
+ * note on handleOrderFulfilled below), so for an account-holder checkout this
+ * is the only surviving email source: one the shopper already handed over by
+ * authenticating into their own account via the Customer Account API, a
+ * different access grant from the redacted Admin-API path. Guest checkouts
+ * are unaffected by this fallback and stay unattributable, as before.
+ */
+export function customerEmailFromNoteAttributes(
+  attrs: readonly ShopifyNoteAttribute[] | undefined,
+): string | undefined {
+  return attrs?.find(a => a.name === '_customer_email')?.value
+}
+
 interface ShopifyOrder {
   id: number
   order_number: number
@@ -299,7 +318,12 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
   // Post-purchase flow trigger. The headless storefront never sent order events;
   // trackPlacedOrder dedupes on the order id so a retried webhook is safe.
   try {
-    if (order.email) {
+    // Basic-plan PII redaction empties order.email for guest AND account-holder
+    // checkouts alike; the note_attributes fallback (see
+    // customerEmailFromNoteAttributes) recovers it for the account-holder
+    // subset, so this event is no longer permanently blind on this store.
+    const placedOrderEmail = order.email || customerEmailFromNoteAttributes(order.note_attributes) || null
+    if (placedOrderEmail) {
       const { trackPlacedOrder } = await import('../app/lib/klaviyo.server.js')
       // UTM + ref attribution stamped onto the cart by api.cart survives here
       // as note_attributes; forward whatever is present as event properties.
@@ -315,7 +339,7 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
         const prop = attrMap[attr.name]
         if (prop && attr.value) attribution[prop] = attr.value
       }
-      await trackPlacedOrder(order.email, {
+      await trackPlacedOrder(placedOrderEmail, {
         orderId:     String(order.id),
         orderNumber: order.order_number,
         value:       parseFloat(order.total_price) || 0,
@@ -359,8 +383,10 @@ export async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promis
   // are redacted the same way, every invite dies right here — so a missing
   // email is a loud failure, never a silent return (ticket #3443; same
   // silent-success class as ADR-009). The fallback chain covers payloads where
-  // `email` is empty but contact_email or customer.email survives.
-  const reviewerEmail = order.email || order.contact_email || order.customer?.email || null
+  // `email` is empty but contact_email, customer.email, or (ticket #9329) the
+  // account-holder's own email stamped onto note_attributes survives.
+  const reviewerEmail = order.email || order.contact_email || order.customer?.email
+    || customerEmailFromNoteAttributes(order.note_attributes) || null
   if (!reviewerEmail) {
     console.error(
       `[webhook:order-fulfilled] order ${order.id} (#${order.order_number}) has no email in the payload ` +

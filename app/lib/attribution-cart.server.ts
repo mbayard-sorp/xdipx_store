@@ -20,7 +20,8 @@ import {
   getStoredRefCode,
   getStoredUTM,
 } from './attribution.server'
-import { setCartAttributes } from './shopify.server'
+import { setCartAttributes, getCustomerProfile } from './shopify.server'
+import { getCustomerToken } from './customer-session.server'
 
 export interface CartAttr { key: string; value: string }
 
@@ -54,6 +55,29 @@ export function attributionCartAttrs(request: Request): CartAttr[] {
 }
 
 /**
+ * The logged-in customer's own email, for account-holder checkouts only
+ * (ticket #9329). Uses the same Customer Account API self-auth session
+ * already used successfully for trackAddedToCart in api.cart.tsx — a
+ * DIFFERENT access grant from the Admin API PII gate that empties
+ * order.email/contact_email/customer.email for every order on this store's
+ * Basic plan (server/webhooks.ts's PII note on handleOrderFulfilled). No new
+ * PII is collected: this relays an email the customer already handed over by
+ * authenticating into their own account. Guest checkouts are unaffected and
+ * stay unattributable, as before. Never throws, same contract as
+ * attributionCartAttrs.
+ */
+export async function customerEmailCartAttr(request: Request): Promise<CartAttr[]> {
+  try {
+    const token = await getCustomerToken(request)
+    if (token?.tokenType !== 'storefront') return []
+    const profile = await getCustomerProfile(token.token).catch(() => null)
+    return profile?.email ? [{ key: '_customer_email', value: profile.email }] : []
+  } catch {
+    return []
+  }
+}
+
+/**
  * Merge attribution (plus any caller-supplied extras, such as a discount tag)
  * onto a cart.
  *
@@ -67,7 +91,7 @@ export async function applyAttributionAttrs(
   extra: CartAttr[] = [],
 ): Promise<void> {
   try {
-    const attrs = [...attributionCartAttrs(request), ...extra]
+    const attrs = [...attributionCartAttrs(request), ...(await customerEmailCartAttr(request)), ...extra]
     if (attrs.length === 0) return
     await setCartAttributes(cartId, attrs)
   } catch (err) {
