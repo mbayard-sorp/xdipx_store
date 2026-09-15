@@ -77,6 +77,18 @@ pointer, not a brief.
    with sourceQuality, the lyrics verdict where a sound is involved, and one concrete way a
    named formula (ten-second-fix, the-one-thing, translate-the-feeling, brand-tentpole) could
    ride it. One `step` event (`phase:'proposals'`) listing what you filed.
+
+   **Routing a trending-sound brief: usable window decides the target team.** A trending sound's
+   window is dated — the trend fades in weeks, not months — while the video lane ships on a
+   multi-week cadence gated by owner script approval. Filing a sub-four-week sound brief at
+   `targetTeam:'video'` bets it against a lane that may not spend it before it expires (three
+   consecutive dated sound briefs expired unspent this way: #6739, #6738, #8048). So: a trending-
+   sound brief whose usable window is under four weeks goes to `targetTeam:'social'` (which
+   publishes to Instagram and X daily and can act on it now), **unless** `video_episodes` holds at
+   least one row at `production_status:'approved'` when you file it, in which case the video lane
+   has a slot that can plausibly spend it before it expires and the brief goes to `targetTeam:'video'`
+   as usual. Durable format-trend briefs (no dated window) are unaffected and keep going to
+   `targetTeam:'video'`.
 5. Retro: one `decision` event covering trends considered and dropped (one line why), plus any
    strike/takedown intelligence worth flagging even without a brief. Log spend, then finish the
    run with an honest summary.
