@@ -159,11 +159,18 @@ const SALE_PATTERNS: {
     check: 'sale-discount',
     re: /\b\d{1,3}\s?%\s*(off|discount)\b|\b(percent off)\b/i,
     detail: 'Caption offers a discount.',
+    // Instagram only (ticket #9405), mirroring sale-pdp-link: ads-policy.md's
+    // Organic-social table bans a discount from the Instagram caption outright,
+    // but carries no such limit for X, where a code/depth/link is the
+    // platform-permitted promo shape (routine-social-daily.md Step 2 item 5).
+    appliesTo: ['instagram'],
   },
   {
     check: 'sale-promo-code',
     re: /\b(promo|coupon|discount)\s*code\b|\bcode\s*[:=]?\s*[A-Z0-9]{4,}\b/,
     detail: 'Caption carries a promo code.',
+    // Instagram only (ticket #9405); see sale-discount above.
+    appliesTo: ['instagram'],
   },
   {
     check: 'sale-cta',

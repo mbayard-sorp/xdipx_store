@@ -378,13 +378,15 @@ describe('isProductSellable', () => {
   })
 })
 
-// ── Platform divergence (X, 2026-08-16) ──────────────────────────────────────
+// ── Platform divergence (X, 2026-08-16; extended ticket #9405) ───────────────
 //
 // The gate serves two platforms with genuinely different rules. These are the
 // cases where treating them the same would break one of them: Instagram removes
 // posts that attempt to sell and has no clickable caption link, while on X the
-// link is the entire point of posting. Getting this backwards either exposes
-// the Instagram account or makes X unable to drive a single click.
+// link is the entire point of posting and a code/depth/link promo is the
+// platform-permitted shape (ads-policy.md, routine-social-daily.md Step 2 item
+// 5). Getting this backwards either exposes the Instagram account or makes X
+// unable to drive a single click or cover an active promo.
 describe('platform divergence', () => {
   const PDP_CAPTION = `a detail worth knowing https://xdipx.com/products/rosales-maya`
 
@@ -413,15 +415,36 @@ describe('platform divergence', () => {
     expect(r.blocked).toBe(false)
   })
 
-  it('still blocks the other sale forms on X', async () => {
-    // Only the PDP-link rule diverges. A price or a promo code is a charter
-    // violation on any platform, and relaxing one rule must not relax the rest.
+  it('still blocks a price on X', async () => {
+    // sale-price is not platform-scoped; only sale-pdp-link, sale-discount, and
+    // sale-promo-code diverge (ticket #9405), and relaxing those must not
+    // relax this one.
     const r = await runChecks({
-      caption: 'just $19.99 today, code SAVE20', mediaUrls: GOOD_MEDIA, platform: 'x',
+      caption: 'just $19.99 today', mediaUrls: GOOD_MEDIA, platform: 'x',
     })
     expect(checks(r)).toContain('sale-price')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('blocks a discount and a promo code on Instagram', async () => {
+    const r = await runChecks({
+      caption: 'take 20% off with code SAVE20', mediaUrls: GOOD_MEDIA, platform: 'instagram',
+    })
+    expect(checks(r)).toContain('sale-discount')
     expect(checks(r)).toContain('sale-promo-code')
     expect(r.blocked).toBe(true)
+  })
+
+  it('allows a discount and a promo code on X (ticket #9405)', async () => {
+    // The LUBE20 promo window produced zero code-carrying X posts because
+    // these two checks fired on X despite X being the platform ads-policy.md
+    // and the daily social routine say permits code/depth/link promo language.
+    const r = await runChecks({
+      caption: 'take 20% off with code LUBE20', mediaUrls: GOOD_MEDIA, platform: 'x',
+    })
+    expect(checks(r)).not.toContain('sale-discount')
+    expect(checks(r)).not.toContain('sale-promo-code')
+    expect(r.blocked).toBe(false)
   })
 
   it('blocks an over-length X post, counting links at t.co width', async () => {
