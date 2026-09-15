@@ -624,6 +624,41 @@ export function isUnattributedSafetyClaim(
   return isMaterialsSafetyClaim(prose)
 }
 
+// ─── Stacked-question guard (ticket #9528) ───────────────────────────────────
+
+/**
+ * Deterministic backstop for HARD RULES line 130 ("Ask exactly ONE question
+ * per turn. Never stack questions.") and the F1 welcome-turn rule (line 142,
+ * "one warm line ... then one question. Nothing more."). The instruction
+ * already lives in the system prompt and still gets violated: sms_turns 1623
+ * (web channel, first turn of a brand-new DISCOVERY conversation) logged
+ * emma_msg = "Something good on your mind? What are you looking for today?",
+ * two question marks in one reply. Wording alone didn't hold, so this counts
+ * "?" in the finished reply and, when it finds more than one, keeps only the
+ * LAST question sentence (the narrowing question the reply was building
+ * toward) and drops the earlier one(s), leaving any non-question
+ * acknowledgement sentence untouched.
+ */
+export function stripStackedQuestions(prose: string): { text: string; caught: boolean } {
+  if (!prose) return { text: prose, caught: false }
+  if ((prose.match(/\?/g) ?? []).length <= 1) return { text: prose, caught: false }
+
+  // Split into sentences, keeping the terminal punctuation attached to each.
+  const sentences = prose.match(/[^.?!]*[.?!]+(?:\s+|$)|[^.?!]+$/g)
+  if (!sentences || sentences.length <= 1) return { text: prose, caught: false }
+
+  const questionIdxs: number[] = []
+  sentences.forEach((s, i) => {
+    if (s.trim().endsWith('?')) questionIdxs.push(i)
+  })
+  if (questionIdxs.length <= 1) return { text: prose, caught: false }
+
+  const lastQuestionIdx = questionIdxs[questionIdxs.length - 1]
+  const kept = sentences.filter((_, i) => !questionIdxs.includes(i) || i === lastQuestionIdx)
+  const out = kept.join('').replace(/[ \t]{2,}/g, ' ').trim()
+  return { text: out || prose, caught: true }
+}
+
 // ─── productCard detection ───────────────────────────────────────────────────
 
 /**
@@ -975,6 +1010,19 @@ export async function executeConversationAgent(
   const guarded = applyFabricationGuard(finalText, realHandles)
   let finalProse = guarded.text || finalText // never ship empty
   let fabricationCaught = guarded.caught
+
+  // ── Stacked-question guard (#9528) ───────────────────────────────────────
+  // The system prompt already says "Ask exactly ONE question per turn" and
+  // still gets violated. Deterministically keep only the last question when
+  // the reply stacked more than one.
+  const deStacked = stripStackedQuestions(finalProse)
+  if (deStacked.caught) {
+    console.warn(
+      `[conversation-agent] stacked questions caught, keeping only the last stage=${stage} channel=${channel}`,
+    )
+    finalProse = deStacked.text
+    fabricationCaught = fabricationCaught ? `${fabricationCaught}|stacked_question` : 'stacked_question'
+  }
 
   // ── Detect pitched product (Task 0.7: tool-result truth first) ──────────
   const allCards: IvrProductCard[] = []
