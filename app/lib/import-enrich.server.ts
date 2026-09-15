@@ -597,6 +597,28 @@ export async function snapshotEnrichFunnel(): Promise<EnrichFunnelSnapshot> {
 }
 
 /**
+ * Candidate IDs behind `snapshotEnrichFunnel`'s `parked` count (ticket #8412).
+ * `routine-enrich-daily.md` Step 6 tells R-ENRICH to "file a suggestion...
+ * naming the parked candidateIds" whenever `parked > 0`, but the queue API had
+ * no way to produce that list -- only the count -- so the routine could only
+ * report a number and point at /admin/imports instead of naming rows. Bounded
+ * by `limit` so a deep backlog can never blow up the response; ordered by
+ * oldest park first, since those are the most overdue for manual review.
+ */
+export async function listParkedEnrichCandidateIds(limit = 50): Promise<number[]> {
+  const rows = await db
+    .select({ id: importCandidates.id })
+    .from(importCandidates)
+    .where(and(
+      eq(importCandidates.status, 'imported'),
+      sql`${importCandidates.enrichFailedAt} IS NOT NULL`,
+    ))
+    .orderBy(asc(importCandidates.enrichFailedAt))
+    .limit(limit)
+  return rows.map(r => r.id)
+}
+
+/**
  * The precise reason a tick submitted no enrichment batch. `idle` and
  * `batch_in_flight` are healthy no-ops (nothing to do, or a batch is
  * legitimately still processing within its SLA); the other three are jams that

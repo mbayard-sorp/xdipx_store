@@ -22,12 +22,14 @@ const claimMock    = vi.fn(async (cap: number, leaseId: string) => ({
 }))
 const completeMock = vi.fn(async () => ({ ok: true, result: 'enriched' }))
 const releaseMock  = vi.fn(async () => ({ ok: false, result: 'requeued', reason: 'subagent generation failed: x' }))
+const parkedIdsMock = vi.fn(async () => [] as number[])
 vi.mock('~/lib/import-enrich.server', () => ({
-  claimEnrichmentForSubagent: (cap: number, leaseId: string) => claimMock(cap, leaseId),
-  completeSubagentEnrichment: () => completeMock(),
-  releaseSubagentClaim:       () => releaseMock(),
-  snapshotEnrichFunnel:       vi.fn(async () => ({ pending: 0, importedUnenriched: 0, inFlight: 0, parked: 0, enriched: 0 })),
-  getEnrichTransport:         vi.fn(async () => (settings.get('import_enrich_transport') === 'subagent' ? 'subagent' : 'batch-api')),
+  claimEnrichmentForSubagent:   (cap: number, leaseId: string) => claimMock(cap, leaseId),
+  completeSubagentEnrichment:   () => completeMock(),
+  releaseSubagentClaim:         () => releaseMock(),
+  snapshotEnrichFunnel:         vi.fn(async () => ({ pending: 0, importedUnenriched: 0, inFlight: 0, parked: 0, enriched: 0 })),
+  listParkedEnrichCandidateIds: () => parkedIdsMock(),
+  getEnrichTransport:           vi.fn(async () => (settings.get('import_enrich_transport') === 'subagent' ? 'subagent' : 'batch-api')),
 }))
 
 import { action, clampClaimCap } from '~/routes/api.team.enrich-queue'
@@ -111,5 +113,12 @@ describe('action gating', () => {
     expect(json.ok).toBe(true)
     expect(json.transport).toBe('batch-api')
     expect(json.enabled).toBe(false)
+  })
+
+  it('status names parked candidateIds (ticket #8412)', async () => {
+    parkedIdsMock.mockResolvedValueOnce([101, 205, 3441])
+    const res = await action({ request: post({ op: 'status' }), params: {}, context: {} } as never)
+    const json = await res.json()
+    expect(json.parkedIds).toEqual([101, 205, 3441])
   })
 })

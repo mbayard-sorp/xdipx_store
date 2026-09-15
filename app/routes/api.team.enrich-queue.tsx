@@ -23,8 +23,11 @@
  *   { op: 'release', candidateId, reason }
  *       -> same shape as complete; for products the routine could not
  *     generate for. Counts an attempt, so the cap holds across transports.
- *   { op: 'status' } -> { ok: true, funnel, transport, enabled }
- *     Read-only funnel snapshot for the routine's run report.
+ *   { op: 'status' } -> { ok: true, funnel, transport, enabled, parkedIds }
+ *     Read-only funnel snapshot for the routine's run report. parkedIds names
+ *     up to 50 candidateIds behind funnel.parked (ticket #8412), oldest park
+ *     first, so a `parked > 0` run can name rows in its Step 6 suggestion
+ *     instead of only reporting a count.
  *
  * Publishing is NOT here: the 30-minute /cron/import-enrich tick keeps
  * flipping enriched drafts live (and recovering expired subagent leases)
@@ -39,6 +42,7 @@ import {
   completeSubagentEnrichment,
   releaseSubagentClaim,
   snapshotEnrichFunnel,
+  listParkedEnrichCandidateIds,
   getEnrichTransport,
 } from '~/lib/import-enrich.server'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
@@ -70,12 +74,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const op = typeof body['op'] === 'string' ? body['op'] : ''
 
   if (op === 'status') {
-    const [funnel, transport, enabledRaw] = await Promise.all([
+    const [funnel, transport, enabledRaw, parkedIds] = await Promise.all([
       snapshotEnrichFunnel(),
       getEnrichTransport(),
       getPipelineSetting('import_enrich_enabled'),
+      listParkedEnrichCandidateIds(),
     ])
-    return Response.json({ ok: true, funnel, transport, enabled: enabledRaw === 'true' })
+    return Response.json({ ok: true, funnel, transport, enabled: enabledRaw === 'true', parkedIds })
   }
 
   // Every mutating op sits behind the same kill switch as the cron tick.
