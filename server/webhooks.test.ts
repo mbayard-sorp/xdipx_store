@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled, referralCodeFromNoteAttributes } from './webhooks'
+import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled, referralCodeFromNoteAttributes, customerEmailFromNoteAttributes } from './webhooks'
 
 vi.mock('../app/lib/reviews.server.js', () => ({
   getReviewSettings: vi.fn(async () => ({ inviteDelayDays: 3 })),
@@ -62,6 +62,30 @@ describe('referralCodeFromNoteAttributes', () => {
   it('returns undefined when there is no referral code (or no attributes)', () => {
     expect(referralCodeFromNoteAttributes([])).toBeUndefined()
     expect(referralCodeFromNoteAttributes(undefined)).toBeUndefined()
+  })
+})
+
+// ticket #9329: for logged-in-account checkouts, api.cart stamps the
+// customer's own email onto the cart (customerEmailCartAttr in
+// attribution-cart.server.ts) as `_customer_email`, the same channel
+// `_ref_code` already crosses the Shopify checkout boundary through.
+describe('customerEmailFromNoteAttributes', () => {
+  it('reads the customer email from the `_customer_email` note attribute the cart writes', () => {
+    expect(customerEmailFromNoteAttributes([{ name: '_customer_email', value: 'cust@example.com' }])).toBe('cust@example.com')
+  })
+
+  it('finds `_customer_email` among the sibling attribution keys', () => {
+    const attrs = [
+      { name: '_fbp', value: 'fb.1.2.3' },
+      { name: '_ref_code', value: 'AFF42' },
+      { name: '_customer_email', value: 'cust@example.com' },
+    ]
+    expect(customerEmailFromNoteAttributes(attrs)).toBe('cust@example.com')
+  })
+
+  it('returns undefined when there is no customer email (or no attributes)', () => {
+    expect(customerEmailFromNoteAttributes([])).toBeUndefined()
+    expect(customerEmailFromNoteAttributes(undefined)).toBeUndefined()
   })
 })
 
@@ -219,6 +243,27 @@ describe('handleOrderFulfilled', () => {
     expect(createInvite).toHaveBeenCalledTimes(1)
     expect(createInvite.mock.calls[0]![0]).toMatchObject({
       reviewerEmail: 'cust@example.com',
+      shopifyProductId: 'gid://shopify/Product/100',
+      shopifyOrderId: '111',
+    })
+  })
+
+  it('falls back to the note_attributes _customer_email when email/contact_email/customer.email are all empty (ticket #9329)', async () => {
+    // The exact case the ticket targets: an account-holder checkout on this
+    // Basic-plan store, where order.email/contact_email/customer.email are
+    // ALL redacted, so the only surviving source is the email the cart
+    // stamped from the customer's own logged-in session.
+    const { createInvite } = await mocks()
+    createInvite.mockClear()
+
+    await handleOrderFulfilled({
+      ...baseOrder,
+      note_attributes: [{ name: '_customer_email', value: 'account-holder@example.com' }],
+    } as Parameters<typeof handleOrderFulfilled>[0])
+
+    expect(createInvite).toHaveBeenCalledTimes(1)
+    expect(createInvite.mock.calls[0]![0]).toMatchObject({
+      reviewerEmail: 'account-holder@example.com',
       shopifyProductId: 'gid://shopify/Product/100',
       shopifyOrderId: '111',
     })
