@@ -1119,15 +1119,18 @@ text and the boxed "on" logotype, same failure mode. For these two, composite-th
 #5493 route a) or reuse of a pre-cleared library asset is the recommended path, not more
 occlusion-angle generation rounds.
 
-**pjur Aqua** (`pjur-water-based-personal-lubricant`, ticket #8416) — a squat pump-cap bottle
-(~4.5in) with a blue accent band. Unlike Pjur Basic's yellow band (which clears reliably with the
-accent-color-band technique above), a blank-label rendering of pjur Aqua's blue band BLOCKed twice
-(run 2026-09-09, rows 211/212): once for showing no wordmark at all (read as a generic
-thermos/travel-mug silhouette) and once for showing the band with a fully blank label (read as an
-unbranded lookalike). The accent-color-band technique alone is not enough here; a brief for this SKU
-needs an explicit target frame (how much of the wordmark/band to show, not just "occlude the label")
-validated against a cleared candidate before the next attempt, or fall back to a pre-cleared library
-asset.
+**pjur Aqua** (`pjur-water-based-personal-lubricant`, ticket #8416, escalated #9357) — a squat
+pump-cap bottle (~4.5in) with a blue accent band. Unlike Pjur Basic's yellow band (which clears
+reliably with the accent-color-band technique above), a blank-label rendering of pjur Aqua's blue
+band kept BLOCKing: two product-identity BLOCKs the day #8416 was filed (run 2026-09-09, rows
+211/212), then 6 more across the following four days (2026-09-11 through 2026-09-13: rows 230, 232,
+233, 234 on product-identity mismatch; rows 237, 244, 245 on the wordmark garbling despite the
+target-frame guidance below), 8+ BLOCKs total against 4 live posted precedents from 2026-09-07 to
+09-10 (rows 204, 206, 208, 209, 217, 220, 226, 227). #8416's target-frame guidance did not resolve
+the failure rate, so per #9357: **treat pjur Aqua as reuse-only**, matching System JO Classic Hybrid
+below — draw only from the 4 already-cleared precedent frames in `social_media_assets` rather than
+generating new attempts, until a working frame is found or a pre-cleared library asset is confirmed
+sufficient on its own.
 
 **System JO Classic Hybrid Silicone Water-Based Personal Lubricant 4oz**
 (`jo-classic-hybrid-lubricant`, ticket #8451) — a distinct failure shape from every SKU above: the
