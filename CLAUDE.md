@@ -219,7 +219,6 @@ db/
 - `product_type_dial` (text) — one of `air-pulsation | vibrator | wand | lube | wear`
 - `sensation_dial` (json) — per-dimension 1–5 ratings
 - `pairing_why` (json) — `{ [accessoryId]: "Emma voice copy" }` for Pairs-with
-- `card_art_blocked` (boolean) — when true, the product's default Shopify image never renders as card art (rails/grids/carousels) site-wide; falls back to `mood_image_url`, else no image. Doctrine safety gate, does not affect the PDP gallery.
 
 ## URL / Canonical Strategy (Day-1 Non-Negotiable)
 
