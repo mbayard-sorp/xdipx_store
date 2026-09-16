@@ -100,10 +100,16 @@ export default function StoreLayout() {
           {announcementBar && <AnnouncementBar block={announcementBar} />}
           <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} emmaPersona={emmaPersona} ageGateLevel={ageGateLevel} />
           <SiteBanner banner={siteBanner} />
-          <main className={`flex-1 ${showMobileShell ? 'pb-20 md:pb-0' : ''}`}>
+          <main className="flex-1">
             <Outlet context={{ buyButtonText }} />
           </main>
-          <Footer socialLinks={socialLinks} footerColumns={footerColumns} brandLinks={footerBrandLinks} categoryLinks={footerCategoryLinks} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} />
+          {/* The mobile safe-area clearance for the fixed MobileExploreMenu tab bar
+              used to live on <main> (pb-20 md:pb-0), which opened an 80px gap of
+              <main>'s background between the last page band and this footer
+              instead of reserving space past the footer's own real last content
+              (design-critic run 905, #9680). It now lives on the footer itself via
+              reserveMobileTabBar, gated by the same showMobileShell condition. */}
+          <Footer socialLinks={socialLinks} footerColumns={footerColumns} brandLinks={footerBrandLinks} categoryLinks={footerCategoryLinks} logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} tagline={footerTagline} discreetHeading={footerDiscreetHeading} discreetBody={footerDiscreetBody} copyright={footerCopyright} disclaimer={footerDisclaimer} reserveMobileTabBar={showMobileShell} />
           {showMobileShell && <MobileExploreMenu menuItems={menuItems} />}
           <AskEmmaWidget />
           <CookieConsent />

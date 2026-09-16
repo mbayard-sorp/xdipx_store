@@ -13,6 +13,20 @@ interface FooterProps {
   discreetBody?: string | null
   copyright?: string | null
   disclaimer?: string | null
+  /**
+   * True on every route except checkout (`_layout.tsx`'s `showMobileShell`),
+   * where the fixed `MobileExploreMenu` tab bar floats over the bottom of the
+   * viewport at every scroll position, including scrolled to the very bottom.
+   * When true, the footer reserves the same 80px of mobile-only bottom
+   * clearance `<main>` used to carry on its own -- which put the reserved
+   * space in the wrong place: an 80px gap of `<main>`'s background opened up
+   * BETWEEN the last homepage band and this footer instead of below it
+   * (design-critic run 905, #9680). Moving the clearance onto the footer's
+   * own padding means the reserved strip is footer background (bg-ink), not
+   * a stray pale gap, and it now actually clears the tab bar past the
+   * footer's real last content instead of past `<main>`'s.
+   */
+  reserveMobileTabBar?: boolean
 }
 
 const currentYear = new Date().getFullYear()
@@ -76,12 +90,16 @@ function QuickLinkRow({ heading, links }: { heading: string; links: QuickLink[] 
   )
 }
 
-export function Footer({ socialLinks = [], footerColumns = [], brandLinks, categoryLinks, logoUrl, logoAlt = 'xdipx', tagline, discreetHeading, discreetBody, copyright, disclaimer }: FooterProps) {
+export function Footer({ socialLinks = [], footerColumns = [], brandLinks, categoryLinks, logoUrl, logoAlt = 'xdipx', tagline, discreetHeading, discreetBody, copyright, disclaimer, reserveMobileTabBar = false }: FooterProps) {
   const brandRow    = brandLinks?.length    ? brandLinks    : FALLBACK_BRAND_LINKS
   const categoryRow = categoryLinks?.length ? categoryLinks : FALLBACK_CATEGORY_LINKS
   return (
-    <footer className="bg-ink text-white/80 pt-12 pb-8 px-4">
-      <div className="max-w-6xl mx-auto">
+    <footer className={`bg-ink text-white/80 pt-12 ${reserveMobileTabBar ? 'pb-20 md:pb-8' : 'pb-8'}`}>
+      {/* Doctrine band container (mx-auto max-w-[1320px] px-6 md:px-16), not the
+          flat px-4 + max-w-6xl this carried before (design-critic run 905,
+          #9680): the footer's left edge matched no other band's, and sat 8px
+          narrower than the doctrine gutter at 375px. */}
+      <div className="mx-auto max-w-[1320px] px-6 md:px-16">
 
         {/* Top: logo + columns */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">

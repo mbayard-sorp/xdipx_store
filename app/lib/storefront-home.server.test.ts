@@ -151,7 +151,7 @@ describe('assembleStorefrontHome — contentBlocks resolution', () => {
     expect(payload.contentBlocks.carouselProductMap).toHaveProperty('rail-1')
   })
 
-  it('asks the Notebook for 6 posts, not 3', async () => {
+  it('asks the Notebook for 8 posts, not 3 (fills the 4-column grid, no dead cells)', async () => {
     vi.mocked(buildHomeContentBlocksLean).mockResolvedValue({
       sections: [], carouselProductMap: {},
     } as unknown as Awaited<ReturnType<typeof buildHomeContentBlocksLean>>)
@@ -159,8 +159,10 @@ describe('assembleStorefrontHome — contentBlocks resolution', () => {
     await assembleStorefrontHome()
 
     // The homepage Notebook shelf is the only path from ~21% of sessions into
-    // the rest of the archive, so it shows six posts plus a see-all link.
-    expect(getBlogPosts).toHaveBeenCalledWith({ perPage: 6 })
+    // the rest of the archive, so it shows a real shelf plus a see-all link.
+    // 8, not 6: NotebookRail renders md:grid-cols-4, and 6 posts left two dead
+    // cells in row 2 (design-critic run 905, #9680).
+    expect(getBlogPosts).toHaveBeenCalledWith({ perPage: 8 })
   })
 
   it('degrades to the empty payload when the team-content upstream rejects', async () => {
