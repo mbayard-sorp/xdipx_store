@@ -125,8 +125,18 @@ The palette lives in `app/app.css` `@theme`. Use the **v3 token names**
 `butter`, `coral-deep`) are legacy and banned in new work. **No gradients. No
 reintroduced orange. No old-cream backgrounds.**
 
+> **Hex values here track `app/app.css`, which is the source of truth.** Coral,
+> sage and `ink-4` were darkened by ticket #3789 (2026-08-19) to clear WCAG AA
+> after an axe sweep found the previous values failing at 3.1:1–3.46:1 as text
+> against every ground they are used on. This section still cited the
+> pre-#3789 values until run 905 (2026-09-16), which meant a critic scoring
+> color against this table would file the *correct* shipped CTA color as a
+> defect. Nothing about the rules changed; only the numbers were out of date.
+> If these ever disagree with the `@theme` block again, `app.css` wins and this
+> table is the bug.
+
 ### The coral budget (hard rule)
-- **Coral (`#FF5A36`) is the primary-action color and it is rationed:** at most
+- **Coral (`#C2350F`) is the primary-action color and it is rationed:** at most
   **one primary coral element per viewport** — normally the primary CTA. A second
   coral accent per full-bleed band is the ceiling, not the target. If two coral
   things fight for attention in one screen, one of them is wrong.
@@ -137,9 +147,9 @@ reintroduced orange. No old-cream backgrounds.**
 - **Plum (`#7A2BB8`) is emphasis, not action:** the `.em` word, the "Discover
   You" guided band, active/pressed CTA (`plum-2`). `plum-soft` (`#F3E8FB`) is a
   full-band tint fill.
-- **Sage (`#7C8F78`)** is the quiet accent: the ♥ motif, tags, metadata, Emma
+- **Sage (`#596756`)** is the quiet accent: the ♥ motif, tags, metadata, Emma
   asides. It never competes with coral.
-- **Ink** (`#1A1418` → `ink-4` `#9A8F97`) is the type ramp and the one dark
+- **Ink** (`#1A1418` → `ink-4` `#726673`) is the type ramp and the one dark
   closer band. Body is `ink-3`; fine print `ink-4`; never body text lighter than
   `ink-3` on paper.
 - **Lines** (`line` / `line-2` / `line-3`) are hairline borders and dividers at

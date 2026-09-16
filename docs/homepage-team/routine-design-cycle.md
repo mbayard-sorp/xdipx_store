@@ -120,10 +120,19 @@ plus the retired-route denylist stand.
 - **Credential-free probes available to cloud routines — check this list before recording a
   deferral.** A build-readiness check that looks like it needs owner/admin credentials sometimes
   already has a credential-free equivalent shipped for cloud routines: `GET
-  /api/team/discovery-vocab` (#5631) serves live per-tag and per-combination product counts without
-  needing Shopify or Sanity session credentials. Deferring a check as "needs credentials this cloud
-  routine lacks" without checking this list first costs a full cycle of delay for no reason (run 520
-  deferred exactly this check, which run 646 then ran credential-free).
+  /api/team/discovery-vocab` (#5631) serves live **per-tag** product counts without needing Shopify
+  or Sanity session credentials. Deferring a check as "needs credentials this cloud routine lacks"
+  without checking this list first costs a full cycle of delay for no reason (run 520 deferred
+  exactly this check, which run 646 then ran credential-free).
+  - **It does NOT serve per-combination counts, whatever an earlier version of this line said
+    (corrected run 905).** `computeVocabCounts()` in `app/lib/discovery.server.ts` tallies each
+    mood/audience/matters tag independently, so one call cannot satisfy the cross-product gate above
+    it. Combinations are measured with the scoring endpoint, credential-free as well: `GET
+    /api/discovery?variant=a&budget=300&matters=<TAG>&mood=<TAG>`, counting items at the maximum
+    score (`SCORE_MOOD` 3 + `SCORE_MATTERS` 2 = 5), the method `concepts/either-or.md` documents and
+    `concepts/nothing-in-the-way.md` used for 30 combinations. Always pass the **storage** tag form
+    (`normalizeTag()`), never a rendered chip label; run 520 shipped two dead poles on display
+    strings.
   - **Homepage singleton diagnosis (`storefrontHome`, `panelDeck`) has no credential-free path yet
     (ticket #8424, run 778).** Findings worth knowing before re-deriving them: (1) the Sanity
     dataset IS publicly readable without a token at
