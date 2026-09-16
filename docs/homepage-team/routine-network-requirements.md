@@ -81,11 +81,15 @@ fallback itself fails.
 |---|---|---|
 | **Direct Postgres / Neon socket** | egress policy blocks the DB port | Read scoreboard / `daily_profit_summary` / settings over the **HTTPS team API**; never open a DB socket. |
 | **GA4 MCP** (`google-analytics`) | not connected in the scheduled runner | Treat as unavailable unless a run confirms it is connected. Per strategy brief, GA4 is unused below 300 sessions/week anyway — run on margin math and say so. |
-| **Claude_Preview design gate** (composed-page screenshot) | MCP not wired into the cloud runner, and headless Chromium cannot reach the live site through the sandbox proxy | The **degraded per-image heuristic doctrine check is the STANDING path**, not a per-run surprise. Note it once and move on. |
+| **Claude_Preview design gate** (composed-page screenshot) | MCP not wired into the cloud runner | **Superseded 2026-09-16 (run 905): the real gate runs in the cloud runner now.** `npx tsx scripts/design-snapshots.ts --base https://xdipx.com --routes / --viewport doctrine` captures 375/768/1440 full-page PNGs for `design-critic` to score. The script carries both sandbox accommodations itself (Node-`fetch` transport for the proxy CA, and a fallback to the pre-installed chromium); do **not** run `playwright install`. The degraded per-image heuristic is now the FALLBACK, used only when that command actually fails, with the failure named in the run summary. |
 | **Shopify Admin creds** | absent in the runner | Skip probes and dep-installs whose only purpose is reaching Admin; use the **Storefront API** metafields (`namespace:"xdipx"`) with `SHOPIFY_STOREFRONT_ACCESS_TOKEN` for margin/handle reads. **Social image generation does NOT need the Admin token in the sandbox** (ticket #4133): `scripts/gen-social-image.ts` POSTs to `POST /api/team/social-image`, which runs generation + the Shopify Files rehost **server-side** where the Admin token already lives. Do not chase `SHOPIFY_ADMIN_ACCESS_TOKEN` into the runner for imagery; route through the server, exactly as the video lane already does. |
 
-**Honest counterweight (not a cost cut):** the design gate genuinely not running
-on any cloud publish is a quality-gate **gap**. The real fix is *connecting*
-Claude_Preview (or a server-side render-to-image endpoint) in the runner — a
-separate owner/eng ask, not permanently skipping it. This section only removes
-the wasted re-probe and documents today's reality.
+**Honest counterweight, and its resolution.** The design gate not running on any
+cloud publish was a quality-gate **gap**, and this section used to say the real
+fix was *connecting* Claude_Preview (or a server-side render-to-image endpoint)
+in the runner, as a separate owner/eng ask. That ask is no longer needed: run
+905 (2026-09-16) made `scripts/design-snapshots.ts` work inside the sandbox, so
+the gate scores real pixels from a cloud routine with no MCP and no owner
+action. What the row above now removes is the wasted re-probe **and** the
+standing excuse. A skipped design gate is a named failure again, not the
+documented default.

@@ -47,11 +47,6 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, type BrowserContext, type Route } from '@playwright/test'
 
-// Node >= 20 only honours HTTPS_PROXY in the global fetch dispatcher when this
-// is set, and it is read when that dispatcher is first built. Set it before any
-// fetch in this process so --via-fetch can reach the origin through the proxy.
-process.env['NODE_USE_ENV_PROXY'] ??= '1'
-
 const argv = process.argv.slice(2)
 function flag(name: string): string | undefined {
   const i = argv.indexOf(`--${name}`)
@@ -84,6 +79,11 @@ export function sanitizeResponseHeaders(headers: Iterable<[string, string]>): Re
  * True when chromium's own network stack cannot be trusted to reach `base`:
  * an HTTPS proxy is in the environment AND the target is not loopback (a local
  * dev server is reached directly and needs no interception).
+ *
+ * Loopback is matched literally, not resolved. A local dev server addressed by
+ * an alias (`http://dev.local:3000`, a compose service name, a LAN IP) on a
+ * machine with an ambient `HTTPS_PROXY` will be intercepted; pass
+ * `--no-via-fetch` there. The default `http://localhost:3000` is unaffected.
  */
 export function shouldUseFetchTransport(
   base: string,
@@ -157,6 +157,13 @@ function routeName(route: string): string {
  * Serve one chromium request from Node's fetch instead of chromium's own
  * network stack. Failures abort the single request rather than the capture:
  * a third-party analytics beacon that will not load must not blank the page.
+ *
+ * One deliberate difference from the chromium-direct path: `redirect: 'follow'`
+ * resolves the whole chain inside Node, so chromium sees a single 200 for the
+ * URL it asked for and `page.url()` keeps reporting the PRE-redirect URL. The
+ * captured pixels are the destination's and are correct, which is all this CLI
+ * promises, but do not use `page.url()` here to discover where a route landed
+ * (the repo still has 301s on `/for-him` and `/for-her`).
  */
 async function fulfilFromNodeFetch(route: Route): Promise<void> {
   const request = route.request()
@@ -213,7 +220,15 @@ async function preparedContext(width: number, height: number): Promise<BrowserCo
       JSON.stringify({ verified: true, timestamp: Date.now(), version: '1.0' }),
     )
   })
-  if (VIA_FETCH) await context.route('**/*', fulfilFromNodeFetch)
+  if (VIA_FETCH) {
+    // Node only honours HTTPS_PROXY in the global fetch dispatcher when this is
+    // set, and it is read when that dispatcher is first built. Setting it here
+    // is still before this process's first fetch (nothing fetches until a page
+    // requests something) and keeps the module free of import-time side
+    // effects, so the test file can import it cleanly.
+    process.env['NODE_USE_ENV_PROXY'] ??= '1'
+    await context.route('**/*', fulfilFromNodeFetch)
+  }
   return context
 }
 
