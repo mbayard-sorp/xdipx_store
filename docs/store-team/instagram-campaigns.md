@@ -540,6 +540,23 @@ meaningless. These rules exist so that cannot happen again:
   the feedback is not a rework. `social-publish-gate` reads the original row's `feedback` and
   REVISEs any rework that leaves a clause of it unmet.
 
+### 3.9a Lube-category default: macro/hands-and-strand, no bottle (ticket #9538)
+
+The Lube, Actually campaign (2026-09-07 through 09-19) published 7 of its last 7 Instagram posts as
+product-free hands-and-glide macro shots (no bottle, no brand, no SKU shown) — not because a rule
+required it, but because every attempt that week to show an actual branded lube bottle drew a
+product-identity or baked-in-text BLOCK (rows 230, 233, 244, 256, 257), while the macro/hands-and-strand
+technique (a thin strand of clear liquid between two fingers, no bottle in frame) PASSed cleanly every
+time it was tried (rows 236, 249, 250, 261, 262). This is a §3.9 subject-not-verb-compliant treatment,
+not an exception to it: the subject (what the product does, felt on skin) is still depicted, just
+without a bottle render that risks a wordmark BLOCK.
+
+**Default rule: for a lube-category Instagram or X post, prefer the macro/hands-and-strand no-bottle
+treatment over a branded bottle render**, especially for any SKU on the wordmark-risk list
+(`routine-social-daily.md` Step 5). Reach for a branded bottle frame only when the post specifically
+needs to establish or reinforce brand/SKU identity (a new-arrival or brand-partner post) and the SKU is
+not on the wordmark-risk list.
+
 ### 3.8 Scene and location variety, and how it is kept honest
 
 Owner direction, verbatim: *"Variety is key here. Put them on a beach, or camping, doing some fun
