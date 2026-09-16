@@ -308,7 +308,7 @@ function Hero({
     <section className="bg-paper">
       {/* Tighter vertical rhythm at 375px so the product still enters the first
           viewport (design-critic finding: the mobile fold was all type). */}
-      <div className="mx-auto grid max-w-[1320px] items-center gap-7 px-6 py-7 md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] md:gap-16 md:px-16 md:py-16">
+      <div className="mx-auto grid max-w-[1320px] items-center gap-7 px-6 py-7 md:px-16 md:py-16 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-16">
         {/* text column — single Reveal group, above the fold */}
         <Reveal variant="up" disabled className="min-w-0">
           <p className="mb-5 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
@@ -316,7 +316,7 @@ function Hero({
           </p>
           {emmaHero?.headline ? (
             <h1
-              className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink md:text-[4.4rem]"
+              className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink lg:text-[4.4rem]"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
             >
               {/* A Sanity-driven headline gets the same one-word plum emphasis as
@@ -326,7 +326,7 @@ function Hero({
             </h1>
           ) : (
             <h1
-              className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink md:text-[4.4rem]"
+              className="text-[2.7rem] leading-[1.04] tracking-[-0.015em] text-ink lg:text-[4.4rem]"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 450 }}
             >
               Pleasure, worth getting <em className="em">right</em>.
@@ -382,7 +382,7 @@ function Hero({
           <p className="mt-5 text-[14px] text-ink-3 md:mt-7" style={BODY}>
             Where do you want to start?
           </p>
-          <div className="-mx-1 mt-3 flex gap-2.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="-mx-1 mt-3 flex gap-2.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden">
             {MOOD_PILLS.map(pill => (
               <Link
                 key={pill.label}
@@ -425,7 +425,7 @@ function Hero({
                   src={lead.imageUrl}
                   alt={lead.imageAlt ?? lead.title}
                   priority
-                  sizes="(max-width: 768px) 100vw, 50vw"
+                  sizes="(max-width: 1024px) 100vw, 50vw"
                   className="h-full w-full object-cover"
                 />
               ) : (
