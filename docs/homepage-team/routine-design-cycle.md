@@ -120,10 +120,19 @@ plus the retired-route denylist stand.
 - **Credential-free probes available to cloud routines — check this list before recording a
   deferral.** A build-readiness check that looks like it needs owner/admin credentials sometimes
   already has a credential-free equivalent shipped for cloud routines: `GET
-  /api/team/discovery-vocab` (#5631) serves live per-tag and per-combination product counts without
-  needing Shopify or Sanity session credentials. Deferring a check as "needs credentials this cloud
-  routine lacks" without checking this list first costs a full cycle of delay for no reason (run 520
-  deferred exactly this check, which run 646 then ran credential-free).
+  /api/team/discovery-vocab` (#5631) serves live **per-tag** product counts without needing Shopify
+  or Sanity session credentials. Deferring a check as "needs credentials this cloud routine lacks"
+  without checking this list first costs a full cycle of delay for no reason (run 520 deferred
+  exactly this check, which run 646 then ran credential-free).
+  - **It does NOT serve per-combination counts, whatever an earlier version of this line said
+    (corrected run 905).** `computeVocabCounts()` in `app/lib/discovery.server.ts` tallies each
+    mood/audience/matters tag independently, so one call cannot satisfy the cross-product gate above
+    it. Combinations are measured with the scoring endpoint, credential-free as well: `GET
+    /api/discovery?variant=a&budget=300&matters=<TAG>&mood=<TAG>`, counting items at the maximum
+    score (`SCORE_MOOD` 3 + `SCORE_MATTERS` 2 = 5), the method `concepts/either-or.md` documents and
+    `concepts/nothing-in-the-way.md` used for 30 combinations. Always pass the **storage** tag form
+    (`normalizeTag()`), never a rendered chip label; run 520 shipped two dead poles on display
+    strings.
   - **Homepage singleton diagnosis (`storefrontHome`, `panelDeck`) has no credential-free path yet
     (ticket #8424, run 778).** Findings worth knowing before re-deriving them: (1) the Sanity
     dataset IS publicly readable without a token at
@@ -203,13 +212,30 @@ from colliding with uncommitted work, they do not remove it.
   375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
   type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
   re-review. Record the verdict + scores as an `/event` row (`agentRole:'design-critic'`).
-  **Working browser-capture recipe for cloud routines (ticket #8421).** Chromium cannot reach
-  `xdipx.com` directly through the agent proxy — `page.goto()` returns `ERR_CONNECTION_RESET` and the
-  proxy logs `ws_closed_mid_exchange`, and neither `--proxy-server` nor `--disable-http2` fixes it.
-  The working path: intercept every request with Playwright's `context.route()` and fulfil it from
-  Node `fetch` under `NODE_USE_ENV_PROXY=1`. Chromium is pre-installed at
-  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; do **not** run `playwright install`. Routine A's Step
-  7.5 post-publish spot-check captures the same way and reads this same recipe.
+  **Capture the screenshots with the repo CLI (ticket #8421, run 905).** One command, and it carries
+  the cloud-routine accommodations itself:
+
+  ```bash
+  npx tsx scripts/design-snapshots.ts --base https://xdipx.com --routes / --viewport doctrine
+  ```
+
+  `--viewport doctrine` is exactly the 375/768/1440 set this gate scores. Do **not** hand-roll the
+  capture and do **not** run `playwright install` — the sandbox forbids it and the script does not
+  need it. Routine A's Step 7.5 post-publish spot-check uses the same command with `--viewport mobile`.
+
+  What the script now handles for you, and why it is worth knowing when it misbehaves: chromium
+  cannot reach `xdipx.com` through the agent proxy (`page.goto()` fails at the TLS handshake with
+  `ERR_CERT_AUTHORITY_INVALID`, and has also presented as `ERR_CONNECTION_RESET`; neither
+  `--proxy-server` nor `--disable-http2` fixes it), so `--via-fetch` intercepts every request with
+  `context.route()` and fulfils it from Node `fetch`, which does trust the proxy CA. It auto-enables
+  only when an HTTPS proxy is present and the base is not loopback, so local runs are unchanged;
+  `--no-via-fetch` opts out. Separately, the image pre-installs one chromium build under
+  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and the pinned Playwright often wants a different build
+  number, so the script falls back to the pre-installed binary after its own resolution fails
+  (`--executable-path` forces it). **This recipe lived in prose here until run 905, and the cost was
+  real:** run 778 re-implemented it by hand and run 899 skipped the gate outright at the turn cap. If
+  you find yourself hand-rolling a capture again, that is a code ticket against this script, not a
+  longer paragraph here.
 - **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
   `docs/emma-voice.md` (the canonical voice charter).
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the

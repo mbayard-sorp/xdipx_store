@@ -882,3 +882,230 @@ this document does not own the doctrine):** doctrine §7 lists Aesop and Arket a
 bench references, and both refused capture this run for the first time. If they
 refuse again next cycle they should be annotated as prior-knowledge-only
 entries so no future teardown implies a fetch it cannot make.
+
+---
+
+## Delta — 2026-09-16 (Routine B design cycle, run 905)
+
+**Captures (real, this run):** `www.honeyplaybox.com`, `www.dame.com` and
+`www.tootimid.com`. Those three are the only sites reported below. Honey Play
+Box is the host not captured in either of the last two cycles (its only prior
+appearance is the original July 2026 baseline), which is why it was chosen.
+
+Capture provenance, stated per host because the two tools disagreed again this
+run:
+
+- **`www.honeyplaybox.com` — WebFetch 200 AND raw `curl -L` 200 (803,947
+  bytes).** Every string quoted below was re-verified by `grep` against the raw
+  HTML, not against the WebFetch summary. Highest-confidence capture of the run.
+- **`www.tootimid.com` — WebFetch 200 AND raw `curl -L` 200 (702,872 bytes).**
+  Same treatment: the discretion sentence and the four first-person tiles were
+  verified against raw bytes.
+- **`www.dame.com` — WebFetch 200 only. Raw `curl -L` returned HTTP 429**
+  (rate limit at the edge, landing on `https://dame.com/`), so nothing from Dame
+  was verified against raw bytes. Dame strings below are WebFetch extraction
+  only and are marked as such where they carry weight. One oddity recorded
+  rather than smoothed over: the extraction reported a "It's Black Friday. Add
+  products to your cart to reveal up to 60% off." banner on a September page.
+  It is reported as captured-but-unverified and nothing in this delta is built
+  on it.
+
+**Refusals, recorded as results:**
+
+| Host | Result this run | History |
+|---|---|---|
+| `www.aesop.com` | HTTP **403** (WebFetch) | 403 on 2026-09-09. Third bench cycle unreachable. |
+| `www.arket.com` | HTTP **403** (WebFetch *and* `curl`) | 403 on 2026-09-09. Second consecutive. |
+| `www.lovehoney.com` | HTTP **403** (WebFetch *and* `curl`) | 403 on 2026-09-02 and 2026-09-09. Third consecutive. |
+| `maude.com` | HTTP **301 → `https://brandportal.godaddysites.com/`**, not followed | Parked-domain redirect, same mode as 2026-08-26; a *different* mode from 2026-09-09's curl-35 reset. |
+| `vush.com` | `curl` exit **56** (recv failure / reset), HTTP 000 | ETIMEOUT 2026-09-02, CONNECT 502 2026-09-09. Third consecutive. |
+
+Nothing is reported for Aesop, Arket, Lovehoney, Maude or Vush beyond the
+refusal itself, and no competitor copy is quoted from memory anywhere in this
+delta. The standing 16-capture baseline is unchanged.
+
+**Bench-maintenance note, now escalated.** The 2026-09-09 delta flagged that
+Aesop and Arket had refused for the first time. Both refused again, and
+Lovehoney has now refused three cycles running. Per that note's own trigger
+condition, doctrine §7's Aesop, Arket and Lovehoney rows should be annotated as
+**prior-knowledge-only** bench entries so no future teardown implies a fetch it
+cannot make. This document does not own the doctrine; that annotation is an
+agent-editor pass, filed as a suggestion rather than actioned here.
+
+**The lens this run:** how the field handles the **customer's worry** — noise,
+storage, first-time nerves, cleanup, battery death, travel, body reaction. The
+occasion is this cycle's ambition concept (`concepts/nothing-in-the-way.md`),
+which proposes entering the catalogue *through* a worry. Before wiring that, the
+teardown had to answer whether anyone already does it.
+
+### The finding: the field answers worry with a BADGE. Nobody makes worry a DOOR.
+
+Across all three captures, every worry answer is a passive reassurance surface.
+Not one of them is clickable into product, and not one of them changes what the
+page shows you.
+
+- **Honey Play Box — six trust badges, zero of them navigational.** Verified in
+  the raw HTML as `htb-item-title` spans, in page order: "Secure Checkout",
+  "Discreet Shipping", "Premium Materials", "Earn Points", "7 Days Satisfaction
+  Guarantee", "Worry-Free Purchase". Each is an icon plus a two-or-three-word
+  label. The closing act the doctrine §7 bench credits this site for is
+  confirmed live and is, in H2 order: "Reviews" → "Industry Awards" → "As Seen
+  On", with the badge strip after it. Awards verified as `haw-item-title`: "Top
+  Brand of the Year 2024", "Sex Toy of the Year 2024", "Best Male product Line
+  2023", "Best Erotic Women's Brand of 2022". Its only guidance moment is a
+  third-party quiz: H2 "SEX TOY QUIZ", body "Complete our 2-minute quiz to
+  discover your perfect match! Our small appreciation will be revealed at the
+  end.", CTA "Take The Quiz" — served by `quiz-loader.min.js` from
+  `pc-quiz.s3.us-east-2.amazonaws.com` against `api.quizkitapp.com`, i.e. the
+  finder is rented, not built. "Worry-Free Purchase" is likewise rented: the raw
+  HTML shows a Seel widget (`static.seel.com/shopify/worry-free-purchase/...`),
+  so the most reassuring-sounding badge on the page is a purchased insurance
+  product wearing trust chrome.
+- **TooTimid — the field's only first-person door voice, and it is spent
+  entirely on appetite.** Four featured tiles, verified in raw HTML: "I want
+  quick, easy clit O's. Shop our fast orgasm toys.", "I want to stay rock hard
+  Shop all of our cock rings", "I want to last longer Shop our stamina
+  trainers", "I want smooth anal sex Shop our anal training kits". Every one is
+  a want. Not one is a constraint. Its worry copy sits elsewhere and stays
+  static: section heading "100% Discreet Shipping" over the mechanical sentence
+  "All orders arrive in plain packaging, and the shipping label doesn't say what
+  company it's from. We deliver self-pleasure to your doorstep quickly and
+  discreetly!", plus a separate "Satisfaction Guaranteed" heading. The absence
+  is measurable rather than inferred: across 702,872 bytes of homepage, "easy to
+  clean" occurs **0** times and "quiet" occurs **1** time, neither as a door.
+- **Dame — worry answered by authority, repeated as a strip** (WebFetch
+  extraction, unverified against raw bytes). Badge strip under the hero:
+  "Medical-Grade Silicone", "Waterproof Charging Port", "60 Day Satisfaction
+  Guarantee", "10,000+ 5 Star Reviews"; a second recurring strip of "Discreet
+  Shipping", "3 year warranty", "User-tested + doctor-approved"; and a
+  "User-Tested, Doctor Approved" medical-board section with four named doctors.
+  Its in-page door layer is unchanged from the 2026-09-09 capture: the 2-up
+  "Sexual Health" / "Intimate Essentials", with the guidance moment "Not sure
+  which toy is right for you? Find Your Vibe" → "Take Our Quiz" directly under
+  it.
+
+**The cross-site rule this produces:** in this field a worry is treated as
+something to be *soothed once, near the footer*, never as something to be
+*acted on*. The visitor who arrives thinking "I share a wall" has no way to say
+so. The badge tells them the store is trustworthy; it does not tell them which
+three products solve their actual problem. Honey Play Box's whole closing act
+and Dame's doctor board are proof that the field spends real money on the
+soothing and none of it on the navigating.
+
+**Applied to our page.** We are currently no better: our worry vocabulary exists
+and is completely unexposed. The live discovery index carries 5,120 products
+with worry-shaped `matters` tags at real volume (`Discreet` 1,011,
+`Beginner-Friendly` 1,609, `Easy To Clean` 2,148, `Rechargeable` 1,070,
+`Travel-Ready` 641, `Whisper-Quiet` 100 — measured this run via
+`GET /api/team/discovery-vocab`), and the only place a visitor can touch any of
+it is a chip group buried inside `/discover`. On the homepage the entire
+dimension is invisible. The one `matters`-based deep link that exists,
+`?preset=hands-free` in `app/lib/discovery-presets.ts`, points at an appetite,
+not a worry.
+
+### Adopted
+
+1. **Worry becomes a door. That is this cycle's ambition concept** and it is
+   wired to a measured matrix rather than a hunch:
+   `docs/homepage-team/concepts/nothing-in-the-way.md`. One tap on the thing
+   that would stop you, an optional second tap on one thing that is a yes, and
+   the shelf rebuilds from real `/products/{handle}` cards. All 24 v1
+   combinations were measured against the `>=2` floor this run and all pass.
+2. **TooTimid's first-person register, adopted for the labels only.** "I want to
+   last longer" is the one piece of door voice in the entire capture set that
+   sounds like a person instead of a taxonomy. We take the grammatical person
+   and spend it on the constraint side, which nobody occupies: the chip says
+   what the visitor is afraid of, in their words. Register adopted; TooTimid's
+   explicitness, discount stacking and SEO shape are rejected below, and every
+   final string still goes to `emma-copywriter` under `emma-empathy-reviewer`.
+3. **The mechanical sentence travels with the result, not just the trust strip.**
+   TooTimid's discretion sentence works because it names the box and the label
+   rather than showing a badge, which is already doctrine §6. The new move: when
+   a worry door resolves, the shelf arrives carrying one mechanics sentence
+   answering *that* worry, sourced from real product data. A badge repeated six
+   times (Honey Play Box) reassures nobody twice; a sentence attached to three
+   real products answers the question that was actually asked.
+4. **Honey Play Box's closing-act ordering is re-confirmed live**, not on
+   memory: Reviews → Industry Awards → As Seen On → trust badges. Backlog item
+   17 ("Closing proof act") keeps its sequencing, with our standing amendment
+   that we render only the slots we can fill honestly.
+5. **Dame's twice-placed guarantee is live evidence for backlog items 5 and 9.**
+   "60 Day Satisfaction Guarantee" appears in the hero badge strip and the
+   guarantee/warranty language repeats lower down. That is the trust-at-the-top
+   plus trust-at-the-button pattern the doctrine already mandates; this capture
+   is the field evidence for it. (WebFetch-only, so it supports a decision we
+   had already taken rather than originating one.)
+
+### Rejected, with reasons, so they are not re-proposed
+
+- **A rented finder (Honey Play Box's `quizkitapp` embed).** Third-party JS that
+  owns the visitor's answers, ships its own DOM after hydration, and cannot obey
+  our SSR-visible / zero-CLS / `loader → useLoaderData` discipline. Every finder
+  we build stays first-party. The speed of renting is real and it is not worth
+  the CLS, the data, or the Oxygen seam.
+- **Awards and press slots (Honey Play Box "Industry Awards" / "As Seen On";
+  TooTimid "As Seen In").** We have none. Doctrine §6: never fabricate proof.
+  The slot stays built-empty (backlog item 20) until an offsite placement is
+  genuinely earned.
+- **A purchased "Worry-Free Purchase" badge (Honey Play Box's Seel widget).**
+  Buying a third-party insurance product and rendering it as a trust mark is the
+  cheapest possible version of the named guarantee, and it is worse than nothing
+  because the promise belongs to a vendor. Ours is a proper noun we honour
+  ourselves, owner-approved on name and terms before first publish.
+- **Dame's medical/doctor board.** Authority we cannot honestly claim. Rejected
+  permanently, not deferred.
+- **Reviews proof printed in the hero (Dame's "10,000+ 5 Star Reviews").**
+  Standing refusal until real data clears the threshold (backlog item 8).
+- **Discount doors and free-gift hooks (TooTimid's "Pick FREE Sex Toy", "Up to
+  80% off", "50% OFF All Orders w/ code: Love50"; Honey Play Box's "Unlock the
+  Mystery Box | 3 Premium Toys, Only $99").** Urgency theatre and code-gating,
+  charter-banned twice over. No change.
+- **Body-safety as a worry door.** The single most emotionally important worry
+  in the category, and it **fails the build-readiness gate on measurement**:
+  `Body-Safe-Silicone` carries 11 products in a 5,120 index and returns 0, 0, 1,
+  0 full matches against the four proposed mood poles. Rejected for v1 and
+  logged loudly so a future cycle re-opens it only after the metafield is
+  backfilled, never on intuition. `Latex-Free` (2,492) survives but answers a
+  narrower question than the one people are actually asking.
+- **Adding a "worry" chip group to the Compass instead of a homepage band.**
+  `/discover` already has a `matters` group. Renaming it is not a new experience
+  (mission brief §9) and it buries the idea behind a link we are capped at two
+  of.
+- **A dedicated worry route (`/quiet`, `/discreet`, `/first-time`).** Tempting,
+  and it hits the IA fence: a new URL goes to `tech-architect`, and the
+  canonical / SEO story is unfunded. Named as a deliberate deferral rather than
+  discarded.
+- **A "See all" on the worry shelf.** No collection exists that contains the set
+  "quiet AND playful", and ticket #4270 is explicit that a module with no
+  honest destination ships **no** See-all rather than falling back to
+  `/collections/best-sellers`. v1 ships no See-all. If IA later rules that the
+  one permitted `/discover` preset pill can be spent here, that is IA's call and
+  not this document's.
+
+### The one thing we will do this week that none of them do
+
+Let a visitor **navigate by what is stopping them**. Honey Play Box, Dame and
+TooTimid between them run eleven separate worry-reassurance surfaces across
+three homepages, and every single one is inert. We will make the worry the
+control: the thing you are afraid of becomes the thing you tap, and the page
+answers by changing what it shows you instead of by promising harder.
+
+### IA fence check
+
+The adopted items split cleanly. Items 2-5 are content-level inside the locked
+Nº 01-Nº 11 shell: label register, a mechanics sentence attached to existing
+fields, and re-confirmation of backlog sequencing already agreed. **Item 1 is
+not** — the worry shelf is a **new section type** and therefore requires a named
+spec through `homepage-ia` review plus an additive-only Sanity block in a new
+file before any build, exactly as the fence requires. It is filed as a concept
+wire this cycle, not as a build. It adds **no** new URL (every output is
+`/products/{handle}`; the tap re-queries the existing `/api/discovery` resource
+route), adds **no** `/discover` link so the two-link cap is untouched, and does
+not go near the retired-route denylist. The one idea that did imply a new route
+was rejected above and routed to `tech-architect` if it is ever revived. No
+Sanity schema is modified. Copy lands with `emma-copywriter` under
+`emma-empathy-reviewer`; any build lands with `rr7-engineer`.
+
+With GA4 below the 300-sessions/week weighting threshold, this cycle banks the
+above as design capital: a wire and a measured matrix, no code, no generated
+imagery, no build spend.
