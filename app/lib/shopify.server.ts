@@ -219,6 +219,7 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "quiet_endorsement_copy" }
     { namespace: "xdipx", key: "pair_bundle_copy" }
     { namespace: "xdipx", key: "endorsement_copy" }
+    { namespace: "xdipx", key: "card_art_blocked" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -307,6 +308,8 @@ const CARD_METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "audience_tags" }
     { namespace: "xdipx", key: "matters_tags" }
     { namespace: "xdipx", key: "hero_video" }
+    { namespace: "xdipx", key: "card_art_blocked" }
+    { namespace: "xdipx", key: "mood_image_url" }
   ]) {
     namespace key value
   }
@@ -392,7 +395,7 @@ export function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     seoTitle: node.title,
     dealPrice,
     msrp: parseFloat(parseMetafield(mf, 'original_price') || (variant?.compareAtPrice?.amount ?? '0')),
-    images: parseImages(node.images.edges),
+    images: gateCardImages(parseImages(node.images.edges), mf),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
     qty: variant?.quantityAvailable ?? 0,
@@ -481,6 +484,30 @@ function parseSpecificationsBullets(raw: string): string[] {
 
 function parseImages(edges: { node: { url: string; altText: string | null } }[]): ProductImage[] {
   return edges.map(e => ({ url: e.node.url, altText: e.node.altText ?? '' }))
+}
+
+/**
+ * Card-art doctrine gate (ticket #9675, design-critic run 905 P1: supplier
+ * packshots rendering as rail/grid card art breached design-doctrine.md
+ * §4.3's on-site imagery ceiling -- nipples visible through a sheer harness
+ * on one SKU, a depicted bondage scene on another, neither reviewable by a
+ * human before a merchandising run picks the SKU). Card art is the only
+ * on-site surface where a product's default Shopify image goes live with no
+ * review step, so the gate lives at this single conversion point rather
+ * than in every rail/grid/carousel component -- once xdipx.card_art_blocked
+ * is set, the flagged packshot can never resurface as card art from any
+ * caller, regardless of which rail or grid picks the SKU next. Falls back
+ * to the reviewed mood image when one exists; otherwise the card carries no
+ * image (ProductCard's existing placeholder), never the flagged photo. Does
+ * not touch the PDP gallery -- that surface is out of this ticket's scope.
+ */
+function gateCardImages(
+  images: ProductImage[],
+  mf: ({ namespace: string; key: string; value: string } | null)[],
+): ProductImage[] {
+  if (parseMetafield(mf, 'card_art_blocked') !== 'true') return images
+  const moodImageUrl = parseMetafield(mf, 'mood_image_url')
+  return moodImageUrl ? [{ url: moodImageUrl, altText: '' }] : []
 }
 
 // ─── Sensation dial v1 → v2 projection ────────────────────────────────────
@@ -690,7 +717,7 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     id: node.id,
     handle: node.handle,
     title: node.title,
-    images: parseImages(node.images.edges),
+    images: gateCardImages(parseImages(node.images.edges), mf),
     videos: parseVideos(node.media),
     variants: node.variants.edges.map(e => ({
       id: e.node.id,
