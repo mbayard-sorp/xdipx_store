@@ -189,7 +189,6 @@ export function createCronRoutes() {
           statusCode: res.statusCode,
           payload,
         })
-        const failed = status === 'failed'
 
         await recordCronRun({
           route,
@@ -200,10 +199,25 @@ export function createCronRoutes() {
           result: payload,
           triggerKind,
         })
-        // Heartbeat on any non-failed completion, recorded routes included: a
-        // recorded route whose INSERT failed still beat, so a database blip
-        // degrades the record's resolution instead of reading as a dead cron.
-        if (!failed) await heartbeatCron(route, startedAt)
+        // Heartbeat on every completed invocation, failed ones included.
+        //
+        // This used to gate on `!failed`, which is right for a *recorded*
+        // route (its `cron_runs` row already carries the failure, so the
+        // heartbeat only needs to cover a database blip) but wrong for an
+        // *unrecorded* one, where the heartbeat is the only liveness tier
+        // that exists at all. `readCronLiveness()`'s own contract is "has
+        // this surface shown evidence of life", not "did it succeed" — a
+        // route that ran to completion and deliberately answered non-2xx to
+        // report a real finding (ticket #9699: notebook-healthcheck and
+        // seo-daily are both report-only checks that 503 on a genuine content
+        // problem, with their own Sentry/ticket alerting already covering
+        // that) is alive, not dark. Gating the heartbeat on success made an
+        // unrecorded route's OWN correct detection of a problem the reason
+        // its liveness signal went stale, so the janitor sweep reported two
+        // healthy, firing crons as silent for over a day. A route that is
+        // truly killed (SIGKILL at maxDuration) never reaches this line
+        // regardless, so that failure mode stays correctly invisible.
+        await heartbeatCron(route, startedAt)
       } catch (bookkeepingErr) {
         console.warn(`[cron:${path}] recording failed (ignored):`, bookkeepingErr)
       }

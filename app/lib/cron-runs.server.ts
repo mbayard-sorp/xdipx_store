@@ -358,6 +358,18 @@ export async function readCronLiveness(now = new Date()): Promise<CronLiveness[]
       ? Math.max(0, Math.round((now.getTime() - lastSeenAt.getTime()) / 60_000))
       : null
 
+    // A valve-gated route (keyword-research today) is dispatched on schedule
+    // and correctly no-ops while its valve is off; silence there is the valve
+    // doing its job, not the surface going dark, so it is never breached on
+    // age while the valve reads off. A settings read failure is treated as
+    // "on" (fail open into the ordinary floor) rather than silently exempting
+    // the route from ever breaching.
+    let valveOff = false
+    if (e.valveGate) {
+      const value = await getPipelineSetting(e.valveGate)
+      valveOff = value !== 'true'
+    }
+
     out.push({
       route: e.route,
       plane: e.plane,
@@ -368,7 +380,7 @@ export async function readCronLiveness(now = new Date()): Promise<CronLiveness[]
       lastSeenAt,
       source,
       ageMinutes,
-      breached: e.demandDriven
+      breached: e.demandDriven || valveOff
         ? false
         : ageMinutes === null || ageMinutes > e.periodMinutes + e.graceMinutes,
       demandDriven: e.demandDriven,
@@ -450,6 +462,10 @@ interface LoadedExpectation {
   /** Merged from the code manifest, never from the row: whether a route has a
    *  scheduler at all is a structural fact about the code, not a tunable. */
   demandDriven: boolean
+  /** Merged from the code manifest, same reasoning as `demandDriven`: the
+   *  `cron_expectations` table has no column for it, and which valve (if
+   *  any) gates a route is a code fact, not sweep-tunable data. */
+  valveGate: string | undefined
 }
 
 /**
@@ -472,7 +488,13 @@ async function loadExpectations(): Promise<LoadedExpectation[]> {
         ownerTeam: cronExpectations.ownerTeam,
       })
       .from(cronExpectations)
-    if (rows.length > 0) return rows.map((r) => ({ ...r, demandDriven: isDemandDriven(r.route) }))
+    if (rows.length > 0) {
+      return rows.map((r) => ({
+        ...r,
+        demandDriven: isDemandDriven(r.route),
+        valveGate: valveGateFor(r.route),
+      }))
+    }
   } catch (err) {
     console.warn(`${LOG} expectation read failed, using the code manifest`, err)
   }
@@ -485,12 +507,18 @@ async function loadExpectations(): Promise<LoadedExpectation[]> {
     moneyRelevant: e.moneyRelevant,
     ownerTeam: e.ownerTeam,
     demandDriven: e.demandDriven === true,
+    valveGate: e.valveGate,
   }))
 }
 
 /** Whether the code manifest marks this route as having no scheduler. */
 function isDemandDriven(route: string): boolean {
   return CRON_EXPECTATIONS.some((e) => e.route === route && e.demandDriven === true)
+}
+
+/** The `pipeline_settings` key (if any) that gates this route's real work. */
+function valveGateFor(route: string): string | undefined {
+  return CRON_EXPECTATIONS.find((e) => e.route === route)?.valveGate
 }
 
 interface LatestRun {
