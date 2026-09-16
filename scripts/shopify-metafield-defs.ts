@@ -190,13 +190,6 @@ const DEFS: MetafieldDef[] = [
     description: 'JSON { eyebrow, subhead, headline, body, bannerLine, pairedHandle, generatedAt } — Haiku-generated Emma copy for the alt "pair bundle" homepage template. Tied to a specific partner product by pairedHandle.',
     type:        'json',
   },
-  // Card-art doctrine gate (ticket #9675, design-critic run 905 P1)
-  {
-    key:         'card_art_blocked',
-    name:        'Card art blocked',
-    description: 'When true, this product\'s default (supplier) image is never rendered as card art on rails, grids, or carousels site-wide -- falls back to mood_image_url when set, else no image. Set by hand after a design-critic or manual finding that the packshot breaches design-doctrine.md §4.3\'s on-site imagery ceiling. Does not affect the PDP gallery.',
-    type:        'boolean',
-  },
 ]
 
 const STORE = process.env['SHOPIFY_STORE_DOMAIN']
