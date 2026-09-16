@@ -1132,6 +1132,15 @@ below — draw only from the 4 already-cleared precedent frames in `social_media
 generating new attempts, until a working frame is found or a pre-cleared library asset is confirmed
 sufficient on its own.
 
+**Swiss Navy** (ticket #9538) — two different SKUs BLOCKed on baked-in-text the same day (2026-09-15,
+run 895 morning half): **Swiss Navy Silicone Lubricant 4oz**
+(`swiss-navy-silicone-lubricant-4-oz`, row 256, IG: legible "SWISS NA[VY]" glyphs on the navy block)
+and **Swiss Navy Water-Based Toy Lubricant 2oz** (`swiss-navy-water-based-toy-lubricant-2-oz`, row
+257, X: mirrored/reversed "SWISS NAVY" text plus a color/cap mismatch against the real packshot).
+Same failure shape as Wicked Simply Hybrid and Botanical ON above: printed wordmark text does not
+stay unrendered across cast-composite attempts. Prefer the macro/hands-and-strand no-bottle
+treatment (`instagram-campaigns.md` §3.9a) over more occlusion-angle rounds for this brand.
+
 **System JO Classic Hybrid Silicone Water-Based Personal Lubricant 4oz**
 (`jo-classic-hybrid-lubricant`, ticket #8451) — a distinct failure shape from every SKU above: the
 label carries a two-tier wordmark (a cyan-blue panel with a clean, legible "JO" wordmark) stacked
