@@ -91,10 +91,10 @@ const INK_TOKENS: Token[] = [
   { name: 'ink', value: '#1A1418', use: 'Primary text, dark closer band', className: 'bg-ink', dark: true },
   { name: 'ink-2', value: '#3D2F3A', use: 'Secondary dark surface', className: 'bg-ink-2', dark: true },
   { name: 'ink-3', value: '#6B5F68', use: 'Body text, metadata', className: 'bg-ink-3', dark: true },
-  { name: 'ink-4', value: '#9A8F97', use: 'Fine print, numerals', className: 'bg-ink-4', dark: true },
+  { name: 'ink-4', value: '#726673', use: 'Fine print, numerals', className: 'bg-ink-4', dark: true },
 ]
 const CORAL_TOKENS: Token[] = [
-  { name: 'coral', value: '#FF5A36', use: 'Primary CTA, hero accent (rationed: 1/viewport)', className: 'bg-coral', dark: true },
+  { name: 'coral', value: '#C2350F', use: 'Primary CTA, hero accent (rationed: 1/viewport)', className: 'bg-coral', dark: true },
   { name: 'coral-2', value: '#FF7A5A', use: 'Hover / secondary coral', className: 'bg-coral-2', dark: true },
   { name: 'coral-soft', value: '#FFE6DD', use: 'Full-band tint fill (not a text color)', className: 'bg-coral-soft', border: true },
 ]
@@ -104,7 +104,7 @@ const PLUM_TOKENS: Token[] = [
   { name: 'plum-soft', value: '#F3E8FB', use: 'Full-band tint fill', className: 'bg-plum-soft', border: true },
 ]
 const ACCENT_TOKENS: Token[] = [
-  { name: 'sage', value: '#7C8F78', use: 'Quiet accent: ♥ motif, tags, Emma asides', className: 'bg-sage', dark: true },
+  { name: 'sage', value: '#596756', use: 'Quiet accent: ♥ motif, tags, Emma asides', className: 'bg-sage', dark: true },
   { name: 'line', value: 'ink 8%', use: 'Hairline borders, dividers', className: 'bg-line', border: true },
   { name: 'line-2', value: 'ink 16%', use: 'Stronger dividers', className: 'bg-line-2', border: true },
   { name: 'line-3', value: 'ink 32%', use: 'Strongest dividers', className: 'bg-line-3', border: true },
