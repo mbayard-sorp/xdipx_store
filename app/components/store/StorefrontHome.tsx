@@ -989,7 +989,11 @@ function Rail({
   if (!rail.items.length) return null
   return (
     <Reveal variant="fade" className="py-2">
-      <div className="mb-3 px-6 md:px-16">
+      {/* mx-auto max-w-[1320px]: matches the doctrine band container every
+          other section on the page uses (design-critic run 905, #9680) --
+          without it this rail's left edge drifted ~20px right of every
+          other band at 1440px. */}
+      <div className="mx-auto mb-3 max-w-[1320px] px-6 md:px-16">
         <SectionNumeral n="06" className="mb-3 block" />
         <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
           {eyebrow}
@@ -998,7 +1002,7 @@ function Rail({
           {heading} <em className="em">{emphasis}</em>
         </h2>
       </div>
-      <div className="flex snap-x gap-[18px] overflow-x-auto px-6 pb-3.5 [scrollbar-width:none] md:px-16 [&::-webkit-scrollbar]:hidden">
+      <div className="mx-auto flex max-w-[1320px] snap-x gap-[18px] overflow-x-auto px-6 pb-3.5 [scrollbar-width:none] md:px-16 [&::-webkit-scrollbar]:hidden">
         {rail.items.slice(0, 10).map((it, i) => (
           <div key={it.product.id} className="w-[220px] shrink-0 snap-start">
             <StorefrontProductCard
@@ -1010,7 +1014,7 @@ function Rail({
         ))}
       </div>
       {aside && (
-        <p className="px-6 pt-3 text-[1.05rem] italic text-sage md:px-16" style={DISPLAY}>
+        <p className="mx-auto max-w-[1320px] px-6 pt-3 text-[1.05rem] italic text-sage md:px-16" style={DISPLAY}>
           ♥ {aside}
         </p>
       )}
@@ -1143,12 +1147,12 @@ function Couples({
         </div>
         {rail && rail.items.length > 0 && (
           <Reveal variant="fade" className="mt-8">
-            <div className="mb-3 px-6 md:px-16">
+            <div className="mx-auto mb-3 max-w-[1320px] px-6 md:px-16">
               <p className="text-[1.05rem] italic text-sage" style={DISPLAY}>
                 ♥ A few more, chosen for sharing.
               </p>
             </div>
-            <div className="flex snap-x gap-[18px] overflow-x-auto px-6 pb-3.5 [scrollbar-width:none] md:px-16 [&::-webkit-scrollbar]:hidden">
+            <div className="mx-auto flex max-w-[1320px] snap-x gap-[18px] overflow-x-auto px-6 pb-3.5 [scrollbar-width:none] md:px-16 [&::-webkit-scrollbar]:hidden">
               {rail.items.slice(0, 10).map((it, i) => (
                 <div key={it.product.id} className="w-[220px] shrink-0 snap-start">
                   <StorefrontProductCard

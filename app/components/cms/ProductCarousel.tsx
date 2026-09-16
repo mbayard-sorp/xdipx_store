@@ -62,6 +62,13 @@ export function ProductCarousel({
 
   if (!products.length) return null
 
+  // The carousel layout renders its own circular scroll-arrow buttons right
+  // before the See-all link (design-critic run 905): a ctaLabel carrying its
+  // own trailing arrow glyph then abuts the → scroll button, reading as a
+  // doubled arrow. Grid layouts render no scroll buttons, so their CTA keeps
+  // whatever arrow the label carries.
+  const displayCtaLabel = layout === 'carousel' ? ctaLabel.replace(/\s*→\s*$/, '') : ctaLabel
+
   const bgClass = BG_CLASSES[bgStyle] ?? 'bg-white'
   const dark = isDark(bgStyle)
   const storefront = chrome === 'storefront'
@@ -84,9 +91,15 @@ export function ProductCarousel({
     // not the legacy py-12 (ticket #8418: three published emmaCuratedRail
     // blocks on the storefront home all measured at 48px, off the 64/80
     // scale). Legacy chrome (ForHim/ForHer, the deferred daily-deal home)
-    // is untouched.
-    <section className={`${storefront ? 'py-16 md:py-20' : 'py-12'} px-4 ${bgClass}`}>
-      <div className="max-w-6xl mx-auto">
+    // is untouched. Storefront chrome also takes the doctrine band container
+    // (mx-auto max-w-[1320px] px-6 md:px-16) instead of the flat px-4 +
+    // max-w-6xl legacy carries (design-critic run 905, #9680): at 1440px
+    // that left every emmaCuratedRail block's content ~20px further right
+    // than every other band on the page, and 8px narrower than the doctrine
+    // gutter at 375px. Legacy chrome is untouched -- it isn't part of the
+    // storefront doctrine surface this finding audited.
+    <section className={`${storefront ? 'py-16 md:py-20' : 'py-12 px-4'} ${bgClass}`}>
+      <div className={storefront ? 'mx-auto max-w-[1320px] px-6 md:px-16' : 'max-w-6xl mx-auto'}>
         {/* Header — flex-wrap + gap so the CTA drops onto its own row instead of
             colliding with the heading at narrow widths (390px / the 375px floor);
             min-w-0 lets the heading column shrink, shrink-0 + whitespace-nowrap
@@ -160,7 +173,7 @@ export function ProductCarousel({
                 }`}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
-                {ctaLabel}
+                {displayCtaLabel}
               </Link>
             )}
           </div>
