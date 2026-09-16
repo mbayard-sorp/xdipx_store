@@ -82,6 +82,21 @@ export interface CronExpectation {
    * on a schedule of its own; these do not fire unless something asks.
    */
   demandDriven?: boolean
+  /**
+   * A `pipeline_settings` key that, when not `'true'`, means this route is
+   * expected to fire and immediately no-op rather than do its real work.
+   *
+   * Different from `demandDriven`: the route IS on a real schedule and IS
+   * dispatched by Vercel every period, it just returns `{ ok: true, skipped:
+   * '<key> is off' }` (a `skipped` outcome, not `failed`) while the valve is
+   * off. Without this, a floor with no other escape hatch treats a
+   * deliberately-paused surface identically to a dead one and keeps filing
+   * the same breach every sweep for as long as the valve stays off — which,
+   * for a feature paused on purpose, can be indefinite. When the valve reads
+   * off, `breached` is forced false the same way it is for a demand-driven
+   * route; when it reads on, the ordinary age-vs-floor check applies.
+   */
+  valveGate?: string
   notes: string
 }
 
@@ -586,7 +601,11 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     recorded: false,
     moneyRelevant: false,
     ownerTeam: 'content',
-    notes: 'Monthly. The longest period in the manifest, hence a full day of grace.',
+    valveGate: 'keyword_research_enabled',
+    notes:
+      'Monthly. The longest period in the manifest, hence a full day of grace. Paused in #198 '
+      + 'via keyword_research_enabled (off by default); the sweep does not breach this on age '
+      + 'while the valve reads off (#9699) — flipping it back on is what re-arms the floor.',
   },
   {
     route: '/cron/aeo-surface-check',

@@ -1,6 +1,30 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { classifyCronOutcome, heartbeatKey, CRON_RUN_RETENTION_DAYS } from '~/lib/cron-runs.server'
+const getPipelineSettingMock = vi.hoisted(() => vi.fn(async (_key: string) => null as string | null))
+
+// `loadExpectations()` and `latestRunByRoute()` both fall back to the code
+// manifest / an empty map on a DB error, which is the well-tested fallback
+// path, so a `db.select` that throws is enough to drive `readCronLiveness()`
+// end to end without reproducing drizzle's query builder.
+vi.mock('~/lib/db.server', () => ({
+  db: {
+    select: () => {
+      throw new Error('no db in this test')
+    },
+  },
+}))
+vi.mock('~/lib/kv.server', () => ({
+  kvGet: vi.fn(async () => null),
+  kvSet: vi.fn(async () => {}),
+}))
+// `getPipelineSetting` lives in feed-processor.server.ts; mocking it directly
+// is far simpler than reproducing its own `db.select(...).from(pipelineSettings)`
+// chain through the same `db` mock above.
+vi.mock('~/lib/feed-processor.server', () => ({
+  getPipelineSetting: getPipelineSettingMock,
+}))
+
+import { classifyCronOutcome, heartbeatKey, readCronLiveness, CRON_RUN_RETENTION_DAYS } from '~/lib/cron-runs.server'
 
 describe('classifyCronOutcome', () => {
   it('reads a plain 200 as succeeded', () => {
@@ -66,5 +90,36 @@ describe('heartbeat keys and retention', () => {
     // A succeeded row is worth a fortnight; a failed one is evidence you may
     // need months later to establish when a lane actually broke.
     expect(CRON_RUN_RETENTION_DAYS.failed).toBeGreaterThan(CRON_RUN_RETENTION_DAYS.ok)
+  })
+})
+
+describe('readCronLiveness valve gate (#9699)', () => {
+  // /cron/keyword-research is scheduled monthly and paused by
+  // keyword_research_enabled (off by default). With no heartbeat ever
+  // recorded, its age is null, which would ordinarily always breach.
+  it('never breaches a valve-gated route while its valve reads off', async () => {
+    getPipelineSettingMock.mockResolvedValue(null)
+    const liveness = await readCronLiveness()
+    const row = liveness.find((l) => l.route === '/cron/keyword-research')
+    expect(row).toBeDefined()
+    expect(row!.ageMinutes).toBeNull()
+    expect(row!.breached).toBe(false)
+  })
+
+  it('falls back to the ordinary age-vs-floor check once the valve reads on', async () => {
+    getPipelineSettingMock.mockResolvedValue('true')
+    const liveness = await readCronLiveness()
+    const row = liveness.find((l) => l.route === '/cron/keyword-research')
+    expect(row).toBeDefined()
+    // Same never-seen state as above, but now the valve no longer excuses it.
+    expect(row!.breached).toBe(true)
+  })
+
+  it('does not exempt an ordinary, non-valve-gated route', async () => {
+    getPipelineSettingMock.mockResolvedValue(null)
+    const liveness = await readCronLiveness()
+    const row = liveness.find((l) => l.route === '/cron/seo-daily')
+    expect(row).toBeDefined()
+    expect(row!.breached).toBe(true)
   })
 })
