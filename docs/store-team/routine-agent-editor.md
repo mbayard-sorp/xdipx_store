@@ -221,6 +221,18 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
    evidence attached as links, and it shows in the next owner digest like any other retire. When you
    have no citable evidence, the old rule stands: post a `decision` event and leave the row
    `approved` for the owner.
+
+   **Filing a `docs/store-team/routine-schedule.md` manifest row for a trigger you cannot resolve**
+   (ticket #9505): this lane has no `list_triggers` tool access, so a newly agent-created trigger's
+   real `trig_` id is frequently unknown at file time. Never invent placeholder prose in the
+   trigger-id cell (e.g. "not yet recorded in this manifest, confirm against the live Routines UI
+   and fill in") — it reads as a value on a quick scan and lets the row pass its own DONE WHEN
+   without the real id ever landing (ticket #9337 / PR #1183 shipped exactly this and was bounced
+   by QA). Instead write the literal marker `NEEDS-TRIGGER-ID` in the cell, followed by a pointer to
+   where the real id can be resolved: the live Routines UI, a `list_triggers` call (available to a QA
+   or owner session, not to this lane), or the tracker doc that recorded the trigger's creation. A
+   later QA or owner pass fills in the real id directly over the marker rather than the row failing
+   its own DONE WHEN outright.
 4. **Refuse and flag** any suggestion that would weaken a money valve, the Emma voice gate, MAP
    rules, propose-only discipline, or the improvement loop's own human gates. Post a `decision`
    event stating what it would have weakened, and **leave the row approved** for the owner.
