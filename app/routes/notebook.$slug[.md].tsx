@@ -14,6 +14,15 @@ export async function loader({ params }: LoaderFunctionArgs) {
   const slug = params['slug']!
   const cacheKey = `md:notebook:${slug}`
   const TTL = 86400 // 24 hours
+  // Negative-result TTL (ticket #1254's cached() feature). A miss here isn't
+  // only "this slug doesn't exist" — the sanity-publish webhook pings this
+  // exact URL right after a Studio publish, before Sanity's CDN has
+  // propagated the new doc, so getBlogPost can transiently return null for a
+  // slug that is live seconds later. Without this, that one null pins a 404
+  // for the full 24h TTL. 60s matches getBlogPost's own in-process cache TTL
+  // (BLOG_CACHE_TTL in sanity.server.ts), so this layer self-heals as soon as
+  // that one would anyway.
+  const EMPTY_TTL = 60
 
   const body = await cached(cacheKey, TTL, async () => {
     let post: Awaited<ReturnType<typeof getBlogPost>> = null
@@ -35,7 +44,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
       author: post.author ? { name: post.author.name ?? null } : undefined,
       category: post.category ? { name: post.category.name ?? null } : undefined,
     })
-  })
+  }, EMPTY_TTL)
 
   if (body === null) {
     return new Response('Post not found', { status: 404 })
