@@ -203,13 +203,30 @@ from colliding with uncommitted work, they do not remove it.
   375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
   type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
   re-review. Record the verdict + scores as an `/event` row (`agentRole:'design-critic'`).
-  **Working browser-capture recipe for cloud routines (ticket #8421).** Chromium cannot reach
-  `xdipx.com` directly through the agent proxy — `page.goto()` returns `ERR_CONNECTION_RESET` and the
-  proxy logs `ws_closed_mid_exchange`, and neither `--proxy-server` nor `--disable-http2` fixes it.
-  The working path: intercept every request with Playwright's `context.route()` and fulfil it from
-  Node `fetch` under `NODE_USE_ENV_PROXY=1`. Chromium is pre-installed at
-  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; do **not** run `playwright install`. Routine A's Step
-  7.5 post-publish spot-check captures the same way and reads this same recipe.
+  **Capture the screenshots with the repo CLI (ticket #8421, run 905).** One command, and it carries
+  the cloud-routine accommodations itself:
+
+  ```bash
+  npx tsx scripts/design-snapshots.ts --base https://xdipx.com --routes / --viewport doctrine
+  ```
+
+  `--viewport doctrine` is exactly the 375/768/1440 set this gate scores. Do **not** hand-roll the
+  capture and do **not** run `playwright install` — the sandbox forbids it and the script does not
+  need it. Routine A's Step 7.5 post-publish spot-check uses the same command with `--viewport mobile`.
+
+  What the script now handles for you, and why it is worth knowing when it misbehaves: chromium
+  cannot reach `xdipx.com` through the agent proxy (`page.goto()` fails at the TLS handshake with
+  `ERR_CERT_AUTHORITY_INVALID`, and has also presented as `ERR_CONNECTION_RESET`; neither
+  `--proxy-server` nor `--disable-http2` fixes it), so `--via-fetch` intercepts every request with
+  `context.route()` and fulfils it from Node `fetch`, which does trust the proxy CA. It auto-enables
+  only when an HTTPS proxy is present and the base is not loopback, so local runs are unchanged;
+  `--no-via-fetch` opts out. Separately, the image pre-installs one chromium build under
+  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and the pinned Playwright often wants a different build
+  number, so the script falls back to the pre-installed binary after its own resolution fails
+  (`--executable-path` forces it). **This recipe lived in prose here until run 905, and the cost was
+  real:** run 778 re-implemented it by hand and run 899 skipped the gate outright at the turn cap. If
+  you find yourself hand-rolling a capture again, that is a code ticket against this script, not a
+  longer paragraph here.
 - **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
   `docs/emma-voice.md` (the canonical voice charter).
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the
