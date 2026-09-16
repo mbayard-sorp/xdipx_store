@@ -460,8 +460,11 @@ export function AskEmmaWidget() {
                 <p className="flex items-center gap-1.5 text-sm font-bold leading-none" style={{ fontFamily: 'var(--font-display)' }}>
                   Ask Emma
                   <span className="relative flex h-2 w-2" aria-label="Online">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400 ring-1 ring-white/80" />
+                    {/* sage, not emerald-400: #00C789-ish Tailwind greens aren't in the
+                        xdipx palette -- sage is the only green token (design-critic
+                        run 905, #9681). */}
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sage opacity-70" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-sage ring-1 ring-white/80" />
                   </span>
                 </p>
                 <p className="mt-1 text-[11px] opacity-90">Online · {tagline}</p>
@@ -656,8 +659,11 @@ export function AskEmmaWidget() {
             className="absolute bottom-0.5 right-0.5 flex h-3 w-3"
             aria-label="Emma is online"
           >
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-white" />
+            {/* sage, not emerald-400: sampled off-palette at #00C789-ish, and sage
+                is the only green in the xdipx token set (design-critic run 905,
+                #9681). */}
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sage opacity-60" />
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-sage ring-2 ring-white" />
           </span>
         )}
       </button>

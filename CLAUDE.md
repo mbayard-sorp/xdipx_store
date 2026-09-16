@@ -101,15 +101,15 @@ Build and test at 375px first. Most traffic will be mobile. Use responsive class
 | `ink` | `#1A1418` | Primary text, dark surfaces |
 | `ink-2` | `#3D2F3A` | Secondary dark surface |
 | `ink-3` | `#6B5F68` | Secondary text, metadata |
-| `ink-4` | `#9A8F97` | Tertiary / fine print |
+| `ink-4` | `#726673` | Tertiary / fine print |
 | `line` | `rgba(26,20,24,0.08)` | Dividers, borders (also `line-2`, `line-3`) |
-| `coral` | `#FF5A36` | Primary CTA, hero accent — use sparingly |
+| `coral` | `#C2350F` | Primary CTA, hero accent — use sparingly |
 | `coral-2` | `#FF7A5A` | Hover / secondary coral |
 | `coral-soft` | `#FFE6DD` | Coral tint backgrounds |
 | `plum` | `#7A2BB8` | Emphasis (italic word in headlines), active CTA |
 | `plum-2` | `#5B1F8A` | Pressed / deep plum |
 | `plum-soft` | `#F3E8FB` | Plum tint backgrounds |
-| `sage` | `#7C8F78` | Accent — hearts, tags, quiet states |
+| `sage` | `#596756` | Accent — hearts, tags, quiet states |
 
 Radii: `--radius-sm 8`, `--radius 14`, `--radius-md 18`, `--radius-lg`..`--radius-4xl 22` (everything ≥ lg is 22px).
 

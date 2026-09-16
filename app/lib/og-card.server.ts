@@ -21,16 +21,20 @@ const WIDTH = 1200
 const HEIGHT = 630
 
 // v3 tokens, mirrored from app/app.css (satori can't read CSS custom props).
+// coral and the 'guides'/'care' category accents below were the pre-#3789
+// (2026-08-19) values -- #FF5A36 and #7C8F78 failed WCAG AA and were darkened
+// in app.css, but this hand-mirrored copy was missed (design-critic run 905,
+// #9681), so share cards were shipping the old, non-AA colors.
 const INK = '#1A1418'
 const INK_3 = '#6B5F68'
-const CORAL = '#FF5A36'
+const CORAL = '#C2350F'
 const PAPER = '#FFFFFF'
 
 // Category identity map (art direction §5), as raw hex for the chip + wash.
 const CATEGORY_ACCENTS: Record<string, { text: string; tint: string; wash: string }> = {
-  'guides': { text: '#FF5A36', tint: '#FFE6DD', wash: 'rgba(255,230,221,0.55)' },
+  'guides': { text: '#C2350F', tint: '#FFE6DD', wash: 'rgba(255,230,221,0.55)' },
   'comparisons': { text: '#7A2BB8', tint: '#F3E8FB', wash: 'rgba(243,232,251,0.55)' },
-  'care': { text: '#7C8F78', tint: '#ECF0EA', wash: 'rgba(236,240,234,0.55)' },
+  'care': { text: '#596756', tint: '#ECF0EA', wash: 'rgba(236,240,234,0.55)' },
   'wellness-basics': { text: '#6B5F68', tint: '#F4F3F1', wash: 'rgba(244,243,241,0.55)' },
 }
 const NEUTRAL_ACCENT = CATEGORY_ACCENTS['wellness-basics']!
