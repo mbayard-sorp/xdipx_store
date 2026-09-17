@@ -1321,6 +1321,53 @@ total (21 images), still trivial against the daily content-team budget.
   request ends at `heroImage` / `heroImageAlt` / `imagePrompt` / `heroImageVisionVerdict`, and
   leaving the doc a draft afterwards is the correct outcome, never a defect to fix.
 
+- `cast: sofia` + Wearable We-Vibe Sync Go Turquoise Couples Vibrator
+  (`we-vibe-sync-go-turquoise`), "Why Am I Always the One Who Initiates Sex? What Two Therapists
+  Call the Pursuer Role" (`podcast-notes`, not †-health-adjacent, content run 925, ticket #2748).
+  Gesture per the "Is this normal? / Is it just me?" row: product held up in one hand at eye
+  level, head tilted at it, brow raised, mid-question, free hand palm-up asking the room.
+  **Casting:** routine-briefed `sofia`; checked against the last five published human heroes
+  (`marcus` 09-15, `jade` 09-11, `priya` 09-10, `maya` 09-08, `diego` 09-04) — `sofia` last
+  appeared 08-28, outside the window, so no-repeat-within-5 is clear. No `editorialPhoto` on
+  `castMember.sofia` (only `referencePhoto`), so `editorialPhoto ?? referencePhoto` fell back to
+  `referencePhoto` per ticket #2751; that reference is a tight portrait crop, mitigated with
+  explicit "waist-up framing, generous room on both sides of the subject" per the standing
+  precedent. Two rounds via `composeSceneFrame` (Atlas `atlas/seedream-4.5-edit` one-stage
+  composite, `landscape_4_3`, 2 candidates each).
+  - **Round 1 (2 candidates, REJECTED both):** product identity failed on candidate 1 — the
+    device rendered as a plain oval/pebble remote with no visible curved hook, not faithful to
+    reference 2's horseshoe/wishbone silhouette. Candidate 2 got the shape right but both
+    candidates shared the same background defect: a solid saturated coral-orange wall panel
+    abutting a solid saturated magenta/plum panel, the same "saturated full-intensity wall
+    instead of the pale coral-soft/plum-soft tint" failure already logged against the
+    `jade`/Le Wand Mini entry above. Neither candidate reached the manual curatorial gate.
+  - **Round 2 (2 candidates, corrected prompt: explicit product-silhouette description added,
+    explicit "pale, barely-there" wash language replacing the plain "coral-soft and plum-soft
+    warmth" phrasing, explicit "arm extended forward, not pressed against her temple" gesture
+    correction after the `marcus`/We-Vibe Chorus phone-to-ear precedent):** candidate 1 nailed
+    product shape and the ground-lock pastel wash but rejected on curatorial review — open
+    cardigan over a lace bralette left the midriff and cleavage bare, failing the §0-H
+    fully-clothed / no-bare-torso hard rule the prompt itself asked for (the model ignored the
+    "fully clothed in soft casual clothing" instruction). Candidate 2 kept: fully clothed in a
+    soft plain top, device shape, button placement, and teal-turquoise finish faithful to
+    reference 2, held out at arm's length in front of the face (not at the temple), brow
+    furrowed and raised in a searching, faintly exasperated mid-question read, free hand open
+    palm-up, natural five-fingered hands on both, background a soft pastel wash from pale
+    coral-soft peach into pale plum-soft lavender with no saturated color-block panel → passed
+    the code-enforced anatomy vision gate (limb count / hand anatomy / face-body integrity /
+    extra-or-merged limbs all `pass`) and manual curatorial review →
+    `image-5ac507bb048411a12bf99b6f62317124c433ce26-1200x900-png` (post:
+    `why-am-i-always-the-one-who-initiates-sex`). **Precedent, reinforcing the jade/Le Wand
+    entry:** when a §0-H composite returns a solid saturated wall block instead of a pale tint,
+    naming the exact hex-adjacent language ("pale, barely-there... almost white, not a solid
+    saturated paint color, not a bold color-block panel") in the retry prompt fixed it in one
+    round, same as the isolate-one-variable expression fix on the `marcus`/We-Vibe Chorus entry.
+    `check-hero-embed-match.ts --slug why-am-i-always-the-one-who-initiates-sex` verified green
+    (imagePrompt non-empty; all three distinctive tokens of this product's title — `wearable`,
+    `sync`, `turquoise` — present in `heroImageAlt` + `imagePrompt`). Spend: round 1 + round 2 via
+    Atlas one-stage composite, well inside the 500-cents/day content-team daily image budget (0
+    spend logged before this run).
+
 ### Archetype E scaffold — surreal brand art / visual wit (doctrine §4-E, owner license 2026-07-28)
 
 For owned surfaces only: homepage editorial tiles, §0-P surreal-option blog heroes (never on †
