@@ -7,6 +7,11 @@
  * per-segment `lastmod` on the index so Google can skip untouched segments,
  * and headroom before the 50,000-URL / 50MB per-file protocol limits.
  *
+ * Products are additionally narrowed to a bounded, rotating submission set
+ * (sitemap-selection.ts): at 5,483 submitted URLs against ~340 Google
+ * crawls a month, submitting the whole catalog was not a submission but a
+ * queue nobody worked through. Non-product segments are submitted in full.
+ *
  * Two corrections are applied to the raw URL set here, both driven by the
  * gsc_url_inspections table the index monitor maintains:
  *
@@ -35,7 +40,7 @@
  * a crawler nothing and was demonstrably false for 4,400 PDPs.
  */
 import { neon } from '@neondatabase/serverless'
-import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap, getComparisonsForSitemap } from '~/lib/sanity.server'
+import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap, getComparisonsForSitemap, getEditoriallyLinkedHandles } from '~/lib/sanity.server'
 import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, getIndexableProductHandles, type SitemapProductImages, type SitemapCollection } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
 import { DEAD_VERDICT_STATES } from '~/lib/gsc-index.server'
@@ -45,6 +50,10 @@ import {
   PRODUCT_PRIORITY, PRODUCT_CHANGEFREQ,
   type SitemapImage, type SitemapSegment, type SitemapUrl, type UrlHealth,
 } from '~/lib/sitemap-xml'
+import {
+  isoWeekIndex, quotaFromEnv, selectProductHandles, type SitemapCandidate,
+} from '~/lib/sitemap-selection'
+import { INDEX_VERSION } from '~/lib/discovery.server'
 import { CANONICAL_ALIASED_HANDLES } from '~/lib/collection-canonical-aliases'
 import { getDropPageUpdatedAt } from '~/lib/category-page.server'
 import { dealHistory } from '../../db/schema'
@@ -64,10 +73,18 @@ const sql = neon(process.env['DATABASE_URL']!)
  * with their lastmod floored to the fix date below, and are additionally
  * pushed via IndexNow (indexnow-bulk.server.ts, `scope: 'stale'`), which the
  * `indexnow_pings` ledger confirms is live (a 1,561-URL batch on 2026-09-09
- * covering this exact cohort, HTTP 200). Dropping live, sellable products
- * from the sitemap to save crawl budget would make the stale noindex verdict
- * permanent by construction, since the sitemap is Google's main path back to
- * a URL to reconsider it.
+ * covering this exact cohort, HTTP 200).
+ *
+ * NOTE (2026-09-17, owner direction): #9316 also argued that dropping live
+ * sellable products from the sitemap would make the stale verdict permanent,
+ * since the sitemap is Google's main path back to a URL to reconsider it.
+ * That half no longer holds, because the sitemap now submits a bounded,
+ * rotating slice of the catalog — see sitemap-selection.ts for the reasoning
+ * and for the two mechanisms (weekly rotation, and a protected set that
+ * exempts anything indexed or earning impressions) that keep deselection
+ * temporary. This block's own behaviour is unchanged: the lastmod floor and
+ * the refusal to trust a pre-fix dead verdict both still apply, to whichever
+ * URLs the selection submits.
  */
 const BAD_VERDICT_STATES = [
   'Excluded by ‘noindex’ tag',
@@ -103,6 +120,121 @@ export async function getUrlHealth(): Promise<UrlHealth> {
     console.error('[sitemap] getUrlHealth failed:', err)
     return { dead: new Set(), stale: new Map() }
   }
+}
+
+/**
+ * Candidates for the product sitemap: every product in the live discovery
+ * index, with the dial and stock state selection needs.
+ *
+ * Reads the precomputed discovery payload rather than re-querying Shopify:
+ * it is already assembled for the storefront, it is one Postgres row, and it
+ * carries `productTypeDial` and `totalInventory` in the same shape the
+ * Compass serves. INDEX_VERSION is imported, never hardcoded — seo-daily
+ * froze on a five-week-old payload that way (see discovery.server.ts).
+ *
+ * Returns [] on any failure, which selectProductHandles reads as a failed
+ * read and falls open on.
+ */
+export async function getSitemapProductCandidates(): Promise<SitemapCandidate[]> {
+  try {
+    const rows = await sql`
+      SELECT e->>'handle' AS handle,
+             e->>'productTypeDial' AS dial,
+             COALESCE((e->>'totalInventory')::int, 0) AS inventory
+      FROM discovery_index_payload p,
+           LATERAL jsonb_array_elements(p.index_json::jsonb) e
+      WHERE p.version = ${INDEX_VERSION}
+    ` as unknown as Array<{ handle: string | null; dial: string | null; inventory: number | null }>
+    const out: SitemapCandidate[] = []
+    for (const r of rows) {
+      if (!r.handle) continue
+      out.push({ handle: r.handle, dial: r.dial, inStock: (r.inventory ?? 0) > 0 })
+    }
+    return out
+  } catch (err) {
+    console.error('[sitemap] getSitemapProductCandidates failed:', err)
+    return []
+  }
+}
+
+/** `/products/<handle>` → `<handle>`; null for anything else. */
+function productHandleFromUrl(url: string): string | null {
+  const m = /\/products\/([^/?#]+)/.exec(url)
+  return m?.[1] ?? null
+}
+
+/**
+ * Handles exempt from the per-dial quota.
+ *
+ * The union of "Google already values this" and "a human already touched
+ * this". Pulling an indexed URL out of the sitemap is the one move that could
+ * turn a crawl-budget fix into a deindexing event, so those are protected
+ * unconditionally — out of stock included, since an out-of-stock page that
+ * ranks is still a page worth keeping submitted.
+ *
+ * Every source is independently guarded: a protected set that comes back
+ * short costs a product one week in the rotation, which is survivable, while
+ * a throw here would cost the whole sitemap.
+ */
+export async function getProtectedProductHandles(): Promise<Set<string>> {
+  const out = new Set<string>()
+  const add = (h: string | null | undefined) => { if (h) out.add(h) }
+
+  const guarded = async (name: string, fn: () => Promise<void>) => {
+    try { await fn() } catch (err) { console.error(`[sitemap] protected/${name} failed:`, err) }
+  }
+
+  await Promise.all([
+    // Indexed by Google, or earning impressions. Both keyed off the URL.
+    guarded('gsc', async () => {
+      const rows = await sql`
+        SELECT url FROM gsc_url_inspections
+        WHERE coverage_state = 'Submitted and indexed' AND url LIKE '%/products/%'
+      ` as unknown as Array<{ url: string }>
+      for (const r of rows) add(productHandleFromUrl(r.url))
+    }),
+    guarded('gsc-impressions', async () => {
+      const rows = await sql`
+        SELECT DISTINCT e->>'page' AS page
+        FROM gsc_snapshots s, LATERAL jsonb_array_elements(s.top_pages) e
+        WHERE e->>'page' LIKE '%/products/%'
+      ` as unknown as Array<{ page: string | null }>
+      for (const r of rows) if (r.page) add(productHandleFromUrl(r.page))
+    }),
+    // Customer signal. Handles are stored directly on these two.
+    guarded('wishlist', async () => {
+      const rows = await sql`
+        SELECT DISTINCT handle FROM wishlist_items WHERE handle IS NOT NULL
+      ` as unknown as Array<{ handle: string | null }>
+      for (const r of rows) add(r.handle)
+    }),
+    guarded('orders', async () => {
+      const rows = await sql`
+        SELECT DISTINCT handle FROM order_line_items WHERE handle IS NOT NULL
+      ` as unknown as Array<{ handle: string | null }>
+      for (const r of rows) add(r.handle)
+    }),
+    // Reviewed products key off the Shopify product id, so they resolve
+    // through the discovery index's id → handle mapping.
+    guarded('reviews', async () => {
+      const rows = await sql`
+        SELECT DISTINCT e->>'handle' AS handle
+        FROM discovery_index_payload p,
+             LATERAL jsonb_array_elements(p.index_json::jsonb) e
+        WHERE p.version = ${INDEX_VERSION}
+          AND e->>'id' IN (SELECT DISTINCT shopify_product_id FROM reviews WHERE status = 'approved')
+      ` as unknown as Array<{ handle: string | null }>
+      for (const r of rows) add(r.handle)
+    }),
+    // Editorially linked: an Emma pick, a curated rail slot, or a product
+    // embedded in a Notebook post. These are the products the site itself
+    // points at, so they are the ones whose PDP has real internal link equity.
+    guarded('editorial', async () => {
+      for (const h of await getEditoriallyLinkedHandles()) add(h)
+    }),
+  ])
+
+  return out
 }
 
 /** Relativize Shopify admin URLs (https://xdipx.com/collections/x → /collections/x). */
@@ -177,7 +309,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
       return fallback
     })
 
-  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles, newDropLastmod, comparisons] = await Promise.all([
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles, newDropLastmod, comparisons, candidates, protectedHandles] = await Promise.all([
     guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
     guard(getBlogCategories(), [], 'getBlogCategories'),
     guard(getAllBlogSeries(), [], 'getAllBlogSeries'),
@@ -191,6 +323,8 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     guard(getIndexableProductHandles(), null, 'getIndexableProductHandles'),
     guard(getDropPageUpdatedAt('new'), undefined, 'getDropPageUpdatedAt(new)'),
     guard(getComparisonsForSitemap(), [], 'getComparisonsForSitemap'),
+    getSitemapProductCandidates(),
+    getProtectedProductHandles(),
   ])
 
   const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0]!.dealDate) : null
@@ -343,7 +477,30 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
   // getIndexableProductHandles. Fail open on a missing or implausible set.
   const listable = keepIndexable(products, indexableHandles)
 
-  const productUrls: SitemapUrl[] = listable.map(p => {
+  // Bounded, rotating submission set. See sitemap-selection.ts for why the
+  // sitemap stopped submitting the whole catalog; `handles: null` means the
+  // selection declined (failed or implausibly small read) and we publish the
+  // full list exactly as before.
+  const selection = selectProductHandles({
+    candidates,
+    protectedHandles,
+    quotaPerDial: quotaFromEnv(process.env['SITEMAP_PRODUCT_QUOTA_PER_DIAL']),
+    weekIndex: isoWeekIndex(),
+  })
+  const submittable = selection.handles
+  if (!submittable) {
+    console.warn(`[sitemap] product selection declined (${selection.reason ?? 'unknown'}); publishing every product`)
+  }
+  const selected = submittable ? listable.filter(p => submittable.has(p.handle)) : listable
+  if (submittable) {
+    const { candidates: pool, inStock, quotaPicked, protectedPicked } = selection.stats
+    console.log(
+      `[sitemap] products ${listable.length} → ${selected.length} `
+      + `(pool ${pool}, in stock ${inStock}, quota ${quotaPicked}, protected ${protectedPicked})`,
+    )
+  }
+
+  const productUrls: SitemapUrl[] = selected.map(p => {
     const imageData = productImages.get(p.handle)
     const images: SitemapImage[] = imageData
       ? imageData.images.map(img => ({
