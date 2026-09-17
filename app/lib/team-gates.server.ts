@@ -244,9 +244,10 @@ export interface PublishGateOutput {
 
 /**
  * Content identity for the vision-judgment cache (ticket #8452). Hashes
- * exactly what the model is shown — platform, caption, media, alt text, and
- * the resolved product handle — so a hash match means the model would be
- * shown byte-identical input to the call that produced the cached verdict.
+ * exactly what the model is shown — platform, caption, media, alt text, the
+ * resolved product handle, and any caller-supplied reference packshot
+ * (ticket #9770) — so a hash match means the model would be shown
+ * byte-identical input to the call that produced the cached verdict.
  * Deliberately excludes `recentCaptions`/precedents: those drift as new posts
  * go live between calls, and treating that drift as "the row changed" would
  * defeat the point (a row gated twice minutes apart, as in the incident this
@@ -258,6 +259,7 @@ export function computePublishGateContentHash(input: {
   mediaUrls: readonly string[] | null | undefined
   altText: string | null | undefined
   productHandle: string | null
+  referencePackshotUrl?: string | null
 }): string {
   const stable = JSON.stringify({
     platform: input.platform,
@@ -265,6 +267,7 @@ export function computePublishGateContentHash(input: {
     mediaUrls: input.mediaUrls ?? [],
     altText: input.altText ?? null,
     productHandle: input.productHandle,
+    referencePackshotUrl: input.referencePackshotUrl ?? null,
   })
   return createHash('sha256').update(stable).digest('hex')
 }
@@ -637,8 +640,26 @@ export function verdictConsistencyCheck(
  * last 10-14 *live* posts' grid composition, only their captions. Each of
  * these is real judgment work the original agent definition documents and
  * this first cut does not attempt, rather than a silent regression.
+ *
+ * `opts.referencePackshotUrl` (ticket #9770) lets the caller supply a real
+ * product photo directly instead of relying solely on `post.shopifyProductId`
+ * resolving to one. Rows 238/266 (2026-09-14/16) named a specific SKU
+ * ("Biird Cecii Beaded Glass Dildo") in the caption but had no
+ * `shopifyProductId` set, so `productHandle` never resolved and the model
+ * judged product-identity from the SKU name alone (HOLD on row 238, a wrong
+ * BLOCK on row 266 whose premise a real packshot comparison contradicted).
+ * The drafting routine already fetches and verifies a real packshot URL for
+ * SKU-tagged imagery before this step (`routine-social-daily.md` Step 5), so
+ * passing it through here closes the gap without depending on
+ * `shopifyProductId` being set correctly at draft time. When supplied, it
+ * takes priority over the `productHandle`-resolved packshot and marks the
+ * post as product-featuring even if `shopifyProductId` is null.
  */
-export async function runPublishGateCheck(postId: number): Promise<PublishGateOutput> {
+export async function runPublishGateCheck(
+  postId: number,
+  opts?: { referencePackshotUrl?: string },
+): Promise<PublishGateOutput> {
+  const referencePackshotUrl = opts?.referencePackshotUrl?.trim() || null
   const [post] = await db
     .select({
       id: socialPosts.id,
@@ -668,7 +689,7 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
     throw new Response(`Conflict: row ${postId} is already posted; re-verdicting a live post is not permitted.`, { status: 409 })
   }
 
-  const featuresProduct = !!post.shopifyProductId
+  const featuresProduct = !!post.shopifyProductId || !!referencePackshotUrl
   let productHandle: string | null = null
   if (post.shopifyProductId) {
     try {
@@ -725,6 +746,7 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
     mediaUrls: post.mediaUrls,
     altText: post.altText,
     productHandle,
+    referencePackshotUrl,
   })
   const cached = post.lastPublishGateCheckJson
   if (cached && cached.contentHash === contentHash) {
@@ -747,8 +769,11 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
   // costs nothing extra. `null` when the post features no product, or when
   // the fetch fails or the product has no images on Shopify — either way the
   // model has nothing real to compare against and must say so rather than
-  // judging identity from its own memory of the SKU.
-  const packshotUrl = await fetchPackshotUrl(productHandle)
+  // judging identity from its own memory of the SKU. A caller-supplied
+  // `referencePackshotUrl` (ticket #9770) takes priority: it covers the case
+  // where `shopifyProductId` was never set on the row (so there is no handle
+  // to resolve from) even though the caption names a specific SKU.
+  const packshotUrl = referencePackshotUrl ?? (await fetchPackshotUrl(productHandle))
 
   // Asset-reuse precedent (ticket #8976): a different row that already
   // cleared this gate with byte-identical media, still live. Grounds the
@@ -835,11 +860,11 @@ export async function runPublishGateCheck(postId: number): Promise<PublishGateOu
   // two different ways across two separate calls, run 823's incident) is
   // machine-detectable by grepping `[publish-gate:product-identity]` for a
   // productHandle, not lost the moment the request returns.
-  if (productHandle) {
+  if (productHandle || referencePackshotUrl) {
     console.error(
       formatProductIdentityLogLine({
         postId,
-        productHandle,
+        productHandle: productHandle ?? '(reference-url, no shopifyProductId on row)',
         packshotUrl,
         verdict: modelResult.verdict,
         findings: modelResult.findings,

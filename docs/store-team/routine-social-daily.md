@@ -1677,10 +1677,20 @@ you are handing it a post id.
 ```bash
 curl -s -X POST "$BASE_URL/api/team/publish-gate" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"postId":<post id>}'
+  -d '{"postId":<post id>,"referencePackshotUrl":"<real Shopify product photo, if you have one>"}'
 # -> {"id":<post id>,"gate":{"verdict":"PASS|REVISE|BLOCK|HOLD","reviewer":"publish-gate",
 #      "notes":"...","featuresProduct":true|false,"productHandle":"...","findings":[...]}}
 ```
+
+**Pass `referencePackshotUrl` when the draft names a specific SKU but the row has no
+`shopifyProductId`** (ticket #9770). The endpoint normally resolves a real packshot itself from
+`post.shopifyProductId`, but a row can go to the gate without one set even though its caption plainly
+names a SKU (rows 238/266, 2026-09-14/16: both tagged "Biird Cecii Beaded Glass Dildo" in the
+caption with `shopifyProductId` null, so the gate had no photo to compare against and either HOLDed
+honestly or BLOCKed on a guess from the product name alone). If Step 5 already fetched and verified
+the real Shopify product photo for this post's SKU (the same `productImageUrl` you gave the image
+generator), pass that exact URL as `referencePackshotUrl` here too; the field is optional and the
+call above works unchanged without it.
 
 It runs the full deterministic floor server-side first (`runDeterministicPublishChecks`, unchanged
 and un-lowered — a mechanical block short-circuits straight to a BLOCK verdict with no model spend),

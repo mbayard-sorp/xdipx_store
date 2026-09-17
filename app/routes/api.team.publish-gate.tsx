@@ -1,7 +1,7 @@
 /**
  * POST /api/team/publish-gate
  *
- *   { postId: number } -> { id, gate: { verdict, reviewer, notes,
+ *   { postId: number, referencePackshotUrl?: string } -> { id, gate: { verdict, reviewer, notes,
  *     featuresProduct, productHandle?, findings } }
  *
  * The publish-gate half of ticket #6916. Runs `social-publish-gate`'s
@@ -18,6 +18,14 @@
  * before. That relay step, and the deterministic re-check it performs
  * server-side before writing `approved`, are UNCHANGED: this route only
  * replaces where the verdict comes from, not how it is applied.
+ *
+ * `referencePackshotUrl` (ticket #9770) is an optional caller-supplied real
+ * product photo, used to ground the vision pass's product-identity judgment
+ * when the row's own `shopifyProductId` is unset (so `productHandle` cannot
+ * resolve one server-side) but the caller already has a verified packshot for
+ * the SKU the caption names, per `routine-social-daily.md` Step 5. It is
+ * never required: omit it and the endpoint resolves a packshot from
+ * `shopifyProductId` exactly as before.
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
@@ -40,8 +48,10 @@ export async function action({ request }: ActionFunctionArgs) {
     return new Response('Bad Request: postId (positive integer) required', { status: 400 })
   }
 
+  const referencePackshotUrl = typeof body['referencePackshotUrl'] === 'string' ? body['referencePackshotUrl'] : undefined
+
   try {
-    const result = await runPublishGateCheck(postId)
+    const result = await runPublishGateCheck(postId, referencePackshotUrl !== undefined ? { referencePackshotUrl } : {})
     return Response.json(result, { headers: { 'Cache-Control': 'no-store' } })
   } catch (err) {
     if (err instanceof Response) return err
