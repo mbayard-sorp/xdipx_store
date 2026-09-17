@@ -233,6 +233,16 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
    or owner session, not to this lane), or the tracker doc that recorded the trigger's creation. A
    later QA or owner pass fills in the real id directly over the marker rather than the row failing
    its own DONE WHEN outright.
+
+   **Before opening a redo PR for a bounced ticket, check whether the marker is even still needed**
+   (ticket #9643): a bounce's own `lastError` is a message this lane already has, not something that
+   needs re-discovering. Ticket #9337 was bounced a second time (PR #1198, itself a redo of bounced
+   PR #1183) for shipping `NEEDS-TRIGGER-ID` again, even though the real `trig_` value had already
+   been handed over verbatim in that exact ticket's `lastError` from the first bounce. Before writing
+   `NEEDS-TRIGGER-ID` (or any other unresolved placeholder) into a redo, read the ticket's
+   `lastError`/`suggestion_links` history first: if QA or a prior pass already supplied the concrete
+   value the row needs, use it directly instead of falling back to a marker that only defers the same
+   fix to a third pass.
 4. **Refuse and flag** any suggestion that would weaken a money valve, the Emma voice gate, MAP
    rules, propose-only discipline, or the improvement loop's own human gates. Post a `decision`
    event stating what it would have weakened, and **leave the row approved** for the owner.
