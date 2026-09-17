@@ -77,6 +77,14 @@ because the question shape lets Emma speak with authority about the *reader's* e
 her own, which is exactly what her no-lived-experience constraint requires; a fixed neutral frame (per
 the `cropSignature` / `lightSignature` locks in §3) gives visual continuity with no face.
 
+**Ask Emma provenance boundary (ticket #9674).** An Ask Emma caption may pose an invented
+rhetorical question freely, no provenance needed — e.g. "Is it weird that I want it more than he
+does?" is fine as a standalone rhetorical prompt. The moment the caption asserts that an inbound
+event actually happened ("someone asked me this week", "a reader wrote in", "I got a message about
+this"), it has crossed into Customer Question territory and needs the same provenance that format
+already requires above: cite a real source (support ticket id, DM, or search query) in the run
+summary, or drop the event-asserting frame and pose the question as a standalone prompt instead.
+
 **Spec-checklist caption shape (available to Today's Pick and Brand Crush).** A caption may take the
 form: a customer question or a plain lead, then a short run of checkmark lines of material,
 compatibility, and safety fact, then hashtags. It converts catalog knowledge into authority without
