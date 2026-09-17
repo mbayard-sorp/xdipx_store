@@ -2401,6 +2401,52 @@ export async function getProductHandlesForSitemap(): Promise<{ handle: string; _
   }
 }
 
+/**
+ * Handles the site itself points at: Emma picks, curated-rail slots, and
+ * products embedded in a published Notebook post.
+ *
+ * Feeds the sitemap's protected set (sitemap.server.ts). These are the PDPs
+ * with real internal link equity, so they are the ones a crawler can actually
+ * reach from an indexed page — exactly the products worth keeping submitted
+ * even when their dial's rotation window has moved on.
+ *
+ * `productHandles` comes back RAW because the dataset holds both the
+ * productRef-object and bare-string shapes; see normalizeProductHandles.
+ * Returns [] on any failure — the caller treats a short protected set as
+ * survivable, a throw as not.
+ */
+export async function getEditoriallyLinkedHandles(): Promise<string[]> {
+  if (!projectId) return []
+  try {
+    const client = getClient()
+    if (!client) return []
+    const res = await client.fetch<{
+      picks?: (string | null)[]
+      rails?: ProductHandleEntry[][]
+      embeds?: (string | null)[]
+    }>(`{
+      "picks": *[_type == "emmaPick" && defined(productHandle)].productHandle,
+      "rails": *[_type == "emmaCuratedRail"].productHandles,
+      "embeds": *[_type == "blogPost" && defined(publishedAt)].body[_type == "blogProductEmbed"].productHandle
+    }`)
+    const handles = new Set<string>()
+    // `emmaPick` carries a singular `productHandle` string; the rails carry a
+    // `productHandles` array in either of the two dataset shapes.
+    for (const list of [res?.picks, res?.embeds]) {
+      for (const h of list ?? []) {
+        if (typeof h === 'string' && h.trim().length > 0) handles.add(h.trim())
+      }
+    }
+    for (const rail of res?.rails ?? []) {
+      for (const h of normalizeProductHandles(rail)) handles.add(h)
+    }
+    return [...handles]
+  } catch (err) {
+    console.error('[sanity] getEditoriallyLinkedHandles error:', err)
+    return []
+  }
+}
+
 // ─── Home Config (discovery rebuild) ─────────────────────────────────────────
 // Singleton: singleton.homeConfig
 // 5-minute TTL so a variant flip propagates quickly without hammering Sanity.
