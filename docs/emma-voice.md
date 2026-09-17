@@ -328,16 +328,23 @@ Draft against both, and understand which one you are avoiding.
   runs 5**: TikTok moderates the category harder than Meta and the 9-by-implication ruling does
   not extend there. Empathy layer stays fully on everywhere: this is where the shame-free voice
   does its work.
-- **X carve-out: PDP links and hashtags.** Two rules elsewhere in this section are calibrated for
-  Instagram/TikTok and do not extend to X as written. (1) The "commerce goes post → profile → link
-  in bio → site; the caption never points at a PDP" rule below is an Instagram/TikTok rule: on X, a
-  direct `/products/{slug}` PDP link with channel UTMs is **allowed and encouraged**
-  (`docs/store-team/routine-social-daily.md` Step 4c), including the second link a toy+lube pairing
-  post requires. (2) The 5-to-8 hashtag count below is an Instagram search-keyword calibration: X
-  runs **0-3** hashtags, because the 280 weighted-character limit (each URL counts 23) plus one or
-  two mandatory pairing links leaves little room, and X's discovery model does not reward a
-  hashtag block the way Instagram's does. Every other rule in this section (register, vocabulary,
-  imagery, no lived experience) applies to X unchanged.
+- **X carve-out: PDP links, hashtags, and a stated live promo code.** Three rules elsewhere in this
+  section are calibrated for Instagram/TikTok and do not extend to X as written. (1) The "commerce
+  goes post → profile → link in bio → site; the caption never points at a PDP" rule below is an
+  Instagram/TikTok rule: on X, a direct `/products/{slug}` PDP link with channel UTMs is **allowed
+  and encouraged** (`docs/store-team/routine-social-daily.md` Step 4c), including the second link a
+  toy+lube pairing post requires. (2) The 5-to-8 hashtag count below is an Instagram search-keyword
+  calibration: X runs **0-3** hashtags, because the 280 weighted-character limit (each URL counts 23)
+  plus one or two mandatory pairing links leaves little room, and X's discovery model does not reward
+  a hashtag block the way Instagram's does. (3) The "never sell in the post" rule below (no prices,
+  no discounts, no promo codes) is also an Instagram/TikTok rule: `instagram-campaigns.md` §4b states
+  verbatim that on X, in email, in SMS, and on the site, an owner-approved live promo code and its
+  discount depth may be stated freely, because X's organic policy permits commerce and the owned
+  channels are where a real offer belongs. A caption naming a live, owner-approved code plus its
+  discount depth is not a sale-attempt violation on X even when it closes on the number (ticket
+  #9537: this exact contradiction between the two docs let voice-gate wrongly BLOCK a live LUBE20
+  promo on X for over a week of its active window). Every other rule in this section (register,
+  vocabulary, imagery, no lived experience) applies to X unchanged.
 - **On Instagram the register is Emma off the clock (codified 2026-08-08).** The account reads
   like a group chat with a friend who happens to work in the industry: first person, direct
   address, reactions, questions back to the audience. Lowercase-casual is licensed here and only
@@ -412,7 +419,8 @@ Draft against both, and understand which one you are avoiding.
 - **Never sell in the post.** No prices, no discounts, no promo codes, no "shop", no site CTAs
   (the whitelist is for site and email; a CTA in a caption is the sale attempt that gets the post
   pulled). Commerce goes post → profile → link in bio → site. The caption never points at a PDP.
-  (Instagram/TikTok; X carves out to allow a direct PDP link, see above.)
+  (Instagram/TikTok; X carves out to allow a direct PDP link and a stated live promo code with its
+  discount depth, see above.)
 - **Tag the maker.** When a featured brand's Instagram handle is verified in the registry
   (`docs/store-team/brand-ig-handles.json`), tag it in the caption. Never guess a handle; a wrong
   tag is worse than none.
