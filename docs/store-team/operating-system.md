@@ -219,6 +219,34 @@ the row text and its links are the only carriers, so the conventions are the con
    covers the same route and feature, set `blockedById` against it (or fold the new finding into it as
    a note) instead of filing a fresh, unlinked duplicate.
 
+### Playbook-authoring conventions
+
+Binding on any routine playbook, generalized from two homepage-team retro findings on run 905
+(#9683, #9684) after the design-cycle gate silently ran broken or unachievable for months.
+
+1. **A mechanical workaround belongs in repo tooling, not playbook prose.** (#9683) Ticket #8421
+   correctly diagnosed why headless Chromium could not capture xdipx.com from a cloud routine and
+   wrote the fix into `routine-design-cycle.md` step 4 as a paragraph. Prose is not code: run 778
+   hand-rolled the recipe from that paragraph, and run 899 skipped the mandatory design-critic gate
+   entirely at the turn cap trying to. Run 905 finally moved the recipe into the repo's own capture
+   CLI (`scripts/design-snapshots.ts`), and the gate now runs on one command. When a recorded recipe
+   has been hand-implemented twice, that is the trigger to file a `code` ticket putting it in a
+   script rather than writing a longer paragraph — a prose recipe is at best a stopgap that must
+   carry a code ticket, not a permanent substitute for one.
+2. **A playbook step that names a measurement, threshold, or endpoint capability must be checked
+   against what the tool can actually produce.** (#9684) `routine-design-cycle.md` step 4 required
+   design-critic to score screenshots at 375/768/1440, but `scripts/design-snapshots.ts` only
+   offered 375 and 1280 and had no way to request the other widths — the specified gate was
+   literally unachievable with the repo's own tool, and every run that captured at three widths had
+   quietly built its own harness instead of filing the mismatch. The same run found a second
+   instance in the same file: a credential-free-probe step described an endpoint as serving
+   "per-tag and per-combination" counts when the underlying function tallies each tag independently,
+   so a run trusting that sentence would believe it had satisfied a cross-product gate it had not
+   actually run. When a playbook step relies on a named capability, verify the tool can produce it
+   and report the mismatch as a playbook defect (a suggestion row, or a direct fix if you own the
+   file) rather than routing around it silently — silently routing around it is exactly what let
+   both defects go unnoticed for months.
+
 ---
 
 ## 4. The gates
