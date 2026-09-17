@@ -460,6 +460,20 @@ describe('computePublishGateContentHash (ticket #8452)', () => {
     const h2 = computePublishGateContentHash({ ...base, platform: 'x' })
     expect(h1).not.toBe(h2)
   })
+
+  it('changes when a caller-supplied referencePackshotUrl is added or swapped (ticket #9770)', () => {
+    const withoutRef = computePublishGateContentHash(base)
+    const withRef = computePublishGateContentHash({ ...base, referencePackshotUrl: 'https://cdn.example/real-packshot.jpg' })
+    expect(withoutRef).not.toBe(withRef)
+    const withDifferentRef = computePublishGateContentHash({ ...base, referencePackshotUrl: 'https://cdn.example/other-packshot.jpg' })
+    expect(withRef).not.toBe(withDifferentRef)
+  })
+
+  it('treats a missing referencePackshotUrl the same as an explicit null (no accidental cache miss)', () => {
+    const missing = computePublishGateContentHash(base)
+    const explicitNull = computePublishGateContentHash({ ...base, referencePackshotUrl: null })
+    expect(missing).toBe(explicitNull)
+  })
 })
 
 describe('isImageLevelFinding (ticket #8976)', () => {
