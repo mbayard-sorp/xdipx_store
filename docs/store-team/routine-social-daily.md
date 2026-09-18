@@ -685,6 +685,12 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
 - **Rotate.** Never two consecutive Instagram posts from the same pillar, and never two consecutive
   posts in the same format. The ground follows the 4-beat cycle and the archetype follows the 7-beat
   spine (§3.1). Read the last few posted rows to find your position in both.
+- **Ask Emma provenance boundary (ticket #9674).** An invented rhetorical question is fine with no
+  provenance ("Is it weird that I want it more than he does?"), but the moment the caption asserts
+  an inbound event actually happened ("someone asked me this week", "a reader wrote in"), it needs
+  the same provenance the Customer Question format requires — cite a real source (support ticket
+  id, DM, or search query) in the run summary — or drop the event-asserting frame. See
+  `instagram-campaigns.md` §2.
 - **Fill the daily slate** (`instagram-campaigns.md` §4a) in order, and stop when
   `social_freq_instagram` is met: A resource, B campaign, C Today's Pick, D what's new, E carousel.
   Slot A ships even on a one-post day. Baseline is at least one post daily, no zero days; 10/day is
