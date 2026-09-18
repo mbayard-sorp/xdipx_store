@@ -62,6 +62,10 @@ apply-shadow.log
 scripts/.tmp-media/
 scripts/_tmp-*/
 scripts/.tmp/
+# The name drifted again on content run 942 (2026-09-18), this time out of
+# scripts/ entirely: the hero run wrote the composed prompt and its candidate
+# renders to a repo-root scratchpad/, which none of the globs above reach.
+scratchpad/
 
 # Playwright visual harness artifacts (tests/visual/__screenshots__ baselines ARE committed)
 test-results/

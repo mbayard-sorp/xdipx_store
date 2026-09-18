@@ -2027,5 +2027,82 @@ routing, casting, and prompt above are reusable as-is — no rework needed, only
 
 ---
 
+---
+
+## Notebook §0-H keeper — content run 942, "How Do You Tell Your Partner About a Fantasy?"
+
+`cast: diego` + Satin Sex & Mischief Blindfold Black
+(`sportsheets-sex-mischief-satin-blindfold-black`), `blogPost-how-do-you-bring-up-a-fantasy-with-a-partner`
+(category `real-talk`, routed to §0-H human hero; not † health-adjacent, levity license in play).
+**Casting:** brief-directed `diego`; clears no-repeat-within-5 (prior five human heroes: `sofia`
+2026-09-17, `marcus` 09-15, `jade` 09-11, `priya` 09-10, `maya` 09-08; diego's own last appearance
+was 09-04, six heroes back) and deliberately varies the run of female-presenting figures on a topic
+where a male-presenting discloser is the better read. `castMember.diego.editorialPhoto` unset, so
+compositing fell back to `referencePhoto` per `editorialPhoto ?? referencePhoto`; camera distance
+stated explicitly ("waist-up framing, generous room on both sides of the subject") per the standing
+precedent, since the reference photo is a tight portrait crop. Gesture per the "How do I even
+start?" row: product held out in both hands at arm's length, leaning back from it, wide-eyed,
+mouth caught mid-sentence. Route: `--surface hero --cast diego`, `composeSceneFrame()` → Atlas
+one-stage (`atlas/seedream-4.5-edit`), composite rung on all three rounds (no fallback-ladder rungs
+needed; every candidate across all rounds cleared the code-enforced ticket #8691 anatomy gate).
+
+**Keeper (round 3, candidate 1):** "…sits on the edge of a bed against a single plain near-white
+warm-neutral bedroom wall, softly blurred and out of focus behind him, shallow depth of field. Warm
+directional sunlight falls across the wall and bedding in a soft golden-coral glow with gentle
+falloff, exactly like real afternoon window light, not a painted color, not a color block… holding
+the folded black satin Sex & Mischief blindfold from reference 2 in both hands, large and
+co-primary with his face… He holds the blindfold out in both hands at arm's length, leaning back a
+little from it, eyes wide and eyebrows up, mouth open mid-sentence, like a man working out how on
+earth to say this out loud. Expression theatrically big: the nerve it takes to name a want,
+rehearsed dread just before saying it, drama in the face and the hands, never in the light…" — full
+prompt persisted to `imagePrompt` on the draft. Passed gate: product co-primary, faithful shape/
+color/finish to the real plate, gesture matches the briefed sceneBeat (arm's-length extension,
+lean-back, wide eyes, mid-sentence mouth — reads as nerve/dread, not delight), bright warm daylight
+via a genuine directional sunbeam (not a paint block), near-white/warm-neutral ground reads
+palette-compatible, no uncanny hands/face, clearly adult, fully clothed, no product-in-use, clears
+the swap test (the blindfold functions as the visible stand-in for "the thing I want to try," which
+is the crux of a fantasy-disclosure post).
+
+**Rejects:**
+- Round 1 (2 candidates): anatomy gate passed both, but both rendered the scene as two full-wall
+  solid paint blocks (a saturated salmon-coral wall + a saturated wine/burgundy-plum wall) instead
+  of soft coral-soft/plum-soft daylight tint on a white/warm-neutral ground — the same
+  saturated-full-intensity-wall ground-lock failure already logged against the jade/`le-wand-mini-micro-wand`
+  entry above. Candidate 1 additionally read as a delighted open grin (wrong register: reads as
+  amusement, not "rehearsed dread"), and its arms were bent close to the chest rather than extended
+  to arm's length.
+- Round 2 (2 candidates): explicit "no solid saturated wall paint, no painted color blocks, soft
+  blush of daylight not paint" language added — model still rendered two-tone painted walls (orange/
+  lavender in one candidate, cream/wine-gradient in the other), so the fix did not land. **Fix that
+  worked (round 3):** stopped describing two walls entirely — specified a *single* plain near-white
+  wall with the subject seated so it fills most of frame, explicit "softly blurred and out of focus
+  behind him, shallow depth of field," and reframed the warm color as light falling across the wall
+  ("exactly like real afternoon window light") rather than an attribute of the wall itself. Removing
+  the second wall from the composition altogether, not just re-describing its color, is what broke
+  the model's two-tone-paint default.
+
+**Mechanical note (ticket #9369 in practice):** the identical `--prompt` was repeated verbatim on
+the `--upload` call (not just at generation), so `imagePrompt` persisted correctly rather than
+falling back to the generic default.
+
+**`check-hero-embed-match.ts` false-positive, found and fixed live:** the first upload attempt (alt
++ prompt both containing "…how on earth **you** say this out loud" plus "**black**" from the
+product's own name) tripped `findHeroEmbedMismatches` against an entirely unrelated catalog SKU,
+"Me You Us Rechargeable Silicone Wand Massager Black" — `distinctiveTokens()` reduces that title to
+exactly `["you", "black"]` (neither word is in `GENERIC_TOKENS`), and both happened to appear
+together in the hero copy by coincidence, not because the hero named that product. Fixed by
+rephrasing "how on earth **you** say this out loud" → "how on earth **to** say this out loud" in
+both the prompt and re-checking the alt text for the same stray token; re-upload with the corrected
+copy cleared `check-hero-embed-match.ts` clean. Flagging as a code-level false-positive risk (any
+two-word catalog title reducible to common English words like "you"/"black"/"us" is one coincidental
+phrase away from a false mismatch) rather than something every future hero-copy pass can be
+expected to catch by eye.
+
+Three rounds, 6 candidates total (all via Atlas one-stage composite), well inside the content-team
+daily image budget. `heroImage`, `heroImageAlt`, and `imagePrompt` all set on the **draft** doc
+(`drafts.blogPost-how-do-you-bring-up-a-fantasy-with-a-partner`); post not published.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
