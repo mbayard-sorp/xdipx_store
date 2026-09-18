@@ -102,8 +102,12 @@ file a suggestion.
 Found → today's post is the podcast review (content-plan §8A shape): patch the brief
 `status:'drafted'` immediately (idempotent claim), carry its takeaways, agree/pushback angles,
 `productAngles` (stock-verified before embedding), `suggestedTitle`, and episode URL into Step 4,
-and use category `blogCategory-podcast-notes`. None pending → fall back to a care post and note it
-in the retro.
+and use category `blogCategory-podcast-notes`. **Before concluding none pending, re-run the same
+query against the raw perspective**: a brief that was `createIfNotExists`-ed but never
+`publish_documents`-ed sits `pending` on raw while invisible on published, which is exactly what
+stranded a complete brief for a day (ticket #9934). If raw turns up a stranded pending brief,
+`publish_documents` it now and claim it as today's topic before falling back to a care post. Only
+when raw is also empty → fall back to a care post and note it in the retro.
 
 **Real Talk days (Tue/Fri):** pick the next unwritten topic from content-plan §8B (or a queued
 brief that fits the problem→resolution shape), and write to the §8B structure — essay-shaped
@@ -357,6 +361,14 @@ REVISE:
   documented pre-flight had already passed clean. As with every shape above, the fix is narrowing or
   deletion, never a hedge — run 649 resolved its instance by deletion and both gates confirmed the
   result.
+- a **conditional claim from a named source, restated without its condition** — the source says X
+  is true *when* Y, and the draft states X unconditionally. Not limited to specs: it applies to
+  any claim traced to a named source, including a behavioural or psychological one, and it is
+  invisible to every bullet above because nothing in it is quantified, superlative, or numeric
+  (run 925, second occurrence after run 466's IPX7 line). For every claim attributed to a named
+  source, quote the source's own sentence next to the draft's sentence before submit, and check
+  whether the source's sentence carries a `when`, an `if`, or an `as long as` that the draft's
+  does not.
 
 The accuracy gate (`sex-wellness-reviewer`) returned REVISE on first submit in four consecutive
 daily-writer runs (466, 485, 502, 523), and every one resolved the same way — by narrowing or
@@ -448,6 +460,12 @@ not captured on upload, so a bad hero can never be retro'd), a hero that names a
 post does not embed, and the inverse the older audit is blind to, a post that carries embeds while its
 hero names no catalog product at all. Resolve each by regenerating or re-uploading the hero with an
 explicit `--prompt` that depicts a product the article is actually about, not by loosening the check.
+
+**`--upload` must repeat `--prompt`.** `gen-notebook-art.ts --upload` called without `--prompt`
+silently overwrites `imagePrompt` with the generic `SURFACES[hero].defaultPrompt` — non-empty, so
+it passes this checker clean while destroying the exact record #2750 exists to protect (ticket
+#9369). Always repeat the same `--prompt` used at generation time on the upload call; the
+script-side fix (preserve-or-refuse without `--prompt`) is still open.
 
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
