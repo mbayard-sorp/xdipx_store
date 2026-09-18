@@ -508,13 +508,35 @@ export async function upsertAnnouncementBar(messages: AnnouncementMessage[]): Pr
   const client = getClient(true)
   if (!client) throw new Error('Sanity not configured')
   await client.createIfNotExists({ _id: 'singleton.homepage', _type: 'homepageSections', sections: [] })
-  await client
-    .patch('singleton.homepage')
-    .setIfMissing({ sections: [] })
-    .set({
-      'sections[_type=="announcementBar"].messages': messages,
-    })
-    .commit()
+  // A filtered-path `.set()` is a silent no-op when no `announcementBar` block
+  // already exists in `sections[]`, so check first and insert when it's missing
+  // instead of only ever patching a block that may not be there (#9891).
+  const existing = await client.fetch<{ _key: string } | null>(
+    `*[_id == "singleton.homepage"][0].sections[_type == "announcementBar"][0]{_key}`
+  )
+  if (existing?._key) {
+    await client
+      .patch('singleton.homepage')
+      .set({
+        'sections[_type=="announcementBar"].messages': messages,
+        'sections[_type=="announcementBar"].active': true,
+      })
+      .commit()
+  } else {
+    await client
+      .patch('singleton.homepage')
+      .setIfMissing({ sections: [] })
+      .append('sections', [{
+        _type: 'announcementBar',
+        _key: `announcementBar-${Date.now()}`,
+        active: true,
+        order: 0,
+        messages,
+        rotationIntervalMs: 4000,
+        bgStyle: 'charcoal',
+      }])
+      .commit()
+  }
   invalidateCache('sanity:homepage')
 }
 
