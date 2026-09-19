@@ -15,6 +15,15 @@
  * limbs), recorded onto the asset's `social_media_assets` row so the publish
  * gate can refuse to PASS a draft whose media has no recorded verdict.
  *
+ * Extended (ticket #10268) with three imagery-ceiling checks: nippleOccluded,
+ * genitaliaAbsent, adultUnambiguous. The original four checks alone let a
+ * bare torso or hip crop with no hands in frame pass trivially, so nothing
+ * in the unattended path ever asked whether a generated frame stayed inside
+ * docs/design-doctrine.md section 3.2a's exposure ceiling. Two owner-preview
+ * generations broke that fence (full nudity) without the prompt ever asking
+ * for it, which is why the check has to live on the produced pixels rather
+ * than on prompt wording.
+ *
  * FAILS CLOSED throughout, matching social-publish-gate.server.ts's own
  * contract: a fetch that fails, a model call that errors, or a response that
  * does not parse as the expected shape all produce a FAILING verdict, never
@@ -24,7 +33,7 @@
  * Reused (ticket #8691) by the Notebook hero generation path
  * (scripts/gen-notebook-art.ts) via `runVisionGateOnImage`, the buffer-based
  * core `runVisionGate` itself delegates to: that path holds a local,
- * not-yet-uploaded candidate buffer rather than a live url, but the same four
+ * not-yet-uploaded candidate buffer rather than a live url, but the same
  * doctrine checks apply, so it calls the same checks directly instead of
  * forking a second implementation.
  */
@@ -34,18 +43,31 @@ import { socialMediaAssets } from '../../db/schema'
 import { SONNET } from './models.server'
 import { stripUrlQuery } from './social-asset-library.server'
 
-/** The doctrine's hard checks (docs/design-doctrine.md:224), one verdict each. */
+/**
+ * The doctrine's hard checks (docs/design-doctrine.md:224) plus the imagery-ceiling
+ * checks added by ticket #10268: the original four catch anatomy defects, but nothing
+ * checked whether a generated frame stayed inside section 3.2a's exposure ceiling.
+ * A torso crop with no hands in it passed every anatomy check trivially, so two
+ * owner-preview generations this session broke the fence (full nudity) without the
+ * prompt ever asking for it.
+ */
 export type VisionCheckName =
   | 'limbCount'
   | 'handAnatomy'
   | 'faceBodyIntegrity'
   | 'extraOrMergedLimbs'
+  | 'nippleOccluded'
+  | 'genitaliaAbsent'
+  | 'adultUnambiguous'
 
 export const VISION_CHECK_NAMES: readonly VisionCheckName[] = [
   'limbCount',
   'handAnatomy',
   'faceBodyIntegrity',
   'extraOrMergedLimbs',
+  'nippleOccluded',
+  'genitaliaAbsent',
+  'adultUnambiguous',
 ]
 
 export interface VisionVerdict {
@@ -90,17 +112,20 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   return true
 }
 
-const VISION_SYSTEM_PROMPT = `You are a strict anatomy QA reviewer for AI-generated marketing imagery. You will be shown one image. Check ONLY these four things, matching docs/design-doctrine.md's vision-gate hard check:
+const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check ONLY these seven things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks:
 
 1. limbCount: every person or hand visible has the correct, anatomically normal number of limbs (two arms, two legs per full figure shown).
 2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused or missing digits.
 3. faceBodyIntegrity: faces and bodies are coherent, not warped, duplicated, or melted together.
 4. extraOrMergedLimbs: no extra, duplicated, or merged limbs anywhere in the frame (including partially visible limbs at the edge of frame).
+5. nippleOccluded: no nipple or areola is visible or outlined anywhere in frame, including through sheer or wet fabric. Fail if any nipple or areola is visible or outlined.
+6. genitaliaAbsent: no labia or penis is visible or outlined, no product is depicted in contact with genitalia, and no fluid is depicted on or near genitalia. Fail if any of these is present.
+7. adultUnambiguous: the depicted person, if any, is unambiguously an adult. Judge this on ambiguity, not on apparent intent, and judge it explicitly even on a faceless body crop where the usual facial age markers are absent. Fail (do not pass) if there is any genuine uncertainty about adulthood.
 
 Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail"}
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail"}
 
-"pass" is true only when all four checks are "pass". If the image has no visible people or hands at all (a product-only shot), every check passes trivially and "pass" is true. When in doubt about a genuine anatomy defect, fail the check; this gate exists specifically to catch what a fast human scroll would catch.`
+"pass" is true only when all seven checks are "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-7 still apply to any depicted skin or body part even without hands or a face. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not.`
 
 export interface VisionGateDeps {
   fetchImageBase64?: (url: string) => Promise<{ data: string; mediaType: string }>

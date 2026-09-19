@@ -15,14 +15,72 @@ import {
 
 const CLEAN_RESPONSE = {
   pass: true,
-  checks: { limbCount: 'pass', handAnatomy: 'pass', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'pass' },
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    adultUnambiguous: 'pass',
+  },
   notes: 'clean, nothing anomalous',
 }
 
 const ANATOMY_FAIL_RESPONSE = {
   pass: false,
-  checks: { limbCount: 'fail', handAnatomy: 'fail', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'fail' },
+  checks: {
+    limbCount: 'fail',
+    handAnatomy: 'fail',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'fail',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    adultUnambiguous: 'pass',
+  },
   notes: 'the cast member has three arms',
+}
+
+const NIPPLE_FAIL_RESPONSE = {
+  pass: false,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'fail',
+    genitaliaAbsent: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'nipple visible through wet fabric, top edge of frame',
+}
+
+const GENITALIA_FAIL_RESPONSE = {
+  pass: false,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'fail',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'genitalia visible, crop ran wider than requested',
+}
+
+const AGE_AMBIGUOUS_FAIL_RESPONSE = {
+  pass: false,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    adultUnambiguous: 'fail',
+  },
+  notes: 'faceless torso crop, no reliable adult age markers visible',
 }
 
 function deps(over: Partial<VisionGateDeps> = {}): VisionGateDeps {
@@ -61,8 +119,16 @@ describe('isValidVerdictShape', () => {
     expect(isValidVerdictShape('pass')).toBe(false)
   })
 
-  it('lists all four doctrine hard checks', () => {
-    expect(VISION_CHECK_NAMES).toEqual(['limbCount', 'handAnatomy', 'faceBodyIntegrity', 'extraOrMergedLimbs'])
+  it('lists the four doctrine hard checks plus the three imagery-ceiling checks', () => {
+    expect(VISION_CHECK_NAMES).toEqual([
+      'limbCount',
+      'handAnatomy',
+      'faceBodyIntegrity',
+      'extraOrMergedLimbs',
+      'nippleOccluded',
+      'genitaliaAbsent',
+      'adultUnambiguous',
+    ])
   })
 })
 
@@ -84,6 +150,36 @@ describe('runVisionGate', () => {
     expect(verdict.notes).toContain('three arms')
     // A genuine anatomy read, not a check that failed to run — ticket #8830
     // callers must still bill this one.
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  // Ticket #10268: imagery-ceiling checks. A torso/hip crop with no hands in
+  // frame passed every original check trivially; these three catch what the
+  // anatomy checks structurally cannot.
+  it('rejects a frame with a visible nipple', async () => {
+    const d = deps({ callVision: vi.fn(async () => NIPPLE_FAIL_RESPONSE) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/onskin.jpg', d)
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checks.nippleOccluded).toBe('fail')
+    expect(verdict.notes).toContain('nipple')
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  it('rejects a frame with visible genitalia', async () => {
+    const d = deps({ callVision: vi.fn(async () => GENITALIA_FAIL_RESPONSE) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/onskin.jpg', d)
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checks.genitaliaAbsent).toBe('fail')
+    expect(verdict.notes).toContain('genitalia')
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  it('rejects a faceless body crop with ambiguous adult age markers', async () => {
+    const d = deps({ callVision: vi.fn(async () => AGE_AMBIGUOUS_FAIL_RESPONSE) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/onskin.jpg', d)
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checks.adultUnambiguous).toBe('fail')
+    expect(verdict.notes).toContain('age markers')
     expect(verdict.checkCompleted).toBe(true)
   })
 
