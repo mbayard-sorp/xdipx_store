@@ -208,6 +208,19 @@ said nothing.
 - **Wardrobe and skin.** Per the owner's list above. Lingerie, a thong, tiny high-cut bottoms, an
   open shirt, or nothing above the waist with the nipple covered. Bare back, stomach, legs,
   shoulders, cleavage, buttocks. Fabric is opaque where it covers the nipple or the labia.
+  **On-skin frames (owner direction 2026-09-19, §3.2c) carry no clothing at all.** Owner, verbatim:
+  *"no clothes on any of the bodies. No underwear or bras. Jewelry is ok."* For those frames the
+  body is bare, fine jewelry is licensed and encouraged, and the occluder is the crop, the pose, a
+  hand or forearm, the hair, a sheet edge, or the product. Bedding is not clothing and stays
+  available. Breast presence is the default on any on-skin chest or torso frame, not the exception:
+  the owner's dominant note across 18 reviewed frames was *"as much breast as possible, but no
+  nipple"*, *"the tops of her breasts"*, *"bottom of breasts"*, *"cleavage"*. A chest frame that
+  crops the breasts out entirely has under-delivered and is a REVISE. The stop list below does not
+  move. **State plainly what this costs:** wardrobe was the visible evidence of compliance to a
+  HUMAN reviewer, a thong reads as a lingerie campaign, and a bare body with a product at the right
+  line reads as nothing until the reviewer decides. Exposure rises deliberately. The removal watcher
+  (ticket #2741) and the step-down ladder in `docs/ads-policy.md` are more load-bearing from the
+  first on-skin post, and the first removal on one is the signal this latitude was priced wrong.
 - **Beds and posture.** On or in a bed. Arched, prone, tangled in sheets, gripping fabric. Aftermath
   and anticipation are both licensed: the quiet after, the reach toward, the unopened box.
 - **Product against a body.** The product may touch or rest on skin: collarbone, sternum, stomach,
@@ -256,7 +269,18 @@ those the same number. At 3 or 4 posts a day a 13-day campaign is 39 to 56 posts
 "4 of 14 per campaign" silently stops meaning anything. So read every proportion in this document as
 a **rolling window over the most recent posts**, never as a per-campaign total:
 
-- **Charge:** roughly 4 ceiling, 2 mid, 1 educational per rolling 7.
+- **Charge:** roughly 4 ceiling, 2 mid, 1 educational per rolling 7. **Do not re-base these
+  numbers again.** They have been re-based three times in five weeks (2/3/2, 3/3/1, 4/2/1) while
+  the measured output moved the other way, and on 2026-09-19 the last 21 posted held 1 ceiling
+  frame against the ~12 this ratio implies. A target that has never once been run is not evidence
+  the target is wrong. What the on-skin treatment changes is what **mid** means, and for the first
+  time it gets a positive definition rather than "not the ceiling":
+  **Ceiling on-skin** = a bare contact zone in implied-nude territory: hip hollow, small of the
+  back to the dimples, sternum with the breasts bare, stomach to the navel.
+  **Mid on-skin** = a contact zone that reads clothed-adjacent even while bare: inner wrist,
+  forearm, nape with the hair lifted, behind the knee, the back of a shoulder. Real contact, real
+  charge, a frame a perfume campaign could run.
+  **Educational** stays the quiet one. It is the only frame that may be.
 - **Cast:** at most 4 cast frames per rolling 14. The cap is on repetition of the same face, not on
   frames-per-day: no single cast member appears in more than 2 of any 5 consecutive cast frames,
   mirroring the §3.7 product-post rotation floor ("no cast member carries more than 2 of any 5
@@ -268,10 +292,39 @@ a **rolling window over the most recent posts**, never as a per-campaign total:
   faces in one campaign; that one is about identity, not frequency, and it does not re-base.
 - **Product-forward:** at most half of any single day's set, per `mission-brief.md` §6b.
 
-**State the garment in every prompt regardless.** Not a restriction, a fidelity rule: the model
-inherits the reference photo's neckline when you leave it unsaid, so an unstated wardrobe is an
-accidental one rather than a chosen one. At least one approved cast reference has a deep V, and the
-2026-08-13 bralette was not asked for by the brief that produced it.
+**State the garment in every prompt regardless, and for an on-skin frame state what CLOSES the
+frame instead.** The garment rule is a fidelity rule, not a restriction: the model inherits the
+reference photo's neckline when you leave it unsaid, so an unstated wardrobe is an accidental one
+rather than a chosen one. At least one approved cast reference has a deep V, and the 2026-08-13
+bralette was not asked for by the brief that produced it. An on-skin frame has no garment to state,
+so the brief states what is outside the crop and which drawn object closes each edge. Worked
+example that verifiably held: *"bare, no clothing anywhere in the picture, fine gold chain at the
+throat; the frame is filled by throat, collarbones and breastbone and her shoulder closes it at the
+bottom edge."* Three rules came out of 40 measured frames on 2026-09-19, and they are binding on
+every brief:
+
+- **Write the frame, never the exclusion.** Describing what is EXCLUDED (*"everything above that
+  line is out of frame"*, *"cuts across so only the lower half is included"*) makes the model
+  render a nude WIDE shot, reliably, in every attempt tested. Describe positively what FILLS the
+  frame and name the body part or object that CLOSES it.
+- **An inanimate closer holds; a limb described by region does not.** A folded sheet or towel
+  drawn across the hips closed the bottom edge cleanly in every frame that used one (5 of 5). A
+  forearm described as *"lying across her chest"* covered the nipples in 0 of 4, because that names
+  a region and the model puts the arm somewhere else that is anatomically plausible. Where a limb
+  DID hold it was performing an action only possible at that exact spot: arms crossed tight, a hand
+  cupping from below, a second person's hand pressing an object, a pastie adhered. Name the action,
+  not the region, or use an object.
+- **The camera angle decides more than the wording.** Every fence breach on a breast-in-frame
+  brief (6 of 6) shared one composition: the subject supine, the camera above, both breasts in the
+  picture. In that pose the breasts separate and the model fills the gap with the limb instead of
+  covering. Every frame that held was seated, kneeling, side-lying with one breast, or two-person.
+  Do not brief the supine-from-above composition with breasts in frame; change the camera, not
+  the sentence.
+
+None of these three substitutes for a check on the produced pixels. Across 24 frames the fence
+breach rate was roughly 29 percent and it rose whenever the brief asked for more skin. Ticket
+#10268 adds nipple, genitalia, adulthood and legible-text checks to `social-vision-gate.server.ts`,
+and until it is live no on-skin frame ships to Instagram unattended.
 
 **"Desire-forward" means the picture and the caption, since 2026-08-22.** Owner direction
 2026-08-16 asked for posts that are *"desire forward and product highlighting"*; on 2026-08-22 the
@@ -315,6 +368,99 @@ skip the plate. Cap cast per the rolling window in §3.2b (at most 4 cast frames
 never more than one in a day), and never run three or more faces in one campaign. This used to read
 "4 of 14 posts, which the 7-beat spine does automatically", which was true only while a campaign was
 14 posts long; at a multi-post slate the spine no longer does it for you and the window is the rule.
+
+### 3.2c The on-skin treatment (owner direction 2026-09-19)
+
+Owner, verbatim: *"Our posts are starting to get boring. Almost like we are regressing to boring
+and not staying on the edge of what's allowed to create curiosity and desire... products against
+skin on the body. I want to see the edges of breasts, the pubic mounds, bellies, backs, butt cheeks.
+No full nudity, but the suggestion that the subject is nude is what I want. These are close up
+shots, they are not wide body shots... Could be with a hand holding it in place."*
+
+**This is not new licence.** It is the third bullet of §3.2a, which calls product-against-a-body
+"the single biggest unlock in this ruling", read out loud. Measured across all 152 Instagram rows
+on 2026-09-19: sternum 0, hip hollow 0, small of the back 0, inner wrist 0, stomach-as-contact 0.
+"Collarbone" appeared five times and not one was a contact frame. The licence had been briefed
+zero times in the account's history. The root cause is structural and it is named here so the
+section change holds: the gate has a BLOCK and no BORING. Too hot costs a post; too cold costs
+nothing anyone measures. Under that gradient a run retreats every day. Ticket #10271 puts the
+rolling mix on the page so cold is at least visible.
+
+**What an on-skin frame is.** A close crop with a product in contact with bare skin at a named
+body zone, resting under its own weight. The cast member's body is the location. Three variety
+axes replace the room when the crop eats it, and they rotate the way §3.8 rotates locations:
+
+- **Body zone**: hip hollow, sternum, nape, small of the back, inner wrist, forearm, stomach, top
+  of thigh, behind the knee, shoulder blade, ankle. **No zone repeats inside 5 consecutive on-skin
+  frames, judged on the visible zone, not the label.** Four anal or prostate products in a set of
+  nine is four gluteal frames if shot naively; the window is what stops that.
+- **Contact mode**: resting, held by the subject, pressed by a second person's hand, drawn along
+  the skin, worn, balanced against the body's own curve.
+- **Crop scale**: macro, close, medium. With clothing gone the wardrobe edge is gone as a location
+  proxy, so the trace of the world comes from the sheet, the surface, the hour of the light, or a
+  second body, and the brief names which.
+
+**The cap, a merchandising rule before a safety one.** At most 3 close crops per rolling 7
+Instagram product posts, never two consecutive, and at least one ceiling frame per rolling 7 wide
+enough to read a location. Ten tight crops of bare skin is a stock library and fails the standing
+bar ("someone scrolling the last ten posts sees ten different lives"). It is also the aggregate
+read that gets an account actioned rather than a post.
+
+**Placement follows use, or it is a product on a person.** The owner's test: *"Have the team
+evaluate how to best place these based on how they are used."* A heavy steel plug goes in a palm,
+because weight is the product and weight is only legible when something carries it. Graduated
+beads go along the spine, because the spine is the body's own graduated column and gives absolute
+scale. A hands-free prostate massager is briefed by what the hands are doing instead. A lipstick
+bullet goes at the collarbone, not the wrist, because the disguise is what people buy. Pasties go
+on the nipples, and they are the one product whose use zone and licensed placement are the same
+place: the stop list's test is "no nipple visible" and a pastie satisfies it BY being the product.
+A vibrator over a nipple is not settled by that and stays an owner question.
+
+**Brief craft, from the owner's review of 40 frames on 2026-09-19. Binding.**
+
+- **The product rests.** *"the toy should be resting, it looks like it's pushing into the skin."*
+  It settles where it was set down. It never presses, dents or pushes into skin.
+- **No product emerging from a navel.** The model does this unprompted and did it twice. Name it as
+  a negative in every belly frame.
+- **Anatomy is a reject condition.** *"a lot of body distortion. Belly button on a back."* One
+  navel, on the front, only. Correct limbs and fingers, no merged or duplicated parts.
+- **Only depict products we sell, in a zone where one plausibly belongs.** *"good use of close up
+  neck shot and holding a toy. However we don't sell any neck massagers."* Pair every body zone
+  with a catalog category before briefing it. The nape is retired until a SKU fits it.
+- **Only brief from a bare-product reference.** Shopify `featuredMedia` is sometimes the retail
+  carton. SKU 96203 has the box as image A and the product as image B; passing A made the model
+  reconstruct the toy from box art and invent a stalk and club that do not exist. Walk the media
+  list for a text-free bare-product frame. Never assume the featured image is one.
+- **Plug placement.** Owner, twice: *"lay the plug between the butt cheeks."* Licensed. It is the
+  highest-classifier-signal frame in the campaign because it reads as product-positioned-for-use
+  on a bare rear. Ceiling tier, at most one per rolling 7, and the first frame to drop if the
+  removal watcher fires. The lower-back placement above the cleft, with a folded towel closing the
+  frame at the top of the buttocks, is the safer default and it held cleanly.
+- **Two cast members in frame.** *"love the use of having multiple people in the shot. More like
+  this."* Raised from permitted to preferred on ceiling frames. A cast member's hand pressing the
+  product to another's skin is also the most reliable occluder we have.
+- **Cock ring.** The use zone is an unconditional stop, so the frame is the hand-off: a woman's
+  hand pressing the ring flat to a man's lower belly above a folded sheet, his hand over her wrist.
+  The argument is that she is sharing it with him. No cast shadow reading as a penis: §3.2a stops
+  "a penis, in any state, visible or outlined", and a deliberate shadow is an outline.
+- **Paddle.** Shootable. Violence comes from three removable things: a raised implement, a gripped
+  handle, a mark on skin. Hand flat on the paddle FACE, never the handle; across the lap, at her
+  side, or in a relaxed hand; no marks, so aftermath is closed. A paddle is a held object, not a
+  restraint, and it is nearer a hairbrush than a cuff in what the frame says.
+- **Brand names on real products are fine.** Owner, verbatim: *"Showing brand names is OK when we
+  are placing actual products."* Packaging junk (barcodes, labels, cartons) and baked-in captions
+  stay out. The three-case rule lives in `docs/design-doctrine.md` §4 item 4.
+- **Ban the word "paper" from image prompts.** The brand token name renders as literal sheets of
+  paper: a prop in 4 of 7 frames before the ban, 0 of 33 after. Say "warm off-white linen".
+
+**Surfaces.** Instagram and X share one imagery fence until X can label sensitive media. The
+posting path (`postTweet` in `app/lib/twitter.server.ts`) sends text and media ids only; X permits
+the category on condition of labeling; we cannot label; therefore nothing on X may need it.
+Ticket #10277. A frame drafted hotter for X manufactures a row the gate blocks.
+
+**Still owner-only, not licensed here:** a pleasure product covering a nipple (the specialists
+split, and only the owner resolves it); a product covering a vulva (both specialists BLOCK: §3.2a's
+"product against genitalia" is a contact rule with no covering exception).
 
 ### 3.3 Carousel arc: six slides
 
@@ -467,6 +613,20 @@ talking about these products*, not as a catalogue. That premise is the test to a
 is technically compliant but feels wrong: would this read as a person with a life, or as a product
 listing with a human decoration attached?
 
+**An on-skin close crop is a cast member in a scene only when all three hold (owner direction
+2026-09-19, §3.2c).** A faceless bare hip is a cast member's skin, not a cast member in a scene,
+and it has no identity anchor the system can verify. So the frame satisfies this rule when: (a) it
+is generated from that cast member's approved BODY reference and the `castSlug` on the row names
+them (ticket #10270 adds the reference; until it lands, the model invents the skin tone and "use our
+cast members' skin tones" has nothing behind it); (b) it carries an **adult identity marker** inside
+the crop: the face, a hand, a tattoo, jewellery, body hair, or the second cast member; and (c) it
+carries a trace of the life around it: the hour of the light, a sheet or surface entering frame, or
+a second person. Skin and product alone, with no face, no adult marker and no edge of a world, is a
+plate with skin in it and not a publishable lead. Clause (b) is load-bearing and gets more so with
+clothing gone: ticket #7727 recorded three independent age-ambiguity BLOCKs in one day on exactly
+this chest-up framing, and the rule is judged on ambiguity, not intent. Jewellery, which the owner
+has licensed, is the cheapest adult marker available; use it deliberately.
+
 **When the model will not hold the product, use the packshot on a card (owner catch 2026-08-22).** Four plate renders of the Womanizer Classic 2 in a row invented a white body, then a stylus tip, with the packshot passed as reference and the defect named in the prompt; negations do not hold on the current provider. The fallback for a product slide is the real Shopify packshot composited onto a brand card (kicker, one line, XDIPX, slide counter) by `scripts/generate-slate-carousel-slides.ts` kind `packshot`. It is generated social art under a `social-` filename, so provenance passes, and it is the one representation that cannot drift. Reach for it after the second failed plate, not the fifth.
 
 **Solo product shot: licensed, as slide 2, and it must still be generated art.** A product-only
@@ -559,11 +719,30 @@ time it was tried (rows 236, 249, 250, 261, 262). This is a §3.9 subject-not-ve
 not an exception to it: the subject (what the product does, felt on skin) is still depicted, just
 without a bottle render that risks a wordmark BLOCK.
 
-**Default rule: for a lube-category Instagram or X post, prefer the macro/hands-and-strand no-bottle
-treatment over a branded bottle render**, especially for any SKU on the wordmark-risk list
-(`routine-social-daily.md` Step 5). Reach for a branded bottle frame only when the post specifically
-needs to establish or reinforce brand/SKU identity (a new-arrival or brand-partner post) and the SKU is
-not on the wordmark-risk list.
+**Default rule, restated 2026-09-19 as the constraint rather than the technique: a lube-category
+Instagram or X post carries no legible packaging junk and no invented product body.** That was
+always the protection; "no bottle" was one technique that achieved it, and writing the technique
+as the default made it a floor a tired run never left, which is how seven consecutive lube posts
+became the same photograph. Owner, on a glide-on-belly frame: *"ideally we show the bottle of lube
+in a shot like this."* Three treatments satisfy the constraint, in preference order:
+
+1. **A real bottle resting on skin**, lying on its side in the hollow of the waist or on the flat
+   of the stomach, label foreshortened and partly occluded by the contact, colour and silhouette
+   stated from the packshot. A brand mark on the bottle is fine (owner ruling, §3.2c); a barcode or
+   printed panel is not, and the prompt negative does not reliably stop it, so the legible-text
+   report in the vision gate (ticket #10268) is the control.
+2. **Product-on-skin with no bottle**: glide on a stomach, a hip, the inside of a forearm, held
+   between a thumb and the skin.
+3. **Hands-and-strand macro with no bottle.** The observed-safe technique of September 2026, now
+   the fallback rather than the first choice.
+
+**No lube treatment repeats on two consecutive lube posts.** Seven of seven happened because
+nothing forbade seven of seven.
+
+**Fluid crop floor, a fence not a preference.** A frame with fluid on skin ends at or above the
+navel and never includes the pubic area. A bare stomach with glide on it and the pubic line in
+shot is "fluid on or near genitalia" on §3.2a's stop list, and it was the one frame of eight that
+had to be rejected the day this rule was written.
 
 ### 3.8 Scene and location variety, and how it is kept honest
 
