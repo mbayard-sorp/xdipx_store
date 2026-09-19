@@ -2709,6 +2709,13 @@ export interface DraftSocialPostInput {
   // posts legitimately carry neither).
   sceneLocation?: string | undefined
   castSlugs?: string[] | undefined
+  // Scene variety tracking, part 2 (migration 099, ticket #10269). Sibling
+  // fields to sceneLocation, same optionality: not every post is a
+  // cast/location shoot, and only the on-skin campaign's crops carry a
+  // body zone, contact mode, or crop scale at all.
+  bodyZone?: string | undefined
+  contactMode?: string | undefined
+  cropScale?: string | undefined
 }
 
 /** Review states a still-open draft can sit in before the gate or the owner
@@ -2787,6 +2794,9 @@ export async function createDraftSocialPost(
       subject:       p.subject ?? null,
       sceneLocation: p.sceneLocation ?? null,
       castSlugs:     p.castSlugs ?? null,
+      bodyZone:      p.bodyZone ?? null,
+      contactMode:   p.contactMode ?? null,
+      cropScale:     p.cropScale ?? null,
     })
     .returning({ id: socialPosts.id })
   return { id: row!.id, deduped: false }
