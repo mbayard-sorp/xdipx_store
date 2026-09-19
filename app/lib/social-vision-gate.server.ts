@@ -15,6 +15,23 @@
  * limbs), recorded onto the asset's `social_media_assets` row so the publish
  * gate can refuse to PASS a draft whose media has no recorded verdict.
  *
+ * Extended (ticket #10268) with three imagery-ceiling checks: nippleOccluded,
+ * genitaliaAbsent, adultUnambiguous. The original four checks alone let a
+ * bare torso or hip crop with no hands in frame pass trivially, so nothing
+ * in the unattended path ever asked whether a generated frame stayed inside
+ * docs/design-doctrine.md section 3.2a's exposure ceiling. Two owner-preview
+ * generations broke that fence (full nudity) without the prompt ever asking
+ * for it, which is why the check has to live on the produced pixels rather
+ * than on prompt wording.
+ *
+ * Extended again (ticket #10279) with `legibleText`, a REPORT field rather
+ * than a pass/fail check: it never gates `pass`. The owner ruled a
+ * manufacturer's brand mark on a product we genuinely stock and feature is
+ * fine, while packaging junk (barcodes, shipping labels, printed ingredient
+ * paragraphs) and baked-in caption/watermark text are not, and that is a
+ * policy call this module has no business making per-SKU. So the gate transcribes
+ * whatever text it finds and leaves the pass/fail judgment to the caller.
+ *
  * FAILS CLOSED throughout, matching social-publish-gate.server.ts's own
  * contract: a fetch that fails, a model call that errors, or a response that
  * does not parse as the expected shape all produce a FAILING verdict, never
@@ -24,7 +41,7 @@
  * Reused (ticket #8691) by the Notebook hero generation path
  * (scripts/gen-notebook-art.ts) via `runVisionGateOnImage`, the buffer-based
  * core `runVisionGate` itself delegates to: that path holds a local,
- * not-yet-uploaded candidate buffer rather than a live url, but the same four
+ * not-yet-uploaded candidate buffer rather than a live url, but the same
  * doctrine checks apply, so it calls the same checks directly instead of
  * forking a second implementation.
  */
@@ -34,18 +51,31 @@ import { socialMediaAssets } from '../../db/schema'
 import { SONNET } from './models.server'
 import { stripUrlQuery } from './social-asset-library.server'
 
-/** The doctrine's hard checks (docs/design-doctrine.md:224), one verdict each. */
+/**
+ * The doctrine's hard checks (docs/design-doctrine.md:224) plus the imagery-ceiling
+ * checks added by ticket #10268: the original four catch anatomy defects, but nothing
+ * checked whether a generated frame stayed inside section 3.2a's exposure ceiling.
+ * A torso crop with no hands in it passed every anatomy check trivially, so two
+ * owner-preview generations this session broke the fence (full nudity) without the
+ * prompt ever asking for it.
+ */
 export type VisionCheckName =
   | 'limbCount'
   | 'handAnatomy'
   | 'faceBodyIntegrity'
   | 'extraOrMergedLimbs'
+  | 'nippleOccluded'
+  | 'genitaliaAbsent'
+  | 'adultUnambiguous'
 
 export const VISION_CHECK_NAMES: readonly VisionCheckName[] = [
   'limbCount',
   'handAnatomy',
   'faceBodyIntegrity',
   'extraOrMergedLimbs',
+  'nippleOccluded',
+  'genitaliaAbsent',
+  'adultUnambiguous',
 ]
 
 export interface VisionVerdict {
@@ -66,13 +96,26 @@ export interface VisionVerdict {
    * was evaluated, let alone kept).
    */
   checkCompleted: boolean
+  /**
+   * Ticket #10279: transcription of any legible text, wordmark, barcode, or
+   * label found anywhere in the frame, or `''` when the check ran and found
+   * none. This is a REPORT field, not a check: it never participates in
+   * `pass` and has no entry in `checks`. The owner ruled a brand mark on a
+   * product we genuinely stock and feature is fine, but packaging junk
+   * (barcodes, shipping labels, printed ingredient text) and baked-in
+   * caption/watermark text are not, and that is a per-case policy call this
+   * gate cannot make, so it surfaces what it read and leaves pass/fail to
+   * the caller. `null` means the check never ran at all (the fail-closed
+   * path, same distinction `checkCompleted` draws for the pass/fail checks).
+   */
+  legibleText: string | null
 }
 
 /** A verdict that fails every check, used whenever the check could not run at all. */
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
-  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false }
+  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null }
 }
 
 /** Structural validation of a parsed model response before it is trusted as a verdict. */
@@ -87,20 +130,30 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   for (const name of VISION_CHECK_NAMES) {
     if (c[name] !== 'pass' && c[name] !== 'fail') return false
   }
+  // Ticket #10279: legibleText is a report field, not a check, but a real
+  // model response must always carry it as a string (possibly ''). A
+  // response missing it, or carrying the wrong type, did not follow the
+  // expected shape and fails closed like any other malformed response.
+  if (typeof o['legibleText'] !== 'string') return false
   return true
 }
 
-const VISION_SYSTEM_PROMPT = `You are a strict anatomy QA reviewer for AI-generated marketing imagery. You will be shown one image. Check ONLY these four things, matching docs/design-doctrine.md's vision-gate hard check:
+const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these seven things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS one report-only item at the end:
 
 1. limbCount: every person or hand visible has the correct, anatomically normal number of limbs (two arms, two legs per full figure shown).
 2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused or missing digits.
 3. faceBodyIntegrity: faces and bodies are coherent, not warped, duplicated, or melted together.
 4. extraOrMergedLimbs: no extra, duplicated, or merged limbs anywhere in the frame (including partially visible limbs at the edge of frame).
+5. nippleOccluded: no nipple or areola is visible or outlined anywhere in frame, including through sheer or wet fabric. Fail if any nipple or areola is visible or outlined.
+6. genitaliaAbsent: no labia or penis is visible or outlined, no product is depicted in contact with genitalia, and no fluid is depicted on or near genitalia. Fail if any of these is present.
+7. adultUnambiguous: the depicted person, if any, is unambiguously an adult. Judge this on ambiguity, not on apparent intent, and judge it explicitly even on a faceless body crop where the usual facial age markers are absent. Fail (do not pass) if there is any genuine uncertainty about adulthood.
+
+REPORT ONLY, not a check, does not affect "pass": legibleText. Read the whole frame for any legible text: brand wordmarks, barcodes, shipping labels, printed ingredient text, captions, watermarks, anything with readable letters or numbers. Transcribe everything legible into one string, or return "" if there is none. Never judge whether the text is acceptable; that is a policy decision made elsewhere with more context than you have (for example a manufacturer's wordmark on a product actually being sold is allowed, while a barcode or shipping label is not, and you cannot tell those apart from pixels alone in every case). Just report what you read.
 
 Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail"}
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>"}
 
-"pass" is true only when all four checks are "pass". If the image has no visible people or hands at all (a product-only shot), every check passes trivially and "pass" is true. When in doubt about a genuine anatomy defect, fail the check; this gate exists specifically to catch what a fast human scroll would catch.`
+"pass" is true only when all seven checks in "checks" are "pass"; "legibleText" never affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-7 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is "".`
 
 export interface VisionGateDeps {
   fetchImageBase64?: (url: string) => Promise<{ data: string; mediaType: string }>

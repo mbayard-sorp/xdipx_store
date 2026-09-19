@@ -26,10 +26,19 @@ const noPairingDial = async () => null
 /** Passing vision-gate verdict for tests unrelated to that check (#6763). */
 const PASSING_VERDICT: VisionVerdict = {
   pass: true,
-  checks: { limbCount: 'pass', handAnatomy: 'pass', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'pass' },
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    adultUnambiguous: 'pass',
+  },
   notes: 'test fixture: clean',
   checkedAt: '2026-08-31T00:00:00.000Z',
   checkCompleted: true,
+  legibleText: '',
 }
 
 /**
@@ -751,10 +760,19 @@ describe('vision-gate verdict', () => {
   it('blocks media carrying a recorded failing verdict', async () => {
     const failing: VisionVerdict = {
       pass: false,
-      checks: { limbCount: 'fail', handAnatomy: 'fail', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'fail' },
+      checks: {
+        limbCount: 'fail',
+        handAnatomy: 'fail',
+        faceBodyIntegrity: 'pass',
+        extraOrMergedLimbs: 'fail',
+        nippleOccluded: 'pass',
+        genitaliaAbsent: 'pass',
+        adultUnambiguous: 'pass',
+      },
       notes: 'three arms visible on the cast member',
       checkedAt: '2026-08-30T00:00:00.000Z',
       checkCompleted: true,
+      legibleText: '',
     }
     const r = await runChecksRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
