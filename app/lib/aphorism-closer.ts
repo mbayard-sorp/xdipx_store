@@ -169,6 +169,8 @@ export interface DraftParagraph {
   /** Section heading text, or a pseudo-section label ("Title", "Excerpt", "Intro"). */
   section: string
   text: string
+  /** True when this paragraph unit is itself an h2 heading's own text. */
+  isHeading?: boolean
 }
 
 export interface DraftInput {
@@ -203,7 +205,7 @@ export function draftToParagraphs(draft: DraftInput): DraftParagraph[] {
       section = text || section
       // A heading rarely carries the tic, but scan it too, attributed to its
       // own section so a hit is never silently dropped.
-      if (text) paragraphs.push({ section, text })
+      if (text) paragraphs.push({ section, text, isHeading: true })
       continue
     }
     if (text) paragraphs.push({ section, text })
