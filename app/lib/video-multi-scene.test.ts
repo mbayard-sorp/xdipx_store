@@ -554,6 +554,7 @@ describe('enqueueVideoJob — presenter voice guard (ticket #6584)', () => {
     slug: 'maya', name: 'Maya', role: null, photoUrl: 'https://blob.test/maya.jpg', photoAlt: null,
     shortBio: null, personaNotes: null, archetype: null, ageRange: null, description: null,
     emotionTags: [] as string[], editorialPhotoUrl: null, voiceId: null as string | null,
+    bodyReferencePhotoUrl: null, skinToneNote: null,
     ...overrides,
   })
 
