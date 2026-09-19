@@ -556,8 +556,13 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      two sections earlier, then the cycle-2 rewrite widened a storage claim into contradiction with
      the already-PASSed glass line), and run 329 fixed it in one sentence, so the defect is cheap to
      fix and expensive to detect late. Cheap mechanical hint: a scope-widening rewrite almost always
-     introduces a universal quantifier (whatever, anything, everything, always, never), so treat any
-     of those words appearing in a rewrite as a prompt to re-read the rest of the post.
+     introduces a universal quantifier (whatever, anything, everything, always, never, none of, the
+     only, nothing else), so treat any of those words appearing in a rewrite as a prompt to re-read
+     the rest of the post. The scan runs on predicate position as well as subject position (ticket
+     #10117: a rewrite that dodged "none of" as the subject by relocating the same universal into the
+     predicate — "the only thing left to decide is who wears it" — was still a scope-widening rewrite
+     and still needs the re-read). A quantifier bound to a catalog collection rather than to people is
+     still a universal-results claim needing a source.
    - **Enumeration-consistency scan (part of the same pre-resubmit self-check, ticket #6910):** when
      a gate asks for a change to an enumerated list, a red-flag list, a safety enumeration, or a tier
      assignment, first grep the whole document for every other instance of that enumeration, the FAQ
