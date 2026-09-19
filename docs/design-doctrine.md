@@ -203,9 +203,30 @@ they outlive any single run. Every merchandising image obeys all of them.
    evidence of a household, worn items are evidence of a person, and evidence
    of a person is the entire point. Without this carve-out a robe belt gets
    rejected as prop salad.
-4. **No text in the pixels.** No words, letters, captions, labels, logos,
-   watermarks baked in. Copy lives in the markup. Add "no text, no words, no
-   letters, no watermark, no logo, no caption" to every negative prompt.
+4. **No text in the pixels, with one narrow owner-ruled exception.** This is
+   now three cases, not one:
+   - **Brand mark on a product we stock and are featuring: allowed.** Owner
+     ruling, 2026-09-19, verbatim: "Showing brand names is OK when we are
+     placing actual products." A manufacturer's wordmark or logo rendered on
+     the body of a product we genuinely sell, in a post genuinely about that
+     product, is truthful product depiction, not baked-in text. It is how
+     every retailer shoots product. It does not block publish on doctrine
+     grounds.
+   - **Packaging junk: still out.** Barcodes, shipping labels, batch codes,
+     printed ingredient paragraphs, retail cartons. Measured example: atlas
+     prediction `cff6ca1cab404e27b3a85cd4a5b6c5dd` rendered a barcode and
+     label text on a lube bottle. That is not brand identity, it is
+     packaging, and it reads cheap in an editorial frame. Keep it in the
+     negative prompt.
+   - **Text as graphic: still out, unchanged.** No captions, headlines,
+     watermarks, or invented words baked into the pixels. Copy lives in the
+     markup. This was the rule's original target and the owner has not
+     touched it.
+
+   Negative-prompt guidance: keep "no watermark, no caption, no invented
+   text, no barcode, no shipping label, no ingredient panel" on every
+   negative prompt. Drop any blanket "no logo, no brand name" language for
+   the product body itself, since it now over-forbids case 1.
 5. **Hard limits (legal / processor / ad-platform):** no exposed genitalia, no
    nipples, no sex acts — nothing a premium lingerie campaign could not run.
    Short of that, push toward playful curiosity with charge underneath.

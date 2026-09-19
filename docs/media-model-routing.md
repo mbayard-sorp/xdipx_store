@@ -56,6 +56,33 @@ carton. A one-shot composite puts the BOX in the presenter's hand with the manuf
 name legible on it, which breaks the no-text-in-pixels rule and ships a competitor's logo.
 Stage 1 exists solely to remove that failure class, and it removed it completely.
 
+Three cases were being conflated under that one rule and are now distinct
+(`docs/design-doctrine.md` §4 item 4 carries the same split):
+
+- **The retail carton in frame.** `ATLAS_NO_CARTON_CLAUSE` addresses this: keep the box out of
+  the shot entirely. Unchanged.
+- **The manufacturer's brand mark on the product body itself.** Now allowed, owner ruling
+  2026-09-19 ("Showing brand names is OK when we are placing actual products"). This is not a
+  new mitigation, it is the edit endpoint doing what it already does: seedream-v4.5/edit holds
+  reference-image text faithfully, and a wordmark molded or printed onto the product we are
+  featuring is part of that same faithfulness. Nothing in the routing changes for this case.
+- **Packaging junk** (barcodes, shipping labels, batch codes, ingredient paragraphs). Still
+  unwanted. Proven NOT stoppable via the prompt negative alone: three of eight frames in the
+  2026-09 run reproduced this kind of text with the negative present (atlas ids
+  `0f66b19b24cb4608953df7ef547f0169`, `102469c103154c179d1dcc4fdc24824b`,
+  `cff6ca1cab404e27b3a85cd4a5b6c5dd`). The control is not a better negative prompt, it is the
+  legible-text report in the vision gate (PR #1226, ticket #10268): the gate transcribes any
+  legible text/wordmark/barcode/label it finds and the caller decides, rather than the gate
+  passing or failing on a fixed policy.
+
+**A Shopify `featuredMedia` reference is sometimes the retail box, not the product.** Measured
+2026-09-19: SKU 96203 (Lilac Licks) has the carton as media image A and the bare product as
+image B. `featuredMedia` returned A. Using A as the `--ref-image` made the model reconstruct the
+toy from box art and invent a stalk-and-club shape at the tip that does not exist on the real
+product, a geometry hallucination downstream of a reference-selection bug, not a prompting
+failure. Rule: never assume `featuredMedia` is a product shot. Walk the product's media list for
+a text-free bare-product frame before using it as a reference.
+
 **A cast member's reference photo propagates into every downstream frame.** Maya's canonical
 `referencePhoto` is a deep-V cleavage shot, and the compositor faithfully carried that neckline
 into scenes briefed as "elevated loungewear". Wardrobe register is fixed by re-shooting the
