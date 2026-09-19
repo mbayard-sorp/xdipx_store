@@ -42,6 +42,14 @@
  *     (migration 079). The `account` block carries the follower-count
  *     denominator per-post reach needs (ticket #4064); each sweep also persists
  *     a timestamped follower reading to KV so trend is derivable.
+ *   { op: 'mixReport' } -> { report: SocialMixReport, lines: string[] }
+ *     Rolling-window mix report over the last posted+approved Instagram rows
+ *     (ticket #10271): ceiling/mid/educational vs the §3.2b 4/2/1 target,
+ *     close-crop cap, product-forward/free, body-zone and location repeat
+ *     windows, lube-treatment repeats, carousel floor. A REPORT, never a
+ *     gate — nothing reads this op to block, revise, or hold a post. `lines`
+ *     is plain text for the routine's run summary; `/admin/socials` renders
+ *     the same `report` object. See social-mix-report.server.ts.
  *
  * The social-media-manager stub's only write path. Rows land in social_posts
  * with status='draft' AND review_status='pending_review' for human review in
@@ -88,6 +96,7 @@ import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
 import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
 import { applyPublishGateVerdict, parsePublishGateVerdict, reworkSocialPost, parseReworkInput } from '~/lib/social-publish-approve.server'
 import { captureSocialEngagement, captureInstagramAccount, rankBySaves } from '~/lib/social-engagement.server'
+import { getSocialMixReport, formatSocialMixReportLines } from '~/lib/social-mix-report.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -278,6 +287,17 @@ export async function action({ request }: ActionFunctionArgs) {
       autopostValve,
       platformValves: { instagram: instagramAutopublish, x: xAutopublish },
     })
+  }
+
+  // Rolling-window mix report (ticket #10271). A REPORT, not a verdict: never
+  // gates a draft, a rework, or a publish decision, and social-publish-gate
+  // never calls this op. Computed from the last posted+approved Instagram
+  // rows' stored columns only (never caption/imageBrief prose); the routine
+  // pastes `lines` into its run summary, and the same numbers render on
+  // /admin/socials (see admin.socials.calendar.tsx).
+  if (b['op'] === 'mixReport') {
+    const report = await getSocialMixReport()
+    return Response.json({ report, lines: formatSocialMixReportLines(report) })
   }
 
   return new Response('Bad Request', { status: 400 })

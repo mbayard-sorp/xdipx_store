@@ -1,0 +1,418 @@
+/**
+ * Rolling-window mix report for posted Instagram frames (ticket #10271).
+ *
+ * NOT A GATE. This module produces a report, never a per-frame verdict, and
+ * it must never be wired into social-publish-gate.server.ts or any BLOCK/
+ * REVISE/HOLD path. The ticket that created it forbids that route explicitly:
+ * the publish gate already owns per-frame judgment, and this report's whole
+ * job is the thing the gate structurally cannot do -- notice that the last
+ * ten frames were all quiet, which costs the gate nothing to approve one at a
+ * time but costs the feed everything in aggregate.
+ *
+ * Root cause this exists to fix (ticket #10271, owner direction 2026-09-19):
+ * the last 21 posted Instagram frames held 12 product-free, 7 hands-and-
+ * strand lube macros and 1 self-described ceiling frame, against the ~12 the
+ * 4-per-rolling-7 target in `docs/store-team/instagram-campaigns.md` §3.2b
+ * implies. Nobody saw it for three weeks because seeing it required an
+ * ad-hoc SQL query. `computeSocialMixReport` is that query, always on, with
+ * one pure function so it is unit-testable without a database (ticket
+ * #10110 half-detected the same regression the day before and sat at
+ * `approved`, unapplied, specifically because nothing read it).
+ *
+ * Column dependencies (data-contract note, `docs/audits/
+ * conversation-channels-product-lookup-audit-2026-08-04.md`): `bodyZone`,
+ * `contactMode` and `cropScale` land in PR #1227 / migration 099 (ticket
+ * #10269), which was still open (unmerged) when this file was written. This
+ * module is coded against those column names ahead of the merge, per the
+ * ticket's own instruction; until #1227 lands, every row read from the
+ * database has `bodyZone`/`cropScale` = null, so the body-zone window and
+ * close-crop lines read UNKNOWN in production (never a guessed 0) until
+ * rows start carrying real values. `sceneLocation` (migration 093) is
+ * already live on `main`, but per ticket #10269's own finding it has never
+ * been sent by any caller, so it too reads UNKNOWN today. No line here ever
+ * derives a verdict from caption/imageBrief prose -- an unpopulated column
+ * prints UNKNOWN, it is never inferred.
+ *
+ * There is currently no `lube_treatment`-shaped column anywhere in
+ * `social_posts` (searched `db/schema.ts` and every migration under
+ * `db/migrations/`), so the lube-treatment-repeat line is unconditionally
+ * UNKNOWN. It is printed anyway, on its own line, so its absence stays
+ * visible instead of quietly dropped -- the failure mode this whole ticket
+ * exists to close.
+ */
+
+export interface SocialMixReportRow {
+  id: number
+  /** True when the row is product-forward: `shopify_product_id` is set. */
+  shopifyProductId: string | null
+  /** `media_urls`; a carousel is >1 URL (matches `social-post-ops.server.ts`'s `mediaForRow`). */
+  mediaUrls: string[] | null
+  /** migration 099 (PR #1227, ticket #10269). Null on every row until that PR merges and ships callers. */
+  bodyZone: string | null
+  /** migration 099 (PR #1227, ticket #10269). Read for completeness; no report line uses it yet. */
+  contactMode: string | null
+  /** migration 099 (PR #1227, ticket #10269). Null on every row until that PR merges and ships callers. */
+  cropScale: string | null
+  /** migration 093, live on main, but unsent by every caller per ticket #10269's finding. */
+  sceneLocation: string | null
+}
+
+export type LineStatus = 'ok' | 'breach' | 'unknown'
+
+export interface MixReportLine {
+  label: string
+  /** Formatted "actual vs target" text, e.g. "1 / 7 (target 4, band 3-5)". */
+  detail: string
+  status: LineStatus
+}
+
+export interface SocialMixReport {
+  /** How many rows the report actually had to work with (<= what was requested). */
+  sampleSize: number
+  lines: {
+    ceiling: MixReportLine
+    mid: MixReportLine
+    educational: MixReportLine
+    closeCrop: MixReportLine
+    productForward: MixReportLine
+    productFree: MixReportLine
+    bodyZoneWindow: MixReportLine
+    locationWindow: MixReportLine
+    lubeTreatment: MixReportLine
+    carousel: MixReportLine
+  }
+  /** True if any line reads BREACH; convenience for a caller that just wants a headline. */
+  anyBreach: boolean
+}
+
+// docs/store-team/instagram-campaigns.md §3.2b: "roughly 4 at the ceiling, 2
+// mid, 1 educational" per rolling 7. "Roughly" per the doc's own wording, so
+// a line reads BREACH outside a +/-1 band, not on every non-exact count.
+const CHARGE_WINDOW = 7
+const CHARGE_TARGETS = { ceiling: 4, mid: 2, educational: 1 } as const
+const CHARGE_TOLERANCE = 1
+
+// #10272 item 6 (on-skin campaign, owner all-hands 2026-09-19): the two
+// on-skin body-zone bands that map to a charge tier. Zones outside both
+// lists (top-of-thigh, ankle) are real on-skin frames but the doc does not
+// assign them a tier, so they count toward neither -- an honest gap, not a
+// guess.
+const CEILING_ZONES = new Set(['hip-hollow', 'small-of-back', 'sternum', 'stomach'])
+const MID_ZONES = new Set(['inner-wrist', 'forearm', 'nape', 'behind-knee', 'shoulder-blade'])
+
+// #10267/#10272 item 4 (the cap predates the wardrobe amendment and both
+// versions state it identically): at most 3 close crops per rolling 7 (the
+// same CHARGE_WINDOW above), never two consecutive. "Close crop" = the two
+// tight crop_scale values; 'medium'/'wide' are not close crops.
+const CLOSE_CROP_CAP = 3
+const CLOSE_CROP_SCALES = new Set(['macro', 'close'])
+
+// mission-brief.md §6b + ticket #10110's own reading of it ("misses the ~40%
+// product-in-scene share... clears the <=50% ceiling"): read as a rolling-14
+// band, per ticket #10271's own window choice for this line. Below the floor
+// is exactly the failure #10110 detected and #10271 exists to keep visible;
+// above the ceiling is the inverse failure (all-product spam).
+const PRODUCT_WINDOW = 14
+const PRODUCT_FORWARD_FLOOR_SHARE = 0.4
+const PRODUCT_FORWARD_CEILING_SHARE = 0.5
+// #10110: "misses the standing two-week floor of 'at least one product-free
+// resource post'." A hard floor independent of the share band above.
+const PRODUCT_FREE_MIN = 1
+
+// #10267/#10272 item 3/6: no body-zone repeat inside 5 consecutive on-skin
+// frames; no location repeat inside 8 consecutive product posts (§3.8,
+// unchanged by the on-skin campaign).
+const BODY_ZONE_WINDOW = 5
+const LOCATION_WINDOW = 8
+
+// #10110: "misses the standing two-week floor of... at least one carousel
+// published." Same rolling-14 window as PRODUCT_WINDOW above.
+const CAROUSEL_MIN = 1
+
+function isCarousel(row: SocialMixReportRow): boolean {
+  return (row.mediaUrls?.length ?? 0) > 1
+}
+
+function isProductForward(row: SocialMixReportRow): boolean {
+  return !!row.shopifyProductId
+}
+
+function chargeTierOf(row: SocialMixReportRow): 'ceiling' | 'mid' | null {
+  if (!row.bodyZone) return null
+  if (CEILING_ZONES.has(row.bodyZone)) return 'ceiling'
+  if (MID_ZONES.has(row.bodyZone)) return 'mid'
+  return null
+}
+
+function bandLine(label: string, actual: number, window: number, floor: number, ceiling: number, unit = ''): MixReportLine {
+  const inBand = actual >= floor && actual <= ceiling
+  const bandText = floor === ceiling ? `${floor}` : `${floor}-${ceiling}`
+  return {
+    label,
+    detail: `${actual}${unit} / ${window} (target band ${bandText}${unit})${inBand ? '' : ' -- BREACH'}`,
+    status: inBand ? 'ok' : 'breach',
+  }
+}
+
+function minFloorLine(label: string, actual: number, window: number, min: number): MixReportLine {
+  const ok = actual >= min
+  return {
+    label,
+    detail: `${actual} / ${window} (floor ${min})${ok ? '' : ' -- BREACH'}`,
+    status: ok ? 'ok' : 'breach',
+  }
+}
+
+function maxCapLine(label: string, actual: number, window: number, cap: number, extraBreach: boolean, extraNote?: string): MixReportLine {
+  const breach = actual > cap || extraBreach
+  const note = extraBreach && extraNote ? ` -- BREACH (${extraNote})` : breach ? ' -- BREACH' : ''
+  return {
+    label,
+    detail: `${actual} / ${window} (cap ${cap})${note}`,
+    status: breach ? 'breach' : 'ok',
+  }
+}
+
+function unknownLine(label: string, reason: string): MixReportLine {
+  return { label, detail: `UNKNOWN (${reason})`, status: 'unknown' }
+}
+
+/**
+ * Pure. `rows` must be ordered newest-first (the same order
+ * `.orderBy(desc(postedAt))` returns) -- exactly the last N posted+approved
+ * Instagram rows, however many the caller fetched. No DB, no network, no
+ * clock reads: fully deterministic from its input, which is what makes it
+ * unit-testable without a database.
+ */
+export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixReport {
+  const last7 = rows.slice(0, CHARGE_WINDOW)
+  const last14 = rows.slice(0, PRODUCT_WINDOW)
+
+  // --- Charge tier (ceiling / mid / educational) ---
+  // "Educational" has no column anywhere in social_posts that encodes charge
+  // tier for non-on-skin frames (postType is auto_deal|thread_reply|manual|
+  // campaign|video_reel|video_short -- a delivery mechanism, not a pillar).
+  // Ceiling/mid are computed from bodyZone per #10272 item 6; educational is
+  // always UNKNOWN rather than backed into from "not ceiling, not mid" (that
+  // would silently misclassify every non-on-skin ceiling frame -- a full
+  // scene composition, a cast frame -- as educational, which is exactly the
+  // hidden-drift failure this ticket exists to stop).
+  const bodyZoneKnownIn7 = last7.filter(r => r.bodyZone != null).length
+  let ceiling: MixReportLine
+  let mid: MixReportLine
+  const educational = unknownLine('Educational (last 7)', 'no column encodes charge tier for non-on-skin frames')
+  if (bodyZoneKnownIn7 === 0) {
+    ceiling = unknownLine('Ceiling (last 7)', 'body_zone unpopulated on every row in window')
+    mid = unknownLine('Mid (last 7)', 'body_zone unpopulated on every row in window')
+  } else {
+    const ceilingCount = last7.filter(r => chargeTierOf(r) === 'ceiling').length
+    const midCount = last7.filter(r => chargeTierOf(r) === 'mid').length
+    ceiling = bandLine(
+      'Ceiling (last 7)', ceilingCount, CHARGE_WINDOW,
+      CHARGE_TARGETS.ceiling - CHARGE_TOLERANCE, CHARGE_TARGETS.ceiling + CHARGE_TOLERANCE,
+    )
+    mid = bandLine(
+      'Mid (last 7)', midCount, CHARGE_WINDOW,
+      CHARGE_TARGETS.mid - CHARGE_TOLERANCE, CHARGE_TARGETS.mid + CHARGE_TOLERANCE,
+    )
+  }
+
+  // --- Close crop (cap 3 per rolling 7, never two consecutive) ---
+  const cropKnownIn7 = last7.filter(r => r.cropScale != null).length
+  let closeCrop: MixReportLine
+  if (cropKnownIn7 === 0) {
+    closeCrop = unknownLine('Close crop (last 7)', 'crop_scale unpopulated on every row in window')
+  } else {
+    const closeCropCount = last7.filter(r => r.cropScale && CLOSE_CROP_SCALES.has(r.cropScale)).length
+    let twoConsecutive = false
+    for (let i = 0; i < last7.length - 1; i++) {
+      const a = last7[i]!.cropScale
+      const b = last7[i + 1]!.cropScale
+      if (a && b && CLOSE_CROP_SCALES.has(a) && CLOSE_CROP_SCALES.has(b)) { twoConsecutive = true; break }
+    }
+    closeCrop = maxCapLine('Close crop (last 7)', closeCropCount, CHARGE_WINDOW, CLOSE_CROP_CAP, twoConsecutive, 'two consecutive close crops')
+  }
+
+  // --- Product-forward / product-free (last 14, ticket #10110's criteria) ---
+  const productForwardCount = last14.filter(isProductForward).length
+  const productFreeCount = last14.length - productForwardCount
+  const pfFloor = Math.round(PRODUCT_WINDOW * PRODUCT_FORWARD_FLOOR_SHARE)
+  const pfCeiling = Math.round(PRODUCT_WINDOW * PRODUCT_FORWARD_CEILING_SHARE)
+  const productForward = bandLine('Product-forward (last 14)', productForwardCount, PRODUCT_WINDOW, pfFloor, pfCeiling)
+  const productFreeCap = PRODUCT_WINDOW - pfFloor
+  const productFreeOverCap = productFreeCount > productFreeCap
+  const productFreeUnderFloor = productFreeCount < PRODUCT_FREE_MIN
+  const productFree: MixReportLine = {
+    label: 'Product-free (last 14)',
+    detail: `${productFreeCount} / ${PRODUCT_WINDOW} (floor ${PRODUCT_FREE_MIN}, cap ${productFreeCap})` +
+      (productFreeOverCap ? ' -- BREACH (over cap)' : productFreeUnderFloor ? ' -- BREACH (under floor)' : ''),
+    status: (productFreeOverCap || productFreeUnderFloor) ? 'breach' : 'ok',
+  }
+
+  // --- Body-zone window: no repeat inside 5 consecutive on-skin frames ---
+  const onSkin = rows.filter(r => r.bodyZone != null)
+  let bodyZoneWindow: MixReportLine
+  if (onSkin.length === 0) {
+    bodyZoneWindow = unknownLine('Body-zone window (last 5 on-skin)', 'body_zone unpopulated on every row')
+  } else {
+    const windowRows = onSkin.slice(0, BODY_ZONE_WINDOW)
+    const seen = new Set<string>()
+    let repeat = false
+    for (const r of windowRows) {
+      if (seen.has(r.bodyZone!)) { repeat = true; break }
+      seen.add(r.bodyZone!)
+    }
+    bodyZoneWindow = {
+      label: 'Body-zone window (last 5 on-skin)',
+      detail: `${windowRows.length} on-skin frame(s) checked, ${repeat ? 'REPEAT FOUND' : 'no repeat'}` +
+        (repeat ? ' -- BREACH' : ''),
+      status: repeat ? 'breach' : 'ok',
+    }
+  }
+
+  // --- Location window: no repeat inside 8 consecutive product posts ---
+  const located = rows.filter(r => r.sceneLocation != null)
+  let locationWindow: MixReportLine
+  if (located.length === 0) {
+    locationWindow = unknownLine('Location window (last 8)', 'scene_location unpopulated on every row')
+  } else {
+    const windowRows = located.slice(0, LOCATION_WINDOW)
+    const seen = new Set<string>()
+    let repeat = false
+    for (const r of windowRows) {
+      if (seen.has(r.sceneLocation!)) { repeat = true; break }
+      seen.add(r.sceneLocation!)
+    }
+    locationWindow = {
+      label: 'Location window (last 8)',
+      detail: `${windowRows.length} located frame(s) checked, ${repeat ? 'REPEAT FOUND' : 'no repeat'}` +
+        (repeat ? ' -- BREACH' : ''),
+      status: repeat ? 'breach' : 'ok',
+    }
+  }
+
+  // --- Lube-treatment repeats: no column exists anywhere, always UNKNOWN ---
+  const lubeTreatment = unknownLine(
+    'Lube-treatment repeats',
+    'no lube_treatment (or equivalent) column exists in social_posts',
+  )
+
+  // --- Carousel count (last 14, floor 1) ---
+  const carouselCount = last14.filter(isCarousel).length
+  const carousel = minFloorLine('Carousel (last 14)', carouselCount, PRODUCT_WINDOW, CAROUSEL_MIN)
+
+  const lines = {
+    ceiling, mid, educational, closeCrop, productForward, productFree,
+    bodyZoneWindow, locationWindow, lubeTreatment, carousel,
+  }
+  const anyBreach = Object.values(lines).some(l => l.status === 'breach')
+
+  return { sampleSize: rows.length, lines, anyBreach }
+}
+
+const LINE_ORDER: (keyof SocialMixReport['lines'])[] = [
+  'ceiling', 'mid', 'educational', 'closeCrop', 'productForward', 'productFree',
+  'bodyZoneWindow', 'locationWindow', 'lubeTreatment', 'carousel',
+]
+
+/** Plain-text lines for the social run summary (routine-social-daily.md Step 7) and log output. */
+export function formatSocialMixReportLines(report: SocialMixReport): string[] {
+  return LINE_ORDER.map(key => {
+    const line = report.lines[key]
+    const marker = line.status === 'breach' ? 'BREACH' : line.status === 'unknown' ? 'UNKNOWN' : 'ok'
+    return `[mix-report] ${line.label}: ${line.detail} (${marker})`
+  })
+}
+
+const LINE_LABELS: Record<keyof SocialMixReport['lines'], string> = {
+  ceiling: 'Ceiling (last 7)',
+  mid: 'Mid (last 7)',
+  educational: 'Educational (last 7)',
+  closeCrop: 'Close crop (last 7)',
+  productForward: 'Product-forward (last 14)',
+  productFree: 'Product-free (last 14)',
+  bodyZoneWindow: 'Body-zone window (last 5 on-skin)',
+  locationWindow: 'Location window (last 8)',
+  lubeTreatment: 'Lube-treatment repeats',
+  carousel: 'Carousel (last 14)',
+}
+
+/**
+ * Every line UNKNOWN, never a guessed 0/BREACH. Used when the report
+ * genuinely could not be computed (e.g. a DB read failed) so a caller (the
+ * admin page, the routine's summary) degrades instead of crashing or
+ * printing a false-negative "in band" -- the exact class of bug in
+ * `MEMORY.md`'s "merged != applied migration" precedent: code shipped
+ * assuming a column exists before the migration that adds it has actually
+ * run against the live database.
+ */
+function unavailableReport(reason: string): SocialMixReport {
+  const lines = {} as SocialMixReport['lines']
+  for (const key of LINE_ORDER) lines[key] = unknownLine(LINE_LABELS[key], reason)
+  return { sampleSize: 0, lines, anyBreach: false }
+}
+
+// --- DB wrapper -------------------------------------------------------
+
+export interface GetSocialMixReportDeps {
+  /** Returns the last `limit` posted+approved Instagram rows, newest first. */
+  loadRows: (limit: number) => Promise<SocialMixReportRow[]>
+}
+
+// Comfortably larger than every window used above (max 14, plus enough slack
+// for the on-skin/location windows to find their 5/8 within a sparser
+// subset of a longer history).
+const DEFAULT_FETCH_LIMIT = 60
+
+async function liveLoadRows(limit: number): Promise<SocialMixReportRow[]> {
+  const { db } = await import('./db.server')
+  const { socialPosts } = await import('../../db/schema')
+  const { and, eq, desc } = await import('drizzle-orm')
+  const rows = await db
+    .select({
+      id: socialPosts.id,
+      shopifyProductId: socialPosts.shopifyProductId,
+      mediaUrls: socialPosts.mediaUrls,
+      bodyZone: socialPosts.bodyZone,
+      contactMode: socialPosts.contactMode,
+      cropScale: socialPosts.cropScale,
+      sceneLocation: socialPosts.sceneLocation,
+    })
+    .from(socialPosts)
+    .where(and(
+      eq(socialPosts.platform, 'instagram'),
+      eq(socialPosts.status, 'posted'),
+      eq(socialPosts.reviewStatus, 'approved'),
+    ))
+    .orderBy(desc(socialPosts.postedAt))
+    .limit(limit)
+  return rows.map(r => ({
+    id: r.id,
+    shopifyProductId: r.shopifyProductId ?? null,
+    mediaUrls: r.mediaUrls ?? null,
+    bodyZone: r.bodyZone ?? null,
+    contactMode: r.contactMode ?? null,
+    cropScale: r.cropScale ?? null,
+    sceneLocation: r.sceneLocation ?? null,
+  }))
+}
+
+/**
+ * Fetches the last N posted+approved Instagram rows and computes the
+ * report. Not a gate. Never throws: a read failure (e.g. migration 099 not
+ * yet applied against this database even though the code references its
+ * columns, per PR #1227's dependency) degrades to an all-UNKNOWN report
+ * rather than taking down whatever page or routine called this.
+ */
+export async function getSocialMixReport(
+  over: Partial<GetSocialMixReportDeps> = {},
+): Promise<SocialMixReport> {
+  const loadRows = over.loadRows ?? liveLoadRows
+  try {
+    const rows = await loadRows(DEFAULT_FETCH_LIMIT)
+    return computeSocialMixReport(rows)
+  } catch (err) {
+    console.error('[social-mix-report] getSocialMixReport failed, degrading to UNKNOWN:', err)
+    return unavailableReport('report read failed, see server logs')
+  }
+}

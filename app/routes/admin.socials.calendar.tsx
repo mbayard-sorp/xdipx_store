@@ -33,6 +33,7 @@ import { laWallClockToUtc, utcToLaParts, formatLaSlot } from '~/lib/social-sched
 import { laZoneAbbrev } from '~/lib/social-schedule-ui'
 import { effectiveGateStatus } from '~/lib/social-publish-approve.server'
 import { weekOf, addDays, capsByDay, slotOf, cellFor, shortDayLabel } from '~/lib/social-calendar'
+import { getSocialMixReport, type SocialMixReport } from '~/lib/social-mix-report.server'
 import { CalendarGrid, CapIndicator } from '~/components/admin/social/CalendarGrid'
 import { PostChip } from '~/components/admin/social/PostChip'
 import { RescheduleSheet } from '~/components/admin/social/RescheduleSheet'
@@ -120,7 +121,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const end = laWallClockToUtc(addDays(week.monday, 7), '00:00')
 
   const slot = sql`coalesce(${socialPosts.scheduledAt}, ${socialPosts.scheduledFor}::timestamptz)`
-  const [rows, unscheduled, caps] = await Promise.all([
+  const [rows, unscheduled, caps, mixReport] = await Promise.all([
     db.select(COLS).from(socialPosts)
       .where(and(
         ne(socialPosts.status, 'deleted'),
@@ -135,6 +136,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .orderBy(desc(socialPosts.createdAt))
       .limit(50),
     loadCaps(),
+    // Rolling-window mix report (ticket #10271). A REPORT, not a gate:
+    // nothing here changes what this page lets the owner do.
+    getSocialMixReport(),
   ])
 
   return {
@@ -145,6 +149,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     posts: rows.map(serialize),
     unscheduled: unscheduled.map(serialize),
     caps,
+    mixReport,
   }
 }
 
@@ -182,7 +187,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function SocialsCalendar() {
   const data = useLoaderData<typeof loader>()
-  const { week, todayLa, nowMs, zone, caps } = data
+  const { week, todayLa, nowMs, zone, caps, mixReport } = data
   const fetcher = useFetcher<typeof action>()
   const navigate = useNavigate()
   const [params] = useSearchParams()
@@ -257,6 +262,8 @@ export default function SocialsCalendar() {
   return (
     <section className="space-y-3 pb-20 md:pb-0">
       <p className="sr-only" aria-live="polite" role="status">{liveText}</p>
+
+      <MixReportPanel report={mixReport} />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -440,6 +447,57 @@ export default function SocialsCalendar() {
         />
       )}
     </section>
+  )
+}
+
+/**
+ * Rolling-window mix report (ticket #10271). Read-only, never gates
+ * anything on this page — the calendar's own reschedule/unschedule actions
+ * are untouched by it. Open by default when a line reads BREACH so the
+ * drift is not one extra click away; collapsed otherwise so it does not
+ * compete with the calendar for attention on a clean week.
+ */
+function MixReportPanel({ report }: { report: SocialMixReport }) {
+  const order: { key: keyof SocialMixReport['lines'] }[] = [
+    { key: 'ceiling' }, { key: 'mid' }, { key: 'educational' },
+    { key: 'closeCrop' }, { key: 'productForward' }, { key: 'productFree' },
+    { key: 'bodyZoneWindow' }, { key: 'locationWindow' }, { key: 'lubeTreatment' },
+    { key: 'carousel' },
+  ]
+  return (
+    <details
+      open={report.anyBreach}
+      className={`rounded-2xl border p-3 ${report.anyBreach ? 'border-coral bg-coral-soft' : 'border-line bg-paper-2'}`}
+    >
+      <summary className="flex items-center justify-between cursor-pointer select-none min-h-11">
+        <span className="font-display text-base text-ink">
+          Mix report{' '}
+          <span className="font-mono text-[10px] text-ink-3">(rolling window, last {report.sampleSize} posted)</span>
+        </span>
+        {report.anyBreach ? (
+          <span className="font-mono text-[10px] uppercase tracking-wide text-coral">Breach</span>
+        ) : (
+          <span className="font-mono text-[10px] uppercase tracking-wide text-ink-4">In band</span>
+        )}
+      </summary>
+      <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+        {order.map(({ key }) => {
+          const line = report.lines[key]
+          return (
+            <li key={key} className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="text-ink-3">{line.label}</span>
+              <span
+                className={`font-mono text-right ${
+                  line.status === 'breach' ? 'text-coral font-semibold' : line.status === 'unknown' ? 'text-ink-4' : 'text-ink'
+                }`}
+              >
+                {line.detail}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </details>
   )
 }
 
