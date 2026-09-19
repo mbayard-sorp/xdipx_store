@@ -25,6 +25,7 @@ const CLEAN_RESPONSE = {
     adultUnambiguous: 'pass',
   },
   notes: 'clean, nothing anomalous',
+  legibleText: '',
 }
 
 const ANATOMY_FAIL_RESPONSE = {
@@ -39,6 +40,7 @@ const ANATOMY_FAIL_RESPONSE = {
     adultUnambiguous: 'pass',
   },
   notes: 'the cast member has three arms',
+  legibleText: '',
 }
 
 const NIPPLE_FAIL_RESPONSE = {
@@ -53,6 +55,7 @@ const NIPPLE_FAIL_RESPONSE = {
     adultUnambiguous: 'pass',
   },
   notes: 'nipple visible through wet fabric, top edge of frame',
+  legibleText: '',
 }
 
 const GENITALIA_FAIL_RESPONSE = {
@@ -67,6 +70,7 @@ const GENITALIA_FAIL_RESPONSE = {
     adultUnambiguous: 'pass',
   },
   notes: 'genitalia visible, crop ran wider than requested',
+  legibleText: '',
 }
 
 const AGE_AMBIGUOUS_FAIL_RESPONSE = {
@@ -81,6 +85,22 @@ const AGE_AMBIGUOUS_FAIL_RESPONSE = {
     adultUnambiguous: 'fail',
   },
   notes: 'faceless torso crop, no reliable adult age markers visible',
+  legibleText: '',
+}
+
+const BRANDED_TEXT_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'clean, product wordmark visible on the paddle handle',
+  legibleText: 'TANTUS',
 }
 
 function deps(over: Partial<VisionGateDeps> = {}): VisionGateDeps {
@@ -117,6 +137,22 @@ describe('isValidVerdictShape', () => {
   it('rejects null and non-objects', () => {
     expect(isValidVerdictShape(null)).toBe(false)
     expect(isValidVerdictShape('pass')).toBe(false)
+  })
+
+  // Ticket #10279: legibleText is a report field, not a check, but the shape
+  // validator still requires it as a string so a malformed response fails
+  // closed the same way a missing check would.
+  it('rejects a missing legibleText', () => {
+    const { legibleText: _legibleText, ...rest } = CLEAN_RESPONSE
+    expect(isValidVerdictShape(rest)).toBe(false)
+  })
+
+  it('rejects a non-string legibleText', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, legibleText: null })).toBe(false)
+  })
+
+  it('accepts an empty-string legibleText (checked, nothing found)', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, legibleText: '' })).toBe(true)
   })
 
   it('lists the four doctrine hard checks plus the three imagery-ceiling checks', () => {
@@ -183,6 +219,23 @@ describe('runVisionGate', () => {
     expect(verdict.checkCompleted).toBe(true)
   })
 
+  // Ticket #10279: legibleText is a report field, not a check. A brand mark
+  // on a product does not fail the vision gate; it just gets transcribed for
+  // the caller to make the policy call on.
+  it('transcribes legible text without affecting pass', async () => {
+    const d = deps({ callVision: vi.fn(async () => BRANDED_TEXT_RESPONSE) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/paddle.jpg', d)
+    expect(verdict.pass).toBe(true)
+    expect(verdict.legibleText).toBe('TANTUS')
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  it('reports an empty legibleText when the check ran and found no text', async () => {
+    const d = deps()
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/clean.jpg', d)
+    expect(verdict.legibleText).toBe('')
+  })
+
   it('fails closed when the fetch throws', async () => {
     const d = deps({ fetchImageBase64: vi.fn(async () => { throw new Error('network down') }) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', d)
@@ -192,6 +245,9 @@ describe('runVisionGate', () => {
     // Ticket #8830: the check never ran, so a billing caller must not treat
     // this like a genuine judged-and-rejected image.
     expect(verdict.checkCompleted).toBe(false)
+    // The legibleText check never ran either; null distinguishes "did not
+    // check" from "checked and found nothing" (empty string).
+    expect(verdict.legibleText).toBeNull()
   })
 
   it('fails closed when the model call throws', async () => {

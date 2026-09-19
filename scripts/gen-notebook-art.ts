@@ -107,7 +107,7 @@ export function remoteVisionCallVision(runId?: number): NonNullable<VisionGateDe
     if (!verdict.checkCompleted) {
       throw new Error(`vision-gate route could not complete the check: ${verdict.notes}`)
     }
-    return { pass: verdict.pass, checks: verdict.checks, notes: verdict.notes }
+    return { pass: verdict.pass, checks: verdict.checks, notes: verdict.notes, legibleText: verdict.legibleText }
   }
 }
 

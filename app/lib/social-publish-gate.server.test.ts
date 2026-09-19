@@ -38,6 +38,7 @@ const PASSING_VERDICT: VisionVerdict = {
   notes: 'test fixture: clean',
   checkedAt: '2026-08-31T00:00:00.000Z',
   checkCompleted: true,
+  legibleText: '',
 }
 
 /**
@@ -771,6 +772,7 @@ describe('vision-gate verdict', () => {
       notes: 'three arms visible on the cast member',
       checkedAt: '2026-08-30T00:00:00.000Z',
       checkCompleted: true,
+      legibleText: '',
     }
     const r = await runChecksRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },

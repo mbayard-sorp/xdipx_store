@@ -24,6 +24,14 @@
  * for it, which is why the check has to live on the produced pixels rather
  * than on prompt wording.
  *
+ * Extended again (ticket #10279) with `legibleText`, a REPORT field rather
+ * than a pass/fail check: it never gates `pass`. The owner ruled a
+ * manufacturer's brand mark on a product we genuinely stock and feature is
+ * fine, while packaging junk (barcodes, shipping labels, printed ingredient
+ * paragraphs) and baked-in caption/watermark text are not, and that is a
+ * policy call this module has no business making per-SKU. So the gate transcribes
+ * whatever text it finds and leaves the pass/fail judgment to the caller.
+ *
  * FAILS CLOSED throughout, matching social-publish-gate.server.ts's own
  * contract: a fetch that fails, a model call that errors, or a response that
  * does not parse as the expected shape all produce a FAILING verdict, never
@@ -88,13 +96,26 @@ export interface VisionVerdict {
    * was evaluated, let alone kept).
    */
   checkCompleted: boolean
+  /**
+   * Ticket #10279: transcription of any legible text, wordmark, barcode, or
+   * label found anywhere in the frame, or `''` when the check ran and found
+   * none. This is a REPORT field, not a check: it never participates in
+   * `pass` and has no entry in `checks`. The owner ruled a brand mark on a
+   * product we genuinely stock and feature is fine, but packaging junk
+   * (barcodes, shipping labels, printed ingredient text) and baked-in
+   * caption/watermark text are not, and that is a per-case policy call this
+   * gate cannot make, so it surfaces what it read and leaves pass/fail to
+   * the caller. `null` means the check never ran at all (the fail-closed
+   * path, same distinction `checkCompleted` draws for the pass/fail checks).
+   */
+  legibleText: string | null
 }
 
 /** A verdict that fails every check, used whenever the check could not run at all. */
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
-  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false }
+  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null }
 }
 
 /** Structural validation of a parsed model response before it is trusted as a verdict. */
@@ -109,10 +130,15 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   for (const name of VISION_CHECK_NAMES) {
     if (c[name] !== 'pass' && c[name] !== 'fail') return false
   }
+  // Ticket #10279: legibleText is a report field, not a check, but a real
+  // model response must always carry it as a string (possibly ''). A
+  // response missing it, or carrying the wrong type, did not follow the
+  // expected shape and fails closed like any other malformed response.
+  if (typeof o['legibleText'] !== 'string') return false
   return true
 }
 
-const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check ONLY these seven things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks:
+const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these seven things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS one report-only item at the end:
 
 1. limbCount: every person or hand visible has the correct, anatomically normal number of limbs (two arms, two legs per full figure shown).
 2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused or missing digits.
@@ -122,10 +148,12 @@ const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI
 6. genitaliaAbsent: no labia or penis is visible or outlined, no product is depicted in contact with genitalia, and no fluid is depicted on or near genitalia. Fail if any of these is present.
 7. adultUnambiguous: the depicted person, if any, is unambiguously an adult. Judge this on ambiguity, not on apparent intent, and judge it explicitly even on a faceless body crop where the usual facial age markers are absent. Fail (do not pass) if there is any genuine uncertainty about adulthood.
 
-Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail"}
+REPORT ONLY, not a check, does not affect "pass": legibleText. Read the whole frame for any legible text: brand wordmarks, barcodes, shipping labels, printed ingredient text, captions, watermarks, anything with readable letters or numbers. Transcribe everything legible into one string, or return "" if there is none. Never judge whether the text is acceptable; that is a policy decision made elsewhere with more context than you have (for example a manufacturer's wordmark on a product actually being sold is allowed, while a barcode or shipping label is not, and you cannot tell those apart from pixels alone in every case). Just report what you read.
 
-"pass" is true only when all seven checks are "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-7 still apply to any depicted skin or body part even without hands or a face. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not.`
+Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>"}
+
+"pass" is true only when all seven checks in "checks" are "pass"; "legibleText" never affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-7 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is "".`
 
 export interface VisionGateDeps {
   fetchImageBase64?: (url: string) => Promise<{ data: string; mediaType: string }>
