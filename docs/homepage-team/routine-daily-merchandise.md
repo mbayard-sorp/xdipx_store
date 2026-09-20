@@ -629,14 +629,20 @@ Every merchandise run touches all of these, not just the hero and rails:
    code ticket owns that path. For every See-all the run controls, its destination must CONTAIN the
    module's own products; `/collections/best-sellers` is not an acceptable fallback for any module,
    because best-seller order is a different ranking from the discovery index and is structurally
-   guaranteed to mismatch. **Definition of done, every run:** after publishing, fetch the live
-   homepage and, for each See-all, assert at least one of the module's own handles appears on
-   destination page 1. **Probe the destination via its collection loader / JSON payload (or the
-   products API), NOT a raw-HTML grep:** PLP product grids are client-hydrated, so the handles are
-   absent from the destination's initial SSR HTML and a grep returns false 0s (run 145 could not
-   confirm continuity for exactly this reason). Report the check in the run summary; a failure blocks
-   the run's done state. When no destination genuinely contains the set, ship the module with **no**
-   See-all rather than point it somewhere plausible.
+   guaranteed to mismatch. **Probe BEFORE publishing, not after (#4865, second occurrence #10260):**
+   for each candidate `ctaLink`, check the destination's collection loader / JSON payload (or the
+   products API) — NOT a raw-HTML grep, since PLP product grids are client-hydrated and the handles
+   are absent from the destination's initial SSR HTML, which reads as a false 0 (run 145) — and
+   confirm at least one of the module's own handles appears on destination page 1 before you write
+   the rail. Checking only after publish let two live rails ship with a `ctaLink` that never
+   contained the module's own products (run 442's me-time/under-thirty rails; run 952's
+   `teamRail-2026-09-06-2`/wayfinder `wf65a`, pointing at `/collections/under-30` and
+   `/collections/couples` with zero of either module's handles on page 1). **Definition of done,
+   every run:** the pre-publish probe result for each See-all is recorded before the write, and the
+   live homepage is re-fetched after publishing to confirm the same assertion still holds. Report
+   both checks in the run summary; a failure blocks the run's done state. When no destination
+   genuinely contains the set, publish the module with `ctaLink` **unset** — ship with no See-all —
+   rather than point it somewhere plausible.
    **Rail diversity (no product in more than one wired rail).** A product handle appears in at most
    one wired `emmaCuratedRail` per page. Sharing one SKU across every rail (run #72 shipped
    nixie-mystic-wave in all three) makes the rails read as one shelf; dedupe handles across the wired
