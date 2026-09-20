@@ -39,12 +39,19 @@ One further gap found in the same pass, verified by search:
   portrait, the model invents everything below the neck including skin tone, and the run reports success.
 
 **What this does to today's slate.** A `medium` or `wide` crop correctly uses the portrait reference,
-which is approved and present, so those frames are shippable now. A `macro` or `close` crop is not.
-So of the four posts below, **IG 2 and X 2 can ship today; IG 1 and X 1 are held** at the image step
-and their briefs are written ready for the moment a body reference lands.
+which is approved and present. A `macro` or `close` crop cannot run at all. So **IG 1 is BLOCKed**,
+and IG 2, X 1 and X 2 are medium-crop frames that clear clause (a) on their own.
 
-This is the on-skin campaign's real state on day 1: the code is merged, the wiring stops one step
-short, and the content dependency is empty. It is not visible from any page, which is why a dry run
+**And this is the finding to read first.** The one frame in this slate that would actually have
+corrected the boring-feed regression, the true ceiling-on-skin close crop, is exactly the frame the
+empty `bodyReferencePhoto` field blocks. The observable result today is one ceiling frame, which is
+the same number the 2026-09-19 audit flagged across the last 21 posts. That is not a coincidence and
+it will repeat: as long as this dependency is open, every plan to fix the regression degrades back
+to the safe end, because the harder frame is always the one that needs the missing asset. The
+pipeline has a BLOCK and no BORING, so cold costs nothing and the run retreats every day.
+
+This is the on-skin campaign's real state on day 1: the code is merged, the selector is not called,
+and the content dependency is empty. None of it is visible from any page, which is why a dry run
 found it and three weeks of live runs did not.
 
 ---
@@ -138,7 +145,20 @@ Negatives: no nipple, no labia, no pubic line in frame, no product emerging from
 
 **§3.7 three-clause check:** (a) **FAILS today.** Requires Maya's approved body reference; `bodyReferencePhoto` is null. (b) adult identity marker: two brass chains plus her own hand and forearm, inside the crop. (c) trace of the world: the hour of the light, the oak floor, and the linen entering frame.
 
-**Status: HELD.** Everything except clause (a) is ready. This post ships the day a body reference for Maya is approved and `presenterPhotoUrlForCrop` is actually called by the generation path.
+**Status: BLOCK** (gate verdict, 2026-09-20). This slate first called it HELD; the gate corrected that
+and the correction is right. Two reasons, and neither is a scheduling wait:
+
+- `runDeterministicPublishChecks` blocks unconditionally on `media.length === 0`, and there is no
+  asset. A `block` finding is final.
+- The likeness risk is a landmine rather than a queue. With `presenterPhotoUrlForCrop` uncalled,
+  a run that briefs this without reading §0 first silently substitutes Maya's portrait and invents
+  her entire body and skin tone under her name. "Held" reads as a date; this is an unapproved
+  likeness.
+
+Everything else in the brief is ready and the gate said so: the camera note, the closers, the
+hip-hollow reasoning, the negatives. It resubmits when a body reference for Maya is approved AND
+the selector is actually called by the generation path, and it gets a fresh gate read against real
+pixels, which nobody has judged yet because none exist.
 
 ---
 
@@ -158,9 +178,11 @@ The study that found the orgasm gap also found what narrows it. More time was on
 **CAPTION**
 The study that found the orgasm gap also found what narrows it. More time was on the list.
 
-In the same national survey, the women who orgasmed more often reported more oral sex, longer sessions, and asking out loud for what they wanted. Not better luck. Three specific, learnable things, and one of them is just refusing to hurry.
+In the same national survey, the women who orgasmed more often also reported three things: more oral sex, longer sessions, and asking out loud for what they wanted. Nobody proved which way that runs. It is still a hard pattern to look away from, and one of the three is just refusing to hurry.
 
 The Le Wand Classique is built for the unhurried version: 606 grams, a deep steady motor instead of a quick buzzy one, a flexible neck, and a run time measured in hours rather than minutes. It is made to stay exactly where you put it, long past the point most people give up and reach for something faster.
+
+Give it JO H2O Cooling to work with. Water-based, so it will not degrade the silicone the way a silicone lube would, and it stays slick for as long as you are planning to take.
 
 Today's pick, and worth an actual afternoon rather than the last ten minutes before sleep.
 
@@ -184,7 +206,22 @@ Negatives: no nipple, no labia, no pubic line, no product emerging from a navel,
 
 **§3.7 three-clause check:** (a) **PASSES.** Medium crop, so `presenterPhotoUrlForCrop` correctly selects the portrait reference, which is approved and present for Maya. (b) adult identity marker: her face is in frame. (c) trace of the world: the sunroom, the bench, the hour.
 
-**Status: SHIPPABLE.**
+**Status: REVISE, then shippable** (gate verdict, 2026-09-20). This slate first called it shippable,
+which was premature, and the gate caught two things:
+
+- **The pairing was missing from the caption.** `social-crossplatform-strategy.md` §3 is explicit
+  that Instagram names the pairing without a link, and the X companion for the same SKU named JO
+  H2O Cooling in the same run. It was simply dropped between the two platform drafts. Added above.
+- **A correlation was written as a prescription.** The line read "Not better luck. Three specific,
+  learnable things." Frederick et al. 2018 reports an association between higher orgasm frequency
+  and more oral sex, longer sessions, and asking for what you want. It does not establish that
+  doing those things causes the outcome. Rewritten above to report the pattern and say plainly that
+  nobody proved which way it runs. No number was invented, but converting an association into an
+  instruction is the same fabricated-proof failure the doctrine bans.
+
+Both revisions are applied. Nothing else was flagged: §3.7's three clauses genuinely pass at medium
+crop, the wardrobe and occlusion are compliant, no sale attempt, no image narration in the caption,
+6 hashtags all in range.
 
 ---
 
@@ -198,12 +235,12 @@ Neither post names a price. See §1: the MAP gate was run and both heroes fail i
 
 `castSlugs: ["maya","marcus"]`, `sceneLocation: "bedroom-late-morning"`, `cropScale: "medium"`
 
-**Weighted length: 278/280**, measured with `weightedTweetLength()`.
+**Weighted length: 267/280**, measured with `weightedTweetLength()`.
 
 ```
-95% of straight men orgasm most times. 65% of straight women do. The gap is contact: most women need clitoral stimulation, not penetration.
+95% of straight men orgasm most times. 65% of straight women do. Most women orgasm from clitoral stimulation, which penetration alone mostly misses.
 
-Womanizer Classic 2 pulses air over it. Pair with JO H2O Cooling, water-based, toy-safe.
+Classic 2 pulses air over it. Pair with JO H2O Cooling, water-based.
 
 https://xdipx.com/products/womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator?utm_source=x&utm_medium=social&utm_campaign=orgasm-gap-closed
 https://xdipx.com/products/jo-h2o-cooling-water-based-lubricant?utm_source=x&utm_medium=social&utm_campaign=orgasm-gap-closed
@@ -211,11 +248,22 @@ https://xdipx.com/products/jo-h2o-cooling-water-based-lubricant?utm_source=x&utm
 
 **Image brief:** Maya and Marcus, bedroom, overcast diffuse late-morning light, 16:9. Two cast members in frame is preferred on ceiling frames per §3.2c. Marcus bare to the waist; Maya bare with the oatmeal linen throw drawn across her hips closing the lower edge and her arm crossed tight closing the upper. His hand flat on her waist. The Classic 2 in her hand, held out between them, 148 mm at true scale. Both faces in frame, reading curiosity rather than verdict. Same negatives as §3.
 
-**Why it is held:** the frame itself is `medium` and would pass clause (a). It is held with IG 1 only so the two halves of one campaign beat ship together; drafting them apart is what §1 of the cross-platform strategy exists to prevent.
+**Status: REVISE, then shippable** (gate verdict, 2026-09-20). One finding, and the gate also
+corrected this slate's disposition.
+
+- **The exclusivity claim overreached.** The line read "most women need clitoral stimulation, not
+  penetration", which states a physiological need and an exclusivity the 95/65 orgasm-frequency
+  data does not establish, while running the two together as one finding. Rewritten above to report
+  where the orgasm comes from rather than assert what anyone needs. Note the gate's own suggested
+  rewrite used "gets there", which the charter names as a banned gesture, so it was not adopted.
+- **Holding this with IG 1 is editorial, not compliance.** The frame is `medium`, so
+  `presenterPhotoUrlForCrop` resolves to the approved portrait and clause (a) passes. The missing
+  body reference does not touch it. Shipping the two halves of one campaign beat together is a
+  choice worth making, but it must not be recorded as a technical blocker it is not.
 
 **No opinion is attributed to either cast member.** The caption is mechanism and a pairing fact. §4a's rule bites hardest here, because a synthetic face now sits beside a checkout link.
 
-### X 2 — companion to IG 2. SHIPPABLE TODAY
+### X 2 — companion to IG 2. PASS
 
 `castSlugs: ["marcus"]`, `sceneLocation: "sunroom-late-morning"`, `cropScale: "medium"`
 
@@ -253,7 +301,8 @@ It is not isolated. In a 50-product sample of active products read live today, *
 - **Campaign:** The Orgasm Gap, Closed, day 1 of 13. Calendar row would be promoted `planned` to `active` by the §4 reconciliation pass.
 - **Slate:** the 08-24 slate expired 09-06 with no successor. This file is the successor and the runway is intact through 2026-11-09.
 - **Drafted vs published, never conflated:** drafted 4 (2 Instagram, 2 X). Published 0. Nothing was filed to `social_posts`, nothing went through `social-publish-gate`, nothing reached the hourly publish job. This session has no team token or database.
-- **Shippable vs held:** 2 shippable (IG 2, X 2), 2 held on the §0 body-reference dependency.
+- **Gate verdicts (Step 6.5, run adversarially on all four):** 1 BLOCK (IG 1), 2 REVISE (IG 2, X 1), 1 PASS (X 2). Both REVISE findings are applied above. IG 1 does not resubmit until §0 clears.
+- **Charge ratio, stated plainly:** on paper this slate carries two ceiling frames. In practice it ships one, because §0 blocks the other. Report it as one. Reporting the intent rather than the outcome is how the last three weeks looked fine.
 - **Volume ladder:** rung unread this session. The last value written to a document is `social_freq_instagram = 3` (owner, 2026-08-16); read the live value, never that sentence.
 - **Mix report:** `POST /api/team/social-post {"op":"mixReport"}` would run at Step 7. Expect the body-zone and close-crop lines to read UNKNOWN, because the migration-099 columns are null on every row drafted before today. UNKNOWN is not clean.
 
@@ -262,3 +311,19 @@ It is not isolated. In a 50-product sample of active products read live today, *
 1. **Body reference photos.** Eight cast members need one before any close or macro on-skin frame can ship. Whose, and how explicit? The owner approves cast likeness.
 2. **A vibrator over a nipple** remains owner-only and unresolved (§3.2c). It is not needed for this campaign.
 3. **The MAP floor breaches in §6.**
+
+## 9. Filed rather than fixed here
+
+- **Make the presenter-reference fallback loud.** `presenterPhotoUrlForCrop` has no production
+  caller and degrades silently, so nothing warns when a close crop is built from a portrait. It
+  should be called by the generation path and it should refuse, or at minimum warn, rather than
+  quietly substitute. Distinct from #10270, which added the field and the selector. This is the
+  difference between a dependency and a landmine.
+- **Check `PAIRING_REQUIRED_TYPE_DIALS` covers `wand` and `air-pulsation`.** The gate's deterministic
+  pairing check may not fire for either product in this campaign, which would explain how IG 2's
+  missing pairing got past drafting and had to be caught editorially. Verify the live
+  `product_type_dial` values for both SKUs and extend the set if they are absent.
+- **One line separating mechanism-as-fact from mechanism-as-narration.** §6a licenses
+  mechanism-and-health framing; License A bans mechanism-on-body description. The charter's own
+  worked example ("air pulsation seals over the clitoris and pulses") resolves it, but the gate had
+  to reason its way there. A clarifying sentence would save the next reviewer the trip.
