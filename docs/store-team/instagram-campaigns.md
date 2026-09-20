@@ -324,9 +324,19 @@ every brief:
   the sentence.
 
 None of these three substitutes for a check on the produced pixels. Across 24 frames the fence
-breach rate was roughly 29 percent and it rose whenever the brief asked for more skin. Ticket
-#10268 adds nipple, genitalia, adulthood and legible-text checks to `social-vision-gate.server.ts`,
-and it is live since 2026-09-19 (PR #1226): the checks run per candidate at generation time, fail closed, and the publish gate BLOCKs a failing or missing verdict. The remaining hole is the legacy carve-out that skips a `social-`/`ig-` prefixed asset with no recorded verdict; until that carve-out is sunset (ticket filed 2026-09-20) a run must confirm every on-skin lead has a recorded verdict before relaying PASS.
+breach rate was roughly 29 percent and it rose whenever the brief asked for more skin.
+
+**That check is live, and this paragraph no longer holds anything back.** It used to end "until it
+is live no on-skin frame ships to Instagram unattended", which was true when it was written on
+2026-09-19 and stale the same day: ticket #10268 merged as `d88d3d3` and #10279 as `f2bd4bc`.
+`social-vision-gate.server.ts` now runs seven checks per frame (the doctrine's four anatomy checks
+plus `nippleOccluded`, `genitaliaAbsent`, `adultUnambiguous`) and reports `legibleText` as a
+transcription rather than a verdict, and `social-publish-gate.server.ts` blocks any media URL that
+carries no recorded verdict or a failed one. So the unattended path is open for on-skin frames on
+the same terms as every other frame. Left as written, the sentence was a hold on exactly the
+treatment §3.2c exists to ship, which is the §3.6 failure again: the gate was right and the
+document was stale. Owner direction that does not reach the binding document has not landed, and
+neither has a blocker that outlives its cause. One hole remains (ticket #10337): the publish gate still SKIPS rather than BLOCKS a `social-`/`ig-` prefixed asset with no recorded verdict, a legacy burn-in carve-out; until it is sunset a run confirms every on-skin lead has a recorded verdict before relaying PASS.
 
 **"Desire-forward" means the picture and the caption, since 2026-08-22.** Owner direction
 2026-08-16 asked for posts that are *"desire forward and product highlighting"*; on 2026-08-22 the
