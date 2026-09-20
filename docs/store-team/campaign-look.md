@@ -90,9 +90,11 @@ What remains is code, not judgment, and all of it is on the bus:
 
 ## 6. Changelog
 
-- **2026-09-20**. Created. Records the on-skin treatment (owner 2026-09-19), the
-  nudity definition (owner 2026-09-20), and the site-wide extension (owner
-  2026-09-20, all-hands). Video (#192), Emma likeness (#193) and paid remain out.
+- **2026-09-20, morning.** Created. Records the on-skin treatment (owner
+  2026-09-19), the nudity definition (owner 2026-09-20), and the site-wide
+  extension (owner 2026-09-20, all-hands). Video (#192), Emma likeness (#193)
+  and paid remain out. **Superseded on video and Emma by the entry below, filed
+  the same day; read both before quoting either.**
 - **2026-09-20, later the same day.** Owner answered every open question at the
   readiness all-hands. #182 body references uploaded and approved for all eight
   cast members. #155 Studio deployed. #193 "Yes, Emma can and she has a body

@@ -1142,10 +1142,16 @@ nothing errors and the run reports success while the model invents everything be
 
 **One real gap remains, and it is narrower than it used to be.** The route path
 (`app/routes/api.team.social-image.tsx`, `app/routes/api.admin.social-image.tsx`) calls
-`resolveCastReference` and therefore the selector. `scripts/gen-social-image.ts` does NOT: it takes
-`--presenter-image <url>` and resolves by hand, so `withSkinToneNote` never runs on the CLI path and
-the bare-product picker never runs either. Ticket #10475 closes that. Until it lands, a CLI-driven
-close crop still needs the body reference URL passed explicitly.
+`resolveCastReference`, which wraps the selector and also applies `withSkinToneNote` and the
+bare-product picker. `scripts/gen-social-image.ts` reaches `presenterPhotoUrlForCrop` directly
+instead, so it DOES resolve the right reference but the other two never run on that path. Ticket
+#10475 closes it.
+
+**Use `--cast-slug`, never `--presenter-image`, for a macro or close crop.** The CLI already
+enforces this and will not let you get it wrong: a hand-passed `--presenter-image` with
+`--crop-scale macro|close` exits 1 by design (`scripts/gen-social-image.ts:177`), and a
+`--cast-slug` whose member has no `bodyReferencePhoto` exits 1 with the remedy printed. Passing the
+body reference URL by hand is refused, not required.
 
 **The brief carries subject, product(s), and feeling, always (owner direction 2026-08-22,
 `instagram-campaigns.md` §3.9).** Alongside the handle, photo, dimensions, and beat, pass
