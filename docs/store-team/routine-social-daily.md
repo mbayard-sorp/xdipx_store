@@ -1079,6 +1079,28 @@ asserted, and they will decay the same way `sceneLocation` did if nothing sends 
 nullable and optional for a post with no location/body-zone shoot (education, inspiration), never
 optional for one that has one.
 
+**A `macro` or `close` crop needs the cast member's BODY reference, and today there is not one.**
+`presenterPhotoUrlForCrop` (`app/lib/sanity.server.ts`) is the function that picks the body
+reference for those two crop scales and the portrait for everything else. Two things are true about
+it and both change what you may do:
+
+- **Nothing calls it.** `scripts/gen-social-image.ts` takes `--presenter-image <url>` as a
+  caller-supplied argument and never consults the selector, so the choice is yours to make by hand.
+- **`bodyReferencePhoto` is null on all eight approved cast members** (verified authenticated
+  against Sanity on 2026-09-20), and `skinToneNote` with it. The selector's own fallback returns the
+  portrait silently in that case, and its docstring names the reason: the owner has not approved one.
+
+So a close or macro on-skin frame generated today is built from a head-and-shoulders portrait, the
+model invents everything below the neck including skin tone, and **§3.7 clause (a) fails** while the
+run reports success. That is the silent-degradation shape, not a missing nice-to-have.
+
+**Until a body reference is approved: do not ship a `macro` or `close` on-skin frame.** Brief it,
+hold it, and say in the run summary that it is held and why. A `medium` or `wide` crop is unaffected,
+because the portrait reference is the correct input at those scales and it exists. Do not work around
+this by generating the close crop from the portrait anyway; the whole point of clause (a) is that a
+faceless bare crop has no identity anchor the system can verify, and inventing one is worse than
+posting less.
+
 **The brief carries subject, product(s), and feeling, always (owner direction 2026-08-22,
 `instagram-campaigns.md` §3.9).** Alongside the handle, photo, dimensions, and beat, pass
 `social-art-director` the post's subject in one line, the product(s) that belong to that subject,
