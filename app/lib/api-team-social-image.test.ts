@@ -72,6 +72,8 @@ const validGenerate = {
   date: '2026-08-18',
   imageSize: { width: 1080, height: 1350 },
   refImageUrl: 'https://cdn.shopify.com/files/real-packshot.jpg',
+  // Required on every generation call since ticket #10501.
+  sceneLocation: 'bedroom-loft',
 }
 
 const validCast = {
@@ -83,6 +85,8 @@ const validCast = {
   presenterImageUrl: 'https://cdn/presenter.jpg',
   productImageUrl: 'https://cdn/product.jpg',
   scale: 'palm',
+  // Required on every generation call since ticket #10501.
+  sceneLocation: 'bedroom-loft',
 }
 
 const MAYA = {
@@ -162,6 +166,34 @@ describe('generate', () => {
     expect(res.status).toBe(403)
     expect(await res.json()).toMatchObject({ error: 'gated', reason: 'over_budget' })
     expect(genMock).not.toHaveBeenCalled()
+  })
+
+  // Ticket #10501: a caller could hit this route directly and route around
+  // scripts/gen-social-image.ts's own requirement, so the route must refuse
+  // on its own — before the money gate, so a refusal never reaches spend.
+  it('rejects a generation call with no sceneLocation, before the money gate runs', async () => {
+    const res = await post({ ...validGenerate, sceneLocation: undefined })
+    expect(res.status).toBe(400)
+    expect(genMock).not.toHaveBeenCalled()
+    expect(gateMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a macro/close crop missing bodyZone or contactMode', async () => {
+    const macro = await post({ ...validGenerate, cropScale: 'macro' })
+    expect(macro.status).toBe(400)
+    const closeOnly = await post({ ...validGenerate, cropScale: 'close', bodyZone: 'hip-hollow' })
+    expect(closeOnly.status).toBe(400)
+    expect(genMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts a macro crop that supplies bodyZone and contactMode', async () => {
+    const res = await post({ ...validGenerate, cropScale: 'macro', bodyZone: 'hip-hollow', contactMode: 'resting' })
+    expect(res.status).toBe(200)
+  })
+
+  it('accepts a medium/wide crop with only sceneLocation', async () => {
+    const res = await post({ ...validGenerate, cropScale: 'wide' })
+    expect(res.status).toBe(200)
   })
 })
 
@@ -259,10 +291,14 @@ describe('cast: body reference + skin tone + castSlugs (#10336)', () => {
     date: '2026-08-18',
     productImageUrl: 'https://cdn/product.jpg',
     scale: 'palm',
+    // Required on every generation call since ticket #10501.
+    sceneLocation: 'bedroom-loft',
   }
+  // A macro/close crop additionally requires bodyZone/contactMode (#10501).
+  const ON_SKIN_AXES = { bodyZone: 'hip-hollow', contactMode: 'resting' }
 
   it('passes the body reference for a close crop', async () => {
-    const res = await post({ ...castBySlug, castSlug: 'maya', cropScale: 'close' })
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'maya', cropScale: 'close' })
     expect(res.status).toBe(200)
     expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
       presenterImageUrl: 'https://cdn/maya-body.jpg',
@@ -272,7 +308,7 @@ describe('cast: body reference + skin tone + castSlugs (#10336)', () => {
   })
 
   it('prepends the skin-tone note to the scene prompt', async () => {
-    await post({ ...castBySlug, castSlug: 'maya', cropScale: 'close' })
+    await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'maya', cropScale: 'close' })
     expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
       prompt: 'Skin tone: deep brown skin with warm undertones. held at the collarbone, window light',
     }))
@@ -286,7 +322,7 @@ describe('cast: body reference + skin tone + castSlugs (#10336)', () => {
   })
 
   it('returns bodyReferenceMissing and a warning when a close crop has no body reference', async () => {
-    const res = await post({ ...castBySlug, castSlug: 'ruth', cropScale: 'close' })
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'ruth', cropScale: 'close' })
     expect(res.status).toBe(200)
     const body = await res.json() as { bodyReferenceMissing?: boolean; warning?: string }
     expect(body.bodyReferenceMissing).toBe(true)
@@ -304,14 +340,14 @@ describe('cast: body reference + skin tone + castSlugs (#10336)', () => {
   })
 
   it('rejects a castSlug that is not on the approved roster', async () => {
-    const res = await post({ ...castBySlug, castSlug: 'nobody', cropScale: 'close' })
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'nobody', cropScale: 'close' })
     expect(res.status).toBe(400)
     expect(castMock).not.toHaveBeenCalled()
   })
 
   it('refuses to read an empty roster as "there are none"', async () => {
     rosterMock.mockResolvedValue([])
-    const res = await post({ ...castBySlug, castSlug: 'maya', cropScale: 'close' })
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'maya', cropScale: 'close' })
     expect(res.status).toBe(400)
     expect(castMock).not.toHaveBeenCalled()
   })
@@ -319,6 +355,12 @@ describe('cast: body reference + skin tone + castSlugs (#10336)', () => {
   it('forwards an explicit castSlugs list when given', async () => {
     await post({ ...castBySlug, castSlug: 'maya', cropScale: 'medium', castSlugs: ['maya', 'ruth'] })
     expect(castMock).toHaveBeenCalledWith(expect.objectContaining({ castSlugs: ['maya', 'ruth'] }))
+  })
+
+  it('refuses a close crop missing bodyZone/contactMode, before ever resolving the reference', async () => {
+    const res = await post({ ...castBySlug, castSlug: 'maya', cropScale: 'close' })
+    expect(res.status).toBe(400)
+    expect(castMock).not.toHaveBeenCalled()
   })
 })
 

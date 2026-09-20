@@ -1542,7 +1542,10 @@ mandatory and unchanged: generator URLs expire (Atlas output in ~14 days, fal in
 fetches the image server-side at publish time, so every asset is rehosted regardless of provider,
 routing per `docs/media-model-routing.md`. The script also writes the spend row.
 
-**Product post, cast composite.** The presenter holds and shows the product (§3.6):
+**Product post, cast composite.** The presenter holds and shows the product (§3.6). **`--scene-location`
+is required on every call, no exception** (ticket #10501: the script itself now refuses without it,
+before any money is spent) — pass `social-art-director`'s location choice, normalized to a slug
+(`bedroom-loft`, `bathroom-spa`):
 
 ```bash
 npx tsx scripts/gen-social-image.ts \
@@ -1552,6 +1555,26 @@ npx tsx scripts/gen-social-image.ts \
   --ref-image "<real Shopify product photo>" \
   --extra-ref "<the same product photo again>" \
   --scale "<cue from the product's real dimensions, see below>" \
+  --scene-location "<social-art-director's location, e.g. bedroom-loft>" \
+  --candidates 2 --caller social-media-manager
+```
+
+**On-skin brief (macro/close crop): use `--cast-slug`, never `--presenter-image`, and add
+`--body-zone`/`--contact-mode`.** Per the rule above ("Use `--cast-slug`, never `--presenter-image`,
+for a macro or close crop"), a macro or close on-skin frame also requires `--body-zone` and
+`--contact-mode` — the script refuses without them, same as `--scene-location`:
+
+```bash
+npx tsx scripts/gen-social-image.ts \
+  --prompt "<scene, the closer-object rule, light, product silhouette, negatives>" \
+  --handle <product-handle> --archetype cast --mood <short-token> \
+  --cast-slug <approved-cast-slug> --crop-scale macro|close \
+  --ref-image "<real Shopify product photo>" \
+  --extra-ref "<the same product photo again>" \
+  --scale "<cue from the product's real dimensions, see below>" \
+  --scene-location "<social-art-director's location>" \
+  --body-zone "<social-art-director's zone, e.g. hip-hollow>" \
+  --contact-mode "<social-art-director's contact mode, e.g. resting>" \
   --candidates 2 --caller social-media-manager
 ```
 
@@ -1562,7 +1585,9 @@ how a frame once shipped with an object that was not the SKU at all.
 **Product-free post** (education, inspiration, a campaign kickoff naming several categories): drop
 `--presenter-image` and pass the cast reference as `--ref-image`. With no product to preserve, a
 single reference holding just the presenter is the right tool. For art with no person either, use
-`--no-ref` with a reason.
+`--no-ref` with a reason. **`--scene-location` is still required** — it is the one axis with no
+"none" sentinel and no exemption for product-free art; give it a location even for a metaphor or
+typography frame (a flat-lay hook can still say `studio-flatlay`).
 
 **Scale is a lookup, not a judgment.** Read the length from the product's `xdipx.specifications`
 metafield ("Length: 4.7 inches") and build the cue with `scaleCueFromLengthInches()`. Do not guess a
@@ -1614,6 +1639,10 @@ carrying a bare Nalpac/Shopify SKU packshot — shipping either is drafting into
 - **Product-free art (metaphor hook, typography plate):** the single-image form,
   `--archetype scene|metaphor|macro|plate ... --ref-image <url>`, or `--no-ref --no-ref-reason
   "<why>"` for genuinely product-free art.
+- **`--scene-location` is mandatory on every call above, no exception** (ticket #10501): the script
+  refuses with exit 1 before generating if it is missing. `--body-zone` and `--contact-mode` are
+  additionally mandatory whenever `--crop-scale` is `macro` or `close`. This is enforced pre-spend at
+  generation, not backfilled later — a missing axis here is a run defect, not a note for later.
 - **The cast-composite path is LIVE. Do not degrade to the single-image form.** This bullet used to
   say the cast form was waiting on an unmerged publish-job PR; that PR merged, and
   `generateCastComposite` and `scaleCueFromLengthInches` both ship in

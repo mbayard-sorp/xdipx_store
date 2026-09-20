@@ -12,6 +12,7 @@ import {
   mergeSceneAxes,
   parseSceneAxes,
   parseSceneAxisTags,
+  requireSceneAxesForGeneration,
   sceneAxisTags,
   validateSceneAxis,
 } from './social-scene-vocab'
@@ -131,5 +132,53 @@ describe('mergeSceneAxes / hasAllSceneAxes', () => {
     expect(hasAllSceneAxes({
       bodyZone: 'sternum', contactMode: 'resting', cropScale: 'macro', sceneLocation: 'bedroom-loft',
     })).toBe(true)
+  })
+})
+
+// Ticket #10501: without this, the routine's Step 5 template (and any direct
+// caller of api.team.social-image.tsx) could omit every axis and produce an
+// untagged asset, the exact shape that decayed coverage to 0/7 twice already
+// (migrations 093, 099).
+describe('requireSceneAxesForGeneration', () => {
+  it('refuses a call with no sceneLocation at all', () => {
+    const result = requireSceneAxesForGeneration({})
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toContain('sceneLocation')
+  })
+
+  it('refuses a wide/medium crop missing sceneLocation even when other axes are present', () => {
+    const result = requireSceneAxesForGeneration({ cropScale: 'wide' })
+    expect(result.ok).toBe(false)
+  })
+
+  it('passes a non-skin generation that supplies only sceneLocation', () => {
+    expect(requireSceneAxesForGeneration({ sceneLocation: 'bedroom-loft' })).toEqual({ ok: true })
+  })
+
+  it('passes a medium/wide crop with sceneLocation and no bodyZone/contactMode', () => {
+    expect(requireSceneAxesForGeneration({ sceneLocation: 'bedroom-loft', cropScale: 'medium' })).toEqual({ ok: true })
+    expect(requireSceneAxesForGeneration({ sceneLocation: 'bedroom-loft', cropScale: 'wide' })).toEqual({ ok: true })
+  })
+
+  it('refuses a macro crop missing bodyZone and/or contactMode', () => {
+    const missingBoth = requireSceneAxesForGeneration({ sceneLocation: 'bedroom-loft', cropScale: 'macro' })
+    expect(missingBoth.ok).toBe(false)
+    if (!missingBoth.ok) expect(missingBoth.error).toContain('bodyZone and contactMode')
+
+    const missingOne = requireSceneAxesForGeneration({
+      sceneLocation: 'bedroom-loft', cropScale: 'macro', bodyZone: 'hip-hollow',
+    })
+    expect(missingOne.ok).toBe(false)
+  })
+
+  it('refuses a close crop the same way it refuses macro', () => {
+    const result = requireSceneAxesForGeneration({ sceneLocation: 'bedroom-loft', cropScale: 'close' })
+    expect(result.ok).toBe(false)
+  })
+
+  it('passes a fully-supplied on-skin generation', () => {
+    expect(requireSceneAxesForGeneration({
+      sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'hip-hollow', contactMode: 'resting',
+    })).toEqual({ ok: true })
   })
 })

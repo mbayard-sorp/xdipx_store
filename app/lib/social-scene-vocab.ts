@@ -13,9 +13,12 @@
  * This is the data-and-query standard the conversation-channels audit wrote
  * down (`docs/audits/conversation-channels-product-lookup-audit-2026-08-04.md`):
  * canonical vocab is imported, never re-typed. `social-mix-report.server.ts`
- * imports its zone/crop sets from here, and a unit test asserts each of those
- * sets is a subset of the vocabulary, so the report can never again classify
- * against a token the writers cannot produce.
+ * declares its own `CEILING_ZONES` / `MID_ZONES` / `PLUG_ZONE` /
+ * `CLOSE_CROP_SCALES` as local `Set` literals rather than importing from
+ * here, but `social-mix-report.server.test.ts` asserts each of those sets is
+ * a subset of `BODY_ZONES` / `CROP_SCALES` above, so the report can never
+ * classify against a token the writers cannot produce — the guarantee is
+ * test-enforced, not import-enforced.
  *
  * Pure constants and pure functions only, no `.server` suffix: the same
  * vocabulary is used by the generation route, the draft route, the rework
@@ -199,6 +202,36 @@ export function parseSceneAxes(raw: Record<string, unknown>, prefix = ''): Scene
     axes[key] = parsed.value
   }
   return { ok: true, axes }
+}
+
+/**
+ * Which of the four axes generation MUST supply, given the parsed set
+ * (ticket #10501). `parseSceneAxes` only ever validates a value that is
+ * PRESENT — every axis stays optional there by design, because a 400 at
+ * draft time would strand an already-billed image (see that function's own
+ * doc comment). Generation is the opposite: it runs before any money is
+ * spent, so a missing axis there costs exactly one retry, not a stranded
+ * frame. Two call sites need the identical rule (the CLI,
+ * `scripts/gen-social-image.ts`, and the route it delegates to,
+ * `app/routes/api.team.social-image.tsx`, which a caller could hit directly
+ * and route around the CLI's own check), so the rule lives here once rather
+ * than being retyped at both.
+ *
+ * `sceneLocation` is required unconditionally — it is the one axis with no
+ * `NON_SKIN_SENTINEL`, so there is no "not applicable" answer for it to
+ * carry. `bodyZone` and `contactMode` are required only when `cropScale` is
+ * `macro` or `close`: those are the on-skin crops (docs/store-team/
+ * routine-social-daily.md §5.0a), and a wide or medium crop legitimately has
+ * neither a zone nor a contact mode to report.
+ */
+export function requireSceneAxesForGeneration(axes: SceneAxes): { ok: true } | { ok: false; error: string } {
+  if (!axes.sceneLocation) {
+    return { ok: false, error: 'sceneLocation is required on every social image generation' }
+  }
+  if ((axes.cropScale === 'macro' || axes.cropScale === 'close') && (!axes.bodyZone || !axes.contactMode)) {
+    return { ok: false, error: `bodyZone and contactMode are required when cropScale is ${axes.cropScale}` }
+  }
+  return { ok: true }
 }
 
 // --- Asset tag encoding ----------------------------------------------------

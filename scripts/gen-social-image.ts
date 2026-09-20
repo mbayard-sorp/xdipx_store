@@ -87,6 +87,7 @@ function hasFlag(name: string): boolean {
  * is honored, not treated as unset.
  */
 import { SOCIAL_MAX_IMAGES_DEFAULT } from '~/lib/team-keys'
+import { requireSceneAxesForGeneration } from '~/lib/social-scene-vocab'
 // Type-only: erased at runtime, so importing it never loads shopify.server /
 // db.server into the sandbox. Generation + rehost now run SERVER-SIDE via
 // POST /api/team/social-image (ticket #4133), where the Shopify Admin token
@@ -193,6 +194,25 @@ async function main() {
     process.exit(1)
   }
   const needsBodyReference = cropScale === 'macro' || cropScale === 'close'
+
+  // ── Scene axes: required, not merely validated-if-present (ticket #10501) ──
+  //
+  // Ticket #10479/#10480 made the axes ride with generation, where the brief
+  // actually chooses them, so the draft op never has to ask the drafting
+  // agent to recall them. But nothing forced a caller to actually SUPPLY
+  // them here, so the routine's Step 5 template could (and did) omit every
+  // one, producing an untagged asset the backfill has nothing to read from.
+  // That is exactly the shape that decayed coverage to 0/7 twice already
+  // (migrations 093 and 099). Refusing here is pre-spend and costs exactly
+  // one retry — the opposite of refusing at draft time, which would strand
+  // an already-billed image. The rule itself lives in social-scene-vocab.ts
+  // (requireSceneAxesForGeneration), shared with api.team.social-image.tsx
+  // so the two surfaces cannot drift.
+  const axesRequired = requireSceneAxesForGeneration(sceneAxes)
+  if (!axesRequired.ok) {
+    console.error(`${axesRequired.error}. See app/lib/social-scene-vocab.ts.`)
+    process.exit(1)
+  }
 
   if (castSlug && presenterArg) {
     console.error('--cast-slug and --presenter-image are mutually exclusive: pass the slug and let the crop scale pick the reference, or pass the URL yourself.')
