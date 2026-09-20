@@ -106,7 +106,7 @@ maya/marcus), light signature (macro-lit to overcast diffuse). **Four of five.**
 **Product:** `womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator` (44 in stock)
 **Subject:** External stimulation is the mechanism that closes the orgasm gap, and it is a different thing from a vibrator.
 **Sensation sold:** recognition, then permission.
-**Draft payload:** `castSlugs: ["maya"]`, `sceneLocation: "bedroom-late-morning"`, `bodyZone: "hip-hollow"`, `contactMode: "resting"`, `cropScale: "close"`
+**Draft payload:** `shopifyProductId: "<gid of womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator, from the Step 2.6 stock fetch>"`, `castSlugs: ["maya"]`, `sceneLocation: "bedroom-late-morning"`, `bodyZone: "hip-hollow"`, `contactMode: "resting"`, `cropScale: "close"`
 **Charge tier:** ceiling. §3.2b's ceiling-on-skin definition names the hip hollow explicitly.
 
 **HOOK**
@@ -167,7 +167,7 @@ pixels, which nobody has judged yet because none exist.
 **Product:** `classique-rechargeable-wand-massager` (Le Wand Classique, 16 in stock)
 **Subject:** Taking more time is the other half of what closes the gap.
 **Sensation sold:** anticipation.
-**Draft payload:** `castSlugs: ["maya"]`, `sceneLocation: "sunroom-late-morning"`, `bodyZone: "thigh-top"`, `contactMode: "resting"`, `cropScale: "medium"`
+**Draft payload:** `shopifyProductId: "<gid of classique-rechargeable-wand-massager, from the Step 2.6 stock fetch>"`, `castSlugs: ["maya"]`, `sceneLocation: "sunroom-late-morning"`, `bodyZone: "thigh-top"`, `contactMode: "resting"`, `cropScale: "medium"`
 **Charge tier:** ceiling, at medium crop. This is the §3.2c "at least one ceiling frame per rolling 7 wide enough to read a location", and holding it at medium is also what keeps the close-crop cap ("never two consecutive") intact on a two-post day.
 
 Chosen over the Zola mini deliberately: the subject is duration and weight, not portability, and a 606 g wand's product truth is exactly the thing the caption is about.

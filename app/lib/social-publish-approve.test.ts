@@ -5,7 +5,7 @@
 // an agent's PASS surviving a deterministic block, a product handle failing to
 // reach publish time, a PASS that says nothing, and a verdict landing on a row
 // that was not waiting for one.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   parsePublishGateVerdict,
   applyPublishGateVerdict,
@@ -184,6 +184,71 @@ describe('applyPublishGateVerdict', () => {
     expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
     expect(writes[0]?.reviewStatus).toBe('approved')
     expect(parseGateStamp(writes[0]?.feedback)?.verdict).toBe('PASS')
+  })
+
+  // ── The durable product link is backfilled from the gate's handle ──────────
+  // The stock guard skips a row whose shopify_product_id is null and the mix
+  // report counts it as product-free, and the drafting routine never sent the
+  // column, so the approved write fills it from the handle the PASS asserted.
+
+  it('backfills shopify_product_id from the PASS handle when the row has none', async () => {
+    const { repo, writes } = fakeRepo(row({ shopifyProductId: null }))
+    const resolved: string[] = []
+    const r = await applyPublishGateVerdict(
+      7,
+      verdict({ featuresProduct: true, productHandle: 'dame-aer' }),
+      {
+        repo, ...inStock,
+        resolveProductIdByHandle: async (h) => { resolved.push(h); return 'gid://shopify/Product/4242' },
+      },
+    )
+    expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
+    expect(resolved).toEqual(['dame-aer'])
+    expect(writes[0]?.shopifyProductId).toBe('gid://shopify/Product/4242')
+    expect(writes[0]?.reviewStatus).toBe('approved')
+  })
+
+  it('leaves an existing shopify_product_id alone: the drafter is the source of truth', async () => {
+    const { repo, writes } = fakeRepo(row({ shopifyProductId: 'gid://shopify/Product/1' }))
+    const resolve = vi.fn(async () => 'gid://shopify/Product/999')
+    await applyPublishGateVerdict(
+      7, verdict({ featuresProduct: true, productHandle: 'dame-aer' }),
+      { repo, ...inStock, resolveProductIdByHandle: resolve },
+    )
+    expect(resolve).not.toHaveBeenCalled()
+    expect(writes[0]).not.toHaveProperty('shopifyProductId')
+  })
+
+  it('does not resolve or write a product id when the PASS says the post features no product', async () => {
+    const { repo, writes } = fakeRepo(row())
+    const resolve = vi.fn(async () => 'gid://shopify/Product/999')
+    await applyPublishGateVerdict(7, verdict(), { repo, ...inStock, resolveProductIdByHandle: resolve })
+    expect(resolve).not.toHaveBeenCalled()
+    expect(writes[0]).not.toHaveProperty('shopifyProductId')
+  })
+
+  it('still approves when the handle does not resolve or the lookup throws', async () => {
+    for (const resolve of [async () => null, async () => { throw new Error('storefront down') }]) {
+      const { repo, writes } = fakeRepo(row())
+      const r = await applyPublishGateVerdict(
+        7, verdict({ featuresProduct: true, productHandle: 'dame-aer' }),
+        { repo, ...inStock, resolveProductIdByHandle: resolve },
+      )
+      expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
+      expect(writes[0]).not.toHaveProperty('shopifyProductId')
+    }
+  })
+
+  it('does not backfill on a PASS the deterministic checks refused', async () => {
+    const { repo, writes } = fakeRepo(row())
+    const resolve = vi.fn(async () => 'gid://shopify/Product/999')
+    const r = await applyPublishGateVerdict(
+      7, verdict({ featuresProduct: true, productHandle: 'dame-aer' }),
+      { repo, gateDeps: { getAvailability: async () => false }, resolveProductIdByHandle: resolve },
+    )
+    expect(r.ok).toBe(false)
+    expect(resolve).not.toHaveBeenCalled()
+    expect(writes[0]).not.toHaveProperty('shopifyProductId')
   })
 
   // ── Phase 5 (#4913): the verdict lands in the columns, the stamp is dual-written ──
