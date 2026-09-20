@@ -72,8 +72,19 @@ charter's invented-testimonial ban wearing a rule number).
   charter amendment 2026-09-04: that show's spoken track runs at 9, plain, with acts nameable; the
   owner posts it manually and accepts the platform risk. These caps remain the default for every
   other script.)
-- **P2.** Judge by the most revealing frame: no product-on-body, no simulated use, wardrobe safe
+- **P2.** Judge by the most revealing frame: **no product operating on a body** (the wording in
+  `docs/emma-voice.md`, and the two documents now match), no simulated use, wardrobe safe
   in every frame, and the AI-generated label is always on.
+
+**Stated divergence: video stays wardrobe-safe while stills do not.** The on-skin treatment in
+`instagram-campaigns.md` §3.2c licenses bare bodies with product against skin on stills, and as of
+the owner's direction of 2026-09-20 it is the active look on every surface. Video deliberately does
+not follow, for two reasons worth naming rather than leaving as an inconsistency somebody quietly
+"fixes": a clip is judged on its most revealing frame, so a wardrobe that holds for 29 frames and
+slips on the 30th is judged on the 30th, and the platform video classifier is measurably stricter
+than the still classifier at the same level of exposure. **Whether §3.2c on-skin frames may appear
+in a Reel is an owner decision, filed as blocker #192.** Until it is answered the video wardrobe
+rules above stand unchanged, and a script or frame prompt does not borrow the still ceiling.
 - **P3.** Audio and caption hygiene: no trending audio with flagged lyrics ever (instrumentals
   and trending formats are fine); explicit nouns allowed in caption prose per platform caps but
   never in hashtags or bio.

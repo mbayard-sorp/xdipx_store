@@ -150,6 +150,16 @@ live platform at zero means recovery is its first job and its quota arithmetic m
 new drafting. "The morning run already used the quota" describes a day the morning run filled with
 live posts, not one it filled with rejections.
 
+**Recovery may not be bought by retreating to a cold frame.** A zero-day recovery draft is held to
+the same mix as any other draft: the evening run may satisfy a zero-post day with an educational or
+clothed frame **at most once per rolling 7**, and beyond that it keeps walking the ladder in the
+shape the mix needs rather than shipping the safest picture available. Retreat is the failure mode
+this section exists to stop, and a recovery slot is exactly where it happens. Every run summary
+states two things about imagery, zero day or not: **how many vision-gate attempts were spent**, and
+**whether a body reference existed for the cast member used** (`bodyReferencePhoto`, resolved by
+`presenterPhotoUrlForCrop`). "Held the close crop, no body reference for <slug>" is a complete and
+honest answer; a silent portrait fallback is not.
+
 **Who supports a zero day (the rest of the team).** The ticket is the handoff, and each lane has a
 standing job it does not get to decline:
 
@@ -619,7 +629,10 @@ Until tagging exists, commerce on Instagram runs post to profile to link in bio 
 
 **Owner direction 2026-08-22, binding at run start:** "I'm officially saying, our posts should be at
 a 9 for the explicit register. That's an order. I want innuendo, suggestive phrases, skin in the
-images (not nudity)." Instagram captions now run at **9 by implication** per the social addendum in
+images (not nudity)." **Read "nudity" there with the owner's own definition of 2026-09-20: visible
+nipples, labia, penis, or anus, and nothing else.** A bare body that shows none of those is not
+nudity and is licensed, which is what the on-skin treatment in `instagram-campaigns.md` §3.2c
+runs on. Instagram captions now run at **9 by implication** per the social addendum in
 `docs/emma-voice.md` (v5.5) and `instagram-campaigns.md` §3.2b: the wanting is nameable, the heat
 arrives through innuendo, anticipation, and the unsaid, and the vocabulary fence is unchanged (no act
 naming, no orgasm or arousal words, no anatomy nouns, no emoji-anatomy). "Too tame" is now a REVISE
@@ -1075,9 +1088,41 @@ optional. When the brief is an on-skin frame (macro/close crop of a body zone ra
 scene), also carry `social-art-director`'s body zone, contact mode, and crop-scale choices through as
 `bodyZone`, `contactMode`, and `cropScale` on the same draft call (migration 099, same ticket): these
 are the sibling fields the on-skin campaign's own variety windows need to be checkable rather than
-asserted, and they will decay the same way `sceneLocation` did if nothing sends them. All four are
-nullable and optional for a post with no location/body-zone shoot (education, inspiration), never
-optional for one that has one.
+asserted, and they will decay the same way `sceneLocation` did if nothing sends them. `sceneLocation` is sent on EVERY product row without exception, and the three on-skin fields are
+sent whenever the frame touches skin. **A product row written without them is a run defect and the
+run summary names it**, because an UNKNOWN in the mix report is indistinguishable from a cap nobody
+kept. They stay optional only for a post with no location and no body-zone shoot at all (education,
+inspiration).
+
+**Step 5.0a, the on-skin mix, and it is a rule you check before you brief (§3.2b, §3.2c).**
+On-skin frames are the active look on every surface, not a social-only experiment (owner direction
+2026-09-20). Do not restate the ceiling here; read §3.2a and §3.2c and brief from them. What this
+step owns is the mix, and every number below is a rolling window over the most recent posts, never a
+per-campaign total:
+
+- **Charge: roughly 4 ceiling / 2 mid / 1 educational per rolling 7.** §3.2b gives both an on-skin
+  definition: **ceiling on-skin** is a bare contact zone in implied-nude territory (hip hollow, small
+  of the back to the dimples, sternum with the breasts bare, stomach to the navel); **mid on-skin**
+  is a contact zone that reads clothed-adjacent even while bare (inner wrist, forearm, behind the
+  knee, the back of a shoulder). Educational stays the only frame that may be quiet.
+- **At most 3 close crops per rolling 7, and never two consecutive.** At least one ceiling frame per
+  rolling 7 is wide enough to read a location. Ten tight crops of bare skin is a stock library.
+- **Body-zone rotation window of 5.** No zone repeats inside 5 consecutive on-skin frames, judged on
+  the visible zone and not the label. Four anal or prostate products in one set is four gluteal
+  frames if shot naively, which is exactly what the window stops.
+- **Placement follows use.** Pair every body zone with a catalog category before briefing it, per the
+  worked treatments in §3.2c (plug, cock ring, paddle, lipstick bullet, beads, pasties). Pointer,
+  not a restatement: read the section.
+
+**The closer-object rule replaces the garment line in every prompt template below.** The templates
+say "wardrobe with its coverage", and on an on-skin frame there is no wardrobe to state. State
+instead **what closes each edge of the frame**: the drawn object or the named action holding it.
+§3.2b's three binding craft rules apply to the words you type: write the frame and never the
+exclusion, use an inanimate closer or a limb named by the action it is performing rather than by
+region, and never brief the supine-from-above composition with breasts in frame.
+
+Check the mix with the `mixReport` op (Step 7) BEFORE briefing, not only in the retro. A cap you
+only measure afterwards is a cap you break first.
 
 **A `macro` or `close` crop needs the cast member's BODY reference, and today there is not one.**
 `presenterPhotoUrlForCrop` (`app/lib/sanity.server.ts`) is the function that picks the body
@@ -1126,6 +1171,14 @@ bowls, plates, candles, fruit bowls, napkins, styled empty tables) per `docs/des
 A product-free frame carries a narrative property (a personal trace, an interrupted state) or a cast
 member, never houseware standing in for the idea. This is the same §4.1 ban the metaphor check below
 already enforces, moved forward to selection so a resource brief never reaches the gate carrying one.
+
+**Only brief from a bare-product reference (§3.2c, binding).** Shopify `featuredMedia` is sometimes
+the retail carton, not the product: SKU 96203 has the box as image A and the product as image B, and
+passing A made the model reconstruct the toy from box art and invent a stalk and a club that do not
+exist. **Walk the product's Shopify media list and pick a text-free bare-product frame. Never assume
+the featured image is one.** That chosen URL is what goes to `--ref-image` and `--extra-ref`. If no
+text-free bare-product frame exists in the media list, say so in the run summary and move the slot
+to a different SKU rather than briefing from the carton.
 
 **Never generate a real brand's wordmark (hard pre-generation rule, ticket #5493).** Do not ask the
 image model to render a real brand's wordmark, logo lockup, or label copy on a product. These are
@@ -1582,14 +1635,17 @@ verdict for this exact caption. `verdict` must be `PASS` and `reviewer` names th
 it; anything else (a missing verdict, a `REVISE`/`BLOCK`, or a gate that could not run) returns 400
 and writes no row.
 
-**`sceneLocation` rides along on every draft that has a location** (ticket #10269 — see Step 5): the
-same value `social-art-director` chose, carried through unchanged. `bodyZone`/`contactMode`/
-`cropScale` ride along too, only for an on-skin frame.
+**`sceneLocation` rides along on every product draft** (ticket #10269, see Step 5): the
+same value `social-art-director` chose, carried through unchanged, always, including when the crop
+ate the room. `bodyZone`/`contactMode`/`cropScale` ride along too, on every frame that touches skin.
+**`castSlugs` rides along on every product draft as well**, because §3.7 clause (a) is only
+checkable when the row names who the skin belongs to. A product row written without these is a run
+defect: report it in the run summary by row id rather than letting it land as a null nobody reads.
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","sceneLocation":"<the location social-art-director chose, e.g. bedroom-loft>","bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","sceneLocation":"<the location social-art-director chose, e.g. bedroom-loft>","castSlugs":["<the cast member social-art-director chose>"],"bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **X drafts carry `mediaUrls` too — never omit it.** The server 400s a `platform:'x'` draft with an

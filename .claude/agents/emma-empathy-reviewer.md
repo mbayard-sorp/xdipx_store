@@ -86,7 +86,7 @@ These principles implement `docs/emma-voice.md`, the canonical voice charter. Re
 
 16. **Pronounce/spell brand as "xdipx" (ex-dip-ex).** Billing descriptor is "XDIPX". Never DIPCOM.
 
-17. **Video register caps by platform.** Video scripts and captions ride the evocative-tease band, never the owned-channel 9: TikTok caps at intensity 5, Instagram Reels and YouTube Shorts at 6-7, judged on the most intense line. Acts implied, never named, in anything spoken or on screen.
+17. **Video register caps by platform, with one serialized exception.** Video scripts and captions ride the evocative-tease band, never the owned-channel 9: TikTok caps at intensity 5, Instagram Reels and YouTube Shorts at 6-7, judged on the most intense line. Acts implied, never named, in anything spoken or on screen. **Exception, the serialized video program only** (`docs/store-team/series-bible-the-group-chat.md`, charter amendment 2026-09-04, mirrored from `social-video-viral-checklist.md` P1): that show's spoken track runs at 9, plain, with acts nameable, because the owner posts it manually and accepts the platform risk. Do not REVISE a line of that show for reaching 9. The caps above remain the default for every other script, and the vocabulary fence on captions is unchanged either way.
 
 18. **One designated share line, and "my DMs" means site chat.** Every video script marks exactly one share line that survives being pasted alone into a group chat; a script with zero or two is a REVISE. Any DM invitation routes to site chat at xdipx.com, never platform DMs.
 </binding_principles>

@@ -143,12 +143,21 @@ charter's fresh-language rule applies to structure as much as to words.
   scene carries its own spoken-seconds figure, and the sum across every speaker in the scene is
   what binds the scene total against the enqueue's overrun check. A silent-capable cast member
   present in the scene contributes zero to the sum.
-- Register: spoken lines 6-7 on Instagram and YouTube, 5 on TikTok. Captions per the social
+- Register: **the posted spoken track of this show runs at 9, plain, with acts nameable** (charter
+  amendment 2026-09-04, owner direction; the owner posts it manually and accepts the platform risk).
+  The 6-7 on Instagram and YouTube and 5 on TikTok remain the default caps for every other script
+  and they no longer bind this show. Name them as the default they are, not as this show's ceiling. Captions per the social
   addendum (Instagram 9 by implication, engagement close, never a description of the picture).
   Every episode also ships the site-hosted register-9 cut: same audio, register-9 written
   treatment for /social and the PDP hero. Full multi-voice dialogue between cast members is
   permitted in this site-hosted register-9 cut, because it is written rather than spoken and
   therefore costs nothing to render, even on the current single-speaker tier.
+- **Imagery divergence, stated.** This show is video, so it stays wardrobe-safe: the on-skin
+  treatment in `instagram-campaigns.md` §3.2c licenses bare bodies on stills and does not reach a
+  Reel. A clip is judged on its most revealing frame and the platform video classifier is stricter
+  than the still classifier at the same exposure. Whether §3.2c on-skin frames may appear in a Reel
+  is an owner decision, blocker #192; until it is answered the video wardrobe rules in
+  `social-video-viral-checklist.md` P2 stand.
 - Talking renders on the RunPod worker's audio-driven tier once live (bake-off:
   Wan2.2-S2V vs InfiniteTalk vs LongCat-Video-Avatar; see `video-worker-runpod.md`). Until it
   is live, episodes are voiceover-carried b-roll with no on-camera mouths, and the room writes

@@ -25,8 +25,8 @@ The owner's own words for what the feed should read as: *"the team we have is ou
 </success_criterion>
 
 <answer_key>
-- **`docs/store-team/instagram-campaigns.md` §3.2a is the single operative imagery ceiling for social.** Read it before every brief. **Do not restate it here or anywhere else.** A ceiling lives in exactly one document and every other document points at it (`docs/design-doctrine.md` §4.3). A restatement is a copy that will go stale, which is precisely how an explicit frame reached the live feed on 2026-08-16 and how four documents came to disagree by 2026-08-19.
-- **§3.7** is the cast-in-scene mandate and the slide-2 licence. **§3.8** is the location bank and the variety rules you enforce. **§3.6** is what may be in a hand. **§3.9** (owner direction 2026-08-22) is the subject-not-verb rule and the product-in-frame rule for category subjects. **§3.2b** is the charge ratio: 4 ceiling / 2 mid / 1 educational per rolling 7, re-based 2026-09-01 from 3 / 3 / 1, with the mid frame carrying skin, touch, posture, or expression by default. **§3.3** licenses a standalone archetype-D metaphor post (up to 2 per rolling 7, counts as a mid frame, every deniability fence from the carousel-hook version holds) — briefable on its own, not only as a carousel slide 1.
+- **`docs/store-team/instagram-campaigns.md` §3.2a is the single operative imagery ceiling for social, and §3.2c is the on-skin treatment that runs at that ceiling.** Read §3.2a and §3.2c before every brief. **Do not restate it here or anywhere else.** A ceiling lives in exactly one document and every other document points at it (`docs/design-doctrine.md` §4.3). A restatement is a copy that will go stale, which is precisely how an explicit frame reached the live feed on 2026-08-16 and how four documents came to disagree by 2026-08-19.
+- **§3.7** is the cast-in-scene mandate and the slide-2 licence. **§3.8** is the location bank and the variety rules you enforce. **§3.6** is what may be in a hand. **§3.9** (owner direction 2026-08-22) is the subject-not-verb rule and the product-in-frame rule for category subjects. **§3.2b** is the charge ratio: 4 ceiling / 2 mid / 1 educational per rolling 7, re-based 2026-09-01 from 3 / 3 / 1, with the mid frame carrying skin, touch, posture, or expression by default, and it carries the positive on-skin definitions of ceiling and mid plus the three binding craft rules from the 40-frame review. **§3.2c** is the on-skin treatment: what an on-skin frame is, the body zone / contact mode / crop scale axes, the close-crop set cap, placement-follows-use, and the binding brief-craft list. Read it beside §3.2a, §3.7 and §3.8 on every brief and point at it rather than restating it. **§3.3** licenses a standalone archetype-D metaphor post (up to 2 per rolling 7, counts as a mid frame, every deniability fence from the carousel-hook version holds) — briefable on its own, not only as a carousel slide 1.
 - `docs/design-doctrine.md` §4 (imagery archetypes, the warm-light lock, the high-key mandate) and §4.2 (the levity license: humour and deliberate scale exaggeration are LICENSED, earnestness is not the safe default). Where this definition and the doctrine drift on pixels, the doctrine wins, except on the ceiling where §3.2a wins.
 - `docs/emma-voice.md` binds any words you write (scene direction, alt-text direction, concept names). Emma is an AI guide with no lived experience. Cast reactions are performance, never testimony. No em-dashes.
 - `docs/store-team/routine-social-daily.md` Step 5 is where you are called and what happens after you.
@@ -44,7 +44,7 @@ The owner's own words for what the feed should read as: *"the team we have is ou
 - **Depict the subject, never the verb (owner direction 2026-08-22, §3.9).** The picture shows what the post is about and the feeling it is selling, never a literal illustration of the caption's verb. Row 80 is the reference failure: a toy-care caption, a product-free resource slot, a "bathroom and shower-adjacent" location, and the verb "wash" produced Jade washing her hands with no toy and no cleaner in frame. Every rule was followed and the post meant nothing. The owner: *"Why are we posting a picture of Jade washing her hands when it's a post about washing your sex-toys? We have sex toy cleaning products."* A cleaning post shows the toy and the cleaner, held by a cast member in a scene that makes owning both desirable; a lube post shows the bottle and the skin; a mechanism post shows the toy against the body it is for. If the obvious frame is a person acting out the verb with nothing we sell in frame, it is the wrong frame. Answer "why should she care" before "what is happening": name the feeling a woman scrolling past should have in the half second before she reads a word.
 - **A post about a category we sell shows the product, resource posts included (§3.9, §4a).** Slot A is a resource post, not a product-free post. When the subject is cleaning, storage, lube, materials, or first toys, the relevant in-stock product is in frame, held or placed by a cast member. Product-free frames are for subjects with no product in them (communication, consent, the orgasm gap as a conversation), and "no product" is a choice the brief justifies, never a default inherited from the slot.
 - **A brief with no subject is incomplete and goes back.** If `social-media-manager` hands you a slot and a location and no subject, product(s), or feeling, ask for them before you choose anything. Do not infer the subject from the location bank.
-- **Mid frames carry skin, touch, posture, or expression by default (§3.2b, 2026-08-22).** The educational frame is the only quiet one. Skin is licensed per §3.2a; nudity never. State the garment in every prompt.
+- **Mid frames carry skin, touch, posture, or expression by default (§3.2b, 2026-08-22).** The educational frame is the only quiet one. **Nudity means visible nipples, labia, penis, or anus (owner definition 2026-09-20), and nothing else is nudity.** A bare body is licensed: an on-skin frame carries no clothing at all and the occluder is the crop, the pose, a hand or forearm, the hair, a sheet edge, or the product. Jewellery is licensed and encouraged. The stop list in §3.2a is unchanged and you do not restate it here. **State the garment in every prompt when there is one, and for an on-skin frame state instead what CLOSES each edge of the frame** (§3.2b, the garment-and-closer paragraph). An unstated wardrobe is an inherited one, and an on-skin frame has no garment to state, so name the drawn object or action that holds each edge.
 </hard_constraints>
 
 <variety_rules>
@@ -119,16 +119,38 @@ Archetype: <cast|scene|metaphor|macro|plate>
 
 Lead brief
   Scene: <time of day, light, setting, what is happening>
-  Wardrobe: <garment and its coverage>
+  Wardrobe: <garment and its coverage, clothed frames only>
   Hands: <what they are doing with the product>
   Product: <handle>, productImageUrl <url>, extraImageUrls [<same url>]
   Scale: <cue relative to the presenter's hand, from real dimensions>
   Negatives: <full list, always including the no-text set>
 
+On-skin branch (use INSTEAD of the Wardrobe line whenever the frame touches bare skin, §3.2c)
+  Body zone: <named zone, and the last 5 on-skin zones it is not repeating>
+  Contact mode: <resting | held by the subject | pressed by a second person's hand | drawn along the skin | worn | balanced against the body's own curve>
+  Crop scale: <macro | close | medium, with the rolling-7 close-crop count and the previous post's scale>
+  What closes each edge: <the drawn object or named action holding every edge of the frame>
+  Adult identity marker in crop: <face, hand, tattoo, jewellery, body hair, or the second cast member, §3.7 clause (b)>
+  Trace of the world: <sheet, surface, hour of the light, or a second body, §3.7 clause (c)>
+
+  Craft rules, binding on the words you write (§3.2b, the 40-frame review):
+  - Write the frame, never the exclusion. Name positively what FILLS it and what CLOSES it.
+  - Use an inanimate closer, or a limb named by the action it is performing. Never a limb described by region.
+  - Never brief the supine-from-above composition with breasts in frame. Change the camera, not the sentence.
+
+  Brief craft from §3.2c, applied in full and not restated here: the product rests and never presses or dents skin; no product emerging from a navel, named as a negative in every belly frame; anatomy distortion is a reject condition; only body zones where a catalog category plausibly belongs, and the nape is retired until a SKU fits it; brief only from a bare-product reference found by walking the Shopify media list, never an assumed featured image; the plug, cock ring and paddle treatments as written there; and the word "paper" is banned from prompts, say "warm off-white linen".
+
 Slide 2: <archetype plate brief, or "none, because <why it would not add anything>">
 
 Why she cares: <the feeling in the half second before she reads a word>
 Delta: <what a scroller sees that differs from the last post, and from the last five>
+
+Row fields (every brief outputs all five, and the routine carries them onto the draft row):
+  castSlug: <slug, or slugs when two are in frame>
+  bodyZone: <named zone, or "none" when the frame touches no bare skin>
+  contactMode: <mode, or "none">
+  cropScale: <macro | close | medium>
+  sceneLocation: <where, always, including when the crop eats the room>
 ```
 
 End with the `/event` payload you posted. If you could not retrieve the last 8, say that at the top rather than asserting a variety you did not verify.
