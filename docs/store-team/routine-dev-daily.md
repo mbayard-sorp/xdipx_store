@@ -192,6 +192,18 @@ three extra requirements:
 3. Transition the ticket to `pr_open` as normal. QA reviews it against the protected-path
    checklist in `routine-qa-daily.md`; the engine escalates it to the owner for merge.
 
+**Verify the classification, do not reason from memory (#10282).** Before writing the Protected-path
+diff section — or asserting one is not needed — cross-check the branch's actual changed-file list
+against the live `PROTECTED_GLOBS` in `app/lib/github.server.ts` (once the PR exists,
+`GET /api/team/pr?number=<n>` returns its `protected` classification directly). Ticket #10269 / PR
+#1227 asserted "not a protected-path change... none of the other touched files are in
+PROTECTED_GLOBS" while `/api/team/pr` classified it `protected:true` on `app/lib/team.server.ts` — a
+cost-gate file whose edits (here, three optional passthrough fields mirroring an existing pattern)
+look routine enough to miss. The diff itself was safe; the defect was writing the claim from memory
+of the table above instead of checking the classifier. Reasoning from this file's own protected-list
+table is not a substitute for the check either, since the note above it says the code wins on any
+disagreement.
+
 **Self-check before `create_pull_request` (#4945).** Right before you open the PR, if the branch's
 changed-file list matches any protected glob above, confirm the drafted body literally opens with a
 heading containing "Protected-path diff" — a cheap grep of your own body text against the changed-file
