@@ -53,7 +53,7 @@ import { assertTeamAuth, gate } from '~/lib/team.server'
 import { SOCIAL_ARCHETYPES, type SocialArchetype } from '~/lib/social-media.server'
 import { apiError } from '~/lib/api-error.server'
 import { logImageCost } from '~/lib/token-log.server'
-import { parseSceneAxes } from '~/lib/social-scene-vocab'
+import { parseSceneAxes, requireSceneAxesForGeneration } from '~/lib/social-scene-vocab'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ONLY_VALUES = ['atlas', 'fal', 'imagen'] as const
@@ -112,6 +112,16 @@ export async function action({ request }: ActionFunctionArgs) {
     const parsedAxes = parseSceneAxes(b)
     if (!parsedAxes.ok) return new Response(parsedAxes.error, { status: 400 })
     const sceneAxes = parsedAxes.axes
+
+    // Required, not merely validated-if-present (ticket #10501). This route
+    // is a direct team-token surface, so the CLI's own requirement
+    // (scripts/gen-social-image.ts) is not enough by itself: a caller could
+    // hit this route directly and route around it, leaving the asset
+    // untagged the same way the routine's Step 5 template did before this
+    // ticket. Refusing here is pre-spend (before `gate()` below) and costs
+    // exactly one retry.
+    const axesRequired = requireSceneAxesForGeneration(sceneAxes)
+    if (!axesRequired.ok) return new Response(`Bad Request: ${axesRequired.error}`, { status: 400 })
 
     // Money gate: generation spends real dollars, so gate before generating,
     // exactly like api.team.video-job's enqueue ops. The CLI already gates too;
