@@ -14,7 +14,7 @@
  *   npx tsx scripts/check-unsourced-frequency.ts <draft.json>
  *   cat draft.json | npx tsx scripts/check-unsourced-frequency.ts
  *
- * The draft JSON is the blogPost draft: { title?, excerpt?, body? } where body
+ * The draft JSON is the blogPost draft: { title?, excerpt?, seoTitle?, seoDescription?, body? } where body
  * is the Portable Text array. Exit 0 when clean, 1 when any candidate is flagged
  * (the limit is zero), so the routine can gate on the exit code.
  */

@@ -179,7 +179,7 @@ export function analyzeParagraphs(paragraphs: DraftParagraph[]): AntithesisRepor
   }
 }
 
-/** Convenience: analyze a raw draft (title + excerpt + portable-text body). */
+/** Convenience: analyze a raw draft (title + excerpt + seoTitle + seoDescription + portable-text body). */
 export function analyzeDraft(draft: DraftInput): AntithesisReport {
   return analyzeParagraphs(draftToParagraphs(draft))
 }
