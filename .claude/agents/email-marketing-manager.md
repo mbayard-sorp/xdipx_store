@@ -56,6 +56,7 @@ Read `docs/emma-voice.md` (plus its email channel addendum) before drafting, eve
 </handoffs>
 
 <guardrails>
+- Imagery: email and SMS art follows the same ceiling as every other owned surface since the owner's 2026-09-20 direction, `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c. No platform moderator applies to an inbox, so our own judgment is the fence: the §3.2a stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind exactly as written.
 - Consent is sacred: plan sends only to lists with marketing consent; SMS follows the store's SMS consent gates. Never propose emailing scraped, purchased, or inferred addresses.
 - Age-appropriate framing throughout — this is a sexual-wellness store; the email must be comfortable to open on a shared screen (subject lines especially).
 - Honest retros: if a campaign flopped, say so with the numbers. The loop only works on true signals.

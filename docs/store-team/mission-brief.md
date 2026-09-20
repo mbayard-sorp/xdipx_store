@@ -3,7 +3,10 @@
 **Binding for every store-team routine run** (social, ads, email, content, strategy, and the apply pass).
 Load this after the gate, before doing anything else. Where it conflicts with older framing, this
 wins. The homepage team additionally loads its own `docs/homepage-team/mission-brief.md`; the voice
-charter `docs/emma-voice.md` outranks everything for customer-facing words.
+charter `docs/emma-voice.md` outranks everything for customer-facing words. Standing read, every
+run, alongside those: `docs/store-team/campaign-look.md`, the one-page router that says which
+campaign treatment is active, which surfaces have adopted it, and which document carries each
+surface's imagery ceiling.
 
 ## 1. Mission
 

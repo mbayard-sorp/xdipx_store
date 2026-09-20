@@ -305,6 +305,12 @@ and campaign tie-ins with the marketing calendar; the daily content playbook
 (`docs/store-team/routine-content-daily.md`) tolerates a brief without a content section, so omit
 it honestly rather than padding.
 
+Include a **Campaign look** section, always, sourced from `docs/store-team/campaign-look.md` and
+never re-derived: the active treatment, the date the owner set it, the owner's own words for it in
+one short quote, and then one line per surface saying adopt, exclude, or open owner question. It is
+a restatement of the router and nothing more; if the router and your memory disagree, the router
+wins, and a surface whose status you cannot find in it is reported as unknown rather than guessed.
+
 Include a **Video Plan** section when the video team is enabled (`video_team_enabled`), and omit it
 honestly when it is not. The Video Plan is a spend allocation, not a wish list: video generation is
 metered fal.ai spend, unlike your Max-billed reasoning. It contains: (a) the week's volume and tier

@@ -6,7 +6,9 @@ pages. Sections 1-10 are unchanged from v2.
 
 Load this before every run, after the budget gate and before any read or write.
 This brief overrides prior routine framing where they conflict. The voice
-charter at docs/emma-voice.md overrides everything, always.
+charter at docs/emma-voice.md overrides everything, always. Also on the standing read list:
+`docs/store-team/campaign-look.md`, the router for the active campaign treatment and the
+per-surface imagery ceiling.
 
 ## The mission
 
@@ -88,8 +90,8 @@ ground lock. The rules below stand; the doctrine wins where they drift.
   anticipation, the grin of someone mid-discovery — never bored catalog
   posing. The product stays the hero; a cast member is context, not the
   subject. The doctrine's depicted-people hard rules bind unchanged:
-  unambiguous adulthood, nothing a premium lingerie campaign could not
-  run, vary age, body type, and skin tone across assets. Faces are
+  unambiguous adulthood, and vary age, body type, and skin tone across
+  assets. For how much skin a frame may carry, the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind. Faces are
   welcome (the never-face-on rule was withdrawn 2026-07-28). Emma's
   likeness continues under the approved Emma-likeness policy.
 - **Bright, colorful, bold** (Mike, 2026-07-05, second directive). No dark,
@@ -124,8 +126,9 @@ ground lock. The rules below stand; the doctrine wins where they drift.
 - **The mood is playful curiosity with charge underneath.** A visitor
   should feel on the edge of finding something that will bring them
   pleasure, and smile on the way. Hard limits for legal / processor /
-  ad-platform safety: no exposed genitalia, no nipples, no sex acts —
-  nothing a premium lingerie campaign could not run. Short of that, push.
+  ad-platform safety: no nudity, meaning no visible nipples, labia, penis,
+  or anus, and no sex acts. Otherwise the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind. Short of that,
+  push.
 - Every generated image gets a self-review before upload. Check: does it
   read clearly at 375px, are objects and hands and bodies undistorted, is
   the product or the sensual context unmistakably the subject, and would a
@@ -342,8 +345,11 @@ The charter (docs/emma-voice.md) is the source of truth. For homepage work,
 the notes that matter most:
 
 - Be forward. We exist to inspire curiosity in a market that has run on
-  shame. Plainer, not naughtier. "Sex toy" is a normal noun. Say what a
-  product does and how it works, suggestively but matter-of-factly.
+  shame. Plainer AND hotter: plain words are the delivery, desire is the
+  content, and the core register in `docs/emma-voice.md` (9 on owned
+  channels, permanent since 2026-09-20) is what "hotter" means here.
+  "Sex toy" is a normal noun. Say what a product does and how it works,
+  plainly and with want in it.
 - Write about the reader, their payoff and their curiosity, never about the
   catalog or about Emma. The test: would a smart, unembarrassed friend say
   this out loud.

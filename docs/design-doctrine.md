@@ -1,4 +1,4 @@
-# xdipx Design Doctrine (v1.3)
+# xdipx Design Doctrine (v1.4)
 
 > The single source of truth for how xdipx **looks**, everywhere: homepage, PLP,
 > PDP, discovery, admin. Every design agent (`homepage-designer`, `rr7-engineer`,
@@ -9,8 +9,9 @@
 > **Authority.** Where this doctrine disagrees with an agent-definition summary,
 > the mission brief's visual notes, or a stray CLAUDE.md line, **this doctrine
 > wins** for visual/layout decisions. The one carve-out is the imagery ceiling:
-> on social surfaces `docs/store-team/instagram-campaigns.md` §3.2a wins, by
-> owner ruling 2026-08-19, and §4.3 below records that deferral. Where it disagrees with `docs/emma-voice.md`
+> `docs/store-team/instagram-campaigns.md` §3.2a wins, on social by owner ruling
+> 2026-08-19 and on owned site surfaces by owner direction 2026-09-20, and §4.3
+> below records that deferral. Where it disagrees with `docs/emma-voice.md`
 > on anything about words, the voice charter wins. Where it disagrees with a hard
 > engineering constraint (SSR, zero-CLS, the `.server.ts` boundary), the
 > constraint wins. It never overrides Shopify-as-source-of-truth or the
@@ -227,9 +228,10 @@ they outlive any single run. Every merchandising image obeys all of them.
    text, no barcode, no shipping label, no ingredient panel" on every
    negative prompt. Drop any blanket "no logo, no brand name" language for
    the product body itself, since it now over-forbids case 1.
-5. **Hard limits (legal / processor / ad-platform):** no exposed genitalia, no
-   nipples, no sex acts — nothing a premium lingerie campaign could not run.
-   Short of that, push toward playful curiosity with charge underneath.
+5. **Hard limits (legal / processor / ad-platform):** no nudity, meaning no visible
+   nipples, labia, penis, or anus (owner definition 2026-09-20), and no sex acts.
+   Short of the hard limits, push toward playful curiosity with charge
+   underneath. The per-surface ceiling lives in §4.3.
 6. **Self-review before upload.** Reads clearly at 375px; hands/bodies/objects
    undistorted; product or sensual context unmistakably the subject; a
    design-literate friend believes it came from a high-end sexual-wellness brand.
@@ -295,7 +297,14 @@ program"); prompts start from the matching per-surface scaffold in
   mood slides, OG/share images, campaign moments.
 
 **The ground lock:** backdrops come only from `coral-soft`, `plum-soft`, and
-`paper` tints, high-key daylight (sage is an accent color, never a ground: there
+`paper` tints, high-key daylight. (`paper` is the CSS surface token; the WORD
+"paper" is banned from image prompts because it renders literal sheets, say
+"warm off-white linen", per `instagram-campaigns.md` §3.2c. An on-skin close crop
+under §3.2c has no backdrop, the body is the location, and the ground lock does
+not apply to it; the trace of the world comes from sheet, surface, or light. That
+exemption is not social-only: since the owner extended on-skin to the whole site
+on 2026-09-20, it applies wherever an on-skin crop runs, on-site surfaces
+included, and the rest of the set still carries the ground.) (sage is an accent color, never a ground: there
 is no soft sage tint token, and a full-strength sage field fights the high-key
 mandate). This constraint is what makes a
 mixed-vendor catalog read as one funded brand; the teardown's core finding is
@@ -439,23 +448,39 @@ agent must never resolve a ceiling question by picking whichever document suits 
 wants. That is how an explicit frame reached the live feed on 2026-08-16.
 
 **Social surfaces** (Instagram, X, and any campaign key art produced for them). The operative
-ceiling is `docs/store-team/instagram-campaigns.md` §3.2a, the owner ruling of 2026-08-16. It
-licenses lingerie and bare skin, beds and arched posture, product resting against skin,
+ceiling is `docs/store-team/instagram-campaigns.md` §3.2a, the owner ruling of 2026-08-16, with
+the on-skin treatment of §3.2c inside it (owner direction 2026-09-19: bare bodies, no clothing,
+product resting on skin, the suggestion of nudity). It licenses lingerie and bare skin, beds and arched posture, product resting against skin,
 lubricant texture, two people touching, arousal on a face, and use implied by framing or by
-occlusion under a sheet when the occluded shape is the product. It fences genitalia and nipples
-visible or outlined, hands on genitals, depicted or discernible sex acts, fluid on or near
+occlusion under a sheet when the occluded shape is the product. It fences nudity, which the
+owner defined on 2026-09-20 as visible nipples, labia, penis, or anus, outlined included, hands on genitals, depicted or discernible sex acts, fluid on or near
 genitalia, product against genitalia, anything age-ambiguous, and anything built to defeat a
 classifier. **This doctrine defers to §3.2a on social imagery and does not restate it**, so the
 ceiling has one home and cannot drift out of sync again. Platform policy still outranks the
 charter on a rented surface: where Meta's rules are tighter, Meta wins.
 
-**On-site merchandising surfaces** (homepage, PLP, PDP, discovery). The product is the hero.
-Product-in-use and bodies in sexual contact stay out. Cast and human figures are welcome, and
-§4.1 and §4.2 apply in full: a body in frame is not the same thing as a body in sexual contact,
-and the interest floor still binds. Brand-art pieces may star the invented hybrid instead.
+**On-site merchandising surfaces** (homepage hero and rails, PLP cards, PDP mood images and
+hero-video stills, discovery, Notebook heroes, email and SMS art). Owner direction 2026-09-20,
+all-hands: **"On-skin extends to all areas of the site."** These surfaces now carry the same
+ceiling as social: `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of
+§3.2c. This doctrine points at that section and does not restate it. The earlier on-site bans on
+product-in-use and on bodies in sexual contact are withdrawn to the extent §3.2a licenses them;
+the stop list does not move anywhere, and nudity as the owner defined it on 2026-09-20 stays out
+on every surface. What no platform moderator supplies on an owned surface, our own judgment
+supplies: the §3.2a fence is the fence.
 
-**Notebook heroes.** `docs/notebook-team/image-brief.md` carries the ceiling, and it tracks the
-on-site line above rather than the social one.
+**"The product is the hero" remains, as a composition rule and not an exposure rule.** It says
+what the frame is about, not how much skin is in it: the reader must be able to tell which
+product the image is selling. Brand-art pieces may star the invented hybrid instead. §4.1 and
+§4.2 apply in full.
+
+Two things are not settled by this direction and stay open: video Reels (owner question, blocker
+#192) and Emma's own likeness in an implied-nude frame (blocker #193). Paid advertising is
+excluded and continues to follow `docs/ads-policy.md`.
+
+**Notebook heroes.** `docs/notebook-team/image-brief.md` still carries the ceiling for Notebook
+art, and it still tracks the on-site line above. Because that line now inherits §3.2a with
+§3.2c, Notebook heroes inherit it too.
 
 **Why this section exists.** Between 2026-08-16 and 2026-08-19 four documents disagreed about
 the same ceiling: this doctrine, `docs/emma-voice.md` in both its core hard-lines and its social
@@ -607,6 +632,19 @@ binding IA — the spine never overrides the routine-design-cycle IA fence.
 4. Fixed aspect ratios on all media frames.
 
 ---
+
+*v1.4, 2026-09-20. Codifies the owner's all-hands direction "On-skin extends to
+all areas of the site": §4.3 gives on-site merchandising surfaces the same
+imagery ceiling as social (`docs/store-team/instagram-campaigns.md` §3.2a with
+the on-skin treatment of §3.2c) by pointer rather than restatement, keeps "the
+product is the hero" as a composition rule, and notes Notebook heroes inherit
+that line through `docs/notebook-team/image-brief.md`. §4 item 5 drops the
+on-site "premium lingerie campaign" ceiling and now carries only the hard
+limits: no nudity as defined by the owner on 2026-09-20, no sex acts. The ground
+lock exemption for on-skin crops is scoped to every surface. Video Reels
+(blocker #192), Emma's likeness (blocker #193) and paid ads (`docs/ads-policy.md`)
+are out of scope. This supersedes the per-surface split introduced at v1.3 on
+2026-08-19 on the on-site side only; the social side is unchanged.*
 
 *v1.2, 2026-08-16. Transcribes the owner's imagery direction of 2026-08-11/12
 (bus tickets #2748/#2755/#2756): adds §4.1 the interest floor (ported verbatim
