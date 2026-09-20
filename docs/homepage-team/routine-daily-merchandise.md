@@ -500,10 +500,10 @@ prompts, follow them.
 
 Imagery follows mission brief section 2: the product is the star — pass the product's real
 Shopify photo as a reference image (`--ref-image`) for every product-linked surface, or use sensual
-human context (lingerie on a body, skin, playful tension) matched to what the surface sells. Housewares
+human context (skin, product resting on bare skin, playful tension) matched to what the surface sells. Housewares
 still-lifes with no product are banned, and so are dark/moody/candlelit scenes: bright daylight or
 high-key studio light, tinted color-block backdrops from the doctrine ground lock, the product bold and large in frame. Fun and
-curiosity-inspiring is the target; exposed genitalia, nipples, and sex acts are the hard limit.
+curiosity-inspiring is the target; nudity (visible nipples, labia, penis, or anus) and sex acts are the hard limit, and the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind.
 
 Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counter:
 

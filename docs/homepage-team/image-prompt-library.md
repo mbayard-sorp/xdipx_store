@@ -10,8 +10,7 @@ compound; this file is where they stop evaporating.
 - After every run, append prompts that produced keepers to the surface's **Keepers** list (with
   the placed asset URL as the thumbnail reference) and add failed patterns to **Rejects**.
 - All scaffolds inherit `docs/design-doctrine.md` §4: real product via `--ref-image` wherever a
-  product is featured or linked; bright/high-key light; v3 palette; nothing a premium lingerie
-  campaign could not run.
+  product is featured or linked; bright/high-key light; v3 palette. For exposure, the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind.
 - **Provider note (2026-08-15, PR #692):** stills are Atlas-primary via `generateImage()` (Atlas
   `seedream-v4.5`/`seedream-v4.5/edit`, then fal, then Imagen); `docs/media-model-routing.md` is
   the single routing source, do not restate routing here. The fal-specific lore in this file
@@ -84,9 +83,11 @@ Scaffold (always with `--ref-image`):
 
 Scaffold — product tiles use `--ref-image`; human-context tiles may use `--no-ref` with reason:
 
-> {Close crop of hands | silk fabric against skin | lingerie detail on a body}, warm natural
-> daylight, {coral | plum} color accent in the styling, editorial fashion photography, playful
-> tension, tasteful crop (no exposed genitalia, no nipples), premium lingerie campaign energy
+> {Close crop of hands | silk fabric against skin | product resting on bare skin on a body},
+> warm natural daylight, {coral | plum} color accent in the styling, editorial fashion
+> photography, playful tension, tasteful crop (no visible nipples, labia, penis, or anus)
+
+(Exposure on this scaffold: the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind.)
 
 **Keepers:**
 

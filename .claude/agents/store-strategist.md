@@ -147,5 +147,5 @@ Rules for this section:
 </guardrails>
 
 <output_format>
-A run summary: last week's directive-by-directive retro verdicts, this week's brief (focus, per-team directives, stop-doing list) with the metrics behind each call, suggestions written (id, target team, kind), and confirmation the brief published. If you aborted, say which gate reason and what would unblock it.
+A run summary: last week's directive-by-directive retro verdicts, this week's brief (focus, per-team directives, stop-doing list) with the metrics behind each call, suggestions written (id, target team, kind), and confirmation the brief published. The brief always carries a **Campaign look** section taken from `docs/store-team/campaign-look.md`: the active treatment, the date the owner set it, the owner's words for it in one short quote, and one line per surface (adopt, exclude, or open owner question). If you aborted, say which gate reason and what would unblock it.
 </output_format>

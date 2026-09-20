@@ -162,9 +162,9 @@ is unchanged; images are expression, words are claims.
   product identity stay faithful to the reference image; scale and expression may be played
   for effect. Never on † health-adjacent topics, where a wrong size or a joke reads as a
   safety claim rather than as wit. Unchanged, and none of it loosened: the warm-light lock
-  and high-key mandate, the charter visual cap of 6-7, never crude, never porn-adjacent, no
-  explicit anatomy, no nudity, no bodies in sexual contact, no product-in-use, the
-  adults-only hard rules, and the uncanny-face reject. Witty never crude; the craft is what
+  and high-key mandate, never crude, never porn-adjacent, the adults-only hard rules, and the
+  uncanny-face reject. For exposure, the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind (Notebook heroes track the on-site
+  line in `docs/design-doctrine.md` §4.3, which now inherits that ceiling). Witty never crude; the craft is what
   makes it art instead of a shitpost.
 - **No-product fallback logs its reason.** Leaving the product out of a human hero is a
   documented exception, never a silent default. It is allowed only when the brief states why
@@ -179,8 +179,8 @@ is unchanged; images are expression, words are claims.
   - **Uncanny-face hard reject.** Faces are where generation visibly fails: wrong teeth,
     dead eyes, warped features, extra fingers near a face. Any uncanny artifact is an
     automatic reject, no salvage crop.
-  - Never explicit anatomy, never nudity, never bodies in sexual contact, no readable
-    invented text.
+  - Never nudity as the charter defines it, and no readable invented text. Everything short
+    of that is governed by the pointer above.
 - **Emma's likeness.** Emma may appear (canonical photo: Sanity `singleton.editor` as ref
   image) in both guide-mode (gesturing, hosting, explaining) and expressive-mode (reflecting
   the reader's feeling). Her friends are the named cast (`castMember` docs) — cast selection
