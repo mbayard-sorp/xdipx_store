@@ -31,6 +31,7 @@
 import { generateImage } from './generate-image.server'
 import { uploadMoodImageToShopifyFilesWithId } from './shopify.server'
 import { tryIngestSocialAsset } from './social-asset-library.server'
+import { sceneAxisTags, type SceneAxes } from './social-scene-vocab'
 import type { VisionVerdict } from './social-vision-gate.server'
 
 /**
@@ -403,6 +404,15 @@ export interface GenerateCastCompositeOpts {
   caller?: string
   /** Cast member slug(s) in the frame, recorded on the library row (#4937). */
   castSlugs?: string[]
+  /**
+   * The scene axes this frame was BRIEFED at (#10479), stamped onto the
+   * library row's `tags` so the draft can resolve them by URL instead of
+   * asking the drafter to remember them. This is the choice point: the zone,
+   * the contact mode, the crop and the location are all decided here, before
+   * a dollar is spent, and re-asserting them at draft time is a second
+   * chance to get it wrong that was taken 281 times out of 281.
+   */
+  sceneAxes?: SceneAxes
 }
 
 export interface GenerateCastCompositeResult {
@@ -462,6 +472,7 @@ async function generateCastCompositeBatch(
   const assetIds: (number | null)[] = []
   const generationBatchId = crypto.randomUUID()
   const scaledPrompt = withProductScale(opts.prompt, opts.scale)
+  const sceneAxisTagList = sceneAxisTags(opts.sceneAxes ?? {})
   for (const [i, falUrl] of frame.urls.entries()) {
     const filename = buildSocialAssetFilename({
       handle: opts.handle,
@@ -499,6 +510,7 @@ async function generateCastCompositeBatch(
         isPicked: false,
         createdBy: opts.caller ?? 'social-media-manager',
         ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
+        ...(sceneAxisTagList.length ? { tags: sceneAxisTagList } : {}),
       })
       // Vision-gate every candidate before it can reach a draft (#6763): the
       // verdict is recorded on the row regardless of outcome (a missing
@@ -584,6 +596,12 @@ export interface GenerateSocialImageOpts {
    * is not counted twice against the social team's daily cap.
    */
   logCost?: boolean
+  /**
+   * The scene axes this frame was briefed at (#10479), stamped onto the
+   * library row's `tags` so the draft resolves them by URL. Same contract as
+   * `GenerateCastCompositeOpts.sceneAxes`.
+   */
+  sceneAxes?: SceneAxes
 }
 
 export interface GenerateSocialImageResult {
@@ -635,6 +653,7 @@ export async function generateAndUploadSocialImage(
 
   let lastProvider: GenerateSocialImageResult['provider'] = 'none'
   let lastModel = ''
+  const axisTags = sceneAxisTags(opts.sceneAxes ?? {})
   const { generateWithVisionGate, runVisionGate, recordVisionVerdict } =
     await import('./social-vision-gate.server')
 
@@ -684,6 +703,7 @@ export async function generateAndUploadSocialImage(
           generationBatchId: crypto.randomUUID(),
           isPicked: false,
           createdBy: opts.caller ?? 'social-media-manager',
+          ...(axisTags.length ? { tags: axisTags } : {}),
         })
         return { url, assetId: asset?.id ?? null }
       } catch (err) {

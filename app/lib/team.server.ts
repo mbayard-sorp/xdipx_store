@@ -2783,8 +2783,30 @@ async function findOpenDuplicateDraft(
 export async function createDraftSocialPost(
   p: DraftSocialPostInput,
 ): Promise<{ id: number; deduped: boolean }> {
+  // Ticket #10479: the four scene axes are supplied where they are CHOSEN
+  // (image generation stamps them on the asset row) and only CONFIRMED here.
+  // Whatever the caller omitted is resolved back from the asset the media
+  // URLs point at, so a drafter that sends none of them still writes a row
+  // carrying all four. Never a 400: the frame is already billed.
+  const { resolveDraftSceneAxes, backfillPostSceneAxes } = await import('./social-scene-axes.server')
+  const axes = await resolveDraftSceneAxes(
+    {
+      bodyZone: p.bodyZone,
+      contactMode: p.contactMode,
+      cropScale: p.cropScale,
+      sceneLocation: p.sceneLocation,
+    },
+    p.mediaUrls,
+  )
+
   const existingId = await findOpenDuplicateDraft(p)
-  if (existingId != null) return { id: existingId, deduped: true }
+  if (existingId != null) {
+    // The deduped branch has to backfill too. Returning an existing row's id
+    // without touching it is what would leave that row's axes null forever
+    // even though the asset knows all four.
+    await backfillPostSceneAxes(existingId, axes)
+    return { id: existingId, deduped: true }
+  }
   const [row] = await db
     .insert(socialPosts)
     .values({
@@ -2804,11 +2826,11 @@ export async function createDraftSocialPost(
       altText:       p.altText ?? null,
       imageBrief:    p.imageBrief ?? null,
       subject:       p.subject ?? null,
-      sceneLocation: p.sceneLocation ?? null,
+      sceneLocation: axes.sceneLocation ?? null,
       castSlugs:     p.castSlugs ?? null,
-      bodyZone:      p.bodyZone ?? null,
-      contactMode:   p.contactMode ?? null,
-      cropScale:     p.cropScale ?? null,
+      bodyZone:      axes.bodyZone ?? null,
+      contactMode:   axes.contactMode ?? null,
+      cropScale:     axes.cropScale ?? null,
     })
     .returning({ id: socialPosts.id })
   return { id: row!.id, deduped: false }
