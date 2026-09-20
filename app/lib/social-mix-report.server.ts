@@ -49,12 +49,17 @@ export interface SocialMixReportRow {
   mediaUrls: string[] | null
   /** migration 099 (PR #1227, ticket #10269). Null on every row until that PR merges and ships callers. */
   bodyZone: string | null
-  /** migration 099 (PR #1227, ticket #10269). Read for completeness; no report line uses it yet. */
+  /** migration 099 (PR #1227, ticket #10269). Drives the contact-mode repeat window (#10340). */
   contactMode: string | null
   /** migration 099 (PR #1227, ticket #10269). Null on every row until that PR merges and ships callers. */
   cropScale: string | null
   /** migration 093, live on main, but unsent by every caller per ticket #10269's finding. */
   sceneLocation: string | null
+  /**
+   * migration 093 (`cast_slugs`, jsonb). Null means the column was never sent
+   * for this row (UNKNOWN); an empty array means a known cast-free frame.
+   */
+  castSlugs: string[] | null
 }
 
 export type LineStatus = 'ok' | 'breach' | 'unknown'
@@ -77,7 +82,12 @@ export interface SocialMixReport {
     productForward: MixReportLine
     productFree: MixReportLine
     bodyZoneWindow: MixReportLine
+    contactModeWindow: MixReportLine
     locationWindow: MixReportLine
+    castRotation: MixReportLine
+    castVolume: MixReportLine
+    wideCeiling: MixReportLine
+    plug: MixReportLine
     lubeTreatment: MixReportLine
     carousel: MixReportLine
   }
@@ -97,8 +107,34 @@ const CHARGE_TOLERANCE = 1
 // lists (top-of-thigh, ankle) are real on-skin frames but the doc does not
 // assign them a tier, so they count toward neither -- an honest gap, not a
 // guess.
-const CEILING_ZONES = new Set(['hip-hollow', 'small-of-back', 'sternum', 'stomach'])
-const MID_ZONES = new Set(['inner-wrist', 'forearm', 'nape', 'behind-knee', 'shoulder-blade'])
+// #10340 item 3: the plug-between-the-cheeks placement §3.2c licenses
+// explicitly is ceiling tier ("the highest-classifier-signal frame in the
+// campaign"), so it belongs in this list as well as in its own capped line.
+const CEILING_ZONES = new Set(['hip-hollow', 'small-of-back', 'sternum', 'stomach', 'gluteal-cleft'])
+// #10340 item 5: 'nape' is retired by §3.2c ("The nape is retired until a SKU
+// fits it" -- we sell no neck massager), so it no longer scores as a mid frame.
+const MID_ZONES = new Set(['inner-wrist', 'forearm', 'behind-knee', 'shoulder-blade'])
+
+// §3.2c, owner direction 2026-09-19: the plug laid between the cheeks is
+// licensed at "at most one per rolling 7" and is "the first frame to drop if
+// the removal watcher fires", so it gets its own counted line rather than
+// hiding inside the ceiling band.
+const PLUG_ZONE = 'gluteal-cleft'
+const PLUG_CAP = 1
+
+// §3.2c, same paragraph as the close-crop cap: "at least one ceiling frame per
+// rolling 7 wide enough to read a location". Wide enough = a ceiling-tier frame
+// whose crop scale is 'medium' (macro/close eat the room, which is the failure
+// the line exists to catch: ten tight crops of bare skin is a stock library).
+const WIDE_CEILING_MIN = 1
+const WIDE_CEILING_SCALES = new Set(['medium'])
+
+// §3.2b Cast: "at most 4 cast frames per rolling 14" and "no single cast member
+// appears in more than 2 of any 5 consecutive cast frames".
+const CAST_VOLUME_WINDOW = 14
+const CAST_VOLUME_CAP = 4
+const CAST_ROTATION_WINDOW = 5
+const CAST_ROTATION_CAP = 2
 
 // #10267/#10272 item 4 (the cap predates the wardrobe amendment and both
 // versions state it identically): at most 3 close crops per rolling 7 (the
@@ -124,6 +160,11 @@ const PRODUCT_FREE_MIN = 1
 // unchanged by the on-skin campaign).
 const BODY_ZONE_WINDOW = 5
 const LOCATION_WINDOW = 8
+// #10340 item 4: contact mode is the second of §3.2c's three variety axes and
+// it rotates the same way the body zone does, so it gets the same window of 5.
+// It was read from the database and then used by nothing, which is the silent
+// half-measurement this ticket exists to close.
+const CONTACT_MODE_WINDOW = 5
 
 // #10110: "misses the standing two-week floor of... at least one carousel
 // published." Same rolling-14 window as PRODUCT_WINDOW above.
@@ -170,6 +211,26 @@ function maxCapLine(label: string, actual: number, window: number, cap: number, 
     label,
     detail: `${actual} / ${window} (cap ${cap})${note}`,
     status: breach ? 'breach' : 'ok',
+  }
+}
+
+/**
+ * "No repeat inside N consecutive frames that carry this axis." Shared by the
+ * body-zone (#10267) and contact-mode (#10340) windows so the two read
+ * identically on the page and cannot drift apart.
+ */
+function repeatWindowLine(label: string, values: string[], window: number): MixReportLine {
+  const windowValues = values.slice(0, window)
+  const seen = new Set<string>()
+  let repeat = false
+  for (const v of windowValues) {
+    if (seen.has(v)) { repeat = true; break }
+    seen.add(v)
+  }
+  return {
+    label,
+    detail: `${windowValues.length} frame(s) checked, ${repeat ? 'REPEAT FOUND' : 'no repeat'}` + (repeat ? ' -- BREACH' : ''),
+    status: repeat ? 'breach' : 'ok',
   }
 }
 
@@ -270,6 +331,12 @@ export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixRep
     }
   }
 
+  // --- Contact-mode window: no repeat inside 5 consecutive on-skin frames ---
+  const contacted = rows.filter(r => r.contactMode != null)
+  const contactModeWindow = contacted.length === 0
+    ? unknownLine('Contact-mode window (last 5 on-skin)', 'contact_mode unpopulated on every row')
+    : repeatWindowLine('Contact-mode window (last 5 on-skin)', contacted.map(r => r.contactMode!), CONTACT_MODE_WINDOW)
+
   // --- Location window: no repeat inside 8 consecutive product posts ---
   const located = rows.filter(r => r.sceneLocation != null)
   let locationWindow: MixReportLine
@@ -297,13 +364,83 @@ export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixRep
     'no lube_treatment (or equivalent) column exists in social_posts',
   )
 
+  // --- Cast rotation + volume (§3.2b) ---
+  // A row whose `castSlugs` is null never had the column sent; an empty array
+  // is a known cast-free frame. Only the first case is UNKNOWN -- guessing 0
+  // cast frames from unsent data is exactly the false-negative "in band" this
+  // module refuses to print.
+  const castKnown = rows.filter(r => r.castSlugs != null)
+  let castRotation: MixReportLine
+  let castVolume: MixReportLine
+  if (castKnown.length === 0) {
+    castRotation = unknownLine('Cast rotation (any 5 consecutive cast frames)', 'cast_slugs unpopulated on every row')
+    castVolume = unknownLine('Cast frames (last 14)', 'cast_slugs unpopulated on every row')
+  } else {
+    const castFrames = castKnown.filter(r => (r.castSlugs?.length ?? 0) > 0)
+    const castIn14 = last14.filter(r => (r.castSlugs?.length ?? 0) > 0).length
+    castVolume = maxCapLine('Cast frames (last 14)', castIn14, CAST_VOLUME_WINDOW, CAST_VOLUME_CAP, false)
+
+    // Every sliding window of 5 consecutive cast frames, not just the newest:
+    // a face that carried 3 of frames 2-6 is the drift the floor exists to
+    // catch even when the newest 5 happen to be clean.
+    let worstSlug: string | null = null
+    let worstCount = 0
+    const lastWindowStart = Math.max(0, castFrames.length - CAST_ROTATION_WINDOW)
+    for (let start = 0; start <= lastWindowStart; start++) {
+      const windowFrames = castFrames.slice(start, start + CAST_ROTATION_WINDOW)
+      const counts = new Map<string, number>()
+      for (const frame of windowFrames) {
+        for (const slug of new Set(frame.castSlugs ?? [])) {
+          counts.set(slug, (counts.get(slug) ?? 0) + 1)
+        }
+      }
+      for (const [slug, n] of counts) {
+        if (n > worstCount) { worstCount = n; worstSlug = slug }
+      }
+    }
+    const rotationBreach = worstCount > CAST_ROTATION_CAP
+    castRotation = {
+      label: 'Cast rotation (any 5 consecutive cast frames)',
+      detail: `${castFrames.length} cast frame(s) checked, busiest face ${worstCount}` +
+        (worstSlug ? ` (${worstSlug})` : '') +
+        ` (cap ${CAST_ROTATION_CAP})` + (rotationBreach ? ' -- BREACH' : ''),
+      status: rotationBreach ? 'breach' : 'ok',
+    }
+  }
+
+  // --- Wide ceiling frame: at least 1 per rolling 7 that reads a location ---
+  let wideCeiling: MixReportLine
+  if (bodyZoneKnownIn7 === 0 || cropKnownIn7 === 0) {
+    wideCeiling = unknownLine(
+      'Wide ceiling frame (last 7)',
+      bodyZoneKnownIn7 === 0
+        ? 'body_zone unpopulated on every row in window'
+        : 'crop_scale unpopulated on every row in window',
+    )
+  } else {
+    const wideCount = last7.filter(
+      r => chargeTierOf(r) === 'ceiling' && r.cropScale != null && WIDE_CEILING_SCALES.has(r.cropScale),
+    ).length
+    wideCeiling = minFloorLine('Wide ceiling frame (last 7)', wideCount, CHARGE_WINDOW, WIDE_CEILING_MIN)
+  }
+
+  // --- Plug between the cheeks: at most 1 per rolling 7 ---
+  const plug = bodyZoneKnownIn7 === 0
+    ? unknownLine('Plug between cheeks (last 7)', 'body_zone unpopulated on every row in window')
+    : maxCapLine(
+        'Plug between cheeks (last 7)',
+        last7.filter(r => r.bodyZone === PLUG_ZONE).length,
+        CHARGE_WINDOW, PLUG_CAP, false,
+      )
+
   // --- Carousel count (last 14, floor 1) ---
   const carouselCount = last14.filter(isCarousel).length
   const carousel = minFloorLine('Carousel (last 14)', carouselCount, PRODUCT_WINDOW, CAROUSEL_MIN)
 
   const lines = {
     ceiling, mid, educational, closeCrop, productForward, productFree,
-    bodyZoneWindow, locationWindow, lubeTreatment, carousel,
+    bodyZoneWindow, contactModeWindow, locationWindow,
+    castRotation, castVolume, wideCeiling, plug, lubeTreatment, carousel,
   }
   const anyBreach = Object.values(lines).some(l => l.status === 'breach')
 
@@ -312,7 +449,8 @@ export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixRep
 
 const LINE_ORDER: (keyof SocialMixReport['lines'])[] = [
   'ceiling', 'mid', 'educational', 'closeCrop', 'productForward', 'productFree',
-  'bodyZoneWindow', 'locationWindow', 'lubeTreatment', 'carousel',
+  'bodyZoneWindow', 'contactModeWindow', 'locationWindow',
+  'castRotation', 'castVolume', 'wideCeiling', 'plug', 'lubeTreatment', 'carousel',
 ]
 
 /** Plain-text lines for the social run summary (routine-social-daily.md Step 7) and log output. */
@@ -332,7 +470,12 @@ const LINE_LABELS: Record<keyof SocialMixReport['lines'], string> = {
   productForward: 'Product-forward (last 14)',
   productFree: 'Product-free (last 14)',
   bodyZoneWindow: 'Body-zone window (last 5 on-skin)',
+  contactModeWindow: 'Contact-mode window (last 5 on-skin)',
   locationWindow: 'Location window (last 8)',
+  castRotation: 'Cast rotation (any 5 consecutive cast frames)',
+  castVolume: 'Cast frames (last 14)',
+  wideCeiling: 'Wide ceiling frame (last 7)',
+  plug: 'Plug between cheeks (last 7)',
   lubeTreatment: 'Lube-treatment repeats',
   carousel: 'Carousel (last 14)',
 }
@@ -377,6 +520,7 @@ async function liveLoadRows(limit: number): Promise<SocialMixReportRow[]> {
       contactMode: socialPosts.contactMode,
       cropScale: socialPosts.cropScale,
       sceneLocation: socialPosts.sceneLocation,
+      castSlugs: socialPosts.castSlugs,
     })
     .from(socialPosts)
     .where(and(
@@ -394,6 +538,7 @@ async function liveLoadRows(limit: number): Promise<SocialMixReportRow[]> {
     contactMode: r.contactMode ?? null,
     cropScale: r.cropScale ?? null,
     sceneLocation: r.sceneLocation ?? null,
+    castSlugs: r.castSlugs ?? null,
   }))
 }
 

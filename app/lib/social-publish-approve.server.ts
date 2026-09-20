@@ -639,6 +639,16 @@ export interface ReworkInput {
   imageBrief?: string
   /** Durable subject line for the post (migration 084). */
   subject?: string
+  /** Scene location (migration 093). Rotated per §3.8. */
+  sceneLocation?: string
+  /** Cast member slugs in frame (migration 093). Empty array clears the row. */
+  castSlugs?: string[]
+  /** On-skin body zone (migration 099). */
+  bodyZone?: string
+  /** On-skin contact mode (migration 099). */
+  contactMode?: string
+  /** On-skin crop scale (migration 099). */
+  cropScale?: string
 }
 
 export type ReworkParse =
@@ -647,6 +657,17 @@ export type ReworkParse =
 
 /** Captions/URLs can be long, but not unbounded — reject a caller bug loudly. */
 const REWORK_TWEET_MAX = 2000
+
+// Ticket #10339: the same caps the `draft` op applies in
+// `api.team.social-post.tsx`, so a REVISE that swaps an on-skin frame for a
+// different body zone or crop updates the variety columns the mix report and
+// the §3.2c rotation windows read. Without these, a reworked row kept the
+// ORIGINAL zone/crop forever and every rotation window read a frame that no
+// longer exists.
+const REWORK_SCENE_LOCATION_MAX = 80
+const REWORK_BODY_ZONE_MAX = 40
+const REWORK_CONTACT_MODE_MAX = 20
+const REWORK_CROP_SCALE_MAX = 10
 
 /**
  * Validate a rework payload. Pure and side-effect-free so the contract is unit
@@ -720,12 +741,53 @@ export function parseReworkInput(raw: unknown): ReworkParse {
     subject = r['subject']
   }
 
+  // Variety axes (#10339). Like altText/imageBrief/subject above, these ride
+  // along with a mediaUrls/tweetText rework and never satisfy the "must change
+  // something" requirement on their own.
+  const capped: Array<[keyof ReworkInput, number]> = [
+    ['sceneLocation', REWORK_SCENE_LOCATION_MAX],
+    ['bodyZone', REWORK_BODY_ZONE_MAX],
+    ['contactMode', REWORK_CONTACT_MODE_MAX],
+    ['cropScale', REWORK_CROP_SCALE_MAX],
+  ]
+  const variety: Partial<Record<'sceneLocation' | 'bodyZone' | 'contactMode' | 'cropScale', string>> = {}
+  for (const [field, max] of capped) {
+    const v = r[field as string]
+    if (v === undefined) continue
+    if (typeof v !== 'string' || v.trim() === '') {
+      return { ok: false, status: 400, error: `Bad Request: rework.${field}, when present, must be a non-empty string` }
+    }
+    if (v.length > max) {
+      return { ok: false, status: 400, error: `Bad Request: rework.${field} must be at most ${max} characters` }
+    }
+    variety[field as 'sceneLocation' | 'bodyZone' | 'contactMode' | 'cropScale'] = v.trim()
+  }
+
+  // castSlugs mirrors the draft op: an array of non-empty strings, filtered.
+  // An explicit empty array is honored (it clears the cast on a frame the
+  // rework took the cast member out of), which is why this is not folded into
+  // the non-empty rule above.
+  let castSlugs: string[] | undefined
+  if (r['castSlugs'] !== undefined) {
+    if (!Array.isArray(r['castSlugs'])) {
+      return { ok: false, status: 400, error: 'Bad Request: rework.castSlugs must be an array of strings' }
+    }
+    castSlugs = (r['castSlugs'] as unknown[])
+      .filter((s): s is string => typeof s === 'string' && s.trim() !== '')
+      .map(s => s.trim())
+  }
+
   const input: ReworkInput = {}
   if (mediaUrls !== undefined) input.mediaUrls = mediaUrls
   if (tweetText !== undefined) input.tweetText = tweetText
   if (altText !== undefined) input.altText = altText
   if (imageBrief !== undefined) input.imageBrief = imageBrief
   if (subject !== undefined) input.subject = subject
+  if (variety.sceneLocation !== undefined) input.sceneLocation = variety.sceneLocation
+  if (castSlugs !== undefined) input.castSlugs = castSlugs
+  if (variety.bodyZone !== undefined) input.bodyZone = variety.bodyZone
+  if (variety.contactMode !== undefined) input.contactMode = variety.contactMode
+  if (variety.cropScale !== undefined) input.cropScale = variety.cropScale
   return { ok: true, input }
 }
 
@@ -777,6 +839,11 @@ export interface ReworkPatch {
   altText?: string
   imageBrief?: string
   subject?: string
+  sceneLocation?: string
+  castSlugs?: string[]
+  bodyZone?: string
+  contactMode?: string
+  cropScale?: string
 }
 
 export interface ReworkRepo {
@@ -876,6 +943,11 @@ export async function reworkSocialPost(
     ...(input.altText !== undefined ? { altText: input.altText } : {}),
     ...(input.imageBrief !== undefined ? { imageBrief: input.imageBrief } : {}),
     ...(input.subject !== undefined ? { subject: input.subject } : {}),
+    ...(input.sceneLocation !== undefined ? { sceneLocation: input.sceneLocation } : {}),
+    ...(input.castSlugs !== undefined ? { castSlugs: input.castSlugs } : {}),
+    ...(input.bodyZone !== undefined ? { bodyZone: input.bodyZone } : {}),
+    ...(input.contactMode !== undefined ? { contactMode: input.contactMode } : {}),
+    ...(input.cropScale !== undefined ? { cropScale: input.cropScale } : {}),
   }
   await repo.write(id, patch)
   return { ok: true, reviewStatus: 'pending_review' }

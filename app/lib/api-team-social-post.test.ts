@@ -345,6 +345,25 @@ describe('rework op — wiring (#4351)', () => {
     expect(reworkMock).toHaveBeenCalledWith(61, { mediaUrls: ['https://cdn/reworked.jpg'] })
   })
 
+  // Ticket #10339: the route has to hand the variety axes to the parser, or
+  // they are silently dropped before validation ever sees them.
+  it('forwards the variety axes to parseReworkInput', async () => {
+    reworkParseMock.mockReturnValue({ ok: true, input: { bodyZone: 'sternum' } })
+    reworkMock.mockResolvedValue({ ok: true, reviewStatus: 'pending_review' })
+    await post({
+      op: 'rework', id: 61, mediaUrls: ['https://cdn/reworked.jpg'],
+      sceneLocation: 'bedroom, late afternoon', castSlugs: ['nadia'],
+      bodyZone: 'sternum', contactMode: 'resting', cropScale: 'medium',
+    })
+    expect(reworkParseMock).toHaveBeenCalledWith(expect.objectContaining({
+      sceneLocation: 'bedroom, late afternoon',
+      castSlugs: ['nadia'],
+      bodyZone: 'sternum',
+      contactMode: 'resting',
+      cropScale: 'medium',
+    }))
+  })
+
   it('relays a 409 (e.g. the row is not needs_changes) from reworkSocialPost', async () => {
     reworkParseMock.mockReturnValue({ ok: true, input: { tweetText: 'x' } })
     reworkMock.mockResolvedValue({ ok: false, status: 409, error: 'Post 61 is draft/approved, not */needs_changes.' })

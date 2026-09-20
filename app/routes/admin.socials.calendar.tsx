@@ -461,8 +461,9 @@ function MixReportPanel({ report }: { report: SocialMixReport }) {
   const order: { key: keyof SocialMixReport['lines'] }[] = [
     { key: 'ceiling' }, { key: 'mid' }, { key: 'educational' },
     { key: 'closeCrop' }, { key: 'productForward' }, { key: 'productFree' },
-    { key: 'bodyZoneWindow' }, { key: 'locationWindow' }, { key: 'lubeTreatment' },
-    { key: 'carousel' },
+    { key: 'bodyZoneWindow' }, { key: 'contactModeWindow' }, { key: 'locationWindow' },
+    { key: 'castRotation' }, { key: 'castVolume' }, { key: 'wideCeiling' }, { key: 'plug' },
+    { key: 'lubeTreatment' }, { key: 'carousel' },
   ]
   return (
     <details
