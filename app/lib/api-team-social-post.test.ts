@@ -237,6 +237,58 @@ describe('draft op, altText/imageBrief/subject pass-through (migration 084)', ()
   })
 })
 
+// Ticket #10269: sceneLocation shipped in migration 093 and was accepted by
+// this route from day one, but no caller ever sent it, so it sat null on
+// every row. bodyZone/contactMode/cropScale (migration 099) are the sibling
+// fields for the on-skin campaign's variety windows. All four thread through
+// the same way altText/imageBrief/subject do above.
+describe('draft op, sceneLocation/bodyZone/contactMode/cropScale pass-through (migration 099)', () => {
+  it('threads sceneLocation/bodyZone/contactMode/cropScale to createDraftSocialPost', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'A fresh line about the wand', voiceGate,
+      sceneLocation: 'bedroom-loft',
+      bodyZone: 'hip-hollow',
+      contactMode: 'resting',
+      cropScale: 'close',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      sceneLocation: 'bedroom-loft',
+      bodyZone: 'hip-hollow',
+      contactMode: 'resting',
+      cropScale: 'close',
+    }))
+  })
+
+  it('is optional: a draft with none of them omits all four', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'no scene here', voiceGate })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      sceneLocation: undefined,
+      bodyZone: undefined,
+      contactMode: undefined,
+      cropScale: undefined,
+    }))
+  })
+
+  it('trims whitespace and drops an empty or over-length value', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'edge cases', voiceGate,
+      sceneLocation: '  bathroom-spa  ',
+      bodyZone: '',
+      contactMode: 'x'.repeat(21),
+      cropScale: 'macro',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      sceneLocation: 'bathroom-spa',
+      bodyZone: undefined,
+      contactMode: undefined,
+      cropScale: 'macro',
+    }))
+  })
+})
+
 // Ticket #5413: op:'config' used to return only autopostValve
 // (social_team_autopost), which gates nothing on the publish path. A routine
 // reading it reports posting posture backwards. platformValves must carry the

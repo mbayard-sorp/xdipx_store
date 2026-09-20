@@ -3,7 +3,7 @@
  *
  *   { op: 'draft', platform, postType?, tweetText, mediaUrls?, dealHistoryId?,
  *     scheduledFor?, reworkedFrom?, shopifyProductId?, altText?, imageBrief?,
- *     subject?, sceneLocation?, castSlugs?,
+ *     subject?, sceneLocation?, castSlugs?, bodyZone?, contactMode?, cropScale?,
  *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id, deduped }
  *     `deduped:true` means a still-open (pending_review/needs_changes) row for
  *     the same platform, caption, and campaign day already existed and `id`
@@ -18,7 +18,10 @@
  *     the scene-variety choice at draft time (instagram-campaigns.md §3.8: no
  *     location repeat inside 8 consecutive Instagram product posts, no cast
  *     member on more than 2 of any 5), read back through {op:'list'} so a
- *     routine can compute both windows from one list call.
+ *     routine can compute both windows from one list call. bodyZone/
+ *     contactMode/cropScale (migration 099, ticket #10269) are the same shape
+ *     for the on-skin campaign's variety windows (#10267): optional, nullable,
+ *     read back the same way.
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
  *   { op: 'config' } -> { frequencies, autopostValve, platformValves: { instagram, x } }
  *     autopostValve (social_team_autopost) gates nothing on the publish path;
@@ -179,6 +182,18 @@ export async function action({ request }: ActionFunctionArgs) {
       castSlugs: Array.isArray(b['castSlugs'])
         ? (b['castSlugs'] as unknown[]).filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
         : undefined,
+      bodyZone:
+        typeof b['bodyZone'] === 'string' && b['bodyZone'].trim().length > 0 && b['bodyZone'].length <= 40
+          ? b['bodyZone'].trim()
+          : undefined,
+      contactMode:
+        typeof b['contactMode'] === 'string' && b['contactMode'].trim().length > 0 && b['contactMode'].length <= 20
+          ? b['contactMode'].trim()
+          : undefined,
+      cropScale:
+        typeof b['cropScale'] === 'string' && b['cropScale'].trim().length > 0 && b['cropScale'].length <= 10
+          ? b['cropScale'].trim()
+          : undefined,
     })
     // Library pick (#4937): the agent chooses one of the generated candidates
     // client-side, so the pick is recorded here, by url, when the draft row

@@ -264,6 +264,15 @@ export const socialPosts = pgTable('social_posts', {
   // routine can compute the two variety windows from one list call instead of
   // re-deriving rotation by reading captions.
   sceneLocation:   varchar('scene_location', { length: 80 }),
+  // Scene variety tracking, part 2 (migration 099, ticket #10269). sceneLocation
+  // above shipped in migration 093 but was never threaded through the draft op
+  // by any caller, so it sat null on every row and the §3.8 location window
+  // could only be guessed from caption prose. These three are the sibling
+  // fields the on-skin campaign's variety windows (ticket #10267) need to be
+  // checkable the same way. All nullable, no backfill.
+  bodyZone:        varchar('body_zone', { length: 40 }),
+  contactMode:     varchar('contact_mode', { length: 20 }),
+  cropScale:       varchar('crop_scale', { length: 10 }),
   // Publish-gate raw-judgment cache (migration 097, ticket #8452). Caches the
   // last runPublishGateCheck() vision-judgment result keyed by a content hash
   // of exactly what was judged, so a second call against an unchanged row

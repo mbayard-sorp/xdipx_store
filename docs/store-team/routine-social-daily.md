@@ -1065,6 +1065,20 @@ that verdict stands and you do not work around it. Before accepting such a verdi
 roster was read with `SANITY_API_TOKEN` and not an empty token: on 2026-08-19 an unauthenticated
 count reported zero when seven existed.
 
+**`sceneLocation` is a required element of the draft call, not an optional extra (ticket #10269).**
+`social_posts.scene_location` shipped in migration 093 and `POST /api/team/social-post {op:'draft'}`
+has accepted it from day one, but no document ever told a caller to send it, so it sat null on
+every one of 152 rows and the §3.8 "no location repeat inside 8 consecutive Instagram product
+posts" window could only be guessed from caption prose. The location `social-art-director` chose in
+this step is what goes in `sceneLocation` on the draft call (Step 6) — carry it through, it is not
+optional. When the brief is an on-skin frame (macro/close crop of a body zone rather than a full
+scene), also carry `social-art-director`'s body zone, contact mode, and crop-scale choices through as
+`bodyZone`, `contactMode`, and `cropScale` on the same draft call (migration 099, same ticket): these
+are the sibling fields the on-skin campaign's own variety windows need to be checkable rather than
+asserted, and they will decay the same way `sceneLocation` did if nothing sends them. All four are
+nullable and optional for a post with no location/body-zone shoot (education, inspiration), never
+optional for one that has one.
+
 **The brief carries subject, product(s), and feeling, always (owner direction 2026-08-22,
 `instagram-campaigns.md` §3.9).** Alongside the handle, photo, dimensions, and beat, pass
 `social-art-director` the post's subject in one line, the product(s) that belong to that subject,
@@ -1546,10 +1560,14 @@ verdict for this exact caption. `verdict` must be `PASS` and `reviewer` names th
 it; anything else (a missing verdict, a `REVISE`/`BLOCK`, or a gate that could not run) returns 400
 and writes no row.
 
+**`sceneLocation` rides along on every draft that has a location** (ticket #10269 — see Step 5): the
+same value `social-art-director` chose, carried through unchanged. `bodyZone`/`contactMode`/
+`cropScale` ride along too, only for an on-skin frame.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","sceneLocation":"<the location social-art-director chose, e.g. bedroom-loft>","bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **X drafts carry `mediaUrls` too — never omit it.** The server 400s a `platform:'x'` draft with an
