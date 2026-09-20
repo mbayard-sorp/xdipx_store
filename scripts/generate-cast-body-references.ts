@@ -79,16 +79,20 @@ interface Candidate {
  */
 function buildBodyPrompt(): string {
   return (
-    'Keep this exact person: the same face, skin tone, body hair and hair. ' +
-    'Photorealistic neck-down body reference of the same person, seated upright on a plain pale oak bench, ' +
-    'turned three-quarters to camera, shoulders down to mid-thigh filling the frame. ' +
-    'Bare, with no clothing in the picture, and a fine brass chain at the throat and a second at one wrist. ' +
-    'A folded warm off-white linen sheet is drawn across the lap and closes the bottom edge of the frame; ' +
-    'the arms are crossed tight over the chest so the forearms cover the nipples completely. ' +
-    'Even overcast daylight from a large window out of frame, open detailed shadows, no hard shadow band. ' +
-    'Plain plum-soft wall behind. Neutral relaxed expression, natural skin texture, true undistorted anatomy, ' +
-    'correct hands and fingers, one navel on the front only. ' +
-    'No nipples, no areola, no genitals, no pubic area in frame, no product, no furniture clutter, ' +
+    'Keep this exact person: the same skin tone, body hair, and body. ' +
+    'Photorealistic anatomical body reference photograph. ' +
+    'The frame is filled edge to edge by the collarbones, chest, ribs, waist and hips of the same person, ' +
+    'seated upright and square to the camera on a plain pale oak bench; ' +
+    'the chin and jaw close the top edge of the frame and the knees close the bottom edge. ' +
+    'Bare, with no clothing anywhere in the picture, a fine gold chain at the throat and a fine gold bangle at one wrist. ' +
+    'A folded cream linen towel is laid flat across the lap and closes the frame over the hips; ' +
+    'both arms are crossed tight and high across the chest so the forearms press flat and cover the nipples completely. ' +
+    'Flat shadowless overcast studio light, soft and directionless, no direct sun, no window in frame, no cast shadows. ' +
+    'Plain wall behind in a very pale desaturated lilac, almost white. ' +
+    'Relaxed neutral expression, mouth closed, not smiling, not posed, looking straight ahead. ' +
+    'Natural unretouched skin texture, true undistorted anatomy, correct hands with five fingers each, ' +
+    'one navel on the front only. Clinical, plain and evenly lit, like a wardrobe fitting reference. ' +
+    'No face in the frame, no nipples, no areola, no genitals, no pubic area, no product, no furniture clutter, ' +
     'no text, no words, no letters, no watermark, no logo, no legible branding.'
   )
 }
