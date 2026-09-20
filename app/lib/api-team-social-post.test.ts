@@ -46,6 +46,11 @@ vi.mock('~/lib/social-engagement.server', () => ({
   captureInstagramAccount: vi.fn().mockResolvedValue({}),
   rankBySaves: (r: unknown[]) => r,
 }))
+const mixReportMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/social-mix-report.server', () => ({
+  getSocialMixReport: mixReportMock,
+  formatSocialMixReportLines: (report: unknown) => [`[mix-report] stub for ${JSON.stringify(report)}`],
+}))
 
 import { action } from '~/routes/api.team.social-post'
 
@@ -359,5 +364,25 @@ describe('rework op — wiring (#4351)', () => {
     expect(reworkParseMock).toHaveBeenCalledWith(expect.objectContaining({
       altText: 'a', imageBrief: 'b', subject: 'c',
     }))
+  })
+})
+
+// Ticket #10271: the rolling-window mix report is a REPORT op, not a gate.
+// This route must not require a voiceGate or any of the draft-op validation;
+// it just fetches and returns the computed report.
+describe('mixReport op (ticket #10271)', () => {
+  it('returns the computed report and formatted lines', async () => {
+    mixReportMock.mockResolvedValue({
+      sampleSize: 21,
+      lines: { ceiling: { label: 'Ceiling (last 7)', detail: '1 / 7 -- BREACH', status: 'breach' } },
+      anyBreach: true,
+    })
+    const res = await post({ op: 'mixReport' })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.report.anyBreach).toBe(true)
+    expect(body.report.sampleSize).toBe(21)
+    expect(Array.isArray(body.lines)).toBe(true)
+    expect(body.lines[0]).toMatch(/^\[mix-report\]/)
   })
 })
