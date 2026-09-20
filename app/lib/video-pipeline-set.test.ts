@@ -58,7 +58,12 @@ vi.mock('~/lib/team.server', () => ({ getTeamConfig: configMock, getTodaySpendCe
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))
 vi.mock('~/lib/blob.server', () => ({ blobPut: vi.fn(), blobFetchToBuffer: vi.fn() }))
 vi.mock('~/lib/token-log.server', () => ({ logVideoCost: vi.fn(), logImageCost: vi.fn() }))
-vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: vi.fn().mockResolvedValue([]) }))
+// Real presenterPhotoUrlForCrop semantics, not a stub (ticket #10484).
+const cropPhoto = vi.hoisted(() => (
+  m: { photoUrl: string; bodyReferencePhotoUrl?: string | null },
+  cropScale: string | null | undefined,
+) => ((cropScale === 'macro' || cropScale === 'close') && m.bodyReferencePhotoUrl ? m.bodyReferencePhotoUrl : m.photoUrl))
+vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: vi.fn().mockResolvedValue([]), presenterPhotoUrlForCrop: cropPhoto }))
 vi.mock('~/lib/shopify.server', () => ({ getProductByHandle: vi.fn() }))
 vi.mock('~/lib/ivr-voice.server', () => ({ getActiveIvrVoiceId: vi.fn().mockResolvedValue('voice-1') }))
 vi.mock('~/lib/elevenlabs.server', () => ({ generateVoiceover: vi.fn(), generateVoiceoverWithTimestamps: vi.fn() }))

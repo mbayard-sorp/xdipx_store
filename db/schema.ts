@@ -1753,6 +1753,17 @@ export interface VideoSceneSpec {
    * speaks; only `presenter`'s voice/line renders for this scene.
    */
   coPresenters?: string[]
+  /**
+   * How tight the shot is (ticket #10484), same vocabulary as the social
+   * stills path (`CROP_SCALES` in app/lib/social-cast-reference.server.ts).
+   * 'macro' and 'close' are the on-skin register: the frame carries no face,
+   * so identity has to anchor to the cast member's neck-down
+   * `bodyReferencePhoto` rather than the portrait `referencePhoto`, and
+   * validateScenes REFUSES the enqueue when the resolved presenter has no
+   * body reference. Absent, 'medium' and 'wide' all resolve the portrait,
+   * which is what every scene did before this field existed.
+   */
+  cropScale?: 'macro' | 'close' | 'medium' | 'wide'
 }
 
 /**
@@ -1804,6 +1815,8 @@ export interface VideoScriptJson {
   talkingHead?: boolean
   /** Scene-kit slug (team-keys SCENE_KIT). Avatar/talking-head jobs with a sceneSlug automatically reuse the latest approved frame from a prior same-presenter job for that scene; first use composes fresh. */
   sceneSlug?: string
+  /** Single-scene equivalent of VideoSceneSpec.cropScale (ticket #10484): 'macro'/'close' resolve the presenter's bodyReferencePhoto and are refused at enqueue when there is none. */
+  cropScale?: 'macro' | 'close' | 'medium' | 'wide'
   /** media_assets id of an already-approved scene frame to REUSE instead of composing, as an explicit override of the sceneSlug lookup (avatar/talking-head jobs only, same presenter; skips composition and re-approval since recomposition causes identity drift). */
   reuseFrameAssetId?: number
   captions?: Record<string, string>       // platform -> caption text
