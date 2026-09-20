@@ -144,7 +144,7 @@ export function analyzeParagraphs(paragraphs: DraftParagraph[]): FrequencyReport
   return { hits, total: hits.length, overLimit: hits.length > 0 }
 }
 
-/** Convenience: analyze a raw draft (title + excerpt + portable-text body). */
+/** Convenience: analyze a raw draft (title + excerpt + seoTitle + seoDescription + portable-text body). */
 export function analyzeDraft(draft: DraftInput): FrequencyReport {
   return analyzeParagraphs(draftToParagraphs(draft))
 }

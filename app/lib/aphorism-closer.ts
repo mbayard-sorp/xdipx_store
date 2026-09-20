@@ -176,6 +176,10 @@ export interface DraftParagraph {
 export interface DraftInput {
   title?: string | null
   excerpt?: string | null
+  /** SEO meta title — ships to every SERP and LLM snippet, so it is in scope for the caps. */
+  seoTitle?: string | null
+  /** SEO meta description — same reasoning as seoTitle. */
+  seoDescription?: string | null
   /** Portable Text array (blogPost.body). */
   body?: unknown
 }
@@ -183,8 +187,12 @@ export interface DraftInput {
 /**
  * Flatten a draft into paragraph units, tracking the current section. Sections
  * are delimited by `h2` blocks (per the charter's "one per section"); the body
- * before the first h2 is the "Intro" section. Title and excerpt are their own
- * pseudo-sections and single paragraphs.
+ * before the first h2 is the "Intro" section. Title, excerpt, and the SEO
+ * fields are their own pseudo-sections and single paragraphs, counted in the
+ * whole-document tally the same as any body section (#10266: a checker that
+ * only sees title/excerpt/body cannot see an instance that lands in
+ * seoDescription, a customer-facing string shipped to every SERP and LLM
+ * snippet).
  */
 export function draftToParagraphs(draft: DraftInput): DraftParagraph[] {
   const paragraphs: DraftParagraph[] = []
@@ -194,6 +202,12 @@ export function draftToParagraphs(draft: DraftInput): DraftParagraph[] {
   }
   if (draft.excerpt && draft.excerpt.trim()) {
     paragraphs.push({ section: 'Excerpt', text: draft.excerpt.trim() })
+  }
+  if (draft.seoTitle && draft.seoTitle.trim()) {
+    paragraphs.push({ section: 'SEO title', text: draft.seoTitle.trim() })
+  }
+  if (draft.seoDescription && draft.seoDescription.trim()) {
+    paragraphs.push({ section: 'SEO description', text: draft.seoDescription.trim() })
   }
 
   const body = Array.isArray(draft.body) ? (draft.body as PtBlock[]) : []
@@ -281,7 +295,7 @@ export function analyzeParagraphs(paragraphs: DraftParagraph[]): AphorismReport 
   return { hits, borderline, perSection, totalPost, violations, overCap: violations.length > 0 }
 }
 
-/** Convenience: analyze a raw draft (title + excerpt + portable-text body). */
+/** Convenience: analyze a raw draft (title + excerpt + seoTitle + seoDescription + portable-text body). */
 export function analyzeDraft(draft: DraftInput): AphorismReport {
   return analyzeParagraphs(draftToParagraphs(draft))
 }

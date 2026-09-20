@@ -304,18 +304,28 @@ phrase**]", was the pre-#925 wide reading the charter has since narrowed to
 anaphoric-demonstrative-subject only; the charter wins and the script follows the charter, so a plain
 abstract-noun-plus-copula sentence stating an idea for the first time is never a hit.) The caps are
 unchanged: 3 per post, 1 per section, never 2 in a paragraph. Trim by de-constructing the flagged
-shape, not by swapping synonyms inside it.
+shape, not by swapping synonyms inside it. **`seoTitle` and `seoDescription` are in scope** (#10266):
+pass them alongside `title`/`excerpt`/`body` in the draft JSON, since both are customer-facing
+strings that ship to every SERP and LLM snippet and the whole-document tally counts them.
 
-**"X, not Y" antithesis pre-flight (mandatory, before Step 5, content-plan §7):** no deterministic
-checker exists for this one yet, so it is a manual count. Read the whole draft including the FAQ
-block and count every instance of the antithesis construction — copula or verb, then a comma or full
-stop, then "not" plus a contrasting noun phrase ("a change, not a loss"; "It does not lower the
-threshold. It meets it."). The charter's own fresh-language rule says to rotate out any phrase that
-starts repeating, and `check-fresh-language.ts`'s word 6-gram comparison cannot see this class at
-all: the words never repeat while the rhetorical mold does (found on content run 687, eight instances
-in one post, clean 0 shared 6-grams). Trim to content-plan §7's cap — 2-3 per post, at most 1 on a
-heading — before submitting to the voice gate, by de-constructing the shape, not by swapping a
-synonym inside it.
+**"X, not Y" antithesis pre-flight (mandatory, before Step 5, content-plan §7):** run the
+deterministic checker on the draft JSON and trim until it exits 0, before submitting to the voice
+gate (ticket #10116 closed the manual-count gap this paragraph used to describe):
+
+```bash
+npx tsx scripts/check-antithesis-cap.ts <draft.json>
+```
+
+The checker covers the whole draft including the FAQ block, and **`seoTitle` and `seoDescription`
+are in scope** (#10266): pass them alongside `title`/`excerpt`/`body` in the draft JSON, since both
+are customer-facing strings that ship to every SERP and LLM snippet. It flags every instance of the
+antithesis construction — copula or verb, then a comma or full stop, then "not" plus a contrasting
+noun phrase ("a change, not a loss"; "It does not lower the threshold. It meets it."). The charter's
+own fresh-language rule says to rotate out any phrase that starts repeating, and
+`check-fresh-language.ts`'s word 6-gram comparison cannot see this class at all: the words never
+repeat while the rhetorical mold does (found on content run 687, eight instances in one post, clean 0
+shared 6-grams). Trim to content-plan §7's cap — 2-3 per post, at most 1 on a heading — before
+submitting to the voice gate, by de-constructing the shape, not by swapping a synonym inside it.
 
 **Unsourced-frequency pre-flight (mandatory, before Step 5):** run the deterministic checker on the
 draft JSON and drive it to exit 0 before submitting to the voice gate:
@@ -334,7 +344,8 @@ address (`that fear will keep you buying`). The limit is zero: any candidate tri
 sourcing the claim, attributing it, or removing it. Do NOT soften it with a hedge (`can`, `often`,
 `it's easy to`): those are charter-banned in this register, so hedging trades a claim defect for a
 voice defect. Like the aphorism checker, it flags candidates and leaves the final judgment to the voice
-gate. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
+gate. **`seoTitle` and `seoDescription` are in scope** (#10266): pass them alongside
+`title`/`excerpt`/`body` in the draft JSON. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
 place (suggestions #1674, #2618).
 
 **Claim-scope pre-flight (mandatory, before Step 5):** before submitting to the gates, list every

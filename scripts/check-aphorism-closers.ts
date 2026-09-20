@@ -16,7 +16,7 @@
  *   npx tsx scripts/check-aphorism-closers.ts <draft.json>
  *   cat draft.json | npx tsx scripts/check-aphorism-closers.ts
  *
- * The draft JSON is the blogPost draft: { title?, excerpt?, body? } where body
+ * The draft JSON is the blogPost draft: { title?, excerpt?, seoTitle?, seoDescription?, body? } where body
  * is the Portable Text array. Exit 0 when within caps, 1 when any cap is
  * exceeded (so the routine can gate on the exit code).
  */

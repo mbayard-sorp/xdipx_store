@@ -161,3 +161,38 @@ describe('analyzeDraft — portable text structure, including the FAQ block', ()
     expect(report.overCap).toBe(false)
   })
 })
+
+describe('analyzeDraft — SEO fields (#10266)', () => {
+  it('reports an instance that lands only in seoDescription', () => {
+    const report = analyzeDraft({
+      title: 'A calm guide',
+      excerpt: 'A plain, useful intro that states its answer first.',
+      seoDescription: 'Roses and lemons are algospeak, not engineering.',
+      body: [block('normal', 'An ordinary sentence with no antithesis.')],
+    })
+    expect(report.totalPost).toBe(1)
+    expect(report.hits[0]?.section).toBe('SEO description')
+  })
+
+  it('reports an instance that lands only in seoTitle', () => {
+    const report = analyzeDraft({
+      seoTitle: 'A choice, not a compromise',
+      body: [block('normal', 'An ordinary sentence with no antithesis.')],
+    })
+    expect(report.totalPost).toBe(1)
+    expect(report.hits[0]?.section).toBe('SEO title')
+  })
+
+  it('counts a seoDescription hit toward the whole-document per-post cap', () => {
+    const report = analyzeDraft({
+      seoDescription: 'A change, not a loss.',
+      body: [
+        block('normal', 'This is a step, not a leap.'),
+        block('normal', 'It is a fit, not a fluke.'),
+        block('normal', 'It is a habit, not a hassle.'),
+      ],
+    })
+    expect(report.totalPost).toBe(4)
+    expect(report.violations.some(v => new RegExp(`cap ${ANTITHESIS_CAPS.perPost}`).test(v))).toBe(true)
+  })
+})
