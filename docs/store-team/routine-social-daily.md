@@ -1869,7 +1869,29 @@ had, so the replacement is not optional. Read instead:
 5. **Slate-mix self-check, computed not asserted (ticket #4066).** Of the last 7 published Instagram
    posts, count and report three numbers: how many were product-forward, how many were carousels, and
    how many were slot A (the product-free resource post). Compute them from real rows, do not assert
-   them. Two consecutive weeks over the 50% product-forward ceiling (`instagram-campaigns.md` §4a)
+   them.
+
+   **Run the mix report; do not hand-count it.** The call is:
+
+   ```bash
+   npx tsx scripts/report-social-mix.ts
+   ```
+
+   It is backed by `app/lib/social-mix-report.server.ts` (ticket #10271) and it computes more than
+   the three numbers above: the ceiling / mid / educational split against the §3.2b charge ratio,
+   the close-crop cap from §3.2c, the body-zone and location variety windows from §3.2c and §3.8,
+   and the carousel count. Paste its lines into the `decision` event verbatim.
+
+   **An UNKNOWN line is not a passing line.** `bodyZone`, `contactMode` and `cropScale` (migration
+   099) and `sceneLocation` (093) are null on every row drafted before Step 5 and Step 6 started
+   sending them, so those windows read UNKNOWN until enough new rows accumulate. Report the UNKNOWN
+   count as its own number. Reading a quiet report as a clean one is precisely how the regression
+   this instrument exists to catch survived three weeks: on 2026-09-19 the last 21 posted frames
+   held 1 ceiling frame against the ~12 the ratio implies, and nothing on any page said so.
+
+   **It is a report, never a gate.** It produces aggregate lines, never a per-frame verdict, and it
+   is not wired into `social-publish-gate.server.ts`. A breach is a finding for this summary to act
+   on, not a reason to hold a post the publish gate already passed. Two consecutive weeks over the 50% product-forward ceiling (`instagram-campaigns.md` §4a)
    files a suggestion (`team:'social'`, kind `instructions`) against this playbook. A standing target,
    checked within two weeks of this rule landing: at least one product-free resource post AND at least
    one carousel have published.
