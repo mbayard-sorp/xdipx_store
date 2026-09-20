@@ -600,6 +600,9 @@ carousels, and Brand Crush alike.
 
 - **Draft-time:** before selecting any product for a post, verify `availableForSale` via the
   Storefront API. An out-of-stock, DRAFT, or ARCHIVED product is ineligible; pick the next candidate.
+  Keep the product `id` (the `gid://shopify/Product/<n>` string) off that same response: it goes on
+  the draft call as `shopifyProductId` (Step 6), which is what lets the publish-time stock guard
+  re-run this exact check at the hourly tick instead of trusting a snapshot taken here.
 - **Queue-hygiene sweep (run start):** sweep the still-unposted `approved`/`pending_review` drafts and,
   for any whose featured product has since gone out of stock, mark it `needs_changes` with feedback
   naming the stock issue, so the owner never approves a post that can no longer be bought.
@@ -1642,10 +1645,27 @@ ate the room. `bodyZone`/`contactMode`/`cropScale` ride along too, on every fram
 checkable when the row names who the skin belongs to. A product row written without these is a run
 defect: report it in the run summary by row id rather than letting it land as a null nobody reads.
 
+**`shopifyProductId` rides along on every product draft, and it is the one field on this list that
+has a money consequence when it is missing.** It is the Shopify product gid
+(`gid://shopify/Product/<numeric id>`) of the SKU the post features, the same product the Step 2.6
+stock check already fetched by handle; read the gid off that response and carry it here. Two things
+read this column and read nothing else. The publish-time stock guard
+(`social-publish/stock-guard.server.ts`) re-checks stock at the hourly tick only when the column is
+set, so a product post written without it can ship after its product sells out, which is the
+2026-08-09 incident the guard exists to prevent. And the mix report (Step 7) counts a row as
+product-forward only when it is set. On 2026-09-20 the report read 0 product-forward of 14 while the
+captions named SKUs, because this playbook had never listed the field: every product post the routine
+had ever drafted carried a null. The gate now backfills the column from the `productHandle` its PASS
+asserts (`applyPublishGateVerdict`), so a forgotten id is repaired at approval time, but that is the
+safety net, not the path: a product row drafted without `shopifyProductId` is a run defect, report it
+by row id exactly like a missing `sceneLocation`. A product-free frame omits it, and that omission is
+what the report counts as product-free, so never send a product id on a frame that does not feature
+the product.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","sceneLocation":"<the location social-art-director chose, e.g. bedroom-loft>","castSlugs":["<the cast member social-art-director chose>"],"bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","shopifyProductId":"<product post only: gid://shopify/Product/<id> of the featured SKU, from the Step 2.6 fetch>","sceneLocation":"<the location social-art-director chose, e.g. bedroom-loft>","castSlugs":["<the cast member social-art-director chose>"],"bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **X drafts carry `mediaUrls` too — never omit it.** The server 400s a `platform:'x'` draft with an
@@ -1655,7 +1675,7 @@ empty or missing `mediaUrls` array (ticket #4131), the same fail-closed shape as
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"x","postType":"manual","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"altText":"<plain description of the image>","scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"x","postType":"manual","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"altText":"<plain description of the image>","shopifyProductId":"<product post only: the same gid as the Instagram post this beat companions>","scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **`altText` is fail-closed too, for any media-bearing Instagram or X draft (ticket #5486), the same
@@ -1961,6 +1981,13 @@ had, so the replacement is not optional. Read instead:
    the three numbers above: the ceiling / mid / educational split against the §3.2b charge ratio,
    the close-crop cap from §3.2c, the body-zone and location variety windows from §3.2c and §3.8,
    and the carousel count. Paste the returned `lines` into the `decision` event verbatim.
+
+   **The product-forward and product-free lines read `shopify_product_id` and nothing else.** They
+   never infer a product from caption prose. So a product post drafted without `shopifyProductId`
+   (Step 6) counts as product-free here, and a product-forward line that reads implausibly low
+   against the slate is the first symptom of that defect, not a content finding. On 2026-09-20 it
+   read 0 of 14 for exactly that reason. When the line disagrees with what the slate says shipped,
+   list the row ids whose column is null in the summary before drawing any conclusion about mix.
 
    The op and the `/admin/socials` panel that renders the same numbers both shipped with #10271.
    **This playbook did not call either**, so Step 7 went on asking for three hand-counted numbers

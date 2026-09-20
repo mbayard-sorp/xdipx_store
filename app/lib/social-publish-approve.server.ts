@@ -46,6 +46,23 @@
  * the same trick `live-post-feedback.ts` uses for the owner's verdict on a live
  * post, for the same reason: no column, and the column is not worth a protected
  * migration on its own.
+ *
+ * ## The durable product link is backfilled from the handle
+ *
+ * The paragraph above predates migration 080: `social_posts.shopify_product_id`
+ * now exists, and two things read it that read nothing else. The publish-time
+ * stock guard (`social-publish/stock-guard.server.ts`) skips its check when the
+ * column is null, and the rolling mix report (`social-mix-report.server.ts`)
+ * counts a row as product-forward only when it is set. The drafting playbook
+ * never told a caller to send it, so every routine-drafted product post landed
+ * with the column null: on 2026-09-20 the report read 0 product-forward of 14
+ * while the captions plainly named SKUs, and the hourly tick re-checked stock
+ * on none of them. So when a PASS asserts `featuresProduct` with a handle and
+ * the row has no product id, the approved write resolves the handle to its
+ * Shopify gid and fills the column. A row that already carries an id is left
+ * alone: the drafter is the source of truth, and the gate only fills a blank.
+ * A resolver failure never blocks the approval; it just leaves the column as
+ * it was, which is exactly today's behaviour, not a regression of it.
  */
 
 import { and, desc, eq } from 'drizzle-orm'
@@ -444,6 +461,12 @@ export interface ApprovePatch {
   gateCheckedAt: Date
   gateFindings: StoredGateFinding[]
   updatedAt: Date
+  /**
+   * Set only on an approved write, only when the PASS named a product handle
+   * and the row's `shopify_product_id` was null (see the module header). The
+   * Shopify gid, the same shape `{op:'draft'}` stores and the stock guard reads.
+   */
+  shopifyProductId?: string
 }
 
 export type PostRow = typeof socialPosts.$inferSelect
@@ -455,6 +478,44 @@ export interface ApplyDeps {
   gateDeps?: { getAvailability?: (handle: string) => Promise<boolean | null> }
   /** Defaults to the live database. */
   repo?: ApproveRepo
+  /**
+   * Handle -> Shopify product gid, for the `shopify_product_id` backfill on an
+   * approved product post. Defaults to the Storefront lookup. Null (or a throw)
+   * means the column is left as it was.
+   */
+  resolveProductIdByHandle?: (handle: string) => Promise<string | null>
+}
+
+/**
+ * Lazy import, like the deterministic gate's own default stock lookup, so the
+ * test suite never loads `shopify.server` and its live env.
+ */
+async function defaultResolveProductIdByHandle(handle: string): Promise<string | null> {
+  const { getProductByHandle } = await import('./shopify.server')
+  const product = await getProductByHandle(handle)
+  return product?.id ?? null
+}
+
+/**
+ * The gid to backfill onto the row, or null when there is nothing to do: the
+ * PASS named no product, the row already carries an id, or the handle did not
+ * resolve. Never throws; see the module header for why a failure here must not
+ * turn into a refused approval.
+ */
+async function productIdToBackfill(
+  post: Pick<PostRow, 'shopifyProductId'>,
+  input: PublishGateVerdictInput,
+  resolve: (handle: string) => Promise<string | null>,
+): Promise<string | null> {
+  if (!input.featuresProduct || !input.productHandle) return null
+  if (post.shopifyProductId) return null
+  try {
+    const id = (await resolve(input.productHandle))?.trim()
+    return id && id.length <= 60 ? id : null
+  } catch (err) {
+    console.error('[publish-gate] shopify_product_id backfill failed, leaving the column null:', err)
+    return null
+  }
 }
 
 /** The live implementation. */
@@ -602,12 +663,23 @@ export async function applyPublishGateVerdict(
     }
   }
 
-  await write(
-    'approved',
-    formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now),
-    'pass',
-    [...agentFindings, ...gate.findings.map(findingToStored)],
+  // The durable product link (module header). Resolved after the deterministic
+  // checks passed, so a stock-out never pays for a Storefront round trip, and
+  // written in the same patch as the approval so the two cannot land apart.
+  const backfillId = await productIdToBackfill(
+    post, input, deps.resolveProductIdByHandle ?? defaultResolveProductIdByHandle,
   )
+  await repo.write(id, {
+    reviewStatus: 'approved',
+    feedback: formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now),
+    reviewedBy: input.reviewer.slice(0, 60),
+    reviewedAt: now,
+    gateStatus: 'pass',
+    gateCheckedAt: now,
+    gateFindings: [...agentFindings, ...gate.findings.map(findingToStored)],
+    updatedAt: now,
+    ...(backfillId ? { shopifyProductId: backfillId } : {}),
+  })
   return { ok: true, reviewStatus: 'approved' }
 }
 
