@@ -106,7 +106,9 @@ async function main() {
   const mood        = arg('mood')
   const platform    = arg('platform') ?? 'instagram'
   const refImage    = arg('ref-image')
-  const presenter   = arg('presenter-image')
+  const presenterArg = arg('presenter-image')
+  const castSlug    = arg('cast-slug')
+  const cropScale   = arg('crop-scale')
   const scale       = arg('scale')
   const extraRef    = arg('extra-ref')
   const noRef       = hasFlag('no-ref')
@@ -120,7 +122,7 @@ async function main() {
   const dryRun      = hasFlag('dry-run')
 
   if (!prompt || !handle || !archetype || !mood) {
-    console.error('Usage: gen-social-image.ts --prompt <p> --handle <h> --archetype scene|cast|metaphor|macro|plate --mood <m> [--platform instagram|tiktok|x] [--ref-image <url>] [--no-ref --no-ref-reason "<why>"] [--slide <n>] [--date YYYY-MM-DD] [--images-so-far <n>] [--only fal|imagen] [--caller <c>] [--run-id <n>] [--dry-run]')
+    console.error('Usage: gen-social-image.ts --prompt <p> --handle <h> --archetype scene|cast|metaphor|macro|plate --mood <m> [--platform instagram|tiktok|x] [--ref-image <url>] [--no-ref --no-ref-reason "<why>"] [--cast-slug <slug> --crop-scale macro|close|medium|wide | --presenter-image <url>] [--scale palm|handheld|forearm|bottle] [--slide <n>] [--date YYYY-MM-DD] [--images-so-far <n>] [--only fal|imagen] [--caller <c>] [--run-id <n>] [--dry-run]')
     process.exit(1)
   }
   if (!ARCHETYPES.includes(archetype)) {
@@ -145,6 +147,73 @@ async function main() {
     console.error('--no-ref requires --no-ref-reason "<why>" (echoed in the manifest)')
     process.exit(1)
   }
+  // ── Presenter reference selection (ticket #10270, wired 2026-09-20) ──────
+  //
+  // `presenterPhotoUrlForCrop` shipped with #10270 and had no caller: this
+  // script took `--presenter-image` as a caller-supplied URL and never asked
+  // which reference the crop actually needs. A macro or close on-skin crop
+  // carries no face, so anchoring it to the portrait means the model invents
+  // everything below the neck including skin tone, under a named persona's
+  // name. §3.7 clause (a) fails and nothing said so, because the selector's
+  // fallback is silent by design.
+  //
+  // So: pass `--cast-slug` and `--crop-scale` and this resolves the right
+  // reference and REFUSES when the close-crop one does not exist yet. The
+  // refusal is the point. A silent portrait substitution is worse than no
+  // image, and "held" is the documented posture until the owner approves a
+  // body reference (`routine-social-daily.md` Step 5).
+  const CROP_SCALES = ['macro', 'close', 'medium', 'wide']
+  if (cropScale && !CROP_SCALES.includes(cropScale)) {
+    console.error(`--crop-scale must be one of: ${CROP_SCALES.join(', ')}`)
+    process.exit(1)
+  }
+  const needsBodyReference = cropScale === 'macro' || cropScale === 'close'
+
+  if (castSlug && presenterArg) {
+    console.error('--cast-slug and --presenter-image are mutually exclusive: pass the slug and let the crop scale pick the reference, or pass the URL yourself.')
+    process.exit(1)
+  }
+  // The back-compat path cannot be allowed to smuggle in the exact failure
+  // above. A hand-passed URL for a close crop is the silent substitution.
+  if (presenterArg && needsBodyReference) {
+    console.error(`--presenter-image with --crop-scale ${cropScale} is refused: a close or macro crop must resolve its reference through --cast-slug so the missing-body-reference case can be caught. See routine-social-daily.md Step 5.`)
+    process.exit(1)
+  }
+
+  let presenter = presenterArg
+  if (castSlug) {
+    if (!cropScale) {
+      console.error('--cast-slug requires --crop-scale macro|close|medium|wide: the crop is what decides which reference is correct.')
+      process.exit(1)
+    }
+    const { getApprovedCastMembers, presenterPhotoUrlForCrop } = await import('../app/lib/sanity.server')
+    const roster = await getApprovedCastMembers()
+    if (!roster.length) {
+      // Never read an empty roster as "there are none": an unauthenticated
+      // read of this dataset returned 1 of 8 on 2026-08-19 and that false zero
+      // reached three binding documents.
+      console.error('No approved cast members returned. Check SANITY_API_TOKEN is set and non-empty before concluding the roster is empty.')
+      process.exit(1)
+    }
+    const member = roster.find(m => m.slug === castSlug)
+    if (!member) {
+      console.error(`--cast-slug "${castSlug}" is not an approved cast member. Approved: ${roster.map(m => m.slug).join(', ')}`)
+      process.exit(1)
+    }
+    if (needsBodyReference && !member.bodyReferencePhotoUrl) {
+      console.error(
+        `${member.name} has no bodyReferencePhoto, so a ${cropScale} crop cannot be generated.\n` +
+        'Generating it from the portrait would invent the body and skin tone under this persona\'s name,\n' +
+        'which fails instagram-campaigns.md §3.7 clause (a). Hold the post and say so in the run summary.\n' +
+        'To unblock: npx tsx scripts/generate-cast-body-references.ts, owner picks, upload to\n' +
+        'castMember.bodyReferencePhoto (the Studio needs redeploying first).',
+      )
+      process.exit(1)
+    }
+    presenter = presenterPhotoUrlForCrop(member, cropScale)
+    console.log(`presenter reference: ${member.name} @ crop ${cropScale} -> ${needsBodyReference ? 'bodyReferencePhoto' : 'referencePhoto'}`)
+  }
+
   // A cast composite needs BOTH references. With only the presenter, the model
   // preserves the presenter and invents the product, which is exactly the
   // failure this mode exists to fix.
