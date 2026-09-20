@@ -27,7 +27,7 @@ generated from that cast member's approved BODY reference and the `castSlug` on 
 Clause (a) cannot be satisfied today. Ticket #10270 added the schema field and the selector; nobody
 has uploaded a photo into it, and approving a cast likeness is the owner's call, not the team's.
 
-Two further gaps found in the same pass, both verified by search:
+One further gap found in the same pass, verified by search:
 
 - **`presenterPhotoUrlForCrop` (`app/lib/sanity.server.ts:467`) has no callers.** It is the function
   that decides to pass the body reference for a `macro` or `close` crop. `scripts/gen-social-image.ts`
@@ -255,7 +255,7 @@ It is not isolated. In a 50-product sample of active products read live today, *
 - **Drafted vs published, never conflated:** drafted 4 (2 Instagram, 2 X). Published 0. Nothing was filed to `social_posts`, nothing went through `social-publish-gate`, nothing reached the hourly publish job. This session has no team token or database.
 - **Shippable vs held:** 2 shippable (IG 2, X 2), 2 held on the §0 body-reference dependency.
 - **Volume ladder:** rung unread this session. The last value written to a document is `social_freq_instagram = 3` (owner, 2026-08-16); read the live value, never that sentence.
-- **Mix report:** `npx tsx scripts/report-social-mix.ts` would run at Step 7. Expect the body-zone and close-crop lines to read UNKNOWN, because the migration-099 columns are null on every row drafted before today. UNKNOWN is not clean.
+- **Mix report:** `POST /api/team/social-post {"op":"mixReport"}` would run at Step 7. Expect the body-zone and close-crop lines to read UNKNOWN, because the migration-099 columns are null on every row drafted before today. UNKNOWN is not clean.
 
 ## 8. Open questions for the owner
 

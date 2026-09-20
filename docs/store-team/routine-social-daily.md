@@ -1893,16 +1893,23 @@ had, so the replacement is not optional. Read instead:
    how many were slot A (the product-free resource post). Compute them from real rows, do not assert
    them.
 
-   **Run the mix report; do not hand-count it.** The call is:
+   **Call the mix report; do not hand-count it.** The call is:
 
    ```bash
-   npx tsx scripts/report-social-mix.ts
+   curl -s -X POST "$BASE_URL/api/team/social-post" \
+     -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+     -d '{"op":"mixReport"}'
    ```
 
    It is backed by `app/lib/social-mix-report.server.ts` (ticket #10271) and it computes more than
    the three numbers above: the ceiling / mid / educational split against the §3.2b charge ratio,
    the close-crop cap from §3.2c, the body-zone and location variety windows from §3.2c and §3.8,
-   and the carousel count. Paste its lines into the `decision` event verbatim.
+   and the carousel count. Paste the returned `lines` into the `decision` event verbatim.
+
+   The op and the `/admin/socials` panel that renders the same numbers both shipped with #10271.
+   **This playbook did not call either**, so Step 7 went on asking for three hand-counted numbers
+   while a fuller report sat one request away. That is the same shape as the regression the report
+   exists to catch: an instrument nothing reads. Call it every run.
 
    **An UNKNOWN line is not a passing line.** `bodyZone`, `contactMode` and `cropScale` (migration
    099) and `sceneLocation` (093) are null on every row drafted before Step 5 and Step 6 started
