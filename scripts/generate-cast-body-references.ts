@@ -28,10 +28,19 @@
  * `referencePhoto`'s wardrobe propagates into every composited frame built
  * from it. Whatever styling, charge or mood lands in a body reference will
  * propagate the same way into every on-skin post generated from it. So these
- * are evenly lit, plainly framed, neck-down frames whose job is to establish
+ * are evenly lit, plainly framed, unoccluded frames whose job is to establish
  * skin tone, body hair, and any tattoos or jewellery that serve as adult
  * identity markers. The charge belongs in the post brief (§3.2b/§3.2c), never
- * baked into the anchor.
+ * baked into the anchor -- and neither does an occluder, which is why the arms
+ * hang clear of the torso rather than crossing it.
+ *
+ * The frame runs head to mid-thigh and shows the pubic mound, because §3.2a's
+ * owner ceiling licenses the mound and a little hair in published frames and an
+ * anchor has to reach the ceiling it anchors. It stops hard short of labia,
+ * vulva or any genital detail: `genitaliaAbsent` in
+ * `app/lib/social-vision-gate.server.ts` fails a frame on exactly that and
+ * `social-publish-gate.server.ts` blocks a failed verdict, so a reference
+ * carrying it could anchor nothing that ships.
  *
  * NOTHING is uploaded to Sanity here, exactly as in the original casting call.
  * Candidates are written to --out for the owner's review; the one he picks per
@@ -63,36 +72,78 @@ interface Candidate {
  * Framing, light and ground only. Nothing about who the person is: that comes
  * from the reference image, and competing with it is what drifts a face.
  *
- * Every clause here is doing work that §3.2c's measured findings demand:
+ * Every clause here is doing work that §3.2c's measured findings, and three
+ * rounds of candidates, demand:
  *   - Describes what FILLS the frame and what CLOSES its edges, never what is
  *     excluded. Describing the exclusion produced a nude wide shot in every
  *     attempt tested.
- *   - Closes the lower edge with a folded sheet, an INANIMATE closer, which
+ *   - Closes the lower edge with a folded towel, an INANIMATE closer, which
  *     held in 5 of 5 frames. A limb described by region held in 0 of 4, so the
- *     arms are given an action ("crossed tight") rather than a region.
+ *     thighs are given an action ("pressed together") rather than a region.
+ *   - **Arms hang straight down, clear of the torso.** Round 2 crossed them
+ *     tight and high across the chest, and the crossed forearms baked a
+ *     permanent occluder into the anchor: every on-skin frame built from it
+ *     would inherit an arm over the sternum, which is precisely the bare
+ *     contact zone §3.2b names as ceiling. An anchor must not pre-occlude the
+ *     thing the posts are for. Arms down leaves the chest and ribs
+ *     unobstructed and lets the crop, the pose, a hand or the product do the
+ *     occluding per frame, where §3.2a puts that decision.
+ *   - **The whole head and face are in frame.** Round 2 asked for a neck-down
+ *     crop and got a face anyway in half the candidates: "no face in the
+ *     frame" fought the reference image, which is a portrait, and the
+ *     reference won. Asking for the face outright stops that fight and costs
+ *     nothing. The anchor's job is skin tone, body hair and build, and a
+ *     visible face makes the identity match verifiable at a glance.
+ *   - **The pubic mound and a little natural pubic hair are visible.** The
+ *     owner's 2026-08-22 ceiling, quoted verbatim in §3.2a, licenses exactly
+ *     that in published frames, so an anchor that stopped at the hip line
+ *     could not anchor a frame that goes where the ceiling already allows.
+ *     Round 4 showed the hair needs a BOUNDARY as well as a licence: asked for
+ *     plainly, the patch rendered spilling off the mound onto the outer thigh
+ *     (owner review, 2026-09-20). So it is specified as a small neat triangle
+ *     confined to the mound and stopping at the thigh crease, with smooth bare
+ *     thighs named positively -- the same fills-and-closes discipline the rest
+ *     of this prompt uses, applied to the hair.
+ *   - **No labia, vulva, cleft or genital detail, thighs closed throughout.**
+ *     Mechanical rather than editorial: §3.2a's stop list is "labia visible or
+ *     outlined", `genitaliaAbsent` in `app/lib/social-vision-gate.server.ts`
+ *     fails a frame on exactly that, and `social-publish-gate.server.ts` blocks
+ *     a failed verdict. Nothing containing it can ever publish, so a reference
+ *     containing it anchors nothing shippable. Mound visible and labia not IS
+ *     the published ceiling. Do not widen this line here.
  *   - Seated upright, never supine-from-above, which shared the composition of
  *     6 of 6 fence breaches on breast-in-frame briefs.
  *   - Names jewellery, the cheapest adult identity marker available and one
  *     the owner has licensed, because clause (b) is judged on ambiguity.
- *   - Says "warm off-white linen", never "paper": the brand token name renders
- *     as literal sheets of paper (a prop in 4 of 7 frames before the ban).
+ *   - Says "a very pale desaturated lilac, almost white", never "plum-soft":
+ *     a brand token name renders as its literal saturated reading, and round 1
+ *     came back with a saturated mauve wall. Same failure class as the standing
+ *     ban on the word "paper", which put literal sheets of paper in 4 of 7
+ *     frames.
  */
 function buildBodyPrompt(): string {
   return (
     'Keep this exact person: the same skin tone, body hair, and body. ' +
     'Photorealistic anatomical body reference photograph. ' +
-    'The frame is filled edge to edge by the collarbones, chest, ribs, waist and hips of the same person, ' +
+    'The frame is filled by the head, face, collarbones, chest, ribs, waist and hips of the same person, ' +
     'seated upright and square to the camera on a plain pale oak bench; ' +
-    'the chin and jaw close the top edge of the frame and the knees close the bottom edge. ' +
+    'the whole head and face are visible and the knees close the bottom edge. ' +
     'Bare, with no clothing anywhere in the picture, a fine gold chain at the throat and a fine gold bangle at one wrist. ' +
-    'A folded cream linen towel is laid flat across the lap and closes the frame over the hips; ' +
-    'both arms are crossed tight and high across the chest so the forearms press flat and cover the nipples completely. ' +
+    'Both arms hang straight down at her sides, relaxed, well clear of the torso, so the chest and ribs are unobstructed. ' +
+    'Knees and thighs pressed together and angled slightly to one side. ' +
+    'The stomach, hip hollows and pubic mound are visible, with a little natural pubic hair ' +
+    'as a small neat triangle confined to the mound itself, stopping at the crease of each thigh; ' +
+    'the thighs and legs are smooth and bare with no hair on them anywhere. ' +
+    'The closed thighs conceal everything below the mound, and a folded cream linen towel laid flat on the bench ' +
+    'closes the bottom edge of the frame at mid-thigh. ' +
     'Flat shadowless overcast studio light, soft and directionless, no direct sun, no window in frame, no cast shadows. ' +
     'Plain wall behind in a very pale desaturated lilac, almost white. ' +
     'Relaxed neutral expression, mouth closed, not smiling, not posed, looking straight ahead. ' +
     'Natural unretouched skin texture, true undistorted anatomy, correct hands with five fingers each, ' +
     'one navel on the front only. Clinical, plain and evenly lit, like a wardrobe fitting reference. ' +
-    'No face in the frame, no nipples, no areola, no genitals, no pubic area, no product, no furniture clutter, ' +
+    'No labia visible or outlined, no vulva, no cleft, no genital detail of any kind, thighs closed throughout, ' +
+    'no pubic hair on the thighs or legs, no stray or floating hair off the mound, ' +
+    'no product, no furniture clutter, ' +
     'no text, no words, no letters, no watermark, no logo, no legible branding.'
   )
 }
@@ -188,7 +239,9 @@ async function main(): Promise<void> {
 
   console.log(
     '\nDone. Review the candidates. Every one still needs a human pass before it is uploaded:\n' +
-    '  - no nipple, no areola, no genitals, no pubic area, nothing age-ambiguous;\n' +
+    '  - no labia, no vulva, no cleft visible or outlined, nothing age-ambiguous;\n' +
+    '  - the pubic mound may show, per the §3.2a ceiling; anything below it may not;\n' +
+    '  - arms genuinely down and clear of the torso, so the anchor pre-occludes nothing;\n' +
     '  - correct anatomy, one navel on the front, no merged or duplicated limbs;\n' +
     "  - the skin tone and body actually match that member's portrait.\n" +
     'Upload the chosen look to castMember.bodyReferencePhoto and write skinToneNote beside it.\n' +
