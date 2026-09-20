@@ -92,7 +92,7 @@ maya/marcus), light signature (macro-lit to overcast diffuse). **Four of five.**
 
 ---
 
-## 3. IG 1 — slot B, campaign beat. CLEARED to generate (§0)
+## 3. IG 1, slot B, campaign beat. CLEARED to generate (§0)
 
 **Product:** `womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator` (44 in stock)
 **Subject:** External stimulation is the mechanism that closes the orgasm gap, and it is a different thing from a vibrator.
@@ -152,7 +152,7 @@ pixels, which nobody has judged yet because none exist.
 
 ---
 
-## 4. IG 2 — slot C, Today's Pick. SHIPPABLE TODAY
+## 4. IG 2, slot C, Today's Pick. SHIPPABLE TODAY
 
 **Product:** `classique-rechargeable-wand-massager` (Le Wand Classique, 16 in stock)
 **Subject:** Taking more time is the other half of what closes the gap.
@@ -221,7 +221,7 @@ Both carry an image with an approved cast member in it (`social-crossplatform-st
 
 Neither post names a price. See §1: the MAP gate was run and both heroes fail it or fall under the 10% surfacing floor.
 
-### X 1 — companion to IG 1. CLEARED with IG 1
+### X 1, companion to IG 1. CLEARED with IG 1
 
 `castSlugs: ["maya","marcus"]`, `sceneLocation: "bedroom-late-morning"`, `cropScale: "medium"`
 
@@ -246,14 +246,15 @@ corrected this slate's disposition.
   data does not establish, while running the two together as one finding. Rewritten above to report
   where the orgasm comes from rather than assert what anyone needs. Note the gate's own suggested
   rewrite used "gets there", which the charter names as a banned gesture, so it was not adopted.
-- **Holding this with IG 1 is editorial, not compliance.** The frame is `medium`, so
-  `presenterPhotoUrlForCrop` resolves to the approved portrait and clause (a) passes. The missing
-  body reference does not touch it. Shipping the two halves of one campaign beat together is a
-  choice worth making, but it must not be recorded as a technical blocker it is not.
+- **Holding this with IG 1 was editorial, not compliance.** The frame is `medium`, so
+  `presenterPhotoUrlForCrop` resolves to the approved portrait and clause (a) passes. The body
+  reference gap never touched it, and that gap is closed now in any case. Shipping the two halves
+  of one campaign beat together is a choice worth making, but it must not be recorded as a
+  technical blocker it is not.
 
 **No opinion is attributed to either cast member.** The caption is mechanism and a pairing fact. §4a's rule bites hardest here, because a synthetic face now sits beside a checkout link.
 
-### X 2 — companion to IG 2. PASS
+### X 2, companion to IG 2. PASS
 
 `castSlugs: ["marcus"]`, `sceneLocation: "sunroom-late-morning"`, `cropScale: "medium"`
 

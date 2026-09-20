@@ -1149,7 +1149,7 @@ instead, so it DOES resolve the right reference but the other two never run on t
 
 **Use `--cast-slug`, never `--presenter-image`, for a macro or close crop.** The CLI already
 enforces this and will not let you get it wrong: a hand-passed `--presenter-image` with
-`--crop-scale macro|close` exits 1 by design (`scripts/gen-social-image.ts:177`), and a
+`--crop-scale macro|close` exits 1 by design (`scripts/gen-social-image.ts:178`), and a
 `--cast-slug` whose member has no `bodyReferencePhoto` exits 1 with the remedy printed. Passing the
 body reference URL by hand is refused, not required.
 
