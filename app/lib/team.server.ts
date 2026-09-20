@@ -1908,6 +1908,13 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // verified reference to the replacement. See the flag's doc on
     // TransitionRule for the fence mechanics.
     { to: 'dismissed', actors: ['any-agent'], delegatedSupersessionOnly: true },
+    // Out-of-band merged-PR reconcile only (#10342). Same fence and same
+    // evidence as the `approved` edge below: only a `merged: true` read from
+    // GitHub for this ticket's own linked PR lets the reconcile walk it. An
+    // untriaged row can carry a PR link (a session files the ticket with its
+    // PR in the same breath, per ADR-008 step 3), and when that PR merges the
+    // row's work is live, so leaving it at `proposed` is drift, not a gate.
+    { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
     OWNER_DISMISS,
   ],
   approved: [
@@ -1957,6 +1964,11 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
   ],
   in_progress: [
     { to: 'pr_open', actors: ['assignee'] },
+    // Out-of-band merged-PR reconcile only (#10342), same fence and same
+    // evidence as the `approved` edge above: GitHub itself must report the
+    // linked PR merged. A claimed ticket whose PR the owner merges by hand is
+    // otherwise stranded until its lease expires and then cycles forever.
+    { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
     { to: 'blocked',  actors: ['assignee', 'system'] },
     // Lease expiry releases the ticket back onto the unassigned queue.
     { to: 'approved', actors: ['system'] },

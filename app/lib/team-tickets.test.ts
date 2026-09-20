@@ -134,7 +134,7 @@ const ACTORS: TicketActor[] = [
 
 /**
  * Every triple the design permits when a code ticket is held by rr7-engineer
- * and the call is a PLAIN transition (no reconcile declaration). The four
+ * and the call is a PLAIN transition (no reconcile declaration). The
  * out-of-band `-> applied` reconcile edges are deliberately absent: they are
  * `outOfBandReconcileOnly` in the map, so a plain call cannot see them.
  */
@@ -164,20 +164,25 @@ const ALLOWED_FOR_CODE_TICKET: Array<[TicketStatus, TicketStatus, TicketActor[]]
 ]
 
 /**
- * The fence on the out-of-band merged-PR reconcile edges. These four triples,
- * and ONLY these four, open up when the caller carries the reconcile
+ * The fence on the out-of-band merged-PR reconcile edges. These six triples,
+ * and ONLY these six, open up when the caller carries the reconcile
  * declaration (`viaOutOfBandReconcile` in TransitionOpts, or an enclosing
  * `runWithOutOfBandReconcile`). The declaration is an in-process signal the
  * team HTTP API does not forward, so at the map level a plain `system`
  * transition, from any present or future call site, cannot close an
- * approved/blocked/pr_open/in_review ticket; the sweeps that HAVE asked GitHub
+ * live ticket in any status; the sweeps that HAVE asked GitHub
  * and seen `merged: true` are the only callers that can.
  *
  * Why the edges exist at all: a hand-merged PR strands its ticket wherever it
  * stood (tickets #120/#423 in approved with PRs #436/#429 merged, #455
- * blocked with PR #508 merged, #291/#323/#441 in pr_open/in_review).
+ * blocked with PR #508 merged, #291/#323/#441 in pr_open/in_review). #10342
+ * added `proposed` and `in_progress` for the same reason: #10269 sat approved
+ * with PR #1227 merged, and the statuses left out were simply more places for
+ * a merged PR's ticket to be stranded.
  */
 const RECONCILE_ONLY_EDGES: Array<[TicketStatus, TicketStatus, TicketActor[]]> = [
+  ['proposed',    'applied', ['system']],
+  ['in_progress', 'applied', ['system']],
   ['approved',  'applied', ['system']],
   ['pr_open',   'applied', ['system']],
   ['in_review', 'applied', ['system']],
@@ -210,9 +215,9 @@ describe('ALLOWED transition matrix', () => {
   })
 
   // The fence, proven exhaustively: the reconcile declaration adds exactly the
-  // four RECONCILE_ONLY_EDGES to the plain matrix and nothing else, so it
-  // cannot be used as a skeleton key for any other edge or actor.
-  it('unlocks exactly the four reconcile edges under the reconcile declaration', () => {
+  // RECONCILE_ONLY_EDGES to the plain matrix and nothing else, so it cannot be
+  // used as a skeleton key for any other edge or actor.
+  it('unlocks exactly the reconcile edges under the reconcile declaration', () => {
     const ctx = { assignee: 'agent:rr7-engineer', kind: 'code', viaOutOfBandReconcile: true }
     const wrong: string[] = []
     for (const from of TICKET_STATUSES) {
