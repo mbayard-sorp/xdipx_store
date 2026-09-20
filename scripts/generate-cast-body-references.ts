@@ -52,6 +52,12 @@
  *   npx tsx scripts/generate-cast-body-references.ts --out /tmp/cast-body
  *   npx tsx scripts/generate-cast-body-references.ts --looks 3 --only maya,marcus
  *   npx tsx scripts/generate-cast-body-references.ts --dry-run
+ *   npx tsx scripts/generate-cast-body-references.ts --only diego --variant male
+ *
+ * The female and male prompts differ in exactly one licensed zone (§3.2a: the
+ * mound is visible on a woman, the groin is covered on a man) and the variant
+ * is resolved per member from the roster description, printed before spend.
+ * `--variant` forces it for the whole run.
  *
  * Cost: $0.036/image (atlas/seedream-4.5-edit). Eight members x 3 looks is
  * about $0.86, logged to api_token_log under feature 'video-cast'.
@@ -62,10 +68,43 @@
  */
 import 'dotenv/config'
 
+/**
+ * Which ceiling the member's prompt is written to. §3.2a licenses different
+ * things for women and men, in the owner's own words: for a woman "the pubic
+ * mound and a little pubic hair is visible above the line", for a man "Penis:
+ * not shown, but all other parts of a man are fine". So the male reference is
+ * bare to the same degree everywhere except the groin, which the towel covers
+ * outright. It is the same frame, the same light and the same ground; only the
+ * one licensed zone differs.
+ */
+type BodyVariant = 'female' | 'male'
+
 interface Candidate {
   slug: string
   name: string
   referencePhotoUrl: string
+  variant: BodyVariant
+}
+
+/**
+ * Resolve the variant from the roster row rather than a hardcoded slug list,
+ * because the roster is read live and a hardcoded list is exactly what went
+ * stale in `generate-cast-candidates.ts` (it still says six; there are eight).
+ *
+ * `castMember` carries no gender field, so this reads the `description` the
+ * schema already requires for deliberate casting ("Latino man presenting late
+ * 20s", "Black woman presenting early 30s"). The `\bman` boundary is load
+ * bearing and easy to "fix" wrongly: in "woman presenting" the `m` is preceded
+ * by `o`, a word character, so there is no word boundary and it does NOT match.
+ * Do not relax it to /man presenting/ — that matches every woman on the roster.
+ *
+ * Anything it cannot read as male gets the female prompt, and the resolved
+ * variant is printed per member on every run so a misread is visible before
+ * money is spent rather than after. `--variant` overrides it outright.
+ */
+function resolveVariant(description: string | null, override: BodyVariant | null): BodyVariant {
+  if (override) return override
+  return description && /\bman presenting\b/i.test(description) ? 'male' : 'female'
 }
 
 /**
@@ -111,6 +150,27 @@ interface Candidate {
  *     a failed verdict. Nothing containing it can ever publish, so a reference
  *     containing it anchors nothing shippable. Mound visible and labia not IS
  *     the published ceiling. Do not widen this line here.
+ *   - **Names adulthood outright, the one deliberate exception to "say nothing
+ *     about the person".** Round 5 ran the four female friends: Sofia, Vivian
+ *     and Emma passed, and all three of Jade's candidates read materially
+ *     younger than her persona and were rejected. Her portrait is the only age
+ *     signal the call has, and for her it does not carry. The exception is
+ *     justified on the same mechanical ground as the labia clause rather than
+ *     on taste: clause (b) is judged on ambiguity, `social-vision-gate.server.ts`
+ *     fails an age-ambiguous frame, and a reference that reads ambiguous
+ *     anchors nothing shippable. Adult proportions are stated positively and
+ *     youthful or adolescent features are named in the negatives. This
+ *     describes a floor, never a look, and never a specific age: the
+ *     reference image still owns identity.
+ *     **It did not fix Jade, and it was never going to.** Re-running her with
+ *     this clause produced three more candidates that read exactly as young as
+ *     the first three, with near-identical faces across all six. That is §3.2a
+ *     working as documented: identity comes from the reference photo, apparent
+ *     age is part of identity, and prompt text does not override it. Do not
+ *     retry this by sharpening the wording. The clause stays as a floor for
+ *     members whose portraits already carry adulthood, and Jade's fix is
+ *     upstream, in her `referencePhoto` (and in `ageRange`, which reads
+ *     "early 30s" against an owner who says 25), not here.
  *   - Seated upright, never supine-from-above, which shared the composition of
  *     6 of 6 fence breaches on breast-in-frame briefs.
  *   - Names jewellery, the cheapest adult identity marker available and one
@@ -121,28 +181,51 @@ interface Candidate {
  *     ban on the word "paper", which put literal sheets of paper in 4 of 7
  *     frames.
  */
-function buildBodyPrompt(): string {
+function buildBodyPrompt(variant: BodyVariant = 'female'): string {
+  const male = variant === 'male'
+
+  // The one clause that differs, and the reason the variants exist at all.
+  // Female: the mound is named as visible, because §3.2a licenses it and an
+  // anchor has to reach the ceiling it anchors. Male: the groin is covered
+  // outright, because §3.2a licenses "all other parts of a man" and nothing
+  // below that line, so there is no ceiling there for a reference to reach.
+  const licensedZone = male
+    ? 'The stomach, hip hollows and the line of the lower stomach are visible, ' +
+      'with natural chest and stomach hair as it grows on him; ' +
+      'a folded cream linen towel is laid flat across the lap and covers the groin completely, ' +
+      'and it closes the bottom edge of the frame at mid-thigh. '
+    : 'The stomach, hip hollows and pubic mound are visible, with a little natural pubic hair ' +
+      'as a small neat triangle confined to the mound itself, stopping at the crease of each thigh; ' +
+      'the thighs and legs are smooth and bare with no hair on them anywhere. ' +
+      'The closed thighs conceal everything below the mound, and a folded cream linen towel laid flat on the bench ' +
+      'closes the bottom edge of the frame at mid-thigh. '
+
+  const stopList = male
+    ? 'No genitals of any kind, no penis, no scrotum, no groin and no pubic area visible at any point, ' +
+      'the towel never lifts or parts, thighs closed throughout, '
+    : 'No labia visible or outlined, no vulva, no cleft, no genital detail of any kind, thighs closed throughout, ' +
+      'no pubic hair on the thighs or legs, no stray or floating hair off the mound, '
+
   return (
     'Keep this exact person: the same skin tone, body hair, and body. ' +
-    'Photorealistic anatomical body reference photograph. ' +
+    `Photorealistic anatomical body reference photograph of a fully adult ${male ? 'man' : 'woman'}, ` +
+    'with adult facial maturity and adult body proportions throughout. ' +
     'The frame is filled by the head, face, collarbones, chest, ribs, waist and hips of the same person, ' +
     'seated upright and square to the camera on a plain pale oak bench; ' +
     'the whole head and face are visible and the knees close the bottom edge. ' +
-    'Bare, with no clothing anywhere in the picture, a fine gold chain at the throat and a fine gold bangle at one wrist. ' +
-    'Both arms hang straight down at her sides, relaxed, well clear of the torso, so the chest and ribs are unobstructed. ' +
+    'Bare, with no clothing anywhere in the picture, a fine gold chain at the throat' +
+    (male ? '. ' : ' and a fine gold bangle at one wrist. ') +
+    `Both arms hang straight down at ${male ? 'his' : 'her'} sides, relaxed, well clear of the torso, ` +
+    'so the chest and ribs are unobstructed. ' +
     'Knees and thighs pressed together and angled slightly to one side. ' +
-    'The stomach, hip hollows and pubic mound are visible, with a little natural pubic hair ' +
-    'as a small neat triangle confined to the mound itself, stopping at the crease of each thigh; ' +
-    'the thighs and legs are smooth and bare with no hair on them anywhere. ' +
-    'The closed thighs conceal everything below the mound, and a folded cream linen towel laid flat on the bench ' +
-    'closes the bottom edge of the frame at mid-thigh. ' +
+    licensedZone +
     'Flat shadowless overcast studio light, soft and directionless, no direct sun, no window in frame, no cast shadows. ' +
     'Plain wall behind in a very pale desaturated lilac, almost white. ' +
     'Relaxed neutral expression, mouth closed, not smiling, not posed, looking straight ahead. ' +
     'Natural unretouched skin texture, true undistorted anatomy, correct hands with five fingers each, ' +
     'one navel on the front only. Clinical, plain and evenly lit, like a wardrobe fitting reference. ' +
-    'No labia visible or outlined, no vulva, no cleft, no genital detail of any kind, thighs closed throughout, ' +
-    'no pubic hair on the thighs or legs, no stray or floating hair off the mound, ' +
+    stopList +
+    'nothing youthful, adolescent or childlike in the face or the body, ' +
     'no product, no furniture clutter, ' +
     'no text, no words, no letters, no watermark, no logo, no legible branding.'
   )
@@ -164,6 +247,12 @@ async function main(): Promise<void> {
   const only = onlyRaw ? new Set(onlyRaw.split(',').map(s => s.trim()).filter(Boolean)) : null
   const dryRun = process.argv.includes('--dry-run')
 
+  const variantRaw = arg('--variant')
+  if (variantRaw && variantRaw !== 'female' && variantRaw !== 'male') {
+    throw new Error(`--variant must be "female" or "male", got "${variantRaw}"`)
+  }
+  const variantOverride = (variantRaw ?? null) as BodyVariant | null
+
   const { getApprovedCastMembers } = await import('../app/lib/sanity.server')
   const roster = await getApprovedCastMembers()
 
@@ -184,7 +273,12 @@ async function main(): Promise<void> {
       console.warn(`  skip ${m.slug}: no referencePhoto to anchor identity to`)
       return false
     })
-    .map(m => ({ slug: m.slug, name: m.name, referencePhotoUrl: m.photoUrl }))
+    .map(m => ({
+      slug: m.slug,
+      name: m.name,
+      referencePhotoUrl: m.photoUrl,
+      variant: resolveVariant(m.description, variantOverride),
+    }))
 
   if (only) {
     for (const slug of only) {
@@ -201,10 +295,23 @@ async function main(): Promise<void> {
   )
   console.log(`Roster read from Sanity: ${roster.length} approved.\n`)
 
+  // Print the resolved variant BEFORE any spend, so a misread of the roster
+  // description is caught by eye rather than by looking at the wrong ceiling
+  // in a finished image.
+  console.log('Prompt variant per member:')
+  for (const c of candidates) {
+    console.log(`  ${c.name.padEnd(8)} ${c.variant}${variantOverride ? ' (--variant override)' : ''}`)
+  }
+  console.log('')
+
   if (dryRun) {
-    console.log('--dry-run: nothing generated. Prompt that would be sent:\n')
-    console.log(buildBodyPrompt())
-    console.log('\nAnchored per member to:')
+    console.log('--dry-run: nothing generated. Prompt(s) that would be sent:\n')
+    for (const variant of [...new Set(candidates.map(c => c.variant))]) {
+      console.log(`--- ${variant} ---`)
+      console.log(buildBodyPrompt(variant))
+      console.log('')
+    }
+    console.log('Anchored per member to:')
     for (const c of candidates) console.log(`  ${c.name.padEnd(8)} ${c.referencePhotoUrl}`)
     return
   }
@@ -217,7 +324,7 @@ async function main(): Promise<void> {
 
   for (const c of candidates) {
     const { buffers, costKey } = await atlasGenerate({
-      prompt: buildBodyPrompt(),
+      prompt: buildBodyPrompt(c.variant),
       refImageUrl: c.referencePhotoUrl,
       count: looks,
       imageSize: 'portrait_4_3',
@@ -239,8 +346,11 @@ async function main(): Promise<void> {
 
   console.log(
     '\nDone. Review the candidates. Every one still needs a human pass before it is uploaded:\n' +
-    '  - no labia, no vulva, no cleft visible or outlined, nothing age-ambiguous;\n' +
-    '  - the pubic mound may show, per the §3.2a ceiling; anything below it may not;\n' +
+    '  - nothing age-ambiguous; a reference that reads young anchors nothing shippable;\n' +
+    '  - women: no labia, no vulva, no cleft visible or outlined. The pubic mound may\n' +
+    '    show, per the §3.2a ceiling, and anything below it may not;\n' +
+    '  - men: no genitals at all. §3.2a licenses every other part of a man and nothing\n' +
+    '    below that line, so the towel must cover the groin completely;\n' +
     '  - arms genuinely down and clear of the torso, so the anchor pre-occludes nothing;\n' +
     '  - correct anatomy, one navel on the front, no merged or duplicated limbs;\n' +
     "  - the skin tone and body actually match that member's portrait.\n" +
