@@ -474,9 +474,13 @@ what the frame is about, not how much skin is in it: the reader must be able to 
 product the image is selling. Brand-art pieces may star the invented hybrid instead. §4.1 and
 §4.2 apply in full.
 
-Two things are not settled by this direction and stay open: video Reels (owner question, blocker
-#192) and Emma's own likeness in an implied-nude frame (blocker #193). Paid advertising is
-excluded and continues to follow `docs/ads-policy.md`.
+Both of the things this direction originally left open were settled by the owner later the same
+day. Video Reels carry the same ceiling as every other surface (blocker #192, "Yes"), with the
+motion clause in `docs/store-team/social-video-viral-checklist.md` P2 on top: the ceiling holds on
+every frame of a clip, not the seed frame. Emma's own likeness may appear in an implied-nude frame
+(blocker #193, "Yes, Emma can and she has a body reference"), so she is a cast member for on-skin
+purposes on the same terms as the rest of the roster. Paid advertising is still excluded and
+continues to follow `docs/ads-policy.md`.
 
 **Notebook heroes.** `docs/notebook-team/image-brief.md` still carries the ceiling for Notebook
 art, and it still tracks the on-site line above. Because that line now inherits §3.2a with
@@ -632,6 +636,15 @@ binding IA — the spine never overrides the routine-design-cycle IA fence.
 4. Fixed aspect ratios on all media frames.
 
 ---
+
+*v1.5, 2026-09-20. Owner answered the two questions v1.4 left open, later the same day. Blocker
+#192, "Yes": video Reels carry the same imagery ceiling as every other surface, with the motion
+clause (the ceiling holds on every frame of a clip, not the seed frame) living in
+`docs/store-team/social-video-viral-checklist.md` P2 and not restated here. Blocker #193, "Yes,
+Emma can and she has a body reference": Emma's own likeness may appear in an implied-nude on-skin
+frame, on the same terms as the rest of the approved cast. §4.3's open-question paragraph now names
+neither. Paid advertising stays excluded and still follows `docs/ads-policy.md`. No ground lock,
+archetype, stop list, or hard limit changes at v1.5.*
 
 *v1.4, 2026-09-20. Codifies the owner's all-hands direction "On-skin extends to
 all areas of the site": §4.3 gives on-site merchandising surfaces the same

@@ -1127,27 +1127,34 @@ region, and never brief the supine-from-above composition with breasts in frame.
 Check the mix with the `mixReport` op (Step 7) BEFORE briefing, not only in the retro. A cap you
 only measure afterwards is a cap you break first.
 
-**A `macro` or `close` crop needs the cast member's BODY reference, and today there is not one.**
-`presenterPhotoUrlForCrop` (`app/lib/sanity.server.ts`) is the function that picks the body
-reference for those two crop scales and the portrait for everything else. Two things are true about
-it and both change what you may do:
+**A `macro` or `close` crop needs the cast member's BODY reference, and as of 2026-09-20 every
+cast member has one.** `presenterPhotoUrlForCrop` (`app/lib/sanity.server.ts`) picks the body
+reference for those two crop scales and the portrait for everything else. The owner approved and
+uploaded a `bodyReferencePhoto` and a `skinToneNote` for all eight active cast members (Diego,
+Emma, Jade, Marcus, Maya, Priya, Sofia, Vivian), clearing blocker #182. **Macro and close on-skin
+frames are cleared to ship.** Emma is in the rotation like anyone else, per the owner's answer to
+blocker #193.
 
-- **Nothing calls it.** `scripts/gen-social-image.ts` takes `--presenter-image <url>` as a
-  caller-supplied argument and never consults the selector, so the choice is yours to make by hand.
-- **`bodyReferencePhoto` is null on all eight approved cast members** (verified authenticated
-  against Sanity on 2026-09-20), and `skinToneNote` with it. The selector's own fallback returns the
-  portrait silently in that case, and its docstring names the reason: the owner has not approved one.
+**Check, do not assume.** This paragraph states a rule, not a snapshot, because the snapshot version
+of it went stale inside a day and held the campaign's key frame for no reason. Before briefing a
+`macro` or `close` crop for a cast member, confirm that person has a `bodyReferencePhoto`. If a
+future cast member does not, hold THAT PERSON's close crop and say so in the run summary; do not
+hold the format. The selector falls back to the portrait silently when the field is empty, so
+nothing errors and the run reports success while the model invents everything below the neck and
+§3.7 clause (a) fails. That silent degradation is the reason for the check.
 
-So a close or macro on-skin frame generated today is built from a head-and-shoulders portrait, the
-model invents everything below the neck including skin tone, and **§3.7 clause (a) fails** while the
-run reports success. That is the silent-degradation shape, not a missing nice-to-have.
+**One real gap remains, and it is narrower than it used to be.** The route path
+(`app/routes/api.team.social-image.tsx`, `app/routes/api.admin.social-image.tsx`) calls
+`resolveCastReference`, which wraps the selector and also applies `withSkinToneNote` and the
+bare-product picker. `scripts/gen-social-image.ts` reaches `presenterPhotoUrlForCrop` directly
+instead, so it DOES resolve the right reference but the other two never run on that path. Ticket
+#10475 closes it.
 
-**Until a body reference is approved: do not ship a `macro` or `close` on-skin frame.** Brief it,
-hold it, and say in the run summary that it is held and why. A `medium` or `wide` crop is unaffected,
-because the portrait reference is the correct input at those scales and it exists. Do not work around
-this by generating the close crop from the portrait anyway; the whole point of clause (a) is that a
-faceless bare crop has no identity anchor the system can verify, and inventing one is worse than
-posting less.
+**Use `--cast-slug`, never `--presenter-image`, for a macro or close crop.** The CLI already
+enforces this and will not let you get it wrong: a hand-passed `--presenter-image` with
+`--crop-scale macro|close` exits 1 by design (`scripts/gen-social-image.ts:178`), and a
+`--cast-slug` whose member has no `bodyReferencePhoto` exits 1 with the remedy printed. Passing the
+body reference URL by hand is refused, not required.
 
 **The brief carries subject, product(s), and feeling, always (owner direction 2026-08-22,
 `instagram-campaigns.md` §3.9).** Alongside the handle, photo, dimensions, and beat, pass

@@ -1,4 +1,4 @@
-<!-- Drafted 2026-09-20 at the owner's all-hands as a simulated end-to-end run of the on-skin campaign. Working drafts: every caption still goes through the voice gate and the publish gate. Product stock, MAP, specifications and the cast roster were verified LIVE against Shopify and Sanity on 2026-09-20, not carried over from the 08-24 slate. Two of the four posts are blocked on a content dependency named in section 0; read that before briefing anything. -->
+<!-- Drafted 2026-09-20 at the owner's all-hands as a simulated end-to-end run of the on-skin campaign. Working drafts: every caption still goes through the voice gate and the publish gate. Product stock, MAP, specifications and the cast roster were verified LIVE against Shopify and Sanity on 2026-09-20, not carried over from the 08-24 slate. The content dependency that blocked two of the four posts was cleared by the owner later the same day; section 0 records what changed and all four are now briefable. -->
 
 # Instagram + X slate, week 1 of "The Orgasm Gap, Closed" (09-20 to 09-26)
 
@@ -15,44 +15,35 @@ Numbers verified against `social-research-2026-08-22.md`.
 
 ---
 
-## 0. Blocking dependency: no cast member has a body reference photo
+## 0. RESOLVED the same day: every cast member now has a body reference photo
 
 **Verified live on 2026-09-20 against Sanity project `0nlwk8cf`, dataset `production`, `published`
-perspective, with a real token.** All eight cast members are `active` and `approvedForUse` with a
-`referencePhoto`: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, Vivian. **`bodyReferencePhoto` is
-null on all eight, and `skinToneNote` is null on all eight.**
+perspective, with a real token, TWICE: once when this slate was drafted and once after the owner
+acted.** All eight cast members are `active` and `approvedForUse`: Diego, Emma, Jade, Marcus, Maya,
+Priya, Sofia, Vivian. At drafting time `bodyReferencePhoto` and `skinToneNote` were null on all
+eight. **At 16:54 to 17:02 UTC the same day the owner uploaded and approved a `bodyReferencePhoto`
+and a `skinToneNote` for every one of them.** Blocker #182 is cleared.
 
 §3.7's three-clause test says an on-skin close crop is a cast member in a scene only when "(a) it is
 generated from that cast member's approved BODY reference and the `castSlug` on the row names them".
-Clause (a) cannot be satisfied today. Ticket #10270 added the schema field and the selector; nobody
-has uploaded a photo into it, and approving a cast likeness is the owner's call, not the team's.
+**Clause (a) is now satisfiable.** Ticket #10270 shipped the schema field and the selector, the
+owner supplied the asset, and commit cf96753f wired `resolveCastReference` into both image routes.
 
-One further gap found in the same pass, verified by search:
+**So IG 1 is NO LONGER BLOCKED.** The close hip-hollow crop is the frame this slate exists to make
+and it can be generated. Emma is also available as a cast member for on-skin frames, per the owner's
+answer to blocker #193 on the same day.
 
-- **`presenterPhotoUrlForCrop` (`app/lib/sanity.server.ts:467`) has no callers.** It is the function
-  that decides to pass the body reference for a `macro` or `close` crop. `scripts/gen-social-image.ts`
-  never consults it; `--presenter-image` is a caller-supplied URL. So the selection ticket #10270
-  describes as "wired" is not reached by the generation path.
-- **It degrades silently.** `presenterPhotoUrlForCrop` returns the portrait reference when no body
-  reference exists, and its own docstring names the reason: "the owner has not approved one". Nothing
-  logs, warns, or blocks. A close-crop on-skin frame generated today is built from a 576x1024
-  portrait, the model invents everything below the neck including skin tone, and the run reports success.
+**The one caveat, narrowed.** `scripts/gen-social-image.ts` resolves the body reference correctly
+via `--cast-slug`, and it refuses rather than substitutes: a hand-passed `--presenter-image` with a
+macro or close crop exits 1, and a cast member with no `bodyReferencePhoto` exits 1. What it does
+not do is go through `resolveCastReference`, so `withSkinToneNote` and the bare-product picker do
+not run on that path. Ticket #10475. Generate close crops with `--cast-slug`.
 
-**What this does to today's slate.** A `medium` or `wide` crop correctly uses the portrait reference,
-which is approved and present. A `macro` or `close` crop cannot run at all. So **IG 1 is BLOCKed**,
-and IG 2, X 1 and X 2 are medium-crop frames that clear clause (a) on their own.
-
-**And this is the finding to read first.** The one frame in this slate that would actually have
-corrected the boring-feed regression, the true ceiling-on-skin close crop, is exactly the frame the
-empty `bodyReferencePhoto` field blocks. The observable result today is one ceiling frame, which is
-the same number the 2026-09-19 audit flagged across the last 21 posts. That is not a coincidence and
-it will repeat: as long as this dependency is open, every plan to fix the regression degrades back
-to the safe end, because the harder frame is always the one that needs the missing asset. The
-pipeline has a BLOCK and no BORING, so cold costs nothing and the run retreats every day.
-
-This is the on-skin campaign's real state on day 1: the code is merged, the selector is not called,
-and the content dependency is empty. None of it is visible from any page, which is why a dry run
-found it and three weeks of live runs did not.
+**What the original finding got right, and keep it.** The regression this slate diagnosed was
+structural, not accidental: the pipeline has a BLOCK and no BORING, so cold costs nothing and the
+run retreats every day, and the one frame that would have corrected it was the one the missing asset
+blocked. The asset is here now. The gradient is not fixed by the asset, and the mix report
+(`{op:mixReport}`) is what makes cold visible. Read it before briefing.
 
 ---
 
@@ -101,7 +92,7 @@ maya/marcus), light signature (macro-lit to overcast diffuse). **Four of five.**
 
 ---
 
-## 3. IG 1 — slot B, campaign beat. HELD at the image step (§0)
+## 3. IG 1, slot B, campaign beat. CLEARED to generate (§0)
 
 **Product:** `womanizer-classic-2-rechargeable-silicone-pleasure-air-clitoral-stimulator` (44 in stock)
 **Subject:** External stimulation is the mechanism that closes the orgasm gap, and it is a different thing from a vibrator.
@@ -143,26 +134,25 @@ Negatives: no nipple, no labia, no pubic line in frame, no product emerging from
 
 **Placement-follows-use reasoning.** Air pulsation's actual use zone is an unconditional stop: §3.2a bans product against genitalia with no covering exception. §3.2c's cock-ring precedent gives the move, which is to shift the frame rather than the fence. The hip hollow is the nearest licensed zone on the same path and it gives the product absolute scale against the pelvis. It also happens to tell the product's truth, because the Classic 2's whole mechanism is that it seals and pulses air rather than pressing, and a product briefed as *resting* is the honest picture of a contactless toy.
 
-**§3.7 three-clause check:** (a) **FAILS today.** Requires Maya's approved body reference; `bodyReferencePhoto` is null. (b) adult identity marker: two brass chains plus her own hand and forearm, inside the crop. (c) trace of the world: the hour of the light, the oak floor, and the linen entering frame.
+**§3.7 three-clause check:** (a) **PASSES.** Requires Maya's approved body reference, and the owner approved and uploaded one for her at 16:57 UTC on 2026-09-20 (verified live against Sanity). (b) adult identity marker: two brass chains plus her own hand and forearm, inside the crop. (c) trace of the world: the hour of the light, the oak floor, and the linen entering frame.
 
-**Status: BLOCK** (gate verdict, 2026-09-20). This slate first called it HELD; the gate corrected that
-and the correction is right. Two reasons, and neither is a scheduling wait:
+**Status: CLEARED to generate.** The original BLOCK had two reasons and the owner cleared the one
+that mattered.
 
-- `runDeterministicPublishChecks` blocks unconditionally on `media.length === 0`, and there is no
-  asset. A `block` finding is final.
-- The likeness risk is a landmine rather than a queue. With `presenterPhotoUrlForCrop` uncalled,
-  a run that briefs this without reading §0 first silently substitutes Maya's portrait and invents
-  her entire body and skin tone under her name. "Held" reads as a date; this is an unapproved
-  likeness.
+- The likeness risk was the real one, and it is gone: Maya has an owner-approved
+  `bodyReferencePhoto`, so a close crop resolves her actual body rather than inventing one under
+  her name. Blocker #182 cleared.
+- `runDeterministicPublishChecks` still blocks on `media.length === 0`, which is simply the
+  statement that no asset exists yet. That is what generating the frame resolves, not a gate
+  finding to argue with.
 
-Everything else in the brief is ready and the gate said so: the camera note, the closers, the
-hip-hollow reasoning, the negatives. It resubmits when a body reference for Maya is approved AND
-the selector is actually called by the generation path, and it gets a fresh gate read against real
+Everything else in the brief was ready and the gate said so: the camera note, the closers, the
+hip-hollow reasoning, the negatives. Generate the frame, then get a fresh gate read against real
 pixels, which nobody has judged yet because none exist.
 
 ---
 
-## 4. IG 2 — slot C, Today's Pick. SHIPPABLE TODAY
+## 4. IG 2, slot C, Today's Pick. SHIPPABLE TODAY
 
 **Product:** `classique-rechargeable-wand-massager` (Le Wand Classique, 16 in stock)
 **Subject:** Taking more time is the other half of what closes the gap.
@@ -231,7 +221,7 @@ Both carry an image with an approved cast member in it (`social-crossplatform-st
 
 Neither post names a price. See §1: the MAP gate was run and both heroes fail it or fall under the 10% surfacing floor.
 
-### X 1 — companion to IG 1. HELD with IG 1
+### X 1, companion to IG 1. CLEARED with IG 1
 
 `castSlugs: ["maya","marcus"]`, `sceneLocation: "bedroom-late-morning"`, `cropScale: "medium"`
 
@@ -256,14 +246,15 @@ corrected this slate's disposition.
   data does not establish, while running the two together as one finding. Rewritten above to report
   where the orgasm comes from rather than assert what anyone needs. Note the gate's own suggested
   rewrite used "gets there", which the charter names as a banned gesture, so it was not adopted.
-- **Holding this with IG 1 is editorial, not compliance.** The frame is `medium`, so
-  `presenterPhotoUrlForCrop` resolves to the approved portrait and clause (a) passes. The missing
-  body reference does not touch it. Shipping the two halves of one campaign beat together is a
-  choice worth making, but it must not be recorded as a technical blocker it is not.
+- **Holding this with IG 1 was editorial, not compliance.** The frame is `medium`, so
+  `presenterPhotoUrlForCrop` resolves to the approved portrait and clause (a) passes. The body
+  reference gap never touched it, and that gap is closed now in any case. Shipping the two halves
+  of one campaign beat together is a choice worth making, but it must not be recorded as a
+  technical blocker it is not.
 
 **No opinion is attributed to either cast member.** The caption is mechanism and a pairing fact. §4a's rule bites hardest here, because a synthetic face now sits beside a checkout link.
 
-### X 2 — companion to IG 2. PASS
+### X 2, companion to IG 2. PASS
 
 `castSlugs: ["marcus"]`, `sceneLocation: "sunroom-late-morning"`, `cropScale: "medium"`
 
@@ -301,24 +292,31 @@ It is not isolated. In a 50-product sample of active products read live today, *
 - **Campaign:** The Orgasm Gap, Closed, day 1 of 13. Calendar row would be promoted `planned` to `active` by the §4 reconciliation pass.
 - **Slate:** the 08-24 slate expired 09-06 with no successor. This file is the successor and the runway is intact through 2026-11-09.
 - **Drafted vs published, never conflated:** drafted 4 (2 Instagram, 2 X). Published 0. Nothing was filed to `social_posts`, nothing went through `social-publish-gate`, nothing reached the hourly publish job. This session has no team token or database.
-- **Gate verdicts (Step 6.5, run adversarially on all four):** 1 BLOCK (IG 1), 2 REVISE (IG 2, X 1), 1 PASS (X 2). Both REVISE findings are applied above. IG 1 does not resubmit until §0 clears.
-- **Charge ratio, stated plainly:** on paper this slate carries two ceiling frames. In practice it ships one, because §0 blocks the other. Report it as one. Reporting the intent rather than the outcome is how the last three weeks looked fine.
+- **Gate verdicts (Step 6.5, run adversarially on all four):** 1 BLOCK (IG 1), 2 REVISE (IG 2, X 1), 1 PASS (X 2). Both REVISE findings are applied above. IG 1's BLOCK was cleared by the owner the same day, see §0 and §3.
+- **Charge ratio, stated plainly:** this slate carries two ceiling frames and, with §0 cleared, can ship both. Report the outcome and not the intent: count a ceiling frame when it posts, not when it is briefed. Reporting intent rather than outcome is how the last three weeks looked fine.
 - **Volume ladder:** rung unread this session. The last value written to a document is `social_freq_instagram = 3` (owner, 2026-08-16); read the live value, never that sentence.
 - **Mix report:** `POST /api/team/social-post {"op":"mixReport"}` would run at Step 7. Expect the body-zone and close-crop lines to read UNKNOWN, because the migration-099 columns are null on every row drafted before today. UNKNOWN is not clean.
 
 ## 8. Open questions for the owner
 
-1. **Body reference photos.** Eight cast members need one before any close or macro on-skin frame can ship. Whose, and how explicit? The owner approves cast likeness.
+1. ~~**Body reference photos.**~~ **ANSWERED 2026-09-20.** The owner uploaded and approved a
+   `bodyReferencePhoto` and a `skinToneNote` for all eight cast members. Blocker #182 cleared.
 2. **A vibrator over a nipple** remains owner-only and unresolved (§3.2c). It is not needed for this campaign.
 3. **The MAP floor breaches in §6.**
 
+Also answered the same day, and none of them need anything further: Emma's likeness in an
+implied-nude frame is licensed (#193), the §3.2c caps stay report-only (#194), on-skin frames may
+appear in video (#192), and the Sanity Studio is deployed (#155).
+
 ## 9. Filed rather than fixed here
 
-- **Make the presenter-reference fallback loud.** `presenterPhotoUrlForCrop` has no production
-  caller and degrades silently, so nothing warns when a close crop is built from a portrait. It
-  should be called by the generation path and it should refuse, or at minimum warn, rather than
-  quietly substitute. Distinct from #10270, which added the field and the selector. This is the
-  difference between a dependency and a landmine.
+- ~~**Make the presenter-reference fallback loud.**~~ **DONE, and it landed before this file was
+  finished.** Commit cf96753f wired `resolveCastReference` into both image routes, and
+  `scripts/gen-social-image.ts` refuses rather than substitutes: a hand-passed `--presenter-image`
+  with a macro or close crop exits 1, and a `--cast-slug` whose member has no `bodyReferencePhoto`
+  exits 1 with the remedy. What remains is narrower and is ticket #10475: the CLI resolves the
+  reference directly instead of through `resolveCastReference`, so `withSkinToneNote` and the
+  bare-product picker do not run on that path.
 - **Check `PAIRING_REQUIRED_TYPE_DIALS` covers `wand` and `air-pulsation`.** The gate's deterministic
   pairing check may not fire for either product in this campaign, which would explain how IG 2's
   missing pairing got past drafting and had to be caught editorially. Verify the live
