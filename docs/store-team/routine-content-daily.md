@@ -419,12 +419,22 @@ named manufacturer's PDP line, which the accuracy gate web-verified was wrong ab
 manufacturer's actual policy. This is a different defect from claim-scope above: claim-scope
 narrows a claim that is true but stated too widely; this catches a claim whose only source is our
 own marketing prose, which may be imprecise or simply wrong about a third party. Before submit,
-list every brand-policy, spec, runtime, material-limit, or comparative claim in the draft whose
-only source is a Shopify product description (ours or a cited competitor's), and for each one
-either trace it to a first-party source (the manufacturer's own published guidance, an
-`mfgProductSpecs` doc, or a spec metafield) or delete it. Never hedge it: a product description
-under the `xdipx` namespace is our own copy and carries no evidentiary weight, and a claim naming a
-real company is the highest-risk shape because it is checkable and wrong-able.
+list every brand-policy, spec, runtime, material-limit, comparative, **or mechanism/technology-class**
+claim in the draft — "this toy is air-pulse / pressure-wave / sonic / thrusting" is exactly as
+checkable and wrong-able about a third party's product as a spec figure is — whose only source is a
+Shopify product description (ours or a cited competitor's), **our own enrichment output (the `xdipx`
+namespace metafields, `product_type_dial` in particular), or the Emma-rewritten Shopify product
+TITLE**, and for each one either trace it to a first-party source (the manufacturer's own published
+guidance, an `mfgProductSpecs` doc, or a spec metafield) or delete it. Never hedge it: a product
+description, metafield, or title under the `xdipx` namespace is our own copy and carries no
+evidentiary weight even though a title or a dial value reads as catalog metadata rather than prose,
+and a claim naming a real company is the highest-risk shape because it is checkable and wrong-able.
+Run 959 lost `bloomgasm-pulsing-petals-throbbing-stimulator` to exactly this gap: trusted on
+`product_type_dial:"air-pulsation"` and the title "Pulsing Petals Rose Air-Pulse Clitoral
+Stimulator," both our own enrichment, when the only resolvable listing for that SKU read "3 Speeds &
+7 Patterns of Pulsing" — vibration, not air-pulse. Repaired in-run by substitution
+(`romp-glow`, verified across four independent retailers); the resolution rule is unchanged: trace
+it to a first-party or independent source, or delete the pick, never hedge it.
 
 **The same pre-flight also covers secondary-source-as-primary, not just our-own-PDP-as-source
 (second occurrence: runs 607 and 760).** An allowlisted host is not an evidentiary source for
