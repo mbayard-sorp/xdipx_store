@@ -37,7 +37,8 @@
       "Bash(git log:*)",
       "Bash(git show:*)",
       "Bash(git status:*)",
-      "Bash(git diff:*)"
+      "Bash(git diff:*)",
+      "Bash(npx tsx scripts/generate-cast-body-references.ts:*)"
     ],
     "ask": [
       "mcp__Sanity__unpublish_documents",
