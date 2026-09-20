@@ -219,7 +219,7 @@ said nothing.
   move. **State plainly what this costs:** wardrobe was the visible evidence of compliance to a
   HUMAN reviewer, a thong reads as a lingerie campaign, and a bare body with a product at the right
   line reads as nothing until the reviewer decides. Exposure rises deliberately. The removal watcher
-  (ticket #2741) and the step-down ladder in `docs/ads-policy.md` are more load-bearing from the
+  (ticket #2741) and the step-down ladder in §4 below are more load-bearing from the
   first on-skin post, and the first removal on one is the signal this latitude was priced wrong.
 - **Beds and posture.** On or in a bed. Arched, prone, tangled in sheets, gripping fabric. Aftermath
   and anticipation are both licensed: the quiet after, the reach toward, the unopened box.
@@ -236,7 +236,9 @@ said nothing.
 **The ceiling stops here, and these do not move:**
 
 - Nipples visible or outlined, sheer fabric included. Labia visible or outlined. A penis, in any
-  state, visible or outlined.
+  state, visible or outlined. The anus visible or outlined (owner definition of nudity,
+  2026-09-20: nipples, labia, penis, anus; everything else is allowed). A plug laid between the
+  cheeks under §3.2c must therefore keep the cleft closed by the pose, a hand, or the product.
 - Hands on genitals, over or under clothing.
 - A depicted or discernible sex act.
 - Fluid on or near genitalia.
@@ -324,7 +326,7 @@ every brief:
 None of these three substitutes for a check on the produced pixels. Across 24 frames the fence
 breach rate was roughly 29 percent and it rose whenever the brief asked for more skin. Ticket
 #10268 adds nipple, genitalia, adulthood and legible-text checks to `social-vision-gate.server.ts`,
-and until it is live no on-skin frame ships to Instagram unattended.
+and it is live since 2026-09-19 (PR #1226): the checks run per candidate at generation time, fail closed, and the publish gate BLOCKs a failing or missing verdict. The remaining hole is the legacy carve-out that skips a `social-`/`ig-` prefixed asset with no recorded verdict; until that carve-out is sunset (ticket filed 2026-09-20) a run must confirm every on-skin lead has a recorded verdict before relaying PASS.
 
 **"Desire-forward" means the picture and the caption, since 2026-08-22.** Owner direction
 2026-08-16 asked for posts that are *"desire forward and product highlighting"*; on 2026-08-22 the
@@ -336,7 +338,7 @@ picture-versus-caption, it is intent-versus-vocabulary.
 
 - **Imagery: yes, and we are under-using the licence we already have.** Everything in §3.2a is
   available: a bed, a body, product against skin, lubricant texture, two people touching, arousal on
-  a face, implied use. The ceiling frames are the desire-forward ones, they are 2 of every 7 by
+  a face, implied use. The ceiling frames are the desire-forward ones, they are roughly 4 of every 7 by
   §3.2b, and they are chosen when the key art is planned rather than discovered on the day. A set
   with no ceiling frame in it has quietly ignored this section.
 - **Caption: register 9 by implication.** The caption wants the reader and says so; it fires the
@@ -355,7 +357,7 @@ three times, and until 2026-08-22 it was not what the account was shipping.
 **Honest note on what this costs.** Lingerie plus a pleasure product in one frame is a stronger
 signal to Meta's classifier than either alone. That is a real increase in account exposure, taken
 deliberately by the owner rather than drifted into. It makes the removal watcher (ticket #2741) and
-the step-down ladder in `docs/ads-policy.md` more load-bearing, not less: the first removal on a
+the step-down ladder in §4 below more load-bearing, not less: the first removal on a
 lingerie frame is the signal that this latitude was priced wrong, and it should step volume down and
 reach the owner rather than be absorbed quietly.
 

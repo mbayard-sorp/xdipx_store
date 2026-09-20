@@ -227,9 +227,14 @@ they outlive any single run. Every merchandising image obeys all of them.
    text, no barcode, no shipping label, no ingredient panel" on every
    negative prompt. Drop any blanket "no logo, no brand name" language for
    the product body itself, since it now over-forbids case 1.
-5. **Hard limits (legal / processor / ad-platform):** no exposed genitalia, no
-   nipples, no sex acts — nothing a premium lingerie campaign could not run.
-   Short of that, push toward playful curiosity with charge underneath.
+5. **Hard limits (legal / processor / ad-platform):** no nudity, meaning no visible
+   nipples, labia, penis, or anus (owner definition 2026-09-20), and no sex acts.
+   On **on-site merchandising surfaces** the working ceiling is additionally
+   "nothing a premium lingerie campaign could not run" (§4.3). That lingerie line
+   is scoped to on-site: on social it does not apply, and
+   `docs/store-team/instagram-campaigns.md` §3.2a and §3.2c (bare bodies,
+   implied nude, product on skin) are the ceiling. Short of the hard limits, push
+   toward playful curiosity with charge underneath.
 6. **Self-review before upload.** Reads clearly at 375px; hands/bodies/objects
    undistorted; product or sensual context unmistakably the subject; a
    design-literate friend believes it came from a high-end sexual-wellness brand.
@@ -295,7 +300,11 @@ program"); prompts start from the matching per-surface scaffold in
   mood slides, OG/share images, campaign moments.
 
 **The ground lock:** backdrops come only from `coral-soft`, `plum-soft`, and
-`paper` tints, high-key daylight (sage is an accent color, never a ground: there
+`paper` tints, high-key daylight. (`paper` is the CSS surface token; the WORD
+"paper" is banned from image prompts because it renders literal sheets, say
+"warm off-white linen", per `instagram-campaigns.md` §3.2c. An on-skin close crop
+under §3.2c has no backdrop, the body is the location, and the ground lock does
+not apply to it; the trace of the world comes from sheet, surface, or light.) (sage is an accent color, never a ground: there
 is no soft sage tint token, and a full-strength sage field fights the high-key
 mandate). This constraint is what makes a
 mixed-vendor catalog read as one funded brand; the teardown's core finding is
@@ -439,11 +448,12 @@ agent must never resolve a ceiling question by picking whichever document suits 
 wants. That is how an explicit frame reached the live feed on 2026-08-16.
 
 **Social surfaces** (Instagram, X, and any campaign key art produced for them). The operative
-ceiling is `docs/store-team/instagram-campaigns.md` §3.2a, the owner ruling of 2026-08-16. It
-licenses lingerie and bare skin, beds and arched posture, product resting against skin,
+ceiling is `docs/store-team/instagram-campaigns.md` §3.2a, the owner ruling of 2026-08-16, with
+the on-skin treatment of §3.2c inside it (owner direction 2026-09-19: bare bodies, no clothing,
+product resting on skin, the suggestion of nudity). It licenses lingerie and bare skin, beds and arched posture, product resting against skin,
 lubricant texture, two people touching, arousal on a face, and use implied by framing or by
-occlusion under a sheet when the occluded shape is the product. It fences genitalia and nipples
-visible or outlined, hands on genitals, depicted or discernible sex acts, fluid on or near
+occlusion under a sheet when the occluded shape is the product. It fences nudity, which the
+owner defined on 2026-09-20 as visible nipples, labia, penis, or anus, outlined included, hands on genitals, depicted or discernible sex acts, fluid on or near
 genitalia, product against genitalia, anything age-ambiguous, and anything built to defeat a
 classifier. **This doctrine defers to §3.2a on social imagery and does not restate it**, so the
 ceiling has one home and cannot drift out of sync again. Platform policy still outranks the
