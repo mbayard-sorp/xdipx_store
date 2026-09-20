@@ -4,9 +4,11 @@
  *   { op: 'generate', prompt, handle, archetype, mood, date, slide?,
  *     refImageUrl?, imageSize?, only?, caller?, runId? }
  *       -> GenerateSocialImageResult { url, filename, provider, model }
- *   { op: 'cast', prompt, handle, mood, date, slide?, presenterImageUrl,
- *     productImageUrl, extraImageUrls?, scale, count?, caller?, runId? }
+ *   { op: 'cast', prompt, handle, mood, date, slide?, presenterImageUrl?,
+ *     castSlug?, cropScale?: macro|close|medium|wide, castSlugs?,
+ *     productImageUrl?, extraImageUrls?, scale, count?, caller?, runId? }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
+ *          plus bodyReferenceMissing?/warning?/productImageFellBack? (#10336, #10341)
  *
  * Why this route exists (ticket #4133). Image generation rehosts the result to
  * Shopify Files (`uploadMoodImageToShopifyFiles` -> `adminGraphQL`), which needs
@@ -106,10 +108,60 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (op === 'cast') {
-      const presenterImageUrl = str(b['presenterImageUrl'])
-      const productImageUrl = str(b['productImageUrl'])
+      let presenterImageUrl = str(b['presenterImageUrl'])
+      let castPrompt = prompt
+      let bodyReferenceMissing = false
+      let warning: string | undefined
       const scale = str(b['scale'])
-      if (!presenterImageUrl) return new Response('Bad Request: presenterImageUrl required', { status: 400 })
+
+      // Presenter reference selection (ticket #10336). Same decision the CLI
+      // makes since PR #1233, shared through social-cast-reference.server:
+      // the crop scale picks the reference, and skinToneNote is stated in the
+      // prompt rather than left for the model to invent. Both were dead code
+      // on this route, which passed the portrait unconditionally.
+      const castSlug = str(b['castSlug'])
+      const cropScale = str(b['cropScale'])
+      const { isCropScale } = await import('~/lib/social-cast-reference.server')
+      if (cropScale && !isCropScale(cropScale)) {
+        return new Response('Bad Request: cropScale must be one of macro|close|medium|wide', { status: 400 })
+      }
+      if (castSlug) {
+        const { getApprovedCastMembers } = await import('~/lib/sanity.server')
+        const { resolveCastReference } = await import('~/lib/social-cast-reference.server')
+        const roster = await getApprovedCastMembers()
+        // Never read an empty roster as "there are none": an unauthenticated
+        // read of this dataset returned 1 of 8 once and the false zero reached
+        // three binding documents.
+        if (!roster.length) {
+          return new Response('Bad Request: no approved cast members returned (check SANITY_API_TOKEN)', { status: 400 })
+        }
+        const member = roster.find(m => m.slug === castSlug)
+        if (!member) {
+          return new Response(`Bad Request: castSlug "${castSlug}" is not an approved cast member`, { status: 400 })
+        }
+        const resolved = resolveCastReference({ member, cropScale, prompt })
+        presenterImageUrl = resolved.presenterImageUrl
+        castPrompt = resolved.prompt
+        bodyReferenceMissing = resolved.bodyReferenceMissing
+        warning = resolved.warning
+      }
+
+      // Product reference (ticket #10341). featuredMedia is sometimes the
+      // retail carton, so when the caller gives a handle instead of a URL,
+      // walk the media list for a bare-product frame.
+      let productImageUrl = str(b['productImageUrl'])
+      let productImageFellBack = false
+      if (!productImageUrl && handle) {
+        const { getProductByHandle, pickBareProductImage } = await import('~/lib/shopify.server')
+        const product = await getProductByHandle(handle)
+        const picked = pickBareProductImage(product?.images ?? [])
+        if (picked.url) {
+          productImageUrl = picked.url
+          productImageFellBack = picked.fellBack
+        }
+      }
+
+      if (!presenterImageUrl) return new Response('Bad Request: presenterImageUrl or castSlug required', { status: 400 })
       if (!productImageUrl) return new Response('Bad Request: productImageUrl required', { status: 400 })
       if (!scale) return new Response('Bad Request: scale required', { status: 400 })
       const extraImageUrls = Array.isArray(b['extraImageUrls'])
@@ -125,8 +177,12 @@ export async function action({ request }: ActionFunctionArgs) {
         : undefined
 
       const { generateCastComposite } = await import('~/lib/social-media.server')
+      const castSlugs = Array.isArray(b['castSlugs'])
+        ? (b['castSlugs'] as unknown[]).filter((v): v is string => typeof v === 'string' && v.length > 0)
+        : castSlug ? [castSlug] : []
+
       const result = await generateCastComposite({
-        prompt,
+        prompt: castPrompt,
         handle,
         mood,
         date,
@@ -134,6 +190,7 @@ export async function action({ request }: ActionFunctionArgs) {
         productImageUrl,
         scale,
         caller,
+        ...(castSlugs.length ? { castSlugs } : {}),
         ...(slide ? { slide } : {}),
         ...(count ? { count } : {}),
         ...(extraImageUrls?.length ? { extraImageUrls } : {}),
@@ -165,7 +222,15 @@ export async function action({ request }: ActionFunctionArgs) {
         })
       }
 
-      return Response.json(result)
+      // The run is not blocked on a missing body reference (a route cannot
+      // refuse without killing a whole scheduled run), but the routine has to
+      // see it, so it rides back on the response.
+      return Response.json({
+        ...result,
+        ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
+        ...(warning ? { warning } : {}),
+        ...(productImageFellBack ? { productImageFellBack: true } : {}),
+      })
     }
 
     // op === 'generate'

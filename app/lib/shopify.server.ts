@@ -510,6 +510,65 @@ function gateCardImages(
   return moodImageUrl ? [{ url: moodImageUrl, altText: '' }] : []
 }
 
+
+/**
+ * Pick a bare-product frame out of a product's media list (ticket #10341).
+ *
+ * instagram-campaigns.md section 3.2c: "Only brief from a bare-product
+ * reference. Shopify featuredMedia is sometimes the retail carton (SKU 96203:
+ * box is image A, product is image B)." No code walked the list, so a brief
+ * built from the featured image sometimes briefed the model on a cardboard box
+ * and got a box-shaped invention back.
+ *
+ * Pure over the media list so it is unit-testable: the caller fetches, this
+ * decides. Heuristic by design, not a promise. It skips frames whose altText or
+ * URL filename names packaging, and when every frame looks like packaging (or
+ * the list is a single image) it returns the featured frame with
+ * `fellBack: true` so the caller can say so out loud rather than silently
+ * briefing from a carton.
+ *
+ * Respects the same card-art doctrine gate as `gateCardImages`: pass
+ * `cardArtBlocked` and the reviewed `moodImageUrl` and a blocked packshot never
+ * comes back out of here either.
+ */
+const PACKAGING_RE = /\b(box|boxed|boxes|package|packaged|packaging|carton|cartons|retail|label|labels|labelled|labeled|blister)\b/
+
+export interface BareProductImage {
+  /** The chosen image URL, or null when nothing is usable. */
+  url: string | null
+  altText: string
+  /** Index into the input list, or -1 when nothing was chosen from it. */
+  index: number
+  /** True when no bare-product frame was identified and this is the fallback. */
+  fellBack: boolean
+}
+
+/** True when this frame's alt text or filename names packaging. */
+export function looksLikePackaging(image: { url: string; altText?: string | null }): boolean {
+  const filename = (image.url.split('?')[0] ?? '').split('/').pop() ?? ''
+  const haystack = `${image.altText ?? ''} ${filename}`.toLowerCase().replace(/[^a-z0-9]+/g, ' ')
+  return PACKAGING_RE.test(haystack)
+}
+
+export function pickBareProductImage(
+  media: { url: string; altText?: string | null }[] | null | undefined,
+  opts?: { cardArtBlocked?: boolean; moodImageUrl?: string | null },
+): BareProductImage {
+  if (opts?.cardArtBlocked) {
+    const mood = opts.moodImageUrl ?? null
+    return { url: mood, altText: '', index: -1, fellBack: true }
+  }
+  const list = (media ?? []).filter(m => !!m?.url)
+  if (!list.length) return { url: null, altText: '', index: -1, fellBack: true }
+  const bareIndex = list.findIndex(m => !looksLikePackaging(m))
+  if (bareIndex >= 0) {
+    const hit = list[bareIndex]!
+    return { url: hit.url, altText: hit.altText ?? '', index: bareIndex, fellBack: false }
+  }
+  const first = list[0]!
+  return { url: first.url, altText: first.altText ?? '', index: 0, fellBack: true }
+}
+
 // ─── Sensation dial v1 → v2 projection ────────────────────────────────────
 // Legacy fixed-key labels per dimension. Used only when sensation_dial_v2 is
 // absent — lets old products keep rendering while migration proceeds.
