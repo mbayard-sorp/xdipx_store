@@ -70,6 +70,10 @@ export async function action({ request }: ActionFunctionArgs) {
       productHandle,
       altText,
       recentCaptions: await dbApproveRepo.recentCaptions(14, post.platform),
+      // #10476: age fallback for the vision-verdict carve-out, plus the video
+      // poster frame, which is not in mediaUrls.
+      postCreatedAt: post.createdAt ?? null,
+      posterUrl: post.posterUrl ?? null,
     })
 
     const findings: StoredGateFinding[] = result.findings.map(findingToStored)

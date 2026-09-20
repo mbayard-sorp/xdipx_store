@@ -336,6 +336,10 @@ export async function action({ request }: ActionFunctionArgs) {
         caption: draft.editedText?.trim() || draft.tweetText,
         mediaUrls: draft.mediaUrls,
         productHandle: await resolvePostProductHandle(draft),
+        // #10476: the owner's Post now click never threaded these, so an
+        // un-verdicted generated asset skipped the vision check on this path.
+        postCreatedAt: draft.createdAt ?? null,
+        posterUrl: draft.posterUrl ?? null,
       },
       getValve,
     )
@@ -389,6 +393,10 @@ export async function action({ request }: ActionFunctionArgs) {
         caption: post.editedText?.trim() || post.tweetText,
         mediaUrls: post.mediaUrls,
         productHandle,
+        // #10476: same gap as the X path above, and this is the one video
+        // reels publish through.
+        postCreatedAt: post.createdAt ?? null,
+        posterUrl: post.posterUrl ?? null,
       },
       getValve,
     )

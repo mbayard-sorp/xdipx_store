@@ -287,6 +287,10 @@ export async function reworkCaption(opts: {
         productHandle,
         recentCaptions,
         altText: parsed.altText,
+        // #10476: age fallback for the vision-verdict carve-out, plus the
+        // video poster frame, which is not in mediaUrls.
+        postCreatedAt: post.createdAt ?? null,
+        posterUrl: post.posterUrl ?? null,
       })
       const blockFindings = gateResult.findings.filter(f => f.severity === 'block')
       if (blockFindings.length === 0) {
@@ -497,6 +501,10 @@ export async function ownerApprovePost(
     productHandle,
     recentCaptions,
     altText: post.altText ?? null,
+    // #10476: age fallback for the vision-verdict carve-out, plus the video
+    // poster frame, which is not in mediaUrls.
+    postCreatedAt: post.createdAt ?? null,
+    posterUrl: post.posterUrl ?? null,
   })
   const blockFindings = gateResult.findings.filter(f => f.severity === 'block')
   if (blockFindings.length > 0) {

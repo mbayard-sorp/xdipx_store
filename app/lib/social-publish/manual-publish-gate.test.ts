@@ -35,6 +35,10 @@ const POST = {
   isVideo: false,
   caption: 'a caption',
   mediaUrls: ['https://cdn.shopify.com/s/files/1/social-thing.jpg'],
+  // Required since ticket #10476. The value is the row's created_at; these
+  // cases are not about the vision-verdict age carve-out, so a fixed recent
+  // date keeps them saying exactly what they said before.
+  postCreatedAt: '2026-09-18T00:00:00.000Z',
 }
 
 // An always-on valve reader. Used where the valve is not what is under test.
