@@ -33,7 +33,7 @@
 import { randomUUID } from 'node:crypto'
 import { eq, and, inArray, desc, isNotNull, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { videoJobs, mediaAssets, socialPosts, videoEpisodes, type VideoScriptJson, type VideoSceneSpec, type VideoSceneState, type RunpodIdleProbe } from '../../db/schema'
+import { videoJobs, mediaAssets, socialMediaAssets, socialPosts, videoEpisodes, type VideoScriptJson, type VideoSceneSpec, type VideoSceneState, type RunpodIdleProbe } from '../../db/schema'
 import { kvSet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import {
   VIDEO_MODELS,
@@ -74,7 +74,9 @@ import {
   isVideoTone,
 } from '~/lib/team-keys'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
-import { extractPoster, applyWatermark, probeDurationSeconds, muxAudio, stripAudio, renderAspectMaster, concatAndNormalize, extractLastFrame, type AspectMaster } from '~/lib/video-assembly.server'
+import { extractPoster, extractFrames, applyWatermark, probeDurationSeconds, muxAudio, stripAudio, renderAspectMaster, concatAndNormalize, extractLastFrame, type AspectMaster } from '~/lib/video-assembly.server'
+import { gateVideoFrames } from '~/lib/video-frame-gate.server'
+import type { VisionVerdict } from '~/lib/social-vision-gate.server'
 import { concatWithAudio, runPostPass, buildEndCard } from '~/lib/video-postpass.server'
 import {
   TTS_CHARS_PER_SECOND,
@@ -2415,6 +2417,31 @@ const ASPECT_MASTERS: { aspect: AspectMaster; purpose: string; suffix: string; w
   { aspect: '4:5', purpose: 'final_4x5', suffix: 'final-4x5', width: 1080, height: 1350 },
 ]
 
+/**
+ * Records the post-render vision gate's verdict for a poster onto a
+ * `social_media_assets` row keyed by the poster's own url (ticket #10485).
+ * Nothing ingested a video final's poster there before this — the social
+ * publish gate's vision-verdict lookup (`getVisionVerdictByUrl`,
+ * app/lib/social-vision-gate.server.ts) reads exactly that table, so without
+ * this a video post's `posterUrl` verdict lookup always came back null and
+ * blocked unconditionally (ticket #10476 removed the legacy no-verdict
+ * carve-out for anything not demonstrably old). Never throws: a failure here
+ * must not turn an already-gated, already-billed render into a failed job.
+ */
+async function recordPosterVisionVerdict(posterUrl: string, verdict: VisionVerdict): Promise<void> {
+  try {
+    await db.insert(socialMediaAssets).values({
+      url: posterUrl,
+      source: 'video',
+      createdBy: 'video-pipeline',
+      visionVerdict: verdict,
+      visionVerdictAt: new Date(),
+    })
+  } catch (err) {
+    console.error(`[video-pipeline] failed to record poster vision verdict for ${posterUrl} (non-fatal):`, err)
+  }
+}
+
 async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
   if (!job.finalAssetId) throw new Error('No final asset for poster extraction')
   const [finalAsset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.finalAssetId)).limit(1)
@@ -2423,6 +2450,25 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
   const video = await blobFetchToBuffer(finalAsset.blobUrl)
   const poster = await extractPoster(video, 1)
   const duration = await probeDurationSeconds(video)
+
+  // Post-render vision gate (ticket #10485): sample the RENDERED clip, not
+  // only the seed still (see video-frame-gate.server.ts's header for the
+  // full incident). Runs unconditionally — a hard safety check, not a spend
+  // valve, matching every other buffer-based vision gate in this codebase —
+  // before any of this tick's Blob writes or the terminal 'done' transition.
+  // A FAIL parks the job for owner review rather than failing it outright: a
+  // false positive on a licensed on-skin frame must not burn the render fee.
+  const sampled = await extractFrames(video, 2, 10)
+  const gateResult = await gateVideoFrames([...sampled, { atSeconds: 1, buffer: poster }])
+  if (!gateResult.pass) {
+    console.error(`[video-pipeline] job ${job.jobId} failed the post-render vision gate, parking for owner review: ${gateResult.notes}`)
+    await touch(job, {
+      status: 'awaiting_final_review',
+      error: `post-render vision gate: ${gateResult.notes}`,
+    })
+    return 'parked'
+  }
+
   const { url } = await blobPut(`video/${job.jobId}/poster.jpg`, poster, { contentType: 'image/jpeg' })
   const [posterRow] = await db.insert(mediaAssets).values({
     kind: 'image',
@@ -2431,6 +2477,9 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
     contentType: 'image/jpeg',
     videoJobId: job.id,
   }).returning({ id: mediaAssets.id })
+  // The poster candidate was appended last (after every sampled clip frame),
+  // so the last verdict in a passing result is the poster's own.
+  await recordPosterVisionVerdict(url, gateResult.frameVerdicts[gateResult.frameVerdicts.length - 1]!)
 
   // Multi-aspect masters, derived from the FINAL so captions/end card/watermark
   // carry over free. Runs here (a light tick) rather than assembly to protect
