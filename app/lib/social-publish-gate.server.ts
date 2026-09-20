@@ -40,7 +40,7 @@
 
 import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset } from './social-media.server'
 import { X_CAPTION_MAX, T_CO_LENGTH, weightedTweetLength } from './social-publish/x-limits'
-import type { VisionVerdict } from './social-vision-gate.server'
+import { VISION_CHECK_NAMES, type VisionCheckName, type VisionVerdict } from './social-vision-gate.server'
 
 /**
  * Is this product sellable right now?
@@ -157,6 +157,28 @@ export interface DeterministicGateInput {
    * on a naming rule rather than on anything about the pixels.
    */
   posterUrl?: string | null
+}
+
+/**
+ * Which of the gate's checks a stored verdict does not actually answer.
+ *
+ * `getVisionVerdictByUrl` returns the stored jsonb blob with no shape
+ * validation, and this gate used to read only `verdict.pass`. So a verdict
+ * written when the gate asked seven questions kept reading as a full pass
+ * after the gate grew an eighth (`anusNotVisible`, ticket #10477): `pass:
+ * true` meant "all of the checks I was asked", not "all of the checks that
+ * exist now". Every asset carrying a pre-#10477 verdict would have published
+ * on a seven-check read forever.
+ *
+ * Deriving the required keys from `VISION_CHECK_NAMES` rather than listing
+ * them here is the point: this is self-healing for every check anyone adds
+ * later, which a one-shot backfill is not. A key present with a value that is
+ * neither `pass` nor `fail` counts as unanswered too, the same standard
+ * `isValidVerdictShape` applies to a live response.
+ */
+export function missingVisionChecks(verdict: VisionVerdict): VisionCheckName[] {
+  const checks = (verdict.checks ?? {}) as Partial<Record<VisionCheckName, unknown>>
+  return VISION_CHECK_NAMES.filter(name => checks[name] !== 'pass' && checks[name] !== 'fail')
 }
 
 /**
@@ -763,6 +785,25 @@ export async function runDeterministicPublishChecks(
         check: 'vision-verdict',
         severity: 'block',
         detail: `Media has no recorded vision-gate verdict: ${u}. A generated asset must pass all eight vision-gate checks (limb count, hand anatomy, face/body integrity, extra or merged limbs, nipples occluded, genitalia absent, no anus visible, subject unambiguously adult) before it can publish.`,
+      })
+      continue
+    }
+    // A verdict that does not answer every current check is not a pass, it is
+    // a partial read, and it is rejected here the same way a missing one is
+    // (ticket #10477 follow-up). NOT routed through the legacy carve-out
+    // above, deliberately: that carve-out's premise is "no verdict exists
+    // because the check did not exist yet", and a verdict that exists
+    // disproves its own premise. An old date cannot excuse an unanswered
+    // question about pixels nobody re-read. The cost is that every asset
+    // holding a pre-#10477 verdict blocks once and re-gates on its next
+    // publish, which is the intended trade: no database operation, nothing to
+    // go stale, and it covers every check added after this one for free.
+    const unanswered = missingVisionChecks(verdict)
+    if (unanswered.length > 0) {
+      findings.push({
+        check: 'vision-verdict',
+        severity: 'block',
+        detail: `Media carries a vision-gate verdict that does not answer every check: ${unanswered.join(', ')} ${unanswered.length === 1 ? 'is' : 'are'} missing from the recorded verdict (${u}). The verdict predates ${unanswered.length === 1 ? 'that check' : 'those checks'}, so its "pass" is a pass on the questions it was asked, not on the ones the gate asks now. Re-run the vision gate on this asset.`,
       })
       continue
     }

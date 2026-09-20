@@ -13,8 +13,9 @@ import {
   REPETITION_SHINGLE,
   isProductSellable,
   classifyLegibleText,
+  missingVisionChecks,
 } from './social-publish-gate.server'
-import type { VisionVerdict } from './social-vision-gate.server'
+import { VISION_CHECK_NAMES, type VisionVerdict } from './social-vision-gate.server'
 
 const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
 const GOOD_MEDIA = [`${CDN}/social-rosales-cast-maya-20260812-1.jpg`]
@@ -957,6 +958,80 @@ describe('vision-gate verdict', () => {
     )
     expect(checks(r)).toContain('vision-verdict')
     expect(r.blocked).toBe(true)
+  })
+
+  // Ticket #10477 follow-up, the residual QA caught. getVisionVerdictByUrl
+  // returns the stored jsonb with no shape validation and this gate used to
+  // read only `pass`, so a verdict written when the gate asked seven
+  // questions kept reading as a full pass after the eighth was added. The
+  // fix is the same move as making postCreatedAt required: do not let an
+  // unanswered question default to the safe-looking branch.
+  describe('a verdict that answers fewer checks than the gate now has', () => {
+    const sevenCheckVerdict = (): VisionVerdict => {
+      const { anusNotVisible: _anusNotVisible, ...checks } = PASSING_VERDICT.checks
+      return { ...PASSING_VERDICT, checks: checks as VisionVerdict['checks'] }
+    }
+
+    it('blocks a stored pass:true verdict that predates anusNotVisible', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => sevenCheckVerdict(), isLibraryMember },
+      )
+      expect(checks(r)).toContain('vision-verdict')
+      expect(r.blocked).toBe(true)
+    })
+
+    it('names the unanswered checks, so the reason is legible', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => sevenCheckVerdict(), isLibraryMember },
+      )
+      const detail = r.findings.find(f => f.check === 'vision-verdict')?.detail ?? ''
+      expect(detail).toContain('anusNotVisible')
+      expect(detail).toContain('does not answer every check')
+    })
+
+    it('counts a key present with an unreadable value as unanswered', async () => {
+      const garbled = {
+        ...PASSING_VERDICT,
+        checks: { ...PASSING_VERDICT.checks, anusNotVisible: 'maybe' },
+      } as unknown as VisionVerdict
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => garbled, isLibraryMember },
+      )
+      expect(r.blocked).toBe(true)
+      expect(r.findings.find(f => f.check === 'vision-verdict')?.detail).toContain('anusNotVisible')
+    })
+
+    // The legacy carve-out exists for art with NO verdict, on the premise
+    // that the check did not exist when the art was made. A verdict that
+    // exists disproves that premise, so an old date does not buy a partial
+    // read a pass.
+    it('does not let the legacy carve-out excuse a partial verdict on an old prefix-named asset', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-08-01T00:00:00.000Z' },
+        {
+          getVisionVerdict: async () => sevenCheckVerdict(),
+          getAssetCreatedAt: async () => new Date('2026-08-01T00:00:00.000Z'),
+        },
+      )
+      expect(checks(r)).toContain('vision-verdict')
+      expect(r.blocked).toBe(true)
+    })
+
+    it('self-heals: a complete verdict passes, and completeness is read off VISION_CHECK_NAMES', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
+      )
+      expect(checks(r)).not.toContain('vision-verdict')
+      expect(r.blocked).toBe(false)
+      // Every name the gate knows about is what completeness is measured
+      // against, so a check added later is covered with no edit here.
+      expect(missingVisionChecks(PASSING_VERDICT)).toEqual([])
+      expect(VISION_CHECK_NAMES.every(n => n in PASSING_VERDICT.checks)).toBe(true)
+    })
   })
 
   // #10281 named seven; #10477 added anusNotVisible, so the message the
