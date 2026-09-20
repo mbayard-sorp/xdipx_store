@@ -10,7 +10,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import ffmpegPath from 'ffmpeg-static'
 import sharp from 'sharp'
@@ -46,18 +46,50 @@ export async function extractPoster(video: Buffer, atSeconds = 1): Promise<Buffe
   }
 }
 
+export interface ExtractedFrame {
+  atSeconds: number
+  buffer: Buffer
+}
+
+/**
+ * Sample a set of frame JPEGs from a rendered clip, starting at 1s (same
+ * settled-motion reasoning as `extractPoster`'s own default) and stepping
+ * `everyNSeconds` thereafter, capped at `maxFrames`. Generalizes
+ * `extractPoster` for the post-render vision gate (ticket #10485): the
+ * pre-existing frame gate only ever inspected the SEED STILL before any
+ * motion existed, so nothing looked at what the rendered clip actually did
+ * with that composition over time.
+ *
+ * A `probeDurationSeconds` failure (returns 0) still yields exactly one frame
+ * at 1s rather than throwing — an unprobeable duration must not silently skip
+ * the gate.
+ */
+export async function extractFrames(video: Buffer, everyNSeconds = 2, maxFrames = 12): Promise<ExtractedFrame[]> {
+  const duration = await probeDurationSeconds(video)
+  const cap = duration > 0 ? duration - 0.1 : 1
+  const frames: ExtractedFrame[] = []
+  for (let t = 1; frames.length < maxFrames; t += everyNSeconds) {
+    frames.push({ atSeconds: t, buffer: await extractPoster(video, t) })
+    if (t + everyNSeconds > cap) break
+  }
+  return frames
+}
+
 /** Duration in seconds via ffmpeg stderr (ffmpeg-static ships no ffprobe). */
 export async function probeDurationSeconds(video: Buffer): Promise<number> {
   const input = tmp('probe.mp4')
   try {
     writeFileSync(input, video)
-    let stderr = ''
-    try {
-      execFileSync(ffmpegPath!, ['-i', input, '-f', 'null', '-'], { timeout: 30_000 })
-    } catch (err) {
-      // ffmpeg writes stream info to stderr and exits non-zero with -f null
-      stderr = err instanceof Error && 'stderr' in err ? String((err as { stderr?: unknown }).stderr ?? '') : ''
-    }
+    // spawnSync, not execFileSync (ticket #10485): the old code only read
+    // stderr inside a catch block, on the assumption that `-f null -`
+    // always exits non-zero. It does not — this exact ffmpeg-static build
+    // exits 0 on a clean decode regardless of whether the input carries
+    // audio, video, or both, so the catch never ran and this silently
+    // returned 0 for every healthy video, not just malformed ones.
+    // spawnSync returns stderr on the result object unconditionally, so the
+    // parse no longer depends on the process's exit code at all.
+    const result = spawnSync(ffmpegPath!, ['-i', input, '-f', 'null', '-'], { timeout: 30_000 })
+    const stderr = result.stderr ? result.stderr.toString() : ''
     const m = /Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/.exec(stderr)
     if (!m) return 0
     return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 100

@@ -1,7 +1,7 @@
 /**
- * Pins the derived status vocabulary (ticket #5716): eleven states, first
- * match wins, including the half-approved multi-scene park and the
- * failed-job-with-posts case.
+ * Pins the derived status vocabulary (ticket #5716, extended #10485 with
+ * `flagged`): twelve states, first match wins, including the half-approved
+ * multi-scene park and the failed-job-with-posts case.
  */
 import { describe, expect, it } from 'vitest'
 import { videoStatusOf, stageIndexOf, nextActionOf } from './video-status'
@@ -10,10 +10,11 @@ const ep = (productionStatus: string, extra: Record<string, unknown> = {}) => ({
 const job = (stage: string, status: string, sceneStateJson: { status: string }[] | null = null) => ({ stage, status, sceneStateJson })
 
 describe('videoStatusOf', () => {
-  it('covers all eleven states', () => {
+  it('covers all twelve states', () => {
     expect(videoStatusOf(ep('shelved'), null).key).toBe('shelved')
     expect(videoStatusOf(ep('rejected'), null).key).toBe('shelved')
     expect(videoStatusOf(ep('rendering'), job('clip', 'failed')).key).toBe('failed')
+    expect(videoStatusOf(ep('rendering'), job('poster', 'awaiting_final_review')).key).toBe('flagged')
     expect(videoStatusOf(ep('posted'), null).key).toBe('posted')
     expect(videoStatusOf(ep('scheduled'), job('done', 'done')).key).toBe('scheduled')
     expect(videoStatusOf(ep('rendering'), job('done', 'done')).key).toBe('review')
@@ -23,6 +24,10 @@ describe('videoStatusOf', () => {
     expect(videoStatusOf(ep('needs_changes'), null).key).toBe('changes')
     expect(videoStatusOf(ep('pending_approval'), null).key).toBe('scripted')
     expect(videoStatusOf(ep('idea'), null).key).toBe('concept')
+  })
+
+  it('a job flagged by the post-render vision gate outranks a calmer episode state', () => {
+    expect(videoStatusOf(ep('rendering'), job('poster', 'awaiting_final_review'), [{ status: 'draft' }]).key).toBe('flagged')
   })
 
   it('half-approved multi-scene job parks as framing even when job.status is queued', () => {
@@ -45,14 +50,15 @@ describe('videoStatusOf', () => {
     expect(videoStatusOf(null, null).key).toBe('concept')
   })
 
-  it('owner-turn states are exactly the coral three plus failed', () => {
-    const owners = ['scripted', 'framing', 'review', 'failed']
+  it('owner-turn states are exactly the coral three plus failed and flagged', () => {
+    const owners = ['scripted', 'framing', 'review', 'failed', 'flagged']
     for (const k of owners) {
       const s = videoStatusOf(
-        k === 'scripted' ? ep('pending_approval') : k === 'failed' ? ep('rendering') : ep('rendering'),
+        k === 'scripted' ? ep('pending_approval') : ep('rendering'),
         k === 'framing' ? job('scene_frame', 'awaiting_frame_approval')
           : k === 'review' ? job('done', 'done')
-          : k === 'failed' ? job('failed', 'failed') : null,
+          : k === 'failed' ? job('failed', 'failed')
+          : k === 'flagged' ? job('poster', 'awaiting_final_review') : null,
       )
       expect(s.turn).toBe('owner')
     }
@@ -66,6 +72,7 @@ describe('stageIndexOf', () => {
     expect(stageIndexOf('scripted', ep('pending_approval', { storyboardJson: [{}] }))).toBe(2)
     expect(stageIndexOf('scripted', ep('pending_approval', { castSlugs: ['maya'] }))).toBe(3)
     expect(stageIndexOf('rendering', null)).toBe(4)
+    expect(stageIndexOf('flagged', null)).toBe(4)
     expect(stageIndexOf('posted', null)).toBe(5)
   })
 })

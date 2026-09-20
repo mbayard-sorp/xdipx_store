@@ -8,9 +8,10 @@
  * would be a second source of truth that drifts the first time a job fails
  * outside the app.
  *
- * Eleven states. Coral is reserved for the three that are genuinely the
- * owner's turn (scripted, framing, review); everything else reads neutral,
- * plum for the machine, sage for fine, amber for owed, red for broken.
+ * Twelve states (ticket #10485 added `flagged`). Coral is reserved for the
+ * three that are genuinely the owner's turn on a normal path (scripted,
+ * framing, review); everything else reads neutral, plum for the machine,
+ * sage for fine, amber for owed, red for broken or flagged.
  */
 
 export interface EpisodeLike {
@@ -33,7 +34,7 @@ export interface PostLike {
 }
 
 export type VideoStatusKey =
-  | 'shelved' | 'failed' | 'posted' | 'scheduled' | 'review' | 'framing'
+  | 'shelved' | 'failed' | 'flagged' | 'posted' | 'scheduled' | 'review' | 'framing'
   | 'rendering' | 'approved' | 'changes' | 'scripted' | 'concept'
 
 export interface VideoStatus {
@@ -49,6 +50,7 @@ export interface VideoStatus {
 const S: Record<VideoStatusKey, Omit<VideoStatus, 'key'>> = {
   shelved:   { word: 'Shelved',      turn: 'nobody',  cls: 'border-line bg-paper-3 text-ink-4 line-through', glyph: '∅' },
   failed:    { word: 'Failed',       turn: 'owner',   cls: 'border-red-200 bg-red-50 text-red-800',          glyph: '✕' },
+  flagged:   { word: 'Flagged',      turn: 'owner',   cls: 'border-red-200 bg-red-50 text-red-800',          glyph: '⚑' },
   posted:    { word: 'Posted',       turn: 'nobody',  cls: 'border-transparent bg-[#4F6150] text-white',     glyph: '✓' },
   scheduled: { word: 'Scheduled',    turn: 'social',  cls: 'border-transparent bg-plum text-white',          glyph: '◷' },
   review:    { word: 'Review cut',   turn: 'owner',   cls: 'border-coral bg-coral-soft text-ink',            glyph: '▶' },
@@ -82,6 +84,10 @@ function keyOf(episode: EpisodeLike | null, job: JobLike | null, posts: PostLike
   if (ps === 'shelved' || ps === 'rejected') return 'shelved'
   if (ps === 'failed') return 'failed'
   if (job && (job.stage === 'failed' || job.status === 'failed')) return 'failed'
+  // Post-render vision gate parked this job for owner review (ticket
+  // #10485), not a pipeline failure — distinct glyph/word from `failed`, but
+  // the same urgency and ranking (never hidden behind a calmer state).
+  if (job && job.status === 'awaiting_final_review') return 'flagged'
   if (posts.some(p => p.status === 'posted') || ps === 'posted' || ps === 'measured') return 'posted'
   if (posts.length > 0 || ps === 'scheduled') return 'scheduled'
   if (job && job.stage === 'done' && job.status === 'done') return 'review'
@@ -105,6 +111,7 @@ export function stageIndexOf(status: VideoStatusKey, episode: EpisodeLike | null
     case 'review': return 4
     case 'framing': return 4
     case 'rendering': return 4
+    case 'flagged': return 4
     case 'approved': return 3
     case 'changes': return 1
     case 'scripted': {
