@@ -12,6 +12,7 @@ import {
   shingles,
   REPETITION_SHINGLE,
   isProductSellable,
+  classifyLegibleText,
 } from './social-publish-gate.server'
 import type { VisionVerdict } from './social-vision-gate.server'
 
@@ -803,7 +804,47 @@ describe('vision-gate verdict', () => {
     // the image-provenance burn-in already grants prefix-named urls above.
     const r = await runChecksRaw(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA },
-      { getVisionVerdict: async () => null },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => new Date('2026-08-12T00:00:00.000Z') },
+    )
+    expect(checks(r)).not.toContain('vision-verdict')
+    expect(r.blocked).toBe(false)
+  })
+
+  // Ticket #10337. `recordVisionVerdict` swallows its database errors and
+  // `tryIngestSocialAsset` can return null, so a prefix-named filename with no
+  // verdict is not proof of age: it is equally the signature of a write that
+  // failed on an image nothing ever looked at.
+  it('blocks a prefix-named asset with no verdict whose library row postdates the cutoff', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => new Date('2026-09-15T00:00:00.000Z') },
+    )
+    expect(checks(r)).toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
+    const finding = r.findings.find(f => f.check === 'vision-verdict')
+    expect(finding?.detail).toContain(GOOD_MEDIA[0])
+    expect(finding?.detail).toContain('no recorded vision-gate verdict')
+  })
+
+  it('falls back to the post created_at when the asset has no library row at all', async () => {
+    const blockedResult = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
+    )
+    expect(blockedResult.blocked).toBe(true)
+
+    const legacy = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-08-20T00:00:00.000Z' },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
+    )
+    expect(checks(legacy)).not.toContain('vision-verdict')
+    expect(legacy.blocked).toBe(false)
+  })
+
+  it('keeps the legacy skip when the age cannot be determined at all', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => { throw new Error('neon down') } },
     )
     expect(checks(r)).not.toContain('vision-verdict')
     expect(r.blocked).toBe(false)
@@ -816,5 +857,76 @@ describe('vision-gate verdict', () => {
     )
     expect(checks(r)).toContain('vision-verdict')
     expect(r.blocked).toBe(true)
+  })
+
+  it('names the seven checks accurately in the no-verdict finding (#10281)', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { getVisionVerdict: async () => null, isLibraryMember },
+    )
+    const detail = r.findings.find(f => f.check === 'vision-verdict')?.detail ?? ''
+    expect(detail).toContain('seven')
+    expect(detail).toContain('genitalia absent')
+    expect(detail).toContain('nipples occluded')
+    expect(detail).toContain('adult')
+  })
+})
+
+// Ticket #10338: the vision gate transcribes legible text and leaves the
+// policy call to its caller. This is that caller, applying the three cases in
+// docs/design-doctrine.md section 4 item 4.
+describe('legible text baked into the image', () => {
+  const isLibraryMember = async () => true
+  const withText = (legibleText: string | null): VisionVerdict => ({ ...PASSING_VERDICT, legibleText })
+  const run = (legibleText: string | null) => runChecksRaw(
+    { caption: CLEAN, mediaUrls: GOOD_MEDIA },
+    { getVisionVerdict: async () => withText(legibleText), isLibraryMember },
+  )
+
+  it('passes a brand mark on a product we stock', async () => {
+    const r = await run('LELO')
+    expect(checks(r)).not.toContain('vision-legible-text')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('passes a short product name', async () => {
+    const r = await run('Satisfyer Pro 2')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('passes when the frame carries no text at all', async () => {
+    const r = await run('')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('blocks packaging junk and quotes the transcription', async () => {
+    const r = await run('barcode 8 712345 678905, NET WT 3.4 FL OZ')
+    expect(checks(r)).toContain('vision-legible-text')
+    expect(r.blocked).toBe(true)
+    expect(r.findings.find(f => f.check === 'vision-legible-text')?.detail).toContain('8 712345 678905')
+  })
+
+  it('blocks an ingredient panel', async () => {
+    const r = await run('Ingredients: water, glycerin')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('blocks a baked-in caption or watermark', async () => {
+    const r = await run('SHOP NOW at xdipx.com')
+    expect(checks(r)).toContain('vision-legible-text')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('blocks text it cannot read as a brand mark, conservatively', async () => {
+    const r = await run('a soft evening, whatever you want it to be, in your hands')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('classifies directly', () => {
+    expect(classifyLegibleText(null)).toBe('none')
+    expect(classifyLegibleText('  ')).toBe('none')
+    expect(classifyLegibleText('Womanizer')).toBe('brand-mark')
+    expect(classifyLegibleText('UPC 012345678905')).toBe('packaging')
+    expect(classifyLegibleText('@xdipx')).toBe('caption-or-watermark')
   })
 })

@@ -240,6 +240,31 @@ export async function isLibraryMember(url: string, deps?: SocialAssetLibraryDeps
 }
 
 /**
+ * `created_at` of the `social_media_assets` row indexing this url, or null
+ * when no row exists or the lookup fails (ticket #10337: the publish gate's
+ * vision-verdict carve-out is date scoped, and "unknown age" must be
+ * distinguishable from "old").
+ */
+export async function getAssetCreatedAtByUrl(url: string): Promise<Date | null> {
+  const bare = stripUrlQuery(url)
+  if (!bare) return null
+  try {
+    const { db } = await import('./db.server')
+    const rows = await db
+      .select({ createdAt: socialMediaAssets.createdAt })
+      .from(socialMediaAssets)
+      .where(sql`split_part(split_part(${socialMediaAssets.url}, '?', 1), '#', 1) = ${bare}`)
+      .orderBy(socialMediaAssets.id)
+      .limit(1)
+    const value = rows[0]?.createdAt
+    return value ? new Date(value) : null
+  } catch (err) {
+    console.error(`[social-library] asset created_at lookup failed: ${url}`, err)
+    return null
+  }
+}
+
+/**
  * Every url is a library member. An empty list is false: fail closed, the
  * same contract as `allMediaAreGeneratedSocialAssets`.
  */
