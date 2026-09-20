@@ -263,7 +263,8 @@ export default function SocialsCalendar() {
     <section className="space-y-3 pb-20 md:pb-0">
       <p className="sr-only" aria-live="polite" role="status">{liveText}</p>
 
-      <MixReportPanel report={mixReport} />
+      <MixReportPanel report={mixReport.instagram} />
+      <MixReportPanel report={mixReport.x} />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
@@ -457,29 +458,43 @@ export default function SocialsCalendar() {
  * drift is not one extra click away; collapsed otherwise so it does not
  * compete with the calendar for attention on a clean week.
  */
+/**
+ * One feed's mix report. Ticket #10478: UNKNOWN is no longer fine print.
+ * It used to render in `text-ink-4`, the token reserved for the quietest
+ * text on the page, which meant the most-decayed signal in the system was
+ * painted the easiest to miss. An unknown line now gets plum weight and the
+ * panel opens on it, the same as a breach, because an unmeasured cap and a
+ * breached cap are the same amount of blind.
+ */
 function MixReportPanel({ report }: { report: SocialMixReport }) {
   const order: { key: keyof SocialMixReport['lines'] }[] = [
+    { key: 'coverage' }, { key: 'videoRows' }, { key: 'removals' },
     { key: 'ceiling' }, { key: 'mid' }, { key: 'educational' },
     { key: 'closeCrop' }, { key: 'productForward' }, { key: 'productFree' },
     { key: 'bodyZoneWindow' }, { key: 'contactModeWindow' }, { key: 'locationWindow' },
     { key: 'castRotation' }, { key: 'castVolume' }, { key: 'wideCeiling' }, { key: 'plug' },
     { key: 'lubeTreatment' }, { key: 'carousel' },
   ]
+  const shell =
+    report.worstStatus === 'breach' ? 'border-coral bg-coral-soft'
+      : report.worstStatus === 'unknown' ? 'border-plum bg-plum-soft'
+      : 'border-line bg-paper-2'
+  const badge =
+    report.worstStatus === 'breach' ? { text: 'Breach', cls: 'text-coral' }
+      : report.worstStatus === 'unknown' ? { text: 'Unknown', cls: 'text-plum' }
+      : { text: 'In band', cls: 'text-ink-4' }
+  const platformLabel = report.platform === 'x' ? 'X' : 'Instagram'
   return (
     <details
       open={report.anyBreach}
-      className={`rounded-2xl border p-3 ${report.anyBreach ? 'border-coral bg-coral-soft' : 'border-line bg-paper-2'}`}
+      className={`rounded-2xl border p-3 ${shell}`}
     >
       <summary className="flex items-center justify-between cursor-pointer select-none min-h-11">
         <span className="font-display text-base text-ink">
-          Mix report{' '}
-          <span className="font-mono text-[10px] text-ink-3">(rolling window, last {report.sampleSize} posted)</span>
+          Mix report <em className="em">{platformLabel}</em>{' '}
+          <span className="font-mono text-[10px] text-ink-3">(rolling window, last {report.sampleSize} posted stills)</span>
         </span>
-        {report.anyBreach ? (
-          <span className="font-mono text-[10px] uppercase tracking-wide text-coral">Breach</span>
-        ) : (
-          <span className="font-mono text-[10px] uppercase tracking-wide text-ink-4">In band</span>
-        )}
+        <span className={`font-mono text-[10px] uppercase tracking-wide ${badge.cls}`}>{badge.text}</span>
       </summary>
       <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
         {order.map(({ key }) => {
@@ -489,7 +504,9 @@ function MixReportPanel({ report }: { report: SocialMixReport }) {
               <span className="text-ink-3">{line.label}</span>
               <span
                 className={`font-mono text-right ${
-                  line.status === 'breach' ? 'text-coral font-semibold' : line.status === 'unknown' ? 'text-ink-4' : 'text-ink'
+                  line.status === 'breach' ? 'text-coral font-semibold'
+                    : line.status === 'unknown' ? 'text-plum font-semibold'
+                    : 'text-ink'
                 }`}
               >
                 {line.detail}

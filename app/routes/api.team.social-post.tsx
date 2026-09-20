@@ -22,6 +22,19 @@
  *     contactMode/cropScale (migration 099, ticket #10269) are the same shape
  *     for the on-skin campaign's variety windows (#10267): optional, nullable,
  *     read back the same way.
+ *
+ *     THE FOUR SCENE AXES ARE NO LONGER A MEMORY TEST (ticket #10479).
+ *     bodyZone/contactMode/cropScale/sceneLocation are stamped onto the
+ *     `social_media_assets` row when the frame is GENERATED, and
+ *     createDraftSocialPost resolves whatever this payload omits back from
+ *     the asset the mediaUrls point at. Both branches backfill, the fresh
+ *     insert and the #4069 dedupe. Sending them here still works and still
+ *     wins, it is a confirmation rather than the only chance to record them:
+ *     two documentation-only attempts at "the agent will remember" (migrations
+ *     093 and 099) produced 0 populated rows out of 281. A PRESENT value is
+ *     validated against `app/lib/social-scene-vocab.ts` and 400s if it is out
+ *     of vocabulary; an ABSENT one is never a 400, because the frame this
+ *     draft carries has already been generated and billed.
  *   { op: 'list', status?, reviewStatus? } -> { posts: [...] }
  *   { op: 'config' } -> { frequencies, autopostValve, platformValves: { instagram, x } }
  *     autopostValve (social_team_autopost) gates nothing on the publish path;
@@ -49,14 +62,19 @@
  *     (migration 079). The `account` block carries the follower-count
  *     denominator per-post reach needs (ticket #4064); each sweep also persists
  *     a timestamped follower reading to KV so trend is derivable.
- *   { op: 'mixReport' } -> { report: SocialMixReport, lines: string[] }
- *     Rolling-window mix report over the last posted+approved Instagram rows
- *     (ticket #10271): ceiling/mid/educational vs the §3.2b 4/2/1 target,
- *     close-crop cap, product-forward/free, body-zone and location repeat
- *     windows, lube-treatment repeats, carousel floor. A REPORT, never a
- *     gate — nothing reads this op to block, revise, or hold a post. `lines`
- *     is plain text for the routine's run summary; `/admin/socials` renders
- *     the same `report` object. See social-mix-report.server.ts.
+ *   { op: 'mixReport' } -> { report: SocialMixReportBundle, lines: string[] }
+ *     Rolling-window mix report over the last posted+approved rows on BOTH
+ *     fenced feeds (ticket #10271, per-platform since #10478): axis coverage,
+ *     video dilution, removals, ceiling/mid/educational vs the §3.2b 4/2/1
+ *     target, close-crop cap, product-forward/free, body-zone, contact-mode
+ *     and location repeat windows, lube-treatment repeats, carousel floor.
+ *     `report` is `{ instagram, x, anyBreach, worstStatus }`; `anyBreach`
+ *     counts UNKNOWN, because an unmeasured cap is not a passing one. A
+ *     REPORT, never a gate: nothing reads this op to block, revise, or hold
+ *     a post, and the owner's 2026-09-20 ruling keeps it that way. `lines` is
+ *     plain text for the routine's run summary, one platform-labelled line
+ *     each; `/admin/socials` renders the same object. See
+ *     social-mix-report.server.ts.
  *
  * The social-media-manager stub's only write path. Rows land in social_posts
  * with status='draft' AND review_status='pending_review' for human review in
@@ -104,6 +122,7 @@ import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
 import { applyPublishGateVerdict, parsePublishGateVerdict, reworkSocialPost, parseReworkInput } from '~/lib/social-publish-approve.server'
 import { captureSocialEngagement, captureInstagramAccount, rankBySaves } from '~/lib/social-engagement.server'
 import { getSocialMixReport, formatSocialMixReportLines } from '~/lib/social-mix-report.server'
+import { parseSceneAxes } from '~/lib/social-scene-vocab'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -159,9 +178,25 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 },
       )
     }
+    // Scene axes (#10480): validated against the single-source vocabulary
+    // rather than by string length. A length-only check let `hip_hollow` or
+    // `Hip-Hollow` persist cleanly and then classify as neither ceiling nor
+    // mid, so a typo became an invisible hole in the compliance report.
+    //
+    // A MISSING axis is deliberately NOT an error here (#10479): the frame
+    // this draft carries has already been generated and billed, so a 400
+    // strands inventory rather than refusing a request. createDraftSocialPost
+    // backfills every omitted axis from the asset the media URLs resolve to,
+    // which is where the value was chosen in the first place. Flipping any
+    // axis to required is ticket #10482's call, on its own evidence.
+    const parsedAxes = parseSceneAxes(b)
+    if (!parsedAxes.ok) return new Response(parsedAxes.error, { status: 400 })
+    const sceneAxes = parsedAxes.axes
+
     // Idempotency guard (#4069): a same-platform, same-caption row still open
     // for the same campaign day comes back as `deduped:true` with the
     // existing id rather than a new sibling row — see createDraftSocialPost.
+    // Both branches of that call (fresh insert AND dedupe) backfill the axes.
     const { id, deduped } = await createDraftSocialPost({
       platform:      b['platform'],
       postType:      typeof b['postType'] === 'string' && b['postType'].length <= 20 ? b['postType'] : 'manual',
@@ -179,25 +214,10 @@ export async function action({ request }: ActionFunctionArgs) {
       altText:      typeof b['altText'] === 'string' && b['altText'].length > 0 ? b['altText'] : undefined,
       imageBrief:   typeof b['imageBrief'] === 'string' && b['imageBrief'].length > 0 ? b['imageBrief'] : undefined,
       subject:      typeof b['subject'] === 'string' && b['subject'].length > 0 ? b['subject'] : undefined,
-      sceneLocation:
-        typeof b['sceneLocation'] === 'string' && b['sceneLocation'].trim().length > 0 && b['sceneLocation'].length <= 80
-          ? b['sceneLocation'].trim()
-          : undefined,
       castSlugs: Array.isArray(b['castSlugs'])
         ? (b['castSlugs'] as unknown[]).filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
         : undefined,
-      bodyZone:
-        typeof b['bodyZone'] === 'string' && b['bodyZone'].trim().length > 0 && b['bodyZone'].length <= 40
-          ? b['bodyZone'].trim()
-          : undefined,
-      contactMode:
-        typeof b['contactMode'] === 'string' && b['contactMode'].trim().length > 0 && b['contactMode'].length <= 20
-          ? b['contactMode'].trim()
-          : undefined,
-      cropScale:
-        typeof b['cropScale'] === 'string' && b['cropScale'].trim().length > 0 && b['cropScale'].length <= 10
-          ? b['cropScale'].trim()
-          : undefined,
+      ...sceneAxes,
     })
     // Library pick (#4937): the agent chooses one of the generated candidates
     // client-side, so the pick is recorded here, by url, when the draft row
@@ -318,10 +338,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // Rolling-window mix report (ticket #10271). A REPORT, not a verdict: never
   // gates a draft, a rework, or a publish decision, and social-publish-gate
-  // never calls this op. Computed from the last posted+approved Instagram
-  // rows' stored columns only (never caption/imageBrief prose); the routine
-  // pastes `lines` into its run summary, and the same numbers render on
-  // /admin/socials (see admin.socials.calendar.tsx).
+  // never calls this op. Computed from the last posted+approved Instagram AND
+  // X rows' stored columns only (never caption/imageBrief prose), one report
+  // per feed since the caps are per feed; the routine pastes `lines` into its
+  // run summary, and the same numbers render on /admin/socials (see
+  // admin.socials.calendar.tsx).
   if (b['op'] === 'mixReport') {
     const report = await getSocialMixReport()
     return Response.json({ report, lines: formatSocialMixReportLines(report) })

@@ -2,13 +2,23 @@
  * POST /api/team/social-image — server-side social image generation + rehost.
  *
  *   { op: 'generate', prompt, handle, archetype, mood, date, slide?,
- *     refImageUrl?, imageSize?, only?, caller?, runId? }
+ *     refImageUrl?, imageSize?, only?, caller?, runId?, + the scene axes }
  *       -> GenerateSocialImageResult { url, filename, provider, model }
  *   { op: 'cast', prompt, handle, mood, date, slide?, presenterImageUrl?,
- *     castSlug?, cropScale?: macro|close|medium|wide, castSlugs?,
- *     productImageUrl?, extraImageUrls?, scale, count?, caller?, runId? }
+ *     castSlug?, castSlugs?, productImageUrl?, extraImageUrls?, scale,
+ *     count?, caller?, runId?, + the scene axes }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
  *          plus bodyReferenceMissing?/warning?/productImageFellBack? (#10336, #10341)
+ *
+ * THE SCENE AXES, on both ops (tickets #10479/#10480): bodyZone, contactMode,
+ * cropScale and sceneLocation, each optional, each validated against the
+ * single-source vocabulary in `app/lib/social-scene-vocab.ts` and stamped
+ * onto the `social_media_assets` row as `axis:<key>=<value>` tags at ingest.
+ * This route is where those choices are MADE, so this is where they are
+ * persisted; `api.team.social-post`'s draft op resolves them back from the
+ * asset by media URL rather than asking the drafting agent to restate them.
+ * Two documentation-only attempts at the restate-them version (migrations 093
+ * and 099) produced 0 populated rows out of 281.
  *
  * Why this route exists (ticket #4133). Image generation rehosts the result to
  * Shopify Files (`uploadMoodImageToShopifyFiles` -> `adminGraphQL`), which needs
@@ -43,6 +53,7 @@ import { assertTeamAuth, gate } from '~/lib/team.server'
 import { SOCIAL_ARCHETYPES, type SocialArchetype } from '~/lib/social-media.server'
 import { apiError } from '~/lib/api-error.server'
 import { logImageCost } from '~/lib/token-log.server'
+import { parseSceneAxes } from '~/lib/social-scene-vocab'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ONLY_VALUES = ['atlas', 'fal', 'imagen'] as const
@@ -90,6 +101,18 @@ export async function action({ request }: ActionFunctionArgs) {
     const slide = num(b['slide'])
     const caller = str(b['caller']) ?? 'social-media-manager'
 
+    // The scene axes (ticket #10479/#10480). This is where they are CHOSEN,
+    // so this is where they are validated and persisted: every value present
+    // is checked against the single-source vocabulary in
+    // `social-scene-vocab.ts` and stamped onto the library row at ingest, and
+    // the draft op resolves them back by URL rather than asking the drafter
+    // to restate them. Refusing here is cheap and correct (pre-spend, one
+    // retry); refusing at draft time would strand an already-billed frame,
+    // which is why that path backfills instead.
+    const parsedAxes = parseSceneAxes(b)
+    if (!parsedAxes.ok) return new Response(parsedAxes.error, { status: 400 })
+    const sceneAxes = parsedAxes.axes
+
     // Money gate: generation spends real dollars, so gate before generating,
     // exactly like api.team.video-job's enqueue ops. The CLI already gates too;
     // this closes the hole a direct team-token call would otherwise open.
@@ -120,11 +143,10 @@ export async function action({ request }: ActionFunctionArgs) {
       // prompt rather than left for the model to invent. Both were dead code
       // on this route, which passed the portrait unconditionally.
       const castSlug = str(b['castSlug'])
-      const cropScale = str(b['cropScale'])
-      const { isCropScale } = await import('~/lib/social-cast-reference.server')
-      if (cropScale && !isCropScale(cropScale)) {
-        return new Response('Bad Request: cropScale must be one of macro|close|medium|wide', { status: 400 })
-      }
+      // Already enum-checked against the shared vocabulary above; `CropScale`
+      // and the report's crop sets are both derived from that same list, so
+      // this can no longer drift from what the report classifies on.
+      const cropScale = sceneAxes.cropScale
       if (castSlug) {
         const { getApprovedCastMembers } = await import('~/lib/sanity.server')
         const { resolveCastReference } = await import('~/lib/social-cast-reference.server')
@@ -191,6 +213,7 @@ export async function action({ request }: ActionFunctionArgs) {
         scale,
         caller,
         ...(castSlugs.length ? { castSlugs } : {}),
+        ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
         ...(slide ? { slide } : {}),
         ...(count ? { count } : {}),
         ...(extraImageUrls?.length ? { extraImageUrls } : {}),
@@ -257,6 +280,7 @@ export async function action({ request }: ActionFunctionArgs) {
       date,
       caller,
       logCost: true,
+      ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
       ...(slide ? { slide } : {}),
       ...(refImageUrl ? { refImageUrl } : {}),
       ...(imageSize ? { imageSize } : {}),

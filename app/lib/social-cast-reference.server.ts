@@ -16,12 +16,19 @@
  * returns `bodyReferenceMissing: true` plus a warning the routine must surface.
  */
 import { presenterPhotoUrlForCrop, type CastMember } from './sanity.server'
+import { CROP_SCALES, isCropScaleValue, type CropScale } from './social-scene-vocab'
 
-export const CROP_SCALES = ['macro', 'close', 'medium', 'wide'] as const
-export type CropScale = (typeof CROP_SCALES)[number]
+// Re-exported, not re-declared (ticket #10480). The crop scale is one of the
+// four scene axes and its vocabulary now lives in `social-scene-vocab.ts`
+// alongside the body zones and contact modes, so the generation route, the
+// draft route, the rework parser and the mix report all classify against one
+// list. A second hand-typed copy here is exactly the drift that let
+// `hip_hollow` persist and match nothing.
+export { CROP_SCALES }
+export type { CropScale }
 
 export function isCropScale(v: unknown): v is CropScale {
-  return typeof v === 'string' && (CROP_SCALES as readonly string[]).includes(v)
+  return isCropScaleValue(v)
 }
 
 /** A macro or close crop is the on-skin case that needs the neck-down reference. */

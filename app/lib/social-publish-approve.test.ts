@@ -524,7 +524,11 @@ describe('parseReworkInput (#4351)', () => {
     })
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.input.sceneLocation).toBe('bedroom, late afternoon')
+    // #10480: the location is normalized to the kebab-case convention
+    // migration 093 documents, rather than stored as free prose, because the
+    // §3.8 rotation window compares locations by equality and "bedroom, late
+    // afternoon" and "bedroom-late-afternoon" would rotate as two rooms.
+    expect(r.input.sceneLocation).toBe('bedroom-late-afternoon')
     expect(r.input.castSlugs).toEqual(['nadia', 'juno'])
     expect(r.input.bodyZone).toBe('sternum')
     expect(r.input.contactMode).toBe('resting')
@@ -539,9 +543,37 @@ describe('parseReworkInput (#4351)', () => {
     }
   })
 
-  it('rejects an empty-string variety axis and a non-array castSlugs', () => {
-    expect(parseReworkInput({ tweetText: 'ok', bodyZone: '   ' }).ok).toBe(false)
+  it('reads an empty-string variety axis as absent, and rejects a non-array castSlugs', () => {
+    // #10479/#10480: an empty string is "I do not have one", which is the
+    // absent case. Refusing it would 400 a rework over a frame that is
+    // already paid for, for no information gained. An out-of-vocabulary
+    // token is still refused (see the vocabulary case below).
+    const empty = parseReworkInput({ tweetText: 'ok', bodyZone: '   ' })
+    expect(empty.ok).toBe(true)
+    if (empty.ok) expect(empty.input.bodyZone).toBeUndefined()
     expect(parseReworkInput({ tweetText: 'ok', castSlugs: 'nadia' }).ok).toBe(false)
+  })
+
+  // #10480: the rework path validates against the same single-source
+  // vocabulary as the draft path, so a REVISE cannot introduce a token the
+  // draft would have refused.
+  it('rejects an out-of-vocabulary zone, mode or crop on the rework path too', () => {
+    for (const bad of [
+      { bodyZone: 'hip_hollow' },
+      { bodyZone: 'Hip-Hollow' },
+      { contactMode: 'held' },
+      { cropScale: 'tight' },
+    ]) {
+      const r = parseReworkInput({ tweetText: 'a cleaner line', ...bad })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain('rework.')
+    }
+  })
+
+  it('accepts the "none" sentinel for a frame that touches no bare skin', () => {
+    const r = parseReworkInput({ tweetText: 'a cleaner line', bodyZone: 'none', contactMode: 'none' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.input.bodyZone).toBe('none')
   })
 
   it('does not let a variety axis alone satisfy the must-change-something rule', () => {

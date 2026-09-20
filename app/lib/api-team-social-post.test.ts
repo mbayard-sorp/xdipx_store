@@ -263,29 +263,82 @@ describe('draft op, sceneLocation/bodyZone/contactMode/cropScale pass-through (m
   it('is optional: a draft with none of them omits all four', async () => {
     const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'no scene here', voiceGate })
     expect(res.status).toBe(200)
-    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
-      sceneLocation: undefined,
-      bodyZone: undefined,
-      contactMode: undefined,
-      cropScale: undefined,
-    }))
+    // Omitted rather than explicitly undefined, because createDraftSocialPost
+    // now distinguishes the two: an absent key is the one it backfills from
+    // the asset (#10479).
+    const arg = createDraftMock.mock.calls[0]![0] as Record<string, unknown>
+    for (const key of ['sceneLocation', 'bodyZone', 'contactMode', 'cropScale']) {
+      expect(arg).not.toHaveProperty(key)
+    }
   })
 
-  it('trims whitespace and drops an empty or over-length value', async () => {
+  it('trims whitespace and reads an empty value as absent', async () => {
     const res = await post({
       op: 'draft', platform: 'instagram', tweetText: 'edge cases', voiceGate,
       sceneLocation: '  bathroom-spa  ',
       bodyZone: '',
-      contactMode: 'x'.repeat(21),
       cropScale: 'macro',
     })
     expect(res.status).toBe(200)
     expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
       sceneLocation: 'bathroom-spa',
-      bodyZone: undefined,
-      contactMode: undefined,
       cropScale: 'macro',
     }))
+    // An absent axis is omitted here, not nulled: createDraftSocialPost
+    // backfills it from the asset the mediaUrls resolve to (#10479).
+    expect(createDraftMock.mock.calls[0]![0]).not.toHaveProperty('bodyZone')
+  })
+})
+
+// Ticket #10480: the axes are validated against the single-source vocabulary
+// in app/lib/social-scene-vocab.ts, not by string length. A length-only check
+// let `hip_hollow` persist and then match neither ceiling nor mid, which is a
+// typo becoming an invisible hole in the compliance report.
+describe('draft op, scene-axis vocabulary (#10480)', () => {
+  it('400s an out-of-vocabulary body zone instead of persisting it', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'typo zone', voiceGate, bodyZone: 'hip_hollow',
+    })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/bodyZone must be one of/)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('400s a Title-Case zone, the casing-drift shape of the same bug', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'casing', voiceGate, bodyZone: 'Hip-Hollow',
+    })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('400s an out-of-vocabulary crop scale', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'tight?', voiceGate, cropScale: 'tight',
+    })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts the "none" sentinel the art director is told to emit for a non-skin frame', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'no skin in this one', voiceGate,
+      bodyZone: 'none', contactMode: 'none', cropScale: 'medium', sceneLocation: 'kitchen-counter',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      bodyZone: 'none', contactMode: 'none',
+    }))
+  })
+
+  it('never 400s a draft for an OMITTED axis: the frame is already billed (#10479)', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'agent sent no axes at all', voiceGate,
+      mediaUrls: ['https://cdn.shopify.com/files/social-cast-wand.jpg'],
+      altText: 'The wand resting on folded linen.',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
   })
 })
 

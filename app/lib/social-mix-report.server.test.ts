@@ -5,15 +5,23 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import {
+  CEILING_ZONES,
+  CLOSE_CROP_SCALES,
+  MID_ZONES,
+  PLUG_ZONE,
   computeSocialMixReport,
+  computeSocialMixReportBundle,
   formatSocialMixReportLines,
   getSocialMixReport,
   type SocialMixReportRow,
 } from './social-mix-report.server'
+import { BODY_ZONES, CROP_SCALES } from './social-scene-vocab'
 
 function row(over: Partial<SocialMixReportRow> = {}): SocialMixReportRow {
   return {
     id: 1,
+    platform: 'instagram',
+    mediaKind: 'image',
     shopifyProductId: null,
     mediaUrls: ['https://cdn.example/a.jpg'],
     bodyZone: null,
@@ -357,23 +365,43 @@ describe('computeSocialMixReport, retired nape zone (§3.2c)', () => {
 })
 
 describe('getSocialMixReport, defensive fallback', () => {
-  it('degrades to an all-UNKNOWN report instead of throwing when loadRows fails', async () => {
+  it('degrades to an all-UNKNOWN bundle instead of throwing when loadRows fails', async () => {
     const loadRows = vi.fn().mockRejectedValue(new Error('column "body_zone" does not exist'))
-    const report = await getSocialMixReport({ loadRows })
-    expect(report.anyBreach).toBe(false)
-    for (const line of Object.values(report.lines)) {
-      expect(line.status).toBe('unknown')
-      expect(line.detail).not.toContain('BREACH')
+    const loadRemovals = vi.fn().mockResolvedValue({ instagram: 0, x: 0 })
+    const bundle = await getSocialMixReport({ loadRows, loadRemovals })
+    // #10478 defect 1: a read failure must NOT render as "in band". Every
+    // line is UNKNOWN, and UNKNOWN is not ok, so the headline alarms.
+    expect(bundle.anyBreach).toBe(true)
+    expect(bundle.worstStatus).toBe('unknown')
+    for (const report of [bundle.instagram, bundle.x]) {
+      for (const line of Object.values(report.lines)) {
+        expect(line.status).toBe('unknown')
+        expect(line.detail).not.toContain('BREACH')
+      }
     }
   })
 
-  it('computes normally when loadRows succeeds', async () => {
+  it('computes normally when loadRows succeeds, one report per fenced feed', async () => {
     const loadRows = vi.fn().mockResolvedValue([
       row({ id: 1, mediaUrls: ['a.jpg', 'b.jpg'] }),
+      row({ id: 2, platform: 'x' }),
     ])
-    const report = await getSocialMixReport({ loadRows })
+    const loadRemovals = vi.fn().mockResolvedValue({ instagram: 0, x: 2 })
+    const bundle = await getSocialMixReport({ loadRows, loadRemovals })
     expect(loadRows).toHaveBeenCalledWith(60)
-    expect(report.sampleSize).toBe(1)
+    expect(bundle.instagram.sampleSize).toBe(1)
+    expect(bundle.x.sampleSize).toBe(1)
+    expect(bundle.instagram.lines.removals.status).toBe('ok')
+    expect(bundle.x.lines.removals.status).toBe('breach')
+    expect(bundle.x.lines.removals.detail).toContain('2 platform-attributed removal')
+  })
+
+  it('degrades only the removals line when the removal count cannot be read', async () => {
+    const loadRows = vi.fn().mockResolvedValue([row({ id: 1 })])
+    const loadRemovals = vi.fn().mockRejectedValue(new Error('timeout'))
+    const bundle = await getSocialMixReport({ loadRows, loadRemovals })
+    expect(bundle.instagram.lines.removals.status).toBe('unknown')
+    expect(bundle.instagram.sampleSize).toBe(1)
   })
 })
 
@@ -381,11 +409,213 @@ describe('formatSocialMixReportLines', () => {
   it('prints one line per report line with an explicit status marker', () => {
     const report = computeSocialMixReport([row(), row(), row()])
     const lines = formatSocialMixReportLines(report)
-    expect(lines).toHaveLength(15)
-    for (const line of lines) expect(line).toMatch(/^\[mix-report\] /)
+    expect(lines).toHaveLength(18)
+    for (const line of lines) expect(line).toMatch(/^\[mix-report\] instagram /)
     // Everything in this all-null fixture is either UNKNOWN (enrichment
     // columns absent) or a hard floor breach (0 carousels, 0 product-free
     // rows against the 1-post floor is moot here since window < 14).
     expect(lines.some(l => l.includes('UNKNOWN'))).toBe(true)
+  })
+})
+
+// --- Ticket #10478: the report reads honest ---------------------------------
+
+describe('computeSocialMixReport, UNKNOWN alarms (#10478 defect 1)', () => {
+  it('sets anyBreach on an all-UNKNOWN window instead of reading clean', () => {
+    const rows = Array.from({ length: 21 }, (_, i) => row({ id: i }))
+    const report = computeSocialMixReport(rows)
+    // Every axis column is null here, which is the exact production state
+    // (281 rows, 0 carrying any axis). The old anyBreach tested only for
+    // 'breach', and this window reported no drift at all.
+    expect(report.anyBreach).toBe(true)
+    expect(report.worstStatus).toBe('breach')
+    expect(report.lines.coverage.status).toBe('breach')
+    expect(report.lines.coverage.detail).toContain('0 / 7')
+    expect(report.lines.coverage.detail).toContain('floor 7')
+  })
+
+  it('separates "unknown" from "breach" in worstStatus', () => {
+    // A clean fortnight: every cap inside its band and all four axes on the
+    // last 7. The only non-ok lines left are the ones with no backing data at
+    // all (educational, lube-treatment, cast_slugs, the removal count), so
+    // the headline must read UNKNOWN rather than BREACH. Both alarm, and the
+    // owner needs to know which one he is looking at.
+    const zones = ['hip-hollow', 'sternum', 'stomach', 'small-of-back', 'inner-wrist', 'forearm', 'behind-knee']
+    const modes = ['resting', 'self-held', 'other-held', 'drawn', 'worn', 'balanced', 'resting']
+    const crops = ['medium', 'wide', 'macro', 'wide', 'medium', 'wide', 'close']
+    const rows: SocialMixReportRow[] = zones.map((zone, i) => row({
+      id: i + 1,
+      bodyZone: zone,
+      contactMode: modes[i]!,
+      cropScale: crops[i]!,
+      sceneLocation: `room-${i + 1}`,
+      shopifyProductId: 'gid://shopify/Product/1',
+      // One carousel clears the rolling-14 floor of 1.
+      ...(i === 0 ? { mediaUrls: ['https://cdn.example/a.jpg', 'https://cdn.example/b.jpg'] } : {}),
+    }))
+    // Rows 8-14: product-free non-skin frames, which is what holds the
+    // product-forward share inside its 6-7 band over the rolling 14.
+    for (let i = 7; i < 14; i++) {
+      rows.push(row({ id: i + 1, bodyZone: 'none', contactMode: 'none', cropScale: 'wide', sceneLocation: `room-${i + 1}` }))
+    }
+
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.coverage.status).toBe('ok')
+    expect(Object.values(report.lines).filter(l => l.status === 'breach')).toEqual([])
+    expect(report.worstStatus).toBe('unknown')
+    expect(report.anyBreach).toBe(true)
+  })
+})
+
+describe('computeSocialMixReport, the "none" sentinel (#10478 defect 4)', () => {
+  it('does not read two consecutive non-skin frames as a zone repeat', () => {
+    // The live bug: the art director emits bodyZone 'none' for a frame with
+    // no bare skin, and any non-null zone counted as an on-skin frame, so two
+    // honest non-skin posts in a row produced REPEAT FOUND and a false BREACH.
+    const rows = [
+      row({ id: 1, bodyZone: 'none', contactMode: 'none' }),
+      row({ id: 2, bodyZone: 'none', contactMode: 'none' }),
+      row({ id: 3, bodyZone: 'hip-hollow', contactMode: 'resting' }),
+    ]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.bodyZoneWindow.status).toBe('ok')
+    expect(report.lines.bodyZoneWindow.detail).toContain('no repeat')
+    expect(report.lines.contactModeWindow.status).toBe('ok')
+  })
+
+  it('still counts a "none" row as a KNOWN zone, so the window is not UNKNOWN', () => {
+    const rows = [row({ id: 1, bodyZone: 'none' }), row({ id: 2, bodyZone: 'none' })]
+    const report = computeSocialMixReport(rows)
+    // Known, so ceiling/mid compute (at 0) rather than degrading to UNKNOWN:
+    // "no on-skin frame this week" is an answer, not a missing column.
+    expect(report.lines.ceiling.status).not.toBe('unknown')
+    expect(report.lines.ceiling.detail).toContain('0 / 7')
+  })
+
+  it('never scores "none" as a charge tier or as the plug placement', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => row({ id: i, bodyZone: 'none' }))
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.plug.detail).toContain('0 / 7')
+    expect(report.lines.plug.status).toBe('ok')
+  })
+})
+
+describe('computeSocialMixReport, video dilution (#10478 defect 2)', () => {
+  it('keeps video rows out of the stills windows and prints them on their own line', () => {
+    // Four reels and three on-skin stills, all three tight. With the reels in
+    // the denominator the close-crop count reads 3 of 7 and sits under the
+    // cap; the stills-only window is what the cap is actually about.
+    const rows = [
+      row({ id: 1, mediaKind: 'video' }),
+      row({ id: 2, mediaKind: 'video' }),
+      row({ id: 3, mediaKind: 'video' }),
+      row({ id: 4, mediaKind: 'video' }),
+      row({ id: 5, bodyZone: 'hip-hollow', cropScale: 'macro' }),
+      row({ id: 6, bodyZone: 'sternum', cropScale: 'close' }),
+      row({ id: 7, bodyZone: 'stomach', cropScale: 'macro' }),
+    ]
+    const report = computeSocialMixReport(rows)
+    expect(report.sampleSize).toBe(3)
+    expect(report.lines.videoRows.detail).toContain('4 / 7')
+    expect(report.lines.videoRows.status).toBe('unknown')
+    // Three close crops among three stills, and two of them consecutive.
+    expect(report.lines.closeCrop.status).toBe('breach')
+  })
+
+  it('infers a video row from an .mp4 media URL on a pre-086 row with no media_kind', () => {
+    const rows = [row({ id: 1, mediaKind: null, mediaUrls: ['https://cdn.example/reel.mp4'] })]
+    const report = computeSocialMixReport(rows)
+    expect(report.sampleSize).toBe(0)
+    expect(report.lines.videoRows.detail).toContain('1 / 7')
+  })
+
+  it('reads ok on the video line when the newest 7 are all stills', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => row({ id: i }))
+    expect(computeSocialMixReport(rows).lines.videoRows.status).toBe('ok')
+  })
+
+  it('counts a NULL media_kind row as a still, which is 271 of the 281 live rows', () => {
+    // Production 2026-09-20: media_kind is NULL on 271 of 281 rows and no row
+    // anywhere carries 'video'. A `media_kind != 'video'` filter would be NULL
+    // for every one of those rows, drop them all, and empty every window. NULL
+    // here means "kind not recorded", the pre-086 default, and it is a still.
+    const rows = Array.from({ length: 7 }, (_, i) => row({
+      id: i + 1,
+      mediaKind: null,
+      mediaUrls: ['https://cdn.example/still.jpg'],
+      bodyZone: 'hip-hollow',
+      cropScale: 'macro',
+    }))
+    const report = computeSocialMixReport(rows)
+    expect(report.sampleSize).toBe(7)
+    expect(report.lines.videoRows.status).toBe('ok')
+    expect(report.lines.videoRows.detail).toContain('0 / 7')
+    // The window is populated, so the close-crop cap actually fires.
+    expect(report.lines.closeCrop.status).toBe('breach')
+  })
+
+  it('never lets a NULL media_kind feed the scene-axis coverage line', () => {
+    // Two different nulls: "kind not recorded" (historical, benign) and "axis
+    // never supplied" (the decay #10479 fixes). Only the second may alarm.
+    const covered = row({
+      id: 1, mediaKind: null,
+      bodyZone: 'hip-hollow', contactMode: 'resting', cropScale: 'medium', sceneLocation: 'bedroom-loft',
+    })
+    const report = computeSocialMixReport(Array.from({ length: 7 }, (_, i) => ({ ...covered, id: i + 1 })))
+    expect(report.lines.coverage.detail).toContain('7 / 7')
+    expect(report.lines.coverage.status).toBe('ok')
+  })
+})
+
+describe('computeSocialMixReportBundle, per platform (#10478 defect 3)', () => {
+  it('computes Instagram and X separately rather than averaging one into the other', () => {
+    const rows = [
+      // X: three consecutive close crops, a real cap problem on the surface
+      // that cannot label sensitive media.
+      row({ id: 1, platform: 'x', bodyZone: 'hip-hollow', cropScale: 'macro' }),
+      row({ id: 2, platform: 'x', bodyZone: 'sternum', cropScale: 'close' }),
+      row({ id: 3, platform: 'x', bodyZone: 'stomach', cropScale: 'macro' }),
+      // Instagram: one wide ceiling frame, nothing tight.
+      row({ id: 4, bodyZone: 'hip-hollow', cropScale: 'medium' }),
+    ]
+    const bundle = computeSocialMixReportBundle(rows)
+    expect(bundle.instagram.platform).toBe('instagram')
+    expect(bundle.x.platform).toBe('x')
+    expect(bundle.instagram.sampleSize).toBe(1)
+    expect(bundle.x.sampleSize).toBe(3)
+    expect(bundle.x.lines.closeCrop.status).toBe('breach')
+    expect(bundle.instagram.lines.closeCrop.status).toBe('ok')
+    expect(bundle.anyBreach).toBe(true)
+  })
+
+  it('prints platform-labelled lines for both feeds', () => {
+    const lines = formatSocialMixReportLines(
+      computeSocialMixReportBundle([row(), row({ id: 2, platform: 'x' })]),
+    )
+    expect(lines.some(l => l.startsWith('[mix-report] instagram '))).toBe(true)
+    expect(lines.some(l => l.startsWith('[mix-report] x '))).toBe(true)
+    expect(lines).toHaveLength(36)
+  })
+})
+
+// --- Ticket #10480: one vocabulary, no drift --------------------------------
+
+describe('the report classifies only against the shared vocabulary (#10480)', () => {
+  it('CEILING_ZONES, MID_ZONES and PLUG_ZONE are all subsets of BODY_ZONES', () => {
+    for (const zone of CEILING_ZONES) expect(BODY_ZONES as readonly string[]).toContain(zone)
+    for (const zone of MID_ZONES) expect(BODY_ZONES as readonly string[]).toContain(zone)
+    expect(BODY_ZONES as readonly string[]).toContain(PLUG_ZONE)
+  })
+
+  it('CLOSE_CROP_SCALES is a subset of CROP_SCALES', () => {
+    for (const scale of CLOSE_CROP_SCALES) expect(CROP_SCALES as readonly string[]).toContain(scale)
+  })
+
+  it('a zone the vocabulary refuses can never reach a charge tier', () => {
+    // `hip_hollow` is the exact typo #10480 exists to stop: it used to pass a
+    // length-only validator, persist, and then match nothing.
+    expect(BODY_ZONES as readonly string[]).not.toContain('hip_hollow')
+    expect(CEILING_ZONES.has('hip_hollow')).toBe(false)
+    expect(MID_ZONES.has('hip_hollow')).toBe(false)
   })
 })

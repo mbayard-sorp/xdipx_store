@@ -39,10 +39,60 @@
  * UNKNOWN. It is printed anyway, on its own line, so its absence stays
  * visible instead of quietly dropped -- the failure mode this whole ticket
  * exists to close.
+ *
+ * WHAT TICKET #10478 CHANGED, and why each one made the report read green
+ * while the campaign ran blind:
+ *
+ *  1. UNKNOWN now alarms. `anyBreach` tests `status !== 'ok'`, so the
+ *     most-decayed signal in the system can no longer sit silent behind an
+ *     "in band" headline. `worstStatus` names which it is, so the admin page
+ *     can paint UNKNOWN as UNKNOWN rather than as a breach or as fine print.
+ *     A new coverage line counts how many of the last 7 carry all four axes.
+ *     A report that gates nothing costs nothing to make loud.
+ *  2. Video rows no longer dilute the stills windows. Nothing on the video
+ *     path writes bodyZone/contactMode/cropScale, so a week of reels used to
+ *     shrink every on-skin count while the rolling-7 still held 7 rows, and
+ *     "0 close crops" read green. Video rows are excluded from the still
+ *     windows and printed as their own line instead.
+ *  3. X is in. Instagram and X share one imagery fence until X can label
+ *     sensitive media, and X is the surface that cannot label, so the report
+ *     computes per platform for both. The caps are per feed, so the windows
+ *     are per feed.
+ *  4. The `none` sentinel. The art director is instructed to emit
+ *     `bodyZone: 'none'` for a frame with no bare skin. Treating any non-null
+ *     zone as an on-skin frame turned two consecutive non-skin posts into a
+ *     false zone repeat and a false BREACH. `none` now reads as "known, not
+ *     on-skin": it counts toward coverage and toward nothing else.
+ *  5. The outcome variable. Report-only measurement of inputs is only
+ *     meaningful next to the result it predicts, so platform-attributed
+ *     removals in the last 30 days print per platform.
+ *
+ * STILL NOT A GATE. Owner ruling 2026-09-20 (blocker #194) made the §3.2c
+ * caps report-only, and that is exactly why the lines above are strict: none
+ * of this can refuse a post, so none of it needs to be forgiving.
  */
+
+import { NON_SKIN_SENTINEL, hasAllSceneAxes } from './social-scene-vocab'
+
+/** The two surfaces that share one imagery fence (instagram-campaigns.md §3.2c). */
+export const MIX_REPORT_PLATFORMS = ['instagram', 'x'] as const
+export type MixReportPlatform = (typeof MIX_REPORT_PLATFORMS)[number]
 
 export interface SocialMixReportRow {
   id: number
+  /**
+   * Which feed this row posted to. Instagram and X are computed separately:
+   * the §3.2b/§3.2c caps are per feed, and an aggregate across both would
+   * average one quiet surface into another loud one.
+   */
+  platform: MixReportPlatform
+  /**
+   * `media_kind` (migration 086): 'image' | 'video' | 'none', nullable on
+   * pre-086 rows. A video row is excluded from every stills window below,
+   * because nothing on the video path writes the axes and leaving reels in
+   * the denominator is what made a week of them read green.
+   */
+  mediaKind: string | null
   /** True when the row is product-forward: `shopify_product_id` is set. */
   shopifyProductId: string | null
   /** `media_urls`; a carousel is >1 URL (matches `social-post-ops.server.ts`'s `mediaForRow`). */
@@ -74,7 +124,12 @@ export interface MixReportLine {
 export interface SocialMixReport {
   /** How many rows the report actually had to work with (<= what was requested). */
   sampleSize: number
+  /** Which feed these numbers describe. */
+  platform: MixReportPlatform
   lines: {
+    coverage: MixReportLine
+    videoRows: MixReportLine
+    removals: MixReportLine
     ceiling: MixReportLine
     mid: MixReportLine
     educational: MixReportLine
@@ -91,8 +146,34 @@ export interface SocialMixReport {
     lubeTreatment: MixReportLine
     carousel: MixReportLine
   }
-  /** True if any line reads BREACH; convenience for a caller that just wants a headline. */
+  /**
+   * True if ANY line is not `ok`, UNKNOWN included (#10478). The old version
+   * tested `status === 'breach'` only, so an unpopulated column never
+   * alarmed and the report read clean by construction. The name is kept
+   * because callers read it; `worstStatus` is what distinguishes the two.
+   */
   anyBreach: boolean
+  /** 'breach' beats 'unknown' beats 'ok'. What a headline should actually say. */
+  worstStatus: LineStatus
+}
+
+/** Both feeds, plus a single headline across them. */
+export interface SocialMixReportBundle {
+  instagram: SocialMixReport
+  x: SocialMixReport
+  /** True when either feed has a non-ok line. */
+  anyBreach: boolean
+  worstStatus: LineStatus
+}
+
+/** Numbers that come from a second query rather than from the window rows. */
+export interface SocialMixReportExtras {
+  /**
+   * Platform-attributed removals in the last 30 days (status='deleted',
+   * `removal_source != 'owner'`). null = could not be read, which prints
+   * UNKNOWN rather than a reassuring 0.
+   */
+  removals30d?: number | null
 }
 
 // docs/store-team/instagram-campaigns.md §3.2b: "roughly 4 at the ceiling, 2
@@ -110,16 +191,16 @@ const CHARGE_TOLERANCE = 1
 // #10340 item 3: the plug-between-the-cheeks placement §3.2c licenses
 // explicitly is ceiling tier ("the highest-classifier-signal frame in the
 // campaign"), so it belongs in this list as well as in its own capped line.
-const CEILING_ZONES = new Set(['hip-hollow', 'small-of-back', 'sternum', 'stomach', 'gluteal-cleft'])
+export const CEILING_ZONES = new Set(['hip-hollow', 'small-of-back', 'sternum', 'stomach', 'gluteal-cleft'])
 // #10340 item 5: 'nape' is retired by §3.2c ("The nape is retired until a SKU
 // fits it" -- we sell no neck massager), so it no longer scores as a mid frame.
-const MID_ZONES = new Set(['inner-wrist', 'forearm', 'behind-knee', 'shoulder-blade'])
+export const MID_ZONES = new Set(['inner-wrist', 'forearm', 'behind-knee', 'shoulder-blade'])
 
 // §3.2c, owner direction 2026-09-19: the plug laid between the cheeks is
 // licensed at "at most one per rolling 7" and is "the first frame to drop if
 // the removal watcher fires", so it gets its own counted line rather than
 // hiding inside the ceiling band.
-const PLUG_ZONE = 'gluteal-cleft'
+export const PLUG_ZONE = 'gluteal-cleft'
 const PLUG_CAP = 1
 
 // §3.2c, same paragraph as the close-crop cap: "at least one ceiling frame per
@@ -141,7 +222,7 @@ const CAST_ROTATION_CAP = 2
 // same CHARGE_WINDOW above), never two consecutive. "Close crop" = the two
 // tight crop_scale values; 'medium'/'wide' are not close crops.
 const CLOSE_CROP_CAP = 3
-const CLOSE_CROP_SCALES = new Set(['macro', 'close'])
+export const CLOSE_CROP_SCALES = new Set(['macro', 'close'])
 
 // mission-brief.md §6b + ticket #10110's own reading of it ("misses the ~40%
 // product-in-scene share... clears the <=50% ceiling"): read as a rolling-14
@@ -176,6 +257,51 @@ function isCarousel(row: SocialMixReportRow): boolean {
 
 function isProductForward(row: SocialMixReportRow): boolean {
   return !!row.shopifyProductId
+}
+
+/**
+ * A row is on-skin when its zone is KNOWN and is not the `none` sentinel
+ * (#10478 defect 4). The art director emits `bodyZone: 'none'` for a frame
+ * that touches no bare skin, so treating any non-null zone as on-skin made
+ * two consecutive non-skin posts read as a zone repeat and a false BREACH.
+ */
+function isOnSkin(row: SocialMixReportRow): boolean {
+  return row.bodyZone != null && row.bodyZone !== NON_SKIN_SENTINEL
+}
+
+/** Known means "the writer answered", which `none` is. Drives coverage, not tiers. */
+function zoneIsKnown(row: SocialMixReportRow): boolean {
+  return row.bodyZone != null
+}
+
+/**
+ * Video rows carry no scene axes (the fan-out insert writes castSlugs and
+ * shopifyProductId only), so they are excluded from every stills window.
+ *
+ * DATA CONTRACT (production, 2026-09-20): `media_kind` is NULL on 271 of 281
+ * `social_posts` rows and there is not one row with `media_kind = 'video'`.
+ * Two consequences, both load-bearing:
+ *
+ *  1. The exclusion is computed HERE, in TypeScript, never as a SQL
+ *     `media_kind != 'video'`. That predicate evaluates to NULL for a NULL
+ *     row, which is not TRUE, so it would silently drop 271 of 281 rows and
+ *     empty every rolling window. The live query filters platform/status
+ *     only. This is the enrichment-filter rule from the 2026-08-04
+ *     conversation-channels audit applied to a nullable column.
+ *  2. NULL means "still, kind not recorded", not "unknown, alarm". It is the
+ *     historical default of every row predating migration 086, so it counts
+ *     as a still and never feeds an UNKNOWN line. The scene-axis coverage
+ *     line measures a different null entirely (the axes that were never
+ *     supplied), and conflating the two would make coverage meaningless on
+ *     day one.
+ *
+ * A `.mp4`-shaped media URL is the one positive fallback for a pre-086 row:
+ * it is evidence the row IS video, never evidence that a null one is.
+ */
+export function isVideoRow(row: SocialMixReportRow): boolean {
+  if (row.mediaKind === 'video') return true
+  if (row.mediaKind === 'image') return false
+  return (row.mediaUrls ?? []).some(u => typeof u === 'string' && /\.(mp4|mov|m4v)(\?|$)/i.test(u))
 }
 
 function chargeTierOf(row: SocialMixReportRow): 'ceiling' | 'mid' | null {
@@ -245,9 +371,50 @@ function unknownLine(label: string, reason: string): MixReportLine {
  * clock reads: fully deterministic from its input, which is what makes it
  * unit-testable without a database.
  */
-export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixReport {
+export function computeSocialMixReport(
+  allRows: SocialMixReportRow[],
+  platform: MixReportPlatform = 'instagram',
+  extras: SocialMixReportExtras = {},
+): SocialMixReport {
+  // Stills only, for every window below (#10478 defect 2). A reel sitting in
+  // the Instagram denominator shrinks each on-skin count while the rolling-7
+  // still holds 7 rows, which is how a week of video made every 3.2c line
+  // read green. The video rows get their own line instead of vanishing.
+  const rows = allRows.filter(r => !isVideoRow(r))
+  const videoIn7 = allRows.slice(0, CHARGE_WINDOW).filter(isVideoRow).length
   const last7 = rows.slice(0, CHARGE_WINDOW)
   const last14 = rows.slice(0, PRODUCT_WINDOW)
+
+  // --- Axis coverage: how many of the last 7 stills carry all four axes ---
+  // The line ticket #10479 exists to move. 0/7 is the state migrations 093
+  // and 099 both shipped into, twice, undetected.
+  const coveredIn7 = last7.filter(r => hasAllSceneAxes({
+    bodyZone: r.bodyZone ?? undefined,
+    contactMode: r.contactMode ?? undefined,
+    cropScale: r.cropScale ?? undefined,
+    sceneLocation: r.sceneLocation ?? undefined,
+  })).length
+  const coverage = minFloorLine('Axis coverage (last 7)', coveredIn7, CHARGE_WINDOW, CHARGE_WINDOW)
+
+  // --- Video rows in the newest 7 posts of this feed ---
+  const videoRows: MixReportLine = videoIn7 === 0
+    ? { label: 'Video rows (last 7 posts)', detail: `0 / ${CHARGE_WINDOW} (stills windows undiluted)`, status: 'ok' }
+    : {
+        label: 'Video rows (last 7 posts)',
+        detail:
+          `${videoIn7} / ${CHARGE_WINDOW} video row(s), axes UNKNOWN ` +
+          '(excluded from the stills windows; nothing on the video path writes them)',
+        status: 'unknown',
+      }
+
+  // --- Removals in the last 30 days: the outcome the caps exist to prevent ---
+  const removals = extras.removals30d == null
+    ? unknownLine('Removals (last 30d)', 'removal count could not be read')
+    : {
+        label: 'Removals (last 30d)',
+        detail: `${extras.removals30d} platform-attributed removal(s)` + (extras.removals30d > 0 ? ' -- BREACH' : ''),
+        status: (extras.removals30d > 0 ? 'breach' : 'ok') as LineStatus,
+      }
 
   // --- Charge tier (ceiling / mid / educational) ---
   // "Educational" has no column anywhere in social_posts that encodes charge
@@ -258,7 +425,7 @@ export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixRep
   // would silently misclassify every non-on-skin ceiling frame -- a full
   // scene composition, a cast frame -- as educational, which is exactly the
   // hidden-drift failure this ticket exists to stop).
-  const bodyZoneKnownIn7 = last7.filter(r => r.bodyZone != null).length
+  const bodyZoneKnownIn7 = last7.filter(zoneIsKnown).length
   let ceiling: MixReportLine
   let mid: MixReportLine
   const educational = unknownLine('Educational (last 7)', 'no column encodes charge tier for non-on-skin frames')
@@ -311,7 +478,8 @@ export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixRep
   }
 
   // --- Body-zone window: no repeat inside 5 consecutive on-skin frames ---
-  const onSkin = rows.filter(r => r.bodyZone != null)
+  // `none` is a known answer, not a zone: it never enters the repeat window.
+  const onSkin = rows.filter(isOnSkin)
   let bodyZoneWindow: MixReportLine
   if (onSkin.length === 0) {
     bodyZoneWindow = unknownLine('Body-zone window (last 5 on-skin)', 'body_zone unpopulated on every row')
@@ -332,7 +500,7 @@ export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixRep
   }
 
   // --- Contact-mode window: no repeat inside 5 consecutive on-skin frames ---
-  const contacted = rows.filter(r => r.contactMode != null)
+  const contacted = rows.filter(r => r.contactMode != null && r.contactMode !== NON_SKIN_SENTINEL)
   const contactModeWindow = contacted.length === 0
     ? unknownLine('Contact-mode window (last 5 on-skin)', 'contact_mode unpopulated on every row')
     : repeatWindowLine('Contact-mode window (last 5 on-skin)', contacted.map(r => r.contactMode!), CONTACT_MODE_WINDOW)
@@ -438,31 +606,76 @@ export function computeSocialMixReport(rows: SocialMixReportRow[]): SocialMixRep
   const carousel = minFloorLine('Carousel (last 14)', carouselCount, PRODUCT_WINDOW, CAROUSEL_MIN)
 
   const lines = {
+    coverage, videoRows, removals,
     ceiling, mid, educational, closeCrop, productForward, productFree,
     bodyZoneWindow, contactModeWindow, locationWindow,
     castRotation, castVolume, wideCeiling, plug, lubeTreatment, carousel,
   }
-  const anyBreach = Object.values(lines).some(l => l.status === 'breach')
+  // Non-ok, not breach-only (#10478 defect 1). An unpopulated column is the
+  // most-decayed signal in the system and it used to read clean.
+  const anyBreach = Object.values(lines).some(l => l.status !== 'ok')
+  const worstStatus: LineStatus = Object.values(lines).some(l => l.status === 'breach')
+    ? 'breach'
+    : anyBreach ? 'unknown' : 'ok'
 
-  return { sampleSize: rows.length, lines, anyBreach }
+  return { sampleSize: rows.length, platform, lines, anyBreach, worstStatus }
+}
+
+/**
+ * Both feeds from one row list. Instagram and X share the imagery fence but
+ * the caps are per feed, so each gets its own windows; X is the surface that
+ * cannot label sensitive media, which is precisely why it may not be left
+ * out of the measurement.
+ */
+export function computeSocialMixReportBundle(
+  rows: SocialMixReportRow[],
+  extras: Partial<Record<MixReportPlatform, SocialMixReportExtras>> = {},
+): SocialMixReportBundle {
+  const instagram = computeSocialMixReport(
+    rows.filter(r => r.platform === 'instagram'), 'instagram', extras.instagram ?? {},
+  )
+  const x = computeSocialMixReport(
+    rows.filter(r => r.platform === 'x'), 'x', extras.x ?? {},
+  )
+  const anyBreach = instagram.anyBreach || x.anyBreach
+  const worstStatus: LineStatus =
+    instagram.worstStatus === 'breach' || x.worstStatus === 'breach' ? 'breach'
+      : anyBreach ? 'unknown' : 'ok'
+  return { instagram, x, anyBreach, worstStatus }
 }
 
 const LINE_ORDER: (keyof SocialMixReport['lines'])[] = [
+  'coverage', 'videoRows', 'removals',
   'ceiling', 'mid', 'educational', 'closeCrop', 'productForward', 'productFree',
   'bodyZoneWindow', 'contactModeWindow', 'locationWindow',
   'castRotation', 'castVolume', 'wideCeiling', 'plug', 'lubeTreatment', 'carousel',
 ]
 
-/** Plain-text lines for the social run summary (routine-social-daily.md Step 7) and log output. */
-export function formatSocialMixReportLines(report: SocialMixReport): string[] {
-  return LINE_ORDER.map(key => {
-    const line = report.lines[key]
-    const marker = line.status === 'breach' ? 'BREACH' : line.status === 'unknown' ? 'UNKNOWN' : 'ok'
-    return `[mix-report] ${line.label}: ${line.detail} (${marker})`
-  })
+/**
+ * Plain-text lines for the social run summary (routine-social-daily.md Step 7)
+ * and log output. Every line names its feed, because the caps are per feed and
+ * an unlabelled line invites exactly the aggregation this report stopped doing.
+ */
+export function formatSocialMixReportLines(
+  report: SocialMixReport | SocialMixReportBundle,
+): string[] {
+  if ('lines' in report) {
+    return LINE_ORDER.map(key => {
+      const line = report.lines[key]
+      const marker = line.status === 'breach' ? 'BREACH' : line.status === 'unknown' ? 'UNKNOWN' : 'ok'
+      return `[mix-report] ${report.platform} ${line.label}: ${line.detail} (${marker})`
+    })
+  }
+  return [
+    ...formatSocialMixReportLines(report.instagram),
+    ...formatSocialMixReportLines(report.x),
+  ]
 }
 
 const LINE_LABELS: Record<keyof SocialMixReport['lines'], string> = {
+  coverage: 'Axis coverage (last 7)',
+  videoRows: 'Video rows (last 7 posts)',
+  removals: 'Removals (last 30d)',
   ceiling: 'Ceiling (last 7)',
   mid: 'Mid (last 7)',
   educational: 'Educational (last 7)',
@@ -489,31 +702,64 @@ const LINE_LABELS: Record<keyof SocialMixReport['lines'], string> = {
  * assuming a column exists before the migration that adds it has actually
  * run against the live database.
  */
-function unavailableReport(reason: string): SocialMixReport {
+function unavailableReport(platform: MixReportPlatform, reason: string): SocialMixReport {
   const lines = {} as SocialMixReport['lines']
   for (const key of LINE_ORDER) lines[key] = unknownLine(LINE_LABELS[key], reason)
-  return { sampleSize: 0, lines, anyBreach: false }
+  // anyBreach is true because every line is UNKNOWN and UNKNOWN is not ok
+  // (#10478). A read failure that reported "in band" would be the same
+  // false-negative this module exists to stop.
+  return { sampleSize: 0, platform, lines, anyBreach: true, worstStatus: 'unknown' }
+}
+
+function unavailableBundle(reason: string): SocialMixReportBundle {
+  return {
+    instagram: unavailableReport('instagram', reason),
+    x: unavailableReport('x', reason),
+    anyBreach: true,
+    worstStatus: 'unknown',
+  }
 }
 
 // --- DB wrapper -------------------------------------------------------
 
 export interface GetSocialMixReportDeps {
-  /** Returns the last `limit` posted+approved Instagram rows, newest first. */
+  /**
+   * The last `limit` posted+approved rows on BOTH fenced feeds (Instagram and
+   * X), newest first. One query; the pure function splits them per platform.
+   */
   loadRows: (limit: number) => Promise<SocialMixReportRow[]>
+  /**
+   * Platform-attributed removals in the last `days` days, per platform. The
+   * outcome variable: measuring inputs with no result next to them is how a
+   * report-only regime stops meaning anything.
+   */
+  loadRemovals: (days: number) => Promise<Record<MixReportPlatform, number>>
 }
 
 // Comfortably larger than every window used above (max 14, plus enough slack
 // for the on-skin/location windows to find their 5/8 within a sparser
-// subset of a longer history).
+// subset of a longer history). Per platform, not global: both feeds come out
+// of one query and the quieter one must not be starved out of its own window
+// by the louder one.
 const DEFAULT_FETCH_LIMIT = 60
+const REMOVAL_WINDOW_DAYS = 30
+
+/** 'instagram' | 'x' only; anything else is not on the shared imagery fence. */
+function asMixPlatform(value: string | null | undefined): MixReportPlatform | null {
+  return (MIX_REPORT_PLATFORMS as readonly string[]).includes(value ?? '')
+    ? (value as MixReportPlatform)
+    : null
+}
 
 async function liveLoadRows(limit: number): Promise<SocialMixReportRow[]> {
   const { db } = await import('./db.server')
   const { socialPosts } = await import('../../db/schema')
-  const { and, eq, desc } = await import('drizzle-orm')
+  const { and, eq, desc, inArray } = await import('drizzle-orm')
   const rows = await db
     .select({
       id: socialPosts.id,
+      platform: socialPosts.platform,
+      mediaKind: socialPosts.mediaKind,
       shopifyProductId: socialPosts.shopifyProductId,
       mediaUrls: socialPosts.mediaUrls,
       bodyZone: socialPosts.bodyZone,
@@ -524,40 +770,90 @@ async function liveLoadRows(limit: number): Promise<SocialMixReportRow[]> {
     })
     .from(socialPosts)
     .where(and(
-      eq(socialPosts.platform, 'instagram'),
+      // Both fenced feeds (#10478 defect 3). The Surfaces paragraph of 3.2c:
+      // "Instagram and X share one imagery fence until X can label sensitive
+      // media", and X is the one that cannot label.
+      inArray(socialPosts.platform, [...MIX_REPORT_PLATFORMS]),
       eq(socialPosts.status, 'posted'),
       eq(socialPosts.reviewStatus, 'approved'),
     ))
     .orderBy(desc(socialPosts.postedAt))
-    .limit(limit)
-  return rows.map(r => ({
-    id: r.id,
-    shopifyProductId: r.shopifyProductId ?? null,
-    mediaUrls: r.mediaUrls ?? null,
-    bodyZone: r.bodyZone ?? null,
-    contactMode: r.contactMode ?? null,
-    cropScale: r.cropScale ?? null,
-    sceneLocation: r.sceneLocation ?? null,
-    castSlugs: r.castSlugs ?? null,
-  }))
+    .limit(limit * MIX_REPORT_PLATFORMS.length)
+  return rows.flatMap(r => {
+    const platform = asMixPlatform(r.platform)
+    if (!platform) return []
+    return [{
+      id: r.id,
+      platform,
+      mediaKind: r.mediaKind ?? null,
+      shopifyProductId: r.shopifyProductId ?? null,
+      mediaUrls: r.mediaUrls ?? null,
+      bodyZone: r.bodyZone ?? null,
+      contactMode: r.contactMode ?? null,
+      cropScale: r.cropScale ?? null,
+      sceneLocation: r.sceneLocation ?? null,
+      castSlugs: r.castSlugs ?? null,
+    }]
+  })
 }
 
 /**
- * Fetches the last N posted+approved Instagram rows and computes the
- * report. Not a gate. Never throws: a read failure (e.g. migration 099 not
- * yet applied against this database even though the code references its
- * columns, per PR #1227's dependency) degrades to an all-UNKNOWN report
- * rather than taking down whatever page or routine called this.
+ * Removals per platform in the window. Mirrors `countRemovedSince` in
+ * `social-removal-watch.server.ts`, including its `removalSource != 'owner'`
+ * exclusion: a post the owner took down himself is not a takedown signal.
+ */
+async function liveLoadRemovals(days: number): Promise<Record<MixReportPlatform, number>> {
+  const { db } = await import('./db.server')
+  const { socialPosts } = await import('../../db/schema')
+  const { and, eq, gte, ne, inArray, sql } = await import('drizzle-orm')
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const rows = await db
+    .select({ platform: socialPosts.platform, n: sql<number>`count(*)::int` })
+    .from(socialPosts)
+    .where(and(
+      inArray(socialPosts.platform, [...MIX_REPORT_PLATFORMS]),
+      eq(socialPosts.status, 'deleted'),
+      gte(socialPosts.postedAt, since),
+      ne(socialPosts.removalSource, 'owner'),
+    ))
+    .groupBy(socialPosts.platform)
+  const out: Record<MixReportPlatform, number> = { instagram: 0, x: 0 }
+  for (const r of rows) {
+    const platform = asMixPlatform(r.platform)
+    if (platform) out[platform] = r.n
+  }
+  return out
+}
+
+/**
+ * Fetches the last N posted+approved rows on both fenced feeds and computes
+ * one report per feed. Not a gate. Never throws: a read failure degrades to
+ * an all-UNKNOWN bundle rather than taking down whatever page or routine
+ * called this, and an all-UNKNOWN bundle now reports `anyBreach: true`,
+ * because "we could not look" must never render as "in band".
+ *
+ * The removal count is fetched independently of the window rows, so a failure
+ * there costs only that line (it prints UNKNOWN) instead of the whole report.
  */
 export async function getSocialMixReport(
   over: Partial<GetSocialMixReportDeps> = {},
-): Promise<SocialMixReport> {
+): Promise<SocialMixReportBundle> {
   const loadRows = over.loadRows ?? liveLoadRows
+  const loadRemovals = over.loadRemovals ?? liveLoadRemovals
+  let removals: Record<MixReportPlatform, number> | null = null
+  try {
+    removals = await loadRemovals(REMOVAL_WINDOW_DAYS)
+  } catch (err) {
+    console.error('[social-mix-report] removal count failed, that line degrades to UNKNOWN:', err)
+  }
   try {
     const rows = await loadRows(DEFAULT_FETCH_LIMIT)
-    return computeSocialMixReport(rows)
+    return computeSocialMixReportBundle(rows, {
+      instagram: { removals30d: removals?.instagram ?? null },
+      x: { removals30d: removals?.x ?? null },
+    })
   } catch (err) {
     console.error('[social-mix-report] getSocialMixReport failed, degrading to UNKNOWN:', err)
-    return unavailableReport('report read failed, see server logs')
+    return unavailableBundle('report read failed, see server logs')
   }
 }

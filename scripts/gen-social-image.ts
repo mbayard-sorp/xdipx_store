@@ -16,7 +16,18 @@
  *     [--platform instagram|tiktok|x] [--ref-image <shopify-product-photo-url>] \
  *     [--no-ref --no-ref-reason "metaphor hook, no product target"] \
  *     [--slide 2] [--date 2026-08-12] [--images-so-far 3] \
+ *     [--body-zone hip-hollow] [--contact-mode resting] [--crop-scale medium] \
+ *     [--scene-location bedroom-loft] \
  *     [--only fal|imagen] [--caller social-media-manager] [--dry-run]
+ *
+ * The four scene axes (--body-zone / --contact-mode / --crop-scale /
+ * --scene-location, ticket #10479) ride with generation, where the brief
+ * actually chooses them, and are stamped onto the `social_media_assets` row.
+ * The draft op resolves them back from the asset by media URL, so the drafting
+ * agent never has to restate them. Each is validated against
+ * `app/lib/social-scene-vocab.ts` server-side: an out-of-vocabulary token is
+ * refused HERE, before any money is spent, which is the whole point of putting
+ * the check at generation rather than at draft time.
  *
  * --ref-image is REQUIRED unless --no-ref is given with a reason, mirroring the
  * homepage rule: an image meant to show a real SKU must place the real SKU via
@@ -109,6 +120,20 @@ async function main() {
   const presenterArg = arg('presenter-image')
   const castSlug    = arg('cast-slug')
   const cropScale   = arg('crop-scale')
+  // The other three scene axes (ticket #10479). They are decided HERE, in the
+  // brief, alongside the crop, so they travel with the generation call and get
+  // stamped onto the `social_media_assets` row. The draft then resolves them
+  // back by URL instead of asking the drafting agent to restate them, which is
+  // the step that failed 281 times out of 281 across migrations 093 and 099.
+  const bodyZone      = arg('body-zone')
+  const contactMode   = arg('contact-mode')
+  const sceneLocation = arg('scene-location')
+  const sceneAxes = {
+    ...(bodyZone ? { bodyZone } : {}),
+    ...(contactMode ? { contactMode } : {}),
+    ...(cropScale ? { cropScale } : {}),
+    ...(sceneLocation ? { sceneLocation } : {}),
+  }
   const scale       = arg('scale')
   const extraRef    = arg('extra-ref')
   const noRef       = hasFlag('no-ref')
@@ -339,6 +364,8 @@ async function main() {
       aspectRatio: platform === 'x' ? '16:9' : '4:5',
       count: Number(arg('candidates') ?? '2'),
       caller,
+      // Stamped onto every candidate's library row (#10479).
+      ...sceneAxes,
       ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),
     })
 
@@ -354,6 +381,9 @@ async function main() {
       provider: 'fal',
       stages: result.costs,
       scale,
+      // Echoed so the run log shows what was recorded on the asset. The draft
+      // does not need it back: it resolves the axes from the asset by URL.
+      ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
       cap, capSource,
     }))
     process.exit(0)
@@ -375,6 +405,8 @@ async function main() {
     ...(slide ? { slide } : {}),
     ...(refImage ? { refImageUrl: refImage } : {}),
     ...(only ? { only } : {}),
+    // Stamped onto the library row (#10479), same as the cast path above.
+    ...sceneAxes,
     ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),
   })
 
@@ -388,6 +420,7 @@ async function main() {
       : null,
     provider: result.provider,
     model: result.model,
+    ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
     cap,
     capSource,
     ...(refImage ? {} : { noRefReason }),
