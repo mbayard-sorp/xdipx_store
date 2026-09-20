@@ -20,6 +20,7 @@ function row(over: Partial<SocialMixReportRow> = {}): SocialMixReportRow {
     contactMode: null,
     cropScale: null,
     sceneLocation: null,
+    castSlugs: null,
     ...over,
   }
 }
@@ -71,6 +72,12 @@ describe('computeSocialMixReport, UNKNOWN instead of a guess', () => {
     expect(report.lines.closeCrop.status).toBe('unknown')
     expect(report.lines.bodyZoneWindow.status).toBe('unknown')
     expect(report.lines.locationWindow.status).toBe('unknown')
+    // #10340: the new lines degrade the same way.
+    expect(report.lines.contactModeWindow.status).toBe('unknown')
+    expect(report.lines.castRotation.status).toBe('unknown')
+    expect(report.lines.castVolume.status).toBe('unknown')
+    expect(report.lines.wideCeiling.status).toBe('unknown')
+    expect(report.lines.plug.status).toBe('unknown')
     // Educational and lube-treatment have no backing column at all, ever.
     expect(report.lines.educational.status).toBe('unknown')
     expect(report.lines.lubeTreatment.status).toBe('unknown')
@@ -204,6 +211,151 @@ describe('computeSocialMixReport, lube-treatment', () => {
   })
 })
 
+// ── Ticket #10340: the §3.2b/§3.2c caps that were left unmeasured ─────────
+
+describe('computeSocialMixReport, cast rotation and volume (§3.2b)', () => {
+  it('flags BREACH when one face carries 3 of 5 consecutive cast frames', () => {
+    const rows = [
+      row({ id: 1, castSlugs: ['nadia'] }),
+      row({ id: 2, castSlugs: ['nadia'] }),
+      row({ id: 3, castSlugs: ['juno'] }),
+      row({ id: 4, castSlugs: ['nadia'] }),
+      row({ id: 5, castSlugs: ['juno'] }),
+    ]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.castRotation.status).toBe('breach')
+    expect(report.lines.castRotation.detail).toContain('nadia')
+  })
+
+  it('reads ok when no face carries more than 2 of any 5 consecutive cast frames', () => {
+    const rows = [
+      row({ id: 1, castSlugs: ['nadia'] }),
+      row({ id: 2, castSlugs: ['juno'] }),
+      row({ id: 3, castSlugs: ['nadia'] }),
+      row({ id: 4, castSlugs: ['juno'] }),
+      row({ id: 5, castSlugs: ['remy'] }),
+    ]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.castRotation.status).toBe('ok')
+  })
+
+  it('checks every sliding window, not only the newest five cast frames', () => {
+    const rows = [
+      row({ id: 1, castSlugs: ['remy'] }),
+      row({ id: 2, castSlugs: ['juno'] }),
+      row({ id: 3, castSlugs: ['nadia'] }),
+      row({ id: 4, castSlugs: ['nadia'] }),
+      row({ id: 5, castSlugs: ['juno'] }),
+      row({ id: 6, castSlugs: ['nadia'] }),
+    ]
+    // The newest 5 (ids 1-5) hold nadia twice; ids 2-6 hold her three times.
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.castRotation.status).toBe('breach')
+  })
+
+  it('flags BREACH above 4 cast frames per rolling 14 and stays ok at 4', () => {
+    const cast = (id: number) => row({ id, castSlugs: ['juno'] })
+    const bare = (id: number) => row({ id, castSlugs: [] })
+    const atCap = [cast(1), cast(2), cast(3), cast(4), ...Array.from({ length: 10 }, (_, i) => bare(10 + i))]
+    expect(computeSocialMixReport(atCap).lines.castVolume.status).toBe('ok')
+
+    const overCap = [cast(5), ...atCap]
+    const report = computeSocialMixReport(overCap)
+    expect(report.lines.castVolume.status).toBe('breach')
+    expect(report.lines.castVolume.detail).toContain('5 / 14')
+  })
+
+  it('treats an empty cast_slugs array as a known cast-free frame, not UNKNOWN', () => {
+    const report = computeSocialMixReport([row({ id: 1, castSlugs: [] }), row({ id: 2, castSlugs: [] })])
+    expect(report.lines.castVolume.status).toBe('ok')
+    expect(report.lines.castVolume.detail).toContain('0 / 14')
+    expect(report.lines.castRotation.status).toBe('ok')
+  })
+})
+
+describe('computeSocialMixReport, wide ceiling frame (§3.2c)', () => {
+  it('flags BREACH when every ceiling frame in the last 7 is a tight crop', () => {
+    const rows = Array.from({ length: 7 }, (_, i) =>
+      row({ id: i + 1, bodyZone: 'hip-hollow', cropScale: i === 0 ? 'macro' : 'close' }),
+    )
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.wideCeiling.status).toBe('breach')
+    expect(report.lines.wideCeiling.detail).toContain('0 / 7')
+  })
+
+  it('reads ok when one ceiling frame in the last 7 is wide enough to read a location', () => {
+    const rows = Array.from({ length: 7 }, (_, i) =>
+      row({ id: i + 1, bodyZone: 'sternum', cropScale: i === 3 ? 'medium' : 'close' }),
+    )
+    expect(computeSocialMixReport(rows).lines.wideCeiling.status).toBe('ok')
+  })
+
+  it('does not count a medium crop at a mid zone as a wide ceiling frame', () => {
+    const rows = Array.from({ length: 7 }, (_, i) =>
+      row({ id: i + 1, bodyZone: 'forearm', cropScale: 'medium' }),
+    )
+    expect(computeSocialMixReport(rows).lines.wideCeiling.status).toBe('breach')
+  })
+
+  it('degrades to UNKNOWN when crop_scale is unpopulated across the window', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => row({ id: i + 1, bodyZone: 'sternum' }))
+    expect(computeSocialMixReport(rows).lines.wideCeiling.status).toBe('unknown')
+  })
+})
+
+describe('computeSocialMixReport, plug between the cheeks (§3.2c)', () => {
+  it('reads ok at one gluteal-cleft frame per rolling 7', () => {
+    const rows = [row({ id: 1, bodyZone: 'gluteal-cleft' }), row({ id: 2, bodyZone: 'sternum' })]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.plug.status).toBe('ok')
+    expect(report.lines.plug.detail).toContain('1 / 7')
+  })
+
+  it('flags BREACH at two, and counts the zone as ceiling tier', () => {
+    const rows = [
+      row({ id: 1, bodyZone: 'gluteal-cleft' }),
+      row({ id: 2, bodyZone: 'gluteal-cleft' }),
+      row({ id: 3, bodyZone: 'hip-hollow' }),
+      row({ id: 4, bodyZone: 'sternum' }),
+    ]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.plug.status).toBe('breach')
+    expect(report.lines.ceiling.detail).toContain('4 / 7')
+    expect(report.lines.ceiling.status).toBe('ok')
+  })
+})
+
+describe('computeSocialMixReport, contact-mode window (§3.2c)', () => {
+  it('flags a repeat inside 5 consecutive on-skin frames', () => {
+    const rows = [
+      row({ id: 1, contactMode: 'resting' }),
+      row({ id: 2, contactMode: 'held' }),
+      row({ id: 3, contactMode: 'resting' }),
+    ]
+    expect(computeSocialMixReport(rows).lines.contactModeWindow.status).toBe('breach')
+  })
+
+  it('reads ok when five consecutive on-skin frames rotate the contact mode', () => {
+    const modes = ['resting', 'held', 'pressed', 'drawn', 'worn']
+    const rows = modes.map((m, i) => row({ id: i + 1, contactMode: m }))
+    expect(computeSocialMixReport(rows).lines.contactModeWindow.status).toBe('ok')
+  })
+
+  it('ignores a repeat that falls outside the window of 5', () => {
+    const modes = ['resting', 'held', 'pressed', 'drawn', 'worn', 'resting']
+    const rows = modes.map((m, i) => row({ id: i + 1, contactMode: m }))
+    expect(computeSocialMixReport(rows).lines.contactModeWindow.status).toBe('ok')
+  })
+})
+
+describe('computeSocialMixReport, retired nape zone (§3.2c)', () => {
+  it('no longer scores a nape frame as mid', () => {
+    const rows = [row({ id: 1, bodyZone: 'nape' }), row({ id: 2, bodyZone: 'inner-wrist' })]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.mid.detail).toContain('1 / 7')
+  })
+})
+
 describe('getSocialMixReport, defensive fallback', () => {
   it('degrades to an all-UNKNOWN report instead of throwing when loadRows fails', async () => {
     const loadRows = vi.fn().mockRejectedValue(new Error('column "body_zone" does not exist'))
@@ -229,7 +381,7 @@ describe('formatSocialMixReportLines', () => {
   it('prints one line per report line with an explicit status marker', () => {
     const report = computeSocialMixReport([row(), row(), row()])
     const lines = formatSocialMixReportLines(report)
-    expect(lines).toHaveLength(10)
+    expect(lines).toHaveLength(15)
     for (const line of lines) expect(line).toMatch(/^\[mix-report\] /)
     // Everything in this all-null fixture is either UNKNOWN (enrichment
     // columns absent) or a hard floor breach (0 carousels, 0 product-free

@@ -31,13 +31,17 @@
  *     reads true posting posture instead of the unused valve (ticket #5413).
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
  *     productHandle? } } -> { ok, reviewStatus } | 422 { findings }
- *   { op: 'rework', id, mediaUrls?, tweetText?, altText?, imageBrief?, subject? }
+ *   { op: 'rework', id, mediaUrls?, tweetText?, altText?, imageBrief?, subject?,
+ *     sceneLocation?, castSlugs?, bodyZone?, contactMode?, cropScale? }
  *     -> { ok, reviewStatus } | 404 | 409
  *     Refile a row the gate bounced to needs_changes (ticket #4351): update the
  *     corrected imagery/copy in place and reset it to pending_review so the gate
  *     re-judges it. At least one of mediaUrls/tweetText is required; altText/
- *     imageBrief/subject ride along optionally. Only a needs_changes row is a
- *     target, so #4069's duplicate-draft guard is intact.
+ *     imageBrief/subject ride along optionally, as do the variety axes
+ *     sceneLocation/castSlugs/bodyZone/contactMode/cropScale (#10339), which a
+ *     REVISE that swaps an on-skin frame for a different zone or crop must move
+ *     or the rotation windows keep reading the replaced frame. Only a
+ *     needs_changes row is a target, so #4069's duplicate-draft guard is intact.
  *   { op: 'engagement' } -> { report: [{ postId, externalPostId, metrics?, error? }],
  *                             account: { account?: { followersCount, ... }, error? } }
  *     Live Instagram insights (reach/likes/comments/saves) for the most
@@ -257,6 +261,14 @@ export async function action({ request }: ActionFunctionArgs) {
       altText: b['altText'],
       imageBrief: b['imageBrief'],
       subject: b['subject'],
+      // #10339: an imagery REVISE that swaps the zone or the crop has to move
+      // the variety columns too, or the §3.2c rotation windows keep reading the
+      // frame that was replaced.
+      sceneLocation: b['sceneLocation'],
+      castSlugs: b['castSlugs'],
+      bodyZone: b['bodyZone'],
+      contactMode: b['contactMode'],
+      cropScale: b['cropScale'],
     })
     if (!parsed.ok) return new Response(parsed.error, { status: parsed.status })
 

@@ -444,6 +444,45 @@ describe('parseReworkInput (#4351)', () => {
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.input.mediaUrls).toEqual([`${CDN}/a.jpg`, `${CDN}/b.jpg`])
   })
+
+  // Ticket #10339: a REVISE that swaps an on-skin frame for a different body
+  // zone or crop has to move the variety columns too, or every §3.2c rotation
+  // window keeps reading the frame that was replaced.
+  it('accepts the variety axes alongside an imagery rework', () => {
+    const r = parseReworkInput({
+      mediaUrls: [`${CDN}/reworked-lead.jpg`],
+      sceneLocation: 'bedroom, late afternoon',
+      castSlugs: ['nadia', '', 'juno '],
+      bodyZone: 'sternum',
+      contactMode: 'resting',
+      cropScale: 'medium',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.input.sceneLocation).toBe('bedroom, late afternoon')
+    expect(r.input.castSlugs).toEqual(['nadia', 'juno'])
+    expect(r.input.bodyZone).toBe('sternum')
+    expect(r.input.contactMode).toBe('resting')
+    expect(r.input.cropScale).toBe('medium')
+  })
+
+  it('rejects a variety axis over its length cap, matching the draft op', () => {
+    for (const [field, len] of [['sceneLocation', 81], ['bodyZone', 41], ['contactMode', 21], ['cropScale', 11]] as const) {
+      const r = parseReworkInput({ tweetText: 'a cleaner line', [field]: 'x'.repeat(len) })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain(field)
+    }
+  })
+
+  it('rejects an empty-string variety axis and a non-array castSlugs', () => {
+    expect(parseReworkInput({ tweetText: 'ok', bodyZone: '   ' }).ok).toBe(false)
+    expect(parseReworkInput({ tweetText: 'ok', castSlugs: 'nadia' }).ok).toBe(false)
+  })
+
+  it('does not let a variety axis alone satisfy the must-change-something rule', () => {
+    const r = parseReworkInput({ bodyZone: 'sternum' })
+    expect(r.ok).toBe(false)
+  })
 })
 
 function fakeReworkRepo(post: PostRow | null) {
@@ -483,6 +522,37 @@ describe('reworkSocialPost (#4351)', () => {
     expect(patch.updatedAt).toBeInstanceOf(Date)
     // An imagery-only rework must NOT touch the caption (that is the #4069 trap).
     expect(patch.tweetText).toBeUndefined()
+  })
+
+  // Ticket #10339 DONE WHEN: a rework call with bodyZone 'sternum' updates the row.
+  it('writes the swapped body zone, crop, contact mode, location and cast to the row', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: 'existing alt text on the bounced row' }))
+    const r = await reworkSocialPost(7, {
+      mediaUrls: [`${CDN}/reworked-lead.jpg`],
+      bodyZone: 'sternum',
+      cropScale: 'medium',
+      contactMode: 'resting',
+      sceneLocation: 'bedroom, late afternoon',
+      castSlugs: ['nadia'],
+    }, { repo })
+    expect(r).toEqual({ ok: true, reviewStatus: 'pending_review' })
+    const patch = writes[0]!.patch
+    expect(patch.bodyZone).toBe('sternum')
+    expect(patch.cropScale).toBe('medium')
+    expect(patch.contactMode).toBe('resting')
+    expect(patch.sceneLocation).toBe('bedroom, late afternoon')
+    expect(patch.castSlugs).toEqual(['nadia'])
+  })
+
+  it('leaves the variety columns untouched when the rework does not mention them', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: 'existing alt text on the bounced row' }))
+    await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    const patch = writes[0]!.patch
+    expect(patch.bodyZone).toBeUndefined()
+    expect(patch.cropScale).toBeUndefined()
+    expect(patch.contactMode).toBeUndefined()
+    expect(patch.sceneLocation).toBeUndefined()
+    expect(patch.castSlugs).toBeUndefined()
   })
 
   it('updates the caption on a copy rework', async () => {
