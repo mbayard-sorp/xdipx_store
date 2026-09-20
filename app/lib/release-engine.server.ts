@@ -346,6 +346,17 @@ export interface TicketFacts {
   status: TicketStatus
   kind: string
   attemptCount: number
+  /**
+   * The PR head sha recorded when this ticket last transitioned to
+   * `verified` (ticket #10502), or `null`/absent when none was recorded —
+   * either the ticket verified before this existed, or the sha lookup at
+   * verification time failed (best-effort, see `transitionSuggestion` in
+   * team.server.ts). `evaluatePullRequest` only bounces on a MISMATCH; a
+   * missing value is treated as "cannot compare", not as a mismatch, so an
+   * old verification or a lookup hiccup never blocks a merge that would
+   * have gone through before this existed.
+   */
+  verifiedHeadSha?: string | null
 }
 
 /**
@@ -357,6 +368,8 @@ export interface TicketFacts {
 export interface PullRequestFacts {
   number: number
   headRef: string
+  /** Current head commit sha, compared against `ticket.verifiedHeadSha` (#10502). */
+  headSha: string
   /** PR title, consulted ONLY for the WIP marker in the conditional undraft
    *  rule. It is untrusted text, and it can only ever KEEP a PR drafted. */
   title: string
@@ -414,6 +427,7 @@ export type ReleaseReasonCode =
   | 'allowlist-pending'
   | 'no-ticket'
   | 'ticket-not-verified'
+  | 'verdict-stale'
   | 'not-mergeable'
   | 'mergeability-unknown'
   | 'ready'
@@ -904,6 +918,21 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
         code: 'ticket-not-verified',
         reason: `ticket #${facts.ticket.id} is '${facts.ticket.status}', not 'verified'`,
       }
+    }
+    // The verdict is pinned to the commit it reviewed, not to the ticket row
+    // (ticket #10502). Before this, any commit pushed to the PR after its
+    // ticket reached 'verified' merged with no review at all, because the
+    // precondition only ever checked the ticket's STATUS. A missing
+    // `verifiedHeadSha` (ticket verified before this existed, or the
+    // best-effort lookup at verification time failed) is treated as "cannot
+    // compare", not as a mismatch, so an unchanged PR merges exactly as it
+    // did before this check existed. Reuses the exact bounce path the
+    // red-build case already uses, above, rather than adding a new state.
+    if (facts.ticket.verifiedHeadSha && facts.ticket.verifiedHeadSha !== facts.headSha) {
+      const lastError =
+        `PR #${facts.number} head moved after ticket #${facts.ticket.id} was verified `
+        + `(verified ${facts.ticket.verifiedHeadSha.slice(0, 12)}, now ${facts.headSha.slice(0, 12)})`
+      return { ...base, action: 'bounce', code: 'verdict-stale', reason: lastError, lastError }
     }
   }
 
@@ -1399,7 +1428,22 @@ async function loadTicketFacts(id: number): Promise<TicketFacts | null> {
     .where(eq(homepageTeamSuggestions.id, id))
     .limit(1)
   if (!row) return null
-  return { id: row.id, status: row.status as TicketStatus, kind: row.kind, attemptCount: row.attemptCount }
+  // The commit sha team.server.ts's transitionSuggestion recorded the last
+  // time this ticket hit 'verified' (ticket #10502). Most recent wins: a
+  // ticket bounced and re-verified after a fix carries a fresh one.
+  const [commitLink] = await db
+    .select({ ref: suggestionLinks.ref })
+    .from(suggestionLinks)
+    .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'commit')))
+    .orderBy(desc(suggestionLinks.createdAt))
+    .limit(1)
+  return {
+    id: row.id,
+    status: row.status as TicketStatus,
+    kind: row.kind,
+    attemptCount: row.attemptCount,
+    verifiedHeadSha: commitLink?.ref ?? null,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1795,6 +1839,7 @@ async function gatherFacts(
   return {
     number: pr.number,
     headRef: pr.headRef,
+    headSha: pr.headSha,
     title: pr.title,
     ageMs: ageMsFromTimestamp(pr.updatedAt),
     draft: pr.draft,

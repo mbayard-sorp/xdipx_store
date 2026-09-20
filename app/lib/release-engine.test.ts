@@ -108,6 +108,7 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
   return {
     number: 100,
     headRef: 'ticket/41',
+    headSha: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
     title: 'fix the rail anchor',
     // Fresh activity by default, so the conditional undraft (which requires 30
     // idle minutes) never fires unless a test opts in with an explicit ageMs.
@@ -735,6 +736,71 @@ describe('evaluatePullRequest: ticket linkage', () => {
     expect(d.action).toBe('skip')
     expect(d.code).toBe('ci-red')
     expect(d.isRevert).toBe(true)
+  })
+})
+
+// A QA verdict is a property of the diff it reviewed, not of the ticket row
+// (ticket #10502). Before this, the precondition only ever checked the
+// ticket's STATUS, so any commit pushed to the PR after the ticket reached
+// 'verified' merged with zero review.
+describe('evaluatePullRequest: verified verdict pinned to a commit (ticket #10502)', () => {
+  const VERIFIED_SHA = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
+
+  it('merges an unchanged PR exactly as before: the head sha matches what was verified', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: VERIFIED_SHA,
+      ticket: { id: 41, status: 'verified', kind: 'code', attemptCount: 0, verifiedHeadSha: VERIFIED_SHA },
+    }))
+    expect(d.action).toBe('merge')
+    expect(d.code).toBe('ready')
+  })
+
+  it('bounces, spending a fix attempt, when the head moved after verification', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      ticket: { id: 41, status: 'verified', kind: 'code', attemptCount: 0, verifiedHeadSha: VERIFIED_SHA },
+    }))
+    expect(d.action).toBe('bounce')
+    expect(d.code).toBe('verdict-stale')
+    expect(d.ticketId).toBe(41)
+    expect(d.lastError).toContain(VERIFIED_SHA.slice(0, 12))
+    expect(d.lastError).toContain('deadbeef')
+  })
+
+  it('still merges when no verifiedHeadSha was recorded at all: cannot compare is not a mismatch', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: 'ffffffffffffffffffffffffffffffffffffffff',
+      ticket: { id: 41, status: 'verified', kind: 'code', attemptCount: 0, verifiedHeadSha: null },
+    }))
+    expect(d.action).toBe('merge')
+    expect(d.code).toBe('ready')
+  })
+
+  it('still merges when verifiedHeadSha is simply absent from the ticket facts (pre-#10502 tickets)', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: 'ffffffffffffffffffffffffffffffffffffffff',
+      ticket: { id: 41, status: 'verified', kind: 'code', attemptCount: 0 },
+    }))
+    expect(d.action).toBe('merge')
+  })
+
+  it('checks the mismatch only once the ticket is otherwise verified: an unverified ticket still reads ticket-not-verified', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      ticket: { id: 41, status: 'pr_open', kind: 'code', attemptCount: 0, verifiedHeadSha: VERIFIED_SHA },
+    }))
+    expect(d.action).toBe('skip')
+    expect(d.code).toBe('ticket-not-verified')
+  })
+
+  it('leaves the existing red-build bounce behaviour unchanged: CI red still bounces even with a matching sha', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: VERIFIED_SHA,
+      checks: { check: 'failure' },
+      ticket: { id: 41, status: 'verified', kind: 'code', attemptCount: 0, verifiedHeadSha: VERIFIED_SHA },
+    }))
+    expect(d.action).toBe('bounce')
+    expect(d.code).toBe('ci-red')
   })
 })
 
