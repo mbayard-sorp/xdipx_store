@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { presenterPhotoUrlForCrop } from './sanity.server'
+import { resolveCastReference } from './social-cast-reference.server'
 
 const PORTRAIT = 'https://cdn.sanity.io/images/proj/ds/portrait.jpg'
 const BODY = 'https://cdn.sanity.io/images/proj/ds/body.jpg'
@@ -42,5 +43,38 @@ describe('presenterPhotoUrlForCrop', () => {
     for (const scale of ['macro', 'close', 'medium', 'wide', undefined, null, 'garbage']) {
       expect(presenterPhotoUrlForCrop({ photoUrl: PORTRAIT, bodyReferencePhotoUrl: null }, scale)).toBe(PORTRAIT)
     }
+  })
+})
+
+/**
+ * Ticket #10336: the selector had no caller outside this file, so both
+ * social-image routes passed the portrait unconditionally. These cases pin the
+ * wiring the routes now share, at the level where it is a pure decision.
+ */
+describe('presenterPhotoUrlForCrop, as the routes call it', () => {
+  const member = {
+    name: 'Maya',
+    photoUrl: PORTRAIT,
+    bodyReferencePhotoUrl: BODY,
+    skinToneNote: 'deep brown skin with warm undertones',
+  }
+
+  it('hands the body reference to the composite for a close crop', () => {
+    expect(resolveCastReference({ member, cropScale: 'close', prompt: 'p' }).presenterImageUrl).toBe(BODY)
+  })
+
+  it('reports the missing body reference instead of substituting silently', () => {
+    const r = resolveCastReference({
+      member: { ...member, bodyReferencePhotoUrl: null },
+      cropScale: 'close',
+      prompt: 'p',
+    })
+    expect(r.presenterImageUrl).toBe(PORTRAIT)
+    expect(r.bodyReferenceMissing).toBe(true)
+  })
+
+  it('carries skinToneNote into the prompt, which nothing did before', () => {
+    expect(resolveCastReference({ member, cropScale: 'medium', prompt: 'p' }).prompt)
+      .toBe('Skin tone: deep brown skin with warm undertones. p')
   })
 })

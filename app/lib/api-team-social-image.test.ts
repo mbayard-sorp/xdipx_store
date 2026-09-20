@@ -14,6 +14,8 @@ const gateMock = vi.hoisted(() => vi.fn())
 const genMock = vi.hoisted(() => vi.fn())
 const castMock = vi.hoisted(() => vi.fn())
 const logImageCostMock = vi.hoisted(() => vi.fn())
+const rosterMock = vi.hoisted(() => vi.fn())
+const productByHandleMock = vi.hoisted(() => vi.fn())
 
 vi.mock('~/lib/team.server', () => ({
   assertTeamAuth: vi.fn(),
@@ -32,6 +34,23 @@ vi.mock('~/lib/api-error.server', () => ({
 vi.mock('~/lib/token-log.server', () => ({
   logImageCost: logImageCostMock,
 }))
+// Ticket #10336/#10341: the cast op now resolves its own presenter reference
+// from the roster and can walk a product's media list for a bare-product
+// frame, so both reads are mocked. `social-cast-reference.server` is left REAL
+// on purpose: the selection rule is what is under test here.
+vi.mock('~/lib/sanity.server', () => ({
+  getApprovedCastMembers: rosterMock,
+  presenterPhotoUrlForCrop: (
+    m: { photoUrl: string; bodyReferencePhotoUrl: string | null },
+    cropScale: string | null | undefined,
+  ) => ((cropScale === 'macro' || cropScale === 'close') && m.bodyReferencePhotoUrl
+    ? m.bodyReferencePhotoUrl
+    : m.photoUrl),
+}))
+vi.mock('~/lib/shopify.server', async () => {
+  const actual = await vi.importActual<typeof import('~/lib/shopify.server')>('~/lib/shopify.server')
+  return { ...actual, getProductByHandle: productByHandleMock }
+})
 
 import { action } from '~/routes/api.team.social-image'
 
@@ -66,10 +85,25 @@ const validCast = {
   scale: 'palm',
 }
 
+const MAYA = {
+  slug: 'maya', name: 'Maya',
+  photoUrl: 'https://cdn/maya-portrait.jpg',
+  bodyReferencePhotoUrl: 'https://cdn/maya-body.jpg',
+  skinToneNote: 'deep brown skin with warm undertones',
+}
+const RUTH = {
+  slug: 'ruth', name: 'Ruth',
+  photoUrl: 'https://cdn/ruth-portrait.jpg',
+  bodyReferencePhotoUrl: null,
+  skinToneNote: null,
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   logImageCostMock.mockResolvedValue(undefined)
   gateMock.mockResolvedValue({ ok: true })
+  rosterMock.mockResolvedValue([MAYA, RUTH])
+  productByHandleMock.mockResolvedValue(null)
   genMock.mockResolvedValue({
     url: 'https://cdn.shopify.com/files/social-we-vibe-chorus-scene-nightstand-20260818.jpg',
     filename: 'social-we-vibe-chorus-scene-nightstand-20260818.jpg',
@@ -204,6 +238,118 @@ describe('cast', () => {
 
   it('rejects a cast op without a presenter reference', async () => {
     const res = await post({ ...validCast, presenterImageUrl: undefined })
+    expect(res.status).toBe(400)
+    expect(castMock).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Ticket #10336. Before this, the route took `presenterImageUrl` from the
+ * caller and never asked which reference the crop needs, so a close crop was
+ * anchored to a portrait and the model invented the body and skin tone under a
+ * named persona's name. `skinToneNote` was fetched from Sanity and used
+ * nowhere, and `castSlugs` never reached the composite.
+ */
+describe('cast: body reference + skin tone + castSlugs (#10336)', () => {
+  const castBySlug = {
+    op: 'cast',
+    prompt: 'held at the collarbone, window light',
+    handle: 'we-vibe-chorus',
+    mood: 'daylight',
+    date: '2026-08-18',
+    productImageUrl: 'https://cdn/product.jpg',
+    scale: 'palm',
+  }
+
+  it('passes the body reference for a close crop', async () => {
+    const res = await post({ ...castBySlug, castSlug: 'maya', cropScale: 'close' })
+    expect(res.status).toBe(200)
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      presenterImageUrl: 'https://cdn/maya-body.jpg',
+      castSlugs: ['maya'],
+    }))
+    expect(await res.json()).not.toHaveProperty('bodyReferenceMissing')
+  })
+
+  it('prepends the skin-tone note to the scene prompt', async () => {
+    await post({ ...castBySlug, castSlug: 'maya', cropScale: 'close' })
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'Skin tone: deep brown skin with warm undertones. held at the collarbone, window light',
+    }))
+  })
+
+  it('keeps the portrait for a medium crop', async () => {
+    await post({ ...castBySlug, castSlug: 'maya', cropScale: 'medium' })
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      presenterImageUrl: 'https://cdn/maya-portrait.jpg',
+    }))
+  })
+
+  it('returns bodyReferenceMissing and a warning when a close crop has no body reference', async () => {
+    const res = await post({ ...castBySlug, castSlug: 'ruth', cropScale: 'close' })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { bodyReferenceMissing?: boolean; warning?: string }
+    expect(body.bodyReferenceMissing).toBe(true)
+    expect(body.warning).toContain('Ruth')
+    // Still generated: a route refusal would kill the whole scheduled run.
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      presenterImageUrl: 'https://cdn/ruth-portrait.jpg',
+    }))
+  })
+
+  it('rejects an unknown crop scale', async () => {
+    const res = await post({ ...castBySlug, castSlug: 'maya', cropScale: 'tight' })
+    expect(res.status).toBe(400)
+    expect(castMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a castSlug that is not on the approved roster', async () => {
+    const res = await post({ ...castBySlug, castSlug: 'nobody', cropScale: 'close' })
+    expect(res.status).toBe(400)
+    expect(castMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses to read an empty roster as "there are none"', async () => {
+    rosterMock.mockResolvedValue([])
+    const res = await post({ ...castBySlug, castSlug: 'maya', cropScale: 'close' })
+    expect(res.status).toBe(400)
+    expect(castMock).not.toHaveBeenCalled()
+  })
+
+  it('forwards an explicit castSlugs list when given', async () => {
+    await post({ ...castBySlug, castSlug: 'maya', cropScale: 'medium', castSlugs: ['maya', 'ruth'] })
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({ castSlugs: ['maya', 'ruth'] }))
+  })
+})
+
+/** Ticket #10341: featuredMedia is sometimes the retail carton. */
+describe('cast: bare-product reference (#10341)', () => {
+  it('walks the media list for a bare-product frame when productImageUrl is omitted', async () => {
+    productByHandleMock.mockResolvedValue({
+      images: [
+        { url: 'https://cdn/96203-box-front.jpg', altText: 'Retail box' },
+        { url: 'https://cdn/96203-product.jpg', altText: 'Chorus' },
+      ],
+    })
+    const res = await post({ ...validCast, productImageUrl: undefined })
+    expect(res.status).toBe(200)
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      productImageUrl: 'https://cdn/96203-product.jpg',
+    }))
+    expect(await res.json()).not.toHaveProperty('productImageFellBack')
+  })
+
+  it('flags the fallback when every frame looks like packaging', async () => {
+    productByHandleMock.mockResolvedValue({
+      images: [{ url: 'https://cdn/96203-box-front.jpg', altText: 'Retail box' }],
+    })
+    const res = await post({ ...validCast, productImageUrl: undefined })
+    expect((await res.json() as { productImageFellBack?: boolean }).productImageFellBack).toBe(true)
+  })
+
+  it('still 400s when the product has no usable image', async () => {
+    productByHandleMock.mockResolvedValue({ images: [] })
+    const res = await post({ ...validCast, productImageUrl: undefined })
     expect(res.status).toBe(400)
     expect(castMock).not.toHaveBeenCalled()
   })
