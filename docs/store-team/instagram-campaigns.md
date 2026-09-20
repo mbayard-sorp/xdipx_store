@@ -470,6 +470,20 @@ posting path (`postTweet` in `app/lib/twitter.server.ts`) sends text and media i
 the category on condition of labeling; we cannot label; therefore nothing on X may need it.
 Ticket #10277. A frame drafted hotter for X manufactures a row the gate blocks.
 
+**How this sits with §3.7.** An on-skin frame satisfies the cast-in-a-scene mandate when all three
+of §3.7's conditions hold: it is generated from that cast member's approved body reference with the
+`castSlug` on the row, it carries an adult identity marker inside the crop, and it carries a trace
+of the life around it. §3.7's premise, a group of people out in the world talking about these
+products, is preserved across the SET by the close-crop cap above rather than by any single frame:
+the cap is what guarantees the wide frames that read a location, which is why it is a merchandising
+rule before it is a safety one.
+
+**Open owner question, blocker #193: may Emma's own likeness appear in an implied-nude frame?**
+§3.7 makes Emma a cast member for imagery purposes and her likeness is licensed for merchandising,
+but that licence was granted before the on-skin treatment existed and it has never been read against
+a bare body. Until the owner answers, brief on-skin frames from the other approved cast members and
+do not resolve this by inference from the likeness policy.
+
 **Still owner-only, not licensed here:** a pleasure product covering a nipple (the specialists
 split, and only the owner resolves it); a product covering a vulva (both specialists BLOCK: §3.2a's
 "product against genitalia" is a contact rule with no covering exception).
