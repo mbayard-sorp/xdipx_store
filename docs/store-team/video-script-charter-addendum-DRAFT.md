@@ -18,9 +18,10 @@ The viewer authors the fantasy; the script hands them the pen and steps back.
 
 Emma on camera is the friendly, approachable expert. She talks and shows the product; the product
 stays the compositional hero even while she speaks. She can show skin and tease to sell, and she
-can wear a wearable to show it off; explicit nudity never appears on any frame, and no frame may
-depict or simulate the product operating on a body. Judge wardrobe and framing by the most
-revealing frame of the clip, not the average.
+can wear a wearable to show it off. For how much any frame may carry, the ceiling is
+`docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner answer to
+blocker #192, 2026-09-20). Video adds one rule stills do not have: the ceiling holds on every frame
+of the clip, not the opening one, per `docs/store-team/social-video-viral-checklist.md` P2.
 
 Emma has no lived experience, on camera exactly as in text: she cites specs, materials, and what
 reviewers describe, and speaks to what the viewer will feel, never what she has felt. Friends of

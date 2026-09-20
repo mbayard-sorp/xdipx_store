@@ -152,12 +152,10 @@ charter's fresh-language rule applies to structure as much as to words.
   treatment for /social and the PDP hero. Full multi-voice dialogue between cast members is
   permitted in this site-hosted register-9 cut, because it is written rather than spoken and
   therefore costs nothing to render, even on the current single-speaker tier.
-- **Imagery divergence, stated.** This show is video, so it stays wardrobe-safe: the on-skin
-  treatment in `instagram-campaigns.md` §3.2c licenses bare bodies on stills and does not reach a
-  Reel. A clip is judged on its most revealing frame and the platform video classifier is stricter
-  than the still classifier at the same exposure. Whether §3.2c on-skin frames may appear in a Reel
-  is an owner decision, blocker #192; until it is answered the video wardrobe rules in
-  `social-video-viral-checklist.md` P2 stand.
+- **Imagery, no divergence.** This show carries the same ceiling as every other surface:
+  `instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner answer to blocker #192,
+  2026-09-20). The bible does not restate it. Because this is video, `social-video-viral-checklist.md`
+  P2's motion clause binds on top of it: the ceiling holds on every frame, not the opening one.
 - Talking renders on the RunPod worker's audio-driven tier once live (bake-off:
   Wan2.2-S2V vs InfiniteTalk vs LongCat-Video-Avatar; see `video-worker-runpod.md`). Until it
   is live, episodes are voiceover-carried b-roll with no on-camera mouths, and the room writes

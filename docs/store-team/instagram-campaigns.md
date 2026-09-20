@@ -418,6 +418,15 @@ enough to read a location. Ten tight crops of bare skin is a stock library and f
 bar ("someone scrolling the last ten posts sees ten different lives"). It is also the aggregate
 read that gets an account actioned rather than a post.
 
+**The caps report, they never hold (owner answer to blocker #194, 2026-09-20, verbatim: "report
+only (no hold)").** `app/lib/social-mix-report.server.ts` computes them and prints them on
+`/admin/socials/calendar`; nothing in the publish path blocks on a breached cap, and nothing
+should. Read that ruling narrowly, because the loose reading demotes something nobody asked to
+demote: **it covers the caps in this section and not the §3.2a stop list.** The stop list is a hard
+stop and still BLOCKs at the gate, on every surface, exactly as before. A cap is a merchandising
+rule about the shape of a set. A stop is a rule about what may be in one frame. "Report only" was
+an answer about the first.
+
 **Placement follows use, or it is a product on a person.** The owner's test: *"Have the team
 evaluate how to best place these based on how they are used."* A heavy steel plug goes in a palm,
 because weight is the product and weight is only legible when something carries it. Graduated
@@ -478,11 +487,13 @@ products, is preserved across the SET by the close-crop cap above rather than by
 the cap is what guarantees the wide frames that read a location, which is why it is a merchandising
 rule before it is a safety one.
 
-**Open owner question, blocker #193: may Emma's own likeness appear in an implied-nude frame?**
-§3.7 makes Emma a cast member for imagery purposes and her likeness is licensed for merchandising,
-but that licence was granted before the on-skin treatment existed and it has never been read against
-a bare body. Until the owner answers, brief on-skin frames from the other approved cast members and
-do not resolve this by inference from the likeness policy.
+**Emma's likeness is licensed in an implied-nude frame (owner answer to blocker #193, 2026-09-20,
+verbatim: "Yes, Emma can and she has a body reference").** §3.7 already made her a cast member for
+imagery purposes; this reads that licence against a bare body explicitly, which is what had never
+been done. She is briefed on the same terms as the rest of the roster: her own approved
+`bodyReferencePhoto`, her `castSlug` on the row, and every fence in §3.2a and §3.2c unchanged. The
+answer was given for her likeness specifically and does not generalise to anyone outside the
+approved cast.
 
 **Still owner-only, not licensed here:** a pleasure product covering a nipple (the specialists
 split, and only the owner resolves it); a product covering a vulva (both specialists BLOCK: §3.2a's
@@ -643,8 +654,10 @@ listing with a human decoration attached?
 2026-09-19, §3.2c).** A faceless bare hip is a cast member's skin, not a cast member in a scene,
 and it has no identity anchor the system can verify. So the frame satisfies this rule when: (a) it
 is generated from that cast member's approved BODY reference and the `castSlug` on the row names
-them (ticket #10270 adds the reference; until it lands, the model invents the skin tone and "use our
-cast members' skin tones" has nothing behind it); (b) it carries an **adult identity marker** inside
+them (ticket #10270 shipped the field and the selector, and the owner approved a
+`bodyReferencePhoto` and a `skinToneNote` for all eight cast members on 2026-09-20, so clause (a)
+is satisfiable today on the route path; the CLI path at `scripts/gen-social-image.ts` does not yet
+reach the selector, ticket #10475); (b) it carries an **adult identity marker** inside
 the crop: the face, a hand, a tattoo, jewellery, body hair, or the second cast member; and (c) it
 carries a trace of the life around it: the hour of the light, a sheet or surface entering frame, or
 a second person. Skin and product alone, with no face, no adult marker and no edge of a world, is a

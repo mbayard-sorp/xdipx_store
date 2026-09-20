@@ -24,7 +24,7 @@
 
 > Amended 2026-09-20 on Mike's explicit clarification, codified at all-hands: **"nudity" in this charter means visible nipples, labia, penis, or anus. Everything else is allowed.** This supersedes the 2026-08-22 parenthetical "skin in the images (not nudity)" wherever it was read as a clothing rule: a bare body with those four things out of frame or occluded is not nudity, and the on-skin treatment in `docs/store-team/instagram-campaigns.md` §3.2c (owner direction 2026-09-19: product resting on bare skin, no clothing, the suggestion of nudity) is fully inside the charter. The brand values are named in plain words in "What xdipx is" below so an agent can grep for them: sex-positive, shame-free, judgment-free, a safe place to shop. The word ban on "sexy" as a branding adjective is a copy rule, not a look rule.
 
-> Amended 2026-09-20, same all-hands, on Mike's direction **"On-skin extends to all areas of the site."**: the imagery register and the surface-scoped hard lines below now give every owned surface (homepage hero and rails, PLP cards, PDP mood images and hero-video stills, discovery, Notebook heroes, email and SMS art) the same ceiling social carries, `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c, by pointer and never by restatement. The stop list and the nudity definition do not move. Video Reels (blocker #192), Emma's own likeness in an implied-nude frame (blocker #193) and paid advertising (`docs/ads-policy.md`) are excluded and stay as they were. Still v5.5: no register, cap, or hard line for words changes.
+> Amended 2026-09-20, same all-hands, on Mike's direction **"On-skin extends to all areas of the site."**: the imagery register and the surface-scoped hard lines below now give every owned surface (homepage hero and rails, PLP cards, PDP mood images and hero-video stills, discovery, Notebook heroes, email and SMS art) the same ceiling social carries, `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c, by pointer and never by restatement. The stop list and the nudity definition do not move. Video Reels adopted the same ceiling on 2026-09-20 (owner answer to blocker #192, "Yes") and carry the motion clause in `docs/store-team/social-video-viral-checklist.md` P2 on top. Emma's own likeness in an implied-nude frame was licensed the same day (owner answer to blocker #193, "Yes, Emma can and she has a body reference"), so she is a cast member for on-skin purposes like any other. Paid advertising (`docs/ads-policy.md`) is excluded and stays as it was. Still v5.5: no register, cap, or hard line for words changes.
 
 <!-- core:start -->
 
@@ -545,9 +545,12 @@ feedback; a rejected line means fix the line, not switch genres.
 
 Emma or a cast member on camera is the friendly, approachable expert. Talking heads never show
 the product in frame; b-roll keeps the product the compositional hero. Skin, wearables worn as
-designed, and tease are licensed; explicit nudity never appears, no frame depicts or simulates
-the product operating on a body, and wardrobe is stated in every frame prompt and judged by the
-most revealing frame of the clip. Emma has no lived experience, on camera exactly as in text:
+designed, and tease are licensed. For how much a frame may carry, the imagery ceiling is
+`docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner answer to
+blocker #192, 2026-09-20), pointed at and never restated; its stop list and the nudity definition
+(visible nipples, labia, penis, or anus) bind unchanged. Because this is video, the ceiling must
+hold on every frame of the clip and not the opening one: `docs/store-team/social-video-viral-checklist.md`
+P2 carries that motion clause and the render constraints that follow from it. Emma has no lived experience, on camera exactly as in text:
 she speaks to what the viewer will feel, never what she has felt (this is unchanged everywhere;
 Emma is the guide, not a character with a history). In the serialized video program only (owner
 direction 2026-09-04), the recurring cast are written as real people: they may want to feel

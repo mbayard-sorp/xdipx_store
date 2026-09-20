@@ -37,7 +37,7 @@ list. Every other document in this repo, including this one, points at it.
 | X | Adopt, platform policy outranks | `docs/emma-voice.md` social addendum |
 | TikTok | Exclude | `docs/ads-policy.md` §Organic social |
 | LinkedIn | Exclude, no product imagery at all | `docs/ads-policy.md` §Organic social |
-| Video / Reels | **Owner question, open** | blocker #192 |
+| Video / Reels | Adopt, motion clause applies | `docs/store-team/social-video-viral-checklist.md` P2 → §3.2a/§3.2c |
 | Paid advertising | Exclude | `docs/ads-policy.md` |
 | Support | n/a, no imagery surface | n/a |
 
@@ -49,25 +49,55 @@ list. Every other document in this repo, including this one, points at it.
   treatment to apply to.
 - **Paid advertising** is excluded because the processor and the ad platforms,
   not our taste, set that ceiling. `docs/ads-policy.md` wins there and always has.
-- **Video** is excluded until the owner answers #192. A still frame and a moving
-  frame are not moderated the same way, and we do not infer the answer.
+- **Video** adopted the treatment on 2026-09-20 (owner answer to blocker #192,
+  "Yes"). A still frame and a moving frame are still not moderated the same
+  way, so video carries one extra rule the stills surfaces do not: the motion
+  clause in `social-video-viral-checklist.md` P2, the ceiling on every frame
+  rather than the seed frame. On-skin runs on b-roll cutaways and never on the
+  talking tier, because a talking-head frame carries no product and an on-skin
+  frame is a product-contact frame by definition.
 - **Owned surfaces have no moderator.** On-site and in-inbox there is no platform
   classifier to stop a bad frame, so the §3.2a stop list is enforced by our own
   gate or not at all.
 
 ## 5. What the look needs that does not exist yet
 
-- **Body reference photos.** Blocker #182. The owner is uploading them. Without
-  references, on-skin briefs drift on body type and skin tone.
-- **Sanity Studio deploy.** Blocker #155. Cast and reference assets cannot be
-  managed until Studio is deployed.
-- **Emma's own likeness in an implied-nude frame.** Blocker #193, open owner
-  question. Until it is answered, Emma is not cast in an on-skin frame.
-- **Caps: gate or report.** Blocker #194. Undecided whether the per-run on-skin
-  caps are a hard gate or a reported number.
+Every owner question this section opened was answered on 2026-09-20. Blocker
+#182 (body references) is cleared: all eight cast members carry an approved
+`bodyReferencePhoto` and a `skinToneNote`. #155 (Studio deploy) is cleared.
+#193 is answered yes. #194 is answered "report only (no hold)", and §3.2c now
+records the narrow reading: the caps report, the §3.2a stop list still BLOCKs.
+#192 is answered yes.
+
+What remains is code, not judgment, and all of it is on the bus:
+
+- **The scheduled image path does not use the body references.**
+  `scripts/gen-social-image.ts` never reaches `resolveCastReference`, so
+  `skinToneNote` reaches no prompt and the bare-product picker never runs.
+  Ticket #10475.
+- **Nothing populates the variety axes.** 281 rows, none carrying
+  `body_zone`, `contact_mode`, `crop_scale` or `scene_location`, so every cap
+  in the mix report reads UNKNOWN and the report is clean by construction.
+  Tickets #10479 and #10478.
+- **The video path cannot read a body reference**, and there is no way to
+  declare a crop scale on a scene. A close on-skin video frame would animate an
+  invented body. Ticket #10484, and it is a hard blocker on on-skin video.
+- **Video is gated on the seed still only.** No automated vision check runs on
+  a rendered clip or its poster. The ban that P2 replaced was covering that
+  hole. Ticket #10485.
+- **Owned surfaces other than Notebook have no imagery gate.** The homepage
+  image path runs a budget gate and nothing else. Ticket #10483.
 
 ## 6. Changelog
 
 - **2026-09-20**. Created. Records the on-skin treatment (owner 2026-09-19), the
   nudity definition (owner 2026-09-20), and the site-wide extension (owner
   2026-09-20, all-hands). Video (#192), Emma likeness (#193) and paid remain out.
+- **2026-09-20, later the same day.** Owner answered every open question at the
+  readiness all-hands. #182 body references uploaded and approved for all eight
+  cast members. #155 Studio deployed. #193 "Yes, Emma can and she has a body
+  reference": Emma moves into the on-skin rotation. #194 "report only (no
+  hold)": the caps report and never block, with the narrow reading written into
+  §3.2c so the §3.2a stop list is not demoted with them. #192 "Yes": video moves
+  from Exclude to Adopt, carrying the motion clause in
+  `social-video-viral-checklist.md` P2 that stills do not. Paid stays out.

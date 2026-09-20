@@ -91,8 +91,9 @@ PASS them all does not go forward. (2) Route EVERY script (spoken lines, present
 captions together) through `emma-empathy-reviewer`, which also verdicts the checklist rule by rule:
 PASS -> proceed.
 REVISE -> apply and re-gate once. BLOCK -> drop the item and record why. Also self-check the
-video-specific hard rules: no lived-experience claims, no named acts in audio/on-screen text, no
-device-on-body depiction, judge wardrobe by the most revealing frame.
+video-specific hard rules: no lived-experience claims, no named acts in audio/on-screen text, and
+every frame inside `docs/store-team/instagram-campaigns.md` §3.2a with §3.2c, judged on the most
+revealing frame of the clip per `social-video-viral-checklist.md` P2.
 
 ## Step 4 — Enqueue
 

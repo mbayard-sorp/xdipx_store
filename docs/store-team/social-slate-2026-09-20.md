@@ -15,44 +15,35 @@ Numbers verified against `social-research-2026-08-22.md`.
 
 ---
 
-## 0. Blocking dependency: no cast member has a body reference photo
+## 0. RESOLVED the same day: every cast member now has a body reference photo
 
 **Verified live on 2026-09-20 against Sanity project `0nlwk8cf`, dataset `production`, `published`
-perspective, with a real token.** All eight cast members are `active` and `approvedForUse` with a
-`referencePhoto`: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, Vivian. **`bodyReferencePhoto` is
-null on all eight, and `skinToneNote` is null on all eight.**
+perspective, with a real token, TWICE: once when this slate was drafted and once after the owner
+acted.** All eight cast members are `active` and `approvedForUse`: Diego, Emma, Jade, Marcus, Maya,
+Priya, Sofia, Vivian. At drafting time `bodyReferencePhoto` and `skinToneNote` were null on all
+eight. **At 16:54 to 17:02 UTC the same day the owner uploaded and approved a `bodyReferencePhoto`
+and a `skinToneNote` for every one of them.** Blocker #182 is cleared.
 
 §3.7's three-clause test says an on-skin close crop is a cast member in a scene only when "(a) it is
 generated from that cast member's approved BODY reference and the `castSlug` on the row names them".
-Clause (a) cannot be satisfied today. Ticket #10270 added the schema field and the selector; nobody
-has uploaded a photo into it, and approving a cast likeness is the owner's call, not the team's.
+**Clause (a) is now satisfiable.** Ticket #10270 shipped the schema field and the selector, the
+owner supplied the asset, and commit cf96753f wired `resolveCastReference` into both image routes.
 
-One further gap found in the same pass, verified by search:
+**So IG 1 is NO LONGER BLOCKED.** The close hip-hollow crop is the frame this slate exists to make
+and it can be generated. Emma is also available as a cast member for on-skin frames, per the owner's
+answer to blocker #193 on the same day.
 
-- **`presenterPhotoUrlForCrop` (`app/lib/sanity.server.ts:467`) has no callers.** It is the function
-  that decides to pass the body reference for a `macro` or `close` crop. `scripts/gen-social-image.ts`
-  never consults it; `--presenter-image` is a caller-supplied URL. So the selection ticket #10270
-  describes as "wired" is not reached by the generation path.
-- **It degrades silently.** `presenterPhotoUrlForCrop` returns the portrait reference when no body
-  reference exists, and its own docstring names the reason: "the owner has not approved one". Nothing
-  logs, warns, or blocks. A close-crop on-skin frame generated today is built from a 576x1024
-  portrait, the model invents everything below the neck including skin tone, and the run reports success.
+**The one caveat, narrowed.** The route path calls the selector; `scripts/gen-social-image.ts` does
+not. It takes `--presenter-image <url>` as a caller-supplied argument, so on the CLI path
+`withSkinToneNote` does not run and the bare-product picker does not run. Ticket #10475 closes it.
+Until then, a CLI-generated close crop needs the body reference URL passed explicitly rather than
+relying on the selector to choose it.
 
-**What this does to today's slate.** A `medium` or `wide` crop correctly uses the portrait reference,
-which is approved and present. A `macro` or `close` crop cannot run at all. So **IG 1 is BLOCKed**,
-and IG 2, X 1 and X 2 are medium-crop frames that clear clause (a) on their own.
-
-**And this is the finding to read first.** The one frame in this slate that would actually have
-corrected the boring-feed regression, the true ceiling-on-skin close crop, is exactly the frame the
-empty `bodyReferencePhoto` field blocks. The observable result today is one ceiling frame, which is
-the same number the 2026-09-19 audit flagged across the last 21 posts. That is not a coincidence and
-it will repeat: as long as this dependency is open, every plan to fix the regression degrades back
-to the safe end, because the harder frame is always the one that needs the missing asset. The
-pipeline has a BLOCK and no BORING, so cold costs nothing and the run retreats every day.
-
-This is the on-skin campaign's real state on day 1: the code is merged, the selector is not called,
-and the content dependency is empty. None of it is visible from any page, which is why a dry run
-found it and three weeks of live runs did not.
+**What the original finding got right, and keep it.** The regression this slate diagnosed was
+structural, not accidental: the pipeline has a BLOCK and no BORING, so cold costs nothing and the
+run retreats every day, and the one frame that would have corrected it was the one the missing asset
+blocked. The asset is here now. The gradient is not fixed by the asset, and the mix report
+(`{op:mixReport}`) is what makes cold visible. Read it before briefing.
 
 ---
 
