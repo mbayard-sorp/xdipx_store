@@ -58,6 +58,20 @@ import { stripUrlQuery } from './social-asset-library.server'
  * A torso crop with no hands in it passed every anatomy check trivially, so two
  * owner-preview generations this session broke the fence (full nudity) without the
  * prompt ever asking for it.
+ *
+ * `anusNotVisible` (ticket #10477) is the owner's 2026-09-20 nudity definition
+ * (nipples, labia, penis, anus) finished in pixels: the first three were
+ * checked and the fourth was policed only as a caption-text regex. It is a
+ * SEPARATE check rather than a widening of `genitaliaAbsent`, deliberately.
+ * `genitaliaAbsent` carries the clause "no product is depicted in contact with
+ * genitalia", and folding the anal region into `genitalia` would fail the
+ * plug-between-the-cheeks placement that
+ * docs/store-team/instagram-campaigns.md section 3.2c licenses at ceiling
+ * tier. That doc keeps the anus line and the product-against-genitalia line as
+ * separate stop-list entries for the same reason, and the publish gate's block
+ * message names the failing check to the drafter, so a merged check would send
+ * a re-brief for the wrong thing. Named for the organ, not the region: the
+ * licensed frame shows the region.
  */
 export type VisionCheckName =
   | 'limbCount'
@@ -66,6 +80,7 @@ export type VisionCheckName =
   | 'extraOrMergedLimbs'
   | 'nippleOccluded'
   | 'genitaliaAbsent'
+  | 'anusNotVisible'
   | 'adultUnambiguous'
 
 export const VISION_CHECK_NAMES: readonly VisionCheckName[] = [
@@ -75,6 +90,7 @@ export const VISION_CHECK_NAMES: readonly VisionCheckName[] = [
   'extraOrMergedLimbs',
   'nippleOccluded',
   'genitaliaAbsent',
+  'anusNotVisible',
   'adultUnambiguous',
 ]
 
@@ -138,7 +154,15 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   return true
 }
 
-const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these seven things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS one report-only item at the end:
+/**
+ * Exported so the calibration of `anusNotVisible` is testable as text
+ * (ticket #10477). The check has two failure directions and only one of them
+ * is obvious: missing a real anus, and over-firing on the licensed
+ * plug-along-the-cleft frame that section 3.2c puts at ceiling tier. The
+ * second is what a well-meaning later edit produces, and the only artifact
+ * that decides it is this wording.
+ */
+export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these eight things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS one report-only item at the end:
 
 1. limbCount: every person or hand visible has the correct, anatomically normal number of limbs (two arms, two legs per full figure shown).
 2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused or missing digits.
@@ -146,14 +170,15 @@ const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI
 4. extraOrMergedLimbs: no extra, duplicated, or merged limbs anywhere in the frame (including partially visible limbs at the edge of frame).
 5. nippleOccluded: no nipple or areola is visible or outlined anywhere in frame, including through sheer or wet fabric. Fail if any nipple or areola is visible or outlined.
 6. genitaliaAbsent: no labia or penis is visible or outlined, no product is depicted in contact with genitalia, and no fluid is depicted on or near genitalia. Fail if any of these is present.
-7. adultUnambiguous: the depicted person, if any, is unambiguously an adult. Judge this on ambiguity, not on apparent intent, and judge it explicitly even on a faceless body crop where the usual facial age markers are absent. Fail (do not pass) if there is any genuine uncertainty about adulthood.
+7. anusNotVisible: no anus is visible or outlined anywhere in frame. Bare buttocks, the visible line of the gluteal cleft, and a product laid along, across or beside the cleft are all PERMITTED and must pass this check: a bare rear is not a failure, and the crease between the buttocks is not a failure. Fail ONLY when the anus itself is depicted, or when its shape is discernibly outlined, including when the buttocks are parted or spread by a pose, by a hand, or by a product, when a product's insertable portion is shown entering or seated in the body, or when it reads through sheer or wet fabric. Judge the anus, not the cleft. If you are uncertain whether a shadow in the cleft is the anus or a shadow, fail.
+8. adultUnambiguous: the depicted person, if any, is unambiguously an adult. Judge this on ambiguity, not on apparent intent, and judge it explicitly even on a faceless body crop where the usual facial age markers are absent. Fail (do not pass) if there is any genuine uncertainty about adulthood.
 
 REPORT ONLY, not a check, does not affect "pass": legibleText. Read the whole frame for any legible text: brand wordmarks, barcodes, shipping labels, printed ingredient text, captions, watermarks, anything with readable letters or numbers. Transcribe everything legible into one string, or return "" if there is none. Never judge whether the text is acceptable; that is a policy decision made elsewhere with more context than you have (for example a manufacturer's wordmark on a product actually being sold is allowed, while a barcode or shipping label is not, and you cannot tell those apart from pixels alone in every case). Just report what you read.
 
 Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>"}
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>"}
 
-"pass" is true only when all seven checks in "checks" are "pass"; "legibleText" never affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-7 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is "".`
+"pass" is true only when all eight checks in "checks" are "pass"; "legibleText" never affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is "".`
 
 export interface VisionGateDeps {
   fetchImageBase64?: (url: string) => Promise<{ data: string; mediaType: string }>

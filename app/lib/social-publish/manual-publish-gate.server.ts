@@ -83,6 +83,16 @@ export interface ManualPublishInput {
    * durable stock guard off `shopify_product_id` besides.
    */
   productHandle?: string | null
+  /**
+   * `social_posts.created_at` for the row being posted. Required for the same
+   * reason the gate's own field is (ticket #10476): this path, the owner's
+   * Post now click, was one of the five that never threaded it, so every
+   * un-verdicted generated asset landed in the gate's "age unknown" branch and
+   * skipped the pixel check entirely. Video reels reach publish through here.
+   */
+  postCreatedAt: string | Date | null
+  /** `social_posts.poster_url`, the video poster frame, when the row has one (#10476). */
+  posterUrl?: string | null
 }
 
 export async function decideManualPublish(
@@ -108,6 +118,8 @@ export async function decideManualPublish(
     mediaUrls: input.mediaUrls,
     platform,
     productHandle: input.productHandle ?? null,
+    postCreatedAt: input.postCreatedAt,
+    posterUrl: input.posterUrl ?? null,
     // Deliberately no recentCaptions: see the repetition note above.
   })
   if (checks.blocked) {

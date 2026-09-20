@@ -329,14 +329,14 @@ breach rate was roughly 29 percent and it rose whenever the brief asked for more
 **That check is live, and this paragraph no longer holds anything back.** It used to end "until it
 is live no on-skin frame ships to Instagram unattended", which was true when it was written on
 2026-09-19 and stale the same day: ticket #10268 merged as `d88d3d3` and #10279 as `f2bd4bc`.
-`social-vision-gate.server.ts` now runs seven checks per frame (the doctrine's four anatomy checks
-plus `nippleOccluded`, `genitaliaAbsent`, `adultUnambiguous`) and reports `legibleText` as a
+`social-vision-gate.server.ts` now runs eight checks per frame (the doctrine's four anatomy checks
+plus `nippleOccluded`, `genitaliaAbsent`, `anusNotVisible`, `adultUnambiguous`) and reports `legibleText` as a
 transcription rather than a verdict, and `social-publish-gate.server.ts` blocks any media URL that
 carries no recorded verdict or a failed one. So the unattended path is open for on-skin frames on
 the same terms as every other frame. Left as written, the sentence was a hold on exactly the
 treatment §3.2c exists to ship, which is the §3.6 failure again: the gate was right and the
 document was stale. Owner direction that does not reach the binding document has not landed, and
-neither has a blocker that outlives its cause. One hole remains (ticket #10337): the publish gate still SKIPS rather than BLOCKS a `social-`/`ig-` prefixed asset with no recorded verdict, a legacy burn-in carve-out; until it is sunset a run confirms every on-skin lead has a recorded verdict before relaying PASS.
+neither has a blocker that outlives its cause. That hole is closed (tickets #10337, #10476): the publish gate BLOCKS a `social-`/`ig-` prefixed asset with no recorded verdict unless it is demonstrably older than the 2026-09-01 legacy cutoff, and an asset it cannot date at all now blocks too rather than skipping, because a row about to publish always has a created_at so "no date" means nobody looked, not old art. The video poster frame is walked as well. A stored verdict that answers fewer checks than the gate currently has is rejected the same way a missing one is, naming the unanswered checks, so a pre-#10477 verdict cannot publish on a seven-check read; that is read off `VISION_CHECK_NAMES`, so it covers every check added later with no further edit. There is no automated re-gate, and do not assume one: `recordVisionVerdict` is called only from a generation flow on a freshly uploaded url, and `/api/team/vision-gate` runs the gate without recording the result, so nothing writes a fresh verdict onto an existing `social_media_assets` row. A blocked row lands in `needs_changes`, and `reworkCaption` cannot clear it, because it redrafts the caption against the same media and reproduces the same finding. Clearing one needs regenerated art, or the re-gate action filed as ticket #10511. Measured against production on 2026-09-20 the cost of that is two rows: all 205 recorded verdicts predate the check, but 72 of the 74 unposted rows touching them are already `rejected`, leaving #238 and #182, both already in `needs_changes` and both over a week stale. One thing still does not gate itself: the video pipeline never calls `runVisionGate`, so a reel has no verdict to find and fails closed on every path until that lands.
 
 **"Desire-forward" means the picture and the caption, since 2026-08-22.** Owner direction
 2026-08-16 asked for posts that are *"desire forward and product highlighting"*; on 2026-08-22 the

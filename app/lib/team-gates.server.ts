@@ -671,6 +671,11 @@ export async function runPublishGateCheck(
       reviewStatus: socialPosts.reviewStatus,
       shopifyProductId: socialPosts.shopifyProductId,
       lastPublishGateCheckJson: socialPosts.lastPublishGateCheckJson,
+      // #10476: the vision-verdict carve-out needs a date to age an
+      // un-verdicted asset by, and the poster frame is a second image the
+      // grid renders that mediaUrls does not carry.
+      createdAt: socialPosts.createdAt,
+      posterUrl: socialPosts.posterUrl,
     })
     .from(socialPosts)
     .where(eq(socialPosts.id, postId))
@@ -708,6 +713,8 @@ export async function runPublishGateCheck(
     productHandle,
     altText: post.altText,
     recentCaptions,
+    postCreatedAt: post.createdAt ?? null,
+    posterUrl: post.posterUrl ?? null,
   })
 
   const deterministicFindings: PublishGateFinding[] = deterministic.findings.map(toStoredFinding)

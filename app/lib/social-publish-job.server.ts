@@ -851,6 +851,9 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       // #10337: age fallback for the vision-verdict legacy carve-out when the
       // media has no social_media_assets row to date it by.
       postCreatedAt: post.createdAt ?? null,
+      // #10476: the video poster frame is a second blob the grid renders and
+      // mediaUrls does not carry.
+      posterUrl: post.posterUrl ?? null,
     }, deps.gateDeps)
 
     if (gate.blocked || gate.held) {

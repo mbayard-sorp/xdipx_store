@@ -40,7 +40,7 @@
 
 import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset } from './social-media.server'
 import { X_CAPTION_MAX, T_CO_LENGTH, weightedTweetLength } from './social-publish/x-limits'
-import type { VisionVerdict } from './social-vision-gate.server'
+import { VISION_CHECK_NAMES, type VisionCheckName, type VisionVerdict } from './social-vision-gate.server'
 
 /**
  * Is this product sellable right now?
@@ -125,13 +125,60 @@ export interface DeterministicGateInput {
    */
   altText?: string | null
   /**
-   * `social_posts.created_at` for the draft under review, when the caller has
-   * it. Used only by the vision-verdict legacy carve-out below, as the
-   * fallback age signal for a prefix-named asset that has no
-   * `social_media_assets` row at all. Absent means "age unknown", which keeps
-   * the legacy skip rather than blocking retroactively.
+   * `social_posts.created_at` for the draft under review. Used only by the
+   * vision-verdict legacy carve-out below, as the fallback age signal for a
+   * prefix-named asset that has no `social_media_assets` row at all.
+   *
+   * REQUIRED, not optional, since ticket #10476, and that is the whole point
+   * of the field's shape. While it was optional, five of the seven call sites
+   * never passed it and typecheck said nothing, so every one of them landed in
+   * the "age unknown" branch, which used to skip silently. A row about to
+   * publish always has a created_at, so "unknown" never meant "old", it meant
+   * "the caller did not tell me". `null` is still accepted, for a caller that
+   * genuinely has no row (a hand-built input, a test), but it now has to be
+   * written down on purpose and it fails closed below.
    */
-  postCreatedAt?: string | Date | null
+  postCreatedAt: string | Date | null
+  /**
+   * `social_posts.poster_url`, the video poster frame, when the row carries
+   * one (ticket #10476). This is a SECOND blob, written alongside the final
+   * mp4 by the video fan-out (`video-pipeline.server.ts`), and it is the image
+   * that renders in the Instagram grid before playback. It is not in
+   * `mediaUrls`, so until this field existed nothing looked at it at all.
+   *
+   * Optional, unlike `postCreatedAt`, because absent is a true and ordinary
+   * statement here: a still post has no poster. The conflation that made
+   * `postCreatedAt` unsafe does not exist for this one.
+   *
+   * It is walked by the vision-verdict check only, not by the image-provenance
+   * check: a poster's blob path (`video/<jobId>/poster.jpg`) is not a
+   * generated-asset filename, and the library ingest re-hosts it under a
+   * different url, so running provenance over it would refuse every video post
+   * on a naming rule rather than on anything about the pixels.
+   */
+  posterUrl?: string | null
+}
+
+/**
+ * Which of the gate's checks a stored verdict does not actually answer.
+ *
+ * `getVisionVerdictByUrl` returns the stored jsonb blob with no shape
+ * validation, and this gate used to read only `verdict.pass`. So a verdict
+ * written when the gate asked seven questions kept reading as a full pass
+ * after the gate grew an eighth (`anusNotVisible`, ticket #10477): `pass:
+ * true` meant "all of the checks I was asked", not "all of the checks that
+ * exist now". Every asset carrying a pre-#10477 verdict would have published
+ * on a seven-check read forever.
+ *
+ * Deriving the required keys from `VISION_CHECK_NAMES` rather than listing
+ * them here is the point: this is self-healing for every check anyone adds
+ * later, which a one-shot backfill is not. A key present with a value that is
+ * neither `pass` nor `fail` counts as unanswered too, the same standard
+ * `isValidVerdictShape` applies to a live response.
+ */
+export function missingVisionChecks(verdict: VisionVerdict): VisionCheckName[] {
+  const checks = (verdict.checks ?? {}) as Partial<Record<VisionCheckName, unknown>>
+  return VISION_CHECK_NAMES.filter(name => checks[name] !== 'pass' && checks[name] !== 'fail')
 }
 
 /**
@@ -675,11 +722,17 @@ export async function runDeterministicPublishChecks(
   // never-inspected image that the gate waved through. With clothing gone on
   // on-skin frames that is a nudity-shipping path, not a cosmetic one.
   //
-  // Age unknown (no row, no post date, or the lookup threw) keeps the legacy
-  // skip: the carve-out is not narrowed retroactively onto art that already
-  // shipped. A non-prefix url with no verdict (an owner upload with no
-  // library row, or a library asset the generator somehow failed to check) is
-  // not covered by the carve-out at all and blocks regardless of date.
+  // Age unknown (no row, no post date, or the lookup threw) BLOCKS, since
+  // ticket #10476. It used to keep the legacy skip, on the reasoning that the
+  // carve-out should not narrow retroactively onto art that already shipped.
+  // That reasoning conflated two different things. These checks only ever run
+  // on a row that is about to publish, and a `social_posts` row always has a
+  // created_at, so "I cannot date this" never means "this is old". It means
+  // the caller did not say, or the lookup failed, and neither is evidence that
+  // anything ever looked at the image. Unchecked, not legacy. A non-prefix url
+  // with no verdict (an owner upload with no library row, or a library asset
+  // the generator somehow failed to check) is not covered by the carve-out at
+  // all and blocks regardless of date.
   const getVerdict = deps?.getVisionVerdict ?? (async (url: string) => {
     const { getVisionVerdictByUrl } = await import('./social-vision-gate.server')
     return getVisionVerdictByUrl(url)
@@ -689,7 +742,13 @@ export async function runDeterministicPublishChecks(
     return getAssetCreatedAtByUrl(url)
   })
   const postCreatedAt = toDate(input.postCreatedAt)
-  for (const u of media) {
+  // The poster frame rides along here and nowhere else (#10476). It is a
+  // publishable image the audience sees in the grid, so it is subject to the
+  // verdict, but it is not `mediaUrls` and must not be judged by the
+  // provenance naming rule above.
+  const poster = input.posterUrl?.trim()
+  const inspectable = poster ? [...media, poster] : media
+  for (const u of inspectable) {
     let verdict: VisionVerdict | null = null
     try {
       verdict = await getVerdict(u)
@@ -706,7 +765,15 @@ export async function runDeterministicPublishChecks(
         }
         // The row's own date when there is a row, otherwise the post's date.
         const age = assetCreatedAt ?? postCreatedAt
-        if (age === null || age.getTime() <= VISION_VERDICT_LEGACY_CUTOFF.getTime()) continue
+        if (age === null) {
+          findings.push({
+            check: 'vision-verdict',
+            severity: 'block',
+            detail: `Generated asset ${u} has no recorded vision-gate verdict and no date to age it by (no social_media_assets row and no post created_at). Unchecked, not legacy.`,
+          })
+          continue
+        }
+        if (age.getTime() <= VISION_VERDICT_LEGACY_CUTOFF.getTime()) continue
         findings.push({
           check: 'vision-verdict',
           severity: 'block',
@@ -717,7 +784,26 @@ export async function runDeterministicPublishChecks(
       findings.push({
         check: 'vision-verdict',
         severity: 'block',
-        detail: `Media has no recorded vision-gate verdict: ${u}. A generated asset must pass all seven vision-gate checks (limb count, hand anatomy, face/body integrity, extra or merged limbs, nipples occluded, genitalia absent, subject unambiguously adult) before it can publish.`,
+        detail: `Media has no recorded vision-gate verdict: ${u}. A generated asset must pass all eight vision-gate checks (limb count, hand anatomy, face/body integrity, extra or merged limbs, nipples occluded, genitalia absent, no anus visible, subject unambiguously adult) before it can publish.`,
+      })
+      continue
+    }
+    // A verdict that does not answer every current check is not a pass, it is
+    // a partial read, and it is rejected here the same way a missing one is
+    // (ticket #10477 follow-up). NOT routed through the legacy carve-out
+    // above, deliberately: that carve-out's premise is "no verdict exists
+    // because the check did not exist yet", and a verdict that exists
+    // disproves its own premise. An old date cannot excuse an unanswered
+    // question about pixels nobody re-read. The cost is that every asset
+    // holding a pre-#10477 verdict blocks once and re-gates on its next
+    // publish, which is the intended trade: no database operation, nothing to
+    // go stale, and it covers every check added after this one for free.
+    const unanswered = missingVisionChecks(verdict)
+    if (unanswered.length > 0) {
+      findings.push({
+        check: 'vision-verdict',
+        severity: 'block',
+        detail: `Media carries a vision-gate verdict that does not answer every check: ${unanswered.join(', ')} ${unanswered.length === 1 ? 'is' : 'are'} missing from the recorded verdict (${u}). The verdict predates ${unanswered.length === 1 ? 'that check' : 'those checks'}, so its "pass" is a pass on the questions it was asked, not on the ones the gate asks now. Re-run the vision gate on this asset.`,
       })
       continue
     }

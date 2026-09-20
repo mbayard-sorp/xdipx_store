@@ -9,6 +9,7 @@ import {
   generateWithVisionGate,
   isValidVerdictShape,
   VISION_CHECK_NAMES,
+  VISION_SYSTEM_PROMPT,
   type VisionVerdict,
   type VisionGateDeps,
 } from './social-vision-gate.server'
@@ -22,6 +23,7 @@ const CLEAN_RESPONSE = {
     extraOrMergedLimbs: 'pass',
     nippleOccluded: 'pass',
     genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
     adultUnambiguous: 'pass',
   },
   notes: 'clean, nothing anomalous',
@@ -37,6 +39,7 @@ const ANATOMY_FAIL_RESPONSE = {
     extraOrMergedLimbs: 'fail',
     nippleOccluded: 'pass',
     genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
     adultUnambiguous: 'pass',
   },
   notes: 'the cast member has three arms',
@@ -52,6 +55,7 @@ const NIPPLE_FAIL_RESPONSE = {
     extraOrMergedLimbs: 'pass',
     nippleOccluded: 'fail',
     genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
     adultUnambiguous: 'pass',
   },
   notes: 'nipple visible through wet fabric, top edge of frame',
@@ -67,9 +71,52 @@ const GENITALIA_FAIL_RESPONSE = {
     extraOrMergedLimbs: 'pass',
     nippleOccluded: 'pass',
     genitaliaAbsent: 'fail',
+    anusNotVisible: 'pass',
     adultUnambiguous: 'pass',
   },
   notes: 'genitalia visible, crop ran wider than requested',
+  legibleText: '',
+}
+
+// Ticket #10477, the two calibration directions of `anusNotVisible`.
+//
+// The licensed frame (docs/store-team/instagram-campaigns.md section 3.2c, at
+// ceiling tier) is bare buttocks with the gluteal cleft visible and a plug
+// resting along the cleft under its own weight. It must PASS. Over-firing on
+// any bare rear deletes the campaign's ceiling frame, which is exactly why
+// this is its own check and not a widening of `genitaliaAbsent`, whose
+// "no product in contact with genitalia" clause the licensed frame would
+// otherwise trip.
+const LICENSED_PLUG_FRAME_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'bare buttocks, gluteal cleft reads as a line, plug lying along the cleft under its own weight, no anus visible or outlined',
+  legibleText: '',
+}
+
+// The failing direction: the pose parts the buttocks and the anus reads.
+const PARTED_ANUS_FAIL_RESPONSE = {
+  pass: false,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'fail',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'buttocks spread by the pose, anus visible and outlined at the base of the cleft',
   legibleText: '',
 }
 
@@ -82,6 +129,7 @@ const AGE_AMBIGUOUS_FAIL_RESPONSE = {
     extraOrMergedLimbs: 'pass',
     nippleOccluded: 'pass',
     genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
     adultUnambiguous: 'fail',
   },
   notes: 'faceless torso crop, no reliable adult age markers visible',
@@ -97,6 +145,7 @@ const BRANDED_TEXT_RESPONSE = {
     extraOrMergedLimbs: 'pass',
     nippleOccluded: 'pass',
     genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
     adultUnambiguous: 'pass',
   },
   notes: 'clean, product wordmark visible on the paddle handle',
@@ -155,7 +204,7 @@ describe('isValidVerdictShape', () => {
     expect(isValidVerdictShape({ ...CLEAN_RESPONSE, legibleText: '' })).toBe(true)
   })
 
-  it('lists the four doctrine hard checks plus the three imagery-ceiling checks', () => {
+  it('lists the four doctrine hard checks plus the four imagery-ceiling checks', () => {
     expect(VISION_CHECK_NAMES).toEqual([
       'limbCount',
       'handAnatomy',
@@ -163,8 +212,53 @@ describe('isValidVerdictShape', () => {
       'extraOrMergedLimbs',
       'nippleOccluded',
       'genitaliaAbsent',
+      'anusNotVisible',
       'adultUnambiguous',
     ])
+  })
+
+  // Ticket #10477. getVisionVerdictByUrl returns the stored blob with no shape
+  // validation, but a LIVE response that omits the new key is malformed and
+  // must fail closed rather than read as a silent pass on the check nobody
+  // answered.
+  it('rejects a response missing anusNotVisible', () => {
+    const { anusNotVisible: _anusNotVisible, ...rest } = CLEAN_RESPONSE.checks
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, checks: rest })).toBe(false)
+  })
+})
+
+// Ticket #10477. The two verdict-flow tests below prove the plumbing carries
+// a pass and a fail. What decides the real calibration is the prompt text,
+// and its dangerous edit is the quiet one: a later hand tightening "anus" to
+// "the anal region" or "the cleft" would fail the licensed ceiling frame
+// without failing a single injected-response test. So the wording is asserted
+// directly, in both directions.
+describe('anusNotVisible prompt calibration', () => {
+  it('names the check and counts eight, not seven', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('anusNotVisible')
+    expect(VISION_SYSTEM_PROMPT).toContain('Check these eight things')
+    expect(VISION_SYSTEM_PROMPT).toContain('all eight checks')
+    expect(VISION_SYSTEM_PROMPT).not.toContain('Check these seven things')
+  })
+
+  it('licenses the bare rear and the cleft in so many words', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('a bare rear is not a failure')
+    expect(VISION_SYSTEM_PROMPT).toContain('the crease between the buttocks is not a failure')
+    expect(VISION_SYSTEM_PROMPT).toContain('a product laid along, across or beside the cleft')
+    expect(VISION_SYSTEM_PROMPT).toContain('Judge the anus, not the cleft')
+  })
+
+  it('still fails the parted, outlined, inserted and sheer cases', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('discernibly outlined')
+    expect(VISION_SYSTEM_PROMPT).toContain('parted or spread')
+    expect(VISION_SYSTEM_PROMPT).toContain("insertable portion is shown entering or seated in the body")
+    expect(VISION_SYSTEM_PROMPT).toContain('through sheer or wet fabric')
+  })
+
+  it('leaves genitaliaAbsent alone, so the licensed plug frame is not caught by its contact clause', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('no product is depicted in contact with genitalia')
+    // The organ, not the region: the licensed frame shows the region.
+    expect(VISION_SYSTEM_PROMPT).not.toContain('analRegionOccluded')
   })
 })
 
@@ -217,6 +311,39 @@ describe('runVisionGate', () => {
     expect(verdict.checks.adultUnambiguous).toBe('fail')
     expect(verdict.notes).toContain('age markers')
     expect(verdict.checkCompleted).toBe(true)
+  })
+
+  // Ticket #10477, calibration direction 1: the licensed frame passes. A bare
+  // rear is not a failure and the crease between the buttocks is not a
+  // failure, so nothing about this frame may block.
+  it('passes the licensed plug-along-the-cleft frame (bare buttocks, cleft visible)', async () => {
+    const d = deps({ callVision: vi.fn(async () => LICENSED_PLUG_FRAME_RESPONSE) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/plug-cleft.jpg', d)
+    expect(verdict.pass).toBe(true)
+    expect(verdict.checks.anusNotVisible).toBe('pass')
+    // The clause that would have deleted this frame had the check been folded
+    // into genitaliaAbsent instead of added beside it.
+    expect(verdict.checks.genitaliaAbsent).toBe('pass')
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  // Calibration direction 2: parted, so the organ itself reads.
+  it('rejects a frame where the buttocks are parted and the anus reads', async () => {
+    const d = deps({ callVision: vi.fn(async () => PARTED_ANUS_FAIL_RESPONSE) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/parted.jpg', d)
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checks.anusNotVisible).toBe('fail')
+    expect(verdict.notes).toContain('anus')
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  it('fails closed on the anus check when the model response omits it', async () => {
+    const { anusNotVisible: _anusNotVisible, ...partial } = LICENSED_PLUG_FRAME_RESPONSE.checks
+    const d = deps({ callVision: vi.fn(async () => ({ ...LICENSED_PLUG_FRAME_RESPONSE, checks: partial })) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/partial.jpg', d)
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checks.anusNotVisible).toBe('fail')
+    expect(verdict.checkCompleted).toBe(false)
   })
 
   // Ticket #10279: legibleText is a report field, not a check. A brand mark
