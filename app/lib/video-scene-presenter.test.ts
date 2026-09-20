@@ -55,7 +55,15 @@ const blobPutMock = vi.hoisted(() => vi.fn(async (path: string) => ({ url: `http
 vi.mock('~/lib/blob.server', () => ({ blobPut: blobPutMock, blobFetchToBuffer: vi.fn() }))
 vi.mock('~/lib/token-log.server', () => ({ logVideoCost: vi.fn(), logImageCost: vi.fn() }))
 const castMock = vi.hoisted(() => vi.fn())
-vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: castMock }))
+// Real presenterPhotoUrlForCrop semantics, not a stub (ticket #10484): the
+// video pipeline resolves a macro/close crop to the cast member's neck-down
+// bodyReferencePhoto through it, and a mock that always handed back the
+// portrait would hide exactly the bug it exists to prevent.
+const cropPhoto = vi.hoisted(() => (
+  m: { photoUrl: string; bodyReferencePhotoUrl?: string | null },
+  cropScale: string | null | undefined,
+) => ((cropScale === 'macro' || cropScale === 'close') && m.bodyReferencePhotoUrl ? m.bodyReferencePhotoUrl : m.photoUrl))
+vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: castMock, presenterPhotoUrlForCrop: cropPhoto }))
 const productMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/shopify.server', () => ({ getProductByHandle: productMock }))
 vi.mock('~/lib/ivr-voice.server', () => ({ getActiveIvrVoiceId: vi.fn().mockResolvedValue('voice-1') }))

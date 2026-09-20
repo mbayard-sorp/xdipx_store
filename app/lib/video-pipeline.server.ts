@@ -60,7 +60,8 @@ import { estimateVideoCostUsd, estimateImageCostUsd, computeRunpodActualCostUsd 
 import { utcIsoToLaWallClock } from '~/lib/social-schedule-ui'
 import { logVideoCost, logImageCost } from '~/lib/token-log.server'
 import { submitRunpodVideo, getRunpodStatus, getRunpodResult, cancelRunpod } from '~/lib/runpod-video.server'
-import { getEditorPhotoUrl, getApprovedCastMembers } from '~/lib/sanity.server'
+import { getEditorPhotoUrl, getApprovedCastMembers, presenterPhotoUrlForCrop } from '~/lib/sanity.server'
+import { CROP_SCALES, isCropScale, needsBodyReference, withSkinToneNote } from '~/lib/social-cast-reference.server'
 import { getProductByHandle } from '~/lib/shopify.server'
 import { getTeamConfig, getTodaySpendCents } from '~/lib/team.server'
 import {
@@ -118,14 +119,101 @@ export function isMultiSceneScript(script: VideoScriptJson): script is VideoScri
 }
 
 /**
+ * The async half of the on-skin gate, resolved by the enqueue and handed to
+ * the synchronous validateScenes (ticket #10484).
+ */
+export interface OnSkinGateContext {
+  /** Job-level presenter, used by a scene that declares none of its own. */
+  jobPresenter: string
+  /** Presenters known to have a bodyReferencePhoto, from presentersWithBodyReference. */
+  bodyReferencePresenters: ReadonlySet<string>
+}
+
+/**
+ * Every presenter that can appear on camera for a scene: the scene's own
+ * presenter (or the job's, when the scene names none) plus its co-presenters.
+ * 'none' is not a person, so it never reaches the on-skin gate.
+ */
+function scenePresentersOnCamera(
+  scene: Pick<VideoSceneSpec, 'presenter' | 'coPresenters'>,
+  jobPresenter: string,
+): string[] {
+  const main = typeof scene.presenter === 'string' ? scene.presenter : jobPresenter
+  const all = [main, ...(Array.isArray(scene.coPresenters) ? scene.coPresenters : [])]
+  return all.filter(p => typeof p === 'string' && p !== 'none')
+}
+
+/**
+ * Which of these presenters have a neck-down body reference in Sanity
+ * (ticket #10484). Resolved once, asynchronously, by the enqueue so the
+ * synchronous validateScenes can refuse an on-skin scene without becoming
+ * async itself (dryRunEpisodeScript, the propose-time caller, is synchronous
+ * and reads no Sanity). Only cast members can ever qualify: 'none' is not a
+ * person and 'emma' resolves singleton.editor, which has a portrait and no
+ * body reference field at all.
+ */
+export async function presentersWithBodyReference(presenters: string[]): Promise<Set<string>> {
+  const friends = [...new Set(presenters.filter(p => p.startsWith('friend:')))]
+  if (!friends.length) return new Set()
+  const cast = await getApprovedCastMembers()
+  const withBody = new Set<string>()
+  for (const p of friends) {
+    const member = cast.find(m => m.slug === p.slice('friend:'.length))
+    if (member?.bodyReferencePhotoUrl) withBody.add(p)
+  }
+  return withBody
+}
+
+/**
+ * The on-skin hard gate (ticket #10484). A macro or close crop is neck-down
+ * with no face in it, so a portrait reference means the model invents the
+ * whole body including skin tone under a named persona's name, failing
+ * instagram-campaigns.md section 3.7 clause (a).
+ *
+ * This REFUSES rather than falling back to the portrait, which is where the
+ * video path deliberately parts company with the stills path: a still built
+ * on an invented body is one frame a human might catch at review, while the
+ * video path ANIMATES that invented body across a whole clip and reports the
+ * job a success. Refusing at enqueue also means it costs nothing.
+ */
+function assertBodyReferenceForCrop(
+  where: string,
+  cropScale: string | null | undefined,
+  presenters: string[],
+  bodyReferencePresenters: ReadonlySet<string>,
+): void {
+  if (!needsBodyReference(cropScale)) return
+  for (const presenter of presenters) {
+    if (bodyReferencePresenters.has(presenter)) continue
+    const remedy = presenter === 'emma'
+      ? 'singleton.editor carries the portrait likeness only, so Emma cannot front an on-skin crop. Cast a cast member who has a bodyReferencePhoto, or drop the shot to cropScale medium or wide.'
+      : 'To unblock: npx tsx scripts/generate-cast-body-references.ts, the owner picks one, upload it to castMember.bodyReferencePhoto. Or drop the shot to cropScale medium or wide.'
+    throw new Error(
+      `${where}: cropScale '${cropScale}' is an on-skin crop and presenter '${presenter}' has no bodyReferencePhoto in Sanity. ` +
+      'Refusing the enqueue instead of composing from the portrait, because that would invent the body and skin tone below the neck ' +
+      'and then animate them (instagram-campaigns.md section 3.7 clause (a)). ' +
+      remedy,
+    )
+  }
+}
+
+/**
  * Validate + normalize a raw scenes array at enqueue: 2-8 scenes, each
  * duration one of the rendering model's allowedDurations, total <= 90s,
  * continuity defaulted (scene 0 'own-frame', every later scene 'last-frame').
  * The rendering model is the LIPSYNC TIER'S BASE CLIP when spec.lipsync is
  * set (the clip stage renders scenes on the base model; lipsync performs the
  * concatenated result afterward) — same resolution advanceClip already uses.
+ *
+ * `onSkin` (ticket #10484) carries the async half of the on-skin gate that
+ * this synchronous function cannot resolve itself: which presenters have a
+ * bodyReferencePhoto in Sanity, resolved once by enqueueVideoJob. Given it, a
+ * macro or close scene whose presenter has no body reference is REFUSED here
+ * before any spend. Omitted by dryRunEpisodeScript, which is synchronous and
+ * reads no Sanity at propose time; the enqueue is the gate that matters,
+ * since it is the only caller that can start a render.
  */
-function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoSceneSpec[] {
+function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec, onSkin?: OnSkinGateContext): VideoSceneSpec[] {
   if (raw.length < MULTI_SCENE_MIN || raw.length > MULTI_SCENE_MAX) {
     throw new Error(`Multi-scene jobs need ${MULTI_SCENE_MIN}-${MULTI_SCENE_MAX} scenes (got ${raw.length})`)
   }
@@ -173,6 +261,21 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
     if (talkingTier && (typeof scene.spokenLine !== 'string' || !scene.spokenLine.trim())) {
       throw new Error(`scenes[${i}].spokenLine is required on the lipsync tier`)
     }
+    // Shot tightness (ticket #10484). Validated as an enum rather than passed
+    // through: an unrecognised value used to vanish silently at the
+    // normalization below, and a typo'd 'closeup' would read as "not on skin"
+    // and quietly skip the body-reference gate.
+    if (scene.cropScale !== undefined && !isCropScale(scene.cropScale)) {
+      throw new Error(`scenes[${i}].cropScale must be one of ${CROP_SCALES.join(' | ')}`)
+    }
+    if (onSkin) {
+      assertBodyReferenceForCrop(
+        `scenes[${i}]`,
+        scene.cropScale,
+        scenePresentersOnCamera(scene, onSkin.jobPresenter),
+        onSkin.bodyReferencePresenters,
+      )
+    }
     total += scene.durationSeconds
     return {
       slug: scene.slug,
@@ -184,6 +287,7 @@ function validateScenes(raw: VideoSceneSpec[], spec: VideoModelSpec): VideoScene
       ...(typeof scene.presenter === 'string' ? { presenter: scene.presenter } : {}),
       ...(typeof scene.spokenLine === 'string' ? { spokenLine: scene.spokenLine } : {}),
       ...(Array.isArray(scene.coPresenters) ? { coPresenters: scene.coPresenters } : {}),
+      ...(isCropScale(scene.cropScale) ? { cropScale: scene.cropScale } : {}),
     }
   })
   if (total > MULTI_SCENE_TOTAL_MAX_SECONDS) {
@@ -426,8 +530,32 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
     if (spec.audioDriven) {
       throw new Error('Multi-scene jobs are not supported on the avatar tier (no per-scene motion prompt); use a single scene or a different model tier.')
     }
-    normalizedScenes = validateScenes(script.scenes, spec)
+    // On-skin gate (ticket #10484): resolve who has a body reference BEFORE
+    // validating, so validateScenes can refuse a macro/close scene whose
+    // presenter has none. One Sanity read for the whole scene list.
+    const onCamera = script.scenes.flatMap(s =>
+      s && typeof s === 'object' ? scenePresentersOnCamera(s, args.presenter) : [],
+    )
+    normalizedScenes = validateScenes(script.scenes, spec, {
+      jobPresenter: args.presenter,
+      bodyReferencePresenters: await presentersWithBodyReference(onCamera),
+    })
     totalDurationSeconds = normalizedScenes.reduce((s, sc) => s + sc.durationSeconds, 0)
+  } else {
+    // Single-scene jobs carry the crop on scriptJson itself. Same enum check
+    // and same hard refusal as the per-scene gate above, so an on-skin single
+    // clip cannot reach a render on a portrait reference either.
+    if (script.cropScale !== undefined && !isCropScale(script.cropScale)) {
+      throw new Error(`scriptJson.cropScale must be one of ${CROP_SCALES.join(' | ')}`)
+    }
+    if (needsBodyReference(script.cropScale) && args.presenter !== 'none') {
+      assertBodyReferenceForCrop(
+        'scriptJson',
+        script.cropScale,
+        [args.presenter],
+        await presentersWithBodyReference([args.presenter]),
+      )
+    }
   }
 
   let speechSeconds = 0
@@ -854,12 +982,38 @@ async function assertFrameCostFitsCeiling(job: VideoJobRow): Promise<void> {
 
 // ─── Stage: scene_frame ──────────────────────────────────────────────────────
 
-async function resolvePresenterPhotoUrl(presenter: string): Promise<string | null> {
-  if (presenter === 'none') return null
+/** What the frame stage needs about a presenter: the reference and its facts. */
+interface PresenterReference {
+  /** Reference image for composition. Null only for presenter 'none'. */
+  photoUrl: string | null
+  /** Plain skin-tone description for the brief to state, cast members only. */
+  skinToneNote: string | null
+  /** True when the presenter has a neck-down bodyReferencePhoto in Sanity. */
+  hasBodyReference: boolean
+}
+
+/**
+ * Resolve a presenter to the reference image the scene frame composes from
+ * (ticket #10484). `cropScale` is the shot tightness: a 'macro' or 'close'
+ * crop carries no face, so it anchors to the cast member's neck-down
+ * bodyReferencePhoto via presenterPhotoUrlForCrop, exactly as the stills path
+ * does in resolveCastReference. Anything else (absent, 'medium', 'wide')
+ * resolves the portrait referencePhoto, which is what every caller got before
+ * this argument existed.
+ *
+ * NOTE this never silently downgrades an on-skin crop to the portrait the way
+ * the stills route does: the enqueue gate (assertBodyReferenceForCrop, run
+ * from validateScenes and from enqueueVideoJob's single-scene branch) has
+ * already refused that job, because here the invented body would be ANIMATED.
+ */
+async function resolvePresenterReference(presenter: string, cropScale?: string | null): Promise<PresenterReference> {
+  if (presenter === 'none') return { photoUrl: null, skinToneNote: null, hasBodyReference: false }
   if (presenter === 'emma') {
     const url = await getEditorPhotoUrl()
     if (!url) throw new Error('Emma canonical photo not found in Sanity (singleton.editor)')
-    return url
+    // singleton.editor carries the portrait likeness only: there is no
+    // bodyReferencePhoto field on it, so Emma can never front an on-skin crop.
+    return { photoUrl: url, skinToneNote: null, hasBodyReference: false }
   }
   if (presenter.startsWith('friend:')) {
     const slug = presenter.slice('friend:'.length)
@@ -867,9 +1021,17 @@ async function resolvePresenterPhotoUrl(presenter: string): Promise<string | nul
     const member = cast.find(m => m.slug === slug)
     // Fail fast — never silently substitute Emma for an unapproved character.
     if (!member) throw new Error(`Cast member '${slug}' not found or not approved for use (castMember.approvedForUse)`)
-    return member.photoUrl
+    return {
+      photoUrl: presenterPhotoUrlForCrop(member, cropScale),
+      skinToneNote: member.skinToneNote,
+      hasBodyReference: !!member.bodyReferencePhotoUrl,
+    }
   }
   throw new Error(`Unknown presenter '${presenter}' (expected none | emma | friend:{slug})`)
+}
+
+async function resolvePresenterPhotoUrl(presenter: string, cropScale?: string | null): Promise<string | null> {
+  return (await resolvePresenterReference(presenter, cropScale)).photoUrl
 }
 
 async function resolveProductImageUrl(handle: string): Promise<string> {
@@ -993,7 +1155,14 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
   // the one spending stage with no getMaxCostCents check.
   await assertFrameCostFitsCeiling(job)
 
-  const presenterUrl = await resolvePresenterPhotoUrl(job.presenter)
+  // Shot tightness decides which reference the presenter resolves to
+  // (ticket #10484): a macro/close on-skin crop anchors to the cast member's
+  // neck-down bodyReferencePhoto, anything else to the portrait. The enqueue
+  // already refused this job if the crop is on-skin and there is no body
+  // reference, so there is no silent portrait fallback to worry about here.
+  const cropScale = isCropScale(script['cropScale']) ? script['cropScale'] : undefined
+  const presenterRef = await resolvePresenterReference(job.presenter, cropScale)
+  const presenterUrl = presenterRef.photoUrl
   // Talking-head frames NEVER include the product (product visuals live in
   // b-roll cutaways or post-composited stills), so the real-photography hard
   // gate only applies when the product actually appears in the frame.
@@ -1003,7 +1172,10 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
   if (!baseImageUrl) throw new Error('No reference image available for scene-frame composition')
 
   const { urls, requestIds, costKey, plate, plateRequestId } = await composeSceneFrame({
-    prompt: framePrompt,
+    // State the cast member's skin tone rather than let the model invent one
+    // (ticket #10484), the same clause withSkinToneNote prepends on the
+    // stills path. No-op when the presenter has no note.
+    prompt: withSkinToneNote(framePrompt, presenterRef.skinToneNote),
     presenterImageUrl: baseImageUrl,
     ...(productUrl ? { productImageUrl: productUrl } : {}),
     count: SCENE_FRAME_CANDIDATES,
@@ -1167,7 +1339,12 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
   // the one spending stage with no getMaxCostCents check.
   await assertFrameCostFitsCeiling(job)
 
-  const presenterUrl = await resolvePresenterPhotoUrl(scenePresenter)
+  // Per-scene shot tightness (ticket #10484): a macro/close on-skin scene
+  // anchors to the presenter's neck-down bodyReferencePhoto, anything else to
+  // the portrait. validateScenes refused this job at enqueue if an on-skin
+  // scene had no body reference to anchor to.
+  const presenterRef = await resolvePresenterReference(scenePresenter, scene.cropScale)
+  const presenterUrl = presenterRef.photoUrl
   if (talkingHead && !presenterUrl) throw new Error('talkingHead requires a presenter (emma or friend:{slug})')
   const productUrl = talkingHead ? null : await resolveProductImageUrl(job.productHandle)
   const baseImageUrl = presenterUrl ?? productUrl
@@ -1177,12 +1354,15 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
   // already accepts extraImageUrls (scripts/generate-slate-2026-08-24.ts uses
   // it for social stills); this is the video frame stage's first caller.
   // Absent coPresenters means the same single-face request as before.
+  // Co-presenters share the scene's crop, so they resolve the same register:
+  // an on-skin two-shot must not pair one body reference with one portrait.
   const coPresenterUrls = scene.coPresenters?.length
-    ? await Promise.all(scene.coPresenters.map(p => resolvePresenterPhotoUrl(p)))
+    ? await Promise.all(scene.coPresenters.map(p => resolvePresenterPhotoUrl(p, scene.cropScale)))
     : []
 
   const { urls, requestIds, costKey, plate, plateRequestId } = await composeSceneFrame({
-    prompt: scene.framePrompt,
+    // Skin tone stated, not invented (ticket #10484), as on the stills path.
+    prompt: withSkinToneNote(scene.framePrompt, presenterRef.skinToneNote),
     presenterImageUrl: baseImageUrl,
     ...(productUrl ? { productImageUrl: productUrl } : {}),
     ...(coPresenterUrls.length ? { extraImageUrls: coPresenterUrls.filter((u): u is string => !!u) } : {}),

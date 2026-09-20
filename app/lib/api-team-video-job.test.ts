@@ -38,7 +38,12 @@ vi.mock('~/lib/video-pipeline.server', () => ({
   // pattern — see that file's own PRESENTER_RE doc comment).
   PRESENTER_RE: /^(none|emma|friend:[a-z0-9-]+)$/,
 }))
-vi.mock('~/lib/sanity.server', () => ({ getApprovedCastMembers: vi.fn().mockResolvedValue([]) }))
+// Real presenterPhotoUrlForCrop semantics, not a stub (ticket #10484).
+const cropPhoto = vi.hoisted(() => (
+  m: { photoUrl: string; bodyReferencePhotoUrl?: string | null },
+  cropScale: string | null | undefined,
+) => ((cropScale === 'macro' || cropScale === 'close') && m.bodyReferencePhotoUrl ? m.bodyReferencePhotoUrl : m.photoUrl))
+vi.mock('~/lib/sanity.server', () => ({ getApprovedCastMembers: vi.fn().mockResolvedValue([]), presenterPhotoUrlForCrop: cropPhoto }))
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))
 vi.mock('~/lib/db.server', () => ({ db: { select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }) } }))
 vi.mock('~/lib/api-error.server', () => ({
