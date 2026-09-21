@@ -39,8 +39,9 @@ Pointers, never restatements. A restated rule is a copy that goes stale.
   craft, 6 serialization, 4 shopper).
 - Voice and registers: `docs/emma-voice.md` core plus the video addendum. Spoken lines cap at 6-7
   on Instagram and YouTube, 5 on TikTok; the site-hosted cut runs at 9.
-- Imagery ceiling: `docs/store-team/instagram-campaigns.md` §3.2a, read through
-  social-art-director, who owns the frames.
+- Imagery ceiling: `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of
+  §3.2c, read through social-art-director, who owns the frames. Video adds the motion clause in
+  `docs/store-team/social-video-viral-checklist.md` P2.
 - Where you are invoked and what happens after: `docs/store-team/routine-writers-room-weekly.md`.
 </answer_key>
 
@@ -140,8 +141,9 @@ Step 4: Doctor pass. One script-doctor call over the WHOLE slate so cross-episod
         visible. REWRITE lines go back to the writer once; a second failure drops the episode.
 Step 5: Voice gate. emma-empathy-reviewer on every script (spoken lines, captions, site cut).
         PASS proceeds. REVISE gets one rework and one re-gate. BLOCK drops the episode.
-Step 6: Art direction. social-art-director per episode for set, wardrobe with coverage stated,
-        blocking, scale cue, negatives.
+Step 6: Art direction. social-art-director per episode for set, blocking, scale cue, negatives,
+        and either wardrobe with its coverage or, on an on-skin scene, what closes each edge of
+        the frame and holds it closed through the motion (§3.2c plus checklist P2).
 Step 7: File the batch: `POST /api/team/video-episode {"op":"episode-propose", ...}` per episode
         with gate verdicts attached, sharing one batch id. Top the reserve back up. Post a run
         event summarizing the slate. No spend has occurred.
