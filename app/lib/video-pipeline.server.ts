@@ -200,6 +200,34 @@ function assertBodyReferenceForCrop(
 }
 
 /**
+ * Re-assert the same on-skin gate at the frame stage (ticket #10500), a
+ * time-of-check-to-time-of-use fix on #10484's enqueue-only gate. A
+ * castMember's bodyReferencePhoto can be removed or unset in Sanity between
+ * enqueue and this stage; without this check, resolvePresenterReference
+ * would silently fall back to the portrait (presenterPhotoUrlForCrop's own
+ * fallback behavior) and the render would proceed, which is exactly the
+ * silent-substitution failure #10484's enqueue gate exists to prevent. Fail
+ * the job here too rather than downgrading the crop, so the reason is
+ * legible in the run.
+ */
+function assertBodyReferenceAtFrameStage(
+  where: string,
+  cropScale: string | null | undefined,
+  presenter: string,
+  ref: PresenterReference,
+): void {
+  if (!needsBodyReference(cropScale)) return
+  if (ref.hasBodyReference) return
+  throw new Error(
+    `${where}: cropScale '${cropScale}' is an on-skin crop and presenter '${presenter}' has no bodyReferencePhoto in Sanity ` +
+    '(re-checked at the frame stage; it passed the enqueue gate but the reference has since been removed or unset). ' +
+    'Refusing rather than composing from the portrait, because that would invent the body and skin tone below the neck ' +
+    'and then animate them (instagram-campaigns.md section 3.7 clause (a)). ' +
+    'To unblock: npx tsx scripts/generate-cast-body-references.ts, the owner picks one, upload it to castMember.bodyReferencePhoto. Or drop the shot to cropScale medium or wide.',
+  )
+}
+
+/**
  * Validate + normalize a raw scenes array at enqueue: 2-8 scenes, each
  * duration one of the rendering model's allowedDurations, total <= 90s,
  * continuity defaulted (scene 0 'own-frame', every later scene 'last-frame').
@@ -1161,9 +1189,11 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
   // (ticket #10484): a macro/close on-skin crop anchors to the cast member's
   // neck-down bodyReferencePhoto, anything else to the portrait. The enqueue
   // already refused this job if the crop is on-skin and there is no body
-  // reference, so there is no silent portrait fallback to worry about here.
+  // reference; re-assert it here too (ticket #10500), since the reference
+  // could have been removed or unset in Sanity since enqueue.
   const cropScale = isCropScale(script['cropScale']) ? script['cropScale'] : undefined
   const presenterRef = await resolvePresenterReference(job.presenter, cropScale)
+  assertBodyReferenceAtFrameStage('scene_frame', cropScale, job.presenter, presenterRef)
   const presenterUrl = presenterRef.photoUrl
   // Talking-head frames NEVER include the product (product visuals live in
   // b-roll cutaways or post-composited stills), so the real-photography hard
@@ -1344,8 +1374,10 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
   // Per-scene shot tightness (ticket #10484): a macro/close on-skin scene
   // anchors to the presenter's neck-down bodyReferencePhoto, anything else to
   // the portrait. validateScenes refused this job at enqueue if an on-skin
-  // scene had no body reference to anchor to.
+  // scene had no body reference to anchor to; re-assert it here too (ticket
+  // #10500), since the reference could have been removed or unset since.
   const presenterRef = await resolvePresenterReference(scenePresenter, scene.cropScale)
+  assertBodyReferenceAtFrameStage(`scenes[${idx}]`, scene.cropScale, scenePresenter, presenterRef)
   const presenterUrl = presenterRef.photoUrl
   if (talkingHead && !presenterUrl) throw new Error('talkingHead requires a presenter (emma or friend:{slug})')
   const productUrl = talkingHead ? null : await resolveProductImageUrl(job.productHandle)
