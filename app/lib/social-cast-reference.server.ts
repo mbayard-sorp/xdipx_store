@@ -82,10 +82,18 @@ export function resolveCastReference(opts: {
     bodyReferenceMissing,
     ...(bodyReferenceMissing
       ? {
+          // Ticket #10560: this used to end with a directive to an agent
+          // ("Hold the post and say so in the run summary"), which is not a
+          // control — nothing enforced it, and it let everyone believe the
+          // instruction was a substitute for an actual sink. The route now
+          // records this on the run's event timeline and tags the asset row
+          // itself (api.team.social-image.tsx), so this stays a plain,
+          // human-readable description of what happened and how to fix the
+          // root cause.
           warning:
             `${member.name} has no bodyReferencePhoto, so this ${cropScale} crop was generated from the portrait. ` +
             'The body and skin tone below the neck are invented under this persona\'s name, which fails ' +
-            'instagram-campaigns.md section 3.7 clause (a). Hold the post and say so in the run summary. ' +
+            'instagram-campaigns.md section 3.7 clause (a). ' +
             'To unblock: npx tsx scripts/generate-cast-body-references.ts, owner picks, upload to castMember.bodyReferencePhoto.',
         }
       : {}),
