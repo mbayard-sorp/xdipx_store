@@ -12,6 +12,7 @@ import {
   addAssetTags, archiveAssets, getAssetUsage, getLibraryAsset, removeAssetTag, unarchiveAssets,
 } from '~/lib/social-studio.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
+import { missingVisionChecks } from '~/lib/social-publish-gate.server'
 import { TagChipInput } from '~/components/admin/social/TagChipInput'
 import { RegenerateModal } from '~/components/admin/social/RegenerateModal'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
@@ -30,9 +31,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     getAssetUsage(asset),
     getApprovedCastMembers().catch(() => []),
   ])
+  // Ticket #10511: summarize the stored vision verdict so the drawer can show
+  // whether this asset would clear the publish gate's vision-verdict check
+  // without the admin having to read the raw JSON blob.
+  const vision = asset.visionVerdict
+    ? { pass: asset.visionVerdict.pass, missing: missingVisionChecks(asset.visionVerdict), checkedAt: asset.visionVerdict.checkedAt }
+    : null
   return {
     asset,
     usage,
+    vision,
     roster: cast.map(m => ({ slug: m.slug, name: m.name, photoUrl: m.photoUrl, role: m.role })),
   }
 }
@@ -63,17 +71,29 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const n = await unarchiveAssets([id])
     return n > 0 ? { ok: true, intent: 'unarchive' } : { ok: false, error: 'Asset not found' }
   }
+  // Ticket #10511: re-run the vision gate against this asset's OWN url and
+  // record the fresh result in place, so a stuck row (an old verdict missing
+  // a check added later, or a needs_changes post blocked on stale art) can be
+  // cleared without regenerating and re-billing the frame.
+  if (intent === 're-gate') {
+    const asset = await getLibraryAsset(id)
+    if (!asset) return { ok: false, error: 'Asset not found' }
+    const { regateAsset } = await import('~/lib/social-vision-gate.server')
+    const verdict = await regateAsset(id, asset.url)
+    return { ok: true, intent: 're-gate', verdict }
+  }
   return { ok: false, error: 'Unknown intent' }
 }
 
 export default function LibraryAssetDrawer() {
-  const { asset, usage, roster } = useLoaderData<typeof loader>()
+  const { asset, usage, vision, roster } = useLoaderData<typeof loader>()
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const [regen, setRegen] = useState(false)
   const back = `/admin/socials/library?${params.toString()}`
   const close = () => navigate(back)
   const archiveFetcher = useFetcher<{ ok: boolean; error?: string; intent?: 'archive' | 'unarchive'; warning?: string | null }>()
+  const regateFetcher = useFetcher<{ ok: boolean; error?: string; intent?: 're-gate'; verdict?: { pass: boolean; notes: string } }>()
   const isArchived = !!asset.archivedAt
 
   return (
@@ -102,6 +122,17 @@ export default function LibraryAssetDrawer() {
             <button type="button" onClick={() => setRegen(true)} className="inline-flex items-center gap-1 min-h-11 px-4 rounded-full bg-coral text-white text-sm font-semibold hover:bg-coral-2">
               <RefreshIcon size={14} /> Edit prompt, regenerate
             </button>
+            <regateFetcher.Form method="post">
+              <input type="hidden" name="intent" value="re-gate" />
+              <button
+                type="submit"
+                disabled={regateFetcher.state !== 'idle'}
+                className="inline-flex items-center gap-1 min-h-11 px-3 rounded-full border border-line bg-paper text-sm font-medium text-ink hover:border-ink-4 disabled:opacity-50"
+                title="Re-run the vision gate against this exact asset and record the fresh verdict, without regenerating the image"
+              >
+                <RefreshIcon size={14} /> {regateFetcher.state !== 'idle' ? 'Re-gating…' : 'Re-run vision gate'}
+              </button>
+            </regateFetcher.Form>
             <archiveFetcher.Form method="post">
               <input type="hidden" name="intent" value={isArchived ? 'unarchive' : 'archive'} />
               <button
@@ -117,6 +148,20 @@ export default function LibraryAssetDrawer() {
           {isArchived && (
             <p className="text-xs text-ink-3">
               Archived{asset.archivedBy ? ` by ${asset.archivedBy}` : ''}. Hidden from the library grid and the Composer picker.
+            </p>
+          )}
+          {vision && (
+            <p className="text-xs text-ink-3">
+              Vision gate: <span className={vision.pass && vision.missing.length === 0 ? 'text-sage font-medium' : 'text-red-700 font-medium'}>
+                {vision.pass && vision.missing.length === 0 ? 'pass' : vision.missing.length > 0 ? `stale (missing ${vision.missing.join(', ')})` : 'fail'}
+              </span> (checked {formatLaWallClock(vision.checkedAt)})
+            </p>
+          )}
+          {!vision && <p className="text-xs text-red-700">Vision gate: no recorded verdict.</p>}
+          {regateFetcher.data?.ok === false && <p className="text-xs text-red-700">{regateFetcher.data.error}</p>}
+          {regateFetcher.data?.ok && regateFetcher.data.intent === 're-gate' && regateFetcher.data.verdict && (
+            <p className={`text-xs ${regateFetcher.data.verdict.pass ? 'text-sage' : 'text-red-700'}`}>
+              Re-gated: {regateFetcher.data.verdict.pass ? 'pass' : 'fail'} — {regateFetcher.data.verdict.notes}
             </p>
           )}
           {archiveFetcher.data?.ok === false && <p className="text-xs text-red-700">{archiveFetcher.data.error}</p>}

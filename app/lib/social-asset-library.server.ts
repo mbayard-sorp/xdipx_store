@@ -232,6 +232,22 @@ export async function tryIngestSocialAsset(
   }
 }
 
+/**
+ * Resolve `{id, url}` rows for a set of media urls (query strings ignored).
+ * Ticket #10511: the re-gate path needs the asset id a mediaUrls entry maps
+ * to, not merely whether one exists (`isLibraryMember`) or a picked-flag
+ * side effect (`tryMarkPickedByUrls`), so this is the bare lookup those two
+ * both already build on.
+ */
+export async function findLibraryAssetsByUrls(
+  urls: readonly string[] | null | undefined,
+  deps?: SocialAssetLibraryDeps,
+): Promise<{ id: number; url: string }[]> {
+  const bare = (urls ?? []).map(stripUrlQuery).filter(Boolean)
+  if (bare.length === 0) return []
+  return resolve(deps).findIdsByUrls(bare)
+}
+
 /** True when a `social_media_assets` row indexes this url (query string ignored). */
 export async function isLibraryMember(url: string, deps?: SocialAssetLibraryDeps): Promise<boolean> {
   const bare = stripUrlQuery(url)

@@ -8,6 +8,7 @@ import {
   allMediaAreLibraryMembers,
   markPicked,
   tryMarkPickedByUrls,
+  findLibraryAssetsByUrls,
   stripUrlQuery,
   aspectFromDimensions,
   type SocialAssetLibraryDeps,
@@ -176,6 +177,22 @@ describe('picking', () => {
     const bad = deps({ findIdsByUrls: vi.fn(async () => { throw new Error('db down') }) })
     expect(await tryMarkPickedByUrls([`${CDN}/a.jpg`], 42, bad)).toEqual([])
     err.mockRestore()
+  })
+
+  // Ticket #10511: the re-gate path needs the row id a media url maps to,
+  // not just membership or a picked-flag side effect.
+  it('findLibraryAssetsByUrls resolves {id, url} rows by bare url', async () => {
+    const d = deps({ findIdsByUrls: vi.fn(async () => [{ id: 238, url: `${CDN}/onskin.jpg` }]) })
+    const rows = await findLibraryAssetsByUrls([`${CDN}/onskin.jpg?v=1`], d)
+    expect(d.findIdsByUrls).toHaveBeenCalledWith([`${CDN}/onskin.jpg`])
+    expect(rows).toEqual([{ id: 238, url: `${CDN}/onskin.jpg` }])
+  })
+
+  it('findLibraryAssetsByUrls returns empty without calling the lookup for no urls', async () => {
+    const d = deps()
+    expect(await findLibraryAssetsByUrls(null, d)).toEqual([])
+    expect(await findLibraryAssetsByUrls([], d)).toEqual([])
+    expect(d.findIdsByUrls).not.toHaveBeenCalled()
   })
 })
 

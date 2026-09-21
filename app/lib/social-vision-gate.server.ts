@@ -297,6 +297,30 @@ export async function recordVisionVerdict(
   }
 }
 
+/**
+ * Re-run the vision gate against an EXISTING asset's own url and record the
+ * fresh result onto its row (ticket #10560/#10511: nothing before this could
+ * refresh a stored verdict; it was written once at generation and stayed
+ * whatever it was, so every check ever added to `VISION_CHECK_NAMES`
+ * invalidated stored verdicts with no way to clear the backlog short of
+ * throwing away a possibly-fine, already-paid-for frame and regenerating).
+ *
+ * Deliberately thin: fetch, judge, record, return. It never overwrites a
+ * verdict without also recording it in full (the same `recordVisionVerdict`
+ * write every generation path uses), so a re-gate can surface a genuine FAIL
+ * but can never launder one — the caller (a publish-time re-check) always
+ * reads back the complete new verdict, not a caller-asserted "it's fine now".
+ */
+export async function regateAsset(
+  assetId: number,
+  url: string,
+  deps?: VisionGateDeps,
+): Promise<VisionVerdict> {
+  const verdict = await runVisionGate(url, deps)
+  await recordVisionVerdict(assetId, verdict, deps)
+  return verdict
+}
+
 /** The recorded verdict for a media url, or null when no library row carries one. */
 export async function getVisionVerdictByUrl(url: string, deps?: VisionGateDeps): Promise<VisionVerdict | null> {
   const bare = stripUrlQuery(url)
