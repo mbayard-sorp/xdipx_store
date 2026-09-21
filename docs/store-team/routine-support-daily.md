@@ -56,6 +56,28 @@ support-analyst agent definition) for as long as daily voice volume stays under 
 Record how many conversations you sampled per channel in a `step` event; a thin or empty day is a
 valid, reported outcome.
 
+**Channel-silence check, mandatory before filing any voice/SMS silence finding (ticket #10494).**
+Zero rows in `sms_turns` for the window is also exactly what a working, healthy channel with no
+traffic looks like, and reading it from our own tables alone cannot tell the two apart. Measured
+2026-09-20 (owner blocker #88): the store's Twilio number had 200 inbound calls and 283 inbound
+SMS in its entire life, 98%+ of both from the owner's own testing, and a 35-day "silence" the
+routine had escalated twice (tickets #4874, #9374, one claimed and dropped by R-DEV for zero
+implementable code) was simply the owner not testing since 2026-08-15 while the pipeline stayed
+provably intact. So: before reporting channel silence as a health finding, query the upstream
+directly — a single Twilio `Calls.json` / `Messages.json` request filtered to the store number
+(`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_PHONE_NUMBER` are already in the environment) —
+to establish a demand baseline before concluding anything about our own tables.
+
+- **Upstream shows no inbound traffic** → the channel simply had no traffic. Note it in one line
+  in the day's summary; this is never a ticket and never an escalation.
+- **Upstream shows inbound traffic that `sms_turns` lacks** → that is a real P1: file it
+  `kind:'code'` per Step 4, citing the specific upstream SID(s) missing from `sms_turns`.
+- **Every run that reports voice/SMS silence cites the upstream inbound count** in its output,
+  whichever branch above it took, so the finding (or the note) is checkable rather than asserted.
+- **Exclude test fixtures from any "distinct phones" count**, on any channel: `+1555555xxxx`,
+  `+1555999xxxx`, and Twilio's magic test number `+15005550006` are not real users and inflate the
+  figure if counted as distinct callers/texters.
+
 ## Step 3: Score each conversation
 
 Three axes, with the per-channel tallies posted as a `step` event:
