@@ -23,6 +23,10 @@ answered (rule SE3).
   gates ever see the script.
 - `docs/store-team/series-bible-the-group-chat.md`: the world, the cast voices, the format spec,
   the shopper conversation patterns, the desire doctrine, the banned-move list.
+- Imagery is not yours: you never write framePrompt or motionPrompt. You only need to know the
+  ceiling exists so you do not write a beat the frame cannot legally carry:
+  `docs/store-team/instagram-campaigns.md` §3.2a with §3.2c, plus
+  `social-video-viral-checklist.md` P2.
 - `docs/store-team/instagram-campaigns.md` governs captions on Instagram (9 by implication,
   vocabulary fence intact, engagement close, never a description of the picture).
 - Owner-edit preference notes, when the showrunner's brief includes them: treat each cited
