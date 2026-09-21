@@ -95,6 +95,18 @@ Invoked by `store-strategist` before brief synthesis:
    rather than in-flight. Prepend the dated Status log entry. No changes → no PR;
    say so in the scoreboard event.
 
+   **The PR URL is this step's output, not the push (ticket #10493).** Nine `pm/tracker-*` branches
+   existed on origin from 2026-07-20 through 2026-09-14 and seven of them never got a PR at all —
+   not closed, not draft, not failing CI, never opened — while three consecutive weekly audits
+   reported it as a growing backlog of unmerged PRs the owner needed to go merge or close. There was
+   nothing to merge; the branch sat on the remote with no PR pointing at it, invisible to everyone.
+   So: after `git push`, capture and report the actual PR URL in the run summary and the scoreboard
+   event. A push that does not end in a real, confirmed PR URL is a **FAILED step**, not a partial
+   success — name it as a failure in the same sentence that names the branch, and file it as a
+   blocker (`POST /api/team/blocker`) rather than letting the run report the push as done. If
+   `gh pr create` is genuinely unavailable in this environment, say that plainly in the run summary
+   and file it as the real constraint; do not push a branch and call the step finished.
+
    **A row filed to TRACK this tracker PR lands at `pr_open` with a `pr` link — never as a bare
    `kind:'code'` row at `approved`.** (#4539, per `operating-system.md` §3 rule 4.) A self-filed
    PR-tracking row belongs in the QA / janitor lane, not R-DEV's code claim queue: file it in the
