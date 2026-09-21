@@ -353,6 +353,36 @@ export const socialMediaAssets = pgTable('social_media_assets', {
 }))
 
 /**
+ * Owner-scoped media-asset adjudications (migration 100, ticket #10503). The
+ * publish gate's subjective findings (age-read, exposure-read) are an agent
+ * judgment re-run fresh on every post that reuses an asset, so a
+ * false-positive the owner has already ruled on keeps re-BLOCKing. One row
+ * per asset url: the specific findings the owner is clearing, why, and who.
+ *
+ * OWNER-WRITE ONLY (`admin.socials.library.$assetId.tsx`, requireAdmin) —
+ * never written by an agent or a team-token route, or the gate becomes
+ * self-clearing. Read via `POST /api/team/social-asset-adjudication` so the
+ * social-drafts routine can hand it to the social-publish-gate subagent as
+ * context before that subagent judges a post reusing this asset. Does not
+ * touch and is never consulted by the deterministic FACT checks
+ * (`runDeterministicPublishChecks`), which run unconditionally regardless.
+ */
+export const socialAssetAdjudications = pgTable('social_asset_adjudications', {
+  id:                 serial('id').primaryKey(),
+  /** Bare url (query string stripped), same convention as social_media_assets lookups. */
+  assetUrl:           text('asset_url').notNull(),
+  /** Short finding labels/snippets the owner is clearing for this asset, e.g. 'age-ambiguity'. */
+  overriddenFindings: jsonb('overridden_findings').$type<string[]>().notNull().default([]),
+  /** The owner's reasoning, shown back to whoever reads the adjudication. */
+  note:               text('note'),
+  adjudicatedBy:      varchar('adjudicated_by', { length: 60 }).notNull(),
+  createdAt:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:          timestamp('updated_at', { withTimezone: true }),
+}, t => ({
+  urlIdx: uniqueIndex('idx_social_asset_adjudications_url').on(t.assetUrl),
+}))
+
+/**
  * Ordered slides of a carousel draft (migration 084). `social_posts.media_urls`
  * stays the publish-time snapshot derived from these rows, so the publish job
  * and the platform adapters never read this table. `url` is denormalised from

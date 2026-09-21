@@ -10,6 +10,7 @@ import {
   buildPublishGateUserContent,
   buildVoiceGateUserContent,
   computePublishGateContentHash,
+  describeAssetAdjudications,
   describeAssetReusePrecedent,
   formatProductIdentityLogLine,
   isImageLevelFinding,
@@ -356,6 +357,19 @@ describe('buildPublishGateUserContent (ticket #8823, product-identity hallucinat
     const withoutPrecedent = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
     expect((withoutPrecedent[0] as { text: string }).text).not.toContain('ASSET_PRECEDENT_BLOCK')
   })
+
+  it('includes the owner-adjudication block (ticket #10503) when supplied, omits it entirely when not', () => {
+    const withAdjudication = buildPublishGateUserContent({
+      ...base,
+      featuresProduct: true,
+      packshotUrl: null,
+      adjudicationBlock: 'OWNER_ADJUDICATION_BLOCK',
+    })
+    expect((withAdjudication[0] as { text: string }).text).toContain('OWNER_ADJUDICATION_BLOCK')
+
+    const withoutAdjudication = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
+    expect((withoutAdjudication[0] as { text: string }).text).not.toContain('OWNER_ADJUDICATION_BLOCK')
+  })
 })
 
 describe('publish-gate identity grounding system prompt (ticket #8823)', () => {
@@ -588,5 +602,46 @@ describe('describeAssetReusePrecedent (ticket #8976)', () => {
       imageFindings: [],
     })
     expect(block).toContain('cleared clean')
+  })
+})
+
+describe('describeAssetAdjudications (ticket #10503)', () => {
+  it('returns empty string for no adjudications, adding nothing to the prompt', () => {
+    expect(describeAssetAdjudications([])).toBe('')
+  })
+
+  it('names the asset url, the cleared findings, and the owner note, and scopes the exception narrowly', () => {
+    const block = describeAssetAdjudications([{
+      url: 'https://cdn.shopify.com/files/social-femmefunn-campervan-x-20260831-1.jpg',
+      overriddenFindings: ['age-ambiguity', 'nipple-areola-outline-risk'],
+      note: 'owner reviewed both, false positives',
+    }])
+    expect(block).toContain('OWNER ADJUDICATION ON FILE')
+    expect(block).toContain('social-femmefunn-campervan-x-20260831-1.jpg')
+    expect(block).toContain('age-ambiguity')
+    expect(block).toContain('nipple-areola-outline-risk')
+    expect(block).toContain('owner reviewed both, false positives')
+    expect(block).toContain('narrow, asset-and-finding-scoped exception')
+  })
+
+  it('omits the owner-note line when none was recorded', () => {
+    const block = describeAssetAdjudications([{
+      url: 'https://cdn.shopify.com/files/asset.jpg',
+      overriddenFindings: ['age-ambiguity'],
+      note: null,
+    }])
+    expect(block).toContain('age-ambiguity')
+    expect(block).not.toContain('owner note:')
+  })
+
+  it('lists multiple adjudicated assets, each with its own findings', () => {
+    const block = describeAssetAdjudications([
+      { url: 'https://cdn.shopify.com/files/a.jpg', overriddenFindings: ['age-ambiguity'], note: null },
+      { url: 'https://cdn.shopify.com/files/b.jpg', overriddenFindings: ['baked-in-text'], note: null },
+    ])
+    expect(block).toContain('a.jpg')
+    expect(block).toContain('age-ambiguity')
+    expect(block).toContain('b.jpg')
+    expect(block).toContain('baked-in-text')
   })
 })
