@@ -35,6 +35,7 @@ import {
   type DedupeScope,
 } from '~/lib/dedupe-key'
 import { cached, invalidateCache, kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
+import { getPullRequest } from '~/lib/github.server'
 import {
   teamKeys,
   teamSpendKvKey,
@@ -2395,6 +2396,40 @@ export async function transitionSuggestion(
   }
 
   const links: TicketLinkInput[] = [...(opts.links ?? [])]
+  // Pin the QA verdict to the exact commit it reviewed (ticket #10502).
+  // Before this, the release engine's merge precondition checked only the
+  // TICKET's status, never which diff earned it — so any commit pushed to
+  // the PR after verification merged with zero review, discovered when a
+  // commit was pushed to PR #1247 after its ticket had already hit
+  // 'verified' in this very session. Records the PR's CURRENT head sha as a
+  // `commit` link (an existing, already-documented link kind — no schema
+  // change); `release-engine.server.ts` bounces the ticket if a later push
+  // moves the head away from this recorded sha. Best-effort: a lookup
+  // failure here must not fail the verification itself (QA's verdict is
+  // still real), it only means this one verification cannot be pinned and
+  // the engine falls back to its pre-existing unpinned check for it.
+  if (to === 'verified') {
+    try {
+      const [prLink] = await db
+        .select({ ref: suggestionLinks.ref })
+        .from(suggestionLinks)
+        .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'pr')))
+        .orderBy(desc(suggestionLinks.createdAt))
+        .limit(1)
+      const prNumberMatch = prLink ? /(?:\/pull\/|#)(\d{1,9})\b/.exec(prLink.ref) : null
+      const prNumber = prNumberMatch?.[1] ? Number(prNumberMatch[1]) : null
+      if (prNumber != null && Number.isInteger(prNumber) && prNumber > 0) {
+        const pr = await getPullRequest(prNumber, 'team-verify')
+        if (pr.ok) {
+          links.push({ kind: 'commit', ref: pr.data.headSha, state: 'verified' })
+        } else {
+          console.warn(`[team] could not read PR #${prNumber} head sha to pin ticket ${id}'s verdict: ${pr.error}`)
+        }
+      }
+    } catch (err) {
+      console.warn(`[team] failed to pin ticket ${id}'s verified commit (non-fatal)`, err)
+    }
+  }
   if (opts.note) links.push({ kind: 'note', ref: opts.note, state: to })
   // Honest attribution on the delegated dismissal (#3573): decided_by above
   // records the true agent actor; this marker records that the authority was
