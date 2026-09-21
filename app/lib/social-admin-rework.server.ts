@@ -291,6 +291,9 @@ export async function reworkCaption(opts: {
         // video poster frame, which is not in mediaUrls.
         postCreatedAt: post.createdAt ?? null,
         posterUrl: post.posterUrl ?? null,
+        // #10560: a reason already recorded on the row still applies to a
+        // regenerated caption for it.
+        pairingNoneReason: post.pairingNoneReason ?? null,
       })
       const blockFindings = gateResult.findings.filter(f => f.severity === 'block')
       if (blockFindings.length === 0) {
@@ -505,6 +508,7 @@ export async function ownerApprovePost(
     // poster frame, which is not in mediaUrls.
     postCreatedAt: post.createdAt ?? null,
     posterUrl: post.posterUrl ?? null,
+    pairingNoneReason: post.pairingNoneReason ?? null,
   })
   const blockFindings = gateResult.findings.filter(f => f.severity === 'block')
   if (blockFindings.length > 0) {

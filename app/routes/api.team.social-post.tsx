@@ -4,6 +4,7 @@
  *   { op: 'draft', platform, postType?, tweetText, mediaUrls?, dealHistoryId?,
  *     scheduledFor?, reworkedFrom?, shopifyProductId?, altText?, imageBrief?,
  *     subject?, sceneLocation?, castSlugs?, bodyZone?, contactMode?, cropScale?,
+ *     pairingNoneReason?,
  *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id, deduped }
  *     `deduped:true` means a still-open (pending_review/needs_changes) row for
  *     the same platform, caption, and campaign day already existed and `id`
@@ -21,7 +22,12 @@
  *     routine can compute both windows from one list call. bodyZone/
  *     contactMode/cropScale (migration 099, ticket #10269) are the same shape
  *     for the on-skin campaign's variety windows (#10267): optional, nullable,
- *     read back the same way.
+ *     read back the same way. pairingNoneReason (migration 100, ticket #10560)
+ *     is the drafter's explicit reason no lube pairing applies to a toy-
+ *     featuring draft, per the pairing-presence self-check
+ *     (routine-social-daily.md); the deterministic pairing-missing check reads
+ *     it back at gate time instead of forcing a lube mention into every
+ *     pairing-required post.
  *
  *     THE FOUR SCENE AXES ARE NO LONGER A MEMORY TEST (ticket #10479).
  *     bodyZone/contactMode/cropScale/sceneLocation are stamped onto the
@@ -45,7 +51,8 @@
  *   { op: 'gate', id, gate: { verdict, reviewer, notes, featuresProduct,
  *     productHandle? } } -> { ok, reviewStatus } | 422 { findings }
  *   { op: 'rework', id, mediaUrls?, tweetText?, altText?, imageBrief?, subject?,
- *     sceneLocation?, castSlugs?, bodyZone?, contactMode?, cropScale? }
+ *     sceneLocation?, castSlugs?, bodyZone?, contactMode?, cropScale?,
+ *     pairingNoneReason? }
  *     -> { ok, reviewStatus } | 404 | 409
  *     Refile a row the gate bounced to needs_changes (ticket #4351): update the
  *     corrected imagery/copy in place and reset it to pending_review so the gate
@@ -217,6 +224,10 @@ export async function action({ request }: ActionFunctionArgs) {
       castSlugs: Array.isArray(b['castSlugs'])
         ? (b['castSlugs'] as unknown[]).filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
         : undefined,
+      pairingNoneReason:
+        typeof b['pairingNoneReason'] === 'string' && b['pairingNoneReason'].trim().length > 0
+          ? b['pairingNoneReason'].trim()
+          : undefined,
       ...sceneAxes,
     })
     // Library pick (#4937): the agent chooses one of the generated candidates
@@ -289,6 +300,7 @@ export async function action({ request }: ActionFunctionArgs) {
       bodyZone: b['bodyZone'],
       contactMode: b['contactMode'],
       cropScale: b['cropScale'],
+      pairingNoneReason: b['pairingNoneReason'],
     })
     if (!parsed.ok) return new Response(parsed.error, { status: parsed.status })
 

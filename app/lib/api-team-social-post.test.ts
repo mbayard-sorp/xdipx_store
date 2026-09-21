@@ -237,6 +237,27 @@ describe('draft op, altText/imageBrief/subject pass-through (migration 084)', ()
   })
 })
 
+// Ticket #10560: the pairing-presence self-check reason threads through the
+// same way altText/imageBrief/subject do above.
+describe('draft op, pairingNoneReason pass-through (migration 100)', () => {
+  it('threads pairingNoneReason to createDraftSocialPost', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'A fresh line about the wand', voiceGate,
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    }))
+  })
+
+  it('is optional and trims, omitting a blank value', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'no reason here', voiceGate, pairingNoneReason: '   ' })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({ pairingNoneReason: undefined }))
+  })
+})
+
 // Ticket #10269: sceneLocation shipped in migration 093 and was accepted by
 // this route from day one, but no caller ever sent it, so it sat null on
 // every row. bodyZone/contactMode/cropScale (migration 099) are the sibling
@@ -436,6 +457,14 @@ describe('rework op — wiring (#4351)', () => {
     expect(reworkParseMock).toHaveBeenCalledWith(expect.objectContaining({
       altText: 'a', imageBrief: 'b', subject: 'c',
     }))
+  })
+
+  it('passes pairingNoneReason through to parseReworkInput (migration 100, ticket #10560)', async () => {
+    reworkParseMock.mockReturnValue({ ok: true, input: { tweetText: 'x', pairingNoneReason: 'external-only' } })
+    reworkMock.mockResolvedValue({ ok: true, reviewStatus: 'pending_review' })
+    const res = await post({ op: 'rework', id: 61, tweetText: 'x', pairingNoneReason: 'external-only' })
+    expect(res.status).toBe(200)
+    expect(reworkParseMock).toHaveBeenCalledWith(expect.objectContaining({ pairingNoneReason: 'external-only' }))
   })
 })
 

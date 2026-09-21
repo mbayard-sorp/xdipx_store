@@ -330,6 +330,29 @@ describe('applyPublishGateVerdict', () => {
     expect(parseGateStamp(writes[0]?.feedback)?.verdict).toBe('REVISE')
   })
 
+  // Ticket #10560: the deterministic re-check reads `pairingNoneReason` fresh
+  // off the row, so a reason recorded at draft/rework time is honored here,
+  // the check the agent's PASS cannot talk past.
+  it('honors a pairingNoneReason recorded on the row instead of blocking on the pairing-missing check', async () => {
+    const noReason = fakeRepo(row({ tweetText: 'a quiet night in with the LELO SONA, external sensation only' }))
+    const blocked = await applyPublishGateVerdict(
+      7, verdict({ featuresProduct: true, productHandle: 'lelo-sona' }),
+      { repo: noReason.repo, ...inStock, gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => 'vibrator' } },
+    )
+    expect(blocked.ok).toBe(false)
+    expect(noReason.writes[0]?.feedback).toContain('pairing-missing')
+
+    const withReason = fakeRepo(row({
+      tweetText: 'a quiet night in with the LELO SONA, external sensation only',
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    }))
+    const passed = await applyPublishGateVerdict(
+      7, verdict({ featuresProduct: true, productHandle: 'lelo-sona' }),
+      { repo: withReason.repo, ...inStock, gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => 'vibrator' } },
+    )
+    expect(passed).toEqual({ ok: true, reviewStatus: 'approved' })
+  })
+
   it('carries the product handle into the stamp so publish time can re-check it', async () => {
     const { repo, writes } = fakeRepo(row())
     await applyPublishGateVerdict(
@@ -579,6 +602,47 @@ describe('parseReworkInput (#4351)', () => {
   it('does not let a variety axis alone satisfy the must-change-something rule', () => {
     const r = parseReworkInput({ bodyZone: 'sternum' })
     expect(r.ok).toBe(false)
+  })
+
+  // Ticket #10560: the pairing-presence self-check reason rides along with a
+  // rework exactly like altText/imageBrief/subject above, and never satisfies
+  // the must-change-something rule on its own.
+  it('accepts pairingNoneReason alongside a copy rework', () => {
+    const r = parseReworkInput({
+      tweetText: 'a cleaner line, no lube mention needed here',
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.input.pairingNoneReason).toBe('external-only feature post, no internal use implied')
+  })
+
+  it('rejects an empty-string pairingNoneReason', () => {
+    const r = parseReworkInput({ tweetText: 'a cleaner line', pairingNoneReason: '   ' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('pairingNoneReason')
+  })
+
+  it('does not let pairingNoneReason alone satisfy the must-change-something rule', () => {
+    const r = parseReworkInput({ pairingNoneReason: 'no toy featured' })
+    expect(r.ok).toBe(false)
+  })
+})
+
+describe('reworkSocialPost writes pairingNoneReason (#10560)', () => {
+  it('carries the reason into the patch when the rework supplies one', async () => {
+    const { repo, writes } = fakeReworkRepo(row({
+      reviewStatus: 'needs_changes',
+      altText: 'a cast member enjoying a quiet solo evening in warm light',
+      feedback: '[publish-gate REVISE ...] pairing-missing',
+    }))
+    const parsed = parseReworkInput({
+      tweetText: 'a quiet night in with the LELO SONA, external sensation only',
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    })
+    if (!parsed.ok) throw new Error('fixture rejected')
+    const r = await reworkSocialPost(7, parsed.input, { repo })
+    expect(r).toEqual({ ok: true, reviewStatus: 'pending_review' })
+    expect(writes[0]?.patch.pairingNoneReason).toBe('external-only feature post, no internal use implied')
   })
 })
 

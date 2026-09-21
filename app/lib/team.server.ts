@@ -2763,6 +2763,11 @@ export interface DraftSocialPostInput {
   bodyZone?: string | undefined
   contactMode?: string | undefined
   cropScale?: string | undefined
+  // Pairing-presence self-check reason (migration 100, ticket #10560). The
+  // explicit reason a toy-featuring draft records for why no lube pairing
+  // applies, read by the deterministic pairing-missing check at gate time.
+  // Optional: most drafts either name a pairing or feature no toy at all.
+  pairingNoneReason?: string | undefined
 }
 
 /** Review states a still-open draft can sit in before the gate or the owner
@@ -2866,6 +2871,7 @@ export async function createDraftSocialPost(
       bodyZone:      axes.bodyZone ?? null,
       contactMode:   axes.contactMode ?? null,
       cropScale:     axes.cropScale ?? null,
+      pairingNoneReason: p.pairingNoneReason ?? null,
     })
     .returning({ id: socialPosts.id })
   return { id: row!.id, deduped: false }
