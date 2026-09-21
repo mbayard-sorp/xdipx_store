@@ -1515,9 +1515,14 @@ accept 2 to 10 slides.
 `social_media_assets` is the team's own index and currently holds 269 unattached assets, all
 on-scheme and provenance-passing, that reuse-first never looked at because it only asked
 `media-manager` for "an existing Shopify Files / Sanity asset." Query `social_media_assets` for a
-reusable candidate first. This does not move generation later: it slots into the existing pre-draft
-position, before any caption is written, exactly where reuse-first has always lived, because a
-caption written against an undecided image is a caption written blind.
+reusable candidate first, via `POST /api/team/social-asset-query {"op":"search", product?, cast?,
+archetype?, tag?, source?, picked?, limit?}` (ticket #10660): a team-token-authed route over the
+same `listLibraryAssets` query `/admin/socials/library` uses, reachable from the scheduled sandbox,
+which has neither an admin session nor a direct Neon network path. `picked` defaults to false, so
+the default result set is candidates never yet attached to a draft or post. This does not move
+generation later: it slots into the existing pre-draft position, before any caption is written,
+exactly where reuse-first has always lived, because a caption written against an undecided image is
+a caption written blind.
 
 **Mandatory filter, all of it, or do not reuse and generate instead.** A reused asset must still
 satisfy the freshness rules in `docs/store-team/instagram-campaigns.md` §3.8: filter candidates on
