@@ -2212,12 +2212,60 @@ export function isMissingConflictTarget(err: unknown): boolean {
   return false
 }
 
+/**
+ * Postgres raises "index row size ... exceeds btree version 4 maximum ..."
+ * as SQLSTATE 54000 (program_limit_exceeded) when an inserted row's entry
+ * for `uq_suggestion_links_sugg_kind_ref` (suggestion_id, kind, ref) is too
+ * large for the index, roughly 2704 bytes. Unlike 42P10 (the index itself
+ * missing), the index exists and works; the VALUE is the problem, so simply
+ * retrying without `onConflictDoNothing` (as `isMissingConflictTarget` does)
+ * does not help — the oversized value still fails on the plain insert too.
+ * Same cause-chain walk as `isMissingConflictTarget`: drizzle and the Neon
+ * driver both wrap the raw pg error and the code can sit a level deep.
+ */
+export function isOversizedIndexEntry(err: unknown): boolean {
+  let cur: unknown = err
+  for (let depth = 0; cur != null && typeof cur === 'object' && depth < 5; depth++) {
+    const rec = cur as Record<string, unknown>
+    if (rec['code'] === '54000') return true
+    if (typeof rec['message'] === 'string' && rec['message'].includes('54000')) return true
+    cur = rec['cause']
+  }
+  return false
+}
+
+/**
+ * Byte budget for a single `suggestion_links.ref` value, kept well under the
+ * ~2704-byte btree index-tuple ceiling on `uq_suggestion_links_sugg_kind_ref`
+ * (suggestion_id, kind, ref) so there is headroom left for the other two
+ * indexed columns and per-attribute/tuple overhead (ticket #10506).
+ */
+export const LINK_REF_MAX_BYTES = 2000
+
+/**
+ * Truncates `ref` to at most `maxBytes` UTF-8 bytes, backing off to a
+ * character boundary so a multi-byte trailing character is never split into
+ * an invalid byte sequence (a plain character-length clamp does not do this:
+ * multi-byte UTF-8 text can overflow the byte budget well before it hits a
+ * character count that looks safe).
+ */
+export function clampRefBytes(ref: string, maxBytes: number = LINK_REF_MAX_BYTES): string {
+  const buf = Buffer.from(ref, 'utf8')
+  if (buf.byteLength <= maxBytes) return ref
+  let end = maxBytes
+  while (end > 0 && (buf[end]! & 0xc0) === 0x80) end--
+  return `${buf.subarray(0, end).toString('utf8')}…`
+}
+
 async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Promise<void> {
   if (links.length === 0) return
   const rows = links.map(l => ({
     suggestionId: id,
     kind:         l.kind.slice(0, 12),
-    ref:          l.ref,
+    // Clamp defensively even though callers (the transition note especially)
+    // should already be clamped: this is the last line of defense against
+    // the btree index-tuple ceiling, for any link kind, not only notes.
+    ref:          clampRefBytes(l.ref),
     state:        l.state ? l.state.slice(0, 16) : null,
   }))
   try {
@@ -2229,8 +2277,22 @@ async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Pr
     // status update already committed, turning a successful transition into
     // a 500 with the note/link silently lost. Degrade to a plain insert
     // (possible duplicate row, recoverable) rather than losing the write.
-    if (!isMissingConflictTarget(err)) throw err
-    await db.insert(suggestionLinks).values(rows)
+    if (isMissingConflictTarget(err)) {
+      await db.insert(suggestionLinks).values(rows)
+      return
+    }
+    // #10506: the clamp above should make this unreachable, but a `kind` or
+    // `suggestionId` combination this function does not control could still
+    // tip an already-clamped ref over the ceiling. Clamp harder and retry
+    // once rather than rethrowing a write the caller cannot recover from.
+    if (isOversizedIndexEntry(err)) {
+      const tighter = rows.map(r => ({ ...r, ref: clampRefBytes(r.ref, Math.floor(LINK_REF_MAX_BYTES / 2)) }))
+      await db.insert(suggestionLinks).values(tighter).onConflictDoNothing({
+        target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
+      })
+      return
+    }
+    throw err
   }
 }
 
@@ -2445,22 +2507,6 @@ export async function transitionSuggestion(
     if (pr) patch['applyRef'] = pr.ref
   }
 
-  const guards = [eq(homepageTeamSuggestions.id, id), eq(homepageTeamSuggestions.status, from)]
-  if (rule.actors.includes('assignee')) {
-    guards.push(eq(homepageTeamSuggestions.assignee, actor))
-  }
-  const updated = await db
-    .update(homepageTeamSuggestions)
-    .set(patch)
-    .where(and(...guards))
-    .returning()
-  if (updated.length === 0) {
-    throw new Response(
-      `Conflict: suggestion ${id} changed underneath the '${from}' -> '${to}' transition`,
-      { status: 409 },
-    )
-  }
-
   const links: TicketLinkInput[] = [...(opts.links ?? [])]
   // Pin the QA verdict to the exact commit it reviewed (ticket #10502).
   // Before this, the release engine's merge precondition checked only the
@@ -2494,7 +2540,32 @@ export async function transitionSuggestion(
       state: to,
     })
   }
+  // Write links (notably the `note` recording WHY this transition happened)
+  // BEFORE the status update commits (ticket #10506). addTicketLinks clamps
+  // and retries defensively, but if it still fails for some unforeseen
+  // reason, writing it first means the failure surfaces as an ordinary 500
+  // with NO status change, rather than a status change whose stated reason
+  // silently vanished. The old order (status first, links second) is exactly
+  // what produced #10506: the transition committed, the note write then blew
+  // the btree index-tuple ceiling with SQLSTATE 54000, and the caller saw a
+  // 500 with no way to tell the transition had actually gone through.
   await addTicketLinks(id, links)
+
+  const guards = [eq(homepageTeamSuggestions.id, id), eq(homepageTeamSuggestions.status, from)]
+  if (rule.actors.includes('assignee')) {
+    guards.push(eq(homepageTeamSuggestions.assignee, actor))
+  }
+  const updated = await db
+    .update(homepageTeamSuggestions)
+    .set(patch)
+    .where(and(...guards))
+    .returning()
+  if (updated.length === 0) {
+    throw new Response(
+      `Conflict: suggestion ${id} changed underneath the '${from}' -> '${to}' transition`,
+      { status: 409 },
+    )
+  }
 
   return updated[0]!
 }
