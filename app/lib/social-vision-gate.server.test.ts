@@ -5,6 +5,7 @@ import {
   runVisionGate,
   runVisionGateOnImage,
   recordVisionVerdict,
+  regateAsset,
   getVisionVerdictByUrl,
   generateWithVisionGate,
   isValidVerdictShape,
@@ -440,6 +441,35 @@ describe('recordVisionVerdict', () => {
     await expect(
       recordVisionVerdict(42, { ...CLEAN_RESPONSE, checkedAt: '2026-08-31T00:00:00Z' } as VisionVerdict, { updateVerdict: update }),
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('regateAsset (ticket #10511)', () => {
+  it('fetches, judges, and records against the given asset id', async () => {
+    const update = vi.fn(async () => {})
+    const fetchImageBase64 = vi.fn(async () => ({ data: 'abc', mediaType: 'image/jpeg' }))
+    const callVision = vi.fn(async () => CLEAN_RESPONSE)
+    const verdict = await regateAsset(238, 'https://cdn.shopify.com/files/onskin.jpg', {
+      fetchImageBase64, callVision, updateVerdict: update,
+    })
+    expect(verdict.pass).toBe(true)
+    expect(fetchImageBase64).toHaveBeenCalledWith('https://cdn.shopify.com/files/onskin.jpg')
+    expect(update).toHaveBeenCalledWith(238, expect.objectContaining({ pass: true }))
+  })
+
+  it('records a genuine fail in full rather than only reporting it (cannot launder a bad frame)', async () => {
+    const update = vi.fn(async () => {})
+    const fetchImageBase64 = vi.fn(async () => ({ data: 'abc', mediaType: 'image/jpeg' }))
+    const callVision = vi.fn(async () => ({
+      ...CLEAN_RESPONSE,
+      pass: false,
+      checks: { ...CLEAN_RESPONSE.checks, anusNotVisible: 'fail' },
+    }))
+    const verdict = await regateAsset(182, 'https://cdn.shopify.com/files/x.jpg', {
+      fetchImageBase64, callVision, updateVerdict: update,
+    })
+    expect(verdict.pass).toBe(false)
+    expect(update).toHaveBeenCalledWith(182, expect.objectContaining({ pass: false }))
   })
 })
 

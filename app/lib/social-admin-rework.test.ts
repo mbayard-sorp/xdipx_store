@@ -21,6 +21,8 @@ const getProductsByIdsMock = vi.hoisted(() => vi.fn())
 const getProductHandleByIdMock = vi.hoisted(() => vi.fn())
 const runDeterministicPublishChecksMock = vi.hoisted(() => vi.fn())
 const recentCaptionsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
+const findLibraryAssetsByUrlsMock = vi.hoisted(() => vi.fn())
+const regateAssetMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./db.server', () => ({ db: dbMock }))
 vi.mock('./social-media.server', () => ({
@@ -42,6 +44,12 @@ vi.mock('./social-publish-approve.server', async () => {
     dbApproveRepo: { ...actual.dbApproveRepo, recentCaptions: recentCaptionsMock },
   }
 })
+vi.mock('./social-asset-library.server', () => ({
+  findLibraryAssetsByUrls: findLibraryAssetsByUrlsMock,
+}))
+vi.mock('./social-vision-gate.server', () => ({
+  regateAsset: regateAssetMock,
+}))
 
 import {
   buildImageRegenPrompt,
@@ -53,6 +61,7 @@ import {
   reworkCaption,
   createOwnerReworkRow,
   ownerApprovePost,
+  regateMediaAndApprove,
   shouldRetireReworkSource,
   supersededFeedback,
   SUPERSEDED_PREFIX,
@@ -476,5 +485,57 @@ describe('ownerApprovePost', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.findings).toHaveLength(1)
     expect(dbMock.update).not.toHaveBeenCalled()
+  })
+})
+
+// ── regateMediaAndApprove (ticket #10511) ───────────────────────────────────
+
+describe('regateMediaAndApprove', () => {
+  it('re-gates every library asset behind the post\'s media, then approves once the checks clear', async () => {
+    dbMock.select.mockReturnValue(selectReturning({ ...BASE_ROW }))
+    findLibraryAssetsByUrlsMock.mockResolvedValue([{ id: 238, url: BASE_ROW.mediaUrls[0] }])
+    regateAssetMock.mockResolvedValue({ pass: true, checks: {}, notes: 'Clean.', checkedAt: '2026-09-21', checkCompleted: true, legibleText: '' })
+    runDeterministicPublishChecksMock.mockResolvedValue({ findings: [], blocked: false, held: false })
+    const set = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) })
+    dbMock.update.mockReturnValue({ set })
+
+    const r = await regateMediaAndApprove({ postId: 61, actor: 'owner-studio' })
+    expect(r).toEqual({ ok: true })
+    expect(regateAssetMock).toHaveBeenCalledWith(238, BASE_ROW.mediaUrls[0])
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ reviewStatus: 'approved' }))
+  })
+
+  it('records the fresh verdict but does not approve when the deterministic re-check still blocks', async () => {
+    dbMock.select.mockReturnValue(selectReturning({ ...BASE_ROW }))
+    findLibraryAssetsByUrlsMock.mockResolvedValue([{ id: 238, url: BASE_ROW.mediaUrls[0] }])
+    regateAssetMock.mockResolvedValue({ pass: false, checks: {}, notes: 'Anus visible.', checkedAt: '2026-09-21', checkCompleted: true, legibleText: '' })
+    runDeterministicPublishChecksMock.mockResolvedValue({
+      findings: [{ check: 'vision-verdict', severity: 'block', detail: 'Media failed the vision-gate checks.' }],
+      blocked: true, held: false,
+    })
+
+    const r = await regateMediaAndApprove({ postId: 61, actor: 'owner-studio' })
+    expect(r.ok).toBe(false)
+    // The re-gate itself still ran and recorded the real fail; only the
+    // approve step was refused. A genuine fail is never overwritten with a
+    // caller-asserted pass.
+    expect(regateAssetMock).toHaveBeenCalledTimes(1)
+    expect(dbMock.update).not.toHaveBeenCalled()
+  })
+
+  it('refuses when the post has no media', async () => {
+    dbMock.select.mockReturnValue(selectReturning({ ...BASE_ROW, mediaUrls: [] }))
+    const r = await regateMediaAndApprove({ postId: 61, actor: 'owner-studio' })
+    expect(r).toEqual({ ok: false, error: 'This post has no media to re-gate.' })
+    expect(findLibraryAssetsByUrlsMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses when no library row exists for any of the media (e.g. an owner upload)', async () => {
+    dbMock.select.mockReturnValue(selectReturning({ ...BASE_ROW }))
+    findLibraryAssetsByUrlsMock.mockResolvedValue([])
+    const r = await regateMediaAndApprove({ postId: 61, actor: 'owner-studio' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('No library asset rows found')
+    expect(regateAssetMock).not.toHaveBeenCalled()
   })
 })

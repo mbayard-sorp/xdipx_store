@@ -103,6 +103,11 @@ export function PostPreviewCard({
   const [applying, setApplying] = useState(false)
   const [applyResult, setApplyResult] = useState<{ ok: boolean; id?: number; error?: string } | null>(null)
   const [alsoRegenerateImage, setAlsoRegenerateImage] = useState(false)
+  // Ticket #10511: "Re-gate media" is a second, non-fetcher async action for
+  // the same reason applyFeedbackNow is (a plain POST to
+  // /api/admin/social-rework, not this route's own action).
+  const [regating, setRegating] = useState(false)
+  const [regateResult, setRegateResult] = useState<{ ok: boolean; error?: string } | null>(null)
   // Ticket #5476: a refused owner action (a Post-now the deterministic gate
   // refused, a failed review, a failed rework) is shown as a prominent banner
   // beside the buttons instead of a 12px line at the card bottom. Each banner
@@ -117,7 +122,7 @@ export function PostPreviewCard({
   const isSubmitting = fetcher.state !== 'idle'
   const posting = postFetcher.state !== 'idle'
   const saving = saveFetcher.state !== 'idle'
-  const busy = isSubmitting || posting || saving || applying
+  const busy = isSubmitting || posting || saving || applying || regating
   const media = mediaRefsOf(post)
   const edited = caption.trim() !== post.tweetText.trim()
 
@@ -150,6 +155,12 @@ export function PostPreviewCard({
   const canPostNow = !gateBlocked && !needsMedia && !overLimit
   const waitingSince = post.reviewStatus === 'needs_changes' ? formatWaitingAge(post.reviewedAt) : null
   const nextPass = post.reviewStatus === 'needs_changes' ? formatNextReworkPass() : null
+  // Ticket #10511: reworkCaption's automated retry only ever redrafts the
+  // CAPTION, so a block on the media itself (a stale or incomplete recorded
+  // verdict, or a genuine anatomy/exposure fail) reproduces on every retry.
+  // Surface the manual escape only when that is plausibly the reason —
+  // a caption-only finding has its normal remediation already.
+  const blockedOnVision = (post.gateFindings ?? []).some(f => f.check === 'vision-verdict' || f.check === 'vision-legible-text')
 
   function submit(decision: 'approved' | 'needs_changes' | 'rejected') {
     if (decision === 'needs_changes' && !feedback.trim()) {
@@ -212,6 +223,26 @@ export function PostPreviewCard({
       if (result.ok) revalidator.revalidate()
     } finally {
       setApplying(false)
+    }
+  }
+
+  // Ticket #10511: re-runs the vision gate against this post's own media and
+  // approves it if that clears the deterministic checks — the manual escape
+  // for a needs_changes row a caption-only rework structurally cannot fix.
+  async function regateMedia() {
+    setRegating(true)
+    setRegateResult(null)
+    try {
+      const res = await fetch('/api/admin/social-rework', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ intent: 'regate-media', postId: post.id }),
+      })
+      const result = await res.json().catch(() => ({ ok: false, error: 'The server sent back something unreadable.' }))
+      setRegateResult(result)
+      if (result.ok) revalidator.revalidate()
+    } finally {
+      setRegating(false)
     }
   }
 
@@ -463,6 +494,17 @@ export function PostPreviewCard({
             >
               {applying ? 'Applying' : 'Apply my feedback now ♥'}
             </button>
+            {blockedOnVision && (
+              <button
+                type="button"
+                onClick={regateMedia}
+                disabled={busy}
+                title="Re-run the vision gate against this post's own media and approve it if that clears the checks, without regenerating the image"
+                className="px-4 py-2 bg-paper-2 text-ink-3 rounded-full text-sm font-semibold border border-line hover:border-ink-4 transition-colors disabled:opacity-50"
+              >
+                {regating ? 'Re-gating' : 'Re-gate media'}
+              </button>
+            )}
             {confirmReject ? (
               <span className="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-red-200 bg-red-50">
                 <span className="text-xs text-red-700">Terminal. Cannot be reworked or reconsidered.</span>
@@ -524,6 +566,8 @@ export function PostPreviewCard({
               , waiting on you in the queue.
             </p>
           )}
+          {regateResult?.ok && <p className="text-xs text-[#4F6150]">Re-gated and approved.</p>}
+          {regateResult?.ok === false && <p className="text-xs text-red-700">{regateResult.error}</p>}
         </div>
       </div>
     </div>
