@@ -49,11 +49,12 @@
  */
 
 import type { ActionFunctionArgs } from 'react-router'
-import { assertTeamAuth, gate } from '~/lib/team.server'
+import { assertTeamAuth, gate, recordEvent } from '~/lib/team.server'
 import { SOCIAL_ARCHETYPES, type SocialArchetype } from '~/lib/social-media.server'
 import { apiError } from '~/lib/api-error.server'
 import { logImageCost } from '~/lib/token-log.server'
 import { parseSceneAxes, requireSceneAxesForGeneration } from '~/lib/social-scene-vocab'
+import { Sentry } from '~/lib/sentry.server'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ONLY_VALUES = ['atlas', 'fal', 'imagen'] as const
@@ -123,10 +124,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const axesRequired = requireSceneAxesForGeneration(sceneAxes)
     if (!axesRequired.ok) return new Response(`Bad Request: ${axesRequired.error}`, { status: 400 })
 
+    // Ticket #10560: captured once and reused below for the run-event sink,
+    // rather than re-reading `b['runId']` a second time.
+    const runId = num(b['runId'])
+
     // Money gate: generation spends real dollars, so gate before generating,
     // exactly like api.team.video-job's enqueue ops. The CLI already gates too;
     // this closes the hole a direct team-token call would otherwise open.
-    const gateResult = await gate('social', num(b['runId']))
+    const gateResult = await gate('social', runId)
     if (!gateResult.ok) {
       return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
     }
@@ -228,6 +233,8 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(count ? { count } : {}),
         ...(extraImageUrls?.length ? { extraImageUrls } : {}),
         ...(aspectRatio ? { aspectRatio } : {}),
+        ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
+        ...(productImageFellBack ? { productImageFellBack: true } : {}),
       })
 
       // Log spend for every billed frame (mirrors what the CLI used to do in
@@ -255,9 +262,38 @@ export async function action({ request }: ActionFunctionArgs) {
         })
       }
 
+      // Ticket #10560: the run is not blocked on a missing body reference or
+      // a product-image fallback (a route cannot refuse without killing a
+      // whole scheduled run), and the response field below was the ONLY
+      // place either condition landed — nothing read it. Record it on the
+      // caller's run timeline (readable at /admin/homepage-team) and to
+      // Sentry, so it is visible without depending on a caller that echoes
+      // and reads its own response. Both writes are non-fatal, matching
+      // `tryIngestSocialAsset`'s contract: telemetry must never fail an
+      // already-billed generation.
+      if (bodyReferenceMissing || productImageFellBack) {
+        const parts = [
+          ...(warning ? [warning] : []),
+          ...(productImageFellBack ? ['Fell back to a packaging/retail-box frame; no bare-product image was available.'] : []),
+        ]
+        const summary = `[social-image:cast] ${handle}: ${parts.join(' ')}`
+        if (runId != null) {
+          try {
+            await recordEvent({ runId, eventType: 'error', summary, agentRole: 'social-media-manager' })
+          } catch (err) {
+            console.error('[social-image] recordEvent failed (non-fatal):', err)
+          }
+        }
+        try {
+          Sentry.captureMessage(summary, 'warning')
+        } catch (err) {
+          console.error('[social-image] Sentry.captureMessage failed (non-fatal):', err)
+        }
+      }
+
       // The run is not blocked on a missing body reference (a route cannot
       // refuse without killing a whole scheduled run), but the routine has to
-      // see it, so it rides back on the response.
+      // see it, so it rides back on the response too.
       return Response.json({
         ...result,
         ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),

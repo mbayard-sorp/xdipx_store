@@ -134,6 +134,9 @@ export async function action({ request }: ActionFunctionArgs) {
         count,
         aspectRatio: aspect === '16:9' ? '16:9' : '4:5',
         caller,
+        // Ticket #10560: tags the ingested asset row so the condition is
+        // countable in the library, the same as the scheduled team route.
+        ...(resolved.bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
       })
       const assetIds = (result as { assetIds?: number[] }).assetIds
       // Generation is not blocked on a missing body reference, but the Studio

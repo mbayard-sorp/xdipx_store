@@ -413,6 +413,14 @@ export interface GenerateCastCompositeOpts {
    * chance to get it wrong that was taken 281 times out of 281.
    */
   sceneAxes?: SceneAxes
+  /**
+   * Ticket #10560: the caller's own body-reference/product-reference fallback
+   * flags, stamped onto every ingested candidate's `tags` alongside the scene
+   * axes so the condition is countable (folds into the coverage report)
+   * instead of living only in an HTTP response field nothing reads.
+   */
+  bodyReferenceMissing?: boolean
+  productImageFellBack?: boolean
 }
 
 export interface GenerateCastCompositeResult {
@@ -472,7 +480,14 @@ async function generateCastCompositeBatch(
   const assetIds: (number | null)[] = []
   const generationBatchId = crypto.randomUUID()
   const scaledPrompt = withProductScale(opts.prompt, opts.scale)
-  const sceneAxisTagList = sceneAxisTags(opts.sceneAxes ?? {})
+  // Ticket #10560: the fallback flags ride alongside the scene axes so the
+  // condition is durable and countable per frame, not just an HTTP response
+  // field nothing downstream reads.
+  const sceneAxisTagList = [
+    ...sceneAxisTags(opts.sceneAxes ?? {}),
+    ...(opts.bodyReferenceMissing ? ['body-reference-missing'] : []),
+    ...(opts.productImageFellBack ? ['product-image-fell-back'] : []),
+  ]
   for (const [i, falUrl] of frame.urls.entries()) {
     const filename = buildSocialAssetFilename({
       handle: opts.handle,

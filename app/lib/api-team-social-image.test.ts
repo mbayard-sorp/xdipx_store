@@ -16,10 +16,16 @@ const castMock = vi.hoisted(() => vi.fn())
 const logImageCostMock = vi.hoisted(() => vi.fn())
 const rosterMock = vi.hoisted(() => vi.fn())
 const productByHandleMock = vi.hoisted(() => vi.fn())
+const recordEventMock = vi.hoisted(() => vi.fn())
+const captureMessageMock = vi.hoisted(() => vi.fn())
 
 vi.mock('~/lib/team.server', () => ({
   assertTeamAuth: vi.fn(),
   gate: gateMock,
+  recordEvent: recordEventMock,
+}))
+vi.mock('~/lib/sentry.server', () => ({
+  Sentry: { captureMessage: captureMessageMock },
 }))
 vi.mock('~/lib/social-media.server', () => ({
   // Real values: the route validates the archetype against this list.
@@ -105,6 +111,7 @@ const RUTH = {
 beforeEach(() => {
   vi.clearAllMocks()
   logImageCostMock.mockResolvedValue(undefined)
+  recordEventMock.mockResolvedValue(undefined)
   gateMock.mockResolvedValue({ ok: true })
   rosterMock.mockResolvedValue([MAYA, RUTH])
   productByHandleMock.mockResolvedValue(null)
@@ -331,6 +338,44 @@ describe('cast: body reference + skin tone + castSlugs (#10336)', () => {
     expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
       presenterImageUrl: 'https://cdn/ruth-portrait.jpg',
     }))
+  })
+
+  // Ticket #10560: the response field alone reached zero code, so a missing
+  // body reference is now also a run event (when a runId is given) and a
+  // Sentry message, in addition to the field the response still carries.
+  it('records a run event and a Sentry message when the body reference falls back, and threads the flag into generateCastComposite', async () => {
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'ruth', cropScale: 'close', runId: 42 })
+    expect(res.status).toBe(200)
+    expect(recordEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 42,
+      eventType: 'error',
+      summary: expect.stringContaining('Ruth'),
+    }))
+    expect(captureMessageMock).toHaveBeenCalledWith(expect.stringContaining('Ruth'), 'warning')
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({ bodyReferenceMissing: true }))
+  })
+
+  it('skips the run-event write but still logs to Sentry when no runId is given', async () => {
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'ruth', cropScale: 'close' })
+    expect(res.status).toBe(200)
+    expect(recordEventMock).not.toHaveBeenCalled()
+    expect(captureMessageMock).toHaveBeenCalled()
+  })
+
+  it('still returns 200 with the result when both telemetry writes throw', async () => {
+    recordEventMock.mockRejectedValue(new Error('neon down'))
+    captureMessageMock.mockImplementation(() => { throw new Error('sentry down') })
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'ruth', cropScale: 'close', runId: 42 })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { bodyReferenceMissing?: boolean }
+    expect(body.bodyReferenceMissing).toBe(true)
+  })
+
+  it('does not record an event or a Sentry message when no fallback happened', async () => {
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'maya', cropScale: 'close', runId: 42 })
+    expect(res.status).toBe(200)
+    expect(recordEventMock).not.toHaveBeenCalled()
+    expect(captureMessageMock).not.toHaveBeenCalled()
   })
 
   it('rejects an unknown crop scale', async () => {
