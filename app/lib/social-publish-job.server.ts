@@ -854,6 +854,11 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       // #10476: the video poster frame is a second blob the grid renders and
       // mediaUrls does not carry.
       posterUrl: post.posterUrl ?? null,
+      // #10560: without this, a row that recorded a legitimate "no pairing
+      // applies" reason at draft/rework time and cleared the gate on it would
+      // still get blocked here at publish time, since this re-check is fresh
+      // and does not read the gate's own cached verdict.
+      pairingNoneReason: post.pairingNoneReason ?? null,
     }, deps.gateDeps)
 
     if (gate.blocked || gate.held) {

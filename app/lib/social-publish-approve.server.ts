@@ -475,8 +475,12 @@ export type ReviewStatus = 'approved' | 'needs_changes' | 'rejected' | 'pending_
 
 export interface ApplyDeps {
   now?: () => Date
-  /** Passed through to the deterministic gate so a test can decide stock. */
-  gateDeps?: { getAvailability?: (handle: string) => Promise<boolean | null> }
+  /**
+   * Passed through verbatim to the deterministic gate (ticket #10560 widened
+   * this from `{ getAvailability }` alone so a test can also inject
+   * `getProductTypeDial`, the pairing check's own dependency).
+   */
+  gateDeps?: Parameters<typeof runDeterministicPublishChecks>[1]
   /** Defaults to the live database. */
   repo?: ApproveRepo
   /**
@@ -631,6 +635,10 @@ export async function applyPublishGateVerdict(
     // #10476: the video poster frame is a second blob the grid renders and
     // mediaUrls does not carry.
     posterUrl: post.posterUrl ?? null,
+    // #10560: read fresh off the row so a reason recorded at draft or rework
+    // time is honored here, the deterministic re-verification the agent's
+    // PASS cannot talk past.
+    pairingNoneReason: post.pairingNoneReason ?? null,
   }, deps.gateDeps)
 
   if (gate.blocked || gate.held) {
@@ -728,6 +736,8 @@ export interface ReworkInput {
   contactMode?: string
   /** On-skin crop scale (migration 099). */
   cropScale?: string
+  /** Pairing-presence self-check reason (migration 100, ticket #10560). */
+  pairingNoneReason?: string
 }
 
 export type ReworkParse =
@@ -809,6 +819,16 @@ export function parseReworkInput(raw: unknown): ReworkParse {
     }
     subject = r['subject']
   }
+  // Pairing-presence self-check reason (migration 100, ticket #10560). Same
+  // shape as altText/imageBrief/subject above: rides along with the rework,
+  // never satisfies the "must change something" requirement on its own.
+  let pairingNoneReason: string | undefined
+  if (r['pairingNoneReason'] !== undefined) {
+    if (typeof r['pairingNoneReason'] !== 'string' || r['pairingNoneReason'].trim() === '') {
+      return { ok: false, status: 400, error: 'Bad Request: rework.pairingNoneReason, when present, must be a non-empty string' }
+    }
+    pairingNoneReason = r['pairingNoneReason'].trim()
+  }
 
   // Variety axes (#10339). Like altText/imageBrief/subject above, these ride
   // along with a mediaUrls/tweetText rework and never satisfy the "must change
@@ -849,6 +869,7 @@ export function parseReworkInput(raw: unknown): ReworkParse {
   if (variety.bodyZone !== undefined) input.bodyZone = variety.bodyZone
   if (variety.contactMode !== undefined) input.contactMode = variety.contactMode
   if (variety.cropScale !== undefined) input.cropScale = variety.cropScale
+  if (pairingNoneReason !== undefined) input.pairingNoneReason = pairingNoneReason
   return { ok: true, input }
 }
 
@@ -905,6 +926,7 @@ export interface ReworkPatch {
   bodyZone?: string
   contactMode?: string
   cropScale?: string
+  pairingNoneReason?: string
 }
 
 export interface ReworkRepo {
@@ -1009,6 +1031,7 @@ export async function reworkSocialPost(
     ...(input.bodyZone !== undefined ? { bodyZone: input.bodyZone } : {}),
     ...(input.contactMode !== undefined ? { contactMode: input.contactMode } : {}),
     ...(input.cropScale !== undefined ? { cropScale: input.cropScale } : {}),
+    ...(input.pairingNoneReason !== undefined ? { pairingNoneReason: input.pairingNoneReason } : {}),
   }
   await repo.write(id, patch)
   return { ok: true, reviewStatus: 'pending_review' }

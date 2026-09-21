@@ -273,6 +273,15 @@ export const socialPosts = pgTable('social_posts', {
   bodyZone:        varchar('body_zone', { length: 40 }),
   contactMode:     varchar('contact_mode', { length: 20 }),
   cropScale:       varchar('crop_scale', { length: 10 }),
+  // Pairing-presence self-check reason (migration 100, ticket #10560). The
+  // deterministic pairing-missing check (social-publish-gate.server.ts) has
+  // accepted `pairingNoneReason` since it was written, but nothing wrote it:
+  // no column existed, so no caller could persist a drafter's "no lube
+  // pairing applies here" judgment from draft time through to gate time,
+  // which forced an awkward lube-naming workaround into every pairing-
+  // required toy post regardless of whether one actually fit. Nullable, no
+  // backfill: absent means "no reason recorded", never "cleared".
+  pairingNoneReason: text('pairing_none_reason'),
   // Publish-gate raw-judgment cache (migration 097, ticket #8452). Caches the
   // last runPublishGateCheck() vision-judgment result keyed by a content hash
   // of exactly what was judged, so a second call against an unchanged row
