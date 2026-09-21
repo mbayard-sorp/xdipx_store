@@ -357,6 +357,13 @@ export interface TicketFacts {
    * have gone through before this existed.
    */
   verifiedHeadSha?: string | null
+  /**
+   * When this ticket last transitioned to `verified` (`verified_at`), used
+   * only to decide whether a MISSING `verifiedHeadSha` is legacy or a
+   * failure (ticket #10671). `null`/absent means the row predates the
+   * column, and is treated as legacy, so it fails open exactly as before.
+   */
+  verifiedAt?: Date | string | null
 }
 
 /**
@@ -408,6 +415,36 @@ export interface PullRequestFacts {
   labelSplitEnabled: boolean
 }
 
+/**
+ * The moment the verdict pin stops being advisory (ticket #10671).
+ *
+ * #10502 records the QA-verified head sha and #931 below bounces on a
+ * mismatch, but the write is best-effort and the compare FAILS OPEN on a
+ * missing pin, so a failed pin was indistinguishable from a row that was
+ * never pinnable and the engine merged on ticket status alone. Measured on
+ * production 2026-09-21, that was 6 of 12 verifications.
+ *
+ * A ticket verified BEFORE this instant merges unpinned exactly as it does
+ * today (legacy, deliberately not narrowed retroactively). A ticket verified
+ * AFTER it with no pin is bounced as `verdict-unpinned`. Set ~48h ahead of
+ * the fix being authored so the rows already sitting verified-and-unpinned
+ * drain through the queue naturally instead of stranding on the new rule.
+ *
+ * Same idiom as VISION_VERDICT_LEGACY_CUTOFF in social-publish-gate.server.ts
+ * (PR #1248), for the same reason: a missing verdict after the cutoff means
+ * the check did not run, not that it predates the check.
+ */
+export const VERDICT_PIN_CUTOFF = new Date('2026-09-23T18:00:00.000Z')
+
+/** A `verified_at` that survived a JSON round trip is a string, not a Date.
+ *  Anything unparseable is treated as absent, which fails OPEN: a timestamp
+ *  we cannot read is not evidence that the verification was post-cutoff. */
+function toDate(v: Date | string | null | undefined): Date | null {
+  if (!v) return null
+  const d = v instanceof Date ? v : new Date(v)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 export type ReleaseAction =
   | 'merge' | 'wait' | 'skip' | 'bounce' | 'escalate-protected' | 'undraft'
   | 'retrigger-ci' | 'escalate-ci'
@@ -428,6 +465,7 @@ export type ReleaseReasonCode =
   | 'no-ticket'
   | 'ticket-not-verified'
   | 'verdict-stale'
+  | 'verdict-unpinned'
   | 'not-mergeable'
   | 'mergeability-unknown'
   | 'ready'
@@ -934,6 +972,25 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
         + `(verified ${facts.ticket.verifiedHeadSha.slice(0, 12)}, now ${facts.headSha.slice(0, 12)})`
       return { ...base, action: 'bounce', code: 'verdict-stale', reason: lastError, lastError }
     }
+    // ...and a verification with NO pin at all fails CLOSED once it is new
+    // enough to have been pinnable (ticket #10671). Without this the whole
+    // check above degrades silently: the pin write is best-effort, its
+    // console.warn only reaches Sentry in this estate, and a null pin read
+    // as "cannot compare", so a failed pin merged on ticket status alone and
+    // looked exactly like a healthy row. Bouncing sends it back to QA, which
+    // re-verifies and re-pins; it never blocks a merge that a fresh verdict
+    // cannot unblock.
+    if (!facts.ticket.verifiedHeadSha) {
+      const verifiedAt = toDate(facts.ticket.verifiedAt)
+      if (verifiedAt && verifiedAt.getTime() >= VERDICT_PIN_CUTOFF.getTime()) {
+        const lastError =
+          `ticket #${facts.ticket.id} was verified at ${verifiedAt.toISOString()} with no recorded `
+          + `head sha, so the verdict cannot be tied to a diff (the pin write failed; see the `
+          + `verdict-pin-failed note on the row). Re-verify PR #${facts.number} at `
+          + `${facts.headSha.slice(0, 12)}`
+        return { ...base, action: 'bounce', code: 'verdict-unpinned', reason: lastError, lastError }
+      }
+    }
   }
 
   // 5. GitHub's own mergeability verdict, last so the reasons above are the
@@ -1423,6 +1480,7 @@ async function loadTicketFacts(id: number): Promise<TicketFacts | null> {
       status: homepageTeamSuggestions.status,
       kind: homepageTeamSuggestions.kind,
       attemptCount: homepageTeamSuggestions.attemptCount,
+      verifiedAt: homepageTeamSuggestions.verifiedAt,
     })
     .from(homepageTeamSuggestions)
     .where(eq(homepageTeamSuggestions.id, id))
@@ -1443,6 +1501,7 @@ async function loadTicketFacts(id: number): Promise<TicketFacts | null> {
     kind: row.kind,
     attemptCount: row.attemptCount,
     verifiedHeadSha: commitLink?.ref ?? null,
+    verifiedAt: row.verifiedAt ?? null,
   }
 }
 
