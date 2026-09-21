@@ -1774,6 +1774,13 @@ the [X] thing you [verb]?") and rewrite any hit before `op:'draft'`. id141 (a re
 "tell me below" a day after row 133 spent it in the same campaign. Both checks are draft-time
 catches for the exact failure mode the voice gate misses (it reads a caption in isolation, not
 against posted history) and the publish gate catches at the cost of a full rework cycle.
+**Tenth check, X weighted length (ticket #10435), X drafts only:** before calling `op:'draft'` on
+a `platform:'x'` row, compute the caption's weighted length the way X (and the publish gate) does:
+every URL counts at t.co width, 23 characters, regardless of its real length
+(`app/lib/social-publish/x-limits.ts`), not `String.length`. Trim or rewrite if the weighted total
+exceeds 280. Four X drafts BLOCKed on the publish gate's deterministic `caption-too-long` check in
+the week before 2026-09-20 (rows 260, 251, 247, 241, all 290-369 raw chars against the 280 weighted
+limit) that this check would have caught before the draft ever reached the gate.
 
 **Every image-bearing post carries an accessibility description, and it goes in `altText`, never in
 `tweetText` (ticket #4067, re-homed by owner direction 2026-08-22).** This is standing, not an
