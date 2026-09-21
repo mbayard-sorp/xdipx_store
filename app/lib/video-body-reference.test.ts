@@ -372,4 +372,68 @@ describe('scene_frame stage, which reference an on-skin crop composes from (tick
       presenterImageUrl: 'https://blob.test/maya.jpg',
     }))
   })
+
+  // Parity with the multi-scene skin-tone assertion above (ticket #10500):
+  // withSkinToneNote is wired at both call sites, but only the multi-scene
+  // one was test-covered, so a future refactor could silently drop the
+  // single-scene one without a red test.
+  it('single-scene: states the cast member\'s skin tone in the frame prompt rather than leaving it to the model', async () => {
+    state.selectResults = [[jobRow({
+      scriptJson: { framePrompt: 'the wand against a hip', motionPrompt: 'push in', cropScale: 'close' },
+    })]]
+
+    await advanceInflightVideoJobs()
+
+    const call = composeSceneFrameMock.mock.calls[0]![0] as { prompt: string }
+    expect(call.prompt).toContain('Skin tone: warm deep brown.')
+    expect(call.prompt).toContain('the wand against a hip')
+  })
+})
+
+/**
+ * TOCTOU re-assertion at the frame stage (ticket #10500). #10484's gate only
+ * ran at enqueue; if a castMember's bodyReferencePhoto is removed or unset in
+ * Sanity between enqueue and the frame stage, resolvePresenterReference used
+ * to fall back to the portrait silently and the render proceeded — the exact
+ * failure #10484 exists to prevent, just moved one stage later. These tests
+ * never call enqueueVideoJob: the job row is injected directly at the frame
+ * stage (as the suite above already does), and the cast mock is the one that
+ * simulates "the reference is gone by the time this stage runs".
+ */
+describe('scene_frame stage re-asserts the body-reference gate (ticket #10500, TOCTOU on #10484)', () => {
+  it('single-scene: fails the job rather than composing from the portrait when the body reference is gone', async () => {
+    castMock.mockResolvedValue([{ ...MAYA, bodyReferencePhotoUrl: null }, RUTH])
+    state.selectResults = [[jobRow({
+      scriptJson: { framePrompt: 'the wand against a hip', motionPrompt: 'push in', cropScale: 'close' },
+    })]]
+
+    const result = await advanceInflightVideoJobs()
+
+    expect(result.failed).toBe(1)
+    expect(composeSceneFrameMock).not.toHaveBeenCalled()
+  })
+
+  it('multi-scene: fails the job rather than composing from the portrait when the body reference is gone', async () => {
+    castMock.mockResolvedValue([{ ...MAYA, bodyReferencePhotoUrl: null }, RUTH])
+    state.selectResults = [[multiSceneRow('close')]]
+
+    const result = await advanceInflightVideoJobs()
+
+    expect(result.failed).toBe(1)
+    expect(composeSceneFrameMock).not.toHaveBeenCalled()
+  })
+
+  it('single-scene: a medium crop still composes fine with no body reference (only on-skin crops are gated)', async () => {
+    castMock.mockResolvedValue([{ ...MAYA, bodyReferencePhotoUrl: null }, RUTH])
+    state.selectResults = [[jobRow({
+      scriptJson: { framePrompt: 'the wand on a cream surface', motionPrompt: 'push in', cropScale: 'medium' },
+    })]]
+
+    const result = await advanceInflightVideoJobs()
+
+    expect(result.failed).toBe(0)
+    expect(composeSceneFrameMock).toHaveBeenCalledWith(expect.objectContaining({
+      presenterImageUrl: 'https://blob.test/maya.jpg',
+    }))
+  })
 })
