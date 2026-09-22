@@ -51,6 +51,7 @@ import { SONNET } from './models.server'
 import { EMMA_VOICE_SOCIAL, EMMA_VOICE_LINKEDIN } from './emma-voice.server'
 import { runDeterministicPublishChecks, type GatePlatform, type GateFinding } from './social-publish-gate.server'
 import { stripUrlQuery } from './social-asset-library.server'
+import { getAssetAdjudication, type AssetAdjudicationRow } from './social-asset-adjudication.server'
 import { SOCIAL_PLATFORMS } from './team-keys'
 import { getProductHandleById, getProductByHandle } from './shopify.server'
 import { logApiTokens } from './token-log.server'
@@ -414,6 +415,57 @@ export function describeAssetReusePrecedent(precedent: AssetReusePrecedent | nul
     'or platform-specific check. Do not re-open product identity, colour, baked-in text, proportion, or anatomy ' +
     'for this unchanged image unless you can point to a pixel that is visibly different from the prior check, ' +
     'which an unchanged url makes very unlikely.'
+  )
+}
+
+/** One asset's owner adjudication, paired with the bare url it applies to. */
+export interface AssetAdjudicationGrounding {
+  url: string
+  overriddenFindings: string[]
+  note: string | null
+}
+
+/**
+ * Owner adjudications for this post's media (ticket #10503), one lookup per
+ * url. Best-effort: a lookup failure is treated as "no adjudication on file"
+ * rather than failing the whole gate call, the same fail-open-to-fresh-judgment
+ * contract `findAssetReusePrecedent` already uses for its own DB read.
+ */
+async function getMediaAdjudications(mediaUrls: readonly string[]): Promise<AssetAdjudicationGrounding[]> {
+  const out: AssetAdjudicationGrounding[] = []
+  for (const url of mediaUrls) {
+    try {
+      const row: AssetAdjudicationRow | null = await getAssetAdjudication(url)
+      if (row) out.push({ url, overriddenFindings: row.overriddenFindings ?? [], note: row.note })
+    } catch (err) {
+      console.error(`[publish-gate] asset-adjudication lookup failed for ${url} (treating as none on file):`, err)
+    }
+  }
+  return out
+}
+
+/**
+ * The user-turn text block grounding the model in any owner adjudication on
+ * this post's media (ticket #10503), or '' when there are none. Mirrors
+ * `describeAssetReusePrecedent`'s shape: named ground truth for the specific
+ * findings it covers, not a licence to skip judging anything else. Unlike
+ * that precedent (which requires an exact PASS from a posted row), an
+ * adjudication is an explicit owner ruling and can apply even to an asset
+ * that has never passed the gate on its own.
+ */
+export function describeAssetAdjudications(adjudications: readonly AssetAdjudicationGrounding[]): string {
+  if (adjudications.length === 0) return ''
+  const rows = adjudications.map(a => {
+    const findings = a.overriddenFindings.map(f => `  - ${f}`).join('\n')
+    return `Asset ${a.url}:\n${findings}${a.note ? `\n  owner note: ${a.note}` : ''}`
+  }).join('\n')
+  return (
+    'OWNER ADJUDICATION ON FILE for one or more of this post\'s images. The store owner has personally reviewed ' +
+    'the specific findings named below for the exact asset(s) listed and ruled them false positives. Do not ' +
+    're-raise a listed finding for its named asset unless you can point to something categorically different from ' +
+    'what the owner already reviewed (a materially different crop, a different frame, visible new content). Every ' +
+    'other check on this image, and every check on any OTHER image in this post, still applies in full — this is a ' +
+    'narrow, asset-and-finding-scoped exception, never a general pass:\n' + rows
   )
 }
 
@@ -825,6 +877,17 @@ export async function runPublishGateCheck(
     )
   }
 
+  // Owner adjudications (ticket #10503): a false-positive the owner has
+  // already ruled on for a specific asset, independent of whether that asset
+  // has ever posted or passed on its own (unlike the precedent above).
+  const adjudications = await getMediaAdjudications(media)
+  if (adjudications.length) {
+    console.error(
+      `[publish-gate] post ${postId}: found owner adjudication(s) for ${adjudications.length} asset(s), ` +
+        `grounding ${adjudications.reduce((n, a) => n + a.overriddenFindings.length, 0)} finding(s)`,
+    )
+  }
+
   const content = buildPublishGateUserContent({
     platform,
     tweetText: post.tweetText,
@@ -836,6 +899,7 @@ export async function runPublishGateCheck(
     mediaUrls: media,
     packshotUrl,
     assetPrecedentBlock: describeAssetReusePrecedent(assetPrecedent),
+    adjudicationBlock: describeAssetAdjudications(adjudications),
   })
 
   let modelResult = await callPublishGateModel(postId, content)
@@ -1049,6 +1113,8 @@ export function buildPublishGateUserContent(input: {
   packshotUrl: string | null
   /** Asset-reuse grounding block (ticket #8976), or '' when there is no precedent. */
   assetPrecedentBlock?: string
+  /** Owner-adjudication grounding block (ticket #10503), or '' when there is none on file. */
+  adjudicationBlock?: string
 }): Anthropic.ContentBlockParam[] {
   const packshotNote = input.featuresProduct
     ? input.packshotUrl
@@ -1072,6 +1138,7 @@ export function buildPublishGateUserContent(input: {
         `${input.featuresProduct ? '' : `${input.registerPrecedentsBlock}\n\n`}` +
         `${packshotNote ? `${packshotNote}\n\n` : ''}` +
         `${input.assetPrecedentBlock ? `${input.assetPrecedentBlock}\n\n` : ''}` +
+        `${input.adjudicationBlock ? `${input.adjudicationBlock}\n\n` : ''}` +
         `${input.mediaUrls.length} generated candidate image(s) follow${input.packshotUrl ? ' after the packshot' : ''}.`,
     },
     ...(input.packshotUrl
