@@ -453,6 +453,10 @@ export interface VaultDeal {
   specifications?: string[]
   /** xdipx.product_type_dial */
   productTypeDial?: string | null
+  /** xdipx.cast_target — ticket #10731: the GMC feed's gender field derives
+   *  from this (imagery-casting fact, not a merchandising axis) since
+   *  audience_tags never carries a for-him/for-her value. */
+  castTarget?: string | null
   /** xdipx.original_price (already mapped to msrp but kept raw for feed) */
   originalPrice?: string | null
   /** xdipx.map_price — minimum advertised price; 0/absent means no MAP constraint */
