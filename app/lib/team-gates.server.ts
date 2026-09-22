@@ -191,6 +191,14 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
   const msg = await client.messages.create({
     model: SONNET,
     max_tokens: 512,
+    // Pinned at 0 (ticket #10560), mirroring the publish gate's own fix
+    // (#7896): this call ran at the SDK default temperature, and the same
+    // caption re-judged minutes apart produced four different objections to
+    // one construction and REVISEd a licensed lube-pairing mention four
+    // different ways across ~16 round trips on the LELO SONA / orgasm-gap
+    // post (run 981). A charter compliance verdict is a fail-closed judgment
+    // task, not one where call-to-call variety is a feature.
+    temperature: 0,
     system: cacheableSystem(system),
     messages: [{ role: 'user', content: buildVoiceGateUserContent({ text, platform }) }],
   })
@@ -589,7 +597,15 @@ async function callPublishGateModel(
 ): Promise<ReturnType<typeof parsePublishGateModelOutput>> {
   const msg = await client.messages.create({
     model: SONNET,
-    max_tokens: 2048,
+    // Raised from 2048 (ticket #10560): a `referencePackshotUrl` call (#9770)
+    // grounds product-identity judgment against a second real photo, and the
+    // extra comparison reasoning pushed the same postId to a max_tokens
+    // truncation twice in a row (run 981, ad hoc session) even after the
+    // #9153 preamble-only retry below, because the cutoff landed mid-object
+    // rather than in the preamble; omitting referencePackshotUrl resolved it
+    // cleanly on the identical caption. 3072 gives that longer reasoning path
+    // room without changing the floor for the common case.
+    max_tokens: 3072,
     // Pinned at 0 (ticket #7896): the same caption against the same
     // precedent set must return the same verdict. Rows #182/#185 showed the
     // opposite at the SDK default temperature — identical input, three
@@ -616,26 +632,35 @@ async function callPublishGateModel(
         `(${msg.usage.output_tokens} output tokens); the JSON may be truncated ` +
         'and will fail-closed to BLOCK if so',
     )
-    // #9153: post 246 (run 850) hit this twice in a row with byte-identical
-    // truncated output on both calls — expected at temperature 0, since a
-    // blind identical retry gives the model no new information and just
-    // spends the same budget on the same prose again. When the whole budget
-    // went to unstructured reasoning before ever reaching the JSON object
-    // (no `{` anywhere in the raw text), retry once with an explicit
-    // instruction to drop the preamble, which changes the input enough to
-    // have a real chance at a different, complete answer. A response that
-    // already started the object and was cut mid-way is a sizing problem,
-    // not a prompt-adherence one, so it is left to fail closed as before.
-    if (!isRetry && respondedWithPreambleOnly(block.text)) {
-      console.error(`[publish-gate] post ${postId}: max_tokens spent entirely on prose before any JSON; retrying once with a skip-the-preamble instruction`)
+    // #9153, widened by #10560: post 246 (run 850) hit this twice in a row
+    // with byte-identical truncated output on both calls — expected at
+    // temperature 0, since a blind identical retry gives the model no new
+    // information and just spends the same budget on the same prose again.
+    // Retrying once with an explicit skip-the-preamble, be-concise
+    // instruction changes the input enough to have a real chance at a
+    // different, complete answer. That used to be gated on the whole budget
+    // going to unstructured reasoning before ever reaching a `{` at all, on
+    // the theory that a response which already started the object and was
+    // cut mid-way is purely a sizing problem the same instruction cannot
+    // help. Ticket #10560's incident (a `referencePackshotUrl` call, run 981)
+    // showed that theory wrong: the cutoff landed mid-object, not in a bare
+    // preamble, and the SAME concise-JSON-only instruction — which also
+    // shortens the notes/findings prose that caused the overrun — is exactly
+    // as likely to fit inside the (now larger, see max_tokens above) budget.
+    // So retry once regardless of which shape the cutoff took; the preamble
+    // check now only picks the log wording.
+    if (!isRetry) {
+      const shape = respondedWithPreambleOnly(block.text) ? 'entirely on prose before any JSON' : 'mid-object, after the JSON had started'
+      console.error(`[publish-gate] post ${postId}: max_tokens spent ${shape}; retrying once with a concise-JSON-only instruction`)
       const retryContent: Anthropic.ContentBlockParam[] = [
         ...content,
         {
           type: 'text',
           text:
-            'Your previous response ran out of tokens before reaching the JSON object. Do not explain your ' +
-            'reasoning in prose first. Respond now with ONLY the JSON object described above, starting with ' +
-            'the { character as the very first character of your response.',
+            'Your previous response was cut off by the token limit before producing one complete, valid ' +
+            'JSON object. Respond now with ONLY that JSON object, as concisely as possible (short notes, no ' +
+            'prose before or after it), starting with the { character as the very first character of your ' +
+            'response.',
         },
       ]
       return callPublishGateModel(postId, retryContent, true)
@@ -728,6 +753,10 @@ export async function runPublishGateCheck(
       // grid renders that mediaUrls does not carry.
       createdAt: socialPosts.createdAt,
       posterUrl: socialPosts.posterUrl,
+      // #10560: the pairing-presence self-check reason, read fresh off the
+      // row so a value recorded at draft or rework time reaches the
+      // deterministic pairing-missing check here too.
+      pairingNoneReason: socialPosts.pairingNoneReason,
     })
     .from(socialPosts)
     .where(eq(socialPosts.id, postId))
@@ -767,6 +796,7 @@ export async function runPublishGateCheck(
     recentCaptions,
     postCreatedAt: post.createdAt ?? null,
     posterUrl: post.posterUrl ?? null,
+    pairingNoneReason: post.pairingNoneReason ?? null,
   })
 
   const deterministicFindings: PublishGateFinding[] = deterministic.findings.map(toStoredFinding)

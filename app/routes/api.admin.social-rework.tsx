@@ -4,6 +4,7 @@
  *   { intent: 'regenerate-image',  postId, feedback, archetype? }
  *   { intent: 'create-rework-row', fromPostId, caption, altText?, mediaUrls, imageBrief?, subject?, scheduledFor? }
  *   { intent: 'owner-approve',     postId }
+ *   { intent: 'regate-media',      postId }
  *
  * The admin door onto `social-admin-rework.server.ts` (ticket #5414, owner
  * direction 2026-08-22). Before this route, those four functions were fully
@@ -41,6 +42,7 @@ import {
   reworkCaption,
   createOwnerReworkRow,
   ownerApprovePost,
+  regateMediaAndApprove,
   type ReworkArchetype,
 } from '~/lib/social-admin-rework.server'
 import { apiError } from '~/lib/api-error.server'
@@ -156,6 +158,18 @@ export async function action({ request }: ActionFunctionArgs) {
       const postId = positiveInt(b['postId'])
       if (!postId) return Response.json({ ok: false, error: 'postId required' }, { status: 400 })
       const result = await ownerApprovePost({ postId, actor })
+      return Response.json(result, { status: result.ok ? 200 : 409 })
+    }
+
+    // Ticket #10511: re-run the vision gate on every media url the post
+    // carries and, if that clears the deterministic checks, approve it —
+    // the manual escape for a needs_changes row blocked on stale/incomplete
+    // vision-verdict data that reworkCaption's caption-only retry loop
+    // structurally cannot clear.
+    if (intent === 'regate-media') {
+      const postId = positiveInt(b['postId'])
+      if (!postId) return Response.json({ ok: false, error: 'postId required' }, { status: 400 })
+      const result = await regateMediaAndApprove({ postId, actor })
       return Response.json(result, { status: result.ok ? 200 : 409 })
     }
 

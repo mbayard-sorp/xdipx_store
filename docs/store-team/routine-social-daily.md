@@ -1515,9 +1515,14 @@ accept 2 to 10 slides.
 `social_media_assets` is the team's own index and currently holds 269 unattached assets, all
 on-scheme and provenance-passing, that reuse-first never looked at because it only asked
 `media-manager` for "an existing Shopify Files / Sanity asset." Query `social_media_assets` for a
-reusable candidate first. This does not move generation later: it slots into the existing pre-draft
-position, before any caption is written, exactly where reuse-first has always lived, because a
-caption written against an undecided image is a caption written blind.
+reusable candidate first, via `POST /api/team/social-asset-query {"op":"search", product?, cast?,
+archetype?, tag?, source?, picked?, limit?}` (ticket #10660): a team-token-authed route over the
+same `listLibraryAssets` query `/admin/socials/library` uses, reachable from the scheduled sandbox,
+which has neither an admin session nor a direct Neon network path. `picked` defaults to false, so
+the default result set is candidates never yet attached to a draft or post. This does not move
+generation later: it slots into the existing pre-draft position, before any caption is written,
+exactly where reuse-first has always lived, because a caption written against an undecided image is
+a caption written blind.
 
 **Mandatory filter, all of it, or do not reuse and generate instead.** A reused asset must still
 satisfy the freshness rules in `docs/store-team/instagram-campaigns.md` §3.8: filter candidates on
@@ -1774,6 +1779,13 @@ the [X] thing you [verb]?") and rewrite any hit before `op:'draft'`. id141 (a re
 "tell me below" a day after row 133 spent it in the same campaign. Both checks are draft-time
 catches for the exact failure mode the voice gate misses (it reads a caption in isolation, not
 against posted history) and the publish gate catches at the cost of a full rework cycle.
+**Tenth check, X weighted length (ticket #10435), X drafts only:** before calling `op:'draft'` on
+a `platform:'x'` row, compute the caption's weighted length the way X (and the publish gate) does:
+every URL counts at t.co width, 23 characters, regardless of its real length
+(`app/lib/social-publish/x-limits.ts`), not `String.length`. Trim or rewrite if the weighted total
+exceeds 280. Four X drafts BLOCKed on the publish gate's deterministic `caption-too-long` check in
+the week before 2026-09-20 (rows 260, 251, 247, 241, all 290-369 raw chars against the 280 weighted
+limit) that this check would have caught before the draft ever reached the gate.
 
 **Every image-bearing post carries an accessibility description, and it goes in `altText`, never in
 `tweetText` (ticket #4067, re-homed by owner direction 2026-08-22).** This is standing, not an

@@ -74,6 +74,7 @@ export async function action({ request }: ActionFunctionArgs) {
       // poster frame, which is not in mediaUrls.
       postCreatedAt: post.createdAt ?? null,
       posterUrl: post.posterUrl ?? null,
+      pairingNoneReason: post.pairingNoneReason ?? null,
     })
 
     const findings: StoredGateFinding[] = result.findings.map(findingToStored)

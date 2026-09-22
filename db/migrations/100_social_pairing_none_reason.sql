@@ -1,0 +1,21 @@
+-- 100_social_pairing_none_reason.sql
+-- Pairing-presence self-check reason (ticket #10560). The deterministic
+-- pairing-missing check in social-publish-gate.server.ts has read
+-- `pairingNoneReason` off its input since it was written, but no caller has
+-- ever had a column to persist it in, so an agent had no legitimate way to
+-- record "no lube pairing applies to this draft" -- every pairing-required
+-- toy post was forced into naming a lube even when the voice gate was
+-- simultaneously unstable about whether that mention read as commerce.
+--
+--   pairing_none_reason  text.  Nullable, no backfill: only rows drafted or
+--                                 reworked after the API change (same ticket)
+--                                 carry a value.
+--
+-- FULLY ADDITIVE: ADD COLUMN IF NOT EXISTS only. No DROP, no RENAME, no ALTER
+-- TYPE, no DML. Merges on the ordinary release-engine lane once
+-- migration-dry-run is green.
+--
+-- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 100
+-- Idempotent: safe to re-run.
+
+ALTER TABLE social_posts ADD COLUMN IF NOT EXISTS pairing_none_reason text;

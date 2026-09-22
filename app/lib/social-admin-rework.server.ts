@@ -291,6 +291,9 @@ export async function reworkCaption(opts: {
         // video poster frame, which is not in mediaUrls.
         postCreatedAt: post.createdAt ?? null,
         posterUrl: post.posterUrl ?? null,
+        // #10560: a reason already recorded on the row still applies to a
+        // regenerated caption for it.
+        pairingNoneReason: post.pairingNoneReason ?? null,
       })
       const blockFindings = gateResult.findings.filter(f => f.severity === 'block')
       if (blockFindings.length === 0) {
@@ -505,6 +508,7 @@ export async function ownerApprovePost(
     // poster frame, which is not in mediaUrls.
     postCreatedAt: post.createdAt ?? null,
     posterUrl: post.posterUrl ?? null,
+    pairingNoneReason: post.pairingNoneReason ?? null,
   })
   const blockFindings = gateResult.findings.filter(f => f.severity === 'block')
   if (blockFindings.length > 0) {
@@ -518,4 +522,55 @@ export async function ownerApprovePost(
     .set({ reviewStatus: 'approved', reviewedBy: opts.actor, reviewedAt: now, feedback })
     .where(eq(socialPosts.id, opts.postId))
   return { ok: true }
+}
+
+/**
+ * Re-run the vision gate on a post's media and, if that clears every check,
+ * approve it the same way `ownerApprovePost` does (ticket #10511).
+ *
+ * The gap this closes: a post blocked on the `vision-verdict` finding (a
+ * stored verdict missing a check added after it was judged, or a genuine
+ * anatomy/exposure fail from a stale run) had exactly one automated
+ * remediation loop, `reworkCaption`, which redrafts the CAPTION and re-runs
+ * the gate against the SAME mediaUrls — reproducing the identical
+ * media-based finding every time and burning attempts on a class of finding
+ * it structurally cannot address. There was also no manual escape short of
+ * regenerating the art (an already-billed frame may be perfectly fine).
+ *
+ * This does not inspect which finding blocked the post before re-gating —
+ * it always re-gates every media url the post carries, then defers the
+ * pass/fail call entirely to `ownerApprovePost`'s own deterministic
+ * re-check. That re-check is what prevents this from ever laundering a
+ * genuine failure: `regateAsset` always records the fresh verdict in full
+ * before this returns, so if the new read is still a fail (or some other
+ * check blocks), `ownerApprovePost` reports that truthfully instead of
+ * approving.
+ */
+export async function regateMediaAndApprove(
+  opts: { postId: number; actor: string },
+): Promise<{ ok: true } | { ok: false; error: string; findings?: unknown[] }> {
+  const post = await loadPost(opts.postId)
+  if (!post) return { ok: false, error: `No social post ${opts.postId}` }
+
+  const media = [...(post.mediaUrls ?? []), ...(post.posterUrl ? [post.posterUrl] : [])]
+  if (media.length === 0) {
+    return { ok: false, error: 'This post has no media to re-gate.' }
+  }
+
+  const { findLibraryAssetsByUrls } = await import('./social-asset-library.server')
+  const { regateAsset } = await import('./social-vision-gate.server')
+  const rows = await findLibraryAssetsByUrls(media)
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      error:
+        'No library asset rows found for this post\'s media, so there is nothing to re-gate ' +
+        '(likely an owner upload with no library row). Regenerating the art is the remaining option.',
+    }
+  }
+  for (const row of rows) {
+    await regateAsset(row.id, row.url)
+  }
+
+  return ownerApprovePost(opts)
 }

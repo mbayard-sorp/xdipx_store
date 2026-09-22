@@ -2241,6 +2241,72 @@ async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Pr
  * still be held at 20:00), short enough that a dead agent releases the row the
  * same day. See the renewal in transitionSuggestion for why this exists at all.
  */
+export const VERDICT_PIN_RETRY_DELAY_MS = 250
+
+/** Keep the failure note short. A long `ref` overflows the btree entry on the
+ *  uq_suggestion_links_sugg_kind_ref unique index, which 500s the write AFTER
+ *  the status update has already committed (ticket #10506). */
+const VERDICT_PIN_NOTE_MAX = 180
+
+export const VERDICT_PIN_NOTE_PREFIX = 'verdict-pin-failed'
+
+function verdictPinNote(detail: string): string {
+  const note = `${VERDICT_PIN_NOTE_PREFIX}: ${detail.replace(/\s+/g, ' ').trim()}`
+  return note.length > VERDICT_PIN_NOTE_MAX ? `${note.slice(0, VERDICT_PIN_NOTE_MAX - 1)}\u2026` : note
+}
+
+/**
+ * Attempts to read the PR head sha this verification should be pinned to
+ * (ticket #10502, hardened by #10671).
+ *
+ * Returns `{ sha }` on success; `{ failure }` with a SHORT reason when a pin
+ * was EXPECTED and could not be written; `{}` when no pin was ever expected
+ * (the ticket carries no `pr` link at all, e.g. a docs or process row), which
+ * is not a failure and must not be annotated as one.
+ *
+ * Measured on production 2026-09-21: only 6 of the 12 tickets verified after
+ * #10502 deployed carried a pin, the failures interleaved with successes 19
+ * seconds apart, so the live suspect is a transient `getPullRequest` failure
+ * rather than a deploy boundary or a parsing bug. Hence the single retry.
+ */
+async function pinVerifiedCommit(id: number): Promise<{ sha?: string; failure?: string }> {
+  try {
+    const [prLink] = await db
+      .select({ ref: suggestionLinks.ref })
+      .from(suggestionLinks)
+      .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'pr')))
+      .orderBy(desc(suggestionLinks.createdAt))
+      .limit(1)
+    // No PR link: nothing to pin, and never was. Not a failure.
+    if (!prLink) return {}
+    const prNumberMatch = /(?:\/pull\/|#)(\d{1,9})\b/.exec(prLink.ref)
+    const prNumber = prNumberMatch?.[1] ? Number(prNumberMatch[1]) : null
+    if (prNumber == null || !Number.isInteger(prNumber) || prNumber <= 0) {
+      return { failure: verdictPinNote(`no PR number in link ${prLink.ref}`) }
+    }
+    // Retry once. The failures this is chasing are transient GitHub reads, and
+    // a second attempt costs one HTTP call against a control that otherwise
+    // degrades all the way back to pre-#10502 behaviour.
+    let lastError = 'unknown error'
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const pr = await getPullRequest(prNumber, 'team-verify')
+      if (pr.ok) return { sha: pr.data.headSha }
+      lastError = String(pr.error)
+      console.warn(
+        `[team] could not read PR #${prNumber} head sha to pin ticket ${id}'s verdict `
+        + `(attempt ${attempt} of 2): ${lastError}`,
+      )
+      if (attempt < 2 && VERDICT_PIN_RETRY_DELAY_MS > 0) {
+        await new Promise(r => setTimeout(r, VERDICT_PIN_RETRY_DELAY_MS))
+      }
+    }
+    return { failure: verdictPinNote(`PR #${prNumber} read failed twice: ${lastError}`) }
+  } catch (err) {
+    console.warn(`[team] failed to pin ticket ${id}'s verified commit (non-fatal)`, err)
+    return { failure: verdictPinNote(`${err instanceof Error ? err.message : String(err)}`) }
+  }
+}
+
 export const BOUNCE_LEASE_SEC = 6 * 3600
 
 /**
@@ -2398,37 +2464,23 @@ export async function transitionSuggestion(
   const links: TicketLinkInput[] = [...(opts.links ?? [])]
   // Pin the QA verdict to the exact commit it reviewed (ticket #10502).
   // Before this, the release engine's merge precondition checked only the
-  // TICKET's status, never which diff earned it — so any commit pushed to
-  // the PR after verification merged with zero review, discovered when a
-  // commit was pushed to PR #1247 after its ticket had already hit
-  // 'verified' in this very session. Records the PR's CURRENT head sha as a
-  // `commit` link (an existing, already-documented link kind — no schema
+  // TICKET's status, never which diff earned it, so any commit pushed to
+  // the PR after verification merged with zero review. Records the PR's
+  // CURRENT head sha as a `commit` link (an existing link kind, no schema
   // change); `release-engine.server.ts` bounces the ticket if a later push
-  // moves the head away from this recorded sha. Best-effort: a lookup
-  // failure here must not fail the verification itself (QA's verdict is
-  // still real), it only means this one verification cannot be pinned and
-  // the engine falls back to its pre-existing unpinned check for it.
+  // moves the head away from this recorded sha.
+  //
+  // Still best-effort on purpose (ticket #10671): a GitHub hiccup must not
+  // fail QA's verdict, because that would turn an API blip into a stalled
+  // queue. What #10671 adds is that the failure is no longer SILENT. When a
+  // pin was expected and could not be written, a short `note` link records
+  // that and why, so an unpinnable row says so instead of being
+  // indistinguishable from a row that was never eligible; and the engine
+  // fails CLOSED on an unpinned verification after VERDICT_PIN_CUTOFF.
   if (to === 'verified') {
-    try {
-      const [prLink] = await db
-        .select({ ref: suggestionLinks.ref })
-        .from(suggestionLinks)
-        .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'pr')))
-        .orderBy(desc(suggestionLinks.createdAt))
-        .limit(1)
-      const prNumberMatch = prLink ? /(?:\/pull\/|#)(\d{1,9})\b/.exec(prLink.ref) : null
-      const prNumber = prNumberMatch?.[1] ? Number(prNumberMatch[1]) : null
-      if (prNumber != null && Number.isInteger(prNumber) && prNumber > 0) {
-        const pr = await getPullRequest(prNumber, 'team-verify')
-        if (pr.ok) {
-          links.push({ kind: 'commit', ref: pr.data.headSha, state: 'verified' })
-        } else {
-          console.warn(`[team] could not read PR #${prNumber} head sha to pin ticket ${id}'s verdict: ${pr.error}`)
-        }
-      }
-    } catch (err) {
-      console.warn(`[team] failed to pin ticket ${id}'s verified commit (non-fatal)`, err)
-    }
+    const pin = await pinVerifiedCommit(id)
+    if (pin.sha) links.push({ kind: 'commit', ref: pin.sha, state: 'verified' })
+    else if (pin.failure) links.push({ kind: 'note', ref: pin.failure, state: to })
   }
   if (opts.note) links.push({ kind: 'note', ref: opts.note, state: to })
   // Honest attribution on the delegated dismissal (#3573): decided_by above
@@ -2763,6 +2815,11 @@ export interface DraftSocialPostInput {
   bodyZone?: string | undefined
   contactMode?: string | undefined
   cropScale?: string | undefined
+  // Pairing-presence self-check reason (migration 100, ticket #10560). The
+  // explicit reason a toy-featuring draft records for why no lube pairing
+  // applies, read by the deterministic pairing-missing check at gate time.
+  // Optional: most drafts either name a pairing or feature no toy at all.
+  pairingNoneReason?: string | undefined
 }
 
 /** Review states a still-open draft can sit in before the gate or the owner
@@ -2866,6 +2923,7 @@ export async function createDraftSocialPost(
       bodyZone:      axes.bodyZone ?? null,
       contactMode:   axes.contactMode ?? null,
       cropScale:     axes.cropScale ?? null,
+      pairingNoneReason: p.pairingNoneReason ?? null,
     })
     .returning({ id: socialPosts.id })
   return { id: row!.id, deduped: false }

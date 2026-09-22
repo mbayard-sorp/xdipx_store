@@ -41,9 +41,13 @@ already written and gated. What binds YOU at render time:
 
 - No text burned into generated frames, any frame: captions and overlays land in post. The
   pipeline's watermark is post-production branding and is fine.
-- Platform safety is stricter than the charter: never depict or simulate the product operating
-  on a body; judge wardrobe by the most revealing frame of the clip. ads-policy section Creative
-  applies to organic too.
+- The imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin
+  treatment of §3.2c (owner answer to blocker #192, 2026-09-20), pointed at and never restated.
+  Video's one extra rule is `docs/store-team/social-video-viral-checklist.md` P2's motion clause:
+  the ceiling holds on every frame of the clip, not the seed frame. That makes motion your
+  surface specifically; see `docs/store-team/routine-video-render.md` section Motion safety for
+  what it means for motionPrompt, clip length and tier. `docs/ads-policy.md` section Creative
+  keeps on-skin paid-ineligible; organic video is not paid.
 - YouTube descriptions carry the real product link with UTMs:
   `utm_source={platform}&utm_medium=organic-video&utm_campaign={formula}-{product-handle}`.
 - aiDisclosure always on. No em-dashes in anything you write.
@@ -54,8 +58,8 @@ already written and gated. What binds YOU at render time:
   the oldest approved episode at or past its planned slot, else the approved evergreen reserve,
   else an honest empty-queue skip with the `video:empty-episode-queue` blocker.
 - Assemble the enqueue payload VERBATIM from the approved row's stored script. Then assert the
-  spoken text (presenterLine, voiceover, captions, and per-scene spoken lines once ticket 6586
-  ships that field) is byte-identical to the approved row. A mismatch is a refusal: file a blocker
+  spoken text (presenterLine, voiceover, captions, and per-scene spokenLine on scenes that carry
+  one) is byte-identical to the approved row. A mismatch is a refusal: file a blocker
   naming both strings and exit. The server runs the same comparison and 409s; your assert existing
   means that 409 should never fire.
 - One episode per run, maximum. Never render two to catch up; never re-render an aired episode;
@@ -84,11 +88,12 @@ The approved script carries the scenes; you translate them into pipeline fields 
   words per second, fit inside the scene durations; never an on-camera mouth on a silent tier.
 - presenterLine (talking tier): performed audio-first on the RunPod worker's audio-driven mode
   from the approved standing-set frame. Speech must fit inside the clip length; the enqueue
-  rejects overruns. **Per-scene spoken lines are not a real field yet.** `VideoSceneSpec` carries
-  no spoken-line field and `validateScenes` (`video-pipeline.server.ts:126-152`) silently drops
-  anything outside its whitelist, so do not carry a per-scene spoken line into the enqueue payload
-  believing it will render; the audio comes from `presenterLine` alone until ticket 6586 ships a
-  real per-scene field.
+  rejects overruns. **Per-scene spoken lines are a real field.** `VideoSceneSpec.spokenLine`
+  (`db/schema.ts:1737-1745`, ADR-014, ticket #6586) carries it, and `validateScenes`
+  (`app/lib/video-pipeline.server.ts`) REQUIRES `spokenLine` on every scene when the job's tier
+  is the lipsync/talking tier, throwing if it is missing; it is preserved through normalization
+  onto the enqueue payload. Carry the approved row's per-scene spoken line on a talking-tier job:
+  the enqueue rejects its absence, it is not decorative.
 </scene_and_motion_prompts>
 
 <tier_selection>

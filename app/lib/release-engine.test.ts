@@ -86,6 +86,7 @@ import {
   ENGINE_HOLD_LABEL,
   machineHoldLabel,
   clearStaleEngineHold,
+  VERDICT_PIN_CUTOFF,
 } from '~/lib/release-engine.server'
 
 // ---------------------------------------------------------------------------
@@ -801,6 +802,133 @@ describe('evaluatePullRequest: verified verdict pinned to a commit (ticket #1050
     }))
     expect(d.action).toBe('bounce')
     expect(d.code).toBe('ci-red')
+  })
+})
+
+// The pin only closes the hole if a MISSING pin is treated as a failure once
+// it is new enough to have been pinnable (ticket #10671). Before this, the
+// best-effort write failing (6 of 12 verifications on production 2026-09-21)
+// left a row that looked healthy and merged on ticket status alone, silently
+// back to pre-#10502 behaviour.
+describe('evaluatePullRequest: an unpinned verdict fails closed after the cutoff (ticket #10671)', () => {
+  const VERIFIED_SHA = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
+  const BEFORE = new Date(VERDICT_PIN_CUTOFF.getTime() - 60_000)
+  const AFTER = new Date(VERDICT_PIN_CUTOFF.getTime() + 60_000)
+
+  it('bounces a ticket verified AFTER the cutoff that carries no pin', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: VERIFIED_SHA,
+      ticket: {
+        id: 41, status: 'verified', kind: 'code', attemptCount: 0,
+        verifiedHeadSha: null, verifiedAt: AFTER,
+      },
+    }))
+    expect(d.action).toBe('bounce')
+    expect(d.code).toBe('verdict-unpinned')
+    expect(d.ticketId).toBe(41)
+    expect(d.lastError).toContain('no recorded')
+    expect(d.lastError).toContain(AFTER.toISOString())
+  })
+
+  it('still merges a ticket verified BEFORE the cutoff with no pin: legacy rows are not narrowed retroactively', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: VERIFIED_SHA,
+      ticket: {
+        id: 41, status: 'verified', kind: 'code', attemptCount: 0,
+        verifiedHeadSha: null, verifiedAt: BEFORE,
+      },
+    }))
+    expect(d.action).toBe('merge')
+    expect(d.code).toBe('ready')
+  })
+
+  it('exactly at the cutoff is post-cutoff: the boundary is inclusive', () => {
+    const d = evaluatePullRequest(facts({
+      ticket: {
+        id: 41, status: 'verified', kind: 'code', attemptCount: 0,
+        verifiedHeadSha: null, verifiedAt: new Date(VERDICT_PIN_CUTOFF.getTime()),
+      },
+    }))
+    expect(d.code).toBe('verdict-unpinned')
+  })
+
+  it('accepts verified_at as an ISO string, as a JSON round trip leaves it', () => {
+    const d = evaluatePullRequest(facts({
+      ticket: {
+        id: 41, status: 'verified', kind: 'code', attemptCount: 0,
+        verifiedHeadSha: null, verifiedAt: AFTER.toISOString(),
+      },
+    }))
+    expect(d.code).toBe('verdict-unpinned')
+  })
+
+  it('fails OPEN on an unreadable or null verified_at: cannot tell is not post-cutoff', () => {
+    for (const verifiedAt of [null, 'not a date'] as const) {
+      const d = evaluatePullRequest(facts({
+        ticket: { id: 41, status: 'verified', kind: 'code', attemptCount: 0, verifiedHeadSha: null, verifiedAt },
+      }))
+      expect(d.action).toBe('merge')
+    }
+  })
+
+  it('fails OPEN when verified_at is absent from the facts entirely (pre-column rows)', () => {
+    const d = evaluatePullRequest(facts({
+      ticket: { id: 41, status: 'verified', kind: 'code', attemptCount: 0, verifiedHeadSha: null },
+    }))
+    expect(d.action).toBe('merge')
+  })
+
+  it('still merges a PINNED, unchanged PR verified after the cutoff', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: VERIFIED_SHA,
+      ticket: {
+        id: 41, status: 'verified', kind: 'code', attemptCount: 0,
+        verifiedHeadSha: VERIFIED_SHA, verifiedAt: AFTER,
+      },
+    }))
+    expect(d.action).toBe('merge')
+    expect(d.code).toBe('ready')
+  })
+
+  it('still bounces a MOVED head as verdict-stale, not as verdict-unpinned', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      ticket: {
+        id: 41, status: 'verified', kind: 'code', attemptCount: 0,
+        verifiedHeadSha: VERIFIED_SHA, verifiedAt: AFTER,
+      },
+    }))
+    expect(d.action).toBe('bounce')
+    expect(d.code).toBe('verdict-stale')
+  })
+
+  it('does not reach the unpinned check before the ticket is verified at all', () => {
+    const d = evaluatePullRequest(facts({
+      ticket: {
+        id: 41, status: 'pr_open', kind: 'code', attemptCount: 0,
+        verifiedHeadSha: null, verifiedAt: AFTER,
+      },
+    }))
+    expect(d.action).toBe('skip')
+    expect(d.code).toBe('ticket-not-verified')
+  })
+
+  it('leaves the red-build bounce first in line: CI red still reads ci-red on an unpinned post-cutoff ticket', () => {
+    const d = evaluatePullRequest(facts({
+      checks: { check: 'failure' },
+      ticket: {
+        id: 41, status: 'verified', kind: 'code', attemptCount: 0,
+        verifiedHeadSha: null, verifiedAt: AFTER,
+      },
+    }))
+    expect(d.action).toBe('bounce')
+    expect(d.code).toBe('ci-red')
+  })
+
+  it('the cutoff is set ahead of #10502 deploying, so rows verified in the gap drain rather than strand', () => {
+    // #10502 deployed to production 2026-09-21T01:01:34Z; the rows measured
+    // unpinned were verified that afternoon.
+    expect(VERDICT_PIN_CUTOFF.getTime()).toBeGreaterThan(new Date('2026-09-21T17:00:00Z').getTime())
   })
 })
 

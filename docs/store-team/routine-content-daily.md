@@ -186,7 +186,44 @@ resumed-draft), and whether it was a fresh topic or a resume.
 
 ## Step 4: Draft the post (Sanity, status draft)
 
-Create idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `patch`. Fields:
+**Comparison-doc authoring, Sunday quota only (content-plan §2, #3892; owner decision 2026-09-20,
+blocker #120: SEED /compare and KEEP it).** When today's brief is the seo-curator's Sunday
+comparison slot AND it is planned for the structured `_type:'comparison'` doc (per
+`routine-seo-curation.md`'s Structured comparison-doc quota: while fewer than 3-5 `comparison`
+docs exist, a clean, in-stock, both-sides-real Sunday head-to-head is seeded as a `comparison` doc
+for the content lane to author), author a Sanity `comparison` document, a different doc type at a
+different route (`/compare/{slug}`, plus its `.md` twin) with a different shape from the `blogPost`
+below, instead of — or alongside without duplicating — the Notebook post.
+
+- **Schema** (`studio/schemas/comparison.js`): `title`, `slug`, `excerpt`, `items[]` (2-5 entries:
+  `name`, `productHandle` when it's a catalog product, `blurb`, `bestFor`), optional `attributes[]`
+  (at-a-glance table rows: `label` plus `values[]` in the same order as `items`), `verdict`,
+  optional `body` (rich-text deep dive), `faqs[]` (`question`/`answer`, emitted as FAQPage
+  JSON-LD), `seoTitle`/`seoDescription`, `publishedAt`, `status`.
+- **Author it via** `npx tsx scripts/sanity-content-cli.ts create-if-not-exists --id comparison-<slug> --file <path-to-json>`
+  (the CLI is generic across `_type`; no code change is needed).
+- **Link-to-Notebook differentiation rule, mandatory.** The comparison doc is a short, structured
+  spec-and-verdict surface (scannable `attributes` rows plus a one-paragraph `verdict`), never a
+  re-run of the Notebook essay's prose. Where a Notebook post on the same head-to-head already
+  exists or is being written this run, the comparison doc's `body`/`verdict` LINKS to it for the
+  deep dive rather than repeating it. At a 2.0% index rate, near-identical prose shipped at two
+  URLs is actively harmful, not merely redundant. If a given head-to-head genuinely cannot support
+  both without repetition, ship only the comparison doc and let the Notebook post stand as the
+  essay.
+- **Ten already-published Notebook comparison posts are restructuring source material, not new
+  research:** wand-vs-bullet-vibrator, air-pulse-vs-clitoral-suction,
+  rabbit-vs-dual-stimulation-vibrator, remote-vs-app-controlled-long-distance-toy,
+  egg-vibrator-vs-bullet-vibrator, dildo-vs-vibrator-whats-the-difference,
+  mini-vs-full-size-vibrator-does-size-matter, air-pulse-toy-vs-vibrator-difference,
+  silicone-vs-water-based-lube, ai-companion-toys-vs-what-you-can-actually-buy.
+- **Same gates as any published prose:** route the comparison doc's copy (`excerpt`, item
+  `blurb`s, `verdict`, `faqs`) through Step 5's dual gate before publish.
+- **Honest in-stock, both-sides-real rule applies** (content-plan §2 line 27): every item is a
+  real, currently in-stock option; never a fabricated or discontinued comparator.
+- Filed separately, not part of this procedure: comparison URLs are not yet in the sitemap, so a
+  seeded doc will not be submitted for indexing on its own.
+
+Create the `blogPost` idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `patch`. Fields:
 
 - `title`; `slug` (`{_type:'slug', current}`); `author` (reference to the Emma `blogAuthor` doc,
   `_ref:'blogAuthor-emma'`); `category` (reference to a `blogCategory`: `blogCategory-guides` |
@@ -362,7 +399,15 @@ REVISE:
   without the condition that bounds it;
 - **two different objects sharing one coordinated noun phrase**, where a modifier parses onto a
   category it does not belong to (e.g. "silicone and latex condoms" reading as the nonexistent
-  "silicone condoms");
+  "silicone condoms"). The same shape recurs one level up, in a **coordinated rationale**: two
+  objects share one because-clause that is only true of one of them (run 975: "Water-based is the
+  safe default with a silicone toy and with latex condoms, because oil compromises latex" pins a
+  latex-specific reason onto the silicone-toy half too, which is actually a silicone-on-silicone
+  surface-compatibility issue, nothing to do with oil and latex). Nothing here is quantified,
+  superlative, or numeric, so a claim can be factually correct on both halves and still fail this
+  check on the reasoning. The fix for either shape is the same: **split the sentence so each
+  coordinated element carries its own reason**, never a hedge and never a deletion of the reason
+  (run 975 resolved this way and both gates PASSed the result);
 - an **absolute or guaranteed OUTCOME for the reader from a named product**, especially in future
   tense (`it will`, `you will`, `this delivers`), where the post elsewhere acknowledges individual
   variation. This shape hides in product pairing copy rather than in a factual sentence, so it is

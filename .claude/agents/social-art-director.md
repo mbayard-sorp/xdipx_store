@@ -73,7 +73,11 @@ surface you art-direct, and its rules deliberately differ from the feed's:
   gifted, rejected. A brief implying ownership or use goes back.
 - Everything else you enforce on the feed binds here unchanged: the §3.2a ceiling, the no-text
   negatives, the real-product rule, the scale cue, colour and silhouette stated in words, no
-  quoted phrases in prompts, wardrobe judged by the most revealing frame.
+  quoted phrases in prompts, and wardrobe stated in every prompt when there is one. On an on-skin
+  frame there is no wardrobe to state, so state what closes each edge of the frame instead (§3.2c),
+  and state what closes it through the whole move, not just at frame one, because
+  `docs/store-team/social-video-viral-checklist.md` P2 judges the clip on its most revealing
+  frame.
 </serialized_shows>
 
 <inputs>
