@@ -427,6 +427,13 @@ the ceiling. §3.2a is already "the single operative imagery ceiling for social"
 hotter caption register" and "the ceiling remains instagram-campaigns.md §3.2a on both platforms".
 None of that moves. What moves is where a frame sits by default underneath it, on both surfaces.
 
+**It does NOT reach the video lane (owner answer, 2026-09-22: "No action needed on the video for
+now").** The order covers stills on Instagram and X and stops there. Read "for now" as written: this
+is a scope boundary with a date on it, not a judgment that reels should stay clothed, and the video
+pipeline already carries the on-skin machinery from tickets #10484, #10485, #10486 and #10500. So
+extending it later is a decision, not a build. Until that decision, no routine widens this to video
+on its own reading of "no more boring posts".
+
 **One compounding risk to know about on X, recorded rather than discovered later.** The X 16:9
 cast-composite path already fails `product-identity` and `age-ambiguity` at a materially higher rate
 than the Instagram 4:5 path on the same SKU and the same cast reference (ticket #10685: two
