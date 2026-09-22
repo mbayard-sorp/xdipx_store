@@ -96,8 +96,10 @@ and the publish gate; nothing here softens a verdict.
    planned successor in the same Step 2a pass and pull its window forward; that is date arithmetic
    inside your remit, not inventing campaign N+1. Both zero days ran on "no active campaign, so a
    resource filler", and the filler was the class that could not clear the gate.
-4b. **A recovery draft is scheduled for today, never tomorrow.** The Step 3 default of
-   `scheduledFor` = tomorrow is for a day that is already covered. While the platform is at zero,
+4b. **A recovery draft is scheduled for today, never tomorrow.** This is the same rule as Step 3's
+   `target_day`, read from the other end: `target_day` is today exactly while the platform is at
+   zero for today, and the Step 3 default of `scheduledFor` = tomorrow is for a day that is
+   already covered. While the platform is at zero,
    every new draft and rework carries today's UTC date (or no slot at all, which the publisher
    reads as "ship when there is room"), so the hourly tick ships it the same day the gate PASSes
    it. Row 193 (2026-09-06) cleared the gate at 17:28 UTC after eight attempts and was scheduled
@@ -106,7 +108,7 @@ and the publish gate; nothing here softens a verdict.
    move this rung makes automatic.
 5. **Attempt ceiling: 4 x `social_freq_<platform>` drafts per platform per UTC day, all statuses,
    both runs combined.** This replaces the day-of-quota exhaustion in Step 3 as the thing that ends
-   drafting: `rejected` rows no longer consume `today_remaining`, but every row you write consumes
+   drafting: `rejected` rows no longer consume `slot_remaining`, but every row you write consumes
    this. Reaching it without a live post is exhaustion, and exhaustion is when you may stop.
 
 **Exhaustion is the only stopping point, and it has a fixed shape.** Only when the ladder is walked
@@ -146,7 +148,7 @@ row hoping for a different answer, never self-certify, never soften.
 
 **The evening run is the recovery run.** It reads the day's `approved`/`posted` counts first. A
 live platform at zero means recovery is its first job and its quota arithmetic must not stop it:
-`rejected` rows do not count against `today_remaining` (Step 3), and rung 1 reworks bind before any
+`rejected` rows do not count against `slot_remaining` (Step 3), and rung 1 reworks bind before any
 new drafting. "The morning run already used the quota" describes a day the morning run filled with
 live posts, not one it filled with rejections.
 
@@ -548,7 +550,7 @@ run summary, never silently drop it.
 `rework_allowance(platform) = social_freq_<platform>`, an equal budget dedicated to reworking
 `needs_changes` rows, stated here so it is auditable rather than implicit. Outstanding owner
 feedback is worked **before** new drafting, up to the rework allowance for that platform.
-Consuming rework allowance does **not** reduce `today_remaining(platform)` for new drafts (Step 3);
+Consuming rework allowance does **not** reduce `slot_remaining(platform)` for new drafts (Step 3);
 it draws down its own count instead:
 
 ```
@@ -645,34 +647,64 @@ the picture (the description goes in `altText`), the picture depicts the subject
 (§3.9), and a post about a category we sell shows the product, slot A included (§4a). Hashtags are
 5 to 8 per §7a. Any earlier "register 4-5" language for Instagram in this file or elsewhere is stale.
 
-**THE QUOTA IS PER DAY, NOT PER RUN. Count today's rows before you draft anything.** The social
-routine fires **twice daily** (14:00 and 22:00 UTC, `routine-schedule.md` routine 6). Two runs each
-drafting a full quota is double the intended volume, and on Instagram that is the fastest way to get
-the account actioned. So the first thing Step 3 does is arithmetic:
+**THE QUOTA IS PER SLOT DAY, NOT PER RUN, AND NOT PER RUN DAY. Count the rows already standing
+for the day you are drafting FOR before you draft anything.** The social routine fires **twice
+daily** (14:00 and 22:00 UTC, `routine-schedule.md` routine 6). Two runs each drafting a full quota
+is double the intended volume, and on Instagram that is the fastest way to get the account actioned.
+So the first thing Step 3 does is arithmetic:
 
 ```
-today_remaining(platform) = social_freq_<platform>
-                          - new rows written for that platform today at review_status
-                            pending_review, needs_changes, or approved, or at status posted
+target_day(platform)    = today (UTC)    while the platform has no approved or posted row
+                                         whose slot is today  -> Step 1b recovery
+                        = tomorrow (UTC) otherwise              -> ordinary supply
+
+slot_remaining(platform) = social_freq_<platform>
+                         - rows for that platform whose SLOT is target_day, at review_status
+                           pending_review, needs_changes, or approved, or at status posted
 ```
+
+A row's **slot** is its `scheduledFor` date (or the UTC date of `scheduledAt` when only that is
+set). A row with neither counts toward **today**, because that is what the publisher does with it:
+`eligibleWhere` reads a slotless row as "ship when there is room". `op:'list'` returns
+`scheduledFor`, `scheduledAt`, `postedAt` and `createdAt` on every row, so this is arithmetic you
+can do from the Step 2 item 7 list without another call.
+
+**Count by the slot, never by the day the row moved. This is the fix for a loop that drained the
+queue to zero (2026-09-21).** The formula used to subtract rows "written today ... or at status
+posted", and a row posted today was written *yesterday*, for today, while a new draft defaults to
+`scheduledFor` = **tomorrow**. So a day whose posts arrived from yesterday's buffer computed a
+remainder of 0 and both runs drafted nothing, leaving the next day with no supply at all. Run 973
+(2026-09-20 14:09) and run 980 (2026-09-20 22:10) each wrote an honest zero on that reasoning, zero
+rows were created on 2026-09-20, 2026-09-21 opened empty, and X reached a zero-post day (P1 ticket
+#10658). The consumption of one day was being charged against the supply of the next, which is a
+self-starving oscillator: a full day guarantees the empty one after it. Counting by slot closes it,
+because a posted row is charged to the day it was FOR, which has already shipped, and today's
+publishing can no longer reach tomorrow's allowance.
 
 **`rejected` rows do not count (Step 1b, owner direction 2026-09-06).** A row the gate BLOCKed is
 dead: it will never publish, so it fills nothing. Counting it as filled is how the evening run of
 2026-09-05 (run 710) drafted nothing on a day with zero live posts, because twelve rejections had
 "used the quota". What bounds runaway drafting instead is the **attempt ceiling** in Step 1b rung
 5: `4 x social_freq_<platform>` rows per platform per UTC day, all statuses, both runs combined.
-Reaching it with the platform still at zero live posts is exhaustion, with the fixed shape Step 1b
-gives it.
+That ceiling stays per **run day**, not per slot day: it bounds how much work a day may spend, not
+how much supply a day may hold. Reaching it with the platform still at zero live posts is
+exhaustion, with the fixed shape Step 1b gives it.
 
 **Reworks are not part of this formula (ticket #5421).** They draw down their own
-`rework_allowance(platform)`, defined in Step 2.5, and do not subtract from `today_remaining`. The
+`rework_allowance(platform)`, defined in Step 2.5, and do not subtract from `slot_remaining`. The
 two pools are joined only by the combined per-platform ceiling in Step 2.5
 (`2 x social_freq_<platform>` a day, rework-first if it binds).
 
-Use the Step 2 item 7 list, filtered to today's date, to get that count. **If the remainder is 0,
+Use the Step 2 item 7 list, filtered to `target_day`, to get that count. **If the remainder is 0,
 draft nothing for that platform and say so in the run summary.** A run that honestly drafts zero
-because the day is already full is a correct run, not a wasted one. Never treat a fresh
-`social_freq_*` as this run's allowance.
+because the day it is drafting for is already full is a correct run, not a wasted one. Never treat a
+fresh `social_freq_*` as this run's allowance.
+
+**State both numbers in the run summary, per platform:** `target_day` and the `slot_remaining` you
+computed from it. A zero has to be legible afterwards as "tomorrow is already covered" rather than
+"today already happened", because those two readings are the bug above and its fix, and only the
+summary can tell them apart on the record. Run summaries written before 2026-09-22 use the old name
+`today_remaining`; it meant this quantity computed against the run's own calendar day.
 
 This lives here, in the binding playbook, and not only in the evening trigger's prompt. A cloud
 trigger prompt is out-of-repo config that this file cannot see and that nobody reviews on a diff, so
@@ -692,8 +724,9 @@ Restricted Goods standard regardless of how clean the image is), fresh language 
 fit 280 chars **and require media, same as Instagram and TikTok** (Step 5) — an X draft is never text
 plus a link alone. Instagram and TikTok drafts are posted manually
 by the owner once approved. At most one promo-angle post per run, and only referencing
-owner-approved promo codes. Propose a `scheduledFor` date for every draft (default: tomorrow) so
-the Studio's calendar strip populates.
+owner-approved promo codes. Propose a `scheduledFor` date for every draft (`target_day`, which is
+tomorrow on an ordinary day and today during a Step 1b recovery) so the Studio's calendar strip
+populates and so the row is charged to the day it is actually meant to fill.
 
 **Instagram drafts against the active campaign.** Read its pillars, formats, rotation, and visual
 scheme from `docs/store-team/instagram-campaigns.md`, then:
