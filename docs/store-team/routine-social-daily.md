@@ -794,6 +794,17 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   carousel, 30% pure education with no product in frame, 20% inspiring, 10% site news and trend
   reacts; at most half of a multi-post day is product-forward). The charter points at the brief for
   this ratio, so the brief is where it is maintained.
+- **Check `mixReport` before defaulting to another product-free post, not only in the retro (ticket
+  #10719).** Call `POST /api/team/social-post {"op":"mixReport"}` (Step 7) during slate-fill, before
+  drafting slot A/D beyond what the day requires. mixReport has shown the drift running the other
+  way from the 2026-08-17 measurement above: product-free far over its §6b share, product-forward
+  far under the 6-7/14 target band, and zero carousels in the trailing 14 published rows. When the
+  returned productForward line reads under band, use remaining non-slot-A capacity for a
+  product-forward slot (B/C) rather than another product-free resource/education post, subject to
+  the #4770 per-run cap and slot-A-first precondition above, which still bind unchanged. **At least
+  one carousel per rolling 14-day window is a standing slot-E requirement, not an optional format**:
+  if mixReport's carousel count reads 0 in the trailing 14, schedule one this run, budget
+  permitting, rather than deferring it another cycle.
 - **Set `postType:'campaign'`** on Instagram campaign posts (the enum already carries it and no row
   has ever used it) and name the campaign slug in the draft's event summary, so posts can be traced
   to their campaign until the schema carries a real link.
