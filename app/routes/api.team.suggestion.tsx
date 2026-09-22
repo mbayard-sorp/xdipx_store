@@ -65,6 +65,7 @@ import {
   agentRetireSuggestion,
   assertTeamAuth,
   claimSuggestion,
+  clampRefBytes,
   countSuggestions,
   createSuggestionDetailed,
   getTicket,
@@ -261,7 +262,13 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response("Bad Request: actor must be 'owner' | 'auto' | 'system' | 'agent:<slug>'", { status: 400 })
     }
     const suggestion = await transitionSuggestion(b['id'], b['to'] as TicketStatus, b['actor'], {
-      note:      typeof b['note'] === 'string' ? b['note'] : undefined,
+      // #10506: a caller-supplied note becomes a `note` link on the ticket,
+      // and an unclamped one can overflow the btree index-tuple ceiling on
+      // uq_suggestion_links_sugg_kind_ref (SQLSTATE 54000) AFTER the status
+      // update already committed. Byte-aware, not character-aware: a
+      // character clamp can still overflow the byte budget on multi-byte
+      // UTF-8 text.
+      note:      typeof b['note'] === 'string' ? clampRefBytes(b['note']) : undefined,
       // #5054: coerce a top-level `pr` shorthand here too — a transition to
       // pr_open is the other place agents attach the mergeability-deciding link.
       links:     parseLinksWithPr(b),
