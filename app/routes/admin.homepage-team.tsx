@@ -30,7 +30,7 @@ import {
   listAdCampaigns, decideAdCampaign, SUGGESTION_LIST_MAX, getSocialFrequencies,
   type TeamConfig, type GateResult, type TicketStatus,
 } from '~/lib/team.server'
-import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, X_METRICS_MAX_READS_MONTH_KEY, X_METRICS_MAX_READS_MONTH_DEFAULT, type TeamId, type SocialPlatform } from '~/lib/team-keys'
+import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, X_METRICS_MAX_READS_MONTH_KEY, X_METRICS_MAX_READS_MONTH_DEFAULT, SOCIAL_EXTRA_KEYS as SOCIAL_TEAM_EXTRA_KEYS, SOCIAL_MAX_IMAGES_DEFAULT, type TeamId, type SocialPlatform } from '~/lib/team-keys'
 import { getTodayRunpodPodSpendCents } from '~/lib/token-log.server'
 import {
   NO_EXECUTOR_KINDS, classifyTeamTablesError, facetTotal, fmtAge, sumFacetCount, truncationNote,
@@ -464,6 +464,13 @@ export async function action({ request }: ActionFunctionArgs) {
     ...Object.values(VIDEO_EXTRA_KEYS),
     ...Object.values(VALVE_KEYS),
     ...Object.values(SOCIAL_EXTRA_KEYS),
+    // The social team's daily image cap (social_team_max_images). It lives in
+    // team-keys.ts and is already read by getTeamConfig('social'), but had no
+    // control anywhere, so it had never been written at all: the social routine
+    // ran on the hardcoded default of 12 and run 992 hit 12/12 and returned
+    // over_image_cap before it could draft a compliant X candidate, costing a
+    // zero-post day (ticket #10658). Raising it took a one-off script.
+    ...Object.values(SOCIAL_TEAM_EXTRA_KEYS),
     ...Object.values(RELEASE_ENGINE_KEYS),
     // Per-platform drafting quotas (ticket #3676). The keys already exist in
     // team-keys.ts (socialFreqKey) and are read by getSocialFrequencies();
@@ -682,6 +689,9 @@ export default function AgentTeamsPage() {
           )}
           {team === 'content' && (
             <SettingField label="Max images / day" settingKey={CONTENT_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? 0} />
+          )}
+          {team === 'social' && (
+            <SettingField label="Max images / day" settingKey={SOCIAL_TEAM_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? SOCIAL_MAX_IMAGES_DEFAULT} />
           )}
           {team === 'video' && (
             <>
