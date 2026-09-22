@@ -624,11 +624,14 @@ catalog for no benefit on the organic surface. The gates that do bind an Instagr
 unchanged: the voice charter, `docs/ads-policy.md` §Organic social and §Creative, Step 2.6 stock,
 and `social-publish-gate`.
 
-Where approval does bind, hard: the approved set is the only set that can appear in the shop or
-carry a product tag. If and when product tagging is wired into the publisher, a tag may reference
-an approved product only, and an unapproved one is a publish-time block, not a warning.
+Where approval does bind, hard: the approved set is the only set that can appear in the shop. Product
+tagging itself is permanently retired, not merely unwired (ticket #10732): the endpoint the publisher
+called does not exist, and even a corrected one could never succeed, since Meta's commerce policy
+prohibits Shops for adult products outright (`docs/ads-policy.md`'s Product tagging bullet has the
+citations). Do not re-add it without an explicit owner decision that a real, policy-compliant path
+exists.
 
-Until tagging exists, commerce on Instagram runs post to profile to link in bio to `/social` to PDP.
+Commerce on Instagram runs post to profile to link in bio to `/social` to PDP.
 
 ## Step 3 — Draft (reworks included)
 
