@@ -412,13 +412,28 @@ axes replace the room when the crop eats it, and they rotate the way §3.8 rotat
   proxy, so the trace of the world comes from the sheet, the surface, the hour of the light, or a
   second body, and the brief names which.
 
-**STANDING ORDER, 2026-09-22: ON-SKIN IS THE DEFAULT ON EVERY INSTAGRAM PRODUCT POST, UNTIL THE
-OWNER SAYS STOP.** Owner, verbatim: *"The two posts that went out to IG are boring. Why weren't they
+**STANDING ORDER, 2026-09-22: ON-SKIN IS THE DEFAULT ON EVERY INSTAGRAM AND X PRODUCT POST, UNTIL
+THE OWNER SAYS STOP.** Owner, verbatim: *"The two posts that went out to IG are boring. Why weren't they
 on-skin posts? I want to see on-skin posts until I say stop. No more boring posts."* This has no end
 date. It ends when he says it ends, and until then a clothed product frame is an exception that has
 to justify itself in writing (`social-art-director.md`, Clothed exception block). The only standing
 exemption is a product-free resource post, meaning a subject with no product in it, and §3.9 already
 narrows those hard.
+
+**It covers X as well as Instagram (owner answer, 2026-09-22: "Yes, on-skin applies to x too").**
+Read that as what it is: a change of DEFAULT POSITION within the existing ceiling, not a widening of
+the ceiling. §3.2a is already "the single operative imagery ceiling for social" and
+`social-crossplatform-strategy.md` §4a already holds that "the imagery fence does not widen with X's
+hotter caption register" and "the ceiling remains instagram-campaigns.md §3.2a on both platforms".
+None of that moves. What moves is where a frame sits by default underneath it, on both surfaces.
+
+**One compounding risk to know about on X, recorded rather than discovered later.** The X 16:9
+cast-composite path already fails `product-identity` and `age-ambiguity` at a materially higher rate
+than the Instagram 4:5 path on the same SKU and the same cast reference (ticket #10685: two
+occurrences, 2026-09-05 and 2026-09-21, each time clean at 4:5 the same day). Requiring on-skin on a
+path that already fails more will compound, so the X lane is where to expect the first burnt image
+budget. That is an argument for fixing #10685's generate-at-4:5-then-crop question, not an argument
+for exempting X, which the owner has ruled on.
 
 The order was given against measured evidence, so it is not a matter of taste. Across all 152
 Instagram rows on 2026-09-19: sternum 0, hip hollow 0, small of the back 0, inner wrist 0,

@@ -164,6 +164,22 @@ gate cannot see is advisory.
   being labeled per X's own rules, and `postTweet` (`app/lib/twitter.server.ts`) accepts only text
   and media ids with no sensitive-media flag. We cannot label, so we must not post anything that
   would need labeling. The ceiling remains `instagram-campaigns.md` §3.2a on both platforms.
+- **On-skin is the default on X too (owner answer 2026-09-22: "Yes, on-skin applies to x too"), and
+  the labeling constraint above is exactly what bounds it.** The standing order in
+  `instagram-campaigns.md` §3.2c now covers both surfaces. It changes the default position under the
+  ceiling; it does not move the ceiling, and the bullet above still holds in full. The thing to
+  understand is that the §3.2a stop list is now doing double duty on X: no visible nipples, labia,
+  penis or anus is not only the brand ceiling there, it is the only thing keeping our frames out of
+  label-required territory on a publisher that cannot label. An on-skin frame that honours the stop
+  list is implied-nude, not nude, and does not need a flag. One that breaks it needs a flag we
+  cannot set. So on X the stop list is a publishing constraint, not only an editorial one, and a
+  frame that is borderline against it should not be posted to X at all.
+- **There is an owner-only way to widen this, and it is not an agent's to take.** X has no per-post
+  sensitivity parameter on the v2 create-tweet endpoint that `postTweet` uses, which is why we cannot
+  label per post. X does have an ACCOUNT-level "mark media you Tweet as containing material that may
+  be sensitive" setting. Turning it on would cover the whole timeline and change who sees the posts
+  by default. That is a reach-versus-latitude tradeoff and a brand decision, so it is an owner
+  decision, it is not a valve, and no routine may ask for it as a workaround.
 - **Roster, verified 2026-08-21: eight approved cast members**, all `active`, all `approvedForUse`,
   all with a `referencePhoto`: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, Vivian (Vivian approved
   2026-08-21). Rotate across them
