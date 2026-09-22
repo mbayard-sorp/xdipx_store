@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { mapAllowsAdvertisedDiscount } from './gmc-metafields.server'
+import { mapAllowsAdvertisedDiscount, gmcGender } from './gmc-metafields.server'
+
+// Ticket #10731 (ADR-015 follow-up): gmcGender used to read a for-him/for-her
+// axis out of audience_tags, but the live enrichment vocabulary for that
+// field is solo/couples/gift and never writes for-him/for-her — verified
+// live 2026-09-22 against the full active catalog (5,282 products): 0 male,
+// 0 female, 5,282 unisex. It now derives from xdipx.cast_target instead.
+describe('gmcGender', () => {
+  it('maps cast_target=male to male', () => {
+    expect(gmcGender('male')).toBe('male')
+  })
+
+  it('maps cast_target=female to female', () => {
+    expect(gmcGender('female')).toBe('female')
+  })
+
+  it('maps cast_target=universal to unisex', () => {
+    expect(gmcGender('universal')).toBe('unisex')
+  })
+
+  it('falls back to unisex when cast_target is null, undefined, or an unrecognized value', () => {
+    expect(gmcGender(null)).toBe('unisex')
+    expect(gmcGender(undefined)).toBe('unisex')
+    expect(gmcGender('not-a-real-value')).toBe('unisex')
+  })
+})
 
 describe('mapAllowsAdvertisedDiscount', () => {
   it('allows a discount when there is no MAP (0 or absent)', () => {

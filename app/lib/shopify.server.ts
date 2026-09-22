@@ -1819,6 +1819,7 @@ const GMC_FEED_METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "feature_bullets" }
     { namespace: "xdipx", key: "specifications" }
     { namespace: "xdipx", key: "product_type_dial" }
+    { namespace: "xdipx", key: "cast_target" }
     { namespace: "xdipx", key: "deal_score" }
     { namespace: "xdipx", key: "nalpac_sku" }
     { namespace: "mm-google-shopping", key: "google_product_category" }
@@ -1923,6 +1924,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
   const mapPriceNum   = mapPriceRaw ? parseFloat(mapPriceRaw) : null
   const mapRestricted = parseMetafieldByNsKey(mf, 'xdipx', 'map_restricted') === 'true'
   const productTypeDial = parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial')
+  const castTarget     = parseMetafieldByNsKey(mf, 'xdipx', 'cast_target')
   const dealScoreRaw   = parseMetafieldByNsKey(mf, 'xdipx', 'deal_score')
   const dealScoreNum   = dealScoreRaw ? parseFloat(dealScoreRaw) : null
   const nalpacSku      = parseMetafieldByNsKey(mf, 'xdipx', 'nalpac_sku')
@@ -1968,6 +1970,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     ...(featureBullets.length > 0 ? { featureBullets } : {}),
     ...(specifications.length > 0 ? { specifications } : {}),
     ...(productTypeDial != null ? { productTypeDial } : {}),
+    ...(castTarget      != null ? { castTarget }      : {}),
     ...(originalPrice   != null ? { originalPrice }   : {}),
     ...(mapPriceNum !== null && !isNaN(mapPriceNum) ? { mapPrice: mapPriceNum } : {}),
     ...(mapRestricted ? { mapRestricted } : {}),
