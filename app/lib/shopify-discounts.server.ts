@@ -164,11 +164,40 @@ export function extractPromoCode(text: string): string | null {
 }
 
 /**
- * Extract eligible product SKUs from labelled lists. Only numbers that directly
- * follow a "SKU"/"SKUs" label are taken, so counts written elsewhere as "SKUs
- * (1503 MAP-locked ...)" and dollar/percent figures are never mistaken for a
- * scope. Row #51 writes them as "SKUs 84740/84743/84747/84748; ...".
+ * Extract eligible product SKUs from labelled lists. Two shapes, both
+ * additive (a brief may use either or both; nothing here can subtract a
+ * match the other shape found):
+ *
+ *  A. Numbers that directly follow a "SKU"/"SKUs" label, e.g. row #51's
+ *     "SKUs 84740/84743/84747/84748; ...". Only these numbers are taken by
+ *     this half, so counts written elsewhere as "SKUs (1503 MAP-locked ...)"
+ *     and dollar/percent figures are never mistaken for a scope.
+ *
+ *  B. The per-SKU margin-list shape real promo-manager briefs actually write
+ *     today (ticket #10737): a lead-in sentence naming a SKU count, followed
+ *     by a "; "-delimited list of "<SKU> <Product Name> $<price> -> <pct>%"
+ *     entries, e.g. "...for these 12: 99352 Camtoyz Fouria $53.99 -> 30.5%;
+ *     98578 Syntra Bullet $21.99 -> 28.9%; ...". `extractSkus` used to only
+ *     recognize shape A, so briefs #9321 (BULLETWEEK20) and #9322
+ *     (COUPLESCONTROL20) resolved ZERO products and were refused
+ *     'no-eligible-products' even though every one of their 12 and 8 SKUs is
+ *     a real, live, resolvable product (verified 2026-09-22 against
+ *     production Shopify).
+ *
+ *     The "-> pct%" arrow is the load-bearing anchor: a brief's EXCLUDED list
+ *     uses a different shape ("93291 BANG! 7X ($13.99, wholesale $14.99,
+ *     -33.9%)", or a bare comma list of numbers with no product name or
+ *     price at all), never the arrow, so requiring it is what keeps this
+ *     half from mistaking an excluded SKU for an eligible one. The number
+ *     immediately preceding the arrow-margin is taken only when nothing
+ *     else — no other digit, no "$", no semicolon — sits between them,
+ *     which is what keeps a stray count or date earlier in the same
+ *     sentence ("scoped to exactly 12 SKUs", "confirmed live ...
+ *     2026-09-14") from being mistaken for the SKU that owns a much later
+ *     margin figure.
  */
+const SKU_MARGIN_LIST_RE = /(\d{4,6})[^\d$;\n]*\$[\d.]+\s*->\s*[\d.]+%/g
+
 export function extractSkus(text: string): string[] {
   const skus = new Set<string>()
   for (const m of text.matchAll(/\bskus?\b\s*:?\s*(\d[\d,/\s]*\d)/gi)) {
@@ -176,6 +205,7 @@ export function extractSkus(text: string): string[] {
       if (n.length >= 3) skus.add(n)
     }
   }
+  for (const m of text.matchAll(SKU_MARGIN_LIST_RE)) skus.add(m[1] as string)
   return [...skus]
 }
 
