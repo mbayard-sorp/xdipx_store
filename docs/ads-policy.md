@@ -134,14 +134,18 @@ What follows from this:
 
 - **Approved products can appear in the shops. Rejected ones cannot.** Meta's diagnostic scopes the
   rejection to `mini_shops`, which is the shops surface, not ad delivery and not organic reach.
-- **Product tagging is live as of 2026-08-16** (ticket #3744). The owner added the
-  `instagram_shopping_tag_products` permission, and the publisher
-  (`app/lib/social-publish/instagram.server.ts`) now tags the gate stamp's featured product on feed
-  photos and carousels when Meta's `available_catalog_product_search` returns it, which by
-  construction limits tags to Shops-approved products. A tag is additive and loosens nothing: the
-  sale-attempt checks in this document still bind, the post stays editorial, and any tag failure
-  (no approved match, missing scope, API refusal) degrades to publishing without the tag, never to
-  a failed publish. The pre-2026-08-16 claim that no post can carry a product tag is obsolete.
+- **Product tagging was never actually live, and is now permanently removed** (ticket #10732,
+  superseding the 2026-08-16 #3744 claim below). `available_catalog_product_search` is not a real
+  Graph API edge — the correct one, `catalog_product_search`, requires a `catalog_id` this store
+  has never had, so every publish attempt was malformed from day one and silently degraded to
+  untagged while leaking a raw Graph error into `cron_runs.result`. Even a corrected call could
+  never succeed regardless: Meta's commerce policy prohibits promoting the buying, selling, or
+  trading of adult products across Shops on Facebook and Instagram
+  (facebook.com/policies_center/commerce/adult_products, help.instagram.com/1627591223954487), so a
+  sexual-wellness catalog cannot pass Shop review. The tagging code path is removed from
+  `app/lib/social-publish/instagram.server.ts`; every post publishes untagged, which is correct and
+  was always the actual outcome. Do not re-add it without an explicit owner decision that a real,
+  policy-compliant path exists.
 - **Approval is not a licence and rejection is not a ban.** Commerce review judges a catalog item;
   community standards judge a post. Never treat an approved product as permission to post something
   §Organic social forbids, and never treat a rejected product as ineligible to appear in an
