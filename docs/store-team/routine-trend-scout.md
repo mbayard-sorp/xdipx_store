@@ -58,8 +58,13 @@ team's budget.
 
 Scan with WebSearch/WebFetch, honestly and within budget:
 
-- **Reddit**: sexual-wellness and toy-recommendation communities; recurring questions, new
-  complaints, product debates.
+- **Reddit (via press/roundup coverage only, not direct fetch)**: WebFetch structurally refuses
+  reddit.com and old.reddit.com, and WebSearch alone never surfaces a resolvable thread URL
+  (verified dead across runs 444, 569, 699, 829, 954, 2026-08-23 onward). Source this lane through
+  press and roundup coverage that explicitly quotes or summarizes a Reddit thread, which does
+  resolve, rather than attempting to fetch reddit.com directly. An honest zero for the run is
+  correct and expected when no such coverage exists that week; never fabricate a thread you could
+  not read.
 - **TikTok trend coverage**: press/roundup coverage of sex-ed TikTok waves (read coverage, never
   the app itself).
 - **Research + press**: newly published studies and major-outlet wellness journalism.
