@@ -1124,6 +1124,17 @@ PR's entry on the same line and produced real git conflicts between semantically
 naturally instead of colliding. A run that shipped a visible change without a changelog entry is
 incomplete. This is a docs append on the agent-editor allowlist; it carries no code.
 
+**If this run's dispatch forbids git branch/commit/push (ticket #9503), do not attempt the PR.**
+Run 880 (2026-09-15) hit exactly this: the scheduled dispatch explicitly forbade any git operation
+for the run, which the append instruction above does not account for, and the changelog entry for a
+real, shipped change (hero re-pin, rail 0 relineup, 4 new images) was silently lost. When git access
+is unavailable this run, write the complete changelog entry (in this file's exact entry format,
+with the real run id, Sanity revisions, asset IDs, and Step 2c sameness-diff surfaces) into the run's
+own `kind:'instructions'`, `category:'docs'` ticket body instead of into the file, and name it
+explicitly in the run summary as a pending changelog append. A subsequent run with git access, or
+the agent-editor apply pass, appends it verbatim from that ticket text rather than the shipping run
+re-deriving data it no longer holds.
+
 **The run that made the change opens this PR itself, and files its ticket as `kind:'instructions'`,
 never `kind:'code'`.** (#4758) Only the run that shipped the change holds the data the entry format
 requires (its own run id, the Sanity revisions, asset IDs, and the sameness-diff surfaces from Step
