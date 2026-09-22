@@ -757,6 +757,10 @@ export async function runPublishGateCheck(
       // row so a value recorded at draft or rework time reaches the
       // deterministic pairing-missing check here too.
       pairingNoneReason: socialPosts.pairingNoneReason,
+      // ADR-015, ticket #10730: the cast drafted into this frame, read fresh
+      // off the row so a recast via the admin CastPicker reaches the
+      // deterministic cast-target-mismatch check here too.
+      castSlugs: socialPosts.castSlugs,
     })
     .from(socialPosts)
     .where(eq(socialPosts.id, postId))
@@ -797,6 +801,7 @@ export async function runPublishGateCheck(
     postCreatedAt: post.createdAt ?? null,
     posterUrl: post.posterUrl ?? null,
     pairingNoneReason: post.pairingNoneReason ?? null,
+    castSlugs: post.castSlugs ?? [],
   })
 
   const deterministicFindings: PublishGateFinding[] = deterministic.findings.map(toStoredFinding)

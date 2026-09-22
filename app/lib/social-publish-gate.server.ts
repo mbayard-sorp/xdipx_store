@@ -101,6 +101,14 @@ export interface DeterministicGateInput {
    */
   productHandle?: string | null
   /**
+   * `social_posts.cast_slugs` — the cast members drafted into this frame.
+   * Consulted by the cast/product casting gate (ADR-015, ticket #10730)
+   * alongside `productHandle`'s resolved `xdipx.cast_target`. Absent or empty
+   * means no cast recorded; the casting check below treats that as a finding
+   * only when the product's cast_target is non-universal (fail closed).
+   */
+  castSlugs?: readonly string[] | null
+  /**
    * Explicit reason the drafter recorded for why no lube pairing applies to a
    * toy-featuring draft, per the pairing-presence self-check
    * (docs/store-team/routine-social-daily.md, "Pairing-presence self-check
@@ -648,6 +656,22 @@ export async function runDeterministicPublishChecks(
      * the stock check's narrow "this one product is unverifiable".
      */
     getProductTypeDial?: (handle: string) => Promise<string | null>
+    /**
+     * `xdipx.cast_target` for the featured product (ADR-015, ticket #10730,
+     * the casting check below). Defaults to the real lookup via
+     * `getDealByHandle`. A failure here IS fail-closed (unlike
+     * `getProductTypeDial` above): a null/unresolved cast_target is treated
+     * as "no classification on file", which the casting check itself blocks
+     * on per ADR-015 §5, not as "the rule does not apply".
+     */
+    getCastTarget?: (handle: string) => Promise<string | null>
+    /**
+     * `castMember.bodyPresentation` for the roster, keyed by slug. Defaults
+     * to the real lookup via `getApprovedCastMembers`. A slug absent from the
+     * returned map is treated as "no bodyPresentation on file", which the
+     * casting check fails closed on (ADR-015 §5).
+     */
+    getCastPresentations?: (slugs: readonly string[]) => Promise<ReadonlyMap<string, 'masculine' | 'feminine' | null>>
   },
 ): Promise<DeterministicGateResult> {
   const findings: GateFinding[] = []
@@ -911,6 +935,59 @@ export async function runDeterministicPublishChecks(
             `pairing-presence self-check). Name a compatible lube or log why none applies.`,
         })
       }
+    }
+  }
+
+  // ── Cast/product casting gate (ADR-015, ticket #10730) ────────────────────
+  //
+  // Owner, verbatim, 2026-09-22: "When we have a man holding a vibrator; we
+  // look like idiots." A product's xdipx.cast_target ('male' | 'female' |
+  // 'universal') says which cast presentation may be shown ALONE with it;
+  // `checkCastTargetMatch` is the pure data check (social-cast-target-gate.
+  // server.ts). This is defense in depth for the admin CastPicker/rework
+  // path — social-art-director's own brief-time pre-check (ADR-015 §4 call
+  // site 1) is a judgment step in an interactive subagent session the
+  // unattended publish path never spawns, so this deterministic check is the
+  // only place the rule is actually enforced on that path.
+  if (input.productHandle) {
+    const getCastTarget = deps?.getCastTarget ?? (async (handle: string) => {
+      const { getDealByHandle } = await import('./shopify.server')
+      const deal = await getDealByHandle(handle)
+      return deal?.castTarget ?? null
+    })
+    let castTargetRaw: string | null
+    try {
+      castTargetRaw = await getCastTarget(input.productHandle)
+    } catch {
+      castTargetRaw = null
+    }
+    const castTarget = castTargetRaw === 'male' || castTargetRaw === 'female' || castTargetRaw === 'universal'
+      ? castTargetRaw
+      : null
+
+    const castSlugs = (input.castSlugs ?? []).filter((s): s is string => !!s && s.trim().length > 0)
+
+    const getPresentations = deps?.getCastPresentations ?? (async (slugs: readonly string[]) => {
+      const { getApprovedCastMembers } = await import('./sanity.server')
+      const roster = await getApprovedCastMembers()
+      const bySlug = new Map(roster.map(m => [m.slug, m.bodyPresentation] as const))
+      return new Map(slugs.map(s => [s, bySlug.get(s) ?? null] as const))
+    })
+    let presentationBySlug: ReadonlyMap<string, 'masculine' | 'feminine' | null>
+    try {
+      presentationBySlug = await getPresentations(castSlugs)
+    } catch {
+      presentationBySlug = new Map()
+    }
+
+    const { checkCastTargetMatch } = await import('./social-cast-target-gate.server')
+    const castVerdict = checkCastTargetMatch(castTarget, castSlugs, presentationBySlug)
+    if (!castVerdict.pass) {
+      findings.push({
+        check: 'cast-target-mismatch',
+        severity: 'block',
+        detail: `"${input.productHandle}": ${castVerdict.reason ?? 'cast/product casting check failed.'}`,
+      })
     }
   }
 

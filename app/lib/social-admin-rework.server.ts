@@ -294,6 +294,7 @@ export async function reworkCaption(opts: {
         // #10560: a reason already recorded on the row still applies to a
         // regenerated caption for it.
         pairingNoneReason: post.pairingNoneReason ?? null,
+        castSlugs: post.castSlugs ?? [],
       })
       const blockFindings = gateResult.findings.filter(f => f.severity === 'block')
       if (blockFindings.length === 0) {
@@ -509,6 +510,7 @@ export async function ownerApprovePost(
     postCreatedAt: post.createdAt ?? null,
     posterUrl: post.posterUrl ?? null,
     pairingNoneReason: post.pairingNoneReason ?? null,
+    castSlugs: post.castSlugs ?? [],
   })
   const blockFindings = gateResult.findings.filter(f => f.severity === 'block')
   if (blockFindings.length > 0) {

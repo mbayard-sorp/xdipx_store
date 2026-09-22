@@ -197,6 +197,9 @@ export interface PublishTickDeps {
   gateDeps?: {
     getAvailability?: (handle: string) => Promise<boolean | null>
     getProductTypeDial?: (handle: string) => Promise<string | null>
+    /** ADR-015, ticket #10730 — the cast/product casting gate's deps. */
+    getCastTarget?: (handle: string) => Promise<string | null>
+    getCastPresentations?: (slugs: readonly string[]) => Promise<ReadonlyMap<string, 'masculine' | 'feminine' | null>>
   }
   /**
    * The publish-time stock guard's product lookup (ticket #2212). Defaults to
@@ -859,6 +862,7 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       // still get blocked here at publish time, since this re-check is fresh
       // and does not read the gate's own cached verdict.
       pairingNoneReason: post.pairingNoneReason ?? null,
+      castSlugs: post.castSlugs ?? [],
     }, deps.gateDeps)
 
     if (gate.blocked || gate.held) {
