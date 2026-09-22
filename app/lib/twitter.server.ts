@@ -84,12 +84,23 @@ export async function xVerifyCredentials(): Promise<{ state: 'live' | 'dead' | '
 
 // ─── Low-Level API Calls ─────────────────────────────────────────────────
 
-async function xFetch<T>(
+/**
+ * Sign, send, and throw on a non-2xx. Returns the raw `Response` so the caller
+ * decides whether a body is expected.
+ *
+ * Split out of `xFetch` because that decision is not the same for every
+ * endpoint and cannot be inferred from the status code. `xFetch` parses JSON and
+ * is right for the v2 endpoints that always answer with one. The v1.1 upload
+ * host has endpoints that answer a **200 with an empty body**, and parsing that
+ * throws `Unexpected end of JSON input` on a request that in fact succeeded.
+ * `xSendNoBody` below is for those.
+ */
+async function xSend(
   url: string,
   method: 'GET' | 'POST' | 'DELETE',
   body?: unknown,
   contentType = 'application/json',
-): Promise<T> {
+): Promise<Response> {
   const oauth = getOAuth()
   const token = getToken()
   const authHeader = oauth.toHeader(
@@ -117,6 +128,39 @@ async function xFetch<T>(
     throw err
   }
 
+  return res
+}
+
+/**
+ * A call whose success is the status code and nothing else.
+ *
+ * Any 2xx resolves, an empty body included. Use this and never `xFetch` where
+ * the response is discarded: `xFetch` would parse a body the caller does not
+ * read, and turn an endpoint that answers 200-with-no-content into a thrown
+ * error on a request X accepted.
+ */
+async function xSendNoBody(
+  url: string,
+  method: 'GET' | 'POST' | 'DELETE',
+  body?: unknown,
+  contentType = 'application/json',
+): Promise<void> {
+  await xSend(url, method, body, contentType)
+}
+
+/**
+ * A call whose response body is the point. Throws on a non-2xx, and throws on a
+ * 2xx whose body will not parse, because a caller that reads `res.data` cannot
+ * be handed `{}`: that is how a tweet with no `id` would reach a row marked
+ * posted. 204 stays the one no-content status this accepts, unchanged.
+ */
+async function xFetch<T>(
+  url: string,
+  method: 'GET' | 'POST' | 'DELETE',
+  body?: unknown,
+  contentType = 'application/json',
+): Promise<T> {
+  const res = await xSend(url, method, body, contentType)
   if (res.status === 204) return {} as T
   return (await res.json()) as T
 }
@@ -141,7 +185,9 @@ export async function postTweet(
 }
 
 export async function deleteTweet(tweetId: string): Promise<void> {
-  await xFetch(`https://api.x.com/2/tweets/${tweetId}`, 'DELETE')
+  // Response discarded, so `xSendNoBody`: nothing here reads a body, and this
+  // must not start failing if X ever answers it with 200-and-nothing.
+  await xSendNoBody(`https://api.x.com/2/tweets/${tweetId}`, 'DELETE')
 }
 
 export async function replyToTweet(
@@ -303,7 +349,15 @@ export async function setMediaAltText(
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
   const url = 'https://upload.x.com/1.1/media/metadata/create.json'
   try {
-    await xFetch(url, 'POST', { media_id: mediaId, alt_text: { text: altText.slice(0, 1000) } })
+    // 200 with an EMPTY BODY on success, which is why this is `xSendNoBody` and
+    // not `xFetch`. Under `xFetch` every single X post since alt text shipped
+    // logged `Alt text failed, published without it: Unexpected end of JSON
+    // input` and carried that note into its run event, on a call X had
+    // accepted: the throw came from `res.json()`, downstream of the `res.ok`
+    // check, so the alt text was being set and only the report was wrong.
+    // Nothing here degrades quietly, so a false failure is not harmless: it is
+    // the note the next reader trusts.
+    await xSendNoBody(url, 'POST', { media_id: mediaId, alt_text: { text: altText.slice(0, 1000) } })
     return { ok: true }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
