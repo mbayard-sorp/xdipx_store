@@ -412,9 +412,32 @@ axes replace the room when the crop eats it, and they rotate the way §3.8 rotat
   proxy, so the trace of the world comes from the sheet, the surface, the hour of the light, or a
   second body, and the brief names which.
 
-**The cap, a merchandising rule before a safety one.** At most 3 close crops per rolling 7
-Instagram product posts, never two consecutive, and at least one ceiling frame per rolling 7 wide
-enough to read a location. Ten tight crops of bare skin is a stock library and fails the standing
+**STANDING ORDER, 2026-09-22: ON-SKIN IS THE DEFAULT ON EVERY INSTAGRAM PRODUCT POST, UNTIL THE
+OWNER SAYS STOP.** Owner, verbatim: *"The two posts that went out to IG are boring. Why weren't they
+on-skin posts? I want to see on-skin posts until I say stop. No more boring posts."* This has no end
+date. It ends when he says it ends, and until then a clothed product frame is an exception that has
+to justify itself in writing (`social-art-director.md`, Clothed exception block). The only standing
+exemption is a product-free resource post, meaning a subject with no product in it, and §3.9 already
+narrows those hard.
+
+The order was given against measured evidence, so it is not a matter of taste. Across all 152
+Instagram rows on 2026-09-19: sternum 0, hip hollow 0, small of the back 0, inner wrist 0,
+stomach-as-contact 0. The licence in this section had been briefed **zero times in the account's
+history**. The two rows that triggered the order, 292 and 293 on 2026-09-22, both carried
+`body_zone` null and `contact_mode` null, which is not "judged clothed" but "nobody answered".
+
+**While this order is in force, the 3-per-rolling-7 close-crop cap and the no-two-consecutive rule
+below are SUSPENDED** (owner decision, same day, asked and answered directly). They are suspended
+rather than deleted, and rather than left to show a permanent breach, because a doctrine that
+contradicts itself is a doctrine a run can quote either half of. The ceiling-frame floor is NOT
+suspended: at least one frame per rolling 7 must still be wide enough to read a location, because
+that one is what stops the grid becoming a stock library, and the owner's complaint was that the
+grid is boring, which ten identical macro crops would also be. When the order lifts, both
+suspended clauses resume as written with no further decision needed.
+
+**The cap, a merchandising rule before a safety one (SUSPENDED while the standing order above is in
+force).** At most 3 close crops per rolling 7 Instagram product posts, never two consecutive, and at
+least one ceiling frame per rolling 7 wide enough to read a location. Ten tight crops of bare skin is a stock library and fails the standing
 bar ("someone scrolling the last ten posts sees ten different lives"). It is also the aggregate
 read that gets an account actioned rather than a post.
 
@@ -626,6 +649,45 @@ the PASS that shipped post 47). The line was withdrawn by owner ruling 2026-08-1
 points at §3.2a, which is the single operative rule for Instagram imagery. Product in hand and
 product against skin are both licensed; the fence moved to genitalia, hands on genitals, and
 depicted acts.
+
+### 3.7a The cast member has to match the product (owner direction 2026-09-22)
+
+Owner direction, verbatim across three messages: *"the context of the toy needs to be taken into
+account. When we have a man holding a vibrator; we look like idiots. A man can share a prostate
+massager or a stroker."* Then: *"If you want to show a man holding a vibrator he should be holding it
+against a woman's skin."* Then: *"A man should show products that men use!"*
+
+§3.7 says every product post carries a cast member. This section says **which** one.
+
+- **A man alone in frame carries only a product a man uses.** On the current taxonomy
+  (`app/types/index.ts`, `ProductTypeDial` and `ProductSubtypeDial`): `stroker`, `cock-ring`,
+  `extender`, `pump`, and `anal` with subtype `prostate`, plus the body-neutral `lube`, `massage`,
+  `condom`, `wellness`, `book-media`.
+- **A man never appears alone with a `vibrator` (every subtype, `wand` and `air-pulsation`
+  included), a `dildo`, or `wear`.** The failure this section is written from: row 293, 2026-09-22,
+  Marcus alone in a white v-neck holding a ROMP Presto Wand at chest height.
+- **A man MAY carry any of those in a two-cast frame where he holds it against the woman's skin.**
+  That is `contactMode: other-held`, which already exists in the vocabulary for exactly this. His
+  hand on the product, the product on her skin. §3.2a already licenses the hand-off frame and
+  §3.6's worked cock-ring example is the same shape read from the other side.
+- **A woman in frame is unrestricted by this section.** The owner's complaint was specific and this
+  rule is no wider than the complaint.
+
+**The product's audience is a product-side fact, and social asks rather than infers (owner
+direction, same day).** Verbatim: *"Our /all-hands team should be able to tell the merchandising
+agents and the social media agents which products are related to men, and which are for women. Some
+are universal. Bind the social media team to check with our product and experts before using a male
+or a female cast member in an image."* So the classification is published once by the people who own
+the catalog and read by everyone else. Until it is published, the type and subtype dials above are
+the interim answer, and a product whose audience cannot be determined is a product to swap out, not
+to guess at: pick a body-neutral product, or put a woman in frame.
+
+**Scope guard, and it matters.** This governs **who appears in a photograph with an object, and
+nothing else.** It must never reach collections, navigation, merchandising copy, or SEO. The store
+deliberately retired gendered merchandising: `/for-him` and `/for-her` 301 away and
+`app/routes/_layout.for-him.tsx` carries the instruction "never redirect to the gendered
+/collections/for-him". A casting rule is not a merchandising taxonomy, and the day this leaks into
+one is the day it has been misread.
 
 ### 3.7 A cast member in a scene, on every product post (owner ruling 2026-08-19)
 
