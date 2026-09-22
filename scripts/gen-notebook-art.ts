@@ -27,9 +27,12 @@
  *   # content-run-scheduled hero generation always sees itself as the
  *   # blocking sibling run and the gate fails closed on every candidate.
  *
- *   # Step 2 — after review, upload the chosen file and patch the target doc:
+ *   # Step 2 — after review, upload the chosen file and patch the target doc.
+ *   # --prompt is REQUIRED here (ticket #10682): repeat the exact prompt from
+ *   # Step 1, or the upload is refused rather than silently writing the
+ *   # generic surface-default prompt to imagePrompt.
  *   npx tsx scripts/gen-notebook-art.ts --surface category --slug care \
- *     --upload .notebook-art/category-care-1.png --alt "..."
+ *     --upload .notebook-art/category-care-1.png --alt "..." --prompt "..."
  *
  *   # Hero cast-plus-product composite (--cast <castSlug> on --surface hero):
  *   # routes through composeSceneFrame() (packaging-strip + identity-hold), NOT
@@ -613,7 +616,23 @@ async function main() {
     process.exit(1)
   }
 
-  const prompt = arg('prompt') ?? SURFACES[surface].defaultPrompt(slug)
+  // #10682 (code half of #9369): --upload used to fall through to this same
+  // `?? SURFACES[surface].defaultPrompt(slug)` default whenever --prompt was
+  // not repeated on the upload call, silently overwriting blogPost.imagePrompt
+  // with the generic surface-default prompt instead of the one that actually
+  // produced the candidate image. That defeated ticket #2750's guardrail and
+  // burned repeat generation spend on the same SKUs. --upload now REQUIRES
+  // --prompt explicitly (fails loud); generation-only invocations keep the
+  // convenience default since there is no persisted imagePrompt at risk yet.
+  const explicitPrompt = arg('prompt')
+  if (uploadFile && !explicitPrompt) {
+    console.error(
+      '--prompt is required with --upload: repeat the exact prompt that produced the file you are ' +
+      'uploading (Step 1\'s prompt), or the wrong value gets written to imagePrompt (ticket #10682).',
+    )
+    process.exit(1)
+  }
+  const prompt = explicitPrompt ?? SURFACES[surface].defaultPrompt(slug)
 
   if (uploadFile) {
     if (!alt) {

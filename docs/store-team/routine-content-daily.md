@@ -527,11 +527,13 @@ post does not embed, and the inverse the older audit is blind to, a post that ca
 hero names no catalog product at all. Resolve each by regenerating or re-uploading the hero with an
 explicit `--prompt` that depicts a product the article is actually about, not by loosening the check.
 
-**`--upload` must repeat `--prompt`.** `gen-notebook-art.ts --upload` called without `--prompt`
-silently overwrites `imagePrompt` with the generic `SURFACES[hero].defaultPrompt` — non-empty, so
-it passes this checker clean while destroying the exact record #2750 exists to protect (ticket
-#9369). Always repeat the same `--prompt` used at generation time on the upload call; the
-script-side fix (preserve-or-refuse without `--prompt`) is still open.
+**`--upload` must repeat `--prompt`.** `gen-notebook-art.ts --upload` used to silently overwrite
+`imagePrompt` with the generic `SURFACES[hero].defaultPrompt` whenever `--prompt` was not repeated
+on the upload call — non-empty, so it passed this checker clean while destroying the exact record
+#2750 exists to protect (ticket #9369). As of ticket #10682 the script itself refuses an `--upload`
+call with no explicit `--prompt` rather than silently substituting the default, so a missing
+`--prompt` is now a loud CLI error instead of a quiet bad write. Always repeat the same `--prompt`
+used at generation time on the upload call.
 
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 

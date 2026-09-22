@@ -324,14 +324,15 @@ property, never all of them; the packshot is the third resort, never the second.
     gel droplet on the paper catching the side light. Warm directional daylight, soft falloff, no
     hands, no bodies, no bed, no banned domestic-metaphor object anywhere in frame →
     `image-00cb6d3dc42164d678c6d5557389f66a47df5b00-2304x1728-jpg`.
-  - **Prompt-record correction worth knowing (applies to every §0-P and §0-H run).**
-    `gen-notebook-art.ts --upload` does not accept `--prompt`, so the `imagePrompt` it writes on
-    upload is the surface's generic **default** prompt, not the prompt that actually produced the
-    keeper. `check-hero-embed-match.ts` still passes, because it only tests for a non-empty prompt
-    and for hero/embed coupling, so this fails silently and leaves the post's stored prompt unable
-    to explain its own image on a retro. Run 574 patched `blogPost.imagePrompt` back to the real
-    composed prompt with `sanity-content-cli.ts patch` immediately after upload. Do the same until
-    `--upload` learns `--prompt`.
+  - **Prompt-record correction, fixed as of ticket #10682 (applies to every §0-P and §0-H run).**
+    `gen-notebook-art.ts --upload` used to silently accept a missing `--prompt` and write the
+    surface's generic **default** prompt instead of the prompt that actually produced the keeper.
+    `check-hero-embed-match.ts` still passed, because it only tests for a non-empty prompt and for
+    hero/embed coupling, so this failed silently and left the post's stored prompt unable to
+    explain its own image on a retro. Run 574 patched `blogPost.imagePrompt` back to the real
+    composed prompt with `sanity-content-cli.ts patch` immediately after upload. `--upload` now
+    REFUSES to run without an explicit `--prompt` (loud CLI error) instead of substituting the
+    default, so always repeat the same `--prompt` used at generation time on the upload call.
   - **Composition note for future §0-P lubricant heroes:** a single sheer fabric sweep plus one
     gel droplet reads as sensory anticipation at the charter's visual 6-7 without any body in
     frame, and the droplet does the work the packaging shot cannot: it says what is inside the
