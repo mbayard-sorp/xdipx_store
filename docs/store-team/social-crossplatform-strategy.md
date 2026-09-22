@@ -85,10 +85,18 @@ count; re-verify before citing, the queue moves). Strategy:
 - **Approval is not a licence** (`docs/ads-policy.md` §Meta Shops). Commerce review judges a catalog
   item; community standards judge a post. Never treat an approved product as permission to post
   something §Organic social forbids, and never exclude a rejected product from editorial posts.
-- Product tagging is live as of 2026-08-16: the owner added `instagram_shopping_tag_products`, and
-  the publisher tags the gate stamp's featured product on feed photos and carousels when it is
-  Shops-approved (`docs/ads-policy.md` §Meta Shops). Non-approved products publish untagged with
-  the reason logged. A tag is additive; it changes nothing about what passes the gate.
+- **Product tagging was never actually live, and is now permanently removed** (ticket #10732,
+  superseding the 2026-08-16 claim below). `available_catalog_product_search` is not a real Graph
+  API edge — the correct one, `catalog_product_search`, requires a `catalog_id` this store has never
+  had, so every publish attempt was malformed from day one and silently degraded to untagged while
+  leaking a raw Graph error into `cron_runs.result`. Even a corrected call could never succeed
+  regardless: Meta's commerce policy prohibits promoting the buying, selling, or trading of adult
+  products across Shops on Facebook and Instagram
+  (facebook.com/policies_center/commerce/adult_products, help.instagram.com/1627591223954487), so a
+  sexual-wellness catalog cannot pass Shop review. The tagging code path is removed from
+  `app/lib/social-publish/instagram.server.ts`; every post publishes untagged, which is correct and
+  was always the actual outcome. Do not re-add it without an explicit owner decision that a real,
+  policy-compliant path exists.
 
 ## 3. The pairing rule: a toy never travels alone
 
