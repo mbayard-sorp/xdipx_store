@@ -659,13 +659,20 @@ against a woman's skin."* Then: *"A man should show products that men use!"*
 
 §3.7 says every product post carries a cast member. This section says **which** one.
 
-- **A man alone in frame carries only a product a man uses.** On the current taxonomy
-  (`app/types/index.ts`, `ProductTypeDial` and `ProductSubtypeDial`): `stroker`, `cock-ring`,
-  `extender`, `pump`, and `anal` with subtype `prostate`, plus the body-neutral `lube`, `massage`,
-  `condom`, `wellness`, `book-media`.
-- **A man never appears alone with a `vibrator` (every subtype, `wand` and `air-pulsation`
-  included), a `dildo`, or `wear`.** The failure this section is written from: row 293, 2026-09-22,
-  Marcus alone in a white v-neck holding a ROMP Presto Wand at chest height.
+- **A man alone in frame carries only a product classified `male` or `universal`.** The
+  classification is `xdipx.cast_target`, derived from `product_type_dial` and
+  `product_subtype_dial`; the full derivation table is ADR-015 §1 and that table is authoritative,
+  not the summary here. Clearly `male`: `stroker`, `cock-ring`, `pump`, `extender`, and `anal` with
+  subtype `prostate`. Clearly `universal`: `lube`, `massage`, `condom`, `wellness`, `book-media`,
+  `bondage`, `couples`.
+- **A man never appears alone with a product classified `female`.** Chiefly `vibrator` (every
+  subtype, `wand` and `air-pulsation` included). The failure this section is written from: row 293,
+  2026-09-22, Marcus alone in a white v-neck holding a ROMP Presto Wand at chest height.
+- **Read the subtype, never only the parent.** Two parents split by subtype and a summary that
+  ignored them would be wrong in both directions: a `dildo` is `female` except a `packer`, which is
+  `male`; `wear` is `universal` except `mens-underwear` (`male`) and the `panty`/`bodysuit`/
+  `hosiery` family (`female`). This is exactly why the classification is a published product fact
+  and not a list anyone reproduces from memory.
 - **A man MAY carry any of those in a two-cast frame where he holds it against the woman's skin.**
   That is `contactMode: other-held`, which already exists in the vocabulary for exactly this. His
   hand on the product, the product on her skin. §3.2a already licenses the hand-off frame and
