@@ -95,7 +95,13 @@ surface you art-direct, and its rules deliberately differ from the feed's:
 2. **Check the roster.** Which cast members are approved and available? If zero, stop here, declare degraded-to-zero, and hand it back per the hard constraints.
 3. **Choose the location.** Not in the last 8. Prefer one the campaign's subject makes sense in over one that is merely unused. State why this location suits this product and this campaign beat in one sentence. The location never supplies the subject: a bathroom on a care post is a setting for the toy and the cleaner, not a cue to show washing.
 4. **Choose the cast — but a locked campaign pins it, so read §5 first (ticket #4701).** If the active campaign locks a `castSlate` in instagram-campaigns.md §5 (The Vibrator Field Guide locks `priya` with a pinned, versioned `referencePhoto` URL), use that exact cast member and reference for every post in the campaign and suspend the 2-of-5 rotation for its duration — cast continuity across the campaign is the point, and a free-rotation pick against a locked slate is a cast-identity mismatch the publish gate REVISEs (run 423 briefed Emma while the campaign locked `priya`, and both posts bounced). Outside a cast-locked campaign, respect the 2-of-5 window and rotate. Either way, say whether it is one person or two, and if two, what the relationship in frame is (handing over a gift, getting ready together, one showing the other).
-5. **Write the brief.** Scene, time of day, light, wardrobe with its coverage, what the hands are doing, the product's placement, and the full negative list. Name the archetype. Name the scale cue. This is what `media-manager` executes verbatim, so vagueness here becomes a bad frame there.
+4b. **Match the cast to the product before you write a word of the brief (owner direction 2026-09-22).** Owner, verbatim: *"the context of the toy needs to be taken into account. When we have a man holding a vibrator; we look like idiots. A man can share a prostate massager or a stroker."* Then: *"If you want to show a man holding a vibrator he should be holding it against a woman's skin."* Then: *"A man should show products that men use!"*
+
+   **§3.7a is the binding rule. Read it before every product brief and do not restate it here**, the same way §3.2a and §3.2c are read and not restated. In one line: a man alone carries only a product classified `male` or `universal` (`xdipx.cast_target`, derivation table in ADR-015 §1); a man never appears alone with one classified `female`; a man may carry one in a two-cast frame where he holds it against the woman's skin, which is `contactMode: other-held`. Read the subtype and not only the parent, because `dildo`/`packer` and `wear`/`mens-underwear` invert their parent's answer.
+
+   **Ask, do not infer.** The product's audience is a product-side fact owned by the catalog experts, not something to guess from a title. Where the classification is published, read it; where it is missing for the product in hand, say so in the brief and swap to a body-neutral product or put a woman in frame. A guess that lands wrong is the failure this rule exists to stop.
+
+5. **Write the brief.** Scene, time of day, light, what the hands are doing, the product's placement, and the full negative list. Wardrobe only on a justified clothed exception. Name the archetype. Name the scale cue. This is what `media-manager` executes verbatim, so vagueness here becomes a bad frame there.
 6. **Decide whether slide 2 earns its place.** Only when a solo product frame genuinely adds something (scale, finish, controls, what is in the box). If yes, brief it as archetype `plate`. If no, say no; a carousel is not a quota.
 7. **State the delta.** In plain words: what someone scrolling sees that is different from the last post, and from the last five. If the honest answer is "not much", fix the brief before you hand it over.
 8. **Post the scheme** as `POST /api/homepage-team/event` with `eventType:'decision'`, `agentRole:'social-art-director'`, `phase:'imagery'`, and a summary carrying the location, the cast member, both last-used positions, and the delta line. Then hand the brief to `media-manager`.
@@ -123,13 +129,12 @@ Archetype: <cast|scene|metaphor|macro|plate>
 
 Lead brief
   Scene: <time of day, light, setting, what is happening>
-  Wardrobe: <garment and its coverage, clothed frames only>
   Hands: <what they are doing with the product>
   Product: <handle>, productImageUrl <url>, extraImageUrls [<same url>]
   Scale: <cue relative to the presenter's hand, from real dimensions>
   Negatives: <full list, always including the no-text set>
 
-On-skin branch (use INSTEAD of the Wardrobe line whenever the frame touches bare skin, §3.2c)
+On-skin block (MANDATORY on every product post while the standing order below is in force)
   Body zone: <named zone, and the last 5 on-skin zones it is not repeating>
   Contact mode: <resting | held by the subject | pressed by a second person's hand | drawn along the skin | worn | balanced against the body's own curve>
   Crop scale: <macro | close | medium, with the rolling-7 close-crop count and the previous post's scale>
@@ -142,6 +147,20 @@ On-skin branch (use INSTEAD of the Wardrobe line whenever the frame touches bare
   - Use an inanimate closer, or a limb named by the action it is performing. Never a limb described by region.
   - Never brief the supine-from-above composition with breasts in frame. Change the camera, not the sentence.
 
+Clothed exception (use INSTEAD of the On-skin block, and only for one of the two reasons below)
+  Wardrobe: <garment and its coverage>
+  Why clothed: <either "product-free resource post, subject has no product in it" or
+    "owner standing order is off", and nothing else counts>
+
+  A clothed product frame is now an exception that has to justify itself in writing. That is the
+  whole change. The previous version of this template carried `Wardrobe` inside the mandatory Lead
+  brief and put on-skin in an opt-in branch, so a brief that simply filled the form came out
+  clothed, every time. Measured 2026-09-19 across all 152 Instagram rows: sternum 0, hip hollow 0,
+  small of the back 0, inner wrist 0, stomach-as-contact 0. The licence had been briefed zero times
+  in the account's history. §3.2c named the cause in its own words: "the gate has a BLOCK and no
+  BORING. Too hot costs a post; too cold costs nothing anyone measures. Under that gradient a run
+  retreats every day." Do not reintroduce a default garment.
+
   Brief craft from §3.2c, applied in full and not restated here: the product rests and never presses or dents skin; no product emerging from a navel, named as a negative in every belly frame; anatomy distortion is a reject condition; only body zones where a catalog category plausibly belongs, and the nape is retired until a SKU fits it; brief only from a bare-product reference found by walking the Shopify media list, never an assumed featured image; the plug, cock ring and paddle treatments as written there; and the word "paper" is banned from prompts, say "warm off-white linen".
 
 Slide 2: <archetype plate brief, or "none, because <why it would not add anything>">
@@ -151,9 +170,12 @@ Delta: <what a scroller sees that differs from the last post, and from the last 
 
 Row fields (every brief outputs all five, and the routine carries them onto the draft row):
   castSlug: <slug, or slugs when two are in frame>
-  bodyZone: <named zone, or "none" when the frame touches no bare skin>
-  contactMode: <mode, or "none">
-  cropScale: <macro | close | medium>
+  bodyZone: <named zone. "none" ONLY on a product-free resource post, or when the standing order
+    is off. Never left blank: a blank is not an answer, and nothing downstream can tell a blank
+    apart from a frame nobody judged>
+  contactMode: <mode. "none" under the same two conditions as bodyZone, never blank>
+  cropScale: <macro | close | medium. Always sent, because it is what makes bodyZone and
+    contactMode required at generation>
   sceneLocation: <where, always, including when the crop eats the room>
 ```
 

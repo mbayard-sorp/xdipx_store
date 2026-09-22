@@ -1329,14 +1329,27 @@ product and is hardcoded to 4:5:
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-image" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"cast","prompt":"<scene, location, wardrobe, light, negatives>",
+  -d '{"op":"cast","prompt":"<scene, location, light, what closes each edge, negatives>",
        "handle":"<product-handle>","mood":"<short-token>","date":"<YYYY-MM-DD>",
        "presenterImageUrl":"<castMember referencePhoto, the exact versioned URL>",
        "productImageUrl":"<real Shopify product photo>",
        "extraImageUrls":["<the same product photo again>"],
        "scale":"<cue from the product real dimensions>","count":2,
+       "sceneLocation":"<where, always>",
+       "cropScale":"<macro | close | medium, ALWAYS sent>",
+       "bodyZone":"<named zone from the vocabulary>",
+       "contactMode":"<named mode from the vocabulary>",
        "caller":"social-media-manager"}'
 ```
+
+**All four axis keys go on every product generation, and `cropScale` is the one that matters most.**
+This template used to carry none of them and asked for "wardrobe" in the prompt, which is how rows
+292 and 293 (2026-09-22) came out clothed with `body_zone` and `contact_mode` null.
+`requireSceneAxesForGeneration` only demands `bodyZone` and `contactMode` **when `cropScale` is
+`macro` or `close`**, so omitting `cropScale` satisfied validation while supplying nothing, the
+asset carried no `axis:` tag, the draft-time backfill found nothing, and the row landed null. Null
+is not the `none` sentinel: `none` means "judged, and not an on-skin frame", null means nobody
+answered, and the mix report scores null as UNKNOWN, which is not a passing line.
 
 **A second real product passed via `extraImageUrls` is a known high-failure-rate composite
 (#7728).** The two-stage packaging-strip treatment that `productImageUrl` (the PRIMARY product)
@@ -1526,10 +1539,12 @@ stops.
   degraded-to-zero honesty the Step 2b imagery preflight already requires for Instagram: the "no zero
   days" baseline is channel-scoped, and a wrong image on a linked post is worse than a missing post.
 - **Cost note.** A cast composite runs `--candidates 2`, so a full 4-post X day plus a 4-post
-  Instagram day draws roughly 16 billed generations against `social_team_max_images`, which defaults
-  to 12 and is currently unset. Reuse-first genuinely matters here, and if runs start reporting the
-  image cap as the binding constraint that is an owner config item, not something to work around by
-  dropping the cast.
+  Instagram day draws roughly 16 billed generations against `social_team_max_images`, **which the
+  owner set to 50 on 2026-09-22** (it had never been written and was running on the code default of
+  12, which is what exhausted the budget mid-run on 2026-09-21 and produced the X zero-post day in
+  ticket #10658). Reuse-first still matters, and if runs start reporting the image cap as the
+  binding constraint that is an owner config item, not something to work around by dropping the
+  cast.
 
 **Only a generated, rehosted asset is publishable.** The URL you put in `mediaUrls` must have a
 `social-` or `ig-` prefixed basename, because `isGeneratedSocialAsset` checks exactly that and the
@@ -1561,7 +1576,12 @@ a caption written blind.
 satisfy the freshness rules in `docs/store-team/instagram-campaigns.md` §3.8: filter candidates on
 cast slug (never the same face two days running), ground colour (the 4-beat ground cycle),
 archetype (the 7-beat archetype spine), and recency, and **exclude any asset already attached to a
-posted row**. Skipping this filter produces a visibly repetitive grid, a customer-facing quality
+posted row**. **Add the on-skin axis to that filter while the standing order is in force:** a
+candidate for a product post must carry an `axis:bodyZone=` tag naming a real zone, and an asset
+with no axis tags at all is not eligible. The library holds a few hundred assets generated before
+the axes existed, all of them clothed and all of them axis-less, so reuse without this clause is
+the cheapest possible way to launder a boring frame back onto the grid and it defeats the standing
+order entirely. Skipping this filter produces a visibly repetitive grid, a customer-facing quality
 regression, not a savings worth having. Record which asset the run reused and why it was eligible
 (which filter checks it passed) in the draft's event summary, the same way a generated asset's
 brief is recorded.
