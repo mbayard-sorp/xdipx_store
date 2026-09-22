@@ -62,6 +62,7 @@ import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
 import { EMMA_VOICE_ENRICHMENT } from '~/lib/emma-voice.server'
 import { PRODUCT_TYPE_DIALS } from '~/types'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
+import { deriveCastTarget } from '~/lib/cast-target.server'
 
 const VALID_IVR_EXPERIENCE = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
 
@@ -249,6 +250,12 @@ export async function applyFullEnrichmentWrites(numericProductId: string, writes
   }
   if (writes.originalTitle)          doc.originalTitle       = ed(writes.originalTitle)
   if (writes.productSubtypeDial != null) doc.productSubtypeDial = writes.productSubtypeDial
+  // ADR-015, ticket #10730 — write-if-absent: an explicit xdipx.cast_target
+  // override always wins and is never clobbered by re-enrichment. Only
+  // compute + write the derived default when the product carries none yet.
+  if (!snap.metafields['xdipx.cast_target']?.trim()) {
+    doc.castTarget = deriveCastTarget(writes.productTypeDial, writes.productSubtypeDial ?? null)
+  }
   if (writes.sensationDialV2)        doc.sensationDialV2     = writes.sensationDialV2
   if (sSpecs?.length)                doc.specifications      = sSpecs
   if (sCare?.length)                 doc.careInstructions    = sCare

@@ -197,6 +197,13 @@ const DEFS: MetafieldDef[] = [
     description: 'When true, this product\'s default (supplier) image is never rendered as card art on rails, grids, or carousels site-wide -- falls back to mood_image_url when set, else no image. Set by hand after a design-critic or manual finding that the packshot breaches design-doctrine.md §4.3\'s on-site imagery ceiling. Does not affect the PDP gallery.',
     type:        'boolean',
   },
+  // Cast/product casting gate (ADR-015, ticket #10730)
+  {
+    key:         'cast_target',
+    name:        'Cast target (imagery casting)',
+    description: 'male | female | universal. Which cast presentation may be shown ALONE with this product in social imagery (ADR-015). Derived from product_type_dial/subtype; an explicit value here always wins. Casting metadata only, never customer-facing.',
+    type:        'single_line_text_field',
+  },
 ]
 
 const STORE = process.env['SHOPIFY_STORE_DOMAIN']

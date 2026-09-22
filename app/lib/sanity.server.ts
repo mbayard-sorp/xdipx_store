@@ -402,6 +402,13 @@ export interface CastMember {
   bodyReferencePhotoUrl: string | null
   /** Plain skin-tone description for a brief to state rather than a model to invent. */
   skinToneNote: string | null
+  /**
+   * ADR-015, ticket #10730 — 'masculine' | 'feminine', which xdipx.cast_target
+   * products this presenter may be shown alone with. Null until the
+   * castMemberCastingFields backfill has run for this member. Production/
+   * casting metadata only, never surfaced storefront-side.
+   */
+  bodyPresentation: 'masculine' | 'feminine' | null
 }
 
 export async function getApprovedCastMembers(): Promise<CastMember[]> {
@@ -425,7 +432,8 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         "editorialPhotoUrl": editorialPhoto.asset->url,
         voiceId,
         "bodyReferencePhotoUrl": bodyReferencePhoto.asset->url,
-        skinToneNote
+        skinToneNote,
+        bodyPresentation
       }`,
     )
     return (raw ?? [])
@@ -446,6 +454,9 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         voiceId:      m.voiceId ?? null,
         bodyReferencePhotoUrl: m.bodyReferencePhotoUrl ?? null,
         skinToneNote: m.skinToneNote ?? null,
+        bodyPresentation: m.bodyPresentation === 'masculine' || m.bodyPresentation === 'feminine'
+          ? m.bodyPresentation
+          : null,
       }))
   } catch (err) {
     console.error('[sanity] getApprovedCastMembers error:', err)

@@ -64,7 +64,17 @@ function runChecks(
 ): ReturnType<typeof runChecksRaw> {
   return runChecksRaw(
     { ...input, postCreatedAt: input.postCreatedAt ?? null },
-    { getVisionVerdict: async () => PASSING_VERDICT, ...(deps ?? {}) },
+    {
+      getVisionVerdict: async () => PASSING_VERDICT,
+      // ADR-015 / ticket #10730: default every call site that predates the
+      // cast-target gate to 'universal' (always passes, no cast required),
+      // the same way getProductTypeDial defaults every call site that
+      // predates the pairing rule to "no dial resolved". The dedicated
+      // describe block below overrides these directly.
+      getCastTarget: async () => 'universal',
+      getCastPresentations: async () => new Map(),
+      ...(deps ?? {}),
+    },
   )
 }
 
@@ -243,6 +253,73 @@ describe('pairing rule: a toy never travels alone (crossplatform strategy §3, t
       { getAvailability: inStock, getProductTypeDial: async () => { throw new Error('shopify down') } },
     )
     expect(checks(r)).not.toContain('pairing-missing')
+  })
+})
+
+describe('cast/product casting gate (ADR-015, ticket #10730)', () => {
+  const femaleTarget = async () => 'female'
+  const maleTarget = async () => 'male'
+  const marcusMasculine = async () => new Map([['marcus', 'masculine' as const]])
+  const mayaFeminine = async () => new Map([['marcus', 'masculine' as const], ['maya', 'feminine' as const]])
+
+  it('always passes a universal-classified product regardless of cast', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'jo-h2o-lube', castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: async () => 'universal', getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).not.toContain('cast-target-mismatch')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('DONE WHEN: blocks a male-presenting solo cast member with a female-classified product', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'le-wand-powerful-petite', castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).toContain('cast-target-mismatch')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('DONE WHEN: passes the same product in an other-held two-cast frame with a matching member', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'le-wand-powerful-petite', castSlugs: ['marcus', 'maya'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: mayaFeminine },
+    )
+    expect(checks(r)).not.toContain('cast-target-mismatch')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('passes a solo cast member whose presentation matches', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'stroker-x', castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: maleTarget, getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).not.toContain('cast-target-mismatch')
+  })
+
+  it('fails closed when the product carries no cast_target classification', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'unclassified-product', castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: async () => null, getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).toContain('cast-target-mismatch')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('fails closed when a non-universal product names no cast at all', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'le-wand-powerful-petite', castSlugs: [] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: async () => new Map() },
+    )
+    expect(checks(r)).toContain('cast-target-mismatch')
+  })
+
+  it('does not fire for a product-free post (no productHandle)', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).not.toContain('cast-target-mismatch')
   })
 })
 

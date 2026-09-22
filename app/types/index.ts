@@ -277,6 +277,10 @@ export interface Deal {
   audienceTags?:           string[]
   mattersTags?:            string[]
   productTypeDial?:        ProductTypeDial
+  /** ADR-015, ticket #10730 — one of male | female | universal, either the
+   *  explicit xdipx.cast_target override or the enrich-time derived default.
+   *  Production/casting metadata only; never customer-facing. */
+  castTarget?:             string
   /** @deprecated Use sensationDialV2 — read-fallback only. */
   sensationDial?:          SensationDial
   sensationDialV2?:        SensationDialV2

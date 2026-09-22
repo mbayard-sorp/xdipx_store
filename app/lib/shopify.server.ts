@@ -220,6 +220,7 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "pair_bundle_copy" }
     { namespace: "xdipx", key: "endorsement_copy" }
     { namespace: "xdipx", key: "card_art_blocked" }
+    { namespace: "xdipx", key: "cast_target" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -814,6 +815,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
   const mapRestrictedRaw = parseMetafield(mf, 'map_restricted')
   const heroVideo        = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
   const productTypeDial  = parseMetafield(mf, 'product_type_dial') as ProductTypeDial | ''
+  const castTarget       = parseMetafield(mf, 'cast_target')
   const sensationDial    = parseMetafieldJSON<Deal['sensationDial']>(mf, 'sensation_dial', {})
   const sensationDialV2  = normalizeSensationDialV2(parseMetafieldJSON<unknown>(mf, 'sensation_dial_v2', null))
     ?? projectLegacyDial(sensationDial as SensationDial | undefined)
@@ -884,6 +886,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     ...(audienceTags.length > 0 ? { audienceTags } : {}),
     ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
     ...(productTypeDial ? { productTypeDial } : {}),
+    ...(castTarget ? { castTarget } : {}),
     ...(sensationDial && Object.keys(sensationDial).length > 0 ? { sensationDial } : {}),
     ...(sensationDialV2 ? { sensationDialV2 } : {}),
     ...(careInstructions ? { careInstructions } : {}),
@@ -3199,6 +3202,10 @@ export interface ProductPageDoc {
    *  custom.product_subtype_dial (the only non-xdipx-namespace metafield in
    *  this push path). Empty/undefined for sex-machine and unclassified products. */
   productSubtypeDial?: string | null | undefined  // custom.product_subtype_dial (single_line_text_field)
+  /** ADR-015, ticket #10730 — xdipx.cast_target (single_line_text_field).
+   *  Caller decides whether to write: applyFullEnrichmentWrites only sets
+   *  this when no override already exists on the product (write-if-absent). */
+  castTarget?: string | undefined
   moodTags?: string[] | undefined                 // xdipx.mood_tags (list.text)
   audienceTags?: string[] | undefined             // xdipx.audience_tags (list.text)
   mattersTags?: string[] | undefined              // xdipx.matters_tags (list.text)
@@ -3302,6 +3309,7 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   // Phase 1 D1 — hierarchical taxonomy subtype scoped to product_type_dial.
   // Lives in custom namespace per metafield-defs registry.
   addCustom('product_subtype_dial', doc.productSubtypeDial ?? undefined, 'single_line_text_field')
+  add('cast_target',      doc.castTarget,                      'single_line_text_field')
   add('original_title',   doc.originalTitle,                   'single_line_text_field')
   // Phase 2 — category stored as JSON string[] (mirrors care/box/specs).
   // Legacy single-value strings still parse via parseCategory on read.

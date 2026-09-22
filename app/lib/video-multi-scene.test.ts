@@ -563,6 +563,7 @@ describe('enqueueVideoJob — presenter voice guard (ticket #6584)', () => {
     shortBio: null, personaNotes: null, archetype: null, ageRange: null, description: null,
     emotionTags: [] as string[], editorialPhotoUrl: null, voiceId: null as string | null,
     bodyReferencePhotoUrl: null, skinToneNote: null,
+    bodyPresentation: null as 'masculine' | 'feminine' | null,
     ...overrides,
   })
 

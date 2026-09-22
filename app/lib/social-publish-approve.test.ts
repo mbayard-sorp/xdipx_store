@@ -176,7 +176,11 @@ const verdict = (over: Record<string, unknown> = {}) => {
 }
 
 describe('applyPublishGateVerdict', () => {
-  const inStock = { gateDeps: { getAvailability: async () => true } }
+  // ADR-015 / ticket #10730: default to 'universal' (always passes, no cast
+  // required) so these pre-existing cases keep testing exactly what they
+  // always tested; the cast-target gate has its own dedicated tests in
+  // social-publish-gate.server.test.ts.
+  const inStock = { gateDeps: { getAvailability: async () => true, getCastTarget: async () => 'universal' } }
 
   it('approves a clean PASS and stamps the verdict onto the row', async () => {
     const { repo, writes } = fakeRepo(row())
@@ -337,7 +341,7 @@ describe('applyPublishGateVerdict', () => {
     const noReason = fakeRepo(row({ tweetText: 'a quiet night in with the LELO SONA, external sensation only' }))
     const blocked = await applyPublishGateVerdict(
       7, verdict({ featuresProduct: true, productHandle: 'lelo-sona' }),
-      { repo: noReason.repo, ...inStock, gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => 'vibrator' } },
+      { repo: noReason.repo, ...inStock, gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => 'vibrator', getCastTarget: async () => 'universal' } },
     )
     expect(blocked.ok).toBe(false)
     expect(noReason.writes[0]?.feedback).toContain('pairing-missing')
@@ -348,7 +352,7 @@ describe('applyPublishGateVerdict', () => {
     }))
     const passed = await applyPublishGateVerdict(
       7, verdict({ featuresProduct: true, productHandle: 'lelo-sona' }),
-      { repo: withReason.repo, ...inStock, gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => 'vibrator' } },
+      { repo: withReason.repo, ...inStock, gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => 'vibrator', getCastTarget: async () => 'universal' } },
     )
     expect(passed).toEqual({ ok: true, reviewStatus: 'approved' })
   })

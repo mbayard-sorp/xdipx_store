@@ -639,6 +639,7 @@ export async function applyPublishGateVerdict(
     // time is honored here, the deterministic re-verification the agent's
     // PASS cannot talk past.
     pairingNoneReason: post.pairingNoneReason ?? null,
+    castSlugs: post.castSlugs ?? [],
   }, deps.gateDeps)
 
   if (gate.blocked || gate.held) {
