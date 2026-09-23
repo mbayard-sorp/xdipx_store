@@ -225,13 +225,24 @@ async function main() {
     process.exit(1)
   }
 
-  let presenter = presenterArg
+  // Ticket #10475: this block keeps every pre-spend refusal below (unknown
+  // slug, missing body reference) so a human running the CLI interactively
+  // still gets an immediate, friendly exit, but no longer resolves the
+  // reference URL itself. The route's own `if (castSlug)` branch
+  // (app/routes/api.team.social-image.tsx) already calls the shared
+  // `resolveCastReference`, which both picks the URL AND prepends the
+  // member's `withSkinToneNote` clause to the prompt — sending a
+  // pre-resolved `presenterImageUrl` here instead of `castSlug` bypassed
+  // that branch entirely, so the skin-tone note (and, when no explicit
+  // product image is supplied, `pickBareProductImage`) never ran on this
+  // scheduled path.
+  const presenter = presenterArg
   if (castSlug) {
     if (!cropScale) {
       console.error('--cast-slug requires --crop-scale macro|close|medium|wide: the crop is what decides which reference is correct.')
       process.exit(1)
     }
-    const { getApprovedCastMembers, presenterPhotoUrlForCrop } = await import('../app/lib/sanity.server')
+    const { getApprovedCastMembers } = await import('../app/lib/sanity.server')
     const roster = await getApprovedCastMembers()
     if (!roster.length) {
       // Never read an empty roster as "there are none": an unauthenticated
@@ -251,30 +262,32 @@ async function main() {
         'Generating it from the portrait would invent the body and skin tone under this persona\'s name,\n' +
         'which fails instagram-campaigns.md §3.7 clause (a). Hold the post and say so in the run summary.\n' +
         'To unblock: npx tsx scripts/generate-cast-body-references.ts, owner picks, upload to\n' +
-        'castMember.bodyReferencePhoto (the Studio needs redeploying first).',
+        'castMember.bodyReferencePhoto.',
       )
       process.exit(1)
     }
-    presenter = presenterPhotoUrlForCrop(member, cropScale)
-    console.log(`presenter reference: ${member.name} @ crop ${cropScale} -> ${needsBodyReference ? 'bodyReferencePhoto' : 'referencePhoto'}`)
+    console.log(`presenter reference: ${member.name} @ crop ${cropScale} -> ${needsBodyReference ? 'bodyReferencePhoto' : 'referencePhoto'} (resolved server-side)`)
   }
+  // Either reference path means a cast composite: a caller-supplied URL or an
+  // approved cast slug the route resolves itself.
+  const usingCastComposite = Boolean(presenter || castSlug)
 
   // A cast composite needs BOTH references. With only the presenter, the model
   // preserves the presenter and invents the product, which is exactly the
   // failure this mode exists to fix.
-  if (presenter && !refImage) {
-    console.error('--presenter-image requires --ref-image <real shopify product photo>: a cast composite needs both references, or the product is invented.')
+  if (usingCastComposite && !refImage) {
+    console.error('--presenter-image/--cast-slug requires --ref-image <real shopify product photo>: a cast composite needs both references, or the product is invented.')
     process.exit(1)
   }
-  if (presenter && archetype !== 'cast') {
-    console.error('--presenter-image requires --archetype cast')
+  if (usingCastComposite && archetype !== 'cast') {
+    console.error('--presenter-image/--cast-slug requires --archetype cast')
     process.exit(1)
   }
   // Required, not defaulted. A silent default would be wrong for most of the
   // catalog and wrong invisibly, which is exactly how a palm-sized toy shipped
   // vase-sized (#2761).
-  if (presenter && !scale) {
-    console.error('--presenter-image requires --scale palm|handheld|forearm|bottle (or a free-text clause relative to the hand). Omitting it renders the product the wrong size.')
+  if (usingCastComposite && !scale) {
+    console.error('--presenter-image/--cast-slug requires --scale palm|handheld|forearm|bottle (or a free-text clause relative to the hand). Omitting it renders the product the wrong size.')
     process.exit(1)
   }
 
@@ -352,8 +365,8 @@ async function main() {
         prompt, handle, archetype, mood, platform, imageSize, aspect, date,
         ...(slide ? { slide } : {}),
         filename: buildSocialAssetFilename({ handle, archetype: archetype as never, mood, date, aspect, ...(slide ? { slide } : {}) }),
-        only: presenter ? 'composeSceneFrame (qwen plate -> flux-2 lora edit)' : (only ?? 'fal-then-imagen'),
-        ...(presenter ? { presenter, mode: 'cast-composite', scale } : {}),
+        only: usingCastComposite ? 'composeSceneFrame (qwen plate -> flux-2 lora edit)' : (only ?? 'fal-then-imagen'),
+        ...(usingCastComposite ? { mode: 'cast-composite', scale, ...(presenter ? { presenter } : { castSlug }) } : {}),
         caller, cap, capSource,
         ...(refImage ? { refImage } : { noRefReason }),
       },
@@ -364,16 +377,21 @@ async function main() {
   // ── 4a. Cast composite (two-stage) ────────────────────────────────────────
   // A single reference image holds exactly one thing, so the single-ref path
   // below cannot hold a cast identity AND a real product at once: it preserves
-  // the presenter and invents the product. Anything with a presenter goes
-  // through composeSceneFrame instead, which takes both references.
-  if (presenter) {
+  // the presenter and invents the product. Anything with a presenter or a
+  // cast slug goes through composeSceneFrame instead, which takes both
+  // references.
+  if (usingCastComposite) {
     const result = await callSocialImageRoute<GenerateCastCompositeResult>({
       op: 'cast',
       prompt,
       handle,
       mood,
       date,
-      presenterImageUrl: presenter,
+      // castSlug (not a pre-resolved URL) when the caller used --cast-slug,
+      // so the route's own resolveCastReference call runs and applies the
+      // skin-tone note (ticket #10475); the caller-supplied URL path is
+      // unchanged.
+      ...(presenter ? { presenterImageUrl: presenter } : { castSlug }),
       productImageUrl: refImage!,
       scale: scale!,
       ...(extraRef ? { extraImageUrls: [extraRef] } : {}),
