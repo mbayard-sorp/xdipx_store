@@ -579,6 +579,52 @@ approved cast.
 split, and only the owner resolves it); a product covering a vulva (both specialists BLOCK: §3.2a's
 "product against genitalia" is a contact rule with no covering exception).
 
+**The full render is the frame that ships (owner direction 2026-09-23, library 652 to 687).** Owner,
+verbatim: *"The goal here is to generate images that don't need to be cropped. Maybe create a list of
+shots and angles and loop through them. There can't be full bare breasts in them. You can have side
+bottom or cleavage boob only... All the Jade pics are great uncropped. Need to be careful not to produce
+distorted bodies. Some odd looking hands."* Three rulings fall out of that and they bind every
+bodyscape brief:
+
+- **Brief a composition that closes itself, not a crop.** The crop-is-the-closer paragraph above stays
+  true as a rescue, but it is not the plan. Every brief describes a pose, an object, or a camera
+  placement that holds all four edges on the FULL render, on the assumption that the model renders
+  wider than asked. A frame that needs a crop to be clean is scored as a miss on the shot, and a shot
+  that needs a crop twice leaves the bank.
+- **Breasts: side, under, or cleavage only.** Never a full bare breast, never a nipple. The occluder is
+  a named action (hugging a pillow, leaning the torso onto the knees, forearms pressing inward, lying
+  on the front) or the camera (from behind, from the feet, from the side at hip height). This narrows
+  the "as much breast as possible" note in §3.2a to the three views that survived review.
+- **Hands and bodies are a reject condition on par with the stop list.** Fewer hands is safer:
+  prefer resting or balanced contact, and when a hand is in frame the brief names what every finger
+  does and keeps the whole hand visible (a hand half behind the product is the hand the model gets
+  wrong). Poses keep one clear spine line; no torso and hips facing different ways. media-manager
+  counts fingers on every render before the gate sees it.
+
+**The shot bank, ranked from the 2026-09-23 loop (8 shots, 2 candidates each, no crops, no retries).**
+Reliable, both candidates clean on the full frame: **shoulder from behind with the face in
+three-quarter turn** (library 668, 669; the 666/667 shape, and the owner's note that a face in a
+shoulder frame is fine); **standing at the window from behind, wand held flat to the small of the
+back, a sheet knotted low at the hip** (676, 677); **sitting cross-legged, product along the crossed
+shins, a sheet across the lap** (686, 687). Borderline, one of two clean: **seated on the bed edge
+leaning onto drawn-up knees, product on the thigh** (675 clean, 673 lost a breast past the forearm);
+**side-lying hugging a pillow, product in the crook of the wrist and forearm** (685 clean, 684 lost a
+nipple when the pillow slipped). Retired from the bank until re-briefed: **hip hollow from the feet**
+(all four candidates put the product on or beside the vulva); **kneeling, product held at the sternum
+with forearms pressed inward** (all four exposed both breasts and the pubic area); **prone with the
+shins raised, product behind the knee** (the model dropped the product to the bed or the glutes both
+times). The pattern in the winners: the camera is behind or below, the chest is out of frame by
+construction, and the only hand in frame is doing one thing. Rotate the reliable three and the
+borderline two under the §3.2c zone window; a new shot enters the bank only after a two-candidate
+loop with both clean.
+
+**Two things a gate pass does not tell you.** 664 passed the gate while clothed, 666 and 667 passed
+with a face in a no-face brief, and 683 passed with the product lying on the sheet next to the leg.
+The gate checks the stop list; the brief check (zone, wardrobe, product contact, hands) is
+media-manager's read and it is recorded on the run. Separately, the gate parser fails closed on prose
+replies (ticket 11004): a `checkCompleted:false` verdict is a malfunction, not a verdict, and the
+frame is judged by eye until that ticket lands.
+
 ### 3.3 Carousel arc: six slides
 
 The previously filed four-slide reveal shape (metaphor → cast reaction → product reveal →
