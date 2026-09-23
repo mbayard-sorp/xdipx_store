@@ -248,7 +248,9 @@ frame, no face unless the brief says why. Reference frames in the socials librar
 - The product held against a bare shoulder, camera looking over the shoulder.
 
 A full-body or face-forward portrait (library asset 635) is the exception, at most 1 per rolling 7,
-and the brief names why. The three brief rules below (write the frame, inanimate closers, camera
+and the brief names why. Reels (product-talk clips) are proposed exempt, pending the owner's
+ruling asked 2026-09-23 (recommended yes: a face-forward talking frame is the format). Until he
+rules, the cap applies to reels too. The three brief rules below (write the frame, inanimate closers, camera
 angle) apply to every bodyscape frame without change.
 
 **The crop is the closer (owner test run 2026-09-22, library 640 to 651).** Briefed as a close
@@ -468,6 +470,12 @@ is a scope boundary with a date on it, not a judgment that reels should stay clo
 pipeline already carries the on-skin machinery from tickets #10484, #10485, #10486 and #10500. So
 extending it later is a decision, not a build. Until that decision, no routine widens this to video
 on its own reading of "no more boring posts".
+
+**Product in hand is not an on-skin frame (owner ruling 2026-09-23).** A presenter holding the
+product at chest height while speaking is a hold, not a contact frame; this section's zones, caps,
+and standing order do not apply to it, and §3.2a still binds it on every frame. On-skin stays out
+of the talking frame. Whether on-skin reaches video at all is still the 2026-09-22 scope boundary
+above, and this ruling does not move it.
 
 **One compounding risk to know about on X, recorded rather than discovered later.** The X 16:9
 cast-composite path already fails `product-identity` and `age-ambiguity` at a materially higher rate
