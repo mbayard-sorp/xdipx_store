@@ -110,6 +110,20 @@ export const QUEUE_FINGERPRINT_KEY = 'owner-digest:queue-fingerprint'
  * different records. This function must therefore always return a decision the
  * handler can report — never silently do nothing.
  */
+/**
+ * The send-on-change fingerprint: the unified owner queue's own fingerprint
+ * plus the two video gate counts. The video gates are not owner-queue entries,
+ * so without this a day whose only news was a newly parked frame or final cut
+ * read as 'queue-unchanged' and the digest stayed quiet about owner-only work.
+ */
+export function digestFingerprint(
+  queueFingerprint: string,
+  parkedVideoFrames: { count: number } | null | undefined,
+  parkedVideoRenders: { count: number } | null | undefined,
+): string {
+  return `${queueFingerprint}|video:${parkedVideoFrames?.count ?? 0}/${parkedVideoRenders?.count ?? 0}`
+}
+
 export function shouldSendDigest(input: {
   fingerprint: string
   lastFingerprint: string | null
@@ -1737,10 +1751,11 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // trivial next to the gathering already done, and deciding here means the
   // decision sees the same queue the email would have carried rather than a
   // second, possibly different, read.
-  if (unified) {
+  const fp = unified ? digestFingerprint(unified.fingerprint, parkedVideoFrames, parkedVideoRenders) : null
+  if (unified && fp) {
     const lastFingerprint = await kvGet<string>(QUEUE_FINGERPRINT_KEY).catch(() => null)
     const decision = shouldSendDigest({
-      fingerprint: unified.fingerprint,
+      fingerprint: fp,
       lastFingerprint: lastFingerprint ?? null,
       oldestEntryAgeDays: unified.entries.reduce((m, e) => Math.max(m, e.ageDays), 0),
       isMonday: new Date().getUTCDay() === 1,
@@ -1750,14 +1765,14 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       // Record what the queue looked like even though nothing was sent, so
       // tomorrow's comparison is against today's reality rather than against
       // the last day that happened to send.
-      await kvSet(QUEUE_FINGERPRINT_KEY, unified.fingerprint, 30 * 86_400).catch(() => {})
+      await kvSet(QUEUE_FINGERPRINT_KEY, fp, 30 * 86_400).catch(() => {})
       return { sent: false, skipped: decision.reason }
     }
   }
 
   const res = await sendOwnerEmail(subject, html, { escalation: 'daily-digest', fromName: 'xdipx daily digest' })
   if (res.sent) {
-    if (unified) await kvSet(QUEUE_FINGERPRINT_KEY, unified.fingerprint, 30 * 86_400).catch(() => {})
+    if (fp) await kvSet(QUEUE_FINGERPRINT_KEY, fp, 30 * 86_400).catch(() => {})
     return { sent: true, subject }
   }
 

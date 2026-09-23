@@ -98,6 +98,8 @@ import { generateVoiceover, generateVoiceoverWithTimestamps } from '~/lib/eleven
 import { charAlignmentToWordTimings, type WordTiming } from '~/lib/caption-timing'
 import { expandVariantSet, type VariantAxes } from '~/lib/video-variants'
 import { resolvePresenterVoiceId } from '~/lib/video-presenter-voice.server'
+import { INFLIGHT_VIDEO_STATUSES } from '~/lib/video-status'
+export { INFLIGHT_VIDEO_STATUSES }
 
 const SCENE_FRAME_CANDIDATES = 3
 const POLLER_IDLE_TTL_SECONDS = 30 * 60
@@ -902,12 +904,6 @@ export interface AdvanceVideoResult {
   parked: number
 }
 
-/**
- * The statuses the poller advances. Every parked status (awaiting_frame_approval,
- * awaiting_render_approval, awaiting_final_review) is deliberately absent: a
- * parked job costs nothing and only an owner action moves it.
- */
-export const INFLIGHT_VIDEO_STATUSES = ['queued', 'running', 'awaiting_provider', 'applying'] as const
 
 export async function advanceInflightVideoJobs(opts: { maxJobs?: number } = {}): Promise<AdvanceVideoResult> {
   const maxJobs = opts.maxJobs ?? 5
@@ -2799,7 +2795,10 @@ export async function rejectRenderedVideo(jobRowId: number, reason: string, reje
   const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
   if (!job) throw new Error('Job not found')
   const updated = await db.update(videoJobs)
-    .set({ status: 'failed', stage: 'failed', error: `Final cut rejected by owner: ${why}`.slice(0, 2000), updatedAt: new Date() })
+    // stage stays 'done' on purpose: status 'failed' already keeps the row out
+    // of every list and fan-out, and the hourly RunPod idle re-probe keys on
+    // stage 'done' + completedAt, so a rejected cut still gets its GPU checked.
+    .set({ status: 'failed', error: `Final cut rejected by owner: ${why}`.slice(0, 2000), updatedAt: new Date() })
     .where(and(eq(videoJobs.id, jobRowId), eq(videoJobs.status, AWAITING_RENDER_APPROVAL)))
     .returning({ id: videoJobs.id })
   if (!updated.length) throw new Error('Job is not awaiting final-cut approval')

@@ -59,6 +59,7 @@ import { mediaAssets } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { getAdminUser } from '~/lib/session.server'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
+import { INFLIGHT_VIDEO_STATUSES } from '~/lib/video-status'
 
 export const meta: MetaFunction = () => [{ title: 'Video Studio — xdipx Admin' }]
 
@@ -395,7 +396,7 @@ async function composeAction(form: FormData): Promise<Response> {
 
 type Row = Awaited<ReturnType<typeof loader>>['rows'][number]
 
-const ACTIVE = new Set(['queued', 'running', 'awaiting_provider', 'applying'])
+const ACTIVE = new Set<string>(INFLIGHT_VIDEO_STATUSES)
 
 export default function VideoStudioPage() {
   const { rows, active, models, cast } = useLoaderData<typeof loader>()

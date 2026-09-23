@@ -603,7 +603,9 @@ describe('render gate: awaiting_render_approval', () => {
   it('rejectRenderedVideo fails the job with the reason and hands a linked episode back', async () => {
     state.selectResults = [[{ ...posterJob, stage: 'done', status: 'awaiting_render_approval', episodeId: 4 }]]
     const result = await rejectRenderedVideo(11, 'hands melt at 0:04', 'mike@xdipx.com')
-    expect(state.updates[0]).toMatchObject({ status: 'failed', stage: 'failed' })
+    expect(state.updates[0]).toMatchObject({ status: 'failed' })
+    // stage stays 'done' so the RunPod idle re-probe still sees the job.
+    expect(state.updates[0]).not.toHaveProperty('stage')
     expect(String(state.updates[0]?.['error'])).toMatch(/Final cut rejected by owner: hands melt/)
     expect(episodeMocks.markEpisodeRenderRejected).toHaveBeenCalledWith(4, 'job job-cut: hands melt at 0:04', 'mike@xdipx.com')
     expect(result).toEqual({ episodeReleased: true, episodeId: 4 })

@@ -71,6 +71,9 @@ import {
   renderTicketsSection,
   renderAdCampaignQueueSection,
   gatherParkedVideoRenders,
+  digestFingerprint,
+  shouldSendDigest,
+  QUEUE_FINGERPRINT_KEY,
   runOwnerDigest,
   type AdCampaignQueueRow,
   type EscalationFacts,
@@ -888,6 +891,57 @@ describe('renderAdCampaignQueueSection', () => {
     const html = renderAdCampaignQueueSection([{ ...row, name: '<script>x</script>' }])
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
+  })
+})
+
+describe('digest fingerprint carries the video gate counts', () => {
+  const decide = (fingerprint: string, lastFingerprint: string) =>
+    shouldSendDigest({ fingerprint, lastFingerprint, oldestEntryAgeDays: 0, isMonday: false })
+
+  it('a day whose only change is a newly parked final cut reads as queue-changed', () => {
+    const before = digestFingerprint('q1', { count: 2 }, { count: 0 })
+    const after = digestFingerprint('q1', { count: 2 }, { count: 1 })
+    expect(decide(after, before)).toEqual({ send: true, reason: 'queue-changed' })
+  })
+
+  it('unchanged counts on an unchanged queue stay quiet; null reads as zero', () => {
+    expect(decide(digestFingerprint('q1', null, null), digestFingerprint('q1', { count: 0 }, { count: 0 })))
+      .toEqual({ send: false, reason: 'queue-unchanged' })
+  })
+
+  it('runOwnerDigest: only parkedVideoRenders 0 -> 1 changes, and the run sends instead of skipping', async () => {
+    const { kvGet, kvSet } = await import('~/lib/kv.server')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-23T13:00:00Z')) // a Wednesday: no Monday send
+    try {
+      let parkedCuts = 0
+      executeMock.mockReset()
+      executeMock.mockImplementation(async (q: unknown) => {
+        const text = new PgDialect().sqlToQuery(q as never).sql
+        if (text.includes("status = 'awaiting_render_approval'")) return { rows: [{ n: parkedCuts, oldest_days: parkedCuts ? 0 : null }] }
+        return { rows: [] }
+      })
+      reconcileMock.mockResolvedValue({ checked: 0, updated: [], skipped: true })
+      loopHealthMock.mockResolvedValue(null)
+
+      // Day 1 baseline: capture the fingerprint the run records.
+      vi.mocked(kvSet).mockClear()
+      await runOwnerDigest({ force: true })
+      const stored = vi.mocked(kvSet).mock.calls.find(c => c[0] === QUEUE_FINGERPRINT_KEY)?.[1] as string | undefined
+      expect(stored).toBeDefined()
+      expect(stored).toMatch(/\|video:0\/0$/)
+      vi.mocked(kvGet).mockImplementation(async (key: string) => (key === QUEUE_FINGERPRINT_KEY ? stored : null) as never)
+
+      // Same world: skipped as unchanged.
+      await expect(runOwnerDigest({ force: false })).resolves.toMatchObject({ sent: false, skipped: 'queue-unchanged' })
+
+      // Only change: one final cut parks. The run sends.
+      parkedCuts = 1
+      await expect(runOwnerDigest({ force: false })).resolves.toMatchObject({ sent: true })
+    } finally {
+      vi.mocked(kvGet).mockImplementation(async () => null)
+      vi.useRealTimers()
+    }
   })
 })
 

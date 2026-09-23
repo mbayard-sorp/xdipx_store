@@ -64,7 +64,15 @@ const S: Record<VideoStatusKey, Omit<VideoStatus, 'key'>> = {
   concept:   { word: 'Concept',      turn: 'room',    cls: 'border-line bg-paper text-ink-3',                glyph: '·' },
 }
 
-const IN_FLIGHT_JOB = new Set(['queued', 'running', 'awaiting_provider', 'applying'])
+/**
+ * The video_jobs statuses the poller advances (the one list; the pipeline and
+ * the render screen import it). Every parked status (awaiting_frame_approval,
+ * awaiting_render_approval, awaiting_final_review) is deliberately absent: a
+ * parked job costs nothing and only an owner action moves it.
+ */
+export const INFLIGHT_VIDEO_STATUSES = ['queued', 'running', 'awaiting_provider', 'applying'] as const
+
+const IN_FLIGHT_JOB = new Set<string>(INFLIGHT_VIDEO_STATUSES)
 
 /**
  * Collapse (episode, job, posts) to the one status the owner reads. First
