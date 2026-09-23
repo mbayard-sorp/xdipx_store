@@ -849,7 +849,7 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   if (pitches && pitches.count > 0) {
     const oldest = pitches.oldestHours == null ? ''
       : pitches.oldestHours >= 48 ? ` (oldest ${Math.round(pitches.oldestHours / 24)}d)` : ` (oldest ${pitches.oldestHours}h)`
-    items.push(`Video pitch: ${pitches.count} ${pitches.count === 1 ? 'clip' : 'clips'} awaiting you, est $${pitches.totalEstUsd.toFixed(2)}${oldest}: <a href="https://xdipx.com/admin/video-studio/scripts" style="color:#c2410c;">/admin/video-studio/scripts</a>`)
+    items.push(`Video pitch: ${pitches.count} ${pitches.count === 1 ? 'clip' : 'clips'} awaiting you, est $${pitches.totalEstUsd.toFixed(2)}, incl. alternates${oldest}: <a href="https://xdipx.com/admin/video-studio/scripts" style="color:#c2410c;">/admin/video-studio/scripts</a>`)
   }
   for (const c of (f.adCampaigns ?? []).slice(0, 5)) {
     items.push(`Ad campaign #${c.id} &ldquo;${esc(clip(c.name, 60))}&rdquo; (${esc(c.platform)}) approved ${c.ageDays}d ago and never launched, only you can create it in-platform: <a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`)

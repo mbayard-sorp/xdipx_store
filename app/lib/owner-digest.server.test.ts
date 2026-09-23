@@ -893,13 +893,13 @@ describe('pending video pitches (plan Phase 2b)', () => {
 
   it('puts one Video pitch line on Needs Mike with the scripts link', () => {
     const html = renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 5, totalEstUsd: 4.2, oldestHours: 30 } })
-    expect(html).toContain('Video pitch: 5 clips awaiting you, est $4.20 (oldest 30h)')
+    expect(html).toContain('Video pitch: 5 clips awaiting you, est $4.20, incl. alternates (oldest 30h)')
     expect(html).toContain('https://xdipx.com/admin/video-studio/scripts')
   })
 
   it('shows the age in days past 48h and singularizes one clip', () => {
     const html = renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 1, totalEstUsd: 0.9, oldestHours: 80 } })
-    expect(html).toContain('Video pitch: 1 clip awaiting you, est $0.90 (oldest 3d)')
+    expect(html).toContain('Video pitch: 1 clip awaiting you, est $0.90, incl. alternates (oldest 3d)')
   })
 
   it('says nothing when there is no pitch or the read failed', () => {

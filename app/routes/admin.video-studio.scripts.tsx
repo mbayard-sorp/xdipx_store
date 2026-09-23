@@ -238,7 +238,7 @@ function PitchCard({ pitch, product }: { pitch: NonNullable<Ep['pitch']>; produc
         <span className="kicker mr-1 text-[10px] text-ink-4">first frame</span>
         {pitch.firstFrameConcept}
       </p>
-      {pitch.readAudioUrl && (
+      {pitch.readAudioUrl ? (
         <div>
           <audio controls preload="none" src={pitch.readAudioUrl} className="w-full md:max-w-sm">
             <track kind="captions" />
@@ -247,6 +247,8 @@ function PitchCard({ pitch, product }: { pitch: NonNullable<Ep['pitch']>; produc
             <p className="mt-0.5 text-[11px] text-amber-800">This read predates the room&rsquo;s last revision of the spoken line.</p>
           )}
         </div>
+      ) : (
+        <p className="text-xs text-ink-4">no audio read on this pitch</p>
       )}
     </div>
   )
