@@ -670,6 +670,16 @@ out the sheets and it's AI sloppy."* Four rules, binding on every bodyscape brie
   includes the full curve of both cheeks below that edge. The brief says what she did with the sheet
   (pulled it up, knotted it at the hip, held it to her chest), because a sheet with no action behind
   it is the "coming out of the sheets" read.
+- **Body hair follows real anatomy (owner direction 2026-09-23, test 4, library 690 and 691).** Owner,
+  verbatim: *"the female bodies don't typically have pubic hair in the cleft of the butt cheeks... They
+  only will have it on their pubic mounds."* When the brief puts the top of the cleft in frame (the
+  buttocks rule above), the model reads it as a pubic zone and grows hair there: 690 rendered a dense
+  patch with a crease that read as genital, 691 a fainter one. So every frame that shows the lower back
+  or the top of the cleft states it positively, "smooth bare skin at the top of the cleft and across
+  the lower back", and carries the negative "no hair at the cleft, the sacrum or the lower back". Pubic
+  hair appears only on the pubic mound, and only on a front frame that briefs it (the belly bullet in
+  §3.2a, still at most 1 per rolling 7). media-manager rejects a render with hair anywhere else on the
+  body the same way it rejects a navel on the back.
 - **The reference frames for all of the above are 676 and 677** (Maya at the window from behind, wand
   held flat across the lower back in her own hand, sheet knotted at the hip). Owner: *"love these!
   Excellent presentation of the product and the body."* One prop and an hour of light away from a
