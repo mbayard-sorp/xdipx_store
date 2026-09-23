@@ -192,11 +192,17 @@ export const SOCIAL_MAX_IMAGES_DEFAULT = 12
  * cost exceeds it, so a model-tier misconfig cannot drain the daily budget in
  * one loop. frame_review parks every job at awaiting_frame_approval so the
  * owner picks the scene frame in /admin/video-studio BEFORE the expensive clip
- * generation; flipping it off lets auto-QC choose the frame.
+ * generation; flipping it off lets auto-QC choose the frame. render_review
+ * parks every finished cut at awaiting_render_approval so the owner approves
+ * the final video before it fans out to social drafts; flipping it off lets a
+ * finished cut land straight in the Ready-for-review list as before.
  */
 export const VIDEO_EXTRA_KEYS = {
   maxCostCents: 'video_team_max_cost_cents',
   frameReview:  'video_frame_review',
+  // Final-cut gate (defaults ON, read like frame_review: anything but 'false'
+  // is on). No migration seeds the row; absence is the expected steady state.
+  renderReview: 'video_render_review',
   // Hard cap on how many jobs one enqueue-set call may expand to (078). Read
   // via getTeamConfig('video').maxVariantsPerSet — the key rides the existing
   // 'video_team_%' LIKE query, no extra round trip.
