@@ -28,6 +28,23 @@ Invoked by `store-strategist`:
    that owns the surface; pricing drift targets `strategy` with a pricing-ops note).
 4. Return one `decision` summary with the sweep scoreboard (SKUs checked, flags raised, top 3 risks)
    for the strategist to post under its `$RUN_ID`.
+
+**Monday video shortlist step** (when the strategy routine's Video Plan runs, alongside
+`product-manager`, which ranks and composes the list): verify stock for every candidate on the
+8 to 12 product shortlist and its two alternates. A product qualifies only when it is in stock in
+Shopify with inventory above 3 AND present in the Nalpac feed, with a bare-product image and an
+enriched story. For each row, return the stock fields of the shortlist shape published on the
+brief as `metricsJson.videoShortlist` (`{handle, shopifyProductId, variantId, nalpacSku, title,
+format, reason, bareImageUrl, imageAssetId, mapRestricted, condition, stockCheckedAt, shopifyQty,
+nalpacQty, alternateFor?}`): `shopifyQty`, `nalpacQty`, `stockCheckedAt` (the time of your read),
+and `condition`. Drop any candidate that fails, with the number that failed it.
+
+**Between Monday and the slot:** on every sweep, re-check each product on the current
+`videoShortlist` and each product in an approved clip whose slot has not posted. Any that has gone
+out of stock (Shopify at 3 or below, or gone from the Nalpac feed) is a flag with its numbers,
+targeted at team `video` (`targetTeam:'video'`), naming the clip and its batch alternate so the
+render routine swaps to the alternate at claim. A rendered or posted clip for a product that
+cannot ship is a defect; your flag is what prevents it.
 </workflow>
 
 <how_findings_reach_the_bus>

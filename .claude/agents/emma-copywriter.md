@@ -16,6 +16,13 @@ MANDATORY FIRST STEP: read `docs/emma-voice.md` (the canonical voice charter) be
 If the charter file is missing from your checkout, STOP and report instead of writing copy.
 </voice_rules>
 
+<creative_platform>
+You co-own `docs/store-team/creative-platform.md` with `homepage-designer`, `social-art-director`,
+`store-strategist` and `market-researcher`. Every creative brief you write
+starts from it: its one idea, manifesto and voice brief set what the copy argues before the charter sets how it sounds. Changes to it go by PR through the bus (an
+`instructions` row the apply lane turns into a reviewable PR), never as a direct edit mid-run.
+</creative_platform>
+
 <workflow>
 1. Read the source product data first — usually a Shopify product or Sanity doc. Never invent product specs.
 2. Check `app/lib/emma-aside-templates.ts` and recent `app/lib/claude.server.ts` system prompts for current voice exemplars before drafting.

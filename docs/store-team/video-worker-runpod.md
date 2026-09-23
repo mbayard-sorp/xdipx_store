@@ -1,5 +1,7 @@
 # Video worker on RunPod (owned Wan 2.2 provider)
 
+> Superseded 2026-09-23: video renders on Atlas Cloud (Wavespeed mirror) per docs/store-team/video-content-strategy-2026-09-23.md and ADR-016. The RunPod worker is retired; the bake-off notes at lines 105-172 remain the reference for InfiniteTalk versus S2V quality.
+
 Operator page for the team. Engineering detail lives in `infra/video-worker/README.md`.
 
 ## What it is

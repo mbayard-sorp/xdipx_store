@@ -4,8 +4,11 @@ The playbook for the weekly platform-format research routine. Entry agent: `soci
 One job per run: scan how short video is winning right now across three lanes (format trends on
 TikTok/Reels/Shorts, trending sounds with a lyrics-cleanliness verdict per sound, competitor and
 creator activity in the sexual-wellness space) and file up to 4 trend briefs as suggestion rows
-targeting the video and social teams. The video-producer's Tuesday run and the social-media-manager's
-daily runs read approved briefs with their weekly context.
+targeting the video and social teams. The Writers Room (Tuesday 17:00 UTC, entry agent
+`series-showrunner`, `docs/store-team/routine-writers-room-weekly.md`) reads the video-targeted
+briefs as context at run start (v2 playbook, lands with this docs PR), and the social-media-manager's daily runs read the social-targeted
+ones with their weekly context. A `strategy` brief is context, not a work order: it never needs
+approval to be read.
 
 Scope note: this routine is distinct from routine 16 (trend-scout), which researches community
 discourse for the content/blog lanes and writes `trendTopicBrief` docs in Sanity. This routine
@@ -14,7 +17,7 @@ never writes a `trendTopicBrief`; its only write path is suggestion rows, mirror
 PROPOSE-ONLY: this routine never posts, never writes `social_posts` rows, never enqueues or
 touches video jobs, and generates no images. Runs on the **Max subscription**. Recommended
 cadence: weekly, Monday 17:00 UTC (after Monday's strategy brief at 12:00, the day before the
-video-producer's Tuesday 17:00 run). Never call the site's Anthropic-keyed endpoints; the site is
+Writers Room's Tuesday 17:00 pitch). Never call the site's Anthropic-keyed endpoints; the site is
 for data reads, gating, run/event recording, suggestion filing, and spend logging only.
 
 Auth on every `/api/team/*` call: header `x-team-secret: $TEAM_TOKEN` (falls back to
@@ -92,7 +95,10 @@ No explicit-content sourcing (education/product/wellness register only). One `st
 
 For each of the strongest findings the pipeline can honestly use, file one suggestion row
 (`POST /api/team/suggestion`): `targetTeam:'video'` for format/production findings,
-`targetTeam:'social'` for timing/caption/sound findings, kind `strategy`. Each body carries:
+`targetTeam:'social'` for timing/caption/sound findings, kind `strategy` for both. Never file a
+video-targeted brief as kind `instructions`: with `video_team_auto_approve_suggestions` off, as
+season 1 requires (it is live on until the owner flips it), an `instructions` row targeting video
+would sit at `proposed` until the owner triages it, and the Writers Room would never see it in time. Each body carries:
 
 - The trend in plain words and why now.
 - Evidence: real URLs actually resolved, with honest sourceQuality (`viewed-directly` /
@@ -135,8 +141,8 @@ Ships inert. To turn on, in order:
    `docs/store-team/routine-schedule.md`): Monday `0 17 * * 1` UTC, fresh session per fire,
    completion notifications off, prompt per the common skeleton in the schedule manifest, and
    record the `trig_` id in the manifest.
-6. **Next Tuesday**, confirm the video-producer run's context read picked up any approved briefs
-   (its retro should name them).
+6. **Next Tuesday**, confirm the Writers Room run's context read picked up the week's
+   video-targeted briefs (its retro should name them).
 
 **Kill-switch drill:** `social_trend_scout_enabled` off = Step 0 exits before any run row. The
 social team's enable switch off = Step 1 gate refuses. Both are honest no-ops.

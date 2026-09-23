@@ -208,6 +208,9 @@ is on the record with a ticket the team can act on tomorrow.
    2026-08-16): the one-campaign-two-registers through line, the X companion beat, the pairing
    rule, maker relations, and the Meta-approved-catalog preference. Where it and a charter or gate
    disagree, the charter and the gate win, as that file itself states.
+4c. `docs/store-team/creative-platform.md` (binding context once it exists): the brand idea, the
+   manifesto, and the campaign signature every surface shares, next to `campaign-look.md`. Where it
+   and the charter disagree, the charter wins.
 5. Calendar (`GET /api/team/calendar`), current featured products/deals. Read it for two signals,
    not as a formality (owner audit 2026-09-01, after the WANDWEEK20 window ran 08-25 to 08-31 with
    zero posts):
@@ -641,6 +644,43 @@ citations). Do not re-add it without an explicit owner decision that a real, pol
 exists.
 
 Commerce on Instagram runs post to profile to link in bio to `/social` to PDP.
+
+## Step 2.8: Clip days (the week is built around the clips)
+
+A **clip day** is any day with a video row scheduled for it: an Instagram `social_posts` row
+carrying a `videoJobId` (postType `video_reel`) whose `scheduledFor` is today in LA wall-clock (the
+fanout writes `scheduledFor` as the LA wall-clock date of the episode's planned slot, not the UTC
+date). These rows arrive fanned out from the owner's render approval in `/admin/video-studio` (see
+the video note in Step 5); you never create them. Check at run start with
+`POST /api/team/social-post {"op":"list","status":"draft"}` (the list op takes no platform filter)
+and keep the rows where `platform` is `instagram`, `videoJobId` is set, and `scheduledFor` is today
+in LA wall-clock. That list caps at 50 rows, so before declaring a non-clip day also run
+`{"op":"list","status":"draft","reviewStatus":"pending_review"}` and apply the same filter.
+
+On a clip day:
+
+- **The reel is the day's Instagram post, and the owner posts it.** Draft no competing Instagram
+  still for that day. Do NOT send the reel row to `POST /api/team/publish-gate`: the hourly publish
+  tick does not read `video_team_autopublish` today, so a gate PASS that moves a `videoJobId` row to
+  `approved` ships the reel unattended. The reel row stays at `pending_review`. The owner's "post"
+  touch is the manual **Post now** in Social Studio (`/admin/socials/queue`), which already
+  double-gates video through `manual-publish-gate`. When the Phase 3 valve double-gate merges and
+  the owner delegates by flipping `video_team_autopublish` on, this paragraph is superseded.
+- **Step 1b counts the reel.** On a clip day the reel row at `pending_review` counts toward Step 1b's
+  definition of done for Instagram, and the repair ladder does not fire for Instagram that day.
+  X is judged by Step 1b as usual.
+- **The X companion leads with the clip's one fact** (the single product fact the clip is built on,
+  from its script), at register 6-7 per the social addendum, on the same SKU, with the PDP link and
+  UTMs per the companion beat in Step 3. It carries the clip itself once X video upload ships
+  (`app/lib/social-publish/x.server.ts` does not implement chunked video upload yet and refuses a
+  video row); until then it is a still companion under Step 5's X rules, gated in Step 6.5 like any
+  X draft.
+- **Captions are unchanged.** Instagram stays at 9 by implication; the reel's caption came through
+  the owner's approval and is not yours to rewrite (file a suggestion targeting the video team if it
+  reads off-voice).
+
+On a non-clip day nothing changes: stills remain the base layer, and the rest of this playbook runs
+as written. Report clip days in the run summary as `clipDay: true` with the reel's post id.
 
 ## Step 3 — Draft (reworks included)
 
@@ -1781,7 +1821,8 @@ identity is degraded, rather than letting a reuse-only run look like a normal on
 the video_jobs pipeline), never improvised here: approved videos arrive in your world as
 pre-approved `social_posts` rows (postType `video_reel`/`video_short`, `video_job_id` set) fanned
 out from `/admin/video-studio`. Do not draft over them, count them against your text/image
-quotas, or reschedule them; your daily drafts stay additive to the video slate. If a video draft's
+quotas, or reschedule them. On a clip day the reel is the day's Instagram post and the X companion
+follows it (Step 2.8); on every other day your drafts stay additive to the video slate. If a video draft's
 caption reads off-voice, file a suggestion targeting the video team rather than editing it.
 
 LinkedIn drafts are **text-only by default** — no `mediaUrls` required, and product photography is
@@ -2031,7 +2072,10 @@ The gate that runs works; the problem this sweep fixes is coverage, not the gate
 `videoJobId` exactly the same way, one `POST /api/team/publish-gate` call per row. These are Reels
 the owner approved in the Video Studio; that approval reviewed the video, not the finished post, so
 they wait here for the same verdict your own drafts get. Skipping them strands them: no other pass
-gates a video row, and an ungated row can never publish.
+gates a video row, and an ungated row can never publish. **Carve-out (clip days, Step 2.8):** until
+the Phase 3 valve double-gate merges and the owner flips `video_team_autopublish` on, do not gate a
+`videoJobId` reel row here. It stays at `pending_review` for the owner's manual Post now in
+`/admin/socials/queue`, and on its clip day it counts toward Step 1b's done for Instagram.
 
 Give it only the post id. It gathers its own inputs server-side: the caption as it will publish,
 every media URL, the charter as it reads today, and the ads policy (see the known-gap note above for

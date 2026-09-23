@@ -1,5 +1,7 @@
 # Series Bible: The Group Chat (working title)
 
+> Shelved for season 1 of the product-talk program (owner decision 2026-09-23). Cast, standing sets and voices carry over unchanged into docs/store-team/video-clip-rules.md (lands with this change) and docs/store-team/video-realism-recipe.md. The four ledger episodes move to `shelved`. Nothing here binds a video run until the owner reopens the show. §4 and §9 stay the pointer for the daily still story line per instagram-campaigns.md §3.2c.
+
 > Canon and rules for xdipx's serialized video program. This document is the show. It changes
 > deliberately, by PR through the improvement bus (kind `instructions`), never mid-run. Mutable
 > per-episode state (arc beats, open loops, decisions) lives in the `video_episodes` ledger, not
