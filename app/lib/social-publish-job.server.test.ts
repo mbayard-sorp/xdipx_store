@@ -68,8 +68,12 @@ function fakeRepo(rows: PostRow[], over: Partial<PublishRepo> = {}) {
  * has its own tests; a publish case that also made eight Graph calls would be
  * testing two things and hanging on one of them.
  */
-const tick = (opts: Parameters<typeof runSocialPublishTick>[0]) =>
-  runSocialPublishTick({ removalWatch: async () => null, ...opts })
+const tick = (
+  opts: Omit<Parameters<typeof runSocialPublishTick>[0], 'isVideoEnabled'> & { isVideoEnabled?: () => Promise<boolean> },
+) =>
+  // Video valve on by default: these cases are about stills and the platform
+  // valve. The double-gate has its own suite in social-publish-run.server.test.ts.
+  runSocialPublishTick({ removalWatch: async () => null, isVideoEnabled: async () => true, ...opts })
 
 const enabled = async () => true
 const cap = (n: number) => async () => n
@@ -158,7 +162,7 @@ describe('the durable stock guard (shopify_product_id)', () => {
     const { repo, calls } = fakeRepo([post({ shopifyProductId: 'gid://shopify/Product/404' })])
     const publish = vi.fn()
     const r = await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish, repo,
       checkStockByProductId: async () => null,
     })
     expect(publish).not.toHaveBeenCalled()
@@ -194,7 +198,7 @@ describe('the durable stock guard (shopify_product_id)', () => {
     const { repo, calls } = fakeRepo([oos, clean])
     const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_2' }))
     const r = await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish, repo,
       checkStockByProductId: async (id) => id !== 'gid://shopify/Product/999',
     })
     expect(r.attempts.map(a => ({ postId: a.postId, outcome: a.outcome }))).toEqual([
@@ -232,7 +236,7 @@ describe('the gate runs at publish time', () => {
     const { repo, calls } = fakeRepo([post()])
     const publish = vi.fn()
     await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish, repo,
       productHandleFor: async () => 'gone-oos',
       gateDeps: { getAvailability: async () => false, getProductTypeDial: async () => null },
     })
@@ -309,7 +313,7 @@ describe('the gate runs at publish time', () => {
     const publish = vi.fn()
     const seen: string[] = []
     await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish, repo,
       gateDeps: { getAvailability: async (h) => { seen.push(h); return false }, getProductTypeDial: async () => null },
     })
     expect(seen).toEqual(['femmefunn-ultra-bullet'])
@@ -320,7 +324,7 @@ describe('the gate runs at publish time', () => {
   it('publishes a clean post', async () => {
     const { repo, calls } = fakeRepo([post()])
     const r = await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
     })
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
     expect(calls.posted).toEqual([1])
@@ -389,7 +393,7 @@ describe('the gate runs at publish time', () => {
     const { repo, calls } = fakeRepo([post({ feedback: null, gateStatus: 'owner' })])
     const publish = vi.fn()
     await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish, repo,
       productHandleFor: async () => 'gone-oos',
       gateDeps: { getAvailability: async () => false, getProductTypeDial: async () => null },
     })
@@ -403,7 +407,7 @@ describe('the gate runs at publish time', () => {
     const { repo } = fakeRepo([post({ feedback: stamped, gateStatus: 'pass', shopifyProductId: 'gid://shopify/Product/42' })])
     const seen: string[] = []
     await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
       checkStockByProductId: async () => true,
       productHandleById: async (id) => (id === 'gid://shopify/Product/42' ? 'fresh-handle' : null),
       gateDeps: { getAvailability: async (h) => { seen.push(h); return true }, getProductTypeDial: async () => null, getCastTarget: async () => 'universal' },
@@ -417,7 +421,7 @@ describe('the gate runs at publish time', () => {
     const { repo } = fakeRepo([post({ feedback: stamped, gateStatus: 'pass', shopifyProductId: 'gid://shopify/Product/42' })])
     const seen: string[] = []
     await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
       checkStockByProductId: async () => true,
       productHandleById: async () => null,
       gateDeps: { getAvailability: async (h) => { seen.push(h); return true }, getProductTypeDial: async () => null, getCastTarget: async () => 'universal' },
@@ -428,7 +432,7 @@ describe('the gate runs at publish time', () => {
   it('keeps the PASS stamp behind the stock-guard note when it bounces a row (burn-in)', async () => {
     const { repo, calls } = fakeRepo([post({ feedback: PASS_STAMP, gateStatus: 'pass', shopifyProductId: 'gid://shopify/Product/9' })])
     await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
       checkStockByProductId: async () => false,
     })
     const fb = calls.needsChanges[0]?.feedback ?? ''
@@ -473,7 +477,7 @@ describe('the gate runs at publish time', () => {
     const { repo, calls } = fakeRepo([reel])
     const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_reel_1' }))
     const r = await tick({
-      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish, repo,
       gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => null, getCastTarget: async () => 'universal' },
     })
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'published' }])
@@ -585,7 +589,7 @@ describe('the removal watch guards the tick', () => {
     const { repo } = fakeRepo([post()])
     const publish = vi.fn()
     const r = await runSocialPublishTick({
-      isEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish, repo,
       removalWatch: async () => ({
         checked: 3, removed: [17], removalsInWindow: 2, unknown: 0, valveTurnedOff: true,
       }),
@@ -597,7 +601,7 @@ describe('the removal watch guards the tick', () => {
   it('publishes normally after a single removal, which only steps volume down', async () => {
     const { repo } = fakeRepo([post()])
     const r = await runSocialPublishTick({
-      isEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
       removalWatch: async () => ({
         checked: 3, removed: [17], removalsInWindow: 1, unknown: 0, frequencySteppedTo: 1,
       }),

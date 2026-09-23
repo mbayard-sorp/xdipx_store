@@ -380,18 +380,23 @@ export async function uploadMediaFromUrl(
   }
 }
 
-// ─── Chunked Video Upload (v1.1 INIT / APPEND / FINALIZE / STATUS) ───────
+// ─── Chunked Video Upload (INIT / APPEND / FINALIZE / STATUS) ────────────
 
 /** X's APPEND ceiling per segment. Our clips are a few MB, so usually one. */
 export const X_VIDEO_SEGMENT_BYTES = 5 * 1024 * 1024
 
-/** X's ceiling for a `tweet_video` upload. One definition, in x-limits. */
-export const X_VIDEO_MAX_BYTES = X_VIDEO_MAX_SIZE_BYTES
-
 /** Total time we will wait on X's post-FINALIZE processing before giving up. */
 export const X_VIDEO_MAX_PROCESSING_WAIT_MS = 120_000
 
-const UPLOAD_URL = 'https://upload.x.com/1.1/media/upload.json'
+/**
+ * The two hosts that speak the chunked command protocol. v1.1 is primary
+ * because it is the one verified live (image upload, 2026-08-16). v2 is the
+ * fallback for the day v1.1 is retired: X has announced that move, and a 404
+ * or 410 on INIT is what it will look like. Same multipart fields and the same
+ * OAuth 1.0a signing on both.
+ */
+export const X_UPLOAD_URL_V1 = 'https://upload.x.com/1.1/media/upload.json'
+export const X_UPLOAD_URL_V2 = 'https://api.x.com/2/media/upload'
 
 interface ProcessingInfo {
   state?: 'pending' | 'in_progress' | 'succeeded' | 'failed'
@@ -400,9 +405,26 @@ interface ProcessingInfo {
   error?: { code?: number; name?: string; message?: string }
 }
 
+/** v1.1 answers flat; v2 wraps the same fields under `data` with `id`. */
 interface UploadCommandResponse {
   media_id_string?: string
   processing_info?: ProcessingInfo
+  data?: { id?: string; processing_info?: ProcessingInfo }
+}
+
+/** An upload-command failure that remembers its HTTP status. */
+class XUploadError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+  }
+}
+
+function mediaIdOf(r: UploadCommandResponse): string | undefined {
+  return r.media_id_string ?? r.data?.id
+}
+
+function processingInfoOf(r: UploadCommandResponse): ProcessingInfo | undefined {
+  return r.processing_info ?? r.data?.processing_info
 }
 
 /**
@@ -421,7 +443,7 @@ export function videoSegmentRanges(
 }
 
 /**
- * POST one command to the v1.1 upload endpoint as multipart/form-data.
+ * POST one command to an upload endpoint as multipart/form-data.
  *
  * Same signing as `uploadMedia`: OAuth 1.0a over url + method only. That is
  * correct for multipart, whose body parameters are excluded from the OAuth
@@ -431,9 +453,9 @@ export function videoSegmentRanges(
  * `media` part rather than base64 `media_data`, so a 5 MB segment stays 5 MB on
  * the wire.
  */
-async function postUploadCommand(fields: Record<string, string | Buffer>): Promise<Response> {
+async function postUploadCommand(uploadUrl: string, fields: Record<string, string | Buffer>): Promise<Response> {
   const oauth = getOAuth()
-  const authHeader = oauth.toHeader(oauth.authorize({ url: UPLOAD_URL, method: 'POST' }, getToken()))
+  const authHeader = oauth.toHeader(oauth.authorize({ url: uploadUrl, method: 'POST' }, getToken()))
   const boundary = `----XBoundary${Date.now()}${Math.random().toString(16).slice(2)}`
 
   const parts: Buffer[] = []
@@ -451,14 +473,14 @@ async function postUploadCommand(fields: Record<string, string | Buffer>): Promi
   }
   parts.push(Buffer.from(`--${boundary}--\r\n`))
 
-  const res = await fetch(UPLOAD_URL, {
+  const res = await fetch(uploadUrl, {
     method: 'POST',
     headers: { ...authHeader, 'Content-Type': `multipart/form-data; boundary=${boundary}` },
     body: Buffer.concat(parts),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`X video ${String(fields.command)} failed ${res.status}: ${text.slice(0, 300)}`)
+    throw new XUploadError(`X video ${String(fields.command)} failed ${res.status}: ${text.slice(0, 300)}`, res.status)
   }
   return res
 }
@@ -478,20 +500,27 @@ async function readUploadJson(res: Response, command: string): Promise<UploadCom
   }
 }
 
-async function getUploadStatus(mediaId: string): Promise<UploadCommandResponse> {
+async function getUploadStatus(uploadUrl: string, mediaId: string): Promise<UploadCommandResponse> {
   // Query params ride on the URL, which oauth-1.0a folds into the signature.
-  const url = `${UPLOAD_URL}?command=STATUS&media_id=${encodeURIComponent(mediaId)}`
+  const url = `${uploadUrl}?command=STATUS&media_id=${encodeURIComponent(mediaId)}`
   const oauth = getOAuth()
   const authHeader = oauth.toHeader(oauth.authorize({ url, method: 'GET' }, getToken()))
   const res = await fetch(url, { method: 'GET', headers: { ...authHeader } })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`X video STATUS failed ${res.status}: ${text.slice(0, 300)}`)
+    throw new XUploadError(`X video STATUS failed ${res.status}: ${text.slice(0, 300)}`, res.status)
   }
   return readUploadJson(res, 'STATUS')
 }
 
+/** Statuses on INIT that mean "this endpoint is gone", not "this upload is bad". */
+const ENDPOINT_GONE = new Set([404, 410])
+
 export interface UploadVideoOptions {
+  /**
+   * Overrides the download's own content-type. Normally omitted: the Blob's
+   * `video/*` header is used, and `video/mp4` only when there is none.
+   */
   mediaType?: string
   /** Injected so tests do not actually wait out `check_after_secs`. */
   sleep?: (ms: number) => Promise<void>
@@ -509,9 +538,14 @@ export interface UploadVideoOptions {
  * Throws with a specific message on every failure, unlike `uploadMediaFromUrl`
  * which swallows to null: the caller refuses to post without the video either
  * way, and the message is what the owner reads on the failed row.
+ *
+ * Endpoint fallback: a 404 or 410 on v1.1 INIT reruns the whole sequence on the
+ * v2 endpoint. If v2 refuses INIT as well, the error names both statuses, so a
+ * retired endpoint reads as exactly that on the failed row rather than as a bad
+ * clip. Only INIT falls back: once an endpoint has accepted INIT, a later
+ * failure is about this upload, not about the endpoint.
  */
 export async function uploadVideoFromUrl(videoUrl: string, opts: UploadVideoOptions = {}): Promise<string> {
-  const mediaType = opts.mediaType ?? 'video/mp4'
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
   const maxWaitMs = opts.maxProcessingWaitMs ?? X_VIDEO_MAX_PROCESSING_WAIT_MS
   const label = videoUrl.split('?')[0]
@@ -519,32 +553,56 @@ export async function uploadVideoFromUrl(videoUrl: string, opts: UploadVideoOpti
   const download = await fetch(videoUrl)
   if (!download.ok) throw new Error(`Video download failed ${download.status} for ${label}`)
   const declared = Number(download.headers.get('content-length') ?? NaN)
-  if (Number.isFinite(declared) && declared > X_VIDEO_MAX_BYTES) {
-    throw new Error(`Video is ${declared} bytes; X accepts at most ${X_VIDEO_MAX_BYTES}.`)
+  if (Number.isFinite(declared) && declared > X_VIDEO_MAX_SIZE_BYTES) {
+    throw new Error(`Video is ${declared} bytes; X accepts at most ${X_VIDEO_MAX_SIZE_BYTES}.`)
   }
+  // The download's own type, as uploadMediaFromUrl does, defaulting only when
+  // absent. A non-video type (a Blob served as application/octet-stream) also
+  // falls back to video/mp4: X's INIT refuses anything that is not video/*, and
+  // every clip the pipeline renders is an MP4.
+  const headerType = download.headers.get('content-type')?.split(';')[0]?.trim()
+  const mediaType = opts.mediaType ?? (headerType?.startsWith('video/') ? headerType : 'video/mp4')
   const buffer = Buffer.from(await download.arrayBuffer())
   if (buffer.length === 0) throw new Error(`Video download for ${label} was empty.`)
-  if (buffer.length > X_VIDEO_MAX_BYTES) {
-    throw new Error(`Video is ${buffer.length} bytes; X accepts at most ${X_VIDEO_MAX_BYTES}.`)
+  if (buffer.length > X_VIDEO_MAX_SIZE_BYTES) {
+    throw new Error(`Video is ${buffer.length} bytes; X accepts at most ${X_VIDEO_MAX_SIZE_BYTES}.`)
   }
 
-  const init = await readUploadJson(
-    await postUploadCommand({
-      command: 'INIT',
-      total_bytes: String(buffer.length),
-      media_type: mediaType,
-      media_category: 'tweet_video',
-    }),
-    'INIT',
-  )
-  const mediaId = init.media_id_string
-  if (!mediaId) throw new Error('X video INIT returned no media_id_string.')
+  const initFields = {
+    command: 'INIT',
+    total_bytes: String(buffer.length),
+    media_type: mediaType,
+    media_category: 'tweet_video',
+  }
+  const init = async (url: string) => {
+    const r = await readUploadJson(await postUploadCommand(url, initFields), 'INIT')
+    const id = mediaIdOf(r)
+    if (!id) throw new Error('X video INIT returned no media id.')
+    return id
+  }
+
+  let uploadUrl = X_UPLOAD_URL_V1
+  let mediaId: string
+  try {
+    mediaId = await init(X_UPLOAD_URL_V1)
+  } catch (err) {
+    if (!(err instanceof XUploadError) || !ENDPOINT_GONE.has(err.status)) throw err
+    console.warn(`[twitter] v1.1 media upload INIT answered ${err.status}; retrying on v2.`)
+    uploadUrl = X_UPLOAD_URL_V2
+    try {
+      mediaId = await init(X_UPLOAD_URL_V2)
+    } catch (err2) {
+      const v2Status = err2 instanceof XUploadError ? String(err2.status) : 'no status'
+      const v2Detail = err2 instanceof Error ? err2.message : String(err2)
+      throw new Error(`X video v1.1 and v2 media upload both refused (${err.status}, ${v2Status}): ${v2Detail}`)
+    }
+  }
 
   // APPEND answers 2xx with an empty body; only the status matters.
   const ranges = videoSegmentRanges(buffer.length)
   for (let i = 0; i < ranges.length; i++) {
     const [start, end] = ranges[i]!
-    await postUploadCommand({
+    await postUploadCommand(uploadUrl, {
       command: 'APPEND',
       media_id: mediaId,
       segment_index: String(i),
@@ -553,12 +611,12 @@ export async function uploadVideoFromUrl(videoUrl: string, opts: UploadVideoOpti
   }
 
   const finalized = await readUploadJson(
-    await postUploadCommand({ command: 'FINALIZE', media_id: mediaId }),
+    await postUploadCommand(uploadUrl, { command: 'FINALIZE', media_id: mediaId }),
     'FINALIZE',
   )
 
   // No processing_info on FINALIZE means X is done with it already.
-  let info = finalized.processing_info
+  let info = processingInfoOf(finalized)
   let waitedMs = 0
   while (info && info.state !== 'succeeded') {
     if (info.state === 'failed') {
@@ -575,7 +633,7 @@ export async function uploadVideoFromUrl(videoUrl: string, opts: UploadVideoOpti
     }
     await sleep(nextMs)
     waitedMs += nextMs
-    info = (await getUploadStatus(mediaId)).processing_info
+    info = processingInfoOf(await getUploadStatus(uploadUrl, mediaId))
   }
 
   return mediaId

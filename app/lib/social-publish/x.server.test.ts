@@ -140,7 +140,7 @@ describe('xPublisher video', () => {
     })
 
     expect(result).toEqual({ ok: true, externalPostId: 'tweet-1' })
-    expect(uploadVideoFromUrl).toHaveBeenCalledWith('https://blob.example/clip.mp4?token=x', { mediaType: 'video/mp4' })
+    expect(uploadVideoFromUrl).toHaveBeenCalledWith('https://blob.example/clip.mp4?token=x')
     // The poster is not uploaded as a second media item: X takes one video.
     expect(uploadMediaFromUrl).not.toHaveBeenCalled()
     expect(postTweet).toHaveBeenCalledWith('the clip', ['video-media-1'])

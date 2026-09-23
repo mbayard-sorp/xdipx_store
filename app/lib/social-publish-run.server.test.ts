@@ -3,6 +3,7 @@ import { instagramTickDeps, xTickDeps, VIDEO_TICK_VALVE_KEY } from './social-pub
 import {
   runSocialPublishTick,
   MAX_PER_TICK,
+  VIDEO_SKIP_LOOKAHEAD,
   type PostRow,
   type PublishRepo,
   type PublishTickDeps,
@@ -129,7 +130,7 @@ function fakeRepo(rows: PostRow[]) {
 }
 
 /** A tick with everything but the valves and the repo stubbed out. */
-function tickWith(rows: PostRow[], over: Partial<PublishTickDeps>) {
+function tickWith(rows: PostRow[], over: Pick<PublishTickDeps, 'isVideoEnabled'> & Partial<Pick<PublishTickDeps, 'isEnabled'>>) {
   const { repo, calls } = fakeRepo(rows)
   const publish = vi.fn(async (p: PostRow) => ({ ok: true as const, externalPostId: `ext-${p.id}` }))
   const run = () => runSocialPublishTick({
@@ -196,11 +197,34 @@ describe('the video double-gate in the scheduled tick', () => {
     expect(calls.limits).toEqual([MAX_PER_TICK])
   })
 
-  it('treats an absent isVideoEnabled as on, so pre-existing callers are unchanged', async () => {
-    const { run, calls } = tickWith([videoRow(1)], {})
-    await run()
-    expect(calls.posted).toEqual([1])
-    expect(calls.limits).toEqual([MAX_PER_TICK])
+  it('notes video_lookahead_exhausted when the widened read is full and all video', async () => {
+    const rows = Array.from({ length: MAX_PER_TICK + VIDEO_SKIP_LOOKAHEAD + 3 }, (_, i) => videoRow(i + 1))
+    const { run, calls } = tickWith(rows, { isVideoEnabled: async () => false })
+    const r = await run()
+    expect(calls.limits).toEqual([MAX_PER_TICK + VIDEO_SKIP_LOOKAHEAD])
+    expect(calls.posted).toEqual([])
+    expect(r.note).toBe('video_lookahead_exhausted')
+  })
+
+  it('does not note exhaustion when the read was short (the queue simply ran out)', async () => {
+    const { run } = tickWith([videoRow(1), videoRow(2)], { isVideoEnabled: async () => false })
+    const r = await run()
+    expect(r).not.toHaveProperty('note')
+  })
+
+  it('does not note exhaustion when the read was full but held a still', async () => {
+    const rows = Array.from({ length: MAX_PER_TICK + VIDEO_SKIP_LOOKAHEAD }, (_, i) =>
+      i === MAX_PER_TICK + VIDEO_SKIP_LOOKAHEAD - 1 ? stillRow(i + 1) : videoRow(i + 1))
+    const { run, calls } = tickWith(rows, { isVideoEnabled: async () => false })
+    const r = await run()
+    expect(calls.posted).toEqual([MAX_PER_TICK + VIDEO_SKIP_LOOKAHEAD])
+    expect(r).not.toHaveProperty('note')
+  })
+
+  it('does not note exhaustion with the video valve on', async () => {
+    const { run } = tickWith([videoRow(1), videoRow(2)], { isVideoEnabled: async () => true })
+    const r = await run()
+    expect(r).not.toHaveProperty('note')
   })
 })
 

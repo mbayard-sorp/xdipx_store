@@ -7,8 +7,9 @@ import {
   uploadVideoFromUrl,
   videoSegmentRanges,
   X_VIDEO_SEGMENT_BYTES,
-  X_VIDEO_MAX_BYTES,
+  X_UPLOAD_URL_V2,
 } from './twitter.server'
+import { X_VIDEO_MAX_SIZE_BYTES } from './social-publish/x-limits'
 
 const MB5 = 5 * 1024 * 1024
 const UPLOAD = 'https://upload.x.com/1.1/media/upload.json'
@@ -59,6 +60,10 @@ function fakeX(opts: {
   statusSequence?: unknown[]
   failOn?: { command: string; status: number; body: string }
   contentLength?: string
+  /** The Blob's content-type header; `null` sends none. Default video/mp4. */
+  contentType?: string | null
+  /** INIT status per host, to simulate a retired endpoint. */
+  initStatusByHost?: Record<string, number>
 }) {
   const calls: Call[] = []
   const statuses = [...(opts.statusSequence ?? [])]
@@ -66,9 +71,12 @@ function fakeX(opts: {
     const url = String(input)
     const method = init?.method ?? 'GET'
     if (url.startsWith('https://blob.example/')) {
-      const headers: Record<string, string> = { 'content-type': 'video/mp4' }
+      const headers: Record<string, string> = {}
+      const ct = opts.contentType === undefined ? 'video/mp4' : opts.contentType
+      if (ct) headers['content-type'] = ct
       if (opts.contentLength) headers['content-length'] = opts.contentLength
-      return new Response(new Uint8Array(opts.videoBytes), { status: 200, headers })
+      // A Blob body so a null content-type is really absent, not text/plain.
+      return new Response(new Blob([new Uint8Array(opts.videoBytes)]), { status: 200, headers })
     }
     const headers = (init?.headers ?? {}) as Record<string, string>
     if (method === 'GET') {
@@ -80,6 +88,8 @@ function fakeX(opts: {
     const { fields, mediaBytes } = parseMultipart(init!.body as Buffer, headers['Content-Type']!)
     const command = fields.command!
     calls.push({ url, method, command, fields, mediaBytes, auth: headers.Authorization })
+    const initStatus = command === 'INIT' ? opts.initStatusByHost?.[url] : undefined
+    if (initStatus) return new Response('{"errors":[{"message":"gone"}]}', { status: initStatus })
     if (opts.failOn?.command === command) return new Response(opts.failOn.body, { status: opts.failOn.status })
     if (command === 'INIT') return jsonRes({ media_id_string: 'm-1', expires_after_secs: 86400 })
     if (command === 'APPEND') return new Response(null, { status: 204 })
@@ -222,13 +232,80 @@ describe('uploadVideoFromUrl', () => {
       String(input).startsWith('https://blob.example/')
         ? new Response(new Uint8Array(10), { status: 200 })
         : jsonRes({})))
-    await expect(uploadVideoFromUrl(BLOB, { sleep: noSleep })).rejects.toThrow(/INIT returned no media_id_string/)
+    await expect(uploadVideoFromUrl(BLOB, { sleep: noSleep })).rejects.toThrow(/INIT returned no media id/)
   })
 
   it('refuses a download whose declared size is over 512 MB, before INIT', async () => {
-    const { calls } = fakeX({ videoBytes: 10, contentLength: String(X_VIDEO_MAX_BYTES + 1) })
+    const { calls } = fakeX({ videoBytes: 10, contentLength: String(X_VIDEO_MAX_SIZE_BYTES + 1) })
     await expect(uploadVideoFromUrl(BLOB, { sleep: noSleep })).rejects.toThrow(/X accepts at most/)
     expect(calls).toHaveLength(0)
+  })
+
+  it('falls back to the v2 endpoint for the whole sequence when v1.1 INIT answers 404', async () => {
+    const { calls } = fakeX({
+      videoBytes: 1000,
+      initStatusByHost: { [UPLOAD]: 404 },
+      finalizeInfo: { state: 'pending', check_after_secs: 1 },
+      statusSequence: [{ state: 'succeeded' }],
+    })
+    await expect(uploadVideoFromUrl(BLOB, { sleep: noSleep })).resolves.toBe('m-1')
+    expect(calls.map(c => [c.command, c.url.split('?')[0]])).toEqual([
+      ['INIT', UPLOAD],
+      ['INIT', X_UPLOAD_URL_V2],
+      ['APPEND', X_UPLOAD_URL_V2],
+      ['FINALIZE', X_UPLOAD_URL_V2],
+      ['STATUS', X_UPLOAD_URL_V2],
+    ])
+    // Identical multipart fields and signing on the fallback.
+    expect(calls[1]!.fields).toEqual(calls[0]!.fields)
+    for (const c of calls) expect(c.auth).toMatch(/^OAuth /)
+  })
+
+  it('reads the v2 response shape (data.id, data.processing_info)', async () => {
+    const statuses = [{ state: 'succeeded' }]
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('https://blob.example/')) return new Response(new Uint8Array(10), { status: 200 })
+      if (url === UPLOAD) return new Response('', { status: 410 })
+      if ((init?.method ?? 'GET') === 'GET') return jsonRes({ data: { id: 'v2-id', processing_info: statuses.shift() } })
+      const body = (init!.body as Buffer).toString('latin1')
+      if (body.includes('\r\n\r\nAPPEND\r\n')) return new Response(null, { status: 204 })
+      if (body.includes('\r\n\r\nFINALIZE\r\n')) return jsonRes({ data: { id: 'v2-id', processing_info: { state: 'pending', check_after_secs: 1 } } })
+      return jsonRes({ data: { id: 'v2-id' } })
+    }))
+    await expect(uploadVideoFromUrl(BLOB, { sleep: noSleep })).resolves.toBe('v2-id')
+    expect(noSleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('names both endpoints and both statuses when v1.1 and v2 both refuse INIT', async () => {
+    const { calls } = fakeX({ videoBytes: 1000, initStatusByHost: { [UPLOAD]: 410, [X_UPLOAD_URL_V2]: 403 } })
+    await expect(uploadVideoFromUrl(BLOB, { sleep: noSleep }))
+      .rejects.toThrow(/v1\.1 and v2 media upload both refused \(410, 403\)/)
+    expect(calls.map(c => c.command)).toEqual(['INIT', 'INIT'])
+  })
+
+  it('does not fall back on a non-404/410 INIT failure', async () => {
+    const { calls } = fakeX({ videoBytes: 1000, initStatusByHost: { [UPLOAD]: 403 } })
+    await expect(uploadVideoFromUrl(BLOB, { sleep: noSleep })).rejects.toThrow(/INIT failed 403/)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('uses the download\'s video content-type as media_type', async () => {
+    const { calls } = fakeX({ videoBytes: 10, contentType: 'video/quicktime' })
+    await uploadVideoFromUrl(BLOB, { sleep: noSleep })
+    expect(calls[0]!.fields.media_type).toBe('video/quicktime')
+  })
+
+  it('defaults media_type to video/mp4 when the download has no content-type', async () => {
+    const { calls } = fakeX({ videoBytes: 10, contentType: null })
+    await uploadVideoFromUrl(BLOB, { sleep: noSleep })
+    expect(calls[0]!.fields.media_type).toBe('video/mp4')
+  })
+
+  it('defaults media_type to video/mp4 when the download is typed as a non-video', async () => {
+    const { calls } = fakeX({ videoBytes: 10, contentType: 'application/octet-stream' })
+    await uploadVideoFromUrl(BLOB, { sleep: noSleep })
+    expect(calls[0]!.fields.media_type).toBe('video/mp4')
   })
 
   it('throws on a failed download without calling X', async () => {

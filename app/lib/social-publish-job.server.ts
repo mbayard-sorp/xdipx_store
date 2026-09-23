@@ -105,6 +105,14 @@ export interface PublishTickResult {
   expired?: number
   /** Approved rows this platform should have published days ago and did not. */
   overdue?: number
+  /**
+   * Why a tick that ran published nothing, when the cause is structural rather
+   * than a row's own fault. `video_lookahead_exhausted`: the video valve is off
+   * and every row the widened read returned was a video, so any still queued
+   * behind them was out of reach this tick. Present only in that case, so the
+   * zero-day check can name the cause instead of reporting a silent day.
+   */
+  note?: 'video_lookahead_exhausted'
 }
 
 /**
@@ -165,10 +173,10 @@ export interface PublishTickDeps {
    * row is left untouched and eligible, and reported as
    * `skipped_video_valve_off`.
    *
-   * Optional so the callers and fakes that predate it keep their behavior;
-   * both scheduled platforms supply it (`social-publish-run.server.ts`).
+   * Required, deliberately: an optional reader would let a future deps object
+   * publish video unattended simply by leaving it out.
    */
-  isVideoEnabled?: () => Promise<boolean>
+  isVideoEnabled: () => Promise<boolean>
   /**
    * Month-to-date spend in USD, and the ceiling it is checked against. Both
    * optional, and supplied together or not at all.
@@ -772,9 +780,15 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
   // being claimed, and the eligibility read looks further down the queue so
   // an off valve cannot starve stills behind the videos at the head of it:
   // skipped rows do not spend the tick's `room`.
-  const videoEnabled = deps.isVideoEnabled ? await deps.isVideoEnabled() : true
+  const videoEnabled = await deps.isVideoEnabled()
   const room = Math.min(MAX_PER_TICK, maxPerDay - publishedToday)
-  const eligible = await repo.listEligible(videoEnabled ? room : room + VIDEO_SKIP_LOOKAHEAD)
+  const readLimit = videoEnabled ? room : room + VIDEO_SKIP_LOOKAHEAD
+  const eligible = await repo.listEligible(readLimit)
+  // The read came back full and every row in it is a video the off valve will
+  // pass over: there may be stills further down that this tick cannot see.
+  const lookaheadExhausted = !videoEnabled &&
+    eligible.length === readLimit &&
+    eligible.every(r => isVideoPost(r))
   const recentCaptions = await repo.recentCaptions(14)
 
   const attempts: PublishAttempt[] = []
@@ -950,5 +964,6 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     ...(spendUsd !== undefined ? { spendUsd: spendUsd + spentThisTick } : {}),
     ...expiredField,
     ...overdueField,
+    ...(lookaheadExhausted ? { note: 'video_lookahead_exhausted' as const } : {}),
   }
 }

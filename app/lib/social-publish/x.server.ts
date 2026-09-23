@@ -103,7 +103,9 @@ export const xPublisher: SocialPublisher = {
       // specific message rather than returning null, and a video post never
       // degrades to text: the clip is the post.
       try {
-        mediaIds.push(await uploadVideoFromUrl(videoUrl, { mediaType: 'video/mp4' }))
+        // Media type comes from the Blob's own content-type inside the
+        // uploader, video/mp4 only when the header is absent.
+        mediaIds.push(await uploadVideoFromUrl(videoUrl))
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         return {
