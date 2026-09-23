@@ -46,7 +46,7 @@ const PASS_VERDICT: VisionVerdict = {
 const FAIL_VERDICT: VisionVerdict = {
   ...PASS_VERDICT,
   pass: false,
-  checks: { ...PASS_VERDICT.checks, nippleOccluded: 'fail' },
+  checks: { ...PASS_VERDICT.checks!, nippleOccluded: 'fail' },
   notes: 'nipple visible',
 }
 

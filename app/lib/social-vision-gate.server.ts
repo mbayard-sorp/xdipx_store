@@ -97,7 +97,16 @@ export const VISION_CHECK_NAMES: readonly VisionCheckName[] = [
 export interface VisionVerdict {
   /** True only when every check below passed. */
   pass: boolean
-  checks: Record<VisionCheckName, 'pass' | 'fail'>
+  /**
+   * `null` only on the specific `checkCompleted: false` case where the model
+   * never returned a parseable verdict at all, even after a retry (ticket
+   * #10990/#11004): there is no per-check read to report, real or fail-closed,
+   * so the field says so rather than claiming a "fail" reading against pixels
+   * nobody actually judged. Every other `checkCompleted: false` path (fetch
+   * error, model-call error, malformed shape) keeps the pre-existing
+   * all-`'fail'` fail-closed shape, unchanged.
+   */
+  checks: Record<VisionCheckName, 'pass' | 'fail'> | null
   /** Free-text reasoning, always present so a block finding can explain itself. */
   notes: string
   checkedAt: string
@@ -132,6 +141,38 @@ function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
   return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null }
+}
+
+/**
+ * A verdict for the one case that is not "checked and it's fine" nor "checked
+ * and it failed": the model answered in prose instead of JSON, twice (ticket
+ * #10990/#11004). `failClosedVerdict` reports `checks: {...all 'fail'}`, which
+ * reads as a genuine anatomy read to anything that inspects individual checks
+ * instead of `checkCompleted`; this verdict reports `checks: null` instead, so
+ * a caller that only looks at `checks` cannot mistake "never judged" for "judged
+ * and rejected". `pass`/`checkCompleted` still fail closed exactly like
+ * `failClosedVerdict`, so nothing that only reads those two fields needs to
+ * change.
+ */
+function incompleteVerdict(notes: string): VisionVerdict {
+  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null }
+}
+
+/**
+ * Thrown by `callVision` specifically when the model's response could not be
+ * parsed as JSON, carrying the raw text (ticket #10990) so the caller can log
+ * what actually came back and decide whether to retry, distinct from a
+ * transport or auth error which is never worth retrying with a stricter
+ * prompt.
+ */
+export class VisionParseError extends Error {
+  constructor(
+    message: string,
+    public readonly rawText: string,
+  ) {
+    super(message)
+    this.name = 'VisionParseError'
+  }
 }
 
 /** Structural validation of a parsed model response before it is trusted as a verdict. */
@@ -180,9 +221,20 @@ Respond with ONLY a JSON object, no prose before or after, in exactly this shape
 
 "pass" is true only when all eight checks in "checks" are "pass"; "legibleText" never affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is "".`
 
+export interface VisionCallOpts {
+  /**
+   * Ticket #10990: set on the single retry after a JSON parse failure. The
+   * default implementation appends a "reply with the JSON object only"
+   * instruction and lowers temperature, on the theory that a prose reply is a
+   * formatting slip, not a content re-read, so the retry should nudge format
+   * rather than re-ask the substantive question.
+   */
+  strict?: boolean
+}
+
 export interface VisionGateDeps {
   fetchImageBase64?: (url: string) => Promise<{ data: string; mediaType: string }>
-  callVision?: (imageBase64: string, mediaType: string) => Promise<unknown>
+  callVision?: (imageBase64: string, mediaType: string, opts?: VisionCallOpts) => Promise<unknown>
   updateVerdict?: (assetId: number, verdict: VisionVerdict) => Promise<void>
   lookupVerdictByUrl?: (bareUrl: string) => Promise<VisionVerdict | null>
 }
@@ -195,17 +247,24 @@ const defaultDeps: Required<VisionGateDeps> = {
     const mediaType = (res.headers.get('content-type') ?? '').split(';')[0] || 'image/jpeg'
     return { data: buffer.toString('base64'), mediaType }
   },
-  callVision: async (imageBase64, mediaType) => {
+  callVision: async (imageBase64, mediaType, opts) => {
     const { default: Anthropic } = await import('@anthropic-ai/sdk')
     const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
     const allowedMediaTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
     const media = (allowedMediaTypes as readonly string[]).includes(mediaType)
       ? (mediaType as (typeof allowedMediaTypes)[number])
       : 'image/jpeg'
+    const strict = opts?.strict === true
     const msg = await client.messages.create({
       model: SONNET,
       max_tokens: 400,
-      system: VISION_SYSTEM_PROMPT,
+      system: strict
+        ? `${VISION_SYSTEM_PROMPT}\n\nReply with the JSON object only. No prose, no explanation, no markdown fence: the first character of your reply must be "{" and the last must be "}".`
+        : VISION_SYSTEM_PROMPT,
+      // Ticket #10990: the retry lowers temperature toward deterministic
+      // formatting rather than re-asking the substantive question; the first
+      // attempt keeps the SDK default.
+      ...(strict ? { temperature: 0 } : {}),
       messages: [
         {
           role: 'user',
@@ -220,7 +279,12 @@ const defaultDeps: Required<VisionGateDeps> = {
     if (block?.type !== 'text') throw new Error('vision gate: unexpected response block type')
     // Model sometimes wraps JSON in a fence despite instructions; strip it.
     const cleaned = block.text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
-    return JSON.parse(cleaned)
+    try {
+      return JSON.parse(cleaned)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new VisionParseError(message, block.text)
+    }
   },
   updateVerdict: async (assetId, verdict) => {
     const { db } = await import('./db.server')
@@ -263,6 +327,35 @@ export async function runVisionGateOnImage(
     }
     return { ...parsed, checkedAt: new Date().toISOString(), checkCompleted: true }
   } catch (err) {
+    if (err instanceof VisionParseError) {
+      // A prose reply is a formatting slip, not a real refusal (ticket
+      // #10990/#11004): log the raw text (part c of the fix) and retry once
+      // with a stricter prompt before treating it as anything terminal.
+      console.error('[social-vision-gate] response was not valid JSON, retrying once with a stricter prompt', {
+        message: err.message,
+        rawText: err.rawText,
+      })
+      try {
+        const retried = await d.callVision(image.data, image.mediaType, { strict: true })
+        if (!isValidVerdictShape(retried)) {
+          return failClosedVerdict('Vision gate response did not match the expected verdict shape after a strict retry; failing closed.')
+        }
+        return { ...retried, checkedAt: new Date().toISOString(), checkCompleted: true }
+      } catch (retryErr) {
+        if (retryErr instanceof VisionParseError) {
+          console.error('[social-vision-gate] response still not valid JSON after strict retry', {
+            message: retryErr.message,
+            rawText: retryErr.rawText,
+          })
+          // Not a genuine anatomy read in either direction: no verdict was ever
+          // reached, so `checks` says so (null) rather than claiming a 'fail'
+          // read against pixels nobody actually judged.
+          return incompleteVerdict(`Vision gate check could not parse a JSON verdict after a strict retry: ${retryErr.message}`)
+        }
+        const message = retryErr instanceof Error ? retryErr.message : String(retryErr)
+        return failClosedVerdict(`Vision gate check could not complete: ${message}`)
+      }
+    }
     const message = err instanceof Error ? err.message : String(err)
     return failClosedVerdict(`Vision gate check could not complete: ${message}`)
   }

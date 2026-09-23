@@ -11,6 +11,7 @@ import {
   isValidVerdictShape,
   VISION_CHECK_NAMES,
   VISION_SYSTEM_PROMPT,
+  VisionParseError,
   type VisionVerdict,
   type VisionGateDeps,
 } from './social-vision-gate.server'
@@ -268,7 +269,7 @@ describe('runVisionGate', () => {
     const d = deps()
     const verdict = await runVisionGate('https://cdn.shopify.com/files/clean.jpg', d)
     expect(verdict.pass).toBe(true)
-    expect(verdict.checks.handAnatomy).toBe('pass')
+    expect(verdict.checks!.handAnatomy).toBe('pass')
     expect(verdict.checkedAt).toBeTruthy()
     expect(verdict.checkCompleted).toBe(true)
   })
@@ -277,7 +278,7 @@ describe('runVisionGate', () => {
     const d = deps({ callVision: vi.fn(async () => ANATOMY_FAIL_RESPONSE) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/three-arms.jpg', d)
     expect(verdict.pass).toBe(false)
-    expect(verdict.checks.limbCount).toBe('fail')
+    expect(verdict.checks!.limbCount).toBe('fail')
     expect(verdict.notes).toContain('three arms')
     // A genuine anatomy read, not a check that failed to run — ticket #8830
     // callers must still bill this one.
@@ -291,7 +292,7 @@ describe('runVisionGate', () => {
     const d = deps({ callVision: vi.fn(async () => NIPPLE_FAIL_RESPONSE) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/onskin.jpg', d)
     expect(verdict.pass).toBe(false)
-    expect(verdict.checks.nippleOccluded).toBe('fail')
+    expect(verdict.checks!.nippleOccluded).toBe('fail')
     expect(verdict.notes).toContain('nipple')
     expect(verdict.checkCompleted).toBe(true)
   })
@@ -300,7 +301,7 @@ describe('runVisionGate', () => {
     const d = deps({ callVision: vi.fn(async () => GENITALIA_FAIL_RESPONSE) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/onskin.jpg', d)
     expect(verdict.pass).toBe(false)
-    expect(verdict.checks.genitaliaAbsent).toBe('fail')
+    expect(verdict.checks!.genitaliaAbsent).toBe('fail')
     expect(verdict.notes).toContain('genitalia')
     expect(verdict.checkCompleted).toBe(true)
   })
@@ -309,7 +310,7 @@ describe('runVisionGate', () => {
     const d = deps({ callVision: vi.fn(async () => AGE_AMBIGUOUS_FAIL_RESPONSE) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/onskin.jpg', d)
     expect(verdict.pass).toBe(false)
-    expect(verdict.checks.adultUnambiguous).toBe('fail')
+    expect(verdict.checks!.adultUnambiguous).toBe('fail')
     expect(verdict.notes).toContain('age markers')
     expect(verdict.checkCompleted).toBe(true)
   })
@@ -321,10 +322,10 @@ describe('runVisionGate', () => {
     const d = deps({ callVision: vi.fn(async () => LICENSED_PLUG_FRAME_RESPONSE) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/plug-cleft.jpg', d)
     expect(verdict.pass).toBe(true)
-    expect(verdict.checks.anusNotVisible).toBe('pass')
+    expect(verdict.checks!.anusNotVisible).toBe('pass')
     // The clause that would have deleted this frame had the check been folded
     // into genitaliaAbsent instead of added beside it.
-    expect(verdict.checks.genitaliaAbsent).toBe('pass')
+    expect(verdict.checks!.genitaliaAbsent).toBe('pass')
     expect(verdict.checkCompleted).toBe(true)
   })
 
@@ -333,7 +334,7 @@ describe('runVisionGate', () => {
     const d = deps({ callVision: vi.fn(async () => PARTED_ANUS_FAIL_RESPONSE) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/parted.jpg', d)
     expect(verdict.pass).toBe(false)
-    expect(verdict.checks.anusNotVisible).toBe('fail')
+    expect(verdict.checks!.anusNotVisible).toBe('fail')
     expect(verdict.notes).toContain('anus')
     expect(verdict.checkCompleted).toBe(true)
   })
@@ -343,7 +344,7 @@ describe('runVisionGate', () => {
     const d = deps({ callVision: vi.fn(async () => ({ ...LICENSED_PLUG_FRAME_RESPONSE, checks: partial })) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/partial.jpg', d)
     expect(verdict.pass).toBe(false)
-    expect(verdict.checks.anusNotVisible).toBe('fail')
+    expect(verdict.checks!.anusNotVisible).toBe('fail')
     expect(verdict.checkCompleted).toBe(false)
   })
 
@@ -369,7 +370,7 @@ describe('runVisionGate', () => {
     const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', d)
     expect(verdict.pass).toBe(false)
     expect(verdict.notes).toContain('network down')
-    expect(VISION_CHECK_NAMES.every(n => verdict.checks[n] === 'fail')).toBe(true)
+    expect(VISION_CHECK_NAMES.every(n => verdict.checks![n] === 'fail')).toBe(true)
     // Ticket #8830: the check never ran, so a billing caller must not treat
     // this like a genuine judged-and-rejected image.
     expect(verdict.checkCompleted).toBe(false)
@@ -415,7 +416,7 @@ describe('runVisionGateOnImage', () => {
     const callVision = vi.fn(async () => ANATOMY_FAIL_RESPONSE)
     const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/png' }, { callVision })
     expect(verdict.pass).toBe(false)
-    expect(verdict.checks.extraOrMergedLimbs).toBe('fail')
+    expect(verdict.checks!.extraOrMergedLimbs).toBe('fail')
     expect(verdict.notes).toContain('three arms')
   })
 
@@ -426,6 +427,56 @@ describe('runVisionGateOnImage', () => {
     expect(verdict.pass).toBe(false)
     expect(verdict.notes).toContain('anthropic 529')
     expect(fetchImageBase64).not.toHaveBeenCalled()
+  })
+})
+
+// Ticket #10990/#11004. A prose reply from the model is a formatting slip,
+// not a real refusal, and must not read as a genuine anatomy fail.
+describe('JSON parse failure retry', () => {
+  it('retries once with a stricter, lower-temperature call and succeeds', async () => {
+    const rawProse = 'I need to look closer at this image before I can answer.'
+    const callVision = vi.fn(async (_b64: string, _mt: string, opts?: { strict?: boolean }) => {
+      if (!opts?.strict) throw new VisionParseError('Unexpected token I is not valid JSON', rawProse)
+      return CLEAN_RESPONSE
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+
+    expect(callVision).toHaveBeenCalledTimes(2)
+    expect(callVision).toHaveBeenNthCalledWith(1, 'ZmFrZQ==', 'image/jpeg')
+    expect(callVision).toHaveBeenNthCalledWith(2, 'ZmFrZQ==', 'image/jpeg', { strict: true })
+    expect(verdict.pass).toBe(true)
+    expect(verdict.checkCompleted).toBe(true)
+    // Part (c) of the fix: the raw model text is logged, not swallowed.
+    expect(errorSpy.mock.calls.some(call => String(call[1]?.rawText ?? call.join(' ')).includes(rawProse))).toBe(true)
+    errorSpy.mockRestore()
+  })
+
+  it('returns checkCompleted:false with checks left null (not "fail") when the retry also fails to parse', async () => {
+    const callVision = vi.fn(async () => {
+      throw new VisionParseError('Unexpected token I is not valid JSON', 'I need to think about this differently.')
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+
+    expect(callVision).toHaveBeenCalledTimes(2)
+    expect(verdict.checkCompleted).toBe(false)
+    expect(verdict.checks).toBeNull()
+    expect(verdict.pass).toBe(false)
+    // Distinct from a genuine anatomy fail: no check reads 'fail' because none
+    // of them were ever answered.
+    expect(verdict.checks).not.toEqual(expect.objectContaining({ limbCount: 'fail' }))
+    errorSpy.mockRestore()
+  })
+
+  it('does not retry a non-parse failure (network/model error stays a single attempt)', async () => {
+    const callVision = vi.fn(async () => { throw new Error('anthropic 529') })
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+
+    expect(callVision).toHaveBeenCalledTimes(1)
+    expect(verdict.checkCompleted).toBe(false)
+    // A real transport/auth failure keeps the pre-existing fail-closed shape.
+    expect(VISION_CHECK_NAMES.every(n => verdict.checks![n] === 'fail')).toBe(true)
   })
 })
 
