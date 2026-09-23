@@ -556,7 +556,7 @@ function teamRailToGridRail(products: LeanCardProduct[]): Rail {
  */
 export const ANCHOR_GRID_DEFAULT_EYEBROW = 'Worth a look'
 export const ANCHOR_GRID_DEFAULT_HEADING = 'A good place to start, chosen with care.'
-export const ANCHOR_GRID_DEFAULT_EMPHASIS = 'chosen with care'
+export const ANCHOR_GRID_DEFAULT_EMPHASIS = 'care'
 
 function ProductGrid({
   rail,
