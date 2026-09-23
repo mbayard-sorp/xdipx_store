@@ -1045,7 +1045,7 @@ describe('vision-gate verdict', () => {
   // unanswered question default to the safe-looking branch.
   describe('a verdict that answers fewer checks than the gate now has', () => {
     const sevenCheckVerdict = (): VisionVerdict => {
-      const { anusNotVisible: _anusNotVisible, ...checks } = PASSING_VERDICT.checks
+      const { anusNotVisible: _anusNotVisible, ...checks } = PASSING_VERDICT.checks!
       return { ...PASSING_VERDICT, checks: checks as VisionVerdict['checks'] }
     }
 
@@ -1107,7 +1107,7 @@ describe('vision-gate verdict', () => {
       // Every name the gate knows about is what completeness is measured
       // against, so a check added later is covered with no edit here.
       expect(missingVisionChecks(PASSING_VERDICT)).toEqual([])
-      expect(VISION_CHECK_NAMES.every(n => n in PASSING_VERDICT.checks)).toBe(true)
+      expect(VISION_CHECK_NAMES.every(n => n in PASSING_VERDICT.checks!)).toBe(true)
     })
   })
 

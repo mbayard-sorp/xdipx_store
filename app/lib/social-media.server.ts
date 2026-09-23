@@ -448,6 +448,26 @@ export interface GenerateCastCompositeResult {
   assetIds?: (number | null)[]
 }
 
+/**
+ * Tag an asset whose vision-gate verdict never reached a real judgment (a
+ * prose reply that failed to parse even after the gate's own retry, a
+ * network error, a model-call error) as `vision-incomplete`, distinct from a
+ * genuine anatomy/exposure fail (ticket #10990). `checkCompleted: false`
+ * already drops the candidate from what the caller returns exactly like a
+ * real fail does; the tag is what lets a human or a rerun find these rows
+ * again instead of reading as ordinary rejects in the library grid. Non-fatal:
+ * a tagging failure never unwinds generation or rehosting.
+ */
+export async function tagIncompleteVisionVerdict(assetId: number | null | undefined, verdict: VisionVerdict): Promise<void> {
+  if (verdict.checkCompleted || assetId == null) return
+  try {
+    const { addAssetTags } = await import('./social-studio.server')
+    await addAssetTags([assetId], 'vision-incomplete')
+  } catch (err) {
+    console.error(`[social-media] failed to tag incomplete vision verdict on asset ${assetId}`, err)
+  }
+}
+
 /** One composeSceneFrame call, rehosted, ingested, and vision-gated per candidate. */
 async function generateCastCompositeBatch(
   opts: GenerateCastCompositeOpts,
@@ -534,6 +554,7 @@ async function generateCastCompositeBatch(
       // returns, exactly the same as a rehost failure above.
       const verdict = await runVisionGate(url)
       if (asset?.id != null) await recordVisionVerdict(asset.id, verdict)
+      await tagIncompleteVisionVerdict(asset?.id, verdict)
       if (!verdict.pass) continue
       urls.push(url)
       filenames.push(filename)
@@ -727,7 +748,10 @@ export async function generateAndUploadSocialImage(
       }
     },
     runGate: (url) => runVisionGate(url),
-    recordVerdict: (assetId, verdict) => recordVisionVerdict(assetId, verdict),
+    recordVerdict: async (assetId, verdict) => {
+      await recordVisionVerdict(assetId, verdict)
+      await tagIncompleteVisionVerdict(assetId, verdict)
+    },
   })
 
   return {
