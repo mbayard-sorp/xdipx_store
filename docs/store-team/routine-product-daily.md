@@ -47,6 +47,13 @@ orthogonal — you can be enabled-to-run but off-to-execute.
    opportunities, (c) needs-review masters (variant sprawl > 30), (d) stale watching rows.
 3. Consume `nalpac-feed-analyst`'s scores — don't re-derive them.
 
+**Stale watching rows get a deadline, not another deferral (stale-watching-backlog-2026w39).** A
+`watching` row aged more than 4 weeks with zero reconsideration gets a final approve/reject **on
+this run**, rather than being re-deferred again: 3 rows sat 5-9 weeks untouched because "stale
+watching rows past a few weeks" named a category to sweep with no resolution deadline attached. If a
+row genuinely still needs more signal, document why it stays `watching` (what signal it is waiting
+on) instead of rolling it forward silently.
+
 ## Step 3: Judge + execute
 
 **Feed-health pre-check, before any approve call (ticket #8393).** Read the latest two
