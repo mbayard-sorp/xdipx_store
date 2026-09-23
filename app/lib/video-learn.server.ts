@@ -23,9 +23,10 @@
  * a week), carry an explicit `n`, and flag `underpowered` below
  * MIN_EPISODES_FOR_SIGNAL.
  */
-import { desc, inArray, isNotNull } from 'drizzle-orm'
+import { and, desc, inArray, isNotNull, notInArray } from 'drizzle-orm'
 import { db } from './db.server'
 import { videoEpisodes, videoJobs, videoScriptEdits, socialPosts } from '../../db/schema'
+import { ROOM_EDITORS } from './video-episodes'
 import {
   MIN_EPISODES_FOR_SIGNAL,
   UNSPECIFIED,
@@ -211,13 +212,20 @@ export async function listBatchSignals(opts: { batches?: number } = {}): Promise
   if (!eps.length) return { batches: [], flags: learnFlags([]) }
 
   const epIds = eps.map(e => e.id)
+  // The owner edit ratio measures the OWNER's hand on the script: the
+  // video-room's own episode-revise writes are excluded here, and again in
+  // episodeEditStats (belt and braces, and what the tests can observe).
   const edits = await db.select({
     episodeId: videoScriptEdits.episodeId,
     field: videoScriptEdits.field,
     before: videoScriptEdits.before,
     after: videoScriptEdits.after,
+    editedBy: videoScriptEdits.editedBy,
     createdAt: videoScriptEdits.createdAt,
-  }).from(videoScriptEdits).where(inArray(videoScriptEdits.episodeId, epIds))
+  }).from(videoScriptEdits).where(and(
+    inArray(videoScriptEdits.episodeId, epIds),
+    notInArray(videoScriptEdits.editedBy, [...ROOM_EDITORS]),
+  ))
 
   const jobIdsOf = (e: (typeof eps)[number]): number[] => [
     ...(Array.isArray(e.priorJobIdsJson) ? e.priorJobIdsJson : []),

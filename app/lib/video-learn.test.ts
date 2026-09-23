@@ -106,6 +106,16 @@ describe('owner edit ratio', () => {
     expect(stats).toEqual({ changedWords: 3, spokenWords: 6 })
   })
 
+  it('ignores a video-room revision: it does not move the owner edit ratio', () => {
+    const script = { presenterLine: 'this one purrs low and slow' }
+    const owner = { field: 'script.presenterLine', before: 'this one hums low', after: 'this one purrs low and slow', editedBy: 'owner', createdAt: '2026-09-22T10:00:00Z' }
+    const room = { field: 'script.presenterLine', before: 'it hums', after: 'this one hums low', editedBy: 'video-room', createdAt: '2026-09-21T10:00:00Z' }
+    expect(episodeEditStats(script, [room, owner])).toEqual(episodeEditStats(script, [owner]))
+    expect(episodeEditStats(script, [room, owner])).toEqual({ changedWords: 3, spokenWords: 4 })
+    // Only the room touched it: zero owner change against what the owner was handed.
+    expect(episodeEditStats({ presenterLine: 'this one hums low' }, [room])).toEqual({ changedWords: 0, spokenWords: 4 })
+  })
+
   it('is null for a script with no spoken words', () => {
     expect(episodeEditStats({ captions: { instagram: 'read, not heard' } }, [])).toBeNull()
   })

@@ -12,6 +12,7 @@
  *      thresholds that turn them into flags for the room and the digest.
  */
 import type { VideoEpisodeReviewNote, VideoScriptJson } from '../../db/schema'
+import { ROOM_EDITORS } from './video-episodes'
 
 export const MIN_EPISODES_FOR_SIGNAL = 5
 
@@ -128,6 +129,8 @@ export interface ScriptEditRow {
   field: string
   before: string | null
   after: string
+  /** Absent in older callers; a ROOM_EDITORS value marks the room's own revision. */
+  editedBy?: string
   createdAt: Date | string
 }
 
@@ -136,13 +139,15 @@ export interface ScriptEditRow {
  * writers delivered. The denominator is the ORIGINAL script: for a field the
  * owner edited, its earliest recorded `before`; for an untouched field, its
  * current value. Returns null when the script has no spoken words at all.
+ * Edits by the video-room (ROOM_EDITORS) are ignored: a room revision is the
+ * writers' own work, so the text it produced is what the owner was handed.
  */
 export function episodeEditStats(
   currentScript: VideoScriptJson | null | undefined,
   edits: ScriptEditRow[],
 ): { changedWords: number; spokenWords: number } | null {
   const spoken = edits
-    .filter(e => isSpokenEditField(e.field))
+    .filter(e => isSpokenEditField(e.field) && !(ROOM_EDITORS as readonly string[]).includes(e.editedBy ?? ''))
     .sort((x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime())
   const original: Record<string, string> = { ...spokenFieldsOf(currentScript) }
   const seen = new Set<string>()
