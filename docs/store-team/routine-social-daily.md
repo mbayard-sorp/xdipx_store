@@ -659,6 +659,16 @@ the picture (the description goes in `altText`), the picture depicts the subject
 (§3.9), and a post about a category we sell shows the product, slot A included (§4a). Hashtags are
 5 to 8 per §7a. Any earlier "register 4-5" language for Instagram in this file or elsewhere is stale.
 
+**Register FLOOR, checked at draft time, symmetrical to the ceiling Step 6.5 already runs
+(drift-ig-register-floor, week 2026-09-21).** The vocabulary fence above is a ceiling; it is not
+the only failure mode. 14 of 14 Instagram posts published 09-14..09-22 read as plain register 5-6
+education with no innuendo or anticipation beat, which is a floor breach, not a safe default: on
+Instagram "too tame" is a defect exactly like a vocabulary-fence breach is. Before a caption goes to
+the voice gate, confirm it reads at register 8 or above and can name the specific act or feeling it
+is anchoring to; a caption that cannot clear that bar is rewritten before drafting stops, not shipped
+on the theory that plain-education is the safe choice. Report a register self-assessment per
+Instagram post in the run summary (Step 8).
+
 **THE QUOTA IS PER SLOT DAY, NOT PER RUN, AND NOT PER RUN DAY. Count the rows already standing
 for the day you are drafting FOR before you draft anything.** The social routine fires **twice
 daily** (14:00 and 22:00 UTC, `routine-schedule.md` routine 6). Two runs each drafting a full quota
@@ -743,6 +753,15 @@ populates and so the row is charged to the day it is actually meant to fill.
 **Instagram drafts against the active campaign.** Read its pillars, formats, rotation, and visual
 scheme from `docs/store-team/instagram-campaigns.md`, then:
 
+- **Resolve "the active campaign" from the draft's scheduled publish date, not the run date
+  (drift-campaign-spine-phase, week 2026-09-21).** A draft written today for `target_day` =
+  tomorrow belongs to whichever campaign's window covers tomorrow, which is not always the campaign
+  Step 2a activated for today. Getting this wrong runs the content two days ahead of its own spine:
+  the week of 09-14 shipped six Materials 101 education posts before the Materials 101 campaign
+  window (row 31) opened on 09-21, while the campaign that WAS live that week ("The Orgasm Gap,
+  Closed") appeared on almost nothing. Name, per Instagram post in the run summary, which
+  `marketing_calendar` row id its theme was drawn from.
+
 - **Rotate.** Never two consecutive Instagram posts from the same pillar, and never two consecutive
   posts in the same format. The ground follows the 4-beat cycle and the archetype follows the 7-beat
   spine (§3.1). Read the last few posted rows to find your position in both.
@@ -817,6 +836,22 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   one carousel per rolling 14-day window is a standing slot-E requirement, not an optional format**:
   if mixReport's carousel count reads 0 in the trailing 14, schedule one this run, budget
   permitting, rather than deferring it another cycle.
+- **Rolling 7-day product-forward FLOOR, checked alongside the ceiling (drift-ig-product-ratio-floor,
+  week 2026-09-21).** The "at most half a day is product-forward" rule above is a ceiling and was
+  never close to breached; the account drifted under it instead, no existing check watched that
+  direction, and it went as low as 2 of 14 posts (~14%) against the ~40% mission-brief target.
+  Target the rolling-7-day product-forward share at ~40%, floor not below ~30%, checked at draft
+  time from the same `mixReport` call. Report the trailing-7-day product-forward percentage in the
+  run summary (Step 8).
+- **When the drift is not a one-off, the "prefer" above becomes a "must" (social-mix-drift-product-
+  forward-carousel, three independent measurements: 2026-09-01, 2026-09-19, 2026-09-22).** Written
+  guidance has told a run to prefer product-forward under band for weeks and the ratio kept drifting
+  the same direction anyway. So: when the rolling-14 `mixReport` productForward count reads more
+  than 2 posts under the low end of its band on two consecutive runs, the next run's slate MUST open
+  with slot B or C (after slot A, which still ships first) rather than treating product-forward as
+  optional capacity, and at least one carousel MUST be scheduled in that same run's slot E/A choice
+  whenever the rolling-14 carousel count is still 0. This is a checked precondition at that point,
+  not a preference the run can defer under time pressure.
 - **Set `postType:'campaign'`** on every Instagram AND X product row under the on-skin standing
   order, with `bodyZone`, `contactMode`, and `cropScale` set on both platforms, and name the campaign
   slug in the draft's event summary, so posts can be traced to their campaign until the schema
@@ -2221,3 +2256,7 @@ The summary always carries: drafts written and reworks (per platform), gate resu
 check slugs, **drafted versus approved versus posted as three separate numbers per platform**, the
 Step 1b rung the run reached, and the retro verdict. A summary that reports twelve drafts and does
 not say how many are live has not reported the run.
+
+Also carries, per the drift-floor checks in Step 3: a register self-assessment per Instagram post,
+the trailing-7-day product-forward percentage, and, per Instagram post, which `marketing_calendar`
+row id its theme was drawn from.
