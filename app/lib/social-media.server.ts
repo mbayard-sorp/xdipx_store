@@ -31,7 +31,7 @@
 import { generateImage } from './generate-image.server'
 import { uploadMoodImageToShopifyFilesWithId } from './shopify.server'
 import { tryIngestSocialAsset } from './social-asset-library.server'
-import { sceneAxisTags, type SceneAxes } from './social-scene-vocab'
+import { NON_SKIN_SENTINEL, sceneAxisTags, type SceneAxes } from './social-scene-vocab'
 import type { VisionVerdict } from './social-vision-gate.server'
 
 /**
@@ -491,6 +491,44 @@ export async function tagIncompleteVisionVerdict(assetId: number | null | undefi
   }
 }
 
+/**
+ * Crop-to-zone pass (ticket #10999, "the crop is the closer"). Briefed as a
+ * close on-skin bodyscape, the two-stage compositor renders wide about half
+ * the time, and the FULL wide render is what used to reach the vision gate
+ * and fail on stop-list anatomy that a tight crop of the same render would
+ * never show. When `sceneAxes.cropScale` is `close` or `macro` and a real
+ * body zone is briefed, this crops the candidate to that zone BEFORE the
+ * vision gate ever sees it, so the gate judges the pixels that would ship,
+ * not the ones that would not.
+ *
+ * Returns `null` when the crop pass refuses the candidate (uncroppable,
+ * zone-miss, or a model/transport failure): the caller must drop the
+ * candidate exactly like a rehost or vision-gate failure (billed, unshipped).
+ * A wide/medium crop, or an axis-free frame, passes the original buffer
+ * through untouched — the pass is additive, never a requirement.
+ */
+async function maybeCropToZone(
+  buffer: Buffer,
+  sceneAxes: SceneAxes | undefined,
+  aspectRatio: SocialAspect,
+): Promise<{ buffer: Buffer; tag?: string } | null> {
+  const cropScale = sceneAxes?.cropScale
+  const bodyZone = sceneAxes?.bodyZone
+  if (cropScale !== 'close' && cropScale !== 'macro') return { buffer }
+  if (!bodyZone || bodyZone === NON_SKIN_SENTINEL) return { buffer }
+  // The crop pass only knows the two live feed shapes; any other aspect
+  // passes through uncropped rather than guessing a target ratio.
+  if (aspectRatio !== '4:5' && aspectRatio !== '16:9') return { buffer }
+
+  const { cropImageToZone, formatCropBoxTag } = await import('./social-crop-to-zone.server')
+  const result = await cropImageToZone({ data: buffer, mediaType: 'image/jpeg' }, { bodyZone, aspectRatio })
+  if (!result.cropped || !result.buffer) {
+    console.error(`[social-media] crop-to-zone rejected candidate (${result.reason}): ${result.notes}`)
+    return null
+  }
+  return { buffer: result.buffer, ...(result.box ? { tag: formatCropBoxTag(result.box) } : {}) }
+}
+
 /** One composeSceneFrame call, rehosted, ingested, and vision-gated per candidate. */
 async function generateCastCompositeBatch(
   opts: GenerateCastCompositeOpts,
@@ -545,12 +583,19 @@ async function generateCastCompositeBatch(
     try {
       const res = await fetch(falUrl)
       if (!res.ok) continue
-      const buffer = Buffer.from(await res.arrayBuffer())
+      const fetchedBuffer = Buffer.from(await res.arrayBuffer())
+      // Crop-to-zone (#10999), before rehost and before the vision gate: a
+      // refusal here (uncroppable/zone-miss/model error) drops the candidate
+      // exactly like a rehost or vision-gate failure below, still billed.
+      const cropOutcome = await maybeCropToZone(fetchedBuffer, opts.sceneAxes, opts.aspectRatio ?? '4:5')
+      if (!cropOutcome) continue
+      const buffer: Buffer = cropOutcome.buffer
       const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
       // Library dual-write (#4937): the buffer is already in hand, so no
       // re-fetch. Non-fatal; the Shopify url is what the gate checks, so the
       // row indexes under it and carries the Sanity asset id alongside.
       // `shopifyFileId` (#5426) makes a future purge deterministic.
+      const candidateTags = [...sceneAxisTagList, ...(cropOutcome.tag ? [cropOutcome.tag] : [])]
       const asset = await tryIngestSocialAsset({
         buffer,
         filename,
@@ -568,13 +613,15 @@ async function generateCastCompositeBatch(
         isPicked: false,
         createdBy: opts.caller ?? 'social-media-manager',
         ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
-        ...(sceneAxisTagList.length ? { tags: sceneAxisTagList } : {}),
+        ...(candidateTags.length ? { tags: candidateTags } : {}),
       })
       // Vision-gate every candidate before it can reach a draft (#6763): the
       // verdict is recorded on the row regardless of outcome (a missing
       // verdict is what makes social-publish-gate block, not a failing one
       // alone), and a failing candidate is dropped from what this function
-      // returns, exactly the same as a rehost failure above.
+      // returns, exactly the same as a rehost failure above. Runs against the
+      // CROPPED buffer's uploaded url when a crop happened (#10999), so the
+      // gate judges the pixels that would ship.
       const verdict = await runVisionGate(url)
       if (asset?.id != null) await recordVisionVerdict(asset.id, verdict)
       await tagIncompleteVisionVerdict(asset?.id, verdict)
@@ -734,8 +781,8 @@ export async function generateAndUploadSocialImage(
       lastProvider = result.provider
       lastModel = result.model
 
-      const buffer = result.buffers[0]
-      if (!buffer) return null
+      const generatedBuffer = result.buffers[0]
+      if (!generatedBuffer) return null
 
       // Rehost failure must not throw: the generation above is already billed
       // by the provider, and an exception here used to unwind the caller
@@ -743,9 +790,20 @@ export async function generateAndUploadSocialImage(
       // uncounted (#887). Returning null here (a "generation miss" to the
       // vision-gate loop) tells the caller "billed but unshipped".
       try {
+        // Crop-to-zone (#10999), before rehost and before the vision gate:
+        // see `maybeCropToZone`'s own doc comment. A refusal here is treated
+        // exactly like the rehost failure below (billed but unshipped).
+        const cropOutcome = await maybeCropToZone(
+          generatedBuffer,
+          opts.sceneAxes,
+          opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
+        )
+        if (!cropOutcome) return null
+        const buffer = cropOutcome.buffer
         const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
         // Library dual-write (#4937), non-fatal, buffer already in hand.
         // `shopifyFileId` (#5426) makes a future purge deterministic.
+        const candidateTags = [...axisTags, ...(cropOutcome.tag ? [cropOutcome.tag] : [])]
         const asset = await tryIngestSocialAsset({
           buffer,
           filename,
@@ -762,7 +820,7 @@ export async function generateAndUploadSocialImage(
           generationBatchId: crypto.randomUUID(),
           isPicked: false,
           createdBy: opts.caller ?? 'social-media-manager',
-          ...(axisTags.length ? { tags: axisTags } : {}),
+          ...(candidateTags.length ? { tags: candidateTags } : {}),
         })
         return { url, assetId: asset?.id ?? null }
       } catch (err) {
