@@ -1883,7 +1883,7 @@ export const videoJobs = pgTable('video_jobs', {
   modelTier:         varchar('model_tier', { length: 16 }).notNull(),                // VideoModelId
   targetPlatforms:   jsonb('target_platforms').$type<string[]>().notNull().default([]),
   stage:             varchar('stage', { length: 16 }).notNull().default('scene_frame'), // scene_frame|clip|lipsync|assembly|poster|done|failed
-  status:            varchar('status', { length: 24 }).notNull().default('queued'),  // queued|running|awaiting_provider|awaiting_frame_approval|applying|done|failed
+  status:            varchar('status', { length: 24 }).notNull().default('queued'),  // queued|running|awaiting_provider|awaiting_frame_approval|applying|awaiting_render_approval|awaiting_final_review|done|failed
   providerRequestIds: jsonb('provider_request_ids').$type<Record<string, { requestId: string; statusUrl: string; responseUrl: string }>>().notNull().default({}),
   sceneFrameAssetId: integer('scene_frame_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
   // Multi-scene jobs (Phase 3, migration 084). Both null for every existing
@@ -1962,8 +1962,11 @@ export interface VideoEpisodeReviewNote {
    * the provider (ticket #5726), 'edited' when the owner saved a script edit
    * via editEpisodeScript (ticket #7558). None of the three is an owner
    * decision and none can be written through decideEpisode.
+   * 'render_rejected' IS an owner decision, but on the final cut, not the
+   * script: written by markEpisodeRenderRejected when the owner rejects a cut
+   * parked at the render gate, never through decideEpisode.
    */
-  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed' | 'edited'
+  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed' | 'render_rejected' | 'edited'
   tags?: string[]
   note?: string
   by?: string

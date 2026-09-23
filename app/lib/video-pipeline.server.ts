@@ -15,6 +15,14 @@
  * awaiting_frame_approval for the owner's pick in /admin/video-studio; that
  * status is deliberately outside the in-flight set so parked jobs cost nothing.
  *
+ * The render gate is the same shape at the other end: with the
+ * video_render_review valve ON (default) the poster stage parks the finished
+ * cut at stage 'done' / status 'awaiting_render_approval' instead of 'done'.
+ * Only approveRenderedVideo (owner click) flips it to 'done', and
+ * fanOutVideoToSocialDrafts refuses anything that is not status 'done', so no
+ * social draft exists for a cut the owner has not seen. Also outside the
+ * in-flight set, so a parked cut costs nothing either.
+ *
  * Multi-scene jobs (Phase 3, migration 083, 20-60s videos): scriptJson.scenes
  * (2-8 scenes) makes video_jobs.scenes_json / scene_state_json non-null and
  * routes advanceSceneFrame/advanceClip through their multi-scene branches
@@ -894,12 +902,19 @@ export interface AdvanceVideoResult {
   parked: number
 }
 
+/**
+ * The statuses the poller advances. Every parked status (awaiting_frame_approval,
+ * awaiting_render_approval, awaiting_final_review) is deliberately absent: a
+ * parked job costs nothing and only an owner action moves it.
+ */
+export const INFLIGHT_VIDEO_STATUSES = ['queued', 'running', 'awaiting_provider', 'applying'] as const
+
 export async function advanceInflightVideoJobs(opts: { maxJobs?: number } = {}): Promise<AdvanceVideoResult> {
   const maxJobs = opts.maxJobs ?? 5
   const rows = await db
     .select()
     .from(videoJobs)
-    .where(inArray(videoJobs.status, ['queued', 'running', 'awaiting_provider', 'applying']))
+    .where(inArray(videoJobs.status, [...INFLIGHT_VIDEO_STATUSES]))
     .orderBy(videoJobs.updatedAt)
     .limit(maxJobs)
 
@@ -1075,6 +1090,18 @@ async function frameReviewEnabled(): Promise<boolean> {
   const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.frameReview).catch(() => null)
   return v !== 'false' // defaults ON
 }
+
+/**
+ * Final-cut gate (video_render_review, defaults ON like frame review). Exported
+ * for the owner digest and the admin copy; the pipeline is its only writer.
+ */
+export async function renderReviewEnabled(): Promise<boolean> {
+  const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.renderReview).catch(() => null)
+  return v !== 'false' // defaults ON
+}
+
+/** The parked status the render gate writes (fits video_jobs.status varchar(24)). */
+export const AWAITING_RENDER_APPROVAL = 'awaiting_render_approval'
 
 /** Stages past the frame gate: a frame carried here counts as owner-approved. */
 const FRAME_APPROVED_STAGES = ['clip', 'lipsync', 'assembly', 'poster', 'done']
@@ -2541,13 +2568,20 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
   if (duration > 0) {
     await db.update(mediaAssets).set({ durationSeconds: String(duration), width: 1080, height: 1920 }).where(eq(mediaAssets.id, finalAsset.id))
   }
+  // Render gate: with video_render_review ON (default) the finished cut parks
+  // for the owner instead of reaching 'done'. stage is 'done' either way (the
+  // machine has nothing left to do, and completedAt is the render time the
+  // RunPod re-probe keys on); only the status differs, and the poller never
+  // selects the parked one. fanOutVideoToSocialDrafts refuses anything but
+  // status 'done', so a parked cut cannot reach Social Studio by any path.
+  const parkForReview = await renderReviewEnabled()
   await touch(job, {
     stage: 'done',
-    status: 'done',
+    status: parkForReview ? AWAITING_RENDER_APPROVAL : 'done',
     posterAssetId: posterRow?.id ?? null,
     completedAt: new Date(),
   })
-  console.log(`[video-pipeline] job ${job.jobId} complete (${duration.toFixed(1)}s, $${Number(job.costUsd).toFixed(2)})`)
+  console.log(`[video-pipeline] job ${job.jobId} ${parkForReview ? 'rendered, parked for final-cut approval' : 'complete'} (${duration.toFixed(1)}s, $${Number(job.costUsd).toFixed(2)})`)
 
   // RunPod off-confirmation (ticket #5717). Ordering is load-bearing: this
   // sits AFTER the terminal write, in its own catch, so a RunPod API hiccup
@@ -2559,7 +2593,7 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
       console.warn(`[video-pipeline] job ${job.jobId} runpod idle probe failed:`, err)
     }
   }
-  return 'done'
+  return parkForReview ? 'parked' : 'done'
 }
 
 // ─── RunPod off-confirmation (ticket #5717) ─────────────────────────────────
@@ -2730,6 +2764,54 @@ export async function rejectVideoJob(jobRowId: number, reason: string): Promise<
   }
 }
 
+/**
+ * Owner approves a parked final cut: awaiting_render_approval -> done. The
+ * write is conditional on the parked status, so a double click (or a second
+ * tab) cannot run the fan-out twice: the second call throws instead of
+ * returning a job that is already done. The caller then runs the existing
+ * approve path (fanOutVideoToSocialDrafts plus optional Shopify graduation).
+ */
+export async function approveRenderedVideo(jobRowId: number): Promise<void> {
+  const updated = await db.update(videoJobs)
+    .set({ status: 'done', updatedAt: new Date() })
+    .where(and(eq(videoJobs.id, jobRowId), eq(videoJobs.status, AWAITING_RENDER_APPROVAL)))
+    .returning({ id: videoJobs.id })
+  if (!updated.length) throw new Error('Job is not awaiting final-cut approval')
+}
+
+export interface RejectRenderResult {
+  /** The linked episode moved off 'rendering' (false when unlinked or already moved). */
+  episodeReleased: boolean
+  episodeId: number | null
+}
+
+/**
+ * Owner rejects a parked final cut. A reason is REQUIRED (a silent rejection
+ * teaches the room nothing, same rule as decideEpisode's needs_changes). The
+ * job goes terminal ('failed', reason in `error`) with the same conditional
+ * write as approval, and a linked episode comes off 'rendering' with the
+ * owner's reason appended to reviewNotesJson (markEpisodeRenderRejected), so
+ * its script page offers "Render again" (a retake) or "send back" (a revise).
+ */
+export async function rejectRenderedVideo(jobRowId: number, reason: string, rejectedBy: string): Promise<RejectRenderResult> {
+  const why = reason.trim()
+  if (!why) throw new Error('A reason is required to reject a final cut')
+  const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
+  if (!job) throw new Error('Job not found')
+  const updated = await db.update(videoJobs)
+    .set({ status: 'failed', stage: 'failed', error: `Final cut rejected by owner: ${why}`.slice(0, 2000), updatedAt: new Date() })
+    .where(and(eq(videoJobs.id, jobRowId), eq(videoJobs.status, AWAITING_RENDER_APPROVAL)))
+    .returning({ id: videoJobs.id })
+  if (!updated.length) throw new Error('Job is not awaiting final-cut approval')
+
+  // Dynamic import: video-episodes.server imports dryRunEpisodeScript from here.
+  const { markEpisodeRenderRejected, episodeForJob } = await import('./video-episodes.server')
+  const episodeId = job.episodeId ?? (await episodeForJob(job.id))?.id ?? null
+  if (episodeId == null) return { episodeReleased: false, episodeId: null }
+  const episodeReleased = await markEpisodeRenderRejected(episodeId, `job ${job.jobId}: ${why}`, rejectedBy)
+  return { episodeReleased, episodeId }
+}
+
 /** Re-run a finished/failed job as a NEW job with owner feedback appended. */
 export async function regenerateVideoJob(jobRowId: number, feedback: string): Promise<{ jobId: string; estCostUsd: number }> {
   const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
@@ -2794,6 +2876,11 @@ export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: st
   const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
   if (!job) throw new Error('Job not found')
   if (job.stage !== 'done') throw new Error('Job is not finished')
+  // The render gate's teeth: a cut parked at awaiting_render_approval (or any
+  // non-done status) never fans out, whichever intent asked.
+  if (job.status !== 'done') {
+    throw new Error(job.status === AWAITING_RENDER_APPROVAL ? 'Final cut is awaiting your approval' : `Job status is ${job.status}, not done`)
+  }
   const finalAsset = job.finalAssetId
     ? (await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.finalAssetId)).limit(1))[0]
     : undefined
@@ -2983,5 +3070,5 @@ export async function listVideoJobs(limit = 40): Promise<VideoJobWithAssets[]> {
 
 /** True while any job is in a state the admin page should live-poll for. */
 export function hasActiveVideoJobs(rows: VideoJobWithAssets[]): boolean {
-  return rows.some(r => ['queued', 'running', 'awaiting_provider', 'applying'].includes(r.job.status))
+  return rows.some(r => (INFLIGHT_VIDEO_STATUSES as readonly string[]).includes(r.job.status))
 }

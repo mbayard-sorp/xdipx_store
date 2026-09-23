@@ -66,6 +66,7 @@ vi.mock('./video-pipeline.server', () => ({ dryRunEpisodeScript: vi.fn() }))
 import {
   releaseEpisodeClaim,
   markEpisodeRenderFailed,
+  markEpisodeRenderRejected,
   reapStaleEpisodeClaims,
   decideEpisode,
   editEpisodeScript,
@@ -129,6 +130,42 @@ describe('releaseEpisodeClaim', () => {
   it('refuses a missing episode', async () => {
     state.row = null
     await expect(releaseEpisodeClaim(7, 'gated')).resolves.toBe(false)
+  })
+})
+
+describe('markEpisodeRenderRejected (render gate reject)', () => {
+  it('moves a rendering episode to failed with the owner reason, attributed to the owner', async () => {
+    state.row = episode({ videoJobId: 42, reviewNotesJson: [{ at: 'x', decision: 'approved', by: 'mike' }] })
+    await expect(markEpisodeRenderRejected(7, 'job vid-9: hands melt at 0:04', 'mike@xdipx.com')).resolves.toBe(true)
+    expect(state.sets[0]).toMatchObject({ productionStatus: 'failed' })
+    const notes = state.sets[0]?.['reviewNotesJson'] as { decision: string; note: string; by: string }[]
+    expect(notes).toHaveLength(2)
+    expect(notes[1]).toMatchObject({ decision: 'render_rejected', by: 'mike@xdipx.com' })
+    expect(notes[1]?.note).toMatch(/hands melt/)
+  })
+
+  it('keeps video_job_id so a later "Render again" retires it onto prior_job_ids_json', async () => {
+    state.row = episode({ videoJobId: 42 })
+    await markEpisodeRenderRejected(7, 'no', 'mike')
+    expect(state.sets[0]).not.toHaveProperty('videoJobId')
+  })
+
+  it('then decideEpisode(approved) is a retake of the rejected job (re-render path)', async () => {
+    state.row = episode({ productionStatus: 'failed', videoJobId: 42 })
+    await decideEpisode({ episodeId: 7, decision: 'approved', decidedBy: 'mike' })
+    expect(state.sets[0]).toMatchObject({ productionStatus: 'approved', videoJobId: null, priorJobIdsJson: [42] })
+  })
+
+  it('then decideEpisode(needs_changes) hands it to the room (revise path)', async () => {
+    state.row = episode({ productionStatus: 'failed', videoJobId: 42 })
+    await decideEpisode({ episodeId: 7, decision: 'needs_changes', decidedBy: 'mike', note: 'tighten the hook' })
+    expect(state.sets[0]).toMatchObject({ productionStatus: 'needs_changes' })
+  })
+
+  it('leaves an episode that is not rendering alone', async () => {
+    state.row = episode({ productionStatus: 'scheduled' })
+    await expect(markEpisodeRenderRejected(7, 'no', 'mike')).resolves.toBe(false)
+    expect(state.sets).toHaveLength(0)
   })
 })
 

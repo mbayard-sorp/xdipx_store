@@ -8,9 +8,10 @@
  * would be a second source of truth that drifts the first time a job fails
  * outside the app.
  *
- * Twelve states (ticket #10485 added `flagged`). Coral is reserved for the
- * three that are genuinely the owner's turn on a normal path (scripted,
- * framing, review); everything else reads neutral, plum for the machine,
+ * Thirteen states (ticket #10485 added `flagged`; the render gate added
+ * `finalcut`). Coral is reserved for the four that are genuinely the owner's
+ * turn on a normal path (scripted, framing, finalcut, review); everything else
+ * reads neutral, plum for the machine,
  * sage for fine, amber for owed, red for broken or flagged.
  */
 
@@ -34,7 +35,7 @@ export interface PostLike {
 }
 
 export type VideoStatusKey =
-  | 'shelved' | 'failed' | 'flagged' | 'posted' | 'scheduled' | 'review' | 'framing'
+  | 'shelved' | 'failed' | 'flagged' | 'finalcut' | 'posted' | 'scheduled' | 'review' | 'framing'
   | 'rendering' | 'approved' | 'changes' | 'scripted' | 'concept'
 
 export interface VideoStatus {
@@ -51,6 +52,7 @@ const S: Record<VideoStatusKey, Omit<VideoStatus, 'key'>> = {
   shelved:   { word: 'Shelved',      turn: 'nobody',  cls: 'border-line bg-paper-3 text-ink-4 line-through', glyph: '∅' },
   failed:    { word: 'Failed',       turn: 'owner',   cls: 'border-red-200 bg-red-50 text-red-800',          glyph: '✕' },
   flagged:   { word: 'Flagged',      turn: 'owner',   cls: 'border-red-200 bg-red-50 text-red-800',          glyph: '⚑' },
+  finalcut:  { word: 'Awaiting your approval: final cut', turn: 'owner', cls: 'border-coral bg-coral-soft text-ink', glyph: '◉' },
   posted:    { word: 'Posted',       turn: 'nobody',  cls: 'border-transparent bg-[#4F6150] text-white',     glyph: '✓' },
   scheduled: { word: 'Scheduled',    turn: 'social',  cls: 'border-transparent bg-plum text-white',          glyph: '◷' },
   review:    { word: 'Review cut',   turn: 'owner',   cls: 'border-coral bg-coral-soft text-ink',            glyph: '▶' },
@@ -88,6 +90,9 @@ function keyOf(episode: EpisodeLike | null, job: JobLike | null, posts: PostLike
   // #10485), not a pipeline failure — distinct glyph/word from `failed`, but
   // the same urgency and ranking (never hidden behind a calmer state).
   if (job && job.status === 'awaiting_final_review') return 'flagged'
+  // Render gate: the cut is finished and parked for the owner. Ranked above
+  // posts and the episode's own status so a waiting-on-you cut never hides.
+  if (job && job.status === 'awaiting_render_approval') return 'finalcut'
   if (posts.some(p => p.status === 'posted') || ps === 'posted' || ps === 'measured') return 'posted'
   if (posts.length > 0 || ps === 'scheduled') return 'scheduled'
   if (job && job.stage === 'done' && job.status === 'done') return 'review'
@@ -101,7 +106,12 @@ function keyOf(episode: EpisodeLike | null, job: JobLike | null, posts: PostLike
   return 'concept'
 }
 
-/** The six-dot stage rail: where this episode sits on the production line. */
+/**
+ * The six-dot stage rail: where this episode sits on the production line. A
+ * cut parked at the render gate sits on 'Render' (index 4): the approval is
+ * the last act of rendering, and a seventh dot would move 'Posted' for every
+ * row on the board.
+ */
 export const STAGE_STEPS = ['Concept', 'Script', 'Storyboard', 'Cast+Product', 'Render', 'Posted'] as const
 
 export function stageIndexOf(status: VideoStatusKey, episode: EpisodeLike | null): number {
@@ -109,6 +119,7 @@ export function stageIndexOf(status: VideoStatusKey, episode: EpisodeLike | null
     case 'posted': return 5
     case 'scheduled': return 5
     case 'review': return 4
+    case 'finalcut': return 4
     case 'framing': return 4
     case 'rendering': return 4
     case 'flagged': return 4
@@ -136,6 +147,8 @@ export function nextActionOf(status: VideoStatusKey, episodeId: number | null, j
       return { label: 'Pick frame', to: '/admin/video-studio/render' }
     case 'review':
       return { label: 'Review cut', to: '/admin/video-studio/render' }
+    case 'finalcut':
+      return { label: 'Approve cut', to: '/admin/video-studio/render' }
     case 'failed':
       return jobRowId != null ? { label: 'See error', to: '/admin/video-studio/render' } : null
     default:

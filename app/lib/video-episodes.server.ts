@@ -560,6 +560,36 @@ export async function markEpisodeRenderFailed(episodeId: number, error: string):
 }
 
 /**
+ * The owner rejected this episode's final cut at the render gate. Same
+ * destination as markEpisodeRenderFailed ('failed', whose script page offers
+ * "Render again" as a retake and "send back" as a revise, both through
+ * decideEpisode), but the note is the owner's, not the pipeline's: decision
+ * 'render_rejected', by the owner, carrying their reason, so the room and the
+ * learn loop can tell a cut the owner turned down from a render that died.
+ *
+ * video_job_id is deliberately KEPT: decideEpisode's retake path is what
+ * retires it onto prior_job_ids_json, and clearing it here would make a
+ * "Render again" lose the rejected job from the episode's history.
+ */
+export async function markEpisodeRenderRejected(episodeId: number, reason: string, rejectedBy: string): Promise<boolean> {
+  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, episodeId)).limit(1)
+  const ep = rows[0]
+  if (!ep || !['rendering', 'approved'].includes(ep.productionStatus)) return false
+  const note: VideoEpisodeReviewNote = {
+    at: new Date().toISOString(),
+    decision: 'render_rejected',
+    note: reason.slice(0, 2000),
+    by: rejectedBy,
+  }
+  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
+  const updated = await db.update(videoEpisodes)
+    .set({ productionStatus: 'failed', reviewNotesJson: notes, updatedAt: new Date() })
+    .where(and(eq(videoEpisodes.id, episodeId), inArray(videoEpisodes.productionStatus, ['rendering', 'approved'])))
+    .returning({ id: videoEpisodes.id })
+  return updated.length > 0
+}
+
+/**
  * Backstop for a run that died between claiming and enqueueing without ever
  * calling releaseEpisodeClaim — the crashed-worker case releaseEpisodeClaim
  * cannot cover, mirroring team.server's expireStaleRuns/expireStaleClaims.

@@ -183,6 +183,7 @@ interface LoaderData {
   videoProgram: boolean
   videoDefaultModelTier: string | null
   videoFrameReview: boolean
+  videoRenderReview: boolean
   videoEndcard: boolean
   instagramAutopublish: boolean
   instagramPublishMaxPerDay: number
@@ -218,7 +219,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
+  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.socialMetricsSweep).catch(() => false),
@@ -241,6 +242,11 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     // Frame review is not a VALVE_KEYS member (it defaults ON, unlike the
     // ship-OFF valves) — read it directly from pipeline_settings.
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.frameReview)).limit(1)
+      .then(rows => rows[0]?.value !== 'false')
+      .catch(() => true),
+    // Render review (final-cut gate) defaults ON exactly like frame review;
+    // no migration seeds the row, so absence reads ON.
+    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.renderReview)).limit(1)
       .then(rows => rows[0]?.value !== 'false')
       .catch(() => true),
     // End card defaults OFF; read directly for the same not-a-VALVE_KEYS reason.
@@ -443,7 +449,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     filteredOpenTotal, ticketLinks, filter,
     kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram,
-    videoDefaultModelTier, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
+    videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges, runpodPodSpentCents,
   }
@@ -590,7 +596,7 @@ export default function AgentTeamsPage() {
     suggestions, needsYou, needsYouTotal, filteredOpenTotal,
     ticketLinks, filter, kindOptions, assigneeOptions, teamOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish,
-    seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoEndcard,
+    seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
     releaseEngine, releaseEngineMaxMerges, runpodPodSpentCents,
@@ -847,6 +853,12 @@ export default function AgentTeamsPage() {
               detail="When ON, every video job parks after scene-frame composition so you pick the frame in /admin/video-studio before the expensive clip generation. OFF lets auto-QC choose the frame. Keep ON until frame quality has earned trust."
               settingKey={VIDEO_EXTRA_KEYS.frameReview}
               on={videoFrameReview}
+            />
+            <ValveRow
+              label={`Final-cut review is ${videoRenderReview ? 'ON' : 'OFF'}`}
+              detail="When ON, every finished video parks at the end of rendering so you watch the final cut in /admin/video-studio before anything reaches Social Studio. Approve fans it out to social drafts; reject needs a reason, which goes on the episode. OFF sends finished cuts straight to Ready for review."
+              settingKey={VIDEO_EXTRA_KEYS.renderReview}
+              on={videoRenderReview}
             />
             <ValveRow
               label={`Autopublish is ${videoAutopublish ? 'ON' : 'OFF'}`}

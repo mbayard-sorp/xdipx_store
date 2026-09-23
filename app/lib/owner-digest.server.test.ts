@@ -70,6 +70,7 @@ import {
   renderTicketLoopSection,
   renderTicketsSection,
   renderAdCampaignQueueSection,
+  gatherParkedVideoRenders,
   runOwnerDigest,
   type AdCampaignQueueRow,
   type EscalationFacts,
@@ -826,14 +827,35 @@ describe('renderNeedsMikeSection', () => {
       ...emptyFacts,
       parkedVideoFrames: { count: 3, oldestDays: 4 },
     })
-    expect(html).toContain('3 video frames are awaiting your pick')
+    expect(html).toContain('Video: 3 frames and 0 final cuts awaiting you')
     expect(html).toContain('oldest 4d')
     expect(html).toContain('/admin/video-studio')
   })
 
-  it('says nothing about video frames when the valve is off (null) or the queue is empty', () => {
+  it('folds parked final cuts into the same one video line, with the older age', () => {
+    const html = renderNeedsMikeSection({
+      ...emptyFacts,
+      parkedVideoFrames: { count: 1, oldestDays: 1 },
+      parkedVideoRenders: { count: 2, oldestDays: 3 },
+    })
+    expect(html).toContain('Video: 1 frame and 2 final cuts awaiting you (oldest 3d)')
+    expect(html.match(/Video: /g)).toHaveLength(1)
+  })
+
+  it('lists final cuts alone when no frames wait (frame valve off reads null)', () => {
+    const html = renderNeedsMikeSection({
+      ...emptyFacts,
+      parkedVideoFrames: null,
+      parkedVideoRenders: { count: 1, oldestDays: 0 },
+    })
+    expect(html).toContain('Video: 0 frames and 1 final cut awaiting you (oldest 0d)')
+  })
+
+  it('says nothing about video when both queues are empty or unreadable', () => {
     expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: null })).not.toContain('video-studio')
     expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: { count: 0, oldestDays: null } })).not.toContain('video-studio')
+    expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: null, parkedVideoRenders: null })).not.toContain('video-studio')
+    expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoRenders: { count: 0, oldestDays: null } })).not.toContain('video-studio')
   })
 })
 
@@ -866,5 +888,32 @@ describe('renderAdCampaignQueueSection', () => {
     const html = renderAdCampaignQueueSection([{ ...row, name: '<script>x</script>' }])
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
+  })
+})
+
+describe('gatherParkedVideoRenders', () => {
+  const dialect = new PgDialect()
+
+  it('counts jobs parked at the render gate and ages them from when they parked', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [{ n: 2, oldest_days: 2.6 }] })
+    await expect(gatherParkedVideoRenders()).resolves.toEqual({ count: 2, oldestDays: 3 })
+    const { sql: text } = dialect.sqlToQuery(executeMock.mock.calls[0]?.[0])
+    expect(text).toContain("status = 'awaiting_render_approval'")
+    expect(text).toContain('MIN(updated_at)')
+    // Not valve-gated: a parked cut waits on the owner whatever the valve says.
+    expect(executeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads an empty queue as zero with no age', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [{ n: 0, oldest_days: null }] })
+    await expect(gatherParkedVideoRenders()).resolves.toEqual({ count: 0, oldestDays: null })
+  })
+
+  it('returns null rather than throwing when the read fails', async () => {
+    executeMock.mockReset()
+    executeMock.mockRejectedValue(new Error('db down'))
+    await expect(gatherParkedVideoRenders()).resolves.toBeNull()
   })
 })

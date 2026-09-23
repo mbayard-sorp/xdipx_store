@@ -227,9 +227,9 @@ export default function ScriptReader() {
         </div>
         {failed && !decided && (
           <div className="mx-auto mt-2 max-w-4xl rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
-            This episode&rsquo;s render failed. &ldquo;Render again&rdquo; re-arms it for the next render run and
-            spends again; &ldquo;Changes&rdquo; sends it back to the writers room instead. The failure reason is
-            the newest entry in the revision notes below.
+            This episode&rsquo;s render failed, or you rejected its final cut. &ldquo;Render again&rdquo; re-arms it
+            for the next render run and spends again; &ldquo;Changes&rdquo; sends it back to the writers room instead.
+            The reason is the newest entry in the revision notes below.
           </div>
         )}
         {changesOpen && !decided && (

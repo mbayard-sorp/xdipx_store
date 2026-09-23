@@ -794,6 +794,13 @@ export interface NeedsMikeFacts {
    * nothing owner-only to surface). (#4356)
    */
   parkedVideoFrames?: { count: number; oldestDays: number | null } | null
+  /**
+   * Finished cuts parked at awaiting_render_approval (the render gate): only
+   * the owner's approve/reject in /admin/video-studio/render moves them.
+   * Counted whatever the valve says, because flipping `video_render_review`
+   * off does not release a cut that is already parked. `null` on a read error.
+   */
+  parkedVideoRenders?: { count: number; oldestDays: number | null } | null
 }
 
 /**
@@ -825,10 +832,17 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   for (const c of (f.adCampaigns ?? []).slice(0, 5)) {
     items.push(`Ad campaign #${c.id} &ldquo;${esc(clip(c.name, 60))}&rdquo; (${esc(c.platform)}) approved ${c.ageDays}d ago and never launched, only you can create it in-platform: <a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`)
   }
-  const frames = f.parkedVideoFrames
-  if (frames && frames.count > 0) {
-    const oldest = frames.oldestDays != null ? ` (oldest ${frames.oldestDays}d)` : ''
-    items.push(`${frames.count} video ${frames.count === 1 ? 'frame is' : 'frames are'} awaiting your pick${oldest}, only you can approve ${frames.count === 1 ? 'it' : 'them'}: <a href="https://xdipx.com/admin/video-studio/render" style="color:#c2410c;">/admin/video-studio</a>`)
+  // One video line for both gates: frames awaiting a pick, final cuts
+  // awaiting approval. Either count alone is enough to list it.
+  const frameCount = f.parkedVideoFrames?.count ?? 0
+  const cutCount = f.parkedVideoRenders?.count ?? 0
+  if (frameCount > 0 || cutCount > 0) {
+    const ages = [
+      frameCount > 0 ? f.parkedVideoFrames?.oldestDays : null,
+      cutCount > 0 ? f.parkedVideoRenders?.oldestDays : null,
+    ].filter((d): d is number => d != null)
+    const oldest = ages.length ? ` (oldest ${Math.max(...ages)}d)` : ''
+    items.push(`Video: ${frameCount} ${frameCount === 1 ? 'frame' : 'frames'} and ${cutCount} final ${cutCount === 1 ? 'cut' : 'cuts'} awaiting you${oldest}, only you can approve them: <a href="https://xdipx.com/admin/video-studio/render" style="color:#c2410c;">/admin/video-studio</a>`)
   }
   if (items.length === 0) {
     return `<p style="margin:0;color:${GOOD};">Nothing on this list today.</p>`
@@ -1320,6 +1334,31 @@ async function gatherParkedVideoFrames(): Promise<{ count: number; oldestDays: n
   }
 }
 
+/**
+ * Finished video cuts parked at `awaiting_render_approval` (the render gate).
+ * Unlike the frame sweep this does NOT return null when the valve is off: the
+ * poller never picks a parked cut back up, so a cut parked before the valve
+ * flipped still waits on the owner and still belongs on the list. Oldest age
+ * is from `updated_at`, the moment it parked, not the job's creation.
+ */
+export async function gatherParkedVideoRenders(): Promise<{ count: number; oldestDays: number | null } | null> {
+  try {
+    const res = await db.execute(sql`
+      SELECT COUNT(*)::int AS n,
+             EXTRACT(epoch FROM now() - MIN(updated_at))::float8 / 86400 AS oldest_days
+        FROM video_jobs
+       WHERE status = 'awaiting_render_approval'`)
+    const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+    return {
+      count: Number(row?.['n'] ?? 0),
+      oldestDays: row?.['oldest_days'] == null ? null : Math.round(Number(row['oldest_days'])),
+    }
+  } catch (err) {
+    console.warn('[owner-digest] parked video-render sweep failed:', String(err).slice(0, 200))
+    return null
+  }
+}
+
 async function gatherEscalations(): Promise<EscalationFacts> {
   const out: EscalationFacts = { protectedPrs: [], exhausted: [] }
   try {
@@ -1485,7 +1524,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     return null
   })
 
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames] =
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
@@ -1522,6 +1561,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       gatherStaleOwnerRows(),
       gatherAdCampaignQueue(),
       gatherParkedVideoFrames(),
+      gatherParkedVideoRenders(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
@@ -1539,6 +1579,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     missedRoutines: loopHealth?.routineFlags ?? [],
     adCampaigns: adCampaignQueue,
     parkedVideoFrames,
+    parkedVideoRenders,
   }
 
   // ── Compose ───────────────────────────────────────────────────────────────
