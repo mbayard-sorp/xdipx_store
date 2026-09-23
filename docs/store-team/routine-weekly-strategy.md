@@ -96,7 +96,17 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
 
 ## Step 3 — Retro on last week's brief
 
-Directive by directive: followed? outcome? keep/adjust/drop? One `decision` event each:
+Directive by directive: followed? outcome? keep/adjust/drop? **And a fourth question (retro-verify-
+standing-premises, second occurrence 2026-09-22): is the premise still true, and what did you
+check?** A directive whose premise died reads as "followed, no outcome" under the first three
+questions alone and gets renewed unchecked — run 865 found an owner blocker whose trigger had never
+fired once after ten days open, and the very next week's run found four more false premises in a
+single pass, three of them standing directives from that same prior brief. Re-verifying the outcome
+of a directive is not the same check as re-verifying whether its premise still holds; do both. For
+any premise that is re-asserted rather than freshly re-verified, name a file, query, or probe as
+evidence. Extend the same check to every `owner_blockers` row the brief carries forward. Keep it
+bounded: verify the premises of directives and blockers this brief actually carries forward, not the
+entire historical backlog. One `decision` event each:
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/event" \
