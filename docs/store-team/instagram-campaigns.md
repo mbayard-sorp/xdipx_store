@@ -233,6 +233,41 @@ said nothing.
 - **Implication.** Use may be implied by context, framing and caption. Occlusion under a sheet is
   licensed **when the occluded shape is the product**.
 
+**Bodyscape is the default on-skin frame (owner direction 2026-09-22, codified same day).** The body
+is the landscape and the product is the only object in it. Close crop, one zone, skin fills the
+frame, no face unless the brief says why. Reference frames in the socials library: asset 602
+(Womanizer Beauty in the hip hollow, gold waist chain, sheet closing the top corner) and asset 607
+(LELO SONA held flat on the stomach, sheet closing the bottom edge). Licensed compositions include:
+
+- The thigh and the hip crease, product resting on the thigh.
+- The belly, with the under-curve of the breasts at the top edge and a hint of pubic hair at the
+  bottom edge. Pubic hair is not on the stop list under the 2026-09-20 nudity definition, but it is
+  new ground for the classifier: at most 1 such frame per rolling 7, never the default.
+- Face-down on the bed, product on the small of the back, the tops of the cheeks in frame, the
+  cleft closed by the pose or the sheet.
+- The product held against a bare shoulder, camera looking over the shoulder.
+
+A full-body or face-forward portrait (library asset 635) is the exception, at most 1 per rolling 7,
+and the brief names why. The three brief rules below (write the frame, inanimate closers, camera
+angle) apply to every bodyscape frame without change.
+
+**The crop is the closer (owner test run 2026-09-22, library 640 to 651).** Briefed as a close
+bodyscape, the model still renders wide roughly half the time: the belly and back briefs came back
+with nipples and the pubic area in the full frame and the vision gate failed them, correctly. The
+owner then cropped three of those failed renders to the zone that was briefed (Atlas requests
+02c8be17, b2fe49e5, b2134600) and every crop was exactly the frame wanted: belly with the navel, one
+hand with a ring, a hint of pubic hair at the bottom edge, sheet at the corner. So the pipeline
+treats a wide render as raw material, not a verdict: media-manager crops the render to the briefed
+zone first, the vision gate and the publish gate judge the crop that would ship, and only the crop
+enters the library as the candidate. The stop list is judged on the shipped pixels. A render that
+cannot be cropped to a clean frame is the one that fails.
+
+**Anatomy belongs to the zone.** A back brief that comes back with a navel, a thigh brief that comes
+back with a stomach, is a zone miss, not a near miss: media-manager rejects it before the gate sees
+it. Owner-approved results from the test run: 640 and 641 (Womanizer Beauty on the top of the thigh,
+gold anklet, sheet closing the top corner) are ceiling bodyscape frames; 650 and 651 (Spectrum
+g-spot held to a bare shoulder from behind) passed the gate and are the mid-charge shape.
+
 **The ceiling stops here, and these do not move:**
 
 - Nipples visible or outlined, sheer fabric included. Labia visible or outlined. A penis, in any
