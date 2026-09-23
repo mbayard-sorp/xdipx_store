@@ -396,6 +396,35 @@ describe('applyPublishGateVerdict', () => {
     expect(writes[0]?.reviewStatus).toBe('pending_review')
   })
 
+  // Ticket #10982: every BLOCK/REVISE/HOLD row landed with gate_findings = []
+  // once the agent sent no itemised findings, which reads on the dashboard as
+  // "nothing was found" on a row that was explicitly refused.
+  it('synthesises a finding from the notes when a BLOCK carries none of its own', async () => {
+    const { repo, writes } = fakeRepo(row())
+    await applyPublishGateVerdict(
+      7, verdict({ verdict: 'BLOCK', notes: 'Withholding test answered a body.' }), { repo },
+    )
+    expect(writes[0]?.gateFindings).toEqual([
+      { check: 'agent-judgment', verdict: 'block', note: 'Withholding test answered a body.' },
+    ])
+  })
+
+  it('does not synthesise a finding when the agent itemised its own', async () => {
+    const { repo, writes } = fakeRepo(row())
+    await applyPublishGateVerdict(
+      7,
+      verdict({
+        verdict: 'REVISE',
+        notes: 'Catalog-on-a-table.',
+        findings: [{ check: 'imagery-ceiling', severity: 'warn', detail: 'catalog framing' }],
+      }),
+      { repo },
+    )
+    expect(writes[0]?.gateFindings).toEqual([
+      { check: 'imagery-ceiling', verdict: 'revise', note: 'catalog framing' },
+    ])
+  })
+
   it('does not skip the deterministic checks on a non-PASS', async () => {
     // A REVISE is not going anywhere, so verifying it would only cost a Shopify
     // round trip. Asserting it here so a future refactor does not quietly make

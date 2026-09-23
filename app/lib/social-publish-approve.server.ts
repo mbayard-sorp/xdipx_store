@@ -607,16 +607,32 @@ export async function applyPublishGateVerdict(
 
   // A non-PASS needs no verification: it is not going anywhere. Recording it is
   // the whole job, and REVISE/BLOCK carry the reason the drafter has to act on.
+  // Deliberately does NOT run the deterministic checks here (see the "does not
+  // skip the deterministic checks on a non-PASS" test below, which asserts the
+  // opposite name for the opposite reason): a verdict that isn't shipping isn't
+  // worth a Storefront round trip.
   if (input.verdict !== 'PASS') {
     const reviewStatus =
       input.verdict === 'BLOCK' ? 'rejected'
       : input.verdict === 'REVISE' ? 'needs_changes'
       : 'pending_review'   // HOLD: left where the owner will see it
+    // #10982: the agent contract makes `findings` optional, and most BLOCK/
+    // REVISE/HOLD verdicts arrive with none -- the reasoning lives only in
+    // `notes`. The dashboard (GateVerdictPanel, PostPreviewCard) and any
+    // aggregate-by-check-name query both read `gate_findings`, so an empty
+    // array here reads as "nothing was found" on a row that was explicitly
+    // refused. Synthesize one finding from the notes when the agent itemised
+    // none, so the column is never empty on a non-PASS.
+    const findings = agentFindings.length > 0 ? agentFindings : [{
+      check: 'agent-judgment',
+      verdict: gateStatusForVerdict(input.verdict),
+      note: input.notes,
+    }]
     await write(
       reviewStatus,
       formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now),
       gateStatusForVerdict(input.verdict),
-      agentFindings,
+      findings,
     )
     return { ok: true, reviewStatus }
   }
