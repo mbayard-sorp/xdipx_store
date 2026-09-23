@@ -52,9 +52,12 @@ elsewhere in this file that treats "drafted and honestly gated" as a finished ru
 
 **What done means.** For every gate platform (Instagram, X) whose valve is on and whose
 `social_freq_<platform>` is above zero, the day is done when at least one row for that platform is
-`approved` or `posted` today, and the target is the full quota. A run ends with the day's count in
-front of it: count `approved` plus `posted` rows per platform for today's UTC date before you write
-the final run update.
+`approved` or `posted` today, and the target is the full quota. **Under the on-skin standing order
+(`instagram-campaigns.md` §3.2c, owner direction 2026-09-22) at least one of each platform's rows
+counted here is an on-skin campaign row: `postType:'campaign'` with `bodyZone` set. A day filled only
+by `manual` rows is reported as short, not full, and the run drafts an on-skin bodyscape row before
+it ends.** A run ends with the day's count in front of it: count `approved` plus `posted` rows per
+platform for today's UTC date, and the on-skin subset, before you write the final run update.
 
 **Run status is derived from that count, not from effort.**
 
@@ -78,8 +81,10 @@ and the publish gate; nothing here softens a verdict.
    allowance and the combined 2x ceiling in Step 2.5 do not bind on a zero platform; the attempt
    ceiling in rung 5 does. Run 720 (2026-09-06) left rows 185 and 186 at `needs_changes` on a
    one-line "add anticipation" REVISE and finished at zero. Those were twenty minutes from live.
-2. **Pivot after two failed iterations on one concept** (Step 2b). Same product, subject, or image
-   angle failing twice is a dead concept for today.
+2. **Pivot after two failed iterations on one concept** (Step 2b). Under the on-skin standing order
+   a concept is the same product in the same body zone. Pivot to a different in-stock SKU with a
+   simpler silhouette (single colour, no accent stripe, no nozzle detail) on the same on-skin
+   bodyscape treatment; change the product, body zone, or crop scale, never the treatment.
 3. **Fall back to a proven shape.** List `status:'posted'` rows for the platform from the last 14
    days. Those rows PASSed this exact gate and stayed live; their shape is the calibration. Draft the
    next attempt in a shape that has at least two live precedents: the same slot, the same format,
@@ -89,7 +94,10 @@ and the publish gate; nothing here softens a verdict.
    and the category-comparison education post with the product in frame (rows 142, 149, 167, 168,
    152). A subject class that failed the gate on two consecutive days (toy care and cleaning,
    2026-09-05 and 2026-09-06, twelve attempts) is off the table until the calibration ticket for it
-   closes; do not lead a zero day with it.
+   closes; do not lead a zero day with it. **While the §3.2c standing order is in force, a fallback
+   stays on-skin.** The clothed precedents above are calibration for slot, format, and charge, not
+   for wardrobe. A clothed or `manual` shape is a fallback only after two different on-skin products
+   have each failed twice on product identity in the same run, and the run summary names both.
 4. **Recover the campaign before recovering the caption.** A day with no active `IG: ` campaign
    is a defect, not a context (`instagram-campaigns.md` §4: there is never a day with no active
    campaign). If the active campaign was closed early (a removal, an owner deletion), activate its
@@ -491,9 +499,10 @@ where the account posts nothing is a real miss, not a neutral outcome. Two thing
 neither weakens a single gate above:
 
 1. **Pivot after 2 failed iterations on one idea; don't grind it to the daily ceiling.** If a post
-   concept (the same product, subject, or image angle) draws two BLOCK/REVISE verdicts in a run,
-   stop iterating it and move to a genuinely different subject, product, or format for the
-   remaining allowance. On 2026-09-05, 10 of the day's Instagram allowance and both of X's
+   concept (the same product, subject, or image angle; under the on-skin order, the same product
+   in the same body zone) draws two BLOCK/REVISE verdicts in a run, stop iterating it and move to
+   a genuinely different subject, product, or format for the remaining allowance. Under the on-skin
+   order the pivot changes the product, zone, or crop and keeps the bodyscape treatment. On 2026-09-05, 10 of the day's Instagram allowance and both of X's
    new-draft slots were spent on one toy-care angle before the day's quota was gone, and every
    single attempt failed the gate. A pivot after the second failure leaves room to try something
    with better odds instead of guaranteeing a zero day on the way to exhausting the ceiling. A
@@ -808,9 +817,11 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   one carousel per rolling 14-day window is a standing slot-E requirement, not an optional format**:
   if mixReport's carousel count reads 0 in the trailing 14, schedule one this run, budget
   permitting, rather than deferring it another cycle.
-- **Set `postType:'campaign'`** on Instagram campaign posts (the enum already carries it and no row
-  has ever used it) and name the campaign slug in the draft's event summary, so posts can be traced
-  to their campaign until the schema carries a real link.
+- **Set `postType:'campaign'`** on every Instagram AND X product row under the on-skin standing
+  order, with `bodyZone`, `contactMode`, and `cropScale` set on both platforms, and name the campaign
+  slug in the draft's event summary, so posts can be traced to their campaign until the schema
+  carries a real link. A `manual` product row under the standing order is a run defect the summary
+  names.
 - **A campaign licenses nothing.** Step 4a, 4b, 2.6, and 2b all apply unchanged inside a campaign.
   "Wand Week" is not permission to sell wands.
 - **Any post removal ends the campaign** and steps volume down one level immediately, per
@@ -904,10 +915,13 @@ as usual: the pairing is advice, the sale lives on X and the site.
 rule only if a run verifies it before shipping; the week of 2026-08-17 it did not, and four
 toy-featuring posts (Womanizer Premium 2, Ferri, Dame Pom, Fifty Shades Ace Pro) all went out with
 no lube named. So before writing any draft that features a toy, confirm one of two things is true
-and record which in the draft's event summary: either the caption names a compatible lubricant
+and record which on the draft call itself: either the caption names a compatible lubricant
 (Instagram: named in the caption, no link; X: the lube PDP linked with channel UTMs), or no pairing
-genuinely applies (a no-product education beat, or a feature that is not a toy) and the summary says
-in one clause why none applies. A toy-featuring draft that names no lube and logs no reason has
+genuinely applies (a no-product education beat, or a feature that is not a toy) and the draft sends
+`pairingNoneReason` with one clause saying why. The publish gate reads that field, not the event
+summary; rows 283 and 284 (2026-09-21) blocked `pairing-missing` because the reason lived only in
+the summary. On X, count both PDP links at 23 characters each and check the weighted length is under
+280 BEFORE briefing the image; cut words, never the pairing. A toy-featuring draft that names no lube and logs no reason has
 failed this check and is not ready to ship. This is real helpfulness sourced from
 `accessory_product_ids` / `pairing_why` or material compatibility, never upsell theater.
 
@@ -1773,7 +1787,7 @@ the product.
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","shopifyProductId":"<product post only: gid://shopify/Product/<id> of the featured SKU, from the Step 2.6 fetch>","sceneLocation":"<the location social-art-director chose, e.g. bedroom-loft>","castSlugs":["<the cast member social-art-director chose>"],"bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"instagram","postType":"campaign","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","shopifyProductId":"<product post only: gid://shopify/Product/<id> of the featured SKU, from the Step 2.6 fetch>","sceneLocation":"<the location social-art-director chose, e.g. bedroom-loft>","castSlugs":["<the cast member social-art-director chose>"],"bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","pairingNoneReason":"<only when no lube is named: one clause why>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **X drafts carry `mediaUrls` too — never omit it.** The server 400s a `platform:'x'` draft with an
@@ -1783,7 +1797,7 @@ empty or missing `mediaUrls` array (ticket #4131), the same fail-closed shape as
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"x","postType":"manual","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"altText":"<plain description of the image>","shopifyProductId":"<product post only: the same gid as the Instagram post this beat companions>","scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"x","postType":"campaign","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"altText":"<plain description of the image>","shopifyProductId":"<product post only: the same gid as the Instagram post this beat companions>","bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","pairingNoneReason":"<only when no lube is named: one clause why>","scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **`altText` is fail-closed too, for any media-bearing Instagram or X draft (ticket #5486), the same
