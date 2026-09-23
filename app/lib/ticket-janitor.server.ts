@@ -511,9 +511,6 @@ const TWICE_WEEKLY_GAP = 96 + 26
  * as of 2026-09-02. If the manifest and this table disagree, fix one of them in
  * the same PR that moved the other.
  *
- * The podcast lane's playbook opens its run with runType 'manual', so its
- * liveness rides the manual bucket and is approximate by construction.
- *
  * **Curating this by hand is the known failure mode, not an aside.** R-ENRICH
  * had no entry, so its total failure on 2026-08-23 and 08-24 was invisible to
  * every liveness check while 136 products sat unenriched. The same thing had
@@ -557,7 +554,7 @@ export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   { routine: 'Email Briefs', team: 'email', runType: 'email', kind: 'weekly', schedule: 'Tue 15:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Design Cycle (Routine B)', team: 'homepage', runType: 'design', kind: 'weekly', schedule: 'Wed 14:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly SEO curation', team: 'content', runType: 'seo-curation', kind: 'weekly', schedule: 'Sun 19:00', maxGapHours: WEEKLY_GAP },
-  { routine: 'Weekly podcast review', team: 'content', runType: 'manual', kind: 'weekly', schedule: 'Wed 21:05', maxGapHours: WEEKLY_GAP },
+  { routine: 'Weekly podcast review', team: 'content', runType: 'podcast', kind: 'weekly', schedule: 'Wed 21:05', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly trend scout', team: 'content', runType: 'trend-scout', kind: 'weekly', schedule: 'Sat 19:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly business research', team: 'social', runType: 'research', kind: 'weekly', schedule: 'Thu 16:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly social trend scout', team: 'social', runType: 'social-trend-scout', kind: 'weekly', schedule: 'Mon 17:00', maxGapHours: WEEKLY_GAP },

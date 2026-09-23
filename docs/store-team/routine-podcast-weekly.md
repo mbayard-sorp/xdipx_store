@@ -14,7 +14,7 @@ Runs on the **Max subscription** under the **content** team's gate and budget. C
 ```bash
 curl -s -X POST "$BASE_URL/api/team/run" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"start","team":"content","runType":"manual"}'   # → $RUN_ID
+  -d '{"op":"start","team":"content","runType":"podcast"}'   # → $RUN_ID
 ```
 
 ## Step 1 — Gate
