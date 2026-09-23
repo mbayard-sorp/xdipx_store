@@ -7,7 +7,11 @@
  *         paysOffLoopKey?, callbackToEpisode?, part2Hook?, storyboardJson?,
  *         hookText?, hookPattern?, castSlugs?, productPlacements?,
  *         scriptJson?, siteCutJson?, modelTier?, plannedSlotAt?, isReserve?,
- *         gateVerdicts?, seasonNumber? } ], createdBy? }
+ *         gateVerdicts?, seasonNumber?,
+ *         // the pitch (plan Phase 2b), all-or-nothing, stored on scriptJson.pitch:
+ *         format, speaker, listener?, fact, factSource: spec|material|reviews,
+ *         laugh, firstFrameConcept, estCostUsd, readAudioUrl?, productHandle,
+ *         alternate? } ], createdBy? }
  *     -> { batchId, seriesId, episodes: [{id, episodeUid, seasonNumber,
  *          episodeNumber, logline, estCostUsd}] }
  *     Rows land at production_status 'pending_approval', numbered max+1 in a
@@ -22,12 +26,22 @@
  *     closed by none). This is the writers room's continuity read and the
  *     script-doctor's evidence source.
  *
- *   { op: 'owner-edits', episodeId?, limit? }
- *     -> { edits }
+ *   { op: 'owner-edits', episodeId?, limit?, includeRoom? }
+ *     -> { edits, lineNotes }
  *     Recent before/after diffs captured by editEpisodeScript (ticket
- *     #7567) when the owner saves a script edit in /admin/video-studio.
- *     Read-only, team-token auth — the writers room's line-level signal of
- *     what the owner changes. Never a path to mutate a script.
+ *     #7567) when the owner saves a script edit in /admin/video-studio, plus
+ *     the owner's per-line notes ({episodeId, field, lineIdx, note}) from the
+ *     script reader. The room's own episode-revise rows are excluded unless
+ *     includeRoom is true, so the signal stays the owner's. Read-only.
+ *
+ *   { op: 'episode-revise', episodeId, fields: { presenterLine?, voiceover?,
+ *       shareLine?, cta?, captionIg?, captionX? }, editedBy: 'video-room',
+ *       note, readAudioUrl? }
+ *     -> { episodeId, changedFields, productionStatus, estCostUsd }
+ *     The /video-room command's write-back: a new script version with one
+ *     video_script_edits row per changed field. Only on pending_approval or
+ *     needs_changes rows (409 otherwise); the row lands at pending_approval.
+ *     A revision is not a decision and never approves anything.
  *
  *   { op: 'episode-claim', runId? }
  *     -> { episode } | 404 { error: 'empty_episode_queue' }
@@ -56,9 +70,13 @@ import {
   claimNextEpisode,
   releaseEpisodeClaim,
   listOwnerScriptEdits,
+  listLineNotes,
+  reviseEpisodeScript,
+  EpisodeReviseError,
   type ProposeEpisodeInput,
 } from '~/lib/video-episodes.server'
 import { apiError } from '~/lib/api-error.server'
+import { ROOM_EDITORS } from '~/lib/video-episodes'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -99,11 +117,42 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (b['op'] === 'owner-edits') {
-      const result = await listOwnerScriptEdits({
+      const scope = {
         ...(typeof b['episodeId'] === 'number' ? { episodeId: b['episodeId'] } : {}),
         ...(typeof b['limit'] === 'number' ? { limit: b['limit'] } : {}),
-      })
-      return Response.json(result)
+      }
+      const [result, lineNotes] = await Promise.all([
+        listOwnerScriptEdits({
+          ...scope,
+          // The room's own revisions are not owner signal; the retro would be
+          // grading itself. includeRoom:true returns the whole history.
+          ...(b['includeRoom'] === true ? {} : { excludeEditedBy: [...ROOM_EDITORS] }),
+        }),
+        listLineNotes(scope),
+      ])
+      return Response.json({ ...result, lineNotes })
+    }
+
+    if (b['op'] === 'episode-revise') {
+      const episodeId = typeof b['episodeId'] === 'number' ? b['episodeId'] : NaN
+      if (!Number.isFinite(episodeId)) {
+        return new Response('Bad Request: episodeId required', { status: 400 })
+      }
+      try {
+        const result = await reviseEpisodeScript({
+          episodeId,
+          fields: (b['fields'] ?? {}) as Record<string, string>,
+          editedBy: typeof b['editedBy'] === 'string' ? b['editedBy'] : 'video-room',
+          note: typeof b['note'] === 'string' ? b['note'] : '',
+          ...(typeof b['readAudioUrl'] === 'string' ? { readAudioUrl: b['readAudioUrl'] } : {}),
+        })
+        return Response.json(result)
+      } catch (err) {
+        if (err instanceof EpisodeReviseError) {
+          return Response.json({ error: err.message }, { status: err.status })
+        }
+        throw err
+      }
     }
 
     if (b['op'] === 'learn') {

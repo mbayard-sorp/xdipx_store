@@ -58,6 +58,7 @@ vi.mock('~/lib/homepage-payload.server', () => ({
 import {
   MAX_TICKET_ATTEMPTS,
   countStaleUndecidedOwnerAsks,
+  gatherPendingVideoPitches,
   parseRenderTruth,
   renderEscalationsSection,
   renderHomepageNowSection,
@@ -859,6 +860,51 @@ describe('renderNeedsMikeSection', () => {
     expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: { count: 0, oldestDays: null } })).not.toContain('video-studio')
     expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: null, parkedVideoRenders: null })).not.toContain('video-studio')
     expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoRenders: { count: 0, oldestDays: null } })).not.toContain('video-studio')
+  })
+})
+
+describe('pending video pitches (plan Phase 2b)', () => {
+  it('reads count, batch estimate and oldest age from pending_approval episodes only', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [{ n: 5, total_est: 4.126, oldest_hours: 30.4 }] })
+    await expect(gatherPendingVideoPitches()).resolves.toEqual({ count: 5, totalEstUsd: 4.13, oldestHours: 30 })
+    const query = new PgDialect().sqlToQuery(executeMock.mock.calls[0]?.[0]).sql
+    expect(query).toMatch(/from video_episodes/i)
+    expect(query).toMatch(/production_status = 'pending_approval'/)
+    // The column wins; the room's pitch estimate fills a row with no dry-run.
+    expect(query).toMatch(/coalesce\(\s*est_cost_usd/i)
+    expect(query).toContain(`script_json->'pitch'->>'estCostUsd'`)
+    expect(query).not.toMatch(/update|insert/i)
+  })
+
+  it('reports an empty queue with a null age', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [{ n: 0, total_est: 0, oldest_hours: null }] })
+    await expect(gatherPendingVideoPitches()).resolves.toEqual({ count: 0, totalEstUsd: 0, oldestHours: null })
+  })
+
+  it('returns null on a read failure so the digest still sends', async () => {
+    executeMock.mockReset()
+    executeMock.mockRejectedValue(new Error('db down'))
+    await expect(gatherPendingVideoPitches()).resolves.toBeNull()
+  })
+
+  const empty: NeedsMikeFacts = { needsOwnerPrs: [], blockedRows: [], staleOwnerRows: [], orphans: [], conflictedPrs: [], missedRoutines: [] }
+
+  it('puts one Video pitch line on Needs Mike with the scripts link', () => {
+    const html = renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 5, totalEstUsd: 4.2, oldestHours: 30 } })
+    expect(html).toContain('Video pitch: 5 clips awaiting you, est $4.20 (oldest 30h)')
+    expect(html).toContain('https://xdipx.com/admin/video-studio/scripts')
+  })
+
+  it('shows the age in days past 48h and singularizes one clip', () => {
+    const html = renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 1, totalEstUsd: 0.9, oldestHours: 80 } })
+    expect(html).toContain('Video pitch: 1 clip awaiting you, est $0.90 (oldest 3d)')
+  })
+
+  it('says nothing when there is no pitch or the read failed', () => {
+    expect(renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 0, totalEstUsd: 0, oldestHours: null } })).not.toContain('Video pitch')
+    expect(renderNeedsMikeSection({ ...empty, pendingVideoPitches: null })).not.toContain('Video pitch')
   })
 })
 

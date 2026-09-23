@@ -799,6 +799,8 @@ export interface NeedsMikeFacts {
   /** PRs GitHub reports merge-conflicted, on which CI structurally cannot run. */
   conflictedPrs: ConflictedPr[]
   missedRoutines: RoutineLivenessFlag[]
+  /** The Writers Room's pitch batch awaiting the owner's script read (plan Phase 2b). */
+  pendingVideoPitches?: PendingVideoPitches | null
   /** Approved ad_campaigns rows with no externalCampaignId: launch is owner-only. */
   adCampaigns?: AdCampaignQueueRow[]
   /**
@@ -842,6 +844,12 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   }
   for (const m of f.missedRoutines.slice(0, 5)) {
     items.push(`Routine ${esc(m.routine)} missed its window (${esc(m.schedule)} UTC): ${m.lastRunAt ? `last run ${m.hoursSince}h ago` : 'no run row ever'}`)
+  }
+  const pitches = f.pendingVideoPitches
+  if (pitches && pitches.count > 0) {
+    const oldest = pitches.oldestHours == null ? ''
+      : pitches.oldestHours >= 48 ? ` (oldest ${Math.round(pitches.oldestHours / 24)}d)` : ` (oldest ${pitches.oldestHours}h)`
+    items.push(`Video pitch: ${pitches.count} ${pitches.count === 1 ? 'clip' : 'clips'} awaiting you, est $${pitches.totalEstUsd.toFixed(2)}${oldest}: <a href="https://xdipx.com/admin/video-studio/scripts" style="color:#c2410c;">/admin/video-studio/scripts</a>`)
   }
   for (const c of (f.adCampaigns ?? []).slice(0, 5)) {
     items.push(`Ad campaign #${c.id} &ldquo;${esc(clip(c.name, 60))}&rdquo; (${esc(c.platform)}) approved ${c.ageDays}d ago and never launched, only you can create it in-platform: <a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`)
@@ -1314,6 +1322,43 @@ async function gatherStaleOwnerRows(): Promise<StaleOwnerRow[]> {
   }
 }
 
+export interface PendingVideoPitches {
+  count: number
+  /** Sum of each pending clip's estimate: the render's dry-run where it ran, else the room's pitch estimate. */
+  totalEstUsd: number
+  oldestHours: number | null
+}
+
+/**
+ * Episodes at pending_approval: the Writers Room's pitch batch, which only
+ * the owner can approve (the team API deliberately has no decide op), so a
+ * batch nobody reads is owner-only work (plan Phase 2b). Null on a read
+ * failure; the digest must still send.
+ */
+export async function gatherPendingVideoPitches(): Promise<PendingVideoPitches | null> {
+  try {
+    const res = await db.execute(sql`
+      SELECT COUNT(*)::int AS n,
+             COALESCE(SUM(COALESCE(
+               est_cost_usd,
+               CASE WHEN jsonb_typeof(script_json->'pitch'->'estCostUsd') = 'number'
+                    THEN (script_json->'pitch'->>'estCostUsd')::numeric END
+             )), 0)::float8 AS total_est,
+             EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 3600 AS oldest_hours
+        FROM video_episodes
+       WHERE production_status = 'pending_approval'`)
+    const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+    return {
+      count: Number(row?.['n'] ?? 0),
+      totalEstUsd: Math.round(Number(row?.['total_est'] ?? 0) * 100) / 100,
+      oldestHours: row?.['oldest_hours'] == null ? null : Math.round(Number(row['oldest_hours'])),
+    }
+  } catch (err) {
+    console.warn('[owner-digest] pending video-pitch sweep failed:', String(err).slice(0, 200))
+    return null
+  }
+}
+
 /**
  * Video jobs parked awaiting the owner's frame pick (#4356).
  *
@@ -1529,6 +1574,8 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // send so a re-render does not imply a real escalation happened; `null` renders
   // as "not computed", distinct from a real zero.
   const staleUndecided = opts.force ? null : await countStaleUndecidedOwnerAsks()
+  // Started here, awaited into Needs Mike below; never rejects (null on failure).
+  const pendingVideoPitchesP = gatherPendingVideoPitches()
   // The unified queue, computed once and rendered here exactly as
   // /api/team/status and /admin/ops render it. Never fatal: a digest that
   // cannot compute the queue must still deliver the fifteen sections it always
@@ -1588,6 +1635,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     needsOwnerPrs: escalations.protectedPrs,
     blockedRows,
     staleOwnerRows,
+    pendingVideoPitches: await pendingVideoPitchesP,
     orphans: loopHealth?.orphans ?? [],
     conflictedPrs: loopHealth?.conflictedPrs ?? [],
     missedRoutines: loopHealth?.routineFlags ?? [],

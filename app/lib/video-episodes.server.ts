@@ -12,12 +12,28 @@
  *   - the open-loop ledger      = opened loops no later episode closed
  */
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { videoEpisodes, videoSeries, videoJobs, videoScriptEdits } from '../../db/schema'
 import type { VideoEpisodeReviewNote, VideoScriptJson } from '../../db/schema'
 import { HOOK_PATTERNS, VIDEO_FORMULAS } from './team-keys'
-import { ARC_POSITIONS, SCRIPT_LOCKED_STATUSES, validatePlacements, scriptsSpeakIdentically, spokenTextOf } from './video-episodes'
+import {
+  ARC_POSITIONS,
+  SCRIPT_LOCKED_STATUSES,
+  REVISABLE_STATUSES,
+  REVISE_FIELDS,
+  ROOM_EDITORS,
+  READ_AFFECTING_FIELDS,
+  validatePlacements,
+  validatePitch,
+  validateLineNote,
+  validateAudioUrl,
+  hasPitchInput,
+  readPitch,
+  scriptsSpeakIdentically,
+  spokenTextOf,
+} from './video-episodes'
+import type { EpisodePitch, ReviseField } from './video-episodes'
 import { dryRunEpisodeScript, getMaxCostCents } from './video-pipeline.server'
 import { isVideoModelId, tierIneligibility } from './fal-video.server'
 import type { VideoModelId } from './fal-video.server'
@@ -48,6 +64,23 @@ export interface ProposeEpisodeInput {
   isReserve?: boolean
   gateVerdicts?: { doctor?: string; voice?: string }
   seasonNumber?: number
+  /**
+   * The pitch (plan Phase 2b), flat on the clip or nested under `pitch`.
+   * Optional as a whole (older callers file no pitch), but any one key makes
+   * the full pitch required and validated. Stored on scriptJson.pitch.
+   */
+  pitch?: Partial<EpisodePitch>
+  format?: string
+  speaker?: string
+  listener?: string
+  fact?: string
+  factSource?: string
+  laugh?: string
+  firstFrameConcept?: string
+  estCostUsd?: number
+  readAudioUrl?: string
+  productHandle?: string
+  alternate?: boolean
 }
 
 export interface ProposedEpisode {
@@ -132,6 +165,15 @@ export async function proposeEpisodes(args: {
         estCostUsd = dryRunEpisodeScript(e.scriptJson, modelTier).estCostUsd
       }
     }
+    // The pitch is validated whole or not at all: a card missing its fact or
+    // its laugh is not a pitch the owner can judge.
+    const pitch = hasPitchInput(e as unknown as Record<string, unknown>)
+      ? validatePitch(e as unknown as Record<string, unknown>, where)
+      : null
+    // The dry-run estimate is the render's own arithmetic and wins; the room's
+    // estimate fills the column only when there is no dry-run (no tier yet),
+    // so the queue and digest totals are never blank for a pitched clip.
+    if (estCostUsd == null && pitch) estCostUsd = pitch.estCostUsd
     if (estCostUsd != null && maxCostCents != null && estCostUsd * 100 > maxCostCents) {
       // The per-video ceiling was enforced only at enqueue, so an over-ceiling
       // episode filed clean, the reader disabled Approve on it, and it sat in
@@ -144,7 +186,10 @@ export async function proposeEpisodes(args: {
     const plannedSlotAt = e.plannedSlotAt ? new Date(e.plannedSlotAt) : null
     if (plannedSlotAt && Number.isNaN(plannedSlotAt.getTime())) throw new Error(`${where}.plannedSlotAt is not a valid date`)
     const castSlugs = Array.isArray(e.castSlugs) ? e.castSlugs.filter((s): s is string => typeof s === 'string' && !!s.trim()) : []
-    return { e, arcPosition, placements, modelTier, estCostUsd, plannedSlotAt, castSlugs }
+    const scriptJson: VideoScriptJson | null = pitch
+      ? { ...(e.scriptJson ?? {}), pitch: pitch as unknown as Record<string, unknown> }
+      : e.scriptJson ?? null
+    return { e, arcPosition, placements, modelTier, estCostUsd, plannedSlotAt, castSlugs, scriptJson }
   })
 
   const seasonNumber = prepared[0]?.e.seasonNumber ?? 1
@@ -186,7 +231,7 @@ export async function proposeEpisodes(args: {
       hookPattern: p.e.hookPattern ?? null,
       castSlugs: p.castSlugs,
       productPlacements: p.placements,
-      scriptJson: p.e.scriptJson ?? null,
+      scriptJson: p.scriptJson,
       siteCutJson: p.e.siteCutJson ?? null,
       modelTier: p.modelTier,
       estCostUsd: p.estCostUsd != null ? String(p.estCostUsd) : null,
@@ -338,7 +383,9 @@ export async function decideEpisode(args: {
  * Owner edit of episode script text, ADMIN-SESSION ONLY by design (ticket
  * #7558, Part A of #7557): called from the /admin/video-studio script-reader
  * action, never exposed on the team-token API, mirroring decideEpisode's own
- * admin-only boundary — agents never mutate a script via the team token.
+ * admin-only boundary. The room's own path is reviseEpisodeScript below (the
+ * episode-revise op): same merge and diff capture, but only on undecided
+ * rows, only under the 'video-room' editor name, and never an approval.
  *
  * Merges the given fields into the existing scriptJson/siteCutJson rather
  * than replacing them wholesale, so an edit to one field (say, the CTA)
@@ -367,43 +414,35 @@ export interface EditEpisodeScriptInput {
   siteCut?: { title?: string; dek?: string; copy?: string }
 }
 
-export async function editEpisodeScript(args: EditEpisodeScriptInput): Promise<void> {
-  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, args.episodeId)).limit(1)
-  const ep = rows[0]
-  if (!ep) throw new Error(`episode ${args.episodeId} not found`)
-  if ((SCRIPT_LOCKED_STATUSES as readonly string[]).includes(ep.productionStatus)) {
-    throw new Error(
-      `episode ${args.episodeId} is ${ep.productionStatus}; script edits are not allowed once a render has started or completed`,
-    )
-  }
-  if (!args.script && !args.siteCut) {
-    throw new Error('editEpisodeScript requires at least one of script or siteCut')
-  }
+type ScriptEditFields = NonNullable<EditEpisodeScriptInput['script']>
+type SiteCutFields = NonNullable<EditEpisodeScriptInput['siteCut']>
+interface ScriptDiffEntry { field: string; before: string | null; after: string }
 
+/**
+ * Merge an edit into an episode's script/site cut and diff it, without
+ * writing. Shared by the owner's editEpisodeScript and the room's
+ * reviseEpisodeScript so both capture video_script_edits identically.
+ */
+function computeScriptEdit(ep: VideoEpisodeRow, script: ScriptEditFields | undefined, siteCut: SiteCutFields | undefined): {
+  nextScript: VideoScriptJson
+  nextSiteCut: VideoEpisodeRow['siteCutJson'] | undefined
+  diffEntries: ScriptDiffEntry[]
+} {
   const currentScript = (ep.scriptJson ?? {}) as VideoScriptJson
-  const { captions: captionEdits, ...scriptEdits } = args.script ?? {}
+  const { captions: captionEdits, ...scriptEdits } = script ?? {}
   const nextScript: VideoScriptJson = {
     ...currentScript,
     ...scriptEdits,
     ...(captionEdits ? { captions: { ...(currentScript.captions ?? {}), ...captionEdits } } : {}),
   }
 
-  const note: VideoEpisodeReviewNote = {
-    at: new Date().toISOString(),
-    decision: 'edited',
-    note: 'owner edited script text',
-    by: args.editedBy,
-  }
-  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
-
   // One video_script_edits row per field whose value actually changed, so
-  // the writers room can later read what the owner changes without
-  // re-deriving it from reviewNotesJson prose. A field re-saved unchanged
-  // (the reader form round-tripping an untouched value) writes no row — it
-  // is not a preference signal.
+  // the writers room can later read what changed without re-deriving it from
+  // reviewNotesJson prose. A field re-saved unchanged (the reader form
+  // round-tripping an untouched value) writes no row: it is not a signal.
   const currentScriptRec = currentScript as Record<string, unknown>
   const currentSiteCutRec = (ep.siteCutJson ?? {}) as Record<string, string | undefined>
-  const diffEntries: { field: string; before: string | null; after: string }[] = []
+  const diffEntries: ScriptDiffEntry[] = []
   for (const [key, after] of Object.entries(scriptEdits)) {
     if (after == null) continue
     const before = currentScriptRec[key]
@@ -417,46 +456,299 @@ export async function editEpisodeScript(args: EditEpisodeScriptInput): Promise<v
       if (before !== after) diffEntries.push({ field: `script.captions.${platform}`, before, after })
     }
   }
-  if (args.siteCut) {
-    for (const [key, after] of Object.entries(args.siteCut)) {
+  if (siteCut) {
+    for (const [key, after] of Object.entries(siteCut)) {
       if (after == null) continue
       const before = currentSiteCutRec[key] ?? null
       if (before !== after) diffEntries.push({ field: `siteCut.${key}`, before, after })
     }
   }
+  return {
+    nextScript,
+    nextSiteCut: siteCut ? { ...(ep.siteCutJson ?? {}), ...siteCut } : undefined,
+    diffEntries,
+  }
+}
+
+async function insertScriptDiffs(episodeId: number, editedBy: string, diffEntries: ScriptDiffEntry[]): Promise<void> {
+  if (!diffEntries.length) return
+  await db.insert(videoScriptEdits).values(
+    diffEntries.map(d => ({ episodeId, field: d.field, before: d.before, after: d.after, editedBy })),
+  )
+}
+
+export async function editEpisodeScript(args: EditEpisodeScriptInput): Promise<void> {
+  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, args.episodeId)).limit(1)
+  const ep = rows[0]
+  if (!ep) throw new Error(`episode ${args.episodeId} not found`)
+  if ((SCRIPT_LOCKED_STATUSES as readonly string[]).includes(ep.productionStatus)) {
+    throw new Error(
+      `episode ${args.episodeId} is ${ep.productionStatus}; script edits are not allowed once a render has started or completed`,
+    )
+  }
+  if (!args.script && !args.siteCut) {
+    throw new Error('editEpisodeScript requires at least one of script or siteCut')
+  }
+
+  const { nextScript, nextSiteCut, diffEntries } = computeScriptEdit(ep, args.script, args.siteCut)
+
+  const note: VideoEpisodeReviewNote = {
+    at: new Date().toISOString(),
+    decision: 'edited',
+    note: 'owner edited script text',
+    by: args.editedBy,
+  }
+  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, note] : [note]
 
   await db.update(videoEpisodes).set({
     scriptJson: nextScript,
     reviewNotesJson: notes,
     updatedAt: new Date(),
-    ...(args.siteCut ? { siteCutJson: { ...(ep.siteCutJson ?? {}), ...args.siteCut } } : {}),
+    ...(nextSiteCut ? { siteCutJson: nextSiteCut } : {}),
   }).where(eq(videoEpisodes.id, args.episodeId))
 
-  if (diffEntries.length) {
-    await db.insert(videoScriptEdits).values(
-      diffEntries.map(d => ({
-        episodeId: args.episodeId,
-        field: d.field,
-        before: d.before,
-        after: d.after,
-        editedBy: args.editedBy,
-      })),
-    )
-  }
+  await insertScriptDiffs(args.episodeId, args.editedBy, diffEntries)
 }
 
 /**
- * Recent owner script edits (ticket #7567), the writers room's read side of
- * editEpisodeScript's diff capture: every before/after a real owner save
- * produced, newest first. Team-token auth (read-only, no script mutation) —
- * distinct from decideEpisode/editEpisodeScript, which stay admin-only.
+ * A room revision refused for a reason the caller maps to an HTTP status:
+ * 400 bad input, 404 unknown episode, 409 wrong status (the owner already
+ * decided it, or a render holds it).
  */
-export async function listOwnerScriptEdits(opts: { episodeId?: number; limit?: number } = {}): Promise<{
+export class EpisodeReviseError extends Error {
+  constructor(message: string, readonly status: 400 | 404 | 409) {
+    super(message)
+    this.name = 'EpisodeReviseError'
+  }
+}
+
+export interface ReviseEpisodeInput {
+  episodeId: number
+  fields: Partial<Record<ReviseField, string>>
+  editedBy: string
+  note: string
+  /** A fresh ElevenLabs read of the revised lines; without one, a changed spoken line marks the old read stale. */
+  readAudioUrl?: string
+}
+
+const REVISE_FIELD_MAX = 2000
+
+/**
+ * The Writers Room's live revision (plan Phase 2b, the /video-room command):
+ * saves a new script version with the same merge and per-field
+ * video_script_edits capture as the owner's editEpisodeScript, under the
+ * editor name 'video-room' (ROOM_EDITORS; the team token cannot write an edit
+ * under the owner's name). This is NOT a decision and never approves: a row
+ * at needs_changes returns to pending_approval (the room answered the note,
+ * the owner reads it again), and a row at pending_approval stays there.
+ *
+ * Refuses anything the owner already decided or a render holds, and the
+ * write itself is conditional on the status, so an approval that lands
+ * between the read and the write wins and the revision is refused: the owner
+ * must never approve one text and render another.
+ */
+export async function reviseEpisodeScript(args: ReviseEpisodeInput): Promise<{
+  episodeId: number
+  changedFields: string[]
+  productionStatus: 'pending_approval'
+  estCostUsd: number | null
+}> {
+  const editedBy = args.editedBy
+  if (!(ROOM_EDITORS as readonly string[]).includes(editedBy)) {
+    throw new EpisodeReviseError(`editedBy must be one of ${ROOM_EDITORS.join('|')}`, 400)
+  }
+  const note = typeof args.note === 'string' ? args.note.trim() : ''
+  if (!note) throw new EpisodeReviseError('note is required: a revision the owner cannot trace teaches nothing', 400)
+  if (!args.fields || typeof args.fields !== 'object' || Array.isArray(args.fields)) {
+    throw new EpisodeReviseError('fields must be an object', 400)
+  }
+  const unknownKeys = Object.keys(args.fields).filter(k => !(REVISE_FIELDS as readonly string[]).includes(k))
+  if (unknownKeys.length) {
+    throw new EpisodeReviseError(`unknown field(s) ${unknownKeys.join(', ')}; allowed ${REVISE_FIELDS.join('|')}`, 400)
+  }
+  const clean: Partial<Record<ReviseField, string>> = {}
+  for (const [k, v] of Object.entries(args.fields) as [ReviseField, unknown][]) {
+    if (v === undefined) continue
+    if (typeof v !== 'string' || !v.trim()) throw new EpisodeReviseError(`fields.${k} must be a non-empty string`, 400)
+    if (v.trim().length > REVISE_FIELD_MAX) throw new EpisodeReviseError(`fields.${k} over ${REVISE_FIELD_MAX} chars`, 400)
+    clean[k] = v.trim()
+  }
+  if (!Object.keys(clean).length) {
+    throw new EpisodeReviseError(`fields must carry at least one of ${REVISE_FIELDS.join('|')}`, 400)
+  }
+  let readAudioUrl: string | undefined
+  if (args.readAudioUrl != null) {
+    try {
+      readAudioUrl = validateAudioUrl(args.readAudioUrl, 'readAudioUrl')
+    } catch (err) {
+      throw new EpisodeReviseError(err instanceof Error ? err.message : 'readAudioUrl invalid', 400)
+    }
+  }
+
+  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, args.episodeId)).limit(1)
+  const ep = rows[0]
+  if (!ep) throw new EpisodeReviseError(`episode ${args.episodeId} not found`, 404)
+  if (!(REVISABLE_STATUSES as readonly string[]).includes(ep.productionStatus)) {
+    throw new EpisodeReviseError(
+      `episode ${args.episodeId} is ${ep.productionStatus}; the room may revise only ${REVISABLE_STATUSES.join('/')} episodes`,
+      409,
+    )
+  }
+
+  const script: ScriptEditFields = {}
+  if (clean.presenterLine !== undefined) script.presenterLine = clean.presenterLine
+  if (clean.voiceover !== undefined) script.voiceover = clean.voiceover
+  if (clean.shareLine !== undefined) script.shareLine = clean.shareLine
+  if (clean.cta !== undefined) script.cta = clean.cta
+  const captions: Record<string, string> = {}
+  if (clean.captionIg !== undefined) captions['instagram'] = clean.captionIg
+  if (clean.captionX !== undefined) captions['x'] = clean.captionX
+  if (Object.keys(captions).length) script.captions = captions
+
+  const { nextScript, diffEntries } = computeScriptEdit(ep, script, undefined)
+
+  // The read is the owner's ear on the pitch. A new read replaces it; a
+  // changed spoken line without one flags the old read so the card says so.
+  const pitch = readPitch(ep.scriptJson)
+  const spokenChanged = diffEntries.some(d => (READ_AFFECTING_FIELDS as readonly string[]).some(f => d.field === `script.${f}`))
+  if (pitch) {
+    const nextPitch: EpisodePitch = { ...pitch }
+    if (readAudioUrl) {
+      nextPitch.readAudioUrl = readAudioUrl
+      delete nextPitch.readAudioStale
+    } else if (spokenChanged && pitch.readAudioUrl) {
+      nextPitch.readAudioStale = true
+    }
+    nextScript['pitch'] = nextPitch
+  }
+
+  // Re-run the render's own dry-run on the revised text, as propose does, so
+  // a revision cannot put an unrenderable or over-ceiling script in front of
+  // the owner. Without a tier there is nothing to dry-run; the estimate stands.
+  let estCostUsd: number | null = ep.estCostUsd != null ? Number(ep.estCostUsd) : null
+  if (ep.modelTier && isVideoModelId(ep.modelTier)) {
+    try {
+      estCostUsd = dryRunEpisodeScript(nextScript, ep.modelTier).estCostUsd
+    } catch (err) {
+      throw new EpisodeReviseError(
+        `revised script does not render on ${ep.modelTier}: ${err instanceof Error ? err.message : String(err)}`,
+        400,
+      )
+    }
+    const maxCostCents = await getMaxCostCents().catch(() => null)
+    if (estCostUsd != null && maxCostCents != null && estCostUsd * 100 > maxCostCents) {
+      throw new EpisodeReviseError(
+        `revised script estimates $${estCostUsd.toFixed(2)}, over the $${(maxCostCents / 100).toFixed(2)} per-video ceiling`,
+        400,
+      )
+    }
+  }
+
+  const reviewNote: VideoEpisodeReviewNote = {
+    at: new Date().toISOString(),
+    decision: 'revised',
+    note: `${editedBy} revised ${diffEntries.map(d => d.field).join(', ') || 'nothing (text unchanged)'}: ${note}`,
+    by: editedBy,
+  }
+  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, reviewNote] : [reviewNote]
+
+  const updated = await db.update(videoEpisodes).set({
+    scriptJson: nextScript,
+    reviewNotesJson: notes,
+    productionStatus: 'pending_approval',
+    ...(estCostUsd != null ? { estCostUsd: String(estCostUsd) } : {}),
+    updatedAt: new Date(),
+  })
+    .where(and(eq(videoEpisodes.id, args.episodeId), inArray(videoEpisodes.productionStatus, [...REVISABLE_STATUSES])))
+    .returning({ id: videoEpisodes.id })
+  if (!updated.length) {
+    throw new EpisodeReviseError(`episode ${args.episodeId} changed status while revising; re-read it before revising again`, 409)
+  }
+
+  await insertScriptDiffs(args.episodeId, editedBy, diffEntries)
+  return { episodeId: args.episodeId, changedFields: diffEntries.map(d => d.field), productionStatus: 'pending_approval', estCostUsd }
+}
+
+/**
+ * The owner's note on one spoken line (script reader, admin session only).
+ * Append-only onto review_notes_json as a 'line_note' entry; never touches
+ * status or script text. Allowed at any status: a note on a posted clip is
+ * still the retro's signal.
+ */
+export async function addLineNote(args: { episodeId: number; field: unknown; lineIdx: unknown; note: unknown; by: string }): Promise<void> {
+  const v = validateLineNote(args)
+  const rows = await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, args.episodeId)).limit(1)
+  const ep = rows[0]
+  if (!ep) throw new Error(`episode ${args.episodeId} not found`)
+  const entry: VideoEpisodeReviewNote = {
+    at: new Date().toISOString(),
+    decision: 'line_note',
+    field: v.field,
+    lineIdx: v.lineIdx,
+    note: v.note,
+    by: args.by,
+  }
+  const notes = Array.isArray(ep.reviewNotesJson) ? [...ep.reviewNotesJson, entry] : [entry]
+  await db.update(videoEpisodes).set({ reviewNotesJson: notes, updatedAt: new Date() })
+    .where(eq(videoEpisodes.id, args.episodeId))
+}
+
+export interface EpisodeLineNote {
+  episodeId: number
+  at: string
+  field: string
+  lineIdx: number
+  note: string
+  by: string | null
+}
+
+/** Flatten line_note entries out of review_notes_json rows, newest first. Pure, for tests. */
+export function extractLineNotes(
+  rows: { id: number; reviewNotesJson: VideoEpisodeReviewNote[] | null }[],
+  limit: number,
+): EpisodeLineNote[] {
+  const out: EpisodeLineNote[] = []
+  for (const r of rows) {
+    for (const n of Array.isArray(r.reviewNotesJson) ? r.reviewNotesJson : []) {
+      if (n.decision !== 'line_note' || typeof n.field !== 'string' || typeof n.lineIdx !== 'number') continue
+      out.push({ episodeId: r.id, at: n.at, field: n.field, lineIdx: n.lineIdx, note: n.note ?? '', by: n.by ?? null })
+    }
+  }
+  return out.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, limit)
+}
+
+/**
+ * The owner's line notes for the Writers Room retro (owner-edits op). Reads
+ * only episodes whose notes contain a line_note (jsonb containment), most
+ * recently touched first.
+ */
+export async function listLineNotes(opts: { episodeId?: number; limit?: number } = {}): Promise<EpisodeLineNote[]> {
+  const limit = Math.min(Math.max(1, opts.limit ?? 50), 200)
+  const hasLineNote = sql`${videoEpisodes.reviewNotesJson} @> '[{"decision":"line_note"}]'::jsonb`
+  const rows = await db.select({ id: videoEpisodes.id, reviewNotesJson: videoEpisodes.reviewNotesJson })
+    .from(videoEpisodes)
+    .where(opts.episodeId != null ? and(eq(videoEpisodes.id, opts.episodeId), hasLineNote) : hasLineNote)
+    .orderBy(desc(videoEpisodes.updatedAt))
+    .limit(100)
+  return extractLineNotes(rows, limit)
+}
+
+/**
+ * Recent script edits (ticket #7567), the writers room's read side of the
+ * diff capture: every before/after a save produced, newest first. Team-token
+ * auth, read-only. `excludeEditedBy` lets the owner-edits op drop the room's
+ * own revisions, so "what the owner changes" is never the room grading itself.
+ */
+export async function listOwnerScriptEdits(opts: { episodeId?: number; limit?: number; excludeEditedBy?: string[] } = {}): Promise<{
   edits: (typeof videoScriptEdits.$inferSelect)[]
 }> {
   const limit = Math.min(Math.max(1, opts.limit ?? 50), 200)
+  const conds = [
+    opts.episodeId != null ? eq(videoScriptEdits.episodeId, opts.episodeId) : undefined,
+    opts.excludeEditedBy?.length ? notInArray(videoScriptEdits.editedBy, opts.excludeEditedBy) : undefined,
+  ].filter((c): c is NonNullable<typeof c> => !!c)
   const edits = await db.select().from(videoScriptEdits)
-    .where(opts.episodeId != null ? eq(videoScriptEdits.episodeId, opts.episodeId) : undefined)
+    .where(conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds))
     .orderBy(desc(videoScriptEdits.createdAt))
     .limit(limit)
   return { edits }
