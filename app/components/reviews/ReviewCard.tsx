@@ -44,7 +44,7 @@ export function ReviewCard({ review, showAiSummary = true }: ReviewCardProps) {
         {/* Avatar */}
         <div
           className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
-          style={{ background: '#7C8F78', fontFamily: 'var(--font-display)' }}
+          style={{ background: 'var(--color-sage)', fontFamily: 'var(--font-display)' }}
           aria-hidden="true"
         >
           {initials(review.reviewerName)}

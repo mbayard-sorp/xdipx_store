@@ -1109,3 +1109,369 @@ Sanity schema is modified. Copy lands with `emma-copywriter` under
 With GA4 below the 300-sessions/week weighting threshold, this cycle banks the
 above as design capital: a wire and a measured matrix, no code, no generated
 imagery, no build spend.
+
+---
+
+## Delta — 2026-09-23 (Routine B design cycle, run 1034)
+
+**Captures (real, this run):** `www.sextoy.com`, `www.tootimid.com`,
+`spectrumboutique.com`, `www.awaytravel.com`, `www.babeland.com`,
+`www.lelo.com`, `www.unboundbabes.com`, `dame.com`, and our own
+`xdipx.com`. Those nine are the only sites reported below. **Babeland and
+LELO have never been reviewed in this document** (no prior mention of either
+host anywhere in it); they are this cycle's new-competitor slot.
+
+Capture provenance, stated per host:
+
+- **Raw `curl -L` 200, every quoted string re-verified by `grep` against the
+  raw bytes:** `www.sextoy.com` (394,255 B), `www.tootimid.com` (704,510 B),
+  `spectrumboutique.com` (474,504 B), `www.babeland.com` (498,831 B),
+  `www.lelo.com` (141,302 B), `www.unboundbabes.com` (409,981 B),
+  `dame.com` (1,121,930 B), `xdipx.com` (302,950 B). Highest-confidence tier;
+  all site-by-site quotes below come from this tier.
+- **WebFetch 200 as a second, independent read** on `www.babeland.com`,
+  `www.sextoy.com` and `www.awaytravel.com`. Babeland's and sextoy.com's
+  WebFetch extractions agreed with the raw bytes on every string this delta
+  uses. **`www.awaytravel.com` is WebFetch-only for its card metadata** — the
+  raw fetch returned 200 (1,024,225 B) but the card fields are client-rendered,
+  so Away's per-card strings below are extraction-only and are marked as such.
+- **`dame.com` is raw-verified this run**, which matters because the
+  2026-09-16 delta could only reach it by WebFetch and flagged one finding as
+  unverified. That finding is now confirmed in raw bytes; see the Dame bullet.
+
+**Refusals and blocks, recorded as results:**
+
+| Host | Result this run | History |
+|---|---|---|
+| `www.lovehoney.com` | HTTP **403** (`curl`) | 403 on 2026-09-02, 09-09, 09-16. **Fourth consecutive.** |
+| `www.aesop.com` | HTTP **403** (`curl`) | 403 on 2026-09-09, 09-16. Third bench cycle unreachable. |
+| `www.arket.com` | HTTP **403** (`curl`) | 403 on 2026-09-09, 09-16. Third consecutive. |
+| `www.cos.com` | HTTP **403** (`curl`) | First attempt recorded in this document. |
+| `www.glossier.com` | HTTP **429** with a `<title>Verifying your connection...</title>` bot-challenge interstitial; retried once, 429 again | First refusal recorded for this host. |
+| `www.honeyplaybox.com` | HTTP **429**, same challenge interstitial | 200 on 2026-09-16. |
+| `maude.com` | HTTP **301 → `https://brandportal.godaddysites.com/`** (200 on the parked domain), not followed | Same parked-domain mode as 2026-08-26 and 2026-09-16. |
+| `vush.com` | `curl` HTTP **000**, no bytes | ETIMEOUT 2026-09-02, CONNECT 502 09-09, recv-failure 09-16. **Fourth consecutive.** |
+| `www.bellesaboutique.com` | `curl` HTTP **000**, no bytes | First attempt recorded in this document. |
+| **In The Groove** (mission brief §4 standing set) | `inthegroove.com` HTTP **429** with the same challenge interstitial. `shopinthegroove.com` returned 200 but is **a different company** — `<title>In The Groove &ndash; In The Groove Engraving</title>`, a laser-engraving business, not the retailer | **No In The Groove capture exists in this document, this run or any prior run.** |
+
+Note on the 429s: Glossier, Honey Play Box and `inthegroove.com` all returned
+429 with near-identical 9.1 KB bodies titled "Verifying your connection...".
+That is a bot-challenge interstitial, not a per-site editorial decision, and
+`dame.com` returned the same 429 on first attempt and **200 on retry**. So a
+429 in this table means "challenged on the attempts made", not "permanently
+closed"; a retry is worth one cheap attempt next cycle. 403s and the `000`s
+did not respond to retry.
+
+Nothing is reported for Lovehoney, Aesop, Arket, COS, Glossier, Honey Play Box,
+Maude, Vush, Bellesa or In The Groove beyond the refusal itself. No competitor
+copy is quoted from memory anywhere in this delta.
+
+**Bench-maintenance note, unchanged in substance and now worse in degree.** The
+2026-09-16 delta asked for doctrine §7's Aesop, Arket and Lovehoney rows to be
+annotated **prior-knowledge-only**. All three refused again; Lovehoney is now
+four cycles unreachable and Vush four. COS (§7 "Arket / COS") and Glossier
+(§7 "Glossier", "Glossier / Away") joined the refusal list this run, which
+leaves the "Glossier / Away" bench row half-reachable — **Away is reachable and
+was captured**, Glossier is not. The annotation is an agent-editor pass on
+`docs/design-doctrine.md`; this document does not own the doctrine and does not
+action it here.
+
+**The lens this run:** **recency and curation claims** — how the field tells a
+visitor that a page is alive and that a human chose what is on it. The lens was
+picked because our whole mission-brief premise is a homepage that *changes every
+week*, and the question nobody had asked is whether a visitor can tell.
+
+### The finding: "new" is a mood in this field, not a state. The only page that can prove today is today is piping real data.
+
+Across nine captures, recency and curation are asserted almost entirely with
+adjectives attached to **sections**, never as facts attached to **objects**, and
+almost nothing on any adult-category homepage carries a date.
+
+- **sextoy.com — the densest curation vocabulary in the set, and not one word
+  of it is falsifiable.** Verified in raw HTML, the tile eyebrows read (page
+  order) "Staff pick", "Curated pick", "In-house favorites", "Trending now",
+  "Fresh picks", "Core category", "Popular choice", "Exploration", "Best
+  sellers", "Easy start", "Partner play", "Top picks". The curation band is
+  headed "Curated collections" / "Picks from the SexToy Team" with the body
+  "Explore staff picks, themed collections, and standout categories worth a
+  closer look." Every one of those is a label on an evergreen collection. The
+  tile under "Trending now" is a collection titled "Toys in Motion" — a pun, not
+  a ranking. "Fresh picks" leads to "New Sex Toys" with the line "See what just
+  landed, from new launches and restocks to the latest toys worth checking out."
+  No date, no count, no name, nowhere. Two §7 bench claims for this site are
+  re-confirmed live: the mono intent kickers (literal string "Easy start") and
+  the finite ranked franchise ("Top Ten Sex Toys", 3 occurrences).
+- **sextoy.com also ships the exact card state our doctrine §6 forbids.** Raw
+  HTML contains "No reviews" **5 times** on homepage cards, alongside "1
+  review", "10 reviews", "6 reviews" and "168 reviews". Live field proof, not
+  theory, that an unsuppressed empty proof state renders "No reviews" directly
+  beneath a $59.00 product.
+- **TooTimid — the single dated surface in the entire capture set, and it is
+  dated only because the data is real.** Under the heading "Let customers speak
+  for us" / "from 29954 reviews", the homepage streams individual reviews each
+  carrying a reviewer name or "Anonymous", the product name, and a date:
+  "09/23/2026" (today, raw-verified), then 09/22/2026 ×6 and 09/21/2026 ×4 in
+  the captured window. Nobody wrote the word "fresh" anywhere near it. The
+  freshness is a side effect of piping a live feed.
+- **Away (§7 bench, WebFetch extraction) — the one site in the set where a
+  recency label is a FACT ABOUT AN OBJECT.** Its cards distinguish two different
+  states: "New" on a new product and **"New color"** on a new colorway of an old
+  one. Card metadata is dense and all of it is data: review count in parentheses
+  ("(14K)", "(803)"), price shape ("From $295" vs "$395"), variant count ("10
+  colors") plus the named colorway ("Coast Blue", "No. 20 Legacy"), and a
+  third-party citation carrying its year, "NYT Wirecutter 'Our Pick' 2025". The
+  sections are "A few of our favorites", "New arrivals", "Worth the hype",
+  "Reasons to get Away", "Stay in the know". The contrast with sextoy.com is the
+  whole finding: Away's "New" survives being checked, sextoy.com's "Fresh picks"
+  cannot be checked at all.
+- **Babeland (new to this document) — the best tile COPY in the set, wrapped in
+  the worst card chrome.** Four editorial promo tiles, raw-verified, each a
+  payoff sentence whose CTA names the actual destination: "one small toy can
+  make a huge difference" → SHOP WE-VIBE PIVOT 2; "feel why it's the most iconic
+  toy of all time" → SHOP MAGIC WAND; "same old routine? we don't think so" →
+  SHOP BDSM KITS; "turn 'we should try that' into 'let's do it'" → SHOP JOQUE
+  HARNESS. Its door layer, "WHAT'S YOUR VIBE?" / "explore our curated aesthetics
+  + themed collections to fit your vibe", runs two-line tiles (name + qualifier)
+  with a bespoke CTA verb each: "foodie cuties / play with your food / Dig In",
+  "dark desires / edgy + erotic / Go Dark", "go glow / glow-in-the-dark fun /
+  Glow On". Against that, the opening rail "Trending Clit Vibes" is
+  wall-to-wall discount chrome: every card carries a percentage badge plus
+  "Original price was $X / Sale price is $Y", and the page-top banner reads "15%
+  off a single item* with code PLEASEME". "Trending" is asserted; nothing on the
+  card says by how much or since when.
+- **LELO (new to this document) — time used as TENURE, never as recency.** Its
+  trust strip is a set of two-line H3 pairs, claim over qualifier, raw-verified:
+  "32 MILLION PRODUCTS SOLD / over 20 years", "20+ YEARS / market leader",
+  "200+ DESIGN AWARDS / over 20 years", "ISO 3533 / safety standard",
+  "CERTIFIED / body-safe materials", "SWEDISH / design", "FAST & DISCREET /
+  shipping", "SATISFACTION / guarantee". Every number is a lifetime total. The
+  only "now" on the page is an invented occasion: "pleasure fest" / "Shop
+  irresistible Orgasm Day deals". It also runs a quiz ("SEX TOY QUIZ" / "Not
+  sure which sex toy is right for you?"), making three of the captured adult
+  sites with a quiz as the guidance moment.
+- **Unbound — two genuinely data-backed states, and they stand out for it.** A
+  "BACK IN STOCK!" badge on a card (an inventory fact, not an adjective) and a
+  bestseller list scoped to an occasion, "TRAVEL BEST SELLERS". Its identity
+  door is unchanged from run 646's finding and still asks who you are: "Not sure
+  where to start? / I am / new here / experienced / buying a gift / pregnant /
+  menopausal / down for whatever". Its proof band "What ppl are saying..." mixes
+  customer quotes attributed to initials ("by C.L.", "by Julie G.") with press
+  quotes attributed to outlets ("by Vogue", "by Glamour") in one undated row.
+- **Spectrum Boutique — curation expressed entirely as a discount calendar.**
+  Raw-verified promo tiles "Rise & Grind" ("take 20% off all grinding sex toys
+  this month with code: GrindTime"), "Get Dressed Up" ("...20% off with code:
+  DressUp"), "Hit the Books" ("Get 20% off our collection of how-to sex books,
+  erotica, sexual health books & more with code: HitTheBooks"), plus "Tantus
+  Sale!" / "Use code: TANTUS20" and a brand spotlight "Get to know Blush". The
+  only recency word on the page is "this month", and it is attached to a coupon.
+- **Dame — the cautionary tale, and it is now raw-verified.** The 2026-09-16
+  delta reported a Black Friday banner from a WebFetch extraction and correctly
+  refused to build on it. Confirmed in raw bytes this run: the served HTML
+  contains `<div class="popup-overlay black-friday-sale">` with "It's Black
+  Friday." and "Add products to your cart to reveal **up to 60% off.**" — on
+  **2026-09-23**. Whether it paints is JS-gated and not determinable from the
+  bytes, but the string is shipped and roughly nine months out of season. Dame's
+  homepage is otherwise unchanged in shape from the 09-16 capture: "Clinically
+  studied. Actually proven.", "Our Bestsellers", the 2-up "Sexual Health" /
+  "Intimate Essentials" door, "Not sure which toy is right for you? Find Your
+  Vibe", and the "User-Tested, Doctor Approved" board of four named doctors.
+
+**The cross-site rule this produces:** *in this field, freshness is decoration
+and curation is a font.* Twelve curation eyebrows on sextoy.com, a "Trending"
+rail on Babeland, a "this month" on Spectrum, and between them zero checkable
+assertions. The two exceptions prove the mechanism rather than breaking it:
+TooTimid and Unbound say something true about recency only because a real feed
+or a real inventory flag is doing the talking. And Dame shows the cost of the
+other path — a hard-coded seasonal claim does not just go stale, it goes stale
+*loudly*, and every week it survives it quietly teaches returning visitors that
+nothing on the page is maintained.
+
+### Applied to our page (measured this run against the live `xdipx.com` HTML, 200, 302,950 B)
+
+We are on the wrong side of our own finding, in four specific and cheap places.
+
+1. **We make three recency claims and can evidence none of them on the page.**
+   The served homepage carries the announcement line "This week: one toy, two
+   bodies, a single motion working both.", a rail headed "Newest arrivals" /
+   "Landed this week" / "The newest arrivals, hand-checked before they reach the
+   shelf.", the numeral "Nº 01, this week's pick", and a nav entry "New" → `/new`.
+   Whether the rail is sorted by a real timestamp is **not determinable from a
+   cloud routine**: it is a Sanity-driven rail and, re-checked this run, there is
+   still no credential-free `GET /api/team/homepage-payload` (ticket #8424 —
+   `app/lib/homepage-payload.server.ts` exists but is the Variant A precompute,
+   not a team endpoint, and no `api.team.homepage-payload.tsx` route exists). So
+   the honest statement is: the claim is on the page, its backing is unverifiable
+   from here, and that is exactly the condition under which the rule below says
+   derive it or drop it.
+2. **The door tiles are bare nouns, and the second line is already built and
+   simply empty.** The live "Pick your door" band renders "Pleasure / Play /
+   Body / Wear / Last Chance / Couples" with nothing under them. But
+   `WayfinderTile` in `app/types/cms.ts` already carries an optional
+   `emmaAside`, and `StorefrontHome.tsx` already renders it with a sage ♥. The
+   two-line door tile that Babeland and LELO both run is, for us, a **Sanity
+   content edit with zero code and zero schema**.
+3. **Three `/discover` links on one page, against a cap of two.** The served
+   HTML contains exactly three `href="/discover"` (the Meet Emma band's "Find
+   your fit →", the "Where to begin" band's "Take a peek →", and a third band's
+   "Show me →"), and **none** of them is a `?preset=` deep link. Mission brief §1
+   allows one closer plus at most one `/discover?preset=…` pill. This is a
+   live breach of a standing rule, it is content-level, and it belongs to
+   `homepage-ia` and Routine A, not to this teardown.
+4. **"Surprise me" → `/collections/best-sellers`.** The intent-pill row ("Just
+   curious" → `/collections/first-time`, "Slow nights" → `/collections/massage-mood`,
+   "For two" → `/collections/couples`, "Hands-free" → `/collections/wearable-toys`)
+   is otherwise well-targeted, and then the one pill that promises the
+   unexpected lands on the most-expected shelf in the store. Ticket #4270's
+   letter is about auto-generated modules' See-alls, so this is not a rule
+   breach; it is the same instinct the rule was written against, and it is a
+   one-field content fix.
+
+### Adopted
+
+1. **Freshness is proof, and proof is never fabricated.** Doctrine §6's rule
+   for reviews, extended to recency by the same logic: any word on any surface
+   claiming a thing is new, newest, this week's, just landed, or trending must
+   be **derived from a real timestamp, ranking, or inventory flag**, or it must
+   be deleted. Not softened — deleted, exactly as §6 says an empty proof slot
+   beats a fake one. A rule, not a build; it costs nothing and it binds Routine
+   A's copy from the next run. Concretely it puts "Landed this week" and "Nº 01,
+   this week's pick" on notice: either the rotation data backs them or the words
+   change to something we can defend.
+2. **Away's grammar: a recency label is a state on an OBJECT and it names which
+   fact changed.** "New" and "New color" are two labels because they are two
+   facts. Adopted as the label grammar for any future badge we ship, and as the
+   reason we will not adopt a "Trending" or "Fresh picks" section eyebrow: a
+   label that cannot be attached to a specific object and checked is decoration.
+   Spec-level this cycle; no code.
+3. **Babeland's promo-tile grammar: the tile headline is a payoff SENTENCE and
+   the CTA resolves to the named destination.** We take the structure — one
+   plain sentence about what the thing does for you, over a link to the specific
+   product or collection it is about — and reject their CTA strings, since ours
+   come from the whitelist ("Take a peek →", "Show me", "Find your fit →", "I'll
+   take it ♥"). This directly serves mission brief §1's 70 percent target and is
+   content-only inside the existing `wayfinderMosaic` promo fields (`heading`,
+   `body`, `ctaLabel`, `ctaLink`). Copy through `emma-copywriter` under
+   `emma-empathy-reviewer`, as always.
+4. **The two-line door tile, shipped this cycle as content.** Every
+   `wayfinderTile` gets its `emmaAside` filled: one short qualifying line under
+   the noun, saying who the door is for or what is behind it. Converging
+   evidence from LELO (claim over qualifier, eight times) and Babeland (name
+   over qualifier, eight times), and the cheapest adoptable in the set for us
+   because the field, the renderer and the sage ♥ treatment are all already
+   live. **This is the cheap-and-certain item of the cycle.**
+5. **Seasonal language never lives in component code.** Dame's September Black
+   Friday modal is the evidence. Any date-bound or season-bound string on our
+   surfaces lives in Sanity with a named owner who can retire it in one edit; a
+   seasonal string hard-coded in a component is a defect on the day it is
+   written, not on the day it expires. Review note for `rr7-engineer` and
+   `design-critic`, no build.
+6. **One certain hygiene fix, named for the shell PR queue:** `app/root.tsx`
+   sets `className="bg-cream"` on `<html>` (line 276) and again on the error
+   boundary (line 398). `cream` is a retired v2 alias, banned in new work by
+   doctrine §3. It is visually a no-op **today** only because `app/app.css`
+   remaps `--color-cream` to `#FFFFFF`, which is precisely the kind of load-
+   bearing coincidence that resurrects the old palette the moment the alias is
+   unmapped. Two tokens to change, `paper` in both places. `[shell-PR]`,
+   `rr7-engineer`, not this routine's to merge.
+
+### Rejected, with reasons, so they are not re-proposed
+
+- **Discount chrome on cards (Babeland's per-card "15% OFF" + "Original price
+  was … / Sale price is …"; sextoy.com's "On sale", "Daily Deal", "Super Save";
+  Spectrum's code-gated "GrindTime" / "DressUp" / "HitTheBooks" / "TANTUS20").**
+  Urgency and discount theatre, charter-banned. Unchanged from every prior
+  delta; logged again because it is now the dominant card treatment on three of
+  the four adult sites captured.
+- **Invented occasions (LELO's "pleasure fest" / "Orgasm Day deals").** A
+  manufactured holiday is a countdown with a costume on. Permanent reject.
+- **Tenure claims (Babeland "for over 30 years"; TooTimid "For more than 20
+  years"; LELO "20+ YEARS market leader" and "32 MILLION PRODUCTS SOLD";
+  sextoy.com "Since 1999" and "Trusted online for 25+ years").** We are new.
+  Doctrine §6: never fabricate proof. Note what the capture shows, though —
+  tenure is the field's default substitute for recency, and we have neither, so
+  our honest lever is the *derived* freshness of item 1 rather than an age we
+  do not have.
+- **Certification, awards and press rows (LELO's "200+ DESIGN AWARDS" and "ISO
+  3533 / safety standard"; Babeland's "as featured in"; TooTimid's "As Seen In";
+  Dame's four-doctor board).** Standing reject, re-confirmed. Backlog item 20's
+  press slot stays built-empty until a placement is genuinely earned.
+- **Rendering an empty proof state (sextoy.com's five "No reviews" cards and its
+  "1 review" card).** Hard reject, and now with live evidence rather than
+  argument. Any reviews surface we build hard-suppresses below threshold
+  (backlog item 8).
+- **Bespoke per-tile CTA verbs (Babeland's "Dig In", "Wander In", "Get Sweet",
+  "Go Dark", "Blast Off", "Play Pretend", "Get Lifted", "Glow On").** Genuinely
+  charming and genuinely off-charter: CTAs come from the whitelist only. The
+  personality those verbs carry is redirected into the `emmaAside` qualifier
+  line (adopted item 4), which is the right home for voice anyway.
+- **Aesthetic/mood collections as a second door layer (Babeland's "WHAT'S YOUR
+  VIBE?": foodie cuties, pleasure garden, sweet little thing, dark desires,
+  cosmic vibes, fantasy roleplay, 420 vibes, go glow).** Two objections, both
+  fatal on their own. It implies eight new collection URLs, which is
+  `tech-architect`'s call and not this document's. And it would put a second
+  door layer on the homepage with a *different vocabulary* from the first —
+  precisely the defect run 778 named. Rejected as proposed; if a future cycle
+  wants aesthetic doors, they replace the existing door vocabulary rather than
+  sitting beside it, and they go through IA.
+- **A homepage review stream (TooTimid's dated feed).** The most effective
+  single thing in the capture set and the one we structurally cannot copy: it
+  works because 29,954 reviews exist. Gated on real data (backlog item 8), not
+  on design. Not deferred out of taste, deferred out of arithmetic.
+- **An inventory "BACK IN STOCK!" badge (Unbound).** Honest, data-backed, and
+  the right *shape* per adopted item 2 — and it needs inventory-state plumbing
+  into the card payload, which is new machinery shipping to a page below the
+  300-sessions/week threshold. Named as a deliberate deferral with a clear
+  trigger: revisit when traffic returns or when the card payload gains stock
+  state for another reason.
+- **Occasion-scoped bestseller sets (Unbound's "TRAVEL BEST SELLERS").**
+  Attractive, and it hits #4270: no collection exists that contains "the
+  best-selling travel-friendly things", so the module would either ship without
+  a See-all or fall back to `/collections/best-sellers`, and the second is
+  forbidden. Parked until either a real scoped collection exists or IA rules on
+  a See-all-less variant.
+- **A rented quiz (LELO's "SEX TOY QUIZ", joining Honey Play Box's
+  `quizkitapp` embed and Dame's "Find Your Vibe").** Standing reject, restated
+  because three of four captured adult sites now run one: third-party JS cannot
+  obey our SSR-visible / zero-CLS / `loader → useLoaderData` discipline, and it
+  owns the visitor's answers. The Compass stays first-party.
+- **A brand-spotlight band (Spectrum's "Get to know Blush").** Interesting and
+  adjacent to the brand eyebrow we already render on cards, and it is a **new
+  section type**, so it needs a named spec through `homepage-ia` plus an
+  additive Sanity block before any build. Not proposed as a build this cycle;
+  logged so a future cycle can pick it up deliberately rather than re-derive it.
+
+### The one thing we will do this week that none of them do
+
+**Put a date behind our own claim, or delete the claim.** Nine homepages, one
+dated surface, and that one is dated only by accident of piping a live feed.
+Every other "fresh", "trending", "new", "curated" and "this month" in the entire
+capture set is a word chosen by a designer, checkable by nobody — and Dame shows
+where that road ends, still saying "It's Black Friday." in September. We will
+make our freshness the one thing on the page that survives being checked: the
+recency words stay only where a real timestamp, ranking or inventory flag puts
+them, and everywhere else they come off. Nobody in this field will do that,
+because for them the word *is* the feature.
+
+### IA fence check
+
+All six adopted items are inside the fence, and three of them are rules rather
+than surfaces. Items 1, 2 and 5 are **standing rules** that change no markup.
+Items 3 and 4 are **content-only edits to existing fields** on the existing
+`wayfinderMosaic` block inside the locked Nº 01-Nº 11 shell (`emmaAside`,
+`promo.heading`, `promo.body`, `promo.ctaLabel`, `promo.ctaLink`) — **no new
+section type, no Sanity schema change of any kind, additive or otherwise**, and
+`rr7-engineer` is not needed. Item 6 is a two-token hygiene fix in
+`app/root.tsx` that ships as an ordinary `[shell-PR]` and touches no protected
+path. **No adopted item adds a URL or a route**; the two ideas that did (Babeland's
+eight aesthetic collections, Spectrum's brand spotlight) were rejected above and
+routed to `tech-architect` / `homepage-ia` respectively if ever revived. The
+two-link `/discover` cap is not only respected but **enforced**: this delta
+reports a live breach of it (three links, measured) and hands it to
+`homepage-ia` and Routine A to reduce, which moves the page toward the cap
+rather than away from it. The retired-route denylist is untouched. All copy
+lands with `emma-copywriter` under `emma-empathy-reviewer`.
+
+With GA4 below the 300-sessions/week weighting threshold, this cycle banks the
+above as design capital. The only spend proposed is one content pass (item 4,
+already-built field, already-built renderer) and one two-token code fix
+(item 6). No generated imagery, no new machinery, no new section types.
