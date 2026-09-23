@@ -551,6 +551,27 @@ export function looksLikePackaging(image: { url: string; altText?: string | null
   return PACKAGING_RE.test(haystack)
 }
 
+/**
+ * Ticket #11028: `looksLikePackaging` only catches an explicit textual
+ * signal, and a Nalpac-imported SKU carries none — its images are named
+ * `<sku><letter>.jpg` (`92268A.jpg`) with no altText at all. A manual check
+ * of 8 in-stock SKUs found image A was the retail carton on 7 of them, so
+ * treating an unlabeled first-lettered Nalpac frame as confidently bare (what
+ * the old `bareIndex = list.findIndex(...)` did, by picking index 0) is
+ * exactly the SKU 96203 failure 3.2c's "only brief from a bare-product
+ * reference" rule exists to stop. This is NOT the same signal as
+ * `looksLikePackaging`: it does not claim the frame IS packaging (it might be
+ * a fine bare shot), only that nothing here confirms it, so it must not win
+ * over a frame that carries no such doubt.
+ */
+const NALPAC_UNLABELED_FIRST_FRAME_RE = /^\d+a\.[a-z0-9]+$/i
+
+function isUnconfirmedNalpacFirstFrame(image: { url: string; altText?: string | null }): boolean {
+  if (image.altText && image.altText.trim()) return false
+  const filename = (image.url.split('?')[0] ?? '').split('/').pop() ?? ''
+  return NALPAC_UNLABELED_FIRST_FRAME_RE.test(filename)
+}
+
 export function pickBareProductImage(
   media: { url: string; altText?: string | null }[] | null | undefined,
   opts?: { cardArtBlocked?: boolean; moodImageUrl?: string | null },
@@ -561,13 +582,21 @@ export function pickBareProductImage(
   }
   const list = (media ?? []).filter(m => !!m?.url)
   if (!list.length) return { url: null, altText: '', index: -1, fellBack: true }
-  const bareIndex = list.findIndex(m => !looksLikePackaging(m))
-  if (bareIndex >= 0) {
-    const hit = list[bareIndex]!
-    return { url: hit.url, altText: hit.altText ?? '', index: bareIndex, fellBack: false }
+  // Explicit packaging signal excludes a frame outright; among what is left,
+  // prefer one that is not ALSO the unconfirmed Nalpac first frame (ticket
+  // #11028) — e.g. an `<sku>B.jpg` sibling, which Nalpac's own convention
+  // (and 3.2c's SKU 96203 writeup) commonly uses for the actual product shot.
+  const nonPackaging = list.filter(m => !looksLikePackaging(m))
+  const confirmedBare = nonPackaging.find(m => !isUnconfirmedNalpacFirstFrame(m))
+  if (confirmedBare) {
+    return { url: confirmedBare.url, altText: confirmedBare.altText ?? '', index: list.indexOf(confirmedBare), fellBack: false }
   }
-  const first = list[0]!
-  return { url: first.url, altText: first.altText ?? '', index: 0, fellBack: true }
+  // Nothing confirms a bare frame exists: the best candidate (a non-packaging
+  // frame if any survived, else the featured frame) rides back, but flagged,
+  // so the caller records the fallback rather than silently briefing from
+  // what might be a carton.
+  const fallback = nonPackaging[0] ?? list[0]!
+  return { url: fallback.url, altText: fallback.altText ?? '', index: list.indexOf(fallback), fellBack: true }
 }
 
 // ─── Sensation dial v1 → v2 projection ────────────────────────────────────
