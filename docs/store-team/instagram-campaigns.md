@@ -251,6 +251,23 @@ A full-body or face-forward portrait (library asset 635) is the exception, at mo
 and the brief names why. The three brief rules below (write the frame, inanimate closers, camera
 angle) apply to every bodyscape frame without change.
 
+**The crop is the closer (owner test run 2026-09-22, library 640 to 651).** Briefed as a close
+bodyscape, the model still renders wide roughly half the time: the belly and back briefs came back
+with nipples and the pubic area in the full frame and the vision gate failed them, correctly. The
+owner then cropped three of those failed renders to the zone that was briefed (Atlas requests
+02c8be17, b2fe49e5, b2134600) and every crop was exactly the frame wanted: belly with the navel, one
+hand with a ring, a hint of pubic hair at the bottom edge, sheet at the corner. So the pipeline
+treats a wide render as raw material, not a verdict: media-manager crops the render to the briefed
+zone first, the vision gate and the publish gate judge the crop that would ship, and only the crop
+enters the library as the candidate. The stop list is judged on the shipped pixels. A render that
+cannot be cropped to a clean frame is the one that fails.
+
+**Anatomy belongs to the zone.** A back brief that comes back with a navel, a thigh brief that comes
+back with a stomach, is a zone miss, not a near miss: media-manager rejects it before the gate sees
+it. Owner-approved results from the test run: 640 and 641 (Womanizer Beauty on the top of the thigh,
+gold anklet, sheet closing the top corner) are ceiling bodyscape frames; 650 and 651 (Spectrum
+g-spot held to a bare shoulder from behind) passed the gate and are the mid-charge shape.
+
 **The ceiling stops here, and these do not move:**
 
 - Nipples visible or outlined, sheer fabric included. Labia visible or outlined. A penis, in any
