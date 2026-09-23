@@ -283,6 +283,42 @@ Sanity alone). And an update applied while a run is in flight does not affect th
 fix landed ninety seconds after its 21:05 fire on 2026-08-05, so that run still prompted and the
 change first took effect the following week.
 
+## Expected runType per routine
+
+Declared reference for the `runType` each routine's playbook opens its run row with. Mirrors
+`ROUTINE_CADENCES` in `app/lib/ticket-janitor.server.ts`, the actual source of truth the routine-
+liveness coverage check compares observed runs against. **If the manifest and this table disagree,
+fix one of them in the same PR.**
+
+| Routine | Team | Expected `runType` |
+|---|---|---|
+| R-DEV daily dev | strategy | `dev` |
+| R-QA daily QA gate | strategy | `qa` |
+| Daily content writer | content | `content` |
+| Daily merchandiser (Routine A) | homepage | `merchandise` |
+| Daily social drafts | social | `social` |
+| Daily product manager | product | `product` |
+| Daily product enricher (R-ENRICH) | product | `enrich` |
+| Daily support review | support | `support` |
+| Daily blocker scout (R-BLOCK) | strategy | `blocker-scout` |
+| Weekly strategy | strategy | `strategy` |
+| Apply pass (agent-editor) | strategy | `apply` |
+| Cost review | strategy | `cost-review` |
+| Weekly off-site scout | strategy | `offsite` |
+| Ads Proposals | ads | `ads` |
+| Email Briefs | email | `email` |
+| Design Cycle (Routine B) | homepage | `design` |
+| Weekly SEO curation | content | `seo-curation` |
+| Weekly podcast review | content | `podcast` |
+| Weekly trend scout | content | `trend-scout` |
+| Weekly business research | social | `research` |
+| Weekly social trend scout | social | `social-trend-scout` |
+| Weekly writers room | video | `writers-room` |
+| Video render (2x weekly) | video | `video-render` |
+| Daily Pricing Sweep | ops (no team gate) | n/a — never writes a run row, by design |
+| PR Queue Watchdog (R-WATCH) | none | n/a — starts no run row, by design |
+| PR Shepherd (R-SHEP) | none | n/a — starts no run row, by design |
+
 ## Appendix: retired trigger prompts
 
 A trigger record is the only place a routine's prompt text lives; this manifest otherwise carries

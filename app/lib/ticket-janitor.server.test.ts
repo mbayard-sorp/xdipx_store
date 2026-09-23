@@ -368,7 +368,7 @@ describe('ROUTINE_CADENCES', () => {
       'email|email',
       'homepage|design',
       'content|content',
-      'content|manual',
+      'content|podcast',
       'content|seo-curation',
       'content|trend-scout',
       'homepage|merchandise',
