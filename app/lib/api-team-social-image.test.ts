@@ -27,12 +27,19 @@ vi.mock('~/lib/team.server', () => ({
 vi.mock('~/lib/sentry.server', () => ({
   Sentry: { captureMessage: captureMessageMock },
 }))
-vi.mock('~/lib/social-media.server', () => ({
-  // Real values: the route validates the archetype against this list.
-  SOCIAL_ARCHETYPES: ['scene', 'cast', 'metaphor', 'macro', 'plate'],
-  generateAndUploadSocialImage: genMock,
-  generateCastComposite: castMock,
-}))
+vi.mock('~/lib/social-media.server', async () => {
+  // Ticket #10981: lengthInchesFromSpecifications/scaleCueFromLengthInches are
+  // left REAL, same reasoning as social-cast-reference.server below — the
+  // derivation is what several tests here exercise, not a fake to stub out.
+  const actual = await vi.importActual<typeof import('~/lib/social-media.server')>('~/lib/social-media.server')
+  return {
+    ...actual,
+    // Real values: the route validates the archetype against this list.
+    SOCIAL_ARCHETYPES: ['scene', 'cast', 'metaphor', 'macro', 'plate'],
+    generateAndUploadSocialImage: genMock,
+    generateCastComposite: castMock,
+  }
+})
 vi.mock('~/lib/api-error.server', () => ({
   apiError: (_scope: string, err: unknown) =>
     Response.json({ error: err instanceof Error ? err.message : 'failed' }, { status: 500 }),
@@ -439,6 +446,82 @@ describe('cast: bare-product reference (#10341)', () => {
     const res = await post({ ...validCast, productImageUrl: undefined })
     expect(res.status).toBe(400)
     expect(castMock).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Ticket #10981. Root cause of the product-size-plausibility blocks (row 285,
+ * a Womanizer Beauty rendered ~2x real size on a forearm): this route asked
+ * for a free-text `scale` and never consulted the real dimensions already in
+ * Shopify, so a composite with no hand in frame had no anchor at all.
+ */
+describe('cast: derived scale cue from real dimensions (#10981)', () => {
+  it('derives a scale cue from specifications and prepends it to the prompt', async () => {
+    productByHandleMock.mockResolvedValue({
+      images: [{ url: 'https://cdn/product.jpg', altText: 'Chorus' }],
+      specifications: ['Length: 3.5 inches'],
+    })
+    const res = await post({ ...validCast, bodyZone: 'forearm' })
+    expect(res.status).toBe(200)
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('forearm'),
+    }))
+    // The caller's own free-text scale still rides through unchanged
+    // (additive, not replaced) — `withProductScale` applies it downstream.
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({ scale: 'palm' }))
+    const body = await res.json() as { derivedLengthInches?: number; derivedScaleCue?: string }
+    expect(body.derivedLengthInches).toBe(3.5)
+    expect(body.derivedScaleCue).toContain('3.5 inches')
+  })
+
+  it('derives a womanizer-beauty-lilac call with bodyZone forearm and returns a derived length', async () => {
+    productByHandleMock.mockResolvedValue({
+      images: [{ url: 'https://cdn/womanizer.jpg', altText: 'Womanizer Beauty' }],
+      specifications: ['Length: 3.9 inches'],
+    })
+    const res = await post({ ...validCast, handle: 'womanizer-beauty-lilac', bodyZone: 'forearm' })
+    const body = await res.json() as { derivedLengthInches?: number; derivedScaleCue?: string }
+    expect(res.status).toBe(200)
+    expect(body.derivedLengthInches).toBe(3.9)
+    expect(body.derivedScaleCue).toBeTruthy()
+  })
+
+  it('falls back to the hand-relative cue when no bodyZone is given', async () => {
+    productByHandleMock.mockResolvedValue({
+      images: [{ url: 'https://cdn/product.jpg', altText: 'Chorus' }],
+      specifications: ['Length: 4.7 inches'],
+    })
+    const res = await post(validCast)
+    const body = await res.json() as { derivedScaleCue?: string }
+    expect(body.derivedScaleCue).toContain('two thirds')
+  })
+
+  it('derives the cue even when the caller already supplied an explicit productImageUrl', async () => {
+    productByHandleMock.mockResolvedValue({
+      images: [{ url: 'https://cdn/other.jpg' }],
+      specifications: ['Length: 2 inches'],
+    })
+    const res = await post(validCast)
+    // The caller's explicit productImageUrl is untouched by the product fetch.
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({ productImageUrl: 'https://cdn/product.jpg' }))
+    const body = await res.json() as { derivedLengthInches?: number }
+    expect(body.derivedLengthInches).toBe(2)
+  })
+
+  it('omits the derived fields when the product has no specifications', async () => {
+    productByHandleMock.mockResolvedValue({ images: [{ url: 'https://cdn/product.jpg' }] })
+    const res = await post(validCast)
+    const body = await res.json() as { derivedLengthInches?: number; derivedScaleCue?: string }
+    expect(body.derivedLengthInches).toBeUndefined()
+    expect(body.derivedScaleCue).toBeUndefined()
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({ prompt: validCast.prompt }))
+  })
+
+  it('omits the derived fields when the product lookup returns null (no handle match)', async () => {
+    productByHandleMock.mockResolvedValue(null)
+    const res = await post(validCast)
+    const body = await res.json() as { derivedLengthInches?: number }
+    expect(body.derivedLengthInches).toBeUndefined()
   })
 })
 

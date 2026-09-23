@@ -9,6 +9,8 @@
  *     count?, caller?, runId?, + the scene axes }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
  *          plus bodyReferenceMissing?/warning?/productImageFellBack? (#10336, #10341)
+ *          plus derivedLengthInches?/derivedScaleCue? when `handle` resolves to a
+ *          product carrying `xdipx.specifications` (#10981)
  *
  * THE SCENE AXES, on both ops (tickets #10479/#10480): bodyZone, contactMode,
  * cropScale and sceneLocation, each optional, each validated against the
@@ -188,14 +190,48 @@ export async function action({ request }: ActionFunctionArgs) {
       // walk the media list for a bare-product frame.
       let productImageUrl = str(b['productImageUrl'])
       let productImageFellBack = false
-      if (!productImageUrl && handle) {
+      // Real-dimension scale cue (ticket #10981). Root cause of the
+      // product-size-plausibility blocks (row 285, a Womanizer Beauty
+      // rendered ~2x real size on a forearm): this route asked the caller
+      // for a free-text `scale` and never consulted the real numbers already
+      // sitting in Shopify (`xdipx.specifications`), so a composite with no
+      // hand in frame had nothing to anchor it. Derived whenever a handle is
+      // present, independent of whether the caller also supplied an explicit
+      // productImageUrl, because the size problem exists either way.
+      let derivedScaleCue: string | undefined
+      let derivedLengthInches: number | undefined
+      if (handle) {
         const { getProductByHandle, pickBareProductImage } = await import('~/lib/shopify.server')
         const product = await getProductByHandle(handle)
-        const picked = pickBareProductImage(product?.images ?? [])
-        if (picked.url) {
-          productImageUrl = picked.url
-          productImageFellBack = picked.fellBack
+        if (!productImageUrl && product) {
+          const picked = pickBareProductImage(product.images ?? [])
+          if (picked.url) {
+            productImageUrl = picked.url
+            productImageFellBack = picked.fellBack
+          }
         }
+        // `Product` (app/types/index.ts) does not declare `specifications` in
+        // its type even though `nodeToProduct` populates it from
+        // `xdipx.specifications` when present; same cast precedent already
+        // used to read this field off this same function's result in
+        // scripts/generate-slate-2026-08-24.ts.
+        const specs = (product as unknown as { specifications?: string[] } | null)?.specifications
+        if (specs?.length) {
+          const { lengthInchesFromSpecifications, scaleCueFromLengthInches } = await import('~/lib/social-media.server')
+          const inches = lengthInchesFromSpecifications(specs)
+          if (inches != null) {
+            derivedLengthInches = inches
+            derivedScaleCue = scaleCueFromLengthInches(inches, sceneAxes.bodyZone ?? null)
+          }
+        }
+      }
+      // Prepended, not appended: the trailing negative-prompt block is what
+      // this composite tends to end on, same reasoning as `withProductScale`.
+      // The caller's own `scale` (below) still applies on top of this via
+      // `withProductScale` inside `generateCastComposite` — this is an
+      // additive anchor, not a replacement for it.
+      if (derivedScaleCue) {
+        castPrompt = `${derivedScaleCue} ${castPrompt}`
       }
 
       if (!presenterImageUrl) return new Response('Bad Request: presenterImageUrl or castSlug required', { status: 400 })
@@ -299,6 +335,10 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
         ...(warning ? { warning } : {}),
         ...(productImageFellBack ? { productImageFellBack: true } : {}),
+        // Ticket #10981: echoed so the run summary can quote what anchored
+        // the prompt, and so a caller can assert against it in a test.
+        ...(derivedLengthInches != null ? { derivedLengthInches } : {}),
+        ...(derivedScaleCue ? { derivedScaleCue } : {}),
       })
     }
 

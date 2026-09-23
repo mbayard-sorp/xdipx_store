@@ -305,9 +305,32 @@ export const PRODUCT_SCALES = {
  *
  * Anchors assume an adult hand of roughly 7.5in wrist to fingertip and a palm
  * of roughly 4in from wrist crease to finger base.
+ *
+ * Ticket #10981: an on-skin frame with no hand in shot (a product resting
+ * against a body zone, not held) has no anchor at all when the cue is always
+ * phrased against "her hand" — row 285 rendered a Womanizer Beauty roughly 2x
+ * real size on a forearm because nothing told the model how wide a forearm
+ * is. `bodyZone` lets the cue anchor against the zone the product actually
+ * rests on instead. Only `forearm` gets a zone-relative anchor: it carries
+ * the owner's own reference measurement from that incident (~65mm/2.6in
+ * wide), and this module has no equivalent sourced measurement for the other
+ * eleven body zones, so every other zone (and no zone) falls back to the
+ * hand-relative cue below rather than ship an invented anatomical number.
  */
-export function scaleCueFromLengthInches(lengthIn: number): string {
+const FOREARM_WIDTH_INCHES = 2.6
+
+export function scaleCueFromLengthInches(lengthIn: number, bodyZone?: string | null): string {
   const L = `about ${lengthIn} inches long`
+  if (bodyZone === 'forearm') {
+    const ratio = lengthIn / FOREARM_WIDTH_INCHES
+    if (ratio <= 1.15) {
+      return `The product is ${L}: about as long as the forearm it rests against is wide (roughly ${FOREARM_WIDTH_INCHES} inches), so it reads compact against the arm, not oversized.`
+    }
+    if (ratio <= 2) {
+      return `The product is ${L}: noticeably longer than the forearm it rests against is wide (roughly ${FOREARM_WIDTH_INCHES} inches), spanning a real but modest stretch of the arm, not dominating it.`
+    }
+    return `The product is ${L}: several times longer than the forearm it rests against is wide (roughly ${FOREARM_WIDTH_INCHES} inches). Keep it visually anchored to the forearm's actual scale, extending along the arm rather than enlarged to fill the frame.`
+  }
   if (lengthIn <= 2.5) {
     return `The product is small, ${L}: it disappears almost entirely inside her closed hand.`
   }

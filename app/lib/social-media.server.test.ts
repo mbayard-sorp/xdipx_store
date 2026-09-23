@@ -271,6 +271,35 @@ describe('scale from real dimensions (ticket #2761)', () => {
       expect(cue).toMatch(/hand|palm|wrist|finger|elbow/)
     }
   })
+
+  // Ticket #10981. Row 285: a Womanizer Beauty rendered ~2x real size on a
+  // forearm because the cue was always phrased against a hand that is not in
+  // frame on an on-skin, no-hand composite.
+  describe('bodyZone: forearm (ticket #10981)', () => {
+    it('anchors against the forearm, not the hand, when bodyZone is forearm', () => {
+      const cue = scaleCueFromLengthInches(3.5, 'forearm')
+      expect(cue).toContain('3.5 inches')
+      expect(cue).toContain('forearm')
+      expect(cue).not.toMatch(/hand|palm|wrist|finger/)
+    })
+
+    it('reads compact for a product about as long as the forearm is wide', () => {
+      const cue = scaleCueFromLengthInches(2.6, 'forearm')
+      expect(cue).toContain('compact against the arm')
+    })
+
+    it('reads oversized-warning for a product several times the forearm width', () => {
+      const cue = scaleCueFromLengthInches(7, 'forearm')
+      expect(cue).toContain('several times longer')
+      expect(cue).toContain('rather than enlarged to fill the frame')
+    })
+
+    it('falls back to the hand-relative cue for a null/undefined/other bodyZone', () => {
+      expect(scaleCueFromLengthInches(4.7)).toContain('two thirds')
+      expect(scaleCueFromLengthInches(4.7, null)).toContain('two thirds')
+      expect(scaleCueFromLengthInches(4.7, 'hip-hollow')).toContain('two thirds')
+    })
+  })
 })
 
 // Ticket #10990: a vision-gate verdict that never reached a real judgment
