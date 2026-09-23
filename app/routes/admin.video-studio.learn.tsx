@@ -19,6 +19,7 @@ import { getValve, VALVE_KEYS } from '~/lib/team.server'
 const DIMENSIONS: { key: LearnDimension; label: string }[] = [
   { key: 'speaker', label: 'By speaker' },
   { key: 'format', label: 'By format' },
+  { key: 'product', label: 'By product' },
 ]
 
 export async function loader({ request }: LoaderFunctionArgs) {

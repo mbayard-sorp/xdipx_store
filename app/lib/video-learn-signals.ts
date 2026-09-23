@@ -71,13 +71,16 @@ export function median(values: number[]): number | null {
 // ── Owner edit ratio ────────────────────────────────────────────────────────
 
 /**
- * The spoken fields of a script, as `video_script_edits.field` names them.
- * Mirrors spokenTextOf in video-episodes.ts minus captions (a caption is
- * read, not heard). `script.scenes*` covers any future per-scene spokenLine
- * edit; editEpisodeScript does not write one today.
+ * The spoken fields of a script, as `video_script_edits.field` names them:
+ * presenterLine, voiceover, and the CTA (the plan has the CTA spoken, not
+ * shown). Captions are excluded (a caption is read, not heard).
+ * `script.scenes*` covers any future per-scene spokenLine edit;
+ * editEpisodeScript does not write one today. Note spokenTextOf in
+ * video-episodes.ts does NOT include cta, so the enqueue guard's byte check
+ * does not cover it; that is a separate follow-up.
  */
 export function isSpokenEditField(field: string): boolean {
-  return field === 'script.presenterLine' || field === 'script.voiceover' || field.startsWith('script.scenes')
+  return field === 'script.presenterLine' || field === 'script.voiceover' || field === 'script.cta' || field.startsWith('script.scenes')
 }
 
 export function words(text: string | null | undefined): string[] {
@@ -102,12 +105,12 @@ export function wordEditDistance(before: string | null | undefined, after: strin
   return prev[b.length]!
 }
 
-/** Spoken lines of a script keyed by edit-field name (presenterLine, voiceover, scene spokenLines). */
+/** Spoken lines of a script keyed by edit-field name (presenterLine, voiceover, cta, scene spokenLines). */
 export function spokenFieldsOf(script: VideoScriptJson | null | undefined): Record<string, string> {
   const out: Record<string, string> = {}
   if (!script || typeof script !== 'object') return out
   const rec = script as Record<string, unknown>
-  for (const k of ['presenterLine', 'voiceover'] as const) {
+  for (const k of ['presenterLine', 'voiceover', 'cta'] as const) {
     const v = rec[k]
     if (typeof v === 'string' && v.trim()) out[`script.${k}`] = v
   }

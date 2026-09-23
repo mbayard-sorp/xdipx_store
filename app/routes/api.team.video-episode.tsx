@@ -44,7 +44,7 @@
  *     A revision is not a decision and never approves anything.
  *
  *   { op: 'learn', limit?, batches? }
- *     -> { episodes, rollups: { speaker, format }, batches, flags }
+ *     -> { episodes, rollups: { speaker, format, product }, batches, flags }
  *     Posted clips keyed on reach (IG reach, else X impressions), plus
  *     per-batch owner edit ratio, needs_changes and approved rates, frame
  *     re-roll rate, hours to decision, and the threshold flags.

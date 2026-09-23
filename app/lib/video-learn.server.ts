@@ -135,8 +135,8 @@ export async function listEpisodePerformance(opts: { limit?: number } = {}): Pro
   return out
 }
 
-export type LearnDimension = 'speaker' | 'format'
-export const LEARN_DIMENSIONS: readonly LearnDimension[] = ['speaker', 'format']
+export type LearnDimension = 'speaker' | 'format' | 'product'
+export const LEARN_DIMENSIONS: readonly LearnDimension[] = ['speaker', 'format', 'product']
 
 export interface DimensionRollup {
   dimension: LearnDimension
@@ -149,15 +149,21 @@ export interface DimensionRollup {
   underpowered: boolean
 }
 
-/** Pure rollup: group measured clips by one dimension, medians only, sorted by median reach. */
+/**
+ * Pure rollup: group measured clips by one dimension, medians only, sorted by
+ * median reach. 'product' is multi-valued: a clip with two handles counts in
+ * both product groups.
+ */
 export function rollupByDimension(rows: EpisodePerformance[], dimension: LearnDimension): DimensionRollup[] {
   const groups = new Map<string, EpisodePerformance[]>()
   for (const row of rows) {
     if (row.unswept) continue
-    const key = row[dimension]
-    const g = groups.get(key) ?? []
-    g.push(row)
-    groups.set(key, g)
+    const keys = dimension === 'product' ? row.productHandles : [row[dimension]]
+    for (const key of keys) {
+      const g = groups.get(key) ?? []
+      g.push(row)
+      groups.set(key, g)
+    }
   }
   return [...groups.entries()]
     .map(([value, g]): DimensionRollup => ({
@@ -194,6 +200,10 @@ export async function listBatchSignals(opts: { batches?: number } = {}): Promise
     .orderBy(desc(videoEpisodes.createdAt))
     .limit(200)
 
+  // Assumption: the newest 200 batched episodes cover the kept batches. At
+  // 5 clips a batch that is 40 batches, well past the 26-batch ceiling; if
+  // batches ever grow past ~7 clips, a kept batch near the tail could be
+  // read partially and this cap must rise (or select batch ids first).
   const batchOrder: string[] = []
   for (const e of episodes) if (e.batchId && !batchOrder.includes(e.batchId)) batchOrder.push(e.batchId)
   const kept = new Set(batchOrder.slice(0, keep))

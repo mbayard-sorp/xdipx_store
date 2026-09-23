@@ -63,6 +63,22 @@ describe('dimensions and primary reach', () => {
     expect(bySpeaker.every(r => r.underpowered)).toBe(true)
     expect(rollupByDimension(rows, 'format').map(r => r.value)).toEqual(['versus', 'show'])
   })
+
+  it('counts a two-handle clip in both product groups', () => {
+    const base = {
+      label: '', logline: '', hookText: null, speaker: 'maya', format: 'versus', modelTier: null, costUsd: null,
+      postedAt: null, runtimeSeconds: null, primaryReachSource: 'ig_reach' as const, impressions: null, saves: null,
+      comments: null, plays: null, avgWatchTimeMs: null, avgPctViewed: null, unswept: false,
+    }
+    const rows: EpisodePerformance[] = [
+      { ...base, episodeId: 1, productHandles: ['rose-toy', 'magic-wand'], primaryReach: 500, reach: 500 },
+      { ...base, episodeId: 2, productHandles: ['rose-toy'], primaryReach: 100, reach: 100 },
+    ]
+    expect(rollupByDimension(rows, 'product').map(r => [r.value, r.n, r.medianPrimaryReach])).toEqual([
+      ['magic-wand', 1, 500],
+      ['rose-toy', 2, 300],
+    ])
+  })
 })
 
 describe('owner edit ratio', () => {
@@ -72,19 +88,26 @@ describe('owner edit ratio', () => {
     expect(wordEditDistance('Hi, there.', 'hi there')).toBe(0)
   })
 
-  it('divides changed spoken words by the ORIGINAL spoken words, ignoring captions and CTA', () => {
+  it('divides changed spoken words by the ORIGINAL spoken words, ignoring captions', () => {
     const current = { presenterLine: 'this one purrs low and slow', voiceover: 'ten speeds four modes' }
     const stats = episodeEditStats(current, [
       { field: 'script.presenterLine', before: 'this one hums low', after: 'this one purrs low and slow', createdAt: '2026-09-22T10:00:00Z' },
       { field: 'script.captions.instagram', before: 'a', after: 'b c d e f', createdAt: '2026-09-22T10:00:00Z' },
-      { field: 'script.cta', before: 'Show me', after: 'Take a peek', createdAt: '2026-09-22T10:00:00Z' },
     ])
     // original: 4 (hums line) + 4 (voiceover) = 8; changed: hums->purrs + "and slow" = 3
     expect(stats).toEqual({ changedWords: 3, spokenWords: 8 })
   })
 
+  it('counts a spoken CTA edit in both numerator and denominator', () => {
+    const stats = episodeEditStats({ presenterLine: 'one two three four', cta: 'Take a peek' }, [
+      { field: 'script.cta', before: 'Show me', after: 'Take a peek', createdAt: '2026-09-22T10:00:00Z' },
+    ])
+    // original: 4 (presenterLine) + 2 ("Show me") = 6; changed: Show->Take, me->a, +peek = 3
+    expect(stats).toEqual({ changedWords: 3, spokenWords: 6 })
+  })
+
   it('is null for a script with no spoken words', () => {
-    expect(episodeEditStats({ cta: 'Show me' }, [])).toBeNull()
+    expect(episodeEditStats({ captions: { instagram: 'read, not heard' } }, [])).toBeNull()
   })
 })
 
