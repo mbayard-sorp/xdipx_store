@@ -109,7 +109,7 @@ export default function AdminReviewsDashboard() {
                     y={chartH - h}
                     width={barW}
                     height={h}
-                    fill="var(--color-sage)"
+                    style={{ fill: 'var(--color-sage)' }}
                     opacity={0.7}
                     rx={1}
                   />
