@@ -22,16 +22,24 @@
  * has already been billed. So length is checked before anything is uploaded,
  * not after.
  *
- * ## What this deliberately does not do
+ * ## Video
  *
- * Video. X requires chunked INIT/APPEND/FINALIZE upload for video, which the
- * existing `uploadMedia` does not implement. A video draft fails with a clear
- * detail rather than silently posting as text, which would strip the media the
- * post was built around.
+ * X requires chunked INIT/APPEND/FINALIZE upload for video, then a STATUS poll
+ * until processing succeeds; `uploadVideoFromUrl` does that on the same OAuth
+ * 1.0a signing as the image path. A failed upload fails the post with the
+ * reason rather than posting text-only, which would strip the media the post
+ * was built around. Whether a video row reaches this adapter unattended is the
+ * job's decision (the `video_team_autopublish` double-gate), not this file's.
  */
 
 import type { SocialPublisher, PublishInput, PublishResult } from './types'
-import { X_CAPTION_MAX, X_MEDIA_MAX, weightedTweetLength } from './x-limits'
+import {
+  X_CAPTION_MAX,
+  X_MEDIA_MAX,
+  X_VIDEO_MAX_DURATION_SEC,
+  X_VIDEO_MAX_SIZE_BYTES,
+  weightedTweetLength,
+} from './x-limits'
 
 /** All four OAuth 1.0a values must be present; a partial set cannot sign. */
 const REQUIRED_ENV = [
@@ -67,42 +75,70 @@ export const xPublisher: SocialPublisher = {
       return { ok: false, reason: 'error', detail: 'Post has no text.' }
     }
 
-    if (input.media.kind === 'video') {
-      return {
-        ok: false,
-        reason: 'error',
-        detail: 'X video posting needs chunked upload (INIT/APPEND/FINALIZE), which is not implemented. Post this one by hand from the Social Studio.',
-      }
-    }
+    const { uploadMediaFromUrl, uploadVideoFromUrl, postTweet, setMediaAltText } = await import('../twitter.server')
 
-    const imageUrls = input.media.kind === 'carousel'
-      ? input.media.imageUrls.slice(0, X_MEDIA_MAX)
-      : [input.media.imageUrl]
-
-    if (input.media.kind === 'carousel' && input.media.imageUrls.length > X_MEDIA_MAX) {
-      // Not an error: X takes the first 4 and the post is still coherent. Worth
-      // saying out loud in the log rather than silently dropping slides.
-      console.warn(
-        `[x-publisher] post ${input.postId} has ${input.media.imageUrls.length} images; X takes ${X_MEDIA_MAX}. Publishing the first ${X_MEDIA_MAX}.`,
-      )
-    }
-
-    const { uploadMediaFromUrl, postTweet, setMediaAltText } = await import('../twitter.server')
-
-    // uploadMediaFromUrl swallows its own failures and returns null. Treat that
-    // as terminal rather than posting text-only: an image post that quietly
-    // becomes a text post is a content change nothing reviewed.
     const mediaIds: string[] = []
-    for (const url of imageUrls) {
-      const id = await uploadMediaFromUrl(url)
-      if (!id) {
+
+    if (input.media.kind === 'video') {
+      // Pre-flight from whatever the caller knows, before the billable upload.
+      // The size ceiling is enforced again on the downloaded bytes, so an
+      // unknown size here is not a gap.
+      const { durationSec, sizeBytes, videoUrl } = input.media
+      if (durationSec != null && durationSec > X_VIDEO_MAX_DURATION_SEC) {
         return {
           ok: false,
           reason: 'error',
-          detail: `Media upload failed for ${url.split('?')[0]}. Not posting without the image.`,
+          detail: `Video is ${durationSec}s; X accepts at most ${X_VIDEO_MAX_DURATION_SEC}s. Trim it or post it on Instagram only.`,
         }
       }
-      mediaIds.push(id)
+      if (sizeBytes != null && sizeBytes > X_VIDEO_MAX_SIZE_BYTES) {
+        return {
+          ok: false,
+          reason: 'error',
+          detail: `Video is ${sizeBytes} bytes; X accepts at most ${X_VIDEO_MAX_SIZE_BYTES}.`,
+        }
+      }
+
+      // Chunked INIT/APPEND/FINALIZE plus STATUS polling. Throws with a
+      // specific message rather than returning null, and a video post never
+      // degrades to text: the clip is the post.
+      try {
+        mediaIds.push(await uploadVideoFromUrl(videoUrl, { mediaType: 'video/mp4' }))
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return {
+          ok: false,
+          reason: 'error',
+          detail: `Video upload failed for ${videoUrl.split('?')[0]}: ${describeXApiError(message)} Not posting without the video.`,
+        }
+      }
+    } else {
+      const imageUrls = input.media.kind === 'carousel'
+        ? input.media.imageUrls.slice(0, X_MEDIA_MAX)
+        : [input.media.imageUrl]
+
+      if (input.media.kind === 'carousel' && input.media.imageUrls.length > X_MEDIA_MAX) {
+        // Not an error: X takes the first 4 and the post is still coherent. Worth
+        // saying out loud in the log rather than silently dropping slides.
+        console.warn(
+          `[x-publisher] post ${input.postId} has ${input.media.imageUrls.length} images; X takes ${X_MEDIA_MAX}. Publishing the first ${X_MEDIA_MAX}.`,
+        )
+      }
+
+      // uploadMediaFromUrl swallows its own failures and returns null. Treat that
+      // as terminal rather than posting text-only: an image post that quietly
+      // becomes a text post is a content change nothing reviewed.
+      for (const url of imageUrls) {
+        const id = await uploadMediaFromUrl(url)
+        if (!id) {
+          return {
+            ok: false,
+            reason: 'error',
+            detail: `Media upload failed for ${url.split('?')[0]}. Not posting without the image.`,
+          }
+        }
+        mediaIds.push(id)
+      }
     }
 
     // Alt text (social_posts.alt_text, ticket #4204), on the first image only,

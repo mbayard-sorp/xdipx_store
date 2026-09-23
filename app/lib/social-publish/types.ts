@@ -20,7 +20,19 @@ export type PublishResult =
  */
 export type PublishMedia =
   | { kind: 'image'; imageUrl: string }
-  | { kind: 'video'; videoUrl: string; posterUrl?: string }
+  | {
+      kind: 'video'
+      videoUrl: string
+      posterUrl?: string
+      /**
+       * Clip length and file size, when the caller knows them. Optional pre-flight
+       * inputs for platforms with hard ceilings (X: 140 s, 512 MB), checked before
+       * anything billable is uploaded. Absent means "not known here", never zero;
+       * the adapter still enforces size on the downloaded bytes.
+       */
+      durationSec?: number
+      sizeBytes?: number
+    }
   /** Multi-image Instagram carousel (2-10 slides). social_posts.media_urls. */
   | { kind: 'carousel'; imageUrls: string[] }
 

@@ -37,6 +37,7 @@ import { estimateXPostCostUsd, estimateXSpendUsd } from './social-publish/x-limi
 import { permalinkFor } from './social-permalink.server'
 import { formatLaSlot } from './social-schedule'
 import { fileBlocker } from './owner-blockers.server'
+import { isVideoPost } from '~/components/admin/social/types'
 import type { AutoPublishPlatform } from './team-keys'
 
 /**
@@ -47,6 +48,13 @@ import type { AutoPublishPlatform } from './team-keys'
  * makes that a trickle instead of a flood.
  */
 export const MAX_PER_TICK = 2
+
+/**
+ * Extra rows the eligibility read fetches while the video valve is off, so the
+ * video rows the tick passes over do not crowd the stills behind them out of
+ * the read. Bounds the look-ahead; it never raises how many rows publish.
+ */
+export const VIDEO_SKIP_LOOKAHEAD = 10
 
 /** Fallback when `instagram_publish_max_per_day` is unset. */
 export const DEFAULT_MAX_PER_DAY = 3
@@ -68,6 +76,12 @@ export type PublishOutcome =
   | 'spend_cap'
   /** The row's durable shopify_product_id is not available for sale (#2212). */
   | 'out_of_stock'
+  /**
+   * A video row while `video_team_autopublish` is off. The row is not claimed
+   * or written: it stays eligible for the tick after the valve comes on, and
+   * stays available to the owner's Post-now in the meantime.
+   */
+  | 'skipped_video_valve_off'
 
 export interface PublishAttempt {
   postId: number
@@ -143,6 +157,18 @@ export interface PublishTickDeps {
   platform?: PublishPlatform
   /** Reads the autopublish valve. Injected so tests never touch settings. */
   isEnabled: () => Promise<boolean>
+  /**
+   * Reads the video autopublish valve (`video_team_autopublish`), the second
+   * half of the video double-gate. A video row publishes unattended only when
+   * BOTH this and the platform valve are on, the same rule the manual path
+   * applies (`manualPublishValveKey(true)`). Off is a skip, not a failure: the
+   * row is left untouched and eligible, and reported as
+   * `skipped_video_valve_off`.
+   *
+   * Optional so the callers and fakes that predate it keep their behavior;
+   * both scheduled platforms supply it (`social-publish-run.server.ts`).
+   */
+  isVideoEnabled?: () => Promise<boolean>
   /**
    * Month-to-date spend in USD, and the ceiling it is checked against. Both
    * optional, and supplied together or not at all.
@@ -741,14 +767,33 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     }
   }
 
+  // The video half of the double-gate, read fresh once per tick like the
+  // platform valve above. When it is off, video rows are passed over without
+  // being claimed, and the eligibility read looks further down the queue so
+  // an off valve cannot starve stills behind the videos at the head of it:
+  // skipped rows do not spend the tick's `room`.
+  const videoEnabled = deps.isVideoEnabled ? await deps.isVideoEnabled() : true
   const room = Math.min(MAX_PER_TICK, maxPerDay - publishedToday)
-  const eligible = await repo.listEligible(room)
+  const eligible = await repo.listEligible(videoEnabled ? room : room + VIDEO_SKIP_LOOKAHEAD)
   const recentCaptions = await repo.recentCaptions(14)
 
   const attempts: PublishAttempt[] = []
   let spentThisTick = 0
+  let slotsLeft = room
 
   for (const candidate of eligible) {
+    if (slotsLeft <= 0) break
+
+    // Checked BEFORE the claim, for the same reason as the budget below: the
+    // claim flips the row to `publishing` and every way back writes something.
+    // A valve-off video is not a bad post, so nothing about it is written.
+    if (!videoEnabled && isVideoPost(candidate)) {
+      console.log(`[social-publish] ${platform} post ${candidate.id}: skipped_video_valve_off`)
+      attempts.push({ postId: candidate.id, outcome: 'skipped_video_valve_off' })
+      continue
+    }
+    slotsLeft--
+
     // Budget is checked BEFORE the claim, not after.
     //
     // A row is claimed by flipping it to `publishing`, and the only ways back

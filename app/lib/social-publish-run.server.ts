@@ -25,6 +25,16 @@ import {
 } from './social-publish-job.server'
 import type { PublishMedia } from './social-publish/types'
 import { isVideoPost } from '~/components/admin/social/types'
+import { manualPublishValveKey } from './social-publish/manual-publish-gate.server'
+
+/**
+ * The valve the scheduled tick reads for a video row, on every platform.
+ *
+ * Derived from the manual path's own key function rather than restated, so the
+ * Post-now click and the hourly tick cannot disagree about which valve is the
+ * owner's video release (`video_team_autopublish`).
+ */
+export const VIDEO_TICK_VALVE_KEY = manualPublishValveKey(true)
 
 /** Fallback when `x_publish_max_per_day` is unset. Owner decision 2026-08-16. */
 export const X_DEFAULT_MAX_PER_DAY = 2
@@ -49,8 +59,8 @@ async function numericSetting(key: string, fallback: number): Promise<number> {
  *
  * Shared by both platforms because the decision is about the row, not the
  * destination: what kind of media a draft carries does not change with where it
- * is going. Each adapter then rejects what it cannot handle (X refuses video,
- * Instagram refuses a one-item carousel).
+ * is going. Each adapter then rejects what it cannot handle (Instagram refuses
+ * a one-item carousel; X takes video through chunked upload since Phase 3).
  */
 export function mediaForPost(post: PostRow):
   | { ok: true; media: PublishMedia }
@@ -110,6 +120,7 @@ export async function instagramTickDeps(): Promise<PublishTickDeps> {
   return {
     platform: 'instagram',
     isEnabled: () => getValve(VALVE_KEYS.instagramAutopublish),
+    isVideoEnabled: () => getValve(VIDEO_TICK_VALVE_KEY),
     maxPerDay: () => numericSetting('instagram_publish_max_per_day', DEFAULT_MAX_PER_DAY),
     publish: publishViaRegistry,
   }
@@ -135,6 +146,7 @@ export async function xTickDeps(): Promise<PublishTickDeps> {
   return {
     platform: 'x',
     isEnabled: () => getValve(VALVE_KEYS.xAutopublish),
+    isVideoEnabled: () => getValve(VIDEO_TICK_VALVE_KEY),
     maxPerDay: () => numericSetting('x_publish_max_per_day', X_DEFAULT_MAX_PER_DAY),
     monthSpendUsd: () => estimateXSpendThisMonthUsd(),
     maxSpendUsd: () => numericSetting('x_publish_max_spend_usd_month', X_DEFAULT_MAX_SPEND_USD_MONTH),
