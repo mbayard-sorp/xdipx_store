@@ -181,7 +181,15 @@ Skip this step Tuesday through Sunday. On Mondays, run both of these in order be
    propose new ones if not. Nothing else refreshes this table — the last row was minted 2026-07-07
    and the runway ran to 2026-09-07, after which every routine that reads "today's theme" would have
    found nothing. Also close out past-dated rows still marked `active` so the calendar states what is
-   true today.
+   true today — **but only for `IG: `-prefixed rows.** `POST /api/team/calendar {op:'setStatus'}`
+   is IG-row-guarded by design (app/routes/api.team.calendar.tsx); a non-IG row's status is
+   admin-session-only and this team-token routine structurally cannot change it (stale-watching-
+   backlog-*, marketing-calendar bookkeeping drift, second occurrence 2026-09-13/2026-09-06). Don't
+   attempt a non-IG `setStatus` call and don't silently skip it either: when a non-IG row is stuck
+   past-dated `active` or a current-week row is stuck `planned`, name the row id in the run summary
+   and file it as a `process` suggestion (`targetTeam` unset, so it reaches the strategist) if one
+   isn't already open, so it reaches an admin-authorized action instead of rolling forward untouched
+   week after week.
 
 3. **Audit every generated promo/tile image against the NEW theme, and clear the leftovers.** On the
    theme rotation, look at each generated promo/wayfinder-tile/rail image on the live page and check
