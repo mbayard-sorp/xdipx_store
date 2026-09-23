@@ -866,21 +866,24 @@ describe('renderNeedsMikeSection', () => {
 describe('pending video pitches (plan Phase 2b)', () => {
   it('reads count, batch estimate and oldest age from pending_approval episodes only', async () => {
     executeMock.mockReset()
-    executeMock.mockResolvedValue({ rows: [{ n: 5, total_est: 4.126, oldest_hours: 30.4 }] })
-    await expect(gatherPendingVideoPitches()).resolves.toEqual({ count: 5, totalEstUsd: 4.13, oldestHours: 30 })
+    executeMock.mockResolvedValue({ rows: [{ n: 5, total_est: 4.126, oldest_hours: 30.4, newest_at: '2026-09-22T17:05:00.000Z' }] })
+    await expect(gatherPendingVideoPitches()).resolves.toEqual({
+      count: 5, totalEstUsd: 4.13, oldestHours: 30, batchMarker: '2026-09-22T17:05:00.000Z',
+    })
     const query = new PgDialect().sqlToQuery(executeMock.mock.calls[0]?.[0]).sql
     expect(query).toMatch(/from video_episodes/i)
     expect(query).toMatch(/production_status = 'pending_approval'/)
     // The column wins; the room's pitch estimate fills a row with no dry-run.
     expect(query).toMatch(/coalesce\(\s*est_cost_usd/i)
     expect(query).toContain(`script_json->'pitch'->>'estCostUsd'`)
+    expect(query).toMatch(/max\(created_at\)/i)
     expect(query).not.toMatch(/update|insert/i)
   })
 
   it('reports an empty queue with a null age', async () => {
     executeMock.mockReset()
-    executeMock.mockResolvedValue({ rows: [{ n: 0, total_est: 0, oldest_hours: null }] })
-    await expect(gatherPendingVideoPitches()).resolves.toEqual({ count: 0, totalEstUsd: 0, oldestHours: null })
+    executeMock.mockResolvedValue({ rows: [{ n: 0, total_est: 0, oldest_hours: null, newest_at: null }] })
+    await expect(gatherPendingVideoPitches()).resolves.toEqual({ count: 0, totalEstUsd: 0, oldestHours: null, batchMarker: null })
   })
 
   it('returns null on a read failure so the digest still sends', async () => {
@@ -892,18 +895,18 @@ describe('pending video pitches (plan Phase 2b)', () => {
   const empty: NeedsMikeFacts = { needsOwnerPrs: [], blockedRows: [], staleOwnerRows: [], orphans: [], conflictedPrs: [], missedRoutines: [] }
 
   it('puts one Video pitch line on Needs Mike with the scripts link', () => {
-    const html = renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 5, totalEstUsd: 4.2, oldestHours: 30 } })
+    const html = renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 5, totalEstUsd: 4.2, oldestHours: 30, batchMarker: 'b' } })
     expect(html).toContain('Video pitch: 5 clips awaiting you, est $4.20, incl. alternates (oldest 30h)')
     expect(html).toContain('https://xdipx.com/admin/video-studio/scripts')
   })
 
   it('shows the age in days past 48h and singularizes one clip', () => {
-    const html = renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 1, totalEstUsd: 0.9, oldestHours: 80 } })
+    const html = renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 1, totalEstUsd: 0.9, oldestHours: 80, batchMarker: 'b' } })
     expect(html).toContain('Video pitch: 1 clip awaiting you, est $0.90, incl. alternates (oldest 3d)')
   })
 
   it('says nothing when there is no pitch or the read failed', () => {
-    expect(renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 0, totalEstUsd: 0, oldestHours: null } })).not.toContain('Video pitch')
+    expect(renderNeedsMikeSection({ ...empty, pendingVideoPitches: { count: 0, totalEstUsd: 0, oldestHours: null, batchMarker: null } })).not.toContain('Video pitch')
     expect(renderNeedsMikeSection({ ...empty, pendingVideoPitches: null })).not.toContain('Video pitch')
   })
 })
@@ -950,6 +953,21 @@ describe('digest fingerprint carries the video gate counts', () => {
     expect(decide(after, before)).toEqual({ send: true, reason: 'queue-changed' })
   })
 
+  it('a new pitch batch on an otherwise unchanged queue sends, even at the same clip count', () => {
+    const frames = { count: 1 }
+    const cuts = { count: 0 }
+    const before = digestFingerprint('q1', frames, cuts, { count: 5, batchMarker: '2026-09-15T17:05:00.000Z' })
+    const after = digestFingerprint('q1', frames, cuts, { count: 5, batchMarker: '2026-09-22T17:05:00.000Z' })
+    expect(decide(after, before)).toEqual({ send: true, reason: 'queue-changed' })
+    expect(decide(after, after)).toEqual({ send: false, reason: 'queue-unchanged' })
+  })
+
+  it('no pending pitch reads the same whether the read returned zero, failed, or was not passed', () => {
+    const none = digestFingerprint('q1', null, null)
+    expect(digestFingerprint('q1', null, null, null)).toBe(none)
+    expect(digestFingerprint('q1', null, null, { count: 0, batchMarker: null })).toBe(none)
+  })
+
   it('unchanged counts on an unchanged queue stay quiet; null reads as zero', () => {
     expect(decide(digestFingerprint('q1', null, null), digestFingerprint('q1', { count: 0 }, { count: 0 })))
       .toEqual({ send: false, reason: 'queue-unchanged' })
@@ -975,7 +993,7 @@ describe('digest fingerprint carries the video gate counts', () => {
       await runOwnerDigest({ force: true })
       const stored = vi.mocked(kvSet).mock.calls.find(c => c[0] === QUEUE_FINGERPRINT_KEY)?.[1] as string | undefined
       expect(stored).toBeDefined()
-      expect(stored).toMatch(/\|video:0\/0$/)
+      expect(stored).toMatch(/\|video:0\/0\|pitch:$/)
       vi.mocked(kvGet).mockImplementation(async (key: string) => (key === QUEUE_FINGERPRINT_KEY ? stored : null) as never)
 
       // Same world: skipped as unchanged.
@@ -983,6 +1001,43 @@ describe('digest fingerprint carries the video gate counts', () => {
 
       // Only change: one final cut parks. The run sends.
       parkedCuts = 1
+      await expect(runOwnerDigest({ force: false })).resolves.toMatchObject({ sent: true })
+    } finally {
+      vi.mocked(kvGet).mockImplementation(async () => null)
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('digest fingerprint carries the pitch batch marker (plan Phase 2b)', () => {
+  it('runOwnerDigest: only a new same-size pitch batch lands, and the run sends instead of skipping', async () => {
+    const { kvGet, kvSet } = await import('~/lib/kv.server')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-23T13:00:00Z')) // a Wednesday: no Monday send
+    try {
+      let newestAt = '2026-09-15T17:05:00.000Z'
+      executeMock.mockReset()
+      executeMock.mockImplementation(async (q: unknown) => {
+        const text = new PgDialect().sqlToQuery(q as never).sql
+        if (text.includes("production_status = 'pending_approval'")) {
+          return { rows: [{ n: 5, total_est: 4.2, oldest_hours: 20, newest_at: newestAt }] }
+        }
+        return { rows: [] }
+      })
+      reconcileMock.mockResolvedValue({ checked: 0, updated: [], skipped: true })
+      loopHealthMock.mockResolvedValue(null)
+
+      vi.mocked(kvSet).mockClear()
+      await runOwnerDigest({ force: true })
+      const stored = vi.mocked(kvSet).mock.calls.find(c => c[0] === QUEUE_FINGERPRINT_KEY)?.[1] as string | undefined
+      expect(stored).toMatch(/\|pitch:5@2026-09-15T17:05:00\.000Z$/)
+      vi.mocked(kvGet).mockImplementation(async (key: string) => (key === QUEUE_FINGERPRINT_KEY ? stored : null) as never)
+
+      // Same batch still pending: quiet.
+      await expect(runOwnerDigest({ force: false })).resolves.toMatchObject({ sent: false, skipped: 'queue-unchanged' })
+
+      // Next Tuesday's batch replaces it at the same clip count. The run sends.
+      newestAt = '2026-09-22T17:05:00.000Z'
       await expect(runOwnerDigest({ force: false })).resolves.toMatchObject({ sent: true })
     } finally {
       vi.mocked(kvGet).mockImplementation(async () => null)

@@ -112,16 +112,23 @@ export const QUEUE_FINGERPRINT_KEY = 'owner-digest:queue-fingerprint'
  */
 /**
  * The send-on-change fingerprint: the unified owner queue's own fingerprint
- * plus the two video gate counts. The video gates are not owner-queue entries,
- * so without this a day whose only news was a newly parked frame or final cut
- * read as 'queue-unchanged' and the digest stayed quiet about owner-only work.
+ * plus the two video gate counts and the pending pitch batch marker. None of
+ * these are owner-queue entries, so without them a day whose only news was a
+ * newly parked frame or final cut, or a fresh Tuesday pitch batch, read as
+ * 'queue-unchanged' and the digest stayed quiet about owner-only work. The
+ * pitch marker is count plus newest created_at, not a count alone: a new batch
+ * the same size as an old one still changes it.
  */
 export function digestFingerprint(
   queueFingerprint: string,
   parkedVideoFrames: { count: number } | null | undefined,
   parkedVideoRenders: { count: number } | null | undefined,
+  pendingVideoPitches?: { count: number; batchMarker: string | null } | null,
 ): string {
-  return `${queueFingerprint}|video:${parkedVideoFrames?.count ?? 0}/${parkedVideoRenders?.count ?? 0}`
+  const pitch = pendingVideoPitches && pendingVideoPitches.count > 0
+    ? `${pendingVideoPitches.count}@${pendingVideoPitches.batchMarker ?? ''}`
+    : ''
+  return `${queueFingerprint}|video:${parkedVideoFrames?.count ?? 0}/${parkedVideoRenders?.count ?? 0}|pitch:${pitch}`
 }
 
 export function shouldSendDigest(input: {
@@ -1327,6 +1334,8 @@ export interface PendingVideoPitches {
   /** Sum of each pending clip's estimate: the render's dry-run where it ran, else the room's pitch estimate. */
   totalEstUsd: number
   oldestHours: number | null
+  /** Newest pending episode's created_at (ISO): changes whenever a new batch lands, feeds digestFingerprint. */
+  batchMarker: string | null
 }
 
 /**
@@ -1344,7 +1353,8 @@ export async function gatherPendingVideoPitches(): Promise<PendingVideoPitches |
                CASE WHEN jsonb_typeof(script_json->'pitch'->'estCostUsd') = 'number'
                     THEN (script_json->'pitch'->>'estCostUsd')::numeric END
              )), 0)::float8 AS total_est,
-             EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 3600 AS oldest_hours
+             EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 3600 AS oldest_hours,
+             MAX(created_at) AS newest_at
         FROM video_episodes
        WHERE production_status = 'pending_approval'`)
     const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
@@ -1352,6 +1362,8 @@ export async function gatherPendingVideoPitches(): Promise<PendingVideoPitches |
       count: Number(row?.['n'] ?? 0),
       totalEstUsd: Math.round(Number(row?.['total_est'] ?? 0) * 100) / 100,
       oldestHours: row?.['oldest_hours'] == null ? null : Math.round(Number(row['oldest_hours'])),
+      batchMarker: row?.['newest_at'] == null ? null
+        : row['newest_at'] instanceof Date ? row['newest_at'].toISOString() : String(row['newest_at']),
     }
   } catch (err) {
     console.warn('[owner-digest] pending video-pitch sweep failed:', String(err).slice(0, 200))
@@ -1799,7 +1811,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // trivial next to the gathering already done, and deciding here means the
   // decision sees the same queue the email would have carried rather than a
   // second, possibly different, read.
-  const fp = unified ? digestFingerprint(unified.fingerprint, parkedVideoFrames, parkedVideoRenders) : null
+  const fp = unified ? digestFingerprint(unified.fingerprint, parkedVideoFrames, parkedVideoRenders, needsMike.pendingVideoPitches) : null
   if (unified && fp) {
     const lastFingerprint = await kvGet<string>(QUEUE_FINGERPRINT_KEY).catch(() => null)
     const decision = shouldSendDigest({
