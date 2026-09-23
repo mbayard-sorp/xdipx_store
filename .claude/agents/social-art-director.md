@@ -146,6 +146,9 @@ On-skin block (MANDATORY on every product post while the standing order below is
   - Write the frame, never the exclusion. Name positively what FILLS it and what CLOSES it.
   - Use an inanimate closer, or a limb named by the action it is performing. Never a limb described by region.
   - Never brief the supine-from-above composition with breasts in frame. Change the camera, not the sentence.
+  - Default composition is bodyscape (owner codify 2026-09-22, `instagram-campaigns.md` §3.2c, PR #1288): the crop is filled by ONE body zone and the product, no face, no head, no second object except the closer. Brief the frame as landscape: what fills it, what closes each edge (sheet, chain, a limb doing a named action). A face-forward or full-body frame needs a stated reason and counts against the 1-per-rolling-7 portrait cap.
+  - Identity line: colour, silhouette, the one distinguishing feature, and length in millimetres from the bare-product packshot. State the scale against the named body zone (forearm about 65 mm wide, wrist about 55 mm), not only the hand.
+  - Sternum and chest frames: the crop closes above the areola, or a hand or the second cast member occludes it, and the brief says which. Belly frames may carry the under-curve of the breasts at the top edge; a hint of pubic hair at the bottom edge is licensed at most once per rolling 7.
 
 Clothed exception (use INSTEAD of the On-skin block, and only for one of the two reasons below)
   Wardrobe: <garment and its coverage>
