@@ -54,13 +54,17 @@ vi.mock('~/lib/db.server', () => {
 })
 vi.mock('~/lib/team.server', () => ({
   assertTeamAuth: vi.fn(),
-  listCalendar: vi.fn(),
+  listCalendar: vi.fn(async () => [{ id: 1, name: 'IG: Field Guide', eventDate: '2026-09-24' }]),
   proposeCalendarEvent: vi.fn(),
+}))
+const clipsMock = vi.fn()
+vi.mock('~/lib/video-calendar.server', () => ({
+  listCalendarVideoClips: (...args: unknown[]) => clipsMock(...args),
 }))
 
 // Lives in app/lib rather than next to the route: anything in app/routes is
 // picked up by flatRoutes/typegen as a route module, tests included.
-import { action } from '~/routes/api.team.calendar'
+import { action, loader } from '~/routes/api.team.calendar'
 
 function post(body: Record<string, unknown>): Promise<Response> {
   const request = new Request('http://localhost/api/team/calendar', {
@@ -146,5 +150,44 @@ describe('setStatus IG guard', () => {
       expect(res.status).toBe(400)
     }
     expect(state.updates).toHaveLength(0)
+  })
+})
+
+describe('GET videoClips (video program v2, Phase 2b)', () => {
+  function get(qs = ''): Promise<Response> {
+    const request = new Request(`http://localhost/api/team/calendar${qs}`)
+    return loader({ request, params: {}, context: {} } as never) as Promise<Response>
+  }
+
+  it('keeps events untouched and adds videoClips, passing the window through', async () => {
+    const clip = {
+      episodeId: 7, productHandle: 'rose-toy', title: 'The rose, explained', speaker: 'maya',
+      format: 'show-and-tell', status: 'approved', plannedSlotAt: '2026-09-25T17:00:00.000Z',
+    }
+    clipsMock.mockResolvedValueOnce([clip])
+    const res = await get('?from=2026-09-20&to=2026-09-30')
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.events).toEqual([{ id: 1, name: 'IG: Field Guide', eventDate: '2026-09-24' }])
+    expect(body.videoClips).toEqual([clip])
+    expect(clipsMock).toHaveBeenLastCalledWith('2026-09-20', '2026-09-30')
+  })
+
+  it('returns videoClips: [] when the clip lookup throws, never failing the calendar', async () => {
+    clipsMock.mockRejectedValueOnce(new Error('neon down'))
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await get()
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.events).toHaveLength(1)
+    expect(body.videoClips).toEqual([])
+    spy.mockRestore()
+  })
+
+  it('400s a malformed date before any lookup', async () => {
+    clipsMock.mockClear()
+    const res = await get('?from=09-20-2026')
+    expect(res.status).toBe(400)
+    expect(clipsMock).not.toHaveBeenCalled()
   })
 })

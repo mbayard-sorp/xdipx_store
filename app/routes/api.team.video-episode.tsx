@@ -43,6 +43,12 @@
  *     needs_changes rows (409 otherwise); the row lands at pending_approval.
  *     A revision is not a decision and never approves anything.
  *
+ *   { op: 'learn', limit?, batches? }
+ *     -> { episodes, rollups: { speaker, format }, batches, flags }
+ *     Posted clips keyed on reach (IG reach, else X impressions), plus
+ *     per-batch owner edit ratio, needs_changes and approved rates, frame
+ *     re-roll rate, hours to decision, and the threshold flags.
+ *
  *   { op: 'episode-claim', runId? }
  *     -> { episode } | 404 { error: 'empty_episode_queue' }
  *     Render lane only: the oldest approved episode at/past its planned slot,
@@ -159,13 +165,19 @@ export async function action({ request }: ActionFunctionArgs) {
       // The room's weekly reading (ticket #5718): measured episodes flattened
       // plus rollups, medians only, every group carrying its n and an
       // underpowered flag below the signal floor. The honest limits are in
-      // video-learn.server.ts's module doc and bind the room too.
-      const { listEpisodePerformance, rollupByDimension } = await import('~/lib/video-learn.server')
-      const rows = await listEpisodePerformance({ ...(typeof b['limit'] === 'number' ? { limit: b['limit'] } : {}) })
-      const dims = ['formula', 'hookPattern', 'castSlug', 'productHandle', 'placementRole', 'arcPosition'] as const
+      // video-learn.server.ts's module doc and bind the room too. Phase 2b:
+      // keyed on reach (IG, else X impressions) by speaker and format, plus
+      // per-batch owner-behaviour signals and their threshold flags.
+      const { listEpisodePerformance, rollupByDimension, listBatchSignals, LEARN_DIMENSIONS } = await import('~/lib/video-learn.server')
+      const [rows, process] = await Promise.all([
+        listEpisodePerformance({ ...(typeof b['limit'] === 'number' ? { limit: b['limit'] } : {}) }),
+        listBatchSignals({ ...(typeof b['batches'] === 'number' ? { batches: b['batches'] } : {}) }),
+      ])
       return Response.json({
         episodes: rows,
-        rollups: Object.fromEntries(dims.map(d => [d, rollupByDimension(rows, d)])),
+        rollups: Object.fromEntries(LEARN_DIMENSIONS.map(d => [d, rollupByDimension(rows, d)])),
+        batches: process.batches,
+        flags: process.flags,
       })
     }
 
