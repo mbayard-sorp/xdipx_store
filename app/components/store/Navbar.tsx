@@ -137,7 +137,15 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
           as bg-paper and border-paper-2 (app.css legacy alias table), so this is
           a pixel-identical rename, not a restyle. */}
       <header className="sticky top-0 z-[60] bg-paper/95 backdrop-blur-sm border-b border-paper-2">
-        <nav className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+        {/* max-w-[1320px] px-6 md:px-16, not the old max-w-6xl px-4 (design-critic
+            run 1034, #11083 item B): the old container left-aligned the wordmark
+            37px off every other band's 124px edge, the fourth non-doctrine
+            container in the shell. Matches Footer.tsx's doctrine band container
+            (design-critic run 905, #9680) so the shell agrees with itself. Must
+            ship paired with item A (below): md:px-16 alone would shrink the old
+            768 mega-menu slot from 736px to 640px, but that slot no longer
+            renders at 768 once the mega menu moves to lg:flex. */}
+        <nav className="max-w-[1320px] mx-auto px-6 md:px-16 h-14 flex items-center justify-between gap-4">
 
           {/* Logo */}
           <Link
@@ -169,8 +177,13 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
             )}
           </Link>
 
-          {/* Desktop mega menu — flex-1 so SearchBar expansion compresses it left */}
-          <div className="hidden md:flex flex-1 min-w-0 overflow-hidden">
+          {/* Desktop mega menu — flex-1 so SearchBar expansion compresses it left.
+              lg:flex, not md:flex (design-critic run 1034, #11083 item A): at
+              768 the 8-item menu had ~476px for 8 items and truncated to a
+              single clipped "N" of "Notebook", with no fallback (the mobile
+              drawer below was already md:hidden). The hamburger fallback button
+              picks up the 768-1023 gap this creates. */}
+          <div className="hidden lg:flex flex-1 min-w-0 overflow-hidden">
             <DesktopMegaMenu items={menuItems} banners={megaMenuBanners} />
           </div>
 
@@ -283,10 +296,15 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
               </button>
             </div>
 
-            {/* Hamburger — desktop-only fallback (mobile uses the bottom explore menu) */}
+            {/* Hamburger — desktop-only fallback (mobile uses the bottom explore menu).
+                hidden md:flex lg:hidden, not the old unconditional "hidden flex"
+                (design-critic run 1034, #11083 item A): the old class had no
+                breakpoint, so this trigger never rendered at any width and the
+                768-1023 gap the mega-menu move (above) opens up would otherwise
+                have no way to open the drawer at all. */}
             <button
               onClick={() => setDrawerOpen(true)}
-              className="hidden flex flex-col items-center justify-center w-11 h-11 rounded-full hover:bg-cream-2 transition-colors gap-[5px]"
+              className="hidden md:flex lg:hidden flex-col items-center justify-center w-11 h-11 rounded-full hover:bg-cream-2 transition-colors gap-[5px]"
               aria-label="Open menu"
             >
               <span className="block w-[18px] h-[2px] bg-ink rounded-full" />
@@ -326,12 +344,15 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
       </AnimatePresence>
 
       {/* ── Mobile nav drawer ───────────────────────────────────────── */}
+      {/* lg:hidden, not md:hidden (design-critic run 1034, #11083 item A): the
+          drawer now covers the 768-1023 gap the mega-menu move (above) opens
+          up, not only true mobile widths. */}
       <AnimatePresence>
         {drawerOpen && (
         <>
           {/* Backdrop — z-[65] sits above sticky navbar (z-[60]) */}
           <motion.div
-            className="fixed inset-0 z-[65] bg-ink/50 backdrop-blur-sm md:hidden"
+            className="fixed inset-0 z-[65] bg-ink/50 backdrop-blur-sm lg:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -342,7 +363,7 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
 
           {/* Drawer panel — slides in from right */}
           <motion.div
-            className="fixed top-0 right-0 bottom-0 z-[66] w-[85vw] max-w-xs bg-cream shadow-2xl flex flex-col md:hidden"
+            className="fixed top-0 right-0 bottom-0 z-[66] w-[85vw] max-w-xs bg-cream shadow-2xl flex flex-col lg:hidden"
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
