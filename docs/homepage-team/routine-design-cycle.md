@@ -254,11 +254,16 @@ curl -s -X POST "$BASE_URL/api/homepage-team/run" \
 The Vercel preview URL (auto-attached to the PR) is the review surface. **The routine stops here.**
 Review happens on that preview (`qa-reviewer` on the daily QA pass, or you), and the release engine
 squash-merges once CI is green, the linked ticket is `verified`, and the protected-path classifier
-finds nothing sensitive in the diff. Anything touching checkout and payment, cart, migrations and
-schema, auth and session, team valves and spend controls, CI and deploy config, or the release
-engine itself stops and emails you; only you merge those. **The team still cannot merge its own
-code.** That remains the enforcement of the "gate code" decision, and `release_engine_enabled` off
-restores owner-merges-everything.
+finds nothing sensitive in the diff. The protected-path list is **cost-only** (owner direction
+2026-08-19): team valves and spend controls, the enforcement core (`github.server.ts`,
+`release-engine.server.ts`, `migration-classify.server.ts`, `.github/**`), secrets, the checkout
+probe, the deploy-critical build scripts, and non-additive `db/migrations/**`. Checkout and cart
+code, auth and session, `db/schema.ts`, `vercel.json`, and `package.json` are no longer protected —
+they are ordinary code PRs covered by CI, the QA verdict, and post-deploy smoke with automatic
+revert. Anything on the cost-only list stops and emails you; only you merge those. **The team still
+cannot merge its own code.** That remains the enforcement of the "gate code" decision, and
+`release_engine_enabled` off restores owner-merges-everything. Full detail:
+`docs/store-team/operating-system.md` §4.
 
 ### 6. Spend
 
