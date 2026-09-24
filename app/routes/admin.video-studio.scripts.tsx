@@ -16,6 +16,7 @@ import { db } from '~/lib/db.server'
 import { videoEpisodes, videoSeries } from '../../db/schema'
 import { asc, eq, inArray } from 'drizzle-orm'
 import { decideEpisode } from '~/lib/video-episodes.server'
+import { readPitch } from '~/lib/video-episodes'
 
 export const REVIEW_NOTE_TAGS = [
   'hook weak',
@@ -40,19 +41,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const seriesById = new Map(seriesRows.map(s => [s.id, s.title]))
   const totalEstUsd = episodes.reduce((sum, e) => sum + (e.estCostUsd ? Number(e.estCostUsd) : 0), 0)
   return {
-    episodes: episodes.map(e => ({
-      id: e.id,
-      label: `S${e.seasonNumber}E${e.episodeNumber}`,
-      seriesTitle: seriesById.get(e.seriesId) ?? null,
-      logline: e.logline,
-      hookText: e.hookText,
-      castSlugs: e.castSlugs ?? [],
-      product: e.productPlacements?.[0]?.handle ?? null,
-      estCostUsd: e.estCostUsd,
-      isReserve: e.isReserve,
-      gateVerdicts: e.gateVerdictsJson ?? null,
-      plannedSlotAt: e.plannedSlotAt?.toISOString() ?? null,
-    })),
+    episodes: episodes.map(e => {
+      const pitch = readPitch(e.scriptJson)
+      return {
+        id: e.id,
+        label: `S${e.seasonNumber}E${e.episodeNumber}`,
+        seriesTitle: seriesById.get(e.seriesId) ?? null,
+        logline: e.logline,
+        hookText: e.hookText,
+        castSlugs: e.castSlugs ?? [],
+        product: pitch?.productHandle ?? e.productPlacements?.[0]?.handle ?? null,
+        estCostUsd: e.estCostUsd,
+        isReserve: e.isReserve,
+        gateVerdicts: e.gateVerdictsJson ?? null,
+        plannedSlotAt: e.plannedSlotAt?.toISOString() ?? null,
+        // The Writers Room's pitch (plan Phase 2b), null on pre-pitch rows.
+        pitch: pitch
+          ? {
+              format: pitch.format,
+              speaker: pitch.speaker,
+              listener: pitch.listener ?? null,
+              fact: pitch.fact,
+              factSource: pitch.factSource,
+              laugh: pitch.laugh,
+              firstFrameConcept: pitch.firstFrameConcept,
+              readAudioUrl: pitch.readAudioUrl ?? null,
+              readAudioStale: pitch.readAudioStale === true,
+              alternate: pitch.alternate === true,
+            }
+          : null,
+      }
+    }),
     totalEstUsd,
   }
 }
@@ -120,6 +139,8 @@ function SlateRow({ ep }: { ep: Ep }) {
             <span className="font-mono text-ink">{ep.label}</span>
             {ep.seriesTitle && <span>{ep.seriesTitle}</span>}
             {ep.isReserve && <span className="rounded-full border border-line px-2 py-0.5">evergreen reserve</span>}
+            {ep.pitch?.alternate && <span className="rounded-full border border-line px-2 py-0.5">alternate</span>}
+            {ep.pitch && <span className="font-mono">{ep.pitch.format}</span>}
             {ep.estCostUsd != null && <span className="font-mono tabular-nums">est ${Number(ep.estCostUsd).toFixed(2)}</span>}
             {ep.gateVerdicts?.doctor && <span>doctor {ep.gateVerdicts.doctor}</span>}
             {ep.gateVerdicts?.voice && <span>voice {ep.gateVerdicts.voice}</span>}
@@ -127,9 +148,13 @@ function SlateRow({ ep }: { ep: Ep }) {
           {/* The hook is the whole bet: largest text in the row. */}
           {ep.hookText && <p className="mt-1 text-base font-semibold text-ink">&ldquo;{ep.hookText}&rdquo;</p>}
           <p className="mt-1 text-sm text-ink-3">{ep.logline}</p>
-          <p className="mt-1 text-xs text-ink-4">
-            {ep.castSlugs.join(', ') || 'no cast'} · {ep.product ?? 'no product'}
-          </p>
+          {ep.pitch ? (
+            <PitchCard pitch={ep.pitch} product={ep.product} />
+          ) : (
+            <p className="mt-1 text-xs text-ink-4">
+              {ep.castSlugs.join(', ') || 'no cast'} · {ep.product ?? 'no product'}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Link to={`/admin/video-studio/scripts/${ep.id}`} className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:border-coral">
@@ -184,6 +209,47 @@ function SlateRow({ ep }: { ep: Ep }) {
         </fetcher.Form>
       )}
       {err && <p className="mt-2 text-xs text-red-700">{err}</p>}
+    </div>
+  )
+}
+
+/**
+ * The pitch as the owner judges it (plan Phase 2b): who is talking about what,
+ * the one fact the clip rests on and where it came from, the laugh, and the
+ * room's read in the cast voice when there is one. At 375px everything
+ * stacks; the player is full width so the thumb can reach it.
+ */
+function PitchCard({ pitch, product }: { pitch: NonNullable<Ep['pitch']>; product: string | null }) {
+  return (
+    <div className="mt-2 space-y-1.5 text-sm">
+      <p className="text-xs text-ink-3">
+        <span className="font-semibold text-ink">{product ?? 'no product'}</span>
+        <span> · {pitch.speaker}{pitch.listener ? ` to ${pitch.listener}` : ''}</span>
+      </p>
+      <p className="text-ink">
+        <span className="kicker mr-1 text-[10px] text-ink-4">fact ({pitch.factSource})</span>
+        {pitch.fact}
+      </p>
+      <p className="text-ink">
+        <span className="kicker mr-1 text-[10px] text-ink-4">laugh</span>
+        {pitch.laugh}
+      </p>
+      <p className="text-xs text-ink-3">
+        <span className="kicker mr-1 text-[10px] text-ink-4">first frame</span>
+        {pitch.firstFrameConcept}
+      </p>
+      {pitch.readAudioUrl ? (
+        <div>
+          <audio controls preload="none" src={pitch.readAudioUrl} className="w-full md:max-w-sm">
+            <track kind="captions" />
+          </audio>
+          {pitch.readAudioStale && (
+            <p className="mt-0.5 text-[11px] text-amber-800">This read predates the room&rsquo;s last revision of the spoken line.</p>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-ink-4">no audio read on this pitch</p>
+      )}
     </div>
   )
 }

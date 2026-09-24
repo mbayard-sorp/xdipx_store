@@ -101,7 +101,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const tiles = {
     needsRead: rows.filter(r => r.status.key === 'scripted').length,
     needsFrame: rows.filter(r => r.status.key === 'framing').length,
-    needsReview: rows.filter(r => r.status.key === 'review').length,
+    // A cut parked at the render gate is the review the owner owes first.
+    needsReview: rows.filter(r => r.status.key === 'review' || r.status.key === 'finalcut').length,
     rendering: rows.filter(r => r.status.key === 'rendering').length,
     scheduled: rows.filter(r => r.status.key === 'scheduled').length,
     posted: rows.filter(r => r.status.key === 'posted').length,

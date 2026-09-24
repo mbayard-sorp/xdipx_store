@@ -110,6 +110,27 @@ export const QUEUE_FINGERPRINT_KEY = 'owner-digest:queue-fingerprint'
  * different records. This function must therefore always return a decision the
  * handler can report — never silently do nothing.
  */
+/**
+ * The send-on-change fingerprint: the unified owner queue's own fingerprint
+ * plus the two video gate counts and the pending pitch batch marker. None of
+ * these are owner-queue entries, so without them a day whose only news was a
+ * newly parked frame or final cut, or a fresh Tuesday pitch batch, read as
+ * 'queue-unchanged' and the digest stayed quiet about owner-only work. The
+ * pitch marker is count plus newest created_at, not a count alone: a new batch
+ * the same size as an old one still changes it.
+ */
+export function digestFingerprint(
+  queueFingerprint: string,
+  parkedVideoFrames: { count: number } | null | undefined,
+  parkedVideoRenders: { count: number } | null | undefined,
+  pendingVideoPitches?: { count: number; batchMarker: string | null } | null,
+): string {
+  const pitch = pendingVideoPitches && pendingVideoPitches.count > 0
+    ? `${pendingVideoPitches.count}@${pendingVideoPitches.batchMarker ?? ''}`
+    : ''
+  return `${queueFingerprint}|video:${parkedVideoFrames?.count ?? 0}/${parkedVideoRenders?.count ?? 0}|pitch:${pitch}`
+}
+
 export function shouldSendDigest(input: {
   fingerprint: string
   lastFingerprint: string | null
@@ -785,6 +806,8 @@ export interface NeedsMikeFacts {
   /** PRs GitHub reports merge-conflicted, on which CI structurally cannot run. */
   conflictedPrs: ConflictedPr[]
   missedRoutines: RoutineLivenessFlag[]
+  /** The Writers Room's pitch batch awaiting the owner's script read (plan Phase 2b). */
+  pendingVideoPitches?: PendingVideoPitches | null
   /** Approved ad_campaigns rows with no externalCampaignId: launch is owner-only. */
   adCampaigns?: AdCampaignQueueRow[]
   /**
@@ -794,6 +817,13 @@ export interface NeedsMikeFacts {
    * nothing owner-only to surface). (#4356)
    */
   parkedVideoFrames?: { count: number; oldestDays: number | null } | null
+  /**
+   * Finished cuts parked at awaiting_render_approval (the render gate): only
+   * the owner's approve/reject in /admin/video-studio/render moves them.
+   * Counted whatever the valve says, because flipping `video_render_review`
+   * off does not release a cut that is already parked. `null` on a read error.
+   */
+  parkedVideoRenders?: { count: number; oldestDays: number | null } | null
 }
 
 /**
@@ -822,13 +852,26 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   for (const m of f.missedRoutines.slice(0, 5)) {
     items.push(`Routine ${esc(m.routine)} missed its window (${esc(m.schedule)} UTC): ${m.lastRunAt ? `last run ${m.hoursSince}h ago` : 'no run row ever'}`)
   }
+  const pitches = f.pendingVideoPitches
+  if (pitches && pitches.count > 0) {
+    const oldest = pitches.oldestHours == null ? ''
+      : pitches.oldestHours >= 48 ? ` (oldest ${Math.round(pitches.oldestHours / 24)}d)` : ` (oldest ${pitches.oldestHours}h)`
+    items.push(`Video pitch: ${pitches.count} ${pitches.count === 1 ? 'clip' : 'clips'} awaiting you, est $${pitches.totalEstUsd.toFixed(2)}, incl. alternates${oldest}: <a href="https://xdipx.com/admin/video-studio/scripts" style="color:#c2410c;">/admin/video-studio/scripts</a>`)
+  }
   for (const c of (f.adCampaigns ?? []).slice(0, 5)) {
     items.push(`Ad campaign #${c.id} &ldquo;${esc(clip(c.name, 60))}&rdquo; (${esc(c.platform)}) approved ${c.ageDays}d ago and never launched, only you can create it in-platform: <a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`)
   }
-  const frames = f.parkedVideoFrames
-  if (frames && frames.count > 0) {
-    const oldest = frames.oldestDays != null ? ` (oldest ${frames.oldestDays}d)` : ''
-    items.push(`${frames.count} video ${frames.count === 1 ? 'frame is' : 'frames are'} awaiting your pick${oldest}, only you can approve ${frames.count === 1 ? 'it' : 'them'}: <a href="https://xdipx.com/admin/video-studio/render" style="color:#c2410c;">/admin/video-studio</a>`)
+  // One video line for both gates: frames awaiting a pick, final cuts
+  // awaiting approval. Either count alone is enough to list it.
+  const frameCount = f.parkedVideoFrames?.count ?? 0
+  const cutCount = f.parkedVideoRenders?.count ?? 0
+  if (frameCount > 0 || cutCount > 0) {
+    const ages = [
+      frameCount > 0 ? f.parkedVideoFrames?.oldestDays : null,
+      cutCount > 0 ? f.parkedVideoRenders?.oldestDays : null,
+    ].filter((d): d is number => d != null)
+    const oldest = ages.length ? ` (oldest ${Math.max(...ages)}d)` : ''
+    items.push(`Video: ${frameCount} ${frameCount === 1 ? 'frame' : 'frames'} and ${cutCount} final ${cutCount === 1 ? 'cut' : 'cuts'} awaiting you${oldest}, only you can approve them: <a href="https://xdipx.com/admin/video-studio/render" style="color:#c2410c;">/admin/video-studio</a>`)
   }
   if (items.length === 0) {
     return `<p style="margin:0;color:${GOOD};">Nothing on this list today.</p>`
@@ -1286,6 +1329,48 @@ async function gatherStaleOwnerRows(): Promise<StaleOwnerRow[]> {
   }
 }
 
+export interface PendingVideoPitches {
+  count: number
+  /** Sum of each pending clip's estimate: the render's dry-run where it ran, else the room's pitch estimate. */
+  totalEstUsd: number
+  oldestHours: number | null
+  /** Newest pending episode's created_at (ISO): changes whenever a new batch lands, feeds digestFingerprint. */
+  batchMarker: string | null
+}
+
+/**
+ * Episodes at pending_approval: the Writers Room's pitch batch, which only
+ * the owner can approve (the team API deliberately has no decide op), so a
+ * batch nobody reads is owner-only work (plan Phase 2b). Null on a read
+ * failure; the digest must still send.
+ */
+export async function gatherPendingVideoPitches(): Promise<PendingVideoPitches | null> {
+  try {
+    const res = await db.execute(sql`
+      SELECT COUNT(*)::int AS n,
+             COALESCE(SUM(COALESCE(
+               est_cost_usd,
+               CASE WHEN jsonb_typeof(script_json->'pitch'->'estCostUsd') = 'number'
+                    THEN (script_json->'pitch'->>'estCostUsd')::numeric END
+             )), 0)::float8 AS total_est,
+             EXTRACT(epoch FROM now() - MIN(created_at))::float8 / 3600 AS oldest_hours,
+             MAX(created_at) AS newest_at
+        FROM video_episodes
+       WHERE production_status = 'pending_approval'`)
+    const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+    return {
+      count: Number(row?.['n'] ?? 0),
+      totalEstUsd: Math.round(Number(row?.['total_est'] ?? 0) * 100) / 100,
+      oldestHours: row?.['oldest_hours'] == null ? null : Math.round(Number(row['oldest_hours'])),
+      batchMarker: row?.['newest_at'] == null ? null
+        : row['newest_at'] instanceof Date ? row['newest_at'].toISOString() : String(row['newest_at']),
+    }
+  } catch (err) {
+    console.warn('[owner-digest] pending video-pitch sweep failed:', String(err).slice(0, 200))
+    return null
+  }
+}
+
 /**
  * Video jobs parked awaiting the owner's frame pick (#4356).
  *
@@ -1316,6 +1401,31 @@ async function gatherParkedVideoFrames(): Promise<{ count: number; oldestDays: n
     }
   } catch (err) {
     console.warn('[owner-digest] parked video-frame sweep failed:', String(err).slice(0, 200))
+    return null
+  }
+}
+
+/**
+ * Finished video cuts parked at `awaiting_render_approval` (the render gate).
+ * Unlike the frame sweep this does NOT return null when the valve is off: the
+ * poller never picks a parked cut back up, so a cut parked before the valve
+ * flipped still waits on the owner and still belongs on the list. Oldest age
+ * is from `updated_at`, the moment it parked, not the job's creation.
+ */
+export async function gatherParkedVideoRenders(): Promise<{ count: number; oldestDays: number | null } | null> {
+  try {
+    const res = await db.execute(sql`
+      SELECT COUNT(*)::int AS n,
+             EXTRACT(epoch FROM now() - MIN(updated_at))::float8 / 86400 AS oldest_days
+        FROM video_jobs
+       WHERE status = 'awaiting_render_approval'`)
+    const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+    return {
+      count: Number(row?.['n'] ?? 0),
+      oldestDays: row?.['oldest_days'] == null ? null : Math.round(Number(row['oldest_days'])),
+    }
+  } catch (err) {
+    console.warn('[owner-digest] parked video-render sweep failed:', String(err).slice(0, 200))
     return null
   }
 }
@@ -1476,6 +1586,8 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // send so a re-render does not imply a real escalation happened; `null` renders
   // as "not computed", distinct from a real zero.
   const staleUndecided = opts.force ? null : await countStaleUndecidedOwnerAsks()
+  // Started here, awaited into Needs Mike below; never rejects (null on failure).
+  const pendingVideoPitchesP = gatherPendingVideoPitches()
   // The unified queue, computed once and rendered here exactly as
   // /api/team/status and /admin/ops render it. Never fatal: a digest that
   // cannot compute the queue must still deliver the fifteen sections it always
@@ -1485,7 +1597,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     return null
   })
 
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames] =
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
@@ -1522,6 +1634,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       gatherStaleOwnerRows(),
       gatherAdCampaignQueue(),
       gatherParkedVideoFrames(),
+      gatherParkedVideoRenders(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
@@ -1534,11 +1647,13 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     needsOwnerPrs: escalations.protectedPrs,
     blockedRows,
     staleOwnerRows,
+    pendingVideoPitches: await pendingVideoPitchesP,
     orphans: loopHealth?.orphans ?? [],
     conflictedPrs: loopHealth?.conflictedPrs ?? [],
     missedRoutines: loopHealth?.routineFlags ?? [],
     adCampaigns: adCampaignQueue,
     parkedVideoFrames,
+    parkedVideoRenders,
   }
 
   // ── Compose ───────────────────────────────────────────────────────────────
@@ -1696,10 +1811,11 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // trivial next to the gathering already done, and deciding here means the
   // decision sees the same queue the email would have carried rather than a
   // second, possibly different, read.
-  if (unified) {
+  const fp = unified ? digestFingerprint(unified.fingerprint, parkedVideoFrames, parkedVideoRenders, needsMike.pendingVideoPitches) : null
+  if (unified && fp) {
     const lastFingerprint = await kvGet<string>(QUEUE_FINGERPRINT_KEY).catch(() => null)
     const decision = shouldSendDigest({
-      fingerprint: unified.fingerprint,
+      fingerprint: fp,
       lastFingerprint: lastFingerprint ?? null,
       oldestEntryAgeDays: unified.entries.reduce((m, e) => Math.max(m, e.ageDays), 0),
       isMonday: new Date().getUTCDay() === 1,
@@ -1709,14 +1825,14 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       // Record what the queue looked like even though nothing was sent, so
       // tomorrow's comparison is against today's reality rather than against
       // the last day that happened to send.
-      await kvSet(QUEUE_FINGERPRINT_KEY, unified.fingerprint, 30 * 86_400).catch(() => {})
+      await kvSet(QUEUE_FINGERPRINT_KEY, fp, 30 * 86_400).catch(() => {})
       return { sent: false, skipped: decision.reason }
     }
   }
 
   const res = await sendOwnerEmail(subject, html, { escalation: 'daily-digest', fromName: 'xdipx daily digest' })
   if (res.sent) {
-    if (unified) await kvSet(QUEUE_FINGERPRINT_KEY, unified.fingerprint, 30 * 86_400).catch(() => {})
+    if (fp) await kvSet(QUEUE_FINGERPRINT_KEY, fp, 30 * 86_400).catch(() => {})
     return { sent: true, subject }
   }
 

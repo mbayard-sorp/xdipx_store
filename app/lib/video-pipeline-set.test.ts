@@ -14,6 +14,8 @@ const state = {
   inserts: [] as Array<Record<string, unknown>>,
   /** Every db.update(...).set(...) payload, so a test can assert WHY a job failed. */
   updates: [] as Array<Record<string, unknown>>,
+  /** Rows a conditional update's .returning() pretends to have matched. */
+  updateReturns: [{ id: 1 }] as Array<{ id: number }>,
 }
 
 vi.mock('~/lib/db.server', () => {
@@ -38,7 +40,13 @@ vi.mock('~/lib/db.server', () => {
       update: () => ({
         set: (v: Record<string, unknown>) => {
           state.updates.push(v)
-          return { where: () => Promise.resolve() }
+          return {
+            where: () => {
+              const p = Promise.resolve() as Promise<unknown> & { returning?: () => Promise<unknown> }
+              p.returning = () => Promise.resolve(state.updateReturns)
+              return p
+            },
+          }
         },
       }),
     },
@@ -55,7 +63,17 @@ const configMock = vi.hoisted(() => vi.fn())
 // daily budget.
 const spendMock = vi.hoisted(() => vi.fn(async () => 0))
 vi.mock('~/lib/team.server', () => ({ getTeamConfig: configMock, getTodaySpendCents: spendMock }))
-vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))
+const settingMock = vi.hoisted(() => vi.fn(async (_key: string): Promise<string | null> => null))
+vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: settingMock }))
+const gateFramesMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/video-frame-gate.server', () => ({ gateVideoFrames: gateFramesMock }))
+const episodeMocks = vi.hoisted(() => ({
+  reapStaleEpisodeClaims: vi.fn(async () => 0),
+  markEpisodeRenderFailed: vi.fn(async () => true),
+  markEpisodeRenderRejected: vi.fn(async () => true),
+  episodeForJob: vi.fn(async (): Promise<{ id: number } | null> => null),
+}))
+vi.mock('~/lib/video-episodes.server', () => episodeMocks)
 vi.mock('~/lib/blob.server', () => ({ blobPut: vi.fn(), blobFetchToBuffer: vi.fn() }))
 vi.mock('~/lib/token-log.server', () => ({ logVideoCost: vi.fn(), logImageCost: vi.fn() }))
 // Real presenterPhotoUrlForCrop semantics, not a stub (ticket #10484).
@@ -69,6 +87,7 @@ vi.mock('~/lib/ivr-voice.server', () => ({ getActiveIvrVoiceId: vi.fn().mockReso
 vi.mock('~/lib/elevenlabs.server', () => ({ generateVoiceover: vi.fn(), generateVoiceoverWithTimestamps: vi.fn() }))
 vi.mock('~/lib/video-assembly.server', () => ({
   extractPoster: vi.fn(),
+  extractFrames: vi.fn(async () => []),
   applyWatermark: vi.fn(),
   probeDurationSeconds: vi.fn(),
   muxAudio: vi.fn(),
@@ -108,7 +127,8 @@ import { estimateAvatarSpeechSeconds } from '~/lib/avatar-script'
 import { logVideoCost } from '~/lib/token-log.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
 import { computeRunpodActualCostUsd, estimateVideoCostUsd } from '~/lib/model-pricing.server'
-import { rejectVideoJob } from '~/lib/video-pipeline.server'
+import { INFLIGHT_VIDEO_STATUSES, rejectVideoJob, approveRenderedVideo, rejectRenderedVideo, fanOutVideoToSocialDrafts } from '~/lib/video-pipeline.server'
+import { extractPoster, probeDurationSeconds } from '~/lib/video-assembly.server'
 
 const baseArgs = {
   productHandle: 'satin-wand',
@@ -126,6 +146,8 @@ beforeEach(() => {
   state.selectResults = []
   state.inserts = []
   state.updates = []
+  state.updateReturns = [{ id: 1 }]
+  settingMock.mockImplementation(async () => null)
   configMock.mockResolvedValue({
     team: 'video', enabled: true, dailyCents: 2000, maxRunsPerDay: 1,
     autoApproveSuggestions: false, maxCostCents: 600, maxVariantsPerSet: 4,
@@ -467,5 +489,139 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
     expect(runpodResultMock).not.toHaveBeenCalled()
     expect(state.inserts).toHaveLength(0)
     expect(logVideoCost).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The render gate (Phase 2b): the poster stage parks a finished cut at
+ * awaiting_render_approval while video_render_review is ON (the default), the
+ * poller never selects it, only an owner approve releases it to 'done', and
+ * nothing fans out to social drafts until then.
+ */
+describe('render gate: awaiting_render_approval', () => {
+  const posterJob = {
+    id: 11,
+    jobId: 'job-cut',
+    productHandle: 'satin-wand',
+    shopifyProductGid: null,
+    formula: 'myth-busting',
+    presenter: 'none',
+    scriptJson: { motionPrompt: 'slow push', durationSeconds: 8 },
+    aiDisclosure: true,
+    modelTier: 'kling25-pro',
+    targetPlatforms: ['instagram'],
+    stage: 'poster',
+    status: 'queued',
+    providerRequestIds: {},
+    sceneFrameAssetId: 55,
+    finalAssetId: 90,
+    posterAssetId: null,
+    scenesJson: null,
+    sceneStateJson: null,
+    costUsd: '1.20',
+    metricsJson: null,
+    variantGroupId: null,
+    variantAxes: null,
+    error: null,
+    team: 'video',
+    runId: null,
+    episodeId: null as number | null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    completedAt: null,
+  }
+
+  function armPosterStage() {
+    state.selectResults = [
+      [posterJob],                                                  // poller's job-rows query
+      [{ id: 90, blobUrl: 'https://blob.test/video/job-cut/final.mp4' }], // final asset
+    ]
+    vi.mocked(blobFetchToBuffer).mockResolvedValue(Buffer.from('mp4'))
+    vi.mocked(extractPoster).mockResolvedValue(Buffer.from('jpg'))
+    vi.mocked(probeDurationSeconds).mockResolvedValue(8)
+    vi.mocked(blobPut).mockResolvedValue({ url: 'https://blob.test/video/job-cut/poster.jpg' } as never)
+    gateFramesMock.mockResolvedValue({ pass: true, notes: '', frameVerdicts: [{ verdict: 'pass' }] })
+  }
+
+  it('the poller never selects a parked cut', () => {
+    expect(INFLIGHT_VIDEO_STATUSES as readonly string[]).not.toContain('awaiting_render_approval')
+    expect(INFLIGHT_VIDEO_STATUSES as readonly string[]).not.toContain('awaiting_frame_approval')
+    expect('awaiting_render_approval'.length).toBeLessThanOrEqual(24) // video_jobs.status varchar(24)
+  })
+
+  const terminalWrite = () => state.updates.find(u => u['stage'] === 'done')
+
+  it('parks the finished cut instead of finishing it when the valve is unset (defaults ON)', async () => {
+    armPosterStage()
+    const result = await advanceInflightVideoJobs()
+    expect(result.failed).toBe(0)
+    expect(result.parked).toBe(1)
+    expect(result.done).toBe(0)
+    expect(terminalWrite()).toMatchObject({ stage: 'done', status: 'awaiting_render_approval' })
+    expect(terminalWrite()?.['posterAssetId']).toBeDefined()
+    expect(settingMock).toHaveBeenCalledWith('video_render_review')
+  })
+
+  it('finishes straight to done when video_render_review is false', async () => {
+    armPosterStage()
+    settingMock.mockImplementation(async (key: string) => (key === 'video_render_review' ? 'false' : null))
+    const result = await advanceInflightVideoJobs()
+    expect(result.done).toBe(1)
+    expect(result.parked).toBe(0)
+    expect(terminalWrite()).toMatchObject({ stage: 'done', status: 'done' })
+  })
+
+  it('the post-render vision gate still wins: a FAIL parks at awaiting_final_review, not the render gate', async () => {
+    armPosterStage()
+    gateFramesMock.mockResolvedValue({ pass: false, notes: 'nudity', frameVerdicts: [] })
+    await advanceInflightVideoJobs()
+    expect(state.updates.some(u => u['status'] === 'awaiting_final_review')).toBe(true)
+    expect(state.updates.some(u => u['status'] === 'awaiting_render_approval')).toBe(false)
+  })
+
+  it('approveRenderedVideo releases a parked cut to done', async () => {
+    await approveRenderedVideo(11)
+    expect(state.updates[0]).toMatchObject({ status: 'done' })
+  })
+
+  it('approveRenderedVideo throws when nothing was parked (double click, or already decided)', async () => {
+    state.updateReturns = []
+    await expect(approveRenderedVideo(11)).rejects.toThrow(/not awaiting final-cut approval/)
+  })
+
+  it('fanOutVideoToSocialDrafts refuses a parked cut, so no social draft exists before approval', async () => {
+    state.selectResults = [[{ ...posterJob, stage: 'done', status: 'awaiting_render_approval' }]]
+    await expect(fanOutVideoToSocialDrafts(11, 'mike')).rejects.toThrow(/awaiting your approval/)
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it('rejectRenderedVideo requires a reason and writes nothing without one', async () => {
+    await expect(rejectRenderedVideo(11, '   ', 'mike')).rejects.toThrow(/reason is required/)
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('rejectRenderedVideo fails the job with the reason and hands a linked episode back', async () => {
+    state.selectResults = [[{ ...posterJob, stage: 'done', status: 'awaiting_render_approval', episodeId: 4 }]]
+    const result = await rejectRenderedVideo(11, 'hands melt at 0:04', 'mike@xdipx.com')
+    expect(state.updates[0]).toMatchObject({ status: 'failed' })
+    // stage stays 'done' so the RunPod idle re-probe still sees the job.
+    expect(state.updates[0]).not.toHaveProperty('stage')
+    expect(String(state.updates[0]?.['error'])).toMatch(/Final cut rejected by owner: hands melt/)
+    expect(episodeMocks.markEpisodeRenderRejected).toHaveBeenCalledWith(4, 'job job-cut: hands melt at 0:04', 'mike@xdipx.com')
+    expect(result).toEqual({ episodeReleased: true, episodeId: 4 })
+  })
+
+  it('rejectRenderedVideo on an unlinked job fails it and touches no episode', async () => {
+    state.selectResults = [[{ ...posterJob, stage: 'done', status: 'awaiting_render_approval' }]]
+    const result = await rejectRenderedVideo(11, 'off-brand', 'mike')
+    expect(result).toEqual({ episodeReleased: false, episodeId: null })
+    expect(episodeMocks.markEpisodeRenderRejected).not.toHaveBeenCalled()
+  })
+
+  it('rejectRenderedVideo refuses a job that is not parked (never fails a finished or approved cut)', async () => {
+    state.selectResults = [[{ ...posterJob, stage: 'done', status: 'done' }]]
+    state.updateReturns = []
+    await expect(rejectRenderedVideo(11, 'late change of heart', 'mike')).rejects.toThrow(/not awaiting final-cut approval/)
+    expect(episodeMocks.markEpisodeRenderRejected).not.toHaveBeenCalled()
   })
 })

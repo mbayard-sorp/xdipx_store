@@ -3,7 +3,10 @@
  * Arc context first (you cannot judge a part-2 door without knowing what part
  * 1 left hanging), the hook set large, beats as prose blocks, closers labeled
  * with the rule they satisfy, the cost against the ceiling with approve
- * disabled when over, and the append-only revision-notes loop.
+ * disabled when over, and the append-only revision-notes loop. Every spoken
+ * line carries a small "note" affordance (plan Phase 2b): the owner's
+ * line-level comment lands on review_notes_json as a line_note the Writers
+ * Room retro reads back through the owner-edits op.
  *
  * The trailing underscore escapes the scripts queue's layout while staying
  * inside the studio shell (flatRoutes; precedent admin.imports_.opportunities).
@@ -15,8 +18,10 @@ import { requireAdmin, getAdminUser } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { videoEpisodes, videoSeries } from '../../db/schema'
 import { and, eq } from 'drizzle-orm'
-import { decideEpisode, editEpisodeScript } from '~/lib/video-episodes.server'
-import { SCRIPT_LOCKED_STATUSES } from '~/lib/video-episodes'
+import { addLineNote, decideEpisode, editEpisodeScript } from '~/lib/video-episodes.server'
+import { LINE_NOTE_MAX, SCRIPT_LOCKED_STATUSES } from '~/lib/video-episodes'
+import type { LineNoteField } from '~/lib/video-episodes'
+import type { VideoEpisodeReviewNote } from '../../db/schema'
 import { getTeamConfig } from '~/lib/team.server'
 import { VIDEO_MAX_COST_CENTS_DEFAULT } from '~/lib/team-keys'
 import { REVIEW_NOTE_TAGS } from './admin.video-studio.scripts'
@@ -90,6 +95,23 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const form = await request.formData()
   const id = Number(params['episodeId'])
 
+  // A note on one spoken line (plan Phase 2b): append-only, never a decision,
+  // never touches status or text.
+  if (String(form.get('intent') ?? '') === 'line-note') {
+    try {
+      await addLineNote({
+        episodeId: id,
+        field: form.get('field'),
+        lineIdx: form.get('lineIdx'),
+        note: form.get('note'),
+        by: user?.email ?? 'owner',
+      })
+      return Response.json({ ok: true, lineNoted: true })
+    } catch (err) {
+      return Response.json({ ok: false, error: err instanceof Error ? err.message : 'Note failed' }, { status: 400 })
+    }
+  }
+
   // The owner editing script text (ticket #7558) is a separate intent from
   // the approve/needs_changes/rejected decision below, so it never touches
   // production_status or the approval note.
@@ -144,11 +166,64 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 }
 
-function Closer({ label, rule, value }: { label: string; rule: string; value: string | null }) {
+/**
+ * The per-line note affordance: earlier notes on this exact line, then a small
+ * "note" toggle that opens a one-line form posting the line-note intent. Its
+ * own fetcher, so a note never races the decide or edit forms.
+ */
+function LineNote({ field, lineIdx, notes }: { field: LineNoteField; lineIdx: number; notes: VideoEpisodeReviewNote[] }) {
+  const fetcher = useFetcher<{ ok: boolean; lineNoted?: boolean; error?: string }>()
+  const [open, setOpen] = useState(false)
+  const mine = notes.filter(n => n.decision === 'line_note' && n.field === field && n.lineIdx === lineIdx)
+  const saved = fetcher.data?.ok && fetcher.data.lineNoted
+  const error = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null
+  return (
+    <div className="mt-1.5">
+      {mine.map((n, i) => (
+        <p key={i} className="text-xs text-ink-3">
+          <span aria-hidden>&#9998;</span> {n.note} <span className="font-mono text-ink-4">{n.at.slice(0, 10)}</span>
+        </p>
+      ))}
+      {saved && !open && <p className="text-xs text-ink-3">Note saved, the room reads it at the retro.</p>}
+      {open ? (
+        <fetcher.Form method="post" className="mt-1 flex flex-col gap-2 md:flex-row md:items-start"
+          onSubmit={() => setOpen(false)}>
+          <input type="hidden" name="intent" value="line-note" />
+          <input type="hidden" name="field" value={field} />
+          <input type="hidden" name="lineIdx" value={lineIdx} />
+          <textarea name="note" required rows={2} maxLength={LINE_NOTE_MAX} placeholder="What is wrong with this line?"
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink" />
+          <div className="flex gap-2">
+            <button type="submit" disabled={fetcher.state !== 'idle'}
+              className="rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-paper disabled:opacity-40">
+              Save note
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="text-xs text-ink-3 underline">Cancel</button>
+          </div>
+        </fetcher.Form>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)}
+          className="min-h-[32px] text-xs font-semibold text-ink-3 underline hover:text-ink">
+          note
+        </button>
+      )}
+      {error && <p className="text-xs text-red-700">{error}</p>}
+    </div>
+  )
+}
+
+function Closer({ label, rule, value, noteField, notes }: {
+  label: string
+  rule: string
+  value: string | null
+  noteField?: LineNoteField
+  notes?: VideoEpisodeReviewNote[]
+}) {
   return (
     <div className={`rounded-xl border p-3 ${value ? 'border-line bg-paper' : 'border-dashed border-line bg-paper-3'}`}>
       <p className="text-[11px] uppercase tracking-wide text-ink-4">{label} <span className="font-mono">({rule})</span></p>
       {value ? <p className="mt-1 text-sm text-ink">&ldquo;{value}&rdquo;</p> : <p className="mt-1 text-xs text-ink-4">none</p>}
+      {value && noteField && <LineNote field={noteField} lineIdx={0} notes={notes ?? []} />}
     </div>
   )
 }
@@ -227,9 +302,9 @@ export default function ScriptReader() {
         </div>
         {failed && !decided && (
           <div className="mx-auto mt-2 max-w-4xl rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
-            This episode&rsquo;s render failed. &ldquo;Render again&rdquo; re-arms it for the next render run and
-            spends again; &ldquo;Changes&rdquo; sends it back to the writers room instead. The failure reason is
-            the newest entry in the revision notes below.
+            This episode&rsquo;s render failed, or you rejected its final cut. &ldquo;Render again&rdquo; re-arms it
+            for the next render run and spends again; &ldquo;Changes&rdquo; sends it back to the writers room instead.
+            The reason is the newest entry in the revision notes below.
           </div>
         )}
         {changesOpen && !decided && (
@@ -361,6 +436,7 @@ export default function ScriptReader() {
             <p className="mt-1 text-xl font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
               &ldquo;{ep.hookText}&rdquo;
             </p>
+            <LineNote field="hookText" lineIdx={0} notes={ep.reviewNotes} />
           </div>
         )}
 
@@ -384,12 +460,14 @@ export default function ScriptReader() {
                     {typeof sc['motionPrompt'] === 'string' && (
                       <p className="mt-1 text-xs text-ink-3">camera: {sc['motionPrompt'] as string}</p>
                     )}
+                    <LineNote field="scenes" lineIdx={i} notes={ep.reviewNotes} />
                   </div>
                 ))
               : ep.beats.map((b, i) => (
                   <div key={i} className="rounded-xl border border-line bg-paper p-3">
                     <p className="text-base text-ink">&ldquo;{b.line}&rdquo;</p>
                     {b.direction && <p className="mt-1 text-xs text-ink-3">{b.direction}</p>}
+                    <LineNote field="beats" lineIdx={i} notes={ep.reviewNotes} />
                   </div>
                 ))}
           </section>
@@ -399,18 +477,20 @@ export default function ScriptReader() {
           <section className="rounded-xl border border-line bg-paper p-3">
             <p className="text-[11px] uppercase tracking-wide text-ink-4">Spoken line ({ep.modelTier ?? 'tier from default'})</p>
             <p className="mt-1 text-base text-ink">&ldquo;{ep.presenterLine}&rdquo;</p>
+            <LineNote field="presenterLine" lineIdx={0} notes={ep.reviewNotes} />
           </section>
         )}
         {ep.voiceover && (
           <section className="rounded-xl border border-line bg-paper p-3">
             <p className="text-[11px] uppercase tracking-wide text-ink-4">Voiceover (b-roll, no on-camera mouth)</p>
             <p className="mt-1 text-base text-ink">&ldquo;{ep.voiceover}&rdquo;</p>
+            <LineNote field="voiceover" lineIdx={0} notes={ep.reviewNotes} />
           </section>
         )}
 
         <section className="grid gap-2 md:grid-cols-3">
-          <Closer label="Share line" rule="S1" value={ep.shareLine} />
-          <Closer label="CTA" rule="C1" value={ep.cta} />
+          <Closer label="Share line" rule="S1" value={ep.shareLine} noteField="shareLine" notes={ep.reviewNotes} />
+          <Closer label="CTA" rule="C1" value={ep.cta} noteField="cta" notes={ep.reviewNotes} />
           <Closer label="Part-2 door" rule="SE3" value={ep.part2Hook} />
         </section>
 
@@ -452,7 +532,8 @@ export default function ScriptReader() {
             <ul className="mt-1 space-y-1 text-xs text-ink-3">
               {ep.reviewNotes.map((n, i) => (
                 <li key={i}>
-                  <span className="font-mono">{n.at.slice(0, 10)}</span> {n.decision}
+                  <span className="font-mono">{n.at.slice(0, 10)}</span>{' '}
+                  {n.decision === 'line_note' ? `line note on ${n.field ?? '?'}${n.field === 'scenes' || n.field === 'beats' ? ` ${(n.lineIdx ?? 0) + 1}` : ''}` : n.decision}
                   {n.tags?.length ? ` [${n.tags.join(', ')}]` : ''}{n.note ? `: ${n.note}` : ''}
                 </li>
               ))}

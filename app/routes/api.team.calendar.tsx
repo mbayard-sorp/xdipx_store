@@ -1,7 +1,15 @@
 /**
  * /api/team/calendar — shared marketing calendar (reads + proposals + IG status).
  *
- *   GET ?from=YYYY-MM-DD&to=YYYY-MM-DD -> { events: [...] }
+ *   GET ?from=YYYY-MM-DD&to=YYYY-MM-DD -> { events: [...], videoClips: [...] }
+ *
+ * `videoClips` (video program v2, Phase 2b) lists video episodes from
+ * owner-approved through posted: { episodeId, productHandle, title, speaker,
+ * format, status, plannedSlotAt, postedAt?, permalink? }. Window: from/to when
+ * given, else 14 days back to 14 days forward; an approved clip with no slot
+ * yet is always listed. `events` is unchanged for existing consumers, and a
+ * failed clip lookup returns `videoClips: []` rather than failing the calendar
+ * every routine reads at run start.
  *   POST { op: 'propose', eventDate, name, type?, theme?, assetsJson? } -> { id }  (status 'planned')
  *   POST { op: 'setStatus', id, status } -> { ok, id, status }        (IG-guarded)
  *
@@ -40,6 +48,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { and, eq, like } from 'drizzle-orm'
 import { assertTeamAuth, listCalendar, proposeCalendarEvent } from '~/lib/team.server'
+import { listCalendarVideoClips } from '~/lib/video-calendar.server'
 import { db } from '~/lib/db.server'
 import { marketingCalendar } from '../../db/schema'
 
@@ -69,8 +78,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if ((from && !DATE_RE.test(from)) || (to && !DATE_RE.test(to))) {
     return new Response('Bad Request: dates must be YYYY-MM-DD', { status: 400 })
   }
-  const events = await listCalendar(from, to)
-  return Response.json({ events }, { headers: { 'Cache-Control': 'no-store' } })
+  const [events, videoClips] = await Promise.all([
+    listCalendar(from, to),
+    listCalendarVideoClips(from, to).catch((err: unknown) => {
+      console.error('[api.team.calendar] videoClips lookup failed', err)
+      return []
+    }),
+  ])
+  return Response.json({ events, videoClips }, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 export async function action({ request }: ActionFunctionArgs) {
