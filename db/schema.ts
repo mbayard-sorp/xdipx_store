@@ -1902,14 +1902,8 @@ export const videoJobs = pgTable('video_jobs', {
   runId:             integer('run_id').references(() => homepageTeamRuns.id, { onDelete: 'set null' }),
   // Serialized video program (migration 086). episodeId back-references the
   // video_episodes row this job renders (plain integer, no FK: the FK lives on
-  // video_episodes.video_job_id to avoid a circular pair). The runpod columns
-  // are the per-video off-confirmation (ticket #5717): probeJson is ALWAYS
-  // written by the terminal probe; confirmedAt only when both the serverless
-  // endpoint and the pods list read zero. A failed read is "could not ask",
-  // never a false all-clear.
-  episodeId:             integer('episode_id'),
-  runpodIdleConfirmedAt: timestamp('runpod_idle_confirmed_at', { withTimezone: true }),
-  runpodIdleProbeJson:   jsonb('runpod_idle_probe_json').$type<RunpodIdleProbe>(),
+  // video_episodes.video_job_id to avoid a circular pair).
+  episodeId:         integer('episode_id'),
   createdAt:         timestamp('created_at').notNull().defaultNow(),
   updatedAt:         timestamp('updated_at').notNull().defaultNow(),
   completedAt:       timestamp('completed_at'),
@@ -1923,22 +1917,6 @@ export const videoJobs = pgTable('video_jobs', {
 }))
 
 // ─── Serialized video program (migration 086, all-hands 2026-08-26) ──────────
-
-/**
- * Result of the terminal RunPod idle probe (ticket #5717). `clear` is true
- * ONLY when both surfaces were successfully read AND both are zero; a thrown
- * read lands in `couldNotAsk` and is never conflated with clear:false.
- */
-export interface RunpodIdleProbe {
-  checkedAt: string
-  endpoint: {
-    workers: { idle: number; initializing: number; ready: number; running: number; throttled: number; unhealthy: number; active: number }
-    jobs: { inQueue: number; inProgress: number }
-  } | null
-  pods: { id: string; name: string; hoursRunning: number; costPerHour: number }[] | null
-  clear: boolean
-  couldNotAsk: string[]
-}
 
 /**
  * One product placement inside an episode. The role and mentionType
