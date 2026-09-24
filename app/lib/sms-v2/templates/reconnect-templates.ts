@@ -36,6 +36,19 @@ const WITHOUT_ORDER_TEMPLATES: ReadonlyArray<() => string> = [
   () => `Oh good, you're here again. What's on your mind?`,
 ]
 
+// ─── Direct question on the return turn ─────────────────────────────────────
+//
+// #4596-class defect (#11335): the first message back can itself be a direct,
+// answerable question ("what's your phone number?") rather than small talk.
+// RECONNECT has no LLM call and can't research an arbitrary question, but it
+// can give the two real, published contact channels instead of silently
+// ignoring the ask, then pivot into shopping the same as the cold templates.
+
+const RESEARCH_HANDOFF_TEMPLATES: ReadonlyArray<() => string> = [
+  () => `Good question. For a direct answer, email hello@xdipx.com or call (623) 900-1188. And if you're just browsing, tell me what you're after and I'll help now.`,
+  () => `Fair question. The fastest way to a real answer is hello@xdipx.com or (623) 900-1188. In the meantime, what can I help you find?`,
+]
+
 // ─── Pickers ────────────────────────────────────────────────────────────────
 
 /**
@@ -51,5 +64,11 @@ export function pickReconnectWithOrderTemplate(slots: ReconnectWithOrderSlots): 
 export function pickReconnectColdTemplate(): string {
   const idx = Math.floor(Date.now() / 7000) % WITHOUT_ORDER_TEMPLATES.length
   const fn = WITHOUT_ORDER_TEMPLATES[idx]!
+  return fn()
+}
+
+export function pickReconnectResearchTemplate(): string {
+  const idx = Math.floor(Date.now() / 7000) % RESEARCH_HANDOFF_TEMPLATES.length
+  const fn = RESEARCH_HANDOFF_TEMPLATES[idx]!
   return fn()
 }
